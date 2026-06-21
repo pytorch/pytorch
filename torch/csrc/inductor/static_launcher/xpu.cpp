@@ -32,7 +32,7 @@
     if (status != ZE_RESULT_SUCCESS) {                                    \
       std::stringstream ss;                                               \
       ss << "L0 runtime error: " << std::hex << std::uppercase << status; \
-      throw std::runtime_error(ss.str());                                 \
+      throw std::runtime_error(std::move(ss).str());                      \
     }                                                                     \
   }
 

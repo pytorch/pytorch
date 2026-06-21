@@ -347,7 +347,7 @@ void ts_eager_fallback(
                 op.schema().operator_name(),
                 " appears to be a view operator, ",
                 "but it has no implementation for the backend \"",
-                dev_str.str(),
+                std::move(dev_str).str(),
                 "\". View operators don't support ",
                 "falling back to run on the eager, since the tensor's "
                 "storage cannot be shared across devices.");

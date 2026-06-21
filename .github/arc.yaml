@@ -100,8 +100,19 @@ runner_mapping:
   # ---- Partner hardwares ----
 
   linux.idc.xpu: linux.idc.xpu
+  linux.google.tpuv7x.1: linux.google.tpuv7x.1
   linux.rocm.gpu.2: linux.rocm.gpu.2
   linux.rocm.gpu.mi210.1: linux.rocm.gpu.mi210.1
   linux.rocm.gpu.mi210.2: linux.rocm.gpu.mi210.2
   linux.rocm.gpu.gfx950.1: linux.rocm.gpu.gfx950.1
   linux.rocm.gpu.gfx950.2: linux.rocm.gpu.gfx950.2
+
+# Runners whose hardware exists only on the Meta fleet (no LF / no AWS EC2
+# equivalent). The mapper forces the 'mt-' prefix on these regardless of which
+# experiment drives the build runner. When adding a new H100/B200 (or similar
+# Meta-only) variant to runner_mapping above, also add it here.
+meta_only_runners:
+  - linux.aws.h100
+  - linux.aws.h100.4
+  - linux.aws.h100.8
+  - linux.dgx.b200

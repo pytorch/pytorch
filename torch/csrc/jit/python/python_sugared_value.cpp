@@ -159,8 +159,8 @@ std::shared_ptr<SugaredValue> PythonValue::call(
 
 std::string PythonValue::kind() const {
   std::stringstream ss;
-  ss << "python value of type '" << typeString(self) << "'";
-  return ss.str();
+  ss << "python value of type '" << typeString(self) << '\'';
+  return std::move(ss).str();
 }
 
 std::vector<std::shared_ptr<SugaredValue>> PythonValue::asTuple(
@@ -170,7 +170,7 @@ std::vector<std::shared_ptr<SugaredValue>> PythonValue::asTuple(
   std::stringstream ss;
   ss << kind() << " cannot be used as a tuple";
   checkForAddToConstantsError(ss);
-  throw(ErrorReport(loc) << ss.str());
+  throw(ErrorReport(loc) << std::move(ss).str());
 }
 
 std::shared_ptr<SugaredValue> PythonValue::attr(
@@ -180,7 +180,7 @@ std::shared_ptr<SugaredValue> PythonValue::attr(
   std::stringstream ss;
   ss << "attribute lookup is not defined on " << kind();
   checkForAddToConstantsError(ss);
-  throw(ErrorReport(loc) << ss.str());
+  throw(ErrorReport(loc) << std::move(ss).str());
 }
 
 py::object PythonValue::getattr(
@@ -283,7 +283,7 @@ bool ModuleValue::areAllSubmodulesSubtypeOf(
         if (why_not) {
           *why_not << "Attribute " << self_type->getAttributeName(i)
                    << " is not of annotated type " << ty->annotation_str()
-                   << ": " << ss.str();
+                   << ": " << std::move(ss).str();
         }
 
         return false;
@@ -304,7 +304,7 @@ SugaredValuePtr ModuleValue::getitem(
       // Check that all submodules comply with the type hint.
       std::stringstream ss;
       if (!areAllSubmodulesSubtypeOf(type_hint, &ss)) {
-        throw(ErrorReport(loc) << ss.str());
+        throw(ErrorReport(loc) << std::move(ss).str());
       }
 
       // Emit a prim::ModuleContainerIndex operator. This is needed because
@@ -351,7 +351,7 @@ SugaredValuePtr ModuleValue::getitem(
       // Check that all submodules comply with the type hint.
       std::stringstream ss;
       if (!areAllSubmodulesSubtypeOf(type_hint, &ss)) {
-        throw(ErrorReport(loc) << ss.str());
+        throw(ErrorReport(loc) << std::move(ss).str());
       }
 
       // Emit a prim::ModuleContainerIndex operator. This is needed because
@@ -856,8 +856,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
       ErrorReport(loc)
       << "Module '"
       << concreteType_->getJitType()->expectRef<ClassType>().name()->name()
-      << "'"
-      << " has no attribute '" << field << "' " << hint);
+      << '\'' << " has no attribute '" << field << "' " << hint);
 }
 
 SugaredValuePtr ModuleValue::iter(const SourceRange& loc, GraphFunction& m) {

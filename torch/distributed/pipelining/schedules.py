@@ -438,7 +438,17 @@ class _PipelineSchedule(ABC):
                 if torch.device(stage.device).type != "cpu"
             }
         )
-        with torch.random.fork_rng(devices=devices):
+        device_type = devices[0].type if devices else None
+        # Assert all device types are the same
+        if device_type is not None and not all(
+            device.type == device_type for device in devices
+        ):
+            device_types = {device.type for device in devices}
+            raise AssertionError(
+                "All stages must have the same device type for RNG forking. "
+                f"Found device types: {device_types}"
+            )
+        with torch.random.fork_rng(devices=devices, device_type=device_type):
             if needs_fwd:
                 next_stage_args: Any = None
                 for stage in stages:
@@ -622,6 +632,25 @@ def _batch_p2p(p2p_ops: list[dist.P2POp], desc: str | None = None) -> list[dist.
         return []
     desc_str = f"{desc}, " if desc else ""
     logger.debug("batch_p2p %s%s", desc_str, p2p_ops)
+
+    # Per-direction P2P (config.pipeline_per_direction_p2p) tags forward and
+    # backward ops with different communicators. A fused batch (e.g. 1F1B's
+    # fwd_sends + bwd_recvs) then spans >1 group; issue each group's ops as their
+    # own batch so they run on separate comms/streams instead of one FIFO. When
+    # all ops share a group (the default), this is a no-op fast path.
+    ops_by_group: dict[str, list[dist.P2POp]] = {}
+    for p in p2p_ops:
+        ops_by_group.setdefault(p.group.group_name, []).append(p)
+    if len(ops_by_group) > 1:
+        works: list[dist.Work] = []
+        # Issue the groups in a deterministic, rank-independent order (by group
+        # name -- identical on every rank for a given group). The same fused
+        # batch is built in opposite list order on neighboring ranks (e.g.
+        # ``fwd_sends + bwd_recvs`` vs ``bwd_sends + fwd_recvs``); sorting keeps
+        # every rank issuing the two communicators in the same order.
+        for _, group_ops in sorted(ops_by_group.items()):
+            works += _batch_p2p(group_ops, desc=desc)
+        return works
 
     op_types = {p.op for p in p2p_ops}
     if op_types == {dist.isend}:
@@ -3017,7 +3046,7 @@ class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
         backward_requires_autograd: bool = True,
         defer_pp_recv: bool = False,
     ):
-        # TODO: we dont support input/weight backward split with torch.compile
+        # TODO: we don't support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
         self.pp_group_size = stages[0].group_size
         super().__init__(
@@ -3214,7 +3243,7 @@ class ScheduleZBVZeroBubble(_PipelineScheduleRuntime):
         backward_requires_autograd: bool = True,
         defer_pp_recv: bool = False,
     ):
-        # TODO: we dont support input/weight backward split with torch.compile
+        # TODO: we don't support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
         self.pp_group_size = stages[0].group_size
         super().__init__(
@@ -3400,7 +3429,7 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
         backward_requires_autograd: bool = True,
         defer_pp_recv: bool = False,
     ):
-        # TODO: we dont support input/weight backward split with torch.compile
+        # TODO: we don't support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
         self.pp_group_size = stages[0].group_size
         super().__init__(

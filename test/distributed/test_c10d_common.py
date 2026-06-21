@@ -1788,6 +1788,28 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
         # with self.assertRaises(RuntimeError):
         # _canonicalize_group_rank(dpg, group_rank=123, return_global=True)
 
+    def test_get_backend_impl(self):
+        dist.Backend.register_backend(
+            "dummy", PythonProcessGroupExtensionTest.create_dummy
+        )
+
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = "6789"
+        dist.init_process_group("dummy", rank=self.rank, world_size=self.world_size)
+
+        backend = dist.get_backend_impl()
+        self.assertIsInstance(backend, DummyProcessGroup)
+        pg = c10d._get_default_group()
+        self.assertIs(pg.get_backend(torch.device("cpu")), backend)
+        self.assertIs(dist.get_backend_impl(device=torch.device("cpu")), backend)
+
+        group_name = c10d._get_process_group_name(pg)
+        self.assertEqual(
+            dist.get_backend_impl(str(group_name)).getBackendName(), "Dummy"
+        )
+
+        dist.destroy_process_group()
+
     def test_canonicalize_helper(self):
         dist.Backend.register_backend(
             "dummy", PythonProcessGroupExtensionTest.create_dummy
@@ -2311,10 +2333,10 @@ class ReduceOpTest(TestCase):
         ):
             self.assertTrue(isinstance(reduce_op, c10d.ReduceOp))
         for scale in (torch.tensor(1.0), 2.0):
-            self.assertTrue(
-                isinstance(dist._make_nccl_premul_sum(scale), c10d.ReduceOp)
-            )
-            self.assertTrue(isinstance(c10d.ReduceOp.PREMUL_SUM(scale), c10d.ReduceOp))
+            self.assertIsInstance(dist._make_nccl_premul_sum(scale), c10d.ReduceOp)
+            premul_sum = c10d.ReduceOp.PREMUL_SUM(scale)
+            self.assertIsInstance(premul_sum, c10d.ReduceOp)
+            self.assertEqual(premul_sum.factor, scale)
 
     # Ref: https://github.com/pytorch/pytorch/pull/87303#discussion_r1002879700
     def test_reduceop_copyable(self):

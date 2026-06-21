@@ -273,7 +273,7 @@ def infer_concrete_type_builder(nn_module, share_types=True):
         attr_type, _ = infer_type(name, item)
         if item is None:
             # Modules can be None. We don't have direct support for optional
-            # Modules, so the register it as an NoneType attribute instead.
+            # Modules, so we register it as a NoneType attribute instead.
             concrete_type_builder.add_attribute(name, attr_type.type(), False, False)
             continue
         if attr_type.success():
@@ -674,7 +674,7 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
     # Make the compiled methods available to the Python ScriptModule class.
     for method_stub in method_stubs:
         if method_stub.original_method is None:
-            # define()'d methods don't have an Python original_method, so we
+            # define()'d methods don't have a Python original_method, so we
             # don't need to do any Python re-wrapping stuff
             continue
 

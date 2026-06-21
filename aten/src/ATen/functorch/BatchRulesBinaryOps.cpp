@@ -180,7 +180,7 @@ static std::tuple<Tensor, std::optional<int64_t>> masked_select_batch_rule(
       "vmap: Attempted to vmap over `mask` in torch.masked_select(self, mask) ",
       "We cannot support this because for each batch this would return a ",
       "differently shaped Tensor. "
-      "Please voice your support in https://github.com/pytorch/functorch/issues/256");
+      "Please file an issue at https://github.com/pytorch/pytorch/issues if you need this feature.");
   auto self_ = moveBatchDimToFront(self, self_bdim);
   const auto batch_size = self_.size(0);
   const auto self_logical_rank = rankWithoutBatchDim(self, self_bdim);
@@ -200,7 +200,7 @@ static std::tuple<Tensor, std::optional<int64_t>> masked_select_backward_batch_r
       "vmap: Attempted to vmap over `mask` in torch.masked_select_backward(grad, self, mask) ",
       "We cannot support this because for each batch this would return a ",
       "differently shaped Tensor. "
-      "Please voice your support in https://github.com/pytorch/functorch/issues/256");
+      "Please file an issue at https://github.com/pytorch/pytorch/issues if you need this feature.");
   auto self_ = moveBatchDimToFront(self, self_bdim);
   auto grad_ = moveBatchDimToFront(grad, grad_bdim);
 

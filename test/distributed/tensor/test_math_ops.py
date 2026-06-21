@@ -131,6 +131,29 @@ class DistMathOpsTest(DTensorTestBase):
         self.assertEqual(dt_dim1.placements, (Shard(0),))
 
     @with_comms
+    def test_prims_amax_amin(self):
+        device_mesh = self.build_device_mesh()
+        tensor = torch.randn(12, 8, 8, device=self.device_type)
+        dtensor = distribute_tensor(tensor, device_mesh, [Shard(0)])
+
+        for op in (torch.ops.prims.amax.default, torch.ops.prims.amin.default):
+            # Reducing a sharded dim produces a partial max/min that is resolved
+            # when materializing the full tensor.
+            dt_dim0 = op(dtensor, [0])
+            self.assertEqual(dt_dim0.full_tensor(), op(tensor, [0]))
+            self.assertTrue(dt_dim0.placements[0].is_partial())
+
+            # Reducing a non-sharded dim preserves the input sharding.
+            dt_dim1 = op(dtensor, [1])
+            self.assertEqual(dt_dim1.full_tensor(), op(tensor, [1]))
+            self.assertEqual(dt_dim1.placements, (Shard(0),))
+
+            full_dims = list(range(tensor.ndim))
+            dt_full = op(dtensor, full_dims)
+            self.assertEqual(dt_full.full_tensor(), op(tensor, full_dims))
+            self.assertTrue(dt_full.placements[0].is_partial())
+
+    @with_comms
     @skip_unless_torch_gpu
     def test_mean(self):
         self.linear_op_reductions("mean")
@@ -1826,6 +1849,12 @@ class DistMathOpsTest(DTensorTestBase):
         result = F.group_norm(dt_inp, num_groups, dt_weight, dt_bias)
         self.assertEqual(result.full_tensor(), expected)
         self.assertTrue(result.placements[0].is_shard(0))
+
+        # group_norm with weight=None, bias=None (affine=False)
+        expected_no_affine = F.group_norm(inp, num_groups)
+        result_no_affine = F.group_norm(dt_inp, num_groups)
+        self.assertEqual(result_no_affine.full_tensor(), expected_no_affine)
+        self.assertTrue(result_no_affine.placements[0].is_shard(0))
 
 
 DistMathOpsTestWithLocalTensor = create_local_tensor_test_class(

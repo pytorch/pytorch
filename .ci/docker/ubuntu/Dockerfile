@@ -1,10 +1,10 @@
+ARG UBUNTU_VERSION=22.04
+
+FROM ubuntu:${UBUNTU_VERSION} AS base
+
 ARG UBUNTU_VERSION
 
-FROM ubuntu:${UBUNTU_VERSION} as base
-
-ARG UBUNTU_VERSION
-
-ENV DEBIAN_FRONTEND noninteractive
+ENV DEBIAN_FRONTEND=noninteractive
 
 ARG CLANG_VERSION
 
@@ -35,7 +35,7 @@ ARG PYTHON_FREETHREADED
 ARG DOCS
 ENV ANACONDA_PYTHON_VERSION=$ANACONDA_PYTHON_VERSION
 ENV PYTHON_FREETHREADED=$PYTHON_FREETHREADED
-ENV PATH /opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/bin:/opt/conda/bin:$PATH
+ENV PATH=/opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/bin:/opt/conda/bin:$PATH
 ENV DOCS=$DOCS
 COPY requirements-ci.txt requirements-docs.txt /opt/conda/
 COPY ./common/install_conda.sh install_conda.sh
@@ -59,8 +59,8 @@ COPY ./common/install_nccl.sh install_nccl.sh
 COPY ./ci_commit_pins/nccl* /ci_commit_pins/
 COPY ./common/install_cusparselt.sh install_cusparselt.sh
 RUN bash ./install_cuda.sh ${CUDA_VERSION} && rm install_cuda.sh install_nccl.sh /ci_commit_pins/nccl* install_cusparselt.sh
-ENV DESIRED_CUDA ${CUDA_VERSION}
-ENV PATH /usr/local/nvidia/bin:/usr/local/cuda/bin:$PATH
+ENV DESIRED_CUDA=${CUDA_VERSION}
+ENV PATH=/usr/local/nvidia/bin:/usr/local/cuda/bin:$PATH
 # No effect if cuda not installed
 ENV USE_SYSTEM_NCCL=1
 ENV NCCL_INCLUDE_DIR="/usr/local/cuda/include/"
@@ -76,7 +76,7 @@ COPY ci_commit_pins/huggingface-requirements.txt huggingface-requirements.txt
 COPY ci_commit_pins/timm.txt timm.txt
 COPY ci_commit_pins/torchbench.txt torchbench.txt
 # Only build aoti cpp tests when INDUCTOR_BENCHMARKS is set to True
-ENV BUILD_AOT_INDUCTOR_TEST ${INDUCTOR_BENCHMARKS}
+ENV BUILD_AOT_INDUCTOR_TEST=${INDUCTOR_BENCHMARKS}
 RUN if [ -n "${INDUCTOR_BENCHMARKS}" ]; then bash ./install_inductor_benchmark_deps.sh; fi
 RUN rm install_inductor_benchmark_deps.sh common_utils.sh timm.txt huggingface-requirements.txt torchbench.txt
 
@@ -90,14 +90,14 @@ ARG TRITON_CPU
 
 # Create a separate stage for building Triton and Triton-CPU.  install_triton
 # will check for the presence of env vars
-FROM base as triton-builder
+FROM base AS triton-builder
 COPY ./common/install_triton.sh install_triton.sh
 COPY ./common/common_utils.sh common_utils.sh
 COPY ci_commit_pins/triton.txt triton.txt
 COPY ci_commit_pins/triton-cpu.txt triton-cpu.txt
 RUN bash ./install_triton.sh
 
-FROM base as final
+FROM base AS final
 COPY --from=triton-builder /opt/triton /opt/triton
 RUN if [ -n "${TRITON}" ] || [ -n "${TRITON_CPU}" ]; then pip install /opt/triton/*.whl; chown -R jenkins:jenkins /opt/conda; fi
 RUN rm -rf /opt/triton
@@ -159,18 +159,18 @@ ARG ACL
 COPY ./common/install_acl.sh install_acl.sh
 RUN if [ -n "${ACL}" ]; then bash ./install_acl.sh; fi
 RUN rm install_acl.sh
-ENV INSTALLED_ACL ${ACL}
+ENV INSTALLED_ACL=${ACL}
 
 ARG OPENBLAS
 COPY ./common/install_openblas.sh install_openblas.sh
 RUN if [ -n "${OPENBLAS}" ]; then bash ./install_openblas.sh; fi
 RUN rm install_openblas.sh
-ENV INSTALLED_OPENBLAS ${OPENBLAS}
+ENV INSTALLED_OPENBLAS=${OPENBLAS}
 
 # Install ccache/sccache (do this last, so we get priority in PATH)
 ARG SKIP_SCCACHE_INSTALL
 COPY ./common/install_cache.sh install_cache.sh
-ENV PATH /opt/cache/bin:$PATH
+ENV PATH=/opt/cache/bin:$PATH
 RUN if [ -z "${SKIP_SCCACHE_INSTALL}" ]; then bash ./install_cache.sh; fi
 RUN rm install_cache.sh
 
@@ -186,11 +186,11 @@ RUN rm install_openmpi.sh
 
 # Include BUILD_ENVIRONMENT environment variable in image
 ARG BUILD_ENVIRONMENT
-ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
+ENV BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}
 
 # AWS specific CUDA build guidance
-ENV TORCH_NVCC_FLAGS "-Xfatbin -compress-all"
-ENV CUDA_PATH /usr/local/cuda
+ENV TORCH_NVCC_FLAGS="-Xfatbin -compress-all"
+ENV CUDA_PATH=/usr/local/cuda
 
 USER jenkins
 CMD ["bash"]

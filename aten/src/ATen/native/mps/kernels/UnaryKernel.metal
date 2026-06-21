@@ -373,9 +373,10 @@ struct log10_functor {
   inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
     // Base 10 complex log = ln(x+yi)/ln(10)
     auto magnitude = ::precise::sqrt(x.x * x.x + x.y * x.y);
-    auto real = ::precise::log(magnitude);
-    auto imag = (x.x == 0 && x.y == 0) ? 0 : ::precise::atan2(x.y, x.x);
-    return div(T(real, imag), T(::precise::log(10), 0));
+    auto real = ::precise::log10(magnitude);
+    auto imag =
+        (x.x == 0 && x.y == 0) ? 0 : ::precise::atan2(x.y, x.x) * M_LOG10E_F;
+    return T(real, imag);
   }
   inline float operator()(const bool x) {
     return x ? 0 : -INFINITY;
@@ -400,7 +401,7 @@ struct log1p_functor {
     return T(real, imag);
   }
   inline float operator()(const bool x) {
-    return x ? ::precise::log(2.0) : 0;
+    return x ? M_LN2_F : 0;
   }
 };
 
@@ -415,11 +416,12 @@ struct log2_functor {
   }
   template <typename T>
   inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
-    // Base 10 complex log = ln(x+yi)/ln(2)
+    // Base 2 complex log = ln(x+yi)/ln(2)
     auto magnitude = ::precise::sqrt(x.x * x.x + x.y * x.y);
-    auto real = ::precise::log(magnitude);
-    auto imag = (x.x == 0 && x.y == 0) ? 0 : ::precise::atan2(x.y, x.x);
-    return div(T(real, imag), T(::precise::log(2), 0));
+    auto real = ::precise::log2(magnitude);
+    auto imag =
+        (x.x == 0 && x.y == 0) ? 0 : ::precise::atan2(x.y, x.x) * M_LOG2E_F;
+    return T(real, imag);
   }
   inline float operator()(const bool x) {
     return x ? 0 : -INFINITY;
@@ -498,14 +500,13 @@ struct exp2_functor {
   template <typename T>
   inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
     // based on https://mathworld.wolfram.com/ComplexExponentiation.html
-    auto coef = ::precise::pow(4, x.x / 2);
+    auto coef = ::precise::pow(2, x.x);
     // y == 0: same rationale as exp_ short-circuit (avoid coef*0 = NaN).
     if (x.y == 0) {
       return T(coef, 0);
     }
-    auto ln = ::precise::log(4);
     float real;
-    float imag = ::precise::sincos(static_cast<float>(0.5 * x.y * ln), real);
+    float imag = ::precise::sincos(static_cast<float>(x.y) * M_LN2_F, real);
     using elem_t = decltype(x.x + x.x);
     return T(
         coef * static_cast<elem_t>(real), coef * static_cast<elem_t>(imag));
@@ -663,6 +664,29 @@ REGISTER_UNARY_OP(bitwise_not, short, short);
 REGISTER_UNARY_OP(bitwise_not, char, char);
 REGISTER_UNARY_OP(bitwise_not, uchar, uchar);
 REGISTER_UNARY_OP(bitwise_not, bool, bool);
+
+struct logical_not_functor {
+  template <typename T, enable_if_t<!is_complex_v<T>, bool> = true>
+  inline bool operator()(const T x) {
+    return x == T(0);
+  }
+  template <typename T, enable_if_t<is_complex_v<T>, bool> = true>
+  inline bool operator()(const T x) {
+    return x.x == 0 && x.y == 0;
+  }
+};
+
+REGISTER_UNARY_OP(logical_not, bool, bool);
+REGISTER_UNARY_OP(logical_not, uchar, bool);
+REGISTER_UNARY_OP(logical_not, char, bool);
+REGISTER_UNARY_OP(logical_not, short, bool);
+REGISTER_UNARY_OP(logical_not, int, bool);
+REGISTER_UNARY_OP(logical_not, long, bool);
+REGISTER_UNARY_OP(logical_not, half, bool);
+REGISTER_UNARY_OP(logical_not, float, bool);
+REGISTER_UNARY_OP(logical_not, bfloat, bool);
+REGISTER_UNARY_OP(logical_not, float2, bool);
+REGISTER_UNARY_OP(logical_not, half2, bool);
 
 REGISTER_UNARY_OP(abs, int, int);
 REGISTER_UNARY_OP(abs, long, long);

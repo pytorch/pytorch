@@ -59,7 +59,7 @@ import cutlass.pipeline as pipeline
 from cutlass import BFloat16, const_expr, Float16, Float32, Int32, Int64
 
 import torch
-from torch._vendor.quack.cache_utils import jit_cache
+from torch._vendor.quack.cache import jit_cache
 
 from ._ptx import cvta_smem, make_bulk_reduce_add
 

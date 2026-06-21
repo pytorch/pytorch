@@ -227,7 +227,7 @@ std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
       std::string op_name = op.at(0).toStringRef();
       std::string op_overload_name = op.at(1).toStringRef();
       if (!op_overload_name.empty()) {
-        op_name.append(".");
+        op_name.push_back('.');
         op_name.append(op_overload_name);
       }
 
@@ -385,8 +385,8 @@ ModelCompatCheckResult is_compatible(
     } else {
       OperatorInfo runtime_op_info = runtime_info.operator_info.at(op_name);
 
-      // If the runtime op has no schema information its a false alarm and isn't
-      // actually usable
+      // If the runtime op has no schema information it's a false alarm and
+      // isn't actually usable
       if (!runtime_op_info.num_schema_args.has_value()) {
         result.status = ModelCompatibilityStatus::ERROR;
         std::ostringstream s;

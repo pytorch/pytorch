@@ -394,7 +394,14 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
           [](const libkineto::ITraceActivity& a) -> int64_t {
             auto* linked = a.linkedActivity();
             return linked ? linked->correlationId() : 0;
-          });
+          })
+      .def(
+          "linked_activity",
+          [](const libkineto::ITraceActivity& a)
+              -> const libkineto::ITraceActivity* {
+            return a.linkedActivity();
+          },
+          py::return_value_policy::reference);
 #endif
 
   py::class_<ProfilerResult>(m, "_ProfilerResult")
@@ -432,7 +439,10 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       py::arg("config"),
       py::arg("activities"),
       py::arg("scopes") = std::unordered_set<at::RecordScope>());
-  m.def("_disable_profiler", disableProfiler);
+  m.def(
+      "_disable_profiler",
+      disableProfiler,
+      py::call_guard<py::gil_scoped_release>());
   m.def(
       "_prepare_profiler",
       prepareProfiler,

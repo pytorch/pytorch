@@ -182,10 +182,10 @@ std::pair<Option, std::string> _parseOption(
       printable_option += kwonly_part;
     } else if (out_pos >= 2) {
       printable_option.erase(out_pos - 2);
-      printable_option += ")";
+      printable_option += ')';
     } else {
       printable_option.erase(out_pos);
-      printable_option += ")";
+      printable_option += ')';
     }
     has_out = true;
   }
@@ -282,9 +282,9 @@ std::string _formattedArgDesc(
       result += py_typename(arg) + " of ";
       auto num_elements = PySequence_Length(arg);
       if (is_tuple) {
-        result += "(";
+        result += '(';
       } else {
-        result += "[";
+        result += '[';
       }
       for (const auto i : c10::irange(num_elements)) {
         if (i != 0) {
@@ -296,11 +296,11 @@ std::string _formattedArgDesc(
       }
       if (is_tuple) {
         if (num_elements == 1) {
-          result += ",";
+          result += ',';
         }
-        result += ")";
+        result += ')';
       } else {
-        result += "]";
+        result += ']';
       }
     } else {
       result += py_typename(arg);
@@ -313,7 +313,7 @@ std::string _formattedArgDesc(
   }
   if (!arguments.empty())
     result.erase(result.length() - 2);
-  result += ")";
+  result += ')';
   return result;
 }
 
@@ -327,7 +327,7 @@ std::string _argDesc(
     result += kwarg.first + "=" + py_typename(kwarg.second) + ", ";
   if (!arguments.empty())
     result.erase(result.length() - 2);
-  result += ")";
+  result += ')';
   return result;
 }
 
@@ -419,7 +419,7 @@ std::string format_invalid_args(
       auto& printable_option_str = pair.second;
       error_msg += " * ";
       error_msg += printable_option_str;
-      error_msg += "\n";
+      error_msg += '\n';
       if (_argcountMatch(option, args, kwargs)) {
         std::vector<std::string> unmatched_kwargs;
         if (has_kwargs)
@@ -430,12 +430,12 @@ std::string format_invalid_args(
           for (auto& kwarg : unmatched_kwargs)
             error_msg += kwarg + ", ";
           error_msg.erase(error_msg.length() - 2);
-          error_msg += "\n";
+          error_msg += '\n';
         } else {
           error_msg +=
               "      didn't match because some of the arguments have invalid types: ";
           error_msg += _formattedArgDesc(option, args, kwargs);
-          error_msg += "\n";
+          error_msg += '\n';
         }
       }
     }

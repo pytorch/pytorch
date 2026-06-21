@@ -6,18 +6,24 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from typing import NamedTuple
 
 import torch
 from torch._inductor import config
 from torch._inductor.codegen.common import TritonScratchWorkspace
-from torch._inductor.codegen.cpp_wrapper_gpu import DeferredTritonCallWrapper
+from torch._inductor.codegen.cpp_wrapper_gpu import (
+    CppWrapperGpu,
+    DeferredTritonCallWrapper,
+)
 from torch._inductor.codegen.cuda.device_op_overrides import CUDADeviceOpOverrides
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import IndentedBuffer
+from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfXpu,
     slowTest,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, RUN_GPU
@@ -55,6 +61,40 @@ class GpuWrapperTemplate:
     pass
 
 
+def _register_fbcode_cpp_wrapper_arg_helper_op(m, device):
+    def impl(xs, dtype, device_arg, layout, memory_format):
+        if dtype != torch.float32:
+            raise AssertionError(f"Unexpected dtype: {dtype}")
+        if torch.device(device_arg).type != device:
+            raise AssertionError(f"Unexpected device: {device_arg}")
+        if layout != torch.strided:
+            raise AssertionError(f"Unexpected layout: {layout}")
+        if memory_format != torch.contiguous_format:
+            raise AssertionError(f"Unexpected memory_format: {memory_format}")
+        return (
+            xs[0]
+            .to(device=device_arg, dtype=dtype)
+            .contiguous(memory_format=memory_format)
+        )
+
+    def meta(xs, dtype, _device_arg, layout, memory_format):
+        return torch.empty_like(
+            xs[0],
+            dtype=dtype,
+            layout=layout,
+            memory_format=memory_format,
+        )
+
+    m.define(
+        "arg_helpers("
+        "Tensor[] xs, ScalarType dtype, Device device, "
+        "Layout layout, MemoryFormat memory_format"
+        ") -> Tensor"
+    )
+    m.impl("arg_helpers", impl, GPU_TYPE.upper())
+    m.impl("arg_helpers", meta, "Meta")
+
+
 class TestGpuWrapper(InductorTestCase):
     device = GPU_TYPE
 
@@ -79,6 +119,70 @@ class TestGpuWrapper(InductorTestCase):
         )(test_fn)
         comp()
 
+    def test_cpp_wrapper_gpu_debug_sync_codegen(self):
+        wrapper = CppWrapperGpu.__new__(CppWrapperGpu)
+        wrapper.device = "cuda"
+
+        debug_sync = IndentedBuffer()
+        wrapper.generate_debug_sync(debug_sync)
+        code = debug_sync.getvalue()
+        self.assertIn("AOTI_RUNTIME_CUDA_CHECK", code)
+        self.assertIn("DeviceSynchronize", code)
+        self.assertNotIn("torch.cuda.synchronize()", code)
+
+        wrapper.prefix = IndentedBuffer()
+        wrapper._lazy_kernel_names = []
+        graph = SimpleNamespace(is_dual_wrapper_mode=False)
+        with (
+            config.patch({"triton.debug_sync_graph": True}),
+            V.set_graph_handler(graph),
+        ):
+            wrapper._codegen_entry_impl_prologue()
+        code = wrapper.prefix.getvalue()
+        self.assertIn("AOTI_RUNTIME_CUDA_CHECK", code)
+        self.assertIn("DeviceSynchronize", code)
+        self.assertNotIn("torch.cuda.synchronize()", code)
+
+        wrapper.device = "xpu"
+        with self.assertRaisesRegex(
+            NotImplementedError, "triton debug sync is not supported"
+        ):
+            wrapper.generate_debug_sync(IndentedBuffer())
+
+    def test_debug_sync_graph(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+        if GPU_TYPE != "cuda":
+            self.skipTest("CUDA/ROCm-only cpp_wrapper debug sync")
+
+        def test_fn(x):
+            return x * 2
+
+        compiled = torch.compile(
+            options={"cpp_wrapper": True, "triton.debug_sync_graph": True}
+        )(test_fn)
+        x = torch.randn(8, device=self.device)
+        with torch.utils._device.DeviceContext(self.device):
+            result = compiled(x)
+        self.assertEqual(result, x * 2)
+
+    def test_debug_sync_kernel(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+        if GPU_TYPE != "cuda":
+            self.skipTest("CUDA/ROCm-only cpp_wrapper debug sync")
+
+        def test_fn(x):
+            return x * 2
+
+        compiled = torch.compile(
+            options={"cpp_wrapper": True, "triton.debug_sync_kernel": True}
+        )(test_fn)
+        x = torch.randn(8, device=self.device)
+        with torch.utils._device.DeviceContext(self.device):
+            result = compiled(x)
+        self.assertEqual(result, x * 2)
+
     def test_non_tensor_args_wrapped_on_cpu(self):
         if not RUN_GPU:
             self.skipTest("GPU not available")
@@ -91,6 +195,34 @@ class TestGpuWrapper(InductorTestCase):
         with torch.utils._device.DeviceContext(self.device):
             _, code = test_torchinductor.run_and_get_cpp_code(compiled, x, 3)
         self.assertIn("torch.tensor(arg, device='cpu')", code)
+
+    @config.patch(implicit_fallbacks=True)
+    def test_fbcode_custom_op_fallback_python_arg_helpers(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+        if not config.is_fbcode():
+            self.skipTest("fbcode-only cpp_wrapper symbol visibility test")
+
+        device = self.device
+        with torch.library._scoped_library(
+            "fbcode_cpp_wrapper_arg_helpers", "FRAGMENT"
+        ) as m:
+            _register_fbcode_cpp_wrapper_arg_helper_op(m, device)
+
+            def fn(x):
+                y = x.sin()
+                return torch.ops.fbcode_cpp_wrapper_arg_helpers.arg_helpers(
+                    [y],
+                    torch.float32,
+                    torch.device(device),
+                    torch.strided,
+                    torch.contiguous_format,
+                ).cos()
+
+            x = torch.randn(4, 4, device=device)
+            expected = fn(x)
+            actual = torch.compile(fullgraph=True, options={"cpp_wrapper": True})(fn)(x)
+            self.assertEqual(actual, expected)
 
     def test_cpp_scratch_scales_with_grid_size_for_tma(self):
         if GPU_TYPE != "cuda" or torch.version.hip:
@@ -342,6 +474,21 @@ class TestGpuWrapper(InductorTestCase):
         self.assertIn("needs_vec_isa=False", code)
         self.assertIn("kernel_needs_vec_isa=True", code)
 
+    def test_map_fullgraph_cpp_wrapper(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+
+        def body_fn(x):
+            return torch.nn.functional.gelu(x)
+
+        def fn(xs):
+            return torch._higher_order_ops.map(body_fn, xs).sum()
+
+        xs = torch.randn(8, 64, device=self.device)
+        expected = fn(xs)
+        opt_fn = torch.compile(fn, fullgraph=True, options={"cpp_wrapper": True})
+        self.assertEqual(opt_fn(xs), expected)
+
 
 instantiate_parametrized_tests(TestGpuWrapper)
 
@@ -448,6 +595,7 @@ compiled(x)
 class TestCppWrapperStaticInitDeadlock(InductorTestCase):
     device = GPU_TYPE
 
+    @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/184496")
     def test_static_init_dlopen_does_not_deadlock(self):
         """The cpp_wrapper-generated .so must not trigger Triton kernel
         compilation from a static initializer (dlopen-time): doing so

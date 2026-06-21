@@ -14,7 +14,7 @@
 #include <errno.h>
 #include <io.h>
 #include <sys/stat.h>
-#include <windows.h>
+#include <torch/headeronly/util/win32-headers.h>
 #include <functional> // std::function
 #else // !_WIN32
 #include <sys/mman.h>

@@ -470,6 +470,7 @@
   patterns:
   - torch/_dynamo/**
   - torch/csrc/dynamo/**
+  - torch/_C/_dynamo/**
   - test/cpython/**
   - test/dynamo/**
   - test/dynamo_expected_failures/**
@@ -479,6 +480,7 @@
   approved_by:
   - guilhermeleobas
   - rtimpe
+  - trichmo
   mandatory_checks_name:
   - EasyCLA
   - Lint

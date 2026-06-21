@@ -288,17 +288,20 @@ struct PyCompilerInterfaceImpl : PyCompilerInterface {
     py::object proxy = handle.attr("unpack_hook")(hook_id, hook_input_id);
     auto tmp = py::cast<std::optional<at::Tensor>>(std::move(proxy));
     TORCH_INTERNAL_ASSERT(tmp.has_value());
-    return tmp.value();
+    return std::move(tmp).value();
   }
-  void call_accumulate_grad(
+  at::Tensor call_accumulate_grad(
       PyObject* py_compiler,
       const at::Tensor& variable,
+      const at::Tensor& variable_grad,
       const at::Tensor& grad,
       bool has_post_hooks) const override {
     py::handle handle(py_compiler);
-    py::object stuff =
-        handle.attr("accumulate_grad")(variable, grad, has_post_hooks);
-    TORCH_INTERNAL_ASSERT(stuff.is_none());
+    py::object stuff = handle.attr("accumulate_grad")(
+        variable, variable_grad, grad, has_post_hooks);
+    auto tmp = py::cast<std::optional<at::Tensor>>(std::move(stuff));
+    TORCH_INTERNAL_ASSERT(tmp.has_value());
+    return std::move(tmp).value();
   }
 };
 

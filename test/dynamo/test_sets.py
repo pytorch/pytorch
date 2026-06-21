@@ -87,6 +87,40 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         y = fn(x)
         self.assertEqual(y, x.sin())
 
+    def test_do_not_rehash_dict_keys(self):
+        # Building a set/frozenset (or subclass) from a dict must reuse the
+        # dict's stored hashes instead of re-invoking __hash__, mirroring
+        # CPython's set_update_internal fast path.  Also covers the explicit
+        # base-slot call `int.__hash__(self)` inside the custom __hash__.
+        class HashCountingInt(int):
+            def __init__(self, *args):
+                self.hash_count = 0
+
+            def __hash__(self):
+                self.hash_count += 1
+                return int.__hash__(self)
+
+        def run(thetype, n):
+            d = dict.fromkeys(map(HashCountingInt, range(n)))
+            counts = [sum(e.hash_count for e in d)]
+            s = thetype(d)
+            counts.append(sum(e.hash_count for e in d))
+            s.difference(d)
+            counts.append(sum(e.hash_count for e in d))
+            dict.fromkeys(set(d))
+            counts.append(sum(e.hash_count for e in d))
+            dict.fromkeys(frozenset(d))
+            counts.append(sum(e.hash_count for e in d))
+            return counts, len(s)
+
+        for thetype in (set, frozenset, SetSubclass, FrozenstSubclass):
+            n = 10
+            ref = run(thetype, n)
+            res = torch.compile(run, backend="eager", fullgraph=True)(thetype, n)
+            self.assertEqual(ref, res)
+            # Every key hashed exactly once (during the initial fromkeys).
+            self.assertEqual(ref[0], [n] * 5)
+
 
 class TestSetGuards(LoggingTestCase):
     def test_set_with_function(self):
@@ -649,19 +683,54 @@ class _SetBase(_FrozensetBase):
         self.thetype.discard(p, "a")
         self.assertEqual(p, {"b", "c"})
 
+    @make_dynamo_test
+    def test_remove_discard_unhashable(self):
+        # remove/discard hash the key before the membership check, so an
+        # unhashable element raises TypeError rather than KeyError (remove) or
+        # silently succeeding (discard). Mirrors CPython set_discard_key.
+        self.assertRaises(TypeError, self.thetype("abc").remove, [])
+        self.assertRaises(TypeError, self.thetype("abc").discard, [])
+
 
 class FrozensetTests(_FrozensetBase, _BaseSetTests):
     thetype = frozenset
 
+    @make_dynamo_test
+    def test_copy_preserves_identity(self):
+        p = frozenset("abc")
+        self.assertTrue(id(p) == id(p.copy()))
+        self.assertTrue(id(p) == id(frozenset.copy(p)))
 
-class SetTests(_SetBase, _BaseSetTests):
+
+class _SetKeyCoercionMixin:
+    # set/frozenset allow an (unhashable) set key for remove/discard by
+    # coercing it to a frozenset for the lookup, mirroring the set-key
+    # fallback in CPython set_remove_impl / set_discard_impl.
+    @make_dynamo_test
+    def test_remove_set_key(self):
+        s = self.thetype([frozenset("ab")])
+        s.remove(set("ab"))
+        self.assertEqual(len(s), 0)
+        self.assertRaises(KeyError, self.thetype([frozenset("ab")]).remove, set("z"))
+
+    @make_dynamo_test
+    def test_discard_set_key(self):
+        s = self.thetype([frozenset("ab")])
+        s.discard(set("ab"))
+        self.assertEqual(len(s), 0)
+        # A second discard of a missing key is a no-op, not an error.
+        s.discard(set("ab"))
+        self.assertEqual(len(s), 0)
+
+
+class SetTests(_SetBase, _SetKeyCoercionMixin, _BaseSetTests):
     thetype = set
 
     def test_in_frozenset(self):
         super().test_in_frozenset()
 
 
-class UserDefinedSetTests(_SetBase, _BaseSetTests):
+class UserDefinedSetTests(_SetBase, _SetKeyCoercionMixin, _BaseSetTests):
     class CustomSet(set):
         pass
 
@@ -679,6 +748,17 @@ class UserDefinedFrozensetTests(_FrozensetBase, _BaseSetTests):
         pass
 
     thetype = CustomFrozenset
+
+    @make_dynamo_test
+    def test_copy_returns_base_frozenset(self):
+        p = self.thetype("abc")
+        result = p.copy()
+        self.assertTrue(type(result) is frozenset)
+        self.assertTrue(id(result) != id(p))
+
+        result = frozenset.copy(p)
+        self.assertTrue(type(result) is frozenset)
+        self.assertTrue(id(result) != id(p))
 
     def test_in_frozenset(self):
         super().test_in_frozenset()

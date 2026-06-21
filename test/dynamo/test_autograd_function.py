@@ -2,6 +2,7 @@
 import copy
 import math
 from dataclasses import dataclass
+from unittest import mock
 
 import torch
 import torch._dynamo.test_case
@@ -228,6 +229,31 @@ class ModuleWithGradFunc(torch.nn.Module):
 
 class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
     # Sound behaviors, tested for working capture
+    def test_function_ctx_does_not_instantiate_function(self):
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.scale = 3
+                return x.sin()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output * ctx.scale
+
+        def fn(x):
+            return Foo.apply(x)
+
+        x = torch.randn(3, requires_grad=True)
+        ref = fn(x)
+        with mock.patch.object(
+            torch.autograd.Function,
+            "__init__",
+            side_effect=AssertionError("deprecated Function instantiated"),
+        ):
+            res = torch.compile(fn, backend="eager", fullgraph=True)(x)
+
+        self.assertEqual(res, ref)
+
     def test_autograd_function_equivalence(self):
         for grad in [True, False]:
             for i in range(1, 5):
@@ -1032,14 +1058,11 @@ class GraphModule(torch.nn.Module):
                 return "FooTensor"
 
             def __tensor_flatten__(self):
-                return ("_data",), (
-                    self._config,
-                    self._scale,
-                )
+                return ("_data", "_scale"), (self._config,)
 
             @staticmethod
             def __tensor_unflatten__(tensors, metadatas, outer_size, outer_stride):
-                return FooTensor(tensors["_data"], metadatas[0], metadatas[1])
+                return FooTensor(tensors["_data"], metadatas[0], tensors["_scale"])
 
             @classmethod
             def __torch_dispatch__(cls, func, types, args, kwargs=None):
@@ -2753,6 +2776,63 @@ class AutogradFunctionFunctorchTests(torch._dynamo.test_case.TestCase):
 
     See https://github.com/pytorch/pytorch/issues/174067
     """
+
+    def test_vmap_generate_rule_compiled(self):
+        class Double(torch.autograd.Function):
+            generate_vmap_rule = True
+
+            @staticmethod
+            def forward(x):
+                return x * 2
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad * 2
+
+        def fn(x):
+            return torch.vmap(Double.apply)(x)
+
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+
+        x1 = torch.randn(2, 3, requires_grad=True)
+        x2 = x1.detach().clone().requires_grad_(True)
+
+        expected = fn(x1)
+        expected.sum().backward()
+
+        actual = opt_fn(x2)
+        actual.sum().backward()
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(x2.grad, x1.grad)
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_vmap_custom_rule_error_falls_back_to_eager(self):
+        class BadVmap(torch.autograd.Function):
+            @staticmethod
+            def forward(x):
+                return torch.zeros(x.shape, device=x.device)
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def vmap(info, in_dims, x):
+                return torch.zeros(x.shape[1:], device=x.device), (None,)
+
+        def fn(x):
+            return torch.vmap(BadVmap.apply)(x)
+
+        opt_fn = torch.compile(fn, backend="eager")
+
+        with self.assertRaisesRegex(RuntimeError, "returned an incompatible"):
+            opt_fn(torch.randn(2, 3))
 
     def test_new_style_autograd_function_with_grad_no_compile(self):
         """Baseline: new-style autograd.Function works with torch.func.grad."""

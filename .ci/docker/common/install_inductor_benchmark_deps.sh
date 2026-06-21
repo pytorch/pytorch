@@ -12,7 +12,7 @@ function install_timm() {
   local commit
   commit=$(get_pinned_commit timm)
 
-  pip_install "git+https://github.com/huggingface/pytorch-image-models@${commit}"
+  pip_install --no-deps "git+https://github.com/huggingface/pytorch-image-models@${commit}"
 }
 
 function install_torchbench() {

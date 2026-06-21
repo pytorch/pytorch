@@ -453,10 +453,6 @@ def _flash_attention_forward_flop(
 ) -> int:
     """Count flops for self-attention."""
     # NB: We aren't accounting for causal attention here
-    if cum_seq_q is None and query.ndim == 4:
-        query = query.transpose(-2, -3)
-        key = key.transpose(-2, -3)
-        value = value.transpose(-2, -3)
     # in case this is a nested tensor, we unpack the individual batch elements
     # and then sum the flops per batch element
     sizes = _unpack_flash_attention_nested_shapes(
@@ -535,7 +531,7 @@ def sdpa_backward_flop_count(grad_out_shape, query_shape, key_shape, value_shape
     # scores: [b, h_q, s_k, s_q] @ gradOut: [b, h_q, s_q, d_v] -> gradV: [b, h_q, s_k, d_v]
     total_flops += bmm_flop((b * h_q, s_k, s_q), (b * h_q, s_q, d_v))
 
-    # Step 3: We propagate th gradients through the k @ v operation
+    # Step 3: We propagate the gradients through the k @ v operation
     # gradScores: [b, h_q, s_q, s_k] @ k: [b, h_q, s_k, d_q] -> gradQ: [b, h_q, s_q, d_q]
     total_flops += bmm_flop((b * h_q, s_q, s_k), (b * h_q, s_k, d_q))
     # q: [b, h_q, d_q, s_q] @ gradScores: [b, h_q, s_q, s_k] -> gradK: [b, h_q, d_q, s_k]
@@ -565,11 +561,6 @@ def _flash_attention_backward_flop(
     *args,
     **kwargs,
 ) -> int:
-    if cum_seq_q is None and query.ndim == 4:
-        grad_out = grad_out.transpose(-2, -3)
-        query = query.transpose(-2, -3)
-        key = key.transpose(-2, -3)
-        value = value.transpose(-2, -3)
     # in case this is a nested tensor, we unpack the individual batch elements
     # and then sum the flops per batch element
     shapes = _unpack_flash_attention_nested_shapes(

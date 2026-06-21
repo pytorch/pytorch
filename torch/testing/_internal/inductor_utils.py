@@ -393,6 +393,12 @@ class MockGraphHandler(GraphLowering):
         self.constants = {}
         self.scheduler = None
 
+    def try_get_buffer(self, buffer_name: str):
+        return self.name_to_buffer.get(buffer_name)
+
+    def get_buffer(self, buffer_name: str):
+        return self.name_to_buffer[buffer_name]
+
     def get_dtype(self, buffer_name: str) -> torch.dtype:
         """Return default dtype for any buffer (for testing)."""
         return torch.float32

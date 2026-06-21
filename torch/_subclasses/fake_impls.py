@@ -160,6 +160,20 @@ def _is_tensor_constructor(func: OpOverload) -> bool:
     )
 
 
+@functools.cache
+def _has_device_arg(func: OpOverload) -> bool:
+    device_type = torch._C.DeviceObjType.get()
+    optional_device_type = torch._C.OptionalType(device_type)
+    return any(
+        arg.name == "device"
+        and (
+            arg.type.isSubtypeOf(device_type)
+            or arg.type.isSubtypeOf(optional_device_type)
+        )
+        for arg in func._schema.arguments
+    )
+
+
 def register_op_impl(
     run_impl_check: Callable[[OpOverload], bool]
     | OpOverload
@@ -217,9 +231,6 @@ def constructors(
     _, new_kwargs = _normalize_function_or_error(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
-    if "names" in kwargs:
-        # REASON: "torch.compile doesn't support named tensors"
-        raise UnsupportedOperatorException(func)
 
     if func in _like_tensor_constructors:
         default_device = new_kwargs["input"].device
@@ -229,14 +240,20 @@ def constructors(
         # cpu is default device if none is specified
         default_device = torch.device("cpu")
         args = ()
-    out_device = new_kwargs.pop("device", None)
+    has_device_arg = _has_device_arg(func)
+    out_device = new_kwargs.pop("device", None) if has_device_arg else None
     out_device = out_device if out_device is not None else default_device
-    new_kwargs["device"] = torch.device("meta")
+    if has_device_arg:
+        new_kwargs["device"] = torch.device("meta")
     # _like constructors have fake tensor inputs (maybe this causes the non-like
     # to fail? hmmm)
     with in_kernel_invocation_manager(fake_mode):
         r = func(*args, **new_kwargs)
-    return FakeTensor(fake_mode, r, out_device)
+    if r.device.type == "meta":
+        return fake_mode.fake_tensor_converter.from_meta_and_device(
+            fake_mode, r, out_device
+        )
+    return fake_mode.fake_tensor_converter.from_real_tensor(fake_mode, r)
 
 
 @register_op_impl(aten.is_pinned.default)
@@ -346,7 +363,7 @@ def workaround_stride_incorrect_op(
     raise UnsupportedOperatorException(func)
 
 
-# Dont default to default device handling,
+# Don't default to default device handling,
 # since the device of `the_template` is ignored
 @register_op_impl(aten.resize_as_.default)
 def resize_as_(
@@ -361,6 +378,195 @@ def _sparse_coo_tensor_with_dims_and_tensors(
     fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
 ) -> FakeTensor:
     return constructors(fake_mode, func, *args, **kwargs)
+
+
+def _spdiags_static_offsets(offsets: FakeTensorLike) -> list[int] | None:
+    constant = getattr(offsets, "constant", None)
+    if constant is None:
+        constant = getattr(offsets, "real_tensor", None)
+    if isinstance(constant, FakeTensor):
+        return None
+    if constant is None or constant.device.type != "cpu":
+        return None
+    return [int(offset) for offset in constant.reshape(-1).tolist()]
+
+
+def _spdiags_nnz(offsets: list[int], rows: int, cols: int, diag_cols: int) -> int:
+    nnz = 0
+    pos_offset_limit = min(cols, diag_cols)
+    for offset in offsets:
+        if offset <= 0:
+            nnz_per_diag = min(offset + rows, diag_cols)
+        else:
+            nnz_per_diag = pos_offset_limit - offset
+        torch._check(
+            nnz_per_diag >= 0,
+            lambda: f"Trying to create tensor with negative dimension {nnz_per_diag}",
+        )
+        nnz += nnz_per_diag
+    return nnz
+
+
+def _spdiags_max_nnz_per_diag(rows: int, cols: int, diag_cols: int) -> int:
+    non_positive_offset_max = min(rows, diag_cols)
+    positive_offset_max = max(min(cols, diag_cols) - 1, 0)
+    return max(non_positive_offset_max, positive_offset_max, 0)
+
+
+def _spdiags_dynamic_size(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    *,
+    max_size: int | None,
+) -> torch.SymInt:
+    if (
+        fake_mode.shape_env is None
+        or not fake_mode.shape_env.allow_dynamic_output_shape_ops
+    ):
+        raise DynamicOutputShapeException(func)
+
+    nnz = fake_mode.shape_env.create_unbacked_symint()
+
+    from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
+
+    _constrain_range_for_size(nnz, min=0, max=max_size)
+    return nnz
+
+
+def _spdiags_is_static_int(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+@register_op_impl(aten._spdiags.default)
+def _spdiags(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    diagonals: FakeTensorLike,
+    offsets: FakeTensorLike,
+    shape: Sequence[int],
+    layout: torch.layout | None = None,
+) -> FakeTensor:
+    diagonals_dim = diagonals.dim()
+    torch._check(diagonals_dim in (1, 2), lambda: "Diagonals must be vector or matrix")
+    torch._check(len(shape) == 2, lambda: "Output shape must be 2d")
+
+    offsets_dim = offsets.dim()
+    torch._check(offsets_dim in (0, 1), lambda: "Offsets must be scalar or vector")
+
+    n_diags = 1 if diagonals_dim == 1 else diagonals.size(0)
+    n_offsets = 1 if offsets_dim == 0 else offsets.size(0)
+    torch._check(
+        n_diags == n_offsets,
+        lambda: f"Number of diagonals ({n_diags}) does not match the number of offsets ({n_offsets})",
+    )
+
+    if layout is not None:
+        torch._check(
+            layout in (torch.sparse_coo, torch.sparse_csc, torch.sparse_csr),
+            lambda: f"Only output layouts (Sparse, SparseCsc, SparseCsr) are supported, got {layout}",
+        )
+    torch._check(
+        offsets.dtype == torch.long,
+        lambda: f"Offset Tensor must have dtype Long but got {offsets.dtype}",
+    )
+    torch._check(
+        diagonals.device.type == "cpu" and offsets.device.type == "cpu",
+        lambda: "_spdiags is only implemented for CPU tensors",
+    )
+
+    rows, cols = shape
+    diag_cols = diagonals.size(0) if diagonals_dim == 1 else diagonals.size(1)
+    static_sizes = all(
+        _spdiags_is_static_int(value) for value in (rows, cols, diag_cols, n_offsets)
+    )
+
+    static_offsets = _spdiags_static_offsets(offsets)
+    if static_offsets is not None:
+        torch._check(
+            len(static_offsets) == len(set(static_offsets)),
+            lambda: "Offset tensor contains duplicate values",
+        )
+
+    out_layout = layout if layout is not None else torch.sparse_coo
+    if static_sizes and (rows == 0 or cols == 0):
+        nnz = 0
+    elif static_offsets is not None and static_sizes:
+        nnz = _spdiags_nnz(static_offsets, rows, cols, diag_cols)  # type: ignore[arg-type]
+    elif static_sizes and n_offsets == 0:
+        nnz = 0
+    else:
+        max_nnz = (
+            n_offsets * _spdiags_max_nnz_per_diag(rows, cols, diag_cols)
+            if static_sizes
+            else None
+        )
+        nnz = _spdiags_dynamic_size(fake_mode, func, max_size=max_nnz)  # type: ignore[arg-type]
+
+    with in_kernel_invocation_manager(fake_mode):
+        values = torch.empty((nnz,), dtype=diagonals.dtype, device="meta")
+        with torch.sparse.check_sparse_tensor_invariants(False):
+            if out_layout == torch.sparse_coo:
+                indices = torch.empty((2, nnz), dtype=torch.long, device="meta")
+                is_coalesced = nnz <= 1 if isinstance(nnz, int) else False
+                out = torch.ops.aten._sparse_coo_tensor_unsafe.default(
+                    indices,
+                    values,
+                    shape,
+                    device=torch.device("meta"),
+                    is_coalesced=is_coalesced,
+                )
+            elif out_layout == torch.sparse_csr:
+                crow_indices = torch.empty((rows + 1,), dtype=torch.long, device="meta")
+                col_indices = torch.empty((nnz,), dtype=torch.long, device="meta")
+                out = torch.ops.aten._sparse_compressed_tensor_unsafe.default(
+                    crow_indices,
+                    col_indices,
+                    values,
+                    shape,
+                    layout=out_layout,
+                    device=torch.device("meta"),
+                )
+            else:
+                ccol_indices = torch.empty((cols + 1,), dtype=torch.long, device="meta")
+                row_indices = torch.empty((nnz,), dtype=torch.long, device="meta")
+                out = torch.ops.aten._sparse_compressed_tensor_unsafe.default(
+                    ccol_indices,
+                    row_indices,
+                    values,
+                    shape,
+                    layout=out_layout,
+                    device=torch.device("meta"),
+                )
+
+    return fake_mode.fake_tensor_converter.from_meta_and_device(
+        fake_mode, out, diagonals.device
+    )
+
+
+@register_op_impl(aten._to_dense.default)
+def _to_dense(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    self: FakeTensor,
+    dtype: torch.dtype | None = None,
+    masked_grad: bool | None = None,
+) -> FakeTensor:
+    if self.layout is torch.sparse_coo:
+        if dtype is not None:
+            raise RuntimeError("dtype argument is not supported by sparse_to_dense")
+        with in_kernel_invocation_manager(fake_mode):
+            out = torch.empty(
+                tuple(self.shape),
+                dtype=self.dtype,
+                device="meta",
+            )
+        return FakeTensor(fake_mode, out, self.fake_device)
+
+    with in_kernel_invocation_manager(fake_mode):
+        out = func(self, dtype=dtype, masked_grad=masked_grad)
+    return fake_mode.fake_tensor_converter.from_meta_and_device(
+        fake_mode, out, self.fake_device
+    )
 
 
 # index.Tensor data-dependent in only some conditions
@@ -467,6 +673,20 @@ def unique2(
     return_counts: bool = False,
 ) -> tuple[FakeTensor, FakeTensor, FakeTensor]:
     return _unique(fake_mode, func, arg, None, sorted, return_inverse, return_counts)
+
+
+@register_op_impl(aten._unique.default)
+def unique(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    arg: FakeTensor,
+    sorted: bool = True,
+    return_inverse: bool = False,
+) -> tuple[FakeTensor, FakeTensor]:
+    uniques, inverse, _counts = _unique(
+        fake_mode, func, arg, None, sorted, return_inverse, False
+    )
+    return uniques, inverse
 
 
 @register_op_impl(aten.select.int)
@@ -780,6 +1000,7 @@ def try_duck_specialization_first(a: torch.Tensor, shape) -> bool:
     buckets: dict[int, dict[sympy.Expr, torch.SymInt]] = defaultdict(dict)
     for s in list(a_syms) + list(target_syms):
         # setdefault keeps the *first* SymInt seen for each (hint, expr).
+        # pyrefly: ignore [bad-index]
         buckets[s.node.hint].setdefault(s.node.expr, s)
 
     candidates: list[tuple[torch.SymInt, torch.SymInt]] = []
@@ -1195,7 +1416,7 @@ def slice_forward(
     new_size: IntLikeType | None = None
     if start_index is not None and end_index is not None:
         if guard_or_false(end_index >= start_index):
-            new_size = (end_index - start_index + step - 1) // step
+            new_size = (end_index - start_index + step - 1) // step  # type: ignore[bad-assignment]
         elif guard_or_false(start_index >= end_index):
             new_size = 0
         else:
@@ -1203,7 +1424,7 @@ def slice_forward(
             # ordering (e.g., when they involve Min/Max). Compute the size via
             # max(end - start, 0) to avoid creating an unbacked symint.
             diff = torch.sym_max(end_index - start_index, 0)
-            new_size = (diff + step - 1) // step
+            new_size = (diff + step - 1) // step  # type: ignore[assignment]
 
     # create unbacked if case unknown
     if new_size is None:
@@ -1409,7 +1630,7 @@ def foreach_run_and_map_input_device(
     return out_fake
 
 
-# Dont default to default device handling,
+# Don't default to default device handling,
 # Since op can take in non-zero sized cpu
 # index tensors with cuda self
 @register_op_impl(aten.index.Tensor)
@@ -1439,6 +1660,28 @@ def embedding_bag(
 
     with fake_mode:
         return meta_embedding_bag(*args, **kwargs)
+
+
+@register_op_impl(aten.embedding.default)
+def embedding(
+    fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
+) -> Any:
+    from torch._meta_registrations import embedding as meta_embedding
+
+    _, new_kwargs = _normalize_function_or_error(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+    weight = new_kwargs["weight"]
+    indices = new_kwargs["indices"]
+    if (
+        weight.device != indices.device
+        and weight.device.type != "meta"
+        and indices.device.type != "meta"
+    ):
+        return NotImplemented
+
+    with fake_mode:
+        return typing_cast(FakeTensor, meta_embedding(*args, **kwargs))
 
 
 # takes in multiple-devices, don't default to default device handling
@@ -1521,7 +1764,14 @@ def nyi(fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any) 
         raise AssertionError(f"NYI: {func}")
 
 
-@register_op_impl([aten.convolution.default, aten.convolution_backward.default])
+@register_op_impl(
+    [
+        aten.convolution.default,
+        aten._convolution.default,
+        aten._convolution.deprecated,
+        aten.convolution_backward.default,
+    ]
+)
 def conv(
     fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
 ) -> FakeTensor | tuple[FakeTensor | None, FakeTensor | None, FakeTensor | None]:
@@ -1533,7 +1783,12 @@ def conv(
     # Internal passes such as Inductor freezing may run fake propagation over
     # folded convs that do not need to match eager's public input checks.
     if (
-        func is aten.convolution.default
+        func
+        in (
+            aten.convolution.default,
+            aten._convolution.default,
+            aten._convolution.deprecated,
+        )
         and input_.dtype != weight.dtype
         and not input_.is_mkldnn
         and not fake_mode.allow_non_fake_inputs
@@ -1558,6 +1813,13 @@ def conv(
         if not all_hinted:
             # TODO: We can make this a little more faithful with best effort
             # channels last detection (but only if it's statically obvious!)
+            mem_fmt = None
+        elif input_.dim() == k - 1:
+            # Unbatched input: eager routes directly to the slow dilated
+            # backward kernels, which produce contiguous gradients and bypass
+            # the channels-last backend-memory-format selection. Mirror that
+            # here; _select_conv_backend would also reject the missing batch
+            # dim.
             mem_fmt = None
         else:
             # convolution has "bias" but not "bias_sizes"; convolution_backward
@@ -1604,7 +1866,11 @@ def conv(
     with in_kernel_invocation_manager(fake_mode):
         out = func(**new_kwargs)
 
-        if func is aten.convolution.default:
+        if func in (
+            aten.convolution.default,
+            aten._convolution.default,
+            aten._convolution.deprecated,
+        ):
             return convert(out, mem_fmt)  # type: ignore[return]
         else:
             return (
@@ -1635,7 +1901,13 @@ def bincount(
 
     _constrain_range_for_size(new_size)
     torch._check(new_size >= minlength)
-    return inputs.new_empty(new_size)  # type: ignore[return]
+
+    if weights is None:
+        return inputs.new_empty(new_size, dtype=torch.long)  # type: ignore[return]
+    elif weights.dtype == torch.float32:
+        return inputs.new_empty(new_size, dtype=torch.float32)  # type: ignore[return]
+    else:
+        return inputs.new_empty(new_size, dtype=torch.float64)  # type: ignore[return]
 
 
 @register_op_impl(torch.ops.aten._pack_padded_sequence.default)

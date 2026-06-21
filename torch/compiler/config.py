@@ -136,6 +136,34 @@ Entries in this list are dominant over all other flags dynamic=False, force_nn_m
 and force_parameter_static_shapes.
 """
 
+dynamic_values: str = Config(
+    env_name_default="TORCH_COMPILE_DYNAMIC_VALUES", default=""
+)
+"""
+Comma delimited list of integer values that should cause any matching int source or
+tensor dim to be marked dynamic.
+
+This is useful for JIT workflows with graph breaks where you don't know up-front which
+sources need to be dynamic, but you can warm up the model with a distinctive "sentinel"
+value (e.g. an odd batch size like 1111) and have any int or tensor dim that equals one
+of those values be marked dynamic automatically. This is needed because with graph
+breaks we do not propagate dynamic properties through eager code, so an int or tensor
+derived in eager between two compiled regions cannot inherit the dynamic-ness of its
+source — matching on the sentinel value lets us recover it on the next compiled region.
+
+Example::
+
+    TORCH_COMPILE_DYNAMIC_VALUES="1111,2222"
+
+Pick sentinel values unlikely to occur as legitimate shapes/ints in your
+workload (e.g. 1111, 2222) — matching is purely by value, so any int source
+or tensor dim equal to a listed value anywhere in the program will be
+marked dynamic.
+
+unlike ``dynamic_sources``, ``dynamic_values`` does NOT override
+``force_parameter_static_shapes`` or ``force_nn_module_property_static_shapes``.
+"""
+
 unbacked_sources: str = Config(
     env_name_default="TORCH_COMPILE_UNBACKED_SOURCES", default=""
 )

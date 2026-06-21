@@ -6,6 +6,7 @@ import sys
 import traceback
 import types
 from collections import namedtuple
+from contextlib import nullcontext
 from typing import Any, cast, TYPE_CHECKING, TypeVar
 
 import sympy
@@ -20,7 +21,7 @@ from torch._dynamo.exc import UserErrorType
 from torch._dynamo.source import GetItemSource
 from torch._dynamo.utils import dynamo_timed, get_metrics_context
 from torch._export.utils import _compiling_state_context
-from torch._guards import TracingContext
+from torch._guards import detect_fake_mode, TracingContext
 from torch.export.dynamic_shapes import _RelaxedConstraint, Constraint
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
@@ -35,8 +36,18 @@ if TYPE_CHECKING:
 
     from torch._dynamo.output_graph import OutputReturnInfo
     from torch._subclasses.fake_tensor import FakeTensorMode
+    from torch.export._trace import _DynamicShapesInput
     from torch.fx import Node
     from torch.fx.node import Argument, Target
+
+from torch.fx.experimental._spec_binding import _bind_spec_to_args
+from torch.fx.experimental.dynamic_spec import (
+    _coerce_to_shapes_spec,
+    IntermediateSpec,
+    ParamsSpec,
+    ShapesSpec,
+)
+
 
 T = TypeVar("T")
 log = logging.getLogger(__name__)
@@ -757,6 +768,18 @@ class _DynamoBytecodeCodeGen(torch.fx.graph.CodeGen):
     def process_inputs(self, *inputs: Any) -> Any:
         self._inputs = inputs
         results = self.dynamo_bytecode_flatten(*inputs)
+        fake_mode = detect_fake_mode()
+        if fake_mode is not None and pytree.tree_any(
+            lambda x: isinstance(x, torch.Tensor) and not fake_mode.is_our_fake(x),
+            results,
+        ):
+            # Bytecode replay can recover tensors captured from module
+            # attributes as extra FX placeholder values. These tensors are not
+            # visible in AOTAutograd's user-facing call signature, so allow the
+            # active FakeTensorMode to convert them at dispatch time. This must
+            # remain enabled for AOT's backward trace too, since autograd can
+            # save the recovered tensors from the forward.
+            fake_mode.allow_non_fake_inputs = True
         return results
 
     def process_outputs(self, outputs: Any) -> Any:
@@ -777,6 +800,23 @@ class _DynamoBytecodeCodeGen(torch.fx.graph.CodeGen):
         has_orig_self = (fn_args[0] == "self") if len(fn_args) > 0 else False
         if has_orig_self:
             free_vars.insert(0, "self")
+        # Rename any non-first `self` in fn_args to a unique name. The base
+        # CodeGen.gen_fn_def prepends `"self"` for the GraphModule's bound-
+        # method receiver whenever fn_args[0] != "self", which collides with
+        # a schema param literally named `self` (e.g. `aten.where.self(Tensor
+        # cond, Tensor self, Tensor other)` -> `def forward(self, cond, self,
+        # other)` -> `SyntaxError: duplicate argument 'self' in function
+        # definition`). Both the function-def arg list (via super().gen_fn_def)
+        # and the body binding (via gen_var_bindings) reference fn_args, so
+        # the rename is consistent end-to-end.
+        fn_args = list(fn_args)
+        first_pos = 1 if has_orig_self else 0
+        for i in range(first_pos, len(fn_args)):
+            if fn_args[i] == "self":
+                new_name = "self_"
+                while new_name in fn_args:
+                    new_name += "_"
+                fn_args[i] = new_name
         fn_definition = super().gen_fn_def(
             fn_args[:], maybe_return_annotation, expanded_def=expanded_def
         )
@@ -868,7 +908,7 @@ def _dynamo_graph_capture_for_export(
     mod: Callable[..., Any],
     *,
     constraints: list[Constraint] | None = None,
-    dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any] | None = None,
+    dynamic_shapes: _DynamicShapesInput = None,
 ) -> Callable[..., torch.fx.GraphModule]:
     """
     Improved dynamo graph capture using transformer approach with proper fake tensor handling.
@@ -891,21 +931,38 @@ def _dynamo_graph_capture_for_export(
     2. Need to attach guards
     """
 
-    _dynamic_shapes = dynamic_shapes
     _constraints = constraints
 
     def inner(*args: Any, **kwargs: Any) -> torch.fx.GraphModule:
         # This sets the is_exporting flag when building guards.
         with _compiling_state_context():
-            flat_inputs, in_spec = pytree.tree_flatten((args, kwargs))
+            # Only a ShapesSpec/ParamsSpec object opts into the new spec API.
+            # A bare dict/tuple in export's `dynamic_shapes` is now bound to
+            # the Dim export API.
+            # TODO: inspect dictionary leaves and enable dict for ParamsSpec
+            # here too, like make_fx and compile.
+            user_spec: ShapesSpec | None = None
+            if isinstance(dynamic_shapes, (ShapesSpec, ParamsSpec)):
+                user_spec = _coerce_to_shapes_spec(dynamic_shapes)
+            flattened_spec: ShapesSpec | None = None
+            if user_spec is not None:
+                # _bind_spec_to_args also flattens (args, kwargs) for us.
+                leaf_specs, flat_inputs, in_spec = _bind_spec_to_args(
+                    mod, args, kwargs, user_spec
+                )
+                flattened_spec = ShapesSpec(
+                    # leaf_specs is list[LeafSpec]; cast around list invariance
+                    # (ParamsSpec wants list[IntermediateSpec]).
+                    ParamsSpec({"*args": cast(list[IntermediateSpec], leaf_specs)}),
+                    assumptions=user_spec._assumptions or None,
+                )
+            else:
+                flat_inputs, in_spec = pytree.tree_flatten((args, kwargs))
             check_user_input_output(flat_inputs, UserErrorType.INVALID_INPUT)
             module_to_trace = ModuleToTrace(mod, in_spec)
             orig_callable = mod.forward if isinstance(mod, torch.nn.Module) else mod
 
             constraints: list[Constraint] | None = _constraints
-            dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any] | None = (
-                _dynamic_shapes
-            )
 
             from . import reset  # type: ignore[attr-defined]
 
@@ -928,10 +985,22 @@ def _dynamo_graph_capture_for_export(
                 install_free_tensors=torch._dynamo.config.install_free_tensors_for_export,
             )
 
+            # If a user spec was supplied, re-key it to the intermediate
+            # ModuleToTrace.forward(*flat_args) layout and expose via
+            # ``torch._dynamo.config._shapes_spec`` for the variable
+            # builder.
+            shapes_spec_in_use = user_spec is not None
+            shapes_spec_ctx = nullcontext()
+            if flattened_spec is not None:
+                shapes_spec_ctx = torch._dynamo.config.patch(
+                    _shapes_spec=flattened_spec
+                )
+
             with (
                 get_metrics_context(),
                 dynamo_timed("fullgraph_capture"),
                 dynamo_config_ctx,
+                shapes_spec_ctx,
             ):
                 out = fullgraph_capture(
                     module_to_trace,
@@ -956,15 +1025,18 @@ def _dynamo_graph_capture_for_export(
                     graph.recompile()
                     fake_mode = None
 
-                _suggest_or_raise_constraint_violation(
-                    module_to_trace,
-                    orig_callable,
-                    fake_mode,
-                    out,
-                    args,
-                    kwargs,
-                    dynamic_shapes,
-                )
+                # ShapesSpec is unbacked based, constraint violations are not
+                # relevant.
+                if not shapes_spec_in_use:
+                    _suggest_or_raise_constraint_violation(
+                        module_to_trace,
+                        orig_callable,
+                        fake_mode,
+                        out,
+                        args,
+                        kwargs,
+                        dynamic_shapes,  # type: ignore[arg-type]
+                    )
 
                 # Extract export metadata from the new location
                 export_metadata = out.graph_capture_output.output_graph.export_metadata

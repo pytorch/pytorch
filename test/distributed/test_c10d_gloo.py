@@ -11,6 +11,7 @@ import random
 import sys
 import tempfile
 import time
+import unittest
 from datetime import timedelta
 from functools import reduce
 from itertools import groupby
@@ -54,6 +55,7 @@ from torch.testing._internal.common_distributed import (
     verify_ddp_error_logged,
 )
 from torch.testing._internal.common_utils import (
+    IS_MACOS,
     retry_on_connect_failures,
     run_tests,
     skip_but_pass_in_sandcastle,
@@ -896,7 +898,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                     input[i * out_size : (i + 1) * out_size] = float(self.rank + i + 1)
                 output = torch.empty(out_size)
 
-                work = dist.reduce_scatter_tensor(output, input, op=op, async_op=True)
+                work = dist.reduce_scatter_single(output, input, op=op, async_op=True)
                 work.wait()
 
                 r = self.rank
@@ -1148,13 +1150,13 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self.assertEqual(pg.options._timeout, timedelta(seconds=23))
 
     @requires_gloo()
-    def test_gloo_set_pg_timeout_api(self):
+    def test_gloo_set_timeout_api(self):
         """
-        Test _set_pg_timeout API for Gloo backend (issue #165422).
-        This test demonstrates that dynamically changing timeout via _set_pg_timeout
+        Test set_timeout API for Gloo backend (issue #165422).
+        This test demonstrates that dynamically changing timeout via set_timeout
         actually affects operation timeouts by:
         1. verifying operations complete successfully with normal timeout
-        2. setting a very short timeout via _set_pg_timeout
+        2. setting a very short timeout via set_timeout
         3. demonstrating that operations timeout with the new short timeout value
         """
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -1174,9 +1176,9 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         tensor = torch.rand(10)
         pg.allreduce(tensor).wait()
 
-        # change timeout to a very short value using _set_pg_timeout
+        # change timeout to a very short value using set_timeout
         # this is the API from issue #165422
-        c10d.distributed_c10d._set_pg_timeout(timedelta(milliseconds=1), pg)
+        c10d.set_timeout(timedelta(milliseconds=1), pg)
         self.assertEqual(backend.options._timeout, timedelta(milliseconds=1))
 
         # demonstrate that the new timeout is actually enforced
@@ -1185,6 +1187,30 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             t1 = torch.zeros([1], dtype=torch.float32)
             with self.assertRaisesRegex(RuntimeError, "Timed out waiting 1ms"):
                 pg.allreduce([t1]).wait()
+
+        dist.destroy_process_group()
+
+    @requires_gloo()
+    def test_gloo_set_pg_timeout_deprecated(self):
+        """
+        The private `_set_pg_timeout` alias is deprecated but must remain
+        functional, delegating to the public `set_timeout`.
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend="gloo",
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
+            timeout=timedelta(seconds=50),
+        )
+
+        pg = dist.distributed_c10d._get_default_group()
+        backend = pg._get_backend(torch.device("cpu"))
+
+        with self.assertWarnsRegex(FutureWarning, "_set_pg_timeout"):
+            c10d.distributed_c10d._set_pg_timeout(timedelta(seconds=23), pg)
+        self.assertEqual(backend.options._timeout, timedelta(seconds=23))
 
         dist.destroy_process_group()
 
@@ -1704,6 +1730,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         inputs = [torch.tensor([i + self.rank]).cuda() for i in range(1000)]
         self._test_reduce_stress(inputs)
 
+    @unittest.skipIf(IS_MACOS, "https://github.com/pytorch/pytorch/issues/71195")
     @requires_gloo()
     def test_send_recv_all_to_all(self):
         store = c10d.FileStore(self.file_name, self.world_size)

@@ -15,7 +15,6 @@ import types
 import unittest
 import warnings
 from collections import namedtuple, OrderedDict
-from unittest.case import skipIf
 
 from common_utils import (
     check_vmap_fallback,
@@ -28,6 +27,7 @@ from common_utils import (
     is_valid_inplace_sample_input,
     opsToleranceOverride,
     skip,
+    skipIf,
     tol1,
     xfail,
     xfailIf,
@@ -71,6 +71,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfTorchDynamo,
     subtest,
+    TEST_MPS,
     TEST_WITH_ROCM,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
@@ -1223,9 +1224,13 @@ class TestVmapAPI(TestCase):
     def test_vmap_autocast_cpu(self):
         self._test_vmap_autocast("cpu")
 
-    @skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_vmap_autocast_cuda(self):
         self._test_vmap_autocast("cuda")
+
+    @unittest.skipIf(not TEST_MPS, "MPS is unavailable")
+    def test_vmap_autocast_mps(self):
+        self._test_vmap_autocast("mps")
 
     def test_restore_vmap_pytree_input_output(self):
         def f(x, y):
@@ -1286,6 +1291,28 @@ class TestVmapAPI(TestCase):
             RuntimeError, "mutating directly with `.data` under vmap"
         ):
             torch.func.vmap(foo)(torch.randn(3, 3))
+
+    def test_vmap_out_dims_negative_one_independent_output(self):
+        t = torch.randn(2, 3)
+        t_scalar = torch.randn([])
+
+        def f_dep(x):
+            return x
+
+        def f_ind(x):
+            return t
+
+        def f_ind_scalar(x):
+            return t_scalar
+
+        res_dep_neg1 = vmap(f_dep, in_dims=0, out_dims=-1)(t)
+        self.assertEqual(res_dep_neg1.shape, torch.Size([3, 2]))
+
+        res_ind_neg1 = vmap(f_ind, in_dims=0, out_dims=-1)(torch.zeros(1))
+        self.assertEqual(res_ind_neg1.shape, torch.Size([2, 3, 1]))
+
+        res_ind_scalar_neg1 = vmap(f_ind_scalar, in_dims=0, out_dims=-1)(torch.zeros(5))
+        self.assertEqual(res_ind_scalar_neg1.shape, torch.Size([5]))
 
 
 def slice_inputs(inputs, bdims, i):
@@ -2913,6 +2940,48 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(lambda x: op(x, (2, 3)), (torch.rand(B0, 1, 1),))
         test(lambda x: op(x, (2, 3)), (torch.rand(1, B0, 1),), in_dims=1)
 
+    def test_repeat_interleave(self):
+        # https://github.com/pytorch/pytorch/issues/135424
+        # Vmapping over the `repeats` tensor requires `output_size` because the
+        # output length (the sum of `repeats`) is data-dependent.
+        repeats = torch.tensor([[4, 0, 8], [2, 2, 8], [4, 2, 6], [2, 4, 6], [0, 4, 8]])
+        output_size = 12  # every row sums to 12
+
+        # repeat_interleave.Tensor: the base overload returning gather indices.
+        def index_op(rep):
+            return torch.repeat_interleave(rep, output_size=output_size)
+
+        expected = torch.stack([index_op(r) for r in repeats])
+        self.assertEqual(vmap(index_op)(repeats), expected)
+
+        # repeat_interleave.self_Tensor: torch.repeat_interleave(input, repeats).
+        def op(rep):
+            values = torch.arange(1, rep.shape[0] + 1)
+            return torch.repeat_interleave(values, rep, output_size=output_size)
+
+        expected = torch.stack([op(r) for r in repeats])
+        self.assertEqual(vmap(op)(repeats), expected)
+
+        # Batching `values` while leaving `repeats` an unbatched constant keeps
+        # the output length the same per sample, so `output_size` is optional.
+        values = torch.randn(5, 3)
+        const_repeats = torch.tensor([2, 1, 3])
+
+        def op2(v):
+            return torch.repeat_interleave(v, const_repeats)
+
+        expected = torch.stack([op2(v) for v in values])
+        self.assertEqual(vmap(op2)(values), expected)
+
+        # Omitting `output_size` while vmapping over `repeats` is data-dependent
+        # and must raise a clear error.
+        def bad(rep):
+            values = torch.arange(1, rep.shape[0] + 1)
+            return torch.repeat_interleave(values, rep)
+
+        with self.assertRaisesRegex(RuntimeError, "output_size"):
+            vmap(bad)(repeats)
+
     @skipIfTorchDynamo()
     def test_slogdet(self):
         test = functools.partial(self._vmap_test, check_propagates_grad=False)
@@ -4438,6 +4507,9 @@ class TestVmapOperatorsOpInfo(TestCase):
                         sample.kwargs["memory_format"] == torch.channels_last
                     ),
                 ),
+                xfail("native_group_norm"),
+                # https://github.com/pytorch/pytorch/issues/164556
+                skipIf("cholesky_solve", lambda *args: TEST_WITH_ROCM),
             }
         ),
     )
@@ -4501,11 +4573,9 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("put"),
                 xfail("quantile"),
                 xfail("renorm"),
-                xfail("squeeze_copy"),
                 xfail("resize_as_"),
                 xfail("take"),
                 xfail("tensor_split"),
-                xfail("transpose_copy"),
                 xfail("to_sparse"),
                 # TypeError: expected Tensor as element 0 in argument 0, but got float
                 xfail("item"),
@@ -4531,9 +4601,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("histc"),
                 xfail("as_strided"),
                 xfail("as_strided_copy"),
-                xfail("permute_copy"),
-                xfail("t_copy"),
-                xfail("unsqueeze_copy"),
                 xfail("istft"),
                 xfail("nonzero"),
                 xfail("nn.functional.fractional_max_pool2d"),
@@ -4614,6 +4681,7 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail(
                     "searchsorted"
                 ),  # aten::searchsorted.Scalar hit the vmap fallback which is currently disabled
+                xfail("native_group_norm"),
             }
         ),
     )

@@ -12,11 +12,13 @@ import setuptools
 import subprocess
 import sys
 import sysconfig
+import threading
 import types
 import collections
 from pathlib import Path
 import errno
 import logging
+from typing import TYPE_CHECKING
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +29,6 @@ from ._cpp_extension_versioner import ExtensionVersioner
 from typing_extensions import deprecated
 from torch.torch_version import TorchVersion, Version
 
-
-from setuptools.command.build_ext import build_ext
 
 IS_WINDOWS = sys.platform == 'win32'
 IS_MACOS = sys.platform.startswith('darwin')
@@ -99,9 +99,46 @@ CUDA_CLANG_VERSIONS: VersionMap = {
     '13.0': ((7, 0), (21, 0)),
 }
 
-__all__ = ["get_default_build_root", "check_compiler_ok_for_platform", "get_compiler_abi_compatibility_and_version", "BuildExtension",
+__all__ = ["get_default_build_root", "check_compiler_ok_for_platform", "get_compiler_abi_compatibility_and_version", "BuildExtension",  # noqa: F822, RUF100
            "CppExtension", "CUDAExtension", "SyclExtension", "include_paths", "library_paths", "load", "load_inline", "is_ninja_available",
            "verify_ninja_availability", "remove_extension_h_precompiler_headers", "get_cxx_compiler", "check_compiler_is_gcc"]
+
+# setuptools.command.build_ext imports Cython when available, so keep it off the
+# cpp_extension import path until BuildExtension is explicitly requested.
+_BUILD_EXTENSION_CLASS = None
+_BUILD_EXTENSION_BASE_INITIALIZED = False
+_BUILD_EXTENSION_LOCK = threading.Lock()
+
+
+if TYPE_CHECKING:
+    from setuptools.command.build_ext import build_ext as _LazyBuildExt
+else:
+    class _LazyBuildExt(setuptools.Command):
+        pass
+
+
+def _get_build_extension():
+    global _BUILD_EXTENSION_BASE_INITIALIZED
+    build_extension = _BUILD_EXTENSION_CLASS
+    if build_extension is None:
+        raise RuntimeError("BuildExtension class is not initialized")
+    if not _BUILD_EXTENSION_BASE_INITIALIZED:
+        with _BUILD_EXTENSION_LOCK:
+            if not _BUILD_EXTENSION_BASE_INITIALIZED:
+                from setuptools.command.build_ext import build_ext
+
+                build_extension.__bases__ = (build_ext,)
+                globals()["BuildExtension"] = build_extension
+                _BUILD_EXTENSION_BASE_INITIALIZED = True
+    return build_extension
+
+
+def __getattr__(name):
+    if name == "BuildExtension":
+        return _get_build_extension()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 # Taken directly from python stdlib < 3.9
 # See https://github.com/pytorch/pytorch/issues/48617
 def _nt_quote_args(args: list[str] | None) -> list[str]:
@@ -213,7 +250,7 @@ def _join_sycl_home(*paths) -> str:
     only once we need to get any SYCL-specific path.
     """
     if SYCL_HOME is None:
-        raise OSError('SYCL runtime is not dected. Please setup the pytorch '
+        raise OSError('SYCL runtime is not detected. Please setup the pytorch '
                       'prerequisites for Intel GPU following the instruction in '
                       'https://github.com/pytorch/pytorch?tab=readme-ov-file#intel-gpu-support '
                       'or install intel-sycl-rt via pip.')
@@ -677,7 +714,7 @@ def _wrap_sycl_host_flags(cflags):
 
         # Some versions of DPC++ compiler pass paths to SYCL headers as user include paths (`-I`) rather
         # than system paths (`-isystem`). This makes host compiler to report warnings encountered in the
-        # SYCL headers, such as deprecated warnings, even if warmed API is not actually used in the program.
+        # SYCL headers, such as deprecated warnings, even if warned API is not actually used in the program.
         # We expect that this issue will be addressed in the later version of DPC++ compiler. To workaround the
         # issue now we wrap paths to SYCL headers in `/external:I`. Warning free compilation is especially important
         # for Windows build as `/sdl` compilation flag assumes that and we will fail compilation otherwise.
@@ -694,7 +731,7 @@ def _wrap_sycl_host_flags(cflags):
     return wrapped_host_cflags
 
 
-class BuildExtension(build_ext):
+class BuildExtension(_LazyBuildExt):
     """
     A custom :mod:`setuptools` build extension .
 
@@ -820,7 +857,7 @@ class BuildExtension(build_ext):
             self.compiler.src_extensions += ['.mm']
         # Save the original _compile method for later.
         if self.compiler.compiler_type == 'msvc':
-            self.compiler._cpp_extensions += ['.cu', '.cuh']
+            self.compiler._cpp_extensions += ['.cu', '.cuh', '.hip']
             original_compile = self.compiler.compile
             original_spawn = self.compiler.spawn
         else:
@@ -1249,7 +1286,7 @@ class BuildExtension(build_ext):
             else:
                 self.compiler._compile = unix_wrap_single_compile
 
-        build_ext.build_extensions(self)
+        super().build_extensions()
 
     def get_ext_filename(self, ext_name):
         # Get the original shared library name. For Python 3, this name will be
@@ -1332,6 +1369,10 @@ class BuildExtension(build_ext):
         name = names[-1]
         define = f'-DTORCH_EXTENSION_NAME={name}'
         self._add_compile_flag(extension, define)
+
+
+_BUILD_EXTENSION_CLASS = BuildExtension
+del BuildExtension
 
 
 def CppExtension(name, sources, *args, **kwargs):
@@ -1502,7 +1543,7 @@ def CUDAExtension(name, sources, *args, **kwargs):
     An exception to this rule is "dynamic parallelism" (nested kernel launches)  which is not used a lot anymore.
     `Relocatable device code` is less optimized so it needs to be used only on object files that need it.
     Using `-dlto` (Device Link Time Optimization) at the device code compilation step and `dlink` step
-    helps reduce the protentional perf degradation of `-rdc`.
+    helps reduce the potential perf degradation of `-rdc`.
     Note that it needs to be used at both steps to be useful.
 
     If you have `rdc` objects you need to have an extra `-dlink` (device linking) step before the CPU symbol linking step.

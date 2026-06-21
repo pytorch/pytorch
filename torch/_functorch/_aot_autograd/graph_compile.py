@@ -221,6 +221,13 @@ def aot_stage1_graph_capture(
             fw_metadata=aot_state.fw_metadata,
         )
     )
+    if aot_config.disable_functionalization:
+        # Effect tokens are introduced by FunctionalTensorMode.  The
+        # disable_functionalization path intentionally traces without the
+        # effect-token wrapper, so metadata-discovered tokens must not affect
+        # graph signatures or forward/backward output partitioning.
+        aot_state.fw_metadata.tokens = {}
+        aot_state.fw_metadata.num_backward_tokens = 0
 
     # NB: This is currently only used for backwards, where fwd/bwd
     # deterministic TLS can be different
@@ -1063,7 +1070,7 @@ def run_joint_graph_passes_on_hops(
     #   outputs - (*grad_outs)  -- Different
     # Here both input and output signature change. The output signature handling
     # is quite easy because the grads_out are sitting at the right place, so we
-    # dont have to do anything.
+    # don't have to do anything.
     #
     # For the input signature, we have to collect the saved tensors from the
     # corresponding forward graph output. We collect all saved_tensors when we
@@ -2779,6 +2786,13 @@ def _aot_stage2b_compile_forward_or_inference(
         if tracing_context := torch._guards.TracingContext.try_get():
             tracing_context.fw_metadata = _get_inner_meta(
                 maybe_subclass_meta, fw_metadata
+            )
+
+        if config.enable_complex_wrapper:
+            from .complex_decomposition import decompose_complex_in_graph
+
+            fw_module = decompose_complex_in_graph(
+                fw_module, adjusted_flat_args, aot_config.decompositions
             )
 
         with TracingContext.report_output_strides() as fwd_output_strides:

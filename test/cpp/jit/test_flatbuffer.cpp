@@ -594,7 +594,7 @@ class TorchBindFlatbufferTestStruct : public torch::jit::CustomClassHolder {
     ss << "Hello! Your tensor has ";
     ss << t.numel();
     ss << " elements!";
-    return ss.str();
+    return std::move(ss).str();
   }
 };
 

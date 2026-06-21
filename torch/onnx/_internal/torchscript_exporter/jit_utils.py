@@ -71,7 +71,7 @@ class GraphContext:
                 as arguments to the `symbolic` definition.
             outputs: The number of outputs this operator returns.
                 By default an operator is assumed to return a single output.
-                If `outputs` is greater than one, this functions returns a tuple
+                If `outputs` is greater than one, this function returns a tuple
                 of output `Value`, representing each output of the ONNX operator
                 in order.
             kwargs: The attributes of the ONNX operator, whose keys are named
@@ -123,7 +123,7 @@ class GraphContext:
                 as arguments to the `symbolic` definition.
             outputs: The number of outputs this operator returns.
                 By default an operator is assumed to return a single output.
-                If `outputs` is greater than one, this functions returns a tuple
+                If `outputs` is greater than one, this function returns a tuple
                 of output `Value`, representing each output of the ONNX operator
                 in order.
             kwargs: The attributes of the ONNX operator, whose keys are named
@@ -165,7 +165,7 @@ def add_op_with_blocks(
         inputs: The inputs to the operator.
         outputs: The number of outputs this operator returns.
             By default an operator is assumed to return a single output.
-            If `outputs` is greater than one, this functions returns a tuple
+            If `outputs` is greater than one, this function returns a tuple
             of output `Value`, representing each output of the ONNX operator
             in order.
         n_blocks: The number of sub-blocks to create in the node.
@@ -215,7 +215,7 @@ def _add_op(
             as arguments to the `symbolic` definition.
         outputs: The number of outputs this operator returns.
             By default an operator is assumed to return a single output.
-            If `outputs` is greater than one, this functions returns a tuple
+            If `outputs` is greater than one, this function returns a tuple
             of output `Value`, representing each output of the ONNX operator
             in order.
         kwargs: The attributes of the ONNX operator, whose keys are named

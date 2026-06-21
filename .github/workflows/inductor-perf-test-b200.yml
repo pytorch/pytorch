@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: pt2"]
 name: inductor-perf-b200
 
 on:
@@ -79,7 +80,7 @@ jobs:
       opt_out_experiments: lf
 
   build:
-    name: cuda13.0-py3.10-gcc11-sm100
+    name: cuda13.0-py3.12-gcc11-sm100
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
@@ -89,8 +90,8 @@ jobs:
       # from trunk. Also use a memory-intensive runner here because memory is
       # usually the bottleneck
       runner: linux.12xlarge.memory
-      build-environment: linux-jammy-cuda13.0-py3.10-gcc11-sm100
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks
+      build-environment: linux-jammy-cuda13.0-py3.12-gcc11-sm100
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11-inductor-benchmarks
       cuda-arch-list: '10.0'
       test-matrix: |
         { include: [
@@ -103,7 +104,7 @@ jobs:
     secrets: inherit
 
   test-periodically:
-    name: cuda13.0-py3.10-gcc11-sm100
+    name: cuda13.0-py3.12-gcc11-sm100
     uses: ./.github/workflows/_linux-test.yml
     needs: build
     if: github.event.schedule == '0 7 * * 1-6'
@@ -122,7 +123,7 @@ jobs:
     secrets: inherit
 
   test-weekly:
-    name: cuda13.0-py3.10-gcc11-sm100
+    name: cuda13.0-py3.12-gcc11-sm100
     uses: ./.github/workflows/_linux-test.yml
     needs: build
     if: github.event.schedule == '0 7 * * 0'
@@ -141,7 +142,7 @@ jobs:
     secrets: inherit
 
   test:
-    name: cuda13.0-py3.10-gcc11-sm100
+    name: cuda13.0-py3.12-gcc11-sm100
     uses: ./.github/workflows/_linux-test.yml
     needs: build
     with:

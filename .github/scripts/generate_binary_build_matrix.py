@@ -28,7 +28,7 @@ CUDA_ARCHES = ["12.6", "13.0", "13.2"]
 CUDA_STABLE = "13.0"
 CUDA_ARCHES_FULL_VERSION = {
     "12.6": "12.6.3",
-    "13.0": "13.0.2",
+    "13.0": "13.0.3",
     "13.2": "13.2.1",
 }
 CUDA_ARCHES_CUDNN_VERSION = {
@@ -51,34 +51,30 @@ CUDA_AARCH64_ARCHES = [
     "13.2-aarch64",
 ]
 
-
-# WARNING: For CUDA 13.0, cublas is pinned to a version range rather
-# than an exact version. A broken cublas release within that range will be
-# silently pulled in.
 PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     "12.6": (
-        "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.6.3; platform_system == 'Linux' | "
-        "cuda-bindings>=12.9.4,<13; platform_system == 'Linux' | "
+        "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvtx]==12.6.3; platform_system == 'Linux' | "
+        "cuda-bindings>=12.9.4,<13; platform_system == 'Linux' and python_version < '3.15' | "
         "nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | "
         "nvidia-nccl-cu12==2.29.3; platform_system == 'Linux' | "
-        "nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'"
+        "nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux' | "
+        "nvidia-nvjitlink-cu12>=12.6.85,<13; platform_system == 'Linux'"
     ),
     "13.0": (
-        "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cufile,nvjitlink,nvtx]==13.0.2; platform_system == 'Linux' | "
-        "nvidia-cublas>=13.1.0.3,<=13.1.1.3; platform_system == 'Linux' | "
-        "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | "
-        "nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | "
+        "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.3; platform_system == 'Linux' | "
+        "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | "
+        "nvidia-cudnn-cu13==9.23.1.3; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | "
-        "nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | "
+        "nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
     ),
     "13.2": (
         "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.1; platform_system == 'Linux' | "
-        "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | "
-        "nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | "
+        "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | "
+        "nvidia-cudnn-cu13==9.23.1.3; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | "
-        "nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | "
+        "nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
     ),
     "xpu": (
@@ -102,7 +98,8 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "tbb==2023.0.0 | "
         "tcmlib==1.5.0 | "
         "umf==1.1.0 | "
-        "intel-pti==0.17.0"
+        "intel-pti==0.17.0 | "
+        "pyzes==0.1.1; platform_system == 'Linux' and platform_machine == 'x86_64'"
     ),
 }
 
@@ -431,14 +428,6 @@ def generate_wheels_matrix(
 
             # TODO: Enable python 3.15 on non linux OSes
             if os not in ["linux", "linux-aarch64"] and (
-                python_version == "3.15" or python_version == "3.15t"
-            ):
-                continue
-
-            # TODO: Re-enable ROCm for python 3.15 once composable_kernel's
-            # ck_tile/01_fmha/generate.py is updated; it still uses
-            # importlib.abc.Loader.load_module() which was removed in 3.15.
-            if arch_version in ROCM_ARCHES and (
                 python_version == "3.15" or python_version == "3.15t"
             ):
                 continue
