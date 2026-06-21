@@ -2940,6 +2940,48 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(lambda x: op(x, (2, 3)), (torch.rand(B0, 1, 1),))
         test(lambda x: op(x, (2, 3)), (torch.rand(1, B0, 1),), in_dims=1)
 
+    def test_repeat_interleave(self):
+        # https://github.com/pytorch/pytorch/issues/135424
+        # Vmapping over the `repeats` tensor requires `output_size` because the
+        # output length (the sum of `repeats`) is data-dependent.
+        repeats = torch.tensor([[4, 0, 8], [2, 2, 8], [4, 2, 6], [2, 4, 6], [0, 4, 8]])
+        output_size = 12  # every row sums to 12
+
+        # repeat_interleave.Tensor: the base overload returning gather indices.
+        def index_op(rep):
+            return torch.repeat_interleave(rep, output_size=output_size)
+
+        expected = torch.stack([index_op(r) for r in repeats])
+        self.assertEqual(vmap(index_op)(repeats), expected)
+
+        # repeat_interleave.self_Tensor: torch.repeat_interleave(input, repeats).
+        def op(rep):
+            values = torch.arange(1, rep.shape[0] + 1)
+            return torch.repeat_interleave(values, rep, output_size=output_size)
+
+        expected = torch.stack([op(r) for r in repeats])
+        self.assertEqual(vmap(op)(repeats), expected)
+
+        # Batching `values` while leaving `repeats` an unbatched constant keeps
+        # the output length the same per sample, so `output_size` is optional.
+        values = torch.randn(5, 3)
+        const_repeats = torch.tensor([2, 1, 3])
+
+        def op2(v):
+            return torch.repeat_interleave(v, const_repeats)
+
+        expected = torch.stack([op2(v) for v in values])
+        self.assertEqual(vmap(op2)(values), expected)
+
+        # Omitting `output_size` while vmapping over `repeats` is data-dependent
+        # and must raise a clear error.
+        def bad(rep):
+            values = torch.arange(1, rep.shape[0] + 1)
+            return torch.repeat_interleave(values, rep)
+
+        with self.assertRaisesRegex(RuntimeError, "output_size"):
+            vmap(bad)(repeats)
+
     @skipIfTorchDynamo()
     def test_slogdet(self):
         test = functools.partial(self._vmap_test, check_propagates_grad=False)
