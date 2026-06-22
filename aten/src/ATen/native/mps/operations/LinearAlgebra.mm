@@ -793,16 +793,37 @@ static Tensor& addbmm_or_baddbmm_out_mps_impl(const Tensor& input,
 
   if (opType == ADDBMM_OP_TYPE) {
     result.resize_as_(input);
-
-    const int64_t num_batches = batch1.size(0);
-
-    if (num_batches == 0) {
-      result.zero_();
+    // addbmm's result isn't populated by a meta function (unlike baddbmm),
+    // so copy input now so that beta-scaling guards below work correctly.
+    if (beta.toComplexDouble() != 0.0) {
+      result.copy_(input);
+    }
+    // addbmm sums across batches into a 2D output, so B=0 doesn't make
+    // result.numel()==0 the way it does for baddbmm; needs its own guard.
+    if (batch1.size(0) == 0) {
+      if (beta.toComplexDouble() == 0.0) {
+        result.zero_();
+      } else {
+        result.mul_(beta);
+      }
       return result;
     }
   } else if (result.numel() == 0) {
     // Empty baddbmm output (e.g. a zero-sized batch dim): nothing to compute,
     // avoid feeding empty buffers to the MPSGraph / Metal kernel paths.
+    return result;
+  }
+
+  // Empty tensors would hit the Placeholder [srcBuf length] > 0 assertion.
+  if (result.numel() == 0) {
+    return result;
+  }
+  if (batch1.size(2) == 0) {
+    if (beta.toComplexDouble() == 0.0) {
+      result.zero_();
+    } else {
+      result.mul_(beta);
+    }
     return result;
   }
 
