@@ -20,7 +20,7 @@ from torch.testing._internal.common_methods_invocations import (
 )
 
 from torch.masked import as_masked_tensor, masked_tensor, _combine_input_and_mask
-from torch.masked.maskedtensor.core import _masks_match, _tensors_match
+from torch.masked.maskedtensor.core import _map_mt_args_kwargs, _masks_match, _tensors_match
 from torch.masked.maskedtensor.unary import NATIVE_INPLACE_UNARY_FNS, NATIVE_UNARY_FNS, UNARY_NAMES
 from torch.masked.maskedtensor.binary import NATIVE_BINARY_FNS, NATIVE_INPLACE_BINARY_FNS, BINARY_NAMES
 from torch.masked.maskedtensor.reductions import REDUCE_NAMES
@@ -129,6 +129,23 @@ class TestBasics(TestCase):
             masked_tensor(data, mt)
         with self.assertRaisesRegex(TypeError, "mask must be a Tensor"):
             masked_tensor(data, 0)
+
+    def test_map_mt_args_kwargs_maps_each_kwarg(self, device):
+        # _map_mt_args_kwargs must map every kwarg from its own value. It used to
+        # map all kwargs from `a`, the positional-arg loop variable left over from
+        # the previous loop, so kwargs took the last arg's value (and crashed with
+        # NameError when there were no positional args). passthrough ops feed the
+        # mapped kwargs straight into the op, so this silently used the wrong data.
+        mask = torch.tensor([True, True, True], device=device)
+        first = masked_tensor(torch.ones(3, device=device), mask)
+        keyword = masked_tensor(torch.full((3,), 2.0, device=device), mask)
+
+        _, impl_kwargs = _map_mt_args_kwargs((first,), {"other": keyword}, lambda x: x.get_data())
+        self.assertTrue(torch.equal(impl_kwargs["other"], keyword.get_data()))
+
+        # No positional args: the kwarg must still be mapped (previously NameError).
+        _, impl_kwargs = _map_mt_args_kwargs((), {"other": keyword}, lambda x: x.get_data())
+        self.assertTrue(torch.equal(impl_kwargs["other"], keyword.get_data()))
 
     def test_diff_layouts(self, device):
         data = torch.randn((3, 4), device=device).to_sparse_coo()

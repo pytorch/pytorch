@@ -89,7 +89,7 @@ def _map_mt_args_kwargs(args, kwargs, map_fn):
         impl_args.append(_helper(a, map_fn))
     impl_kwargs = {}
     for k in kwargs:
-        impl_kwargs[k] = _helper(a, map_fn)
+        impl_kwargs[k] = _helper(kwargs[k], map_fn)
     return impl_args, impl_kwargs
 
 
