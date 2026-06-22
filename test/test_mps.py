@@ -828,6 +828,13 @@ class TestAvgPool(TestCaseMPS):
             msg = f'{input_size=}, {kwargs=}'
             self.assertEqual(out_mps, out_cpu, msg=msg)
 
+    def test_local_response_norm_complex_input_raises(self):
+        # Regression test for gh-187611:
+        # complex input should raise NotImplementedError instead of
+        # an opaque Metal RuntimeError on MPS.
+        x = torch.randn(5, 1, 5, 2, 6, dtype=torch.complex64, device="mps")
+        with self.assertRaisesRegex(NotImplementedError, "complex"):
+            F.local_response_norm(x, size=4)
 
     def test_channels_last_storage_offset(self):
         # Regression test: channels_last tensors with non-zero storage_offset produced wrong
