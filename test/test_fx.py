@@ -5591,6 +5591,9 @@ class TestFunctionalTracing(JitTestCase):
         "upsample": CONTROL_FLOW,
         "upsample_bilinear": INTERPOLATE_ARGS_CONFLICT,
         "upsample_nearest": INTERPOLATE_ARGS_CONFLICT,
+        # scaled_mm forwards its `out` kwarg to the mutable _scaled_mm_v2.out
+        # overload, which strict FX tracing rejects.
+        "scaled_mm": MUTABLE,
     }
 
     # List of nn.functionals with Tensor inputs but not with type annotation
