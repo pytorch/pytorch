@@ -1,0 +1,79 @@
+# ---[ xpu
+
+# Poor man's include guard
+if(TARGET torch::xpurt)
+  return()
+endif()
+
+# "icx" is a closed source DPC++ compiler shipped with oneAPI Toolkits
+# "dpclang" is an open source DPC++ compiler shipped with Linux distros
+
+# Check if the XPU_SYCL_COMPILER is NOT already set (e.g. from -D command line)
+if(NOT DEFINED XPU_SYCL_COMPILER)
+    if(DEFINED ENV{XPU_SYCL_COMPILER})
+        set(XPU_SYCL_COMPILER "$ENV{XPU_SYCL_COMPILER}")
+    else()
+        set(XPU_SYCL_COMPILER "icx")
+    endif()
+endif()
+
+# Finalize the setting as a CACHE variable so it appears in cache files
+set(XPU_SYCL_COMPILER "${XPU_SYCL_COMPILER}" CACHE STRING "SYCL compiler to use")
+
+set(XPU_HOST_CXX_FLAGS)
+
+# Find SYCL library.
+find_package(SYCLToolkit REQUIRED)
+if(NOT SYCL_FOUND)
+  set(PYTORCH_FOUND_XPU FALSE)
+  # Exit early to avoid populating XPU_HOST_CXX_FLAGS.
+  return()
+endif()
+set(PYTORCH_FOUND_XPU TRUE)
+
+# SYCL library interface
+add_library(torch::sycl INTERFACE IMPORTED)
+
+set_property(
+    TARGET torch::sycl PROPERTY INTERFACE_INCLUDE_DIRECTORIES
+    ${SYCL_INCLUDE_DIR})
+set_property(
+    TARGET torch::sycl PROPERTY INTERFACE_LINK_DIRECTORIES
+    ${SYCL_LIBRARY_DIR})
+set_property(
+    TARGET torch::sycl PROPERTY INTERFACE_LINK_LIBRARIES
+    ${SYCL_LIBRARY})
+
+# xpurt
+add_library(torch::xpurt INTERFACE IMPORTED)
+set_property(
+    TARGET torch::xpurt PROPERTY INTERFACE_LINK_LIBRARIES
+    torch::sycl)
+
+# setting xpu arch flags
+torch_xpu_get_arch_list(XPU_ARCH_FLAGS)
+# propagate to torch-xpu-ops
+set(TORCH_XPU_ARCH_LIST ${XPU_ARCH_FLAGS})
+
+# Ensure SYCL device code compiles with C++20 (matching CMAKE_CXX_STANDARD).
+# SYCL_FLAGS flows into SYCL_COMPILE_FLAGS in torch-xpu-ops' BuildFlags.cmake
+# and is passed directly to icpx on the device compilation command line.
+list(APPEND SYCL_FLAGS -std=c++20)
+
+# Ensure USE_XPU is enabled.
+string(APPEND XPU_HOST_CXX_FLAGS " -DUSE_XPU")
+string(APPEND XPU_HOST_CXX_FLAGS " -DSYCL_COMPILER_VERSION=${SYCL_COMPILER_VERSION}")
+
+if(DEFINED ENV{XPU_ENABLE_KINETO})
+  set(XPU_ENABLE_KINETO TRUE)
+else()
+  set(XPU_ENABLE_KINETO FALSE)
+endif()
+
+if(WIN32)
+  if(${SYCL_COMPILER_VERSION} GREATER_EQUAL 20250101)
+    set(XPU_ENABLE_KINETO TRUE)
+  endif()
+else()
+  set(XPU_ENABLE_KINETO TRUE)
+endif()

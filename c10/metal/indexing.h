@@ -1,0 +1,1368 @@
+// Metal indexing primitives
+#pragma once
+#include <c10/metal/common.h>
+#include <c10/metal/utils.h>
+#include <metal_stdlib>
+
+namespace c10 {
+namespace metal {
+
+// Given coordinates and strides, calculates offset from the start of the
+// tensors
+template <typename T>
+inline T offset_from_coord(
+    thread T idx[max_ndim],
+    constant long* strides,
+    uint ndim) {
+  T rc = 0;
+  for (uint i = 0; i < ndim; ++i) {
+    rc += idx[i] * T(strides[i]);
+  }
+  return rc;
+}
+
+// Given thread index calculates position in the ndim tensor
+template <typename T>
+inline void pos_from_thread_index(
+    T idx,
+    thread T pos[max_ndim],
+    constant long* sizes,
+    uint ndim) {
+  for (uint i = 0; i < ndim; ++i) {
+    pos[i] = idx % T(sizes[i]);
+    idx /= T(sizes[i]);
+  }
+}
+
+// 2D dispatch overload: thread_pos.x maps directly to pos[0] (innermost dim),
+// thread_pos.y is decomposed across the remaining outer dims. Skips one
+// div/mod per element vs the 1D form.
+template <typename T>
+inline void pos_from_thread_index(
+    uint2 thread_pos,
+    thread T pos[max_ndim],
+    constant long* sizes,
+    uint ndim) {
+  pos[0] = static_cast<T>(thread_pos.x);
+  auto idx = static_cast<T>(thread_pos.y);
+  for (uint i = 1; i < ndim; ++i) {
+    pos[i] = idx % T(sizes[i]);
+    idx /= T(sizes[i]);
+  }
+}
+
+inline long offset_from_thread_index(
+    long idx,
+    constant long* sizes,
+    constant long* strides,
+    uint ndim) {
+  long pos[max_ndim];
+  pos_from_thread_index(idx, pos, sizes, ndim);
+  return offset_from_coord(pos, strides, ndim);
+}
+
+template <typename T>
+inline T val_at_offs(constant void* ptr, long offs) {
+  return *reinterpret_cast<constant T*>(
+      static_cast<constant char*>(ptr) + offs);
+}
+
+template <typename T>
+inline T val_at_offs(device void* ptr, long offs) {
+  return *reinterpret_cast<device T*>(static_cast<device char*>(ptr) + offs);
+}
+
+template <typename T>
+inline device T& ref_at_offs(device void* ptr, long offs) {
+  return *reinterpret_cast<device T*>(static_cast<device char*>(ptr) + offs);
+}
+
+// One thread per element. Used for small dense tensors where the ILP variant's
+// per-thread overhead isn't amortized (see ILP_DISPATCH_THRESHOLD on the host).
+template <typename T, typename F>
+kernel void unary_dense_scalar(
+    device result_of<F, T>* output [[buffer(0)]],
+    constant T* input [[buffer(1)]],
+    uint index [[thread_position_in_grid]]) {
+  F f;
+  output[index] = f(input[index]);
+}
+
+// Each thread loads ILP_PER_THREAD elements into thread-local memory, applies
+// the functor, then writes them back. Increases memory-level parallelism and
+// lets the compiler issue wide loads/stores when alignment permits.
+template <typename T, typename F>
+kernel void unary_dense(
+    device result_of<F, T>* output [[buffer(0)]],
+    constant T* input [[buffer(1)]],
+    constant uint& numel [[buffer(2)]],
+    uint index [[thread_position_in_grid]]) {
+  F f;
+  uint base = index * ILP_PER_THREAD;
+  if (base + ILP_PER_THREAD <= numel) {
+    array<T, ILP_PER_THREAD> tmp_in;
+    array<result_of<F, T>, ILP_PER_THREAD> tmp_out;
+#pragma unroll
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      tmp_in[j] = input[base + j];
+    }
+#pragma unroll
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      tmp_out[j] = f(tmp_in[j]);
+    }
+#pragma unroll
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      output[base + j] = tmp_out[j];
+    }
+  } else {
+    for (uint i = base; i < numel; ++i) {
+      output[i] = f(input[i]);
+    }
+  }
+}
+
+// 2D-grid variant: grid.x = thread_pos.x runs along the fastest-varying
+// (innermost) dim, grid.y enumerates the product of the remaining outer dims.
+// Saves one div+mod per thread vs the 1D form, and lets the SIMD-group walk
+// consecutive elements on the dense side (better memory coalescing).
+template <typename T, typename F>
+kernel void unary_strided(
+    device void* output [[buffer(0)]],
+    constant void* input [[buffer(1)]],
+    constant long* sizes [[buffer(2)]],
+    constant long* input_strides [[buffer(3)]],
+    constant long* output_strides [[buffer(4)]],
+    constant uint& ndim [[buffer(5)]],
+    uint2 thread_pos [[thread_position_in_grid]]) {
+  F f;
+  using res_t = result_of<F, T>;
+  int pos[max_ndim];
+  pos_from_thread_index(thread_pos, pos, sizes, ndim);
+  const auto input_offs = offset_from_coord(pos, input_strides, ndim);
+  const auto output_offs = offset_from_coord(pos, output_strides, ndim);
+  ref_at_offs<res_t>(output, output_offs) =
+      f(val_at_offs<T>(input, input_offs));
+}
+
+// Forward declarations for the castout templates (defined after store_at_offs,
+// which they call). REGISTER_UNARY_OP expands to explicit template
+// instantiations of these, so they must be declared before the macro is used.
+template <typename Tin, typename F>
+kernel void unary_dense_castout(
+    device void* output,
+    constant Tin* input,
+    constant uint2& size_outtype,
+    uint index);
+
+// ILP-wide castout. size_outtype_numel.x=elem_size, .y=out_type, .z=numel.
+template <typename Tin, typename F>
+kernel void unary_dense_castout_ilp(
+    device void* output,
+    constant Tin* input,
+    constant uint3& size_outtype_numel,
+    uint index);
+
+template <typename Tin, typename F>
+kernel void unary_strided_castout(
+    device void* output,
+    constant void* input,
+    constant long* sizes,
+    constant long* input_strides,
+    constant long* output_strides,
+    constant uint2& ndim_outtype,
+    uint2 thread_pos);
+
+// Registers the direct per-(out,in) unary kernels and the castout variants
+// keyed on the input dtype. Castout kernels compute the functor in DTYPE0
+// precision and cast the result to the user-supplied output dtype on store via
+// store_at_offs (runtime ScalarType switch), matching CPU semantics for
+// cross-dtype unary ops. Each (NAME, DTYPE0) pair must be registered at most
+// once across the library, since the castout host_names are keyed only on
+// DTYPE0.
+#define REGISTER_UNARY_OP(NAME, DTYPE0, DTYPE1)                                \
+  static_assert(                                                               \
+      ::metal::                                                                \
+          is_same_v<DTYPE1, ::c10::metal::result_of<NAME##_functor, DTYPE0>>,  \
+      "Output dtype mismatch for unary op " #NAME " and input " #DTYPE0);      \
+  template [[host_name(#NAME "_dense_" #DTYPE1 "_" #DTYPE0)]] kernel void ::   \
+      c10::metal::unary_dense<DTYPE0, NAME##_functor>(                         \
+          device ::c10::metal::result_of<NAME##_functor, DTYPE0> * output,     \
+          constant DTYPE0 * input,                                             \
+          constant uint & numel,                                               \
+          uint index);                                                         \
+  template                                                                     \
+      [[host_name(#NAME "_dense_scalar_" #DTYPE1 "_" #DTYPE0)]] kernel void :: \
+          c10::metal::unary_dense_scalar<DTYPE0, NAME##_functor>(              \
+              device ::c10::metal::result_of<NAME##_functor, DTYPE0> * output, \
+              constant DTYPE0 * input,                                         \
+              uint index);                                                     \
+  template [[host_name(#NAME "_strided_" #DTYPE1 "_" #DTYPE0)]] kernel void :: \
+      c10::metal::unary_strided<DTYPE0, NAME##_functor>(                       \
+          device void* output,                                                 \
+          constant void* input,                                                \
+          constant long* sizes,                                                \
+          constant long* input_strides,                                        \
+          constant long* output_strides,                                       \
+          constant uint& ndim,                                                 \
+          uint2 thread_pos);                                                   \
+  template [[host_name(#NAME "_dense_castout_" #DTYPE0)]] kernel void ::c10::  \
+      metal::unary_dense_castout<DTYPE0, NAME##_functor>(                      \
+          device void* output,                                                 \
+          constant DTYPE0* input,                                              \
+          constant uint2& size_outtype,                                        \
+          uint index);                                                         \
+  template [[host_name(#NAME "_dense_castout_ilp_" #DTYPE0)]] kernel void ::   \
+      c10::metal::unary_dense_castout_ilp<DTYPE0, NAME##_functor>(             \
+          device void* output,                                                 \
+          constant DTYPE0* input,                                              \
+          constant uint3& size_outtype_numel,                                  \
+          uint index);                                                         \
+  template [[host_name(#NAME "_strided_castout_" #DTYPE0)]] kernel void ::     \
+      c10::metal::unary_strided_castout<DTYPE0, NAME##_functor>(               \
+          device void* output,                                                 \
+          constant void* input,                                                \
+          constant long* sizes,                                                \
+          constant long* input_strides,                                        \
+          constant long* output_strides,                                       \
+          constant uint2& ndim_outtype,                                        \
+          uint2 thread_pos)
+
+#define DEFINE_UNARY_FLOATING_FUNCTOR(NAME)                                     \
+  struct NAME##_functor {                                                       \
+    template <typename T>                                                       \
+    inline ::metal::enable_if_t<::metal::is_floating_point_v<T>, T> operator()( \
+        const T x) {                                                            \
+      return T(NAME(x));                                                        \
+    }                                                                           \
+    template <typename T>                                                       \
+    inline ::metal::enable_if_t<::metal::is_integral_v<T>, float> operator()(   \
+        const T x) {                                                            \
+      return NAME(static_cast<float>(x));                                       \
+    }                                                                           \
+  }
+
+#define DEFINE_BINARY_COMPARISON_FUNCTOR(NAME, OP) \
+  struct NAME##_functor {                          \
+    template <typename T>                          \
+    inline bool operator()(const T a, const T b) { \
+      return a OP b;                               \
+    }                                              \
+  }
+
+template <typename T, typename T2, typename F>
+kernel void unary_alpha_dense(
+    device result_of<F, T, T2>* output [[buffer(0)]],
+    constant T* input [[buffer(1)]],
+    constant T2& alpha [[buffer(2)]],
+    uint index [[thread_position_in_grid]]) {
+  F f;
+  output[index] = f(input[index], alpha);
+}
+
+template <typename T, typename T2, typename F>
+kernel void unary_alpha_strided(
+    device void* output [[buffer(0)]],
+    constant void* input [[buffer(1)]],
+    constant long* sizes [[buffer(2)]],
+    constant long* input_strides [[buffer(3)]],
+    constant long* output_strides [[buffer(4)]],
+    constant uint& ndim [[buffer(5)]],
+    constant T2& alpha [[buffer(6)]],
+    uint2 thread_pos [[thread_position_in_grid]]) {
+  F f;
+  using res_t = result_of<F, T, T2>;
+  int pos[max_ndim];
+  pos_from_thread_index(thread_pos, pos, sizes, ndim);
+  const auto input_offs = offset_from_coord(pos, input_strides, ndim);
+  const auto output_offs = offset_from_coord(pos, output_strides, ndim);
+  ref_at_offs<res_t>(output, output_offs) =
+      f(val_at_offs<T>(input, input_offs), alpha);
+}
+
+#define REGISTER_UNARY_ALPHA_OP(NAME, DTYPEI, DTYPEA, DTYPEO)              \
+  static_assert(                                                           \
+      ::metal::is_same_v<                                                  \
+          DTYPEO,                                                          \
+          ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEA>>,        \
+      "Output dtype mismatch for unary op " #NAME " and input " #DTYPEI);  \
+  template [[host_name(#NAME "_dense_" #DTYPEO "_" #DTYPEI                 \
+                             "_" #DTYPEA)]] kernel void ::c10::metal::     \
+      unary_alpha_dense<DTYPEI, DTYPEA, NAME##_functor>(                   \
+          device ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEA> * \
+              output,                                                      \
+          constant DTYPEI * input,                                         \
+          constant DTYPEA & alpha,                                         \
+          uint index);                                                     \
+  template [[host_name(#NAME "_strided_" #DTYPEO "_" #DTYPEI               \
+                             "_" #DTYPEA)]] kernel void ::c10::metal::     \
+      unary_alpha_strided<DTYPEI, DTYPEA, NAME##_functor>(                 \
+          device void* output,                                             \
+          constant void* input,                                            \
+          constant long* sizes,                                            \
+          constant long* input_strides,                                    \
+          constant long* output_strides,                                   \
+          constant uint& ndim,                                             \
+          constant DTYPEA& alpha,                                          \
+          uint2 thread_pos)
+
+// Value at offset with dynamic cast from provided type
+template <typename T, typename P>
+inline T val_at_offs(P ptr, long offs, ScalarType type) {
+  switch (type) {
+#define _CASE_(EnumName, EnumValue, MetalType) \
+  case ScalarType::EnumName:                   \
+    return cast_to<T>(val_at_offs<MetalType>(ptr, offs));
+    C10_METAL_ALL_TYPES_FUNCTOR(_CASE_)
+#undef _CASE_
+  }
+}
+
+// Store with dynamic cast to provided type. Mirrors val_at_offs's runtime
+// switch and is the store-side counterpart used by binary_*_castout kernels
+// (output dtype not known at compile time).
+template <typename T>
+inline void store_at_offs(
+    device void* ptr,
+    long offs,
+    ScalarType type,
+    T value) {
+  switch (type) {
+#define _CASE_(EnumName, EnumValue, MetalType)                     \
+  case ScalarType::EnumName:                                       \
+    ref_at_offs<MetalType>(ptr, offs) = cast_to<MetalType>(value); \
+    return;
+    C10_METAL_ALL_TYPES_FUNCTOR(_CASE_)
+#undef _CASE_
+  }
+}
+
+// Castout variants of the unary kernels: input is loaded at compile-time Tin
+// precision (no cast), the functor runs in Tin precision, and the result
+// (result_of<F, Tin>) is cast to the user-supplied output dtype on store via
+// store_at_offs (runtime ScalarType switch). Matches CPU semantics for
+// cross-dtype unary ops (compute in input precision, cast on store). Mirrors
+// binary_*_castout but is keyed per input dtype, since unary has no separate
+// common-compute dtype.
+template <typename Tin, typename F>
+kernel void unary_dense_castout(
+    device void* output [[buffer(0)]],
+    constant Tin* input [[buffer(1)]],
+    constant uint2& size_outtype [[buffer(2)]],
+    uint index [[thread_position_in_grid]]) {
+  F f;
+  using res_t = result_of<F, Tin>;
+  store_at_offs<res_t>(
+      output,
+      long(index) * size_outtype.x,
+      static_cast<ScalarType>(size_outtype.y),
+      f(input[index]));
+}
+
+// ILP-wide castout: mirrors unary_dense's per-thread tile but stores via the
+// runtime ScalarType switch. The out_type is uniform across all threads so the
+// compiler can hoist the switch out of the unrolled inner loop.
+template <typename Tin, typename F>
+kernel void unary_dense_castout_ilp(
+    device void* output [[buffer(0)]],
+    constant Tin* input [[buffer(1)]],
+    constant uint3& size_outtype_numel [[buffer(2)]],
+    uint index [[thread_position_in_grid]]) {
+  F f;
+  using res_t = result_of<F, Tin>;
+  const uint elem_size = size_outtype_numel.x;
+  const auto out_type = static_cast<ScalarType>(size_outtype_numel.y);
+  const uint numel = size_outtype_numel.z;
+  uint base = index * ILP_PER_THREAD;
+  if (base + ILP_PER_THREAD <= numel) {
+    array<Tin, ILP_PER_THREAD> tmp_in;
+    array<res_t, ILP_PER_THREAD> tmp_out;
+#pragma unroll
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      tmp_in[j] = input[base + j];
+    }
+#pragma unroll
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      tmp_out[j] = f(tmp_in[j]);
+    }
+#pragma unroll
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      store_at_offs<res_t>(
+          output, long(base + j) * elem_size, out_type, tmp_out[j]);
+    }
+  } else {
+    for (uint i = base; i < numel; ++i) {
+      store_at_offs<res_t>(output, long(i) * elem_size, out_type, f(input[i]));
+    }
+  }
+}
+
+template <typename Tin, typename F>
+kernel void unary_strided_castout(
+    device void* output [[buffer(0)]],
+    constant void* input [[buffer(1)]],
+    constant long* sizes [[buffer(2)]],
+    constant long* input_strides [[buffer(3)]],
+    constant long* output_strides [[buffer(4)]],
+    constant uint2& ndim_outtype [[buffer(5)]],
+    uint2 thread_pos [[thread_position_in_grid]]) {
+  F f;
+  using res_t = result_of<F, Tin>;
+  int pos[max_ndim];
+  pos_from_thread_index(thread_pos, pos, sizes, ndim_outtype.x);
+  const auto input_offs = offset_from_coord(pos, input_strides, ndim_outtype.x);
+  const auto output_offs =
+      offset_from_coord(pos, output_strides, ndim_outtype.x);
+  store_at_offs<res_t>(
+      output,
+      output_offs,
+      static_cast<ScalarType>(ndim_outtype.y),
+      f(val_at_offs<Tin>(input, input_offs)));
+}
+
+// Binary elementwise ops kernels
+// Right now there are 4 flavors available:
+// - binary_dense where both input, other and output are dense and share the
+// same type
+// - binary_strided when all inputs are of the same types, but some elements are
+// strided
+// - binary_dense_cast - inputs are dense, but of different dtypes
+// - binary_strided_cast - inputs or output are strided and of different dtypes
+// - binary_dense_broadcast - one input is dense, another one is broadcastable
+// Note about accuracy (for more info see
+// https://github.com/pytorch/pytorch/issues/152736) Sometimes when kernel is
+// invoked to produce `half` output, but one of the arguments is float arguments
+// should be upcast to float, rather than downcast to half At the moment this is
+// expressed with `om_t` optional argument (which stands for opmath_type) which
+// is identical to output type but could be something else
+
+template <typename T, typename F, typename om_t = T>
+kernel void binary_strided(
+    device void* output [[buffer(0)]],
+    constant void* input [[buffer(1)]],
+    constant void* other [[buffer(2)]],
+    constant long* sizes [[buffer(3)]],
+    constant long* output_strides [[buffer(4)]],
+    constant long* input_strides [[buffer(5)]],
+    constant long* other_strides [[buffer(6)]],
+    constant uint3& ndim [[buffer(7)]],
+    uint index [[thread_position_in_grid]]) {
+  F f;
+  using res_t = result_of<F, T, T>;
+  int pos[max_ndim];
+  pos_from_thread_index(int(index), pos, sizes, ndim.x);
+  const auto input_offs = offset_from_coord(pos, input_strides, ndim.x);
+  const auto other_offs = offset_from_coord(pos, other_strides, ndim.x);
+  const auto output_offs = offset_from_coord(pos, output_strides, ndim.x);
+  const auto a = val_at_offs<T>(input, input_offs);
+  const auto b = val_at_offs<T>(other, other_offs);
+  ref_at_offs<res_t>(output, output_offs) =
+      static_cast<res_t>(f(om_t(a), om_t(b)));
+}
+
+template <typename T, typename T2, typename F>
+kernel void binary_alpha_strided(
+    device void* output [[buffer(0)]],
+    constant void* input [[buffer(1)]],
+    constant void* other [[buffer(2)]],
+    constant T2& alpha [[buffer(3)]],
+    constant long* sizes [[buffer(4)]],
+    constant long* output_strides [[buffer(5)]],
+    constant long* input_strides [[buffer(6)]],
+    constant long* other_strides [[buffer(7)]],
+    constant uint3& ndim [[buffer(8)]],
+    uint index [[thread_position_in_grid]]) {
+  F f;
+  int pos[max_ndim];
+  pos_from_thread_index(int(index), pos, sizes, ndim.x);
+  const auto input_offs = offset_from_coord(pos, input_strides, ndim.x);
+  const auto other_offs = offset_from_coord(pos, other_strides, ndim.x);
+  const auto output_offs = offset_from_coord(pos, output_strides, ndim.x);
+  const auto a = val_at_offs<T>(input, input_offs);
+  const auto b = val_at_offs<T>(other, other_offs);
+  ref_at_offs<result_of<F, T, T, T2>>(output, output_offs) = f(a, b, alpha);
+}
+
+template <typename T, typename F, typename om_t = opmath_t<T>>
+kernel void binary_strided_cast(
+    device void* output [[buffer(0)]],
+    constant void* input [[buffer(1)]],
+    constant void* other [[buffer(2)]],
+    constant long* sizes [[buffer(3)]],
+    constant long* output_strides [[buffer(4)]],
+    constant long* input_strides [[buffer(5)]],
+    constant long* other_strides [[buffer(6)]],
+    constant uint4& ndim_types [[buffer(7)]],
+    uint index [[thread_position_in_grid]]) {
+  F f;
+  using res_t = result_of<F, T, T>;
+  int pos[max_ndim];
+  pos_from_thread_index(int(index), pos, sizes, ndim_types.x);
+  const auto input_offs = offset_from_coord(pos, input_strides, ndim_types.x);
+  const auto other_offs = offset_from_coord(pos, other_strides, ndim_types.x);
+  const auto output_offs = offset_from_coord(pos, output_strides, ndim_types.x);
+  const auto a = val_at_offs<om_t>(
+      input, input_offs, static_cast<ScalarType>(ndim_types.y));
+  const auto b = val_at_offs<om_t>(
+      other, other_offs, static_cast<ScalarType>(ndim_types.z));
+  ref_at_offs<res_t>(output, output_offs) = static_cast<res_t>(f(a, b));
+}
+
+// Variant of binary_strided_cast that also runtime-casts on store: the output
+// buffer's dtype is passed via ndim_types.w. Selected when the user-facing
+// output dtype diverges from the kernel's natural output (the iterator's
+// `cast_common_dtype_to_outputs(true)` path). The kernel's natural output
+// `res_t` is computed in compile-time precision, then runtime-cast to the
+// buffer's dtype on store.
+template <typename T, typename F, typename om_t = opmath_t<T>>
+kernel void binary_strided_castout(
+    device void* output [[buffer(0)]],
+    constant void* input [[buffer(1)]],
+    constant void* other [[buffer(2)]],
+    constant long* sizes [[buffer(3)]],
+    constant long* output_strides [[buffer(4)]],
+    constant long* input_strides [[buffer(5)]],
+    constant long* other_strides [[buffer(6)]],
+    constant uint4& ndim_types [[buffer(7)]],
+    uint index [[thread_position_in_grid]]) {
+  F f;
+  using res_t = result_of<F, T, T>;
+  int pos[max_ndim];
+  pos_from_thread_index(int(index), pos, sizes, ndim_types.x);
+  const auto input_offs = offset_from_coord(pos, input_strides, ndim_types.x);
+  const auto other_offs = offset_from_coord(pos, other_strides, ndim_types.x);
+  const auto output_offs = offset_from_coord(pos, output_strides, ndim_types.x);
+  const auto a = val_at_offs<om_t>(
+      input, input_offs, static_cast<ScalarType>(ndim_types.y));
+  const auto b = val_at_offs<om_t>(
+      other, other_offs, static_cast<ScalarType>(ndim_types.z));
+  const res_t result = static_cast<res_t>(f(a, b));
+  store_at_offs<res_t>(
+      output, output_offs, static_cast<ScalarType>(ndim_types.w), result);
+}
+
+template <typename T, typename T2, typename F>
+kernel void binary_alpha_strided_cast(
+    device void* output [[buffer(0)]],
+    constant void* input [[buffer(1)]],
+    constant void* other [[buffer(2)]],
+    constant T2& alpha [[buffer(3)]],
+    constant long* sizes [[buffer(4)]],
+    constant long* output_strides [[buffer(5)]],
+    constant long* input_strides [[buffer(6)]],
+    constant long* other_strides [[buffer(7)]],
+    constant uint4& ndim_types [[buffer(8)]],
+    uint index [[thread_position_in_grid]]) {
+  F f;
+  int pos[max_ndim];
+  pos_from_thread_index(int(index), pos, sizes, ndim_types.x);
+  const auto input_offs = offset_from_coord(pos, input_strides, ndim_types.x);
+  const auto other_offs = offset_from_coord(pos, other_strides, ndim_types.x);
+  const auto output_offs = offset_from_coord(pos, output_strides, ndim_types.x);
+  const auto a =
+      val_at_offs<T>(input, input_offs, static_cast<ScalarType>(ndim_types.y));
+  const auto b =
+      val_at_offs<T>(other, other_offs, static_cast<ScalarType>(ndim_types.z));
+  ref_at_offs<result_of<F, T, T, T2>>(output, output_offs) = f(a, b, alpha);
+}
+
+template <typename T, typename F, typename om_t = opmath_t<T>>
+kernel void binary_dense(
+    device result_of<F, T, T>* out [[buffer(0)]],
+    constant T* input [[buffer(1)]],
+    constant T* other [[buffer(2)]],
+    uint tid [[thread_position_in_grid]]) {
+  F f;
+  using res_t = result_of<F, T, T>;
+  out[tid] = static_cast<res_t>(f(om_t(input[tid]), om_t(other[tid])));
+}
+
+static_assert(
+    ILP_PER_THREAD == 4,
+    "C10_METAL_ILP_PER_THREAD_STR must match ILP_PER_THREAD");
+
+// ILP variant of binary_dense: each thread processes ILP elements.
+// Mirrors unary_dense; selected on the host when both inputs and the output
+// are contiguous, share dtype (no cast), and the iterator has neither a scalar
+// nor a broadcast operand. The unroll width defaults to ILP_PER_THREAD; the
+// host-side kernel name encodes the value (e.g. `..._dense_ilp4_...`) so
+// future variants (ilp8, etc.) can coexist. See exec_binary_kernel for the
+// dispatch threshold.
+template <
+    typename T,
+    typename F,
+    typename om_t = opmath_t<T>,
+    unsigned ILP = ILP_PER_THREAD>
+kernel void binary_dense_ilp(
+    device result_of<F, T, T>* out [[buffer(0)]],
+    constant T* input [[buffer(1)]],
+    constant T* other [[buffer(2)]],
+    constant uint& numel [[buffer(3)]],
+    uint index [[thread_position_in_grid]]) {
+  F f;
+  using res_t = result_of<F, T, T>;
+  uint base = index * ILP;
+  if (base + ILP <= numel) {
+    array<T, ILP> tmp_a;
+    array<T, ILP> tmp_b;
+    array<res_t, ILP> tmp_out;
+#pragma unroll
+    for (uint j = 0; j < ILP; ++j) {
+      tmp_a[j] = input[base + j];
+      tmp_b[j] = other[base + j];
+    }
+#pragma unroll
+    for (uint j = 0; j < ILP; ++j) {
+      tmp_out[j] = static_cast<res_t>(f(om_t(tmp_a[j]), om_t(tmp_b[j])));
+    }
+#pragma unroll
+    for (uint j = 0; j < ILP; ++j) {
+      out[base + j] = tmp_out[j];
+    }
+  } else {
+    for (uint i = base; i < numel; ++i) {
+      out[i] = static_cast<res_t>(f(om_t(input[i]), om_t(other[i])));
+    }
+  }
+}
+
+template <typename T, typename T2, typename F>
+kernel void binary_alpha_dense(
+    device result_of<F, T, T, T2>* out [[buffer(0)]],
+    constant T* input [[buffer(1)]],
+    constant T* other [[buffer(2)]],
+    constant T2& alpha [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  F f;
+  out[tid] = f(input[tid], other[tid], alpha);
+}
+
+template <typename T, typename F, typename om_t = T>
+kernel void binary_dense_cast(
+    device result_of<F, T, T>* out [[buffer(0)]],
+    constant void* input [[buffer(1)]],
+    constant void* other [[buffer(2)]],
+    constant uint4& sizes_types [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  F f;
+  using res_t = result_of<F, T, T>;
+  const auto a = val_at_offs<om_t>(
+      input, tid * sizes_types.x, static_cast<ScalarType>(sizes_types.z));
+  const auto b = val_at_offs<om_t>(
+      other, tid * sizes_types.y, static_cast<ScalarType>(sizes_types.w));
+  out[tid] = static_cast<res_t>(f(a, b));
+}
+
+template <typename T, typename T2, typename F>
+kernel void binary_alpha_dense_cast(
+    device result_of<F, T, T, T2>* out [[buffer(0)]],
+    constant void* input [[buffer(1)]],
+    constant void* other [[buffer(2)]],
+    constant T2& alpha [[buffer(3)]],
+    constant uint4& sizes_types [[buffer(4)]],
+    uint tid [[thread_position_in_grid]]) {
+  F f;
+  const auto a = val_at_offs<T>(
+      input, tid * sizes_types.x, static_cast<ScalarType>(sizes_types.z));
+  const auto b = val_at_offs<T>(
+      other, tid * sizes_types.y, static_cast<ScalarType>(sizes_types.w));
+  out[tid] = f(a, b, alpha);
+}
+
+template <typename T, typename F, typename om_t = opmath_t<T>>
+kernel void binary_dense_broadcast(
+    device result_of<F, T, T>* out [[buffer(0)]],
+    constant T* input [[buffer(1)]],
+    constant T* broadcast [[buffer(2)]],
+    constant long& broadcast_numel [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  F f;
+  using res_t = result_of<F, T, T>;
+  out[tid] = static_cast<res_t>(
+      f(om_t(input[tid]), om_t(broadcast[tid % broadcast_numel])));
+}
+
+template <typename T, typename F, typename om_t = opmath_t<T>>
+kernel void binary_dense_broadcast_rhs(
+    device result_of<F, T, T>* out [[buffer(0)]],
+    constant T* broadcast [[buffer(1)]],
+    constant T* input [[buffer(2)]],
+    constant long& broadcast_numel [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  F f;
+  using res_t = result_of<F, T, T>;
+  out[tid] = static_cast<res_t>(
+      f(om_t(broadcast[tid % broadcast_numel]), om_t(input[tid])));
+}
+
+template <typename T, typename T2, typename F>
+kernel void binary_alpha_dense_broadcast(
+    device result_of<F, T, T, T2>* out [[buffer(0)]],
+    constant T* input [[buffer(1)]],
+    constant T* broadcast [[buffer(2)]],
+    constant long& broadcast_numel [[buffer(3)]],
+    constant T2& alpha [[buffer(4)]],
+    uint tid [[thread_position_in_grid]]) {
+  F f;
+  out[tid] = f(input[tid], broadcast[tid % broadcast_numel], alpha);
+}
+
+template <typename T, typename T2, typename F>
+kernel void binary_alpha_dense_broadcast_rhs(
+    device result_of<F, T, T, T2>* out [[buffer(0)]],
+    constant T* broadcast [[buffer(1)]],
+    constant T* input [[buffer(2)]],
+    constant long& broadcast_numel [[buffer(3)]],
+    constant T2& alpha [[buffer(4)]],
+    uint tid [[thread_position_in_grid]]) {
+  F f;
+  out[tid] = f(broadcast[tid % broadcast_numel], input[tid], alpha);
+}
+
+template <typename T, typename F, typename om_t = T>
+kernel void binary_dense_broadcast_cast(
+    device result_of<F, T, T>* out [[buffer(0)]],
+    constant void* input [[buffer(1)]],
+    constant void* broadcast [[buffer(2)]],
+    constant long& broadcast_numel [[buffer(3)]],
+    constant uint4& sizes_types [[buffer(4)]],
+    uint tid [[thread_position_in_grid]]) {
+  F f;
+  using res_t = result_of<F, T, T>;
+  const auto a = val_at_offs<om_t>(
+      input, tid * sizes_types.x, static_cast<ScalarType>(sizes_types.z));
+  const auto b = val_at_offs<om_t>(
+      broadcast,
+      (tid % broadcast_numel) * sizes_types.y,
+      static_cast<ScalarType>(sizes_types.w));
+  out[tid] = static_cast<res_t>(f(a, b));
+}
+
+template <typename T, typename F, typename om_t = T>
+kernel void binary_dense_broadcast_rhs_cast(
+    device result_of<F, T, T>* out [[buffer(0)]],
+    constant void* broadcast [[buffer(1)]],
+    constant void* input [[buffer(2)]],
+    constant long& broadcast_numel [[buffer(3)]],
+    constant uint4& sizes_types [[buffer(4)]],
+    uint tid [[thread_position_in_grid]]) {
+  F f;
+  using res_t = result_of<F, T, T>;
+  const auto a = val_at_offs<om_t>(
+      broadcast,
+      (tid % broadcast_numel) * sizes_types.x,
+      static_cast<ScalarType>(sizes_types.z));
+  const auto b = val_at_offs<om_t>(
+      input, tid * sizes_types.y, static_cast<ScalarType>(sizes_types.w));
+  out[tid] = static_cast<res_t>(f(a, b));
+}
+
+template <typename T, typename T2, typename F>
+kernel void binary_alpha_dense_broadcast_cast(
+    device result_of<F, T, T, T2>* out [[buffer(0)]],
+    constant void* input [[buffer(1)]],
+    constant void* broadcast [[buffer(2)]],
+    constant long& broadcast_numel [[buffer(3)]],
+    constant T2& alpha [[buffer(4)]],
+    constant uint4& sizes_types [[buffer(5)]],
+    uint tid [[thread_position_in_grid]]) {
+  F f;
+  const auto a = val_at_offs<T>(
+      input, tid * sizes_types.x, static_cast<ScalarType>(sizes_types.z));
+  const auto b = val_at_offs<T>(
+      broadcast,
+      (tid % broadcast_numel) * sizes_types.y,
+      static_cast<ScalarType>(sizes_types.w));
+  out[tid] = f(a, b, alpha);
+}
+
+template <typename T, typename T2, typename F>
+kernel void binary_alpha_dense_broadcast_rhs_cast(
+    device result_of<F, T, T, T2>* out [[buffer(0)]],
+    constant void* broadcast [[buffer(1)]],
+    constant void* input [[buffer(2)]],
+    constant long& broadcast_numel [[buffer(3)]],
+    constant T2& alpha [[buffer(4)]],
+    constant uint4& sizes_types [[buffer(5)]],
+    uint tid [[thread_position_in_grid]]) {
+  F f;
+  const auto a = val_at_offs<T>(
+      broadcast,
+      (tid % broadcast_numel) * sizes_types.x,
+      static_cast<ScalarType>(sizes_types.z));
+  const auto b = val_at_offs<T>(
+      input, tid * sizes_types.y, static_cast<ScalarType>(sizes_types.w));
+  out[tid] = f(a, b, alpha);
+}
+
+template <typename T, typename F, typename om_t = opmath_t<T>>
+kernel void binary_dense_scalar(
+    device result_of<F, T, T>* out [[buffer(0)]],
+    constant T* input [[buffer(1)]],
+    device T* scalar [[buffer(2)]],
+    uint tid [[thread_position_in_grid]]) {
+  F f;
+  using res_t = result_of<F, T, T>;
+  out[tid] = static_cast<res_t>(f(om_t(input[tid]), om_t(scalar[0])));
+}
+
+template <typename T, typename F, typename om_t = opmath_t<T>>
+kernel void binary_dense_scalar_lhs(
+    device result_of<F, T, T>* out [[buffer(0)]],
+    device T* scalar [[buffer(1)]],
+    constant T* input [[buffer(2)]],
+    uint tid [[thread_position_in_grid]]) {
+  F f;
+  using res_t = result_of<F, T, T>;
+  out[tid] = static_cast<res_t>(f(om_t(scalar[0]), om_t(input[tid])));
+}
+
+template <typename T, typename F, typename om_t = T>
+kernel void binary_dense_scalar_cast(
+    device result_of<F, T, T>* out [[buffer(0)]],
+    constant void* input [[buffer(1)]],
+    device void* scalar [[buffer(2)]],
+    constant uint4& sizes_types [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  F f;
+  using res_t = result_of<F, T, T>;
+  const auto a = val_at_offs<om_t>(
+      input, tid * sizes_types.x, static_cast<ScalarType>(sizes_types.z));
+  const auto b =
+      val_at_offs<om_t>(scalar, 0, static_cast<ScalarType>(sizes_types.w));
+  out[tid] = static_cast<res_t>(f(a, b));
+}
+
+template <typename T, typename F, typename om_t = T>
+kernel void binary_dense_scalar_lhs_cast(
+    device result_of<F, T, T>* out [[buffer(0)]],
+    device void* scalar [[buffer(1)]],
+    constant void* input [[buffer(2)]],
+    constant uint4& sizes_types [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  F f;
+  using res_t = result_of<F, T, T>;
+  const auto a =
+      val_at_offs<om_t>(scalar, 0, static_cast<ScalarType>(sizes_types.z));
+  const auto b = val_at_offs<om_t>(
+      input, tid * sizes_types.y, static_cast<ScalarType>(sizes_types.w));
+  out[tid] = static_cast<res_t>(f(a, b));
+}
+
+template <typename T, typename T2, typename F>
+kernel void binary_alpha_dense_scalar(
+    device result_of<F, T, T, T2>* out [[buffer(0)]],
+    constant T* input [[buffer(1)]],
+    device T* scalar [[buffer(2)]],
+    constant T2& alpha [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  F f;
+  out[tid] = f(input[tid], scalar[0], alpha);
+}
+
+template <typename T, typename T2, typename F>
+kernel void binary_alpha_dense_scalar_lhs(
+    device result_of<F, T, T, T2>* out [[buffer(0)]],
+    device T* scalar [[buffer(1)]],
+    constant T* input [[buffer(2)]],
+    constant T2& alpha [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  F f;
+  out[tid] = f(scalar[0], input[tid], alpha);
+}
+
+template <typename T, typename T2, typename F>
+kernel void binary_alpha_dense_scalar_cast(
+    device result_of<F, T, T, T2>* out [[buffer(0)]],
+    constant void* input [[buffer(1)]],
+    device void* scalar [[buffer(2)]],
+    constant T2& alpha [[buffer(3)]],
+    constant uint4& sizes_types [[buffer(4)]],
+    uint tid [[thread_position_in_grid]]) {
+  F f;
+  const auto a = val_at_offs<T>(
+      input, tid * sizes_types.x, static_cast<ScalarType>(sizes_types.z));
+  const auto b =
+      val_at_offs<T>(scalar, 0, static_cast<ScalarType>(sizes_types.w));
+  out[tid] = f(a, b, alpha);
+}
+
+template <typename T, typename T2, typename F>
+kernel void binary_alpha_dense_scalar_lhs_cast(
+    device result_of<F, T, T, T2>* out [[buffer(0)]],
+    device void* scalar [[buffer(1)]],
+    constant void* input [[buffer(2)]],
+    constant T2& alpha [[buffer(3)]],
+    constant uint4& sizes_types [[buffer(4)]],
+    uint tid [[thread_position_in_grid]]) {
+  F f;
+  const auto a =
+      val_at_offs<T>(scalar, 0, static_cast<ScalarType>(sizes_types.z));
+  const auto b = val_at_offs<T>(
+      input, tid * sizes_types.y, static_cast<ScalarType>(sizes_types.w));
+  out[tid] = f(a, b, alpha);
+}
+
+#define REGISTER_BINARY_OP_(NAME, DTYPEI, DTYPEO, OMT)                         \
+  static_assert(                                                               \
+      ::metal::is_same_v<                                                      \
+          DTYPEO,                                                              \
+          ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI>>,            \
+      "Output dtype mismatch for binary op " #NAME " and input " #DTYPEI);     \
+  template [[host_name(#NAME "_strided_" #DTYPEO "_" #DTYPEI)]] kernel void :: \
+      c10::metal::binary_strided<DTYPEI, NAME##_functor, OMT>(                 \
+          device void* out,                                                    \
+          constant void* input,                                                \
+          constant void* other,                                                \
+          constant long* sizes,                                                \
+          constant long* output_strides,                                       \
+          constant long* input_strides,                                        \
+          constant long* other_strides,                                        \
+          constant uint3& ndim,                                                \
+          uint tid);                                                           \
+  template                                                                     \
+      [[host_name(#NAME "_strided_cast_" #DTYPEO "_" #DTYPEI)]] kernel void :: \
+          c10::metal::binary_strided_cast<DTYPEI, NAME##_functor, OMT>(        \
+              device void* out,                                                \
+              constant void* input,                                            \
+              constant void* other,                                            \
+              constant long* sizes,                                            \
+              constant long* output_strides,                                   \
+              constant long* input_strides,                                    \
+              constant long* other_strides,                                    \
+              constant uint4& ndim_types,                                      \
+              uint tid);                                                       \
+  template [[host_name(#NAME "_dense_" #DTYPEO "_" #DTYPEI)]] kernel void ::   \
+      c10::metal::binary_dense<DTYPEI, NAME##_functor, OMT>(                   \
+          device ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI> *     \
+              out_,                                                            \
+          constant DTYPEI * input_,                                            \
+          constant DTYPEI * other_,                                            \
+          uint tid);                                                           \
+  template [[host_name(#NAME "_dense_ilp" C10_METAL_ILP_PER_THREAD_STR         \
+                             "_" #DTYPEO "_" #DTYPEI)]] kernel void ::c10::    \
+      metal::binary_dense_ilp<DTYPEI, NAME##_functor, OMT>(                    \
+          device ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI> *     \
+              out_,                                                            \
+          constant DTYPEI * input_,                                            \
+          constant DTYPEI * other_,                                            \
+          constant uint & numel,                                               \
+          uint tid);                                                           \
+  template                                                                     \
+      [[host_name(#NAME "_dense_cast_" #DTYPEO "_" #DTYPEI)]] kernel void ::   \
+          c10::metal::binary_dense_cast<DTYPEI, NAME##_functor, OMT>(          \
+              device ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI> * \
+                  out_,                                                        \
+              constant void* input,                                            \
+              constant void* other,                                            \
+              constant uint4& sizes_types,                                     \
+              uint tid);                                                       \
+  template [[host_name(#NAME "_dense_broadcast_" #DTYPEO "_" #DTYPEI)]]        \
+  kernel void ::c10::metal::                                                   \
+      binary_dense_broadcast<DTYPEI, NAME##_functor, OMT>(                     \
+          device ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI> *     \
+              out_,                                                            \
+          constant DTYPEI * input_,                                            \
+          constant DTYPEI * broadcast_,                                        \
+          constant long& broadcast_numel,                                      \
+          uint tid);                                                           \
+  template [[host_name(#NAME "_dense_broadcast_rhs_" #DTYPEO "_" #DTYPEI)]]    \
+  kernel void ::c10::metal::                                                   \
+      binary_dense_broadcast_rhs<DTYPEI, NAME##_functor, OMT>(                 \
+          device ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI> *     \
+              out_,                                                            \
+          constant DTYPEI * broadcast_,                                        \
+          constant DTYPEI * input_,                                            \
+          constant long& broadcast_numel,                                      \
+          uint tid);                                                           \
+  template [[host_name(#NAME "_dense_broadcast_cast_" #DTYPEO "_" #DTYPEI)]]   \
+  kernel void ::c10::metal::                                                   \
+      binary_dense_broadcast_cast<DTYPEI, NAME##_functor, OMT>(                \
+          device ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI> *     \
+              out_,                                                            \
+          constant void* input_,                                               \
+          constant void* broadcast_,                                           \
+          constant long& broadcast_numel,                                      \
+          constant uint4& sizes_types,                                         \
+          uint tid);                                                           \
+  template [[host_name(#NAME "_dense_broadcast_rhs_cast_" #DTYPEO              \
+                             "_" #DTYPEI)]] kernel void ::c10::metal::         \
+      binary_dense_broadcast_rhs_cast<DTYPEI, NAME##_functor, OMT>(            \
+          device ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI> *     \
+              out_,                                                            \
+          constant void* broadcast_,                                           \
+          constant void* input_,                                               \
+          constant long& broadcast_numel,                                      \
+          constant uint4& sizes_types,                                         \
+          uint tid);                                                           \
+  template [[host_name(#NAME "_dense_scalar_" #DTYPEO "_" #DTYPEI)]]           \
+  kernel void ::c10::metal::binary_dense_scalar<DTYPEI, NAME##_functor, OMT>(  \
+      device ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI> * out_,   \
+      constant DTYPEI * input_,                                                \
+      device DTYPEI * scalar_,                                                 \
+      uint tid);                                                               \
+  template [[host_name(#NAME "_dense_scalar_lhs_" #DTYPEO "_" #DTYPEI)]]       \
+  kernel void ::c10::metal::                                                   \
+      binary_dense_scalar_lhs<DTYPEI, NAME##_functor, OMT>(                    \
+          device ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI> *     \
+              out_,                                                            \
+          device DTYPEI * scalar_,                                             \
+          constant DTYPEI * input_,                                            \
+          uint tid);                                                           \
+  template [[host_name(#NAME "_dense_scalar_cast_" #DTYPEO "_" #DTYPEI)]]      \
+  kernel void ::c10::metal::                                                   \
+      binary_dense_scalar_cast<DTYPEI, NAME##_functor, OMT>(                   \
+          device ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI> *     \
+              out_,                                                            \
+          constant void* input_,                                               \
+          device void* scalar_,                                                \
+          constant uint4& sizes_types,                                         \
+          uint tid);                                                           \
+  template [[host_name(#NAME "_dense_scalar_lhs_cast_" #DTYPEO                 \
+                             "_" #DTYPEI)]] kernel void ::c10::metal::         \
+      binary_dense_scalar_lhs_cast<DTYPEI, NAME##_functor, OMT>(               \
+          device ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI> *     \
+              out_,                                                            \
+          device void* scalar_,                                                \
+          constant void* input_,                                               \
+          constant uint4& sizes_types,                                         \
+          uint tid)
+
+// OpMath Binary Op promotes inputs to higher precision type before Functor call
+#define REGISTER_OPMATH_BINARY_OP(NAME, DTYPEI, DTYPEO) \
+  REGISTER_BINARY_OP_(NAME, DTYPEI, DTYPEO, ::c10::metal::opmath_t<DTYPEI>)
+
+#define REGISTER_BINARY_OP(NAME, DTYPEI, DTYPEO) \
+  REGISTER_BINARY_OP_(NAME, DTYPEI, DTYPEO, DTYPEI)
+
+// Opt-in castout variant: enables `<NAME>_strided_castout_<DTYPEO>_<DTYPEI>`
+// for ops whose kernel-natural output dtype is fixed (comparison: bool) and
+// whose user-facing `out=` may differ. Arithmetic ops that produce
+// `iter.dtype(0)` directly should NOT register this -- the existing
+// `_<DTYPEO>_<DTYPEI>` cast kernel matrix covers them.
+#define REGISTER_BINARY_CASTOUT_OP(NAME, DTYPEI, DTYPEO)                \
+  template [[host_name(#NAME "_strided_castout_" #DTYPEO "_" #DTYPEI)]] \
+  kernel void ::c10::metal::                                            \
+      binary_strided_castout<DTYPEI, NAME##_functor, DTYPEI>(           \
+          device void* out,                                             \
+          constant void* input,                                         \
+          constant void* other,                                         \
+          constant long* sizes,                                         \
+          constant long* output_strides,                                \
+          constant long* input_strides,                                 \
+          constant long* other_strides,                                 \
+          constant uint4& ndim_types,                                   \
+          uint tid)
+
+#define REGISTER_BINARY_ALPHA_OP(NAME, DTYPEI, DTYPEA, DTYPEO)                \
+  static_assert(                                                              \
+      ::metal::is_same_v<                                                     \
+          DTYPEO,                                                             \
+          ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEA>>,   \
+      "Output dtype mismatch for binary op " #NAME " and input " #DTYPEI);    \
+  template [[host_name(#NAME "_strided_" #DTYPEO "_" #DTYPEI                  \
+                             "_" #DTYPEA)]] kernel void ::c10::metal::        \
+      binary_alpha_strided<DTYPEI, DTYPEA, NAME##_functor>(                   \
+          device void* out,                                                   \
+          constant void* input,                                               \
+          constant void* other,                                               \
+          constant DTYPEA& alpha,                                             \
+          constant long* sizes,                                               \
+          constant long* output_strides,                                      \
+          constant long* input_strides,                                       \
+          constant long* other_strides,                                       \
+          constant uint3& ndim,                                               \
+          uint tid);                                                          \
+  template [[host_name(#NAME "_strided_cast_" #DTYPEO "_" #DTYPEI             \
+                             "_" #DTYPEA)]] kernel void ::c10::metal::        \
+      binary_alpha_strided_cast<DTYPEI, DTYPEA, NAME##_functor>(              \
+          device void* out,                                                   \
+          constant void* input,                                               \
+          constant void* other,                                               \
+          constant DTYPEA& alpha,                                             \
+          constant long* sizes,                                               \
+          constant long* output_strides,                                      \
+          constant long* input_strides,                                       \
+          constant long* other_strides,                                       \
+          constant uint4& ndim_types,                                         \
+          uint tid);                                                          \
+  template [[host_name(#NAME "_dense_" #DTYPEO "_" #DTYPEI                    \
+                             "_" #DTYPEA)]] kernel void ::c10::metal::        \
+      binary_alpha_dense<DTYPEI, DTYPEA, NAME##_functor>(                     \
+          device ::c10::metal::                                               \
+                  result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEA> *         \
+              out_,                                                           \
+          constant DTYPEI * input_,                                           \
+          constant DTYPEI * other_,                                           \
+          constant DTYPEA & alpha,                                            \
+          uint tid);                                                          \
+  template [[host_name(#NAME "_dense_cast_" #DTYPEO "_" #DTYPEI               \
+                             "_" #DTYPEA)]] kernel void ::c10::metal::        \
+      binary_alpha_dense_cast<DTYPEI, DTYPEA, NAME##_functor>(                \
+          device ::c10::metal::                                               \
+                  result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEA> *         \
+              out_,                                                           \
+          constant void* input,                                               \
+          constant void* other,                                               \
+          constant DTYPEA& alpha,                                             \
+          constant uint4& sizes_types,                                        \
+          uint tid);                                                          \
+  template [[host_name(#NAME "_dense_broadcast_" #DTYPEO "_" #DTYPEI          \
+                             "_" #DTYPEA)]] kernel void ::c10::metal::        \
+      binary_alpha_dense_broadcast<DTYPEI, DTYPEA, NAME##_functor>(           \
+          device ::c10::metal::                                               \
+                  result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEA> *         \
+              out_,                                                           \
+          constant DTYPEI * input_,                                           \
+          constant DTYPEI * broadcast_,                                       \
+          constant long& broadcast_numel,                                     \
+          constant DTYPEA& alpha,                                             \
+          uint tid);                                                          \
+  template [[host_name(#NAME "_dense_broadcast_rhs_" #DTYPEO "_" #DTYPEI      \
+                             "_" #DTYPEA)]] kernel void ::c10::metal::        \
+      binary_alpha_dense_broadcast_rhs<DTYPEI, DTYPEA, NAME##_functor>(       \
+          device ::c10::metal::                                               \
+                  result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEA> *         \
+              out_,                                                           \
+          constant DTYPEI * broadcast_,                                       \
+          constant DTYPEI * input_,                                           \
+          constant long& broadcast_numel,                                     \
+          constant DTYPEA& alpha,                                             \
+          uint tid);                                                          \
+  template [[host_name(#NAME "_dense_broadcast_cast_" #DTYPEO "_" #DTYPEI     \
+                             "_" #DTYPEA)]] kernel void ::c10::metal::        \
+      binary_alpha_dense_broadcast_cast<DTYPEI, DTYPEA, NAME##_functor>(      \
+          device ::c10::metal::                                               \
+                  result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEA> *         \
+              out_,                                                           \
+          constant void* input_,                                              \
+          constant void* broadcast_,                                          \
+          constant long& broadcast_numel,                                     \
+          constant DTYPEA& alpha,                                             \
+          constant uint4& sizes_types,                                        \
+          uint tid);                                                          \
+  template [[host_name(#NAME "_dense_broadcast_rhs_cast_" #DTYPEO "_" #DTYPEI \
+                             "_" #DTYPEA)]] kernel void ::c10::metal::        \
+      binary_alpha_dense_broadcast_rhs_cast<DTYPEI, DTYPEA, NAME##_functor>(  \
+          device ::c10::metal::                                               \
+                  result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEA> *         \
+              out_,                                                           \
+          constant void* broadcast_,                                          \
+          constant void* input_,                                              \
+          constant long& broadcast_numel,                                     \
+          constant DTYPEA& alpha,                                             \
+          constant uint4& sizes_types,                                        \
+          uint tid);                                                          \
+  template [[host_name(#NAME "_dense_scalar_" #DTYPEO "_" #DTYPEI             \
+                             "_" #DTYPEA)]] kernel void ::c10::metal::        \
+      binary_alpha_dense_scalar<DTYPEI, DTYPEA, NAME##_functor>(              \
+          device ::c10::metal::                                               \
+                  result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEA> *         \
+              out_,                                                           \
+          constant DTYPEI * input_,                                           \
+          device DTYPEI * scalar_,                                            \
+          constant DTYPEA & alpha,                                            \
+          uint tid);                                                          \
+  template [[host_name(#NAME "_dense_scalar_lhs_" #DTYPEO "_" #DTYPEI         \
+                             "_" #DTYPEA)]] kernel void ::c10::metal::        \
+      binary_alpha_dense_scalar_lhs<DTYPEI, DTYPEA, NAME##_functor>(          \
+          device ::c10::metal::                                               \
+                  result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEA> *         \
+              out_,                                                           \
+          device DTYPEI * scalar_,                                            \
+          constant DTYPEI * input_,                                           \
+          constant DTYPEA & alpha,                                            \
+          uint tid);                                                          \
+  template [[host_name(#NAME "_dense_scalar_cast_" #DTYPEO "_" #DTYPEI        \
+                             "_" #DTYPEA)]] kernel void ::c10::metal::        \
+      binary_alpha_dense_scalar_cast<DTYPEI, DTYPEA, NAME##_functor>(         \
+          device ::c10::metal::                                               \
+                  result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEA> *         \
+              out_,                                                           \
+          constant void* input_,                                              \
+          device void* scalar_,                                               \
+          constant DTYPEA& alpha,                                             \
+          constant uint4& sizes_types,                                        \
+          uint tid);                                                          \
+  template [[host_name(#NAME "_dense_scalar_lhs_cast_" #DTYPEO "_" #DTYPEI    \
+                             "_" #DTYPEA)]] kernel void ::c10::metal::        \
+      binary_alpha_dense_scalar_lhs_cast<DTYPEI, DTYPEA, NAME##_functor>(     \
+          device ::c10::metal::                                               \
+                  result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEA> *         \
+              out_,                                                           \
+          device void* scalar_,                                               \
+          constant void* input_,                                              \
+          constant DTYPEA& alpha,                                             \
+          constant uint4& sizes_types,                                        \
+          uint tid)
+
+// Ternary elementwise ops kernels
+// Right now there are 4 flavors available:
+// - ternary_dense where both input, other1, other2, and output are dense and
+// share the same type
+// - ternary_strided when all inputs are of the same types, but some elements
+// are strided
+// - ternary_dense_cast - inputs are dense, but of different dtypes
+// - ternary_strided_cast - inputs or output are strided and of different dtypes
+// Note about accuracy (for more info see
+// https://github.com/pytorch/pytorch/issues/152736) Sometimes when kernel is
+// invoked to produce `half` output, but one of the arguments is float arguments
+// should be upcast to float, rather than downcast to half At the moment this is
+// expressed with `om_t` optional argument (which stands for opmath_type) which
+// is identical to output type but could be something else
+
+template <typename T, typename F, typename om_t = T>
+kernel void ternary_strided(
+    device void* output [[buffer(0)]],
+    constant void* input [[buffer(1)]],
+    constant void* other1 [[buffer(2)]],
+    constant void* other2 [[buffer(3)]],
+    constant long* sizes [[buffer(4)]],
+    constant long* output_strides [[buffer(5)]],
+    constant long* input_strides [[buffer(6)]],
+    constant long* other1_strides [[buffer(7)]],
+    constant long* other2_strides [[buffer(8)]],
+    constant uint& ndim [[buffer(9)]],
+    uint index [[thread_position_in_grid]]) {
+  F f;
+  using res_t = result_of<F, T, T, T>;
+  int pos[max_ndim];
+  pos_from_thread_index(int(index), pos, sizes, ndim);
+  const auto input_offs = offset_from_coord(pos, input_strides, ndim);
+  const auto other1_offs = offset_from_coord(pos, other1_strides, ndim);
+  const auto other2_offs = offset_from_coord(pos, other2_strides, ndim);
+  const auto output_offs = offset_from_coord(pos, output_strides, ndim);
+  const auto a = val_at_offs<T>(input, input_offs);
+  const auto b = val_at_offs<T>(other1, other1_offs);
+  const auto c = val_at_offs<T>(other2, other2_offs);
+  ref_at_offs<res_t>(output, output_offs) =
+      static_cast<res_t>(f(om_t(a), om_t(b), om_t(c)));
+}
+
+template <typename T, typename F, typename om_t = opmath_t<T>>
+kernel void ternary_strided_cast(
+    device void* output [[buffer(0)]],
+    constant void* input [[buffer(1)]],
+    constant void* other1 [[buffer(2)]],
+    constant void* other2 [[buffer(3)]],
+    constant long* sizes [[buffer(4)]],
+    constant long* output_strides [[buffer(5)]],
+    constant long* input_strides [[buffer(6)]],
+    constant long* other1_strides [[buffer(7)]],
+    constant long* other2_strides [[buffer(8)]],
+    constant uint& ndim [[buffer(9)]],
+    constant uint4& types [[buffer(10)]],
+    uint index [[thread_position_in_grid]]) {
+  F f;
+  using res_t = result_of<F, T, T, T>;
+  int pos[max_ndim];
+  pos_from_thread_index(int(index), pos, sizes, ndim);
+  const auto input_offs = offset_from_coord(pos, input_strides, ndim);
+  const auto other1_offs = offset_from_coord(pos, other1_strides, ndim);
+  const auto other2_offs = offset_from_coord(pos, other2_strides, ndim);
+  const auto output_offs = offset_from_coord(pos, output_strides, ndim);
+  const auto a =
+      val_at_offs<om_t>(input, input_offs, static_cast<ScalarType>(types.x));
+  const auto b =
+      val_at_offs<om_t>(other1, other1_offs, static_cast<ScalarType>(types.y));
+  const auto c =
+      val_at_offs<om_t>(other2, other2_offs, static_cast<ScalarType>(types.z));
+  ref_at_offs<res_t>(output, output_offs) = static_cast<res_t>(f(a, b, c));
+}
+
+template <typename T, typename F, typename om_t = opmath_t<T>>
+kernel void ternary_dense(
+    device result_of<F, T, T, T>* out [[buffer(0)]],
+    constant T* input [[buffer(1)]],
+    constant T* other1 [[buffer(2)]],
+    constant T* other2 [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  F f;
+  using res_t = result_of<F, T, T, T>;
+  out[tid] = static_cast<res_t>(
+      f(om_t(input[tid]), om_t(other1[tid]), om_t(other2[tid])));
+}
+
+template <typename T, typename F, typename om_t = T>
+kernel void ternary_dense_cast(
+    device result_of<F, T, T, T>* out [[buffer(0)]],
+    constant void* input [[buffer(1)]],
+    constant void* other1 [[buffer(2)]],
+    constant void* other2 [[buffer(3)]],
+    constant uint3& sizes [[buffer(4)]],
+    constant uint3& types [[buffer(5)]],
+    uint tid [[thread_position_in_grid]]) {
+  F f;
+  using res_t = result_of<F, T, T, T>;
+  const auto a =
+      val_at_offs<om_t>(input, tid * sizes.x, static_cast<ScalarType>(types.x));
+  const auto b = val_at_offs<om_t>(
+      other1, tid * sizes.y, static_cast<ScalarType>(types.y));
+  const auto c = val_at_offs<om_t>(
+      other2, tid * sizes.z, static_cast<ScalarType>(types.z));
+  out[tid] = static_cast<res_t>(f(a, b, c));
+}
+
+#define REGISTER_TERNARY_OP_(NAME, DTYPEI, DTYPEO, OMT)                        \
+  static_assert(                                                               \
+      ::metal::is_same_v<                                                      \
+          DTYPEO,                                                              \
+          ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEI>>,    \
+      "Output dtype mismatch for ternary op " #NAME " and input " #DTYPEI);    \
+  template [[host_name(#NAME "_strided_" #DTYPEO "_" #DTYPEI)]] kernel void :: \
+      c10::metal::ternary_strided<DTYPEI, NAME##_functor, OMT>(                \
+          device void* out,                                                    \
+          constant void* input,                                                \
+          constant void* other1,                                               \
+          constant void* other2,                                               \
+          constant long* sizes,                                                \
+          constant long* output_strides,                                       \
+          constant long* input_strides,                                        \
+          constant long* other1_strides,                                       \
+          constant long* other2_strides,                                       \
+          constant uint& ndim,                                                 \
+          uint tid);                                                           \
+  template [[host_name(#NAME "_strided_cast_" #DTYPEI)]] kernel void ::c10::   \
+      metal::ternary_strided_cast<DTYPEI, NAME##_functor, OMT>(                \
+          device void* out,                                                    \
+          constant void* input,                                                \
+          constant void* other1,                                               \
+          constant void* other2,                                               \
+          constant long* sizes,                                                \
+          constant long* output_strides,                                       \
+          constant long* input_strides,                                        \
+          constant long* other1_strides,                                       \
+          constant long* other2_strides,                                       \
+          constant uint& ndim,                                                 \
+          constant uint4& types,                                               \
+          uint tid);                                                           \
+  template [[host_name(#NAME "_dense_" #DTYPEO "_" #DTYPEI)]] kernel void ::   \
+      c10::metal::ternary_dense<DTYPEI, NAME##_functor, OMT>(                  \
+          device ::c10::metal::                                                \
+                  result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEI> *          \
+              out_,                                                            \
+          constant DTYPEI * input_,                                            \
+          constant DTYPEI * other1_,                                           \
+          constant DTYPEI * other2_,                                           \
+          uint tid);                                                           \
+  template [[host_name(#NAME "_dense_cast_" #DTYPEI)]] kernel void ::c10::     \
+      metal::ternary_dense_cast<DTYPEI, NAME##_functor, OMT>(                  \
+          device ::c10::metal::                                                \
+                  result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEI> *          \
+              out_,                                                            \
+          constant void* input,                                                \
+          constant void* other1,                                               \
+          constant void* other2,                                               \
+          constant uint3& sizes,                                               \
+          constant uint3& types,                                               \
+          uint tid)
+
+// OpMath ternary Op promotes inputs to higher precision type before Functor
+// call
+#define REGISTER_OPMATH_TERNARY_OP(NAME, DTYPEI, DTYPEO) \
+  REGISTER_TERNARY_OP_(NAME, DTYPEI, DTYPEO, ::c10::metal::opmath_t<DTYPEI>)
+
+#define REGISTER_TERNARY_OP(NAME, DTYPEI, DTYPEO) \
+  REGISTER_TERNARY_OP_(NAME, DTYPEI, DTYPEO, DTYPEI)
+
+} // namespace metal
+} // namespace c10
