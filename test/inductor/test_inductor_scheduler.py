@@ -20,6 +20,7 @@ from torch._inductor.scheduler import (
     BaseSchedulerNode,
     ExternKernelSchedulerNode,
     NestedReduction,
+    OutputNode,
     Scheduler,
 )
 from torch._inductor.sizevars import SizeVarAllocator
@@ -894,6 +895,325 @@ class TestScheduler(TestCase):
 
         scheduler.fusion_would_materialize_disjoint_branches.assert_not_called()
 
+    def test_fusion_would_materialize_late_outputs_from_shared_producer_prevents_fusion(
+        self,
+    ):
+        scheduler, producer, consumer = self._create_late_output_scheduler(
+            producer_output_size=100,
+            consumer_output_size=100,
+            producer_other_user_order=10,
+            consumer_output_user_order=20,
+        )
+
+        self.assertTrue(
+            Scheduler.fusion_would_materialize_late_outputs_from_shared_producer(
+                scheduler, producer, consumer, shared_data_score=100
+            )
+        )
+
+    def test_fusion_would_materialize_late_outputs_from_shared_producer_requires_shared_data(
+        self,
+    ):
+        scheduler, producer, consumer = self._create_late_output_scheduler(
+            producer_output_size=100,
+            consumer_output_size=100,
+            producer_other_user_order=10,
+            consumer_output_user_order=20,
+        )
+
+        self.assertFalse(
+            Scheduler.fusion_would_materialize_late_outputs_from_shared_producer(
+                scheduler, producer, consumer, shared_data_score=0
+            )
+        )
+
+    def test_fusion_would_materialize_late_outputs_from_shared_producer_requires_ancestor(
+        self,
+    ):
+        scheduler, producer, consumer = self._create_late_output_scheduler(
+            producer_output_size=100,
+            consumer_output_size=100,
+            producer_other_user_order=10,
+            consumer_output_user_order=20,
+        )
+        consumer.ancestors = OrderedSet()
+
+        self.assertFalse(
+            Scheduler.fusion_would_materialize_late_outputs_from_shared_producer(
+                scheduler, producer, consumer, shared_data_score=100
+            )
+        )
+
+    def test_fusion_would_materialize_late_outputs_from_shared_producer_allows_small_output(
+        self,
+    ):
+        scheduler, producer, consumer = self._create_late_output_scheduler(
+            producer_output_size=100,
+            consumer_output_size=50,
+            producer_other_user_order=10,
+            consumer_output_user_order=20,
+        )
+
+        self.assertFalse(
+            Scheduler.fusion_would_materialize_late_outputs_from_shared_producer(
+                scheduler, producer, consumer, shared_data_score=100
+            )
+        )
+
+    def test_fusion_would_materialize_late_outputs_from_shared_producer_allows_earlier_output(
+        self,
+    ):
+        scheduler, producer, consumer = self._create_late_output_scheduler(
+            producer_output_size=100,
+            consumer_output_size=100,
+            producer_other_user_order=30,
+            consumer_output_user_order=20,
+        )
+
+        self.assertFalse(
+            Scheduler.fusion_would_materialize_late_outputs_from_shared_producer(
+                scheduler, producer, consumer, shared_data_score=100
+            )
+        )
+
+    def test_fusion_would_materialize_late_outputs_from_shared_producer_sums_shared_outputs(
+        self,
+    ):
+        scheduler, producer, consumer = self._create_late_output_scheduler(
+            producer_output_size=80,
+            consumer_output_size=100,
+            producer_other_user_order=10,
+            consumer_output_user_order=20,
+        )
+        producer.read_writes.writes.add(self._mock_dep("producer_output_2"))
+        consumer.read_writes.reads.add(self._mock_dep("producer_output_2"))
+        scheduler.name_to_buf["producer_output_2"] = (
+            self._create_mock_buffer_users_with_orders({"early_user_2": 12})
+        )
+        user_node = Mock(spec=BaseSchedulerNode)
+        user_node.min_order = 12
+        scheduler.name_to_fused_node["early_user_2"] = user_node
+        output_sizes = {
+            "producer_output": 80,
+            "producer_output_2": 80,
+            "consumer_output": 100,
+        }
+        scheduler.dep_size_hint = Mock(side_effect=lambda dep: output_sizes[dep.name])
+
+        self.assertFalse(
+            Scheduler.fusion_would_materialize_late_outputs_from_shared_producer(
+                scheduler, producer, consumer, shared_data_score=100
+            )
+        )
+
+    def test_late_output_guard_sums_late_consumer_outputs(self):
+        scheduler, producer, consumer = self._create_late_output_scheduler(
+            producer_output_size=100,
+            consumer_output_size=60,
+            producer_other_user_order=10,
+            consumer_output_user_order=20,
+        )
+        consumer.read_writes.writes.add(self._mock_dep("consumer_output_2"))
+        scheduler.name_to_buf["consumer_output_2"] = (
+            self._create_mock_buffer_users_with_orders({"late_user_2": 21})
+        )
+        user_node = Mock(spec=BaseSchedulerNode)
+        user_node.min_order = 21
+        user_node.max_order = 21
+        scheduler.name_to_fused_node["late_user_2"] = user_node
+        output_sizes = {
+            "producer_output": 100,
+            "consumer_output": 60,
+            "consumer_output_2": 60,
+        }
+        scheduler.dep_size_hint = Mock(side_effect=lambda dep: output_sizes[dep.name])
+
+        self.assertTrue(
+            Scheduler.fusion_would_materialize_late_outputs_from_shared_producer(
+                scheduler, producer, consumer, shared_data_score=100
+            )
+        )
+
+    def test_late_output_guard_uses_write_order_for_mixed_consumer(self):
+        scheduler, producer, consumer = self._create_late_output_scheduler(
+            producer_output_size=100,
+            consumer_output_size=100,
+            producer_other_user_order=10,
+            consumer_output_user_order=30,
+            consumer_order=1,
+        )
+        late_consumer = self._create_mock_node(
+            name="late_consumer", reads=["producer_output"], writes=["consumer_output"]
+        )
+        late_consumer.min_order = 20
+        late_consumer.max_order = 20
+        consumer.get_nodes = Mock(return_value=[late_consumer])
+        consumer.max_order = 20
+        scheduler.nodes = [
+            producer,
+            consumer,
+            late_consumer,
+            *scheduler.name_to_fused_node.values(),
+        ]
+
+        self.assertTrue(
+            Scheduler.fusion_would_materialize_late_outputs_from_shared_producer(
+                scheduler, producer, consumer, shared_data_score=100
+            )
+        )
+
+    def test_fusion_would_materialize_late_outputs_from_shared_producer_uses_mutation_renames(
+        self,
+    ):
+        scheduler, producer, consumer = self._create_late_output_scheduler(
+            producer_output_size=100,
+            consumer_output_size=100,
+            producer_other_user_order=10,
+            consumer_output_user_order=20,
+        )
+        next(iter(producer.read_writes.writes)).name = "producer_output_before"
+        next(iter(consumer.read_writes.reads)).name = "producer_output_after"
+        scheduler.mutation_renames = {
+            "producer_output_before": "producer_output",
+            "producer_output_after": "producer_output",
+        }
+        scheduler.dep_size_hint = Mock(
+            side_effect=lambda dep: {
+                "producer_output_before": 100,
+                "consumer_output": 100,
+            }[dep.name]
+        )
+
+        self.assertTrue(
+            Scheduler.fusion_would_materialize_late_outputs_from_shared_producer(
+                scheduler, producer, consumer, shared_data_score=100
+            )
+        )
+
+    def test_late_output_guard_ignores_weak_and_output_users(self):
+        scheduler, producer, consumer = self._create_late_output_scheduler(
+            producer_output_size=100,
+            consumer_output_size=100,
+            producer_other_user_order=10,
+            consumer_output_user_order=20,
+        )
+        scheduler.name_to_buf["producer_output"].users = [
+            self._mock_buffer_user("weak_user", order=10, is_weak=True),
+            self._mock_buffer_user("output", order=10, node=object.__new__(OutputNode)),
+        ]
+
+        self.assertFalse(
+            Scheduler.fusion_would_materialize_late_outputs_from_shared_producer(
+                scheduler, producer, consumer, shared_data_score=100
+            )
+        )
+
+    def test_late_output_guard_ignores_unordered_consumer_output_users(self):
+        scheduler, producer, consumer = self._create_late_output_scheduler(
+            producer_output_size=100,
+            consumer_output_size=100,
+            producer_other_user_order=10,
+            consumer_output_user_order=20,
+        )
+        del scheduler.name_to_fused_node["late_user"]
+
+        self.assertFalse(
+            Scheduler.fusion_would_materialize_late_outputs_from_shared_producer(
+                scheduler, producer, consumer, shared_data_score=100
+            )
+        )
+
+    def test_late_output_guard_blocks_late_graph_output(self):
+        scheduler, producer, consumer = self._create_late_output_scheduler(
+            producer_output_size=100,
+            consumer_output_size=100,
+            producer_other_user_order=10,
+            consumer_output_user_order=20,
+        )
+        scheduler.name_to_buf["consumer_output"].users = [
+            self._mock_buffer_user("output", node=object.__new__(OutputNode))
+        ]
+
+        self.assertTrue(
+            Scheduler.fusion_would_materialize_late_outputs_from_shared_producer(
+                scheduler, producer, consumer, shared_data_score=100
+            )
+        )
+
+    def test_late_output_guard_allows_output_already_live_before_other_user(self):
+        scheduler, producer, consumer = self._create_late_output_scheduler(
+            producer_output_size=100,
+            consumer_output_size=100,
+            producer_other_user_order=10,
+            consumer_output_user_order=20,
+            consumer_order=1,
+        )
+
+        self.assertFalse(
+            Scheduler.fusion_would_materialize_late_outputs_from_shared_producer(
+                scheduler, producer, consumer, shared_data_score=100
+            )
+        )
+
+    def test_fusion_would_materialize_late_outputs_from_shared_producer_uses_fused_user_order(
+        self,
+    ):
+        scheduler, producer, consumer = self._create_late_output_scheduler(
+            producer_output_size=100,
+            consumer_output_size=100,
+            producer_other_user_order=30,
+            consumer_output_user_order=20,
+        )
+        scheduler.name_to_fused_node["early_user"].min_order = 10
+
+        self.assertTrue(
+            Scheduler.fusion_would_materialize_late_outputs_from_shared_producer(
+                scheduler, producer, consumer, shared_data_score=100
+            )
+        )
+
+    @inductor_config.patch("allow_peak_memory_increasing_fusion", False)
+    def test_can_fuse_vertical_blocks_late_output_materialization(self):
+        scheduler = Mock(spec=Scheduler)
+        scheduler.fusion_would_materialize_late_outputs_from_shared_producer = Mock(
+            return_value=True
+        )
+        node1 = self._create_mock_node(name="node1", reads=["A"], writes=["B"])
+        node2 = self._create_mock_node(name="node2", reads=["B"], writes=["C"])
+
+        self.assertFalse(
+            InductorChoices.can_fuse_vertical(
+                scheduler, node1, node2, shared_data_score=100
+            )
+        )
+        check = scheduler.fusion_would_materialize_late_outputs_from_shared_producer
+        check.assert_called_once_with(node1, node2, 100)
+
+    def test_can_fuse_vertical_allows_peak_memory_increasing_fusion_when_configured(
+        self,
+    ):
+        scheduler = Mock(spec=Scheduler)
+        scheduler.fusion_would_materialize_late_outputs_from_shared_producer = Mock(
+            return_value=True
+        )
+        node1 = self._create_mock_node(name="node1", reads=["A"], writes=["B"])
+        node2 = self._create_mock_node(name="node2", reads=["B"], writes=["C"])
+
+        with inductor_config.patch("allow_peak_memory_increasing_fusion", True):
+            self.assertTrue(
+                InductorChoices.can_fuse_vertical(
+                    scheduler, node1, node2, shared_data_score=100
+                )
+            )
+
+        check = scheduler.fusion_would_materialize_late_outputs_from_shared_producer
+        check.assert_not_called()
+
+    def _mock_dep(self, name: str) -> Mock:
+        dep = Mock(spec=Dep)
+        dep.name = name
+        return dep
+
     def _create_mock_node(
         self,
         name: str,
@@ -912,15 +1232,11 @@ class TestScheduler(TestCase):
         # Create mock Dep objects for reads and writes
         read_deps = OrderedSet()
         for read_name in reads:
-            dep = Mock(spec=Dep)
-            dep.name = read_name
-            read_deps.add(dep)
+            read_deps.add(self._mock_dep(read_name))
 
         write_deps = OrderedSet()
         for write_name in writes:
-            dep = Mock(spec=Dep)
-            dep.name = write_name
-            write_deps.add(dep)
+            write_deps.add(self._mock_dep(write_name))
 
         # Create mock ReadWrites object
         read_writes = Mock(spec=ReadWrites)
@@ -942,6 +1258,99 @@ class TestScheduler(TestCase):
             user.get_name = Mock(return_value=name)
             buf.users.append(user)
         return buf
+
+    def _create_mock_buffer_users_with_orders(
+        self, user_orders: dict[str, int]
+    ) -> Mock:
+        buf = Mock()
+        buf.users = []
+        for name, order in user_orders.items():
+            buf.users.append(self._mock_buffer_user(name, order))
+        return buf
+
+    def _mock_buffer_user(
+        self,
+        name: str,
+        order: int | None = None,
+        is_weak: bool = False,
+        node: object | None = None,
+    ) -> Mock:
+        if node is None:
+            user_node = Mock(spec=BaseSchedulerNode)
+            user_node.get_name = Mock(return_value=name)
+            if order is not None:
+                user_node.min_order = order
+            node = user_node
+        user = Mock()
+        user.node = node
+        user.is_weak = is_weak
+        user.get_name = Mock(return_value=name)
+        return user
+
+    def _create_late_output_scheduler(
+        self,
+        producer_output_size: int,
+        consumer_output_size: int,
+        producer_other_user_order: int,
+        consumer_output_user_order: int,
+        consumer_order: int | None = None,
+    ) -> tuple[Mock, Mock, Mock]:
+        scheduler = Mock(spec=Scheduler)
+        scheduler.mutation_renames = {}
+        scheduler.can_buffer_be_removed_through_fusion = Mock(return_value=False)
+        scheduler._materialized_external_outputs = (
+            Scheduler._materialized_external_outputs.__get__(scheduler, Scheduler)
+        )
+        scheduler._materialized_external_output_orders = (
+            Scheduler._materialized_external_output_orders.__get__(
+                scheduler, Scheduler
+            )
+        )
+        scheduler._output_node_order = Scheduler._output_node_order.__get__(
+            scheduler, Scheduler
+        )
+        scheduler.dep_size_hint = Mock(
+            side_effect=lambda dep: {
+                "producer_output": producer_output_size,
+                "consumer_output": consumer_output_size,
+            }[dep.name]
+        )
+        scheduler.name_to_buf = {
+            "producer_output": self._create_mock_buffer_users_with_orders(
+                {"early_user": producer_other_user_order}
+            ),
+            "consumer_output": self._create_mock_buffer_users_with_orders(
+                {"late_user": consumer_output_user_order}
+            ),
+        }
+        scheduler.name_to_fused_node = {}
+        for name, order in (
+            ("early_user", producer_other_user_order),
+            ("late_user", consumer_output_user_order),
+        ):
+            user_node = Mock(spec=BaseSchedulerNode)
+            user_node.min_order = order
+            user_node.max_order = order
+            scheduler.name_to_fused_node[name] = user_node
+
+        producer = self._create_mock_node(
+            name="producer", reads=["input"], writes=["producer_output"]
+        )
+        consumer = self._create_mock_node(
+            name="consumer", reads=["producer_output"], writes=["consumer_output"]
+        )
+        producer.min_order = 0
+        producer.max_order = 0
+        consumer.min_order = (
+            producer_other_user_order + 1
+            if consumer_order is None
+            else consumer_order
+        )
+        consumer.max_order = consumer.min_order
+        scheduler.nodes = [producer, consumer, *scheduler.name_to_fused_node.values()]
+        producer.get_operation_names = Mock(return_value=OrderedSet(["producer_op"]))
+        consumer.ancestors = OrderedSet(["producer_op"])
+        return scheduler, producer, consumer
 
     def _create_materialized_output_scheduler(
         self,
@@ -990,6 +1399,8 @@ class TestScheduler(TestCase):
             template_node.get_device.return_value = torch.device("cpu")
             prologue_node.has_aliasing_or_mutation.return_value = False
             template_node.has_aliasing_or_mutation.return_value = True
+            prologue_node.node = Mock(annotations={})
+            template_node.node = Mock(annotations={})
 
             input_node = Mock()
             input_node.get_name.return_value = "x"
@@ -1008,6 +1419,7 @@ class TestScheduler(TestCase):
             output.users = [user]
             prologue_node.outputs = [output]
             prologue_node.get_nodes.return_value = [prologue_node]
+            template_node.get_nodes.return_value = [template_node]
 
             return prologue_node, template_node, template
 

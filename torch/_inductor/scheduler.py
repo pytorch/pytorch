@@ -6975,6 +6975,62 @@ class Scheduler:
             external_users.update(users)
         return total_bytes, external_users, len(outputs)
 
+    def _output_node_order(self) -> int:
+        return max((node.max_order for node in self.nodes), default=-1) + 1
+
+    def _materialized_external_output_orders(
+        self,
+        node: BaseSchedulerNode,
+        fused_node_names: OrderedSet[str],
+        *,
+        include_output_node: bool = False,
+    ) -> list[tuple[int, int, list[int], OrderedSet[str]]]:
+        outputs: list[tuple[int, int, list[int], OrderedSet[str]]] = []
+        seen_writes: OrderedSet[str] = OrderedSet()
+        output_node_order = self._output_node_order()
+        for snode in node.get_nodes():
+            for write in snode.read_writes.writes:
+                write_name = self.mutation_renames.get(write.name, write.name)
+                if write_name in seen_writes:
+                    continue
+                seen_writes.add(write_name)
+
+                if self.can_buffer_be_removed_through_fusion(
+                    write_name, fused_node_names
+                ):
+                    continue
+
+                buf = self.name_to_buf.get(write_name)
+                if buf is None:
+                    continue
+
+                users: OrderedSet[str] = OrderedSet()
+                user_orders: list[int] = []
+                for user in buf.users:
+                    user_name = user.get_name()
+                    if user.is_weak or user_name in fused_node_names:
+                        continue
+                    if isinstance(user.node, OutputNode):
+                        if include_output_node:
+                            users.add(user_name)
+                            user_orders.append(output_node_order)
+                        continue
+                    user_node = self.name_to_fused_node.get(user_name)
+                    if user_node is None:
+                        continue
+                    users.add(user_name)
+                    user_orders.append(user_node.min_order)
+
+                if not user_orders:
+                    continue
+
+                output_bytes = self.dep_size_hint(write)
+                if output_bytes <= 0:
+                    return []
+
+                outputs.append((output_bytes, snode.max_order, user_orders, users))
+        return outputs
+
     def fusion_would_materialize_outputs_across_extern_branch(
         self,
         node1: BaseSchedulerNode,
@@ -7038,6 +7094,80 @@ class Scheduler:
             ):
                 return True
         return False
+
+    def fusion_would_materialize_late_outputs_from_shared_producer(
+        self,
+        producer: BaseSchedulerNode,
+        consumer: BaseSchedulerNode,
+        shared_data_score: int,
+    ) -> bool:
+        if (
+            shared_data_score <= 0
+            or producer.is_template()
+            or consumer.is_template()
+            or not (producer.get_operation_names() & consumer.ancestors)
+        ):
+            return False
+
+        fused_node_names = OrderedSet(
+            [node.get_name() for node in producer.get_nodes()]
+            + [node.get_name() for node in consumer.get_nodes()]
+        )
+
+        consumer_read_names = OrderedSet(
+            self.mutation_renames.get(read.name, read.name)
+            for read in consumer.read_writes.reads
+        )
+        earliest_other_user_order = None
+        producer_output_bytes = 0
+        for write in producer.read_writes.writes:
+            write_name = self.mutation_renames.get(write.name, write.name)
+            if write_name not in consumer_read_names:
+                continue
+            buf = self.name_to_buf.get(write_name)
+            if buf is None:
+                continue
+            other_users = []
+            for user in buf.users:
+                user_name = user.get_name()
+                if (
+                    user.is_weak
+                    or user_name in fused_node_names
+                    or isinstance(user.node, OutputNode)
+                ):
+                    continue
+                other_users.append(self.name_to_fused_node.get(user_name, user.node))
+            if not other_users:
+                continue
+            user_order = min(user.min_order for user in other_users)
+            earliest_other_user_order = (
+                user_order
+                if earliest_other_user_order is None
+                else min(earliest_other_user_order, user_order)
+            )
+            output_bytes = self.dep_size_hint(write)
+            if output_bytes <= 0:
+                return False
+            producer_output_bytes += output_bytes
+
+        if earliest_other_user_order is None or producer_output_bytes <= 0:
+            return False
+
+        late_output_bytes = 0
+        for (
+            output_bytes,
+            output_order,
+            user_orders,
+            _,
+        ) in self._materialized_external_output_orders(
+            consumer, fused_node_names, include_output_node=True
+        ):
+            if (
+                output_order > earliest_other_user_order
+                and min(user_orders) > earliest_other_user_order
+            ):
+                late_output_bytes += output_bytes
+        return late_output_bytes >= producer_output_bytes
 
     def are_long_distant_nodes(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode

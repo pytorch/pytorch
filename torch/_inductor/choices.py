@@ -653,6 +653,14 @@ class InductorChoices:
         shared_data_score: int,
     ) -> bool:
         """Hook for heuristics to prevent vertical (producer/consumer) fusions"""
+        if not config.allow_peak_memory_increasing_fusion:
+            if scheduler.fusion_would_materialize_late_outputs_from_shared_producer(
+                node1, node2, shared_data_score
+            ):
+                WhyNoFuse(node1, node2)(
+                    "Fusion materializes late outputs from a producer with earlier users."
+                )
+                return False
         return True
 
     @staticmethod
