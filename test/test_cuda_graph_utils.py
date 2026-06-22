@@ -527,6 +527,69 @@ class TestMarkKernels(TestCase):
         self.assertEqual(graph_ids_by_name["graph_a"], {exec_a})
         self.assertEqual(graph_ids_by_name["graph_b"], {exec_b})
 
+    def _assert_keyed_to(self, exec_graph_id):
+        annotations = get_kernel_annotations()
+        self.assertGreater(len(annotations), 0)
+        for tools_id in annotations:
+            self.assertEqual(tools_id >> 32, exec_graph_id)
+
+    @parametrize("trigger", ["instantiate", "replay"])
+    def test_keep_graph_true_remaps_on_first_instantiation(self, trigger):
+        """With keep_graph=True the exec graph is not instantiated at
+        capture_end, so the context exit must not error and the remap must be
+        deferred until the graph is instantiated -- whether that happens via an
+        explicit instantiate() or implicitly on the first replay().
+        """
+        clear_kernel_annotations()
+        graph = torch.cuda.CUDAGraph(keep_graph=True)
+        x = torch.randn(8, device="cuda")
+
+        # Must not raise: previously __exit__ called raw_cuda_graph_exec() before
+        # instantiation, which errors when keep_graph=True.
+        with torch.cuda.graph(graph, enable_annotations=True):
+            with mark_kernels("kg"):
+                _ = x + 1
+
+        # Annotations are recorded but still keyed by the capture id until the
+        # exec graph exists.
+        self.assertGreater(len(get_kernel_annotations()), 0)
+
+        if trigger == "instantiate":
+            graph.instantiate()
+        else:
+            graph.replay()
+
+        self._assert_keyed_to(self._exec_graph_id(graph))
+
+    def test_keep_graph_true_reinstantiate_rekeys_annotations(self):
+        """keep_graph=True is meant for modifying the template and instantiating
+        again. Each instantiate() produces a fresh exec id, so annotations must
+        be rekeyed from the previous exec id to the new one on re-instantiation,
+        while a plain replay() (no new exec graph) leaves them unchanged.
+        """
+        clear_kernel_annotations()
+        graph = torch.cuda.CUDAGraph(keep_graph=True)
+        x = torch.randn(8, device="cuda")
+
+        with torch.cuda.graph(graph, enable_annotations=True):
+            with mark_kernels("kg"):
+                _ = x + 1
+
+        graph.instantiate()
+        exec1 = self._exec_graph_id(graph)
+        self._assert_keyed_to(exec1)
+
+        # Replay does not create a new exec graph: keys must stay on exec1.
+        graph.replay()
+        self.assertEqual(self._exec_graph_id(graph), exec1)
+        self._assert_keyed_to(exec1)
+
+        # Re-instantiate: a new exec id, annotations must follow it.
+        graph.instantiate()
+        exec2 = self._exec_graph_id(graph)
+        self.assertNotEqual(exec1, exec2)
+        self._assert_keyed_to(exec2)
+
     def test_mark_kernels_skips_preexisting_dependents_on_entry_frontier(self):
         graph = torch.cuda.CUDAGraph()
         x = torch.randn(8, device="cuda")
