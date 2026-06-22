@@ -6,7 +6,6 @@
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_extension.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.hpp>
-#include <torch/csrc/distributed/c10d/symm_mem/ops/symm_mem_copy.cuh>
 #include <cstdint>
 
 // All-gather a rank-local bucket of parameter shards into a "parameter-
@@ -141,8 +140,12 @@ __global__ void all_gather_offset_push_kernel(
         static_cast<size_t>(tile_off);
     char* dst = reinterpret_cast<char*>(
         ncclGetLsaPointer(out_window, dst_byte, dst_peer));
-    copy_bytes_vec16_aligned(
-        src, dst, static_cast<size_t>(tile_len), threadIdx.x, blockDim.x);
+    const int64_t nvec = tile_len / AG_ALIGN;
+    for (int64_t k = threadIdx.x; k < nvec; k += blockDim.x) {
+      const int64_t b = k * AG_ALIGN;
+      at::native::memory::st_vec<AG_ALIGN>(
+          dst + b, at::native::memory::ld_vec<AG_ALIGN>(src + b));
+    }
   }
 
   // Publish this rank's writes (release) and observe all peers' writes
