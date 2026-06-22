@@ -294,6 +294,11 @@ sdp::SDPBackend select_sdp_backend_xpu(sdp::sdp_params const& kernel_params) {
 } // namespace
 
 namespace at::native {
+
+namespace xpu::philox {
+  void unpack_onednn_wrapper(at::PhiloxXpuState arg, int64_t* seed_ptr, int64_t* offset_ptr);
+}
+  
 int64_t _fused_sdp_choice_xpu(
     const at::Tensor& query_,
     const at::Tensor& key,
@@ -372,7 +377,9 @@ _scaled_dot_product_fused_attention_overrideable_xpu(
   at::Tensor logsumexp =
       at::empty({batch_size, num_head_q, seq_len_q}, opts.dtype(at::kFloat));
 
-  at::Tensor philox_seed, philox_offset;
+  // at::Tensor philox_seed, philox_offset;
+  at::Tensor philox_seed = at::empty({}, at::dtype(at::kLong).device(at::kXPU));
+  at::Tensor philox_offset = at::empty({}, at::dtype(at::kLong).device(at::kXPU));
   if (dropout_p != 0.0) {
     auto gen = at::get_generator_or_default<at::XPUGeneratorImpl>(
         std::nullopt, at::xpu::detail::getDefaultXPUGenerator());
@@ -382,12 +389,14 @@ _scaled_dot_product_fused_attention_overrideable_xpu(
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(gen->mutex_);
     at::PhiloxXpuState philox_state = gen->philox_xpu_state(counter_offset);
-    std::tuple<uint64_t, uint64_t> unpack_state =
-        xpu::philox::unpack(philox_state);
-    philox_seed = at::full(
-        {}, std::get<0>(unpack_state), at::dtype(at::kLong).device(at::kXPU));
-    philox_offset = at::full(
-        {}, std::get<1>(unpack_state), at::dtype(at::kLong).device(at::kXPU));
+    // std::tuple<uint64_t, uint64_t> unpack_state =
+    //     xpu::philox::unpack(philox_state);
+    // philox_seed = at::full(
+    //     {}, std::get<0>(unpack_state), at::dtype(at::kLong).device(at::kXPU));
+    // philox_offset = at::full(
+    //     {}, std::get<1>(unpack_state), at::dtype(at::kLong).device(at::kXPU));
+    at::native::xpu::philox::unpack_onednn_wrapper(
+        philox_state, static_cast<int64_t*>(philox_seed.data_ptr()), static_cast<int64_t*>(philox_offset.data_ptr()));
   }
 
   at::native::onednn::sdpa(
