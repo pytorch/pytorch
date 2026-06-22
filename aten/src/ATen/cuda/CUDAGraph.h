@@ -41,6 +41,10 @@ TORCH_CUDA_CPP_API MempoolId_t graph_pool_handle();
 TORCH_CUDA_CPP_API bool is_graph_capture_active();
 #endif // defined(USE_ROCM)
 
+struct CUDAGraph;
+
+TORCH_CUDA_CPP_API CUDAGraph* get_graph_from_capture_id(CaptureId_t capture_id);
+
 struct TORCH_CUDA_CPP_API CUDAGraph {
   CUDAGraph(bool keep_graph=false);
   ~CUDAGraph();
@@ -66,7 +70,6 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   CUDAGraph& operator=(CUDAGraph&& other) = delete;
 
   void register_generator_state(c10::intrusive_ptr<at::CUDAGeneratorState> state);
-  void register_generator_state(const at::Generator& generator);
   void capture_begin(
       MempoolId_t pool = {0, 0},
       cudaStreamCaptureMode capture_mode = cudaStreamCaptureModeGlobal);

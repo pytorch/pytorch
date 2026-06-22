@@ -35,6 +35,15 @@ bool is_graph_capture_active() {
 }
 #endif // defined(USE_ROCM)
 
+CUDAGraph* get_graph_from_capture_id(CaptureId_t capture_id) {
+  std::lock_guard<std::mutex> lock(_currently_capturing_graphs_mutex);
+  auto it = _currently_capturing_graphs.find(capture_id);
+  if (it != _currently_capturing_graphs.end()) {
+    return it->second;
+  }
+  return nullptr;
+}
+
 MempoolId_t graph_pool_handle() {
   // Sets just the second value, to distinguish it from MempoolId_ts created from
   // cudaStreamGetCaptureInfo id_s in capture_begin.
@@ -73,14 +82,6 @@ void CUDAGraph::register_generator_state(
   captured_generator_states_[std::move(state)] = 0;
 }
 
-void CUDAGraph::register_generator_state(const at::Generator& generator) {
-  c10::intrusive_ptr<CUDAGeneratorImpl> cuda_gen =
-      dynamic_intrusive_pointer_cast<CUDAGeneratorImpl>(
-          generator.getIntrusivePtr());
-  cuda_gen->register_graph(this);
-}
-
-
 template <>
 std::function<bool(cudaStream_t)> CUDAGraph::create_allocate_filter<cudaStream_t>() const {
   return [this](cudaStream_t stream) {
@@ -104,11 +105,6 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode 
               "To capture a new graph, create a new instance.");
 
   capture_mode_ = capture_mode;
-
-  // default generator is always registered
-  auto* gen = get_generator_or_default<CUDAGeneratorImpl>(
-      std::nullopt, cuda::detail::getDefaultCUDAGenerator());
-  gen->register_graph(this);
 
   auto stream = at::cuda::getCurrentCUDAStream();
 
@@ -167,11 +163,6 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode 
     std::lock_guard<std::mutex> lock(_currently_capturing_graphs_mutex);
     _currently_capturing_graphs.emplace(capture_id_, this);
   }
-
-  for (auto& [generator_state, wholegraph_increment] :
-       captured_generator_states_) {
-    generator_state->init_capture_state(capture_id_);
-  }
 }
 
 // capture_end is split so callers can run work on the captured cudaGraph_t
@@ -198,6 +189,11 @@ void CUDAGraph::capture_end_pre() {
     _currently_capturing_graphs.erase(capture_id_);
   }
 
+  // End pool allocation before checking the capture error. This ensures
+  // captures_underway is cleaned up even if cudaStreamEndCapture failed
+  // (e.g. due to an illegal operation during capture). These calls are
+  // safe regardless of whether the capture succeeded — they simply
+  // remove the pool routing entry added by beginAllocateToPool.
   c10::cuda::CUDACachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
   at::getHostAllocator(at::kCUDA)->end_allocate_to_pool(mempool_id_);
   AT_CUDA_CHECK(endCaptureErr);
@@ -340,6 +336,9 @@ void CUDAGraph::reset() {
   // If the user catches the failure exception in a script, or is running in REPL or (god forbid)
   // a Jupyter notebook, I don't see an easy way for reset() to gracefully fix all such possible error states.
 
+  // See Note [RNG state tensor lifetime and recordStream] in
+  // CUDAGeneratorImpl.cpp — recordStream in setup_for_replay ensures the
+  // allocator won't recycle these tensors until in-flight replays finish.
   if (capture_id_ != 0) {
     for (auto& [generator_state, wholegraph_increment] : captured_generator_states_) {
       generator_state->remove_capture_state(capture_id_);
