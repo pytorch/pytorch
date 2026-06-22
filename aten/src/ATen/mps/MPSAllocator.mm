@@ -88,6 +88,8 @@ size_t MPSHeapAllocatorImpl::get_allocation_size(size_t size, uint32_t usage) co
     return aligned;
   }
   constexpr int kLargeBucketShift = 5; // 32 buckets per power-of-two magnitude
+  // The early return above guarantees aligned > kMaxSmallAlloc > 0, so the clz
+  // below never operates on 0 (which would be undefined behavior).
   size_t granule = (size_t(1) << (63 - __builtin_clzll(aligned))) >> kLargeBucketShift;
   if (granule < vm_page_size) {
     granule = vm_page_size;
@@ -237,9 +239,11 @@ bool MPSHeapAllocatorImpl::get_free_buffer(AllocParams& params) {
   }
 
   if (!params.buffer_block) {
-    // When a bucketed allocation (see get_allocation_size) crosses into a larger
-    // bucket, the cached buffers are one bucket smaller and can never be reused
-    // again. Release the stranded near-fit, freeing its heap, to reclaim them.
+    // A bucketed allocation that crossed into a larger bucket (see
+    // get_allocation_size) can no longer reuse the previous bucket's cached
+    // buffers. Release the largest one within kNearFitReuseDenom (1/8) of the
+    // request to free its heap. The tolerance is kept wider than a bucket so the
+    // stranded near-fit is caught anywhere in the power-of-two band.
     if (no_larger_buffer && !(pool.usage & UsageFlags::SMALL) && !pool.available_buffers.empty()) {
       constexpr size_t kNearFitReuseDenom = 8;
       BufferBlock* nearest = *pool.available_buffers.rbegin();
