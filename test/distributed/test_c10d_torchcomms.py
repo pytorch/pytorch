@@ -7,7 +7,12 @@ import torch.distributed as dist
 from torch.distributed.distributed_c10d import _TORCHCOMM_AVAILABLE
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import C10dTorchCommsTestBase
-from torch.testing._internal.common_utils import parametrize, run_tests, subtest
+from torch.testing._internal.common_utils import (
+    parametrize,
+    run_tests,
+    subtest,
+    TestCase,
+)
 
 
 @unittest.skipIf(not _TORCHCOMM_AVAILABLE, "TorchComms is not installed")
@@ -227,6 +232,185 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
             dist.new_group(ranks=ranks, use_local_synchronization=True)
         with self.assertRaisesRegex(NotImplementedError, "sort_ranks"):
             dist.new_group(ranks=ranks, sort_ranks=False)
+
+    # The next block of tests covers
+    # ``new_group``'s torchcomms behaviors: auto-qualify of bare backends,
+    # ``backend=None`` narrowing to the parent's default-device backend,
+    # and the ``pg_options`` → ``_new_group_with_tag`` bypass dispatch
+    # that lets NCCL Options translate to torchcomms hints applied at
+    # comm construction.
+
+    def test_new_group_backend_none_narrows_to_default_device(self, device):
+        # ``new_group(backend=None)`` under torchcomms must auto-narrow to
+        # the parent's default-device backend (e.g. ``"cuda:nccl"``) so
+        # the subgroup doesn't pick up a free gloo comm.
+        ng = dist.new_group(ranks=list(range(self.world_size)), backend=None)
+        tensor = torch.tensor([self._rank_value], dtype=torch.float32, device=device)
+        dist.all_reduce(tensor, group=ng)
+        self.assertEqual(tensor.item(), sum(range(1, self.world_size + 1)))
+
+    def test_new_group_bare_default_backend_is_auto_qualified(self, device):
+        # Bare ``backend="nccl"`` (or whatever the parent's default-device
+        # backend is) must be auto-qualified to ``"<device>:<backend>"``.
+        ng = dist.new_group(
+            ranks=list(range(self.world_size)),
+            backend=self.backend(device),
+        )
+        tensor = torch.tensor([self._rank_value], dtype=torch.float32, device=device)
+        dist.all_reduce(tensor, group=ng)
+        self.assertEqual(tensor.item(), sum(range(1, self.world_size + 1)))
+
+    def test_new_group_qualified_backend_passes_through(self, device):
+        # An already-qualified backend (``"cuda:nccl"`` etc.) must pass
+        # through unchanged.
+        qualified = f"{device}:{self.backend(device)}"
+        ng = dist.new_group(ranks=list(range(self.world_size)), backend=qualified)
+        tensor = torch.tensor([self._rank_value], dtype=torch.float32, device=device)
+        dist.all_reduce(tensor, group=ng)
+        self.assertEqual(tensor.item(), sum(range(1, self.world_size + 1)))
+
+    def test_new_group_pg_options_routes_through_helper_and_works(self, device):
+        # ``pg_options=ProcessGroupNCCL.Options(...)`` whose fields translate
+        # to torchcomms hints (high_priority_stream / cga_cluster_size /
+        # max_ctas / min_ctas) must bypass ``split_group`` (which can't
+        # consume NCCL Options) and route through ``_new_group_with_tag``
+        # -> ``_new_process_group_helper`` so the hints reach
+        # ``torchcomms.new_comm(hints=...)``. The resulting PG must be
+        # functional for collectives.
+        if "cuda" not in device:
+            self.skipTest("pg_options→hints path is NCCL-specific")
+        opts = dist.ProcessGroupNCCL.Options(is_high_priority_stream=True)
+        opts.config.cga_cluster_size = 2
+        opts.config.max_ctas = 16
+        ng = dist.new_group(
+            ranks=list(range(self.world_size)),
+            pg_options=opts,
+            group_desc="TEST_PG_OPTIONS",
+        )
+        tensor = torch.tensor([self._rank_value], dtype=torch.float32, device=device)
+        dist.all_reduce(tensor, group=ng)
+        self.assertEqual(tensor.item(), sum(range(1, self.world_size + 1)))
+
+    def test_new_group_pg_options_with_backend_none_still_narrows(self, device):
+        # Regression guard: the auto-qualify of ``backend=None`` must apply
+        # even when ``pg_options`` takes the bypass path. Otherwise a
+        # ``cpu:gloo,cuda:nccl`` parent would create an extra gloo
+        # subgroup comm per call.
+        if "cuda" not in device:
+            self.skipTest("pg_options→hints path is NCCL-specific")
+        opts = dist.ProcessGroupNCCL.Options(is_high_priority_stream=True)
+        ng = dist.new_group(
+            ranks=list(range(self.world_size)),
+            backend=None,
+            pg_options=opts,
+            group_desc="TEST_PG_OPTIONS_NONE_BACKEND",
+        )
+        tensor = torch.tensor([self._rank_value], dtype=torch.float32, device=device)
+        dist.all_reduce(tensor, group=ng)
+        self.assertEqual(tensor.item(), sum(range(1, self.world_size + 1)))
+
+    def test_new_group_sequential_pg_options_produce_distinct_pgs(self, device):
+        # Two consecutive ``new_group`` calls with different ``pg_options``
+        # must produce distinct, independently-usable PGs (no caching of
+        # the underlying comm across calls with different hints).
+        if "cuda" not in device:
+            self.skipTest("pg_options→hints path is NCCL-specific")
+        opts_a = dist.ProcessGroupNCCL.Options(is_high_priority_stream=True)
+        opts_a.config.cga_cluster_size = 2
+        opts_b = dist.ProcessGroupNCCL.Options()
+        opts_b.config.cga_cluster_size = 4
+        g_a = dist.new_group(
+            ranks=list(range(self.world_size)),
+            pg_options=opts_a,
+            group_desc="SEQ_A",
+        )
+        g_b = dist.new_group(
+            ranks=list(range(self.world_size)),
+            pg_options=opts_b,
+            group_desc="SEQ_B",
+        )
+        self.assertIsNot(g_a, g_b)
+        self.assertNotEqual(g_a.group_name, g_b.group_name)
+        for g in (g_a, g_b):
+            tensor = torch.tensor(
+                [self._rank_value], dtype=torch.float32, device=device
+            )
+            dist.all_reduce(tensor, group=g)
+            self.assertEqual(tensor.item(), sum(range(1, self.world_size + 1)))
+
+
+class TestNcclOptionsToTorchCommsHints(TestCase):
+    """Pure-fn tests for
+    ``torch.distributed.distributed_c10d._nccl_options_to_torchcomms_hints``.
+
+    Verifies the ``ProcessGroupNCCL.Options`` → ``Dict[str, str]``
+    translation against the hint names torchcomms actually accepts
+    (``high_priority_stream`` / ``cga_cluster_size`` / ``max_ctas`` /
+    ``min_ctas``), and that NCCL_CONFIG_UNDEF_INT (-2**31) sentinel
+    values are dropped.
+    """
+
+    def test_none_returns_empty_dict(self):
+        from torch.distributed.distributed_c10d import (
+            _nccl_options_to_torchcomms_hints,
+        )
+
+        self.assertEqual(_nccl_options_to_torchcomms_hints(None), {})
+
+    def test_default_options_drops_sentinels(self):
+        from torch.distributed.distributed_c10d import (
+            _nccl_options_to_torchcomms_hints,
+        )
+
+        opts = dist.ProcessGroupNCCL.Options()
+        # Fresh Options carries NCCL_CONFIG_UNDEF_INT sentinels for all the
+        # int fields and is_high_priority_stream=False; the translator
+        # should emit nothing.
+        self.assertEqual(_nccl_options_to_torchcomms_hints(opts), {})
+
+    def test_high_priority_stream_emitted_as_string_true(self):
+        from torch.distributed.distributed_c10d import (
+            _nccl_options_to_torchcomms_hints,
+        )
+
+        opts = dist.ProcessGroupNCCL.Options(is_high_priority_stream=True)
+        hints = _nccl_options_to_torchcomms_hints(opts)
+        self.assertEqual(hints.get("high_priority_stream"), "true")
+
+    def test_config_fields_round_trip(self):
+        from torch.distributed.distributed_c10d import (
+            _nccl_options_to_torchcomms_hints,
+        )
+
+        opts = dist.ProcessGroupNCCL.Options(is_high_priority_stream=True)
+        opts.config.cga_cluster_size = 2
+        opts.config.max_ctas = 16
+        opts.config.min_ctas = 4
+        hints = _nccl_options_to_torchcomms_hints(opts)
+        self.assertEqual(hints["high_priority_stream"], "true")
+        self.assertEqual(hints["cga_cluster_size"], "2")
+        self.assertEqual(hints["max_ctas"], "16")
+        self.assertEqual(hints["min_ctas"], "4")
+
+    def test_partial_config_omits_unset_fields(self):
+        from torch.distributed.distributed_c10d import (
+            _nccl_options_to_torchcomms_hints,
+        )
+
+        opts = dist.ProcessGroupNCCL.Options()
+        opts.config.cga_cluster_size = 4
+        hints = _nccl_options_to_torchcomms_hints(opts)
+        self.assertEqual(hints, {"cga_cluster_size": "4"})
+
+    def test_attributeerror_on_non_nccl_options_returns_empty(self):
+        from torch.distributed.distributed_c10d import (
+            _nccl_options_to_torchcomms_hints,
+        )
+
+        class Bogus:
+            pass
+
+        self.assertEqual(_nccl_options_to_torchcomms_hints(Bogus()), {})
 
 
 devices = ["cpu", "cuda", "xpu"]
