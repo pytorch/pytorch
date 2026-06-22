@@ -6889,6 +6889,92 @@ class Scheduler:
 
         return len(unique_io_buffers) > threshold
 
+    def fusion_would_materialize_disjoint_branches(
+        self,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+        shared_data_score: int,
+    ) -> bool:
+        if (
+            shared_data_score <= 0
+            or node1.is_reduction()
+            or node2.is_reduction()
+            or node1.is_template()
+            or node2.is_template()
+        ):
+            return False
+
+        fused_node_names = OrderedSet(
+            [node.get_name() for node in node1.get_nodes()]
+            + [node.get_name() for node in node2.get_nodes()]
+        )
+
+        node1_output_bytes, node1_external_users, node1_output_count = (
+            self._materialized_external_output_info(node1, fused_node_names)
+        )
+        node2_output_bytes, node2_external_users, node2_output_count = (
+            self._materialized_external_output_info(node2, fused_node_names)
+        )
+        if node1_output_count == 0 or node2_output_count == 0:
+            return False
+
+        if node1_external_users & node2_external_users:
+            return False
+
+        return min(node1_output_bytes, node2_output_bytes) >= shared_data_score
+
+    def _materialized_external_outputs(
+        self,
+        node: BaseSchedulerNode,
+        fused_node_names: OrderedSet[str],
+    ) -> list[tuple[int, OrderedSet[str]]]:
+        outputs: list[tuple[int, OrderedSet[str]]] = []
+        seen_writes: OrderedSet[str] = OrderedSet()
+        for snode in node.get_nodes():
+            for write in snode.read_writes.writes:
+                write_name = self.mutation_renames.get(write.name, write.name)
+                if write_name in seen_writes:
+                    continue
+                seen_writes.add(write_name)
+
+                if self.can_buffer_be_removed_through_fusion(
+                    write_name, fused_node_names
+                ):
+                    continue
+
+                buf = self.name_to_buf.get(write_name)
+                if buf is None:
+                    continue
+
+                users = OrderedSet(
+                    user.get_name()
+                    for user in buf.users
+                    if not user.is_weak
+                    and user.get_name() not in fused_node_names
+                    and not isinstance(user.node, OutputNode)
+                )
+                if not users:
+                    continue
+
+                output_bytes = self.dep_size_hint(write)
+                if output_bytes <= 0:
+                    return []
+
+                outputs.append((output_bytes, users))
+        return outputs
+
+    def _materialized_external_output_info(
+        self,
+        node: BaseSchedulerNode,
+        fused_node_names: OrderedSet[str],
+    ) -> tuple[int, OrderedSet[str], int]:
+        outputs = self._materialized_external_outputs(node, fused_node_names)
+        total_bytes = sum(output_bytes for output_bytes, _ in outputs)
+        external_users: OrderedSet[str] = OrderedSet()
+        for _, users in outputs:
+            external_users.update(users)
+        return total_bytes, external_users, len(outputs)
+
     def are_long_distant_nodes(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
