@@ -44,28 +44,58 @@ using namespace c10d::symmetric_memory;
 // (NCCL_DEVICE_HAS_REDUCE_COPY, NCCL >= 2.29.7).
 #ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
 
-// Threads per CTA; sized to copy medium parameter shards efficiently.
+// Threads per CTA.  The tile floor (AG_MIN_BYTES_PER_TILE) is far larger than
+// AG_THREADS_PER_CTA * AG_ALIGN, so every tile keeps all threads busy.
 constexpr int AG_THREADS_PER_CTA = 256;
-// Upper bound on the number of CTAs (and thus LSA barrier slots).  All ranks
-// launch the same CTA count, so each barrier slot has exactly one CTA per rank.
+// Upper bound on total CTAs (and thus LSA barrier slots).  All ranks launch
+// the same grid, so each barrier slot maps to exactly one CTA per rank.
 constexpr int AG_MAX_CTAS = 32;
 // Vectorized copy width in bytes (128-bit). All slices are 16-byte aligned.
 constexpr int AG_ALIGN = 16;
+// Tile size floor, sized for efficient contiguous writes (LSA `st_vec` and
+// multimem both want large runs).  A shard is cut into tiles of at least this
+// size, so the common cases keep big contiguous writes while a huge shard
+// still splits into enough tiles (>= AG_MAX_CTAS once it exceeds
+// AG_MAX_CTAS * this) to load-balance a skewed bucket across CTAs.
+constexpr int64_t AG_MIN_BYTES_PER_TILE = 2 * 1024 * 1024;
 // Max parameters per call.  The schedule is passed by value as a kernel
 // argument (copied by the launch, no device-side upload), so it must fit the
-// kernel parameter space; 256 keeps it at 4 KB.
+// kernel parameter space; 256 keeps it under 8 KB.
 constexpr int AG_MAX_PARAMS = 256;
 
-// Per-parameter schedule, passed by value to the kernel.  The output base of
-// parameter i is derived in the kernel as offsets[i] * world_size.
+// Per-parameter schedule, passed by value to the kernel.  The work is flattened
+// into fixed-size byte tiles: parameter i is cut into first_chunk[i+1] -
+// first_chunk[i] tiles, so a large shard yields many tiles and a small one a
+// single tile.  CTAs grid-stride over the flat tile space, which load-balances
+// across shards of any sizes -- including skewed buckets -- without a per-shard
+// grid dimension.  The output base of parameter i is offsets[i] * world_size.
 struct AllGatherOffsetSchedule {
-  int64_t offsets[AG_MAX_PARAMS]; // logical element offset of each param
-  int64_t sizes[AG_MAX_PARAMS];   // per-rank shard size of each param
+  int64_t offsets[AG_MAX_PARAMS];      // logical element offset of each param
+  int64_t sizes[AG_MAX_PARAMS];        // per-rank shard size of each param
+  int first_chunk[AG_MAX_PARAMS + 1]; // prefix sum of per-param tile counts
 };
 
-// LSA push kernel.  Each CTA grid-strides over the (parameter, destination-
-// peer) work items, writing this rank's own shard of parameter i into the
-// parameter-contiguous slot of every peer's `out` window with 128-bit copies.
+// Largest p in [0, n_params) with first_chunk[p] <= flat_chunk; i.e. the
+// parameter that owns global chunk index flat_chunk.
+__device__ __forceinline__ int ag_find_param(
+    const int* first_chunk,
+    int n_params,
+    int flat_chunk) {
+  int lo = 0, hi = n_params;
+  while (lo + 1 < hi) {
+    const int mid = (lo + hi) >> 1;
+    if (first_chunk[mid] <= flat_chunk) {
+      lo = mid;
+    } else {
+      hi = mid;
+    }
+  }
+  return lo;
+}
+
+// LSA push kernel.  Each CTA grid-strides over the flat (param-chunk, dest-peer)
+// tile space, writing this rank's shard bytes of one tile into the parameter-
+// contiguous slot of one peer's `out` window with 128-bit copies.
 //
 // The acquire sync orders against any prior use of `out`; the trailing
 // release+acquire guarantees that, on return, every rank has finished its
@@ -76,6 +106,8 @@ __global__ void all_gather_offset_push_kernel(
     const char* input_ptr, // local base pointer of `input`
     AllGatherOffsetSchedule sched,
     int n_params,
+    int total_chunks, // total chunks across all shards
+    int64_t tile_bytes,
     int my_rank,
     int world_size,
     int elem_size,
@@ -85,21 +117,30 @@ __global__ void all_gather_offset_push_kernel(
       coop, devComm, ncclTeamLsa(devComm), devComm.lsaBarrier, blockIdx.x};
   bar.sync(coop, cuda::memory_order_acquire);
 
-  const int total_pairs = n_params * world_size;
-  for (int pair = blockIdx.x; pair < total_pairs; pair += gridDim.x) {
-    const int param = pair / world_size;
-    const int dst_peer = pair % world_size;
+  const int64_t total_tiles = static_cast<int64_t>(total_chunks) * world_size;
+  // peer is the fast-varying dimension so consecutive CTAs span all peers and
+  // keep every outbound NVLink busy; clustering CTAs onto a peer subset (e.g.
+  // peer = t / total_chunks when total_chunks < gridDim) leaves links idle.
+  for (int64_t t = blockIdx.x; t < total_tiles; t += gridDim.x) {
+    const int dst_peer = static_cast<int>(t % world_size);
+    const int flat_chunk = static_cast<int>(t / world_size);
+    const int param = ag_find_param(sched.first_chunk, n_params, flat_chunk);
+    const int chunk = flat_chunk - sched.first_chunk[param];
     const int64_t count = sched.sizes[param];
     const int64_t nbytes = count * elem_size;
+    const int64_t tile_off = static_cast<int64_t>(chunk) * tile_bytes;
+    const int64_t tile_len =
+        (nbytes - tile_off < tile_bytes) ? (nbytes - tile_off) : tile_bytes;
     const char* src =
-        input_ptr + sched.offsets[param] * elem_size; // own shard
+        input_ptr + sched.offsets[param] * elem_size + tile_off;
     const int64_t out_base = sched.offsets[param] * world_size;
     const size_t dst_byte = out_window_base_offset +
         static_cast<size_t>(out_base + static_cast<int64_t>(my_rank) * count) *
-            elem_size;
+            elem_size +
+        static_cast<size_t>(tile_off);
     char* dst = reinterpret_cast<char*>(
         ncclGetLsaPointer(out_window, dst_byte, dst_peer));
-    const int64_t nvec = nbytes / AG_ALIGN;
+    const int64_t nvec = tile_len / AG_ALIGN;
     for (int64_t k = threadIdx.x; k < nvec; k += blockDim.x) {
       const int64_t b = k * AG_ALIGN;
       at::native::memory::st_vec<AG_ALIGN>(
@@ -116,18 +157,21 @@ __global__ void all_gather_offset_push_kernel(
 
 #ifdef NCCL_DEVICE_HAS_REDUCE_COPY
 
-// Multimem broadcast kernel.  Each CTA grid-strides over this rank's parameters
-// and broadcasts the rank's own shard into the output's multicast mapping via
-// ncclMultimemCopy; the NVLink switch replicates each store to every rank's
-// output, so each rank only writes its own N shards.  Data is treated as 32-bit
-// words (every slice is 16-byte aligned, hence a multiple of 4 bytes), keeping
-// the kernel dtype-agnostic.
+// Multimem broadcast kernel.  Each CTA grid-strides over the flat param-chunk
+// tile space and broadcasts one tile of the rank's shard into the output's
+// multicast mapping via ncclMultimemCopy; the NVLink switch replicates each
+// store to every rank's output.  Data is treated as 32-bit words (every slice
+// is 16-byte aligned, hence a multiple of 4 bytes), keeping the kernel
+// dtype-agnostic.  ncclMultimemCopy is a CTA-collective, so the tile bounds are
+// uniform across the block (they depend only on blockIdx).
 __global__ void all_gather_offset_mm_kernel(
     ncclWindow_t out_window,
     size_t out_window_base_offset,
     const char* input_ptr, // local base pointer of `input`
     AllGatherOffsetSchedule sched,
     int n_params,
+    int total_chunks, // total chunks across all shards
+    int64_t tile_bytes,
     int my_rank,
     int world_size,
     int elem_size,
@@ -138,15 +182,22 @@ __global__ void all_gather_offset_mm_kernel(
       coop, devComm, ncclTeamLsa(devComm), devComm.lsaBarrier, blockIdx.x};
   bar.sync(coop, cuda::memory_order_acquire);
 
-  for (int param = blockIdx.x; param < n_params; param += gridDim.x) {
+  for (int flat_chunk = blockIdx.x; flat_chunk < total_chunks; flat_chunk += gridDim.x) {
+    const int param = ag_find_param(sched.first_chunk, n_params, flat_chunk);
+    const int chunk = flat_chunk - sched.first_chunk[param];
     const int64_t count = sched.sizes[param];
-    const int64_t words = count * elem_size / 4;
+    const int64_t nbytes = count * elem_size;
+    const int64_t tile_off = static_cast<int64_t>(chunk) * tile_bytes;
+    const int64_t tile_len =
+        (nbytes - tile_off < tile_bytes) ? (nbytes - tile_off) : tile_bytes;
+    const int64_t words = tile_len / 4;
     const int64_t out_base = sched.offsets[param] * world_size;
-    uint32_t* src = reinterpret_cast<uint32_t*>(
-        const_cast<char*>(input_ptr + sched.offsets[param] * elem_size));
+    uint32_t* src = reinterpret_cast<uint32_t*>(const_cast<char*>(
+        input_ptr + sched.offsets[param] * elem_size + tile_off));
     const size_t dst_byte = out_window_base_offset +
         static_cast<size_t>(out_base + static_cast<int64_t>(my_rank) * count) *
-            elem_size;
+            elem_size +
+        static_cast<size_t>(tile_off);
     ncclMultimemCopy(coop, src, out_window, dst_byte, words, mm_handle);
   }
 
@@ -284,11 +335,14 @@ void nccl_all_gather_offset(
       out_window_base_offset % AG_ALIGN == 0,
       "nccl_all_gather_offset: out must be 16-byte aligned in the window");
 
-  // Fill the per-parameter schedule (passed by value to the kernel).
+  // Fill the per-parameter schedule (passed by value to the kernel) and track
+  // the largest shard, which sizes the tile.
   AllGatherOffsetSchedule sched;
+  int64_t max_bytes = 0;
   for (int i = 0; i < n_params; i++) {
     const int64_t off = eff_offsets[i];
     const int64_t sz = split_sizes[i];
+    max_bytes = std::max(max_bytes, sz * elem_size);
     TORCH_CHECK(
         off >= 0 && sz >= 0 && off + sz <= input.numel(),
         "nccl_all_gather_offset: param ", i, " range [", off, ", ", off + sz,
@@ -313,17 +367,37 @@ void nccl_all_gather_offset(
     sched.sizes[i] = sz;
   }
 
+  // Tile the work: the largest shard is split into at most AG_MAX_CTAS tiles
+  // (so it can use the whole grid) but never below AG_MIN_BYTES_PER_TILE, and
+  // every tile boundary stays 16-byte aligned.  Each shard then yields
+  // ceil(bytes / tile_bytes) tiles; the prefix sum lets the kernel map a flat
+  // tile index back to (param, chunk).
+  int64_t tile_bytes = (max_bytes + AG_MAX_CTAS - 1) / AG_MAX_CTAS;
+  tile_bytes = std::max(tile_bytes, AG_MIN_BYTES_PER_TILE);
+  tile_bytes = ((tile_bytes + AG_ALIGN - 1) / AG_ALIGN) * AG_ALIGN;
+  int total_chunks = 0;
+  for (int i = 0; i < n_params; i++) {
+    sched.first_chunk[i] = total_chunks;
+    const int64_t nbytes = sched.sizes[i] * elem_size;
+    const int n_chunks =
+        std::max<int64_t>(1, (nbytes + tile_bytes - 1) / tile_bytes);
+    total_chunks += n_chunks;
+  }
+  sched.first_chunk[n_params] = total_chunks;
+
   const char* input_ptr = reinterpret_cast<const char*>(input.data_ptr());
 
 #ifdef NCCL_DEVICE_HAS_REDUCE_COPY
   if (use_multimem) {
-    const int n_ctas = std::min(n_params, AG_MAX_CTAS);
+    const int n_ctas = std::min(total_chunks, AG_MAX_CTAS);
     all_gather_offset_mm_kernel<<<n_ctas, AG_THREADS_PER_CTA, 0, stream>>>(
         out_window,
         out_window_base_offset,
         input_ptr,
         sched,
         n_params,
+        total_chunks,
+        tile_bytes,
         my_rank,
         world_size,
         elem_size,
@@ -334,14 +408,17 @@ void nccl_all_gather_offset(
   }
 #endif // NCCL_DEVICE_HAS_REDUCE_COPY
 
-  const int total_pairs = n_params * world_size;
-  const int n_ctas = std::min(total_pairs, AG_MAX_CTAS);
+  const int64_t total_tiles = static_cast<int64_t>(total_chunks) * world_size;
+  const int n_ctas =
+      static_cast<int>(std::min<int64_t>(total_tiles, AG_MAX_CTAS));
   all_gather_offset_push_kernel<<<n_ctas, AG_THREADS_PER_CTA, 0, stream>>>(
       out_window,
       out_window_base_offset,
       input_ptr,
       sched,
       n_params,
+      total_chunks,
+      tile_bytes,
       my_rank,
       world_size,
       elem_size,
