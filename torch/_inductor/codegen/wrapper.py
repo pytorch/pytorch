@@ -101,6 +101,7 @@ ReuseKey = tuple[torch.device, torch.dtype, str, bool, int]
 CommBufferReuseKey = tuple[torch.device, torch.dtype, str, "ir.CommBufferType", str]
 BufferLike = ir.Buffer | WorkspaceArg
 FxConversionFunc = Callable[["WrapperLine"], None]
+MAX_REUSE_POOL_CANDIDATES_TO_SCORE = 4096
 
 
 @dataclasses.dataclass
@@ -473,6 +474,29 @@ class MemoryPlanningState:
 
     def pop(self, key: ReuseKey) -> FreeIfNotReusedLine:
         item = self.reuse_pool[key].pop()
+        if item.is_reused:
+            raise AssertionError("expected popped reuse pool item to not be reused")
+        return item
+
+    def get_best(
+        self,
+        key: ReuseKey,
+        key_fn: Callable[[FreeIfNotReusedLine], object],
+        *,
+        max_candidates: int | None = None,
+    ) -> tuple[int, FreeIfNotReusedLine]:
+        pool = self.reuse_pool[key]
+        start = 0
+        if max_candidates is not None:
+            start = max(0, len(pool) - max_candidates)
+        index = min(range(start, len(pool)), key=lambda i: key_fn(pool[i]))
+        item = pool[index]
+        if item.is_reused:
+            raise AssertionError("expected reuse pool item to not be reused")
+        return index, item
+
+    def pop_index(self, key: ReuseKey, index: int) -> FreeIfNotReusedLine:
+        item = self.reuse_pool[key].pop(index)
         if item.is_reused:
             raise AssertionError("expected popped reuse pool item to not be reused")
         return item
@@ -921,11 +945,13 @@ class AllocateLine(MemoryPlanningLine):
             V.graph.scheduler.current_node
         )
 
-    def should_reuse_buffer(self, free_line: FreeIfNotReusedLine, size: int) -> bool:
+    def _reuse_candidate_peak(
+        self, free_line: FreeIfNotReusedLine, size: int
+    ) -> tuple[bool, int]:
         if self.comm_buffer:
-            return True
+            return True, 0
         if free_line.scheduler_node_index + 1 == self.scheduler_node_index:
-            return True
+            return True, 0
         if not config.allow_buffer_reuse_across_fuse_regions:
             scheduler = V.graph.scheduler
             free_region = scheduler.get_fuse_region(
@@ -935,11 +961,14 @@ class AllocateLine(MemoryPlanningLine):
                 scheduler.nodes[self.scheduler_node_index]
             )
             if free_region != alloc_region:
-                return False
+                return False, 0
         overall_peak_memory = self.wrapper.estimate_peak.overall_peak_memory
         peak_memory_in_range = self.wrapper.estimate_peak.peak_between(free_line, self)
         new_peak_memory = size + peak_memory_in_range
-        return new_peak_memory <= overall_peak_memory
+        return new_peak_memory <= overall_peak_memory, peak_memory_in_range
+
+    def should_reuse_buffer(self, free_line: FreeIfNotReusedLine, size: int) -> bool:
+        return self._reuse_candidate_peak(free_line, size)[0]
 
     def plan(self, state: MemoryPlanningState) -> MemoryPlanningLine:
         if self.node.get_name() in V.graph.removed_buffers:
@@ -960,16 +989,34 @@ class AllocateLine(MemoryPlanningLine):
         # Stream is part of the key, so cross-stream reuse is naturally prevented.
         key = buffer_reuse_key(self.node)
         if config.allow_buffer_reuse and key in state:
-            free_line = state.pop(key)
             size = V.graph.sizevars.optimization_hint(
                 V.graph.get_allocation_storage_size(self.node), fallback=0
             ) * get_dtype_size(self.node.get_dtype())
+
+            if config.allow_peak_memory_increasing_fusion:
+                free_line = state.pop(key)
+                if self.should_reuse_buffer(free_line, size):
+                    free_line.is_reused = True
+                    self.wrapper.estimate_peak.update_peak_between(free_line, self)
+                    return ReuseLine(self.wrapper, free_line.node, self.node)
+                state.push(key, free_line)
+                return self
+
+            def reuse_candidate_key(line: FreeIfNotReusedLine) -> tuple[bool, int, int]:
+                can_reuse, peak_between = self._reuse_candidate_peak(line, size)
+                return (not can_reuse, peak_between, -line.scheduler_node_index)
+
+            index, free_line = state.get_best(
+                key,
+                reuse_candidate_key,
+                max_candidates=MAX_REUSE_POOL_CANDIDATES_TO_SCORE,
+            )
             if self.should_reuse_buffer(free_line, size):
+                free_line = state.pop_index(key, index)
                 free_line.is_reused = True
                 self.wrapper.estimate_peak.update_peak_between(free_line, self)
                 return ReuseLine(self.wrapper, free_line.node, self.node)
             else:
-                state.push(key, free_line)
                 return self
 
         if self.node.get_device_or_error().type == "cpu":

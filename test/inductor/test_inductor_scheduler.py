@@ -12,6 +12,14 @@ import torch._inductor.metrics as metrics
 import torch.utils.flop_counter
 from torch._dynamo.utils import counters
 from torch._inductor.choices import InductorChoices
+from torch._inductor.codegen.wrapper import (
+    AllocateLine,
+    buffer_reuse_key,
+    FreeIfNotReusedLine,
+    MAX_REUSE_POOL_CANDIDATES_TO_SCORE,
+    MemoryPlanningState,
+    ReuseLine,
+)
 from torch._inductor.dependencies import Dep, MemoryDep, ReadWrites
 from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import GraphPartitionSignature
@@ -1396,6 +1404,179 @@ class TestScheduler(TestCase):
         check = scheduler.fusion_would_materialize_late_outputs_from_shared_producer
         check.assert_not_called()
 
+    def test_wrapper_reuse_uses_active_peak_limit(self):
+        alloc_line, free_line, graph = self._create_wrapper_reuse_test_lines(
+            overall_peak_memory=1024,
+            peak_between=900,
+        )
+
+        with V.set_graph_handler(graph):
+            with inductor_config.patch(allow_buffer_reuse_across_fuse_regions=True):
+                self.assertTrue(alloc_line.should_reuse_buffer(free_line, 124))
+                self.assertFalse(alloc_line.should_reuse_buffer(free_line, 125))
+
+    @inductor_config.patch("allow_peak_memory_increasing_fusion", False)
+    def test_wrapper_reuse_picks_lower_peak_candidate(self):
+        state, alloc_line, high_peak_free, low_peak_free, graph, estimate_peak = (
+            self._create_wrapper_reuse_plan_case(
+                high_peak=800,
+                low_peak=100,
+                low_peak_index=1,
+                alloc_index=3,
+            )
+        )
+
+        with V.set_graph_handler(graph):
+            result = alloc_line.plan(state)
+
+        self.assertIsInstance(result, ReuseLine)
+        self.assertIs(result.node, low_peak_free.node)
+        self.assertFalse(high_peak_free.is_reused)
+        self.assertTrue(low_peak_free.is_reused)
+        estimate_peak.update_peak_between.assert_called_once_with(
+            low_peak_free, alloc_line
+        )
+
+    def test_wrapper_reuse_scores_adjacent_candidate_without_peak_between(self):
+        _, alloc_line, _, low_peak_free, graph, estimate_peak = (
+            self._create_wrapper_reuse_plan_case(
+                high_peak=100,
+                low_peak=0,
+                low_peak_index=2,
+                alloc_index=3,
+            )
+        )
+        estimate_peak.peak_between.side_effect = AssertionError(
+            "adjacent candidate should not call peak_between"
+        )
+
+        with V.set_graph_handler(graph):
+            state = MemoryPlanningState()
+            state.push(buffer_reuse_key(alloc_line.node), low_peak_free)
+            result = alloc_line.plan(state)
+
+        self.assertIsInstance(result, ReuseLine)
+        self.assertIs(result.node, low_peak_free.node)
+
+    @inductor_config.patch("allow_peak_memory_increasing_fusion", False)
+    def test_wrapper_reuse_skips_illegal_lifo_candidate(self):
+        state, alloc_line, high_peak_free, low_peak_free, graph, estimate_peak = (
+            self._create_wrapper_reuse_plan_case(
+                high_peak=1000,
+                low_peak=100,
+                low_peak_index=1,
+                alloc_index=3,
+            )
+        )
+
+        with V.set_graph_handler(graph):
+            result = alloc_line.plan(state)
+
+        self.assertIsInstance(result, ReuseLine)
+        self.assertIs(result.node, low_peak_free.node)
+        self.assertFalse(high_peak_free.is_reused)
+        self.assertTrue(low_peak_free.is_reused)
+        estimate_peak.update_peak_between.assert_called_once_with(
+            low_peak_free, alloc_line
+        )
+
+    @inductor_config.patch("allow_peak_memory_increasing_fusion", False)
+    def test_wrapper_reuse_leaves_pool_order_when_all_candidates_illegal(self):
+        state, alloc_line, high_peak_free, low_peak_free, graph, estimate_peak = (
+            self._create_wrapper_reuse_plan_case(
+                high_peak=1000,
+                low_peak=970,
+                low_peak_index=1,
+                alloc_index=3,
+            )
+        )
+
+        with V.set_graph_handler(graph):
+            key = buffer_reuse_key(alloc_line.node)
+            before = list(state.reuse_pool[key])
+            result = alloc_line.plan(state)
+            after = list(state.reuse_pool[key])
+
+        self.assertIs(result, alloc_line)
+        self.assertFalse(high_peak_free.is_reused)
+        self.assertFalse(low_peak_free.is_reused)
+        self.assertEqual(before, after)
+        estimate_peak.update_peak_between.assert_not_called()
+
+    @inductor_config.patch("allow_peak_memory_increasing_fusion", False)
+    def test_wrapper_reuse_preserves_remaining_pool_order_after_non_lifo_pop(self):
+        state, alloc_line, first_free, low_peak_free, graph, estimate_peak = (
+            self._create_wrapper_reuse_plan_case(
+                high_peak=1000,
+                low_peak=100,
+                low_peak_index=2,
+                alloc_index=4,
+                first_peak=500,
+            )
+        )
+
+        with V.set_graph_handler(graph):
+            key = buffer_reuse_key(alloc_line.node)
+            before = [line.node.get_name() for line in state.reuse_pool[key]]
+            result = alloc_line.plan(state)
+            after = [line.node.get_name() for line in state.reuse_pool[key]]
+
+        self.assertEqual(before, ["first_peak", "low_peak", "high_peak"])
+        self.assertIsInstance(result, ReuseLine)
+        self.assertIs(result.node, low_peak_free.node)
+        self.assertEqual(after, ["first_peak", "high_peak"])
+        self.assertFalse(first_free.is_reused)
+        self.assertTrue(low_peak_free.is_reused)
+        estimate_peak.update_peak_between.assert_called_once_with(
+            low_peak_free, alloc_line
+        )
+
+    @inductor_config.patch("allow_peak_memory_increasing_fusion", False)
+    def test_wrapper_reuse_tie_breaker_prefers_newest_free_line(self):
+        state, alloc_line, high_peak_free, low_peak_free, graph, estimate_peak = (
+            self._create_wrapper_reuse_plan_case(
+                high_peak=100,
+                low_peak=100,
+                low_peak_index=1,
+                alloc_index=3,
+            )
+        )
+
+        with V.set_graph_handler(graph):
+            result = alloc_line.plan(state)
+
+        self.assertIsInstance(result, ReuseLine)
+        self.assertIs(result.node, low_peak_free.node)
+        self.assertFalse(high_peak_free.is_reused)
+        self.assertTrue(low_peak_free.is_reused)
+        estimate_peak.update_peak_between.assert_called_once_with(
+            low_peak_free, alloc_line
+        )
+
+    def test_memory_planning_get_best_scores_recent_candidates(self):
+        state = MemoryPlanningState()
+        key = (torch.device("cuda:0"), torch.bfloat16, "64", True, 0)
+        for i in range(MAX_REUSE_POOL_CANDIDATES_TO_SCORE + 3):
+            state.push(key, Mock(is_reused=False, score=i))
+
+        scored = []
+
+        def key_fn(line):
+            scored.append(line.score)
+            return line.score
+
+        index, _ = state.get_best(
+            key,
+            key_fn,
+            max_candidates=MAX_REUSE_POOL_CANDIDATES_TO_SCORE,
+        )
+
+        self.assertEqual(index, 3)
+        self.assertEqual(
+            scored,
+            list(range(3, MAX_REUSE_POOL_CANDIDATES_TO_SCORE + 3)),
+        )
+
     def _create_reused_pointwise_result(
         self, nontrivial_read_count: int = 2
     ) -> ir.TensorBox:
@@ -1490,6 +1671,125 @@ class TestScheduler(TestCase):
         user.is_weak = is_weak
         user.get_name = Mock(return_value=name)
         return user
+
+    def _create_wrapper_reuse_test_lines(
+        self, overall_peak_memory: int, peak_between: int
+    ) -> tuple[object, object, Mock]:
+        nodes = [Mock(region="region"), Mock(region="region"), Mock(region="region")]
+        scheduler = Mock()
+        scheduler.nodes = nodes
+        scheduler.get_fuse_region = Mock(side_effect=lambda node: node.region)
+        graph = Mock(scheduler=scheduler)
+
+        free_line = Mock(scheduler_node_index=0)
+        alloc_line = object.__new__(AllocateLine)
+        alloc_line.comm_buffer = False
+        alloc_line.scheduler_node_index = 2
+        alloc_line.wrapper = Mock(
+            estimate_peak=Mock(
+                overall_peak_memory=overall_peak_memory,
+                peak_between=Mock(return_value=peak_between),
+            )
+        )
+        return alloc_line, free_line, graph
+
+    def _create_wrapper_reuse_plan_case(
+        self,
+        high_peak: int,
+        low_peak: int,
+        low_peak_index: int,
+        alloc_index: int,
+        first_peak: int | None = None,
+    ) -> tuple[
+        MemoryPlanningState,
+        AllocateLine,
+        FreeIfNotReusedLine,
+        FreeIfNotReusedLine,
+        Mock,
+        Mock,
+    ]:
+        nodes = [Mock(region="region") for _ in range(alloc_index + 1)]
+        scheduler = Mock()
+        scheduler.nodes = nodes
+        scheduler.get_buf_stream = Mock(return_value=0)
+        scheduler.get_fuse_region = Mock(side_effect=lambda node: node.region)
+
+        sizevars = Mock()
+        sizevars.simplify = Mock(side_effect=lambda value: value)
+        sizevars.optimization_hint = Mock(side_effect=lambda value, fallback=0: value)
+        graph = Mock()
+        graph.scheduler = scheduler
+        graph.unaligned_buffers = OrderedSet()
+        graph.removed_buffers = OrderedSet()
+        graph.get_allocation_storage_size = Mock(return_value=64)
+        graph.sizevars = sizevars
+
+        estimate_peak = Mock()
+        estimate_peak.overall_peak_memory = 1024
+        estimate_peak.peak_between = Mock(
+            side_effect=lambda line, alloc: (
+                {
+                    "first_peak": first_peak,
+                    "high_peak": high_peak,
+                    "low_peak": low_peak,
+                }[line.node.get_name()]
+            )
+        )
+        estimate_peak.update_peak_between = Mock()
+        wrapper = Mock(estimate_peak=estimate_peak)
+
+        first_peak_free = (
+            self._create_wrapper_free_line(
+                "first_peak", scheduler_node_index=1, wrapper=wrapper
+            )
+            if first_peak is not None
+            else None
+        )
+        high_peak_free = self._create_wrapper_free_line(
+            "high_peak", scheduler_node_index=0, wrapper=wrapper
+        )
+        low_peak_free = self._create_wrapper_free_line(
+            "low_peak", scheduler_node_index=low_peak_index, wrapper=wrapper
+        )
+        alloc_line = object.__new__(AllocateLine)
+        alloc_line.wrapper = wrapper
+        alloc_line.node = self._create_wrapper_buffer("alloc")
+        alloc_line.comm_buffer = False
+        alloc_line.scheduler_node_index = alloc_index
+
+        state = MemoryPlanningState()
+        with V.set_graph_handler(graph):
+            key = buffer_reuse_key(alloc_line.node)
+            if first_peak_free is not None:
+                state.push(key, first_peak_free)
+            state.push(key, low_peak_free)
+            state.push(key, high_peak_free)
+        return (
+            state,
+            alloc_line,
+            first_peak_free if first_peak_free is not None else high_peak_free,
+            low_peak_free,
+            graph,
+            estimate_peak,
+        )
+
+    def _create_wrapper_free_line(
+        self, name: str, scheduler_node_index: int, wrapper: Mock
+    ) -> FreeIfNotReusedLine:
+        free_line = object.__new__(FreeIfNotReusedLine)
+        free_line.wrapper = wrapper
+        free_line.node = self._create_wrapper_buffer(name)
+        free_line.is_reused = False
+        free_line.comm_buffer = False
+        free_line.scheduler_node_index = scheduler_node_index
+        return free_line
+
+    def _create_wrapper_buffer(self, name: str) -> Mock:
+        node = Mock()
+        node.get_name = Mock(return_value=name)
+        node.get_device_or_error = Mock(return_value=torch.device("cuda:0"))
+        node.get_dtype = Mock(return_value=torch.bfloat16)
+        return node
 
     def _create_late_output_scheduler(
         self,
