@@ -42,11 +42,24 @@ def _resolve_group_name(group_name: Any) -> "GroupName":
     group_name argument as an FX Node reference (pointing to a
     mesh_get_process_group call) rather than a string literal. For
     bucketing key purposes we resolve via the ProcessGroup stored in
-    node.meta["val"].
+    node.meta["val"] or, for functionalized eager collectives, via the
+    owning module's get_attr value.
     """
     if isinstance(group_name, str):
         return group_name  # pyrefly: ignore [bad-return]
-    pg = group_name.meta["val"]
+    pg = group_name
+    if isinstance(group_name, torch.fx.Node):
+        pg = group_name.meta.get("val")
+        if pg is None and group_name.op == "get_attr":
+            gm = group_name.graph.owning_module
+            if gm is not None:
+                from torch.fx.graph_module import _get_attr
+
+                pg = _get_attr(gm, group_name.target)  # type: ignore[arg-type]
+    if isinstance(pg, str):
+        return pg  # pyrefly: ignore [bad-return]
+    if not hasattr(pg, "group_name"):
+        raise AssertionError(f"could not resolve collective group name from {pg!r}")
     return pg.group_name
 
 

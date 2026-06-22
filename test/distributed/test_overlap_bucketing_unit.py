@@ -1000,6 +1000,44 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         # Should not error in deterministic mode (would have errored before fix)
         schedule_overlap_bucketing(gm)
 
+    @torch._inductor.config.patch(deterministic=True)
+    def test_overlap_scheduler_resolves_get_attr_process_group(self):
+        """
+        Functionalized eager collectives can pass ProcessGroup get_attr nodes to
+        _c10d_functional ops. Overlap scheduling should resolve those without
+        requiring node.meta["val"] on the get_attr node.
+        """
+        from torch._inductor.fx_passes.overlap_scheduling import (
+            schedule_overlap_bucketing,
+        )
+
+        def func(a, b):
+            group_name = "0"
+            ar = torch.ops._c10d_functional.all_reduce(a.sum(), "sum", group_name)
+            mm_result = torch.mm(a, b)
+            ar_out = torch.ops._c10d_functional.wait_tensor(ar)
+            return mm_result + ar_out
+
+        with FakeTensorMode():
+            a = torch.randn(16, 16, device=self.device)
+            b = torch.randn(16, 16, device=self.device)
+            gm = make_fx(func)(a, b)
+
+        ar = gm.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.all_reduce.default,
+        )[0]
+        gm._test_pg = dist.distributed_c10d._get_default_group()
+        with gm.graph.inserting_before(ar):
+            pg_node = gm.graph.create_node("get_attr", "_test_pg")
+        ar.args = (ar.args[0], ar.args[1], pg_node)
+
+        self.assertNotIn("val", pg_node.meta)
+        gm.graph.lint()
+        gm.recompile()
+
+        schedule_overlap_bucketing(gm, pre_bucketing_fsdp_collectives=False)
+
     def test_assume_bucketed_latency_exceeds_exposed_time(self):
         """
         When assume_bucketing_reduces_latency is True and two same-type
