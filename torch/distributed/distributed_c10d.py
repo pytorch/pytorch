@@ -1973,6 +1973,13 @@ def init_process_group(
 
     _update_default_pg(default_pg)
 
+    # Under TorchComms the NCCL comm is created lazily; split_group requires
+    # the parent comm to already exist.  A device barrier forces eager
+    # creation so that subsequent new_group / split_group calls work
+    # immediately.
+    if _use_torchcomms_enabled() and device_id is not None:
+        barrier(device_ids=[device_id.index])
+
     _world.pg_group_ranks[GroupMember.WORLD] = {  # type: ignore[index]
         i: i
         for i in range(GroupMember.WORLD.size())  # type: ignore[attr-defined]

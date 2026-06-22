@@ -363,6 +363,18 @@ class TestC10dTorchCommsInitAutoQualify(C10dTorchCommsTestBase):
         self.assertIsNotNone(default_pg.bound_device_id)
         self.assertEqual(default_pg.bound_device_id.type, "cuda")
 
+    def test_eager_init_barrier_enables_immediate_split_group(self):
+        # split_group requires the parent NCCL comm to exist.  Without the
+        # eager-init barrier inside init_process_group the comm is created
+        # lazily and split_group would hang or error.  This test verifies
+        # that new_group (which delegates to split_group under torchcomms)
+        # works immediately after init with no extra barrier.
+        ranks = list(range(self.world_size))
+        ng = dist.new_group(ranks=ranks)
+        tensor = torch.tensor([self._rank_value], dtype=torch.float32)
+        dist.all_reduce(tensor, group=ng)
+        self.assertEqual(tensor.item(), sum(range(1, self.world_size + 1)))
+
 
 instantiate_device_type_tests(
     TestC10dTorchCommsInitAutoQualify, globals(), only_for=["cuda"]
