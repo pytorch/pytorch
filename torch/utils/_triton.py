@@ -204,6 +204,17 @@ def has_triton() -> bool:
         "mtia": _return_true,
     }
 
+    import torch
+
+    # Dynamically add privateuse1 backend if registered.
+    pu1_backend = torch._C._get_privateuse1_backend_name()
+    if pu1_backend:
+        try:
+            get_interface_for_device(pu1_backend)
+            triton_supported_devices[pu1_backend] = _return_true
+        except NotImplementedError:
+            pass
+
     def is_device_compatible_with_triton() -> bool:
         for device, extra_check in triton_supported_devices.items():
             device_interface = get_interface_for_device(device)
