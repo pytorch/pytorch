@@ -153,6 +153,69 @@ class TestCuTeDSLGroupedGemm(InductorTestCase):
         self.assertEqual(c_compiled.dtype, dtype)
         torch.testing.assert_close(c_eager, c_compiled)
 
+    def test_grouped_gemm_moe_shape_descriptor_update(self):
+        device = "cuda"
+        dtype = torch.bfloat16
+        G, M_per_group, K, N = 256, 16, 3072, 1024
+
+        A = torch.randn(G * M_per_group, K, dtype=dtype, device=device) * 0.1
+        B = torch.randn(G, K, N, dtype=dtype, device=device) * 0.01
+        offsets = torch.arange(1, G + 1, dtype=torch.int32, device=device) * M_per_group
+
+        def grouped_gemm_fn(A_packed, B_batched, offs):
+            return F.grouped_mm(A_packed, B_batched, offs=offs)
+
+        c_eager = grouped_gemm_fn(A, B, offsets)
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "CUTEDSL",
+                "test_configs.autotune_choice_name_regex": "cutedsl",
+                "autotune_fallback_to_aten": False,
+            }
+        ):
+            grouped_gemm_compiled = torch.compile(
+                grouped_gemm_fn, backend="inductor", dynamic=False
+            )
+            c_compiled = grouped_gemm_compiled(A, B, offsets)
+
+        self.assertEqual(c_eager.dtype, dtype)
+        self.assertEqual(c_compiled.dtype, dtype)
+        torch.testing.assert_close(c_eager, c_compiled)
+
+    def test_grouped_gemm_descriptor_update_largest_group_not_first(self):
+        device = "cuda"
+        dtype = torch.bfloat16
+        M_sizes = torch.tensor([16, 128, 32, 64], dtype=torch.int32)
+        G, K, N = len(M_sizes), 64, 128
+
+        A = torch.randn(int(M_sizes.sum()), K, dtype=dtype, device=device) * 0.1
+        B = torch.randn(G, K, N, dtype=dtype, device=device) * 0.01
+        offsets = torch.cumsum(M_sizes, dim=0).to(dtype=torch.int32, device=device)
+
+        def grouped_gemm_fn(A_packed, B_batched, offs):
+            return F.grouped_mm(A_packed, B_batched, offs=offs)
+
+        c_eager = grouped_gemm_fn(A, B, offsets)
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "CUTEDSL",
+                "test_configs.autotune_choice_name_regex": "cutedsl",
+                "autotune_fallback_to_aten": False,
+            }
+        ):
+            grouped_gemm_compiled = torch.compile(
+                grouped_gemm_fn, backend="inductor", dynamic=False
+            )
+            c_compiled = grouped_gemm_compiled(A, B, offsets)
+
+        self.assertEqual(c_eager.dtype, dtype)
+        self.assertEqual(c_compiled.dtype, dtype)
+        torch.testing.assert_close(c_eager, c_compiled)
+
 
 if __name__ == "__main__":
     run_tests()
