@@ -6,7 +6,11 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 #include <nccl_ep.h>
+
+#include <string_view>
 
 namespace c10d::nccl_ep {
 
@@ -33,7 +37,47 @@ struct EpTensor {
         desc.sizes = const_cast<size_t*>(
             reinterpret_cast<const size_t*>(t.sizes().data()));
     }
+
+    // Window-backed constructor: NCCL-EP reads via RDMA from the registered
+    // ncclWindow instead of a plain device pointer (zero-copy path).
+    EpTensor(ncclWindow_t win, uint64_t win_offset, at::Tensor tensor)
+        : t(std::move(tensor)) {
+        TORCH_CHECK_VALUE(
+            t.is_contiguous(),
+            "nccl_ep tensors must be memory-contiguous (call .contiguous())");
+        TORCH_CHECK_VALUE(t.dim() > 0, "nccl_ep tensor must have rank >= 1");
+        desc.ndim = static_cast<unsigned int>(t.dim());
+        desc.datatype = c10d::getNcclDataType(t.scalar_type());
+        desc.data = nullptr;
+        desc.win_hdl = win;
+        desc.win_offset = win_offset;
+        static_assert(sizeof(size_t) == sizeof(int64_t));
+        desc.sizes = const_cast<size_t*>(
+            reinterpret_cast<const size_t*>(t.sizes().data()));
+    }
 };
+
+// Returns an EpTensor for t. If t is backed by NCCLSymmetricMemory registered
+// under group_name, uses the window + offset (zero-copy RDMA path); otherwise
+// falls back to the plain device-pointer path.
+static EpTensor make_ep_tensor(const at::Tensor& t, std::string_view group_name) {
+    namespace sm = c10d::symmetric_memory;
+    if (sm::is_symm_mem_tensor(t)) {
+        // rendezvous() takes std::optional<std::string> (no null-termination
+        // requirement); it is cached after the first collective call.
+        auto symm_mem = sm::rendezvous(t, std::string(group_name));
+        auto* nccl_sm =
+            dynamic_cast<sm::NCCLSymmetricMemory*>(symm_mem.get());
+        if (nccl_sm != nullptr) {
+            ncclWindow_t win = nccl_sm->get_window();
+            void* base = nccl_sm->get_buffer_ptrs()[nccl_sm->get_rank()];
+            uint64_t offset = static_cast<uint8_t*>(t.data_ptr()) -
+                              static_cast<uint8_t*>(base);
+            return EpTensor(win, offset, t);
+        }
+    }
+    return EpTensor(t);
+}
 
 #define NCCL_EP_CHECK(expr)                                             \
     do {                                                                \
@@ -104,6 +148,7 @@ c10::intrusive_ptr<NcclEpGroup> nccl_ep_create_group(
 
     auto result = c10::make_intrusive<NcclEpGroup>();
     result->group = ep_group;
+    result->group_name = pg->getGroupName();
     return result;
 }
 
@@ -142,6 +187,7 @@ c10::intrusive_ptr<NcclEpHandle> nccl_ep_create_handle(
     return c10::make_intrusive<NcclEpHandle>(
         ep_handle,
         layout,
+        group->group_name,
         topk_idx,
         std::move(recv_total_counter));
 }
@@ -169,9 +215,10 @@ void nccl_ep_dispatch(
 
     // topk_idx is bound to the handle at nccl_ep_create_handle time; the new
     // ncclEpDispatch API doesn't take it as a per-call input.
-    EpTensor in_tokens(tokens);
+    EpTensor in_tokens = make_ep_tensor(tokens, handle->group_name);
     EpTensor in_weights(topk_weights);
-    EpTensor out_tok(out_tokens);
+    // Output may also be symm_mem-backed (zero-copy RDMA write path).
+    EpTensor out_tok = make_ep_tensor(out_tokens, handle->group_name);
     std::optional<EpTensor> out_wts, out_idx;
     if (out_topk_weights) out_wts.emplace(*out_topk_weights);
     if (out_topk_idx) out_idx.emplace(*out_topk_idx);
@@ -200,7 +247,7 @@ void nccl_ep_combine(
     auto stream = at::cuda::getCurrentCUDAStream();
     auto ep_handle = reinterpret_cast<ncclEpHandle_t>(handle->handle);
 
-    EpTensor in_tok(expert_tokens);
+    EpTensor in_tok = make_ep_tensor(expert_tokens, handle->group_name);
     EpTensor out_tok(out_tokens);
 
     ncclEpCombineInputs_t inputs = NCCL_EP_COMBINE_INPUTS_INIT;

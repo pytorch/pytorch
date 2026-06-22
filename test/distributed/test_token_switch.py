@@ -5,12 +5,15 @@ import logging
 
 import torch
 import torch.distributed as dist
+import torch.distributed._symmetric_memory as symm_mem
 from torch.distributed._token_switch import _import_nccl_ep, TokenSwitchNCCL
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
     run_tests,
     skip_but_pass_in_sandcastle_if,
 )
@@ -452,6 +455,190 @@ class TokenSwitchNCCLTest(MultiProcContinuousTest):
         # weights are 1/TOP_K = 1.0, so the roundtrip is lossless.
         expected = torch.full((NUM_TOKENS, HIDDEN), token_val, dtype=torch.bfloat16)
         self.assertEqual(combined.cpu(), expected)
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize("explicit_rendezvous", [True, False])
+    def test_dispatch_symm_mem_tokens(self, explicit_rendezvous):
+        """Dispatch with symm_mem-backed input and output (zero-copy window path).
+
+        ``explicit_rendezvous`` toggles whether the caller rendezvous the symm_mem
+        tensors up front; when False, dispatch's ``make_ep_tensor`` establishes the
+        rendezvous implicitly on first use.
+        """
+        self._init()
+        ts = self.get_token_switch()
+        pg = dist.distributed_c10d._get_default_group()
+        num_recv_tokens = self.world_size * NUM_TOKENS
+
+        # Allocate the token buffer in symmetric memory so NCCL EP can address
+        # it via the registered ncclWindow without an extra device-side copy.
+        symm_tokens = symm_mem.empty(
+            NUM_TOKENS, HIDDEN, dtype=torch.bfloat16, device=self.device
+        )
+        if explicit_rendezvous:
+            symm_mem.rendezvous(symm_tokens, group=pg)
+
+        token_val = float(self.rank + 1)
+        symm_tokens.fill_(token_val)
+
+        topk_idx, topk_weights = _generate_topk(
+            self.rank, self.world_size, NUM_TOKENS, TOP_K, self.device
+        )
+        routing = ts.create_routing(topk_idx, layout="flat")
+
+        # Output is also symm_mem-backed: dispatch writes into it via the window.
+        out_tokens = symm_mem.empty(
+            num_recv_tokens, HIDDEN, dtype=torch.bfloat16, device=self.device
+        )
+        if explicit_rendezvous:
+            symm_mem.rendezvous(out_tokens, group=pg)
+
+        out_topk_weights = torch.zeros(
+            (num_recv_tokens, TOP_K), dtype=torch.float32, device=self.device
+        )
+        out_topk_idx = torch.zeros(
+            (num_recv_tokens, TOP_K), dtype=torch.int64, device=self.device
+        )
+
+        ts.dispatch(
+            routing,
+            symm_tokens,
+            topk_weights,
+            out=(out_tokens, out_topk_weights, out_topk_idx),
+        )
+        torch.cuda.synchronize()
+
+        src_rank = (self.rank - 1) % self.world_size
+        expected_val = float(src_rank + 1)
+        received = out_tokens[:NUM_TOKENS].float()
+        self.assertTrue(
+            received.eq(expected_val).all(),
+            f"rank {self.rank}: expected {expected_val}, got {received[0, 0].item()}",
+        )
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize("explicit_rendezvous", [True, False])
+    def test_combine_symm_mem_tokens(self, explicit_rendezvous):
+        """Combine with symm_mem-backed expert tokens (zero-copy window path).
+
+        ``explicit_rendezvous`` toggles whether the caller rendezvous the symm_mem
+        tensor up front; when False, combine's ``make_ep_tensor`` establishes the
+        rendezvous implicitly on first use.
+        """
+        self._init()
+        ts = self.get_token_switch()
+        pg = dist.distributed_c10d._get_default_group()
+        num_recv_tokens = self.world_size * NUM_TOKENS
+
+        topk_idx, topk_weights = _generate_topk(
+            self.rank, self.world_size, NUM_TOKENS, TOP_K, self.device
+        )
+        routing = ts.create_routing(topk_idx, layout="flat")
+
+        token_val = float(self.rank + 1)
+        tokens = torch.full(
+            (NUM_TOKENS, HIDDEN), token_val, dtype=torch.bfloat16, device=self.device
+        )
+        out_tokens = torch.zeros(
+            (num_recv_tokens, HIDDEN), dtype=torch.bfloat16, device=self.device
+        )
+        out_topk_weights = torch.zeros(
+            (num_recv_tokens, TOP_K), dtype=torch.float32, device=self.device
+        )
+        out_topk_idx = torch.zeros(
+            (num_recv_tokens, TOP_K), dtype=torch.int64, device=self.device
+        )
+
+        ts.dispatch(
+            routing,
+            tokens,
+            topk_weights,
+            out=(out_tokens, out_topk_weights, out_topk_idx),
+        )
+        torch.cuda.synchronize()
+
+        # Allocate expert_tokens in symmetric memory for zero-copy combine path.
+        symm_expert_tokens = symm_mem.empty(
+            NUM_TOKENS, HIDDEN, dtype=torch.bfloat16, device=self.device
+        )
+        if explicit_rendezvous:
+            symm_mem.rendezvous(symm_expert_tokens, group=pg)
+        symm_expert_tokens.copy_(out_tokens[:NUM_TOKENS])
+
+        combined = torch.zeros(
+            (NUM_TOKENS, HIDDEN), dtype=torch.bfloat16, device=self.device
+        )
+        ts.combine(routing, symm_expert_tokens, out=combined)
+        torch.cuda.synchronize()
+
+        expected = torch.full((NUM_TOKENS, HIDDEN), token_val, dtype=torch.bfloat16)
+        self.assertEqual(combined.cpu(), expected)
+
+    @skip_if_lt_x_gpu(2)
+    def test_dispatch_group_gemm_combine_symm_mem(self):
+        """Full pipeline: dispatch (symm_mem) -> group_gemm -> weight mul -> combine (symm_mem)."""
+        self._init()
+        ts = self.get_token_switch()
+        pg = dist.distributed_c10d._get_default_group()
+        num_recv_tokens = self.world_size * NUM_TOKENS
+
+        token_val = float(self.rank + 1)
+        tokens = torch.full(
+            (NUM_TOKENS, HIDDEN), token_val, dtype=torch.bfloat16, device=self.device
+        )
+
+        topk_idx, topk_weights = _generate_topk(
+            self.rank, self.world_size, NUM_TOKENS, TOP_K, self.device
+        )
+        routing = ts.create_routing(topk_idx, layout="expert_major")
+
+        out_tokens = symm_mem.empty(
+            num_recv_tokens, HIDDEN, dtype=torch.bfloat16, device=self.device
+        )
+        symm_mem.rendezvous(out_tokens, group=pg)
+        out_topk_weights = torch.zeros(
+            num_recv_tokens, dtype=torch.float32, device=self.device
+        )
+
+        ts.dispatch(
+            routing,
+            tokens,
+            topk_weights,
+            out=(out_tokens, out_topk_weights, None),
+        )
+        torch.cuda.synchronize()
+
+        # group_gemm: simulate with a scaled identity weight matrix.
+        GEMM_SCALE = 2.0
+        expert_tokens = out_tokens[:NUM_TOKENS].contiguous()
+        weight = torch.eye(HIDDEN, dtype=torch.float32, device=self.device) * GEMM_SCALE
+        gemm_out = expert_tokens.float().mm(weight).to(torch.bfloat16)
+
+        # weight mul + allocate directly into symm_mem pool to avoid a copy.
+        expert_weights = out_topk_weights[:NUM_TOKENS]
+        with torch.cuda.use_mem_pool(symm_mem.get_mem_pool(self.device)):
+            gemm_weighted = (
+                (gemm_out.float().mul_(expert_weights[:, None]))
+                .to(torch.bfloat16)
+                .contiguous()
+            )
+        symm_mem.rendezvous(gemm_weighted, group=pg)
+
+        combined = torch.zeros(
+            (NUM_TOKENS, HIDDEN), dtype=torch.bfloat16, device=self.device
+        )
+        ts.combine(routing, gemm_weighted, out=combined)
+        torch.cuda.synchronize()
+
+        # weights are 1/TOP_K = 1.0 and GEMM_SCALE applied, so expected = token_val * GEMM_SCALE.
+        expected_val = token_val * GEMM_SCALE
+        expected = torch.full(
+            (NUM_TOKENS, HIDDEN), expected_val, dtype=torch.bfloat16, device=self.device
+        )
+        self.assertEqual(combined, expected)
+
+
+instantiate_parametrized_tests(TokenSwitchNCCLTest)
 
 
 if __name__ == "__main__":

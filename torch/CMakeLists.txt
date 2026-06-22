@@ -483,7 +483,7 @@ if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
     Python_add_library(_nccl_ep MODULE WITH_SOABI
       "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/nccl_ep.cu"
       "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/nccl_ep_pybind.cpp")
-    target_compile_definitions(_nccl_ep PRIVATE USE_NCCL_EP USE_C10D_NCCL)
+    target_compile_definitions(_nccl_ep PRIVATE USE_NCCL_EP USE_C10D_NCCL USE_NCCL)
     # torch_python: pybind + Tensor/ProcessGroup casters; torch_cuda:
     # ProcessGroupNCCL::getCommPtr, getNcclDataType, CUDA stream, embedded NCCL;
     # __caffe2_nccl_ep: libnccl_ep (static .a or shared .so) + nccl_ep headers.
