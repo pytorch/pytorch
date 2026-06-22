@@ -325,6 +325,14 @@ case "$tag" in
   ;;
 esac
 
+# ubuntu/Dockerfile provisions Python from a deadsnakes venv keyed on
+# PYTHON_VERSION, while the rocm/xpu images still express it as
+# ANACONDA_PYTHON_VERSION (they keep conda). Mirror the value so both flavors
+# get what they expect.
+if [ -z "${PYTHON_VERSION}" ]; then
+  PYTHON_VERSION="${ANACONDA_PYTHON_VERSION}"
+fi
+
 tmp_tag=$(basename "$(mktemp -u)" | tr '[:upper:]' '[:lower:]')
 
 progress_flag=""
