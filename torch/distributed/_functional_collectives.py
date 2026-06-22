@@ -6,6 +6,7 @@ import warnings
 from typing import Any, cast, TYPE_CHECKING
 
 import torch
+import torch.compiler.config
 import torch.distributed as dist
 import torch.distributed.distributed_c10d as c10d
 from torch._utils import _maybe_view_chunk_cat
@@ -1275,7 +1276,7 @@ def _resolve_group(
             raise AssertionError(
                 "Only 1D mesh is supported, pass in (DeviceMesh, int) together if mesh > 1D"
             )
-        if dist.config.compile_on_one_rank:
+        if torch.compiler.config.compile_on_one_rank:
             return torch.ops._dtensor.mesh_get_process_group(group, 0)
         return group._dim_group_names[0]
     elif isinstance(group, tuple):
@@ -1286,7 +1287,7 @@ def _resolve_group(
         ):
             dmesh = group[0]
             dim = group[1]
-            if dist.config.compile_on_one_rank:
+            if torch.compiler.config.compile_on_one_rank:
                 return torch.ops._dtensor.mesh_get_process_group(dmesh, dim)
             return dmesh._dim_group_names[dim]
         else:
@@ -1891,7 +1892,7 @@ def _group_or_group_name(
 ) -> dist.ProcessGroup | c10d.GroupName:
     if isinstance(group, str):
         return group
-    elif dist.config.compile_on_one_rank:
+    elif torch.compiler.config.compile_on_one_rank:
         return group
     else:
         return group.group_name
