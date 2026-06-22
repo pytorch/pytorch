@@ -581,11 +581,9 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
 
         x = torch.arange(1., 6.)
         opt_model(x, 3, out=(values, indices))
-        recompiles_1 = get_num_torch_recompiles()
 
         x = torch.arange(1., 8.)
         opt_model(x, 3, out=(values, indices))
-        recompiles_2 = get_num_torch_recompiles()
 
         x = torch.arange(1., 10.)
         opt_model(x, 3, out=(values, indices))
