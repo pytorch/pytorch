@@ -3633,7 +3633,7 @@ make_fallback(aten._scaled_dot_product_attention_math_for_mps)  # @malfet
 
 
 # 1) Easy
-make_fallback(aten.uniform, warn=False)
+make_fallback(aten.uniform, override_decomp=True)
 make_fallback(aten.exponential.default, warn=False)  # (fails accuracy on test_torch.py)
 make_fallback(aten._pdist_forward, require_contiguous)  # Has decomp. Needs benchmarks
 make_fallback(aten.soft_margin_loss_backward, warn=False)  # py_impl?
