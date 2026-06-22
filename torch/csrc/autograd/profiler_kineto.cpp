@@ -6,6 +6,7 @@
 #include <c10/macros/Export.h>
 #include <c10/util/ApproximateClock.h>
 #include <c10/util/Exception.h>
+#include <c10/util/ScopeExit.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
 #include <c10/util/overloaded.h>
@@ -22,6 +23,10 @@
 #include <torch/csrc/profiler/standalone/privateuse1_observer.h>
 #include <torch/csrc/profiler/util.h>
 
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <mutex>
 #include <stdexcept>
 #include <utility>
 
@@ -597,14 +602,123 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
   post_process_t eventPostProcessCb;
 };
 
+// A reusable, dynamically-counted completion latch for the global
+// RecordFunction callback path (KINETO_ONDEMAND, or KINETO with
+// profile_all_threads). Those callbacks fire on every thread and touch the
+// profiler state while disableProfiler() finalizes and frees it on another
+// thread. While the latch is active, each in-flight callback enter()s before
+// touching the state and exit()s after; teardown calls drain(), which closes
+// the latch to new callbacks and blocks until the in-flight count reaches
+// zero, so finalize never races a live callback. The enter()/isActive()
+// re-check is a handshake: a callback that joined before teardown is always
+// waited for, while one arriving after bails without touching the state.
+//
+// Note that we cannot use a std::latch. A std::latch fixes its count at
+// construction, cannot be incremented afterward, and is single-use. Here the
+// number of in-flight callbacks is unknown up front, grows dynamically as
+// ops dispatch, and the latch must be re-armed for every enable/disable
+// cycle, none of which std::latch supports. The counter stays lock-free on
+// the per-op hot path; the mutex/cv are touched only on the teardown handoff.
+//
+// Because we coordinate across threads that can call it at any arbitrary time,
+// this object must have static lifetime.
+class DynamicCompletionLatch {
+ public:
+  DynamicCompletionLatch() = default;
+
+  // We should have only a single, static instance of this object.
+  DynamicCompletionLatch(const DynamicCompletionLatch&) = delete;
+  DynamicCompletionLatch& operator=(const DynamicCompletionLatch&) = delete;
+
+  // Open the latch (at enableProfiler time) so callbacks begin participating.
+  void activate() {
+    active_.store(true);
+  }
+
+  // Whether the latch is open; that is, teardown has not begun.
+  bool isActive() const {
+    return active_.load();
+  }
+
+  // Register an in-flight callback, paired with exit(). Callers must re-check
+  // isActive() after enter() to close the race with a concurrent drain().
+  void enter() {
+    in_flight_.fetch_add(1);
+  }
+
+  // Deregister an in-flight callback. When this is the last one and the latch
+  // has been closed (drain() in progress), wake the waiting teardown thread.
+  // During normal profiling this is a single lock-free decrement.
+  void exit() {
+    if (in_flight_.fetch_sub(1) == 1 && !active_.load()) {
+      std::lock_guard<std::mutex> lock(mutex_);
+      cv_.notify_all();
+    }
+  }
+
+  // Close the latch to new callbacks and block until all in-flight ones have
+  // exited; returns true once drained (also returns true if the latch was never
+  // opened -- purely thread-local profiling). Closing is fused with the wait,
+  // so the latch cannot be closed without waiting out in-flight callbacks.
+  //
+  // Returns false if the drain does not complete within kDrainTimeout. A normal
+  // drain takes microseconds (the in-flight window is a single op, enter() ->
+  // op -> exit()), so a multi-second wait means a callback's thread is wedged,
+  // dead, or deadlocked on a resource this thread holds. The caller must then
+  // leave the state installed: freeing it under a live callback would
+  // reintroduce the use-after-free this latch exists to prevent.
+  bool drain() {
+    if (!active_.exchange(false)) {
+      return true;
+    }
+    std::unique_lock<std::mutex> lock(mutex_);
+    return cv_.wait_for(
+        lock, kDrainTimeout, [this] { return in_flight_.load() == 0; });
+  }
+
+ private:
+  // Backstop so disableProfiler() can never hang on a wedged or dead callback
+  // thread. Far longer than any real drain, which completes in microseconds.
+  static constexpr std::chrono::seconds kDrainTimeout{30};
+
+  std::atomic<bool> active_{false};
+  std::atomic<int64_t> in_flight_{0};
+  std::mutex mutex_;
+  std::condition_variable cv_; // guarded by mutex_
+};
+
+DynamicCompletionLatch global_callback_latch;
+
 std::unique_ptr<at::ObserverContext> onFunctionEnterGlobal(
     const at::RecordFunction& fn) {
+  // Fast bail once teardown has begun, before taking an in-flight ref, so the
+  // drain in disableProfiler() always converges.
+  if (!global_callback_latch.isActive()) {
+    return nullptr;
+  }
+  global_callback_latch.enter();
+  // Release the ref on any early return or exception, unless ownership is
+  // handed to onFunctionExitGlobal by releasing the guard below.
+  auto in_flight_guard =
+      c10::make_scope_exit([] { global_callback_latch.exit(); });
+  // Re-check after the increment. This is the handshake that makes teardown
+  // safe: if disableProfiler() cleared active concurrently, its drain is
+  // guaranteed to observe our increment and wait iff we still observe active
+  // true here.
+  if (!global_callback_latch.isActive()) {
+    return nullptr;
+  }
   std::shared_ptr<KinetoThreadLocalState> state_ptr =
       KinetoThreadLocalState::getGlobal();
   if (!state_ptr) {
     return nullptr;
   }
-  return state_ptr->recordQueue.getSubqueue()->begin_op(fn);
+  auto ctx = state_ptr->recordQueue.getSubqueue()->begin_op(fn);
+  if (ctx) {
+    // The in-flight ref is now owned by the matching onFunctionExitGlobal.
+    in_flight_guard.release();
+  }
+  return ctx;
 }
 
 std::unique_ptr<at::ObserverContext> onFunctionEnterTLS(
@@ -668,6 +782,19 @@ void onFunctionExitImpl(
 void onFunctionExitGlobal(
     const at::RecordFunction& fn,
     at::ObserverContext* ctx_ptr) {
+  // Release the in-flight ref taken in onFunctionEnterGlobal on every exit
+  // path, but only for ops that produced a context. Ops whose enter bailed
+  // (null context) never took a ref.
+  auto in_flight_guard = c10::make_scope_exit([&] {
+    if (ctx_ptr != nullptr) {
+      global_callback_latch.exit();
+    }
+  });
+  // An op whose enter bailed took no ref and must not touch the state here,
+  // since a concurrent disableProfiler() may already be tearing it down.
+  if (ctx_ptr == nullptr) {
+    return;
+  }
   std::shared_ptr<KinetoThreadLocalState> state_ptr =
       KinetoThreadLocalState::getGlobal();
   if (!state_ptr) {
@@ -695,6 +822,13 @@ void pushGlobalProfilingCallbacks(
       at::RecordFunctionCallback(onFunctionEnterGlobal, onFunctionExitGlobal)
           .needsInputs(state_ptr->config().report_input_shapes)
           .scopes(scopes);
+  // Arm the drain gate before the global callback can fire on any thread.
+  // disableProfiler() relies on this to know it must drain in-flight callbacks.
+  // Do not reset in_flight here: it is already zero once the previous
+  // disableProfiler() drained it, and this function is also called by the
+  // dynamic collection toggle mid-session, where a concurrent in-flight
+  // callback may still hold a reference that must not be discarded.
+  global_callback_latch.activate();
   state_ptr->setCallbackHandle(at::addGlobalCallback(recordFunctionCallback));
 }
 
@@ -1004,6 +1138,30 @@ void disableProfilerInChildThread() {
 std::unique_ptr<ProfilerResult> disableProfiler() {
   // releasing to inform child threads to stop profiling
   profiler_state_info_ptr = nullptr;
+
+  // If global callbacks were installed (KINETO_ONDEMAND, or KINETO with
+  // profile_all_threads), they may be running on other threads right now. Wait
+  // for in-flight ones to finish before popping and finalizing the state, else
+  // a worker thread can mutate the record queue while finalizeTrace() reads
+  // and frees it.
+  if (!global_callback_latch.drain()) {
+    // The drain timed out: an in-flight global callback is wedged or dead, so
+    // we cannot finalize (reading the queue would race the live callback and
+    // reintroduce the use-after-free). We still pop the state and remove the
+    // global callback so a later enableProfiler() is not rejected as "already
+    // enabled". Safe with callbacks in flight: the shared_ptr keepalive keeps
+    // the state alive for one still using it, and removeCallback() is versioned
+    // (running invocations use per-thread snapshots). The session trace is
+    // lost.
+    LOG(ERROR)
+        << "disableProfiler timed out draining in-flight global RecordFunction "
+           "callbacks; abandoning this trace. A callback thread is likely "
+           "wedged or was killed mid-callback.";
+    if (auto state_ptr = ProfilerStateBase::pop()) {
+      state_ptr->removeCallback();
+    }
+    return std::make_unique<ProfilerResult>();
+  }
 
   auto state_ptr = ProfilerStateBase::pop();
   if (!state_ptr) {

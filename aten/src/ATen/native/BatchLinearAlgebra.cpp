@@ -781,6 +781,18 @@ TORCH_META_FUNC(lu_unpack)(const Tensor& LU, const Tensor& pivots, bool unpack_d
   const auto n = sizes.cend()[-1];
   const auto k = std::min(m, n);
 
+  if (unpack_pivots) {
+    // pivots is produced by lu_factor and must have shape (*LU.shape[:-2], min(m, n)).
+    // Without this check, a mismatched pivots tensor leads to out-of-bounds reads in
+    // the unpack_pivots kernel.
+    auto expected_pivots_sizes = LU.sizes().vec();
+    expected_pivots_sizes.pop_back();
+    expected_pivots_sizes.back() = k;
+    TORCH_CHECK_VALUE(pivots.sizes() == IntArrayRef(expected_pivots_sizes),
+        "Expected LU_pivots to have shape ", IntArrayRef(expected_pivots_sizes),
+        " but got ", pivots.sizes(), " instead.");
+  }
+
   // P.shape[-2:] == (m, m) (or size zero if pivot == False)
   sizes.end()[-1] = m;
   if (unpack_pivots) {
@@ -3461,16 +3473,17 @@ static std::string get_default_lstsq_driver(std::optional<std::string_view> driv
     static std::unordered_set<std::string_view> allowed_drivers = {
       "gels", "gelsy", "gelsd", "gelss"
     };
-    if (input.device() == at::kCPU) {
+    // CUDA supports only the 'gels' driver; CPU and MPS support all four.
+    if (input.is_cuda()) {
+      TORCH_CHECK(
+        driver_str == "gels",
+        "torch.linalg.lstsq: `driver` other than `gels` is not supported on CUDA"
+      );
+    } else { // CPU and MPS
       TORCH_CHECK(
         allowed_drivers.find(driver_str) != allowed_drivers.end(),
         "torch.linalg.lstsq: parameter `driver` should be one of "
         "(gels, gelsy, gelsd, gelss)"
-      );
-    } else { // else if (input.is_cuda())
-      TORCH_CHECK(
-        driver_str == "gels",
-        "torch.linalg.lstsq: `driver` other than `gels` is not supported on CUDA"
       );
     }
   } else {

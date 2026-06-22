@@ -1370,7 +1370,7 @@ struct to_ir {
       if (!is_dict_constructor && candidate_types.empty()) {
         throw(
             ErrorReport(src)
-            << "Expected an Union type annotation "
+            << "Expected a Union type annotation "
             << "with an inner " << match_repr << " type, but got "
             << (*refined_type_hint_ptr)->repr_str());
       } else if (candidate_types.size() == 1) {

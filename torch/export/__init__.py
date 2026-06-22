@@ -214,6 +214,12 @@ def export(
             "using `TS2EPConverter(mod, args, kwargs).convert()` instead."
         )
 
+    # If ``mod.forward`` carries an ``@dynamic_spec(...)`` decorator, the
+    # attached ``ShapesSpec`` is used as ``dynamic_shapes``. Passing both raises.
+    from torch.fx.experimental.dynamic_spec import _resolve_dynamic_shapes
+
+    dynamic_shapes = _resolve_dynamic_shapes(mod, dynamic_shapes)
+
     try:
         return _export(
             mod,

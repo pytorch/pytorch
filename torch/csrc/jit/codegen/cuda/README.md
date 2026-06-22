@@ -150,7 +150,7 @@ Without going into too much details about how the integration is done, a few not
 
 ### General ideas of debug nvfuser mal-functioning
 
-Assuming we have ProfilingExecutor things worked out properly, that is, you see a region that's supposed to be fused but did not ended up in a fused kernel, here's ways to dig deeper:
+Assuming we have ProfilingExecutor things worked out properly, that is, you see a region that's supposed to be fused but did not end up in a fused kernel, here's ways to dig deeper:
 
 1. Dump fusion pass result:
     `PYTORCH_JIT_LOG_LEVEL=graph_fuser python your_script.py &> log`
@@ -179,7 +179,7 @@ Assuming we have ProfilingExecutor things worked out properly, that is, you see 
 
     This logs all TorchScript IR parsed to codegen IR as well as kernel generated and executed by nvfuser. Since fallback path is disabled, it's likely that the last log would indicate the failing fusion.
 
-    Hint: look for last `Before Compilation:` that indicates a parsing failure, or `running GraphCache: xxxxx`, which indicates jit compilation/execution failure (also search for the GraphCache address, which would should have dumped a TorchScript IR earlier.
+    Hint: look for last `Before Compilation:` that indicates a parsing failure, or `running GraphCache: xxxxx`, which indicates jit compilation/execution failure (also search for the GraphCache address, which should have dumped a TorchScript IR earlier.
 
 ### Query nvfuser codegen kernels
 

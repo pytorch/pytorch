@@ -177,7 +177,7 @@ def clear_cublass_cache() -> None:
     it will be allocated to the cudagraph private pool and accounted for in the allocator for the duration of the
     program. There is no overhead to this on replay since cudagraphs removes allocation overhead.
     """
-    torch._C._cuda_clearCublasWorkspaces()
+    torch.cuda._clear_cublas_workspaces()
 
 
 @contextlib.contextmanager
@@ -506,6 +506,7 @@ def cudagraphify(
     constants: tuple[torch.Tensor, ...] = (),
     placeholders: tuple[PlaceholderInfo, ...] = (),
     mutated_input_idxs: tuple[int, ...] = (),
+    kernel_free_cudagraph: bool = False,
     compile_id: CompileId | None = None,
 ) -> tuple[ModelType, OutputType]:
     if is_backward and is_inference:
@@ -528,6 +529,7 @@ def cudagraphify(
         constants,
         placeholders,
         mutated_input_idxs,
+        kernel_free_cudagraph,
         compile_id,
     )
 
@@ -1083,13 +1085,15 @@ class CUDAGraphNode:
         inputs.clear()
         del inputs
 
-        # graph used for recording model invocation
-        self.graph: torch.cuda.CUDAGraph | None = torch.cuda.CUDAGraph()
+        self.graph: torch.cuda.CUDAGraph | None = (
+            None if wrapped_function.kernel_free_cudagraph else torch.cuda.CUDAGraph()
+        )
 
         # TODO: register_generator_state should potentially take explicit device
-        with torch.cuda.device(self.device):
-            for rng_state in rng_states:
-                self.graph.register_generator_state(rng_state)
+        if self.graph is not None:
+            with torch.cuda.device(self.device):
+                for rng_state in rng_states:
+                    self.graph.register_generator_state(rng_state)
 
         # we allocate non-static inputs within the same memory pool as the CUDAGraph
         # which we will record the model with. For memory efficiency, it is important
@@ -1164,7 +1168,8 @@ class CUDAGraphNode:
                     raise AssertionError(type(out))
                 self.outputs_metadata.append(out)
 
-        self.graph.replay()
+        if self.graph is not None:
+            self.graph.replay()
 
     def _copy_inputs_and_remove_from_src(
         self, dsts: list[InputType], srcs: list[InputType]
@@ -1349,6 +1354,8 @@ class CUDAGraphNode:
         return output_storages
 
     def run_graph(self) -> None:
+        if self.wrapped_function.kernel_free_cudagraph:
+            return
         if self.graph is None:
             raise AssertionError("expected graph to not be None")
         self.graph.replay()
@@ -1362,8 +1369,6 @@ class CUDAGraphNode:
 
     def _record(self, model: ModelType, inputs: list[InputType]) -> OutputType:
         "Record the model"
-        if self.graph is None:
-            raise AssertionError("expected graph to not be None")
 
         def static_input_iter() -> Generator[torch.Tensor, None, None]:
             for i in self.wrapped_function.static_input_idxs:
@@ -1380,6 +1385,36 @@ class CUDAGraphNode:
                 static_input_iter(), self.wrapped_function.constants
             )
         }
+
+        if self.wrapped_function.kernel_free_cudagraph:
+            with (
+                preserve_rng_state(),
+                torch.cuda.device(self.device),
+                clear_cublas_manager(),
+                _use_cuda_memory_pool_manager(
+                    self.device, self.cuda_graphs_pool, self.stream
+                ),
+                # NB: must go after _use_cuda_memory_pool_manager which switches the stream
+                _update_current_stream_external_object(),
+                ControlFlowOpWarmupDispatchMode(),
+                get_history_recording(),
+            ):
+                static_outputs = model(inputs)
+            if len(inputs) != 0:
+                raise AssertionError(f"expected inputs to be empty, got {len(inputs)}")
+
+            if not isinstance(static_outputs, (list, tuple)):
+                static_outputs = [static_outputs]
+            elif isinstance(static_outputs, tuple):
+                static_outputs = list(static_outputs)
+            static_outputs = cast(OutputType, static_outputs)
+            self._add_first_outputs(
+                static_outputs, static_input_persistent_storage_ptrs
+            )
+            return static_outputs
+
+        if self.graph is None:
+            raise AssertionError("expected graph to not be None")
 
         if config.triton.slow_path_cudagraph_asserts:
             # need to use parent live weakrefs because live_indices isn't set yet
@@ -2578,6 +2613,7 @@ class CUDAGraphTreeManager:
         constants: tuple[torch.Tensor, ...],
         placeholders: tuple[PlaceholderInfo, ...],
         mutated_input_idxs: tuple[int, ...],
+        kernel_free_cudagraph: bool,
         compile_id: CompileId | None,
     ) -> tuple[
         ModelType,
@@ -2592,6 +2628,7 @@ class CUDAGraphTreeManager:
             tuple(t for t in constants if isinstance(t, torch.Tensor) and t.is_cuda),
             placeholders,
             mutated_input_idxs,
+            kernel_free_cudagraph,
         )
         self.id_to_mode[id] = mode
         self.id_to_compile_id[id] = compile_id

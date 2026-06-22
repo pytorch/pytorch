@@ -485,7 +485,7 @@ std::string CUDAHooks::showConfig() const {
   oss << "  - Magma " << MAGMA_VERSION_MAJOR << '.' << MAGMA_VERSION_MINOR << '.' << MAGMA_VERSION_MICRO << '\n';
 #endif
 
-  return std::move(oss).str();
+  return oss.str();
 }
 
 double CUDAHooks::batchnormMinEpsilonCuDNN() const {

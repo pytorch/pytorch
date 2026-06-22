@@ -372,7 +372,7 @@ class Shard(torch._C._distributed.Shard):
             curr_local_size, shard_starting_idx + full_chunk_size
         )
         local_shard_size = torch.sym_max(0, shard_end_idx - shard_starting_idx)
-        return local_shard_size, torch.sym_min(curr_local_size, shard_starting_idx)
+        return local_shard_size, torch.sym_min(curr_local_size, shard_starting_idx)  # type: ignore[return-value]
 
     def _local_shard_size_and_offset(
         self,
@@ -536,7 +536,7 @@ class Shard(torch._C._distributed.Shard):
         if is_padded:
             full_chunk_size = (logical_dim_size + num_chunks - 1) // num_chunks
             pad_size = full_chunk_size - local_tensor.size(self.dim)
-            local_tensor = pad_tensor(local_tensor, self.dim, pad_size)
+            local_tensor = pad_tensor(local_tensor, self.dim, pad_size)  # type: ignore[bad-argument-type]
 
         if not local_tensor.is_contiguous():
             local_tensor = local_tensor.contiguous()
@@ -561,7 +561,7 @@ class Shard(torch._C._distributed.Shard):
         if is_padded:
             full_chunk_size = (logical_dim_size + num_chunks - 1) // num_chunks
             unpad_size = full_chunk_size * num_chunks - logical_dim_size  # type: ignore[possibly-undefined]
-            local_tensor = unpad_tensor(local_tensor, self.dim, unpad_size)
+            local_tensor = unpad_tensor(local_tensor, self.dim, unpad_size)  # type: ignore[bad-argument-type]
 
         # Bind derived symbolic sizes (e.g. 2*(s//2)) back to the original
         # symbol - needed for correct shape propagation and dynamo generation
@@ -662,7 +662,7 @@ class Shard(torch._C._distributed.Shard):
             dim_full_chunk_size = (dim_logical_size + num_chunks - 1) // num_chunks
             results.append((dim_padding, dim_logical_size, dim_full_chunk_size))
 
-        return results[0] + results[1]
+        return results[0] + results[1]  # type: ignore[bad-return]
 
     @staticmethod
     @maybe_run_for_local_tensor
@@ -1356,10 +1356,11 @@ class _StridedShard(torch._C._distributed.StridedShard):
             split_factor_int = self._split_factor_int()
             offset = None if offset_mode is _StridedShardOffsetMode.NONE else []
             if _hint_proves_even_shard(curr_local_size, split_factor * num_chunks):
+                # pyrefly: ignore[bad-return]
                 return (
                     curr_local_size // num_chunks,
                     offset,
-                )  # pyrefly: ignore[bad-return]
+                )
 
             local_shard_size: IntLikeType = 0
             first_split_size = (curr_local_size + split_factor - 1) // split_factor

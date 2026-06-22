@@ -188,6 +188,79 @@ def test_github_output_file():
         os.unlink(tmp_path)
 
 
+def test_h100_forces_mt_prefix_when_no_prefix():
+    matrix = """{ include: [
+      { config: "default", shard: 1, num_shards: 1, runner: "linux.aws.h100" },
+    ]}"""
+    result = run(matrix)
+    check(result.returncode == 0, result.stderr)
+    output = parse_output(result.stdout)
+    check(output["include"][0]["runner"] == "mt-l-x86iamx-22-225-h100")
+
+
+def test_h100_forces_mt_prefix_overriding_lf():
+    matrix = """{ include: [
+      { config: "default", shard: 1, num_shards: 1, runner: "lf-linux.aws.h100" },
+    ]}"""
+    result = run(matrix, prefix="lf-")
+    check(result.returncode == 0, result.stderr)
+    output = parse_output(result.stdout)
+    check(
+        output["include"][0]["runner"] == "mt-l-x86iamx-22-225-h100",
+        f"expected mt- override, got {output['include'][0]['runner']}",
+    )
+
+
+def test_h100_with_mt_prefix_idempotent():
+    matrix = """{ include: [
+      { config: "default", shard: 1, num_shards: 1, runner: "mt-linux.aws.h100" },
+    ]}"""
+    result = run(matrix, prefix="mt-")
+    check(result.returncode == 0, result.stderr)
+    output = parse_output(result.stdout)
+    check(output["include"][0]["runner"] == "mt-l-x86iamx-22-225-h100")
+
+
+def test_b200_forces_mt_prefix_overriding_lf():
+    matrix = """{ include: [
+      { config: "default", shard: 1, num_shards: 1, runner: "lf-linux.dgx.b200" },
+    ]}"""
+    result = run(matrix, prefix="lf-")
+    check(result.returncode == 0, result.stderr)
+    output = parse_output(result.stdout)
+    check(output["include"][0]["runner"] == "mt-l-x86iamx-22-225-b200")
+
+
+def test_non_h100_keeps_lf_prefix():
+    """Regression guard: non-H100/B200 runners must not be forced to mt-."""
+    matrix = """{ include: [
+      { config: "default", shard: 1, num_shards: 1, runner: "lf-linux.4xlarge" },
+    ]}"""
+    result = run(matrix, prefix="lf-")
+    check(result.returncode == 0, result.stderr)
+    output = parse_output(result.stdout)
+    check(output["include"][0]["runner"] == "lf-l-x86iavx512-16-128")
+
+
+def test_h100_multi_gpu_variants_force_mt():
+    matrix = """{ include: [
+      { config: "default", shard: 1, num_shards: 1, runner: "lf-linux.aws.h100.4" },
+      { config: "default", shard: 1, num_shards: 1, runner: "lf-linux.aws.h100.8" },
+    ]}"""
+    result = run(matrix, prefix="lf-")
+    check(result.returncode == 0, result.stderr)
+    output = parse_output(result.stdout)
+    runners = [e["runner"] for e in output["include"]]
+    check(
+        runners
+        == [
+            "mt-l-x86iamx-88-900-h100-4",
+            "mt-l-bx86iamx-176-1800-h100-8",
+        ],
+        f"unexpected runners: {runners}",
+    )
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

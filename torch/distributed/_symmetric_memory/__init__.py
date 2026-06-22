@@ -2282,6 +2282,75 @@ def reduce_scatter_offset(
         )
 
 
+def all_gather_offset(
+    input: torch.Tensor,
+    out: torch.Tensor,
+    group: str,
+    split_sizes: list[int],
+    split_offsets: list[int] | None = None,
+) -> None:
+    r"""
+    all_gather_offset(input, out, group, split_sizes, split_offsets=None) -> None
+
+    All-gather a rank-local bucket of parameter shards held in a symmetric
+    memory buffer into a *parameter-contiguous* output, fusing the gather with
+    the copy-out reorder that FSDP2 would otherwise perform with
+    ``split_with_sizes_copy``.
+
+    ``input`` is a 1-D symmetric tensor holding this rank's shards of ``N``
+    parameters laid out back-to-back: parameter ``i`` occupies
+    ``input[split_offsets[i] : split_offsets[i] + split_sizes[i]]``.
+
+    In the output, each parameter is stored contiguously across ranks (rather
+    than the standard rank-major all-gather layout).  For parameter ``i`` and
+    source rank ``r``, the gathered region is::
+
+        out[off * W + r * size : off * W + (r + 1) * size]
+
+    where ``off = split_offsets[i]``, ``size = split_sizes[i]`` and ``W`` is the
+    group size.  Every rank produces the full output (standard all-gather
+    semantics).
+
+    ``out`` must be a symmetric-memory tensor: each rank writes its own shard
+    into ``out`` on every rank.  When ``out`` has multicast support, the write
+    uses NVLink SHARP (multimem) -- each shard is written once and the switch
+    replicates it to every rank; otherwise each rank pushes its shard directly
+    into every peer's ``out`` over LSA.  ``input`` is read locally and need not
+    be a symmetric-memory tensor.
+
+    All per-parameter offsets and shard sizes must be 16-byte aligned.
+
+    Args:
+        input (Tensor): 1-D contiguous tensor holding this rank's shards.
+        out (Tensor): 1-D contiguous output tensor of numel
+            ``sum(split_sizes) * world_size``, with the same dtype as ``input``,
+            allocated via symmetric memory.
+        group (str): The name of the ``ProcessGroup`` to perform the operation on.
+        split_sizes (list[int]): Per-rank shard size of each parameter, length N.
+        split_offsets (list[int] | None): Start offset of each parameter within
+            ``input``, length N.  If not provided, defaults to the exclusive
+            prefix sum of ``split_sizes`` (a packed bucket).
+
+    Example::
+
+        >>> # doctest: +SKIP
+        >>> # Each rank holds its shards of two parameters in a packed bucket.
+        >>> split_sizes = [s0, s1]
+        >>> inp = symm_mem.empty(s0 + s1, dtype=torch.bfloat16, device="cuda")
+        >>> symm_mem.rendezvous(inp, group=group_name)
+        >>> out = symm_mem.empty((s0 + s1) * world_size, dtype=torch.bfloat16, device="cuda")
+        >>> symm_mem.rendezvous(out, group=group_name)
+        >>> symm_mem.all_gather_offset(inp, out, group_name, split_sizes)
+    """
+    backend = get_backend(input.device)
+    if backend == "NCCL":
+        torch.ops.symm_mem.nccl_all_gather_offset(
+            input, out, group, split_sizes, split_offsets
+        )
+    else:
+        raise NotImplementedError(f"all_gather_offset: unsupported backend: {backend}")
+
+
 def is_symm_mem_tensor(tensor: torch.Tensor) -> bool:
     r"""
     is_symm_mem_tensor(tensor) -> bool
@@ -2298,6 +2367,54 @@ def is_symm_mem_tensor(tensor: torch.Tensor) -> bool:
     return _SymmetricMemory.is_symm_mem_tensor(tensor)
 
 
+def all_to_all_nd(
+    input: torch.Tensor,
+    out: torch.Tensor,
+    scatter_dim: int,
+    gather_dim: int,
+    *,
+    group: str,
+) -> None:
+    r"""
+    all_to_all_nd(input, out, scatter_dim, gather_dim, *, group) -> None
+
+    Permute-free all-to-all: shards along ``scatter_dim`` of ``input`` are exchanged
+    so each rank receives one shard per peer; results are laid out along ``gather_dim``
+    of ``out``. Supported pairs are ``(scatter_dim=1, gather_dim=0)`` and
+    ``(scatter_dim=0, gather_dim=1)``.
+
+    For ``scatter_dim=1``, ``gather_dim=0`` (let ``G`` be the group size): ``input`` is
+    ``[rows, G * local_cols]`` or equivalently ``[rows, G, local_cols]``;
+    each rank ``r`` reads column block ``r`` from every peer and writes peer ``j`` into
+    ``out[j]``. ``out`` must be contiguous with shape ``[G, rows, local_cols]`` or the
+    flattened equivalent ``[G * rows, local_cols]``.
+
+    For ``scatter_dim=0``, ``gather_dim=1`` (``G`` is the group size): ``input`` is
+    ``[G * local_rows, cols]`` or equivalently ``[G, local_rows, cols]``;
+    each rank ``r`` reads row block ``r`` from every peer; peer ``j`` is stored in
+    ``out[:, j, :]``. ``out`` must be contiguous with shape ``[local_rows, G, cols]`` or
+    ``[local_rows, G * cols]`` (flattened gather and inner dims).
+
+    Args:
+        input (Tensor): For ``(scatter_dim=1, gather_dim=0)``, 2-D ``[rows, G*local_cols]`` or
+            3-D ``[rows, G, local_cols]`` in symmetric memory (innermost dimension contiguous).
+            For ``(scatter_dim=0, gather_dim=1)``, 2-D ``[G*local_rows, cols]`` or 3-D
+            ``[G, local_rows, cols]`` (same layout).
+        out (Tensor): Contiguous buffer (see shapes above; 2-D allowed where noted).
+        scatter_dim (int): ``0`` or ``1`` — dimension along which the input is partitioned.
+        gather_dim (int): ``0`` or ``1`` — dimension along which peer chunks are
+            concatenated in ``out``.
+        group (str): The name of the ``ProcessGroup`` to perform the operation on.
+    """
+    backend = get_backend(input.device)
+    if backend == "NCCL":
+        torch.ops.symm_mem.nccl_all_to_all_nd(
+            input, out, scatter_dim, gather_dim, group
+        )
+    else:
+        raise NotImplementedError(f"all_to_all_nd: unsupported backend: {backend}")
+
+
 __all__ = [
     "empty",
     "is_symm_mem_tensor",
@@ -2309,4 +2426,6 @@ __all__ = [
     "get_signal_pad_size",
     "get_mem_pool",
     "reduce_scatter_offset",
+    "all_to_all_nd",
+    "all_gather_offset",
 ]

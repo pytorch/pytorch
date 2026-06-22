@@ -1078,6 +1078,50 @@ class TestOpSchemaMetaProperties(TestCase):
         self.assertIsNone(rule[1])  # d_weight
         self.assertIsNone(rule[2])  # d_bias
 
+        # With weight/bias inputs but masked-off weight/bias outputs
+        strategies = layer_norm_bwd_single_dim_strategy(
+            torch.ops.aten.native_layer_norm_backward.default,
+            (
+                input_meta,
+                input_meta,
+                [8],
+                stat_meta,
+                stat_meta,
+                weight_meta,
+                weight_meta,
+                [True, False, False],
+            ),
+            {},
+        )
+        self.assertEqual(len(strategies), 1)
+        rule = strategies[0]
+        self.assertEqual(len(rule), 9)
+        self.assertEqual(rule[0].dim, 0)  # d_input sharded
+        self.assertIsNone(rule[1])  # d_weight masked off
+        self.assertIsNone(rule[2])  # d_bias masked off
+        self.assertIsInstance(rule[7], Replicate)  # weight input still present
+        self.assertIsInstance(rule[8], Replicate)  # bias input still present
+
+        # d_input can also be masked independently of d_weight/d_bias
+        strategies = layer_norm_bwd_single_dim_strategy(
+            torch.ops.aten.native_layer_norm_backward.default,
+            (
+                input_meta,
+                input_meta,
+                [8],
+                stat_meta,
+                stat_meta,
+                weight_meta,
+                weight_meta,
+                [False, True, False],
+            ),
+            {},
+        )
+        rule = strategies[0]
+        self.assertIsNone(rule[0])  # d_input masked off
+        self.assertIsInstance(rule[1], Partial)  # d_weight reduced
+        self.assertIsNone(rule[2])  # d_bias masked off
+
     def test_rms_norm_bwd_single_dim_strategy(self):
         """rms_norm backward produces correct output/input placements."""
         from torch.distributed.tensor._ops._math_ops import (
@@ -1101,6 +1145,7 @@ class TestOpSchemaMetaProperties(TestCase):
                 [8],  # normalized_shape
                 stat_meta,  # rstd
                 weight_meta,  # weight
+                [True, True],  # output_mask
             ),
             {},
         )
@@ -1115,7 +1160,7 @@ class TestOpSchemaMetaProperties(TestCase):
         # Without weight: d_weight=None
         strategies = rms_norm_bwd_single_dim_strategy(
             torch.ops.aten._fused_rms_norm_backward.default,
-            (input_meta, input_meta, [8], stat_meta, None),
+            (input_meta, input_meta, [8], stat_meta, None, [True, True]),
             {},
         )
         self.assertEqual(len(strategies), 1)
@@ -1123,6 +1168,150 @@ class TestOpSchemaMetaProperties(TestCase):
         # outputs: [d_input, None] + inputs: [grad_out, input, rstd]
         self.assertEqual(len(rule), 5)
         self.assertIsNone(rule[1])  # d_weight
+
+        # With weight input but masked-off d_weight output
+        strategies = rms_norm_bwd_single_dim_strategy(
+            torch.ops.aten._fused_rms_norm_backward.default,
+            (
+                input_meta,  # grad_out
+                input_meta,  # input
+                [8],  # normalized_shape
+                stat_meta,  # rstd
+                weight_meta,  # weight
+                [True, False],  # output_mask
+            ),
+            {},
+        )
+        self.assertEqual(len(strategies), 1)
+        rule = strategies[0]
+        self.assertEqual(len(rule), 6)
+        self.assertEqual(rule[0].dim, 0)  # d_input sharded
+        self.assertIsNone(rule[1])  # d_weight masked off
+        self.assertIsInstance(rule[5], Replicate)  # weight input still present
+
+        # d_input can be masked independently of d_weight
+        strategies = rms_norm_bwd_single_dim_strategy(
+            torch.ops.aten._fused_rms_norm_backward.default,
+            (
+                input_meta,
+                input_meta,
+                [8],
+                stat_meta,
+                weight_meta,
+                [False, True],
+            ),
+            {},
+        )
+        rule = strategies[0]
+        self.assertIsNone(rule[0])  # d_input masked off
+        self.assertIsInstance(rule[1], Partial)  # d_weight reduced
+
+    def test_grid_sampler_bwd_single_dim_strategy(self):
+        """grid_sampler backward respects the native output_mask contract."""
+        from torch.distributed.tensor._ops._math_ops import (
+            grid_sampler_backward_strategy,
+        )
+
+        grad_output_meta = TensorMeta(
+            shape=torch.Size([2, 3, 4, 4]), stride=(48, 16, 4, 1), dtype=torch.float32
+        )
+        input_meta = TensorMeta(
+            shape=torch.Size([2, 3, 8, 8]), stride=(192, 64, 8, 1), dtype=torch.float32
+        )
+        grid_meta = TensorMeta(
+            shape=torch.Size([2, 4, 4, 2]), stride=(32, 8, 2, 1), dtype=torch.float32
+        )
+
+        strategies = grid_sampler_backward_strategy(
+            torch.ops.aten.grid_sampler_2d_backward.default,
+            (grad_output_meta, input_meta, grid_meta, 0, 0, False, [True, False]),
+            {},
+        )
+        self.assertEqual(len(strategies), 1)
+        rule = strategies[0]
+        self.assertEqual(len(rule), 5)
+        self.assertEqual(rule[0].dim, 0)  # grad_input sharded
+        self.assertEqual(rule[1].dim, 0)  # grad_grid is always computed
+        self.assertEqual(rule[2].dim, 0)  # grad_output sharded
+        self.assertEqual(rule[3].dim, 0)  # input sharded
+        self.assertEqual(rule[4].dim, 0)  # grid sharded
+
+        strategies = grid_sampler_backward_strategy(
+            torch.ops.aten.grid_sampler_2d_backward.default,
+            (grad_output_meta, input_meta, grid_meta, 0, 0, False, [False, True]),
+            {},
+        )
+        rule = strategies[0]
+        self.assertIsNone(rule[0])  # grad_input masked off
+        self.assertEqual(rule[1].dim, 0)  # grad_grid sharded
+
+        strategies = grid_sampler_backward_strategy(
+            torch.ops.aten.grid_sampler_2d_backward.default,
+            (grad_output_meta, input_meta, grid_meta, 0, 0, False, [False, False]),
+            {},
+        )
+        rule = strategies[0]
+        self.assertIsNone(rule[0])  # grad_input masked off
+        self.assertEqual(rule[1].dim, 0)  # grad_grid ignores output_mask[1]
+
+    def test_batch_norm_bwd_single_dim_strategy(self):
+        """batch_norm backward respects output_mask."""
+        from torch.distributed.tensor._ops._math_ops import batch_norm_backward_strategy
+
+        input_meta = TensorMeta(
+            shape=torch.Size([4, 8, 16, 16]),
+            stride=(2048, 256, 16, 1),
+            dtype=torch.float32,
+        )
+        channel_meta = TensorMeta(
+            shape=torch.Size([8]), stride=(1,), dtype=torch.float32
+        )
+
+        strategies = batch_norm_backward_strategy(
+            torch.ops.aten.native_batch_norm_backward.default,
+            (
+                input_meta,  # grad_out
+                input_meta,  # input
+                channel_meta,  # weight
+                channel_meta,  # running_mean
+                channel_meta,  # running_var
+                channel_meta,  # save_mean
+                channel_meta,  # save_invstd
+                True,  # train
+                1e-5,  # eps
+                [True, False, True],  # output_mask
+            ),
+            {},
+        )
+        self.assertEqual(len(strategies), 1)
+        rule = strategies[0]
+        self.assertEqual(len(rule), 10)
+        self.assertEqual(rule[0].dim, 1)  # grad_input sharded on channel
+        self.assertIsNone(rule[1])  # grad_weight masked off
+        self.assertEqual(rule[2].dim, 0)  # grad_bias sharded
+        self.assertEqual(rule[3].dim, 1)  # grad_out sharded on channel
+        self.assertEqual(rule[4].dim, 1)  # input sharded on channel
+
+        strategies = batch_norm_backward_strategy(
+            torch.ops.aten.native_batch_norm_backward.default,
+            (
+                input_meta,
+                input_meta,
+                channel_meta,
+                channel_meta,
+                channel_meta,
+                channel_meta,
+                channel_meta,
+                True,
+                1e-5,
+                [False, True, False],
+            ),
+            {},
+        )
+        rule = strategies[0]
+        self.assertIsNone(rule[0])  # grad_input masked off
+        self.assertEqual(rule[1].dim, 0)  # grad_weight sharded
+        self.assertIsNone(rule[2])  # grad_bias masked off
 
     def test_constant_pad_nd_allows_shard_on_non_padded_dim(self):
         """constant_pad_nd should allow sharding on non-padded dims."""

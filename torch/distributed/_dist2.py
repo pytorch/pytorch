@@ -120,8 +120,37 @@ def _nccl_factory(
     return pg
 
 
+def _xccl_factory(
+    store: Store,
+    rank: int,
+    world_size: int,
+    timeout: timedelta,
+    device: torch.device,
+    **kwargs: object,
+) -> ProcessGroup:
+    from torch.distributed import ProcessGroupXCCL
+
+    opts = ProcessGroupXCCL.Options()
+    opts._timeout = timeout
+    for k, v in kwargs.items():
+        if not hasattr(opts, k):
+            raise KeyError(f"Unknown option {k}")
+        setattr(opts, k, v)
+
+    backend_class = ProcessGroupXCCL(store, rank, world_size, opts)
+    backend_class._set_sequence_number_for_group()
+    backend_class.eager_connect_single_device(device)
+
+    pg = ProcessGroup(store, rank, world_size)
+    pg._set_default_backend(ProcessGroup.BackendType.XCCL)
+    pg._register_backend(device, ProcessGroup.BackendType.XCCL, backend_class)
+
+    return pg
+
+
 register_backend("gloo", _gloo_factory)
 register_backend("nccl", _nccl_factory)
+register_backend("xccl", _xccl_factory)
 
 
 def new_group(

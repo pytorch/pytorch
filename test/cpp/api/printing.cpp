@@ -10,7 +10,7 @@ TEST(PrintSciModeTest, ToggleScientificNotation) {
   torch::set_printoption_sci_mode(true);
   std::ostringstream oss1;
   oss1 << t;
-  auto out1 = std::move(oss1).str();
+  auto out1 = oss1.str();
   std::cout << "With sci_mode=true: '" << out1 << '\'' << std::endl;
   EXPECT_TRUE(
       out1.find("e-") != std::string::npos ||
@@ -20,7 +20,7 @@ TEST(PrintSciModeTest, ToggleScientificNotation) {
   torch::set_printoption_sci_mode(false);
   std::ostringstream oss2;
   oss2 << t;
-  auto out2 = std::move(oss2).str();
+  auto out2 = oss2.str();
   std::cout << "With sci_mode=false: '" << out2 << '\'' << std::endl;
   EXPECT_TRUE(
       out2.find("e-") == std::string::npos &&

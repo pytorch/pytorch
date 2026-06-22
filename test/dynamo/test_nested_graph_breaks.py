@@ -1530,6 +1530,33 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(cnts.op_count, 2)
 
+    def test_ngb_suppressed_for_inline_module(self):
+        """NGB should be suppressed for functions in NGB_SUPPRESS_INLINELIST."""
+        from unittest.mock import patch
+
+        def inner(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            return x + 2
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def outer(x):
+            return inner(x) + 3
+
+        inp = torch.randn(3)
+        inner_file = inner.__code__.co_filename
+        with patch(
+            "torch._dynamo.trace_rules.is_ngb_suppressed_inline",
+            side_effect=lambda f: f == inner_file,
+        ):
+            self.assertEqual(outer(inp), inp + 6)
+
+        # NGB normally handles an inlined graph break in 2 frames.
+        # With suppression, the break propagates to the parent, producing more.
+        self.assertGreater(cnts.frame_count, 2)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

@@ -3,9 +3,9 @@
 import math as pymath
 import warnings
 from collections.abc import Callable
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any, TypeVar
-
-from torch.utils._ordered_set import OrderedSet
 
 from .triton_compat import (
     _log2,
@@ -20,6 +20,20 @@ from .triton_compat import (
 
 _T = TypeVar("_T")
 _LOG_2_E: tl.constexpr = tl.constexpr(pymath.log2(pymath.e))
+_skip_gpu_driver_setup: ContextVar[bool] = ContextVar(
+    "_skip_gpu_driver_setup", default=False
+)
+
+
+@contextmanager
+def skip_gpu_driver_setup():
+    # Scoped no-op for set_driver_to_gpu(). ContextVar keeps nested/thread-local
+    # uses isolated.
+    token = _skip_gpu_driver_setup.set(True)
+    try:
+        yield
+    finally:
+        _skip_gpu_driver_setup.reset(token)
 
 
 def set_driver_to_cpu():
@@ -54,6 +68,9 @@ def _is_backend_active(name, backend):
 
 
 def set_driver_to_gpu():
+    if _skip_gpu_driver_setup.get():
+        return
+
     driver = triton.runtime.driver
     for name, backend in triton.backends.backends.items():
         if _is_backend_active(name, backend) and name != "cpu":
@@ -71,73 +88,13 @@ def set_driver_to_gpu():
     raise RuntimeError("Could not find an active GPU backend")
 
 
-def get_backend_options_for_target(target, options=None):
-    options = {} if options is None else dict(options)
-    backend = triton.compiler.compiler.make_backend(target)
-    return backend.parse_options(options).__dict__
-
-
 def get_backend_options():
     from triton.runtime import driver
 
     target = driver.active.get_current_target()
-    return get_backend_options_for_target(target)
-
-
-def _is_concrete_backend_option_value(value: Any) -> bool:
-    import sympy
-
-    import torch
-
-    if isinstance(
-        value,
-        (
-            torch.Tensor,
-            torch.SymInt,
-            torch.SymFloat,
-            torch.SymBool,
-            sympy.Expr,
-        ),
-    ):
-        return False
-    if isinstance(value, (tuple, list, OrderedSet, frozenset)):
-        return all(_is_concrete_backend_option_value(item) for item in value)
-    if isinstance(value, dict):
-        return all(
-            _is_concrete_backend_option_value(key)
-            and _is_concrete_backend_option_value(item)
-            for key, item in value.items()
-        )
-    return True
-
-
-def try_filter_backend_options_for_target(target, options, kernel_arg_names=()):
-    parsed_options = get_backend_options_for_target(target)
-    kernel_arg_names = OrderedSet(kernel_arg_names)
-    filtered_options = {
-        name: value for name, value in options.items() if name in parsed_options
-    }
-    invalid_options = [
-        name
-        for name in options
-        if name not in parsed_options and name not in kernel_arg_names
-    ]
-    if invalid_options:
-        raise RuntimeError(
-            "Triton launch kwargs must be kernel parameters or valid backend options: "
-            f"{sorted(invalid_options)!r}."
-        )
-    dynamic_options = [
-        name
-        for name, value in filtered_options.items()
-        if not _is_concrete_backend_option_value(value)
-    ]
-    if dynamic_options:
-        raise RuntimeError(
-            "Triton backend options must be concrete values: "
-            f"{sorted(dynamic_options)!r}."
-        )
-    return filtered_options
+    backend = triton.compiler.compiler.make_backend(target)
+    options = backend.parse_options(dict())
+    return options.__dict__
 
 
 def get_constexprs(kernel: JITFunction) -> list[int]:

@@ -130,6 +130,7 @@ class TestCase(TorchTestCase):
     def assertExpectedInline(self, *args: Any, **kwargs: Any) -> None:  # type: ignore[override]
         if config.debug_disable_compile_counter:
             return
+        kwargs["skip"] = kwargs.get("skip", 0) + 1
         return super().assertExpectedInline(*args, **kwargs)
 
 

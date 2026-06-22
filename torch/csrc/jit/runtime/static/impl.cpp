@@ -57,7 +57,7 @@ namespace {
 std::string iValueToString(const c10::IValue& val) {
   std::ostringstream oss;
   oss << val;
-  return std::move(oss).str();
+  return oss.str();
 }
 #endif
 
@@ -69,6 +69,42 @@ bool allArgsAreTensors(const Node* node) {
 }
 
 } // namespace
+
+#ifdef FBCODE_CAFFE2
+
+C10_DEFINE_REGISTRY(SRNodeExecutorRegistry, NodeExecutorFunctor)
+
+namespace {
+
+static void sequentialExecute(
+    BlockRunner& block_runner,
+    ProcessedNode* nodes,
+    size_t num_nodes,
+    void* /*ctx*/) {
+  for (size_t i = 0; i < num_nodes; ++i) {
+    nodes[i].run();
+    // Check for incorrect schema alias info.
+    block_runner.verify_and_correct_memory_overlap(nodes[i]);
+  }
+}
+
+struct SequentialNodeExecutorFunctor : public NodeExecutorFunctor {
+  NodeExecutorFn Create(
+      const BlockInfo& /*block_info*/,
+      const StaticModuleOptions& /*opts*/,
+      void** /*context*/) override {
+    return &sequentialExecute;
+  }
+};
+
+} // namespace
+
+C10_REGISTER_CLASS(
+    SRNodeExecutorRegistry,
+    node_executor,
+    SequentialNodeExecutorFunctor)
+
+#endif // FBCODE_CAFFE2
 
 // A manually curated set of ops that are disallowed in static runtime.
 // These are rarely-used ops. Disallowing them typically eliminates
@@ -146,7 +182,7 @@ std::string dumpValueSet(
     oss << '%' << val->debugName() << ", ";
   }
   oss << '}';
-  return std::move(oss).str();
+  return oss.str();
 }
 
 namespace {
@@ -948,6 +984,20 @@ BlockRunner::BlockRunner(
     }
     pnode.set_metadata(std::move(block_runners));
   }
+
+#ifdef FBCODE_CAFFE2
+  // Initialize the pluggable node executor from the registry. If no executor is
+  // registered, or the registered one opts out (returns nullptr), fall back to
+  // the default sequential execution to preserve baseline semantics.
+  node_executor_owner_ = SRNodeExecutorRegistry()->Create("node_executor");
+  if (node_executor_owner_ != nullptr) {
+    node_executor_fn_ = node_executor_owner_->Create(
+        block_info_, sm.opts(), &node_executor_ctx_);
+  }
+  if (node_executor_fn_ == nullptr) {
+    node_executor_fn_ = &sequentialExecute;
+  }
+#endif
 }
 
 BlockRunner::BlockRunner(BlockRunner&&) noexcept = default;
@@ -1320,12 +1370,18 @@ c10::IValue BlockRunner::run_impl(
 
     set_inputs(std::forward<IValueList>(args), kwargs);
 
+#ifdef FBCODE_CAFFE2
+    DCHECK(node_executor_fn_ != nullptr);
+    node_executor_fn_(*this, nodes_.data(), nodes_.size(), node_executor_ctx_);
+#else
     for (auto& n : nodes_) {
       // LOG(INFO) << "Running node: " << PrintNode(n.node());
       n.run();
       // Check for incorrect schema alias info.
       verify_and_correct_memory_overlap(n);
     }
+#endif
+
     on_exit.setFinished();
   }
 

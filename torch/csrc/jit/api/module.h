@@ -656,7 +656,7 @@ struct NamedPolicy {
         }
         ss << nameFragment(cursors[i]);
       }
-      name = std::move(ss).str();
+      name = ss.str();
     }
     return value_type{std::move(name), Policy::create(cursors, std::move(v))};
   }

@@ -409,6 +409,8 @@ TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   m.impl("nccl_put_signal",
       torch::CppFunction::makeFromBoxedFunction<&nccl_put_signal_boxed>());
   m.impl("nccl_reduce_scatter_offset", c10d::nccl_extension::nccl_reduce_scatter_offset);
+  m.impl("nccl_all_to_all_nd", c10d::nccl_extension::nccl_all_to_all_nd);
+  m.impl("nccl_all_gather_offset", c10d::nccl_extension::nccl_all_gather_offset);
 }
 
 // Use CompositeExplicitAutograd as key since ops do not accept tensor as input

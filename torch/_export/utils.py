@@ -256,15 +256,17 @@ def _populate_param_buffer_metadata_to_new_gm(
         metadata.pop("nn_module_stack", None)
         metadata.pop("stack_trace", None)
 
+    inputs_to_parameters = new_sig.inputs_to_parameters
+    inputs_to_buffers = new_sig.inputs_to_buffers
     for node in gm.graph.nodes:
         if node.op == "placeholder":
-            if node.target in new_sig.inputs_to_parameters:
-                param_name = new_sig.inputs_to_parameters[node.target]
+            if node.target in inputs_to_parameters:
+                param_name = inputs_to_parameters[node.target]
                 if param_name in params_buffers_to_node_meta:
                     for k, v in params_buffers_to_node_meta[param_name].items():
                         node.meta[k] = v
-            if node.target in new_sig.inputs_to_buffers:
-                buffer_name = new_sig.inputs_to_buffers[node.target]
+            if node.target in inputs_to_buffers:
+                buffer_name = inputs_to_buffers[node.target]
                 if buffer_name in params_buffers_to_node_meta:
                     for k, v in params_buffers_to_node_meta[buffer_name].items():
                         node.meta[k] = v

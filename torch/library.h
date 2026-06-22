@@ -34,7 +34,7 @@
 /// // You must define all of the operators for this library in
 /// // this namespace.
 /// TORCH_LIBRARY(myops, m) {
-///   // Define a operator with exactly one implementation for all backends.
+///   // Define an operator with exactly one implementation for all backends.
 ///   m.def("add(Tensor self, Tensor other) -> Tensor", &add_impl);
 ///
 ///   // Define a schema for an operator, but provide no implementation
@@ -467,7 +467,7 @@ class TorchLibraryInit;
 // except it also carries at compile time a boolean saying whether or not a
 // registration should actually happen or not.  We then have extra overloads
 // which bypass registration entirely if a selective name is disabled.  We do a
-// constexpr test to see if a operator should be enabled or not; this is
+// constexpr test to see if an operator should be enabled or not; this is
 // currently implemented in ATen/core/op_registration/op_allowlist.h
 
 namespace detail {

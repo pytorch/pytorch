@@ -75,7 +75,7 @@ if TYPE_CHECKING:
 # [Adding a new supported class within the keys of ConstDictVariable]
 # - Implement hash_impl(self, tx) on the VariableTracker subclass (or rely on the
 #   base class default which uses get_real_python_backed_value())
-# - Implement is_python_equal() for key equality
+# - Implement richcompare_impl() for key equality
 
 
 def pydict_check(obj: VariableTracker) -> bool:
@@ -101,6 +101,7 @@ class ConstDictVariable(VariableTracker):
 
     _nonvar_fields = {
         "user_cls",
+        "_checking_python_constant",
         *VariableTracker._nonvar_fields,
     }
 
@@ -116,6 +117,8 @@ class ConstDictVariable(VariableTracker):
             kwargs.pop("original_items")
         if "should_reconstruct_all" in kwargs:
             kwargs.pop("should_reconstruct_all")
+        if "_checking_python_constant" in kwargs:
+            kwargs.pop("_checking_python_constant")
 
         super().__init__(**kwargs)
 
@@ -146,6 +149,11 @@ class ConstDictVariable(VariableTracker):
         )
         self.original_items = items.copy()
         self.user_cls = user_cls
+        # Re-entrancy guard for is_python_constant against self-referential
+        # dicts (d[k] = d, directly or via an OrderedDict/defaultdict wrapper
+        # whose _base_vt is this instance). Both forms re-enter this same
+        # instance's is_python_constant, so a per-instance flag suffices.
+        self._checking_python_constant = False
 
     def _get_dict_cls_from_user_cls(self, user_cls: type) -> type:
         accepted_dict_types = (dict, collections.OrderedDict, collections.defaultdict)
@@ -177,6 +185,25 @@ class ConstDictVariable(VariableTracker):
             val_str = _item_debug_repr(v)
             items.append(f"{key_str}: {val_str}")
         return "{" + ", ".join(items) + "}"
+
+    def is_python_constant(self) -> bool:
+        # Avoid the base implementation, which probes as_python_constant() and
+        # thus rebuilds a real dict, re-hashing the keys (wrong for keys with a
+        # side-effecting __hash__).  Check element constness directly instead.
+        # Re-entrancy guard: a self-referential dict (d[k] = d, directly or via
+        # an OrderedDict/defaultdict wrapper delegating to this _base_vt) would
+        # otherwise recurse forever. A cyclic dict is not a flat python
+        # constant; return False so reconstruct handles the cycle.
+        if self._checking_python_constant:
+            return False
+        self._checking_python_constant = True
+        try:
+            return all(
+                k.vt.is_python_constant() and v.is_python_constant()
+                for k, v in self.items.items()
+            )
+        finally:
+            self._checking_python_constant = False
 
     def as_python_constant(self) -> dict[Any, Any]:
         return {

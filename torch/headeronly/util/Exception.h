@@ -47,7 +47,7 @@ std::string stdTorchCheckMsgImpl(const char* /*msg*/, const Args&... args) {
   // in the headeronly world.
   std::ostringstream oss;
   ((oss << args), ...);
-  return std::move(oss).str();
+  return oss.str();
 }
 
 inline const char* stdTorchCheckMsgImpl(const char* msg) {

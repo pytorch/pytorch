@@ -416,6 +416,21 @@ class TestLinalg(TestCase):
             if driver == 'gels' and rcond is None:
                 check_solution_correctness(a, b, sol)
 
+    @onlyCPU
+    @skipCPUIfNoLapack
+    @dtypes(torch.double)
+    def test_linalg_lstsq_gelsy_jpvt_is_reset(self, device, dtype):
+        a = torch.zeros(2, 3, 3, device=device, dtype=dtype)
+        a[0] = torch.eye(3, device=device, dtype=dtype)
+        a[1, 0, 1] = 1
+        a[1, 1, 2] = 1
+
+        b = torch.ones(2, 3, 1, device=device, dtype=dtype)
+
+        result = torch.linalg.lstsq(a, b, driver='gelsy')
+        expected_rank = torch.tensor([3, 2], device=device)
+        self.assertEqual(result.rank, expected_rank)
+
     @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
@@ -5724,6 +5739,12 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError, "torch.int32 dtype"):
             torch.lu_unpack(lu_data, lu_pivots.long())
 
+        # mismatched LU_pivots shape must be rejected, not crash (see gh-177829)
+        with self.assertRaisesRegex(ValueError, "Expected LU_pivots to have shape"):
+            torch.lu_unpack(lu_data, torch.empty(0, dtype=torch.int32, device=device))
+        with self.assertRaisesRegex(ValueError, "Expected LU_pivots to have shape"):
+            torch.lu_unpack(lu_data, lu_pivots[..., :-1])
+
         # check that once flags are unset, Nones are returned
         p, l, u = torch.lu_unpack(lu_data, lu_pivots, unpack_data=False)
         self.assertTrue(l.numel() == 0 and u.numel() == 0)
@@ -10578,6 +10599,8 @@ class TestLinalgCudaOnly(TestCase):
     @setBlasBackendsToDefaultFinally
     @parametrize("dtype", [torch.float32, torch.bfloat16])
     def test_ck_blas_library_mm(self, dtype):
+        if dtype == torch.bfloat16 and isRocmArchAnyOf(MI200_ARCH):
+            self.skipTest("bfloat16 case skipped on gfx90a")
         device = 'cuda'
         shapes = [(7168, 8192, 1280), (1280, 8192, 7168), (8192, 8192, 1280)]
         for M, K, N in shapes:

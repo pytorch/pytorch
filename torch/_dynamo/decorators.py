@@ -18,6 +18,7 @@ from torch._vendor.packaging.version import InvalidVersion, Version
 from torch.compiler import is_compiling
 from torch.utils._contextlib import _DecoratorContextManager
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+from torch.utils._typing_utils import not_none
 
 from .._utils_internal import justknobs_check
 from . import trace_rules, variables
@@ -1825,7 +1826,7 @@ def override_optimization_hint(x: Any, val: int) -> None:
         raise TypeError(
             f"override_optimization_hint expects a torch.SymInt or int, got {type(x)}"
         )
-    shape_env = x.node.shape_env
+    shape_env = not_none(x.node.shape_env)
     expr = x.node.expr
     import sympy
 
@@ -1839,7 +1840,7 @@ def override_optimization_hint(x: Any, val: int) -> None:
             f"override_optimization_hint expects an unbacked symbol, "
             f"but {expr} is backed"
         )
-    shape_env.var_to_hint_override[expr] = val
+    shape_env._set_unbacked_var_to_hint_override(x, val)
 
 
 def is_dynamo_disable_recursive(method: Callable[[Any], Any]) -> bool | None:

@@ -81,7 +81,7 @@ void registerUpgrader(
             error_stream << '.';
           error_stream << keypath[i];
         }
-        TORCH_CHECK(false, std::move(error_stream).str());
+        TORCH_CHECK(false, error_stream.str());
       }
     }
   }
@@ -172,7 +172,7 @@ void throwUpgraderError(
     error_stream << "\nProblematic object: " << problematic_object.dump(2);
   }
 
-  TORCH_CHECK(false, std::move(error_stream).str());
+  TORCH_CHECK(false, error_stream.str());
 }
 
 nlohmann::json upgrade(nlohmann::json artifact, int target_version) {
@@ -226,7 +226,7 @@ nlohmann::json upgrade(nlohmann::json artifact, int target_version) {
         << "Failed to upgrade to target version " << target_version
         << ". Final version reached: " << current_version
         << ". This may indicate missing upgraders for intermediate versions.";
-    TORCH_CHECK(false, std::move(error_stream).str());
+    TORCH_CHECK(false, error_stream.str());
   }
 
   return artifact;

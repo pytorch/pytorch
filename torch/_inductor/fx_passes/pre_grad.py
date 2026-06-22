@@ -20,6 +20,7 @@ from torch.fx.passes.graph_transform_observer import (
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.nn import functional as F
 from torch.nn.utils.fusion import fuse_conv_bn_eval, fuse_conv_bn_weights
+from torch.utils._ordered_set import OrderedSet
 
 from .. import config
 from ..custom_graph_pass import get_custom_graph_passes
@@ -202,6 +203,20 @@ def _run_pre_dispatch_passes(
     add_passes: str | None = None,
     remove_passes: str | None = None,
 ) -> None:
+    # Wrapper that resolves pre_grad_fusion_options by device before
+    # calling group_batch_fusion_passes, so the predispatch path
+    # gets the same device filtering as the non-predispatch path.
+    def _group_batch_fusion_passes_wrapper(graph: torch.fx.Graph) -> None:
+        group_batch_fusion_passes(
+            graph,
+            pre_grad=True,
+            fusion_options=_resolve_pre_grad_fusion_options(
+                config.pre_grad_fusion_options, example_inputs
+            ),
+        )
+
+    _group_batch_fusion_passes_wrapper.__name__ = "group_batch_fusion_passes"
+
     # order matters
     default_pass_list = [
         # normalize passes, must be called as the first passes
@@ -210,7 +225,7 @@ def _run_pre_dispatch_passes(
         remove_noop_pass,
         relu_nan_to_num,
         fuse_chunk_reshape_concat_pass,
-        group_batch_fusion_passes,
+        _group_batch_fusion_passes_wrapper,
         normalize_node_kwargs_pass,
         fuse_chunk_squeeze_cat_pass,
         merge_concats_pass,
@@ -284,6 +299,40 @@ def _run_pre_dispatch_passes(
     shape_prop(gm)
 
 
+def _resolve_pre_grad_fusion_options(
+    fusion_options: dict[str, dict[str, object]],
+    example_inputs: Sequence[object] | None,
+) -> dict[str, dict[str, object]]:
+    """Filter pre_grad_fusion_options by device compatibility.
+
+    If an option has a "devices" key, only include it when at least one
+    example input tensor's device type matches. Fusions without a "devices"
+    key always pass through (user explicitly opted in). The "devices" key
+    is stripped from the returned options.
+    """
+    if example_inputs is None:
+        resolved: dict[str, dict[str, object]] = {}
+        for pass_name, options in fusion_options.items():
+            resolved[pass_name] = {k: v for k, v in options.items() if k != "devices"}
+        return resolved
+
+    example_device_types = OrderedSet(
+        t.device.type for t in example_inputs if isinstance(t, torch.Tensor)
+    )
+
+    resolved = {}
+    for pass_name, options in fusion_options.items():
+        devices = options.get("devices")
+        if (
+            devices is not None
+            and isinstance(devices, (list, tuple, OrderedSet))
+            and example_device_types.isdisjoint(OrderedSet(devices))
+        ):
+            continue
+        resolved[pass_name] = {k: v for k, v in options.items() if k != "devices"}
+    return resolved
+
+
 def pre_grad_passes(
     gm: torch.fx.GraphModule,
     example_inputs: Sequence[object] = (),
@@ -316,24 +365,39 @@ def pre_grad_passes(
             numpy_compat_normalization(gm.graph)
             if example_inputs is not None:
                 gm = fuse_fx(gm, example_inputs)
+            # Resolve pre_grad_fusion_options by filtering on device type
+            # declared in each fusion's "devices" config key. Fusions without
+            # a "devices" key always pass through. Uses a local copy to avoid
+            # mutating global config.
+            fusion_options = _resolve_pre_grad_fusion_options(
+                config.pre_grad_fusion_options, example_inputs
+            )
             # We should always do the normalization_pass first
-            if "normalization_pass" in config.pre_grad_fusion_options:
+            if "normalization_pass" in fusion_options:
                 pattern_matcher_pass = PRE_GRAD_PATTERNS["normalization_pass"]
                 pattern_matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
             GraphTransformObserver(gm, "group_batch_fusion_passes").apply_graph_pass(
-                lambda graph: group_batch_fusion_passes(graph, pre_grad=True)
+                lambda graph: group_batch_fusion_passes(
+                    graph, pre_grad=True, fusion_options=fusion_options
+                )
             )
-            for pass_name in config.pre_grad_fusion_options:
+            for pass_name in fusion_options:
                 # skip all patterns for group batch fusions
                 if pass_name in PRE_GRAD_FUSIONS or pass_name == "normalization_pass":
+                    continue
+                # skip auto-enabled fusion options that are not registered
+                # as pattern matcher passes (e.g., batch_linear_lhs when
+                # PRE_GRAD_FUSIONS is mocked by tests)
+                if pass_name not in PRE_GRAD_PATTERNS:
                     continue
                 pattern_matcher_pass = PRE_GRAD_PATTERNS[pass_name]
                 inductor_before_change = save_inductor_dict(
                     [pattern_matcher_pass.pass_name]
                 )
                 # we support run same pattern multiple times, the default is to run only once
-                counter = config.pre_grad_fusion_options[pass_name].get("counter", 1)
-                for _ in range(counter):
+                counter_raw = fusion_options[pass_name].get("counter", 1)
+                assert isinstance(counter_raw, int)  # noqa: S101
+                for _ in range(counter_raw):
                     pattern_matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
                 if not is_same_dict(counters["inductor"], inductor_before_change):
                     trace_structured(

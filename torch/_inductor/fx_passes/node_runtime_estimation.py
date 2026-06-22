@@ -117,7 +117,7 @@ def get_hint(x: int | torch.SymInt) -> int | None:
         return x
     if not isinstance(x, torch.SymInt):
         raise AssertionError(f"expected int or SymInt, got {type(x)}")
-    return x.node.hint if x.node.has_hint() else None
+    return x.hint if x.has_hint() else None
 
 
 def can_benchmark_collective() -> bool:
@@ -179,16 +179,16 @@ def _benchmark_collective_with_cuda_events_impl(
     )
 
     # Warmup: call collective once and wait
-    torch.cuda.synchronize()
+    torch.accelerator.synchronize()
     result = n.target(*args, **kwargs)  # type: ignore[operator]
     torch.ops._c10d_functional.wait_tensor(result)
-    torch.cuda.synchronize()
+    torch.accelerator.synchronize()
 
     # Benchmark with CUDA events
     comm_times = []
     for _ in range(nruns):
-        start_evt = torch.cuda.Event(enable_timing=True)
-        end_evt = torch.cuda.Event(enable_timing=True)
+        start_evt = torch.Event(enable_timing=True)
+        end_evt = torch.Event(enable_timing=True)
 
         start_evt.record()
         result = n.target(*args, **kwargs)  # type: ignore[operator]

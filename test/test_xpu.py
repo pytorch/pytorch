@@ -303,6 +303,8 @@ if __name__ == "__main__":
                 torch.xpu.memory_usage()
             with self.assertRaisesRegex(ImportError, "pyzes is required"):
                 torch.xpu.device_memory_used()
+            with self.assertRaisesRegex(ImportError, "pyzes is required"):
+                torch.xpu.list_gpu_processes()
 
     def test_temperature_returns_float(self):
         try:
@@ -413,6 +415,24 @@ if __name__ == "__main__":
         self.assertGreaterEqual(mem_used, 0)
         self.assertLessEqual(mem_used, total_memory)
 
+    def test_list_gpu_processes_returns_string(self):
+        try:
+            import pyzes  # noqa: F401
+        except ImportError:
+            self.skipTest("pyzes is required for this test")
+        if torch.xpu._get_pyzes_version() < (0, 1, 2):
+            with self.assertRaisesRegex(
+                RuntimeError, "requires pyzes version >= 0.1.2"
+            ):
+                torch.xpu.list_gpu_processes()
+
+        processes_info = torch.xpu.list_gpu_processes()
+
+        self.assertIsInstance(processes_info, str)
+        # Sanity check: Output should contain the header line with the current device
+        current_device = torch.xpu.current_device()
+        self.assertRegex(processes_info, rf"GPU:\s*{current_device}\b")
+
     def test_device_count_respects_affinity_mask(self):
         try:
             import pyzes  # noqa: F401
@@ -510,6 +530,39 @@ print(match1, match0)
             .splitlines()[-1]
         )
         self.assertEqual("True True", r)
+
+    def test_device_telemetry_api_without_ze_loader(self):
+        # Simulate libze_loader.so.1 missing: pyzes raises OSError at import
+        # time. Discovery must degrade gracefully; query APIs must surface a
+        # RuntimeError (not leak OSError).
+        import builtins
+
+        real_import = builtins.__import__
+        oserror_msg = (
+            "libze_loader.so.1: cannot open shared object file: "
+            "No such file or directory"
+        )
+
+        def fake_import(name, *args, **kwargs):
+            if name == "pyzes":
+                raise OSError(oserror_msg)
+            return real_import(name, *args, **kwargs)
+
+        torch.xpu._cached_zes_device_infos.clear()
+        with unittest.mock.patch.object(builtins, "__import__", fake_import):
+            self.assertEqual(torch.xpu._device_count_zes(), -1)
+
+            for api in (
+                torch.xpu.temperature,
+                torch.xpu.clock_rate,
+                torch.xpu.power_draw,
+                torch.xpu.utilization,
+                torch.xpu.memory_usage,
+                torch.xpu.device_memory_used,
+                torch.xpu.list_gpu_processes,
+            ):
+                with self.assertRaisesRegex(RuntimeError, "Failed to import pyzes"):
+                    api()
 
     @unittest.skipIf(
         IS_WINDOWS, "Only for lazy initialization on Linux, not applicable on Windows."
@@ -764,6 +817,24 @@ print(torch.xpu.is_initialized())
         torch.manual_seed(1234)
         torch.xpu.set_rng_state(g_state0)
         self.assertEqual(2024, torch.xpu.initial_seed())
+
+    def test_accelerator_default_generator(self):
+        torch.xpu.init()
+        for index in range(torch.accelerator.device_count()):
+            xpu_default_generator = torch.xpu.default_generators[index]
+            acc_default_generator = torch._C._accelerator_getDefaultGenerator(index)
+            self.assertEqual(xpu_default_generator.device, acc_default_generator.device)
+            # Verify they share the same underlying GeneratorImpl
+            self.assertEqual(
+                xpu_default_generator.get_state(), acc_default_generator.get_state()
+            )
+            xpu_default_generator.manual_seed(42)
+            self.assertEqual(acc_default_generator.initial_seed(), 42)
+            # Verify state stays in sync after reseeding
+            xpu_default_generator.seed()
+            self.assertEqual(
+                xpu_default_generator.get_state(), acc_default_generator.get_state()
+            )
 
     def test_serialization_array_with_storage(self):
         x = torch.randn(5, 5).xpu()

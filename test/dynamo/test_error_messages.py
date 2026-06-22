@@ -45,6 +45,31 @@ class GenericCtxMgr:
 
 
 class ErrorMessagesTest(LoggingTestCase):
+    def test_inplace_view_on_graph_input_hint(self):
+        def fn(x):
+            x.transpose_(1, 2)
+            return x
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.randn(2, 3, 4)
+            ),
+            """\
+Unsupported function call (delayed)
+  Explanation: Dynamo determined that a graph break should occur when calling `L['x'].transpose_`. Reason: Getting an inplace view on a graph input is not supported
+  Hint: Avoid mutating a graph input's tensor metadata with in-place view ops. If the mutation is only needed inside the compiled region, replace the in-place call with an out-of-place view, for example `x = x.transpose(1, 2)` instead of `x.transpose_(1, 2)`.
+  Hint: If you need to mutate the input tensor's metadata, move the in-place view call outside `torch.compile`.
+
+  Developer debug context: source: AttrSource(base=LocalSource(local_name='x', is_input=True, dynamism=None, is_derefed_cell_contents=False), member='transpose_')
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0148.html
+
+from user code:
+   File "test_error_messages.py", line N, in fn
+    x.transpose_(1, 2)""",
+        )
+
     def test_dynamic_shape_operator_no_meta_kernel(self):
         def fn():
             return torch.linalg.lstsq(torch.rand(10, 10), torch.rand(10, 10))

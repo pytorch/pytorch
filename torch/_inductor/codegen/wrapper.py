@@ -2470,33 +2470,24 @@ class PythonWrapperCodegen(CodeGen):
             return f"{name}_stride"
 
         def maybe_emit_replacement_aliases(sym: sympy.Symbol) -> None:
-            # Deferred runtime asserts and graph input metadata can reference
-            # either side of a backed-symbol replacement. Emit aliases so both
-            # the pre-replacement and canonical names are defined.
+            # Deferred runtime asserts reference pre-replacement backed
+            # symbols (e.g. s77) that were replaced to this canonical
+            # symbol (s31) during constraint solving. Emit aliases so
+            # the asserts compile. Skip unbacked symbols — they are
+            # defined separately by the unbacked symbol codegen path.
             from torch.utils._sympy.symbol import symbol_is_type, SymT
-
-            def is_backed_symbol(s: sympy.Symbol) -> bool:
-                return not symbol_is_type(s, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT))
 
             for src, tgt in V.graph.sizevars.shape_env.replacements.items():
                 if (
                     tgt == sym
                     and isinstance(src, sympy.Symbol)
                     and src not in bound_vars
-                    and is_backed_symbol(src)
-                    and is_backed_symbol(sym)
+                    and not symbol_is_type(
+                        src, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT)
+                    )
                 ):
                     code.writeline(f"{src} = {sym}")
                     bound_vars.add(src)
-                elif (
-                    src == sym
-                    and isinstance(tgt, sympy.Symbol)
-                    and tgt not in bound_vars
-                    and is_backed_symbol(sym)
-                    and is_backed_symbol(tgt)
-                ):
-                    code.writeline(f"{tgt} = {sym}")
-                    bound_vars.add(tgt)
 
         if isinstance(value, sympy.Expr):
             if not isinstance(value, sympy.Symbol) or value in bound_vars:
@@ -3005,7 +2996,6 @@ class PythonWrapperCodegen(CodeGen):
         reset_to_zero_args,
         grids: list[list[int | sympy.Expr]],
         epilogue_fusion: tuple[ir.ComputedBuffer, str] | None,
-        launch_kwargs: tuple[str, ...],
     ):
         """Codegen a user-defined Triton kernel and return its cache entry.
 
@@ -3016,10 +3006,6 @@ class PythonWrapperCodegen(CodeGen):
         inductor_meta, extra_launcher_call_args)``; subsequent calls with the
         same ``cache_key`` reuse the previously assigned name.
         """
-        from torch._dynamo.device_interface import get_interface_for_device
-
-        from ..runtime.triton_compat import GPUTarget
-        from ..runtime.triton_helpers import try_filter_backend_options_for_target
         from ..runtime.triton_heuristics import (
             config_to_dict,
             FixedGrid,
@@ -3147,11 +3133,9 @@ class PythonWrapperCodegen(CodeGen):
             indices=arg_indices,
             argdefs=[ArgName(x) for x in kernel.arg_names],
         )
-        device = V.graph.get_current_device_or_throw()
-        device_props = DeviceProperties.create(device)
         triton_meta: dict[str, Any] = {
             "signature": triton_signature,
-            "device": device_props,
+            "device": DeviceProperties.create(V.graph.get_current_device_or_throw()),
             # Triton compiler includes equal_to_1 args into constants even
             # when they are not constexpr. otherwise there may be a segfault
             # during launching the Inductor-compiled Triton kernel.
@@ -3177,29 +3161,6 @@ class PythonWrapperCodegen(CodeGen):
 
         if reset_to_zero_args:
             triton_meta["reset_to_zero"] = tuple(reset_to_zero_args)
-
-        backend_option_candidates = {
-            name: kwargs[name] for name in launch_kwargs if name in kwargs
-        }
-        if backend_option_candidates:
-            get_interface_for_device(device).raise_if_triton_unavailable(device)
-            assert GPUTarget is not None  # noqa: S101
-            target = GPUTarget(
-                device_props.type,
-                device_props.cc,
-                device_props.warp_size_or_default,
-            )
-            # HOP capture deliberately keeps an over-approximation of launch kwargs so
-            # a concrete kwarg can still have Triton's direct-call dual meaning:
-            # kernel parameter plus backend option. Once the target backend is known,
-            # only names accepted by parse_options() should be serialized into
-            # triton_meta["backend_options"]. Names that are neither kernel parameters
-            # nor backend options are invalid launch kwargs, matching eager Triton.
-            filtered_backend_options = try_filter_backend_options_for_target(
-                target, backend_option_candidates, kernel.arg_names
-            )
-            if filtered_backend_options:
-                triton_meta["backend_options"] = filtered_backend_options
 
         if len(grids) == 1:
             # compute the grid in the wrapper and pass it in as an arg

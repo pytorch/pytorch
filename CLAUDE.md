@@ -139,6 +139,13 @@ Follow these rules for all code changes in this repository:
 - Assume the reader has familiarity with PyTorch. They may not be the expert
   on the code that is being read, but they should have some experience in the
   area.
+- Splitting code across multiple lines (due to ruff’s column limit rule) is less
+  readable than having code on a single line. When the linter splits your
+  code across multiple lines, please try to put it back on a single line by
+  changing variable names or by using helper local variables. For tests that assert
+  against a golden string, keep just the golden string on one line instead of
+  splitting it across multiple lines and opt-out of the ruff column limit rule
+  via `noqa: B950`.
 - ASCII only in newly added code comments. Do not introduce Unicode characters
   (e.g., smart quotes, em dashes, arrows, non-ASCII letters) in new comments.
   Leave preexisting Unicode in untouched comments alone; only enforce this for

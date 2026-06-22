@@ -301,7 +301,11 @@ jobs:
         uses: ./.github/actions/upload-test-artifacts
         if: always() && steps.test.conclusion && steps.test.conclusion != 'skipped'
         with:
-          use-gha: true
+          # ROCm runners are not on EC2 and have no IAM instance profile, so the
+          # only AWS identity available is the read-only ECR login role, which
+          # cannot write to the gha-artifacts bucket. Skip S3 and upload directly
+          # to GHA to avoid s3:PutObject "not authorized" errors.
+          skip-s3: true
           file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
 
       - name: Collect backtraces from coredumps (if any)

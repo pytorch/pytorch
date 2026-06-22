@@ -18,7 +18,7 @@
 #include <utility>
 
 #ifdef _WIN32
-#include <Windows.h>
+#include <torch/headeronly/util/win32-headers.h>
 #endif
 
 namespace fs = c10::filesystem;

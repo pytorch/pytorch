@@ -7,11 +7,13 @@ import torch
 
 try:
     from cuda.bindings import (  # pyrefly: ignore[missing-import]
+        driver as _cuda_bindings_driver,
         runtime as _cuda_bindings_runtime,
     )
 
     _HAS_CUDA_BINDINGS = True
 except ImportError:
+    _cuda_bindings_driver = None  # type: ignore[assignment]
     _cuda_bindings_runtime = None  # type: ignore[assignment]
     _HAS_CUDA_BINDINGS = False
 
@@ -92,6 +94,34 @@ def _check_cuda_bindings(result: Any) -> Any:
         if isinstance(err_str, bytes):
             err_str = err_str.decode()
         raise RuntimeError(f"CUDA error: {err} ({err_str})")
+    if len(out) == 0:
+        return None
+    if len(out) == 1:
+        return out[0]
+    return out
+
+
+def _check_cuda_bindings_driver(result: Any) -> Any:
+    """Check a cuda.bindings (cuda-python) driver call result for errors.
+
+    Like ``_check_cuda_bindings`` but for the CUDA driver API, whose calls
+    return ``(CUresult, *outputs)`` and report errors via ``cuGetErrorString``.
+    """
+    if not _HAS_CUDA_BINDINGS:
+        raise RuntimeError("cuda.bindings is not available")
+    err, *out = result
+    if (
+        err
+        != _cuda_bindings_driver.CUresult.CUDA_SUCCESS  # pyrefly: ignore[missing-attribute]
+    ):
+        _, err_str = (
+            _cuda_bindings_driver.cuGetErrorString(  # pyrefly: ignore[missing-attribute]
+                err
+            )
+        )
+        if isinstance(err_str, bytes):
+            err_str = err_str.decode()
+        raise RuntimeError(f"CUDA driver error: {err} ({err_str})")
     if len(out) == 0:
         return None
     if len(out) == 1:

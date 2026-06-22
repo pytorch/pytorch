@@ -32,6 +32,7 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.utils import _pytree as pytree
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
+from torch.utils._typing_utils import not_none
 from torch.utils.flop_counter import flop_registry
 
 from .virtualized import V
@@ -129,7 +130,7 @@ def _is_fake_tensor_same(
 
         if isinstance(new, torch.types.py_sym_types):
             return (
-                new.node.shape_env._maybe_evaluate_static(
+                not_none(new.node.shape_env)._maybe_evaluate_static(
                     sympy.Eq(new.node.expr, old.node.expr)
                 )
                 == sympy.true

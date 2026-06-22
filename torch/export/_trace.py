@@ -2159,12 +2159,6 @@ def _non_strict_export(
     _to_aten_func can either be `_export_to_aten_ir_make_fx` or `_export_to_aten_ir`
     """
 
-    if isinstance(dynamic_shapes, (ShapesSpec, ParamsSpec)):
-        raise NotImplementedError(
-            "ShapesSpec/ParamsSpec in dynamic_shapes is not yet supported "
-            "in non-strict export. Use strict=True for now."
-        )
-
     out_spec: TreeSpec | None = None
     in_spec: TreeSpec | None = None
 

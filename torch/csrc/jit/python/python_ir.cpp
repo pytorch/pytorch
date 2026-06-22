@@ -812,7 +812,7 @@ void initPythonIRBindings(PyObject* module_) {
           [](Type& t) {
             std::ostringstream s;
             s << t;
-            return std::move(s).str();
+            return s.str();
           })
       .def(
           "containedTypes",

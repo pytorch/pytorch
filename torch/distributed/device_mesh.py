@@ -45,6 +45,7 @@ else:
     from torch.distributed import config as dist_config
     from torch.distributed.distributed_c10d import (
         _get_default_group,
+        _register_process_group_opaque_type,
         _resolve_process_group,
         get_backend,
         get_process_group_ranks,
@@ -1676,19 +1677,7 @@ def _register_distributed_opaque_types():
 
     from torch._library.opaque_object import MemberType, register_opaque_type
 
-    register_opaque_type(
-        ProcessGroup,
-        typ="reference",
-        members={
-            "size": MemberType.USE_REAL,
-            "rank": MemberType.USE_REAL,
-            "_get_backend_name": MemberType.USE_REAL,
-            "group_name": MemberType.USE_REAL,
-            "group_desc": MemberType.USE_REAL,
-            "__eq__": MemberType.USE_REAL,
-            "__ne__": MemberType.USE_REAL,
-        },
-    )
+    _register_process_group_opaque_type()
 
     register_opaque_type(
         DeviceMesh,

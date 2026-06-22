@@ -4136,6 +4136,10 @@ class Scheduler:
         with dynamo_timed("Scheduler.__init__"):
             self._init(nodes)
 
+    @staticmethod
+    def count_kernel_nodes(nodes: Sequence[BaseSchedulerNode]) -> int:
+        return sum(1 for node in nodes if not isinstance(node, NopKernelSchedulerNode))
+
     def _init(self, nodes: list[ir.Operation]) -> None:
         super().__init__()
         V.graph.scheduler = self
@@ -5699,7 +5703,15 @@ class Scheduler:
                         # pyrefly: ignore [bad-argument-type]
                         with multi_node.swap_as_triton_caller(choice):
                             future_choices.append(
-                                (choice, *self.compile_kernel(node_list_fused))
+                                (
+                                    choice,
+                                    *self.compile_kernel(
+                                        node_list_fused,
+                                        hint_override=getattr(
+                                            choice, "hint_override", None
+                                        ),
+                                    ),
+                                )
                             )
                     elif is_nvgemm:
                         # pyrefly: ignore [missing-attribute]
@@ -9386,12 +9398,7 @@ class Scheduler:
         if min_size > 0:
             for i, (partition, skip) in enumerate(zip(partitions, skip_cudagraphs)):
                 if not skip:
-                    # Count kernels excluding NopKernelSchedulerNode
-                    kernel_count = sum(
-                        1
-                        for n in partition
-                        if not isinstance(n, NopKernelSchedulerNode)
-                    )
+                    kernel_count = self.count_kernel_nodes(partition)
                     if kernel_count < min_size:
                         skip_cudagraphs[i] = True
                         cudagraphs_log.debug(

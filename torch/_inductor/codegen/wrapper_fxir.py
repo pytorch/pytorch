@@ -1142,8 +1142,6 @@ class FxConverter:
             raise AssertionError(f"kwargs overlap config: {call_kwargs}")
         # pyrefly: ignore [missing-attribute]
         call_kwargs.update(kernel_config.kwargs)
-        if extra_options:
-            call_kwargs.update(extra_options)
 
         # Replace sympy.floor with FloorDiv, to make the expression traceable.
         grid = [replace_floor_div(x) if isinstance(x, sympy.Expr) else x for x in grid]
@@ -1166,7 +1164,6 @@ class FxConverter:
                 "grid": wrapper_grid,
                 "tma_descriptor_metadata": {},
                 "kwargs": call_kwargs,
-                "launch_kwargs": tuple(extra_options or ()),
             },
         )
         if extra_options:

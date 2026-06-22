@@ -51,19 +51,6 @@ from torch.profiler import (
     record_function,
     supported_activities,
 )
-from torch.profiler._pattern_matcher import (
-    Conv2dBiasFollowedByBatchNorm2dPattern,
-    ExtraCUDACopyPattern,
-    ForLoopIndexingPattern,
-    FP32MatMulPattern,
-    GradNotSetToNonePattern,
-    MatMulDimInFP16Pattern,
-    NamePattern,
-    OptimizerSingleTensorPattern,
-    Pattern,
-    report_all_anti_patterns,
-    SynchronizedDataLoaderPattern,
-)
 from torch.testing._internal.common_cuda import SM100OrLater, TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -503,7 +490,7 @@ with profile(activities=[ProfilerActivity.CUDA]):
                 "-c",
                 """
 import torch
-from torch.profiler import _cupti_monitor
+from torch.profiler._cupti import monitor as _cupti_monitor
 
 _cupti_monitor.enable_hes_early()
 assert _cupti_monitor.is_hes_enabled()
@@ -519,7 +506,7 @@ assert _cupti_monitor.is_hes_enabled()
                 "-c",
                 """
 import torch
-from torch.profiler import _cupti_monitor
+from torch.profiler._cupti import monitor as _cupti_monitor
 
 torch.randn(1, device="cuda")
 _cupti_monitor.enable_hes_early()
@@ -537,7 +524,7 @@ _cupti_monitor.enable_hes_early()
 
     @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
     def test_cupti_monitor_collection_raw_dump_smoke(self):
-        from torch.profiler import _cupti_monitor
+        from torch.profiler._cupti import monitor as _cupti_monitor
 
         with TemporaryDirectoryName() as out_dir:
             self.assertIsNone(_cupti_monitor.get_monitor())
@@ -575,7 +562,7 @@ _cupti_monitor.enable_hes_early()
 
     @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
     def test_cupti_monitor_collection_repeated_lifecycle(self):
-        from torch.profiler import _cupti_monitor
+        from torch.profiler._cupti import monitor as _cupti_monitor
 
         for _ in range(2):
             with TemporaryDirectoryName() as out_dir:
@@ -855,10 +842,10 @@ class TestProfiler(TestCase):
         import ctypes
 
         pyprof = torch._C._profiler
-        pyprof._cupti_monitor_reset_buffers()
-        self.addCleanup(pyprof._cupti_monitor_reset_buffers)
+        pyprof._cupti_monitor.reset_buffers()
+        self.addCleanup(pyprof._cupti_monitor.reset_buffers)
         buffer_size = 64 * 1024
-        pyprof._cupti_monitor_configure_buffers(buffer_size)
+        pyprof._cupti_monitor.configure_buffers(buffer_size)
 
         if version == 1:
             request_t = ctypes.CFUNCTYPE(
@@ -891,10 +878,10 @@ class TestProfiler(TestCase):
                 ctypes.c_void_p,
             )
         request = request_t(
-            pyprof._cupti_monitor_buffer_request_callback_address(version)
+            pyprof._cupti_monitor.buffer_request_callback_address(version)
         )
         complete = complete_t(
-            pyprof._cupti_monitor_buffer_complete_callback_address(version)
+            pyprof._cupti_monitor.buffer_complete_callback_address(version)
         )
 
         def do_request():
@@ -921,26 +908,26 @@ class TestProfiler(TestCase):
         # First request has an empty free list, so it allocates.
         ptr_a, size_a = do_request()
         self.assertEqual(size_a, buffer_size)
-        self.assertEqual(pyprof._cupti_monitor_allocated_buffers(), 1)
+        self.assertEqual(pyprof._cupti_monitor.allocated_buffers(), 1)
 
         # Complete it, drain it, and return it to the pool.
         do_complete(ptr_a)
-        self.assertEqual(pyprof._cupti_monitor_pending_buffers(), 1)
-        item = pyprof._cupti_monitor_get_completed()
+        self.assertEqual(pyprof._cupti_monitor.pending_buffers(), 1)
+        item = pyprof._cupti_monitor.get_completed()
         # 5th field is layout_epoch, 0 here (no reconfiguration in this test).
         self.assertEqual(item, (ptr_a, 4096, expected_ctx, expected_stream, 0))
-        self.assertEqual(pyprof._cupti_monitor_pending_buffers(), 0)
-        pyprof._cupti_monitor_return_buffer(ptr_a)
+        self.assertEqual(pyprof._cupti_monitor.pending_buffers(), 0)
+        pyprof._cupti_monitor.return_buffer(ptr_a)
 
         # The next request reuses the freed buffer: same pointer, no new alloc.
         ptr_b, _ = do_request()
         self.assertEqual(ptr_b, ptr_a)
-        self.assertEqual(pyprof._cupti_monitor_allocated_buffers(), 1)
+        self.assertEqual(pyprof._cupti_monitor.allocated_buffers(), 1)
 
         # A second concurrently-outstanding buffer forces a fresh allocation.
         ptr_c, _ = do_request()
         self.assertNotEqual(ptr_c, ptr_b)
-        self.assertEqual(pyprof._cupti_monitor_allocated_buffers(), 2)
+        self.assertEqual(pyprof._cupti_monitor.allocated_buffers(), 2)
 
     @skipIfTorchDynamo("native ctypes/CUPTI probe; nothing to compile")
     def test_cupti_monitor_v2_record_layout_capture(self):
@@ -954,9 +941,9 @@ class TestProfiler(TestCase):
         import ctypes
 
         pyprof = torch._C._profiler
-        pyprof._cupti_monitor_reset_buffers()
-        self.addCleanup(pyprof._cupti_monitor_reset_buffers)
-        pyprof._cupti_monitor_configure_buffers(64 * 1024)
+        pyprof._cupti_monitor.reset_buffers()
+        self.addCleanup(pyprof._cupti_monitor.reset_buffers)
+        pyprof._cupti_monitor.configure_buffers(64 * 1024)
 
         class FieldEntry(ctypes.Structure):
             _fields_ = [
@@ -1019,8 +1006,8 @@ class TestProfiler(TestCase):
             ctypes.c_size_t,
             ctypes.c_void_p,
         )
-        request = request_t(pyprof._cupti_monitor_buffer_request_callback_address(2))
-        complete = complete_t(pyprof._cupti_monitor_buffer_complete_callback_address(2))
+        request = request_t(pyprof._cupti_monitor.buffer_request_callback_address(2))
+        complete = complete_t(pyprof._cupti_monitor.buffer_complete_callback_address(2))
 
         buf = ctypes.c_void_p()
         size = ctypes.c_size_t()
@@ -1033,18 +1020,18 @@ class TestProfiler(TestCase):
             ctypes.cast(ctypes.pointer(info), ctypes.c_void_p),
         )
         # Drain the completed buffer so the pool is tidy for the reset cleanup.
-        item = pyprof._cupti_monitor_get_completed()
-        pyprof._cupti_monitor_return_buffer(item[0])
+        item = pyprof._cupti_monitor.get_completed()
+        pyprof._cupti_monitor.return_buffer(item[0])
         # Captured under the initial epoch 0, and the buffer is tagged with it.
         self.assertEqual(item[4], 0)
         self.assertEqual(
-            pyprof._cupti_monitor_record_layouts(0),
+            pyprof._cupti_monitor.record_layouts(0),
             [(9, 16, [(0, 0, 4), (5, 8, 8)])],
         )
 
         # Reconfiguring opens a new epoch with a different layout; the old epoch's
         # layout is retained so buffers still queued under it decode correctly.
-        self.assertEqual(pyprof._cupti_monitor_next_layout_epoch(), 1)
+        self.assertEqual(pyprof._cupti_monitor.next_layout_epoch(), 1)
         entries_b = (FieldEntry * 1)(FieldEntry(ctypes.sizeof(FieldEntry), 0, 0, 4, 4))
         layout_b = RecordLayout(
             ctypes.sizeof(RecordLayout),
@@ -1067,16 +1054,16 @@ class TestProfiler(TestCase):
             8,
             ctypes.cast(ctypes.pointer(info_b), ctypes.c_void_p),
         )
-        item_b = pyprof._cupti_monitor_get_completed()
-        pyprof._cupti_monitor_return_buffer(item_b[0])
+        item_b = pyprof._cupti_monitor.get_completed()
+        pyprof._cupti_monitor.return_buffer(item_b[0])
         self.assertEqual(item_b[4], 1)
         self.assertEqual(
-            pyprof._cupti_monitor_record_layouts(1),
+            pyprof._cupti_monitor.record_layouts(1),
             [(3, 8, [(0, 0, 4)])],
         )
         # Epoch 0 still holds the original layout.
         self.assertEqual(
-            pyprof._cupti_monitor_record_layouts(0),
+            pyprof._cupti_monitor.record_layouts(0),
             [(9, 16, [(0, 0, 4), (5, 8, 8)])],
         )
 
@@ -2397,8 +2384,13 @@ class TestProfiler(TestCase):
 
     def test_profiler_correlation_id(self):
         """
-        We expect the correlation_id to be unique across multiple invocation of the profiler,
-        So we will reuse id_uniqueness_set.
+        We expect the correlation_id of CPU operator events to be unique across
+        multiple invocations of the profiler, so we will reuse id_uniqueness_set.
+        Only cpu_op events are checked: with CUDA available, profile() also
+        collects CUDA activities, and CUPTI's device-enumeration calls at startup
+        (cudaGetDeviceCount, etc.) are recorded as cuda_runtime events whose
+        correlation ids come from a separate counter (also starting at 1) and
+        would otherwise collide with the operator ids.
         """
         id_uniqueness_set = set()
         model = torch.nn.Sequential(
@@ -2414,7 +2406,8 @@ class TestProfiler(TestCase):
                 model(inputs)
             for event in prof.profiler.kineto_results.events():
                 corr_id = event.correlation_id()
-                if (corr_id) and event.device_type() == DeviceType.CPU:
+                is_cpu = event.device_type() == DeviceType.CPU
+                if corr_id and is_cpu and event.activity_type() == "cpu_op":
                     self.assertTrue(corr_id not in id_uniqueness_set)
                     id_uniqueness_set.add(corr_id)
                     self.assertTrue(corr_id < uint32_max)
@@ -2738,7 +2731,11 @@ class TestProfiler(TestCase):
     def test_profiler_time_scale(self):
         MARGIN_ERROR = 0.5
         SEC_TO_US = 1000 * 1000
-        WAIT_TIME = 10
+        # IMPORTANT: For reasons that are not yet understood, having a long idle
+        # profiling window will make later CUPTI activity records (in other tests)
+        # arrive with invalid timestamps, causing them to be dropped as out-of-range.
+        # Empirically, WAIT_TIME should be kept <= 6.
+        WAIT_TIME = 5
         with profile() as p:
             with torch.profiler.record_function("test_span"):
                 for _ in range(WAIT_TIME):
@@ -4381,272 +4378,6 @@ class TestExperimentalUtils(TestCase):
 <built-in function _cuda_synchronize>
 aten::copy_""",
         )
-
-    def test_profiler_name_pattern(self):
-        x = torch.ones((100, 100))
-        with profile() as prof:
-            for _ in range(5):
-                x = x @ x
-                x = x + x
-        matched_events = NamePattern(prof, "aten::mm").matched_events()
-        output = "\n".join([f"{event.name}" for event in matched_events])
-        self.assertExpectedInline(
-            output,
-            """\
-aten::mm
-aten::mm
-aten::mm
-aten::mm
-aten::mm""",
-        )
-
-    # TODO: Add logic for CUDA version of test
-    @unittest.skipIf(torch.cuda.is_available(), "Test not working for CUDA")
-    def test_profiler_pattern_match_helper(self):
-        x = torch.ones((100, 100))
-        with profile() as prof:
-            for _ in range(5):
-                x = x @ x
-                x = x + x
-        event_tree = prof.profiler.kineto_results.experimental_event_tree()
-        pattern = Pattern(prof)
-        self.assertEqual([], pattern.siblings_of(event_tree[0])[0])
-        self.assertEqual(event_tree[1:], pattern.siblings_of(event_tree[0])[1])
-        child_nodes = event_tree[0].children
-        self.assertEqual([], pattern.siblings_of(child_nodes[0])[0])
-        self.assertEqual(child_nodes[1:], pattern.siblings_of(child_nodes[0])[1])
-        self.assertEqual(
-            event_tree[0], pattern.root_of(event_tree[0].children[0].children[0])
-        )
-        self.assertEqual(None, pattern.next_of(event_tree[-1]))
-        self.assertEqual(event_tree[1], pattern.next_of(event_tree[0]))
-        self.assertEqual(event_tree[0], pattern.prev_of(event_tree[1]))
-
-    @unittest.skipIf(
-        TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite."
-    )
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
-    def test_profiler_extra_cuda_copy_pattern(self):
-        cases = (
-            (0, lambda: torch.ones((100, 100), device="cuda")),
-            (1, lambda: torch.ones((100, 100)).to("cuda")),
-            (1, lambda: torch.zeros((100, 100)).to("cuda")),
-            (1, lambda: torch.empty((100, 100)).fill_(5).to("cuda")),
-            (1, lambda: torch.ones((100, 100)).cuda()),
-            (1, lambda: torch.zeros((100, 100)).cuda()),
-            (1, lambda: torch.empty((100, 100)).fill_(5).cuda()),
-            (1, lambda: torch.rand((100, 100)).cuda()),
-            (1, lambda: torch.randn((100, 100)).cuda()),
-            (1, lambda: torch.full((100, 100), 10).cuda()),
-            (0, lambda: torch.rand((100, 100)).to(dtype=torch.float16)),
-            (0, lambda: torch.rand((100, 100)).half()),
-            (0, lambda: torch.rand((100, 100), device="cuda").half()),
-        )
-        num_matched = []
-        for _, fn in cases:
-            with profile(with_stack=True, record_shapes=True) as prof:
-                fn()
-            pattern = ExtraCUDACopyPattern(prof)
-            num_matched.append(len(pattern.matched_events()))
-        self.assertEqual(num_matched, [i for i, _ in cases])
-
-    @unittest.skipIf(
-        TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite."
-    )
-    def test_profiler_for_loop_indexing_pattern(self):
-        x = torch.ones((100, 100))
-
-        def case1():
-            for i in range(100):
-                x[i] = i
-
-        def case2():
-            y = 0
-            for i in range(100):
-                y += x[i]
-
-        def case3():
-            y = 1
-            for i in range(100):
-                y *= x[i]
-
-        def case4():
-            y = x
-            for _ in range(100):
-                y = y @ x
-
-        def case5():
-            for i in range(100):
-                x[i, :] = torch.arange(100) + i
-
-        cases = ((1, case1), (1, case2), (1, case3), (0, case4), (1, case5))
-        num_matched = []
-        for _, fn in cases:
-            with profile(with_stack=True) as prof:
-                fn()
-            pattern = ForLoopIndexingPattern(prof)
-            num_matched.append(len(pattern.matched_events()))
-        self.assertEqual(num_matched, [i for i, _ in cases])
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
-    def test_profiler_fp32_matmul_pattern(self):
-        x = torch.ones((100, 100), device="cuda")
-        with profile(with_stack=True) as prof:
-            x = x @ x
-        pattern = FP32MatMulPattern(prof)
-        has_tf32 = 0 if pattern.skip else 1
-        num_matched = len(pattern.matched_events())
-        self.assertEqual(num_matched, has_tf32)
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
-    def test_profiler_extra_cuda_copy_pattern_benchmark(self):
-        with profile(with_stack=True, record_shapes=True) as prof:
-            x = torch.ones((100, 100)).to("cuda")
-            x = torch.ones((50, 50)).to("cuda")
-        pattern = ExtraCUDACopyPattern(prof)
-        shapes_factor_map = pattern.benchmark(pattern.matched_events())
-        self.assertEqual(len(shapes_factor_map), 2)
-
-    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/165949")
-    def test_profiler_optimizer_single_tensor_pattern(self):
-        x = torch.ones((100, 100))
-        cases = (
-            (1, lambda: torch.optim.Adam(model.parameters())),
-            (1, lambda: torch.optim.SGD(model.parameters(), lr=0.01)),
-            (1, lambda: torch.optim.AdamW(model.parameters())),
-            (0, lambda: torch.optim.Adam(model.parameters(), foreach=True)),
-            (0, lambda: torch.optim.SGD(model.parameters(), lr=0.01, foreach=True)),
-            (0, lambda: torch.optim.AdamW(model.parameters(), foreach=True)),
-        )
-        num_matched = []
-        for _, fn in cases:
-            with profile(with_stack=True) as prof:
-                model = nn.Sequential(
-                    nn.Linear(100, 100),
-                    nn.ReLU(),
-                    nn.Linear(100, 10),
-                )
-                optimizer = fn()
-                optimizer.zero_grad()
-                y_hat = model(x)
-                loss = torch.nn.functional.cross_entropy(
-                    y_hat, torch.randint(0, 10, (100,))
-                )
-                loss.backward()
-                optimizer.step()
-            pattern = OptimizerSingleTensorPattern(prof)
-            num_matched.append(len(pattern.matched_events()))
-        self.assertEqual(num_matched, [i for i, _ in cases])
-
-    def test_profiler_synchronized_dataloader_pattern(self):
-        dataset = torch.rand((100, 100))
-        sync_dataloader = torch.utils.data.DataLoader(dataset, batch_size=10)
-        async_dataloader = torch.utils.data.DataLoader(
-            dataset, batch_size=10, num_workers=4
-        )
-        with profile(with_stack=True) as prof:
-            next(iter(sync_dataloader))
-            next(iter(async_dataloader))
-        pattern = SynchronizedDataLoaderPattern(prof)
-        num_matched = len(pattern.matched_events())
-        self.assertEqual(num_matched, 1)
-
-    @skipIfTorchDynamo(
-        "pattern checks for aten::_zero op which might not be there with torch.compile'd graph"
-    )
-    def test_profiler_grad_not_set_to_none_pattern(self):
-        x = torch.ones((100, 100))
-        model = nn.Sequential(
-            nn.Linear(100, 100),
-            nn.ReLU(),
-            nn.Linear(100, 10),
-        )
-        optimizer = torch.optim.Adam(model.parameters())
-        cases = (
-            (0, lambda: optimizer.zero_grad()),
-            (0, lambda: model.zero_grad()),
-            (1, lambda: optimizer.zero_grad(set_to_none=False)),
-            (1, lambda: model.zero_grad(set_to_none=False)),
-        )
-        num_matched = []
-        for _, fn in cases:
-            with profile(with_stack=True) as prof:
-                y_hat = model(x)
-                loss = torch.nn.functional.cross_entropy(
-                    y_hat, torch.randint(0, 10, (100,))
-                )
-                loss.backward()
-                optimizer.step()
-                fn()
-            pattern = GradNotSetToNonePattern(prof)
-            num_matched.append(len(pattern.matched_events()))
-        self.assertEqual(num_matched, [i for i, _ in cases])
-
-    def test_profiler_conv2d_bias_followed_by_batchnorm2d_pattern(self):
-        x = torch.randn((1, 3, 32, 32))
-        cases = (
-            (1, nn.Sequential(nn.Conv2d(3, 3, 3, 1, 1), nn.BatchNorm2d(3))),
-            (0, nn.Sequential(nn.Conv2d(3, 3, 3, 1, 1, bias=False), nn.BatchNorm2d(3))),
-            (0, nn.Sequential(nn.Conv2d(3, 3, 3, 1, 1))),
-        )
-        num_matched = []
-        for _, model in cases:
-            with profile(with_stack=True, record_shapes=True) as prof:
-                model(x)
-            pattern = Conv2dBiasFollowedByBatchNorm2dPattern(prof)
-            num_matched.append(len(pattern.matched_events()))
-        self.assertEqual(num_matched, [i for i, _ in cases])
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
-    def test_profiler_matmul_dim_fp16_pattern(self):
-        cases = (
-            (1, torch.randn((201, 201), device="cuda", dtype=torch.float16)),
-            (1, torch.randn((3, 97, 97), device="cuda", dtype=torch.float16)),
-            (0, torch.randn((200, 200), device="cuda", dtype=torch.float16)),
-            (0, torch.randn((3, 200, 200), device="cuda", dtype=torch.float16)),
-        )
-        num_matched = []
-        for _, x in cases:
-            with profile(with_stack=True, record_shapes=True) as prof:
-                x @ x
-            pattern = MatMulDimInFP16Pattern(prof)
-            num_matched.append(len(pattern.matched_events()))
-        self.assertEqual(num_matched, [i for i, _ in cases])
-
-    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
-    def test_profiler_pattern_matcher_json_report(self):
-        x = torch.ones((100, 100))
-        model = nn.Sequential(
-            nn.Linear(100, 100),
-            nn.ReLU(),
-            nn.Linear(100, 10),
-        )
-        optimizer = torch.optim.Adam(model.parameters())
-        with profile(with_stack=True, record_shapes=True) as prof:
-            y_hat = model(x)
-            loss = torch.nn.functional.cross_entropy(
-                y_hat, torch.randint(0, 10, (100,))
-            )
-            loss.backward()
-            optimizer.step()
-            optimizer.zero_grad()
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            report_all_anti_patterns(prof, json_report_dir=tmpdir, print_enable=False)
-
-            with open(os.path.join(tmpdir, "torchtidy_report.json")) as f:
-                report = json.load(f)
-
-            # It is platform dependent whether the path will include "profiler/"
-            keys = [k for k in report if k.endswith("test_profiler.py")]
-            self.assertEqual(len(keys), 1, f"{keys}")
-            entry = report[keys[0]]
-
-            self.assertTrue(len(entry) > 0)
-            expected_fields = sorted(["line_number", "name", "url", "message"])
-            for event in entry:
-                actual_fields = sorted(event.keys())
-                self.assertEqual(expected_fields, actual_fields)
 
     @unittest.skipIf(
         not IS_LINUX or not (IS_X86 or IS_ARM64), "linux x86/aarch64 only cpp unwinding"
