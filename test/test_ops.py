@@ -152,6 +152,7 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("index_select"),
     xfail("isin"),
     xfail("kthvalue"),
+    xfail("topk"),
     xfail("lerp"),
     xfail("linalg.cross"),
     xfail("linalg.eigh"),

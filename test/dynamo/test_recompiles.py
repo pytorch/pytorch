@@ -581,17 +581,18 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         values = torch.empty(3)
         indices = torch.empty(3, dtype=torch.long)
 
-        x = torch.arange(1., 6.)
+        x = torch.arange(1.0, 6.0)
         opt_model(x, 3, out=(values, indices))
-        recompiles_1 = get_num_torch_recompiles()
+        get_num_torch_recompiles()
 
-        x = torch.arange(1., 8.)
+        x = torch.arange(1.0, 8.0)
         opt_model(x, 3, out=(values, indices))
-        recompiles_2 = get_num_torch_recompiles()
+        get_num_torch_recompiles()
 
-        x = torch.arange(1., 10.)
+        x = torch.arange(1.0, 10.0)
         opt_model(x, 3, out=(values, indices))
         recompiles_3 = get_num_torch_recompiles()
+
 
         self.assertLessEqual(recompiles_3, 2)
 
@@ -601,5 +602,6 @@ if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
     run_tests()
+    
 
     
