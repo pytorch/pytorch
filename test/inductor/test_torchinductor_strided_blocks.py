@@ -1697,12 +1697,12 @@ class TritonTensorDescriptorTestCUDA(BlockDescriptorTestBase):
 
     def test_bool_dtype_skips_tma(self):
         """
-        torch.bool maps to Triton tl.int1 which has no CUtensorMapDataType
-        entry, so it should skip TMA.
+        torch.bool buffers map to Triton tl.int1 which has no
+        CUtensorMapDataType entry, so they should skip TMA.
         """
 
         def fn(a):
-            return torch.cumsum(a, -1)
+            return torch.logical_not(a)
 
         inp = torch.zeros(16, dtype=torch.bool, device=GPU_TYPE)
         self._run_and_compare(fn, inp, expected_num_block_pointers=0)
