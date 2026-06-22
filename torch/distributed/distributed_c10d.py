@@ -171,6 +171,36 @@ def _use_torchcomms_enabled() -> bool:
     return _TORCHCOMM_AVAILABLE and dist_config.use_torchcomms
 
 
+def _pg_options_to_hints(pg_options: Any) -> dict[str, str] | None:
+    """Convert ProcessGroupNCCL.Options to a torchcomms hints dict."""
+    if pg_options is None:
+        return None
+
+    hints: dict[str, str] = {}
+
+    if hasattr(pg_options, "config"):
+        config = pg_options.config
+        for attr in dir(config):
+            if not attr.startswith("_"):
+                try:
+                    value = getattr(config, attr)
+                    if not callable(value):
+                        hints[attr] = str(value)
+                except Exception:
+                    pass
+
+    for attr in dir(pg_options):
+        if not attr.startswith("_") and attr != "config":
+            try:
+                value = getattr(pg_options, attr)
+                if not callable(value):
+                    hints[attr] = str(value)
+            except Exception:
+                pass
+
+    return hints if hints else None
+
+
 _pickler = pickle.Pickler
 _unpickler = pickle.Unpickler
 
@@ -1850,6 +1880,28 @@ def init_process_group(
     if backend is None:
         backend = "undefined"
 
+    # TorchComms needs device-qualified backend strings so that split_group
+    # can create subgroups for each device type.  Auto-qualify bare backend
+    # names (e.g. "nccl" → "cpu:gloo,cuda:nccl") so callers don't have to.
+    if (
+        _use_torchcomms_enabled()
+        and device_id is not None
+        and ":" not in backend
+        and backend not in (Backend.UNDEFINED, Backend.MPI, Backend.FAKE)
+    ):
+        bare = backend.lower()
+        qualified: dict[str, str] = {}
+        for dev, be in Backend.default_device_backend_map.items():
+            if be == bare:
+                qualified[dev] = bare
+        if not qualified:
+            qualified[device_id.type] = bare
+        if "cpu" not in qualified:
+            cpu_be = Backend.default_device_backend_map.get("cpu")
+            if cpu_be:
+                qualified["cpu"] = cpu_be
+        backend = ",".join(f"{d}:{b}" for d, b in qualified.items())
+
     # Convert string into `Backend` type
     backend = Backend(backend)
 
@@ -2115,18 +2167,22 @@ def _new_process_group_helper(
                 torch_device,
                 backend_str,
             )
-            # TODO: figure out pg option conversion for torchComms.
             # `persistent_store=true` tells torchcomms to reuse the c10d-side
             # `backend_prefix_store` directly instead of constructing its own
             # TCPStore via StoreManager (which would otherwise require an
             # explicit MASTER_ADDR/MASTER_PORT and conflict with the c10d
             # rendezvous store on rapid re-binds).
+            hints: dict[str, str] = {"persistent_store": "true"}
+            if backend_options is not None:
+                extra = _pg_options_to_hints(backend_options)
+                if extra:
+                    hints.update(extra)
             comm = new_comm(
                 backend_str,
                 torch_device,
                 name=group_name,
                 store=backend_prefix_store,
-                hints={"persistent_store": "true"},
+                hints=hints,
             )
             buffer_size = os.environ.get(
                 "TORCH_FR_BUFFER_SIZE",
@@ -5664,7 +5720,6 @@ def split_group(
         pg_backend = Backend(str(backend))
         backend_config = BackendConfig(pg_backend)
 
-    # TODO: figure out pg option for torchComms
     if pg_options is None and not _use_torchcomms_enabled():
         # default pg_options same as the parent process group
         # A deep copy is needed because if the option will be modified inside split
@@ -5929,6 +5984,43 @@ def _new_group_via_split_group(
         group_ranks = list(range(global_world_size))
     else:
         group_ranks = sorted(ranks)
+
+    # Auto-qualify the requested backend so it always names just the parent's
+    # default device backend (the one matching ``bound_device_id``) plus any
+    # explicitly-requested extra device entry.
+    #
+    # split_group's filter has two requirements:
+    #   (1) it must contain the parent's default device backend, and
+    #   (2) device entries it omits are not included in the new subgroup.
+    #
+    # The naive default (``backend=None``) inherits the parent's full set,
+    # which creates an extra gloo comm per subgroup on every nccl-with-gloo
+    # parent — expensive and racy. Explicitly narrowing to the default
+    # device backend gives every torchcomms caller the same single-backend
+    # subgroup they almost always want, while still letting an explicit
+    # device-qualified string (``"cpu:gloo,cuda:nccl"``) opt back into the
+    # multi-backend behavior
+    bound = default_pg.bound_device_id
+    if bound is not None and (backend is None or ":" not in str(backend)):
+        parent_backend_str, _ = _world.pg_map[default_pg]
+        parent_device_backends = _parse_backend_string(parent_backend_str)
+        default_dev = bound.type
+        default_be = parent_device_backends.get(default_dev)
+        if default_be is not None:
+            if backend is None:
+                # Inherit just the default-device backend, not all parent
+                # device backends.
+                backend = f"{default_dev}:{default_be}"
+            else:
+                bare = str(backend)
+                matched_device = next(
+                    (d for d, be in parent_device_backends.items() if be == bare),
+                    None,
+                )
+                if matched_device is not None:
+                    qualified: dict[str, str] = {matched_device: bare}
+                    qualified.setdefault(default_dev, default_be)
+                    backend = ",".join(f"{d}:{b}" for d, b in qualified.items())
 
     # torchcomms backends expect every parent rank to participate in split:
     # members pass their ranks list, non-members pass [] (NCCL_SPLIT_NOCOLOR
