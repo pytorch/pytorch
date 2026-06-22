@@ -1143,7 +1143,12 @@ def get_cpp_options(
     if config.aot_inductor.cross_target_platform == "windows":
         passthrough_args.extend(["-static-libstdc++", "-static-libgcc"])
         if check_mingw_win32_flavor(MINGW_GXX) == "posix":
-            passthrough_args.append("-Wl,-Bstatic -lwinpthread -Wl,-Bdynamic")
+            # winpthread provides clock_gettime, referenced by static libstdc++'s
+            # chrono. The driver places libstdc++ after these args, so force the
+            # symbol undefined up front to pull winpthread in regardless of order.
+            passthrough_args.append(
+                "-Wl,-u,clock_gettime -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic"
+            )
 
     return (
         definitions,
