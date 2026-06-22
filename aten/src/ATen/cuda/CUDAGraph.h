@@ -71,6 +71,12 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
       MempoolId_t pool = {0, 0},
       cudaStreamCaptureMode capture_mode = cudaStreamCaptureModeGlobal);
   void capture_end();
+  // Split capture_end: capture_end_pre ends capture leaving graph_ live (both
+  // keep_graph modes); capture_end_post finalizes (instantiate + destroy for
+  // keep_graph=false). capture_end() == pre() + post(). The split lets callers
+  // operate on the captured cudaGraph_t before finalization.
+  void capture_end_pre();
+  void capture_end_post();
   void instantiate();
   // True once the cudaGraphExec_t has been instantiated (by capture_end when
   // keep_graph=false, or by an explicit instantiate()). The Python replay()

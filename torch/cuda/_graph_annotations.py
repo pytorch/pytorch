@@ -342,32 +342,27 @@ def mark_kernels(annotation: str | dict[str, Any]):
         _pending_scopes.append((annotation, tools_ids))
 
 
-def stamp_capture_graph_id(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
-    """Record the capturing graph's id on the graph object for later remap.
+def maybe_stamp_capture_graph_id(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
+    """Record the captured graph's id on the graph object for later remap.
 
-    Called on graph capture entry while the current stream is still capturing,
-    so the template graph (and its id) is available even when ``keep_graph=False``
-    destroys it at ``capture_end``. ``remap_to_exec_graph`` later matches this
-    graph's annotations to its exec id via this stamp, without relying on call
-    ordering. No-op if annotations are disabled, ``cudaGraphNodeGetToolsId`` is
-    unavailable, or the current stream is not capturing. Harmless when no
-    ``mark_kernels`` regions run: the annotation map stays empty so resolve and
-    remap are no-ops.
+    Called from ``capture_end`` in the window after capture ends and before the
+    graph is finalized, where the template ``cudaGraph_t`` is live for both
+    ``keep_graph`` modes (and reachable via ``raw_cuda_graph``). ``remap_to_exec_graph``
+    later matches this graph's annotations to its exec id via this stamp, without
+    relying on call ordering. No-op if annotations are disabled or
+    ``cudaGraphNodeGetToolsId`` is unavailable. Harmless when no ``mark_kernels``
+    regions run: the annotation map stays empty so resolve and remap are no-ops.
     """
     if not _annotations_enabled or _is_tools_id_unavailable():
         return
-    stream = _cuda_runtime.cudaStream_t(  # pyrefly: ignore[missing-attribute]
-        init_value=torch.cuda.current_stream().cuda_stream
-    )
-    capture_state = _get_capture_state(stream)
-    if capture_state is None:
-        return
-    graph, _ = capture_state
     # Past the _is_tools_id_unavailable() guard cuda-bindings is present and the
     # driver supports the toolsId API (same version gate as cudaGraphGetId), so
-    # any error here is unexpected: error-check and let it raise.
+    # any error here is unexpected: error-check and let it raise. cudaGraphGetId
+    # accepts the raw cudaGraph_t handle (int) directly.
     torch_cuda_graph._capture_graph_id = _check_cuda_bindings(
-        _cuda_runtime.cudaGraphGetId(graph)  # pyrefly: ignore[missing-attribute]
+        _cuda_runtime.cudaGraphGetId(  # pyrefly: ignore[missing-attribute]
+            torch_cuda_graph.raw_cuda_graph()
+        )
     )
     # Fresh capture: annotations are keyed by this capture id until remapped.
     torch_cuda_graph._remapped_exec_id = None
@@ -411,7 +406,7 @@ def remap_to_exec_graph(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
     This function rewrites the keys so annotations match the trace.
 
     The graph's capture id is read from the ``_capture_graph_id`` stamped on it
-    by ``stamp_capture_graph_id`` at capture entry, so only the annotations
+    by ``maybe_stamp_capture_graph_id`` in the capture_end window, so only the annotations
     belonging to this graph are rekeyed. This is order-independent and correct
     when several graphs are captured in sequence: call once per graph. Graphs
     captured with annotations disabled have no capture id and are skipped.
