@@ -1432,11 +1432,15 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
       auto [attn, lse, s, o] = process_chunk(q_h, k_h, v_h, bias_h);
 
       if (first) {
-        std::vector<int64_t> attn_sizes = {q.size(0), h};
-        for (int i = 2; i < attn.dim(); i++) {
-          attn_sizes.push_back(attn.size(i));
-        }
-        final_attn = at::empty(attn_sizes, attn.options());
+        // process_chunk transposes the kernel's (B,M,H,K) output to a
+        // (B,H,M,K) view, so attn is contiguous in (B,M,H,K) order. The
+        // non-chunked and batch-chunking paths preserve that layout, so
+        // final_attn must too. We cannot reuse attn.strides() the way the
+        // batch-chunking path does, because changing the heads dimension
+        // changes the inner strides. Allocate contiguous in (B,M,H,K) order
+        // and transpose back so the returned tensor has the standard layout.
+        std::vector<int64_t> attn_sizes = {q.size(0), attn.size(2), h, attn.size(3)};
+        final_attn = at::empty(attn_sizes, attn.options()).transpose(1, 2);
 
         if (compute_log_sumexp && lse.numel() > 0) {
           std::vector<int64_t> lse_sizes = {q.size(0), h};

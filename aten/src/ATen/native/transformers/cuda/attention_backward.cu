@@ -1196,7 +1196,9 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
     Tensor final_gb;
     if (grad_input_mask[3] && attn_bias_chunk.has_value() &&
         attn_bias_chunk.value().defined()) {
-      final_gb = at::zeros({B_chunk, h,
+      // Every head is fully overwritten by the per-chunk copy_ below, so
+      // empty (matching final_gq/gk/gv above) is sufficient; no zero-init.
+      final_gb = at::empty({B_chunk, h,
                             attn_bias_chunk.value().size(2),
                             attn_bias_chunk.value().size(3)},
                            attn_bias_chunk.value().options());
