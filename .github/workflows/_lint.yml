@@ -23,6 +23,14 @@ jobs:
       image: ${{ inputs.docker-image }}
     timeout-minutes: 120
     steps:
+      - name: Setup SSH (Click me for login details)
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        with:
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
+          instructions: |
+            All linting is done inside the container, to start an interactive session run:
+              docker exec -it $(docker container ps --format '{{.ID}}') bash
+
       - name: Setup Linux
         uses: pytorch/pytorch/.github/actions/setup-linux@main
         with:
@@ -47,3 +55,7 @@ jobs:
 
           # Execute the linter script
           bash "${RUNNER_TEMP}/linter_script"
+
+      - name: Teardown Linux
+        uses: pytorch/test-infra/.github/actions/teardown-linux@main
+        if: always()
