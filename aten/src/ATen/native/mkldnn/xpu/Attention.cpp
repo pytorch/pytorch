@@ -100,7 +100,6 @@ bool can_use_overrideable_attention(sdp::sdp_params const& params, bool debug) {
   constexpr auto constraints =
       std::to_array<bool (*)(sdp::sdp_params const&, bool)>(
           {sdp::check_nested_tensor,
-           sdp::check_for_dropout,
            sdp::check_tensor_shapes,
            sdp::check_batch_size_and_num_heads_dense<true /*supports GQA*/>,
            sdp::check_attn_mask_shape,
@@ -350,9 +349,6 @@ _scaled_dot_product_fused_attention_overrideable_xpu(
       query.size(1) % key.size(1) == 0,
       "scaled_dot_product_fused_attention_overrideable_xpu: number of heads in K/V must divide number of heads in Q");
   TORCH_INTERNAL_ASSERT(
-      dropout_p == 0.0,
-      "scaled_dot_product_fused_attention_overrideable_xpu: Currently do not support dropout > 0");
-  TORCH_INTERNAL_ASSERT(
       !(attn_bias.has_value() && is_causal),
       "scaled_dot_product_fused_attention_overrideable_xpu: attn_bias cannot present with is_causal");
   TORCH_INTERNAL_ASSERT(
@@ -468,9 +464,6 @@ _scaled_dot_product_fused_attention_overrideable_backward_xpu(
   TORCH_INTERNAL_ASSERT(
       value.size(3) == grad_out.size(3),
       "scaled_dot_product_fused_attention_overrideable_backward_xpu: V should have the same head_dim as grad_out");
-  TORCH_INTERNAL_ASSERT(
-      dropout_p == 0.0,
-      "scaled_dot_product_fused_attention_overrideable_backward_xpu: Currently do not support dropout > 0");
   TORCH_INTERNAL_ASSERT(
       logsumexp.dim() == 3 && logsumexp.size(0) == query.size(0) &&
       logsumexp.size(1) == query.size(1) &&
