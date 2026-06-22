@@ -325,12 +325,14 @@ class TestStandaloneInductor(TestCase):
         return_value="100a",
     )
     @unittest.skipIf(torch.version.hip is not None, "CUDA-only")
-    def test_aoti_cuda_target_arch_strips_suffix(self, _):
+    def test_aoti_cuda_target_arch_preserves_suffix(self, _):
         from torch._inductor.codegen.cuda import compile_utils
 
-        self.assertEqual(compile_utils._aoti_cuda_target_arch(), "100")
+        self.assertEqual(compile_utils._aoti_cuda_target_arch(), "100a")
+        with config.patch({"cuda.arch": "90"}):
+            self.assertEqual(compile_utils._aoti_cuda_target_arch(), "90a")
         with config.patch({"cuda.arch": "90a"}):
-            self.assertEqual(compile_utils._aoti_cuda_target_arch(), "90")
+            self.assertEqual(compile_utils._aoti_cuda_target_arch(), "90a")
 
     @mock.patch.dict(os.environ, {"TORCH_CUDA_ARCH_LIST": "8.0;8.6"})
     @mock.patch(
@@ -438,7 +440,7 @@ class TestStandaloneInductor(TestCase):
 
         precompile_config.assert_called_once_with(launcher.config, cc_override=90)
         _, params, cubin, bin_type, asm, asm_type = cache_set.call_args.args
-        self.assertEqual(params["cuda_arch"], "90")
+        self.assertEqual(params["cuda_arch"], "90a")
         self.assertEqual(cubin, b"target cubin")
         self.assertEqual(bin_type, "cubin")
         self.assertEqual(asm, "target ptx")
@@ -468,7 +470,7 @@ class TestStandaloneInductor(TestCase):
 
         precompile_config.assert_not_called()
         _, params, cubin, bin_type, asm, asm_type = cache_set.call_args.args
-        self.assertEqual(params["cuda_arch"], "100")
+        self.assertEqual(params["cuda_arch"], "100a")
         self.assertEqual(cubin, b"current cubin")
         self.assertEqual(bin_type, "cubin")
         self.assertEqual(asm, "current ptx")

@@ -131,8 +131,8 @@ def _nvcc_host_compiler_options() -> list[str]:
     ]
 
 
-def _nvcc_arch_as_compile_option() -> str:
-    arch = cuda_env.get_cuda_arch()
+def _cuda_arch_with_compile_suffix(arch: str) -> str:
+    arch = _normalize_cuda_arch(arch)
     if arch == "90":
         # Required by cutlass compilation.
         return "90a"
@@ -149,6 +149,13 @@ def _nvcc_arch_as_compile_option() -> str:
     if arch == "121":
         return "121a"
     return arch
+
+
+def _nvcc_arch_as_compile_option() -> str:
+    arch = cuda_env.get_cuda_arch()
+    if arch is None:
+        return arch
+    return _cuda_arch_with_compile_suffix(arch)
 
 
 def _normalize_cuda_arch(arch: str) -> str:
@@ -185,14 +192,9 @@ def _cuda_arch_is_compatible_with_current(arch: str, current_arch: str) -> bool:
 
 
 def _aoti_cuda_target_arch() -> str:
-    arch = (
-        _normalize_cuda_arch(str(config.cuda.arch))
-        if config.cuda.arch is not None
-        else _nvcc_arch_as_compile_option()
-    )
-    # Triton cc overrides are numeric compute capabilities. The suffix is only
-    # used for native nvcc compilation, not for the PTX AOTI packages here.
-    return str(_cuda_arch_number(arch))
+    if config.cuda.arch is not None:
+        return _cuda_arch_with_compile_suffix(str(config.cuda.arch))
+    return _nvcc_arch_as_compile_option()
 
 
 def _parse_gencode_options(flags: list[str]) -> OrderedSet[tuple[str, str]]:
