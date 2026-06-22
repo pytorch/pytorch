@@ -33,11 +33,6 @@ on:
         required: false
         type: string
         default: "gha-artifacts"
-      runner_prefix:
-        required: false
-        type: string
-        default: ""
-        description: Prefix for runner label.
       use-arc:
         required: false
         type: boolean
@@ -281,7 +276,7 @@ jobs:
   test-osdc:
     # Don't run on forked repos
     if: github.repository_owner == 'pytorch' && inputs.use-arc
-    runs-on: ${{ inputs.runner_prefix }}l-x86iamx-22-225-h100
+    runs-on: mt-l-x86iamx-22-225-h100
     container:
       image: ${{ inputs.docker-image }}
       options: "--gpus all"
