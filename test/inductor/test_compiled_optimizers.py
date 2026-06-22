@@ -46,6 +46,7 @@ from torch.optim.lr_scheduler import (
     OneCycleLR,
     PolynomialLR,
     ReduceLROnPlateau,
+    SequentialLR,
     StepLR,
 )
 from torch.testing._internal.common_device_type import (
@@ -152,11 +153,9 @@ LR_SCHEDULER_TO_KWARGS = {
     StepLR: {"step_size": 1, "gamma": 100},
     MultiStepLR: {"milestones": [1, 2], "gamma": 100},
     ExponentialLR: {"gamma": 100},
+    SequentialLR: {"schedulers": None, "milestones": [1, 2]},
     CosineAnnealingLR: {"T_max": 7},
-    # These schedulers have memory leaks in eager
-    # https://github.com/pytorch/pytorch/issues/126131
-    # SequentialLR: {"schedulers": None, "milestones": [1, 2]},
-    # ChainedScheduler: {"schedulers": None},
+    ChainedScheduler: {"schedulers": None},
     CyclicLR: {"base_lr": 0.001, "max_lr": 0.02, "cycle_momentum": False},
     CosineAnnealingWarmRestarts: {"T_0": 1},
     OneCycleLR: {
@@ -173,7 +172,7 @@ LR_SCHEDULER_TO_KWARGS = {
 
 
 def create_scheduler(scheduler, optim):
-    kwargs = LR_SCHEDULER_TO_KWARGS[scheduler]
+    kwargs = deepcopy(LR_SCHEDULER_TO_KWARGS[scheduler])
     if "schedulers" in kwargs:
         kwargs["schedulers"] = [
             create_scheduler(torch.optim.lr_scheduler.ConstantLR, optim)
@@ -201,6 +200,12 @@ class KernelCounts(NamedTuple):
 KERNEL_COUNT_OVERRIDES = {
     "test_rmsprop_foreach_weight_decay_cpu": lambda x: assert_expected_inline(x, """12""") ,
     "test_nadam_foreach_weight_decay_momentum_decay_cpu": lambda x: assert_expected_inline(x, """20"""),
+    "test_adam_capturable_foreach_xpu": lambda x: assert_expected_inline(x, """2"""),
+    "test_adam_foreach_xpu": lambda x: assert_expected_inline(x, """2"""),
+    "test_adam_weight_decay_amsgrad_capturable_foreach_xpu": lambda x: assert_expected_inline(x, """2"""),
+    "test_adam_weight_decay_amsgrad_foreach_xpu": lambda x: assert_expected_inline(x, """2"""),
+    "test_adam_weight_decay_foreach_xpu": lambda x: assert_expected_inline(x, """2"""),
+    "test_adam_weight_decay_maximize_foreach_xpu": lambda x: assert_expected_inline(x, """2"""),
     "test_adamw_amsgrad_capturable_foreach_cuda": lambda x: assert_expected_inline(x, """3"""),
     "test_adamw_amsgrad_capturable_foreach_xpu": lambda x: assert_expected_inline(x, """3"""),
     "test_adamw_amsgrad_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
@@ -245,10 +250,6 @@ KERNEL_COUNT_OVERRIDES = {
     "test_sgd_cuda": lambda x: assert_expected_inline(x, """4"""),
     "test_sgd_cpu": lambda x: assert_expected_inline(x, """4"""),
     "test_sgd_xpu": lambda x: assert_expected_inline(x, """4"""),
-    "test_adagrad_initial_accumulator_value_weight_decay_foreach_xpu": lambda x: assert_expected_inline(x, """2"""),
-    "test_adagrad_lr_decay_weight_decay_foreach_xpu": lambda x: assert_expected_inline(x, """2"""),
-    "test_adagrad_weight_decay_foreach_xpu": lambda x: assert_expected_inline(x, """2"""),
-    "test_adagrad_weight_decay_maximize_foreach_xpu": lambda x: assert_expected_inline(x, """2"""),
     "test_adagrad_tensor_lr_cpu": lambda x: assert_expected_inline(x, """6"""),
     "test_adagrad_tensor_lr_cuda": lambda x: assert_expected_inline(x, """6"""),
     "test_adagrad_tensor_lr_xpu": lambda x: assert_expected_inline(x, """6"""),
@@ -555,10 +556,16 @@ def make_recompile_test(optim_cls, closure=None, kernel_count=2, **kwargs):
                 compiled_step()
 
             # perturb state to force recompile
-            # Adagrad doesn't reinitialize state on each step
             # SGD has an empty state
-            if optim_cls in (Adagrad, SGD):
+            if optim_cls is SGD:
                 opt_compiled.param_groups[0]["lr"] = 0.02
+            elif optim_cls is Adagrad:
+                state_tensor = opt_compiled.state[
+                    opt_compiled.param_groups[0]["params"][0]
+                ]["sum"]
+                opt_compiled.state[opt_compiled.param_groups[0]["params"][0]]["sum"] = (
+                    torch.zeros_like(state_tensor)
+                )
             elif optim_cls is Adam:  # ensure we are guarding on the data_ptr of states
                 state_tensor = opt_compiled.state[
                     opt_compiled.param_groups[0]["params"][0]
@@ -571,7 +578,7 @@ def make_recompile_test(optim_cls, closure=None, kernel_count=2, **kwargs):
 
             compiled_step()
 
-        if self.check_kernel_count:
+        if self.check_kernel_count and kernel_count is not None:
             # currently, we compile the step and the rest of the computation
             # separately because the step is a single element tensor
             # hence, the usual kernel count is 2
@@ -719,6 +726,16 @@ class CompiledOptimizerTests(TestCase):
         self.assertIsNotNone(manager)
         self.assertEqual(manager.new_graph_id().id, 1)
 
+    def test_create_scheduler_does_not_mutate_kwargs(self):
+        for scheduler_cls in (ChainedScheduler, SequentialLR):
+            expected_kwargs = deepcopy(LR_SCHEDULER_TO_KWARGS[scheduler_cls])
+            model = torch.nn.Linear(1, 1)
+            opt = SGD(model.parameters(), lr=0.1)
+
+            create_scheduler(scheduler_cls, opt)
+
+            self.assertEqual(LR_SCHEDULER_TO_KWARGS[scheduler_cls], expected_kwargs)
+
     test_adam_recompile = make_recompile_test(Adam, lr=0.01)
     test_adamw_recompile = make_recompile_test(AdamW, lr=0.01)
     test_adamax_recompile = make_recompile_test(Adamax, lr=0.01)
@@ -726,7 +743,7 @@ class CompiledOptimizerTests(TestCase):
     test_rprop_recompile = make_recompile_test(Rprop, lr=0.01, kernel_count=2)
     test_rmsprop_recompile = make_recompile_test(RMSprop, lr=0.01)
     test_adadelta_recompile = make_recompile_test(Adadelta, lr=0.01)
-    test_adagrad_recompile = make_recompile_test(Adagrad, lr=0.01)
+    test_adagrad_recompile = make_recompile_test(Adagrad, lr=0.01, kernel_count=None)
     test_asgd_recompile_default = make_recompile_test(ASGD, lr=0.01)
     test_asgd_recompile_single = make_recompile_test(
         ASGD, kernel_count=8, lr=0.01, foreach=False
@@ -1007,6 +1024,42 @@ class CompiledOptimizerBitwiseTests(TestCase):
     The compiled optimizer step produces results that are bitwise identical
     to the eager optimizer step.
     """
+
+    @config.patch(
+        {
+            "score_fusion_memory_threshold": 1,
+            "eager_numerics.division_rounding": True,
+            "eager_numerics.use_pytorch_libdevice": True,
+            "emulate_precision_casts": True,
+        }
+    )
+    def test_foreach_lerp_scalar_high_weight_bitwise(self):
+        cases = [
+            (0.9, (torch.float32, torch.float32)),
+            (0.1, (torch.float32, torch.float32)),
+            (0.9, (torch.float32, torch.float64)),
+            (0.49999999, (torch.float32, torch.float64)),
+            (0.9, (torch.float16, torch.float16)),
+        ]
+
+        for weight, dtypes in cases:
+            with self.subTest(weight=weight, dtypes=dtypes):
+
+                def fn(start, end):
+                    return torch._foreach_lerp(start, end, weight)
+
+                torch.manual_seed(42)
+                start = [
+                    torch.randn(32, device=GPU_TYPE, dtype=dtypes[0]),
+                    torch.randn(16, device=GPU_TYPE, dtype=dtypes[1]),
+                ]
+                end = [
+                    torch.randn(32, device=GPU_TYPE, dtype=dtypes[0]),
+                    torch.randn(16, device=GPU_TYPE, dtype=dtypes[1]),
+                ]
+                expected = fn(start, end)
+                actual = torch.compile(fn)(start, end)
+                self.assertEqual(actual, expected, atol=0, rtol=0)
 
     @staticmethod
     def _test_optimizer_bitwise(

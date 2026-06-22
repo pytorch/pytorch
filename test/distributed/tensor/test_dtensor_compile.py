@@ -12,6 +12,7 @@ import torch
 import torch._dynamo
 import torch._dynamo.testing
 import torch.distributed as dist
+import torch.distributed._functional_collectives as funcol
 import torch.nn as nn
 from torch._C import FileCheck
 from torch._dynamo.functional_export import dynamo_graph_capture_for_export
@@ -52,11 +53,14 @@ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import get_devtype
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_LINUX,
     parametrize,
     run_tests,
     skipIfHpu,
     skipIfTorchDynamo,
     skipIfXpu,
+    TEST_WITH_SLOW,
+    TEST_XPU,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -248,6 +252,177 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         res = fn(x)
         res.to_local().sum().backward()
 
+    def test_to_local_backward_unbacked_symbolic_stride(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        local = torch.randn(8, 8, device=self.device_type, requires_grad=True)
+        x = DTensor.from_local(local, mesh, [Shard(0)], run_check=False)
+        torch._dynamo.decorators.mark_unbacked(x, 0, hint_override=x.shape[0])
+        torch._dynamo.decorators.mark_unbacked(x, 1, hint_override=x.shape[1])
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def fn(x):
+            return (x.to_local() * 2).sum()
+
+        fn(x).backward()
+        self.assertEqual(local.grad, torch.full_like(local, 2))
+
+    def test_compile_waits_act_nested_in_dtensor_local_tensor(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/180614.
+        # AOTAutograd must resolve AsyncCollectiveTensors (ACTs) nested in
+        # ``DTensor._local_tensor`` (e.g. from ``redistribute(async_op=True)``
+        # or FSDP2's async all-gather) before tracing and again before runtime
+        # execution. Otherwise inductor can read an in-flight collective.
+        from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x):
+            return x + 1
+
+        def make_dtensor_with_act_local():
+            dt = DTensor.from_local(
+                torch.randn(4, 4, device=self.device_type),
+                mesh,
+                [Replicate()],
+                run_check=False,
+            )
+            dt._local_tensor = AsyncCollectiveTensor(dt._local_tensor.clone())
+            return dt
+
+        wait_calls = []
+        orig_wait_tensor = funcol.wait_tensor
+
+        def counting_wait_tensor(t):
+            wait_calls.append(1)
+            return orig_wait_tensor(t)
+
+        with patch.object(funcol, "wait_tensor", counting_wait_tensor):
+            # Warmup compiles through Python dispatch (which waits); clear the
+            # counter so we measure only the compiled runtime path.
+            fn(make_dtensor_with_act_local())
+            wait_calls.clear()
+
+            dt = make_dtensor_with_act_local()
+            self.assertFalse(dt._local_tensor.completed)
+            fn(dt)
+
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertGreaterEqual(
+            len(wait_calls),
+            1,
+            "compiled graph must wait the AsyncCollectiveTensor nested in "
+            "DTensor._local_tensor",
+        )
+        self.assertTrue(dt._local_tensor.completed)
+
+    def test_direct_aot_dtensor_local_tensor_act_to_plain_no_crash(self):
+        # Companion to the wait test above: the crash half of
+        # https://github.com/pytorch/pytorch/issues/180614. Direct AOTAutograd
+        # entry points do not have Dynamo guards to recompile when a nested ACT
+        # input is later a plain tensor. The compiled graph must run on the
+        # plain local instead of trying to wait or unwrap it as ACT.
+        from torch._functorch.aot_autograd import aot_function
+        from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        compile_calls = 0
+
+        def fw_compiler(gm, example_inputs):
+            nonlocal compile_calls
+            compile_calls += 1
+            return gm
+
+        fn = aot_function(lambda x: x + 1, fw_compiler=fw_compiler)
+
+        # Trace with an ACT-wrapped local so the codegen specializes on it.
+        dt_act = DTensor.from_local(
+            torch.randn(4, 4, device=self.device_type),
+            mesh,
+            [Replicate()],
+            run_check=False,
+        )
+        dt_act._local_tensor = AsyncCollectiveTensor(dt_act._local_tensor.clone())
+        fn(dt_act)
+
+        # Invoke the same compiled graph with a plain-local DTensor.
+        dt_plain = DTensor.from_local(
+            torch.randn(4, 4, device=self.device_type),
+            mesh,
+            [Replicate()],
+            run_check=False,
+        )
+        self.assertNotIsInstance(dt_plain._local_tensor, AsyncCollectiveTensor)
+        out = fn(dt_plain)
+        self.assertEqual(out.to_local(), dt_plain.to_local() + 1)
+        self.assertEqual(compile_calls, 1)
+
+    def test_compile_dtensor_local_tensor_act_backward_passthrough(self):
+        # Passthrough forwards preserve ACT wrappers. If nested ACTs are
+        # allowed into traced metadata, backward expects an ACT tangent and
+        # rejects the plain-local cotangent autograd supplies.
+        from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def fn(x):
+            return x
+
+        local = torch.randn(4, 4, device=self.device_type, requires_grad=True)
+        dt = DTensor.from_local(local, mesh, [Replicate()], run_check=False)
+        dt._local_tensor = AsyncCollectiveTensor(dt._local_tensor.clone())
+        out = fn(dt)
+        out.to_local().sum().backward()
+        self.assertIsNotNone(local.grad)
+
+    @unittest.skipIf(not HAS_GPU, "standalone_compile requires GPU and triton")
+    @skipIfXpu(msg="standalone_compile coverage is CUDA-only")
+    @skip_if_lt_x_gpu(1)
+    @patch.object(torch._inductor.config, "compile_threads", 1)
+    def test_aot_standalone_compile_dtensor_to_dtype_layout(self):
+        from torch._inductor import standalone_compile
+
+        device = torch.device(self.device_type, 0)
+        mesh = DeviceMesh(self.device_type, torch.arange(1))
+        index = DTensor.from_local(
+            torch.arange(2, device=device, dtype=torch.int64),
+            mesh,
+            [Replicate()],
+            run_check=False,
+        )
+        rope_cache = DTensor.from_local(
+            torch.randn(4, 4, device=device),
+            mesh,
+            [Replicate()],
+            run_check=False,
+        )
+
+        def backend(gm, example_inputs):
+            return standalone_compile(
+                gm,
+                example_inputs,
+                dynamic_shapes="from_graph",
+                options={"config_patches": {}},
+                aot=True,
+                donate_graph_module=True,
+            )
+
+        def index_to(index, rope_cache):
+            return rope_cache[index].to(device=device).to_local()
+
+        with torch._dynamo.config.patch(enable_aot_compile=True):
+            compiled = torch.compile(index_to, backend=backend, fullgraph=True)
+        with torch.inference_mode():
+            artifact = compiled.aot_compile(((index, rope_cache), {}))
+
+        self.assertIsNotNone(artifact)
+
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW or TEST_XPU,
+        "https://github.com/pytorch/pytorch/issues/178745",
+    )
     @unittest.skipIf(not torch.accelerator.is_available(), "accelerator not available")
     def test_dtensor_basic_compile(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
@@ -294,6 +469,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
     return (view_1,)""",
         )
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/179690")
     @skipIfXpu(msg="AssertionError: torch-xpu-ops: 2958")
     @unittest.skipIf(not torch.accelerator.is_available(), "accelerator not available")
     def test_dtensor_basic_export(self):
@@ -383,6 +559,53 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             opt_fn = fn(x)
             compiled_out = compiled_fn(x)
             self.assertEqual(opt_fn, compiled_out)
+
+    def test_strided_shard_view_unbacked_local(self):
+        # Regression for torchtitan #3409: during compile-time sharding
+        # propagation for any _StridedShard view op,
+        # _StridedShard.local_shard_size_and_offset used to materialize
+        # offsets via .tolist() on a fake offsets tensor, allocating one
+        # unbacked SymInt per element. These symbols never reached the
+        # returned DTensor's tensor_meta, tripping the downstream
+        # PendingUnbackedSymbolNotFound check. The bug triggers for any
+        # _StridedShard view under compile regardless of whether the local
+        # tensor has backed or unbacked dims; torch.nonzero (producing an
+        # unbacked dim 0) is simply how torchtitan #3409 surfaced it.
+        #
+        # The bug lives in pure sharding-propagation arithmetic on rank 0
+        # alone (no collectives are issued during fake-tensor view tracing),
+        # so the FakeStore + world_size=2 setup used by this test class is
+        # equivalent to the multi-rank scenario for the no-offset path
+        # being exercised here.
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        global_bs = 16
+        slen = 4
+        dim = 4
+        split_factor = 8
+
+        def fn(sentinel):
+            nz = torch.nonzero(sentinel).flatten()
+            n_unbacked = nz.size(0)
+            torch._check(n_unbacked >= 1)
+            torch._check(n_unbacked <= global_bs)
+            local = torch.randn(n_unbacked, slen, dim)
+            dt = DTensor.from_local(
+                local,
+                mesh,
+                (_StridedShard(dim=0, split_factor=split_factor),),
+                shape=(global_bs, slen, dim),
+                stride=(slen * dim, dim, 1),
+                run_check=False,
+            )
+            return dt.view(-1, dim)
+
+        sentinel = torch.ones(global_bs, dtype=torch.int64)
+        out = torch.compile(fn, backend="aot_eager", fullgraph=True)(sentinel)
+        self.assertEqual(
+            out.placements,
+            (_StridedShard(dim=0, split_factor=split_factor),),
+        )
+        self.assertEqual(out.shape, (global_bs * slen, dim))
 
     def test_device_mesh_compile(self):
         def fn(x: DeviceMesh):
@@ -581,6 +804,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         res = opt_fn(x)
         self.assertEqual(res, ref)
 
+    @unittest.skip("https://github.com/pytorch/pytorch/issues/171934")
     def test_dtensor_input_mutations(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -954,6 +1178,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
         self.assertEqual(cnt.frame_count, 2)
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/177751")
     @with_comms
     @torch._dynamo.config.patch(trace_autograd_ops=True)
     def test_dtensor_requires_grad_intermediate_backward(self):
@@ -1194,7 +1419,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         # Temporarily ignore setUp(), and use rank3 graphs during tracing
         dist.destroy_process_group()
         fake_store = FakeStore()
-        dist.init_process_group("fake", store=fake_store, rank=3, world_size=2)
+        dist.init_process_group("fake", store=fake_store, rank=3, world_size=4)
         mesh = DeviceMesh(self.device_type, [1, 3])
 
         x = torch.randn(10, 257, 160, requires_grad=True)
@@ -1235,7 +1460,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         # Temporarily ignore setUp(), and use rank3 graphs during tracing
         dist.destroy_process_group()
         fake_store = FakeStore()
-        dist.init_process_group("fake", store=fake_store, rank=3, world_size=2)
+        dist.init_process_group("fake", store=fake_store, rank=3, world_size=4)
         mesh = DeviceMesh(self.device_type, [1, 3])
 
         x = torch.randn(10, 257, 160, requires_grad=True)
@@ -1426,6 +1651,9 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         out_dt = torch.matmul(tmp_dt, x_dt).permute(0, 2, 1)
         out_dt.sum().backward()
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/180656"
+    )
     def test_dynamo_dtensor_from_local_redistribute(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -2462,6 +2690,43 @@ class outer_fn(torch.nn.Module):
             "Placeholder dim should be symbolic",
         )
 
+    def test_make_fx_tp_embedding_no_shadow_nodes(self):
+        """make_fx through a TP-sharded embedding must not produce dead shadow nodes.
+
+        DTensor's ShardingPropagator runs each op on fake global-shape tensors
+        to derive output metadata. Without disable_proxy_modes_tracing, make_fx
+        traces those internal metadata ops, leaving dead "shadow" nodes backed
+        by empty_strided placeholders. For aten.embedding, the shadow node reads
+        uninitialized indices and crashes with out-of-bounds access at runtime.
+        """
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        vocab_size, embed_dim = 32, 16
+        weight = distribute_tensor(torch.randn(vocab_size, embed_dim), mesh, [Shard(0)])
+
+        def fn(weight, indices):
+            dt_indices = DTensor.from_local(
+                indices, mesh, [Replicate()], run_check=False
+            )
+            return torch.nn.functional.embedding(dt_indices, weight).to_local()
+
+        indices = torch.randint(0, vocab_size, (4,))
+
+        traced = make_fx(fn, tracing_mode="fake")(weight, indices)
+
+        empty_strided_nodes = [
+            n
+            for n in traced.graph.nodes
+            if n.op == "call_function"
+            and n.target == torch.ops.aten.empty_strided.default
+        ]
+        self.assertEqual(
+            len(empty_strided_nodes),
+            0,
+            "Shadow empty_strided nodes from ShardingPropagator leaked into "
+            "the make_fx graph; disable_proxy_modes_tracing is not active",
+        )
+
 
 @instantiate_parametrized_tests
 class TestDTensorCompileE2E(DTensorTestBase):
@@ -2925,6 +3190,76 @@ class TestDTensorCompileE2E(DTensorTestBase):
                 2,
                 f"Expected ProcessGroup placeholders but only got {len(placeholders)} placeholder(s)",
             )
+
+
+class TestDTensorACCompile(DTensorTestBase):
+    """Regression test for DTensor + AC + compile interaction.
+
+    When a DTensor with independent inner/outer symbolic shapes is lifted
+    as a freevar into a checkpoint HOP subgraph, ``_lift_basic_symbols``
+    recurses into the inner tensor with ``source=None`` and tries to lift
+    an unbound inner symbol to the root tracer, crashing with::
+
+        AssertionError: Source of '<sym>' is None when lifting it
+        to input of top-level.
+    """
+
+    @property
+    def world_size(self):
+        return 2
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_tp_ac_compile_dtensor_inner_symbol(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        # Embedding produces a DTensor whose inner/outer sizes get
+        # independent symbols (outer = global seq_len, inner = local
+        # seq_len). This is the pattern from TP with variable-length seqs.
+        class EmbedBlock(nn.Module):
+            def __init__(self, vocab, dim, device):
+                super().__init__()
+                self.embed = nn.Embedding(vocab, dim, device=device)
+                self.block = MLPModule(device)
+
+            def forward(self, ids):
+                return self.block(self.embed(ids))
+
+        model = EmbedBlock(32, 10, self.device_type)
+
+        parallelize_module(
+            model,
+            mesh,
+            {
+                "embed": RowwiseParallel(
+                    output_layouts=Shard(1), use_local_output=False
+                ),
+                "block.net1": ColwiseParallel(
+                    input_layouts=Shard(1), use_local_output=False
+                ),
+                "block.net2": RowwiseParallel(use_local_output=False),
+            },
+        )
+        model.block = checkpoint_wrapper(
+            model.block,
+            checkpoint_impl=CheckpointImpl.NO_REENTRANT,
+            checkpoint_fn=checkpoint,
+            use_reentrant=False,
+        )
+        torch._dynamo.config.skip_fwd_side_effects_in_bwd_under_checkpoint = True
+
+        model.block.compile(backend="aot_eager", fullgraph=True)
+
+        ids1 = torch.randint(0, 32, (4, 20), device=self.device_type)
+        out1 = model(ids1)
+        out1.sum().backward()
+        model.zero_grad()
+
+        # Different seq_len triggers dynamic-shape recompilation where
+        # the DTensor inner symbol gets lifted through the AC HOP.
+        ids2 = torch.randint(0, 32, (4, 25), device=self.device_type)
+        out2 = model(ids2)
+        out2.sum().backward()
 
 
 if __name__ == "__main__":

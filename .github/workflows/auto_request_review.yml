@@ -1,3 +1,4 @@
+# Owner(s): ["module: ci"]
 name: Auto Request Review
 
 on:

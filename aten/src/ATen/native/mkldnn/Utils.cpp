@@ -142,8 +142,8 @@ static AttrFunction attr_func_hardsigmoid =
       return attr;
     };
 
-const std::map<std::string_view, AttrFunction>& fusion_unary_attr_map() {
-  static const std::map<std::string_view, AttrFunction> fusion_attr_map{
+const std::unordered_map<std::string_view, AttrFunction>& fusion_unary_attr_map() {
+  static const std::unordered_map<std::string_view, AttrFunction> fusion_attr_map{
       {"relu", ATTR_FUNC(relu)},
       {"sigmoid", ATTR_FUNC(sigmoid)},
       {"tanh", ATTR_FUNC(tanh)},
@@ -157,15 +157,15 @@ const std::map<std::string_view, AttrFunction>& fusion_unary_attr_map() {
   return fusion_attr_map;
 }
 
-const std::map<std::string_view, ideep::algorithm>& fusion_unary_alg_map() {
-  static const std::map<std::string_view, ideep::algorithm> fusion_attr_map{
+const std::unordered_map<std::string_view, ideep::algorithm>& fusion_unary_alg_map() {
+  static const std::unordered_map<std::string_view, ideep::algorithm> fusion_attr_map{
       {"relu", {ideep::algorithm::eltwise_relu}},
   };
   return fusion_attr_map;
 }
 
-const std::map<std::string_view, ideep::algorithm>& fusion_binary_alg_map() {
-  static const std::map<std::string_view, ideep::algorithm> fusion_attr_map{
+const std::unordered_map<std::string_view, ideep::algorithm>& fusion_binary_alg_map() {
+  static const std::unordered_map<std::string_view, ideep::algorithm> fusion_attr_map{
       {"add", {ideep::algorithm::binary_add}},
       {"sub", {ideep::algorithm::binary_sub}},
       {"mul", {ideep::algorithm::binary_mul}},

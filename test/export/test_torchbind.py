@@ -59,6 +59,7 @@ def _assertEqualScriptObject(
 @skipIfTorchDynamo("torchbind not supported with dynamo yet")
 class TestExportTorchbind(TestCase):
     def setUp(self):
+        super().setUp()
         init_torchbind_implementations()
 
         test = self
@@ -1122,6 +1123,7 @@ graph():
 
 class TestCompileTorchbind(TestCase):
     def setUp(self):
+        super().setUp()
         init_torchbind_implementations()
 
         @torch._library.register_fake_class("_TorchScriptTesting::_TensorQueue")
@@ -1603,6 +1605,7 @@ def forward(self, token, obj, x):
 @skipIfTorchDynamo("torchbind not supported with dynamo yet")
 class TestRegisterFakeClass(TestCase):
     def setUp(self):
+        super().setUp()
         init_torchbind_implementations()
 
     def tearDown(self):

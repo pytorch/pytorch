@@ -52,6 +52,21 @@ def _warn_once(msg, category=UserWarning, stacklevel=2):
         warn(msg, category=category, stacklevel=stacklevel)
 
 
+def _parse_custom_profiler_config(
+    experimental_config: _ExperimentalConfig | None,
+) -> dict[str, Any]:
+    if experimental_config is None:
+        return {}
+    raw = getattr(experimental_config, "custom_profiler_config", None)
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return {"backend": raw}
+    return parsed if isinstance(parsed, dict) else {}
+
+
 class _NumpyEncoder(json.JSONEncoder):
     """
     Json encoder for numpy types (np.int, np.float, np.array etc.)
@@ -210,6 +225,23 @@ class _KinetoProfile:
         self.profile_memory = profile_memory
         self.with_stack = with_stack
         self.with_modules = with_modules
+        if (
+            experimental_config is not None
+            and experimental_config.trace_only
+            and with_stack
+        ):
+            import copy
+
+            warn(
+                "trace_only=True is incompatible with with_stack=True "
+                "(stack traces require event post-processing). "
+                "Disabling trace_only."
+            )
+            experimental_config_copy: _ExperimentalConfig = copy.copy(
+                experimental_config
+            )
+            experimental_config_copy.trace_only = False
+            experimental_config = experimental_config_copy
         self.experimental_config = experimental_config
         self.execution_trace_observer = execution_trace_observer
         self.acc_events = acc_events
@@ -237,6 +269,20 @@ class _KinetoProfile:
 
         # user-defined metadata to be amended to the trace
         self.preset_metadata: dict[str, str] = {}
+        self._trace_metadata: dict[str, str] = {}
+        self._custom_profiler_config = _parse_custom_profiler_config(
+            self.experimental_config
+        )
+        self._use_cupti_monitor = self._custom_profiler_config.get(
+            "backend"
+        ) == "cupti_monitor" or bool(self._custom_profiler_config.get("cupti_monitor"))
+        self._monitor_started_here = False
+        self._monitor_tempdir: tempfile.TemporaryDirectory[str] | None = None
+        self._monitor_trace_window: dict[str, object] | None = None
+        if self._use_cupti_monitor and ProfilerActivity.CPU not in self.activities:
+            raise ValueError(
+                "cupti_monitor profiler backend currently requires CPU activity"
+            )
 
     def start(self) -> None:
         self.prepare_trace()
@@ -257,9 +303,10 @@ class _KinetoProfile:
                 "To keep events across cycles, set acc_events=True."
             )
         if (self.profiler is None) or (not self.acc_events):
+            use_device = None if self._use_cupti_monitor else self.use_device
             self.profiler = prof.profile(
                 use_cpu=(ProfilerActivity.CPU in self.activities),
-                use_device=self.use_device,
+                use_device=use_device,
                 record_shapes=self.record_shapes,
                 with_flops=self.with_flops,
                 profile_memory=self.profile_memory,
@@ -274,6 +321,17 @@ class _KinetoProfile:
                 if self.activity_filters
                 else None,
             )
+        if self._use_cupti_monitor:
+            from torch.profiler._cupti import monitor as _mon
+
+            if _mon.get_monitor() is None:
+                self._monitor_tempdir = tempfile.TemporaryDirectory(
+                    prefix="torch_cupti_profiler_"
+                )
+                _mon.start_collection(self._monitor_tempdir.name)
+                self._monitor_started_here = True
+            self._monitor_trace_window = None
+            _mon.prepare_trace_window()
         self.profiler._prepare_trace()
 
     def start_trace(self) -> None:
@@ -282,6 +340,10 @@ class _KinetoProfile:
         if self.profiler is None:
             raise AssertionError("Profiler must be initialized before starting trace")
         self.profiler._start_trace()
+        if self._use_cupti_monitor:
+            from torch.profiler._cupti import monitor as _mon
+
+            _mon.start_trace_window()
 
         if self.profile_memory:
             self.add_metadata_json("profile_memory", "1")
@@ -328,9 +390,23 @@ class _KinetoProfile:
             self.execution_trace_observer.stop()
         if self.profiler is None:
             raise AssertionError("Profiler must be initialized before stopping trace")
-        self.profiler.__exit__(None, None, None)
+        if self._use_cupti_monitor:
+            from torch.profiler._cupti import monitor as _mon
 
-    def export_chrome_trace(self, path: str):
+            if self.use_device:
+                torch.accelerator.synchronize()
+            self._monitor_trace_window = _mon.end_trace_window()
+        self.profiler.__exit__(None, None, None)
+        if self._use_cupti_monitor and self._monitor_started_here:
+            from torch.profiler._cupti import monitor as _mon
+
+            _mon.stop_collection()
+            self._monitor_started_here = False
+            if self._monitor_tempdir is not None:
+                self._monitor_tempdir.cleanup()
+                self._monitor_tempdir = None
+
+    def export_chrome_trace(self, path: str, use_python_export: bool = False):
         """
         Exports the collected trace in Chrome JSON format. If kineto is enabled, only
         last cycle in schedule is exported.
@@ -339,14 +415,35 @@ class _KinetoProfile:
             raise AssertionError(
                 "Profiler must be initialized before exporting chrome trace"
             )
-        if path.endswith(".gz"):
+        if self._use_cupti_monitor:
+            if self._monitor_trace_window is None:
+                raise AssertionError(
+                    "CUPTI monitor trace window must exist before exporting chrome trace"
+                )
+            from torch.profiler._cupti.monitor_trace import (
+                merge_trace_window_into_chrome_trace,
+            )
+
+            with tempfile.NamedTemporaryFile("w+t", suffix=".json") as fp:
+                self.profiler.export_chrome_trace(fp.name, self._trace_metadata)
+                merge_trace_window_into_chrome_trace(
+                    fp.name,
+                    path,
+                    self._monitor_trace_window,
+                    trace_name=path,
+                )
+            return
+        if use_python_export:
+            self.profiler.export_chrome_trace(
+                path, self._trace_metadata, use_python_export=True
+            )
+        elif path.endswith(".gz"):
             with tempfile.NamedTemporaryFile("w+b", suffix=".json") as fp:
-                retvalue = self.profiler.export_chrome_trace(fp.name)
+                self.profiler.export_chrome_trace(fp.name, self._trace_metadata)
                 with open(fp.name, "rb") as fin, gzip.open(path, "wb") as fout:
                     fout.writelines(fin)
-            return retvalue
         else:
-            return self.profiler.export_chrome_trace(path)
+            self.profiler.export_chrome_trace(path, self._trace_metadata)
 
     def export_stacks(self, path: str, metric: str = "self_cpu_time_total"):
         """Save stack traces to a file
@@ -422,6 +519,11 @@ class _KinetoProfile:
         """
         if self.profiler is None:
             raise AssertionError("Profiler must be initialized before accessing events")
+        if self.experimental_config is not None and self.experimental_config.trace_only:
+            raise RuntimeError(
+                "events() is not available when trace_only=True in "
+                "ExperimentalConfig. Use export_chrome_trace() instead."
+            )
         return self.profiler.function_events
 
     def add_metadata(self, key: str, value: str) -> None:
@@ -430,6 +532,7 @@ class _KinetoProfile:
         into the trace file
         """
         wrapped_value = '"' + value.replace('"', '\\"') + '"'
+        self._trace_metadata[key] = wrapped_value
         torch.autograd._add_metadata_json(key, wrapped_value)
 
     def add_metadata_json(self, key: str, value: str) -> None:
@@ -437,6 +540,7 @@ class _KinetoProfile:
         Adds a user defined metadata with a string key and a valid json value
         into the trace file
         """
+        self._trace_metadata[key] = value
         torch.autograd._add_metadata_json(key, value)
 
     def preset_metadata_json(self, key: str, value: str) -> None:
@@ -539,13 +643,25 @@ class _KinetoProfile:
 
 class ProfilerAction(Enum):
     """
-    Profiler actions that can be taken at the specified intervals
+    Profiler actions that can be taken at the specified intervals.
+
+    NONE, WARMUP, RECORD, and RECORD_AND_SAVE are user-facing values that may
+    be returned from a user-provided schedule. DEVICE_STOPPED is set
+    internally by the profiler when device collection stops early due to
+    errors; it must not be returned from a user-provided schedule.
     """
 
     NONE = 0
     WARMUP = 1
     RECORD = 2
     RECORD_AND_SAVE = 3
+    DEVICE_STOPPED = 4
+
+
+def _unreachable_transition(prev: str, current: str) -> None:
+    raise RuntimeError(
+        f"Profiler internal error: {prev} -> {current} should be unreachable"
+    )
 
 
 def schedule(
@@ -619,7 +735,10 @@ def _default_schedule_fn(_: int) -> ProfilerAction:
 
 
 def tensorboard_trace_handler(
-    dir_name: str, worker_name: str | None = None, use_gzip: bool = False
+    dir_name: str,
+    worker_name: str | None = None,
+    use_gzip: bool = False,
+    use_python_export: bool = False,
 ):
     """
     Outputs tracing files to directory of ``dir_name``, then that directory can be
@@ -643,7 +762,10 @@ def tensorboard_trace_handler(
         file_name = f"{worker_name}.{time.time_ns()}.pt.trace.json"
         if use_gzip:
             file_name = file_name + ".gz"
-        prof.export_chrome_trace(os.path.join(dir_name, file_name))
+        prof.export_chrome_trace(
+            os.path.join(dir_name, file_name),
+            use_python_export=use_python_export,
+        )
 
     return handler_fn
 
@@ -763,7 +885,7 @@ class profile(_KinetoProfile):
             # In this example with wait=1, warmup=1, active=2, repeat=1,
             # profiler will skip the first step/iteration,
             # start warming up on the second, record
-            # the third and the forth iterations,
+            # the third and the fourth iterations,
             # after which the trace will become available
             # and on_trace_ready (when set) is called;
             # the cycle repeats starting with the next step
@@ -862,8 +984,20 @@ class profile(_KinetoProfile):
             self.record_steps = False
         self.on_trace_ready = on_trace_ready
         self.step_num = 0
-        self.current_action = self.schedule(self.step_num)
         self.step_rec_fn: prof.record_function | None = None
+
+        schedule_action = self.schedule(self.step_num)
+        if schedule_action == ProfilerAction.DEVICE_STOPPED:
+            raise ValueError(
+                "ProfilerAction.DEVICE_STOPPED is set internally by the "
+                "profiler and must not be returned by a user-provided schedule"
+            )
+        self.current_action = schedule_action
+        # Raw schedule output of the previous step, separate from
+        # current_action which step() may override to DEVICE_STOPPED. Used to
+        # detect cycle boundaries (RECORD_AND_SAVE -> next) when warmup=0,
+        # so DEVICE_STOPPED can exit and resume profiling on the new cycle.
+        self._prev_schedule_action = schedule_action
 
         self.action_map: dict[
             tuple[ProfilerAction, ProfilerAction | None], list[Any]
@@ -918,6 +1052,55 @@ class profile(_KinetoProfile):
                 self.prepare_trace,
                 self.start_trace,
             ],
+            # DEVICE_STOPPED: entered when device collection stops early (e.g.
+            # CUPTI buffer overflow). Absorbs the remainder of the current
+            # profiling cycle, then exits at the next cycle boundary.
+            #
+            # All three entry transitions fire _trace_ready so the user's
+            # callback is invoked even when entry happens from WARMUP. This
+            # matters for active=1 schedules: the only active step (R&S) gets
+            # converted to DEVICE_STOPPED via WARMUP -> R&S override, and
+            # without _trace_ready firing here the user would never see a
+            # callback for that cycle. The trace will be empty (no recording
+            # ran), but the callback firing is the signal that the cycle
+            # completed.
+            (ProfilerAction.WARMUP, ProfilerAction.DEVICE_STOPPED): [
+                self.start_trace,
+                self.stop_trace,
+                self._trace_ready,
+            ],
+            (ProfilerAction.RECORD, ProfilerAction.DEVICE_STOPPED): [
+                self.stop_trace,
+                self._trace_ready,
+            ],
+            (ProfilerAction.DEVICE_STOPPED, ProfilerAction.DEVICE_STOPPED): [],
+            (ProfilerAction.DEVICE_STOPPED, ProfilerAction.WARMUP): [
+                self.prepare_trace,
+            ],
+            (ProfilerAction.DEVICE_STOPPED, ProfilerAction.NONE): [],
+            # Cycle boundary recovery: when the schedule has no WARMUP phase
+            # (warmup=0), DEVICE_STOPPED exits directly into the next cycle's
+            # active phase. Mirrors (NONE, RECORD) / (NONE, RECORD_AND_SAVE).
+            (ProfilerAction.DEVICE_STOPPED, ProfilerAction.RECORD): [
+                self.prepare_trace,
+                self.start_trace,
+            ],
+            (ProfilerAction.DEVICE_STOPPED, ProfilerAction.RECORD_AND_SAVE): [
+                self.prepare_trace,
+                self.start_trace,
+            ],
+            # Unreachable transitions:
+            # - prev=NONE: step()'s entry guard excludes it, and start() and
+            #   __init__ both reject DEVICE_STOPPED from a user schedule.
+            # - prev=RECORD_AND_SAVE: entry guard excludes it because the
+            #   natural (R&S, *) transitions already do the right thing to
+            #   recover.
+            (ProfilerAction.NONE, ProfilerAction.DEVICE_STOPPED): [
+                partial(_unreachable_transition, "NONE", "DEVICE_STOPPED"),
+            ],
+            (ProfilerAction.RECORD_AND_SAVE, ProfilerAction.DEVICE_STOPPED): [
+                partial(_unreachable_transition, "RECORD_AND_SAVE", "DEVICE_STOPPED"),
+            ],
             # used for exit action
             (ProfilerAction.WARMUP, None): [self.start_trace, self.stop_trace],
             (ProfilerAction.RECORD, None): [self.stop_trace, self._trace_ready],
@@ -925,6 +1108,7 @@ class profile(_KinetoProfile):
                 self.stop_trace,
                 self._trace_ready,
             ],
+            (ProfilerAction.DEVICE_STOPPED, None): [],
         }
         # Start tracking increments to profiler step, this will be used
         # by Kineto
@@ -951,7 +1135,17 @@ class profile(_KinetoProfile):
     def stop(self) -> None:
         if self.record_steps and self.step_rec_fn:
             self.step_rec_fn.__exit__(None, None, None)
+            self.step_rec_fn = None
         self._transit_action(self.current_action, None)
+        # Reset current_action to the schedule's view in case step() had
+        # overridden it to DEVICE_STOPPED. Without this, a subsequent start()
+        # would transit (NONE, DEVICE_STOPPED) — unreachable by contract —
+        # and leave the profiler running with no Kineto session.
+        if self._prev_schedule_action == ProfilerAction.DEVICE_STOPPED:
+            raise AssertionError(
+                "_prev_schedule_action must never be DEVICE_STOPPED here"
+            )
+        self.current_action = self._prev_schedule_action
 
     def step(self) -> None:
         """
@@ -959,9 +1153,76 @@ class profile(_KinetoProfile):
         """
         if self.record_steps and self.step_rec_fn:
             self.step_rec_fn.__exit__(None, None, None)
+            # Drop our reference so a subsequent stop() / step() — e.g. after
+            # this step() raises — doesn't double-exit the same instance.
+            self.step_rec_fn = None
         prev_action = self.current_action
-        self.step_num += 1
-        self.current_action = self.schedule(self.step_num)
+        prev_schedule_action = self._prev_schedule_action
+        next_step = self.step_num + 1
+        schedule_action = self.schedule(next_step)
+
+        # Note that we check schedule validity BEFORE changing the profiler's
+        # internal state. This prevents the profiler from being in an invalid
+        # state.
+        if schedule_action == ProfilerAction.DEVICE_STOPPED:
+            raise ValueError(
+                "ProfilerAction.DEVICE_STOPPED is set internally by the "
+                "profiler and must not be returned by a user-provided schedule"
+            )
+
+        self.step_num = next_step
+        self.current_action = schedule_action
+        self._prev_schedule_action = schedule_action
+
+        # DEVICE_STOPPED handling: when Kineto signals that device collection
+        # has stopped early (e.g. CUPTI buffer overflow), we enter
+        # DEVICE_STOPPED and stay there until the current profiling cycle ends.
+        #
+        # Once in DEVICE_STOPPED (prev_action == DEVICE_STOPPED):
+        # - We exit at the next cycle boundary, defined by either:
+        #   - prev_schedule_action == RECORD_AND_SAVE: since active > 0,
+        #     every cycle ends with RECORD_AND_SAVE, so the next step starts
+        #     a new cycle regardless of warmup/wait shape.
+        #   - current_action == NONE: safety hatch for user-defined schedules
+        #     that may emit NONE without a preceding RECORD_AND_SAVE. (The
+        #     standard schedule() builder always pairs them.)
+        # - Otherwise we stay in DEVICE_STOPPED, absorbing the rest of the
+        #   cycle.
+        #
+        # Entering DEVICE_STOPPED (override current_action to DEVICE_STOPPED):
+        # - We enter when all of the following hold:
+        #   - _is_kineto_stopped() is True: Kineto reports the stop.
+        #   - use_device is set: a CPU-only profiler must not react to a
+        #     stale stopped flag from a previous device profiler.
+        #   - prev_action is WARMUP or RECORD: these have no built-in cleanup
+        #     in their natural transitions.
+        #   - current_action is not NONE: if the schedule is already stopping
+        #     us (e.g. RECORD_AND_SAVE -> NONE), respect that rather than
+        #     overriding.
+        # - Otherwise we leave current_action as the schedule's output.
+        # - prev_action == RECORD_AND_SAVE is excluded: the natural (R&S, *)
+        #   transitions already call prepare_trace, so overriding here would
+        #   skip the reset and waste the next cycle.
+
+        if prev_action == ProfilerAction.DEVICE_STOPPED:
+            at_cycle_boundary = (
+                prev_schedule_action == ProfilerAction.RECORD_AND_SAVE
+                or self.current_action == ProfilerAction.NONE
+            )
+            if not at_cycle_boundary:
+                self.current_action = ProfilerAction.DEVICE_STOPPED
+        elif (
+            torch.autograd._is_kineto_stopped()
+            and self.use_device is not None
+            and prev_action in (ProfilerAction.WARMUP, ProfilerAction.RECORD)
+            and self.current_action != ProfilerAction.NONE
+        ):
+            warn(
+                "Device profiling activity collection was stopped early "
+                f"at step {self.step_num}. Profiler schedule is proceeding "
+                "until next cycle without actual profiler activity collection."
+            )
+            self.current_action = ProfilerAction.DEVICE_STOPPED
 
         self._transit_action(prev_action, self.current_action)
         if os.environ.get("KINETO_USE_DAEMON", "") or (

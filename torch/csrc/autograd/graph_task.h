@@ -115,7 +115,7 @@ struct GraphTask : std::enable_shared_from_this<GraphTask> {
   };
   // exec_info_ is safe to read without synchronization
   std::unordered_map<Node*, ExecInfo> exec_info_;
-  // Captures variables are grads captured that we return to the user. After
+  // Captured variables are grads captured that we return to the user. After
   // execution of the GraphTask is completed, the captured_vars_ are moved
   // out of the GraphTask and are no longer valid.
   std::vector<Variable> captured_vars_;
@@ -158,13 +158,15 @@ struct GraphTask : std::enable_shared_from_this<GraphTask> {
 
   // Set an appropriate exception on this graph_task which was encountered while
   // running the provided function.
-  void set_exception(std::exception_ptr eptr, const std::shared_ptr<Node>& fn);
+  void set_exception(
+      std::exception_ptr eptr,
+      const c10::intrusive_ptr<Node>& fn);
 
   // Set an appropriate exception on this graph_task which was encountered while
   // running the provided function. But doesn't signal completion on
   // 'future_result_' right away. The user needs to explicitly mark
   // 'future_result_' completed with an appropriate exception.
-  void set_exception_without_signal(const std::shared_ptr<Node>& fn);
+  void set_exception_without_signal(const c10::intrusive_ptr<Node>& fn);
 
   // Whether or not to stop execution for this GraphTask when an error is
   // encountered. When set to true, this would cause Engine::execute() to throw
@@ -184,7 +186,7 @@ struct GraphTask : std::enable_shared_from_this<GraphTask> {
 
   // Final callbacks installed during execution of this GraphTask
   std::vector<std::function<void()>> final_callbacks_;
-  // To protect reads and writes to final_callbacks_. Intentionally no reusing
+  // To protect reads and writes to final_callbacks_. Intentionally not reusing
   // mutex_ as the two are protecting different data structures.
   std::mutex final_callbacks_lock_;
 

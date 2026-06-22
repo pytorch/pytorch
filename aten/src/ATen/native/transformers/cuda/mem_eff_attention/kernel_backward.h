@@ -2401,7 +2401,7 @@ struct AttentionBackwardKernel {
         thread_id,
         cutlass::MatrixCoord{0, 0});
 
-    MatmulQK::Mma::prologue<kReloadK, true>(
+    MatmulQK::Mma::template prologue<kReloadK, true>(
         shared_storage.mm_qk_k(),
         shared_storage.mm_qk_q(),
         iterator_A,

@@ -461,7 +461,7 @@ void testAlltoall(const std::string& path, const at::DeviceType b) {
   enableProfilerLegacy(ProfilerConfig(
       ProfilerState::CPU, /* report_input_shapes */ true, false));
   for (const auto rank : c10::irange(size)) {
-    work[rank] = tests[rank].getProcessGroup().alltoall_base(
+    work[rank] = tests[rank].getProcessGroup().all_to_all_single(
         outputs[rank], inputs[rank], outputSplits[rank], inputSplits[rank]);
   }
 

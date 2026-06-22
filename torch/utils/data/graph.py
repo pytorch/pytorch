@@ -127,7 +127,7 @@ def traverse(datapipe: DataPipe, only_datapipe: bool | None = None) -> DataPipeG
         and values are tuples of DataPipe instance and the sub-graph
     """
     msg = (
-        "`traverse` function and will be removed after 1.13. "
+        "`traverse` function is deprecated and will be removed after 1.13. "
         "Please use `traverse_dps` instead."
     )
     if not only_datapipe:

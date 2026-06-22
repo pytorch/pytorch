@@ -69,6 +69,10 @@ class MemoryBudgetTest(TestCase):
         super().setUp()
         torch.set_default_device("cuda")
 
+    def tearDown(self):
+        torch.set_default_device(None)
+        super().tearDown()
+
     def test_rematerializes_cheap(self):
         def f(x, w):
             x = x.cos()

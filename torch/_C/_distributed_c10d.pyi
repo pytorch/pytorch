@@ -120,6 +120,8 @@ def set_debug_level_from_env() -> None: ...
 class ReduceOp:
     # pyrefly: ignore  # unknown-name
     def __init__(self, op: RedOpType) -> None: ...
+    @property
+    def factor(self) -> float | Tensor: ...
 
     # pyrefly: ignore  # unknown-name
     SUM: RedOpType = ...
@@ -200,6 +202,87 @@ class BarrierOptions:
 class AllToAllOptions:
     timeout: timedelta
     asyncOp: bool
+
+class ReconfigureOptions:
+    uuid: int
+    handles: set[str] | list[str]
+    timeout: timedelta | None
+    hints: dict[str, str]
+
+class PutOptions:
+    timeout: timedelta
+    hints: dict[str, str]
+
+class SignalOptions:
+    timeout: timedelta
+    hints: dict[str, str]
+
+class WaitSignalOptions:
+    timeout: timedelta
+    hints: dict[str, str]
+
+class WindowAccessType(Enum):
+    UNIFIED = ...
+    SEPARATE = ...
+
+class WindowAttr:
+    access_type: WindowAccessType
+
+class Window:
+    def tensor_register(self, tensor: Tensor, owning: bool = ...) -> None: ...
+    def tensor_deregister(self) -> None: ...
+    def put(
+        self,
+        tensor: Tensor,
+        dst_rank: int,
+        target_offset_nelems: int,
+        async_op: bool,
+        opts: PutOptions = ...,
+    ) -> Work: ...
+    def map_remote_tensor(self, rank: int) -> Tensor: ...
+    def signal(
+        self,
+        peer_rank: int,
+        async_op: bool,
+        opts: SignalOptions = ...,
+    ) -> Work: ...
+    def wait_signal(
+        self,
+        peer_rank: int,
+        async_op: bool,
+        opts: WaitSignalOptions = ...,
+    ) -> Work: ...
+    def get_attr(self, peer_rank: int) -> WindowAttr: ...
+
+class HookOpName(Enum):
+    SEND = ...
+    RECV = ...
+    BROADCAST = ...
+    ALLREDUCE = ...
+    REDUCE = ...
+    ALLGATHER = ...
+    REDUCE_SCATTER = ...
+    ALLTOALL = ...
+    BARRIER = ...
+    SCATTER = ...
+    GATHER = ...
+    SPLIT = ...
+    NEW_WINDOW = ...
+    UNKNOWN = ...
+
+class PreHookArgs:
+    name: HookOpName
+    async_op: bool
+    input_tensors: list[Tensor]
+    output_tensors: list[Tensor]
+    root: int
+    op_id: int
+
+class PostHookArgs:
+    name: HookOpName
+    async_op: bool
+    work: Work | None
+    op_id: int
 
 class Store:
     def set(self, key: str, value: str) -> None: ...
@@ -321,6 +404,8 @@ class Backend:
         def _timeout(self, val: timedelta) -> None: ...
         global_ranks_in_group: list[int]
         group_name: GroupName
+        use_pg_for_symm_mem_rendezvous: bool
+        enable_reconfigure: bool
 
     def __init__(
         self,
@@ -333,6 +418,15 @@ class Backend:
     def supports_coalescing(self) -> bool: ...
     @property
     def supports_time_estimate(self) -> bool: ...
+    @property
+    def supports_reconfigure(self) -> bool: ...
+    def get_reconfigure_handle(self) -> str: ...
+    def reconfigure(self, opts: ReconfigureOptions) -> Work: ...
+    @property
+    def supports_window(self) -> bool: ...
+    def new_window(self, tensor: Tensor | None = None) -> Window: ...
+    def register_abort_hook(self, hook_id: int, hook: Callable[[], None]) -> None: ...
+    def unregister_abort_hook(self, hook_id: int) -> None: ...
     def set_timeout(self, timeout: timedelta) -> None: ...
     @property
     def options(self) -> Options: ...
@@ -382,6 +476,7 @@ class ProcessGroup:
         opts: Backend.Options | None = None,
         group_name: GroupName | None = None,
         group_desc: str | None = None,
+        device_types: list[torch.device] | None = None,
     ) -> ProcessGroup | None: ...
     def merge_remote_group(
         self,
@@ -394,6 +489,23 @@ class ProcessGroup:
     def abort(self) -> None: ...
     def set_timeout(self, timeout: timedelta) -> None: ...
     def shutdown(self) -> None: ...
+    @property
+    def supports_reconfigure(self) -> bool: ...
+    def get_reconfigure_handle(self) -> str: ...
+    def reconfigure(self, opts: ReconfigureOptions) -> Work: ...
+    @property
+    def supports_window(self) -> bool: ...
+    def new_window(self, tensor: Tensor | None = None) -> Window: ...
+    def register_abort_hook(self, hook_id: int, hook: Callable[[], None]) -> None: ...
+    def unregister_abort_hook(self, hook_id: int) -> None: ...
+    def register_pre_hook(
+        self, hook_id: int, hook: Callable[[PreHookArgs], None]
+    ) -> None: ...
+    def unregister_pre_hook(self, hook_id: int) -> None: ...
+    def register_post_hook(
+        self, hook_id: int, hook: Callable[[PostHookArgs], None]
+    ) -> None: ...
+    def unregister_post_hook(self, hook_id: int) -> None: ...
     @overload
     def broadcast(
         self,
@@ -432,6 +544,12 @@ class ProcessGroup:
         tensors: list[Tensor],
         opts=...,
     ) -> Work: ...
+    def reduce_scatter_single_coalesced(
+        self,
+        outputTensors: list[Tensor],
+        inputTensors: list[Tensor],
+        opts: ReduceScatterOptions | None = None,
+    ) -> Work: ...
     def reduce_scatter_tensor_coalesced(
         self,
         outputTensors: list[Tensor],
@@ -466,6 +584,12 @@ class ProcessGroup:
         input_tensor: Tensor,
         timeout: timedelta | None = None,
     ) -> Work: ...
+    def all_gather_single(
+        self,
+        output: Tensor,
+        input: Tensor,
+        opts=...,
+    ) -> Work: ...
     def _allgather_base(
         self,
         output: Tensor,
@@ -475,6 +599,12 @@ class ProcessGroup:
     def allgather_coalesced(
         self,
         output_lists: list[list[Tensor]],
+        input_list: list[Tensor],
+        opts=...,
+    ) -> Work: ...
+    def all_gather_single_coalesced(
+        self,
+        output_lists: list[Tensor],
         input_list: list[Tensor],
         opts=...,
     ) -> Work: ...
@@ -529,11 +659,35 @@ class ProcessGroup:
         op=...,
         timeout: timedelta | None = None,
     ) -> Work: ...
+    def reduce_scatter_single(
+        self,
+        outputTensor: Tensor,
+        inputTensor: Tensor,
+        opts: ReduceScatterOptions | None,
+    ) -> Work: ...
     def _reduce_scatter_base(
         self,
         outputTensor: Tensor,
         inputTensor: Tensor,
         opts: ReduceScatterOptions | None,
+    ) -> Work: ...
+    @overload
+    def all_to_all_single(
+        self,
+        output_tensor: Tensor,
+        input_tensor: Tensor,
+        output_split_sizes: list[int],
+        input_split_sizes: list[int],
+        opts=...,
+    ) -> Work: ...
+    @overload
+    def all_to_all_single(
+        self,
+        output: Tensor,
+        input: Tensor,
+        output_split_sizes: list[int],
+        input_split_sizes: list[int],
+        timeout: timedelta | None = None,
     ) -> Work: ...
     @overload
     def alltoall_base(
@@ -593,6 +747,7 @@ class ProcessGroup:
     def _backend_id(self, backend_type: BackendType) -> int: ...
     @property
     def _device_types(self) -> list[torch.device]: ...
+    def get_backend(self, device: torch.device) -> Backend: ...
     def _get_backend(self, device: torch.device) -> Backend: ...
     def _set_default_backend(self, backend_type: BackendType) -> None: ...
     def _register_backend(
@@ -612,6 +767,16 @@ class ProcessGroup:
     @bound_device_id.setter
     def bound_device_id(self, device: torch.device | None) -> None: ...
     @property
+    def use_pg_for_symm_mem_rendezvous(self) -> bool:
+        """When True, symmetric memory rendezvous exchanges metadata via this
+        PG's NCCL allgather instead of TCPStore, which gets overloaded at large
+        rank counts. This will lazily create the NCCL communicator if it doesn't
+        already exist. If this PG is only used for symmetric memory (no regular
+        collectives), consider calling ``abort()`` after rendezvous to release
+        the communicator."""
+    @use_pg_for_symm_mem_rendezvous.setter
+    def use_pg_for_symm_mem_rendezvous(self, value: bool) -> None: ...
+    @property
     def group_name(self) -> GroupName: ...
     @property
     def group_desc(self) -> str: ...
@@ -625,6 +790,15 @@ class FakeWork(Work):
     def __init__(self) -> None: ...
     def wait(self, timeout: timedelta = ...) -> bool: ...
     def getFuture(self) -> Future: ...
+
+class NCCLXStub(Backend):
+    def __init__(
+        self,
+        store: Store,
+        rank: int,
+        size: int,
+        options: ProcessGroupNCCL.Options = ...,
+    ) -> None: ...
 
 class PythonCallbackWork(Work):
     def __init__(self, callback: Callable[[timedelta], bool]) -> None: ...
@@ -646,6 +820,7 @@ class ProcessGroupGloo(Backend):
         rank: int,
         size: int,
         timeout: timedelta,
+        enable_reconfigure: bool = ...,
     ) -> None: ...
     @staticmethod
     def create_device(hostname="", interface="", lazy_init=None) -> Device: ...
@@ -749,7 +924,7 @@ def _verify_params_across_processes(
     params: list[Tensor],
     logger: Logger | None,
 ): ...
-def _make_nccl_premul_sum(factor: float | list[Tensor]) -> ReduceOp: ...
+def _make_nccl_premul_sum(factor: float | Tensor) -> ReduceOp: ...
 def _register_process_group(
     group_name: GroupName,
     process_group: ProcessGroup,
@@ -771,6 +946,46 @@ def _nvshmemx_cumodule_init(module: int) -> None: ...
 
 # Check if NVSHMEM is available on current system.
 def _is_nvshmem_available() -> bool: ...
+def _register_external_nccl_comm(
+    group_name: str, comm_ptr: int, device: torch.device
+) -> None: ...
+def _unregister_external_nccl_comm(group_name: str, device: torch.device) -> None: ...
+
+# NCCL EP (contrib/nccl_ep) bindings; only registered in USE_C10D_NCCL builds.
+class _NcclEpGroup:
+    @staticmethod
+    def create(
+        pg: ProcessGroup,
+        num_experts: int,
+        max_dispatch_tokens_per_rank: int,
+        max_recv_tokens_per_rank: int,
+        max_token_bytes: int,
+    ) -> _NcclEpGroup: ...
+
+class _NcclEpHandle:
+    @staticmethod
+    def create(
+        group: _NcclEpGroup,
+        topk_idx: Tensor,
+        recv_expert_counter: Tensor | None = None,
+    ) -> _NcclEpHandle: ...
+    def get_num_recv_tokens(self) -> int: ...
+
+# handle is Any: the Python layer (torch.distributed._token_switch.Routing)
+# holds it opaquely as `object`, so callers don't carry the concrete type.
+def _nccl_ep_dispatch(
+    handle: Any,
+    tokens: Tensor,
+    topk_weights: Tensor,
+    out_tokens: Tensor,
+    out_topk_weights: Tensor,
+    out_topk_idx: Tensor,
+) -> None: ...
+def _nccl_ep_combine(
+    handle: Any,
+    expert_tokens: Tensor,
+    out_tokens: Tensor,
+) -> None: ...
 
 class _SymmetricMemory:
     @staticmethod

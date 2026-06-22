@@ -771,8 +771,7 @@ def floor(a):
     exact_dtype=True,
 )
 def frac(x: TensorLikeType) -> TensorLikeType:
-    trunc_x = torch.mul(torch.floor(torch.abs(x)), torch.sign(x))
-    return torch.sub(x, trunc_x)
+    return torch.sub(x, torch.trunc(x))
 
 
 # imag does not use _make_elementwise_unary_reference because it does not support out
@@ -1334,20 +1333,22 @@ def pow(
     a: TensorLikeType | NumberType,
     b: TensorLikeType | NumberType,
 ) -> TensorLikeType:
+    from torch.fx.experimental.symbolic_shapes import statically_known_true
+
     if not (isinstance(a, TensorLikeType) or isinstance(b, TensorLikeType)):
         raise AssertionError("at least one of a or b must be TensorLikeType")
 
     if isinstance(b, Number):
-        if b == 1.0:
+        if statically_known_true(b == 1.0):
             return a.clone()  # type: ignore[return-value,union-attr]
-        elif b == 2.0:
+        elif statically_known_true(b == 2.0):
             return a * a  # type: ignore[return-value]
-        elif b == 0.5:
+        elif statically_known_true(b == 0.5):
             return torch.sqrt(a)  # type: ignore[arg-type]
     elif isinstance(a, Number):
-        if a == 1.0:
+        if statically_known_true(a == 1.0):
             return torch.fill(b, True)
-        if a == 2.0 and (
+        if statically_known_true(a == 2.0) and (
             utils.is_float_dtype(b.dtype) or utils.is_complex_dtype(b.dtype)
         ):
             return torch.exp2(b)
@@ -3068,8 +3069,6 @@ def constant_pad_nd(
     if builtins.all(p < 0 for p in pad):
         return c_input.clone()
 
-    new_shape = list(input_sizes[:l_diff])
-
     for i in range(l_pad):
         pad_idx = len(pad) - ((i + 1) * 2)
         new_dim = input_sizes[l_diff + i] + pad[pad_idx] + pad[pad_idx + 1]
@@ -3079,34 +3078,39 @@ def constant_pad_nd(
             f"{pad[pad_idx]} and {pad[pad_idx + 1]} resulted in a negative output size, "
             f"which is invalid. Check dimension {l_diff + i} of your input.",
         )
-        new_shape.append(new_dim)
-
-    memory_format = utils.suggest_memory_format(input)
-    output = torch.empty(
-        new_shape,
-        dtype=input.dtype,
-        device=input.device,
-        requires_grad=input.requires_grad,
-        memory_format=memory_format,
-    )
 
     if value == 0 and input.dtype == torch.bool:
         value = False
-    # torch.fill isn't typed to allow complex values
-    output = torch.fill(output, value)  # type: ignore[arg-type]
 
-    c_output = output
+    result = c_input
     for i in range(l_diff, l_inp):
         pad_idx = 2 * (l_inp - i - 1)
-        if pad[pad_idx] >= 0:
-            c_output = c_output.narrow(
-                i, pad[pad_idx], c_output.shape[i] - pad[pad_idx]
+        left = max(pad[pad_idx], 0)
+        right = max(pad[pad_idx + 1], 0)
+        if left == 0 and right == 0:
+            continue
+        parts = []
+        if left > 0:
+            left_shape = list(result.shape)
+            left_shape[i] = left
+            # torch.full isn't typed to allow complex values
+            parts.append(
+                torch.full(left_shape, value, dtype=input.dtype, device=input.device)  # type: ignore[arg-type]
             )
-        if pad[pad_idx + 1] >= 0:
-            c_output = c_output.narrow(i, 0, c_output.shape[i] - pad[pad_idx + 1])
+        parts.append(result)
+        if right > 0:
+            right_shape = list(result.shape)
+            right_shape[i] = right
+            # torch.full isn't typed to allow complex values
+            parts.append(
+                torch.full(right_shape, value, dtype=input.dtype, device=input.device)  # type: ignore[arg-type]
+            )
+        result = torch.cat(parts, dim=i)
 
-    prims.copy_to(c_output, c_input)
-    return output
+    if result is c_input:
+        result = result.clone()
+
+    return result.contiguous(memory_format=utils.suggest_memory_format(input))
 
 
 def contiguous(
@@ -3260,6 +3264,8 @@ def flip(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
         raise ValueError("dims has to be a sequence of ints")
     dims = utils.canonicalize_dims(a.ndim, dims)  # type: ignore[assignment]
     utils.validate_no_repeating_dims(dims)
+    if a.ndim == 0:
+        return torch.clone(a)
     return prims.rev(a, dims)
 
 
@@ -3818,21 +3824,47 @@ def istft(
     else:
         end = expected_output_signal_len
 
-    length = max(0, end - start)
-    y = y.narrow(dim=1, start=start, length=length)
-    window_envelop = window_envelop.narrow(dim=1, start=start, length=length)
+    # Clamp end to the valid signal range before slicing so that downstream
+    # meta / fake-tensor execution never sees an out-of-bounds access.
+    # The eager C++ path relies on slice's implicit clamping, but the
+    # compile path may convert slice to narrow which does not clamp.
+    # Use sym_min (not the builtin min) so the clamp stays symbolic under
+    # dynamic shapes: builtin min would evaluate ``end < expected_output_signal_len``
+    # to a concrete bool, installing a guard for backed symints (forcing a
+    # recompile when the relationship flips) or raising
+    # GuardOnDataDependentSymNode for unbacked symints.
+    clamped_end = sym_min(end, expected_output_signal_len)
+
+    y = aten.slice.Tensor(y, 1, start, clamped_end, 1)
+    window_envelop = aten.slice.Tensor(window_envelop, 1, start, clamped_end, 1)
 
     y = y / window_envelop
     if original_ndim == 2:
         y = y.squeeze(0)
 
-    if end > expected_output_signal_len:
+    # Pad the tail symbolically so dynamic shapes don't force a guard on the
+    # ``end`` vs ``expected_output_signal_len`` relationship. sym_max keeps the
+    # pad >= 0, so a zero pad is a no-op when the signal already covers the
+    # requested length. The warning needs a concrete decision, so it is gated on
+    # statically_known_true: it fires for the common concrete-int case but
+    # installs no guard when the relationship isn't statically known.
+    from torch.fx.experimental.symbolic_shapes import statically_known_true
+
+    if statically_known_true(end > expected_output_signal_len):
         warnings.warn(
             "The length of signal is shorter than the length parameter. Result is being "
             + "padded with zeros in the tail. Please check your center and hop_length settings",
             stacklevel=2,
         )
-        y = aten.constant_pad_nd(y, (0, end - expected_output_signal_len), 0)
+    # Only emit the pad when the signal may be shorter than the requested
+    # length. Skipping it in the statically-known no-pad case avoids turning the
+    # view returned by eager (e.g. the squeeze) into a copy, which keeps
+    # _refs.istft view-consistent with the aten op. When the relationship is not
+    # statically known (dynamic shapes), pad symbolically with sym_max so a zero
+    # pad is a no-op and no specializing guard is installed.
+    if not statically_known_true(end <= expected_output_signal_len):
+        pad = sym_max(end - expected_output_signal_len, 0)
+        y = aten.constant_pad_nd(y, (0, pad), 0)
     return y
 
 
@@ -4410,7 +4442,7 @@ def squeeze(a: TensorLikeType, dim: DimsType | None = None) -> TensorLikeType:
         return prims.view_of(a)
 
     # Note: squeeze does not modify tensors when the given dim is not a dimension of length 1
-    # would it be better if we just not allow 1 for unbacked at runtiume?
+    # would it be better if we just not allow 1 for unbacked at runtime?
     dims = tuple(d for d in dims if guard_or_false(a.shape[d] == 1))
     if len(dims) == 0:
         return prims.view_of(a)
@@ -4683,7 +4715,7 @@ def diagonal(
         storage_offset -= offset * self.stride()[dim1]
 
     sizes = [s for i, s in enumerate(self.size()) if i not in (dim1, dim2)]
-    sizes.append(diag_size)
+    sizes.append(diag_size)  # type: ignore[arg-type]
 
     strides = [s for i, s in enumerate(self.stride()) if i not in (dim1, dim2)]
     strides.append(self.stride()[dim1] + self.stride()[dim2])
@@ -5266,10 +5298,11 @@ def new_full(
 
 @aten.empty.out.py_impl(DispatchKey.CompositeImplicitAutograd)
 def empty_out(
-    size: TensorLikeType,
+    size: ShapeType,
     out: TensorLikeType,
     memory_format: torch.memory_format | None = None,
 ) -> TensorLikeType:
+    _maybe_resize_out(out, size, memory_format)
     return out
 
 
@@ -5383,6 +5416,7 @@ def arange(
     # For int64 we truncate arguments to int before calculating length, but
     # other integral dtypes we don't. Weird... but needed to match ATen shapes.
     if dtype == torch.int64 or integer_args:
+        torch._check_value(xstep != 0, lambda: "step must be nonzero")  # type: ignore[possibly-undefined]
         # Uses floordiv to avoid ceil in inductor.
         sgn = bool(xstep > 0) - bool(xstep < 0)  # type: ignore[possibly-undefined]
         length = (xend - xstart + xstep - sgn) // xstep  # type: ignore[possibly-undefined]
@@ -5996,7 +6030,9 @@ def _uniform_helper(
         raise AssertionError(f"low must be Number, got {type(low)}")
     if not isinstance(high, Number):
         raise AssertionError(f"high must be Number, got {type(high)}")
+    # pyrefly: ignore [bad-assignment]
     low = sym_float(low)
+    # pyrefly: ignore [bad-assignment]
     high = sym_float(high)
 
     if not isinstance(dtype, torch.dtype):
@@ -6947,6 +6983,16 @@ def _internal_new_from_data(
         tensor = _recursive_build(inferred_scalar_type, data)
 
         tensor = tensor.to(device, inferred_scalar_type, non_blocking=False, copy=False)
+        if pin_memory and torch.device(device).type == "cpu":
+            pinned_tensor = torch.empty_strided(
+                tensor.shape,
+                tensor.stride(),
+                dtype=tensor.dtype,
+                device=tensor.device,
+                pin_memory=True,
+            )
+            pinned_tensor.copy_(tensor)
+            tensor = pinned_tensor
 
     # NB: lift_fresh is not needed, because we built the tensor from scalars
     # guaranteeing a fresh tensor in this case

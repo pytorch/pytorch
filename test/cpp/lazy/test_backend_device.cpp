@@ -96,7 +96,7 @@ TEST(BackendDeviceTest, Ostream) {
   std::stringstream ss;
   ss << device;
 
-  EXPECT_EQ(device.toString(), ss.str());
+  EXPECT_EQ(device.toString(), std::move(ss).str());
 }
 
 TEST(BackendDeviceTest, FromAten) {

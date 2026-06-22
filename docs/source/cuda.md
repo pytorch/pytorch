@@ -17,6 +17,7 @@
     can_device_access_peer
     check_error
     current_blas_handle
+    current_solver_handle
     current_device
     current_stream
     cudart
@@ -175,6 +176,30 @@
 
 ```{eval-rst}
 .. autoclass:: torch.cuda.use_mem_pool
+```
+
+```{eval-rst}
+.. currentmodule:: torch.cuda.nccl
+```
+
+```{eval-rst}
+.. autofunction:: version
+```
+
+```{eval-rst}
+.. currentmodule:: torch.cuda.profiler
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    profile
+    start
+    stop
+```
+
+```{eval-rst}
+.. currentmodule:: torch.cuda
 ```
 
 ## NVIDIA Tools Extension (NVTX)

@@ -9,8 +9,8 @@ import warnings
 import operator
 from collections.abc import Iterable
 from torch.nn.utils import stateless
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_methods_invocations import op_db, skip, xfail, skipOps
+from torch.testing._internal.common_device_type import instantiate_device_type_tests, skipOps, skip, xfail
+from torch.testing._internal.common_methods_invocations import op_db
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, DataDependentOutputException, FakeTensorMode
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch._decomp import decomposition_table
@@ -23,7 +23,13 @@ from torch.testing._internal.hop_db import hop_db
 from torch.testing._internal.common_device_type import ops
 import torch.testing._internal.optests as optests
 from torch._C import _disabled_torch_function_impl
-from torch.fx.experimental.proxy_tensor import make_fx, DecompositionInterpreter, get_isolated_graphmodule
+from torch.fx.experimental.proxy_tensor import (
+    DecompositionInterpreter,
+    get_isolated_graphmodule,
+    make_fx,
+    ProxyTorchDispatchMode,
+    PythonKeyTracer,
+)
 from torch.utils._pytree import tree_map
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch import nn
@@ -361,6 +367,25 @@ def forward(self, x_1):
     copy_ = torch.ops.aten.copy_.default(zeros, x_1);  zeros = x_1 = None
     return copy_
     """)
+
+    def test_proxy_tensor_mode_tracks_nested_decomp_tables(self):
+        sin_table = {torch.ops.aten.sin.default: lambda x: x}
+        cos_table = {torch.ops.aten.cos.default: lambda x: x}
+        tan_table = {torch.ops.aten.tan.default: lambda x: x}
+
+        mode = ProxyTorchDispatchMode(
+            PythonKeyTracer(),
+            tracing_mode="real",
+            decomposition_table=sin_table,
+        )
+
+        self.assertIs(mode.decomposition_table, sin_table)
+        with mode.enable_decompositions(cos_table):
+            self.assertIs(mode.decomposition_table, cos_table)
+            with mode.enable_decompositions(tan_table):
+                self.assertIs(mode.decomposition_table, tan_table)
+            self.assertIs(mode.decomposition_table, cos_table)
+        self.assertIs(mode.decomposition_table, sin_table)
 
     def test_make_fx_reentrant_dispatch(self):
         def f(x):
@@ -1018,40 +1043,39 @@ class TestSymbolicTracing(TestCase):
 
 
     def test_debug_interpreter(self):
-        import torch.library
-        from torch.library import Library
+        from torch.library import _scoped_library
 
-        foo = Library("foo", "DEF")  # noqa: TOR901
-        foo.define("foo(Tensor self) -> Tensor")
+        with _scoped_library("foo", "DEF") as foo:
+            foo.define("foo(Tensor self) -> Tensor")
 
-        # Operator where meta and cpu disagree on strides
-        @torch.library.impl(foo, "foo", "CPU")
-        def foo_cpu(x):
-            return x.clone().T
+            # Operator where meta and cpu disagree on strides
+            @torch.library.impl(foo, "foo", "CPU")
+            def foo_cpu(x):
+                return x.clone().T
 
-        @torch.library.impl(foo, "foo", "Meta")
-        def foo_meta(x):
-            return x.clone()
+            @torch.library.impl(foo, "foo", "Meta")
+            def foo_meta(x):
+                return x.clone()
 
-        def f(x):
-            return torch.ops.foo.foo.default(x)
+            def f(x):
+                return torch.ops.foo.foo.default(x)
 
-        gm = make_fx(f, tracing_mode="symbolic")(torch.randn(2, 2))
-        from torch._functorch.compilers import DebugInterpreter
+            gm = make_fx(f, tracing_mode="symbolic")(torch.randn(2, 2))
+            from torch._functorch.compilers import DebugInterpreter
 
-        interp = DebugInterpreter(gm)
+            interp = DebugInterpreter(gm)
 
-        # input mismatch is caught (indicates guard problem)
-        self.assertRaisesRegex(
-            AssertionError, r"3 != 1",
-            lambda: interp.run(torch.randn(3, 3).T),
-        )
+            # input mismatch is caught (indicates guard problem)
+            self.assertRaisesRegex(
+                AssertionError, r"3 != 1",
+                lambda: interp.run(torch.randn(3, 3).T),
+            )
 
-        # Catch the incorrect meta
-        self.assertRaisesRegex(
-            AssertionError, r"\(3, 1\) != \(1, 3\)",
-            lambda: interp.run(torch.randn(3, 3))
-        )
+            # Catch the incorrect meta
+            self.assertRaisesRegex(
+                AssertionError, r"\(3, 1\) != \(1, 3\)",
+                lambda: interp.run(torch.randn(3, 3))
+            )
 
     def test_int_input(self):
         def f(x, y):
@@ -1157,6 +1181,70 @@ def forward(self, x_1, y_1):
 
         x = torch.randn(2, 3)
         make_fx(f, tracing_mode="symbolic")(x)
+
+    def test_scalar_placeholder_meta(self):
+        def f(x, n, alpha, flag):
+            y = x + n
+            return y * alpha if flag else y
+
+        gm = make_fx(f)(torch.ones(2), 3, 2.0, True)
+        placeholder_meta = {
+            node.target: node.meta.get("val")
+            for node in gm.graph.nodes
+            if node.op == "placeholder"
+        }
+        self.assertEqual(placeholder_meta["n_1"], 3)
+        self.assertEqual(placeholder_meta["alpha_1"], 2.0)
+        self.assertEqual(placeholder_meta["flag_1"], True)
+
+    def test_unbacked_bindings_on_multiple_token_grid_placeholders(self):
+        from torch._dynamo.source import LocalSource
+        from torch.fx.experimental.symbolic_shapes import (
+            DimDynamic,
+            ShapeEnv,
+            StatelessSymbolicContext,
+        )
+        from torch.utils._pytree import keystr
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=shape_env)
+
+        def fakeify(t, name):
+            return fake_mode.from_tensor(
+                t,
+                source=LocalSource(name, is_input=True),
+                symbolic_context=StatelessSymbolicContext(
+                    dynamic_sizes=[DimDynamic.UNBACKED, DimDynamic.STATIC],
+                    shape_ids={0: "token_grid_batch"},
+                ),
+            )
+
+        token_ids = fakeify(torch.randint(8, (2, 4)), "token_ids")
+        labels = fakeify(torch.randint(8, (2, 4)), "labels")
+        position_ids = fakeify(torch.arange(4).expand(2, 4), "position_ids")
+        expected_symbols = tuple(shape_env.pending_fresh_unbacked_symbols)
+
+        def fn(token_ids, labels, position_ids):
+            token_features = token_ids.to(torch.float32) + position_ids.to(
+                torch.float32
+            )
+            return torch.where(labels >= 0, token_features, token_features.neg())
+
+        with fake_mode:
+            gm = make_fx(fn)(token_ids, labels, position_ids)
+
+        placeholders = [node for node in gm.graph.nodes if node.op == "placeholder"]
+        self.assertEqual(len(placeholders), 3)
+        for placeholder, expected_symbol in zip(
+            placeholders, expected_symbols, strict=True
+        ):
+            bindings = placeholder.meta.get("unbacked_bindings")
+            self.assertIsNotNone(bindings)
+            self.assertEqual(len(bindings), 1)
+            self.assertEqual(set(bindings), {expected_symbol})
+            self.assertEqual(
+                [keystr(path) for path in bindings.values()], [".size()[0]"]
+            )
 
     # https://github.com/pytorch/pytorch/issues/108195
     def test_symbolic_repeat_interleave(self):
@@ -1418,8 +1506,8 @@ def forward(self, crop_camera_1, mask_1):
     view_1 = torch.ops.aten.view.default(expand_1, [sym_size_int, sym_size_int_1, sym_size_int_2]);  expand_1 = sym_size_int_1 = sym_size_int_2 = None
     bmm = torch.ops.aten.bmm.default(view, view_1);  view = view_1 = None
     view_2 = torch.ops.aten.view.default(bmm, [sym_size_int, 3, 3]);  bmm = None
-    mul_9 = sym_size_int * 3
-    view_3 = torch.ops.aten.view.default(view_2, [mul_9, 3]);  view_2 = mul_9 = None
+    mul_11 = sym_size_int * 3
+    view_3 = torch.ops.aten.view.default(view_2, [mul_11, 3]);  view_2 = mul_11 = None
     mm = torch.ops.aten.mm.default(view_3, eye);  view_3 = eye = None
     _unsafe_view = torch.ops.aten._unsafe_view.default(mm, [sym_size_int, 3, 3]);  mm = sym_size_int = None
     index_put_ = torch.ops.aten.index_put_.default(crop_camera_1, [mask_1], _unsafe_view);  crop_camera_1 = mask_1 = _unsafe_view = index_put_ = None
@@ -2056,11 +2144,9 @@ only_fake_tensor_failures = {
 fake_tensor_failures = set()
 
 symbolic_tensor_failures = {
-    xfail('combinations', ''),
     xfail('geqrf', ''),  # aten.geqrf.default - couldn't find symbolic meta function/decomposition
     xfail('histogram', ''),  # Could not run 'aten::histogram.bin_ct' with arguments from the 'Meta' backend. This c...
     xfail('histogramdd', ''),  # aten._histogramdd_bin_edges.default - couldn't find symbolic meta function/decomposition
-    xfail('nn.functional.cross_entropy', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.ctc_loss'),  # aten._ctc_loss.Tensor - couldn't find symbolic meta function/decomposition
 
     xfail('max_pool2d_with_indices_backward', ''),  # Expected a value of type 'List[int]' for argument 'kernel_size' but...
@@ -2164,33 +2250,29 @@ filtered_hop_db = [op for op in hop_db if op.name != "auto_functionalize"]
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "Cond requires dynamo")
 class TestProxyTensorOpInfo(TestCase):
     @ops(op_db + filtered_hop_db + custom_op_db, allowed_dtypes=(torch.float,))
-    @skipOps('TestProxyTensorOpInfo', 'test_make_fx_exhaustive', make_fx_failures.union(only_real_tensor_failures))
+    @skipOps(make_fx_failures.union(only_real_tensor_failures))
     def test_make_fx_exhaustive(self, device, dtype, op):
         _test_make_fx_helper(self, device, dtype, op, "real")
 
     @ops(op_db + filtered_hop_db + custom_op_db, allowed_dtypes=(torch.float,))
-    @skipOps('TestProxyTensorOpInfo', 'test_make_fx_fake_exhaustive',
-             make_fx_failures.union(fake_tensor_failures, only_fake_tensor_failures))
+    @skipOps(make_fx_failures.union(fake_tensor_failures, only_fake_tensor_failures))
     def test_make_fx_fake_exhaustive(self, device, dtype, op):
         _test_make_fx_helper(self, device, dtype, op, "fake")
 
     @ops(op_db + filtered_hop_db + custom_op_db, allowed_dtypes=(torch.float,))
-    @skipOps('TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive',
-             make_fx_failures | fake_tensor_failures | symbolic_tensor_failures)
+    @skipOps(make_fx_failures | fake_tensor_failures | symbolic_tensor_failures)
     def test_make_fx_symbolic_exhaustive(self, device, dtype, op):
         _test_make_fx_helper(self, device, dtype, op, "symbolic")
 
     @ops(op_db + custom_op_db, allowed_dtypes=(torch.float,))
-    @skipOps('TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive_inplace',
-             make_fx_failures | fake_tensor_failures | symbolic_tensor_failures | inplace_symbolic_tensor_failures)
+    @skipOps(make_fx_failures | fake_tensor_failures | symbolic_tensor_failures | inplace_symbolic_tensor_failures)
     def test_make_fx_symbolic_exhaustive_inplace(self, device, dtype, op):
         if not op.get_inplace():
             self.skipTest("No inplace variable for this op")
         _test_make_fx_helper(self, device, dtype, op, "symbolic", inplace=True)
 
     @ops(op_db + custom_op_db, allowed_dtypes=(torch.float,))
-    @skipOps('TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive_out',
-             make_fx_failures | fake_tensor_failures | symbolic_tensor_failures | out_symbolic_tensor_failures)
+    @skipOps(make_fx_failures | fake_tensor_failures | symbolic_tensor_failures | out_symbolic_tensor_failures)
     def test_make_fx_symbolic_exhaustive_out(self, device, dtype, op):
         if not op.supports_out:
             self.skipTest("Op doesn't support out")

@@ -453,7 +453,7 @@ Specifying a positive offset::
 class check_sparse_tensor_invariants:
     """A tool to control checking sparse tensor invariants.
 
-    The following options exists to manage sparsr tensor invariants
+    The following options exists to manage sparse tensor invariants
     checking in sparse tensor construction:
 
     1. Using a context manager:
@@ -674,7 +674,7 @@ def as_sparse_gradcheck(gradcheck):
             return tuple(new_args)
 
         def restore_from_strided_representation(args):
-            """Restore non-strided differentiable tensosr from their strided representations."""
+            """Restore non-strided differentiable tensors from their strided representations."""
             new_args = []
             args = list(args)
             while args:

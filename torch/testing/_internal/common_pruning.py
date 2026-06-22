@@ -118,7 +118,7 @@ class LinearActivation(nn.Module):
 class LinearActivationFunctional(nn.Module):
     r"""Model with only Linear layers, some with bias, some in a Sequential and some following.
     Activation functions modules in between each Linear in the Sequential, and functional
-    activationals are called in between each outside layer.
+    activations are called in between each outside layer.
     Used to test pruned Linear(Bias)-Activation-Linear fusion."""
 
     def __init__(self) -> None:

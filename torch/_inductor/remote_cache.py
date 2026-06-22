@@ -65,8 +65,9 @@ remote_fx_cache_put_timed = functools.partial(
 
 class RemoteCacheBackend(Generic[_T]):
     """
-    A backend implementation for accessing a remote/distributed cache.  Only
-    works with bytes in/out.  For structured data use a RemoteCache.
+    A backend implementation for cache storage. Most backends are remote, but
+    local filesystem backends use the same bytes-oriented interface. For
+    structured data use a RemoteCache.
     """
 
     def __init__(self) -> None:
@@ -130,6 +131,27 @@ class RemoteCachePassthroughSerde(RemoteCacheSerde[_T, _T]):
         return data
 
 
+class LocalCacheBackend(RemoteCacheBackend[bytes]):
+    """
+    A local filesystem implementation of the cache backend interface.
+    """
+
+    @override
+    def _get(self, key: str) -> bytes | None:
+        try:
+            with open(key, "rb") as fd:
+                return fd.read()
+        except FileNotFoundError:
+            return None
+
+    @override
+    def _put(self, key: str, data: bytes) -> None:
+        os.makedirs(os.path.dirname(key), exist_ok=True)
+        from torch._inductor import codecache
+
+        codecache.write_atomic(key, data)
+
+
 # This class is the top of a RemoteCache. A RemoteCache is fundamentally made of
 # three parts:
 #
@@ -189,7 +211,8 @@ class RemoteCache(Generic[_T]):
     # between `None` and a missing cache entry).
     def put(self, key: str, value: _T) -> None:
         with _WaitCounter("pytorch.remote_cache.put").guard():
-            assert value is not None
+            if value is None:
+                raise AssertionError("cannot put None into the cache")
             sample = self._create_sample()
             try:
                 self._put(key, value, sample)
@@ -283,7 +306,8 @@ class RedisRemoteCacheBackend(RemoteCacheBackend[bytes]):
             return None
 
         # In theory redis.get() can return an Awaitable as well...
-        assert value is None or isinstance(value, bytes)
+        if not (value is None or isinstance(value, bytes)):
+            raise AssertionError(f"expected bytes or None, got {type(value)}")
         return value
 
     @override
@@ -330,6 +354,34 @@ class RedisRemoteCache(RemoteCache[JsonDataTy]):
         super()._put(key, value, sample)
 
 
+class LocalCache(RemoteCache[JsonDataTy]):
+    def __init__(self, cache_id: str) -> None:
+        # Local caches use the per-operation key as the filesystem path. Accept
+        # cache_id so they can be constructed through create_cache like remote
+        # caches.
+        backend = LocalCacheBackend()
+        serde = RemoteCacheJsonSerde()
+        super().__init__(backend, serde)
+
+    @override
+    def _get(self, key: str, sample: Sample | None) -> JsonDataTy | None:
+        try:
+            return super()._get(key, sample)
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            log.warning(
+                "Ignoring corrupt local cache entry %s: %s: %s",
+                key,
+                type(exc).__name__,
+                exc,
+            )
+            return None
+
+
+class LocalAutotuneCache(LocalCache):
+    # Keep a distinct cache type for cache stats and test backend overrides.
+    pass
+
+
 class RemoteAutotuneCache(RedisRemoteCache):
     pass
 
@@ -352,24 +404,32 @@ class RemoteDynamoPGOCache(RedisRemoteCache):
 
 def create_cache(
     key: str,
-    is_fbcode: bool,
-    fb_cache_cls: str,
-    oss_cache_cls: str,
+    is_fbcode: bool = False,
+    fb_cache_cls: str | None = None,
+    oss_cache_cls: str | None = None,
+    *,
+    local_cache_cls: str | None = None,
 ) -> RemoteCache[JsonDataTy] | None:
     try:
-        if is_fbcode:
+        this_module = sys.modules[__name__]
+        if local_cache_cls is not None:
+            cache_cls = getattr(this_module, local_cache_cls)
+            return cache_cls(key)
+        elif is_fbcode:
+            if fb_cache_cls is None:
+                raise AssertionError("fb_cache_cls must not be None in fbcode")
             import torch._inductor.fb.remote_cache
 
             cache_cls = getattr(torch._inductor.fb.remote_cache, fb_cache_cls)
             return cache_cls(key)
         else:
-            this_module = sys.modules[__name__]
-
+            if oss_cache_cls is None:
+                raise AssertionError("oss_cache_cls must not be None")
             cache_cls = getattr(this_module, oss_cache_cls)
             return cache_cls(key)
 
     except Exception:
-        log.warning("Unable to create a remote cache", exc_info=True)
+        log.warning("Unable to create cache", exc_info=True)
         return None
 
 

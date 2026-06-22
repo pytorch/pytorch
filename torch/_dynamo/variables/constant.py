@@ -8,23 +8,29 @@ maintaining type safety through the compilation process.
 
 from __future__ import annotations
 
+import enum
 import operator
+from collections.abc import Iterable
 from typing import Any, Literal, overload, TYPE_CHECKING
 from typing_extensions import override
 
 import torch
 from torch._dynamo.source import GetItemSource
 
-from .. import variables
-from ..exc import raise_observed_exception, unimplemented
-from ..utils import common_constant_types, istype, np, raise_args_mismatch
+from .. import graph_break_hints, variables
+from ..exc import raise_observed_exception, raise_type_error, unimplemented
+from ..utils import (
+    common_constant_types,
+    istype,
+    np,
+    raise_args_mismatch,
+    unpack_iterable,
+)
 from .base import ValueMutationNew, VariableTracker
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
-    from torch._dynamo.symbolic_convert import InstructionTranslator
+    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
     from .functions import UserFunctionVariable
 
@@ -91,7 +97,9 @@ class ConstantVariable(VariableTracker):
             return variables.FrozensetVariable(items, **kwargs)  # type: ignore[arg-type]
         elif isinstance(value, slice):
             slice_args = (value.start, value.stop, value.step)
-            slice_args_vars = tuple(ConstantVariable.create(arg) for arg in slice_args)
+            slice_args_vars: list[VariableTracker] = [
+                ConstantVariable.create(arg) for arg in slice_args
+            ]
             return variables.SliceVariable(slice_args_vars, **kwargs)
         elif isinstance(value, (list, tuple)):
             items = []
@@ -109,15 +117,16 @@ class ConstantVariable(VariableTracker):
 
     def __init__(self, value: Any, **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        assert ConstantVariable.is_base_literal(value), f"""
-Cannot construct `ConstantVariable` for value of type {type(value)}.
-
-This failure likely due to PyTorch-internal use of `ConstantVariable` on
-non-literal python values, please try using `VariableTracker.build` instead. If
-you believe it's a necessary and legitimate use case (the value is immutable and
-can't easily be represented with another `VariableTracker` class), please add
-its type to `common_constant_types`.
-"""
+        if not ConstantVariable.is_base_literal(value):
+            raise AssertionError(
+                f"Cannot construct `ConstantVariable` for value of type {type(value)}.\n"
+                "\n"
+                "This failure likely due to PyTorch-internal use of `ConstantVariable` on\n"
+                "non-literal python values, please try using `VariableTracker.build` instead. If\n"
+                "you believe it's a necessary and legitimate use case (the value is immutable and\n"
+                "can't easily be represented with another `VariableTracker` class), please add\n"
+                "its type to `common_constant_types`."
+            )
         if np is not None and isinstance(value, np.number):
             self.value = value.item()
         else:
@@ -135,6 +144,9 @@ its type to `common_constant_types`.
     def is_python_constant(self) -> Literal[True]:
         return True
 
+    def repr_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
+        return ConstantVariable.create(repr(self.value))
+
     def is_symnode_like(self) -> bool:
         return isinstance(self.value, (int, bool))
 
@@ -150,14 +162,48 @@ its type to `common_constant_types`.
         Need this when adding a BaseListVariable and a ConstantVariable together.
         Happens in detectron2.
         """
-        return self.unpack_var_sequence(tx=None)
+        try:
+            return [ConstantVariable.create(x) for x in self.value]
+        except TypeError as e:
+            raise NotImplementedError from e
 
     def getitem_const(
-        self, tx: InstructionTranslator, arg: VariableTracker
+        self, tx: InstructionTranslatorBase, arg: VariableTracker
     ) -> VariableTracker:
+        # bytes_subscript: https://github.com/python/cpython/blob/62a6e898e017c9878490544f6a227b8a187a949c/Objects/bytesobject.c#L1732
+        # unicode_subscript: https://github.com/python/cpython/blob/62a6e898e017c9878490544f6a227b8a187a949c/Objects/unicodeobject.c#L13738
+        if isinstance(self.value, (str, bytes)):
+            from .lists import SliceVariable
+            from .object_protocol import maybe_get_python_type, pyindex_check
+
+            # _PyIndex_Check first, then slice, mirroring unicode_subscript /
+            # bytes_subscript.
+            if pyindex_check(maybe_get_python_type(arg)):
+                arg = arg.nb_index_impl(tx)
+            elif isinstance(arg, SliceVariable):
+                return ConstantVariable.create(self.value[arg.as_index_slice(tx)])
+            else:
+                raise_type_error(
+                    tx,
+                    f"{self.python_type_name()} indices must be integers, "
+                    f"not {arg.python_type_name()}",
+                )
         return ConstantVariable.create(
             self.value[arg.as_python_constant()],
         )
+
+    def sq_item_impl(
+        self, tx: InstructionTranslatorBase, key: VariableTracker
+    ) -> VariableTracker:
+        # unicode_getitem: https://github.com/python/cpython/blob/62a6e898e01/Objects/unicodeobject.c#L13777
+        # bytes_item: https://github.com/python/cpython/blob/62a6e898e01/Objects/bytesobject.c#L319
+        # CPython's sq_item takes Py_ssize_t (already int from vt_getitem's
+        # nb_index_impl).  Unlike mp_subscript, sq_item never handles slices.
+        index = key.as_python_constant()
+        try:
+            return ConstantVariable.create(self.value[index])
+        except IndexError as e:
+            raise_observed_exception(IndexError, tx, args=list(e.args))
 
     @staticmethod
     def is_base_literal(obj: object) -> bool:
@@ -176,29 +222,45 @@ its type to `common_constant_types`.
         return ConstantVariable.is_base_literal(obj)
 
     def unpack_var_sequence(
-        self, tx: InstructionTranslator | None
+        self, tx: InstructionTranslatorBase | None
     ) -> list[VariableTracker]:
         try:
             return [ConstantVariable.create(x) for x in self.as_python_constant()]
         except TypeError as e:
             raise NotImplementedError from e
 
-    def len_impl(self, tx: InstructionTranslator) -> VariableTracker:
+    def hash_impl(self, tx: InstructionTranslatorBase) -> tuple[int, bool]:
+        """Dynamo tracing rule for long_hash, float_hash, unicode_hash, etc."""
+        return hash(self.value), False
+
+    def richcompare_impl(
+        self, tx: InstructionTranslatorBase, other: VariableTracker, op: str
+    ) -> VariableTracker:
+        from .object_protocol import python_constant_richcompare_impl
+
+        return python_constant_richcompare_impl(self, tx, other, op)
+
+    def str_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
+        return ConstantVariable.create(str(self.value))
+
+    def len_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
         """Generic len for any constant value (sequence or mapping)."""
         try:
             return ConstantVariable.create(len(self.value))
         except TypeError as e:
             raise_observed_exception(type(e), tx, args=list(e.args))
 
-    def sq_length(self, tx: InstructionTranslator) -> VariableTracker:
+    def sq_length(self, tx: InstructionTranslatorBase) -> VariableTracker:
         """Sequence length - delegates to len_impl for constants."""
         return self.len_impl(tx)
 
-    def mp_length(self, tx: InstructionTranslator) -> VariableTracker:
+    def mp_length(self, tx: InstructionTranslatorBase) -> VariableTracker:
         """Mapping length - delegates to len_impl for constants."""
         return self.len_impl(tx)
 
-    def const_getattr(self, tx: InstructionTranslator, name: str) -> VariableTracker:
+    def const_getattr(
+        self, tx: InstructionTranslatorBase, name: str
+    ) -> VariableTracker:
         if not hasattr(self.value, name):
             raise_observed_exception(AttributeError, tx, args=[name])
         member = getattr(self.value, name)
@@ -206,18 +268,37 @@ its type to `common_constant_types`.
             raise NotImplementedError
         return member
 
-    def tp_iter_impl(self, tx: InstructionTranslator) -> VariableTracker:
+    def sq_contains(self, tx: InstructionTranslatorBase, item: VariableTracker):
+        """Sequence contains for constants."""
+        if item.is_python_constant():
+            search = item.as_python_constant()
+            try:
+                result = search in self.value
+                return ConstantVariable.create(result)
+            except TypeError as e:
+                raise_observed_exception(
+                    type(e),
+                    tx,
+                    args=list(e.args),
+                )
+        return super().sq_contains(tx, item)
+
+    def tp_iter_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
         from .lists import ListIteratorVariable
 
-        if istype(self.value, str):
-            return ListIteratorVariable(
-                self.unpack_var_sequence(tx), mutation_type=ValueMutationNew()
-            )
+        if isinstance(self.value, Iterable):
+            try:
+                return ListIteratorVariable(
+                    [ConstantVariable.create(c) for c in self.value],
+                    mutation_type=ValueMutationNew(),
+                )
+            except NotImplementedError:
+                pass
         return super().tp_iter_impl(tx)
 
     def call_method(
         self,
-        tx: InstructionTranslator,
+        tx: InstructionTranslatorBase,
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -226,7 +307,9 @@ its type to `common_constant_types`.
 
         if name == "format" and istype(self.value, str):
             return variables.BuiltinVariable(str.format).call_function(
-                tx, [self, *args], kwargs
+                tx,
+                [self, *args],
+                kwargs,
             )
         elif name == "join" and istype(self.value, str):
             if kwargs or len(args) != 1:
@@ -236,7 +319,7 @@ its type to `common_constant_types`.
                     "1 args and 0 kwargs",
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
-            arg_unpacked = args[0].force_unpack_var_sequence(tx)
+            arg_unpacked = unpack_iterable(tx, args[0])
             try:
                 arg_const = [x.as_python_constant() for x in arg_unpacked]
                 return ConstantVariable.create(self.value.join(arg_const))
@@ -311,22 +394,14 @@ its type to `common_constant_types`.
                 )
             except Exception as e:
                 raise_observed_exception(type(e), tx, args=list(e.args))
-        elif name == "__contains__" and len(args) == 1 and args[0].is_python_constant():
-            assert not kwargs
-            search = args[0].as_python_constant()
-            try:
-                result = search in self.value
-                return ConstantVariable.create(result)
-            except TypeError as e:
-                raise_observed_exception(type(e), tx, args=list(e.args))
         return super().call_method(tx, name, args, kwargs)
 
     def call_tree_map(
         self,
-        tx: InstructionTranslator,
+        tx: InstructionTranslatorBase,
         tree_map_fn: UserFunctionVariable,
         map_fn: VariableTracker,
-        rest: Sequence[VariableTracker],
+        rest: list[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if self.value is None:
@@ -373,28 +448,25 @@ its type to `common_constant_types`.
             tree_map_kwargs,
         )
 
+    def reconstruct_pycode(self, codegen) -> str:
+        return repr(self.value)
+
     @override
     def call_obj_hasattr(
-        self, tx: InstructionTranslator, name: str
+        self, tx: InstructionTranslatorBase, name: str
     ) -> ConstantVariable:
         result = hasattr(self.value, name)
         return variables.ConstantVariable.create(result)
 
-    def is_python_hashable(self) -> Literal[True]:
-        return True
-
-    def get_python_hash(self) -> int:
-        return hash(self.value)
-
-    def is_python_equal(self, other: object) -> bool:
-        from .tensor import SymNodeVariable
-
-        if isinstance(other, SymNodeVariable):
-            return self.as_python_constant() == other.evaluate_expr()
-        return (
-            isinstance(other, VariableTracker)
-            and self.as_python_constant() == other.as_python_constant()
-        )
+    def get_id(self, tx: InstructionTranslatorBase) -> int | None:
+        # Singletons have guaranteed stable identity across the process lifetime.
+        if self.value is None or self.value is True or self.value is False:
+            return id(self.value)
+        # Sourceful constants resolve via source like any other sourceful VT.
+        # Sourceless non-singleton constants (e.g. literal 42 in compiled code)
+        # get FakeIdVariable — CPython interning of small ints/strings is an
+        # implementation detail users shouldn't rely on.
+        return super().get_id(tx)
 
     def get_real_python_backed_value(self) -> object:
         return self.value
@@ -405,7 +477,9 @@ its type to `common_constant_types`.
     ) -> VariableTracker:
         # CPython: int and bool define nb_index (returns self for int,
         # int(self) for bool). All other constant types do not.
-        if isinstance(self.value, (int, bool)):
+        from .object_protocol import type_implements_nb_index
+
+        if type_implements_nb_index(type(self.value)):
             return ConstantVariable.create(operator.index(self.value))
         return super().nb_index_impl(tx)
 
@@ -427,30 +501,401 @@ its type to `common_constant_types`.
         # bool inherits nb_float from int via slot inheritance.
         return ConstantVariable.create(float(self.value))
 
+    def _nb_binary_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        op: Any,
+        type_check: Any,
+        reverse: bool,
+    ) -> VariableTracker:
+        # Shared body for ConstantVariable's binary nb_* slots. Mirrors the
+        # CPython contract: if the type doesn't implement the slot, return
+        # NotImplemented so dispatch can try the reverse slot; otherwise run
+        # ``op(v, w)`` and re-raise arithmetic exceptions as observed.
+        if not type_check(type(self.value)):
+            return ConstantVariable.create(NotImplemented)
+        if not other.is_python_constant():
+            return ConstantVariable.create(NotImplemented)
+        self_, other_ = (other, self) if reverse else (self, other)
+        v, w = self_.as_python_constant(), other_.as_python_constant()
+        try:
+            result = op(v, w)
+        except (TypeError, ValueError, OverflowError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        if result is NotImplemented:
+            return ConstantVariable.create(NotImplemented)
+        return VariableTracker.build(tx, result)
+
+    def nb_lshift_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # CPython: only int defines nb_lshift; bool inherits via slot inheritance.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L5489 (long_lshift)
+        from .object_protocol import type_implements_nb_lshift
+
+        return self._nb_binary_impl(
+            tx, other, operator.lshift, type_implements_nb_lshift, reverse
+        )
+
+    def nb_rshift_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # CPython: only int defines nb_rshift; bool inherits via slot inheritance.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L5526 (long_rshift)
+        from .object_protocol import type_implements_nb_rshift
+
+        return self._nb_binary_impl(
+            tx, other, operator.rshift, type_implements_nb_rshift, reverse
+        )
+
+    def nb_floor_divide_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # CPython: int and float define nb_floor_divide; bool inherits int's.
+        # complex does NOT (complex floor division raises TypeError).
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L4057 (long_floor_div)
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L660 (float_floor_div)
+        if not isinstance(self.value, (int, float)):
+            return ConstantVariable.create(NotImplemented)
+        if not other.is_python_constant():
+            return ConstantVariable.create(NotImplemented)
+        self_, other_ = (other, self) if reverse else (self, other)
+        v, w = self_.as_python_constant(), other_.as_python_constant()
+        try:
+            return VariableTracker.build(tx, v // w)
+        except (TypeError, ValueError, ZeroDivisionError, OverflowError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+
+    def nb_true_divide_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # CPython: int, float, and complex define nb_true_divide; bool inherits int's.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L4146 (long_true_divide)
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L618 (float_div)
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c#L518 (complex_div)
+        if not isinstance(self.value, (int, float, complex)):
+            return ConstantVariable.create(NotImplemented)
+        if not other.is_python_constant():
+            return ConstantVariable.create(NotImplemented)
+        self_, other_ = (other, self) if reverse else (self, other)
+        v, w = self_.as_python_constant(), other_.as_python_constant()
+        try:
+            return VariableTracker.build(tx, v / w)
+        except (TypeError, ValueError, ZeroDivisionError, OverflowError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+
+    def nb_remainder_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # CPython: int and float define nb_remainder (bool inherits int's); complex
+        # does NOT. str/bytes/bytearray define nb_remainder for %-formatting.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L4116 (long_mod)
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L640 (float_rem)
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/unicodeobject.c#L15170 (unicode_mod)
+        if not isinstance(self.value, (int, float, str, bytes, bytearray)):
+            return ConstantVariable.create(NotImplemented)
+        if not other.is_python_constant():
+            return ConstantVariable.create(NotImplemented)
+        self_, other_ = (other, self) if reverse else (self, other)
+        v, w = self_.as_python_constant(), other_.as_python_constant()
+        try:
+            return VariableTracker.build(tx, v % w)
+        except (TypeError, ValueError, ZeroDivisionError, OverflowError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+
+    def nb_divmod_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # CPython: int and float define nb_divmod (bool inherits int's); complex
+        # does NOT. Returns a (quotient, remainder) tuple.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L4126 (long_divmod)
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L680 (float_divmod)
+        if not isinstance(self.value, (int, float)):
+            return ConstantVariable.create(NotImplemented)
+        if not other.is_python_constant():
+            return ConstantVariable.create(NotImplemented)
+        self_, other_ = (other, self) if reverse else (self, other)
+        v, w = self_.as_python_constant(), other_.as_python_constant()
+        try:
+            return VariableTracker.build(tx, divmod(v, w))
+        except (TypeError, ValueError, ZeroDivisionError, OverflowError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+
+    def nb_or_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # CPython: int, frozenset, and type all define nb_or.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L5606 (long_or)
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/setobject.c#L1319 (set_or)
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L6028-L6030 (type_as_number.nb_or)
+        # bool inherits int's nb_or via slot inheritance.
+        from .object_protocol import type_implements_nb_or
+
+        return self._nb_binary_impl(
+            tx, other, operator.or_, type_implements_nb_or, reverse
+        )
+
+    def nb_subtract_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # CPython: int, float, and complex define nb_subtract; bool inherits int's.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L3819-L3824 (long_sub_method)
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L598-L606 (float_sub)
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c#L494-L503 (COMPLEX_BINOP(sub, diff))
+        from .object_protocol import type_implements_nb_subtract
+
+        return self._nb_binary_impl(
+            tx, other, operator.sub, type_implements_nb_subtract, reverse
+        )
+
+    def nb_multiply_impl(
+        self,
+        tx: InstructionTranslatorBase,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # int, float, and complex all define nb_multiply (bool inherits int's slot).
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L4242-L4260 (long_mul)
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L608-L616 (float_mul)
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c#L506 (complex_mul)
+        # str/bytes/bytearray do NOT have nb_multiply — they go through sq_repeat,
+        # so this method should not see them as ``self``.
+        from .object_protocol import type_implements_nb_multiply
+
+        if not other.is_python_constant():
+            return ConstantVariable.create(NotImplemented)
+        other_val = other.as_python_constant()
+        # CPython's nb_multiply (e.g. long_mul, float_mul) returns NotImplemented
+        # whenever the other operand isn't numeric — sequence repetition is
+        # then handled by PyNumber_Multiply's sq_repeat fallback. We mirror that
+        # here because ``operator.mul`` performs the full protocol (including
+        # sq_repeat) and would incorrectly short-circuit the dispatch.
+        if not isinstance(other_val, (int, float, complex)):
+            return ConstantVariable.create(NotImplemented)
+        return self._nb_binary_impl(
+            tx, other, operator.mul, type_implements_nb_multiply, reverse
+        )
+
+    def sq_repeat_impl(
+        self,
+        tx: InstructionTranslatorBase,
+        count: VariableTracker,
+    ) -> VariableTracker:
+        # Only str / bytes are reachable via ConstantVariable since list, tuple,
+        # bytearray have their own VTs.  ``count`` was already validated as an
+        # index by sequence_repeat -> nb_index_impl.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/unicodeobject.c#L12371 (unicode_repeat)
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/bytesobject.c#L1448 (bytes_repeat)
+        if not isinstance(self.value, (str, bytes)):
+            raise AssertionError("Expected str or bytes in sq_repeat_impl")
+        n = count.as_python_constant()
+        try:
+            return ConstantVariable.create(self.value * n)
+        except (MemoryError, OverflowError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+
+    def nb_and_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # CPython: int, frozenset, and type all define nb_and.
+        # https://github.com/python/cpython/blob/3.13/Objects/longobject.c#L5574 (long_and)
+        # https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L1506-L1518 (set_and)
+        # bool inherits int's nb_and via slot inheritance.
+        from .object_protocol import type_implements_nb_and
+
+        return self._nb_binary_impl(
+            tx, other, operator.and_, type_implements_nb_and, reverse
+        )
+
+    def nb_xor_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # CPython: int and frozenset define nb_xor.
+        # https://github.com/python/cpython/blob/3.13/Objects/longobject.c#L5587 (long_xor)
+        # https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L1984-L1990 (set_xor)
+        # bool inherits int's nb_xor via slot inheritance.
+        from .object_protocol import type_implements_nb_xor
+
+        return self._nb_binary_impl(
+            tx, other, operator.xor, type_implements_nb_xor, reverse
+        )
+
+    def nb_negative_impl(
+        self,
+        tx: Any,
+    ) -> VariableTracker:
+        # int: https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L5179-L5189
+        # float: https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L839-L849
+        # complex: https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c#L569-L575
+        # bool inherits nb_negative from int via slot inheritance.
+        return ConstantVariable.create(-self.value)
+
+    def nb_positive_impl(
+        self,
+        tx: Any,
+    ) -> VariableTracker:
+        # int: https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L5619 (long_long)
+        # float: https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L1114 (float_float)
+        # complex: https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c#L578 (complex_pos)
+        # bool inherits nb_positive from int via slot inheritance.
+        return ConstantVariable.create(+self.value)
+
+    def nb_add_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # CPython: int, float, and complex define nb_add; bool inherits int's.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L3800 (long_add)
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L559 (float_add)
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c#L720 (COMPLEX_BINOP(add, sum))
+        from .object_protocol import type_implements_nb_add
+
+        return self._nb_binary_impl(
+            tx, other, operator.add, type_implements_nb_add, reverse
+        )
+
+    def nb_power_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        z: VariableTracker | None,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # CPython: int, float, and complex all define nb_power (bool inherits int's).
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c (long_pow)
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c (float_pow)
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c (complex_pow)
+
+        if z is not None:
+            z = z.as_python_constant()
+
+        if not other.is_python_constant():
+            return ConstantVariable.create(NotImplemented)
+
+        self_, other_ = (other, self) if reverse else (self, other)
+        v, w = (
+            self_.as_python_constant(),
+            other_.as_python_constant(),
+        )
+
+        try:
+            return VariableTracker.build(tx, pow(v, w, z))
+        except TypeError:
+            return ConstantVariable.create(NotImplemented)
+        except (ValueError, ZeroDivisionError, OverflowError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+
+    def nb_power_z_impl(
+        self,
+        tx: Any,
+        v: VariableTracker,
+        w: VariableTracker,
+    ) -> VariableTracker:
+        if not isinstance(self.value, int):
+            return ConstantVariable.create(NotImplemented)
+        if not v.is_python_constant() or not w.is_python_constant():
+            return ConstantVariable.create(NotImplemented)
+        v_val, w_val = v.as_python_constant(), w.as_python_constant()
+        if not isinstance(v_val, int) or not isinstance(w_val, int):
+            return ConstantVariable.create(NotImplemented)
+        try:
+            return VariableTracker.build(tx, pow(v_val, w_val, self.value))
+        except (TypeError, ValueError, ZeroDivisionError, OverflowError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+
+    def nb_absolute_impl(
+        self,
+        tx: Any,
+    ) -> VariableTracker:
+        # int: https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L5184-L5190
+        # float: https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L847-L850
+        # complex: https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c#L588-L600
+        #   _Py_c_abs can set errno=ERANGE on overflow, which complex_abs
+        #   converts to OverflowError("absolute value too large").
+        # bool inherits nb_absolute from int via slot inheritance.
+        try:
+            return ConstantVariable.create(abs(self.value))
+        except OverflowError as e:
+            raise_observed_exception(OverflowError, tx, args=list(e.args))
+
+    def nb_invert_impl(
+        self,
+        tx: Any,
+    ) -> VariableTracker:
+        # int: https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L5163-L5177
+        #   long_invert implements ~x as -(x+1).
+        # bool inherits nb_invert from int via slot inheritance.
+        return ConstantVariable.create(~self.value)
+
 
 CONSTANT_VARIABLE_NONE = ConstantVariable(None)
 CONSTANT_VARIABLE_TRUE = ConstantVariable(True)
 CONSTANT_VARIABLE_FALSE = ConstantVariable(False)
 
 
-class FakeIdVariable(VariableTracker):
-    """A compile-time-only id value that can be used as a dict key but cannot
-    be reconstructed across graph breaks.
+class FakeValueKind(enum.Enum):
+    ID = "id"
+    HASH = "hash"
 
-    When dynamo evaluates ``id(x)`` on a variable tracker that has no
-    corresponding runtime object (e.g. a ``ConstDictVariable`` created during
-    tracing), we mint a fake integer id.  This variable holds that id and
-    supports the minimal interface needed to participate as a dict key
-    (hashing and equality).  It intentionally blocks reconstruction so that a
-    graph break does not silently bake a stale id into the resumed bytecode.
+
+class FakeIdVariable(VariableTracker):
+    """A compile-time-only id or hash value that can be used as a dict key but
+    cannot be reconstructed across graph breaks.
+
+    When dynamo evaluates ``id(x)`` or ``hash(x)`` on a variable tracker that
+    has no corresponding runtime object, we mint a fake integer.  The ``kind``
+    field tracks which builtin produced the value so that same-kind comparisons
+    (e.g. ``id(a) != id(b)``) can be resolved at compile time while cross-kind
+    comparisons graph-break.
     """
 
     # PyLong_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L6585
     _cpython_type = int
 
-    def __init__(self, value: int, **kwargs: Any) -> None:
+    _nonvar_fields = {
+        "kind",
+        *VariableTracker._nonvar_fields,
+    }
+
+    def __init__(
+        self, value: int, *, kind: FakeValueKind = FakeValueKind.ID, **kwargs: Any
+    ) -> None:
         super().__init__(**kwargs)
         self.value = value
+        self.kind = kind
 
     def as_python_constant(self) -> int:
         return self.value
@@ -461,16 +906,34 @@ class FakeIdVariable(VariableTracker):
     def python_type(self) -> type:
         return int
 
-    def is_python_hashable(self) -> bool:
-        return True
+    def hash_impl(self, tx: Any) -> tuple[int, bool]:
+        return hash(self.value), True
 
-    def get_python_hash(self) -> int:
-        return hash(self.value)
-
-    def is_python_equal(self, other: object) -> bool:
-        if isinstance(other, (FakeIdVariable, ConstantVariable)):
-            return self.value == other.as_python_constant()
-        return False
+    def richcompare_impl(
+        self, tx: Any, other: VariableTracker, op: str
+    ) -> VariableTracker:
+        if (
+            isinstance(other, FakeIdVariable)
+            and self.kind == other.kind
+            and op in ("__eq__", "__ne__")
+        ):
+            result = (
+                (self.value == other.value)
+                if op == "__eq__"
+                else (self.value != other.value)
+            )
+            return ConstantVariable.create(result)
+        unimplemented(
+            gb_type="Comparison on compile-time-only id or hash value",
+            context=f"FakeIdVariable({self.value}) {op} {type(other).__name__}",
+            explanation="Cannot compare a compile-time-only id() or hash() "
+            "value. The comparison will run eagerly.",
+            hints=[
+                "Avoid comparing id() or hash() of objects created inside "
+                "the compiled region against other values.",
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
 
     def reconstruct(self, codegen: Any) -> None:
         unimplemented(

@@ -77,7 +77,7 @@ some moving parts to implementing the ONNX translation in this case:
   is what `symbolic_helper._if_scalar_type_as()` and
   `_jit_pass_onnx_scalar_type_analysis` does.
 
-- Dispatch to these functions takes advantage an outrageous coincidence
+- Dispatch to these functions takes advantage of an outrageous coincidence
     between the tensor and scalar name.  When we add two tensors together,
     you get the dispatch:
 

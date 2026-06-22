@@ -214,42 +214,48 @@ class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
         K: int,
         device: str,
         helpers: ModuleType,
-        block_m: int,
+        block_m_a: int,
+        block_m_b: int,
         block_k: int,
-        scaling_type: ScalingType,
-        use_padding: bool,
+        scaling_type_a: ScalingType,
+        scaling_type_b: ScalingType,
+        use_padding_a: bool,
+        use_padding_b: bool,
     ) -> None:
         """
         Common initialization for FP8 blockwise scaling.
 
         Args:
-            block_m: Block size for M dimension (1 for 1x128, 128 for 128x128)
+            block_m_a/block_m_b: Per-side block size for M/N (1 for 1x128, 128 for 128x128).
+                The kernel only supports the joint recipes (1, 1), (128, 1), (1, 128);
+                the symmetric (128, 128) is not a valid kernel mode (see get_joint_scaling
+                in aten/src/ATen/native/cuda/ScaledBlas.cpp).
             block_k: Block size for K dimension (always 128)
-            scaling_type: ScalingType enum value
-            use_padding: If True, pad scales for 128x128; if False, use simple transpose for 1x128
+            scaling_type_a/scaling_type_b: ScalingType enum value per side
+            use_padding_a/use_padding_b: If True, pad scales for 128x128; if False, use simple transpose for 1x128
         """
         self.float8_dtype = get_float8_dtype(self._float8_dtype_arg)
 
         # Validate SM90 support
         if device == "cuda" and torch.cuda.get_device_capability(0) != (9, 0):
-            mode_name = "1x128" if block_m == 1 else "128x128"
             raise RuntimeError(
-                f"FP8 BlockWise{mode_name} (DeepSeek style) scaling is only supported on CUDA SM90 (H100)."
+                "FP8 BlockWise (DeepSeek style) scaling is only supported on CUDA SM90 (H100)."
             )
 
-        # Validate dimension divisibility
-        if block_m == 1:
-            # 1x128 only requires K divisible by block_k
-            if K % block_k != 0:
-                raise RuntimeError(
-                    f"FP8 BlockWise1x128 requires K divisible by {block_k}, got K={K}"
-                )
-        else:
-            # 128x128 requires M, N, K all divisible by block size
-            if (M % block_k) != 0 or (N % block_k) != 0 or (K % block_k) != 0:
-                raise RuntimeError(
-                    f"FP8 BlockWise128x128 requires M,N,K divisible by {block_k}, got M={M}, N={N}, K={K}"
-                )
+        # Validate dimension divisibility: K is always required; the 128x128 side
+        # additionally requires its outer dim (M for lhs, N for rhs) divisible by block_k.
+        if K % block_k != 0:
+            raise RuntimeError(
+                f"FP8 BlockWise requires K divisible by {block_k}, got K={K}"
+            )
+        if block_m_a == block_k and M % block_k != 0:
+            raise RuntimeError(
+                f"FP8 BlockWise128x128 lhs requires M divisible by {block_k}, got M={M}"
+            )
+        if block_m_b == block_k and N % block_k != 0:
+            raise RuntimeError(
+                f"FP8 BlockWise128x128 rhs requires N divisible by {block_k}, got N={N}"
+            )
 
         # Create high-precision input tensors
         x_hp = torch.randn(
@@ -262,24 +268,26 @@ class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
         # Quantize to FP8 with block-wise scaling
         with torch.no_grad():
             x_lp, x_scales = helpers.tensor_to_scale_block(
-                x_hp, self.float8_dtype, block_m, block_k
+                x_hp, self.float8_dtype, block_m_a, block_k
             )
             y_lp, y_scales = helpers.tensor_to_scale_block(
-                y_hp, self.float8_dtype, block_m, block_k
+                y_hp, self.float8_dtype, block_m_b, block_k
             )
             x_lp = x_lp.detach().requires_grad_(self.auto_set())
             y_lp = y_lp.detach().requires_grad_(self.auto_set())
 
-        # Process scales based on block configuration
-        if use_padding:
+        # Process scales per side based on each side's block configuration
+        if use_padding_a:
             # 128x128: pad scales to multiple of 4, then transpose
             x_scales, _ = helpers._pad_128x128_scales(x_scales.detach())
-            y_scales, _ = helpers._pad_128x128_scales(y_scales.detach())
             x_scales = x_scales.t()
-            y_scales = y_scales.t()
         else:
             # 1x128: simple transpose to get "outer-dim-major" layout
             x_scales = x_scales.t().contiguous().t().detach()
+        if use_padding_b:
+            y_scales, _ = helpers._pad_128x128_scales(y_scales.detach())
+            y_scales = y_scales.t()
+        else:
             y_scales = y_scales.t().contiguous().t().detach()
 
         self.inputs = {
@@ -289,40 +297,65 @@ class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
             "scale_b": y_scales.reciprocal(),
         }
         self._set_scaled_mm_call_config(
-            scale_recipe_a=scaling_type,
-            scale_recipe_b=scaling_type,
+            scale_recipe_a=scaling_type_a,
+            scale_recipe_b=scaling_type_b,
         )
 
     def _init_fp8_blockwise_1x128(
         self, M: int, N: int, K: int, device: str, helpers: ModuleType
     ) -> None:
-        # FP8 blockwise scaling with 1x128 blocks.
+        # FP8 blockwise scaling with 1x128 blocks on both sides.
         self._init_fp8_blockwise_common(
             M,
             N,
             K,
             device,
             helpers,
-            block_m=1,
+            block_m_a=1,
+            block_m_b=1,
             block_k=self._FP8_BLOCK_K,
-            scaling_type=ScalingType.BlockWise1x128,
-            use_padding=False,
+            scaling_type_a=ScalingType.BlockWise1x128,
+            scaling_type_b=ScalingType.BlockWise1x128,
+            use_padding_a=False,
+            use_padding_b=False,
         )
 
-    def _init_fp8_blockwise_128x128(
+    def _init_fp8_blockwise_128x128_1x128(
         self, M: int, N: int, K: int, device: str, helpers: ModuleType
     ) -> None:
-        # FP8 blockwise scaling with 128x128 blocks.
+        # FP8 blockwise scaling: 128x128 lhs, 1x128 rhs.
         self._init_fp8_blockwise_common(
             M,
             N,
             K,
             device,
             helpers,
-            block_m=self._FP8_BLOCK_K,
+            block_m_a=self._FP8_BLOCK_K,
+            block_m_b=1,
             block_k=self._FP8_BLOCK_K,
-            scaling_type=ScalingType.BlockWise128x128,
-            use_padding=True,
+            scaling_type_a=ScalingType.BlockWise128x128,
+            scaling_type_b=ScalingType.BlockWise1x128,
+            use_padding_a=True,
+            use_padding_b=False,
+        )
+
+    def _init_fp8_blockwise_1x128_128x128(
+        self, M: int, N: int, K: int, device: str, helpers: ModuleType
+    ) -> None:
+        # FP8 blockwise scaling: 1x128 lhs, 128x128 rhs.
+        self._init_fp8_blockwise_common(
+            M,
+            N,
+            K,
+            device,
+            helpers,
+            block_m_a=1,
+            block_m_b=self._FP8_BLOCK_K,
+            block_k=self._FP8_BLOCK_K,
+            scaling_type_a=ScalingType.BlockWise1x128,
+            scaling_type_b=ScalingType.BlockWise128x128,
+            use_padding_a=False,
+            use_padding_b=True,
         )
 
     def _init_mx_blockwise(
@@ -445,8 +478,10 @@ class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
             self._init_fp8_rowwise(M, N, K, device, helpers)
         elif scaling == "fp8_blockwise_1x128":
             self._init_fp8_blockwise_1x128(M, N, K, device, helpers)
-        elif scaling == "fp8_blockwise_128x128":
-            self._init_fp8_blockwise_128x128(M, N, K, device, helpers)
+        elif scaling == "fp8_blockwise_128x128_1x128":
+            self._init_fp8_blockwise_128x128_1x128(M, N, K, device, helpers)
+        elif scaling == "fp8_blockwise_1x128_128x128":
+            self._init_fp8_blockwise_1x128_128x128(M, N, K, device, helpers)
         elif scaling == "mxfp8":
             self._init_mx_blockwise(M, N, K, device, mx_format="mxfp8")
         elif scaling == "mxfp4":
@@ -549,7 +584,11 @@ if _should_generate_scaled_mm_configs():
             tags=["long"],
         )
 
-    # DeepSeek FP8 blockwise (1x128 / 128x128) is SM90-only.
+    # DeepSeek FP8 blockwise scaling, SM90-only. Bench all three joint recipes
+    # the kernel supports (see get_joint_scaling in
+    # aten/src/ATen/native/cuda/ScaledBlas.cpp): (1x128, 1x128), (128x128, 1x128),
+    # and (1x128, 128x128). The symmetric (128x128, 128x128) pair is not a
+    # supported kernel mode, so it is not benched.
     if supports_fp8_deepseek_blockwise_scaling():
         scaled_mm_configs_long += op_bench.config_list(
             attr_names=["M", "N", "K"],
@@ -558,7 +597,11 @@ if _should_generate_scaled_mm_configs():
                 "device": ["cuda"],
                 "float8_dtype": ["e4m3fn"],
                 "output_dtype": ["bfloat16"],
-                "scaling": ["fp8_blockwise_1x128", "fp8_blockwise_128x128"],
+                "scaling": [
+                    "fp8_blockwise_1x128",
+                    "fp8_blockwise_128x128_1x128",
+                    "fp8_blockwise_1x128_128x128",
+                ],
             },
             tags=["long"],
         )

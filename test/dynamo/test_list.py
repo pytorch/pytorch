@@ -11,6 +11,24 @@ from torch.testing._internal.common_utils import make_dynamo_test
 lst = []
 
 
+class AlwaysEqualForListRemove:
+    def __eq__(self, other):
+        return True
+
+
+class NeverEqualForListRemove:
+    def __eq__(self, other):
+        return False
+
+
+class CmpKeyForListSort:
+    def __init__(self, v):
+        self.v = v
+
+    def __lt__(self, other):
+        return self.v % 3 < other.v % 3
+
+
 class TupleTests(torch._dynamo.test_case.TestCase):
     # Tuple methods
     # + count
@@ -279,6 +297,19 @@ class ListTests(TupleTests):
         self.assertRaises(TypeError, p.remove, 2, 3)
 
     @make_dynamo_test
+    def test_remove_uses_item_richcompare(self):
+        p = [AlwaysEqualForListRemove()]
+        self.assertIsNone(p.remove(NeverEqualForListRemove()))
+        self.assertEqual(p, [])
+
+    @make_dynamo_test
+    def test_remove_matches_identity_before_richcompare(self):
+        item = NeverEqualForListRemove()
+        p = [item]
+        self.assertIsNone(p.remove(item))
+        self.assertEqual(p, [])
+
+    @make_dynamo_test
     def test_reverse(self):
         p = self.thetype("abcd")
         self.assertIsNone(p.reverse())
@@ -292,6 +323,54 @@ class ListTests(TupleTests):
         p = self.thetype("dbca")
         self.assertIsNone(p.sort())
         self.assertEqual(p, self.thetype("abcd"))
+
+    @make_dynamo_test
+    def test_sort_cmp_to_key(self):
+        from functools import cmp_to_key
+
+        def revcmp(a, b):
+            return (a < b) - (a > b)
+
+        p = self.thetype([1, 3, 2])
+        p.sort(key=cmp_to_key(revcmp))
+        self.assertEqual(p, self.thetype([3, 2, 1]))
+        p.sort(key=cmp_to_key(revcmp), reverse=True)
+        self.assertEqual(p, self.thetype([1, 2, 3]))
+
+    @make_dynamo_test
+    def test_sort_user_defined_lt(self):
+        p = self.thetype([3, 4, 5])
+        p.sort(key=CmpKeyForListSort)
+        self.assertEqual(p, self.thetype([3, 4, 5]))
+        p.sort(key=CmpKeyForListSort, reverse=True)
+        self.assertEqual(p, self.thetype([5, 4, 3]))
+
+    @make_dynamo_test
+    def test_sort_modified_during_sort(self):
+        from functools import cmp_to_key
+
+        p = self.thetype([1, 3, 2])
+
+        def selfmodifying(a, b):
+            p.append(4)
+            return (a > b) - (a < b)
+
+        self.assertRaises(ValueError, p.sort, key=cmp_to_key(selfmodifying))
+        # items appended during the sort are discarded
+        self.assertEqual(p, self.thetype([1, 2, 3]))
+
+    @make_dynamo_test
+    def test_sort_empty_during_sort(self):
+        p = self.thetype([1, 3, 2])
+        sizes = []
+
+        def key(x):
+            sizes.append(len(p))
+            return x
+
+        p.sort(key=key)
+        self.assertEqual(p, self.thetype([1, 2, 3]))
+        self.assertEqual(sizes, [0, 0, 0])
 
     @make_dynamo_test
     def test_binop_imul(self):

@@ -14,13 +14,20 @@ from torch._environment import is_fbcode
 def cache_dir() -> str:
     cache_dir = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
     if cache_dir is None:
-        os.environ["TORCHINDUCTOR_CACHE_DIR"] = cache_dir = default_cache_dir()
+        cache_dir = default_cache_dir()
+    cache_dir = os.path.abspath(cache_dir)
+    os.environ["TORCHINDUCTOR_CACHE_DIR"] = cache_dir
     os.makedirs(cache_dir, exist_ok=True)
     return cache_dir
 
 
 def default_cache_dir() -> str:
-    sanitized_username = re.sub(r'[\\/:*?"<>|]', "_", getpass.getuser())
+    try:
+        username = getpass.getuser()
+    except (KeyError, ModuleNotFoundError, OSError):
+        getuid = getattr(os, "getuid", None)
+        username = f"uid_{getuid()}" if callable(getuid) else "unknown_user"
+    sanitized_username = re.sub(r'[\\/:*?"<>|]', "_", username)
     return os.path.join(
         tempfile.gettempdir() if not is_fbcode() else "/var/tmp",
         "torchinductor_" + sanitized_username,

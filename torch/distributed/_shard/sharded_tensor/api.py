@@ -406,7 +406,7 @@ class ShardedTensor(ShardedTensorBase):
             dst(int): The rank where full tensor is constructed.
                 Default: 0
             out (:class `torch.Tensor`, optional): The output full tensor.
-                Must to be provided ONLY on ``dst`` rank.
+                Must be provided ONLY on ``dst`` rank.
                 Default: ``None``
             enforce_dtype (bool): Deprecated, please use dtype instead.  Force the
                 gathered tensors to be the same type as input and output.
@@ -641,7 +641,7 @@ class ShardedTensor(ShardedTensorBase):
         elif self._process_group._get_backend_name() == "gloo":
             current_device = torch.device("cpu")
         else:
-            current_device = torch.device(torch.cuda.current_device())
+            current_device = torch.device(torch.accelerator.current_device_index())
         current_dtype = self.dtype
         device_to = current_device
         dtype_to = current_dtype
@@ -667,10 +667,10 @@ class ShardedTensor(ShardedTensorBase):
             torch.device(device_to) if isinstance(device_to, (str, int)) else device_to
         )
 
-        if device_to.type == "cuda":
+        if device_to.type in {"cuda", "xpu"}:
             # if device_to set to cuda, set to current device even
             # if user specify the device index.
-            current_idx = torch.cuda.current_device()
+            current_idx = torch.accelerator.current_device_index()
             if device_to.index != current_idx:
                 warnings.warn(
                     "ShardedTensor.to only move tensor to its current device"

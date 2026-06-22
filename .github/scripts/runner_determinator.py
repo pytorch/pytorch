@@ -41,6 +41,17 @@ Example config:
         rollout_percent: 25
         all_branches: false
         default: true
+      arc:
+        rollout_perc: 50
+        all_branches: true
+        default: false
+        # Comma-separated allowlist of github.workflow names that are
+        # eligible for this experiment. rollout_perc is then applied within
+        # that set; non-listed workflows are 0%. Use the literal "ALL" (or
+        # leave empty) to make every workflow eligible. Prefix an entry with
+        # "-" to exclude that workflow even when "ALL" is present (e.g.
+        # "ALL,-B200 Smoke Tests"); exclusions take priority over inclusions.
+        workflows: pull,trunk
     ---
 
     # Opt-ins:
@@ -82,9 +93,13 @@ GITHUB_OUTPUT = os.getenv("GITHUB_OUTPUT", "")
 GH_OUTPUT_KEY_AMI = "runner-ami"
 GH_OUTPUT_KEY_LABEL_TYPE = "label-type"
 GH_OUTPUT_KEY_USE_ARC = "use-arc"
+GH_OUTPUT_KEY_AMD_DO_LABEL_TYPE = "amd-do-label-type"
 OPT_OUT_LABEL = "no-runner-experiments"
 
 SETTING_EXPERIMENTS = "experiments"
+
+# Sentinel in the per-experiment ``workflows`` allowlist meaning "all workflows".
+WORKFLOW_ALLOWLIST_ALL = "ALL"
 
 LF_FLEET_EXPERIMENT = "lf"
 ARC_FLEET_EXPERIMENT = "arc"
@@ -92,6 +107,9 @@ CANARY_FLEET_SUFFIX = ".c"
 
 ARC_LABEL_PREFIX = "mt-"
 ARC_CANARY_LABEL_PREFIX = "c-"
+
+AMD_DO_EXPERIMENT = "amd-do"
+AMD_DO_LABEL_PREFIX = "amd-do-"
 
 
 class Experiment(NamedTuple):
@@ -104,6 +122,13 @@ class Experiment(NamedTuple):
     default: bool = (
         True  # If True, the experiment is enabled by default for all queries
     )
+    # Per-experiment workflow eligibility. Comma-separated github.workflow
+    # names; when non-empty, only listed workflows are eligible for the
+    # experiment and rollout_perc is applied within that set. The literal
+    # "ALL" (or empty) makes every workflow eligible. A "-" prefix excludes
+    # that workflow even when "ALL" is present (e.g. "ALL,-B200 Smoke Tests");
+    # exclusions take priority over inclusions. Applied after user opt-in/out.
+    workflows: str = ""
 
     # Add more fields as needed
 
@@ -111,6 +136,9 @@ class Experiment(NamedTuple):
 class RunnerPrefixResult(NamedTuple):
     prefix: str
     use_arc: bool = False
+    # Dedicated prefix for the amd-do experiment, exposed via its own output
+    # (amd-do-label-type) instead of being folded into ``prefix``.
+    amd_do_prefix: str = ""
 
 
 class Settings(NamedTuple):
@@ -227,6 +255,13 @@ def parse_args() -> Any:
         default="",
         help="the optional PR number where this is run",
     )
+    parser.add_argument(
+        "--workflow-name",
+        type=str,
+        required=False,
+        default="",
+        help="the name of the calling workflow (github.workflow)",
+    )
 
     return parser.parse_args()
 
@@ -320,6 +355,14 @@ class UserOptins(dict[str, list[UserExperimentConfig]]):
     """
     Dictionary of users with a list of experiment configs they have opted into
     """
+
+
+def parse_workflow_list(workflows: str) -> set[str]:
+    """
+    Parse the per-experiment ``workflows`` setting into a set of allowlisted
+    workflow names. Empty entries are ignored.
+    """
+    return {entry.strip() for entry in workflows.split(",") if entry.strip()}
 
 
 def parse_user_opt_in_from_text(user_optin_text: str) -> UserOptins:
@@ -498,6 +541,7 @@ def get_runner_prefix(
     eligible_experiments: frozenset[str] = frozenset(),
     opt_out_experiments: frozenset[str] = frozenset(),
     is_canary: bool = False,
+    workflow_name: str = "",
 ) -> RunnerPrefixResult:
     settings = parse_settings(rollout_state)
     user_optins = parse_users(rollout_state)
@@ -505,6 +549,7 @@ def get_runner_prefix(
     fleet_prefix = ""
     prefixes = []
     use_arc = False
+    amd_do_prefix = ""
     for experiment_name, experiment_settings in settings.experiments.items():
         if not experiment_settings.all_branches and is_exception_branch(branch):
             log.info(
@@ -587,13 +632,32 @@ def get_runner_prefix(
                     f"with 0% rollout. Not enabling."
                 )
 
-        elif experiment_settings.rollout_perc:
-            # If no user is opted in, then we randomly enable the experiment based on the rollout percentage
-            if random.uniform(0, 100) <= experiment_settings.rollout_perc:
+        else:
+            # workflows: gates which workflows are eligible. rollout_perc is
+            # applied within that gate; non-listed workflows are 0%. The
+            # literal "ALL" (or empty) makes every workflow eligible. Entries
+            # prefixed with "-" are exclusions that take priority, so
+            # "ALL,-foo" enables every workflow except "foo".
+            workflow_list = parse_workflow_list(experiment_settings.workflows)
+            excluded = {e[1:] for e in workflow_list if e.startswith("-")}
+            included = {e for e in workflow_list if not e.startswith("-")}
+            eligible = (
+                not included
+                or WORKFLOW_ALLOWLIST_ALL in included
+                or (workflow_name and workflow_name in included)
+            ) and workflow_name not in excluded
+            if not eligible:
                 log.info(
-                    f"Based on rollout percentage of {experiment_settings.rollout_perc}%, enabling experiment {experiment_name}."
+                    f"Workflow '{workflow_name}' is not eligible for experiment "
+                    f"{experiment_name}. Skipping."
                 )
-                enabled = True
+                continue
+            if experiment_settings.rollout_perc:
+                if random.uniform(0, 100) <= experiment_settings.rollout_perc:
+                    log.info(
+                        f"Based on rollout percentage of {experiment_settings.rollout_perc}%, enabling experiment {experiment_name}."
+                    )
+                    enabled = True
 
         if enabled:
             label = experiment_name
@@ -601,6 +665,15 @@ def get_runner_prefix(
                 use_arc = True
                 log.info(
                     f"ARC experiment enabled. Using ARC runner prefix ({'canary' if is_canary else 'production'})."
+                )
+            elif experiment_name == AMD_DO_EXPERIMENT:
+                # The amd-do experiment is exposed through its own
+                # amd-do-label-type output rather than being mixed into the
+                # shared label-type prefix, so it can be applied per-job
+                # (mirrors use-arc).
+                amd_do_prefix = AMD_DO_LABEL_PREFIX
+                log.info(
+                    "amd-do experiment enabled. Exposing 'amd-do-' prefix via the amd-do-label-type output."
                 )
             elif experiment_name == LF_FLEET_EXPERIMENT:
                 # We give some special treatment to the "lf" experiment since determines the fleet we use
@@ -612,14 +685,18 @@ def get_runner_prefix(
             else:
                 prefixes.append(label)
 
-    # ARC experiment takes precedence: return a fixed label prefix
     if use_arc:
-        arc_prefix = (
-            ARC_CANARY_LABEL_PREFIX + ARC_LABEL_PREFIX
-            if is_canary
-            else ARC_LABEL_PREFIX
+        if fleet_prefix:
+            arc_prefix = "lf-"
+        else:
+            arc_prefix = (
+                ARC_CANARY_LABEL_PREFIX + ARC_LABEL_PREFIX
+                if is_canary
+                else ARC_LABEL_PREFIX
+            )
+        return RunnerPrefixResult(
+            prefix=arc_prefix, use_arc=True, amd_do_prefix=amd_do_prefix
         )
-        return RunnerPrefixResult(prefix=arc_prefix, use_arc=True)
 
     if len(prefixes) > 1:
         log.error(
@@ -632,7 +709,7 @@ def get_runner_prefix(
         prefixes.insert(0, fleet_prefix)
 
     prefix = ".".join(prefixes) + "." if prefixes else ""
-    return RunnerPrefixResult(prefix=prefix)
+    return RunnerPrefixResult(prefix=prefix, amd_do_prefix=amd_do_prefix)
 
 
 def get_rollout_state_from_issue(github_token: str, repo: str, issue_num: int) -> str:
@@ -695,6 +772,7 @@ def main() -> None:
     args = parse_args()
 
     runner_label_prefix = DEFAULT_LABEL_PREFIX
+    amd_do_label_prefix = ""
 
     # Check if the PR is opt-out
     if args.pr_number:
@@ -704,7 +782,11 @@ def main() -> None:
                 f"Opt-out runner determinator because #{args.pr_number} has {OPT_OUT_LABEL} label"
             )
             set_github_output(GH_OUTPUT_KEY_LABEL_TYPE, runner_label_prefix)
+            set_github_output(GH_OUTPUT_KEY_AMD_DO_LABEL_TYPE, amd_do_label_prefix)
             sys.exit()
+
+    if args.workflow_name:
+        log.info(f"Workflow name: '{args.workflow_name}'")
 
     try:
         rollout_state = get_rollout_state_from_issue(
@@ -728,8 +810,10 @@ def main() -> None:
             args.eligible_experiments,
             args.opt_out_experiments,
             is_canary,
+            workflow_name=args.workflow_name,
         )
         runner_label_prefix = result.prefix
+        amd_do_label_prefix = result.amd_do_prefix
         set_github_output(GH_OUTPUT_KEY_USE_ARC, str(result.use_arc).lower())
 
     except Exception as e:
@@ -738,6 +822,7 @@ def main() -> None:
         )
 
     set_github_output(GH_OUTPUT_KEY_LABEL_TYPE, runner_label_prefix)
+    set_github_output(GH_OUTPUT_KEY_AMD_DO_LABEL_TYPE, amd_do_label_prefix)
 
 
 if __name__ == "__main__":

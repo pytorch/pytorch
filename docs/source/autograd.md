@@ -440,7 +440,15 @@ Also see {ref}`saved-tensors-hooks-doc`.
 ```
 
 ```{eval-rst}
+.. autofunction:: torch.autograd.graph.region_activation_memory_budget
+```
+
+```{eval-rst}
 .. autofunction:: torch.autograd.graph.set_warn_on_accumulate_grad_stream_mismatch
+```
+
+```{eval-rst}
+.. autofunction:: torch.autograd.graph.set_override_stale_capture_stream
 ```
 
 % This module needs to be documented. Adding here in the meantime

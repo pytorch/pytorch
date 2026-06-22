@@ -11,7 +11,12 @@ from typing import TYPE_CHECKING
 from torch.utils._config_module import Config, install_config_module
 
 
-__all__ = ["compile_on_one_rank", "dtensor_use_symmetric_memory", "use_torchcomms"]
+__all__ = [
+    "compile_on_one_rank",
+    "dtensor_use_symmetric_memory",
+    "pipeline_per_direction_p2p",
+    "use_torchcomms",
+]
 
 # When enabled, coordinates are computed at runtime via a custom op rather
 # than being baked in at compile time. This allows compiling on one rank
@@ -33,6 +38,23 @@ use_torchcomms: bool = Config(
 dtensor_use_symmetric_memory: bool = Config(
     default=False,
     env_name_default="TORCH_DTENSOR_USE_SYMMETRIC_MEMORY",
+)
+
+# When enabled, pipeline stages carry downstream (r -> r+1, forward activations)
+# and upstream (r -> r-1, backward gradients) P2P on two separate communicators
+# instead of sharing one. A single PP communicator serializes all send/recv in one
+# FIFO: coalescing makes a single mixed batch deadlock-free, but across batches
+# (pipeline skew, looped / V schedules, skip connections) the shared FIFO can
+# still form a dependency cycle and deadlock. Splitting by direction removes that
+# hazard and restores full-duplex bandwidth. Requires a device-bound default
+# process group.
+#
+# This flag force-enables the behavior; it is auto-enabled when TorchComms is in
+# use regardless of this flag (see PipelineStage), so it mainly matters for the
+# non-TorchComms backends.
+pipeline_per_direction_p2p: bool = Config(
+    default=False,
+    env_name_default="TORCH_DISTRIBUTED_PIPELINE_PER_DIRECTION_P2P",
 )
 
 

@@ -61,7 +61,7 @@ static void toBackendSelectiveImpl(
       } else {
         std::stringstream err;
         err << "Attribute named " << atoms[i] << " is not a Module";
-        throw std::runtime_error(err.str());
+        throw std::runtime_error(std::move(err).str());
       }
     }
 

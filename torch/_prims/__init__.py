@@ -349,13 +349,11 @@ def _make_prim(
     if tags:
         _prim._tags = tags
     elif aten_packet := getattr(torch.ops.aten, name, None):
-        overload_tags = [
-            getattr(aten_packet, overload).tags for overload in aten_packet.overloads()
-        ]
+        overload_tags = [overload.tags for overload in aten_packet.op_overloads()]
         tags_intersection = set(overload_tags[0])
         tags_intersection.intersection_update(*overload_tags[1:])
 
-        # dont inadvertently add to prim ops
+        # don't inadvertently add to prim ops
         tags_intersection.discard(torch.Tag.core)
         # causes errors with python ref executor tests, none of the
         # data dependent pytorch ops actually decompose to prims
@@ -1882,7 +1880,7 @@ def _cat_meta(tensors: Sequence[TensorLikeType], dim: int) -> TensorLikeType:
                 )
 
     new_shape = list(tensors[0].shape).copy()
-    new_shape[dim] = torch.sym_sum(sym_sum_args)
+    new_shape[dim] = torch.sym_sum(sym_sum_args)  # type: ignore[call-overload]
     return TensorMeta(
         tensors[0],
         shape=new_shape,
@@ -2388,7 +2386,7 @@ def _prod_aten(
             inp = torch.prod(inp, d, dtype=dtype)
         return inp
     else:
-        return torch.prod(inp, dims, dtype=dtype)
+        return torch.prod(inp, dtype=dtype)
 
 
 prod = _make_reduction_prim(
