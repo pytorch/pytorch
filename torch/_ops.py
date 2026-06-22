@@ -374,6 +374,28 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
     def fallthrough(self, dispatch_key):
         self.non_fallthrough_keys = self.non_fallthrough_keys.remove(dispatch_key)
 
+    def _get_overloaded_args(
+        self, args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> tuple[torch.Tensor, ...]:
+        # Default HOP behavior matches handle_torch_function_no_python_arg_parser
+        # in torch/csrc/utils/python_arg_parser.cpp.
+        overloaded_args: list[torch.Tensor] = []
+
+        def has_python_key(tensor):
+            return torch._C._dispatch_keys(tensor).has("Python")
+
+        def check_overloaded(arg):
+            if isinstance(arg, torch.Tensor) and has_python_key(arg):
+                overloaded_args.append(arg)
+
+        for arg in (*args, *kwargs.values()):
+            check_overloaded(arg)
+            if isinstance(arg, (list, tuple)):
+                for a in arg:
+                    check_overloaded(a)
+
+        return tuple(overloaded_args)
+
     # Use positional-only argument to avoid naming collide with custom ops arguments
     # that are named "self".
     def dispatch(self, /, dispatch_key, *args, **kwargs):
@@ -389,25 +411,7 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
             return dispatch_functorch(self, args, kwargs)
 
         if dispatch_key == DispatchKey.Python:
-            # Keep the following 1:1 with handle_torch_function_no_python_arg_parser
-            # in torch/csrc/utils/python_arg_parser.cpp
-
-            overloaded_args_list = []
-
-            def has_python_key(tensor):
-                return torch._C._dispatch_keys(tensor).has("Python")
-
-            def check_overloaded(arg):
-                if isinstance(arg, torch.Tensor) and has_python_key(arg):
-                    overloaded_args_list.append(arg)
-
-            for arg in (*args, *kwargs.values()):
-                check_overloaded(arg)
-                if isinstance(arg, (list, tuple)):
-                    for a in arg:
-                        check_overloaded(a)
-
-            overloaded_args = tuple(overloaded_args_list)
+            overloaded_args = self._get_overloaded_args(args, kwargs)
 
             # Step 1: dispatch on any user TorchDispatchModes
             from torch.utils._python_dispatch import _pop_mode_temporarily
@@ -534,6 +538,7 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
             return torch.overrides.handle_torch_function(
                 self, flat_args, *args, **kwargs
             )
+        del flat_args
 
         dispatch_key_set = _compute_keyset(args, kwargs, self.non_fallthrough_keys)
         return self.dispatch(dispatch_key_set.highestPriorityTypeId(), *args, **kwargs)
@@ -1278,6 +1283,9 @@ class OpOverloadPacket(Generic[_P, _T]):
     def overloads(self):
         return [n if n else "default" for n in self._overload_names]
 
+    def op_overloads(self):
+        return [getattr(self, n) for n in self.overloads()]
+
 
 # Note - this mirrors the logic of the cpp_function defined in jit/python/init.cpp
 # _jit_get_operations, which calls _get_operation_for_overload_or_packet.
@@ -1293,7 +1301,7 @@ def _call_overload_packet_from_python(
         return ret
 
     # The following mirrors getOpWithStack.
-    # In cpp, we do a schema matching for the arguments, and call ToIValue to
+    # In cpp, we do a schema matching for the arguments, and call ToIValue
     # to check whether the arguments are valid. But need to do similar things here
     # and check the schema whether the FakeScriptObject is the corresponding fake class
     # of the actual class used in schema.

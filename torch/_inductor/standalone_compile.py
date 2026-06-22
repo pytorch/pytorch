@@ -83,7 +83,8 @@ class CompiledArtifact(ABC):
             # If format is unpacked, it must be a CacheCompiledArtifact
             return CacheCompiledArtifact.load(path=path, format=format)
 
-        assert format == "binary"
+        if format != "binary":
+            raise AssertionError(f"expected format == 'binary', got {format}")
         with open(path, "rb") as file:
             from torch.utils._appending_byte_serializer import BytesReader
 
@@ -93,16 +94,20 @@ class CompiledArtifact(ABC):
             reader = BytesReader(result_bytes)
             header = reader.read_bytes()
             if header == AOTCompiledArtifact.AOT_HEADER:
-                assert reader.read_bytes() == torch_key()
+                if reader.read_bytes() != torch_key():
+                    raise AssertionError("torch_key mismatch in serialized artifact")
                 artifact = reader.read_bytes()
-                assert reader.is_finished()
+                if not reader.is_finished():
+                    raise AssertionError("expected reader to be finished")
                 return AOTCompiledArtifact.deserialize(artifact)
             # Otherwise, it's in the CacheCompiledArtifact format
             elif header == CacheCompiledArtifact.CACHE_HEADER:
-                assert reader.read_bytes() == torch_key()
+                if reader.read_bytes() != torch_key():
+                    raise AssertionError("torch_key mismatch in serialized artifact")
                 key = reader.read_str()
                 artifact_bytes = reader.read_bytes()
-                assert reader.is_finished()
+                if not reader.is_finished():
+                    raise AssertionError("expected reader to be finished")
                 torch.compiler.load_cache_artifacts(artifact_bytes)
                 return CacheCompiledArtifact._load_impl(nullcontext(), key)
             else:
@@ -165,7 +170,8 @@ class CacheCompiledArtifact(CompiledArtifact):
 
             if format == "binary":
                 # can't assert that it is a file since it might not exist yet
-                assert not os.path.isdir(path)
+                if os.path.isdir(path):
+                    raise AssertionError(f"expected path to not be a dir: {path}")
 
                 from torch.utils._appending_byte_serializer import BytesWriter
 
@@ -181,9 +187,11 @@ class CacheCompiledArtifact(CompiledArtifact):
 
                 write_atomic(path, writer.to_bytes())
             else:
-                assert format == "unpacked"
+                if format != "unpacked":
+                    raise AssertionError(f"expected format == 'unpacked', got {format}")
                 if os.path.exists(path):
-                    assert os.path.isdir(path)
+                    if not os.path.isdir(path):
+                        raise AssertionError(f"expected path to be a dir: {path}")
                     shutil.rmtree(path, ignore_errors=True)
 
                 from .codecache import FxGraphCache
@@ -193,12 +201,16 @@ class CacheCompiledArtifact(CompiledArtifact):
                     loaded_cache_info = torch.compiler.load_cache_artifacts(
                         artifact_bytes
                     )
-                    assert loaded_cache_info is not None
+                    if loaded_cache_info is None:
+                        raise AssertionError(
+                            "expected loaded_cache_info to not be None"
+                        )
                     # Now write all the output_code artifacts to disk so that
                     # they can be inspected and modified
                     for key in loaded_cache_info.inductor_artifacts:
                         subdir = FxGraphCache._get_tmp_dir_for_key(key)
-                        assert os.path.exists(subdir)
+                        if not os.path.exists(subdir):
+                            raise AssertionError(f"expected subdir to exist: {subdir}")
                         for path in sorted(os.listdir(subdir)):
                             with open(os.path.join(subdir, path), "rb") as f:
                                 graph = pickle.load(f)
@@ -227,7 +239,10 @@ class CacheCompiledArtifact(CompiledArtifact):
                     aot_config=None,
                 )
 
-            assert result is not None
+            if result is None:
+                raise AssertionError(
+                    "expected AOTAutogradCache lookup result to not be None"
+                )
             (entry, _) = result
 
             from .compile_fx import _CompileFxKwargs
@@ -255,7 +270,8 @@ class CacheCompiledArtifact(CompiledArtifact):
         with dynamo_timed("CompiledArtifact.load"):
             if format == "binary":
                 # can't assert that it is a file since it might not exist yet
-                assert not os.path.isdir(path)
+                if os.path.isdir(path):
+                    raise AssertionError(f"expected path to not be a dir: {path}")
                 with open(path, "rb") as file:
                     artifacts = file.read()
                 from torch.utils._appending_byte_serializer import BytesReader
@@ -263,20 +279,28 @@ class CacheCompiledArtifact(CompiledArtifact):
                 from .codecache import torch_key
 
                 reader = BytesReader(artifacts)
-                assert reader.read_bytes() == torch_key()
+                if reader.read_bytes() != torch_key():
+                    raise AssertionError("torch_key mismatch in serialized artifact")
                 key = reader.read_str()
                 artifact_bytes = reader.read_bytes()
-                assert reader.is_finished()
+                if not reader.is_finished():
+                    raise AssertionError("expected reader to be finished")
 
                 torch.compiler.load_cache_artifacts(artifact_bytes)
                 return key, nullcontext()
             else:
-                assert format == "unpacked"
-                assert os.path.isdir(path)
+                if format != "unpacked":
+                    raise AssertionError(f"expected format == 'unpacked', got {format}")
+                if not os.path.isdir(path):
+                    raise AssertionError(f"expected path to be a dir: {path}")
                 autograd_cache_dir = os.path.join(path, "aotautograd")
-                assert os.path.isdir(autograd_cache_dir)
+                if not os.path.isdir(autograd_cache_dir):
+                    raise AssertionError(
+                        f"expected autograd_cache_dir to be a dir: {autograd_cache_dir}"
+                    )
                 files = list(os.listdir(autograd_cache_dir))
-                assert len(files) == 1
+                if len(files) != 1:
+                    raise AssertionError(f"expected exactly 1 file, got {len(files)}")
                 key = files[0]
                 cache_dir_ctx = temporary_cache_dir(path)
                 return key, cache_dir_ctx
@@ -354,7 +378,10 @@ class AOTCompiledArtifact(CompiledArtifact):
                 result_bytes
             )
         )
-        assert isinstance(deserialized, BundledAOTAutogradSerializableCallable)
+        if not isinstance(deserialized, BundledAOTAutogradSerializableCallable):
+            raise AssertionError(
+                f"expected BundledAOTAutogradSerializableCallable, got {type(deserialized)}"
+            )
         return AOTCompiledArtifact.from_bundled_callable(deserialized)
 
     @staticmethod
@@ -373,10 +400,13 @@ class AOTCompiledArtifact(CompiledArtifact):
             result_bytes = file.read()
             reader = BytesReader(result_bytes)
             header = reader.read_bytes()
-            assert header == AOTCompiledArtifact.AOT_HEADER
-            assert reader.read_bytes() == torch_key()
+            if header != AOTCompiledArtifact.AOT_HEADER:
+                raise AssertionError("expected AOTCompiledArtifact header")
+            if reader.read_bytes() != torch_key():
+                raise AssertionError("torch_key mismatch in serialized artifact")
             artifact = reader.read_bytes()
-            assert reader.is_finished()
+            if not reader.is_finished():
+                raise AssertionError("expected reader to be finished")
             return AOTCompiledArtifact.deserialize(artifact)
 
 
@@ -387,15 +417,30 @@ def _resolve_ignore_shape_env(dynamic_shapes: DynamicShapesType):
 
 
 def _resolve_fake_mode(
-    gm: GraphModule, dynamic_shapes: DynamicShapesType
+    gm: GraphModule,
+    dynamic_shapes: DynamicShapesType,
+    fake_mode: FakeTensorMode | None = None,
 ) -> FakeTensorMode:
     if dynamic_shapes == "from_example_inputs":
+        if fake_mode is not None:
+            if fake_mode.shape_env is None:
+                raise ValueError(
+                    "standalone_compile requires `fake_mode` to have a ShapeEnv "
+                    'when `dynamic_shapes="from_example_inputs"`.'
+                )
+            return fake_mode
         return FakeTensorMode(shape_env=ShapeEnv())
+    elif fake_mode is not None:
+        raise ValueError(
+            "standalone_compile only supports passing `fake_mode` when "
+            '`dynamic_shapes="from_example_inputs"`.'
+        )
     elif dynamic_shapes == "from_tracing_context":
         # Reuse fake_mode from the TracingContext.
         # NB: The TracingContext only exists if we're currently in a torch.compile backend.
         context = torch._guards.TracingContext.get()
-        assert context.fake_mode is not None
+        if context.fake_mode is None:
+            raise AssertionError("expected TracingContext.fake_mode to not be None")
         return context.fake_mode
     elif dynamic_shapes == "from_graph":
         # Strategy: find a FakeTensor in the graph output, grab its FakeTensorMode.
@@ -403,8 +448,14 @@ def _resolve_fake_mode(
         # which means that there is at least one Tensor output and the output node
         # contains a flat list of Tensors.
         last_node = next(iter(reversed(gm.graph.nodes)))
-        assert last_node.op == "output"
-        assert len(last_node.args) == 1
+        if last_node.op != "output":
+            raise AssertionError(
+                f"expected last node op == 'output', got {last_node.op}"
+            )
+        if len(last_node.args) != 1:
+            raise AssertionError(
+                f"expected last node to have 1 arg, got {len(last_node.args)}"
+            )
 
         # If gm came from Dynamo, then last_node.args[0] is always a list,
         # even in single-Tensor returns.
@@ -431,16 +482,30 @@ def _resolve_fake_mode(
 
 
 @contextlib.contextmanager
-def _standalone_context(gm: GraphModule, dynamic_shapes: DynamicShapesType, aot: bool):
+def _standalone_context(
+    gm: GraphModule,
+    dynamic_shapes: DynamicShapesType,
+    aot: bool,
+    fake_mode: FakeTensorMode | None = None,
+):
     from torch.compiler._cache import CacheArtifactManager
 
-    fake_mode = _resolve_fake_mode(gm, dynamic_shapes)
-    tracing_context = torch._guards.TracingContext(fake_mode)
+    resolved_fake_mode = _resolve_fake_mode(gm, dynamic_shapes, fake_mode)
+    tracing_context = torch._guards.TracingContext(resolved_fake_mode)
     with (
         torch._guards.tracing(tracing_context),
         CacheArtifactManager.with_fresh_cache(),
         config.patch("triton.autotune_at_compile_time", True),
-        torch._functorch.config.patch("bundled_autograd_cache", aot),
+        torch._functorch.config.patch(
+            {
+                "bundled_autograd_cache": aot,
+                # Standalone artifacts are saved immediately after compile_fx
+                # returns. Training graphs normally lower the backward lazily on
+                # first backward(), so force it while the artifact recorder is
+                # still active.
+                "force_non_lazy_backward_lowering": True,
+            }
+        ),
     ):
         yield
 
@@ -453,6 +518,7 @@ def standalone_compile(
     options: Any,
     aot: bool = False,  # AOT mode, which uses BundledAOTAutogradCache
     donate_graph_module: bool = False,
+    fake_mode: FakeTensorMode | None = None,
 ) -> CompiledArtifact:
     """
     Implementation of torch.inductor.standalone_compile
@@ -460,7 +526,7 @@ def standalone_compile(
     from .compile_fx import compile_fx
 
     ignore_shape_env = _resolve_ignore_shape_env(dynamic_shapes)
-    with _standalone_context(gm, dynamic_shapes, aot):
+    with _standalone_context(gm, dynamic_shapes, aot, fake_mode):
         # compile_fx takes ownership of gm and may mutate it on cache miss.
         # Deepcopy first so the rewrites below land on the owned copy rather
         # than the caller's gm. The gm may carry a non-pickleable torchbind
@@ -481,7 +547,8 @@ def standalone_compile(
         compiled_fn = compile_fx(
             gm, example_inputs, ignore_shape_env=ignore_shape_env, **options
         )
-        assert callable(compiled_fn)
+        if not callable(compiled_fn):
+            raise AssertionError("expected compiled_fn to be callable")
         if aot:
             if not hasattr(compiled_fn, "serialize"):
                 raise RuntimeError(
@@ -503,11 +570,12 @@ def autograd_cache_key(
     example_inputs,
     dynamic_shapes: DynamicShapesType,
     aot: bool = False,  # AOT mode, which uses BundledAOTAutogradCache
+    fake_mode: FakeTensorMode | None = None,
 ):
     from . import compile_fx
 
     ignore_shape_env = _resolve_ignore_shape_env(dynamic_shapes)
-    with _standalone_context(graph, dynamic_shapes, aot):
+    with _standalone_context(graph, dynamic_shapes, aot, fake_mode):
         return compile_fx.autograd_cache_key(
             graph,
             example_inputs,

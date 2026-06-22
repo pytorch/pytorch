@@ -28,6 +28,11 @@ from torch.testing._internal.opinfo.definitions.linalg import sample_inputs_lina
 from torch.testing._internal.opinfo.definitions.sparse import validate_sample_input_sparse
 from test_sparse import CUSPARSE_SPMM_COMPLEX128_SUPPORTED, HIPSPARSE_SPMM_COMPLEX128_SUPPORTED
 import operator
+from torch.testing._internal.common_utils import (
+    IS_LINUX,
+    TEST_WITH_SLOW,
+    skipIfRocm,
+)
 
 if TEST_SCIPY:
     import scipy.sparse as sp
@@ -964,6 +969,10 @@ class TestSparseCompressed(TestCase):
                 dense_to_dtype = sparse.to_dense().to(to_dtype)
                 self.assertEqual(sparse_to_dtype.to_dense(), dense_to_dtype)
 
+    @unittest.skipIf(IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/182086")
+    @unittest.skipIf(IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/181682")
+    @unittest.skipIf(IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/181536")
+    @unittest.skipIf(IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/181535")
     @skipMeta
     @all_sparse_compressed_layouts()
     @dtypes(torch.double)
@@ -2267,8 +2276,8 @@ class TestSparseCSR(TestCase):
         for sparse in self.generate_simple_inputs(
                 layout, device=device, dtype=dtype, index_dtype=torch.int32, enable_hybrid=enable_hybrid):
             for scalar_dtype in all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half):
-                # ComplexHalf is experimental
-                if dtype is torch.half and scalar_dtype.is_complex:
+                # ComplexHalf/BComplex32 is experimental
+                if dtype in (torch.half, torch.bfloat16) and scalar_dtype.is_complex:
                     continue
 
                 scalar_t = torch.tensor(2, dtype=scalar_dtype)
@@ -2287,6 +2296,7 @@ class TestSparseCSR(TestCase):
                         self.assertEqual(res_in, res_in_dense)
                         self.assertEqual(res_out, res_in)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/167783")
     @skipCPUIfNoMklSparse
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_sparse_add(self, device, dtype):

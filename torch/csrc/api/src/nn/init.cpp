@@ -18,7 +18,7 @@ struct Fan {
     const auto dimensions = tensor.ndimension();
     TORCH_CHECK(
         dimensions >= 2,
-        "Fan in and fan out can not be computed for tensor with fewer than 2 dimensions");
+        "Fan in and fan out cannot be computed for tensor with fewer than 2 dimensions");
 
     if (dimensions == 2) {
       in = tensor.size(1);
@@ -233,7 +233,7 @@ std::tuple<int64_t, int64_t> _calculate_fan_in_and_fan_out(
   const auto dimensions = tensor.dim();
   TORCH_CHECK(
       dimensions >= 2,
-      "Fan in and fan out can not be computed "
+      "Fan in and fan out cannot be computed "
       "for tensor with fewer than 2 dimensions")
 
   int64_t fan_in = 0, fan_out = 0;

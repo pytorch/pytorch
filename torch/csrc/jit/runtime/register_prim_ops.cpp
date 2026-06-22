@@ -101,7 +101,7 @@ bool isSortableTupleType(
         why_not << "Contained elements in " << *tuple_type
                 << " are not sortable. Only Int, Bool, Float, String, Tensor, "
                 << "a User Defined Class with __lt__ method defined or Tuples "
-                << "of aforementionted types can be sorted.";
+                << "of aforementioned types can be sorted.";
         return false;
     }
   }
@@ -162,7 +162,8 @@ void sort_op(Stack& stack) {
   if (!g_list.empty()) {
     std::stringstream error_str;
     TORCH_CHECK(
-        isSortableListOfObjectsOrTuples(g_list, error_str), error_str.str());
+        isSortableListOfObjectsOrTuples(g_list, error_str),
+        std::move(error_str).str());
 
     c10::IValueComparator comparator;
     if (reverse) {
@@ -191,7 +192,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         [](Stack& stack) {
           std::stringstream ss;
           ss << pop(stack);
-          push(stack, ss.str());
+          push(stack, std::move(ss).str());
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
@@ -776,7 +777,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
           ss << '\n';
           auto* handler = getPrintHandler();
           TORCH_INTERNAL_ASSERT(handler);
-          handler(ss.str());
+          handler(std::move(ss).str());
         },
         aliasAnalysisSpecialCase()),
     // This is an alternative to aten::cat op that takes variable number of
@@ -1009,7 +1010,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
           for (char c : string) {
             ss << static_cast<char>(::tolower(c));
           }
-          push(stack, ss.str());
+          push(stack, std::move(ss).str());
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
@@ -1309,7 +1310,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         for (char c : string) {                             \
           ss << static_cast<char>(char_op(c));              \
         }                                                   \
-        push(stack, ss.str());                              \
+        push(stack, std::move(ss).str());                   \
       },                                                    \
       aliasAnalysisFromSchema())
 
@@ -1631,7 +1632,7 @@ constexpr c10::AliasAnalysisKind aliasAnalysisFromSchema() {
   return c10::AliasAnalysisKind::FROM_SCHEMA;
 }
 
-// Convert an python index (which may be negative) into an index usable for a
+// Convert a python index (which may be negative) into an index usable for a
 // C++ container
 int64_t normalizeIndex(int64_t idx, int64_t list_size) {
   if (idx < 0) {
@@ -1825,7 +1826,7 @@ static const std::vector<OperatorGeneratorArgs> stringOpGenArgs{
               ss << static_cast<char>(::tolower(c));
             }
           }
-          push(stack, ss.str());
+          push(stack, std::move(ss).str());
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
@@ -1846,7 +1847,7 @@ static const std::vector<OperatorGeneratorArgs> stringOpGenArgs{
               prev_is_nonalpha = true;
             }
           }
-          push(stack, ss.str());
+          push(stack, std::move(ss).str());
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
@@ -1879,7 +1880,7 @@ static const std::vector<OperatorGeneratorArgs> stringOpGenArgs{
           for (std::string::size_type i = 0; i < r_pad; ++i) {
             ss << fillchar;
           }
-          push(stack, ss.str());
+          push(stack, std::move(ss).str());
         },
         aliasAnalysisFromSchema()),
 
@@ -1991,7 +1992,7 @@ static const std::vector<OperatorGeneratorArgs> stringOpGenArgs{
               } while (index % tabsize);
             }
           }
-          push(stack, ss.str());
+          push(stack, std::move(ss).str());
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
@@ -2126,7 +2127,7 @@ static const std::vector<OperatorGeneratorArgs> stringOpGenArgs{
             (void)i; // Suppress unused variable warning
             ss << fillchar;
           }
-          push(stack, ss.str());
+          push(stack, std::move(ss).str());
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
@@ -2148,7 +2149,7 @@ static const std::vector<OperatorGeneratorArgs> stringOpGenArgs{
             ss << fillchar;
           }
           ss << string;
-          push(stack, ss.str());
+          push(stack, std::move(ss).str());
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
@@ -2165,7 +2166,7 @@ static const std::vector<OperatorGeneratorArgs> stringOpGenArgs{
             ss << '0';
           }
           ss << string;
-          push(stack, ss.str());
+          push(stack, std::move(ss).str());
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
@@ -2311,7 +2312,7 @@ static const std::vector<OperatorGeneratorArgs> stringOpGenArgs{
               ss << string;
             }
           }
-          push(stack, ss.str());
+          push(stack, std::move(ss).str());
         },
         aliasAnalysisFromSchema()),
 };
@@ -2914,7 +2915,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs2{
           i = -i;                                        \
         }                                                \
         ss << '0' << prefix << char_op << i;             \
-        push(stack, ss.str());                           \
+        push(stack, std::move(ss).str());                \
       },                                                 \
       aliasAnalysisFromSchema())
 
@@ -2936,7 +2937,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs2{
             std::string str = std::bitset<8 * sizeof(i)>(i).to_string();
             str.erase(0, std::min(str.find_first_not_of('0'), str.size() - 1));
             ss << "0b" << str;
-            push(stack, ss.str());
+            push(stack, std::move(ss).str());
           }
         },
         aliasAnalysisFromSchema()),
@@ -2963,7 +2964,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs2{
               i);
           char c = i;
           ss << c;
-          push(stack, ss.str());
+          push(stack, std::move(ss).str());
         },
         aliasAnalysisFromSchema()),
 
@@ -3328,7 +3329,9 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs2{
           std::stringstream ss;
           ss << ind.toInt();
           push(
-              stack, torch::jit::Object(module_dict.toObject()).attr(ss.str()));
+              stack,
+              torch::jit::Object(module_dict.toObject())
+                  .attr(std::move(ss).str()));
         },
         aliasAnalysisFromSchema()),
 

@@ -61,7 +61,8 @@ def export(
     args: tuple[Any, ...],
     kwargs: Mapping[str, Any] | None = None,
     *,
-    dynamic_shapes: dict[str, Any] | tuple[Any, ...] | list[Any] | None = None,
+    # dynamic_shapes: _DynamicShapesInput | AdditionalInputs | ShapesCollection
+    dynamic_shapes: Any = None,
     strict: bool = False,
     preserve_module_call_signature: tuple[str, ...] = (),
     prefer_deferred_runtime_asserts_over_guards: bool = False,
@@ -127,6 +128,52 @@ def export(
          are denoted by None. Arguments that are dicts or tuples / lists of tensors are
          recursively specified by using mappings or sequences of contained specifications.
 
+         **ShapesSpec API.** ``dynamic_shapes`` may also be a
+         :class:`torch.fx.experimental.dynamic_spec.ShapesSpec` (or its
+         shorthand :class:`torch.fx.experimental.dynamic_spec.ParamsSpec`).
+         This is a newer unbacked unified API across compile, pre-compile,
+         export, etc., and is the recommended way to specify dynamic
+         shapes for export going forward. It is the same spec API exposed
+         via ``shapes_spec=`` in :func:`torch.compile`.
+
+         The keys of ``ParamsSpec`` are **parameter names of the callable
+         being traced** (for an ``nn.Module``, the parameters of
+         ``forward``); keyword and ``**kwargs`` arguments are addressed by
+         name too.
+
+         Key properties (see :mod:`torch.fx.experimental.dynamic_spec` for
+         full details):
+
+         * **Unbacked-only.** Dims / scalars marked dynamic become unbacked
+           SymInts (``u`` symbols) and are never specialized (including no
+           0/1 specialization).
+         * **Assumptions and derived expressions.** A dim can be an
+           expression over the spec's symbols (e.g. ``TensorSpec([B * 2,
+           ...])``), and you can pass relational ``assumptions`` between
+           symbols (e.g. ``[B % 2 == 0]``) that export validates.
+         * **No silent specialization.** The exported graph is guaranteed valid
+           for every assumption provided, otherwise export fails. (By
+           contrast, ``Dim.DYNAMIC`` / ``Dim.AUTO`` may silently specialize a
+           dynamic dim, yielding a graph that is not valid for all the inputs).
+
+         Example::
+
+            batch = ShapeVar("batch", min=2, max=128)
+            ep = torch.export.export(
+                mod,
+                (torch.randn(8, 3), torch.randn(16, 3)),
+                dynamic_shapes=ShapesSpec(
+                    params=ParamsSpec(
+                        {
+                            "x": TensorSpec([batch, 3]),
+                            "y": TensorSpec([batch * 2, 3]),  # derived expression
+                        }
+                    ),
+                    assumptions=[batch % 2 == 0],
+                ),
+                strict=True,
+            )
+
         strict: When disabled (default), the export function will trace the program through
          Python runtime, which by itself will not validate some of the implicit assumptions
          baked into the graph. It will still validate most critical assumptions like shape
@@ -166,6 +213,12 @@ def export(
             "Maybe try converting your ScriptModule to an ExportedProgram "
             "using `TS2EPConverter(mod, args, kwargs).convert()` instead."
         )
+
+    # If ``mod.forward`` carries an ``@dynamic_spec(...)`` decorator, the
+    # attached ``ShapesSpec`` is used as ``dynamic_shapes``. Passing both raises.
+    from torch.fx.experimental.dynamic_spec import _resolve_dynamic_shapes
+
+    dynamic_shapes = _resolve_dynamic_shapes(mod, dynamic_shapes)
 
     try:
         return _export(
@@ -449,7 +502,15 @@ def draft_export(
     an ExportedProgram, even if there are potential soundness issues, and to
     generate a report listing the issues found.
     """
+    from torch.fx.experimental.dynamic_spec import ParamsSpec, ShapesSpec
+
     from ._draft_export import draft_export
+
+    if isinstance(dynamic_shapes, (ShapesSpec, ParamsSpec)):
+        raise NotImplementedError(
+            f"draft_export does not support the new dynamic shapes API "
+            f"({type(dynamic_shapes).__name__}); use torch.export.export instead."
+        )
 
     return draft_export(
         mod=mod,

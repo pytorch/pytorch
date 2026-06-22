@@ -1936,25 +1936,32 @@ along dimension :attr:`dim` according to the indices or number of sections speci
 by :attr:`indices_or_sections`. This function is based on NumPy's
 :func:`numpy.array_split`.
 
+.. function:: tensor_split(input, sections, dim=0) -> List of Tensors
+   :noindex:
+
+   Splits :attr:`input` into :attr:`sections` sections along dimension :attr:`dim`.
+   If :attr:`input` is divisible by :attr:`sections` along dimension :attr:`dim`, each
+   section will be of equal size, :code:`input.size(dim) / sections`. If :attr:`input`
+   is not divisible by :attr:`sections`, the sizes of the first
+   :code:`int(input.size(dim) % sections)` sections will have size
+   :code:`int(input.size(dim) / sections) + 1`, and the rest will have size
+   :code:`int(input.size(dim) / sections)`.
+
+   :attr:`sections` can also be a zero-dimensional long tensor.
+
+.. function:: tensor_split(input, indices, dim=0) -> List of Tensors
+   :noindex:
+
+   Splits :attr:`input` along dimension :attr:`dim` at each of the indices in
+   :attr:`indices`. For instance, :code:`indices=[2, 3]` and :code:`dim=0`
+   would result in the tensors :code:`input[:2]`, :code:`input[2:3]`, and
+   :code:`input[3:]`.
+
+   :attr:`indices` can be a list or tuple of ints, or a one-dimensional long
+   tensor on the CPU.
+
 Args:
     input (Tensor): the tensor to split
-    indices_or_sections (Tensor, int or list or tuple of ints):
-        If :attr:`indices_or_sections` is an integer ``n`` or a zero dimensional long tensor
-        with value ``n``, :attr:`input` is split into ``n`` sections along dimension :attr:`dim`.
-        If :attr:`input` is divisible by ``n`` along dimension :attr:`dim`, each
-        section will be of equal size, :code:`input.size(dim) / n`. If :attr:`input`
-        is not divisible by ``n``, the sizes of the first :code:`int(input.size(dim) % n)`
-        sections will have size :code:`int(input.size(dim) / n) + 1`, and the rest will
-        have size :code:`int(input.size(dim) / n)`.
-
-        If :attr:`indices_or_sections` is a list or tuple of ints, or a one-dimensional long
-        tensor, then :attr:`input` is split along dimension :attr:`dim` at each of the indices
-        in the list, tuple or tensor. For instance, :code:`indices_or_sections=[2, 3]` and :code:`dim=0`
-        would result in the tensors :code:`input[:2]`, :code:`input[2:3]`, and :code:`input[3:]`.
-
-        If :attr:`indices_or_sections` is a tensor, it must be a zero-dimensional or one-dimensional
-        long tensor on the CPU.
-
     dim (int, optional): dimension along which to split the tensor. Default: ``0``
 
 Example::
@@ -2611,88 +2618,6 @@ Example::
 )
 
 add_docstr(
-    torch.cholesky,
-    r"""
-cholesky(input, upper=False, *, out=None) -> Tensor
-
-Computes the Cholesky decomposition of a symmetric positive-definite
-matrix :math:`A` or for batches of symmetric positive-definite matrices.
-
-If :attr:`upper` is ``True``, the returned matrix ``U`` is upper-triangular, and
-the decomposition has the form:
-
-.. math::
-
-  A = U^TU
-
-If :attr:`upper` is ``False``, the returned matrix ``L`` is lower-triangular, and
-the decomposition has the form:
-
-.. math::
-
-    A = LL^T
-
-If :attr:`upper` is ``True``, and :math:`A` is a batch of symmetric positive-definite
-matrices, then the returned tensor will be composed of upper-triangular Cholesky factors
-of each of the individual matrices. Similarly, when :attr:`upper` is ``False``, the returned
-tensor will be composed of lower-triangular Cholesky factors of each of the individual
-matrices.
-
-.. warning::
-
-    :func:`torch.cholesky` is deprecated in favor of :func:`torch.linalg.cholesky`
-    and will be removed in a future PyTorch release.
-
-    ``L = torch.cholesky(A)`` should be replaced with
-
-    .. code:: python
-
-        L = torch.linalg.cholesky(A)
-
-    ``U = torch.cholesky(A, upper=True)`` should be replaced with
-
-    .. code:: python
-
-        U = torch.linalg.cholesky(A).mH
-
-    This transform will produce equivalent results for all valid (symmetric positive definite) inputs.
-
-Args:
-    input (Tensor): the input tensor :math:`A` of size :math:`(*, n, n)` where `*` is zero or more
-                batch dimensions consisting of symmetric positive-definite matrices.
-    upper (bool, optional): flag that indicates whether to return a
-                            upper or lower triangular matrix. Default: ``False``
-
-Keyword args:
-    out (Tensor, optional): the output matrix
-
-Example::
-
-    >>> a = torch.randn(3, 3)
-    >>> a = a @ a.mT + 1e-3 # make symmetric positive-definite
-    >>> l = torch.cholesky(a)
-    >>> a
-    tensor([[ 2.4112, -0.7486,  1.4551],
-            [-0.7486,  1.3544,  0.1294],
-            [ 1.4551,  0.1294,  1.6724]])
-    >>> l
-    tensor([[ 1.5528,  0.0000,  0.0000],
-            [-0.4821,  1.0592,  0.0000],
-            [ 0.9371,  0.5487,  0.7023]])
-    >>> l @ l.mT
-    tensor([[ 2.4112, -0.7486,  1.4551],
-            [-0.7486,  1.3544,  0.1294],
-            [ 1.4551,  0.1294,  1.6724]])
-    >>> a = torch.randn(3, 2, 2) # Example for batched input
-    >>> a = a @ a.mT + 1e-03 # make symmetric positive-definite
-    >>> l = torch.cholesky(a)
-    >>> z = l @ l.mT
-    >>> torch.dist(z, a)
-    tensor(2.3842e-07)
-""",
-)
-
-add_docstr(
     torch.cholesky_solve,
     r"""
 cholesky_solve(B, L, upper=False, *, out=None) -> Tensor
@@ -3226,10 +3151,6 @@ Example::
     >>> torch.cosh(a)
     tensor([ 1.0133,  1.7860,  1.2536,  1.2805])
 
-.. note::
-   When :attr:`input` is on the CPU, the implementation of torch.cosh may use
-   the Sleef library, which rounds very large results to infinity or negative
-   infinity. See `here <https://sleef.org/purec.xhtml>`_ for details.
 """.format(**common_args),
 )
 
@@ -8352,6 +8273,58 @@ Example::
 )
 
 add_docstr(
+    torch.nonzero_static,
+    r"""
+nonzero_static(input, *, size, fill_value=-1) -> Tensor
+
+Returns a 2-D tensor where each row is the index for a non-zero value.
+The returned Tensor has the same `torch.dtype` as `torch.nonzero()`.
+
+Args:
+    {input}
+
+Keyword args:
+    size (int): the size of non-zero elements expected to be included in the out
+        tensor. Pad the out tensor with `fill_value` if the `size` is larger
+        than total number of non-zero elements, truncate out tensor if `size`
+        is smaller. The size must be a non-negative integer.
+    fill_value (int, optional): the value to fill the output tensor with when `size` is larger
+        than the total number of non-zero elements. Default is `-1` to represent
+        invalid index.
+
+Example::
+
+    # Example 1: Padding
+    >>> input_tensor = torch.tensor([[1, 0], [3, 2]])
+    >>> static_size = 4
+    >>> t = torch.nonzero_static(input_tensor, size=static_size)
+    tensor([[  0,   0],
+            [  1,   0],
+            [  1,   1],
+            [  -1, -1]], dtype=torch.int64)
+
+    # Example 2: Truncating
+    >>> input_tensor = torch.tensor([[1, 0], [3, 2]])
+    >>> static_size = 2
+    >>> t = torch.nonzero_static(input_tensor, size=static_size)
+    tensor([[  0,   0],
+            [  1,   0]], dtype=torch.int64)
+
+    # Example 3: 0 size
+    >>> input_tensor = torch.tensor([10])
+    >>> static_size = 0
+    >>> t = torch.nonzero_static(input_tensor, size=static_size)
+    tensor([], size=(0, 1), dtype=torch.int64)
+
+    # Example 4: 0 rank input
+    >>> input_tensor = torch.tensor(10)
+    >>> static_size = 2
+    >>> t = torch.nonzero_static(input_tensor, size=static_size)
+    tensor([], size=(2, 0), dtype=torch.int64)
+""".format(**common_args),
+)
+
+add_docstr(
     torch.normal,
     r"""
 normal(mean, std, *, generator=None, out=None) -> Tensor
@@ -10059,10 +10032,6 @@ Example::
     >>> torch.sinh(a)
     tensor([ 0.5644, -0.9744, -0.1268,  1.0845])
 
-.. note::
-   When :attr:`input` is on the CPU, the implementation of torch.sinh may use
-   the Sleef library, which rounds very large results to infinity or negative
-   infinity. See `here <https://sleef.org/purec.xhtml>`_ for details.
 """.format(**common_args),
 )
 

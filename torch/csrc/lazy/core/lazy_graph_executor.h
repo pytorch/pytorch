@@ -58,7 +58,7 @@ class TORCH_API LazyGraphExecutor {
   // Makes sure that any outstanding IR operation accumulated over live tensors,
   // gets turned into device data. If wait is true, the sync operation will be
   // run synchronously. The devices argument, if not empty, tells the devices
-  // which should be partecipating into the replicated computation.
+  // which should be participating into the replicated computation.
   virtual void SyncLiveTensorsGraph(
       const BackendDevice* device,
       c10::ArrayRef<std::string> devices,
@@ -67,7 +67,7 @@ class TORCH_API LazyGraphExecutor {
   // Applies all the pending IR operations queued over the input tensors. All
   // the tensors must be on the same device. If wait is true, the sync operation
   // will be run synchronously. The devices argument, if not empty, tells the
-  // devices which should be partecipating into the replicated computation.
+  // devices which should be participating into the replicated computation.
   void SyncTensorsGraph(
       std::vector<LazyTensorPtr>* tensors,
       c10::ArrayRef<std::string> devices,

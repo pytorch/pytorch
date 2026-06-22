@@ -1004,6 +1004,9 @@ elseif(USE_CUDA)
     target_link_libraries(torch_cuda PRIVATE __caffe2_nccl)
     target_compile_definitions(torch_cuda PRIVATE USE_NCCL)
   endif()
+  if(USE_NCCL_EP)
+    target_compile_definitions(torch_cuda PRIVATE USE_NCCL_EP)
+  endif()
 
   # Compile with NVSHMEM
   # Default value of `USE_NVSHMEM` is set in CMakeLists.txt under root, to ON.
@@ -1465,7 +1468,7 @@ if(USE_ROCM)
   if(USE_MEM_EFF_ATTENTION)
     target_compile_definitions(torch_hip PRIVATE USE_MEM_EFF_ATTENTION)
   endif()
-  if(USE_ROCM_CK_SDPA)
+  if(TARGET ck_sdpa)
     target_compile_definitions(torch_hip PRIVATE USE_ROCM_CK_SDPA)
   endif()
 
@@ -1850,7 +1853,7 @@ if(USE_ROCM)
   target_link_libraries(torch_hip PUBLIC torch_cpu_library ${Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS})
   target_link_libraries(torch_hip PRIVATE ${Caffe2_HIP_DEPENDENCY_LIBS})
 
-  if(USE_ROCM_CK_SDPA)
+  if(TARGET ck_sdpa)
     target_link_libraries(torch_hip PRIVATE ck_sdpa)
   endif()
 
@@ -1918,7 +1921,9 @@ if(BUILD_TEST)
             if(TARGET Sanitizer::address)
               target_link_libraries(${test_name}_${CPU_CAPABILITY} Sanitizer::address)
             endif()
-            if(TARGET Sanitizer::undefined)
+            # Skip UBSan on ROCm: see cmake/Dependencies.cmake (UBSan + ASAN
+            # on ROCm Clang produces misaligned ASAN globals that abort).
+            if(TARGET Sanitizer::undefined AND NOT USE_ROCM)
               target_link_libraries(${test_name}_${CPU_CAPABILITY} Sanitizer::undefined)
             endif()
           endif()

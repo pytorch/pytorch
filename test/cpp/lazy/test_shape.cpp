@@ -77,7 +77,7 @@ TEST(ShapeTest, Ostream) {
   std::stringstream ss;
   ss << shape;
 
-  EXPECT_EQ(shape.to_string(), ss.str());
+  EXPECT_EQ(shape.to_string(), std::move(ss).str());
 }
 
 } // namespace lazy

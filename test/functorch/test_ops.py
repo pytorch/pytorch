@@ -32,7 +32,7 @@ import torch
 import torch.autograd.forward_ad as fwAD
 from functorch import grad, jacfwd, jacrev, vjp, vmap
 from torch import Tensor
-from torch._functorch.eager_transforms import _as_tuple, jvp
+from torch._functorch.eager_transforms import _as_tuple, jvp, safe_unpack_dual
 from torch.testing._internal.autograd_function_db import autograd_function_db
 from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_device_type import (
@@ -209,17 +209,16 @@ def ref_vjp(f, *primals):
     return result, wrapped
 
 
-def simulate_jvp(f, primals, tangents):
-    primals_out, tangents_out = torch.autograd.functional.jvp(f, primals, tangents)
-    return primals_out, tangents_out
-
-
 def ref_jvp(f, primals, tangents):
     with fwAD.dual_level():
         duals = tuple(fwAD.make_dual(p, t) for p, t in zip(primals, tangents))
         result_duals = f(*duals)
         result_duals, spec = tree_flatten(result_duals)
-        primals_out, tangents_out = zip(*(fwAD.unpack_dual(d) for d in result_duals))
+        # Use safe_unpack_dual instead of fwAD.unpack_dual so that we replicate the
+        # behavior WRT converting None-tangents to zeros_like.
+        primals_out, tangents_out = zip(
+            *(safe_unpack_dual(d, strict=False) for d in result_duals)
+        )
         return tree_unflatten(primals_out, spec), tree_unflatten(tangents_out, spec)
 
 
@@ -404,6 +403,7 @@ aliasing_ops_list_return = {
 skip_noncontig = {
     "_batch_norm_with_update",
     "as_strided_copy",
+    "native_group_norm",
 }
 
 bool_unsupported_ordered_ops = {
@@ -586,15 +586,10 @@ class TestOperators(TestCase):
                     "nn.functional.max_unpool2d"
                 ),  # fails everywhere except on windows
                 skip("nn.functional.max_unpool3d"),  # fails everywhere except on mac
-                xfail(
-                    "native_batch_norm"
-                ),  # TODO: fails comparing None to tensor of 0s for saved_mean/var tangents
-                xfail(
-                    "_native_batch_norm_legit"
-                ),  # TODO: fails comparing None to tensor of 0s for saved_mean/var tangents
-                xfail(
-                    "_batch_norm_with_update"
-                ),  # TODO: fails comparing None to tensor of 0s for saved_mean/var tangents
+                # Tensor-likes are not close
+                xfail("native_batch_norm", device_type="cpu"),
+                # Tensor-likes are not close
+                xfail("_native_batch_norm_legit", device_type="cpu"),
                 xfail("nn.functional.scaled_dot_product_attention"),
                 xfail("torch.ops.aten._flash_attention_forward"),
                 xfail("torch.ops.aten._efficient_attention_forward"),
@@ -646,6 +641,11 @@ class TestOperators(TestCase):
             tol1("svd_lowrank", {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
             tol1("pca_lowrank", {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
             tol1(
+                "nn.functional.linear_cross_entropy",
+                {torch.float32: tol(atol=2e-05, rtol=3e-06)},
+                device_type="cuda",
+            ),
+            tol1(
                 "nn.functional.multi_head_attention_forward",
                 {torch.float32: tol(atol=6e-05, rtol=2e-05)},
             ),
@@ -655,18 +655,7 @@ class TestOperators(TestCase):
         ),
     )
     def test_jvp(self, device, dtype, op):
-        # TODO: get rid of vjp_decomp when we add decomposition support to
-        # PyTorch's forward-mode ad. Currently the decomposition support only
-        # works for functorch.jvp
-        VJP_DECOMP = {
-            "nn.functional.logsigmoid",
-        }
-        if op.name in VJP_DECOMP:
-            fixme_ref_jvp_local = simulate_jvp
-        else:
-            fixme_ref_jvp_local = ref_jvp
-
-        if not op.supports_forward_ad and op.name not in VJP_DECOMP:
+        if not op.supports_forward_ad:
             self.skipTest("Skipped! Forward AD not supported.")
             return
 
@@ -682,7 +671,6 @@ class TestOperators(TestCase):
                     sample,
                     sample.output_process_fn_grad,
                     clone_inputs=False,
-                    fixme_ref_jvp_local=fixme_ref_jvp_local,
                     test_noncontig=op.name not in skip_noncontig,
                 )
             if is_valid_inplace_sample_input(sample, op, inplace_variant):
@@ -691,7 +679,6 @@ class TestOperators(TestCase):
                     sample,
                     sample.output_process_fn_grad,
                     clone_inputs=True,
-                    fixme_ref_jvp_local=fixme_ref_jvp_local,
                     test_noncontig=op.name not in skip_noncontig,
                 )
 
@@ -701,7 +688,6 @@ class TestOperators(TestCase):
         sample,
         output_process_fn,
         clone_inputs,
-        fixme_ref_jvp_local,
         test_noncontig,
     ):
         # NB: we used requires_grad=True to determine where the primals are,
@@ -722,7 +708,7 @@ class TestOperators(TestCase):
             return orig_primals, orig_tangents
 
         primals, tangents = maybe_clone_inputs()
-        expected_primal_outs, expected_tangent_outs = fixme_ref_jvp_local(
+        expected_primal_outs, expected_tangent_outs = ref_jvp(
             contig_fn, primals, tangents
         )
 
@@ -1066,6 +1052,7 @@ class TestOperators(TestCase):
         {
             xfail("as_strided", "partial_views"),
             xfail("as_strided_copy"),
+            xfail("native_group_norm"),
         },
     )
     def test_vmapvjpvjp(self, device, dtype, op):
@@ -1225,6 +1212,7 @@ class TestOperators(TestCase):
                 xfail("as_strided"),
                 xfail("as_strided_copy"),
                 xfail("as_strided", "partial_views"),
+                xfail("native_group_norm"),
             }
         ),
     )
@@ -1340,6 +1328,7 @@ class TestOperators(TestCase):
         vmapjvpall_fail.union(
             {
                 xfail("as_strided_copy"),
+                xfail("native_group_norm"),
             }
         ),
     )
@@ -1406,12 +1395,8 @@ class TestOperators(TestCase):
                 xfail("nn.functional.dropout3d", ""),
                 xfail("as_strided_scatter", ""),
                 xfail("masked.cumprod", ""),
-                xfail("permute_copy"),
                 xfail("renorm"),  # hit vmap fallback, which is disabled
-                xfail("squeeze_copy"),
-                xfail("t_copy"),
-                xfail("transpose_copy"),
-                xfail("unsqueeze_copy"),
+                xfail("native_group_norm"),
             }
         ),
     )
@@ -1470,11 +1455,9 @@ class TestOperators(TestCase):
                 xfail("masked_select"),
                 xfail("nanquantile"),
                 xfail("ormqr"),
-                xfail("permute_copy"),
                 xfail("put"),
                 xfail("quantile"),
                 xfail("renorm"),
-                xfail("squeeze_copy"),
                 xfail("take"),
                 xfail("tensor_split"),
                 xfail("to_sparse"),
@@ -1534,10 +1517,7 @@ class TestOperators(TestCase):
                 xfail(
                     "index_fill"
                 ),  # aten::_unique hit the vmap fallback which is currently disabled
-                xfail("squeeze_copy"),
-                xfail("t_copy"),
-                xfail("transpose_copy"),
-                xfail("unsqueeze_copy"),
+                xfail("native_group_norm"),
             }
         ),
     )
@@ -1646,6 +1626,7 @@ class TestOperators(TestCase):
                 # TODO: implement batching rule
                 xfail("_batch_norm_with_update"),
                 xfail("as_strided", "partial_views"),
+                xfail("native_group_norm"),
             }
         ),
     )
@@ -1733,7 +1714,6 @@ class TestOperators(TestCase):
                 # this is not supported. Tensor is of size [5, 2, 3] while the given forward gradient is of size [1, 2, 3].
                 xfail("normal", ""),
                 xfail("cdist", ""),  # NYI: forward-AD for _cdist_forward
-                xfail("cholesky", ""),  # NYI: forward-AD for cholesky
                 xfail(
                     "nn.functional.embedding_bag", ""
                 ),  # NYI: forward-AD for _embedding_bag
@@ -1913,7 +1893,6 @@ class TestOperators(TestCase):
                 xfail("cdouble"),  # required rank 4 tensor to use channels_last format
                 xfail("cfloat"),  # required rank 4 tensor to use channels_last format
                 xfail("chalf"),  # required rank 4 tensor to use channels_last format
-                xfail("cholesky"),  # Forward AD not implemented and no decomposition
                 xfail("ormqr"),  # Forward AD not implemented and no decomposition
                 xfail("double"),  # required rank 4 tensor to use channels_last format
                 xfail("float"),  # required rank 4 tensor to use channels_last format
@@ -2029,6 +2008,7 @@ class TestOperators(TestCase):
                 # TODO: implement batching rule
                 xfail("_batch_norm_with_update"),
                 xfail("native_dropout_backward"),
+                xfail("native_group_norm"),
             }
         ),
     )
@@ -2353,6 +2333,8 @@ class TestOperators(TestCase):
             skip("sparse.sampled_addmm", ""),
             skip("sparse.mm", "reduce"),
             skip("native_layer_norm", "", device_type="cpu"),
+            # Removed in next PR
+            skip("native_group_norm", dtypes=(torch.float32,), device_type="cpu"),
         },
     )
     @opsToleranceOverride(
@@ -2390,6 +2372,7 @@ class TestOperators(TestCase):
             ),
             tol1("svd_lowrank", {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
             tol1("pca_lowrank", {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
+            tol1("native_group_norm", {torch.float32: tol(atol=5e-5, rtol=5e-6)}),
         ),
     )
     def test_vmap_autograd_grad(self, device, dtype, op):

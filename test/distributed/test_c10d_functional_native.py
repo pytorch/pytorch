@@ -11,14 +11,14 @@ import torch.distributed._functional_collectives as funcol
 from torch._C import FileCheck
 from torch._inductor.utils import fresh_cache, run_and_get_code, run_and_get_triton_code
 from torch.distributed._functional_collectives import (
-    all_gather_into_tensor_coalesced,
-    all_gather_tensor,
+    all_gather_single,
+    all_gather_single_coalesced,
     all_reduce,
     all_reduce_coalesced,
     all_to_all_single,
     AsyncCollectiveTensor,
-    reduce_scatter_tensor,
-    reduce_scatter_tensor_coalesced,
+    reduce_scatter_single,
+    reduce_scatter_single_coalesced,
 )
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_device_type import e4m3_type
@@ -28,7 +28,9 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
+    IS_LINUX,
     run_tests,
+    TEST_WITH_TORCHINDUCTOR,
     TestCase,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
@@ -221,7 +223,7 @@ class TestWithNCCL(DistributedTestBase):
             raise AssertionError("Expected output to equal expect")
 
         # Test Python API and AsyncCollectiveTensor
-        output = all_gather_tensor(
+        output = all_gather_single(
             input,
             0,
             "default",
@@ -242,7 +244,7 @@ class TestWithNCCL(DistributedTestBase):
 
         with torch.inference_mode():
             input = torch.full((2, 2), float(self.rank), device=self.device)
-            out1 = funcol.all_gather_tensor(
+            out1 = funcol.all_gather_single(
                 input, gather_dim=0, group=torch.distributed.group.WORLD
             )
             out2 = out1.to(dtype=torch.bfloat16)
@@ -354,7 +356,7 @@ class TestWithNCCL(DistributedTestBase):
                 raise AssertionError(f"Expected output to equal expect[{i}]")
 
         # Test Python API and AsyncCollectiveTensor
-        outputs = all_gather_into_tensor_coalesced(
+        outputs = all_gather_single_coalesced(
             inputs,
             "default",
         )
@@ -384,7 +386,7 @@ class TestWithNCCL(DistributedTestBase):
             raise AssertionError(f"Expected output to equal {self.rank}")
 
         # Test Python API and AsyncCollectiveTensor
-        output = reduce_scatter_tensor(
+        output = reduce_scatter_single(
             input,
             "avg",
             0,
@@ -434,7 +436,7 @@ class TestWithNCCL(DistributedTestBase):
                 raise AssertionError(f"Expected output to equal {expected}")
 
         # Test Python API and AsyncCollectiveTensor
-        outputs = reduce_scatter_tensor_coalesced(
+        outputs = reduce_scatter_single_coalesced(
             inputs,
             "avg",
             [0] * 10,
@@ -616,10 +618,10 @@ class TestWithNCCL(DistributedTestBase):
         def fp8_rowwise_backward(in_, w, out_grad):
             out_grad_fp8, scale_out_grad = scale(out_grad)
             w_fp8, scale_w = scale(w.t().contiguous())
-            out_grad_fp8 = funcol.all_gather_tensor(
+            out_grad_fp8 = funcol.all_gather_single(
                 out_grad_fp8, gather_dim=0, group=torch.distributed.group.WORLD
             )
-            scale_out_grad = funcol.all_gather_tensor(
+            scale_out_grad = funcol.all_gather_single(
                 scale_out_grad, gather_dim=0, group=torch.distributed.group.WORLD
             )
             in_grad = torch._scaled_mm(
@@ -630,7 +632,7 @@ class TestWithNCCL(DistributedTestBase):
                 out_dtype=torch.bfloat16,
             )
 
-            out_grad = funcol.all_gather_tensor(
+            out_grad = funcol.all_gather_single(
                 out_grad.t().contiguous(),
                 gather_dim=0,
                 group=torch.distributed.group.WORLD,
@@ -842,7 +844,7 @@ class PyWorkTest(TestCase):
         self.assertEqual(pg.dels, 2)
 
         x = torch.rand(2, 2)
-        x = funcol.all_gather_tensor(x, 0, group=pg)
+        x = funcol.all_gather_single(x, 0, group=pg)
         gc.collect()
         self.assertEqual(pg.dels, 2)
         x.wait()
@@ -850,7 +852,7 @@ class PyWorkTest(TestCase):
         self.assertEqual(pg.dels, 3)
 
         x = torch.rand(2, 2)
-        x = funcol.reduce_scatter_tensor(x, "sum", 0, group=pg)
+        x = funcol.reduce_scatter_single(x, "sum", 0, group=pg)
         gc.collect()
         self.assertEqual(pg.dels, 3)
         x.wait()
@@ -898,6 +900,28 @@ class ProcessGroupArgTest(TestCase):
         x = torch.rand(2, 2)
         out = torch.ops._c10d_functional.broadcast_(x, 0, self.pg)
         torch.ops._c10d_functional.wait_tensor(out)
+
+
+class ProcessGroupOpaqueTypeRegistrationTest(TestCase):
+    def test_process_group_is_registered_on_distributed_import(self) -> None:
+        from torch._library.opaque_object import (
+            get_member_type,
+            is_opaque_type,
+            MemberType,
+        )
+
+        self.assertTrue(is_opaque_type(dist.ProcessGroup))
+        self.assertEqual(
+            get_member_type(dist.ProcessGroup, "size"), MemberType.USE_REAL
+        )
+
+        def f(x: torch.Tensor, pg: dist.ProcessGroup) -> torch.Tensor:
+            return x
+
+        self.assertEqual(
+            torch.library.infer_schema(f, mutates_args=()),
+            "(Tensor x, torch.distributed.distributed_c10d.ProcessGroup pg) -> Tensor",
+        )
 
 
 def find_buffer_assignments(code):
@@ -1181,7 +1205,7 @@ class CompileTest(TestCase):
     @fresh_cache()
     def test_inductor_all_gather_into_tensor_single(self):
         def func(arg: torch.Tensor) -> torch.Tensor:
-            ag0 = funcol.all_gather_tensor(arg, 0, "0")
+            ag0 = funcol.all_gather_single(arg, 0, "0")
             ag0 = funcol.wait_tensor(ag0)
             return ag0
 
@@ -1207,11 +1231,15 @@ class CompileTest(TestCase):
         AOTIRunnerUtil.run(func, (arg,))
         torch.accelerator.synchronize()
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHINDUCTOR or IS_LINUX,
+        "https://github.com/pytorch/pytorch/issues/146806",
+    )
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
     def test_inductor_all_gather_into_tensor_coalesced(self):
         def func(args: list[torch.Tensor]) -> torch.Tensor:
-            ag0 = funcol.all_gather_into_tensor_coalesced(args, "0")
+            ag0 = funcol.all_gather_single_coalesced(args, "0")
             ag0 = [funcol.wait_tensor(out) for out in ag0]
             return ag0
 
@@ -1286,7 +1314,7 @@ class CompileTest(TestCase):
     @fresh_cache()
     def test_inductor_reduce_scatter_tensor_single(self):
         def func(arg: torch.Tensor) -> torch.Tensor:
-            rs0 = funcol.reduce_scatter_tensor(arg, "avg", 0, "0")
+            rs0 = funcol.reduce_scatter_single(arg, "avg", 0, "0")
             rs0 = funcol.wait_tensor(rs0)
             return rs0
 
@@ -1312,7 +1340,7 @@ class CompileTest(TestCase):
     @fresh_cache()
     def test_inductor_reduce_scatter_tensor_coalesced(self):
         def func(args: list[torch.Tensor]) -> torch.Tensor:
-            rs0 = funcol.reduce_scatter_tensor_coalesced(
+            rs0 = funcol.reduce_scatter_single_coalesced(
                 args, "avg", [0] * len(args), "0"
             )
             rs0 = [funcol.wait_tensor(out) for out in rs0]
@@ -1603,6 +1631,28 @@ class ACTCompileTest(TestCase):
         act2 = AsyncCollectiveTensor(elem2)
         r2 = compiled_fn(act2)
         self.assertEqual(r2, elem2 * 2)
+
+    def test_direct_aot_top_level_act_path_accepts_plain_runtime_input(self):
+        """
+        Unlike torch.compile, direct AOTAutograd entry points do not have
+        Dynamo input-type guards to force a recompile when a top-level ACT input
+        is later a plain tensor. The runtime wait path must therefore guard
+        before calling trigger_wait() on the recorded ACT input path.
+        """
+        from torch._functorch.aot_autograd import aot_function
+
+        def fw_compiler(gm, example_inputs):
+            return gm
+
+        compiled_fn = aot_function(lambda x: x * 2, fw_compiler=fw_compiler)
+
+        elem = torch.randn(4, 4)
+        r1 = compiled_fn(AsyncCollectiveTensor(elem))
+        self.assertEqual(r1, elem * 2)
+
+        plain = torch.randn(4, 4)
+        r2 = compiled_fn(plain)
+        self.assertEqual(r2, plain * 2)
 
     def test_act_guard_recompiles(self):
         """

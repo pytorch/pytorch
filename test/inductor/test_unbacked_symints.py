@@ -1,12 +1,17 @@
 # Owner(s): ["module: inductor"]
 import functools
 import unittest
+from unittest import mock
+
+import sympy
 
 import torch
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.exc import InternalTorchDynamoError
-from torch._inductor import config as inductor_config
+from torch._inductor import config as inductor_config, ir
+from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.test_case import TestCase as InductorTestCase
+from torch._inductor.virtualized import V
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import (
@@ -517,7 +522,6 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
-    @skipIfXpu(msg="FlashAttentionForward headdim limitation on xpu")
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @skipCUDAIf(not SM80OrLater, "Requires sm80 or later.")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
@@ -544,7 +548,6 @@ class TestUnbackedSymints(InductorTestCase):
         x = torch.tensor([1.0, 0.0, 1.0, 0.0], device=device)
         torch.compile(fn, fullgraph=True)(x)
 
-    @skipIfXpu(msg="FlashAttentionForward headdim limitation on xpu")
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @skipCUDAIf(not SM80OrLater, "Requires sm80 or later.")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
@@ -856,6 +859,41 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
+    @skipIfXpu(msg="standalone_compile coverage is CUDA-only")
+    @skipCPUIf(True, "requires gpu and triton")
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    def test_standalone_compile_reuses_fallback_unbacked_binding(self, device):
+        from torch._inductor import standalone_compile
+        from torch._subclasses.fake_tensor import FakeTensor
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def fn(counts, x):
+            idx = torch.repeat_interleave(counts)
+            return x[idx].sin()
+
+        counts = torch.tensor([1, 2, 1, 0], device=device, dtype=torch.int64)
+        x = torch.randn(4, 8, device=device)
+        torch._dynamo.mark_dynamic(counts, 0, min=1, max=8)
+        gm = make_fx(fn, tracing_mode="symbolic")(counts, x)
+        fake_mode = next(
+            node.meta["val"].fake_mode
+            for node in gm.graph.nodes
+            if isinstance(node.meta.get("val"), FakeTensor)
+        )
+
+        with (
+            torch._guards.tracing(torch._guards.TracingContext(fake_mode)),
+            fake_mode.shape_env.ignore_fresh_unbacked_symbols(),
+        ):
+            compiled = standalone_compile(
+                gm,
+                [counts, x],
+                dynamic_shapes="from_tracing_context",
+                options={},
+            )
+
+        torch.testing.assert_close(compiled(counts, x), fn(counts, x))
+
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_override_optimization_hint_eager(self, device):
         """Test that override_optimization_hint updates var_to_hint_override eagerly."""
@@ -1007,6 +1045,63 @@ class TestUnbackedSymints(InductorTestCase):
         compiled_fn = torch.compile(fn, backend=fx_pass_backend, fullgraph=True)
         result = compiled_fn(t)
         self.assertEqual(result, 8)
+
+    def test_stride_order_uses_unbacked_optimization_hint(self, device):
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        seq = shape_env.create_unbacked_symint()
+        torch._dynamo.override_optimization_hint(seq, 16)
+
+        stride_order = ir.get_stride_order(
+            [256 * sympy.Max(1, seq.node.expr // 2), 256, 1],
+            shape_env,
+        )
+        self.assertEqual(stride_order, [2, 1, 0])
+
+    def test_stride_ordered_uses_symbolic_divisibility(self, device):
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        seq = shape_env.create_unbacked_symint().node.expr
+        sizevars = SizeVarAllocator(shape_env)
+        graph = mock.Mock(sizevars=sizevars)
+
+        layout = ir.FixedLayout(
+            torch.device(device),
+            torch.float32,
+            size=[seq, 8, 16],
+            stride=[256 * seq, 256, 1],
+        )
+        with V.set_graph_handler(graph):
+            with mock.patch.object(
+                sizevars,
+                "optimization_hint",
+                side_effect=AssertionError("unexpected optimization hint"),
+            ):
+                self.assertTrue(layout.is_stride_ordered([2, 1, 0]))
+
+    def test_stride_ordered_rejects_unproved_unbacked_layout(self, device):
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        seq = shape_env.create_unbacked_symint().node.expr
+        sizevars = SizeVarAllocator(shape_env)
+        graph = mock.Mock(sizevars=sizevars)
+
+        layout = ir.FixedLayout(
+            torch.device(device),
+            torch.float32,
+            size=[seq, 2],
+            stride=[seq, 2],
+        )
+        with V.set_graph_handler(graph):
+            with mock.patch.object(
+                sizevars,
+                "optimization_hint",
+                side_effect=AssertionError("unexpected optimization hint"),
+            ):
+                self.assertFalse(layout.is_stride_ordered([1, 0]))
 
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})

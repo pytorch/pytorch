@@ -71,7 +71,7 @@ debugging purposes. This will produce a lot of diagnostic messages but may be
 useful to see if TunableOp is being used at all. Otherwise, TunableOp is
 completely silent, besides file output, unless there is a warning or error
 during its use. The verbose option is only available by setting the environment
-variable PYTORCH_TUNABLEOP_VEROBSE=1.
+variable PYTORCH_TUNABLEOP_VERBOSE=1.
 
 A Note on Tuning Behavior, Warmup, and Cache Effects
 ====================================================
@@ -239,7 +239,7 @@ def tuning_is_enabled() -> bool:
 
 
 def record_untuned_enable(val: bool = True) -> None:
-    r"""Enable recording untuned of TunableOp perations for offline tuning.
+    r"""Enable recording untuned TunableOp operations for offline tuning.
 
     When enabled, if a tuned entry isn't found, write it to the untuned file.
     """
@@ -655,7 +655,7 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
         # Warnings for unsupported cases:
         if m == 1 or n == 1 or k == 1:
             warnings.warn(
-                "Offline tuning is not support for this GEMM. Use online tuning instead. "
+                "Offline tuning is not supported for this GEMM. Use online tuning instead. "
                 + f"Skipped tuning for: {untuned_gemm[1]}",
                 stacklevel=2,
             )

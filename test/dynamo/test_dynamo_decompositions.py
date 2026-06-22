@@ -336,7 +336,7 @@ class GraphModule(torch.nn.Module):
 
     @skipIfCrossRef
     def test_foreach_lerp_inplace_decomposition_enabled(self):
-        """With decompositions enabled, foreach_lerp_ with scalar weight should decompose."""
+        """With decompositions enabled, foreach_lerp_ with tensor weight should decompose."""
 
         def fn(tensors, end_tensors, weight):
             torch._foreach_lerp_(tensors, end_tensors, weight)
@@ -389,6 +389,38 @@ class GraphModule(torch.nn.Module):
         )
 
     @skipIfCrossRef
+    def test_foreach_lerp_inplace_python_scalar_preserves_op(self):
+        """Python scalar weights should use the native foreach_lerp_ op."""
+
+        def fn(tensors, end_tensors):
+            torch._foreach_lerp_(tensors, end_tensors, 0.1)
+            return tensors
+
+        eager = EagerAndRecordGraphs()
+        with torch._dynamo.config.patch(enable_dynamo_decompositions=True):
+            tensors = [torch.randn(4), torch.randn(4)]
+            end_tensors = [torch.randn(4), torch.randn(4)]
+            torch.compile(fn, backend=eager, fullgraph=True)(tensors, end_tensors)
+
+        graph = eager.graphs[0]
+        actual = normalize_gm(graph.print_readable(False))
+
+        self.assertExpectedInline(
+            actual,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_tensors_0_: "f32[4]", L_tensors_1_: "f32[4]", L_end_tensors_0_: "f32[4]", L_end_tensors_1_: "f32[4]"):
+        l_tensors_0_ = L_tensors_0_
+        l_tensors_1_ = L_tensors_1_
+        l_end_tensors_0_ = L_end_tensors_0_
+        l_end_tensors_1_ = L_end_tensors_1_
+
+        _foreach_lerp_ = torch._foreach_lerp_([l_tensors_0_, l_tensors_1_], [l_end_tensors_0_, l_end_tensors_1_], 0.1);  l_tensors_0_ = l_tensors_1_ = l_end_tensors_0_ = l_end_tensors_1_ = _foreach_lerp_ = None
+        return ()
+""",
+        )
+
+    @skipIfCrossRef
     def test_foreach_lerp_inplace_decomposition_disabled(self):
         """With decompositions disabled, foreach_lerp_ should remain as the original op.
 
@@ -413,21 +445,13 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_end_tensors_0_: "f32[4]", L_end_tensors_1_: "f32[4]", L_tensors_0_: "f32[4]", L_tensors_1_: "f32[4]"):
-        l_end_tensors_0_ = L_end_tensors_0_
-        l_end_tensors_1_ = L_end_tensors_1_
+    def forward(self, L_tensors_0_: "f32[4]", L_tensors_1_: "f32[4]", L_end_tensors_0_: "f32[4]", L_end_tensors_1_: "f32[4]"):
         l_tensors_0_ = L_tensors_0_
         l_tensors_1_ = L_tensors_1_
+        l_end_tensors_0_ = L_end_tensors_0_
+        l_end_tensors_1_ = L_end_tensors_1_
 
-        _foreach_sub = torch._foreach_sub([l_end_tensors_0_, l_end_tensors_1_], [l_tensors_0_, l_tensors_1_])
-        getitem: "f32[4]" = _foreach_sub[0]
-        getitem_1: "f32[4]" = _foreach_sub[1];  _foreach_sub = None
-        tensor: "f32[]" = torch.tensor(0.5, dtype = torch.float32, device = device(type='cpu'))
-        sub: "f32[]" = 1.0 - tensor;  tensor = None
-        neg_omw: "f32[]" = -sub;  sub = None
-        copy_: "f32[4]" = l_tensors_0_.copy_(l_end_tensors_0_);  l_end_tensors_0_ = copy_ = None
-        copy__1: "f32[4]" = l_tensors_1_.copy_(l_end_tensors_1_);  l_end_tensors_1_ = copy__1 = None
-        _foreach_addcmul_ = torch._foreach_addcmul_([l_tensors_0_, l_tensors_1_], [neg_omw, neg_omw], (getitem, getitem_1));  l_tensors_0_ = l_tensors_1_ = neg_omw = getitem = getitem_1 = _foreach_addcmul_ = None
+        _foreach_lerp_ = torch._foreach_lerp_([l_tensors_0_, l_tensors_1_], [l_end_tensors_0_, l_end_tensors_1_], 0.5);  l_tensors_0_ = l_tensors_1_ = l_end_tensors_0_ = l_end_tensors_1_ = _foreach_lerp_ = None
         return ()
 """,
         )
@@ -457,21 +481,13 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_end_tensors_0_: "f32[4]", L_end_tensors_1_: "f32[4]", L_tensors_0_: "f32[4]", L_tensors_1_: "f32[4]"):
-        l_end_tensors_0_ = L_end_tensors_0_
-        l_end_tensors_1_ = L_end_tensors_1_
+    def forward(self, L_tensors_0_: "f32[4]", L_tensors_1_: "f32[4]", L_end_tensors_0_: "f32[4]", L_end_tensors_1_: "f32[4]"):
         l_tensors_0_ = L_tensors_0_
         l_tensors_1_ = L_tensors_1_
+        l_end_tensors_0_ = L_end_tensors_0_
+        l_end_tensors_1_ = L_end_tensors_1_
 
-        _foreach_sub = torch._foreach_sub([l_end_tensors_0_, l_end_tensors_1_], [l_tensors_0_, l_tensors_1_])
-        getitem: "f32[4]" = _foreach_sub[0]
-        getitem_1: "f32[4]" = _foreach_sub[1];  _foreach_sub = None
-        tensor: "f32[]" = torch.tensor(0.5, dtype = torch.float32, device = device(type='cpu'))
-        sub: "f32[]" = 1.0 - tensor;  tensor = None
-        neg_omw: "f32[]" = -sub;  sub = None
-        copy_: "f32[4]" = l_tensors_0_.copy_(l_end_tensors_0_);  l_end_tensors_0_ = copy_ = None
-        copy__1: "f32[4]" = l_tensors_1_.copy_(l_end_tensors_1_);  l_end_tensors_1_ = copy__1 = None
-        _foreach_addcmul_ = torch._foreach_addcmul_([l_tensors_0_, l_tensors_1_], [neg_omw, neg_omw], (getitem, getitem_1));  l_tensors_0_ = l_tensors_1_ = neg_omw = getitem = getitem_1 = _foreach_addcmul_ = None
+        _foreach_lerp_ = torch._foreach_lerp_([l_tensors_0_, l_tensors_1_], [l_end_tensors_0_, l_end_tensors_1_], 0.5);  l_tensors_0_ = l_tensors_1_ = l_end_tensors_0_ = l_end_tensors_1_ = _foreach_lerp_ = None
         return ()
 """,
         )
@@ -602,6 +618,67 @@ class TestDynamoDecompositionsNumerics(TestCase):
 
     @skipIfCrossRef
     @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
+    def test_addcmul__backward(self, device):
+        """Compiled addcmul_ backward matches eager backward."""
+
+        def fn(x, tensor1, tensor2):
+            y = x.clone()
+            y.addcmul_(tensor1, tensor2, value=0.5)
+            return y.sum()
+
+        def make_inputs():
+            torch.manual_seed(42)
+            x = torch.randn(4, 4, device=device, requires_grad=True)
+            tensor1 = torch.randn(4, 4, device=device, requires_grad=True)
+            tensor2 = torch.randn(4, 4, device=device, requires_grad=True)
+            return x, tensor1, tensor2
+
+        x1, t1e, t2e = make_inputs()
+        fn(x1, t1e, t2e).backward()
+        expected_grads = (x1.grad, t1e.grad, t2e.grad)
+
+        for backend in ["aot_eager", "eager", "inductor"]:
+            torch._dynamo.reset()
+            x2, t1a, t2a = make_inputs()
+            torch.compile(fn, backend=backend, fullgraph=True)(x2, t1a, t2a).backward()
+            actual_grads = (x2.grad, t1a.grad, t2a.grad)
+            for exp, act in zip(expected_grads, actual_grads):
+                self.assertEqual(exp, act)
+
+    @skipIfCrossRef
+    @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
+    def test_addcmul__tensor_value_backward(self, device):
+        """Compiled addcmul_ backward with tensor value matches eager backward."""
+
+        def fn(x, tensor1, tensor2, value):
+            y = x.clone()
+            y.addcmul_(tensor1, tensor2, value=value)
+            return y.sum()
+
+        def make_inputs():
+            torch.manual_seed(42)
+            x = torch.randn(4, 4, device=device, requires_grad=True)
+            tensor1 = torch.randn(4, 4, device=device, requires_grad=True)
+            tensor2 = torch.randn(4, 4, device=device, requires_grad=True)
+            value = torch.tensor(0.5, device=device)
+            return x, tensor1, tensor2, value
+
+        x1, t1e, t2e, v1 = make_inputs()
+        fn(x1, t1e, t2e, v1).backward()
+        expected_grads = (x1.grad, t1e.grad, t2e.grad)
+
+        for backend in ["aot_eager", "eager", "inductor"]:
+            torch._dynamo.reset()
+            x2, t1a, t2a, v2 = make_inputs()
+            torch.compile(fn, backend=backend, fullgraph=True)(
+                x2, t1a, t2a, v2
+            ).backward()
+            actual_grads = (x2.grad, t1a.grad, t2a.grad)
+            for exp, act in zip(expected_grads, actual_grads):
+                self.assertEqual(exp, act)
+
+    @skipIfCrossRef
+    @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
     def test_addcdiv_tensor_value_numerics(self, device):
         """Compiled addcdiv_ with tensor value matches eager."""
 
@@ -616,6 +693,67 @@ class TestDynamoDecompositionsNumerics(TestCase):
         expected = fn(x.clone(), tensor1, tensor2, value)
         actual = torch.compile(fn, fullgraph=True)(x.clone(), tensor1, tensor2, value)
         self.assertEqual(expected, actual)
+
+    @skipIfCrossRef
+    @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
+    def test_addcdiv__backward(self, device):
+        """Compiled addcdiv_ backward matches eager backward."""
+
+        def fn(x, tensor1, tensor2):
+            y = x.clone()
+            y.addcdiv_(tensor1, tensor2, value=0.5)
+            return y.sum()
+
+        def make_inputs():
+            torch.manual_seed(42)
+            x = torch.randn(4, 4, device=device, requires_grad=True)
+            tensor1 = torch.randn(4, 4, device=device, requires_grad=True)
+            tensor2 = torch.randn(4, 4, device=device, requires_grad=True) + 0.1
+            return x, tensor1, tensor2
+
+        x1, t1e, t2e = make_inputs()
+        fn(x1, t1e, t2e).backward()
+        expected_grads = (x1.grad, t1e.grad, t2e.grad)
+
+        for backend in ["aot_eager", "eager", "inductor"]:
+            torch._dynamo.reset()
+            x2, t1a, t2a = make_inputs()
+            torch.compile(fn, backend=backend, fullgraph=True)(x2, t1a, t2a).backward()
+            actual_grads = (x2.grad, t1a.grad, t2a.grad)
+            for exp, act in zip(expected_grads, actual_grads):
+                self.assertEqual(exp, act)
+
+    @skipIfCrossRef
+    @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
+    def test_addcdiv__tensor_value_backward(self, device):
+        """Compiled addcdiv_ backward with tensor value matches eager backward."""
+
+        def fn(x, tensor1, tensor2, value):
+            y = x.clone()
+            y.addcdiv_(tensor1, tensor2, value=value)
+            return y.sum()
+
+        def make_inputs():
+            torch.manual_seed(42)
+            x = torch.randn(4, 4, device=device, requires_grad=True)
+            tensor1 = torch.randn(4, 4, device=device, requires_grad=True)
+            tensor2 = torch.randn(4, 4, device=device, requires_grad=True) + 0.1
+            value = torch.tensor(0.5, device=device)
+            return x, tensor1, tensor2, value
+
+        x1, t1e, t2e, v1 = make_inputs()
+        fn(x1, t1e, t2e, v1).backward()
+        expected_grads = (x1.grad, t1e.grad, t2e.grad)
+
+        for backend in ["aot_eager", "eager", "inductor"]:
+            torch._dynamo.reset()
+            x2, t1a, t2a, v2 = make_inputs()
+            torch.compile(fn, backend=backend, fullgraph=True)(
+                x2, t1a, t2a, v2
+            ).backward()
+            actual_grads = (x2.grad, t1a.grad, t2a.grad)
+            for exp, act in zip(expected_grads, actual_grads):
+                self.assertEqual(exp, act)
 
     @skipIfCrossRef
     @torch._dynamo.config.patch(enable_dynamo_decompositions=True)

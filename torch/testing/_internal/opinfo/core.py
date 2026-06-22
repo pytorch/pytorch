@@ -1708,11 +1708,18 @@ class sample_skips_and_xfails:
         self.rules = rules
 
     def __call__(self, fn):
-        rules = getattr(fn, "sample_skips_and_xfails", None)
-        if rules is not None:
-            raise RuntimeError("Multiple sets of sample_skips_and_xfails defined")
+        if not isinstance(self.rules, list):
+            raise TypeError(
+                "The rules for sample_skips_and_xfails must be defined as a list"
+            )
 
-        fn.sample_skips_and_xfails = self.rules
+        if hasattr(fn, "sample_skips_and_xfails"):
+            for rule in self.rules:
+                if rule not in fn.sample_skips_and_xfails:
+                    fn.sample_skips_and_xfails.append(rule)
+        else:
+            fn.sample_skips_and_xfails = self.rules
+
         return fn
 
 
@@ -2073,8 +2080,9 @@ def generate_elementwise_binary_arbitrarily_strided_tensors(
     for shape, strides, offset in strided_cases:
         a = make_arg(
             500,
+            **op.lhs_make_tensor_kwargs,
         ).as_strided(shape, strides, offset)
-        b = make_arg(shape)
+        b = make_arg(shape, **op.rhs_make_tensor_kwargs)
         yield SampleInput(a, args=(b,), kwargs=op.sample_kwargs(device, dtype, a)[0])
 
 
@@ -2088,6 +2096,10 @@ def generate_elementwise_binary_small_value_tensors(
     if exclude_zero is None:
         if hasattr(op, "rhs_make_tensor_kwargs"):
             exclude_zero = op.rhs_make_tensor_kwargs.get("exclude_zero", False)
+
+    lhs_exclude_zero = False
+    if hasattr(op, "lhs_make_tensor_kwargs"):
+        lhs_exclude_zero = op.lhs_make_tensor_kwargs.get("exclude_zero", False)
 
     # defines interesting values
     _unsigned_int_vals = (0, 1, 55, 127, 128, 190, 210, 220, 254)
@@ -2130,7 +2142,10 @@ def generate_elementwise_binary_small_value_tensors(
         raise ValueError("Unsupported dtype!")
 
     for l, r in prod:
-        l_vals.append(l)
+        if l == 0 and lhs_exclude_zero:
+            l_vals.append(1)
+        else:
+            l_vals.append(l)
         if r == 0 and exclude_zero:
             r_vals.append(1)
         else:

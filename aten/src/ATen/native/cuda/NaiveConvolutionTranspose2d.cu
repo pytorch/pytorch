@@ -12,6 +12,7 @@
 #include <ATen/cuda/CUDAContext.h>
 
 #include <ATen/native/ConvUtils.h>
+#include <utility>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -825,7 +826,8 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv_transpose2d_backward_cuda(
         1);
   }
 
-  return std::tuple<Tensor, Tensor, Tensor>(grad_input, grad_weight, grad_bias);
+  return std::tuple<Tensor, Tensor, Tensor>(
+      std::move(grad_input), std::move(grad_weight), std::move(grad_bias));
 }
 
 REGISTER_CUDA_DISPATCH(slow_conv_transpose2d_backward_stub, &slow_conv_transpose2d_backward_cuda)

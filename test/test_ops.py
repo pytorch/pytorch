@@ -138,7 +138,6 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("all"),
     xfail("amax"),
     xfail("amin"),
-    xfail("aminmax"),
     xfail("any"),
     xfail("bucketize"),
     xfail("conj_physical"),
@@ -273,14 +272,10 @@ class TestCommon(TestCase):
             "aten.max.default",
             "aten.max.dim",
             "aten.max.dim_max",
-            "aten.max.names_dim",
-            "aten.max.names_dim_max",
             "aten.max.unary_out",
             "aten.min.default",
             "aten.min.dim",
             "aten.min.dim_min",
-            "aten.min.names_dim",
-            "aten.min.names_dim_min",
             "aten.min.unary_out",
             # not pointwise
             "aten.isin.Tensor_Tensor",
@@ -290,8 +285,6 @@ class TestCommon(TestCase):
             "aten.isin.Scalar_Tensor",
             "aten.isin.Scalar_Tensor_out",
             "aten.mode.default",
-            "aten.mode.dimname",
-            "aten.mode.dimname_out",
             "aten.mode.values",
         )
 
@@ -327,9 +320,7 @@ class TestCommon(TestCase):
                     kernel = get_opoverloadpacket_from_dispatch(kernel)
                     overloadpacket = getattr(torch.ops.aten, kernel)
 
-                    for overload_name in overloadpacket.overloads():
-                        overload = getattr(overloadpacket, overload_name)
-
+                    for overload in overloadpacket.op_overloads():
                         if not torch._C._dispatch_has_kernel(overload.name()):
                             continue
 
@@ -405,9 +396,7 @@ class TestCommon(TestCase):
 
                     overloadpacket = getattr(torch.ops.aten, kernel)
 
-                    for overload_name in overloadpacket.overloads():
-                        overload = getattr(overloadpacket, overload_name)
-
+                    for overload in overloadpacket.op_overloads():
                         if not torch._C._dispatch_has_kernel(overload.name()):
                             continue
 
@@ -451,6 +440,11 @@ class TestCommon(TestCase):
                 for dim in reduction_dims:
                     reduction_factor *= sample.input.shape[dim]
 
+                # An empty reduction axis means there is nothing to reduce over
+                # and the numel-by-factor relationship below does not hold.
+                if reduction_factor == 0:
+                    continue
+
                 expected_numel = sample.input.numel() // reduction_factor
 
                 self.assertEqual(
@@ -478,8 +472,7 @@ class TestCommon(TestCase):
             and op.formatted_name
             in ("signal_windows_exponential", "signal_windows_bartlett")
             and dtype == torch.float64
-            and ("cuda" in device or "xpu" in device)
-            or "cpu" in device
+            and ("cpu" in device or "cuda" in device or "xpu" in device)
         ):
             raise unittest.SkipTest("XXX: raises tensor-likes are not close.")
 
@@ -603,10 +596,11 @@ class TestCommon(TestCase):
             if skip_bfloat and (
                 (
                     isinstance(sample.input, torch.Tensor)
-                    and sample.input.dtype == torch.bfloat16
+                    and sample.input.dtype in {torch.bfloat16, torch.bcomplex32}
                 )
                 or any(
-                    isinstance(arg, torch.Tensor) and arg.dtype == torch.bfloat16
+                    isinstance(arg, torch.Tensor)
+                    and arg.dtype in {torch.bfloat16, torch.bcomplex32}
                     for arg in sample.args
                 )
             ):
@@ -1541,12 +1535,20 @@ class TestCommon(TestCase):
             unittest.skip("Does not support complex32")
 
         for sample in op.sample_inputs(device, dtype):
+            # MPS doesn't support float64
+            if torch.float64 in (
+                *sample.args,
+                *sample.kwargs.values(),
+            ) and not op.supports_dtype(torch.float64, device):
+                continue
+
             actual = op(sample.input, *sample.args, **sample.kwargs)
             # sample.transform applies the lambda to torch.Tensor and torch.dtype.
             # However, we only want to apply it to Tensors with dtype `torch.complex32`..
             transformed_sample = sample.transform(
                 lambda x: x.to(torch.complex64)
-                if isinstance(x, torch.Tensor) and x.dtype is torch.complex32
+                if isinstance(x, torch.Tensor)
+                and x.dtype in (torch.complex32, torch.bcomplex32)
                 else x
             )
             expected = op(
@@ -2414,6 +2416,15 @@ class _TestTagsMode(TorchDispatchMode):
 @unMarkDynamoStrictTest
 class TestTags(TestCase):
     @onlyCPU
+    @skipOps(
+        {
+            skip("sparse.sampled_addmm"),
+            skip("sparse.mm", variant_name="reduce"),
+            skip("nn.functional.max_pool1d"),
+            skip("to_sparse"),
+            skip("bmm", variant_name="triton_optimized"),
+        }
+    )
     @ops(ops_and_refs, dtypes=OpDTypes.any_one)
     def test_tags(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=False)
@@ -2490,7 +2501,6 @@ class TestRefsOpsInfo(TestCase):
         "_refs.index_add_",
         "_refs.index_copy_",
         "_refs.index_fill_",
-        "_refs.native_group_norm",
     }
 
     not_in_decomp_table = {
@@ -2559,6 +2569,9 @@ class TestRefsOpsInfo(TestCase):
         "_refs.nn.functional.poisson_nll_loss",
         "_refs.nn.functional.softmax",
         "_refs.nn.functional.softmin",
+        # The frontend ref validates min_val <= max_val, but aten.hardtanh
+        # preserves native ATen semantics and allows inverted bounds.
+        "_refs.nn.functional.hardtanh",
         "_refs.positive",
         "_refs.ravel",
         "_refs.reshape",
@@ -2729,6 +2742,7 @@ fake_backward_skips = {
 
 fake_backward_xfails = {skip(s) for s in fake_backward_skips} | {
     skip("nn.functional.ctc_loss"),
+    skip("bmm", variant_name="triton_optimized"),
 }
 
 fake_autocast_backward_xfails = {
@@ -2864,6 +2878,7 @@ class TestFakeTensor(TestCase):
                     allow_dynamic_output_shape_mode, match_results=False
                 )
 
+    @skipOps({skip("bmm", variant_name="triton_optimized")})
     @ops(op_db, dtypes=OpDTypes.any_one)
     def test_pointwise_ops(self, device, dtype, op):
         name = op.name
@@ -2917,10 +2932,24 @@ class TestFakeTensor(TestCase):
                 with mode:
                     op(input, *args, **kwargs)
 
+    @skipOps(
+        {
+            xfail("item"),
+            skip("native_batch_norm"),
+            skip("bmm", variant_name="triton_optimized"),
+        }
+    )
     @ops(op_db, dtypes=OpDTypes.any_one)
     def test_fake(self, device, dtype, op):
         self._test_fake_helper(device, dtype, op, contextlib.nullcontext)
 
+    @skipOps(
+        {
+            xfail("item"),
+            skip("native_batch_norm"),
+            skip("bmm", variant_name="triton_optimized"),
+        }
+    )
     @ops(op_db, dtypes=OpDTypes.any_one)
     def test_fake_autocast(self, device, dtype, op):
         device_type = torch.device(device).type
@@ -2969,7 +2998,7 @@ class TestFakeTensor(TestCase):
 
     @onlyCUDA
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
-    @skipOps(fake_backward_xfails)
+    @skipOps(fake_backward_xfails | {skip("sparse.sampled_addmm")})
     def test_fake_crossref_backward_no_amp(self, device, dtype, op):
         self._test_fake_crossref_helper(device, dtype, op, contextlib.nullcontext)
 

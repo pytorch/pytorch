@@ -243,7 +243,7 @@ static void fuseTransposeIntoGemm(Block* b) {
 
 // Why this is here:
 //
-//   Pytorch has a "packed" representation of sequences, as well as a
+//   PyTorch has a "packed" representation of sequences, as well as a
 //   "padded" representation. ONNX has only one representation,
 //   corresponding to pytorch's "padded". Therefore, we need to remove
 //   any use of packed sequences before exporting.
@@ -369,7 +369,7 @@ static void pushPackingPastRnn(Block* b) {
 
     // See https://github.com/pytorch/pytorch/issues/9043 for a full
     // description.  Since PackPadded is for now treated in an
-    // unhygenic way, Pytorch ends up propagating an incorrect type.
+    // unhygienic way, PyTorch ends up propagating an incorrect type.
     // Until a long-term cleanup comes around, we can fix this by
     // resetting the size to the correct value.
     TensorTypePtr oldType = rnn->inputs().at(0)->type()->cast<TensorType>();

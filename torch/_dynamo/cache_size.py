@@ -25,12 +25,12 @@ There are two limits
 2) accumulated_recompile_limit
 
 
-Earlier we used to have only limit - maximum number of entries in 1 cache line
-(which is now represented by (2) above). So, why do we need two limits? Lets try
+Earlier we used to have only one limit - maximum number of entries in 1 cache line
+(which is now represented by (2) above). So, why do we need two limits? Let's try
 to understand that.
 
 In general, we want our cache limit value to be a small number (e.g. 8 or even
-lower). This ensures that for frames that cause too many recompilation fall to
+lower). This ensures that for frames that cause too many recompilations fall to
 eager quickly. However, there is another problem that prevents us from lowering
 the value of recompile_limit. This is due to ID_MATCH'd guards. Today, we put
 ID_MATCH guards on nn module if there is a graph break. This means we will have
@@ -45,7 +45,7 @@ for a code object. One important question is - what is the limit for the code
 object that does not have any ID_MATCH guard? For such code objects, we choose
 (1) as the cache size limit.
 
-Lets take an example to understand how these limits help. Suppose, we have 16
+Let's take an example to understand how these limits help. Suppose, we have 16
 instances of a nn module and we ID_MATCH on the self object. Further, suppose
 the inputs to these functions have varying batch size, leading to one
 recompilation. In total, there will be 32 recompilations, and therefore 32 cache

@@ -222,6 +222,22 @@ class MPSBasicTests(TestCase):
         torch._dynamo.mark_dynamic(x, 1)
         self.assertEqual(fn(x), x.var(dim=-1))
 
+    def test_welford_multistage_sibling_redeclare(self):
+        # Regression test: BatchNorm2d-train emits two codegen passes on
+        # the same multistage reduction root (welford + running-stats
+        # update). Sibling indices (r0_1, r0_2) declared via the
+        # root_already_processed branch must be redeclared in the second
+        # loop scope; otherwise Metal compilation fails with
+        # "use of undeclared identifier 'r0_2'".
+        torch.manual_seed(0)
+        bn_ref = torch.nn.BatchNorm2d(8).train()
+        bn_mps = torch.nn.BatchNorm2d(8).to(self.device).train()
+        bn_mps.load_state_dict(bn_ref.state_dict())
+        x = torch.randn(4, 8, 32, 32)
+        y_ref = bn_ref(x)
+        y_mps = torch.compile(bn_mps)(x.to(self.device))
+        self.assertEqual(y_mps.cpu(), y_ref)
+
     def test_sdpa_split_qkv(self):
         # regression test for metal compiler bug where fused (x / A) % B
         # produces wrong results, causing incorrect reads from non-contiguous.
@@ -240,6 +256,23 @@ class MPSBasicTests(TestCase):
             )
 
         self.common(fn, (q, k, v), atol=1e-4, rtol=1e-4, check_lowp=False)
+
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_sdpa_prefill_strided(self, dtype):
+        torch.manual_seed(0)
+        B, H, S, D = 1, 16, 1179, 128
+
+        def fn(q, k, v, mask):
+            q, k, v = (t.transpose(1, 2) for t in (q, k, v))
+            return torch.nn.functional.scaled_dot_product_attention(
+                q, k, v, attn_mask=mask
+            )
+
+        q, k, v = (
+            torch.randn(B, S, H, D, device=self.device, dtype=dtype) for _ in range(3)
+        )
+        mask = torch.zeros(B, 1, S, S, device=self.device, dtype=dtype)
+        self.assertEqual(torch.compile(fn)(q, k, v, mask), fn(q, k, v, mask))
 
     def test_nested_masked_cat(self):
         # Regression test for YOLOv3 compilation failure on MPS.

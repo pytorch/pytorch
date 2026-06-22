@@ -67,7 +67,7 @@ def _add_op_to_registry(registry, op, fn):
     This is an internal API for adding an op to the decomposition table.
 
     If op is OpOverload, it will be added to the registry directly.
-    If op is OpOverloadPacket, all the valid op_overloads in the packet will be added to the registry.
+    If op is OpOverloadPacket, all the valid overload_ops in the packet will be added to the registry.
     """
     overloads: list[torch._ops.OperatorBase] = []
     if isinstance(op, HigherOrderOperator):
@@ -79,8 +79,7 @@ def _add_op_to_registry(registry, op, fn):
     else:
         if not isinstance(op, OpOverloadPacket):
             raise AssertionError(f"expected OpOverloadPacket, got {type(op)}")
-        for ol in op.overloads():
-            overloads.append(getattr(op, ol))
+        overloads.extend(op.op_overloads())
 
     for op_overload in overloads:
         if op_overload in registry:
@@ -277,8 +276,7 @@ def remove_decompositions(
     """
     for op in aten_ops:
         if isinstance(op, OpOverloadPacket):
-            for overload_name in op.overloads():
-                opo = getattr(op, overload_name)
+            for opo in op.op_overloads():
                 decompositions.pop(opo, None)
         elif isinstance(op, OpOverload):
             decompositions.pop(op, None)
@@ -448,8 +446,6 @@ def _core_aten_decompositions_post_autograd() -> dict[
             aten.norm.ScalarOpt_dim,
             aten.norm.dtype_out,
             aten.norm.out,
-            aten.norm.names_dtype_out,
-            aten.norm.names_out,
             aten.norm.ScalarOpt_dtype_out,
             aten.norm.Scalar_out,
             aten.ones,
@@ -512,8 +508,6 @@ def _core_aten_decompositions_post_autograd() -> dict[
             aten.std.correction,
             aten.std.out,
             aten.std.correction_out,
-            aten.std.names_out,
-            aten.std.correction_names_out,
             aten.std_mean.correction,
             aten.std_mean.correction_out,
             aten.stack,

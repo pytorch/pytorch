@@ -2062,6 +2062,7 @@ def validate_revert(
     allowed_apps = {
         "https://github.com/apps/pytorch-auto-revert",
         "https://github.com/apps/facebook-github-tools",
+        "https://github.com/apps/meta-codesync",
     }
     if comment.author_url in allowed_apps:
         allowed_reverters.append("NONE")

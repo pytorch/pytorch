@@ -290,7 +290,7 @@ class AdaptiveLogSoftmaxWithLoss(Module):
             input (Tensor): a minibatch of examples
 
         Returns:
-            log-probabilities of for each class :math:`c`
+            log-probabilities for each class :math:`c`
             in range :math:`0 <= c <= \texttt{n\_classes}`, where :math:`\texttt{n\_classes}` is a
             parameter passed to ``AdaptiveLogSoftmaxWithLoss`` constructor.
 

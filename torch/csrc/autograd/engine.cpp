@@ -923,7 +923,7 @@ static void validate_outputs_impl(
     std::stringstream ss;
     ss << "invalid number of gradients - expected ";
     ss << input_metadata_container.size() << ", but got " << grads.size();
-    TORCH_CHECK(false, format_error(ss.str()));
+    TORCH_CHECK(false, format_error(std::move(ss).str()));
   }
   for (const auto i : c10::irange(grads.size())) {
     if (!has_input_metadata(input_metadata_container[i])) {
@@ -957,7 +957,7 @@ static void validate_outputs_impl(
         std::stringstream ss;
         ss << "invalid gradient at index " << i << " - expected dtype ";
         ss << metadata.grad_dtype().value() << " but got " << grad.dtype();
-        TORCH_CHECK(false, format_error(ss.str()));
+        TORCH_CHECK(false, format_error(std::move(ss).str()));
       }
     }
     if (grad.layout() != metadata.layout()) {
@@ -975,7 +975,7 @@ static void validate_outputs_impl(
         std::stringstream ss;
         ss << "invalid gradient at index " << i << " - expected layout ";
         ss << metadata.layout() << " but got " << grad.layout();
-        TORCH_CHECK(false, format_error(ss.str()));
+        TORCH_CHECK(false, format_error(std::move(ss).str()));
       }
     }
 
@@ -990,7 +990,7 @@ static void validate_outputs_impl(
           std::stringstream ss;
           ss << "invalid gradient at index " << i << " - expected device ";
           ss << metadata.device() << " but got " << grad.device();
-          TORCH_CHECK(false, format_error(ss.str()));
+          TORCH_CHECK(false, format_error(std::move(ss).str()));
         }
       }
     }

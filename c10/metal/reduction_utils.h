@@ -234,6 +234,35 @@ opmath_t<T> threadgroup_sum(
 }
 
 template <typename T>
+::metal::array<opmath_t<T>, 2> threadgroup_sum2(
+    threadgroup opmath_t<T>* data_a,
+    threadgroup opmath_t<T>* data_b,
+    T val_a,
+    T val_b,
+    unsigned idx,
+    unsigned size) {
+  auto rc_a = simd_sum(static_cast<opmath_t<T>>(val_a));
+  auto rc_b = simd_sum(static_cast<opmath_t<T>>(val_b));
+  if (idx % simdgroup_size == 0) {
+    data_a[idx / simdgroup_size] = rc_a;
+    data_b[idx / simdgroup_size] = rc_b;
+  }
+  if (size > simdgroup_size) {
+    ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
+    if (idx < ((size + simdgroup_size - 1) / simdgroup_size)) {
+      auto rc1_a = simd_sum(data_a[idx]);
+      auto rc1_b = simd_sum(data_b[idx]);
+      if (idx == 0) {
+        data_a[0] = rc1_a;
+        data_b[0] = rc1_b;
+      }
+    }
+  }
+  ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
+  return ::metal::array<opmath_t<T>, 2>{data_a[0], data_b[0]};
+}
+
+template <typename T>
 opmath_t<T> threadgroup_prod(
     threadgroup opmath_t<T>* data,
     T val,
@@ -384,6 +413,93 @@ IDX_T threadgroup_argmin(
   ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
   return idx_data[0];
 }
+
+// Reduction op functors bundling identity, replace predicate, and the value
+// reduction helpers (combine / simd_reduce / threadgroup_reduce) used by both
+// value and arg reductions. NaN handling: for floats, isnan-propagating
+// max/min and a strict "replace" predicate that lets NaN beat any finite
+// value and lets any finite value beat -INF/+INF identity.
+//
+// Float identity is +/-INFINITY (not numeric_limits::lowest/max, i.e.
+// -/+FLT_MAX): max(-INF, x) = x for any finite x including -FLT_MAX, but
+// max(-FLT_MAX, -INFINITY) would incorrectly return -FLT_MAX.
+//
+// The isnan() calls below route through static_cast<float>() so the float
+// branch type-checks even when T is integral (Metal 3 lowers `if IF_CONSTEXPR`
+// to a runtime `if` and parses both arms). Both branches' bodies still get
+// dropped on Metal 4 where IF_CONSTEXPR is real `if constexpr`.
+template <typename T>
+struct MaxOp {
+  static inline constexpr T identity() {
+    if IF_CONSTEXPR (::metal::is_floating_point_v<T>) {
+      return T(-INFINITY);
+    } else {
+      return ::metal::numeric_limits<T>::lowest();
+    }
+  }
+
+  // Strict "should-replace" predicate: returns true iff cand strictly beats
+  // cur. NaN-propagating: NaN cand beats finite cur; finite cand never beats
+  // NaN cur.
+  static inline bool replace(T cand, T cur) {
+    if IF_CONSTEXPR (::metal::is_floating_point_v<T>) {
+      if (::metal::isnan(static_cast<float>(cur))) {
+        return false;
+      }
+      return ::metal::isnan(static_cast<float>(cand)) || cand > cur;
+    }
+    return cand > cur;
+  }
+
+  static inline T combine(T a, T b) {
+    return c10::metal::max(a, b);
+  }
+  static inline T simd_reduce(T val) {
+    return c10::metal::simd_max(val);
+  }
+  static inline T threadgroup_reduce(
+      threadgroup T* shared,
+      T val,
+      uint tid,
+      uint tptg) {
+    return c10::metal::threadgroup_max(shared, val, tid, tptg);
+  }
+};
+
+template <typename T>
+struct MinOp {
+  static inline constexpr T identity() {
+    if IF_CONSTEXPR (::metal::is_floating_point_v<T>) {
+      return T(INFINITY);
+    } else {
+      return ::metal::numeric_limits<T>::max();
+    }
+  }
+
+  static inline bool replace(T cand, T cur) {
+    if IF_CONSTEXPR (::metal::is_floating_point_v<T>) {
+      if (::metal::isnan(static_cast<float>(cur))) {
+        return false;
+      }
+      return ::metal::isnan(static_cast<float>(cand)) || cand < cur;
+    }
+    return cand < cur;
+  }
+
+  static inline T combine(T a, T b) {
+    return c10::metal::min(a, b);
+  }
+  static inline T simd_reduce(T val) {
+    return c10::metal::simd_min(val);
+  }
+  static inline T threadgroup_reduce(
+      threadgroup T* shared,
+      T val,
+      uint tid,
+      uint tptg) {
+    return c10::metal::threadgroup_min(shared, val, tid, tptg);
+  }
+};
 
 } // namespace metal
 } // namespace c10

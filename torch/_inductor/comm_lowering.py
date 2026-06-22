@@ -41,7 +41,7 @@ log = logging.getLogger(__name__)
 # within these allocations.
 #
 # To support all different mechanisms with optimal results, we aim to satisfy
-# the strictest requirement for this family of optimizations - we ensures that
+# the strictest requirement for this family of optimizations - we ensure that
 # every collective op invocation is guaranteed to operate on the same
 # allocation, at the same offset, in every iteration.
 #
@@ -95,7 +95,8 @@ def realize_as_comm_buffer(
     """
     x.realize()
     buffer = _get_data(x)
-    assert isinstance(buffer, ir.Buffer)
+    if not isinstance(buffer, ir.Buffer):
+        raise AssertionError(f"expected an `ir.Buffer`, got {type(buffer)}")
 
     layout = buffer.get_output_spec()
     if isinstance(layout, ir.CommBufferLayout):
@@ -126,7 +127,10 @@ def _get_data(x: ir.TensorBox) -> ir.IRNode:
     if isinstance(x.data, ir.BaseView):
         # TensorBox -> *View -> StorageBox -> IRNode
         node = x.data.unwrap_view()
-        assert isinstance(node, (ir.BaseView, ir.MutableBox))
+        if not isinstance(node, (ir.BaseView, ir.MutableBox)):
+            raise AssertionError(
+                f"expected an `ir.BaseView` or `ir.MutableBox`, got {type(node)}"
+            )
         return node.data
     elif isinstance(x.data, ir.StorageBox):
         # TensorBox -> StorageBox -> IRNode
@@ -185,7 +189,8 @@ def _one_shot_all_reduce(inp: ir.TensorBox, reduce_op, group_name):
 
 def _create_out_of_place(kernel, inputs, *args) -> ir.IRNode:
     node = ir._CollectiveKernel.create_out_of_place(kernel, inputs, *args)
-    assert isinstance(node, ir.IRNode)
+    if not isinstance(node, ir.IRNode):
+        raise AssertionError(f"expected an `ir.IRNode`, got {type(node)}")
     return ir.TensorBox.create(node)
 
 
@@ -435,7 +440,8 @@ def register_comm_lowerings():
                 tensors,
                 group_name,
             )
-        assert not unbacked_bindings, f"{kernel} {unbacked_bindings}"
+        if unbacked_bindings:
+            raise AssertionError(f"{kernel} {unbacked_bindings}")
         for op, tensor_arg in zip(op_list, tensor_args):
             tensor_arg.realize()
             if op == "irecv":

@@ -5,22 +5,19 @@ import unittest
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
-from types import SimpleNamespace
-
-import sympy
+from unittest import mock
 
 import torch
 import torch._inductor.kernel.flex.flex_flash_attention as flex_flash_attention_module
 from torch._dynamo.testing import CompileCounterWithBackend, EagerAndRecordGraphs
 from torch._inductor.kernel.flex.flex_flash_attention import (
+    _flash_attention_unavailable_message,
     _hierarchical_indexer_cute,
-    _max_direct_aux_load_vec_size,
     ensure_flash_available,
     HierarchicalIndex,
 )
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code, run_fw_bw_and_get_code
-from torch._inductor.virtualized import V
 from torch.nn.attention.flex_attention import (
     _DEFAULT_SPARSE_BLOCK_SIZE,
     AuxRequest,
@@ -36,7 +33,6 @@ from torch.testing._internal.common_cuda import (
     SM90OrLater,
     xfailIfSM120OrLater,
     xfailIfSM12X,
-    xfailIfSM90,
 )
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -48,7 +44,6 @@ from torch.testing._internal.common_utils import (
     DeterministicGuard,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import MockGraphHandler
 
 
 IS_SM8X = SM80OrLater and not SM90OrLater
@@ -91,14 +86,17 @@ def _distance_decay(score, _b, _h, q_idx, kv_idx):
 
 @contextmanager
 def force_flex_flash_score_mod_vec_size(vec_size: int):
-    original = flex_flash_attention_module._get_flex_flash_fwd_configs
-
     def configs(
         has_score_mod,
         has_aux_tensors,
         device=None,
         score_mod_graph_module=None,
         score_mod_other_buffers=(),
+        has_mask_mod=False,
+        has_mask_aux_tensors=False,
+        mask_mod_graph_module=None,
+        mask_mod_other_buffers=(),
+        aux_scalar_symbols=(),
     ):
         if has_score_mod and has_aux_tensors:
             return [
@@ -106,11 +104,36 @@ def force_flex_flash_score_mod_vec_size(vec_size: int):
             ]
         return [flex_flash_attention_module.FlexFlashConfig()]
 
-    flex_flash_attention_module._get_flex_flash_fwd_configs = configs
-    try:
+    with mock.patch.object(
+        flex_flash_attention_module, "get_flex_flash_fwd_configs", configs
+    ):
         yield
-    finally:
-        flex_flash_attention_module._get_flex_flash_fwd_configs = original
+
+
+@contextmanager
+def use_explicit_flex_flash_mask_mod_vec_size(vec_size: int | None):
+    def configs(
+        has_score_mod,
+        has_aux_tensors,
+        device=None,
+        score_mod_graph_module=None,
+        score_mod_other_buffers=(),
+        has_mask_mod=False,
+        has_mask_aux_tensors=False,
+        mask_mod_graph_module=None,
+        mask_mod_other_buffers=(),
+        aux_scalar_symbols=(),
+    ):
+        if has_mask_mod:
+            return [
+                flex_flash_attention_module.FlexFlashConfig(mask_mod_vec_size=vec_size)
+            ]
+        return [flex_flash_attention_module.FlexFlashConfig()]
+
+    with mock.patch.object(
+        flex_flash_attention_module, "get_flex_flash_fwd_configs", configs
+    ):
+        yield
 
 
 def _sm100_bias(*shape):
@@ -151,98 +174,6 @@ SM100_AUX_SCORE_MOD_CASES = (
 def sm100_aux_score_mod_case_name(case):
     seq_len, index_dim, _bias_factory, _expected_vec_size, _expect_autovec = case
     return f"{index_dim}_seq{seq_len}"
-
-
-@dataclass
-class FakeAuxBuffer:
-    size: tuple[int, ...]
-    stride: tuple[int, ...]
-    offset: int = 0
-
-    def get_size(self):
-        return self.size
-
-    def get_stride(self):
-        return self.stride
-
-    def get_layout(self):
-        return SimpleNamespace(offset=sympy.Integer(self.offset))
-
-
-def _aux_index_graph():
-    graph = torch.fx.Graph()
-    return graph, graph.placeholder("q_idx"), graph.placeholder("kv_idx")
-
-
-class TestFlexFlashAuxVecSelection(InductorTestCase):
-    def test_direct_aux_load_vec_size_selector(self):
-        graph, q_idx, kv_idx = _aux_index_graph()
-        kv_mod_4 = graph.call_function(torch.ops.aten.remainder.Tensor, (kv_idx, 4))
-        kv_stride_mix = graph.call_function(
-            torch.ops.aten.sub.Tensor,
-            (
-                graph.call_function(torch.ops.aten.mul.Tensor, (kv_idx, 2)),
-                kv_mod_4,
-            ),
-        )
-        kv_times_2 = graph.call_function(torch.ops.aten.mul.Tensor, (kv_idx, 2))
-        kv_floor_div_2 = graph.call_function(
-            torch.ops.aten.div.Tensor_mode,
-            (kv_idx, 2),
-            {"rounding_mode": "floor"},
-        )
-
-        buffer = FakeAuxBuffer((128,), (1,))
-        with V.set_graph_handler(MockGraphHandler()):
-            self.assertEqual(
-                _max_direct_aux_load_vec_size([kv_idx], buffer, q_idx, kv_idx), 8
-            )
-            self.assertEqual(
-                _max_direct_aux_load_vec_size([kv_mod_4], buffer, q_idx, kv_idx), 4
-            )
-            self.assertIsNone(
-                _max_direct_aux_load_vec_size([kv_stride_mix], buffer, q_idx, kv_idx)
-            )
-            self.assertIsNone(
-                _max_direct_aux_load_vec_size([kv_times_2], buffer, q_idx, kv_idx)
-            )
-            self.assertIsNone(
-                _max_direct_aux_load_vec_size([kv_floor_div_2], buffer, q_idx, kv_idx)
-            )
-
-    def test_direct_aux_load_vec_size_requires_contiguous_aligned_vector_dim(self):
-        graph, q_idx, kv_idx = _aux_index_graph()
-        with V.set_graph_handler(MockGraphHandler()):
-            self.assertEqual(
-                _max_direct_aux_load_vec_size(
-                    [q_idx, kv_idx],
-                    FakeAuxBuffer((128, 128), (128, 1)),
-                    q_idx,
-                    kv_idx,
-                ),
-                8,
-            )
-            self.assertIsNone(
-                _max_direct_aux_load_vec_size(
-                    [q_idx, kv_idx],
-                    FakeAuxBuffer((128, 128), (1, 128)),
-                    q_idx,
-                    kv_idx,
-                )
-            )
-            self.assertIsNone(
-                _max_direct_aux_load_vec_size(
-                    [q_idx, kv_idx],
-                    FakeAuxBuffer((128, 128), (9, 1)),
-                    q_idx,
-                    kv_idx,
-                )
-            )
-            self.assertIsNone(
-                _max_direct_aux_load_vec_size(
-                    [kv_idx], FakeAuxBuffer((128,), (1,), offset=1), q_idx, kv_idx
-                )
-            )
 
 
 def create_alibi_learned(num_heads=4, dtype=torch.float16):
@@ -978,10 +909,6 @@ GQA_MQA_BLOCK_MASK_CASES = [
 class TestFlexFlash(InductorTestCase):
     # `FlashAttentionForwardSm120` does not have `apply_score_mod`.
     @xfailIfSM120OrLater
-    @decorateIf(
-        unittest.expectedFailure,
-        lambda params: params["case"].requires_grad and IS_SM90,
-    )
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("case", SCORE_MOD_CASES, name_fn=score_case_name)
     def test_flash_attention_score_mod_cases(self, device, dtype, case):
@@ -1095,6 +1022,12 @@ class TestFlexFlash(InductorTestCase):
     def test_flash_attention_backward_deterministic_block_mask_raises(
         self, device, dtype, case
     ):
+        major, _ = torch.cuda.get_device_capability()
+        if major >= 10:
+            self.skipTest(
+                "SM100+ supports deterministic block-sparse FLASH backward; "
+                "this test validates the error on older architectures"
+            )
         from torch._dynamo.exc import BackendCompilerFailed
 
         q, k, v = create_test_tensors(
@@ -1119,12 +1052,8 @@ class TestFlexFlash(InductorTestCase):
 
         with DeterministicGuard(True):
             with self.assertRaisesRegex(
-                (BackendCompilerFailed if not SM120OrLater else AssertionError),
-                (
-                    "Deterministic backward for flex_attention with block_mask using the FLASH backend"
-                    if not SM120OrLater
-                    else "Block sparsity not supported on SM 12.0"
-                ),
+                BackendCompilerFailed,
+                "Deterministic backward for flex_attention with block_mask and BACKEND='FLASH'",
             ):
                 out = compiled_fn(
                     q,
@@ -1139,6 +1068,159 @@ class TestFlexFlash(InductorTestCase):
                     kernel_options={"BACKEND": "FLASH"},
                 )
                 out.sum().backward()
+
+    @dtypes(torch.bfloat16)
+    def test_flash_deterministic_block_mask_without_write_order_raises(
+        self, device, dtype
+    ):
+        major, _ = torch.cuda.get_device_capability()
+        if major < 10:
+            self.skipTest("deterministic block-sparse FLASH backward requires SM100+")
+
+        torch._dynamo.reset()
+        q, k, v = create_test_tensors(
+            seq_len=512,
+            dtype=dtype,
+            device=device,
+            requires_grad=True,
+        )
+        block_mask = _create_block_mask_for_device(
+            _causal_mask, 2, 4, 512, 512, device=device
+        )
+        compiled_fn = torch.compile(flex_attention)
+
+        from torch._inductor.exc import InductorError
+
+        with DeterministicGuard(True):
+            out = compiled_fn(
+                q,
+                k,
+                v,
+                block_mask=block_mask,
+                kernel_options={"BACKEND": "FLASH"},
+            )
+            with self.assertRaisesRegex(
+                InductorError,
+                "create_block_mask\\(\\.\\.\\., compute_dq_write_order=True\\)",
+            ):
+                out.sum().backward()
+
+    @dtypes(torch.bfloat16)
+    def test_flash_deterministic_block_mask_without_scheduler_order_raises(
+        self, device, dtype
+    ):
+        major, _ = torch.cuda.get_device_capability()
+        if major < 10:
+            self.skipTest("deterministic block-sparse FLASH backward requires SM100+")
+
+        torch._dynamo.reset()
+        q, k, v = create_test_tensors(
+            seq_len=512,
+            dtype=dtype,
+            device=device,
+            requires_grad=True,
+        )
+        block_mask = create_block_mask(
+            _causal_mask,
+            2,
+            4,
+            512,
+            512,
+            device=device,
+            BLOCK_SIZE=(
+                _DEFAULT_SPARSE_BLOCK_SIZE * 2,
+                _DEFAULT_SPARSE_BLOCK_SIZE,
+            ),
+            compute_dq_write_order=True,
+        )
+        block_mask.dq_kv_order_spt = None
+        compiled_fn = torch.compile(flex_attention)
+
+        from torch._inductor.exc import InductorError
+
+        with DeterministicGuard(True):
+            out = compiled_fn(
+                q,
+                k,
+                v,
+                block_mask=block_mask,
+                kernel_options={"BACKEND": "FLASH"},
+            )
+            with self.assertRaisesRegex(
+                InductorError,
+                "requires dQ KV scheduler-order metadata",
+            ):
+                out.sum().backward()
+
+    @dtypes(torch.bfloat16)
+    def test_flash_deterministic_block_mask_warn_only_runs_nondeterministic(
+        self, device, dtype
+    ):
+        major, _ = torch.cuda.get_device_capability()
+        if major < 9:
+            self.skipTest("block sparse backward only supported on SM90+ for FLASH")
+
+        torch._dynamo.reset()
+        q, k, v = create_test_tensors(
+            seq_len=512,
+            dtype=dtype,
+            device=device,
+            requires_grad=True,
+        )
+        block_mask = _create_block_mask_for_device(
+            _causal_mask, 2, 4, 512, 512, device=device
+        )
+        compiled_fn = torch.compile(flex_attention)
+
+        with DeterministicGuard(True, warn_only=True):
+            with self.assertWarnsRegex(
+                UserWarning,
+                "does not have a deterministic implementation for this configuration",
+            ):
+                out = compiled_fn(
+                    q,
+                    k,
+                    v,
+                    block_mask=block_mask,
+                    kernel_options={"BACKEND": "FLASH"},
+                )
+                out.sum().backward()
+
+    @dtypes(torch.bfloat16)
+    @parametrize("dq_kv_order", [False, True])
+    def test_flash_attention_backward_deterministic_block_mask_with_write_order(
+        self, device, dtype, dq_kv_order
+    ):
+        major, _ = torch.cuda.get_device_capability()
+        if major < 10:
+            self.skipTest("deterministic block-sparse FLASH backward requires SM100+")
+
+        torch._dynamo.reset()
+        q, k, v = create_test_tensors(
+            seq_len=512,
+            dtype=dtype,
+            device=device,
+            requires_grad=True,
+        )
+        block_mask = create_block_mask(
+            _causal_mask,
+            2,
+            4,
+            512,
+            512,
+            device=device,
+            BLOCK_SIZE=(
+                _DEFAULT_SPARSE_BLOCK_SIZE * 2,
+                _DEFAULT_SPARSE_BLOCK_SIZE,
+            ),
+            compute_dq_write_order=True,
+            dq_kv_order=dq_kv_order,
+        )
+        self.assertIsNotNone(block_mask.dq_write_order)
+        self.assertEqual(block_mask._dq_kv_order(), dq_kv_order)
+
+        with DeterministicGuard(True):
+            flash_vs_triton(q, k, v, block_mask=block_mask)
 
     @decorateIf(
         unittest.expectedFailure,
@@ -1198,7 +1280,7 @@ class TestFlexFlash(InductorTestCase):
             )
             with self.assertWarnsRegex(
                 UserWarning,
-                "Deterministic backward for flex_attention with block_mask",
+                "does not have a deterministic implementation for this configuration",
             ):
                 out.sum().backward()
 
@@ -1393,6 +1475,390 @@ class TestFlexFlash(InductorTestCase):
             self.assertIn("cute.autovec_copy", auto_src)
         else:
             self.assertNotIn("cute.autovec_copy", auto_src)
+
+    def _assert_sm100_mask_vec_matches_scalar(
+        self,
+        fn,
+        *args,
+        expect_autovec: bool = True,
+    ):
+        expected = fn(*args)
+        with use_explicit_flex_flash_mask_mod_vec_size(None):
+            torch._dynamo.reset()
+            scalar, scalar_code = run_and_get_code(
+                torch.compile(fn, fullgraph=True, dynamic=False), *args
+            )
+        torch._dynamo.reset()
+        actual, code = run_and_get_code(
+            torch.compile(fn, fullgraph=True, dynamic=False), *args
+        )
+
+        self.assertEqual(scalar, expected, atol=3e-2, rtol=3e-2)
+        self.assertEqual(actual, scalar, atol=0, rtol=0)
+        self.assertNotIn("mask_mod.__vec_size__", "\n".join(scalar_code))
+        src = "\n".join(code)
+        self.assertIn("mask_mod.__vec_size__ = 32", src)
+        if expect_autovec:
+            self.assertIn("cute.autovec_copy", src)
+        return src
+
+    @unittest.skipUnless(
+        torch.cuda.is_available() and torch.cuda.get_device_capability()[0] in (10, 11),
+        "SM100/SM110 only",
+    )
+    @torch._inductor.config.patch(force_disable_caches=True)
+    def test_flash_attention_sm100_score_and_mask_mod_vec_selection(self):
+        seq_len = 128
+        q, k, v = create_test_tensors(
+            batch_size=1,
+            num_heads=1,
+            seq_len=seq_len,
+            dim=64,
+            dtype=torch.float16,
+            device="cuda",
+        )
+        score_bias = torch.randn(seq_len, device="cuda", dtype=torch.float16)
+        mask_bias = torch.randn(seq_len, seq_len, device="cuda", dtype=torch.float16)
+
+        def fn(q, k, v, score_bias, mask_bias):
+            def score_mod(score, _b, _h, _q_idx, kv_idx):
+                return score + score_bias[kv_idx]
+
+            def mask_mod(_b, _h, q_idx, kv_idx):
+                return (q_idx >= kv_idx) | (mask_bias[q_idx, kv_idx] > 0)
+
+            block_mask = _create_block_mask_for_device(
+                mask_mod, 1, 1, seq_len, seq_len, device="cuda"
+            )
+            return flex_attention(
+                q,
+                k,
+                v,
+                score_mod=score_mod,
+                block_mask=block_mask,
+                kernel_options={"BACKEND": "FLASH"},
+            )
+
+        args = (q, k, v, score_bias, mask_bias)
+        expected = fn(*args)
+        with use_explicit_flex_flash_mask_mod_vec_size(None):
+            torch._dynamo.reset()
+            scalar_mask, scalar_code = run_and_get_code(
+                torch.compile(fn, fullgraph=True, dynamic=False), *args
+            )
+        torch._dynamo.reset()
+        actual, code = run_and_get_code(
+            torch.compile(fn, fullgraph=True, dynamic=False), *args
+        )
+
+        self.assertEqual(scalar_mask, expected, atol=3e-2, rtol=3e-2)
+        self.assertEqual(actual, scalar_mask, atol=0, rtol=0)
+        self.assertNotIn("mask_mod.__vec_size__", "\n".join(scalar_code))
+        src = "\n".join(code)
+        self.assertIn("score_mod.__vec_size__ = 8", src)
+        self.assertIn("mask_mod.__vec_size__ = 32", src)
+        self.assertIn("cute.autovec_copy", src)
+
+    @unittest.skipUnless(
+        torch.cuda.is_available() and torch.cuda.get_device_capability()[0] in (10, 11),
+        "SM100/SM110 only",
+    )
+    @torch._inductor.config.patch(force_disable_caches=True)
+    def test_flash_attention_sm100_mask_mod_rank1_aux_stays_scalar(self):
+        seq_len = 128
+        q, k, v = create_test_tensors(
+            batch_size=1,
+            num_heads=1,
+            seq_len=seq_len,
+            dim=64,
+            dtype=torch.float16,
+            device="cuda",
+        )
+        col_mask = torch.randn(seq_len, device="cuda", dtype=torch.float16)
+
+        def fn(q, k, v, col_mask):
+            def mask_mod(_b, _h, q_idx, kv_idx):
+                return (q_idx >= kv_idx) & (col_mask[kv_idx] > 0)
+
+            block_mask = _create_block_mask_for_device(
+                mask_mod, 1, 1, seq_len, seq_len, device="cuda"
+            )
+            return flex_attention(
+                q, k, v, block_mask=block_mask, kernel_options={"BACKEND": "FLASH"}
+            )
+
+        expected = fn(q, k, v, col_mask)
+        torch._dynamo.reset()
+        actual, code = run_and_get_code(
+            torch.compile(fn, fullgraph=True, dynamic=False), q, k, v, col_mask
+        )
+
+        self.assertEqual(actual, expected, atol=3e-2, rtol=3e-2)
+        src = "\n".join(code)
+        self.assertNotIn("mask_mod.__vec_size__", src)
+        self.assertNotIn("cute.autovec_copy", src)
+
+    @unittest.skipUnless(
+        torch.cuda.is_available() and torch.cuda.get_device_capability()[0] in (10, 11),
+        "SM100/SM110 only",
+    )
+    @torch._inductor.config.patch(force_disable_caches=True)
+    def test_flash_attention_sm100_mask_mod_vec_lane_uniform_no_aux(self):
+        seq_len = 128
+        q, k, v = create_test_tensors(
+            batch_size=1,
+            num_heads=1,
+            seq_len=seq_len,
+            dim=64,
+            dtype=torch.float16,
+            device="cuda",
+        )
+
+        def fn(q, k, v):
+            def mask_mod(_b, _h, q_idx, _kv_idx):
+                return q_idx < 64
+
+            block_mask = _create_block_mask_for_device(
+                mask_mod, 1, 1, seq_len, seq_len, device="cuda"
+            )
+            return flex_attention(
+                q, k, v, block_mask=block_mask, kernel_options={"BACKEND": "FLASH"}
+            )
+
+        self._assert_sm100_mask_vec_matches_scalar(fn, q, k, v, expect_autovec=False)
+
+    @unittest.skipUnless(
+        torch.cuda.is_available() and torch.cuda.get_device_capability()[0] in (10, 11),
+        "SM100/SM110 only",
+    )
+    @torch._inductor.config.patch(force_disable_caches=True)
+    @parametrize("dynamic", [False, True], name_fn=lambda dynamic: str(dynamic))
+    def test_flash_attention_sm100_sliding_window_uses_packed_shift_mask(self, dynamic):
+        seq_len = 128
+        q, k, v = create_test_tensors(
+            batch_size=1,
+            num_heads=1,
+            seq_len=seq_len,
+            dim=64,
+            dtype=torch.float16,
+            device="cuda",
+        )
+        if dynamic:
+            for tensor in (q, k, v):
+                torch._dynamo.mark_dynamic(tensor, 2, min=seq_len, max=seq_len)
+
+        def fn(q, k, v):
+            q_len = q.size(2) if dynamic else seq_len
+            kv_len = k.size(2) if dynamic else seq_len
+
+            def mask_mod(_b, _h, q_idx, kv_idx):
+                return (q_idx >= kv_idx) & (q_idx - kv_idx <= 32)
+
+            block_mask = _create_block_mask_for_device(
+                mask_mod, 1, 1, q_len, kv_len, device="cuda"
+            )
+            return flex_attention(
+                q, k, v, block_mask=block_mask, kernel_options={"BACKEND": "FLASH"}
+            )
+
+        expected = fn(q, k, v)
+        torch._dynamo.reset()
+        actual, code = run_and_get_code(
+            torch.compile(fn, fullgraph=True, dynamic=dynamic), q, k, v
+        )
+
+        self.assertEqual(actual, expected, atol=3e-2, rtol=3e-2)
+        src = "\n".join(code)
+        self.assertIn("mask_mod.__vec_size__ = 32", src)
+        self.assertIn("utils.shr_u32", src)
+        self.assertIn("utils.shl_u32", src)
+        self.assertNotIn("for mask_lane_idx in cutlass.range_constexpr", src)
+
+    @unittest.skipUnless(
+        torch.cuda.is_available() and torch.cuda.get_device_capability()[0] in (10, 11),
+        "SM100/SM110 only",
+    )
+    @torch._inductor.config.patch(force_disable_caches=True)
+    def test_flash_attention_sm100_packed_mask_disabled_by_explicit_vec_config(self):
+        seq_len = 128
+        q, k, v = create_test_tensors(
+            batch_size=1,
+            num_heads=1,
+            seq_len=seq_len,
+            dim=64,
+            dtype=torch.float16,
+            device="cuda",
+        )
+
+        def fn(q, k, v):
+            def mask_mod(_b, _h, q_idx, kv_idx):
+                return (q_idx >= kv_idx) & (q_idx - kv_idx <= 32)
+
+            block_mask = _create_block_mask_for_device(
+                mask_mod, 1, 1, seq_len, seq_len, device="cuda"
+            )
+            return flex_attention(
+                q, k, v, block_mask=block_mask, kernel_options={"BACKEND": "FLASH"}
+            )
+
+        expected = fn(q, k, v)
+        torch._dynamo.reset()
+        with use_explicit_flex_flash_mask_mod_vec_size(16):
+            actual, code = run_and_get_code(
+                torch.compile(fn, fullgraph=True, dynamic=False), q, k, v
+            )
+
+        self.assertEqual(actual, expected, atol=3e-2, rtol=3e-2)
+        src = "\n".join(code)
+        self.assertIn("mask_mod.__vec_size__ = 16", src)
+        self.assertNotIn("utils.shr_u32", src)
+
+    @unittest.skipUnless(
+        torch.cuda.is_available() and torch.cuda.get_device_capability()[0] in (10, 11),
+        "SM100/SM110 only",
+    )
+    @torch._inductor.config.patch(force_disable_caches=True)
+    @parametrize(
+        "dynamic, expect_packed",
+        [(False, True), (True, False)],
+        name_fn=lambda dynamic, expect_packed: f"dynamic_{dynamic}",
+    )
+    def test_flash_attention_sm100_document_offsets_packed_mask(
+        self, dynamic, expect_packed
+    ):
+        seq_len = 128
+        q, k, v = create_test_tensors(
+            batch_size=1,
+            num_heads=1,
+            seq_len=seq_len,
+            dim=64,
+            dtype=torch.float16,
+            device="cuda",
+        )
+        if dynamic:
+            for tensor in (q, k, v):
+                torch._dynamo.mark_dynamic(tensor, 2, min=seq_len, max=seq_len)
+        positions = torch.arange(seq_len, device="cuda", dtype=torch.int32)
+        doc_ids = (positions // 32).expand(1, -1).contiguous()
+        if dynamic:
+            torch._dynamo.mark_dynamic(doc_ids, 1, min=seq_len, max=seq_len)
+        offsets = torch.arange(0, seq_len + 32, 32, device="cuda", dtype=torch.int32)
+        score_bias = torch.randn(seq_len, device="cuda", dtype=torch.float16)
+
+        def fn(q, k, v, doc_ids, offsets, score_bias):
+            q_len = q.size(2) if dynamic else seq_len
+            kv_len = k.size(2) if dynamic else seq_len
+
+            def score_mod(score, _b, _h, _q_idx, kv_idx):
+                return score + score_bias[kv_idx]
+
+            def mask_mod(b, _h, q_idx, kv_idx):
+                doc = doc_ids[b, q_idx]
+                start = offsets[doc]
+                return (kv_idx >= start) & (kv_idx <= q_idx)
+
+            block_mask = _create_block_mask_for_device(
+                mask_mod, 1, 1, q_len, kv_len, device="cuda"
+            )
+            return flex_attention(
+                q,
+                k,
+                v,
+                score_mod=score_mod,
+                block_mask=block_mask,
+                kernel_options={"BACKEND": "FLASH"},
+            )
+
+        args = (q, k, v, doc_ids, offsets, score_bias)
+        expected = fn(*args)
+        torch._dynamo.reset()
+        actual, code = run_and_get_code(
+            torch.compile(fn, fullgraph=True, dynamic=dynamic), *args
+        )
+
+        self.assertEqual(actual, expected, atol=3e-2, rtol=3e-2)
+        src = "\n".join(code)
+        if expect_packed:
+            self.assertIn("utils.shr_u32", src)
+            self.assertIn("score_mod.__vec_size__ = 8", src)
+            self.assertNotIn("for mask_lane_idx in cutlass.range_constexpr", src)
+        else:
+            self.assertNotIn("utils.shr_u32", src)
+            self.assertIn("for mask_lane_idx in cutlass.range_constexpr", src)
+
+    @unittest.skipUnless(
+        torch.cuda.is_available() and torch.cuda.get_device_capability()[0] in (10, 11),
+        "SM100/SM110 only",
+    )
+    @torch._inductor.config.patch(force_disable_caches=True)
+    def test_flash_attention_sm100_mask_mod_explicit_vec_size(self):
+        seq_len = 128
+        q, k, v = create_test_tensors(
+            batch_size=1,
+            num_heads=1,
+            seq_len=seq_len,
+            dim=64,
+            dtype=torch.float16,
+            device="cuda",
+        )
+
+        def fn(q, k, v):
+            def mask_mod(_b, _h, q_idx, kv_idx):
+                lane = kv_idx % 32
+                return (q_idx >= kv_idx) & (
+                    (lane == 0) | (lane == 15) | (lane == 16) | (lane == 31)
+                )
+
+            block_mask = _create_block_mask_for_device(
+                mask_mod, 1, 1, seq_len, seq_len, device="cuda"
+            )
+            return flex_attention(
+                q, k, v, block_mask=block_mask, kernel_options={"BACKEND": "FLASH"}
+            )
+
+        expected = fn(q, k, v)
+        torch._dynamo.reset()
+        with use_explicit_flex_flash_mask_mod_vec_size(8):
+            actual, code = run_and_get_code(
+                torch.compile(fn, fullgraph=True, dynamic=False), q, k, v
+            )
+
+        self.assertEqual(actual, expected, atol=3e-2, rtol=3e-2)
+        self.assertIn("mask_mod.__vec_size__ = 8", "\n".join(code))
+
+    @unittest.skipUnless(
+        torch.cuda.is_available() and torch.cuda.get_device_capability()[0] in (10, 11),
+        "SM100/SM110 only",
+    )
+    @torch._inductor.config.patch(force_disable_caches=True)
+    def test_flash_attention_sm100_aux_mask_mod_vec_mixed_gather_tail(self):
+        seq_len = 130
+        padded_len = 160
+        q, k, v = create_test_tensors(
+            batch_size=1,
+            num_heads=1,
+            seq_len=seq_len,
+            dim=64,
+            dtype=torch.float16,
+            device="cuda",
+        )
+        mask_bias = torch.randn(
+            padded_len, padded_len, device="cuda", dtype=torch.float16
+        )
+        col_mask = torch.randn(seq_len, device="cuda", dtype=torch.float16)
+
+        def fn(q, k, v, mask_bias, col_mask):
+            def mask_mod(_b, _h, q_idx, kv_idx):
+                return (mask_bias[q_idx, kv_idx] > 0) & (col_mask[kv_idx] > 0)
+
+            block_mask = _create_block_mask_for_device(
+                mask_mod, 1, 1, seq_len, seq_len, device="cuda"
+            )
+            return flex_attention(
+                q, k, v, block_mask=block_mask, kernel_options={"BACKEND": "FLASH"}
+            )
+
+        self._assert_sm100_mask_vec_matches_scalar(fn, q, k, v, mask_bias, col_mask)
 
     @xfailIfSM120OrLater
     @dtypes(torch.float16, torch.bfloat16)
@@ -1615,18 +2081,116 @@ class TestFlexFlash(InductorTestCase):
         q, k, v = create_test_tensors(dim=128, dtype=dtype, device=device)
         q.requires_grad_(True)
 
+        torch._dynamo.reset()
+        compiled_fn = torch.compile(flex_attention, fullgraph=True)
+        with DeterministicGuard(False):
+            _, code = run_fw_bw_and_get_code(
+                lambda: compiled_fn(q, k, v, kernel_options={"BACKEND": "FLASH"})
+            )
+        code_str = "\n".join(code)
+        self.assertIn(
+            "deterministic=False",
+            code_str,
+            "Expected deterministic=False to be baked into flash backward codegen",
+        )
+        self.assertNotIn(
+            "are_deterministic_algorithms_enabled()",
+            code_str,
+            "Expected flash backward deterministic setting to be compile-time baked",
+        )
+
+        torch._dynamo.reset()
+        compiled_fn = torch.compile(flex_attention, fullgraph=True)
+        with DeterministicGuard(True):
+            _, code = run_fw_bw_and_get_code(
+                lambda: compiled_fn(q, k, v, kernel_options={"BACKEND": "FLASH"})
+            )
+        code_str = "\n".join(code)
+        self.assertIn(
+            "deterministic=True",
+            code_str,
+            "Expected deterministic=True to be baked into flash backward codegen",
+        )
+        self.assertNotIn(
+            "are_deterministic_algorithms_enabled()",
+            code_str,
+            "Expected flash backward deterministic setting to be compile-time baked",
+        )
+
+    @dtypes(torch.bfloat16)
+    @parametrize("dq_kv_order", [False, True])
+    def test_flash_attention_backward_wires_write_order_codegen(
+        self, device, dtype, dq_kv_order
+    ):
+        major, _ = torch.cuda.get_device_capability()
+        if major < 10:
+            self.skipTest("deterministic block-sparse FLASH backward requires SM100+")
+
+        q, k, v = create_test_tensors(
+            seq_len=512,
+            dtype=dtype,
+            device=device,
+            requires_grad=True,
+        )
+        block_mask = create_block_mask(
+            _causal_mask,
+            2,
+            4,
+            512,
+            512,
+            device=device,
+            BLOCK_SIZE=(
+                _DEFAULT_SPARSE_BLOCK_SIZE * 2,
+                _DEFAULT_SPARSE_BLOCK_SIZE,
+            ),
+            compute_dq_write_order=True,
+            dq_kv_order=dq_kv_order,
+        )
+        self.assertEqual(block_mask._dq_kv_order(), dq_kv_order)
+        opposite_spt_block_mask = create_block_mask(
+            _causal_mask,
+            2,
+            4,
+            512,
+            512,
+            device=device,
+            BLOCK_SIZE=(
+                _DEFAULT_SPARSE_BLOCK_SIZE * 2,
+                _DEFAULT_SPARSE_BLOCK_SIZE,
+            ),
+            compute_dq_write_order=True,
+            dq_kv_order=not dq_kv_order,
+        )
+        self.assertIsNotNone(block_mask.dq_write_order)
+        self.assertIsNotNone(opposite_spt_block_mask.dq_write_order)
+        self.assertFalse(
+            torch.equal(
+                block_mask.dq_write_order, opposite_spt_block_mask.dq_write_order
+            )
+        )
         compiled_fn = torch.compile(flex_attention, fullgraph=True)
 
         def run_for_code():
-            return compiled_fn(q, k, v, kernel_options={"BACKEND": "FLASH"})
+            with DeterministicGuard(True):
+                return compiled_fn(
+                    q,
+                    k,
+                    v,
+                    block_mask=block_mask,
+                    kernel_options={"BACKEND": "FLASH"},
+                )
 
         _, code = run_fw_bw_and_get_code(run_for_code)
         code_str = "\n".join(code)
-        self.assertIn(
-            "are_deterministic_algorithms_enabled()",
-            code_str,
-            "Expected deterministic flag to be wired through flash backward",
+        self.assertIn('block_sparse_kwargs["dq_write_order"]', code_str)
+        self.assertTrue(
+            f'block_sparse_kwargs["spt"] = {dq_kv_order}' in code_str
+            or f'block_sparse_kwargs["dq_kv_order"] = {dq_kv_order}' in code_str
         )
+        if block_mask.dq_write_order_full is not None:
+            self.assertIn('block_sparse_kwargs["dq_write_order_full"]', code_str)
+        else:
+            self.assertNotIn('block_sparse_kwargs["dq_write_order_full"]', code_str)
 
     @xfailIfSM120OrLater
     @dtypes(torch.float16, torch.bfloat16)
@@ -1903,14 +2467,12 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
             self._flash_triton_dynamic(q, k, v)
 
     @xfailIfSM120OrLater
-    @xfailIfSM90
     def test_dynamic_backward(self):
         """Test backward with dynamic sequence lengths."""
         self._run_dynamic_test(seq_lens=[128, 256, 512], requires_grad=True)
 
     # 'FlashAttentionForwardSm120' object has no attribute 'apply_score_mod'
     @xfailIfSM120OrLater
-    @xfailIfSM90
     def test_dynamic_backward_with_score_mod(self):
         """Test backward with score_mod and dynamic sequence lengths."""
 
@@ -1987,8 +2549,8 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
             self._flash_triton_dynamic(q, k, v)
 
     def test_captured_float_fails_with_dynamic(self):
-        """Test that captured Python float fails with dynamic=True."""
-        val = 2.0  # Captured float
+        """Test that captured Python float still fails as a CPU scalar tensor."""
+        val = 2.0
 
         def score_mod(score, _b, _h, _q, _k):
             return score * val
@@ -1996,29 +2558,22 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
         compiled_fn = torch.compile(flex_attention, dynamic=True)
         q, k, v = create_test_tensors(seq_len=256, device="cuda", dtype=torch.float16)
 
-        with self.assertRaisesRegex(
-            RuntimeError, r"captures a dynamic scalar \(SymInt/SymFloat\)"
-        ):
+        with self.assertRaisesRegex(RuntimeError, r"captures a 0-dim CPU tensor"):
             compiled_fn(
                 q, k, v, score_mod=score_mod, kernel_options={"BACKEND": "FLASH"}
             )
 
-    def test_captured_int_fails_with_dynamic(self):
-        """Captured Python int should fail with dynamic=True."""
-        val = 2  # Captured int
+    @xfailIfSM120OrLater
+    def test_captured_int_works_with_dynamic(self):
+        """Captured Python int should work with dynamic=True."""
+        val = 2
 
         def score_mod(score, _b, _h, _q, _k):
             return score * val
 
-        compiled_fn = torch.compile(flex_attention, dynamic=True)
         q, k, v = create_test_tensors(seq_len=256, device="cuda", dtype=torch.float16)
 
-        with self.assertRaisesRegex(
-            RuntimeError, r"captures a dynamic scalar \(SymInt/SymFloat\)"
-        ):
-            compiled_fn(
-                q, k, v, score_mod=score_mod, kernel_options={"BACKEND": "FLASH"}
-            )
+        flash_vs_triton(q, k, v, score_mod=score_mod, dynamic=True)
 
     @xfailIfSM120OrLater
     def test_captured_float_works_with_static(self):
@@ -2148,7 +2703,6 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
         self.assertEqual(out.shape, q.shape)
 
     @xfailIfSM120OrLater
-    @xfailIfSM90
     def test_dynamic_captured_buffer_varying_heads(self):
         """Dynamic head_count with captured tensor buffer under FLASH/TRITON parity."""
         torch._dynamo.reset()
@@ -2209,8 +2763,197 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
 
         self.assertEqual(len(backend.graphs), 1, "Expected a single dynamic graph")
 
+    def _dynamic_multiple_scalar_closures_fn(self):
+        def fn(q, k, v):
+            batch = q.size(0)
+            seq_len = q.size(2)
+
+            def score_mod(score, _b, _h, q_idx, kv_idx):
+                return score + batch + seq_len + q_idx - kv_idx
+
+            return flex_attention(
+                q,
+                k,
+                v,
+                score_mod=score_mod,
+                kernel_options={"BACKEND": "FLASH"},
+            )
+
+        return fn
+
+    def test_dynamic_multiple_scalar_closures_in_score_mod_codegen(self):
+        if SM120OrLater:
+            self.skipTest("score_mod is not supported on SM120")
+
+        fn = self._dynamic_multiple_scalar_closures_fn()
+        q, k, v = create_test_tensors(seq_len=128, device="cuda", dtype=torch.float16)
+        expected = fn(q, k, v)
+        actual, code = run_and_get_code(
+            torch.compile(fn, dynamic=True, fullgraph=True), q, k, v
+        )
+
+        self.assertEqual(actual, expected, atol=3e-2, rtol=3e-2)
+        src = "\n".join(code)
+        self.assertRegex(
+            src,
+            r"aux_scalars = \(cutlass\.Int64\([^)]+\), cutlass\.Int64\([^)]+\)\)",
+        )
+        self.assertIn("aux_scalars[0]", src)
+        self.assertIn("aux_scalars[1]", src)
+
+    @xfailIfSM120OrLater
+    @decorateIf(
+        unittest.expectedFailure,
+        lambda params: IS_SM90,
+    )
+    def test_dynamic_multiple_scalar_closures_with_max_autotune(self):
+        fn = self._dynamic_multiple_scalar_closures_fn()
+        q, k, v = create_test_tensors(seq_len=128, device="cuda", dtype=torch.float16)
+        expected = fn(q, k, v)
+        actual = torch.compile(
+            fn,
+            dynamic=True,
+            fullgraph=True,
+            mode="max-autotune-no-cudagraphs",
+        )(q, k, v)
+
+        self.assertEqual(actual, expected, atol=3e-2, rtol=3e-2)
+
+    def _offset_block_mask(self, offset, q_len=128, kv_len=128):
+        def mask_mod(_b, _h, q_idx, kv_idx):
+            return kv_idx <= q_idx + offset
+
+        return _create_block_mask_for_device(
+            mask_mod, 2, None, q_len, kv_len, device="cuda"
+        )
+
+    def test_dynamic_scalar_closure_in_mask_mod(self):
+        major, _ = torch.cuda.get_device_capability()
+        if SM120OrLater:
+            self.skipTest("block sparse mask_mod is not supported on SM120")
+        if major < 9:
+            self.skipTest("block sparse backward only supported on SM90+")
+
+        flash_counter = CompileCounterWithBackend("inductor")
+        triton_counter = CompileCounterWithBackend("inductor")
+
+        flash = torch.compile(
+            lambda q, k, v, block_mask: flex_attention(
+                q,
+                k,
+                v,
+                block_mask=block_mask,
+                kernel_options={"BACKEND": "FLASH"},
+            ),
+            dynamic=True,
+            fullgraph=True,
+            backend=flash_counter,
+        )
+        triton = torch.compile(
+            lambda q, k, v, block_mask: flex_attention(
+                q,
+                k,
+                v,
+                block_mask=block_mask,
+                kernel_options={"BACKEND": "TRITON"},
+            ),
+            dynamic=True,
+            fullgraph=True,
+            backend=triton_counter,
+        )
+
+        for offset in [0, 1, 5]:
+            torch.manual_seed(1234)
+            q = torch.randn(
+                (2, 4, 1, 64),
+                device="cuda",
+                dtype=torch.float16,
+                requires_grad=True,
+            )
+            k = torch.randn(
+                (2, 4, 128, 64),
+                device="cuda",
+                dtype=torch.float16,
+                requires_grad=True,
+            )
+            v = torch.randn(
+                (2, 4, 128, 64),
+                device="cuda",
+                dtype=torch.float16,
+                requires_grad=True,
+            )
+            q_ref, k_ref, v_ref = [
+                x.detach().clone().requires_grad_() for x in (q, k, v)
+            ]
+            block_mask = self._offset_block_mask(offset, q_len=1, kv_len=128)
+
+            with torch.no_grad():
+                out_ref = flex_attention(
+                    q.float(), k.float(), v.float(), block_mask=block_mask
+                ).to(q.dtype)
+            out_flash = flash(q, k, v, block_mask)
+            out_triton = triton(q_ref, k_ref, v_ref, block_mask)
+            self.assertEqual(out_flash, out_ref, atol=3e-2, rtol=3e-2)
+            self.assertEqual(out_flash, out_triton, atol=3e-2, rtol=3e-2)
+
+            grad = torch.randn_like(out_flash)
+            grads_flash = torch.autograd.grad(out_flash, (q, k, v), grad)
+            grads_triton = torch.autograd.grad(out_triton, (q_ref, k_ref, v_ref), grad)
+            for actual, expected in zip(grads_flash, grads_triton):
+                self.assertEqual(actual, expected, atol=3e-2, rtol=3e-2)
+
+        self.assertEqual(flash_counter.frame_count, 1, "Expected one FLASH graph")
+        self.assertEqual(triton_counter.frame_count, 1, "Expected one TRITON graph")
+
+    def _compare_flash_triton_backward(self, score_mod_factory):
+        def run(q, k, v, backend):
+            batch = q.size(0)
+            return flex_attention(
+                q,
+                k,
+                v,
+                score_mod=score_mod_factory(batch),
+                kernel_options={"BACKEND": backend},
+            )
+
+        flash = torch.compile(lambda q, k, v: run(q, k, v, "FLASH"), dynamic=True)
+        triton = torch.compile(lambda q, k, v: run(q, k, v, "TRITON"), dynamic=True)
+
+        q, k, v = create_test_tensors(
+            seq_len=128, device="cuda", dtype=torch.float16, requires_grad=True
+        )
+        q_ref, k_ref, v_ref = [x.detach().clone().requires_grad_() for x in (q, k, v)]
+        out_flash = flash(q, k, v)
+        out_triton = triton(q_ref, k_ref, v_ref)
+        self.assertEqual(out_flash, out_triton, atol=3e-2, rtol=3e-2)
+
+        grad = torch.randn_like(out_flash)
+        grads_flash = torch.autograd.grad(out_flash, (q, k, v), grad)
+        grads_triton = torch.autograd.grad(out_triton, (q_ref, k_ref, v_ref), grad)
+        for actual, expected in zip(grads_flash, grads_triton):
+            self.assertEqual(actual, expected, atol=3e-2, rtol=3e-2)
+
+    @xfailIfSM120OrLater
+    def test_dynamic_symbol_closure_in_score_mod_backward(self):
+        """Captured SymInt in score_mod should propagate through FLASH backward."""
+        self._compare_flash_triton_backward(
+            lambda batch: lambda score, _b, _h, _q, _kv: score * (batch + 1)
+        )
+
+    @xfailIfSM120OrLater
+    def test_dynamic_symfloat_closure_in_score_mod_backward(self):
+        """SymFloat expressions in score_mod should lower inside FLASH backward."""
+        self._compare_flash_triton_backward(
+            lambda batch: lambda score, _b, _h, _q, _kv: score * ((batch + 1) / 2.0)
+        )
+
 
 class TestHierarchicalIndex(InductorTestCase):
+    def test_flash_attention_unavailable_message_has_install_link(self):
+        message = _flash_attention_unavailable_message()
+        self.assertIn("pip install --pre flash-attn-4", message)
+        self.assertIn("https://pypi.org/project/flash-attn-4/", message)
+
     def test_hierarchical_index_preserves_args(self):
         from sympy import Symbol
 

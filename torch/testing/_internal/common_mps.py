@@ -95,10 +95,22 @@ if torch.backends.mps.is_available():
             "istft",
             "item",
             "kron",
+            "linalg.cond",
             "linalg.cross",
             "linalg.diagonal",
+            "linalg.eigh",
+            "linalg.eigvalsh",
             "linalg.householder_product",
+            "linalg.lstsq",
+            "linalg.lstsqgrad_oriented",
+            "linalg.matrix_norm",
+            "linalg.matrix_rank",
+            "linalg.matrix_rankhermitian",
+            "linalg.norm",
+            "linalg.normsubgradients_at_zero",
+            "linalg.pinvhermitian",
             "linalg.svd",
+            "linalg.svdvals",
             "linalg.vander",
             "linalg.vecdot",
             "linalg.vector_norm",
@@ -146,6 +158,7 @@ if torch.backends.mps.is_available():
             "norm",
             "normfro",
             "norminf",
+            "normnuc",
             "ones",
             "ones_like",
             "outer",
@@ -353,20 +366,9 @@ if torch.backends.mps.is_available():
             "hash_tensor": None,
             "heaviside": None,
             # "kthvalue": None,
-            "lcm": None,
-            "linalg.cond": None,
-            "linalg.eigh": None,
-            "linalg.eigvalsh": None,
             "linalg.ldl_factor": None,
             "linalg.ldl_factor_ex": None,
             "linalg.ldl_solve": None,
-            "linalg.lstsq": None,
-            "linalg.lstsqgrad_oriented": None,
-            "linalg.matrix_norm": [torch.float32],
-            "linalg.norm": [torch.float32],
-            "linalg.normsubgradients_at_zero": [torch.float32],
-            "linalg.svdvals": None,
-            "masked.median": None,
             "matrix_exp": None,
             "max_pool2d_with_indices_backward": [
                 torch.int8,
@@ -385,7 +387,6 @@ if torch.backends.mps.is_available():
                 torch.int16,
                 torch.int32,
             ],
-            "normnuc": None,
             "nn.functional.avg_pool1d": [
                 torch.int16,
                 torch.int32,
@@ -415,7 +416,6 @@ if torch.backends.mps.is_available():
             ],
             "nn.functional.fractional_max_pool2d": None,
             "nn.functional.fractional_max_pool3d": None,
-            "nn.functional.group_norm": [torch.int16, torch.int32],
             "nn.functional.glu": [
                 torch.int32,
                 torch.uint8,
@@ -457,13 +457,6 @@ if torch.backends.mps.is_available():
                 torch.int32,
                 torch.uint8,
                 torch.bool,
-            ],
-            "nn.functional.logsigmoid": [
-                torch.int16,
-                torch.int32,
-                torch.uint8,
-                torch.bool,
-                torch.int8,
             ],
             "nn.functional.max_pool1d": [
                 torch.uint8,
@@ -604,22 +597,6 @@ if torch.backends.mps.is_available():
             "symeig": None,
             "take": None,
             "to": None,
-            "var_meanunbiased": [
-                torch.uint8,
-                torch.int8,
-                torch.int32,
-                torch.int16,
-                torch.bool,
-            ],
-            "var_mean": [torch.uint8, torch.int8, torch.int32, torch.int16, torch.bool],
-            "std_mean": [torch.uint8, torch.int8, torch.int32, torch.int16, torch.bool],
-            "std_meanunbiased": [
-                torch.uint8,
-                torch.int8,
-                torch.int32,
-                torch.int16,
-                torch.bool,
-            ],
             "segment_reduce_": None,
             "_upsample_bilinear2d_aa": [torch.uint8],  # uint8 is for CPU only
             "_upsample_bicubic2d_aa": [torch.uint8],  # uint8 is for CPU only
@@ -634,8 +611,6 @@ if torch.backends.mps.is_available():
                 torch.float32,
             ],
             "float_power": None,
-            "linalg.matrix_rankhermitian": None,
-            "linalg.pinvhermitian": None,
             # MPS: input sizes must be divisible by output sizes
             "nn.functional.adaptive_avg_pool1d": None,
             "nn.functional.adaptive_avg_pool2d": None,
@@ -682,16 +657,6 @@ if torch.backends.mps.is_available():
 
         UNDEFINED_XFAILLIST: dict[str, list | None] = {
             # Top 60 operators
-            # topk fails with duplicate indices
-            "topk": [
-                torch.int16,
-                torch.int32,
-                torch.int64,
-                torch.uint8,
-                torch.int8,
-                torch.float16,
-                torch.bfloat16,
-            ],
             # PCA singular vectors are sign-ambiguous; the new Metal randn in
             # #182386 shifted the sequence so seeded sample inputs land on
             # different sign choices than CPU.
@@ -750,15 +715,12 @@ if torch.backends.mps.is_available():
         }
 
         ON_MPS_XFAILLIST: dict[str, list | None] = {
-            # Failures due to lack of implementation of downstream functions on MPS backend
-            # TODO: remove these once downstream function 'aten::_linalg_svd.U' have been implemented
-            "linalg.matrix_rank": None,
             # Exception: Caused by `torch.arange(-8.001, -4.0, dtype=torch.uint8, device="mps")`
             "arange": [torch.uint8],
             # Failure due to precision issue for fp16
             # on both cpu and mps there are test cases that might produce inf result
             # 'nn.functional.pairwise_distance': [torch.float16],
-            # test blow pass on macOS 12 as it falls back to cpu
+            # test below pass on macOS 12 as it falls back to cpu
             # Argsort case using duplicate indices (undefined behaviour):
             #  - CPU output: tensor([2546, 6917, 3181,  ..., 7128, 5133,   30], device='cpu')
             #  - MPS output: tensor([2546, 6917, 3181,  ..., 7128,   30, 5133], device='mps:0')
@@ -876,7 +838,7 @@ if torch.backends.mps.is_available():
                     ),
                 )
 
-            # If ops is not supported for complex types, expect it to fail
+            # If op is not supported for complex types, expect it to fail
             if key not in SUPPORTED_COMPLEX_OPS:
                 addDecorator(
                     op,
@@ -897,6 +859,8 @@ if torch.backends.mps.is_available():
             "_upsample_bicubic2d_aa": None,  # `_upsample_bilinear2d_aa_backward_out` not implemented for MPS
             "sparse.mmreduce": [torch.float32],  # csr not supported
             "linalg.householder_product": None,
+            "linalg.lstsq": [torch.float32],
+            "linalg.lstsqgrad_oriented": [torch.float32],
             "unique_consecutive": [torch.float16, torch.float32],
             "scalar_tensor": [torch.float16, torch.float32],
             "masked.scatter": [torch.float16, torch.float32],
@@ -907,7 +871,7 @@ if torch.backends.mps.is_available():
             # Correctness issues
             # Same issue as `argsort` and `sort` with duplicate elements (undefined behaviour).
             # Forward pass is passing since `msort` doesn't return the indices, just the values, which match the CPU.
-            # On the backward pass for `sort` both are used (values and indices), thus resulting in a issmatch between CPU and MPS.
+            # On the backward pass for `sort` both are used (values and indices), thus resulting in a mismatch between CPU and MPS.
             # Running `msort` with stable `sort` passes.
             "msort": [torch.float16],
             # Random ops are routed to `_assert_random_op_match` for the
@@ -980,9 +944,6 @@ if torch.backends.mps.is_available():
         }
 
         ON_MPS_XFAILLIST = {
-            # Failures due to lack of implementation of downstream functions on MPS backend
-            # TODO: remove these once downstream function 'aten::_linalg_svd.U' have been implemented
-            "linalg.matrix_rank": None,
             # Exception: Caused by sample input at index 3 on MPS
             "nn.functional.conv3d": [torch.float32],
         }

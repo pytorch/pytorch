@@ -51,6 +51,7 @@ Following is the Release Compatibility Matrix for PyTorch releases:
 
 | PyTorch version | Python | C++ | Stable CUDA | Experimental CUDA | Stable ROCm |
 | --- | --- | --- | --- | --- | --- |
+| 2.13 | >=3.10, <=(3.15, 3.15t experimental) | C++20 | CUDA 12.6 (CUDNN 9.10.2.21) (NCCL 2.29.3), CUDA 13.0 (CUDNN 9.20.0.48) (NCCL 2.29.7) | CUDA 13.2 (CUDNN 9.20.0.48) (NCCL 2.29.7) | ROCm 7.2 |
 | 2.12 | >=3.10, <=(3.14, 3.14t experimental) | C++17 | CUDA 12.6 (CUDNN 9.10.2.21), CUDA 13.0 (CUDNN 9.20.0.48) | CUDA 13.2 (CUDNN 9.20.0.48) | ROCm 7.2 |
 | 2.11 | >=3.10, <=(3.14, 3.14t experimental) | C++17 | CUDA 12.6 (CUDNN 9.10.2.21), CUDA 12.8 (CUDNN 9.17.1.4), CUDA 13.0 (CUDNN 9.17.1.4) | -- | ROCm 7.2 |
 | 2.10 | >=3.10, <=(3.14, 3.14t experimental) | C++17 | CUDA 12.6 (CUDNN 9.10.2.21), CUDA 12.8 (CUDNN 9.10.2.21) | CUDA 13.0 (CUDNN 9.15.1.9) | ROCm 7.1 |
@@ -69,7 +70,7 @@ Following is the Release Compatibility Matrix for PyTorch releases:
 
 ### PyTorch CUDA Support Matrix
 
-For Release 2.12 PyTorch Supports following CUDA Architectures:
+For Release 2.12 and 2.13 PyTorch Supports following CUDA Architectures:
 
 | CUDA | architectures supported for Linux x86 and Windows builds | notes |
 | --- | --- | --- |
@@ -135,7 +136,6 @@ Following requirements need to be met prior to cutting a release branch:
 * All the nightly jobs for pytorch and domain libraries should be green. Validate this using the following HUD links:
   * [PyTorch](https://hud.pytorch.org/hud/pytorch/pytorch/nightly)
   * [TorchVision](https://hud.pytorch.org/hud/pytorch/vision/nightly)
-  * [TorchAudio](https://hud.pytorch.org/hud/pytorch/audio/nightly)
 
 ## Cutting release branches
 
@@ -169,19 +169,19 @@ DRY_RUN=disabled GIT_BRANCH_TO_CUT_FROM=main RELEASE_VERSION=1.11 scripts/releas
 ```
 
 ### Making release branch specific changes for PyTorch
-First you should cut a release branch for pytorch/test-infra:
-* Create a new branch using the naming convention `release/[major].[minor]`, e.g. `release/2.7`
-* On that release branch, update branch pointers for any pytorch-managed reusable actions or workflows to point to the new release's branch ([example](https://github.com/pytorch/test-infra/commit/749b9e36afa23298ad5498c9f5bcd96f5467baff#diff-d41015f3ac6cfa64b00e366bec416bb9487ac27493de7ebe7778fdfc7518b003R39)).
+After the branch is cut, the release-only changes (updating workflow and composite action branch references from `@main` to `@release/[major].[minor]`) are applied by running [`scripts/release/apply-release-changes.sh`](https://github.com/pytorch/pytorch/blob/main/scripts/release/apply-release-changes.sh), which opens a PR with those changes:
 
-Here are examples of changes that should be made to the pytorch/pytorch release branches so that CI / tooling can function normally on
+```
+DRY_RUN=disabled RELEASE_VERSION=2.7 ./scripts/release/apply-release-changes.sh
+```
+
+Here are examples of additional changes that should be made to the pytorch/pytorch release branches so that CI / tooling can function normally on
 them:
 
 * Update backwards compatibility tests to use RC binaries instead of nightlies
-  * Example: https://github.com/pytorch/pytorch/pull/77983 and https://github.com/pytorch/pytorch/pull/77986
-* A release branches should also be created in [`pytorch/xla`](https://github.com/pytorch/xla) and [`pytorch/test-infra`](https://github.com/pytorch/test-infra) repos and pinned in `pytorch/pytorch`
-  * Example: https://github.com/pytorch/pytorch/pull/86290 and https://github.com/pytorch/pytorch/pull/90506
-* Update branch used in composite actions from trunk to release (for example, can be done by running `for i in .github/workflows/*.yml; do sed -i -e s#@main#@release/2.0# $i; done`
-  * Example: https://github.com/pytorch/pytorch/commit/17f400404f2ca07ea5ac864428e3d08149de2304
+  * Example: https://github.com/pytorch/pytorch/pull/186959
+* A release branch should also be created in [`pytorch/test-infra`](https://github.com/pytorch/test-infra) repo and pinned in `pytorch/pytorch`. The test-infra release branch is cut by running [`release/cut-release-branch.sh`](https://github.com/pytorch/test-infra/blob/main/release/cut-release-branch.sh) from the `pytorch/test-infra` repo.
+  * Example: https://github.com/pytorch/test-infra/commit/9f3fd4d6f311679a8ae6317c0cb33c8ed93a34b5
 
 These are examples of changes that should be made to the *default* branch after a release branch is cut
 
@@ -195,9 +195,8 @@ After the branch cut is performed, the PyTorch Dev Infra member should be inform
 
 Follow these examples of PR that updates the version and sets RC Candidate upload channel:
 * torchvision : [Update version.txt](https://github.com/pytorch/vision/pull/8968) and [change workflow branch references](https://github.com/pytorch/vision/pull/8969)
-* torchaudio: [Update version.txt](https://github.com/pytorch/audio/commit/654fee8fd17784271be1637eac1293fd834b4e9a) and [change workflow branch references](https://github.com/pytorch/audio/pull/3890)
 
-The CI workflow updating part of the above PRs can be automated by running: `python release/apply-release-changes.py [version]` (where version is something like '2.7').  That script lives in both pytorch/audio and pytorch/vision.
+The CI workflow updating part of the above PRs can be automated by running: `python release/apply-release-changes.py [version]` (where version is something like '2.7').  That script lives in pytorch/vision.
 
 ## Running Launch Execution team Core XFN sync
 
@@ -248,7 +247,6 @@ To view the state of the release build, please navigate to [HUD](https://hud.pyt
 Release candidates are currently stored in the following places:
 
 * Wheels: https://download.pytorch.org/whl/test/
-* Conda: https://anaconda.org/pytorch-test
 * Libtorch: https://download.pytorch.org/libtorch/test <!-- @lint-ignore -->
 
 Backups are stored in a non-public S3 bucket at [`s3://pytorch-backup`](https://s3.console.aws.amazon.com/s3/buckets/pytorch-backup?region=us-east-1&tab=objects)
@@ -256,9 +254,8 @@ Backups are stored in a non-public S3 bucket at [`s3://pytorch-backup`](https://
 ### Release Candidate health validation
 
 Validate that the release jobs for pytorch and domain libraries are green. Validate this using the following HUD links:
-  * [PyTorch](https://hud.pytorch.org/hud/pytorch/pytorch/release%2F1.12)
-  * [TorchVision](https://hud.pytorch.org/hud/pytorch/vision/release%2F1.12)
-  * [TorchAudio](https://hud.pytorch.org/hud/pytorch/audio/release%2F1.12)
+  * [PyTorch](https://hud.pytorch.org/hud/pytorch/pytorch/release%2F2.13)
+  * [TorchVision](https://hud.pytorch.org/hud/pytorch/vision/release%2F0.28)
 
 Validate that the documentation build has completed and generated an entry corresponding to the release in the [docs repository](https://github.com/pytorch/docs/tree/main/).
 
@@ -381,7 +378,6 @@ Patch releases should be considered if a regression meets the following criteria
 1. Does the regression break core functionality (stable / beta features) including functionality in first party domain libraries?
     * First party domain libraries:
         * [pytorch/vision](https://github.com/pytorch/vision)
-        * [pytorch/audio](https://github.com/pytorch/audio)
 3. Is there not a viable workaround?
     * Can the regression be solved simply or is it not overcomable?
 

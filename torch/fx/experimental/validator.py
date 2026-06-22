@@ -250,7 +250,7 @@ try:
             return z3.Abs(number)
 
         def round_to_int(self, number: z3.ArithRef) -> z3.ArithRef:
-            # Pythons builtin 'round' implements the 'round half to even' strategy
+            # Python's builtin 'round' implements the 'round half to even' strategy
             # See https://en.wikipedia.org/wiki/Rounding#Rounding_half_to_even
             # z3 has an equivalent z3.fpRoundToIntegral(z3.RoundNearestTiesToEven(), ...), but this only applies to
             # floating point numbers, which is different from real numbers that we are dealing with here.
@@ -457,6 +457,19 @@ try:
         def floor_to_int(self, x: z3.ArithRef, dtype: torch.dtype) -> z3.ArithRef:
             return self._ops.floor(x)
 
+        def expr_cond_pair(
+            self, expr: z3.ExprRef, cond: z3.BoolRef
+        ) -> tuple[z3.ExprRef, z3.BoolRef]:
+            return (expr, cond)
+
+        def piecewise(self, *pairs: tuple[z3.ExprRef, z3.BoolRef]) -> z3.ExprRef:
+            if not pairs:
+                raise AssertionError("expected at least one Piecewise pair")
+            result = pairs[-1][0]
+            for expr, cond in reversed(pairs[:-1]):
+                result = z3.If(cond, expr, result)
+            return result
+
         def __getattr__(self, name: str) -> Any:
             REPLACEMENT = {
                 "and_": z3.And,
@@ -522,7 +535,7 @@ try:
                 raise AssertionError(f"Z3 variable not found for: {symbol}")
             return self.symbols[symbol]
 
-        # Create a variable in Z3 of 'type' for 'symbol', if it doesn't already exists.
+        # Create a variable in Z3 of 'type' for 'symbol', if it doesn't already exist.
         def add_var(self, symbol: sympy.Symbol, type: type) -> z3.ExprRef:
             if symbol in self.symbols:
                 return self.symbols[symbol]

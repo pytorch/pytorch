@@ -306,6 +306,11 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
 
     // Faster to transpose q from (b, 1, (nheads_kv ngroups), d) to (b, ngroups, nheads_kv, d) in this case
     // H/t Daniel Haziza
+    // NOTE: when this swap is taken, the kernel args/output MUST use the swapped tensors
+    // (q_padded/k_padded/v_padded) and an output allocated with the swapped shape. The
+    // original CK port passed the un-swapped q and out=empty_like(q), so for GQA + seqlen_q==1
+    // the kernel strided out of bounds and produced garbage (~FLT_MAX) -> downstream NaN. The
+    // arg/output plumbing below is fixed to use the swapped tensors.
     const int seqlenq_ngroups_swapped = seqlen_q == 1 && num_heads > num_heads_k && window_size_left < 0 && window_size_right < 0 && p_dropout == 0.f && head_size % 8 == 0 && !attn_bias_.has_value();
     const int ngroups = num_heads / num_heads_k;
     at::Tensor temp_q = q;
@@ -344,7 +349,12 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
         if (head_size % 8 != 0) { out = at::empty_like(q_padded); };
     }
     else {
-        out = at::empty_like(q);
+        // When the ngroups swap is active, seqlen_q/num_heads have been reassigned to the
+        // swapped (ngroups, num_heads_k) values, so allocate the output with that shape -
+        // empty_like(q) would use the original shape and the kernel would write out of bounds.
+        out = seqlenq_ngroups_swapped
+            ? at::empty({batch_size, seqlen_q, num_heads, head_size}, q.options())
+            : at::empty_like(q);
     }
 
     auto round_multiple = [](int x, int m) { return (x + m -1) / m*m;};
@@ -429,9 +439,9 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
                 num_heads,
                 num_heads_k,
                 head_size_8x,
-                q,
-                k,
-                v,
+                q_padded,
+                k_padded,
+                v_padded,
                 attn_bias,
                 out,
                 softmax_lse,

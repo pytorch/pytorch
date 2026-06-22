@@ -26,3 +26,26 @@ struct QrParams {
   uint32_t m;
   uint32_t n;
 };
+
+struct SvdParams {
+  uint32_t m; // staged rows = max(orig m,n) >= n
+  uint32_t n; // staged cols = k = min(orig m,n)
+  uint32_t max_sweeps;
+  uint32_t compute_uv;
+  float tol;
+  uint32_t u_ld;
+  uint32_t u_bstride;
+  uint32_t v_ld;
+  uint32_t v_bstride;
+  uint32_t transposed; // 1 if SVD ran on A^T (left/right vectors swap targets)
+  uint32_t stage_v; // 1: V accumulator in threadgroup mem (Vtg); 0: device mem
+                    // (Vacc)
+};
+
+struct EighParams {
+  uint32_t n;
+  uint32_t max_sweeps;
+  uint32_t compute_v;
+  uint32_t upper; // UPLO: 1 read upper triangle, 0 read lower
+  float tol;
+};

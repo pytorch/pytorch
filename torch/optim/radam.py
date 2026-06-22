@@ -181,7 +181,7 @@ RAdam.__doc__ = (
             &\rule{110mm}{0.4pt}                                                                 \\
             &\textbf{input}      : \gamma \text{ (lr)}, \: \beta_1, \beta_2
                 \text{ (betas)}, \: \theta_0 \text{ (params)}, \:f(\theta) \text{ (objective)}, \:
-                \lambda \text{ (weightdecay)}, \:\textit{maximize}                               \\
+                \lambda \text{ (weight decay)}, \:\textit{maximize}                               \\
             &\hspace{13mm} \epsilon \text{ (epsilon)}, \textit{decoupled\_weight\_decay}         \\
             &\textbf{initialize} :  m_0 \leftarrow 0 \text{ ( first moment)},
                 v_0 \leftarrow 0 \text{ ( second moment)},                                       \\

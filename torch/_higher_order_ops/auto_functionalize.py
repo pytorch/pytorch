@@ -16,11 +16,11 @@ from torch._higher_order_ops.utils import (
     HopInstance,
     HopSchema,
     materialize_callable_in_args,
+    register_fake,
     unique_graph_id,
 )
 from torch._ops import HigherOrderOperator, OperatorBase, OpOverload
 from torch._prims_common import clone_preserve_strides
-from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
@@ -981,17 +981,15 @@ def auto_functionalized_dense(
         return (out, *result)  # type: ignore[return-value]
 
 
-@auto_functionalized.py_impl(FakeTensorMode)
+@register_fake(auto_functionalized, skip_cache=True)
 def auto_functionalized_fake(
-    mode,
     _mutable_op: OpOverload,
     **kwargs: Any,
 ) -> tuple[Any, tuple[Tensor, ...]]:
-    with mode:
-        result = auto_functionalized_dense(
-            _mutable_op, _only_clone_these_tensors=None, **kwargs
-        )
-        return result
+    result = auto_functionalized_dense(
+        _mutable_op, _only_clone_these_tensors=None, **kwargs
+    )
+    return result
 
 
 @auto_functionalized.py_impl(ProxyTorchDispatchMode)
@@ -1131,17 +1129,15 @@ def _generate_new_op_kwargs_from_bases(
     return new_kwargs, all_bases_new
 
 
-@auto_functionalized_v2.py_impl(FakeTensorMode)
+@register_fake(auto_functionalized_v2, skip_cache=True)
 def auto_functionalized_v2_fake(
-    mode,
     _mutable_op: _MutableOpType,
     **kwargs: dict[str, Any],
 ) -> tuple[Any, tuple[Tensor, ...]]:
-    with mode:
-        result = auto_functionalized_v2_dense(
-            _mutable_op, _only_clone_these_bases=None, **kwargs
-        )
-        return result
+    result = auto_functionalized_v2_dense(
+        _mutable_op, _only_clone_these_bases=None, **kwargs
+    )
+    return result
 
 
 @auto_functionalized_v2.py_impl(ProxyTorchDispatchMode)

@@ -116,7 +116,7 @@ def validate_non_overlapping_shards_metadata(shards: list[ShardMetadata]):
         # if shard is all zeros, we should consider as pass
         all_zeros: bool = all(
             # strictly limited all offsets to be 0 to pass
-            # could loose it later on
+            # could loosen it later on
             shard.shard_offsets == [0] * len(shards[0].shard_offsets)
             and math.prod(shard.shard_sizes) == 0  # one dimension is 0
             for shard in shards

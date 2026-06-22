@@ -72,6 +72,12 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
       cudaStreamCaptureMode capture_mode = cudaStreamCaptureModeGlobal);
   void capture_end();
   void instantiate();
+  // True once the cudaGraphExec_t has been instantiated (by capture_end when
+  // keep_graph=false, or by an explicit instantiate()). The Python replay()
+  // wrapper uses this to instantiate on demand for keep_graph=true.
+  bool has_graph_exec() const {
+    return has_graph_exec_;
+  }
   void replay();
   void reset();
   MempoolId_t pool();
@@ -145,8 +151,29 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   cudaStreamCaptureMode capture_mode_{};
 
 #if !defined(USE_ROCM) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
+  struct OwnedCUDAStream {
+    cudaStream_t stream = nullptr;
+    OwnedCUDAStream() = default;
+    explicit OwnedCUDAStream(cudaStream_t s) : stream(s) {}
+    ~OwnedCUDAStream() {
+      if (stream)
+        C10_CUDA_CHECK_WARN(cudaStreamDestroy(stream));
+    }
+    OwnedCUDAStream(const OwnedCUDAStream&) = delete;
+    OwnedCUDAStream& operator=(const OwnedCUDAStream&) = delete;
+    OwnedCUDAStream(OwnedCUDAStream&& o) noexcept
+        : stream(std::exchange(o.stream, nullptr)) {}
+    OwnedCUDAStream& operator=(OwnedCUDAStream&& o) noexcept {
+      if (stream)
+        C10_CUDA_CHECK_WARN(cudaStreamDestroy(stream));
+      stream = std::exchange(o.stream, nullptr);
+      return *this;
+    }
+  };
+
   std::stack<at::cuda::CUDAStreamGuard> conditional_node_streams_;
   std::stack<CaptureId_t> conditional_graph_capture_ids_;
+  std::stack<OwnedCUDAStream> conditional_node_raw_streams_;
 #endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12040
 };
 

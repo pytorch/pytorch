@@ -222,7 +222,8 @@ bool InterpreterState::run(Stack& stack) {
           while (static_cast<int>(userObj->type()->numAttributes()) <= inst.X) {
             std::stringstream ss;
             ss << userObj->type()->numAttributes();
-            userObj->type()->addAttribute(ss.str(), c10::NoneType::get());
+            userObj->type()->addAttribute(
+                std::move(ss).str(), c10::NoneType::get());
           }
           userObj->setSlot(inst.X, std::move(v));
           frame.step();
