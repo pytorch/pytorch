@@ -831,7 +831,8 @@ jobs:
             --output-dir "${{ runner.temp }}/libtorch_output" \
             --platform windows \
             --desired-cuda "$DESIRED_CUDA" \
-            --libtorch-variant "$LIBTORCH_VARIANT"
+            --libtorch-variant "$LIBTORCH_VARIANT" \
+            --arch x86_64
       - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
@@ -891,7 +892,8 @@ jobs:
             --output-dir "${{ runner.temp }}/libtorch_output" \
             --platform windows \
             --desired-cuda "$DESIRED_CUDA" \
-            --libtorch-variant "$LIBTORCH_VARIANT"
+            --libtorch-variant "$LIBTORCH_VARIANT" \
+            --arch x86_64
       - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
@@ -952,7 +954,8 @@ jobs:
             --output-dir "${{ runner.temp }}/libtorch_output" \
             --platform windows \
             --desired-cuda "$DESIRED_CUDA" \
-            --libtorch-variant "$LIBTORCH_VARIANT"
+            --libtorch-variant "$LIBTORCH_VARIANT" \
+            --arch x86_64
       - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
@@ -1013,7 +1016,8 @@ jobs:
             --output-dir "${{ runner.temp }}/libtorch_output" \
             --platform windows \
             --desired-cuda "$DESIRED_CUDA" \
-            --libtorch-variant "$LIBTORCH_VARIANT"
+            --libtorch-variant "$LIBTORCH_VARIANT" \
+            --arch x86_64
       - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
