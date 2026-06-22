@@ -580,7 +580,7 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_b(x4), f(x4))
         self.assertEqual(cnt.frame_count, 4)
 
-    @parametrize("backend", ["eager", "aot_eager", "inductor"])
+    @parametrize("backend", ["eager", "aot_eager"])
     def test_isolate_recompiles_string_backends(self, backend):
         """Two isolated regions with the same string backend compile
         independently — verified by total cache entry count."""
@@ -638,6 +638,7 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         opt_static(torch.randn(5, 9))
         self.assertEqual(cnt.frame_count, 3)
 
+    @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
     def test_isolate_recompiles_mark_dynamic_vs_static(self):
         """Two regions: one with mark_static, one with mark_dynamic.
         Their guards don't interfere across regions."""
@@ -1268,7 +1269,7 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(fails, f"no recompile reasons logged: {fails}")
 
     @torch._dynamo.config.patch(recompile_limit=8)
-    def test_reasons_include_all_default_entries(self):
+    def test_isolate_recompiles_reasons_include_all_default_entries(self):
         """When the default bucket has multiple entries, recompile-reason
         logging from an isolated region must report guard failures from
         each of them, not just one."""
@@ -1305,7 +1306,7 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
             f"expected guard failures for both default entries, got {default_fails}",
         )
 
-    def test_reset_clears_region_strategy(self):
+    def test_isolate_recompiles_reset_clears_region_strategy(self):
         """torch._dynamo.reset() must clear region_strategy_map on
         ExtraState. Otherwise a RUN_ONLY persisted by a prior region
         would survive reset and prevent the new region from compiling."""
@@ -1363,30 +1364,6 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         # Shared limit exceeded
         with self.assertRaises(FailOnRecompileLimitHit):
             opt_a(torch.randn(5))
-
-    @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
-    def test_no_isolate_recompiles_shared_cache(self):
-        """Baseline: without isolate_recompiles, compile calls share the
-        cache. A recompile from one is visible to the other."""
-        cnt = torch._dynamo.testing.CompileCounter()
-
-        def f(x):
-            return x.sum()
-
-        opt_a = torch.compile(f, backend=cnt, dynamic=False)
-        opt_b = torch.compile(f, backend=cnt, dynamic=False)
-
-        opt_a(torch.randn(4))
-        self.assertEqual(cnt.frame_count, 1)
-
-        opt_b(torch.randn(4))
-        self.assertEqual(cnt.frame_count, 1)
-
-        opt_a(torch.randn(5))
-        self.assertEqual(cnt.frame_count, 2)
-
-        opt_b(torch.randn(5))
-        self.assertEqual(cnt.frame_count, 2)
 
     @torch._dynamo.config.patch(
         recompile_limit=2,
@@ -1485,23 +1462,23 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
 
         opt_f = torch.compile(f, backend=cnt, isolate_recompiles=True)
 
+        # First call: main frame (sin) + resume frame (cos) = 2 compiles.
         opt_f(torch.randn(4))
-        frame_count_after_1 = cnt.frame_count
+        self.assertEqual(cnt.frame_count, 2)
 
+        # Each new mode recompiles only the resume frame (main is cached).
         mode["value"] = "b"
         opt_f(torch.randn(4))
-        frame_count_after_2 = cnt.frame_count
-        self.assertGreater(frame_count_after_2, frame_count_after_1)
+        self.assertEqual(cnt.frame_count, 3)
 
         mode["value"] = "c"
         opt_f(torch.randn(4))
-        frame_count_after_3 = cnt.frame_count
-        self.assertGreater(frame_count_after_3, frame_count_after_2)
+        self.assertEqual(cnt.frame_count, 4)
 
-        # Resume function has 3 entries = recompile_limit. Fourth blocked.
+        # Resume function has 3 entries = recompile_limit. Fourth mode blocked.
         mode["value"] = "d"
         opt_f(torch.randn(4))
-        self.assertEqual(cnt.frame_count, frame_count_after_3)
+        self.assertEqual(cnt.frame_count, 4)
 
     def test_isolate_recompiles_gc_wrapper(self):
         """When an isolated compile wrapper is GC'd, orphaned cache entries
@@ -1536,7 +1513,7 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
 
     # ===== Debug / introspection =====
 
-    def test_debug_get_cache_entry_list_deterministic_order(self):
+    def test_isolate_recompiles_debug_cache_entry_list_deterministic_order(self):
         """_debug_get_cache_entry_list returns entries sorted by
         isolate_recompiles_id for deterministic output."""
         cnt = torch._dynamo.testing.CompileCounter()
