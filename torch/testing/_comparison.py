@@ -86,6 +86,7 @@ _DTYPE_PRECISIONS = {
     torch.float32: (1.3e-6, 1e-5),
     torch.float64: (1e-7, 1e-7),
     torch.complex32: (0.001, 1e-5),
+    torch.bcomplex32: (0.016, 1e-5),
     torch.complex64: (1.3e-6, 1e-5),
     torch.complex128: (1e-7, 1e-7),
 }
@@ -851,6 +852,13 @@ class TensorLikePair(Pair):
         Returns:
             (Tuple[Tensor, Tensor]): Equalized tensors.
         """
+        # bcomplex32 stores components as bfloat16. Cast to complex64 before device movement
+        # because some backends (e.g. XPU) lack a bcomplex32 D2H copy kernel.
+        if actual.dtype == torch.bcomplex32:
+            actual = actual.to(torch.complex64)
+        if expected.dtype == torch.bcomplex32:
+            expected = expected.to(torch.complex64)
+
         # The comparison logic uses operators currently not supported by the MPS backends.
         #  See https://github.com/pytorch/pytorch/issues/77144 for details.
         # TODO: Remove this conversion as soon as all operations are supported natively by the MPS backend
