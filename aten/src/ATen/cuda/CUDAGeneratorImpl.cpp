@@ -172,8 +172,11 @@ c10::intrusive_ptr<CUDAGeneratorState> CUDAGeneratorState::clone() {
  * Get or create capture state for a capture ID.
  * When create_if_not_found is true and the state doesn't exist, lazily creates
  * it and registers the generator with the capturing graph.
+ *
+ * Uses double-checked locking to avoid holding mutex during CUDA operations.
  */
 CUDAGeneratorCaptureState* CUDAGeneratorState::get_capture_state(CaptureId_t capture_id, bool create_if_not_found) {
+  uint64_t seed_for_init = 0;
   {
     std::lock_guard<std::mutex> lock(capture_states_mutex_);
     auto it = capture_states_.find(capture_id);
@@ -183,6 +186,8 @@ CUDAGeneratorCaptureState* CUDAGeneratorState::get_capture_state(CaptureId_t cap
     if (!create_if_not_found) {
       return nullptr;
     }
+    // Read seed_ under lock so set_current_seed() on another thread cannot race.
+    seed_for_init = seed_;
   }
 
   auto* graph = cuda::get_graph_from_capture_id(capture_id);
@@ -190,7 +195,7 @@ CUDAGeneratorCaptureState* CUDAGeneratorState::get_capture_state(CaptureId_t cap
       "RNG op during graph capture but could not find the CUDAGraph object.");
 
   auto capture_state = make_intrusive<CUDAGeneratorCaptureState>();
-  capture_state->initialize(seed_);
+  capture_state->initialize(seed_for_init);
 
   graph->register_generator_state(
       c10::intrusive_ptr<CUDAGeneratorState>::reclaim_copy(this));
@@ -239,16 +244,36 @@ void CUDAGeneratorState::remove_capture_state(CaptureId_t capture_id) {
   capture_states_.erase(capture_id);
 }
 
+/**
+ * Thread safety: Multiple graphs may call replay concurrently if the same
+ * generator state was used to capture multiple graphs. We hold the mutex
+ * while reading seed_/philox_offset_per_thread_ and updating the offset
+ * to prevent races.
+ */
 void CUDAGeneratorState::replay_prologue(CaptureId_t capture_id, uint64_t wholegraph_increment) {
   if (wholegraph_increment == 0) {
     return;
   }
 
-  auto* capture_state = get_capture_state(capture_id);
-  TORCH_INTERNAL_ASSERT(capture_state != nullptr,
-      "replay_prologue called but no capture state found for this capture_id");
-  capture_state->setup_for_replay(seed_, philox_offset_per_thread_);
-  philox_offset_per_thread_ += wholegraph_increment;
+  uint64_t replay_seed;
+  uint64_t replay_offset;
+  CUDAGeneratorCaptureState* capture_state = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(capture_states_mutex_);
+    auto it = capture_states_.find(capture_id);
+    TORCH_INTERNAL_ASSERT(it != capture_states_.end(),
+        "replay_prologue called but no capture state found for this capture_id");
+    capture_state = it->second.get();
+    replay_seed = seed_;
+    replay_offset = philox_offset_per_thread_;
+  }
+
+  capture_state->setup_for_replay(replay_seed, replay_offset);
+
+  {
+    std::lock_guard<std::mutex> lock(capture_states_mutex_);
+    philox_offset_per_thread_ += wholegraph_increment;
+  }
 }
 
 /**
