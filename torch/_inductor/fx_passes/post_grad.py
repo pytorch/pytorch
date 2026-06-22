@@ -141,6 +141,27 @@ def _chain_random_ops_for_ordering(graph: torch.fx.Graph) -> None:
     preserve_node_ordering(graph, additional_deps_map)
 
 
+def reject_current_device_nodes(graph: torch.fx.Graph) -> None:
+    """[device-as-parameter] Reject CooR coor::current_device() nodes in inductor.
+
+    Under compile_on_one_rank, make_fx rewrites a baked accelerator device operand to a
+    ``coor::current_device()`` node so the FX graph is rank-agnostic. Inductor has no
+    device-valued IR and cannot lower a device-returning op, so raise a clear, actionable
+    error instead of failing later with a cryptic lowering assertion. A follow-up adds
+    real support by stripping the node before lowering.
+    """
+    import torch.fx.experimental.proxy_tensor
+
+    target = torch.ops.coor.current_device.default
+    if any(n.op == "call_function" and n.target is target for n in graph.nodes):
+        raise RuntimeError(
+            "compile_on_one_rank is not supported with the inductor backend when the "
+            "graph contains a device-derived factory or cast (it emits a "
+            "coor::current_device node that inductor cannot lower). Use a non-inductor "
+            "backend (e.g. aot_eager) or disable compile_on_one_rank."
+        )
+
+
 def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     """
     Passes that run on after grad.  This is called once on the forwards
@@ -194,6 +215,11 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     # Remove profiler ops (record_function) to prevent them blocking fusion
     GraphTransformObserver(gm, "remove_profiler_ops").apply_graph_pass(
         _remove_profiler_ops
+    )
+
+    # [device-as-parameter] Reject CooR device nodes inductor can't lower (clear error).
+    GraphTransformObserver(gm, "reject_current_device").apply_graph_pass(
+        reject_current_device_nodes
     )
 
     if config.pattern_matcher:

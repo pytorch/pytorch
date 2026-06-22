@@ -1161,6 +1161,111 @@ def _fetch_proxies_and_all_constant_flag(
     return f_flat_args_kwargs, tuple(proxy_flat_args_kwargs), all_constant
 
 
+def _coor_enabled() -> bool:
+    """True when compile-on-one-rank (CooR) device-as-parameter rewriting should run.
+
+    Reads the cross-cutting flag from ``torch.compiler.config`` (its canonical home),
+    honoring ``config.patch``.
+    """
+    from torch.compiler import config as compiler_config
+
+    return compiler_config.compile_on_one_rank
+
+
+def _coor_current_accelerator() -> torch.device | None:
+    """The current accelerator as an indexed device (e.g. cuda:0), or None if there is no
+    accelerator. Used to classify device operands under compile-on-one-rank."""
+    acc = torch.accelerator.current_accelerator()
+    if acc is None:
+        return None
+    return torch.device(acc.type, torch.accelerator.current_device_index())
+
+
+def _coor_current_device() -> torch.device:
+    """The current accelerator as a fully-specialized indexed device (e.g. cuda:0).
+
+    Runtime target of the compile-on-one-rank device node: each rank resolves it to its
+    own current device (cuda:0 on rank 0, cuda:3 on rank 3). Carries the concrete index
+    (unlike type-only ``current_accelerator()``) so consuming ops -- and inductor -- get a
+    fully specified device.
+    """
+    cur = _coor_current_accelerator()
+    if cur is None:
+        raise RuntimeError("compile-on-one-rank requires an accelerator")
+    return cur
+
+
+# Registered as an op (not a bare function) so it is a serializable call_function target
+# with a stable identity for precompile/export and for consumers to match. It reads only
+# torch.accelerator, so it lives in core fx with no torch.distributed coupling.
+torch.library.define(
+    "coor::current_device",
+    "() -> Device",
+    tags=torch.Tag.pt2_compliant_tag,
+)
+
+
+@torch.library.impl("coor::current_device", "CompositeExplicitAutograd")
+def _coor_current_device_impl() -> torch.device:
+    return _coor_current_device()
+
+
+@torch.library.register_fake("coor::current_device")
+def _coor_current_device_fake() -> torch.device:
+    return _coor_current_device()
+
+
+def _coor_match_current_accelerator(
+    device: torch.device, cur: torch.device | None
+) -> bool:
+    """Whether ``device`` should be replaced by the current-device node under CooR.
+
+    True for the current accelerator (matching type, index None or the current index, so
+    both bare ``cuda`` and ``cuda:0`` qualify); False for portable ``cpu``/``meta``.
+    Raises for a different accelerator type or a non-current index -- such a device is
+    rank-specific and cannot be made device-agnostic, so the graph is refused rather than
+    left silently non-portable.
+    """
+    if device.type in ("cpu", "meta"):
+        return False
+    if cur is None or device.type != cur.type:
+        raise RuntimeError(
+            f"device_as_parameter: an op targets {device}, which is not the current "
+            f"accelerator ({cur}); the traced graph cannot be made device-agnostic for "
+            f"compile-on-one-rank."
+        )
+    if device.index is not None and device.index != cur.index:
+        raise RuntimeError(
+            f"device_as_parameter: an op targets {device}, whose index differs from the "
+            f"current accelerator ({cur}); the traced graph cannot be made "
+            f"device-agnostic for compile-on-one-rank."
+        )
+    return True
+
+
+def _current_device_edge(tracer: _ProxyTracer, device: torch.device) -> Proxy:
+    """Return a per-graph ``coor::current_device`` proxy for CooR, cached once per graph.
+
+    Replaces a baked accelerator device operand (``cuda:0`` or bare ``cuda``) with a
+    reference to a single node that, at runtime, yields each rank's specialized device
+    (cuda:0 on rank 0, cuda:3 on rank 3). The node *call* is rank-agnostic; only its
+    runtime return and ``node.meta["val"]`` vary, so ``.code`` matches across ranks (a
+    graph fingerprint must therefore ignore the per-tensor devices in ``meta``).
+
+    NOTE: a consumer that lowers this graph (e.g. inductor) cannot represent a
+    device-returning op, so it must strip this node before lowering.
+    """
+    cached = tracer._current_device_node
+    if cached is not None:
+        return cached
+    edge = tracer.create_proxy(
+        "call_function", torch.ops.coor.current_device.default, (), {}
+    )
+    edge.node.meta["val"] = _coor_current_device()
+    tracer._current_device_node = edge
+    return edge
+
+
 def proxy_call(
     proxy_mode: ProxyTorchDispatchMode,
     func: OpOverload,
@@ -1246,6 +1351,21 @@ def proxy_call(
                 "It may be possible to trace this with dynamic shapes; try setting tracing_mode='symbolic' "
                 "in your make_fx call."
             )
+
+    # [device-as-parameter] Under compile-on-one-rank, replace a baked accelerator device
+    # operand matching the current accelerator with a reference to a single current_device()
+    # node, so the traced graph follows each rank's current device instead of the baked
+    # device. Only the operand changes; the fake op below still runs with the real device.
+    if _coor_enabled() and any(
+        isinstance(e, torch.device) for e in proxy_flat_args_kwargs
+    ):
+        cur = _coor_current_accelerator()
+        proxy_flat_args_kwargs = [
+            _current_device_edge(tracer, e)
+            if isinstance(e, torch.device) and _coor_match_current_accelerator(e, cur)
+            else e
+            for e in proxy_flat_args_kwargs
+        ]
 
     proxy_args, proxy_kwargs = pytree.tree_unflatten(proxy_flat_args_kwargs, spec)
 
@@ -1416,6 +1536,7 @@ def _init_proxy_trackers(tracer: PythonKeyTracer | _GraphAppendingTracerEx) -> N
     tracer.opaque_tracker = WeakIdKeyDictionary()
     tracer._opaque_real_obj_proxy = {}
     tracer.sympy_expr_tracker = {}
+    tracer._current_device_node = None
     # Stores the torch function that was called during tracing
     tracer.torch_fn_metadata = None
     # Stores the counts for every torch function called. This is to help
@@ -1437,6 +1558,8 @@ class PythonKeyTracer(Tracer):
     symnode_tracker: _SymNodeDict
     sympy_expr_tracker: dict[sympy.Symbol, _SympyExprTrackerValue]
     tensor_tracker: MutableMapping[Tensor, _ProxyTensor]
+    # [device-as-parameter] the single current_device() node for this graph (CooR)
+    _current_device_node: Proxy | None
     torch_fn_metadata: OpOverload | None
     torch_fn_counts: dict[OpOverload, int]
     enable_thunkify: bool = False
@@ -2148,6 +2271,8 @@ class _GraphAppendingTracerEx(fx.proxy.GraphAppendingTracer):
     symnode_tracker: _SymNodeDict
     tensor_tracker: MutableMapping[Tensor, _ProxyTensor]
     sympy_expr_tracker: dict[sympy.Symbol, _SympyExprTrackerValue]
+    # [device-as-parameter] the single current_device() node for this graph (CooR)
+    _current_device_node: Proxy | None
     torch_fn_metadata: OpOverload | None
     torch_fn_counts: dict[OpOverload, int]
     enable_thunkify: bool = False
