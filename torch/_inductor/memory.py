@@ -712,33 +712,38 @@ def topological_sort_lpmf(
 
     # schedule nodes one at a time
     schedule: list[BaseSchedulerNode] = []
-    size_threshold = config.size_threshold_for_succ_based_strategy
     num_iters: int = 0
     while num_iters < len(nodes) and nodes_to_schedule:
+        def memory_key(node: BaseSchedulerNode) -> tuple[int, int, int]:
+            return (
+                node.mpi_node.size if node.mpi_node.size > memory_gap else 0,
+                node.mpi_node.size - node_info[node]["memory_to_free"],
+                node.mpi_node.index,
+            )
+
+        def earliest_successor_index(node: BaseSchedulerNode) -> int:
+            return min(
+                (succ_node.mpi_node.index for succ_node in node.mpi_node.succ_nodes),
+                default=len(nodes),
+            )
+
         # select a node to schedule:
-        if (
-            size_threshold > 0
-            and min(node.mpi_node.size for node in nodes_to_schedule) > size_threshold
-        ):
+        successor_indexes = [
+            earliest_successor_index(node) for node in nodes_to_schedule
+        ]
+        use_successor_ordering = (
+            not config.allow_peak_memory_increasing_fusion
+            and min(node.mpi_node.size for node in nodes_to_schedule)
+            > config.size_threshold_for_succ_based_strategy
+            and any(index != len(nodes) for index in successor_indexes)
+        )
+        if use_successor_ordering:
             selected_node = min(
                 nodes_to_schedule,
-                key=lambda node: min(
-                    (
-                        succ_node.mpi_node.index
-                        for succ_node in node.mpi_node.succ_nodes
-                    ),
-                    default=len(nodes),
-                ),
+                key=earliest_successor_index,
             )
         else:
-            selected_node = min(
-                nodes_to_schedule,
-                key=lambda node: (
-                    node.mpi_node.size if node.mpi_node.size > memory_gap else 0,
-                    node.mpi_node.size - node_info[node]["memory_to_free"],
-                    node.mpi_node.index,
-                ),
-            )
+            selected_node = min(nodes_to_schedule, key=memory_key)
         nodes_to_schedule.remove(selected_node)
         schedule.append(selected_node)
         num_iters += 1

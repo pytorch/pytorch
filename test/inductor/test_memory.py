@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
 import torch
@@ -8,6 +9,7 @@ from torch._dynamo.utils import same
 from torch._inductor import config, memory
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_triton_code
+from torch.utils._ordered_set import OrderedSet
 from torch.testing._internal.common_utils import serialTest, skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
@@ -50,6 +52,61 @@ class Foo(torch.nn.Module):
         return t3.sum() + t4.sum()
 
 
+class TestLPMFMemoryOrdering(TestCase):
+    class Node:
+        def __init__(self, name, index, size):
+            self.name = name
+            self.mpi_node = SimpleNamespace(
+                index=index,
+                size=size,
+                pred_nodes=[],
+                succ_nodes=[],
+                pred_buffers=[],
+            )
+
+        def get_outputs(self):
+            return []
+
+        def get_name(self):
+            return self.name
+
+    @config.patch("allow_peak_memory_increasing_fusion", False)
+    @config.patch("size_threshold_for_succ_based_strategy", 0)
+    def test_lpmf_prefers_earliest_successor_when_ready_nodes_allocate(self):
+        early_root = self.Node("early_root", 0, 100)
+        late_root = self.Node("late_root", 1, 10)
+        early_successor = self.Node("early_successor", 2, 0)
+        late_successor = self.Node("late_successor", 10, 0)
+        early_root.mpi_node.succ_nodes = [early_successor]
+        late_root.mpi_node.succ_nodes = [late_successor]
+        early_successor.mpi_node.pred_nodes = [early_root]
+        late_successor.mpi_node.pred_nodes = [late_root]
+
+        order = memory.topological_sort_lpmf(
+            [early_root, late_root, early_successor, late_successor],
+            {},
+            {},
+            OrderedSet(),
+        )
+
+        self.assertEqual(order[0], early_root)
+
+    @config.patch("allow_peak_memory_increasing_fusion", False)
+    @config.patch("size_threshold_for_succ_based_strategy", 0)
+    def test_lpmf_uses_memory_ordering_when_no_successors(self):
+        larger_root = self.Node("larger_root", 0, 100)
+        smaller_root = self.Node("smaller_root", 1, 10)
+
+        order = memory.topological_sort_lpmf(
+            [larger_root, smaller_root],
+            {},
+            {},
+            OrderedSet(),
+        )
+
+        self.assertEqual(order[0], smaller_root)
+
+
 # The tests in this class uses very small tensors. The default
 # score_fusion_memory threshold will cause different fusion decisions and
 # generate a different wrapper. Override the threshold to make these tests
@@ -64,6 +121,7 @@ class TestOperatorReorderForPeakMemory(TestCase):
         self.inputs = torch.ones((M, 2), device=GPU_TYPE)
         self.orig_reorder_method = memory.reorder_for_peak_memory
 
+    @config.patch("allow_peak_memory_increasing_fusion", False)
     @mock.patch.object(config, "reorder_for_peak_memory", True)
     def test_reorder_peak_memory(self):
         outp_corr = self.model(self.inputs)
@@ -79,10 +137,10 @@ class TestOperatorReorderForPeakMemory(TestCase):
         (
             FileCheck()
             .check(call_str)
-            .check("buf1 = ")
             .check("buf0 = ")
             .check("buf2 = ")
             .check("buf4 = ")
+            .check("buf1 = ")
             .check("buf3 = ")
             .check("buf5 = ")
             .check("buf7 = ")
@@ -92,6 +150,7 @@ class TestOperatorReorderForPeakMemory(TestCase):
         outp = compiled_model(self.inputs)
         self.assertTrue(same(outp, outp_corr))
 
+    @config.patch("allow_peak_memory_increasing_fusion", False)
     @mock.patch.object(config, "reorder_for_peak_memory", True)
     def test_reorder_peak_memory_lpmf(self):
         outp_corr = self.model(self.inputs)
@@ -128,11 +187,11 @@ class TestOperatorReorderForPeakMemory(TestCase):
             (
                 FileCheck()
                 .check(call_str)
-                .check("buf1 = ")
                 .check("buf0 = ")
+                .check("buf1 = ")
                 .check("buf2 = ")
-                .check("buf4 = ")
                 .check("buf3 = ")
+                .check("buf4 = ")
                 .check("buf5 = ")
                 .check("buf7 = ")
                 .run(code)

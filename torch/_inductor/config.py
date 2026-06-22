@@ -432,11 +432,10 @@ reorder_prefetch_limit: int | None = None
 reorder_for_peak_memory = True
 reorder_for_peak_memory_debug = False
 
-# In some cases, when all the nodes that can be scheduled are quite large,
-# it is beneficial to switch the scheduling strategy. So instead of using
-# size as the criterion, we choose a node that can unlock more nodes to
-# become schedulable by analyzing their successor nodes. The default value
-# is zero, which turns off this optimization.
+# When all schedulable nodes have allocations larger than this threshold and
+# at least one ready node unlocks a successor, prefer the node that unlocks the
+# earliest successor. The original LPMF memory key remains the fallback when
+# no successor information is available.
 size_threshold_for_succ_based_strategy: int = 0
 
 
