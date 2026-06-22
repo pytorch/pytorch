@@ -103,6 +103,9 @@ class CUDAGraph(_CUDAGraph):
     """
 
     _tracker: _CUDAGraphInputLivenessTracker | None
+    # Read-only property exposed from the C++ _CUDAGraph base via pybind;
+    # annotated (not assigned) so the type checker sees it without shadowing it.
+    _has_graph_exec: bool
     # Stays None unless mark_kernels stamps it during capture (requires
     # annotations enabled and cudaGraphNodeGetToolsId available).
     _capture_graph_id: int | None
@@ -187,6 +190,10 @@ class CUDAGraph(_CUDAGraph):
         r"""Replay the CUDA work captured by this graph."""
         if self._tracker is not None:
             self._tracker.check_alive(self.pool())
+        # With keep_graph=True the exec graph is instantiated on demand here on
+        # the first replay; the C++ replay() requires it to already exist.
+        if not self._has_graph_exec:
+            self.instantiate()
         super().replay()
 
     def reset(self) -> None:

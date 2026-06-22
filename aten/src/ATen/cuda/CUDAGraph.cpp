@@ -255,11 +255,11 @@ void CUDAGraph::instantiate() {
 void CUDAGraph::replay() {
   TORCH_CHECK(capture_ended_,
               "Called CUDAGraph::replay without a preceding successful capture.");
-
-  if (!has_graph_exec_) {
-    TORCH_INTERNAL_ASSERT(keep_graph_);
-    instantiate();
-  }
+  // Instantiating on demand is handled by the Python replay() wrapper (which
+  // can do so for keep_graph=true). At this level the exec graph must exist.
+  TORCH_CHECK(has_graph_exec_,
+              "Called CUDAGraph::replay before the graph was instantiated; "
+              "call instantiate() first.");
 
   c10::OptionalDeviceGuard device_guard{capture_stream_.device()};
 

@@ -72,6 +72,12 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
       cudaStreamCaptureMode capture_mode = cudaStreamCaptureModeGlobal);
   void capture_end();
   void instantiate();
+  // True once the cudaGraphExec_t has been instantiated (by capture_end when
+  // keep_graph=false, or by an explicit instantiate()). The Python replay()
+  // wrapper uses this to instantiate on demand for keep_graph=true.
+  bool has_graph_exec() const {
+    return has_graph_exec_;
+  }
   void replay();
   void reset();
   MempoolId_t pool();
