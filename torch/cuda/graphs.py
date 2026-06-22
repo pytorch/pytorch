@@ -106,7 +106,7 @@ class CUDAGraph(_CUDAGraph):
     # Read-only property exposed from the C++ _CUDAGraph base via pybind;
     # annotated (not assigned) so the type checker sees it without shadowing it.
     _has_graph_exec: bool
-    # Stays None unless stamp_capture_graph_id stamps it at capture entry
+    # Stays None unless maybe_stamp_capture_graph_id stamps it during capture_end
     # (requires annotations enabled and cudaGraphNodeGetToolsId available).
     _capture_graph_id: int | None
     # Exec graph id the recorded annotations are currently keyed to, or None
@@ -184,6 +184,19 @@ class CUDAGraph(_CUDAGraph):
             self._tracker = _CUDAGraphInputLivenessTracker()
             self._tracker.start()
 
+    def capture_end_pre(self) -> None:
+        r"""End capture but do not finalize: leaves the captured ``cudaGraph_t``
+        live (for both ``keep_graph`` modes) so it can be inspected before
+        :meth:`capture_end_post` instantiates and/or destroys it."""
+        super().capture_end_pre()
+
+    def capture_end_post(self) -> None:
+        r"""Finalize a capture started by :meth:`capture_end_pre`: instantiate
+        and destroy the template when ``keep_graph=False``."""
+        super().capture_end_post()
+        if self._tracker is not None:
+            self._tracker.stop()
+
     def capture_end(self) -> None:
         r"""End CUDA graph capture on the current stream.
 
@@ -193,9 +206,16 @@ class CUDAGraph(_CUDAGraph):
         Use :class:`~torch.cuda.graph` or :func:`~torch.cuda.make_graphed_callables`,
         which call ``capture_end`` internally.
         """
-        super().capture_end()
-        if self._tracker is not None:
-            self._tracker.stop()
+        self.capture_end_pre()
+        # Stamp the capture graph id while the template is live (both keep_graph
+        # modes); self-gates on annotations being enabled. An error here is
+        # unexpected and propagates -- we deliberately don't wrap this in a
+        # finally that calls capture_end_post(), since a failing finalize would
+        # mask the real (stamp) error.
+        from torch.cuda._graph_annotations import maybe_stamp_capture_graph_id
+
+        maybe_stamp_capture_graph_id(self)
+        self.capture_end_post()
 
     def instantiate(self) -> None:
         r"""Instantiate the CUDA graph. Will be called by
@@ -502,14 +522,6 @@ class graph:
             # pyrefly: ignore [bad-keyword-argument]
             check_input_liveness=self.check_input_liveness,
         )
-
-        # Stamp the capture graph id while the stream is still capturing: with
-        # keep_graph=False the template graph is destroyed at capture_end, so the
-        # id must be read now for remap_to_exec_graph to use later. Self-gates on
-        # annotations being enabled.
-        from torch.cuda._graph_annotations import stamp_capture_graph_id
-
-        stamp_capture_graph_id(self.cuda_graph)
 
     def __exit__(self, *args: object) -> None:
         if self._enable_annotations:
