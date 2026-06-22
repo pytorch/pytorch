@@ -5,6 +5,7 @@ import contextlib
 import dataclasses
 import enum
 import functools
+import hashlib
 import importlib
 import inspect
 import io
@@ -959,7 +960,15 @@ def get_fused_kernel_name(
         ]
     else:
         raise NotImplementedError
-    return "_".join(["fused"] + sources)
+    name = "_".join(["fused"] + sources)
+    # On Windows the default MAX_PATH (260) limit means a long descriptive
+    # kernel name can push the Triton cache path past the limit, making the
+    # generated .ttir unopenable. Cap the name and append a hash to keep it
+    # both short and unique.
+    if is_windows() and len(name) > 50:
+        h = hashlib.sha256(name.encode("utf-8")).hexdigest()[:8]
+        name = f"{name[:41].rstrip('_')}_{h}"
+    return name
 
 
 def get_kernel_metadata(
