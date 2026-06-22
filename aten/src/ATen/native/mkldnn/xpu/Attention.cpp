@@ -385,9 +385,9 @@ _scaled_dot_product_fused_attention_overrideable_xpu(
     std::tuple<uint64_t, uint64_t> unpack_state =
         xpu::philox::unpack(philox_state);
     philox_seed = at::full(
-        {}, std::get<0>(unpack_state), at::dtype(at::kLong).device(at::kCPU));
+        {}, std::get<0>(unpack_state), at::dtype(at::kLong).device(at::kXPU));
     philox_offset = at::full(
-        {}, std::get<1>(unpack_state), at::dtype(at::kLong).device(at::kCPU));
+        {}, std::get<1>(unpack_state), at::dtype(at::kLong).device(at::kXPU));
   }
 
   at::native::onednn::sdpa(
