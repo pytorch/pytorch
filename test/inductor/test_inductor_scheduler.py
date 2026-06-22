@@ -13,6 +13,7 @@ import torch.utils.flop_counter
 from torch._dynamo.utils import counters
 from torch._inductor.choices import InductorChoices
 from torch._inductor.dependencies import Dep, MemoryDep, ReadWrites
+from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import GraphPartitionSignature
 from torch._inductor.loop_body import MemoryEntry, MemoryUsageType
 from torch._inductor.scheduler import (
@@ -26,6 +27,7 @@ from torch._inductor.scheduler import (
 from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.utils import fresh_inductor_cache, snode_args_kwargs
 from torch._inductor.virtualized import V
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_cuda import SM70OrLater
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -895,6 +897,191 @@ class TestScheduler(TestCase):
 
         scheduler.fusion_would_materialize_disjoint_branches.assert_not_called()
 
+    @inductor_config.patch("allow_peak_memory_increasing_fusion", False)
+    def test_reused_add_reaching_reduction_like_output_realizes(self):
+        def fn(a, b, c):
+            add = torch.ops.aten.add.Tensor(a, b)
+            return add * c, add.sum(dim=1, keepdim=True)
+
+        gm = make_fx(fn)(torch.randn(4, 8), torch.randn(4, 8), torch.randn(4, 8))
+        add = next(n for n in gm.graph.nodes if n.target is torch.ops.aten.add.Tensor)
+
+        self.assertTrue(
+            GraphLowering._should_realize_reused_pointwise_for_reduction(
+                add, self._create_reused_pointwise_result()
+            )
+        )
+
+    def test_reused_add_realization_respects_peak_memory_config(self):
+        def fn(a, b, c):
+            add = torch.ops.aten.add.Tensor(a, b)
+            return add * c, add.sum(dim=1, keepdim=True)
+
+        gm = make_fx(fn)(torch.randn(4, 8), torch.randn(4, 8), torch.randn(4, 8))
+        add = next(n for n in gm.graph.nodes if n.target is torch.ops.aten.add.Tensor)
+
+        with inductor_config.patch("allow_peak_memory_increasing_fusion", True):
+            self.assertFalse(
+                GraphLowering._should_realize_reused_pointwise_for_reduction(
+                    add, self._create_reused_pointwise_result()
+                )
+            )
+
+    @inductor_config.patch("allow_peak_memory_increasing_fusion", False)
+    def test_reused_add_reaching_indirect_reduction_like_output_realizes(self):
+        def fn(a, b, c):
+            add = torch.ops.aten.add.Tensor(a, b)
+            mul = torch.ops.aten.mul.Tensor(add, c)
+            return add - c, mul.sum(dim=1, keepdim=True)
+
+        gm = make_fx(fn)(torch.randn(4, 8), torch.randn(4, 8), torch.randn(4, 8))
+        add = next(n for n in gm.graph.nodes if n.target is torch.ops.aten.add.Tensor)
+
+        self.assertTrue(
+            GraphLowering._should_realize_reused_pointwise_for_reduction(
+                add, self._create_reused_pointwise_result()
+            )
+        )
+
+    def test_reused_add_reaching_small_slice_reduction_does_not_realize(self):
+        def fn(a, b, c):
+            add = torch.ops.aten.add.Tensor(a, b)
+            small = add[:, :1]
+            return add * c, small.sum(dim=1, keepdim=True)
+
+        gm = make_fx(fn)(torch.randn(4, 8), torch.randn(4, 8), torch.randn(4, 8))
+        add = next(n for n in gm.graph.nodes if n.target is torch.ops.aten.add.Tensor)
+
+        self.assertFalse(
+            GraphLowering._should_realize_reused_pointwise_for_reduction(
+                add, self._create_reused_pointwise_result()
+            )
+        )
+
+    def test_reused_pointwise_realization_requires_add(self):
+        def fn(a, b, c):
+            mul = torch.ops.aten.mul.Tensor(a, b)
+            return mul + c, mul.sum(dim=1, keepdim=True)
+
+        gm = make_fx(fn)(torch.randn(4, 8), torch.randn(4, 8), torch.randn(4, 8))
+        mul = next(n for n in gm.graph.nodes if n.target is torch.ops.aten.mul.Tensor)
+
+        self.assertFalse(
+            GraphLowering._should_realize_reused_pointwise_for_reduction(
+                mul, self._create_reused_pointwise_result()
+            )
+        )
+
+    def test_reused_add_realization_requires_reduction_like_user(self):
+        def fn(a, b, c):
+            add = torch.ops.aten.add.Tensor(a, b)
+            return add * c, add - c
+
+        gm = make_fx(fn)(torch.randn(4, 8), torch.randn(4, 8), torch.randn(4, 8))
+        add = next(n for n in gm.graph.nodes if n.target is torch.ops.aten.add.Tensor)
+
+        self.assertFalse(
+            GraphLowering._should_realize_reused_pointwise_for_reduction(
+                add, self._create_reused_pointwise_result()
+            )
+        )
+
+    def test_reused_add_realization_requires_reused_pointwise_reads(self):
+        def fn(a, b, c):
+            add = torch.ops.aten.add.Tensor(a, b)
+            return add * c, add.sum(dim=1, keepdim=True)
+
+        gm = make_fx(fn)(torch.randn(4, 8), torch.randn(4, 8), torch.randn(4, 8))
+        add = next(n for n in gm.graph.nodes if n.target is torch.ops.aten.add.Tensor)
+
+        self.assertFalse(
+            GraphLowering._should_realize_reused_pointwise_for_reduction(
+                add, self._create_reused_pointwise_result(nontrivial_read_count=1)
+            )
+        )
+
+    @inductor_config.patch("allow_peak_memory_increasing_fusion", False)
+    def test_reused_add_realization_unwraps_mutablebox(self):
+        def fn(a, b, c):
+            add = torch.ops.aten.add.Tensor(a, b)
+            return add * c, add.sum(dim=1, keepdim=True)
+
+        gm = make_fx(fn)(torch.randn(4, 8), torch.randn(4, 8), torch.randn(4, 8))
+        add = next(n for n in gm.graph.nodes if n.target is torch.ops.aten.add.Tensor)
+        pointwise = self._create_mock_pointwise_result()
+        result = ir.TensorBox(ir.MutableBox(ir.StorageBox(pointwise)))
+
+        self.assertTrue(
+            GraphLowering._should_realize_reused_pointwise_for_reduction(add, result)
+        )
+
+    def test_output_metadata_shrink_is_reduction_like_without_tag(self):
+        graph = torch.fx.Graph()
+        node = graph.call_function(torch.ops.aten._fused_rms_norm.default)
+        node.meta["val"] = (torch.empty(4, 8), torch.empty(4, 1))
+
+        self.assertFalse(
+            GraphLowering._target_is_reduction_like(
+                torch.ops.aten._fused_rms_norm.default
+            )
+        )
+        self.assertTrue(
+            GraphLowering._call_has_reduction_like_output(node, input_numel=32)
+        )
+
+    def test_reduction_tag_is_reduction_like_without_output_metadata(self):
+        graph = torch.fx.Graph()
+        node = graph.call_function(torch.ops.aten.sum.default)
+
+        self.assertTrue(
+            GraphLowering._call_has_reduction_like_output(node, input_numel=32)
+        )
+
+    def test_nested_output_metadata_shrink_is_reduction_like_without_tag(self):
+        graph = torch.fx.Graph()
+        node = graph.call_function(torch.ops.aten._fused_rms_norm.default)
+        node.meta["val"] = {"full": torch.empty(4, 8), "small": [torch.empty(4, 1)]}
+
+        self.assertTrue(
+            GraphLowering._call_has_reduction_like_output(node, input_numel=32)
+        )
+
+    def test_multiple_full_size_outputs_are_not_reduction_like(self):
+        graph = torch.fx.Graph()
+        node = graph.call_function(torch.ops.aten.alias.default)
+        node.meta["val"] = (torch.empty(4, 8), torch.empty(4, 8))
+
+        self.assertFalse(
+            GraphLowering._call_has_reduction_like_output(node, input_numel=32)
+        )
+
+    def test_single_output_metadata_shrink_is_not_reduction_like(self):
+        graph = torch.fx.Graph()
+        node = graph.call_function(torch.ops.aten.slice.Tensor)
+        node.meta["val"] = torch.empty(4, 4)
+
+        self.assertFalse(
+            GraphLowering._call_has_reduction_like_output(node, input_numel=32)
+        )
+
+    def test_partition_metadata_shrink_is_not_reduction_like(self):
+        graph = torch.fx.Graph()
+        node = graph.call_function(torch.ops.aten.split.Tensor)
+        node.meta["val"] = (torch.empty(2, 8), torch.empty(2, 8))
+
+        self.assertFalse(
+            GraphLowering._call_has_reduction_like_output(node, input_numel=32)
+        )
+
+    def test_full_and_empty_split_is_not_reduction_like(self):
+        graph = torch.fx.Graph()
+        node = graph.call_function(torch.ops.aten.split_with_sizes.default)
+        node.meta["val"] = (torch.empty(4, 8), torch.empty(4, 0))
+
+        self.assertFalse(
+            GraphLowering._call_has_reduction_like_output(node, input_numel=32)
+        )
+
     def test_fusion_would_materialize_late_outputs_from_shared_producer_prevents_fusion(
         self,
     ):
@@ -1208,6 +1395,23 @@ class TestScheduler(TestCase):
 
         check = scheduler.fusion_would_materialize_late_outputs_from_shared_producer
         check.assert_not_called()
+
+    def _create_reused_pointwise_result(
+        self, nontrivial_read_count: int = 2
+    ) -> ir.TensorBox:
+        pointwise = self._create_mock_pointwise_result(nontrivial_read_count)
+        return ir.TensorBox(ir.StorageBox(pointwise))
+
+    def _create_mock_pointwise_result(
+        self, nontrivial_read_count: int = 2
+    ) -> ir.Pointwise:
+        pointwise = object.__new__(ir.Pointwise)
+        object.__setattr__(
+            pointwise,
+            "inner_fn_opcount",
+            Mock(return_value=Mock(nontrivial_read_count=nontrivial_read_count)),
+        )
+        return pointwise
 
     def _mock_dep(self, name: str) -> Mock:
         dep = Mock(spec=Dep)

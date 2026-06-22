@@ -21,6 +21,7 @@ from sympy import Expr
 import torch
 import torch._logging
 import torch.fx
+import torch.utils._pytree as pytree
 from torch import device, Tensor
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import defake, dynamo_timed
@@ -48,6 +49,7 @@ from torch.fx.experimental.symbolic_shapes import (
     ShapeEnv,
     SympyBoolean,
     SymTypes,
+    statically_known_true,
 )
 from torch.fx.node import Node
 from torch.fx.passes.reinplace import _is_view_op
@@ -1861,6 +1863,108 @@ class GraphLowering(torch.fx.Interpreter):
             if isinstance(ir_value, ir.TensorBox):
                 ir_value.realize()
 
+    @staticmethod
+    def _target_is_reduction_like(target: object) -> bool:
+        if not isinstance(target, torch._ops.OpOverload):
+            return False
+        if torch.Tag.reduction in target.tags:
+            return True
+        return False
+
+    @staticmethod
+    def _target_may_return_reduction_like_metadata(target: object) -> bool:
+        if not isinstance(target, torch._ops.OpOverload):
+            return False
+        return "norm" in target.overloadpacket.__name__
+
+    @classmethod
+    def _call_has_reduction_like_output(
+        cls, n: torch.fx.Node, input_numel: int | torch.SymInt
+    ) -> bool:
+        if n.op != "call_function":
+            return False
+        if cls._target_is_reduction_like(n.target):
+            return True
+        if not cls._target_may_return_reduction_like_metadata(n.target):
+            return False
+        tensor_outputs = [
+            output
+            for output in pytree.tree_leaves(n.meta.get("val"))
+            if isinstance(output, torch.Tensor)
+        ]
+        has_full_size_output = any(
+            statically_known_true(output.numel() == input_numel)
+            for output in tensor_outputs
+        )
+        has_smaller_output = any(
+            statically_known_true(output.numel() < input_numel)
+            for output in tensor_outputs
+        )
+        return len(tensor_outputs) > 1 and has_full_size_output and has_smaller_output
+
+    @staticmethod
+    def _node_has_full_size_tensor_value(
+        n: torch.fx.Node, input_numel: int | torch.SymInt
+    ) -> bool:
+        return any(
+            isinstance(output, torch.Tensor)
+            and statically_known_true(output.numel() == input_numel)
+            for output in pytree.tree_leaves(n.meta.get("val"))
+        )
+
+    @classmethod
+    def _user_reaches_reduction_like_output(cls, n: torch.fx.Node) -> bool:
+        cache_key = "_inductor_user_reaches_reduction_like_output"
+        cached = n.meta.get(cache_key)
+        if cached is not None:
+            return cached
+        val = n.meta.get("val")
+        if not isinstance(val, torch.Tensor):
+            return False
+        input_numel = val.numel()
+        worklist = [(n, user) for user in n.users]
+        seen: set[torch.fx.Node] = set()
+        while worklist:
+            parent, user = worklist.pop()
+            if user in seen:
+                continue
+            seen.add(user)
+            if cls._call_has_reduction_like_output(
+                user, input_numel
+            ) and cls._node_has_full_size_tensor_value(parent, input_numel):
+                n.meta[cache_key] = True
+                return True
+            if cls._node_has_full_size_tensor_value(user, input_numel):
+                worklist.extend((user, next_user) for next_user in user.users)
+        n.meta[cache_key] = False
+        return False
+
+    @classmethod
+    def _should_realize_reused_pointwise_for_reduction(
+        cls, n: torch.fx.Node, result: object
+    ) -> bool:
+        if (
+            config.allow_peak_memory_increasing_fusion
+            or n.op != "call_function"
+            or n.target is not torch.ops.aten.add.Tensor
+            or len(OrderedSet(n.users)) <= 1
+            or not isinstance(result, TensorBox)
+            or not cls._user_reaches_reduction_like_output(n)
+        ):
+            return False
+
+        data = result.data
+        while not isinstance(data, StorageBox) and isinstance(
+            data, (ir.BaseView, ir.MutableBox)
+        ):
+            data = data.data
+
+        return (
+            isinstance(data, StorageBox)
+            and isinstance(data.data, Pointwise)
+            and data.data.inner_fn_opcount().nontrivial_read_count > 1
+        )
+
     def run_node(self, n: torch.fx.Node) -> object:
         """Lower and execute a single FX node into Inductor IR."""
 
@@ -2072,6 +2176,10 @@ class GraphLowering(torch.fx.Interpreter):
             # already too many reads and rematerializing can be bad.
             num_users = len(OrderedSet(n.users))
             if num_users > 1 and isinstance(result, TensorBox):
+                if self._should_realize_reused_pointwise_for_reduction(n, result):
+                    result = maybe_apply_channels_last_stride_order(result, n)
+                    result.realize()
+
                 for user in n.users:
                     if user.target in needs_realized_inputs:
                         result.realize_hint()
