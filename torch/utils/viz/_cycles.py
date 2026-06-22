@@ -52,11 +52,11 @@ def observe_garbage(observer):
                         # we have to re-run GC to clean up the cycles
                         # we saved from before.
                         gc.set_debug(0)
-                        before = torch.cuda.memory_allocated()
+                        before = torch.accelerator.memory_allocated()
                         gc.collect()
-                        after = torch.cuda.memory_allocated()
+                        after = torch.accelerator.memory_allocated()
                         if before != after:
-                            logger.warning("CUDA Memory changed during GC, %d bytes freed.", before - after)
+                            logger.warning("Accelerator Memory changed during GC, %d bytes freed.", before - after)
                     finally:
                         enabled = True
                 if orig_trace is not None:
@@ -249,7 +249,7 @@ def object_annotation(obj):
         if len(filename) > FRAME_FILENAME_LIMIT:
             filename = "..." + filename[-(FRAME_FILENAME_LIMIT - 3):]
         return f"frame\n{filename}:{obj.f_lineno}"
-    elif is_cuda_tensor(obj):
+    elif is_accelerator_tensor(obj):
         return f"object\n{type(obj).__module__}.{type(obj).__name__} ({obj.shape})"
     else:
         return f"object\n{type(obj).__module__}.{type(obj).__name__}"
@@ -264,9 +264,9 @@ class Node(NamedTuple):
 
 def create_graph(objects, *, context=None, filter=None):
     if context is None:
-        context = cuda_allocation_context()
+        context = accelerator_allocation_context()
     if filter is None:
-        filter = is_cuda_tensor
+        filter = is_accelerator_tensor
 
     objects = [obj for obj in objects if not isinstance(obj, weakref.ProxyTypes)]
     nodes = [Node(object_annotation(obj), context(obj), filter(obj), []) for obj in objects]
@@ -312,15 +312,15 @@ def escape(n):
     return json.dumps(n)
 
 
-def is_cuda_tensor(obj):
+def is_accelerator_tensor(obj):
     return (
         isinstance(obj, torch.Tensor) and
-        obj.device.type == "cuda" and
+        obj.device.type != "cpu" and
         not torch._subclasses.fake_tensor.is_fake_tensor(obj)
     )
 
-def cuda_allocation_context():
-    snapshot = torch.cuda.memory._snapshot()
+def accelerator_allocation_context():
+    snapshot = torch.accelerator.memory._snapshot()
     addr_to_frame = {}
     for seg in snapshot['segments']:
         addr = seg['address']
@@ -331,7 +331,7 @@ def cuda_allocation_context():
             addr += blk['size']
 
     def object_context(obj):
-        if is_cuda_tensor(obj):
+        if is_accelerator_tensor(obj):
             addr = obj.untyped_storage().data_ptr()
             frames = addr_to_frame.get(addr)
             if frames is not None:
@@ -472,12 +472,12 @@ def to_html(nodes):
     return _template.replace('$DOT', repr(dot)).replace('$LISTENERS', '\n'.join(listeners))
 
 def observe_tensor_cycles(callback):
-    torch.cuda.memory._record_memory_history(max_entries=100000)
+    torch.accelerator.memory._record_memory_history(max_entries=100000)
 
     def observer(garbage) -> None:
         if garbage:
-            if not any(is_cuda_tensor(obj) for obj in garbage):
-                logger.info("No CUDA Tensors found in garbage")
+            if not any(is_accelerator_tensor(obj) for obj in garbage):
+                logger.info("No accelerator Tensors found in garbage")
                 return
             callback(to_html(create_graph(garbage)))
     return observe_garbage(observer)
@@ -485,21 +485,21 @@ def observe_tensor_cycles(callback):
 
 def warn_tensor_cycles():
     """
-    Install a warning that reports whenever a cycle that is holding CUDA memory is observed.
+    Install a warning that reports whenever a cycle that is holding accelerator memory is observed.
 
     The warning produces an .html file that visualizes the cycle,
-    and links it to the stack frame that allocated the CUDA tensor.
+    and links it to the stack frame that allocated the tensor.
 
     Reference cycles are freed by the cycle collector rather than being cleaned up
     when the objects in the cycle first become unreachable. If a cycle points to a tensor,
-    the CUDA memory for that tensor will not be freed until garbage collection runs.
-    Accumulation of CUDA allocations can lead to out of memory errors (OOMs), as well as
+    the accelerator memory for that tensor will not be freed until garbage collection runs.
+    Accumulation of allocations can lead to out of memory errors (OOMs), as well as
     non-deterministic allocation behavior which is harder to debug.
     """
-    logger.info("Watching Python reference cycles for CUDA Tensors.")
+    logger.info("Watching Python reference cycles for accelerator Tensors.")
 
     def write_and_log(html) -> None:
         with NamedTemporaryFile('w', suffix='.html') as f:
             f.write(html)
-            logger.warning('Reference cycle includes a CUDA Tensor see visualization of cycle %s', f.name)
+            logger.warning('Reference cycle includes an accelerator Tensor, see visualization of cycle %s', f.name)
     return observe_tensor_cycles(write_and_log)
