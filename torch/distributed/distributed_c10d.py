@@ -171,6 +171,26 @@ def _use_torchcomms_enabled() -> bool:
     return _TORCHCOMM_AVAILABLE and dist_config.use_torchcomms
 
 
+def _nccl_options_to_torchcomms_hints(pg_options) -> dict:
+    """Translate ``ProcessGroupNCCL.Options`` to the ``Dict[str, str]`` form
+    TorchComms accepts via ``CommOptions.hints``.
+    """
+    if pg_options is None:
+        return {}
+    hints: dict = {}
+    try:
+        if getattr(pg_options, "is_high_priority_stream", False):
+            hints["high_priority_stream"] = "true"
+        cfg = getattr(pg_options, "config", None)
+        for k in ("cga_cluster_size", "max_ctas", "min_ctas"):
+            val = getattr(cfg, k, None)
+            if val is not None and val != -(2**31):  # NCCL_CONFIG_UNDEF_INT
+                hints[k] = str(val)
+    except AttributeError:
+        pass
+    return hints
+
+
 _pickler = pickle.Pickler
 _unpickler = pickle.Unpickler
 
@@ -5885,6 +5905,90 @@ def new_group(
     )
 
 
+def _build_eager_split_via_torchcomms(parent_pg, ranks, hints, group_desc):
+    """Build a TorchComms-backed subgroup over ``ranks`` with ``hints``
+    applied at comm-construction time.
+
+    Used by ``_new_group_via_split_group`` when the caller passes
+    ``pg_options``: ``ProcessGroup::splitGroup`` in C++ does not consume
+    NCCL Options, so we bypass it and create a fresh ``torchcomms.new_comm``
+    directly with the translated ``CommOptions.hints``. Then register the
+    resulting ``ProcessGroup`` in the global c10d bookkeeping so it behaves
+    identically to a ``split_group``-returned PG.
+
+    Member-rank-only collective bootstrap.
+    """
+    import os
+
+    from torch.distributed import PrefixStore, ProcessGroup
+    from torchcomms import new_comm
+
+    try:
+        from torchcomms._comms import _BackendWrapper  # type: ignore[import]
+    except ImportError:
+        from torchcomms._backend_wrapper import _BackendWrapper  # type: ignore[import]
+
+    my_rank = parent_pg.rank()
+    if my_rank not in ranks:
+        return GroupMember.NON_GROUP_MEMBER
+
+    bound = parent_pg.bound_device_id
+    assert bound is not None
+    device = bound
+    gsize = len(ranks)
+    group_local_rank = ranks.index(my_rank)
+    tag = (group_desc or "tc_split") + "_" + "_".join(map(str, ranks)) + (
+        ("_" + "_".join(f"{k}={v}" for k, v in sorted(hints.items()))) if hints else ""
+    )
+    store = PrefixStore(f"{tag}/", _get_default_store())
+
+    # high_priority_stream is a dedicated kwarg on new_comm; the rest go
+    # through the free-form hints dict.
+    hp_stream = None
+    if "high_priority_stream" in hints:
+        hp_stream = hints["high_priority_stream"].lower() in ("1", "true", "yes")
+    extra_hints = {k: v for k, v in hints.items() if k != "high_priority_stream"}
+
+    saved = (os.environ.get("TORCHCOMM_RANK"), os.environ.get("TORCHCOMM_SIZE"))
+    os.environ["TORCHCOMM_RANK"] = str(group_local_rank)
+    os.environ["TORCHCOMM_SIZE"] = str(gsize)
+    try:
+        comm = new_comm(
+            "nccl",
+            device,
+            tag,
+            store=PrefixStore("comm/", store),
+            high_priority_stream=hp_stream,
+            hints=extra_hints or None,
+        )
+    finally:
+        for key, value in zip(("TORCHCOMM_RANK", "TORCHCOMM_SIZE"), saved):
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+    backend_class = _BackendWrapper(comm)
+    pg = ProcessGroup(PrefixStore("pg/", store), group_local_rank, gsize)
+    backend_type = ProcessGroup.BackendType.CUSTOM
+    pg._set_default_backend(backend_type)
+    pg._register_backend(device, backend_type, backend_class)
+    pg._set_group_name(tag)
+    try:
+        pg.bound_device_id = device
+    except Exception:
+        pass
+
+    _register_process_group(tag, pg)
+    _world.pg_map[pg] = ("cuda:nccl", store)
+    _world.pg_names[pg] = tag
+    _world.pg_backend_config[pg] = "cuda:nccl"
+    _world.pg_group_ranks[pg] = {g: i for i, g in enumerate(ranks)}
+    _world.pg_to_tag[pg] = f"user:{tag}"
+    _world.tags_to_pg.setdefault(f"user:{tag}", []).append(pg)
+    return pg
+
+
 def _new_group_via_split_group(
     ranks,
     timeout,
@@ -5929,6 +6033,58 @@ def _new_group_via_split_group(
         group_ranks = list(range(global_world_size))
     else:
         group_ranks = sorted(ranks)
+
+    # Auto-qualify the requested backend so it always names just the parent's
+    # default device backend (the one matching ``bound_device_id``) plus any
+    # explicitly-requested extra device entry.
+    #
+    # split_group's filter has two requirements:
+    #   (1) it must contain the parent's default device backend, and
+    #   (2) device entries it omits are not included in the new subgroup.
+    #
+    # The naive default (``backend=None``) inherits the parent's full set,
+    # which creates an extra gloo comm per subgroup on every nccl-with-gloo
+    # parent — expensive and racy. Explicitly narrowing to the default
+    # device backend gives every torchcomms caller the same single-backend
+    # subgroup they almost always want, while still letting an explicit
+    # device-qualified string (``"cpu:gloo,cuda:nccl"``) opt back into the
+    # multi-backend behavior. Removes per-caller backend-qualifier helpers
+    # (sglang's ``_device_backend_str``, Megatron-LM's
+    # ``_torchcomms_qualified_backend``).
+    bound = default_pg.bound_device_id
+    if bound is not None and (backend is None or ":" not in str(backend)):
+        parent_backend_str, _ = _world.pg_map[default_pg]
+        parent_device_backends = _parse_backend_string(parent_backend_str)
+        default_dev = bound.type
+        default_be = parent_device_backends.get(default_dev)
+        if default_be is not None:
+            if backend is None:
+                # Inherit just the default-device backend, not all parent
+                # device backends.
+                backend = f"{default_dev}:{default_be}"
+            else:
+                bare = str(backend)
+                matched_device = next(
+                    (d for d, be in parent_device_backends.items() if be == bare),
+                    None,
+                )
+                if matched_device is not None:
+                    qualified: dict[str, str] = {matched_device: bare}
+                    qualified.setdefault(default_dev, default_be)
+                    backend = ",".join(f"{d}:{b}" for d, b in qualified.items())
+
+    # When ``pg_options`` is set (a ``ProcessGroupNCCL.Options`` with
+    # ``is_high_priority_stream`` / ``cga_cluster_size`` / ``max_ctas`` /
+    # ``min_ctas``), the C++ ``BackendWrapper::splitGroup`` does not consume
+    # those options. Translate them to TorchComms ``CommOptions.hints`` and
+    # build the subgroup via a standalone ``torchcomms.new_comm`` so the
+    # hints actually take effect
+    if pg_options is not None and default_pg.bound_device_id is not None:
+        hints = _nccl_options_to_torchcomms_hints(pg_options)
+        if hints:
+            return _build_eager_split_via_torchcomms(
+                default_pg, group_ranks, hints, group_desc
+            )
 
     # torchcomms backends expect every parent rank to participate in split:
     # members pass their ranks list, non-members pass [] (NCCL_SPLIT_NOCOLOR
