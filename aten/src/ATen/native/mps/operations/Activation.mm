@@ -169,6 +169,9 @@ TORCH_IMPL_FUNC(threshold_out_mps)
   using CachedGraph = MPSUnaryCachedGraph;
   TORCH_CHECK(self.is_mps());
 
+  if (result.numel() == 0)
+    return;
+
   MPSStream* stream = getCurrentMPSStream();
 
   @autoreleasepool {
@@ -215,6 +218,9 @@ TORCH_IMPL_FUNC(threshold_backward_out_mps)
   using CachedGraph = MPSUnaryGradCachedGraph;
   TORCH_CHECK(self.is_mps());
   TORCH_CHECK(grad.is_mps());
+
+  if (gradInput.numel() == 0)
+    return;
 
   MPSStream* stream = getCurrentMPSStream();
 
