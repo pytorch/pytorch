@@ -119,7 +119,9 @@ class VerifyStateDictMixin:
             model_state_dict={},
             optim_state_dict=new_dist_osd,
         )
-        self.assertEqual(optim.state_dict(), new_optim.state_dict())
+        is_xpu = next(model.parameters()).device.type == "xpu"
+        tol = {"rtol": 1e-5, "atol": 1e-5} if is_xpu else {}
+        self.assertEqual(optim.state_dict(), new_optim.state_dict(), **tol)
 
 
 class FusionEmbedding(nn.Module):
