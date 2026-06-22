@@ -22,7 +22,11 @@ from torch._inductor.custom_graph_pass import (
 from torch._inductor.virtualized import ops  # noqa: F401
 from torch._logging import trace_structured
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
-from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
+from torch.fx.experimental.symbolic_shapes import (
+    guard_or_false,
+    statically_known_true,
+    sym_eq,
+)
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config, ir, pattern_matcher  # noqa: F401
@@ -87,6 +91,124 @@ pass_patterns = [
     PatternMatcherPass(),
     PatternMatcherPass(),
 ]
+
+
+def _decompose_shard_dim_alltoall(gm: fx.GraphModule) -> None:
+    from torch.distributed.distributed_c10d import (
+        _get_group_size_by_name,
+        _resolve_process_group,
+        GroupName,
+    )
+
+    graph = gm.graph
+    target = torch.ops._dtensor.shard_dim_alltoall.default
+    decomposed = 0
+
+    for node in list(graph.nodes):
+        if node.op != "call_function" or node.target is not target:
+            continue
+        if len(node.args) != 4:
+            continue
+
+        inp, gather_dim, shard_dim, group_name = node.args
+        if not isinstance(inp, fx.Node):
+            continue
+        if not isinstance(gather_dim, int) or not isinstance(shard_dim, int):
+            continue
+
+        inp_val = inp.meta.get("val")
+        if not isinstance(inp_val, torch.Tensor):
+            continue
+        if inp_val.dtype.is_complex:
+            continue
+
+        ndim = inp_val.dim()
+        gather_dim = gather_dim + ndim if gather_dim < 0 else gather_dim
+        shard_dim = shard_dim + ndim if shard_dim < 0 else shard_dim
+        if not (0 <= gather_dim < ndim and 0 <= shard_dim < ndim):
+            continue
+        if gather_dim == shard_dim:
+            continue
+
+        try:
+            group = (
+                _resolve_process_group(GroupName(group_name))
+                if isinstance(group_name, str)
+                else group_name
+            )
+            group_size = _get_group_size_by_name(group)
+        except (RuntimeError, ValueError):
+            continue
+
+        input_shape: list[Any] = list(inp_val.shape)
+        shard_dim_size = input_shape[shard_dim]
+        # Dynamic shapes can still decompose under a divisibility shape guard.
+        # If the guard fails at runtime, Dynamo recompiles and may keep the
+        # original shard_dim_alltoall fallback instead.
+        if not guard_or_false(sym_eq(shard_dim_size % group_size, 0)):
+            continue
+
+        # Match eager shard_dim_alltoall semantics. DTensor pads uneven logical
+        # shards before reaching this op, so the local shard dim should split
+        # evenly across the process group here. The emitted collective is
+        # rank-symmetric; all_to_all_single performs the redistribution.
+        local_shard_dim_size = shard_dim_size // group_size
+
+        pre_view_shape: list[Any] = list(input_shape)
+        pre_view_shape[shard_dim] = local_shard_dim_size
+        pre_view_shape.insert(shard_dim, group_size)
+
+        post_view_shape: list[Any] = list(input_shape)
+        post_view_shape[shard_dim] = local_shard_dim_size
+        post_view_shape[gather_dim] = post_view_shape[gather_dim] * group_size
+
+        with graph.inserting_before(node):
+            pre_view = graph.call_function(
+                torch.ops.aten.view.default,
+                args=(inp, pre_view_shape),
+            )
+            pre_movedim = graph.call_function(
+                torch.ops.aten.movedim.int,
+                args=(pre_view, shard_dim, 0),
+            )
+            pre_clone = graph.call_function(
+                torch.ops.aten.clone.default,
+                args=(pre_movedim,),
+                kwargs={"memory_format": torch.contiguous_format},
+            )
+            all2all = graph.call_function(
+                torch.ops._c10d_functional.all_to_all_single.default,
+                args=(
+                    pre_clone,
+                    [1] * group_size,
+                    [1] * group_size,
+                    group_name,
+                ),
+            )
+            wait = graph.call_function(
+                torch.ops._c10d_functional.wait_tensor.default,
+                args=(all2all,),
+            )
+            post_movedim = graph.call_function(
+                torch.ops.aten.movedim.int,
+                args=(wait, 0, gather_dim),
+            )
+            post_clone = graph.call_function(
+                torch.ops.aten.clone.default,
+                args=(post_movedim,),
+                kwargs={"memory_format": torch.contiguous_format},
+            )
+            post_view = graph.call_function(
+                torch.ops.aten.view.default,
+                args=(post_clone, post_view_shape),
+            )
+
+        node.replace_all_uses_with(post_view)
+        graph.erase_node(node)
+        decomposed += 1
+
+    if decomposed:
+        counters["inductor"]["decompose_shard_dim_alltoall"] += decomposed
 
 
 def _remove_profiler_ops(graph: torch.fx.Graph) -> None:
@@ -322,6 +444,12 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         from torch._inductor.fx_passes.decomp_comms import decomp_comms
 
         GraphTransformObserver(gm, "decomp_comms").apply_gm_pass(decomp_comms)
+
+    if config.decompose_shard_dim_alltoall_fx:
+        GraphTransformObserver(gm, "decompose_shard_dim_alltoall").apply_gm_pass(
+            _decompose_shard_dim_alltoall
+        )
+        fake_tensor_updater.incremental_update()
 
     collectives_bucketing: bool = False
 
