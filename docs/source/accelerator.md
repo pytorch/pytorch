@@ -50,6 +50,7 @@ per-backend modules, the following APIs are delegated to each backend:
     current_device_index
     current_device_idx
     get_device_capability
+    get_device_name
     set_stream
     current_stream
     synchronize
