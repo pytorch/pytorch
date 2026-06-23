@@ -864,7 +864,7 @@ def uniform(
         )
     res = (high - low) * rand_samples + low
 
-    if stride != utils.make_contiguous_strides_for(cast(list[int], shape)):
+    if tuple(stride) != utils.make_contiguous_strides_for(cast(list[int], shape)):
         return res.as_strided(shape, stride)
     return res
 
