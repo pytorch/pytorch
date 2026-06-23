@@ -42,6 +42,7 @@ device_type = (
 
 class TestEmbeddingGeneric(NNTestCase):
     """CPU-only embedding tests - accelerator-unrelated"""
+
     hw_classification = "GENERIC"
 
     _do_cuda_memory_leak_check = True
@@ -299,6 +300,7 @@ class TestEmbeddingGeneric(NNTestCase):
 
 class TestEmbeddingDeviceGeneric(NNTestCase):
     """Device-agnostic embedding tests - run on all devices"""
+
     hw_classification = "DEVICE_GENERIC"
 
     def test_embedding_dense_grad(self, device):
