@@ -462,38 +462,47 @@ def register_run_dtensor_rng_op():
         autograd_not_implemented(run_dtensor_rng_op, deferred_error=True)
     )
 
-    @run_dtensor_rng_op.py_impl(DispatchKey.CUDA)
-    def impl_cuda(start_offset_incr, end_offset_incr, op, *args, **kwargs):
+    def _impl_device(start_offset_incr, end_offset_incr, op, *args, **kwargs):
         from torch.distributed.tensor._random import _PhiloxState
-
-        state = _PhiloxState(torch.cuda.get_rng_state())
-        old_offset = state.offset.clone()
-        state.offset = old_offset + start_offset_incr
 
         device = (
             args[0].device
             if args and hasattr(args[0], "device")
-            else torch.device(f"cuda:{torch.cuda.current_device()}")
+            else torch.device(
+                f"{torch.accelerator.current_accelerator().type}:"
+                f"{torch.accelerator.current_device_index()}"
+            )
         )
-        with torch.random.fork_rng(devices=[device], device_type="cuda"):
-            torch.cuda.set_rng_state(state.state)
+        device_type = device.type
+        device_mod = getattr(torch, device_type)
+
+        state = _PhiloxState(device_mod.get_rng_state())
+        old_offset = state.offset.clone()
+        state.offset = old_offset + start_offset_incr
+
+        with torch.random.fork_rng(devices=[device], device_type=device_type):
+            device_mod.set_rng_state(state.state)
             try:
                 out = op(*args, **kwargs)
             finally:
                 state.offset = old_offset + end_offset_incr
 
-        torch.cuda.set_rng_state(state.state)
+        device_mod.set_rng_state(state.state)
         return out
+
+    run_dtensor_rng_op.py_impl(DispatchKey.CUDA)(_impl_device)
+    run_dtensor_rng_op.py_impl(DispatchKey.XPU)(_impl_device)
 
     @run_dtensor_rng_op.py_impl(DispatchKey.BackendSelect)
     def impl_backend_select(start_offset_incr, end_offset_incr, op, *args, **kwargs):
         device = get_device(args, kwargs)
-        if device != "cuda":
+        if device not in ("cuda", "xpu"):
             raise RuntimeError(
-                f"run_dtensor_rng_op only supports CUDA device, got {device}. "
-                f"This operator is designed for distributed random operations on CUDA."
+                f"run_dtensor_rng_op only supports CUDA and XPU devices, got {device}. "
+                f"This operator is designed for distributed random operations on "
+                f"counter-based RNG accelerators."
             )
-        return impl_cuda(start_offset_incr, end_offset_incr, op, *args, **kwargs)
+        return _impl_device(start_offset_incr, end_offset_incr, op, *args, **kwargs)
 
     @register_fake(run_dtensor_rng_op, skip_cache=True)
     def impl_fake_tensor_mode(start_offset_incr, end_offset_incr, op, *args, **kwargs):

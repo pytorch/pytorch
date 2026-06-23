@@ -377,7 +377,7 @@ class OpDispatcher:
                 ):
                     if (
                         maybe_user_generator is not None
-                        or first_local_arg.device.type != "cuda"
+                        or first_local_arg.device.type not in ("cuda", "xpu")
                         or (
                             not _are_we_tracing()
                             and type(first_local_arg) is not torch.Tensor
@@ -393,7 +393,7 @@ class OpDispatcher:
                                     *local_tensor_args, **op_info.local_kwargs
                                 )
                     else:
-                        # CUDA device without user generator, use HOP for traceability
+                        # CUDA/XPU device without user generator, use HOP for traceability
                         if not isinstance(
                             random._rng_tracker, random.OffsetBasedRNGTracker
                         ):
