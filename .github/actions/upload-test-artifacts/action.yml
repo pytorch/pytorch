@@ -212,7 +212,6 @@ runs:
     # ===========================================
     - name: Store Test Downloaded JSONs on Github (fallback)
       uses: actions/upload-artifact@v4
-      if: steps.check-s3.outputs.s3-failed == 'true'
       continue-on-error: true
       with:
         # Add the run attempt, see [Artifact run attempt]
@@ -223,7 +222,6 @@ runs:
 
     - name: Store Test Reports on Github (fallback)
       uses: actions/upload-artifact@v4
-      if: steps.check-s3.outputs.s3-failed == 'true'
       continue-on-error: true
       with:
         # Add the run attempt, see [Artifact run attempt]
@@ -236,7 +234,6 @@ runs:
 
     - name: Store Usage Logs on Github (fallback)
       uses: actions/upload-artifact@v4
-      if: steps.check-s3.outputs.s3-failed == 'true'
       continue-on-error: true
       with:
         # Add the run attempt, see [Artifact run attempt]
