@@ -966,6 +966,28 @@ class BlockMask:
             return None
         return dq_kv_order[index[:2] + (slice(None),)]
 
+    def _query_length_for_sliced_blocks(
+        self, q_index: int | slice | Tensor, selected_q_blocks: int
+    ) -> int:
+        """Maps a Q-block selection to its packed logical token length."""
+        q_block_size = self.BLOCK_SIZE[0]
+        if not isinstance(q_index, slice):
+            return selected_q_blocks * q_block_size
+
+        selected_blocks = range(self.kv_num_blocks.shape[-1])[q_index]
+        if len(selected_blocks) == 0:
+            return 0
+        if selected_blocks.step == 1:
+            return min(selected_blocks.stop * q_block_size, self.seq_lengths[0]) - min(
+                selected_blocks.start * q_block_size, self.seq_lengths[0]
+            )
+
+        q_length = len(selected_blocks) * q_block_size
+        trailing_q_tokens = self.seq_lengths[0] % q_block_size
+        if trailing_q_tokens and self.kv_num_blocks.shape[-1] - 1 in selected_blocks:
+            q_length -= q_block_size - trailing_q_tokens
+        return q_length
+
     @classmethod
     def from_kv_blocks(
         cls,
@@ -1151,12 +1173,40 @@ class BlockMask:
         self, index: int | slice | Tensor | tuple[int | slice | Tensor, ...]
     ) -> Self:
         """
-        Returns a new BlockMask instance by getting the mask for the given index position.
+        Returns a new BlockMask by selecting batch, head, and Q-block rows.
+
+        BlockMask indexing accepts up to three indices. The first two select batch
+        and head metadata. The third selects rows in the block-sparse Q grid, not
+        individual query tokens. For example, ``block_mask[:, :, 1]`` selects one
+        Q-block row, covering the second chunk of ``Q_BLOCK_SIZE`` query tokens,
+        not query token 1. Integer indices are normalized to length-one slices so
+        the corresponding BlockMask dimension is preserved.
+
+        The returned BlockMask is packed: selecting Q block row ``i`` produces
+        local Q block row 0 in the result. Its ``shape[-2]`` is the packed logical
+        query-token length of the selected Q-block rows, clipped for partial final
+        blocks when the selection is a Python integer or slice. Tensor indexing is
+        handled without reading index values, so its logical query length is the
+        number of selected Q-block rows times ``Q_BLOCK_SIZE``. Use a Python
+        integer or slice when selecting a partial final block and an exact logical
+        length is required.
+
+        Callers must slice or gather the query tensor separately and install a new
+        ``mask_mod`` if the mask depends on absolute query positions. KV block
+        columns are not sliced by this API.
 
         Args:
-            index: Index to apply to all attributes.
+            index: Batch, head, and Q-block-row index.
 
-        Example Usage:
+        Returns:
+            A BlockMask containing metadata for the selected batch, head, and
+            packed Q-block rows.
+
+        Raises:
+            IndexError: If more than three indices are provided.
+            NotImplementedError: If tensor dq_kv_order metadata is present.
+
+        Example:
             .. code-block:: python
 
                 def causal_mask(b, h, q_idx, kv_idx):
@@ -1169,27 +1219,25 @@ class BlockMask:
                 assert block_mask.kv_num_blocks.shape == (4, 2, 4)
                 assert block_mask.kv_indices.shape == (4, 2, 4, 4)
 
-                # Index on batch dimension
-                new_block_mask = block_mask[0]
-                assert new_block_mask.kv_num_blocks.shape == (2, 4)
-                assert new_block_mask.kv_indices.shape == (2, 4, 4)
+                batch_slice = block_mask[0]
+                assert batch_slice.kv_num_blocks.shape == (1, 2, 4)
+                assert batch_slice.kv_indices.shape == (1, 2, 4, 4)
 
-                # Index on batch and head dimension
-                new_block_mask = block_mask[0, 1]
-                assert new_block_mask.kv_num_blocks.shape == (4,)
-                assert new_block_mask.kv_indices.shape == (4, 4)
+                head_slice = block_mask[0, 1]
+                assert head_slice.kv_num_blocks.shape == (1, 1, 4)
+                assert head_slice.kv_indices.shape == (1, 1, 4, 4)
 
-                # slicing on batch and head dimension
-                new_block_mask = block_mask[0:2, 1:2]
-                assert new_block_mask.kv_num_blocks.shape == (2, 1, 4)
-                assert new_block_mask.kv_indices.shape == (2, 1, 4, 4)
+                query_block_slice = block_mask[:, :, :1]
+                assert query_block_slice.shape == (4, 2, 128, 512)
+                assert query_block_slice.kv_num_blocks.shape == (4, 2, 1)
+                assert query_block_slice.kv_indices.shape == (4, 2, 1, 4)
 
-                # slicing on batch, head, and query dimension
-                new_block_mask = block_mask[
-                    0:2, 1:2, torch.tensor([1], dtype=torch.int32)
-                ]
-                assert new_block_mask.kv_num_blocks.shape == (2, 1, 1)
-                assert new_block_mask.kv_indices.shape == (2, 1, 1, 4)
+                same_block_slice = block_mask[:, :, 0]
+                assert same_block_slice.shape == (4, 2, 128, 512)
+
+                q = torch.randn(4, 2, 512, 64, device="cuda")
+                q_chunk = q[:, :, :128, :]
+                assert q_chunk.shape[-2] == query_block_slice.shape[-2]
         """
         if self.dq_kv_order is not None:
             raise NotImplementedError(
@@ -1198,6 +1246,10 @@ class BlockMask:
             )
 
         index = (index,) if not isinstance(index, tuple) else index
+        if len(index) > 3:
+            raise IndexError(
+                "BlockMask indexing supports batch, head, and Q-block dimensions"
+            )
         padded = (*index, slice(None), slice(None), slice(None))[:3]
         sizes = self.kv_num_blocks.shape[:3]
         index = tuple(
@@ -1223,7 +1275,12 @@ class BlockMask:
             new_full_kv_indices,
             BLOCK_SIZE=self.BLOCK_SIZE,
             mask_mod=_sliced_mask_mod_error,
-            seq_lengths=self.seq_lengths,
+            seq_lengths=(
+                self._query_length_for_sliced_blocks(
+                    index[2], new_kv_indices.shape[-2]
+                ),
+                self.seq_lengths[1],
+            ),
             compute_q_blocks=self.q_indices is not None,
         )
         new_block_mask.dq_kv_order = self._slice_dq_kv_order(self.dq_kv_order, index)
