@@ -72,7 +72,8 @@ class TestReplicateForwardInputs(FSDPTestMultiThread):
     @skip_if_lt_x_gpu(1)
     def test_root_move_forward_input_to_device(self):
         device = torch.device(device_type.type, 0)
-        torch.accelerator.set_device_index(device)
+        if device.type != "cpu":
+            torch.accelerator.set_device_index(device)
 
         class ParamlessModule(nn.Module):
             def forward(self, x: torch.Tensor, ys: tuple[torch.Tensor, ...]):
