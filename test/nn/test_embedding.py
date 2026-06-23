@@ -40,7 +40,10 @@ device_type = (
 )
 
 
-class TestEmbeddingNN(NNTestCase):
+class TestEmbeddingGeneric(NNTestCase):
+    """CPU-only embedding tests - accelerator-unrelated"""
+    hw_classification = "GENERIC"
+
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
@@ -294,7 +297,10 @@ class TestEmbeddingNN(NNTestCase):
         self.assertTrue(res.shape[0] == input.shape[0])
 
 
-class TestEmbeddingNNDeviceType(NNTestCase):
+class TestEmbeddingDeviceGeneric(NNTestCase):
+    """Device-agnostic embedding tests - run on all devices"""
+    hw_classification = "DEVICE_GENERIC"
+
     def test_embedding_dense_grad(self, device):
         with set_default_dtype(torch.double):
             embd = nn.Embedding(20, 20).to(device)
@@ -1972,8 +1978,8 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         bag(x, per_sample_weights=F.softmax(w, dim=-1))
 
 
-instantiate_device_type_tests(TestEmbeddingNNDeviceType, globals(), allow_xpu=True)
-instantiate_parametrized_tests(TestEmbeddingNN)
+instantiate_device_type_tests(TestEmbeddingDeviceGeneric, globals(), allow_xpu=True)
+instantiate_parametrized_tests(TestEmbeddingGeneric)
 
 if __name__ == "__main__":
     run_tests()
