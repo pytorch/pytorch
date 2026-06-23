@@ -1541,6 +1541,38 @@ TorchDynamo attempted to trace the following frames: [
         self.assertIn("non-infra torch dispatch mode present", msg)
         self.assertIn("fn", msg)
 
+    @requires_gpu
+    @torch._inductor.config.patch("force_disable_caches", True)
+    @make_logging_test(autotuning_inputs=True)
+    def test_autotuning_inputs(self, records):
+        @torch.compile(mode="max-autotune")
+        def f(x):
+            return (x * 2.0 + 1.0).sum(dim=1)
+
+        f(torch.randn(2048, 4096, device=device_type))
+
+        autotune_records = [r for r in records if ".__autotuning_inputs" in r.name]
+        self.assertGreater(len(autotune_records), 0)
+        msg = "\n".join(r.getMessage() for r in autotune_records)
+        self.assertIn("Autotuning inputs for kernel", msg)
+        self.assertIn("shape=(", msg)
+        self.assertIn("dtype=torch.float32", msg)
+        self.assertIn("stride=(", msg)
+
+    @requires_gpu
+    @torch._inductor.config.patch("force_disable_caches", True)
+    @make_logging_test(inductor=logging.DEBUG)
+    def test_autotuning_inputs_off_by_default(self, records):
+        # off_by_default: must stay silent even with the parent inductor log at DEBUG
+        @torch.compile(mode="max-autotune")
+        def f(x):
+            return (x * 2.0 + 1.0).sum(dim=1)
+
+        f(torch.randn(2048, 4096, device=device_type))
+        self.assertEqual(
+            len([r for r in records if ".__autotuning_inputs" in r.name]), 0
+        )
+
 
 # non single record tests
 exclusions = {
@@ -1588,6 +1620,7 @@ exclusions = {
     "loop_tiling",
     "auto_chunker",
     "autotuning",
+    "autotuning_inputs",
     "incremental",
     "graph_region_expansion",
     "hierarchical_compile",
