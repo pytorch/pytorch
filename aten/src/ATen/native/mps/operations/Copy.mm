@@ -4,6 +4,7 @@
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/Copy.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/ops/_copy_from_and_resize_native.h>
 #include <ATen/ops/_copy_from_native.h>
 #include <ATen/ops/imag.h>
@@ -101,6 +102,22 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
 
   id<MTLBuffer> sourceBuffer = getMTLBufferStorage(src);
   size_t dst_tensor_nbytes = dst.nbytes();
+
+  // Fast path: on Apple Silicon (unified memory), MPS tensors use MTLStorageModeShared --
+  // the CPU can read the buffer directly after syncing, with no blit copy needed.
+  if (!non_blocking && src_.dtype() == dst_.dtype()) {
+    auto [cpu_ptr, _unused] = getIMPSAllocator()->getSharedBufferPtr(src.storage().data());
+    if (cpu_ptr) {
+      stream->synchronize(SyncType::COMMIT_AND_WAIT);
+      const char* src_byte_ptr = static_cast<const char*>(cpu_ptr) + storage_byte_offset;
+      char* dst_byte_ptr = static_cast<char*>(dst.data_ptr());
+      std::memcpy(dst_byte_ptr, src_byte_ptr, dst_tensor_nbytes);
+      if (!dst.is_same(dst_)) {
+        dst_.copy_(dst, non_blocking);
+      }
+      return dst_;
+    }
+  }
 
   @autoreleasepool {
     MTLResourceOptions options = MTLResourceCPUCacheModeDefaultCache | MTLResourceStorageModeShared;
