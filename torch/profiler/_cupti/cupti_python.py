@@ -48,8 +48,6 @@ LIBCUPTI_SONAME = "libcupti.so.13"
 # CUPTI C-API result/flag constants (cupti_result.h / cupti_activity.h). These
 # are stable ABI values, so they are spelled out rather than resolved.
 CUPTI_SUCCESS = 0
-CUPTI_ERROR_MAX_LIMIT_REACHED = 12
-CUPTI_ACTIVITY_FLAG_FLUSH_FORCED = 1
 
 # CUpti_ActivityAttribute::CUPTI_ACTIVITY_ATTR_USER_DEFINED_RECORDS (not surfaced
 # by cupti-python); set on the subscription to turn on the v2 user-defined-record
@@ -83,29 +81,6 @@ OVERHEAD_KIND_NAMES: dict[int, str] = {
     7 << 16: "Activity Buffer Request",
     8 << 16: "UVM Activity Init",
 }
-
-
-def disabled_runtime_cbids() -> tuple[int, ...]:
-    """Runtime API callbacks filtered out of activity to cut trace volume."""
-    cbids = Runtime_api_trace_cbid
-    return (
-        cbids.cudaGetDevice_v3020,
-        cbids.cudaSetDevice_v3020,
-        cbids.cudaGetLastError_v3020,
-        cbids.cudaEventCreate_v3020,
-        cbids.cudaEventCreateWithFlags_v3020,
-        cbids.cudaEventDestroy_v3020,
-    )
-
-
-def disabled_driver_cbids() -> tuple[int, ...]:
-    """Driver API callbacks filtered out of activity to cut trace volume."""
-    cbids = Driver_api_trace_cbid
-    return (
-        cbids.cuKernelGetAttribute,
-        cbids.cuDevicePrimaryCtxGetState,
-        cbids.cuCtxGetCurrent,
-    )
 
 
 def _configure_ctypes(lib: ctypes.CDLL) -> None:
@@ -202,6 +177,27 @@ def _configure_ctypes(lib: ctypes.CDLL) -> None:
             ctypes.POINTER(ctypes.c_uint64),
         ]
         lib.cuptiActivityPopExternalCorrelationId_v2.restype = ctypes.c_int
+    # Collection-time noise filter: cuptiActivityEnableRuntimeApi_v2(sub, cbid, 0) stops
+    # CUPTI generating RUNTIME records for that cbid (kineto disables cudaGetDevice/etc.
+    # this way to shrink buffers). Only the subscriber-scoped _v2 form is bound: the
+    # monitor is always on the UDR path, where the global form returns
+    # CUPTI_ERROR_NOT_COMPATIBLE (like the timestamp / ext-correlation APIs).
+    if hasattr(lib, "cuptiActivityEnableRuntimeApi_v2"):
+        lib.cuptiActivityEnableRuntimeApi_v2.argtypes = [
+            ctypes.c_void_p,  # CUpti_SubscriberHandle subscriber
+            ctypes.c_uint32,  # CUpti_runtime_api_trace_cbid
+            ctypes.c_uint8,  # enable
+        ]
+        lib.cuptiActivityEnableRuntimeApi_v2.restype = ctypes.c_int
+    # Same noise filter for the DRIVER API (the v2 monitor enables DRIVER as a carrier,
+    # so its noise cbids would otherwise fill the UDR buffers).
+    if hasattr(lib, "cuptiActivityEnableDriverApi_v2"):
+        lib.cuptiActivityEnableDriverApi_v2.argtypes = [
+            ctypes.c_void_p,  # CUpti_SubscriberHandle subscriber
+            ctypes.c_uint32,  # CUpti_driver_api_trace_cbid
+            ctypes.c_uint8,  # enable
+        ]
+        lib.cuptiActivityEnableDriverApi_v2.restype = ctypes.c_int
 
 
 # --- v2 user-defined-record ctypes structs --------------------------------
@@ -249,6 +245,51 @@ def _noop_callback(*_args: object) -> None:
 _NOOP_CB = _CB_FUNC(_noop_callback)
 
 
+# Runtime-API cbids that are pure noise (no observer needs them); disabled at collection
+# time when libcupti supports it so their RUNTIME records never reach the buffers. Matches
+# the set kineto filters (see also the post-decode _RUNTIME_BLOCKLIST in monitor_trace).
+_NOISY_RUNTIME_API_NAMES = ("cudaGetDevice", "cudaSetDevice", "cudaGetLastError")
+
+
+def _noisy_runtime_cbids() -> list[int]:
+    """The cbid values for :data:`_NOISY_RUNTIME_API_NAMES`, resolved from the cupti enum
+    (``_vNNNN`` version suffix stripped). Empty when the enum is unavailable."""
+    try:
+        members = Runtime_api_trace_cbid.__members__
+    except Exception:
+        return []
+    out: list[int] = []
+    for name, member in members.items():
+        prefix, _, ver = name.rpartition("_v")
+        base = prefix if prefix and ver.isdigit() else name
+        if base in _NOISY_RUNTIME_API_NAMES:
+            out.append(int(member.value))
+    return out
+
+
+# Noisy driver-API cbids. The v2 monitor enables DRIVER as a carrier (NCCL launches
+# collective kernels via the driver API), so these would otherwise fill the UDR buffers.
+# Driver cbid names are unversioned, so -- unlike the runtime names -- they resolve by
+# direct name (no _vNNNN suffix). See also the post-decode allowlist (_DRIVER_REGISTERED
+# in monitor_trace), which keeps any other unregistered driver api out of the trace.
+_NOISY_DRIVER_API_NAMES = (
+    "cuKernelGetAttribute",
+    "cuDevicePrimaryCtxGetState",
+    "cuCtxGetCurrent",
+)
+
+
+def _noisy_driver_cbids() -> list[int]:
+    """The cbid values for :data:`_NOISY_DRIVER_API_NAMES`, resolved by direct name
+    (driver cbid names carry no version suffix). Empty when the enum is unavailable."""
+    out: list[int] = []
+    for name in _NOISY_DRIVER_API_NAMES:
+        member = getattr(Driver_api_trace_cbid, name, None)
+        if member is not None:
+            out.append(int(member.value))
+    return out
+
+
 class CuptiError(RuntimeError):
     pass
 
@@ -279,6 +320,18 @@ class _PyLibCupti:
         self._check(self._lib.cuptiGetVersion(ctypes.byref(version)), "cuptiGetVersion")
         return version.value
 
+    def get_next_record_fn_address(self) -> int:
+        """Raw address of ``cuptiActivityGetNextRecord_v2`` (the v2 record
+        iterator), for the native decode worker to call directly -- so the native
+        module needs no libcupti link, and every consumer shares the one libcupti
+        loaded here. Returns 0 if the symbol is absent (libcupti < 13.2)."""
+        if not hasattr(self._lib, "cuptiActivityGetNextRecord_v2"):
+            return 0
+        return (
+            ctypes.cast(self._lib.cuptiActivityGetNextRecord_v2, ctypes.c_void_p).value
+            or 0
+        )
+
     def get_timestamp(self, sub_handle: int) -> int:
         """CUPTI's normalized nanosecond clock for a subscriber -- the same timebase
         as activity record START/END timestamps, so a value captured here is directly
@@ -295,9 +348,13 @@ class _PyLibCupti:
         )
         return ts.value
 
-    def activity_flush_all(self, forced: bool) -> None:
-        flag = CUPTI_ACTIVITY_FLAG_FLUSH_FORCED if forced else 0
-        self._check(self._lib.cuptiActivityFlushAll(flag), "cuptiActivityFlushAll")
+    def activity_flush_all(self) -> None:
+        """Hand over COMPLETED buffers only (``cuptiActivityFlushAll(0)``). The monitor
+        never forces in-progress buffers (``CUPTI_ACTIVITY_FLAG_FLUSH_FORCED``): a
+        forced flush consumes a still-running kernel's record (its real completion is
+        then never re-delivered) and racing it against concurrent host activity is the
+        flush race that corrupts the HES heap and freezes the decode worker."""
+        self._check(self._lib.cuptiActivityFlushAll(0), "cuptiActivityFlushAll")
 
     def activity_get_num_dropped_records(self, ctx: int, stream_id: int) -> int:
         dropped = ctypes.c_size_t()
@@ -433,6 +490,43 @@ class _PyLibCupti:
             ),
             "cuptiActivityEnable_v2",
         )
+        # ``kind`` is passed as a plain int (the monitor keys its selection by int), so
+        # the old ``kind.name`` check never matched and these were dead code. Compare the
+        # kind value instead. The disable is best-effort: the per-cbid runtime/driver
+        # activity filter returns CUPTI_ERROR_NOT_COMPATIBLE under the user-defined-record
+        # subscriber (a no-op on the monitor's UDR path), so the post-decode blocklist in
+        # monitor_trace is what actually keeps the noise out of the trace.
+        from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
+
+        k = int(kind)
+        if k == int(ActivityKind.RUNTIME):
+            self.disable_noisy_runtime_apis(sub_handle)
+        elif k == int(ActivityKind.DRIVER):
+            self.disable_noisy_driver_apis(sub_handle)
+
+    def disable_noisy_runtime_apis(self, sub_handle: int) -> None:
+        """Best-effort: stop CUPTI emitting RUNTIME records for the noise-only cbids
+        (cudaGetDevice/SetDevice/GetLastError) so they don't fill the UDR buffers, via the
+        subscriber-scoped _v2 entry (the UDR path's form). A no-op if it is absent (the
+        post-decode blocklist still keeps them out of the chrome trace)."""
+        cbids = _noisy_runtime_cbids()
+        fn_v2 = getattr(self._lib, "cuptiActivityEnableRuntimeApi_v2", None)
+        if not cbids or fn_v2 is None:
+            return
+        for cbid in cbids:
+            fn_v2(ctypes.c_void_p(sub_handle), ctypes.c_uint32(cbid), ctypes.c_uint8(0))
+
+    def disable_noisy_driver_apis(self, sub_handle: int) -> None:
+        """Best-effort: stop CUPTI emitting DRIVER records for the noise-only cbids
+        (cuKernelGetAttribute/cuDevicePrimaryCtxGetState/cuCtxGetCurrent) so they don't
+        fill the UDR buffers, via the subscriber-scoped _v2 entry (the UDR path's form). A
+        no-op if it is absent (the post-decode driver allowlist still keeps them out)."""
+        cbids = _noisy_driver_cbids()
+        fn_v2 = getattr(self._lib, "cuptiActivityEnableDriverApi_v2", None)
+        if not cbids or fn_v2 is None:
+            return
+        for cbid in cbids:
+            fn_v2(ctypes.c_void_p(sub_handle), ctypes.c_uint32(cbid), ctypes.c_uint8(0))
 
     def activity_disable(self, sub_handle: int, kind: ActivityKind) -> None:
         self._check(
