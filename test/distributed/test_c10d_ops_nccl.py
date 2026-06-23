@@ -46,26 +46,6 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 
-# Opaque custom op so torch.compile traces the coalescing manager into the graph
-# (Dynamo otherwise graph-breaks on it) and reduce-overhead captures the
-# coalesced collective into a cudagraph. Used by test_coalescing_manager_reduce_overhead.
-@torch.library.custom_op("test_c10d_ops_nccl::coalesced_all_gather", mutates_args=())
-def _coalesced_all_gather(
-    inp: torch.Tensor, world_size: int, group_name: str
-) -> torch.Tensor:
-    group = c10d.distributed_c10d._resolve_process_group(group_name)
-    out = inp.new_empty(inp.numel() * world_size)
-    with dist._coalescing_manager(group=group, device=inp.device, async_ops=True) as cm:
-        dist.all_gather_single(out, inp)
-    cm.wait()
-    return out
-
-
-@_coalesced_all_gather.register_fake
-def _(inp, world_size, group_name):
-    return inp.new_empty(inp.numel() * world_size)
-
-
 class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
     @classmethod
     def backend_str(cls) -> str:
@@ -398,41 +378,6 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
 
         self.assertEqual(static_output.sum().item(), expected_sum)
         torch.cuda.memory._set_allocator_settings("expandable_segments:False")
-
-    @requires_nccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    def test_coalescing_manager_reduce_overhead(self):
-        # An async coalescing manager around a fast-path collective used to
-        # stash the gathered tensors on the discarded per-call Work, so
-        # cm.wait() never freed them and reduce-overhead cudagraph capture
-        # failed its "not tracked as outputs" pool check. The gathered buffer is
-        # an intermediate here (consumed by + 1), so the leak is not masked by
-        # being a graph output.
-        idx = self.rank_to_GPU[self.rank][0]
-        torch.cuda.set_device(idx)
-        device = torch.device(f"cuda:{idx}")
-        group_name = self.pg.group_name
-
-        def f(inp):
-            gathered = torch.ops.test_c10d_ops_nccl.coalesced_all_gather(
-                inp, self.world_size, group_name
-            )
-            return gathered + 1
-
-        compiled = torch.compile(f, mode="reduce-overhead")
-        inp = torch.full((16,), self.rank + 1.0, device=device)
-        expected = (
-            torch.cat(
-                [
-                    torch.full((16,), r + 1.0, device=device)
-                    for r in range(self.world_size)
-                ]
-            )
-            + 1
-        )
-        for _ in range(3):  # warmup iters before cudagraph capture kicks in
-            self.assertEqual(compiled(inp), expected)
-        torch.cuda.synchronize(device=device)
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")

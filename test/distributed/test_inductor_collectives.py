@@ -65,6 +65,28 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils._python_dispatch import TorchDispatchMode
 
+# Opaque custom op so torch.compile traces the coalescing manager into the graph
+# (Dynamo otherwise graph-breaks on it) and reduce-overhead captures the
+# coalesced collective into a cudagraph. Used by
+# TestCollectivesMultiProc.test_coalescing_manager_reduce_overhead.
+@torch.library.custom_op(
+    "test_inductor_collectives::coalesced_all_gather", mutates_args=()
+)
+def _coalesced_all_gather(
+    inp: torch.Tensor, world_size: int, group_name: str
+) -> torch.Tensor:
+    group = c10d.distributed_c10d._resolve_process_group(group_name)
+    out = inp.new_empty(inp.numel() * world_size)
+    with c10d._coalescing_manager(group=group, device=inp.device, async_ops=True) as cm:
+        c10d.all_gather_single(out, inp)
+    cm.wait()
+    return out
+
+
+@_coalesced_all_gather.register_fake
+def _(inp, world_size, group_name):
+    return inp.new_empty(inp.numel() * world_size)
+
 
 class TestBucketingTrace(torch._dynamo.test_case.TestCase):
     def _make_hinted_unbacked_chunked_fake_inputs(self, *, hint=None):
@@ -328,6 +350,41 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 for _ in range(3):
                     compiled_out = compiled_func(x)
                     self.assertEqual(golden_out, compiled_out)
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
+    def test_coalescing_manager_reduce_overhead(self):
+        # An async coalescing manager around a fast-path collective used to
+        # stash the gathered tensors on the discarded per-call Work, so
+        # cm.wait() never freed them and reduce-overhead cudagraph capture
+        # failed its "not tracked as outputs" pool check. The gathered buffer is
+        # an intermediate here (consumed by + 1), so the leak is not masked by
+        # being a graph output.
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            group_name = (
+                torch.distributed.distributed_c10d._get_default_group().group_name
+            )
+
+            def f(inp):
+                gathered = torch.ops.test_inductor_collectives.coalesced_all_gather(
+                    inp, self.world_size, group_name
+                )
+                return gathered + 1
+
+            compiled = torch.compile(f, mode="reduce-overhead")
+            inp = torch.full((16,), self.rank + 1.0, device=self.device)
+            expected = (
+                torch.cat(
+                    [
+                        torch.full((16,), r + 1.0, device=self.device)
+                        for r in range(self.world_size)
+                    ]
+                )
+                + 1
+            )
+            for _ in range(3):  # warmup iters before cudagraph capture kicks in
+                self.assertEqual(compiled(inp), expected)
+            torch.cuda.synchronize(device=self.device)
 
     def test_c10d_functional_tagged_pt2_compliant(self):
         op = torch.ops._c10d_functional.all_reduce.default
