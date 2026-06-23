@@ -3037,17 +3037,3 @@ class _StaticCudaLauncher:
 
 # Defined in torch/csrc/inductor/static_launcher/xpu.cpp
 class _StaticXpuLauncher(_StaticCudaLauncher): ...
-
-# Defined in torch/csrc/cuda/GreenContext.cpp
-class GreenContext:
-    @staticmethod
-    def create(
-        num_sms: _int,
-        device_id: _int,
-    ) -> GreenContext: ...
-    def set_context(
-        self,
-    ) -> None: ...
-    def pop_context(
-        self,
-    ) -> None: ...
