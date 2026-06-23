@@ -510,6 +510,14 @@ class DeviceCachingAllocator {
   ska::flat_hash_map<MempoolId_t, PrivatePool*, MempoolIdHash>
       graph_pools_freeable;
 
+  // Blocks freed during XPU graph capture whose stream_uses are non-empty.
+  // Deferred because inserting events and querying event status are illegal
+  // during graph recording. Flushed in endAllocateToPool once capture ends.
+  ska::flat_hash_set<Block*> deferred_blocks;
+
+  // Tracks which stream uses on a block were recorded during capture.
+  std::unordered_map<Block*, stream_set> block_to_xpugraph_stream_uses;
+
   std::vector<AllocatorTraceTracker> trace_trackers_;
 
   size_t try_merge_blocks(Block* dst, Block* src, BlockPool& pool) {
@@ -626,6 +634,7 @@ class DeviceCachingAllocator {
   }
 
   void process_events(const std::shared_ptr<GatheredContext>& context) {
+    insert_events_deferred_until_no_capture(context);
     using namespace sycl::info;
     for (auto it = xpu_events.begin(); it != xpu_events.end();) {
       while (!it->second.empty()) {
@@ -951,6 +960,7 @@ class DeviceCachingAllocator {
   void synchronize_and_free_events(
       const std::shared_ptr<GatheredContext>& context,
       PrivatePool* pool = nullptr) {
+    insert_events_deferred_until_no_capture(context);
     for (auto& xe : xpu_events) {
       for (auto& e : xe.second) {
         auto event = e.first;
@@ -1292,6 +1302,43 @@ class DeviceCachingAllocator {
     }
   }
 
+  bool is_capture_context() const {
+    return !captures_underway.empty();
+  }
+
+  // Removes stream uses that were recorded onto `block` during capture.
+  void remove_xpugraph_stream_uses(Block* block) {
+    auto it = block_to_xpugraph_stream_uses.find(block);
+    if (it == block_to_xpugraph_stream_uses.end()) {
+      return;
+    }
+    for (const auto& s : it->second) {
+      block->stream_uses.erase(s);
+    }
+    block_to_xpugraph_stream_uses.erase(it);
+  }
+
+  // handle deferred event which is not used by xpugraph
+  void insert_events_deferred_until_no_capture(
+      const std::shared_ptr<GatheredContext>& context) {
+    if (C10_UNLIKELY(!deferred_blocks.empty())) {
+      for (auto* block : deferred_blocks) {
+        TORCH_INTERNAL_ASSERT(!block->stream_uses.empty());
+        // Strip stream uses added during capture;
+        remove_xpugraph_stream_uses(block);
+        if (block->stream_uses.empty()) {
+          free_block(block, context);
+        } else {
+          insert_events(block);
+          if (block->event_count == 0) {
+            free_block(block, context);
+          }
+        }
+      }
+      deferred_blocks.clear();
+    }
+  }
+
   std::vector<Block*> get_private_pool_head_blocks(PrivatePool* pool) const {
     std::vector<Block*> blocks;
     for (Block* b : active_blocks) {
@@ -1470,7 +1517,11 @@ class DeviceCachingAllocator {
         context ? context : block->context_when_allocated);
 
     if (!block->stream_uses.empty()) {
-      insert_events(block);
+      if (C10_UNLIKELY(is_capture_context())) {
+        deferred_blocks.insert(block);
+      } else {
+        insert_events(block);
+      }
     } else {
       free_block(block, context);
     }
@@ -1489,6 +1540,9 @@ class DeviceCachingAllocator {
       return;
     }
     block->stream_uses.insert(stream);
+    if (C10_UNLIKELY(is_capture_context())) {
+      block_to_xpugraph_stream_uses[block].insert(stream);
+    }
   }
 
   void emptyCache(MempoolId_t mempool_id) {
@@ -1761,6 +1815,36 @@ class DeviceCachingAllocator {
   // Called by XPUGraph::capture_end
   void endAllocateToPool(MempoolId_t mempool_id) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
+
+    if (!deferred_blocks.empty()) {
+      auto pool_it = graph_pools.find(mempool_id);
+      if (pool_it != graph_pools.end()) {
+        auto* private_pool = pool_it->second.get();
+        auto context = maybeGatherContext(RecordContext::ALL);
+        std::vector<Block*> blocks_to_erase;
+        for (auto* block : deferred_blocks) {
+          if (block->pool->owner_PrivatePool == private_pool) {
+            // handle deferred blocks belonging to the pool when capture ends
+            remove_xpugraph_stream_uses(block);
+            if (block->stream_uses.empty()) {
+              // free if only stream uses are from capture; otherwise insert
+              // events to track pre-capture stream uses and free when events
+              // complete.
+              free_block(block, context);
+            } else {
+              insert_events(block);
+              if (block->event_count == 0) {
+                free_block(block, context);
+              }
+            }
+            blocks_to_erase.push_back(block);
+          }
+        }
+        for (auto* b : blocks_to_erase) {
+          deferred_blocks.erase(b);
+        }
+      }
+    }
 
     auto it = std::find_if(
         captures_underway.begin(),
