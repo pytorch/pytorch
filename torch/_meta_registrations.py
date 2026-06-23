@@ -8574,15 +8574,18 @@ def _grouped_mm_fp16_cublaslt_supported(
         return False
     mat_a_is_2d = mat_a.dim() == 2
     mat_b_is_2d = mat_b.dim() == 2
-    batch_count = offs.size(0) if mat_a_is_2d or mat_b_is_2d else mat_a.size(0)
+    batch_count = (
+        offs.size(0)
+        if offs is not None and (mat_a_is_2d or mat_b_is_2d)
+        else mat_a.size(0)
+    )
     if batch_count < 1 or batch_count > 1024:
         return False
     device_capability = torch.cuda.get_device_capability()
-    cuda_version = (
-        tuple(int(x) for x in torch.version.cuda.split(".")[:2])
-        if torch.version.cuda
-        else (0, 0)
-    )
+    cuda_version: tuple[int, int] = (0, 0)
+    if torch.version.cuda:
+        parts = torch.version.cuda.split(".")
+        cuda_version = (int(parts[0]), int(parts[1]))
     if device_capability[0] == 9:
         return cuda_version >= (13, 3)
     return cuda_version >= (13, 2) and (
