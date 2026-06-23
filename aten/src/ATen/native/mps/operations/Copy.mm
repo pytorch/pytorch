@@ -176,6 +176,7 @@ static void copy_to_mps_stride_contig(at::Tensor& dst,
   const void* host_src = static_cast<const char*>(src.storage().data()) + src_byte_offset;
 
   TORCH_INTERNAL_ASSERT(src.dtype() == dst.dtype() && src.strides() == dst.strides() && is_dense_in_storage(src));
+  TORCH_INTERNAL_ASSERT(host_src != nullptr, "CPU source storage data is null");
 
   // Fast path: on Apple Silicon (unified memory), MPS buffers use MTLStorageModeShared.
   // CPU can write directly to the shared buffer without issuing a Metal blit command.
