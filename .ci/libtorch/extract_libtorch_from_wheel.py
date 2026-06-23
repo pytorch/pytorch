@@ -101,16 +101,9 @@ def copy_libraries(torch_dir: Path, libtorch_lib: Path, platform: str) -> None:
 
 
 def fix_rpath(libtorch_lib: Path) -> None:
-    """Rewrite RPATH on all shared libraries to $ORIGIN using patchelf.
-
-    The wheel sets RPATH relative to the pip site-packages layout
-    (e.g. $ORIGIN/../../nvidia/nvshmem/lib).  For libtorch, libraries
-    live in a flat lib/ directory and NVIDIA deps come from the user's
-    system CUDA installation, so $ORIGIN is sufficient.
-
-    Requires patchelf to be available (present in manylinux2_28-builder
-    Docker images at /usr/local/bin/patchelf).
-    """
+    # Wheel RPATHs are relative to pip's site-packages layout; rewrite to
+    # $ORIGIN for the flat libtorch lib/ directory. Requires patchelf
+    # (available in manylinux2_28-builder containers).
     if sys.platform != "linux":
         raise RuntimeError(f"fix_rpath is only supported on Linux, got {sys.platform}")
 
