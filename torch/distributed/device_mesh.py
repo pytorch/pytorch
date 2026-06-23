@@ -548,12 +548,28 @@ else:
             # Otherwise, we need to make more than one API call (`new_group`) for subgroup creations. The
             # numbers of API calls are equal to the number of subgroups for each mesh dimension. In a 2 * 4
             # mesh, we need to make two API calls per ranks to create all the subgroups.
+            # The split_group path requires the parent backend to actually
+            # support communicator splitting (e.g. NCCL ncclCommSplit). Some
+            # backends (e.g. XCCL) do not override supportsSplitting() and
+            # would raise inside split_group, so fall back to the new_group
+            # path below when splitting is unsupported. torchcomms handles
+            # splitting independently of supportsSplitting(), so it is exempt.
+            parent_supports_splitting = (
+                dist_config.use_torchcomms
+                or (
+                    torch.accelerator.is_available()
+                    and default_group._get_backend(
+                        torch.accelerator.current_accelerator()  # pyrefly: ignore[bad-argument-type]
+                    ).supports_splitting
+                )
+            )
             if (
                 (
                     getattr(default_group, "bound_device_id", None) is not None
                     or dist_config.use_torchcomms
                 )
                 and torch.accelerator.is_available()
+                and parent_supports_splitting
                 and (
                     backend is None
                     or default_group._get_backend(
