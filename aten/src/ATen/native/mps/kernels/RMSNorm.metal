@@ -3,12 +3,20 @@
 // Copyright © 2024 Apple Inc.
 
 #include <c10/metal/common.h>
+#include <c10/metal/utils.h>
 #include <metal_common>
 #include <metal_simdgroup>
 #include <metal_stdlib>
 
 using namespace metal;
+using c10::metal::opmath_t;
 using c10::metal::simdgroup_size;
+
+template <typename T>
+inline T rms_norm_apply(T x, opmath_t<T> inv, T w) {
+  using op_T = opmath_t<T>;
+  return static_cast<T>((static_cast<op_T>(x) * inv) * static_cast<op_T>(w));
+}
 
 template <typename T>
 [[kernel]] void rms_single_row(
@@ -69,16 +77,12 @@ template <typename T>
   out += gid * size_t(axis_size) + lid * N_READS;
   if (lid * N_READS + N_READS <= axis_size) {
     for (int i = 0; i < N_READS; i++) {
-      out[i] = static_cast<T>(
-          (static_cast<float>(x[i]) * local_inv_mean[0]) *
-          static_cast<float>(w[w_stride * i]));
+      out[i] = rms_norm_apply(x[i], local_inv_mean[0], w[w_stride * i]);
     }
   } else {
     for (int i = 0; i < N_READS; i++) {
       if ((lid * N_READS + i) < axis_size) {
-        out[i] = static_cast<T>(
-            (static_cast<float>(x[i]) * local_inv_mean[0]) *
-            static_cast<float>(w[w_stride * i]));
+        out[i] = rms_norm_apply(x[i], local_inv_mean[0], w[w_stride * i]);
       }
     }
   }
@@ -146,16 +150,14 @@ template <typename T>
   for (uint r = 0; r < axis_size; r += lsize * N_READS) {
     if (r + lid * N_READS + N_READS <= axis_size) {
       for (int i = 0; i < N_READS; i++) {
-        out[r + i] = static_cast<T>(
-            (static_cast<float>(x[r + i]) * local_inv_mean[0]) *
-            static_cast<float>(w[w_stride * (i + r)]));
+        out[r + i] =
+            rms_norm_apply(x[r + i], local_inv_mean[0], w[w_stride * (i + r)]);
       }
     } else {
       for (int i = 0; i < N_READS; i++) {
         if ((r + lid * N_READS + i) < axis_size) {
-          out[r + i] = static_cast<T>(
-              (static_cast<float>(x[r + i]) * local_inv_mean[0]) *
-              static_cast<float>(w[w_stride * (i + r)]));
+          out[r + i] = rms_norm_apply(
+              x[r + i], local_inv_mean[0], w[w_stride * (i + r)]);
         }
       }
     }
