@@ -336,15 +336,11 @@ class _KinetoProfile:
                 else None,
             )
         if self._use_cupti_monitor:
-            from torch.profiler._cupti.observers.profiler import (
-                ProfilerObserver,
-                set_active_profiler_observer,
-            )
+            from torch.profiler._cupti.observers.profiler import ProfilerObserver
 
             self._monitor_trace_window = None
             # Constructing the observer registers it with the shared monitor and starts
-            # collection; mark it active so record_function annotations route to it.
-            # cuda_sync events are opt-in via the config, matching kineto's flag.
+            # collection. cuda_sync events are opt-in via the config, matching kineto's flag.
             self._cupti_profiler_observer = ProfilerObserver(
                 enable_cuda_sync=bool(
                     self._custom_profiler_config.get("enable_cuda_sync_events")
@@ -352,7 +348,10 @@ class _KinetoProfile:
                 # Synchronous export finalizes on the calling thread, so skip the poll thread.
                 defer_export=self._cupti_async_export,
             )
-            set_active_profiler_observer(self._cupti_profiler_observer)
+            # Publish the observer so record_function routes annotations to it. The reference
+            # lives in torch.autograd (not the cupti package), so record_function never
+            # imports the cupti chain on a non-cupti run.
+            prof._set_active_cupti_profiler_observer(self._cupti_profiler_observer)
         self.profiler._prepare_trace()
 
     def start_trace(self) -> None:
@@ -412,13 +411,10 @@ class _KinetoProfile:
         if self.profiler is None:
             raise AssertionError("Profiler must be initialized before stopping trace")
         if self._use_cupti_monitor:
-            from torch.profiler._cupti.observers.profiler import (
-                set_active_profiler_observer,
-            )
-
-            # Close the trace window (end boundary, native clock, no device sync) and queue
-            # it for deferred export; the observer is kept alive past stop for the async write.
-            set_active_profiler_observer(None)
+            # Unpublish the observer (record_function stops routing here) and close the trace
+            # window (end boundary, native clock, no device sync), queuing it for deferred
+            # export; the observer is kept alive past stop for the async write.
+            prof._set_active_cupti_profiler_observer(None)
             if self._cupti_profiler_observer is not None:
                 self._monitor_window_id = self._cupti_profiler_observer.close_window()
         self.profiler.__exit__(None, None, None)

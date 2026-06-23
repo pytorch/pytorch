@@ -1270,30 +1270,17 @@ class profile:
         return all_function_events
 
 
-# pyrefly: ignore [invalid-inheritance]
-_cupti_annotations_module: Any = None
-_cupti_annotations_checked = False
+# Set by torch.profiler to the active cupti_monitor ProfilerObserver while a session is
+# running (None otherwise). record_function routes regions to it via push/pop_annotation.
+# Held as an opaque object -- NOT imported from the cupti package -- so record_function never
+# pulls in the cupti chain on a non-cupti run, and there is a single "is a session active"
+# signal (this reference) rather than a separate flag.
+_active_cupti_profiler_observer: Any = None
 
 
-def _maybe_cupti_annotations():
-    # The experimental CUPTI monitor lets record_function regions show up as user
-    # annotations in monitor traces, via push/pop_user_annotation. Cache the
-    # optional module once so the record_function hot path never re-imports it.
-    global _cupti_annotations_module, _cupti_annotations_checked
-    if not _cupti_annotations_checked:
-        _cupti_annotations_checked = True
-        try:
-            from torch.profiler._cupti.observers import profiler as _cupti_annotations
-
-            _cupti_annotations_module = _cupti_annotations
-        except ModuleNotFoundError:
-            pass
-        except Exception:
-            log.warning(
-                "Unexpected error importing torch.profiler._cupti.observers.profiler",
-                exc_info=True,
-            )
-    return _cupti_annotations_module
+def _set_active_cupti_profiler_observer(observer: Any) -> None:
+    global _active_cupti_profiler_observer
+    _active_cupti_profiler_observer = observer
 
 
 class record_function(_ContextDecorator):  # pyrefly: ignore [invalid-inheritance]
@@ -1353,22 +1340,22 @@ class record_function(_ContextDecorator):  # pyrefly: ignore [invalid-inheritanc
         self.record = torch.ops.profiler._record_function_enter_new(
             self.name, self.args
         )
-        # Guard the CUPTI monitor hookup behind is_scripting() so TorchScript
-        # never compiles _maybe_cupti_monitor (it uses globals/imports).
+        # Route the region to the active cupti_monitor observer, if any. The reference is
+        # None unless a cupti_monitor profile is running, so a non-cupti run never touches
+        # the cupti chain. Guarded by is_scripting() (the global access doesn't compile under
+        # TorchScript), and the global is read inside the guard so it is dead-code-eliminated.
         if not torch.jit.is_scripting():
-            annotations = _maybe_cupti_annotations()
-            if annotations is not None:
-                self._cupti_monitor_external_id = annotations.push_user_annotation(
-                    self.name
-                )
+            observer = _active_cupti_profiler_observer
+            if observer is not None:
+                self._cupti_monitor_external_id = observer.push_annotation(self.name)
         return self
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any):
         if not torch.jit.is_scripting():
             if self._cupti_monitor_external_id is not None:
-                annotations = _maybe_cupti_annotations()
-                if annotations is not None:
-                    annotations.pop_user_annotation()
+                observer = _active_cupti_profiler_observer
+                if observer is not None:
+                    observer.pop_annotation()
                 self._cupti_monitor_external_id = None
         if not self.run_callbacks_on_exit:
             return
