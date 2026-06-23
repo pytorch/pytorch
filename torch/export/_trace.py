@@ -1071,6 +1071,7 @@ def _aot_export_joint_with_descriptors(
         trace_joint=False,
         num_user_fw_outs=None,
         loss_index=None,
+        traced_gradient_input_indices=None,
     )
     return gm, graph_signature
 
