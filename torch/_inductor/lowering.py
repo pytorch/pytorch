@@ -1043,6 +1043,8 @@ def _convert_element_type(x: TensorBox, dtype: torch.dtype):
             )(x, dtype)
     src_dtype = x.get_dtype()
     low_pr_fp = (torch.bfloat16, torch.float16)
+    # In precision-emulation mode, explicit lowp casts must materialize the
+    # storage dtype. Later pointwise barriers will widen from that rounded value.
     use_compute_types = not (
         config.emulate_precision_casts
         and (src_dtype in low_pr_fp or dtype in low_pr_fp)
