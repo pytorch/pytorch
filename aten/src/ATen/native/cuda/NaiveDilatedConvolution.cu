@@ -483,6 +483,9 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv_dilated2d_backward_cuda(
       (output_mask[1] ? at::empty(weight.sizes(), options) : undefined);
   Tensor grad_bias =
       (output_mask[2] ? at::empty(weight.size(0), options) : undefined);
+  Tensor grad_input_ =
+      (output_mask[0] ? (is_batch ? grad_input : grad_input.unsqueeze(0))
+                      : undefined);
   slow_conv_dilated_all_cuda_template<2>(
       undefined,
       input_,
@@ -586,6 +589,9 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv_dilated3d_backward_cuda(
       (output_mask[1] ? at::empty(weight.sizes(), options) : undefined);
   Tensor grad_bias =
       (output_mask[2] ? at::empty(weight.size(0), options) : undefined);
+  Tensor grad_input_ =
+      (output_mask[0] ? (is_batch ? grad_input : grad_input.unsqueeze(0))
+                      : undefined);
   slow_conv_dilated_all_cuda_template<3>(
       undefined,
       input_,
