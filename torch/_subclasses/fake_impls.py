@@ -1961,7 +1961,11 @@ def register_fast_op_impl(
 def infer_size(
     a: Sequence[IntLikeType], b: Sequence[IntLikeType]
 ) -> tuple[IntLikeType, ...]:
-    from torch.fx.experimental.symbolic_shapes import guard_or_false
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_false,
+        has_guarding_hint,
+        sym_or,
+    )
 
     dimsA = len(a)
     dimsB = len(b)
@@ -1974,24 +1978,34 @@ def infer_size(
         sizeA = a[dimA] if dimA >= 0 else 1
         sizeB = b[dimB] if dimB >= 0 else 1
 
-        # NB: It is very important to test for broadcasting, before testing
-        # sizeA == sizeB.  This is because the broadcasting tests are likely
-        # to be statically known (in particular, if sizeA/sizeB is unbacked
-        # but size-like, we will unsoundly assume they never equal 1), but
-        # the sizeA == sizeB test may not be statically known.  However, once
-        # we have established that no broadcasting is happening, the
-        # sizeA == sizeB is now expect_true and we can defer it as a runtime
-        # assert (this works because Python will return the terminal
-        # expression of an or statement as-is, without bool()'ing it; if this
-        # were not the case, we'd need to write this using torch.sym_or() or
-        # something like that).
+        if has_guarding_hint(sizeA) and has_guarding_hint(sizeB):
+            torch._check(
+                guard_or_false(sizeA == 1)
+                or guard_or_false(sizeB == 1)
+                or sizeA == sizeB,
+                lambda: f"The size of tensor a ({sizeA}) "
+                f"must match the size of tensor b ({sizeB}) "
+                f"at non-singleton dimension {i})",
+            )
+            expandedSizes[i] = sizeB if guard_or_false(sizeA == 1) else sizeA
+            continue
+
+        # If unbacked broadcasting is symbolically ambiguous, keep all valid
+        # runtime cases in the assertion. Under the broadcast precondition,
+        # min(sizeA * sizeB, max(sizeA, sizeB)) is exact for equal sizes,
+        # singleton broadcasting, and zero-size singleton broadcasting.
         torch._check(
-            guard_or_false(sizeA == 1) or guard_or_false(sizeB == 1) or sizeA == sizeB,
+            sym_or(sizeA == 1, sizeB == 1, sizeA == sizeB),
             lambda: f"The size of tensor a ({sizeA}) "
             f"must match the size of tensor b ({sizeB}) "
             f"at non-singleton dimension {i})",
         )
-        expandedSizes[i] = sizeB if guard_or_false(sizeA == 1) else sizeA
+        if guard_or_false(sizeA == 1):
+            expandedSizes[i] = sizeB
+        elif guard_or_false(sizeB == 1) or guard_or_false(sizeA == sizeB):
+            expandedSizes[i] = sizeA
+        else:
+            expandedSizes[i] = torch.sym_min(sizeA * sizeB, torch.sym_max(sizeA, sizeB))
     return tuple(expandedSizes)
 
 
@@ -2033,19 +2047,16 @@ def make_fast_binary_impl(
 
         from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq
 
-        # Do some extra safety checks to see if the output
-        # stride is obvious
+        # Do some extra safety checks to see if the output stride is obvious.
+        has_operand_with_final_shape = False
         for op in operands:
             if (
                 isinstance(op, torch.Tensor)
                 and len(op.shape) == len(final_shape)
-                # take the slow path if result is not determined.
                 and guard_or_false(sym_eq(op.shape, final_shape))  # type: ignore[arg-type]
             ):
+                has_operand_with_final_shape = True
                 break
-        else:
-            # if we never break in the for loop above we take the slow path.
-            return slow("both tensors nontrivially broadcast")
 
         # compute_types
         cpu = torch.device("cpu")
@@ -2124,6 +2135,10 @@ def make_fast_binary_impl(
                 ),
                 device=common_device,
             )
+        if not has_operand_with_final_shape:
+            # If no operand has the final shape and we cannot prove a standard
+            # output layout above, take the slower implementation.
+            return slow("both tensors nontrivially broadcast")
         if definitely_channels_last:
             count_label("fast channels_last")
             # do channels last

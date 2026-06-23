@@ -168,10 +168,12 @@ class elementwise_type_promotion_wrapper:
 
 # Returns True if resize is necessary
 def _resize_output_check(out: TensorLikeType, shape: ShapeType):
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
     # If the shapes are correct there's nothing to do
     if utils.same_shape(out.shape, shape):
         return False
-    if out.numel() != 0:
+    if guard_or_false(out.numel() != 0):
         msg = (
             f"An output with one or more elements was resized since it had shape {str(out.shape)} "
             "which does not match the required output shape {str(shape)}. "

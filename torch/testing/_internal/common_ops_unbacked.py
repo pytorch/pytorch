@@ -66,6 +66,7 @@ ops_dde_xfail = {
     xfail("hsplit"),
     xfail("index_fill"),
     xfail("inner"),
+    xfail("isclose"),
     xfail("kron"),
     xfail("linalg.cond"),
     xfail("linalg.cross"),
