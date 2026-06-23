@@ -1057,6 +1057,47 @@ def is_hes_enabled() -> bool:
     return _hes_enabled
 
 
+def enable_nccl_metadata_plugin() -> None:
+    """Enable the in-process NCCL profiler plugin (``ncclProfiler_v6``, compiled into
+    torch_cpu) that feeds the metadata store. NCCL resolves the plugin by dlsym'ing
+    the symbol from the program image (``dlopen(NULL)``) when
+    ``NCCL_PROFILER_PLUGIN=STATIC_PLUGIN``.
+
+    For that lookup to find the symbol, libtorch_cpu must be in the global symbol
+    scope -- but Python loads the torch extension RTLD_LOCAL, so we first re-open
+    libtorch_cpu with ``RTLD_GLOBAL | RTLD_NOLOAD`` to promote the already-loaded
+    library's symbols to global scope (no reload), then set the env var.
+
+    Call BEFORE the first ``init_process_group`` / ``ncclCommInitRank`` -- NCCL reads
+    the env and binds the plugin at comm init. The monitor must also be started by
+    then, and the comms hook registered (see
+    :class:`torch.profiler._cupti.comms.CommMonitorHook`), so the plugin sees a pushed
+    external id to key each blob. NCCL_PROFILER_PLUGIN is a
+    single slot: if it is already set to something else (e.g. another plugin), this
+    leaves it and warns -- our plugin won't load."""
+    existing = os.environ.get("NCCL_PROFILER_PLUGIN")
+    if existing and existing != "STATIC_PLUGIN":
+        logger.warning(
+            "NCCL_PROFILER_PLUGIN already set to %r; the torch CUPTI metadata "
+            "plugin (STATIC_PLUGIN) will not load (single plugin slot).",
+            existing,
+        )
+        return
+    import ctypes
+
+    so = os.path.join(os.path.dirname(torch.__file__), "lib", "libtorch_cpu.so")
+    try:
+        ctypes.CDLL(so, mode=ctypes.RTLD_GLOBAL | os.RTLD_NOLOAD)
+    except OSError as e:
+        logger.warning(
+            "could not promote %s to global symbol scope (%s); NCCL's STATIC_PLUGIN "
+            "lookup may not find ncclProfiler_v6",
+            so,
+            e,
+        )
+    os.environ["NCCL_PROFILER_PLUGIN"] = "STATIC_PLUGIN"
+
+
 def get_monitor() -> CuptiMonitor | None:
     """The process-wide monitor singleton if it has been constructed, else None."""
     return _instance
