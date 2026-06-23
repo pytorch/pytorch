@@ -2214,7 +2214,7 @@ def _enforce_mem_layouts(
     def is_col_major(tensor: Tensor) -> bool:
         return tensor.stride()[-2] == 1
 
-    # These memory layout constraint are only for FP8 GEMMs on NVIDIA GPU architectures >= SM89 and < SM100.
+    # These memory layout constraints are only for FP8 GEMMs on NVIDIA GPU architectures >= SM89 and < SM100.
     # This is because GPU arch < SM89 does not support FP8 GEMMs, and
     # SM100 has support for TN, NT, TT, NN layouts for FP8 GEMMs
     # (i.e., left and right operands can be in row or column major layouts)

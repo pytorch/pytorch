@@ -9624,11 +9624,11 @@ Example::
     tensor([ 5.,  -2.,  9., -8.])
 
     >>> # Values equidistant from two integers are rounded towards the
-    >>> #   the nearest even value (zero is treated as even)
+    >>> #   nearest even value (zero is treated as even)
     >>> torch.round(torch.tensor([-0.5, 0.5, 1.5, 2.5]))
     tensor([-0., 0., 2., 2.])
 
-    >>> # A positive decimals argument rounds to the to that decimal place
+    >>> # A positive decimals argument rounds to that decimal place
     >>> torch.round(torch.tensor([0.1234567]), decimals=3)
     tensor([0.1230])
 
