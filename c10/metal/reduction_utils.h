@@ -120,9 +120,11 @@ inline ::metal::enable_if_t<::metal::is_same_v<T, long>, T> simd_sum(T val) {
 
 template <typename T>
 inline ::metal::enable_if_t<::metal::is_same_v<T, long>, T> simd_prod(T val) {
+  // Fill with 1 (product identity) for inactive lanes in partial simdgroups
+  int2 fill = as_type<int2>(T(1));
   for (ushort i = simdgroup_size / 2; i > 0; i /= 2) {
     val *= as_type<T>(
-        ::metal::simd_shuffle_and_fill_down(as_type<int2>(val), int2(0), i));
+        ::metal::simd_shuffle_and_fill_down(as_type<int2>(val), fill, i));
   }
   return simd_broadcast(val, 0);
 }

@@ -16129,6 +16129,172 @@ class TestMetalLibrary(TestCaseMPS):
 # This requires mps to be properly registered in the device generic test framework which is not the
 # case right now. We can probably use `allow_mps` introduced in https://github.com/pytorch/pytorch/pull/87342
 # to achieve this.
+
+class TestReduceOpsMetal(TestCaseMPS):
+    """Tests for Metal kernel reduce ops: prod."""
+
+    # =========================================================================
+    # Product reduction
+    # =========================================================================
+    def test_prod_metal_basic(self):
+        for shape in [(4,), (3, 4), (2, 3, 4), (2, 3, 4, 5)]:
+            for dtype in [torch.float32, torch.float16, torch.int32, torch.int64]:
+                if dtype in (torch.int32, torch.int64):
+                    cpu_x = torch.randint(1, 3, shape, device='cpu', dtype=dtype)
+                else:
+                    cpu_x = torch.randint(1, 4, shape, device='cpu', dtype=dtype)
+                mps_x = cpu_x.to('mps')
+                # Scalar prod
+                self.assertEqual(torch.prod(mps_x), torch.prod(cpu_x))
+                # Per-dim prod
+                for dim in range(len(shape)):
+                    self.assertEqual(torch.prod(mps_x, dim=dim), torch.prod(cpu_x, dim=dim))
+                    self.assertEqual(
+                        torch.prod(mps_x, dim=dim, keepdim=True),
+                        torch.prod(cpu_x, dim=dim, keepdim=True))
+
+    def test_prod_metal_dtype_promotion(self):
+        cpu_x = torch.tensor([1, 2, 3, 4], dtype=torch.int32, device='cpu')
+        mps_x = cpu_x.to('mps')
+        self.assertEqual(
+            torch.prod(mps_x, dtype=torch.int64),
+            torch.prod(cpu_x, dtype=torch.int64))
+
+    def test_prod_metal_float_types(self):
+        cpu_x = torch.randn(8, 16, device='cpu', dtype=torch.float32)
+        for dtype in [torch.float32, torch.float16, torch.bfloat16]:
+            cx = cpu_x.to(dtype)
+            mx = cx.to('mps')
+            self.assertEqual(torch.prod(mx, dim=1), torch.prod(cx, dim=1), atol=1e-2, rtol=1e-2)
+            self.assertEqual(torch.prod(mx, dim=0), torch.prod(cx, dim=0), atol=1e-2, rtol=1e-2)
+
+    def test_prod_metal_empty(self):
+        cpu_x = torch.empty(0, 3, device='cpu')
+        mps_x = cpu_x.to('mps')
+        self.assertEqual(torch.prod(mps_x), torch.prod(cpu_x))
+
+    def test_prod_metal_scalar(self):
+        cpu_x = torch.tensor(5.0, device='cpu')
+        mps_x = cpu_x.to('mps')
+        self.assertEqual(torch.prod(mps_x), torch.prod(cpu_x))
+
+    def test_prod_metal_bool(self):
+        cpu_x = torch.tensor([True, True, False, True], device='cpu')
+        mps_x = cpu_x.to('mps')
+        self.assertEqual(torch.prod(mps_x), torch.prod(cpu_x))
+        self.assertEqual(torch.prod(mps_x, dtype=torch.int64), torch.prod(cpu_x, dtype=torch.int64))
+
+    def test_prod_metal_large(self):
+        cpu_x = torch.randint(1, 3, (64, 128), device='cpu', dtype=torch.int32)
+        mps_x = cpu_x.to('mps')
+        self.assertEqual(torch.prod(mps_x, dim=0), torch.prod(cpu_x, dim=0))
+        self.assertEqual(torch.prod(mps_x, dim=1), torch.prod(cpu_x, dim=1))
+
+    def test_prod_metal_partial_simdgroup_allreduce(self):
+        # 2-pass all-reduce prod where pass 2 lands a PARTIAL simdgroup
+        # (N=21000 -> num_groups=6, not a multiple of 32). The 64-bit
+        # simd_prod<long> (used by int/bool prod) emulates simd reduction via
+        # simd_shuffle_and_fill_down, where an active lane reading an in-range
+        # inactive lane gets garbage (0 on M1/M2 -> the product collapses to 0).
+        # The dispatch rounds the threadgroup up to a full simdgroup to avoid it.
+        # Passes on M4 regardless; this guards the M1/M2 path.
+        for dtype in (torch.int64, torch.int32, torch.bool):
+            cpu_x = torch.ones(21000, device='cpu', dtype=dtype)
+            if dtype is not torch.bool:
+                cpu_x[:3] = 2  # product = 8, distinguishable from a 0 corruption
+            mps_x = cpu_x.to('mps')
+            self.assertEqual(mps_x.prod().cpu(), cpu_x.prod(), f"prod all-reduce {dtype}")
+
+    def test_prod_metal_dtype_cast_matrix(self):
+        # prod(..., dtype=) accepts any (input, output) scalar combo, but native
+        # kernels only cover same-dtype + the natural acc promotions. Every other
+        # combo (half->float small-M, float->long, bool->uint8, ...) must cast to
+        # the output dtype rather than request an unregistered Metal kernel.
+        # Covers dim=0 (outer/small-M), dim=1 (inner) and all-reduce.
+        import itertools
+        dts = (torch.bool, torch.uint8, torch.int16, torch.int32, torch.int64,
+               torch.float16, torch.bfloat16, torch.float32)
+        cpu_base = torch.ones(6, 4, device='cpu')
+        cpu_base[0] = 2     # product over dim 0 == 2 per column; small, no overflow
+        cpu_base[2, 1] = 0  # one zero: exercises 0-product and bool AND -> False
+        for in_dt, out_dt in itertools.product(dts, dts):
+            cpu_x = cpu_base.to(in_dt)
+            mps_x = cpu_x.to('mps')
+            for kw in ({'dim': 0}, {'dim': 1}, {}):
+                self.assertEqual(torch.prod(mps_x, dtype=out_dt, **kw).cpu(),
+                                 torch.prod(cpu_x, dtype=out_dt, **kw),
+                                 f"prod {in_dt}->{out_dt} {kw}")
+
+    def test_prod_metal_noncontiguous(self):
+        cpu_x = torch.randint(1, 4, (4, 6), device='cpu', dtype=torch.float32)
+        mps_x = cpu_x.to('mps')
+        # Transpose makes it non-contiguous
+        cpu_t = cpu_x.t()
+        mps_t = mps_x.t()
+        self.assertEqual(torch.prod(mps_t, dim=0), torch.prod(cpu_t, dim=0))
+        self.assertEqual(torch.prod(mps_t, dim=1), torch.prod(cpu_t, dim=1))
+
+    def test_prod_metal_bool_fractional(self):
+        # prod(dtype=bool) uses nonzero semantics: a fractional 0.5 is nonzero
+        # -> True. A float->long truncation would make it 0 -> False.
+        for vals in ([0.5, 0.5], [0.5, 0.0], [0.1, 0.2, 0.3]):
+            x = torch.tensor(vals, device="mps")
+            self.assertEqual(torch.prod(x, dtype=torch.bool).item(),
+                             torch.prod(x.cpu(), dtype=torch.bool).item())
+
+    def test_prod_metal_bool_output_unsigned(self):
+        # prod(..., dtype=bool) must work for uint16/32/64: MPS has no scalar ne
+        # for those dtypes, so the bool path uses to(kBool). Match CPU nonzero
+        # semantics across the unsigned + signed-int + float input dtypes.
+        for dt in (torch.uint16, torch.uint32, torch.uint64,
+                   torch.int32, torch.float32):
+            x = torch.tensor([[0, 2, 3], [1, 1, 1]], dtype=dt, device="mps")
+            self.assertEqual(torch.prod(x, dim=1, dtype=torch.bool).cpu(),
+                             torch.prod(x.cpu(), dim=1, dtype=torch.bool))
+
+    def test_prod_metal_half_float_accumulation(self):
+        # MPS prod accumulates float16 in float (opmath/acc_type), matching CUDA
+        # and the MPS sum/var/std convention -- more accurate than CPU's
+        # half-precision accumulation, which drifts ~20% over a long reduction.
+        # Compare to the float-accumulated reference, not CPU.
+        x = torch.full((4096,), 1.0009765625, dtype=torch.float16)
+        self.assertEqual(torch.prod(x.to("mps")).cpu(), torch.prod(x.float()).half())
+
+    def test_prod_metal_unsigned_same_dtype(self):
+        # uint16/32/64 have no native prod kernel and prod is unsupported for
+        # them on CPU too; MPS must raise a clean error, not crash with a Metal
+        # pipeline error or recurse forever (cast-to-self is a no-op).
+        for dt in (torch.uint16, torch.uint32, torch.uint64):
+            x = torch.tensor([[1, 2, 3], [4, 5, 6]]).to(dt).to("mps")
+            with self.assertRaises(RuntimeError):
+                torch.prod(x, dim=1, dtype=dt)
+
+    def test_prod_metal_complex_dtype(self):
+        # Complex prod with an explicit real dtype casts per element before
+        # reducing (CPU semantics), not complex-product-then-cast.
+        for dt in (torch.float32, torch.float16):
+            x = torch.tensor([1 + 2j, 3 + 4j], device="mps")
+            self.assertEqual(torch.prod(x, dtype=dt).item(),
+                             torch.prod(x.cpu(), dtype=dt).item())
+
+    def test_prod_metal_rank_guard(self):
+        # A rank-17 view (reachable via as_strided past the factory rank check)
+        # hits the generic NormParams path, whose per-dim arrays are sized for
+        # max_ndim=16; ranks above 16 must raise cleanly, not index past storage.
+        x = torch.as_strided(torch.ones(1, device="mps"), (1,) * 17, (0,) * 17)
+        with self.assertRaises(RuntimeError):
+            torch.prod(x)
+
+    def test_prod_metal_reduction_extent_over_uint32_raises(self):
+        # A reduced extent of exactly 2^32 (a zero-stride view, so no large
+        # allocation) exceeds the native kernel's uint32 reduction_size, so the
+        # dispatch guard must reject it cleanly rather than wrap to 0.
+        x = torch.as_strided(torch.ones(1, device="mps"), (2, 1 << 32), (0, 0))
+        with self.assertRaises(RuntimeError):
+            torch.prod(x, dim=1)
+
+instantiate_parametrized_tests(TestReduceOpsMetal)
+
 instantiate_device_type_tests(TestConsistency, globals(), allow_mps=True, only_for="mps")
 instantiate_device_type_tests(TestErrorInputs, globals(), allow_mps=True, only_for="mps")
 instantiate_device_type_tests(TestCommon, globals(), allow_mps=True, only_for="mps")

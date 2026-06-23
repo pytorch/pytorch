@@ -1424,3 +1424,148 @@ REGISTER_ARG_REDUCTIONS_FOR_TYPE(int);
 REGISTER_ARG_REDUCTIONS_FOR_TYPE(short);
 REGISTER_ARG_REDUCTIONS_FOR_TYPE(char);
 REGISTER_ARG_REDUCTIONS_FOR_TYPE(uchar);
+
+// ===== prod kernels (this PR, on top of malfet sum/value migration) =====
+// Product reduction kernels
+// ============================================================================
+
+template <typename TI, typename TO, uint NCHAINS = SUM_NCHAINS>
+[[max_total_threads_per_threadgroup(MAX_THREADGROUP_SIZE)]]
+kernel void prod_reduction(
+    constant TI* input [[buffer(0)]],
+    device TO* output [[buffer(1)]],
+    constant NormParams<>& params [[buffer(2)]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint tptg [[threads_per_threadgroup]],
+    uint tgid [[threadgroup_position_in_grid]],
+    uint simd_lane_id [[thread_index_in_simdgroup]],
+    uint simdgroup_id [[simdgroup_index_in_threadgroup]],
+    uint simdgroup_size [[threads_per_simdgroup]]) {
+  using TA = opmath_t<TO>;
+
+  // input_base is uint32: the host dispatch guard rejects inputs whose largest
+  // element offset exceeds 2^32, so the per-group base (tgid * elems_per_group)
+  // and the accumulated index below cannot wrap a 32-bit offset.
+  uint32_t input_base = 0;
+  uint32_t reduction_stride = 1;
+  uint32_t num_reduced_dims = 0;
+  {
+    uint32_t out_idx = tgid;
+    for (int32_t dim = params.ndim - 1; dim >= 0; dim--) {
+      if (params.input_sizes[dim] != params.output_sizes[dim]) {
+        num_reduced_dims++;
+        reduction_stride = params.input_strides[dim];
+      } else {
+        auto idx = out_idx % params.output_sizes[dim];
+        out_idx /= params.output_sizes[dim];
+        input_base += idx * params.input_strides[dim];
+      }
+    }
+  }
+
+  metal::array<TA, NCHAINS> acc;
+  for (uint j = 0; j < NCHAINS; j++)
+    acc[j] = 1;
+
+  const uint32_t rsize = params.reduction_size;
+  const uint32_t stride = tptg * NCHAINS;
+  uint32_t base = tid * NCHAINS;
+
+  if (num_reduced_dims <= 1) {
+    // All indexing here is uint32: input_base, base/idx, and reduction_stride.
+    // The host guard rejects inputs whose largest element offset
+    // (input_base + idx * reduction_stride) could exceed 2^32, so this cannot
+    // wrap.
+    for (; base + NCHAINS <= rsize; base += stride) {
+      for (uint j = 0; j < NCHAINS; j++) {
+        acc[j] *=
+            static_cast<TA>(input[input_base + (base + j) * reduction_stride]);
+      }
+    }
+    for (uint32_t idx = base; idx < rsize; idx++) {
+      acc[idx % NCHAINS] *=
+          static_cast<TA>(input[input_base + idx * reduction_stride]);
+    }
+  } else {
+    for (; base + NCHAINS <= rsize; base += stride) {
+      for (uint j = 0; j < NCHAINS; j++) {
+        acc[j] *=
+            static_cast<TA>(input[get_input_offset(base + j, tgid, params)]);
+      }
+    }
+    for (uint32_t idx = base; idx < rsize; idx++) {
+      acc[idx % NCHAINS] *=
+          static_cast<TA>(input[get_input_offset(idx, tgid, params)]);
+    }
+  }
+
+  TA output_val = acc[0];
+  for (uint j = 1; j < NCHAINS; j++)
+    output_val *= acc[j];
+
+  auto threads_remaining = tptg;
+  threadgroup TA
+      shared_outputs[MAX_THREADGROUP_SIZE / c10::metal::simdgroup_size];
+
+  while (threads_remaining > 1) {
+    output_val = c10::metal::simd_prod(output_val);
+    threads_remaining = ceil_div(threads_remaining, simdgroup_size);
+    if (threads_remaining > 1) {
+      if (simd_lane_id == 0)
+        shared_outputs[simdgroup_id] = output_val;
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+      if (tid < threads_remaining) {
+        output_val = shared_outputs[tid];
+      } else {
+        output_val = static_cast<TA>(1);
+      }
+    }
+  }
+
+  if (tid == 0) {
+    // uint32 output offset: the host guard ensures output.numel() <= 2^32, so
+    // the cross-dimension index*stride sum cannot wrap. reduction_idx is a
+    // tgid-derived id and per-dim sizes/strides stay 32-bit.
+    uint32_t output_offset = 0;
+    uint32_t reduction_idx = tgid;
+    for (int32_t dim = params.ndim - 1; dim >= 0; dim--) {
+      auto output_dim_size = params.output_sizes[dim];
+      if (output_dim_size > 1) {
+        auto index_in_dim = reduction_idx % output_dim_size;
+        reduction_idx /= output_dim_size;
+        output_offset += index_in_dim * params.output_strides[dim];
+      }
+    }
+    output[output_offset] = static_cast<TO>(output_val);
+  }
+}
+
+#define REGISTER_PROD(TI, TO)                               \
+  template [[host_name("prod_reduction_" #TI "_" #TO)]]     \
+  kernel void prod_reduction<TI, TO, SUM_NCHAINS>(          \
+      constant TI * input [[buffer(0)]],                    \
+      device TO * output [[buffer(1)]],                     \
+      constant NormParams<> & params [[buffer(2)]],         \
+      uint tid [[thread_position_in_threadgroup]],          \
+      uint tptg [[threads_per_threadgroup]],                \
+      uint tgid [[threadgroup_position_in_grid]],           \
+      uint simd_lane_id [[thread_index_in_simdgroup]],      \
+      uint simdgroup_id [[simdgroup_index_in_threadgroup]], \
+      uint simdgroup_size [[threads_per_simdgroup]]);
+
+REGISTER_PROD(float, float);
+REGISTER_PROD(half, half);
+REGISTER_PROD(half, float);
+REGISTER_PROD(bfloat, bfloat);
+REGISTER_PROD(bfloat, float);
+REGISTER_PROD(int, int);
+REGISTER_PROD(int, long);
+REGISTER_PROD(long, long);
+REGISTER_PROD(short, short);
+REGISTER_PROD(short, long);
+REGISTER_PROD(char, char);
+REGISTER_PROD(char, long);
+REGISTER_PROD(uchar, uchar);
+REGISTER_PROD(uchar, long);
+REGISTER_PROD(bool, long);
+REGISTER_PROD(bool, int);
