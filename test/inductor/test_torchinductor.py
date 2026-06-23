@@ -19525,6 +19525,30 @@ if RUN_CPU:
             _, code_vec = run_and_get_cpp_code(opt_f, x_vec)
             FileCheck().check_not(".abs()").run(code_vec)
 
+        def test_bernoulli_invalid_probabilities_raise(self):
+            def fn(p):
+                return torch.bernoulli(p)
+
+            opt_fn = torch.compile(fn)
+
+            for invalid_p in (-0.1, 2.0):
+                p = torch.full((4,), invalid_p)
+                with self.assertRaisesRegex(RuntimeError, "Expected p_in"):
+                    opt_fn(p)
+
+        def test_normal_negative_std_tensor_raises(self):
+            def fn(mean, std):
+                return torch.normal(mean, std)
+
+            opt_fn = torch.compile(fn)
+            mean = torch.zeros((4,))
+            std = torch.full((4,), -1.0)
+
+            with self.assertRaisesRegex(
+                RuntimeError, "normal expects all elements of std >= 0.0"
+            ):
+                opt_fn(mean, std)
+
     copy_tests(CommonTemplate, CpuTests, "cpu")
 
 if RUN_GPU or HAS_MPS:
