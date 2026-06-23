@@ -26,7 +26,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 import torch
-import torch._dynamo.config
 from torch.utils.serialization import config as serialization_config
 from torch._subclasses.fake_tensor import FakeTensorMode, FakeTensorConverter
 from torch._utils import _rebuild_tensor
@@ -1034,7 +1033,6 @@ class ClassThatUsesBuildInstructionSomeSlots(ClassThatUsesBuildInstructionAllSlo
 
 class TestBothSerialization(TestCase):
     @parametrize("weights_only", (True, False))
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_serialization_new_format_old_format_compat(self, device, weights_only):
         x = [torch.ones(200, 200, device=device) for i in range(30)]
 
