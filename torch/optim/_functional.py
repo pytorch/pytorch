@@ -31,7 +31,7 @@ def sparse_adam(
     eps: float,
     beta1: float,
     beta2: float,
-    lr: float,
+    lr: float | Tensor,
     maximize: bool,
 ) -> None:
     r"""Functional API that performs Sparse Adam algorithm computation.

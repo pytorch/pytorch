@@ -270,18 +270,23 @@ def _single_tensor_rmsprop(
     momentum_buffer_list: list[Tensor],
     state_steps: list[Tensor],
     *,
-    lr: float,
+    lr: float | Tensor,
     alpha: float,
     eps: float,
-    weight_decay: float,
-    momentum: float,
+    weight_decay: float | int,
+    momentum: float | int,
     centered: bool,
     maximize: bool,
     differentiable: bool,
     capturable: bool,
     has_complex: bool,
 ) -> None:
-    if not torch.jit.is_scripting():
+    if torch.jit.is_scripting():
+        # JIT does not realize the ops below have overloads for both float and
+        # Tensor lr, so narrow to float (scripted callers always pass a float).
+        if not isinstance(lr, float):
+            raise AssertionError(f"Expected lr to be a float, but got {type(lr)}")
+    else:
         lr = _to_scalar(lr)
 
     for i, param in enumerate(params):
@@ -334,9 +339,9 @@ def _single_tensor_rmsprop(
             if is_complex_param:
                 buf = torch.view_as_real(buf)
             buf.mul_(momentum).addcdiv_(grad, avg)
-            param.add_(buf, alpha=-lr)
+            param.add_(buf, alpha=-lr)  # type: ignore[arg-type]
         else:
-            param.addcdiv_(grad, avg, value=-lr)
+            param.addcdiv_(grad, avg, value=-lr)  # type: ignore[arg-type]
 
 
 def _multi_tensor_rmsprop(
@@ -347,11 +352,11 @@ def _multi_tensor_rmsprop(
     momentum_buffer_list: list[Tensor],
     state_steps: list[Tensor],
     *,
-    lr: float,
+    lr: float | Tensor,
     alpha: float,
     eps: float,
-    weight_decay: float,
-    momentum: float,
+    weight_decay: float | int,
+    momentum: float | int,
     centered: bool,
     maximize: bool,
     differentiable: bool,
@@ -489,11 +494,11 @@ def rmsprop(
     capturable: bool = False,
     has_complex: bool = False,
     *,
-    lr: float,
+    lr: float | Tensor,
     alpha: float,
     eps: float,
-    weight_decay: float,
-    momentum: float,
+    weight_decay: float | int,
+    momentum: float | int,
     centered: bool,
 ) -> None:
     r"""Functional API that performs rmsprop algorithm computation.

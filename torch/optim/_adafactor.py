@@ -618,7 +618,7 @@ def adafactor(
     lr: float | Tensor,
     beta2_decay: float,
     weight_decay: float,
-    eps1: float,
+    eps1: float | None,
     eps2: float,
     maximize: bool,
 ) -> None:

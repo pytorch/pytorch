@@ -261,10 +261,10 @@ def sgd(
     grad_scale: Tensor | None = None,
     found_inf: Tensor | None = None,
     *,
-    weight_decay: float,
-    momentum: float,
-    lr: float,
-    dampening: float,
+    weight_decay: float | int,
+    momentum: float | int,
+    lr: float | Tensor,
+    dampening: float | int,
     nesterov: bool,
     maximize: bool,
 ) -> None:
@@ -326,10 +326,10 @@ def _single_tensor_sgd(
     grad_scale: Tensor | None,
     found_inf: Tensor | None,
     *,
-    weight_decay: float,
-    momentum: float,
-    lr: float,
-    dampening: float,
+    weight_decay: float | int,
+    momentum: float | int,
+    lr: float | Tensor,
+    dampening: float | int,
     nesterov: bool,
     maximize: bool,
     has_sparse_grad: bool,
@@ -337,7 +337,12 @@ def _single_tensor_sgd(
     if grad_scale is not None or found_inf is not None:
         raise AssertionError("Expected grad_scale and found_inf to be None")
 
-    if not torch.jit.is_scripting():
+    if torch.jit.is_scripting():
+        # JIT does not realize the ops below have overloads for both float and
+        # Tensor lr, so narrow to float (scripted callers always pass a float).
+        if not isinstance(lr, float):
+            raise AssertionError(f"Expected lr to be a float, but got {type(lr)}")
+    else:
         lr = _to_scalar(lr)
 
     for i, param in enumerate(params):
@@ -386,10 +391,10 @@ def _multi_tensor_sgd(
     grad_scale: Tensor | None,
     found_inf: Tensor | None,
     *,
-    weight_decay: float,
-    momentum: float,
-    lr: float,
-    dampening: float,
+    weight_decay: float | int,
+    momentum: float | int,
+    lr: float | Tensor,
+    dampening: float | int,
     nesterov: bool,
     maximize: bool,
     has_sparse_grad: bool,
@@ -483,10 +488,10 @@ def _fused_sgd(
     grad_scale: Tensor | None,
     found_inf: Tensor | None,
     *,
-    weight_decay: float,
-    momentum: float,
-    lr: float,
-    dampening: float,
+    weight_decay: float | int,
+    momentum: float | int,
+    lr: float | Tensor,
+    dampening: float | int,
     nesterov: bool,
     maximize: bool,
     has_sparse_grad: bool,

@@ -297,9 +297,9 @@ def adagrad(
     differentiable: bool = False,
     has_complex: bool = False,
     *,
-    lr: float,
-    weight_decay: float,
-    lr_decay: float,
+    lr: float | Tensor,
+    weight_decay: float | int,
+    lr_decay: float | int,
     eps: float,
     maximize: bool,
 ) -> None:
@@ -369,9 +369,9 @@ def _single_tensor_adagrad(
     grad_scale: Tensor | None,
     found_inf: Tensor | None,
     *,
-    lr: float,
-    weight_decay: float,
-    lr_decay: float,
+    lr: float | Tensor,
+    weight_decay: float | int,
+    lr_decay: float | int,
     eps: float,
     has_sparse_grad: bool,
     maximize: bool,
@@ -381,7 +381,12 @@ def _single_tensor_adagrad(
     if grad_scale is not None or found_inf is not None:
         raise AssertionError("Expected grad_scale and found_inf to be None")
 
-    if not torch.jit.is_scripting():
+    if torch.jit.is_scripting():
+        # JIT does not realize the ops below have overloads for both float and
+        # Tensor lr, so narrow to float (scripted callers always pass a float).
+        if not isinstance(lr, float):
+            raise AssertionError(f"Expected lr to be a float, but got {type(lr)}")
+    else:
         lr = _to_scalar(lr)
 
     for param, grad, state_sum, step_t in zip(
@@ -437,9 +442,9 @@ def _multi_tensor_adagrad(
     grad_scale: Tensor | None,
     found_inf: Tensor | None,
     *,
-    lr: float,
-    weight_decay: float,
-    lr_decay: float,
+    lr: float | Tensor,
+    weight_decay: float | int,
+    lr_decay: float | int,
     eps: float,
     has_sparse_grad: bool,
     maximize: bool,
@@ -549,8 +554,8 @@ def _fused_adagrad(
     found_inf: Tensor | None,
     *,
     lr: float | Tensor,
-    weight_decay: float,
-    lr_decay: float,
+    weight_decay: float | int,
+    lr_decay: float | int,
     eps: float,
     has_sparse_grad: bool,
     maximize: bool,
