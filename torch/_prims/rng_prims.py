@@ -469,7 +469,7 @@ def register_run_dtensor_rng_op():
             args[0].device
             if args and hasattr(args[0], "device")
             else torch.device(
-                f"{torch.accelerator.current_accelerator().type}:"
+                f"{torch.accelerator.current_accelerator().type}:"  # type: ignore[union-attr]
                 f"{torch.accelerator.current_device_index()}"
             )
         )
