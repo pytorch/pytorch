@@ -355,6 +355,16 @@
       ]
     }
   ],
+  "GB7684": [
+    {
+      "Gb_type": "unbacked to(memory_format=...) alias-or-copy op",
+      "Context": "to(memory_format=...) on marked-unbacked tensor",
+      "Explanation": "Dynamo cannot safely cache a memory-format alias-or-copy branch for a marked-unbacked tensor.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0027": [
     {
       "Gb_type": "Cannot check Tensor object identity without its fake value",
@@ -382,6 +392,16 @@
       "Explanation": "Dynamo must be in compiled_autograd to register hooks.",
       "Hints": [
         "Consider using torch.autograd.Function with a custom backward() method instead of register_hook()."
+      ]
+    }
+  ],
+  "GB8068": [
+    {
+      "Gb_type": "sourceless tensor _base observation",
+      "Context": "_base on sourceless tensor",
+      "Explanation": "Dynamo cannot safely cache a _base observation for a tensor without a guardable source.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
@@ -3538,6 +3558,26 @@
       ]
     }
   ],
+  "GB7788": [
+    {
+      "Gb_type": "unbacked alias-or-copy op with dynamic memory format",
+      "Context": "{alias_or_copy_node.target} on marked-unbacked tensor",
+      "Explanation": "Dynamo cannot safely cache an alias-or-copy branch for a marked-unbacked tensor without a concrete memory format.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB2489": [
+    {
+      "Gb_type": "unbacked alias-or-copy op on sourceless tensor",
+      "Context": "{alias_or_copy_node.target} on marked-unbacked tensor",
+      "Explanation": "Dynamo cannot safely cache an alias-or-copy branch for a marked-unbacked intermediate tensor without a guardable source.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0243": [
     {
       "Gb_type": "Attempted to use `torch.nn.modules.utils._ntuple` with unsupported argument type",
@@ -3913,6 +3953,16 @@
       "Gb_type": "non-constant key in object __dict__",
       "Context": "key={key.vt}",
       "Explanation": "Dynamo expects object __dict__ replacement keys to be constants.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB9644": [
+    {
+      "Gb_type": "unbacked reshape_as alias-or-copy op",
+      "Context": "reshape_as on marked-unbacked tensor",
+      "Explanation": "Dynamo cannot safely cache or functionalize reshape_as for marked-unbacked tensors because its alias-or-copy behavior depends on layout.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
@@ -4942,6 +4992,16 @@
       ]
     }
   ],
+  "GB3754": [
+    {
+      "Gb_type": "unbacked is_contiguous with dynamic layout",
+      "Context": "is_contiguous() on marked-unbacked tensor",
+      "Explanation": "Dynamo cannot safely evaluate is_contiguous() for a marked-unbacked tensor without a specialized trace-time contiguity fact.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0326": [
     {
       "Gb_type": "torch.map: improper inputs",
@@ -5017,6 +5077,26 @@
       "Explanation": "wrap_with_set_grad_enabled expects no keyword arguments (got {len(kwargs)}).",
       "Hints": [
         "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB2963": [
+    {
+      "Gb_type": "unbacked contiguity observation on sourceless tensor",
+      "Context": "is_contiguous() on marked-unbacked tensor",
+      "Explanation": "Dynamo cannot safely cache a contiguity observation for a marked-unbacked intermediate tensor without a guardable source.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB4630": [
+    {
+      "Gb_type": "unbacked to() with dynamic memory format",
+      "Context": "to(memory_format=...) on marked-unbacked tensor",
+      "Explanation": "Dynamo cannot safely cache a memory-format branch for a marked-unbacked tensor without a concrete memory format.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
@@ -5638,6 +5718,16 @@
       "Explanation": "Cannot reconstruct frozen dataclass with __post_init__ method, as it may have side effects that would be incorrectly replayed.",
       "Hints": [
         "Remove the __post_init__ method from the frozen dataclass.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB5865": [
+    {
+      "Gb_type": "unbacked alias-or-copy op with observable aliasing",
+      "Context": "{alias_or_copy_node.target} on marked-unbacked tensor",
+      "Explanation": "Dynamo cannot safely cache an alias-or-copy branch for a marked-unbacked tensor when aliasing is observable through mutation, identity, or graph outputs.",
+      "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }

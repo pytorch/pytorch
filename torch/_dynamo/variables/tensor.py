@@ -41,6 +41,7 @@ from torch.fx.experimental.symbolic_shapes import (
     guard_scalar,
     GuardOnDataDependentSymNode,
     has_free_symbols,
+    has_free_unbacked_symbols,
     is_symbolic,
     SymTypes,
 )
@@ -116,6 +117,365 @@ supported_const_comparison_ops = {
     "==": operator.eq,
     "!=": operator.ne,
 }
+
+_VALUE_ONLY_FUNCTIONS = {
+    operator.abs,
+    operator.add,
+    operator.floordiv,
+    operator.matmul,
+    operator.mod,
+    operator.mul,
+    operator.neg,
+    operator.pos,
+    operator.pow,
+    operator.sub,
+    operator.truediv,
+    torch.abs,
+    torch.add,
+    torch.div,
+    torch.matmul,
+    torch.mul,
+    torch.sub,
+    torch.true_divide,
+}
+
+_VALUE_ONLY_METHODS = {
+    "abs",
+    "add",
+    "div",
+    "float_power",
+    "floor_divide",
+    "matmul",
+    "mul",
+    "multiply",
+    "neg",
+    "positive",
+    "pow",
+    "sub",
+    "subtract",
+    "true_divide",
+}
+
+_ALIASING_METHODS = {
+    "detach",
+    "view_as",
+}
+
+_ALIASING_FUNCTION_NAMES = {
+    "_get_data_attr",
+}
+
+_INPLACE_OPERATOR_FUNCTIONS = {
+    operator.iadd,
+    operator.iand,
+    operator.ifloordiv,
+    operator.ilshift,
+    operator.imatmul,
+    operator.imod,
+    operator.imul,
+    operator.ior,
+    operator.ipow,
+    operator.irshift,
+    operator.isub,
+    operator.itruediv,
+    operator.ixor,
+}
+
+_UNBACKED_ALIAS_OR_COPY_METHODS = {
+    "contiguous",
+    "flatten",
+    "ravel",
+    "reshape",
+    "reshape_as",
+}
+
+_MISSING = object()
+
+
+def _contains_fx_node(obj: Any, nodes: set[torch.fx.Node]) -> bool:
+    if isinstance(obj, torch.fx.Node):
+        return obj in nodes
+    if isinstance(obj, (tuple, list)):
+        return any(_contains_fx_node(x, nodes) for x in obj)
+    if isinstance(obj, dict):
+        return any(_contains_fx_node(x, nodes) for x in obj.values())
+    return False
+
+
+def _is_contiguous_fx_node(node: torch.fx.Node) -> bool:
+    return (node.op == "call_method" and node.target == "contiguous") or (
+        node.op == "call_function" and node.target == torch.ops.aten.contiguous.default
+    )
+
+
+def _node_has_unbacked_stride(node: torch.fx.Node) -> bool:
+    fake = node.meta.get("example_value")
+    if not isinstance(fake, torch.Tensor):
+        return False
+    try:
+        return has_free_unbacked_symbols(fake.stride())
+    except RuntimeError:
+        return True
+
+
+def _node_has_unbacked_size(node: torch.fx.Node) -> bool:
+    fake = node.meta.get("example_value")
+    if not isinstance(fake, torch.Tensor):
+        return False
+    try:
+        return has_free_unbacked_symbols(fake.size())
+    except RuntimeError:
+        return True
+
+
+def _node_depends_on_unbacked_stride_placeholder(node: torch.fx.Node) -> bool:
+    pending = [node]
+    seen: set[torch.fx.Node] = set()
+    while pending:
+        cur = pending.pop()
+        if cur in seen:
+            continue
+        seen.add(cur)
+        if cur.op == "placeholder" and _node_has_unbacked_stride(cur):
+            return True
+        pending.extend(cur.all_input_nodes)
+    return False
+
+
+def _schema_arg_value(node: torch.fx.Node, index: int, arg_schema: Any) -> Any:
+    if index < len(node.args):
+        return node.args[index]
+    return node.kwargs.get(arg_schema.name, _MISSING)
+
+
+def _call_function_mutates_alias_arg(
+    node: torch.fx.Node, aliases: set[torch.fx.Node]
+) -> bool:
+    if node.target is operator.setitem and node.args:
+        return _contains_fx_node(node.args[0], aliases)
+
+    if _contains_fx_node(node.kwargs.get("out"), aliases):
+        return True
+
+    first_tensor_arg = node.args[0] if node.args else _MISSING
+    if first_tensor_arg is _MISSING:
+        first_tensor_arg = node.kwargs.get("input", node.kwargs.get("self", _MISSING))
+
+    if (
+        (
+            getattr(node.target, "__name__", "").endswith("_")
+            or node.target in _INPLACE_OPERATOR_FUNCTIONS
+            or node.kwargs.get("inplace") is True
+        )
+        and first_tensor_arg is not _MISSING
+        and _contains_fx_node(first_tensor_arg, aliases)
+    ):
+        return True
+
+    schema = getattr(node.target, "_schema", None)
+    if schema is None:
+        return False
+
+    for i, arg_schema in enumerate(schema.arguments):
+        alias_info = arg_schema.alias_info
+        arg_value = _schema_arg_value(node, i, arg_schema)
+        if (
+            alias_info is not None
+            and alias_info.is_write
+            and arg_value is not _MISSING
+            and _contains_fx_node(arg_value, aliases)
+        ):
+            return True
+    return False
+
+
+def _call_function_returns_alias_of_alias_arg(
+    node: torch.fx.Node, aliases: set[torch.fx.Node]
+) -> bool:
+    schema = getattr(node.target, "_schema", None)
+    if schema is None:
+        return False
+
+    output_aliases: set[str] = set()
+    for ret_schema in schema.returns:
+        if ret_schema.alias_info is not None:
+            output_aliases.update(ret_schema.alias_info.before_set)
+    if not output_aliases:
+        return False
+
+    for i, arg_schema in enumerate(schema.arguments):
+        alias_info = arg_schema.alias_info
+        arg_value = _schema_arg_value(node, i, arg_schema)
+        if (
+            alias_info is not None
+            and alias_info.before_set & output_aliases
+            and arg_value is not _MISSING
+            and _contains_fx_node(arg_value, aliases)
+        ):
+            return True
+    return False
+
+
+def _node_example_value(node: torch.fx.Node) -> Any:
+    return node.meta.get("example_value", node.meta.get("val"))
+
+
+def _example_value_aliases(value: Any, aliases: set[torch.fx.Node]) -> bool:
+    alias_value_ids: set[int] = set()
+
+    def add_tensor_and_bases(t: torch.Tensor) -> None:
+        seen: set[int] = set()
+        while isinstance(t, torch.Tensor):
+            tensor_id = id(t)
+            if tensor_id in seen:
+                return
+            seen.add(tensor_id)
+            alias_value_ids.add(tensor_id)
+            base = getattr(t, "_base", None)
+            if base is None:
+                return
+            t = base
+
+    for alias in aliases:
+        alias_value = _node_example_value(alias)
+        if isinstance(alias_value, torch.Tensor):
+            add_tensor_and_bases(alias_value)
+
+    def tensor_aliases(t: torch.Tensor) -> bool:
+        seen: set[int] = set()
+        while isinstance(t, torch.Tensor):
+            tensor_id = id(t)
+            if tensor_id in alias_value_ids:
+                return True
+            if tensor_id in seen:
+                return False
+            seen.add(tensor_id)
+            base = getattr(t, "_base", None)
+            if base is None:
+                return False
+            t = base
+        return False
+
+    if isinstance(value, torch.Tensor):
+        return tensor_aliases(value)
+    if isinstance(value, (tuple, list)):
+        return any(_example_value_aliases(x, aliases) for x in value)
+    if isinstance(value, dict):
+        return any(_example_value_aliases(x, aliases) for x in value.values())
+    return False
+
+
+def _node_output_aliases_alias_arg(
+    node: torch.fx.Node, aliases: set[torch.fx.Node]
+) -> bool:
+    if node.args and _contains_fx_node(node.args[0], aliases):
+        if node.op == "call_method" and node.target in _ALIASING_METHODS:
+            return True
+        if (
+            node.op == "call_function"
+            and getattr(node.target, "__name__", "") in _ALIASING_FUNCTION_NAMES
+        ):
+            return True
+    return (
+        node.op == "call_function"
+        and _call_function_returns_alias_of_alias_arg(node, aliases)
+    ) or _example_value_aliases(_node_example_value(node), aliases)
+
+
+def _call_function_is_proven_value_only(node: torch.fx.Node) -> bool:
+    if getattr(node.target, "_schema", None) is not None:
+        return True
+    return node.target in _VALUE_ONLY_FUNCTIONS
+
+
+def _call_method_is_proven_value_only(node: torch.fx.Node) -> bool:
+    return isinstance(node.target, str) and node.target in _VALUE_ONLY_METHODS
+
+
+def _contiguous_aliasing_is_observable(contiguous_node: torch.fx.Node) -> bool:
+    aliases: set[torch.fx.Node] = {contiguous_node}
+    base_node = contiguous_node.args[0] if contiguous_node.args else None
+    base_aliases: set[torch.fx.Node] = (
+        {base_node} if isinstance(base_node, torch.fx.Node) else set()
+    )
+    base_mutated = False
+    seen_contiguous = False
+
+    for node in contiguous_node.graph.nodes:
+        if node is contiguous_node:
+            seen_contiguous = True
+            base_mutated = False
+            continue
+
+        if node.op == "call_method":
+            self_arg = node.args[0] if node.args else None
+            if (
+                isinstance(self_arg, torch.fx.Node)
+                and self_arg in base_aliases
+                and _node_output_aliases_alias_arg(node, base_aliases)
+            ):
+                base_aliases.add(node)
+
+        if node.op == "call_function" and _node_output_aliases_alias_arg(
+            node, base_aliases
+        ):
+            base_aliases.add(node)
+
+        if not seen_contiguous:
+            continue
+
+        if node.op == "output":
+            return _contains_fx_node(node.args, aliases) or _contains_fx_node(
+                node.kwargs, aliases
+            )
+
+        consumes_contiguous_alias = _contains_fx_node(
+            node.args, aliases
+        ) or _contains_fx_node(node.kwargs, aliases)
+
+        if base_mutated and consumes_contiguous_alias:
+            return True
+
+        if node.op == "call_method":
+            self_arg = node.args[0] if node.args else None
+            if isinstance(self_arg, torch.fx.Node) and self_arg in aliases:
+                if isinstance(node.target, str) and node.target.endswith("_"):
+                    return True
+                if _node_output_aliases_alias_arg(node, aliases):
+                    aliases.add(node)
+                elif _call_method_is_proven_value_only(node):
+                    pass
+                else:
+                    return True
+            if (
+                isinstance(self_arg, torch.fx.Node)
+                and self_arg in base_aliases
+                and isinstance(node.target, str)
+                and node.target.endswith("_")
+            ):
+                if consumes_contiguous_alias:
+                    return True
+                base_mutated = True
+            continue
+
+        if node.op == "call_function":
+            if _call_function_mutates_alias_arg(node, aliases):
+                return True
+            if _call_function_mutates_alias_arg(node, base_aliases):
+                if consumes_contiguous_alias:
+                    return True
+                base_mutated = True
+            if not consumes_contiguous_alias:
+                continue
+            if _node_output_aliases_alias_arg(node, aliases):
+                aliases.add(node)
+                continue
+            if not _call_function_is_proven_value_only(node):
+                return True
+
+    return False
+
+
 supported_comparison_ops = {
     **supported_tensor_comparison_ops,
     **supported_const_comparison_ops,
@@ -296,6 +656,300 @@ class TensorVariable(VariableTracker):
             if has_tensor_arg:
                 self.synchronize_attributes(tx)
             tx.output.check_input_mutation_on_current_stream(tx)
+
+    def _has_marked_unbacked_dims(self) -> bool:
+        fake = self.proxy.node.meta.get("example_value")
+
+        if self.source is not None:
+            from .builder import is_unbacked_source
+
+            if any(is_unbacked_source(self.source.name, i) for i in range(self.ndim)):
+                return True
+
+        if fake is None:
+            return False
+
+        if self.source is not None:
+            return _node_has_unbacked_size(
+                self.proxy.node
+            ) or _node_has_unbacked_stride(self.proxy.node)
+
+        return _node_depends_on_unbacked_stride_placeholder(self.proxy.node)
+
+    def _install_unbacked_contiguity_guard(
+        self, memory_format: torch.memory_format
+    ) -> None:
+        if self.source is None:
+            unimplemented(
+                gb_type="unbacked contiguity observation on sourceless tensor",
+                context="is_contiguous() on marked-unbacked tensor",
+                explanation="Dynamo cannot safely cache a contiguity observation "
+                "for a marked-unbacked intermediate tensor without a guardable "
+                "source.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        install_guard(
+            self.source.make_guard(
+                functools.partial(
+                    GuardBuilder.TENSOR_CONTIGUITY_MATCH,
+                    memory_format=memory_format,
+                )
+            )
+        )
+
+    def _try_call_marked_unbacked_to_memory_format(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        if (
+            "memory_format" not in kwargs
+            or not config.mark_unbacked_strides
+            or not self._has_marked_unbacked_dims()
+        ):
+            return None
+
+        try:
+            memory_format = kwargs["memory_format"].as_python_constant()
+        except NotImplementedError:
+            unimplemented(
+                gb_type="unbacked to() with dynamic memory format",
+                context="to(memory_format=...) on marked-unbacked tensor",
+                explanation="Dynamo cannot safely cache a memory-format branch "
+                "for a marked-unbacked tensor without a concrete memory format.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+
+        if memory_format not in (
+            torch.contiguous_format,
+            torch.channels_last,
+            torch.channels_last_3d,
+        ):
+            return None
+
+        def const_arg(arg: VariableTracker) -> object:
+            try:
+                return arg.as_python_constant()
+            except NotImplementedError:
+                return _MISSING
+
+        def device_arg_differs(arg: VariableTracker) -> bool:
+            device = const_arg(arg)
+            if device in (_MISSING, None) or self.device is None:
+                return False
+            if not isinstance(device, (torch.device, int, str)):
+                return False
+            try:
+                target_device = torch.device(device)
+            except (RuntimeError, TypeError):
+                return False
+            if target_device.type != self.device.type:
+                return True
+            if target_device.index is None or self.device.index is None:
+                return False
+            return target_device.index != self.device.index
+
+        def dtype_arg_differs(arg: VariableTracker) -> bool:
+            dtype = const_arg(arg)
+            return dtype is not _MISSING and dtype is not None and dtype != self.dtype
+
+        copy_arg = kwargs.get("copy")
+        dtype_arg = kwargs.get("dtype")
+        device_arg = kwargs.get("device")
+        if copy_arg is None and len(args) >= 4:
+            copy_arg = args[3]
+        if args:
+            first_arg = const_arg(args[0])
+            if isinstance(args[0], TensorVariable):
+                if args[0].dtype != self.dtype or args[0].device != self.device:
+                    return None
+                if copy_arg is None and len(args) >= 3:
+                    copy_arg = args[2]
+            elif isinstance(first_arg, torch.dtype):
+                dtype_arg = dtype_arg or args[0]
+                if copy_arg is None and len(args) >= 3:
+                    copy_arg = args[2]
+            else:
+                device_arg = device_arg or args[0]
+                if len(args) >= 2:
+                    dtype_arg = dtype_arg or args[1]
+
+        if (dtype_arg is not None and dtype_arg_differs(dtype_arg)) or (
+            device_arg is not None and device_arg_differs(device_arg)
+        ):
+            return None
+
+        if copy_arg is not None:
+            try:
+                if copy_arg.as_python_constant() is True:
+                    return None
+            except NotImplementedError:
+                pass
+
+        unimplemented(
+            gb_type="unbacked to(memory_format=...) alias-or-copy op",
+            context="to(memory_format=...) on marked-unbacked tensor",
+            explanation=(
+                "Dynamo cannot safely cache a memory-format alias-or-copy "
+                "branch for a marked-unbacked tensor."
+            ),
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    @staticmethod
+    def _contiguous_memory_format_arg(
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> torch.memory_format | None:
+        memory_format_arg = kwargs.get("memory_format")
+        if memory_format_arg is None and args:
+            memory_format_arg = args[0]
+        if memory_format_arg is None:
+            return torch.contiguous_format
+        try:
+            return memory_format_arg.as_python_constant()
+        except NotImplementedError:
+            return None
+
+    def _install_unbacked_alias_or_copy_guard(
+        self,
+        tx: "InstructionTranslatorBase",
+        alias_or_copy_node: torch.fx.Node,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> None:
+        if not config.mark_unbacked_strides:
+            return
+        if not self._has_marked_unbacked_dims():
+            return
+
+        memory_format = (
+            self._contiguous_memory_format_arg(args, kwargs)
+            if _is_contiguous_fx_node(alias_or_copy_node)
+            else torch.contiguous_format
+        )
+        if memory_format is None:
+            unimplemented(
+                gb_type="unbacked alias-or-copy op with dynamic memory format",
+                context=f"{alias_or_copy_node.target} on marked-unbacked tensor",
+                explanation="Dynamo cannot safely cache an alias-or-copy branch "
+                "for a marked-unbacked tensor without a concrete memory format.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+
+        if self.source is None:
+            unimplemented(
+                gb_type="unbacked alias-or-copy op on sourceless tensor",
+                context=f"{alias_or_copy_node.target} on marked-unbacked tensor",
+                explanation="Dynamo cannot safely cache an alias-or-copy branch "
+                "for a marked-unbacked intermediate tensor without a guardable "
+                "source.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+
+        source = self.source
+        if source is None:
+            raise AssertionError("unreachable after sourceless tensor check")
+        alias_or_copy_node.meta["_dynamo_unbacked_alias_or_copy_guard"] = (
+            source,
+            memory_format,
+        )
+
+        if alias_or_copy_node.target == "reshape_as":
+            unimplemented(
+                gb_type="unbacked reshape_as alias-or-copy op",
+                context="reshape_as on marked-unbacked tensor",
+                explanation="Dynamo cannot safely cache or functionalize "
+                "reshape_as for marked-unbacked tensors because its "
+                "alias-or-copy behavior depends on layout.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+
+        if not _is_contiguous_fx_node(alias_or_copy_node):
+
+            def fail_unbacked_alias_or_copy_observable_aliasing() -> None:
+                unimplemented(
+                    gb_type="unbacked alias-or-copy op with observable aliasing",
+                    context=f"{alias_or_copy_node.target} on marked-unbacked tensor",
+                    explanation=(
+                        "Dynamo cannot safely cache an alias-or-copy "
+                        "branch for a marked-unbacked tensor when "
+                        "aliasing is observable through mutation, "
+                        "identity, or graph outputs."
+                    ),
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+
+            def fail_if_aliasing_observable(gm: torch.fx.GraphModule) -> None:
+                alias_or_copy_node_found = False
+                for node in gm.graph.nodes:
+                    if node is alias_or_copy_node or (
+                        node.op == alias_or_copy_node.op
+                        and node.target == alias_or_copy_node.target
+                        and node.args == alias_or_copy_node.args
+                    ):
+                        alias_or_copy_node_found = True
+                        if _contiguous_aliasing_is_observable(node):
+                            fail_unbacked_alias_or_copy_observable_aliasing()
+
+                if not alias_or_copy_node_found:
+                    fail_unbacked_alias_or_copy_observable_aliasing()
+
+            tx.output.add_graph_finalizer(fail_if_aliasing_observable)
+            return
+
+        output = tx.output
+
+        def install_contiguity_guard_if_aliasing_observable(
+            gm: torch.fx.GraphModule,
+        ) -> None:
+            alias_or_copy_node_found = False
+            if (
+                alias_or_copy_node.graph is gm.graph
+                and alias_or_copy_node in gm.graph.nodes
+                and _contiguous_aliasing_is_observable(alias_or_copy_node)
+            ):
+                output.guards.add(
+                    source.make_guard(
+                        functools.partial(
+                            GuardBuilder.TENSOR_CONTIGUITY_MATCH,
+                            memory_format=memory_format,
+                        )
+                    )
+                )
+                return
+
+            for node in gm.graph.nodes:
+                if node is alias_or_copy_node:
+                    alias_or_copy_node_found = True
+                if (
+                    _is_contiguous_fx_node(node)
+                    and node.args == alias_or_copy_node.args
+                    and _contiguous_aliasing_is_observable(node)
+                ):
+                    alias_or_copy_node_found = True
+                    output.guards.add(
+                        source.make_guard(
+                            functools.partial(
+                                GuardBuilder.TENSOR_CONTIGUITY_MATCH,
+                                memory_format=memory_format,
+                            )
+                        )
+                    )
+                    return
+
+            if not alias_or_copy_node_found:
+                output.guards.add(
+                    source.make_guard(
+                        functools.partial(
+                            GuardBuilder.TENSOR_CONTIGUITY_MATCH,
+                            memory_format=memory_format,
+                        )
+                    )
+                )
+
+        tx.output.add_graph_finalizer(install_contiguity_guard_if_aliasing_observable)
 
     def debug_repr(self) -> str:
         return _tensor_debug_repr(
@@ -727,10 +1381,34 @@ class TensorVariable(VariableTracker):
 
                 proxy = GetAttrVariable.create_getattr_proxy(self.as_proxy(), name)
                 if self.source is not None:
+                    if name == "_base":
+                        example_value = self.proxy.node.meta["example_value"]
+                        base_value = getattr(example_value, "_base", None)
+                        guard_builder = GuardBuilder.ID_MATCH
+                        if base_value is None:
+                            guard_builder = GuardBuilder.NONE_MATCH
+                        install_guard(
+                            AttrSource(self.source, "_base").make_guard(guard_builder)
+                        )
+                        if base_value is not None:
+                            install_guard(
+                                AttrSource(self.source, "_base").make_guard(
+                                    GuardBuilder.TENSOR_METADATA_MATCH
+                                )
+                            )
                     return wrap_fx_proxy(
                         tx=tx, proxy=proxy, source=AttrSource(self.source, name)
                     )
                 else:
+                    if name == "_base":
+                        unimplemented(
+                            gb_type="sourceless tensor _base observation",
+                            context="_base on sourceless tensor",
+                            explanation="Dynamo cannot safely cache a _base "
+                            "observation for a tensor without a guardable "
+                            "source.",
+                            hints=[*graph_break_hints.SUPPORTABLE],
+                        )
                     return wrap_fx_proxy(tx=tx, proxy=proxy)
 
             result = try_generic_attr_handling()
@@ -965,6 +1643,11 @@ class TensorVariable(VariableTracker):
                 ],
             )
 
+        if name == "to":
+            result = self._try_call_marked_unbacked_to_memory_format(tx, args, kwargs)
+            if result is not None:
+                return result
+
         try:
             handler_method = getattr(self, f"method_{name}")
         except AttributeError:
@@ -1021,6 +1704,9 @@ class TensorVariable(VariableTracker):
                 hints=[*graph_break_hints.SUPPORTABLE],
                 from_exc=e,
             )
+
+        if name in _UNBACKED_ALIAS_OR_COPY_METHODS:
+            self._install_unbacked_alias_or_copy_guard(tx, proxy.node, args, kwargs)
 
         # [Note: Inplace ops and VariableTracker metadata]
         # For inplace operations, we need to propagate tensor metadata from the
@@ -1171,6 +1857,17 @@ class TensorVariable(VariableTracker):
             if memory_format is not None
             else torch.contiguous_format
         )
+        if config.mark_unbacked_strides and self._has_marked_unbacked_dims():
+            self._install_unbacked_contiguity_guard(memory_format_const)
+            if self.is_contiguous is None:
+                unimplemented(
+                    gb_type="unbacked is_contiguous with dynamic layout",
+                    context="is_contiguous() on marked-unbacked tensor",
+                    explanation="Dynamo cannot safely evaluate is_contiguous() "
+                    "for a marked-unbacked tensor without a specialized "
+                    "trace-time contiguity fact.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
         if self.is_contiguous is not None:
             # pyrefly: ignore[not-iterable]
             return VariableTracker.build(tx, memory_format_const in self.is_contiguous)

@@ -2601,12 +2601,43 @@ class BuiltinVariable(BaseBuiltinVariable):
         op = self.fn
 
         if op in [operator.is_, operator.is_not]:
-            is_result = (
-                left.is_tensor()
-                and right.is_tensor()
-                and id(extract_fake_example_value(left.as_proxy().node))
-                == id(extract_fake_example_value(right.as_proxy().node))
-            )
+            tensor_tensor_identity = left.is_tensor() and right.is_tensor()
+            if tensor_tensor_identity:
+                left_value = extract_fake_example_value(left.as_proxy().node)
+                right_value = extract_fake_example_value(right.as_proxy().node)
+                is_result = id(left_value) == id(right_value)
+                if (
+                    left.source is not None
+                    and right.source is not None
+                    and left.source != right.source
+                ):
+                    install_guard(
+                        left.source.make_guard(
+                            functools.partial(
+                                GuardBuilder.DUPLICATE_INPUT,
+                                source_b=right.source,
+                                expected=is_result,
+                            )
+                        )
+                    )
+                # Guard alias-or-copy operations whose identity result can
+                # change with runtime layout, without pinning object ids.
+                for arg in (left, right):
+                    alias_or_copy_guard = arg.as_proxy().node.meta.get(
+                        "_dynamo_unbacked_alias_or_copy_guard"
+                    )
+                    if alias_or_copy_guard is not None:
+                        source, memory_format = alias_or_copy_guard
+                        install_guard(
+                            source.make_guard(
+                                functools.partial(
+                                    GuardBuilder.TENSOR_CONTIGUITY_MATCH,
+                                    memory_format=memory_format,
+                                )
+                            )
+                        )
+            else:
+                is_result = False
             if op is operator.is_:
                 return VariableTracker.build(tx, is_result)
             else:

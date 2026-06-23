@@ -3285,6 +3285,28 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 ),
             )
 
+        if (
+            fn_
+            in (
+                torch.ops.aten.contiguous.default,
+                torch.ops.aten.reshape.default,
+                torch.ops.aten.flatten.using_ints,
+                torch.reshape,
+                torch.flatten,
+                torch.ravel,
+            )
+            and args
+        ):
+            from .tensor import TensorVariable
+
+            if isinstance(args[0], TensorVariable) and tensor_variable.is_tensor():
+                guard_args = (
+                    args[1:] if fn_ == torch.ops.aten.contiguous.default else []
+                )
+                args[0]._install_unbacked_alias_or_copy_guard(
+                    tx, tensor_variable.as_proxy().node, guard_args, kwargs
+                )
+
         # Handle e.g., `torch.ones(10, requires_grad=True)`
         if (
             tensor_variable.is_tensor()

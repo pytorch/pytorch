@@ -2307,11 +2307,17 @@ class StatelessSymbolicContext(SymbolicContext, Generic[_P1, _T1]):
                 self, "constraint_strides", [None] * len(self.dynamic_sizes)
             )
         if not all(
-            stride in (DimDynamic.INFER_STRIDE, DimDynamic.DYNAMIC, DimDynamic.DUCK)
+            stride
+            in (
+                DimDynamic.INFER_STRIDE,
+                DimDynamic.DYNAMIC,
+                DimDynamic.DUCK,
+                DimDynamic.UNBACKED,
+            )
             for stride in self.dynamic_strides
         ):
             raise AssertionError(
-                "dynamic_strides must only contain INFER_STRIDE, DYNAMIC, or DUCK"
+                "dynamic_strides must only contain INFER_STRIDE, DYNAMIC, DUCK, or UNBACKED"
             )
 
 
@@ -5282,10 +5288,14 @@ class ShapeEnv:
                 i != len(ex_stride) - 1
                 and ex_stride[i] == ex_size[i + 1] * ex_stride[i + 1]
             )
-            if val in (0, 1) and not contiguous_stride:
+            dynamic_stride = dynamic_strides[i]
+            if (
+                val in (0, 1)
+                and not contiguous_stride
+                and dynamic_stride is not DimDynamic.UNBACKED
+            ):
                 out_stride = sympy.Integer(val)
             else:
-                dynamic_stride = dynamic_strides[i]
                 if dynamic_stride == DimDynamic.INFER_STRIDE and val in candidates:
                     # Set stride to a candidate only for DimDynamic.INFER_STRIDE
                     out_stride = candidates[val]
@@ -5701,9 +5711,13 @@ class ShapeEnv:
                 isinstance(symbolic_context, StatelessSymbolicContext)
                 and symbolic_context.shape_ids is not None
             ):
-                from torch._dynamo.source import TensorPropertySource
+                from torch._dynamo.source import TensorProperty, TensorPropertySource
 
-                if isinstance(source, TensorPropertySource) and source.idx is not None:
+                if (
+                    isinstance(source, TensorPropertySource)
+                    and source.prop is TensorProperty.SIZE
+                    and source.idx is not None
+                ):
                     shape_id = symbolic_context.shape_ids.get(source.idx)
 
             # Check for unbacked bounds
@@ -5711,9 +5725,13 @@ class ShapeEnv:
                 isinstance(symbolic_context, StatelessSymbolicContext)
                 and symbolic_context.unbacked_bounds is not None
             ):
-                from torch._dynamo.source import TensorPropertySource
+                from torch._dynamo.source import TensorProperty, TensorPropertySource
 
-                if isinstance(source, TensorPropertySource) and source.idx is not None:
+                if (
+                    isinstance(source, TensorPropertySource)
+                    and source.prop is TensorProperty.SIZE
+                    and source.idx is not None
+                ):
                     bounds = symbolic_context.unbacked_bounds.get(source.idx)
                     if bounds is not None:
                         unbacked_min, unbacked_max = bounds

@@ -1289,7 +1289,7 @@ class GuardBuilder(GuardBuilderBase):
 
         # Save the guard managers to avoid repeatedly traversing sources.
         self._cached_guard_managers: dict[str, GuardManager] = {}
-        self._cached_duplicate_input_guards: set[tuple[str, str]] = set()
+        self._cached_duplicate_input_guards: set[tuple[str, str, bool]] = set()
         self.object_aliasing_guard_codes: list[tuple[str, str]] = []
         self.guard_nn_modules = config.guard_nn_modules and justknobs_check(
             "pytorch/compiler:guard_nn_modules"
@@ -3046,7 +3046,9 @@ class GuardBuilder(GuardBuilderBase):
     # single source → value check.
     # TODO(voz): Deduplicate w/ AOTAutograd dupe input guards
     @skip_guard_check_spec
-    def DUPLICATE_INPUT(self, guard: Guard, source_b: Source) -> None:
+    def DUPLICATE_INPUT(
+        self, guard: Guard, source_b: Source, expected: bool = True
+    ) -> None:
         if is_from_skip_guard_source(
             guard.originating_source
         ) or is_from_skip_guard_source(source_b):
@@ -3067,15 +3069,22 @@ class GuardBuilder(GuardBuilderBase):
             return
 
         # Check that the guard has not been inserted already
-        key = (ref_a, ref_b)
+        key = (ref_a, ref_b, expected)
         if key in self._cached_duplicate_input_guards:
             return
 
-        self._cached_duplicate_input_guards.add((ref_a, ref_b))
-        self._cached_duplicate_input_guards.add((ref_b, ref_a))
+        self._cached_duplicate_input_guards.add(key)
+        self._cached_duplicate_input_guards.add((ref_b, ref_a, expected))
 
-        code = [f"{ref_b} is {ref_a}"]
+        code = [f"{ref_b} is {'not ' if not expected else ''}{ref_a}"]
         self._set_guard_export_info(guard, code)
+
+        if not expected:
+            self.add_python_lambda_leaf_guard_to_root(
+                code,
+                get_verbose_code_parts(code, guard),
+            )
+            return
 
         if config.use_lamba_guard_for_object_aliasing:
             # Save the code part so that we can install a lambda guard at the
@@ -3719,6 +3728,82 @@ class GuardBuilder(GuardBuilderBase):
 
             if len(code) > 0:
                 self._set_guard_export_info(guard, code)
+
+    @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: (
+            guard.create_fn.keywords["memory_format"],
+            value.is_contiguous(
+                memory_format=guard.create_fn.keywords["memory_format"]
+            ),
+            value._base is None,
+        ),
+        eval_fn=lambda value, metadata: (
+            isinstance(value, torch.Tensor)
+            and value.is_contiguous(memory_format=metadata[0]) == metadata[1]
+            and (value._base is None) == metadata[2]
+        ),
+    )
+    def TENSOR_CONTIGUITY_MATCH(
+        self, guard: Guard, memory_format: torch.memory_format
+    ) -> None:
+        ref = self.arg_ref(guard)
+        value = self.get(guard)
+        expected = value.is_contiguous(memory_format=memory_format)
+        expected_base_is_none = value._base is None
+
+        def guard_fn(x: Any) -> bool:
+            return (
+                isinstance(x, torch.Tensor)
+                and x.is_contiguous(memory_format=memory_format) == expected
+                and (x._base is None) == expected_base_is_none
+            )
+
+        memory_format_names = {
+            torch.contiguous_format: "torch.contiguous_format",
+            torch.channels_last: "torch.channels_last",
+            torch.channels_last_3d: "torch.channels_last_3d",
+        }
+        code = [
+            f"{ref}.is_contiguous(memory_format={memory_format_names.get(memory_format, repr(memory_format))}) == {expected}",
+            f"({ref}._base is None) == {expected_base_is_none}",
+        ]
+        self._set_guard_export_info(guard, code)
+        self.get_guard_manager(guard).add_lambda_guard(
+            guard_fn, get_verbose_code_parts(code, guard), guard.user_stack
+        )
+
+    @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: (
+            tuple(value.size()),
+            tuple(value.stride()),
+        ),
+        eval_fn=lambda value, metadata: (
+            isinstance(value, torch.Tensor)
+            and tuple(value.size()) == metadata[0]
+            and tuple(value.stride()) == metadata[1]
+        ),
+    )
+    def TENSOR_METADATA_MATCH(self, guard: Guard) -> None:
+        ref = self.arg_ref(guard)
+        value = self.get(guard)
+        expected_size = tuple(value.size())
+        expected_stride = tuple(value.stride())
+
+        def guard_fn(x: Any) -> bool:
+            return (
+                isinstance(x, torch.Tensor)
+                and tuple(x.size()) == expected_size
+                and tuple(x.stride()) == expected_stride
+            )
+
+        code = [
+            f"tuple({ref}.size()) == {expected_size}",
+            f"tuple({ref}.stride()) == {expected_stride}",
+        ]
+        self._set_guard_export_info(guard, code)
+        self.get_guard_manager(guard).add_lambda_guard(
+            guard_fn, get_verbose_code_parts(code, guard), guard.user_stack
+        )
 
     # A util that in the case of export, adds data onto guards
     def _set_guard_export_info(

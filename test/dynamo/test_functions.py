@@ -5381,13 +5381,18 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             else:
                 return x + y
 
-        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
+        cnt = torch._dynamo.testing.CompileCounter()
+        fn_opt = torch.compile(backend=cnt, fullgraph=True, dynamic=True)(fn)
 
         x = torch.zeros(2)
         y = torch.ones(2)
 
-        self.assertEqual(fn(x, y), fn_opt(x, y))
         self.assertEqual(fn(x, x), fn_opt(x, x))
+        self.assertEqual(fn(x, y), fn_opt(x, y))
+        z = torch.randn(2)
+        self.assertEqual(fn(z, z), fn_opt(z, z))
+        self.assertEqual(fn(y, x), fn_opt(y, x))
+        self.assertEqual(cnt.frame_count, 2)
 
     def test_is_not_tensor_tensor(self):
         def fn(x, y):
