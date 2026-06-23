@@ -16,7 +16,7 @@ from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
 import torch
 
 from . import cupti_python
-from .records import FIELD_REGISTRY, Kernel, STRING_FIELDS, Sync
+from .records import Api, FIELD_REGISTRY, Kernel, STRING_FIELDS, Sync
 
 
 # A registration request: either a plain iterable of activity kinds (meaning "all
@@ -379,6 +379,17 @@ class CuptiMonitor:
         _cupti_monitor_native.configure_decoder(
             cast(int, self._subscriber), fn_addr, int(_FENCE_KIND), _FENCE_END_FIELD
         )
+        # Drop noisy runtime/driver records in the native decoder by cbid -- CUPTI's own
+        # per-cbid activity filter is NOT_COMPATIBLE under user-defined records
+        from .monitor_trace import driver_kept_cbids, runtime_dropped_cbids
+
+        _cupti_monitor_native.set_cbid_filter(
+            Api.CBID.id,
+            {
+                int(ActivityKind.RUNTIME): (False, list(runtime_dropped_cbids())),
+                int(ActivityKind.DRIVER): (True, list(driver_kept_cbids())),
+            },
+        )
         _cupti_monitor_native.start_decoder()
         # Background drain when flush_period_s >= 0 (0 = drain continuously, no wait);
         # < 0 means no background thread -- the caller drives flush() itself.
@@ -559,6 +570,16 @@ class CuptiMonitor:
         used by observers). Identity until the monitor is started and the clock
         converter is calibrated."""
         return self._convert_time(value)
+
+    def convert_time_array(self, values: np.ndarray) -> np.ndarray:
+        """Vectorized :meth:`convert_time`: the conversion is a constant offset (both
+        clocks are real-time ns), so apply it to a whole column at once. Preserves the
+        scalar contract that 0 (and the uncalibrated case) maps to itself."""
+        out = values.astype(np.int64)
+        if self._session_start_native_ns == 0:
+            return out
+        offset = self._session_start_unix_ns - self._session_start_native_ns
+        return np.where(out == 0, out, out + offset)
 
     def now_unix_ns(self) -> int:
         """Current time on the same unix-epoch clock as decoded record timestamps --
