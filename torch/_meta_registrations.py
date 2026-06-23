@@ -2702,6 +2702,8 @@ def device_hint(tensor) -> "str":
         and tensor.device.type != "meta"
     ):
         return tensor.device.type
+    elif torch.xpu.is_available():
+        return "xpu"
     else:
         return "cuda"  # default to cuda
 
@@ -6424,7 +6426,7 @@ def meta__scaled_dot_product_flash_attention(
     # are going to use cudagraphs or not, so we return meta tensors here
     # it's possible we'll need to have some special handling in inductor for sdpa
     # See [Note] BC breaking change to flash seed/offset
-    if torch.version.hip and torch.cuda.is_available() or torch.xpu.is_available():
+    if torch.version.hip and torch.cuda.is_available() or device_hint(query) == "xpu":
         # Maintain old path on AMD
         seed = torch.empty((), dtype=torch.long, device="meta")
         offset = torch.empty((), dtype=torch.long, device="meta")
@@ -6959,7 +6961,7 @@ def meta__flash_attention_forward(
     # See Note [Seed and Offset]
     # See [Note] BC breaking change to flash seed/offset
     seed, offset = None, None
-    if torch.version.hip and torch.cuda.is_available() or torch.xpu.is_available():
+    if torch.version.hip and torch.cuda.is_available() or device_hint(query) == "xpu":
         # Maintain old path on AMD
         seed = torch.empty((), dtype=torch.long, device="meta")
         offset = torch.empty((), dtype=torch.long, device="meta")
