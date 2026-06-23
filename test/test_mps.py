@@ -1802,6 +1802,67 @@ class TestMPS(TestCaseMPS):
 
         self.assertEqual(linear, linear_mps)
 
+    def test_linear_1d_weight_backward(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/187988
+        # linear() accepts a 1-D weight: it contracts and drops the last input
+        # dimension (the out_features == 1 case with the trailing output dim
+        # squeezed). Its backward fed the 1-D weight and the correspondingly
+        # rank-reduced grad_output straight through, so grad_input/grad_weight
+        # were formed from vector operands instead of the matrices the matmul
+        # expects, which aborted the process on the MPSGraph path.
+        # Compare MPS gradients against CPU for several input ranks and for
+        # contiguous, non-contiguous, and expanded (all-zero-stride) grad_output.
+        def helper(shape, grad_mode, with_bias):
+            in_features = shape[-1]
+            cpu_x = torch.randn(shape, dtype=torch.float32, requires_grad=True)
+            cpu_w = torch.randn(in_features, dtype=torch.float32, requires_grad=True)
+            mps_x = cpu_x.detach().clone().to("mps").requires_grad_()
+            mps_w = cpu_w.detach().clone().to("mps").requires_grad_()
+            # With a 1-D weight the output drops its last dim, so a bias degenerates
+            # to a scalar; only that shape is accepted (and only for rank >= 3 input).
+            cpu_b = torch.randn((), dtype=torch.float32, requires_grad=True) if with_bias else None
+            mps_b = cpu_b.detach().clone().to("mps").requires_grad_() if with_bias else None
+
+            cpu_out = F.linear(cpu_x, cpu_w, cpu_b)
+            mps_out = F.linear(mps_x, mps_w, mps_b)
+            self.assertEqual(cpu_out, mps_out.cpu())
+
+            if grad_mode == "noncontiguous":
+                cpu_grad = torch.randn(cpu_out.shape + (2,), dtype=torch.float32)[..., 0]
+                self.assertFalse(cpu_grad.is_contiguous())
+                mps_grad = cpu_grad.detach().clone().to("mps")
+            elif grad_mode == "expanded":
+                # The all-zero-stride grad that sum().backward() produces; it has to
+                # survive the reshape that restores the squeezed output dim.
+                cpu_grad = torch.ones((), dtype=torch.float32).expand(cpu_out.shape)
+                mps_grad = torch.ones((), dtype=torch.float32, device="mps").expand(mps_out.shape)
+            else:
+                cpu_grad = torch.randn_like(cpu_out)
+                mps_grad = cpu_grad.detach().clone().to("mps")
+
+            cpu_out.backward(cpu_grad)
+            mps_out.backward(mps_grad)
+
+            # grad_weight reduces over the (large) flattened batch dim, so MPS and
+            # CPU differ by float32 reduction-order noise; use the same tolerance
+            # as the other linear gradient checks in this file.
+            self.assertEqual(cpu_x.grad.size(), mps_x.grad.size())
+            self.assertEqual(cpu_x.grad, mps_x.grad.cpu(), atol=8e-04, rtol=10.4e-05)
+            self.assertEqual(cpu_w.grad.size(), mps_w.grad.size())
+            self.assertEqual(cpu_w.grad, mps_w.grad.cpu(), atol=8e-04, rtol=10.4e-05)
+            if with_bias:
+                self.assertEqual(cpu_b.grad.size(), mps_b.grad.size())
+                self.assertEqual(cpu_b.grad, mps_b.grad.cpu(), atol=8e-04, rtol=10.4e-05)
+
+        # 2D/3D/4D/5D input; (3840, 33) and (2, 1920, 33) match the magnitudes
+        # from the original report. 5D exercises the forward's flatten-to-2D path.
+        for shape in [(4, 8), (3840, 33), (2, 1920, 33), (1, 2, 2, 8), (2, 2, 2, 2, 8)]:
+            for grad_mode in ["contiguous", "noncontiguous", "expanded"]:
+                helper(shape, grad_mode, with_bias=False)
+                # A (scalar) bias with a 1-D weight is only valid for rank >= 3 input.
+                if len(shape) >= 3:
+                    helper(shape, grad_mode, with_bias=True)
+
     def test_linear_bias(self):
         def helper(bias_shape):
             device = "cpu"
