@@ -2791,6 +2791,82 @@ class STORAGE_OVERLAPPING : public RelationalGuard {
   std::shared_ptr<StorageOverlapChecker> _checker;
 };
 
+class StorageOverlapPartitionChecker {
+ public:
+  StorageOverlapPartitionChecker(
+      size_t expected_inputs,
+      std::vector<std::vector<int64_t>> expected_partition)
+      : _expected_partition(std::move(expected_partition)),
+        _inputs(expected_inputs, nullptr) {}
+
+  void add(PyObject* obj, size_t input_index) {
+    TORCH_CHECK(THPVariable_CheckExact(obj) || THPVariable_Check(obj));
+    TORCH_CHECK(input_index < _inputs.size());
+    TORCH_CHECK(_inputs[input_index] == nullptr);
+    Py_INCREF(obj);
+    _inputs[input_index] = obj;
+    _seen++;
+  }
+
+  void reset(size_t input_index) {
+    TORCH_CHECK(input_index < _inputs.size());
+    if (_inputs[input_index] != nullptr) {
+      Py_DECREF(_inputs[input_index]);
+      _inputs[input_index] = nullptr;
+      _seen--;
+    }
+  }
+
+  bool maybe_check() {
+    if (_seen < _inputs.size()) {
+      return true;
+    }
+
+    std::vector<Tensor> tensors;
+    tensors.reserve(_inputs.size());
+    for (auto* obj : _inputs) {
+      TORCH_CHECK(obj != nullptr);
+      tensors.push_back(THPVariable_Unpack(obj));
+    }
+    return compute_overlapping_tensor_groups<StaticMeta>(tensors) ==
+        _expected_partition;
+  }
+
+ private:
+  std::vector<std::vector<int64_t>> _expected_partition;
+  std::vector<PyObject*> _inputs;
+  size_t _seen{0};
+};
+
+class STORAGE_OVERLAP_PARTITION : public RelationalGuard {
+ public:
+  STORAGE_OVERLAP_PARTITION(
+      RootGuardManager* root_guard_manager,
+      size_t input_index,
+      std::shared_ptr<StorageOverlapPartitionChecker> checker,
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : RelationalGuard(
+            root_guard_manager,
+            std::move(verbose_code_parts),
+            std::move(user_stack)),
+        _input_index(input_index),
+        _checker(std::move(checker)) {}
+
+  bool check_nopybind(PyObject* value) override {
+    _checker->add(value, _input_index);
+    return _checker->maybe_check();
+  }
+
+  void reset_state() final {
+    _checker->reset(_input_index);
+  }
+
+ private:
+  size_t _input_index;
+  std::shared_ptr<StorageOverlapPartitionChecker> _checker;
+};
+
 /**
  * Symbolic Shape Guard.
  */
@@ -7474,6 +7550,34 @@ void install_storage_overlapping_guard(
       /* overlapping= */ false);
 }
 
+void install_storage_overlap_partition_guard(
+    const py::list& guard_managers,
+    const py::object& expected_partition,
+    const py::object& verbose_code_parts,
+    const py::object& user_stack) {
+  if (guard_managers.empty()) {
+    return;
+  }
+
+  std::shared_ptr<StorageOverlapPartitionChecker> checker =
+      std::make_shared<StorageOverlapPartitionChecker>(
+          guard_managers.size(),
+          py::cast<std::vector<std::vector<int64_t>>>(expected_partition));
+
+  for (const auto i : c10::irange(guard_managers.size())) {
+    auto* guard_manager = py::cast<GuardManager*>(guard_managers[i]);
+    std::shared_ptr<RelationalGuard> guard =
+        std::make_shared<STORAGE_OVERLAP_PARTITION>(
+            guard_manager->get_root(),
+            i,
+            checker,
+            verbose_code_parts,
+            user_stack);
+    guard_manager->get_root()->add_relational_guard_resetter(guard);
+    guard_manager->add_leaf_guard(guard);
+  }
+}
+
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-volatile")
 char flush_cache_by_eviction() {
   constexpr size_t evict_size = 32 * 1024 * 1024;
@@ -8942,6 +9046,9 @@ PyObject* torch_c_dynamo_guards_init() {
       "install_no_tensor_aliasing_guard", install_no_tensor_aliasing_guard);
   py_m.def(
       "install_storage_overlapping_guard", install_storage_overlapping_guard);
+  py_m.def(
+      "install_storage_overlap_partition_guard",
+      install_storage_overlap_partition_guard);
   py_m.def(
       "compute_overlapping_tensors",
       [](const std::vector<Tensor> tensors, bool symbolic) {

@@ -64,6 +64,7 @@ from torch._C._dynamo.guards import (
     GuardManager,
     install_no_tensor_aliasing_guard,
     install_object_aliasing_guard,
+    install_storage_overlap_partition_guard,
     install_storage_overlapping_guard,
     install_symbolic_shape_guard,
     LeafGuard,
@@ -836,30 +837,6 @@ def unwrap_async_collective_tensor(x: torch.Tensor) -> torch.Tensor:
     return x
 
 
-def _storage_overlap_partition(
-    args: list[object],
-) -> tuple[tuple[int, ...], ...]:
-    tensor_positions: list[int] = []
-    tensors: list[torch.Tensor] = []
-    for i, arg in enumerate(args):
-        if isinstance(arg, torch.Tensor):
-            tensor_positions.append(i)
-            tensors.append(arg)
-    groups = torch._C._dynamo.guards.compute_overlapping_tensor_groups(
-        tensors, symbolic=False
-    )
-    return tuple(
-        tuple(tensor_positions[tensor_index] for tensor_index in group)
-        for group in groups
-    )
-
-
-def check_storage_overlap_partition(
-    args: list[object], expected_partition: tuple[tuple[int, ...], ...]
-) -> bool:
-    return _storage_overlap_partition(args) == expected_partition
-
-
 # For user stack printing
 @functools.cache
 def uninteresting_files() -> set[str]:
@@ -907,7 +884,6 @@ def _get_closure_vars() -> dict[str, object]:
             "device": torch.device,
             "___from_numpy": from_numpy,
             "___unwrap_async_collective_tensor": unwrap_async_collective_tensor,
-            "___check_storage_overlap_partition": check_storage_overlap_partition,
             "___as_tensor": torch._as_tensor_fullprec,
             "torch": torch,
             "inspect": inspect,
@@ -5227,14 +5203,20 @@ class CheckFunctionManager:
                 )
                 add_code_part(code_part, None, True)
             elif isinstance(guard, StorageOverlapPartition):
+                partition_guard_managers = [
+                    builder.get_guard_manager_from_source(s)
+                    for s in guard.input_sources
+                ]
                 code_part = (
                     "___check_storage_overlap_partition("
                     f"[{', '.join(source.name for source in guard.input_sources)}], "
                     f"{guard.overlapping_indices})"
                 )
-                builder.add_python_lambda_leaf_guard_to_root(
+                install_storage_overlap_partition_guard(
+                    partition_guard_managers,
+                    guard.overlapping_indices,
                     [code_part],
-                    [code_part],
+                    None,
                 )
                 add_code_part(code_part, None, True)
             else:
