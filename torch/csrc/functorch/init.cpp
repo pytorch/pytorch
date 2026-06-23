@@ -83,7 +83,7 @@ static void _propagate_functional_input_mutation(
   if (unwrapped.unsafeGetTensorImpl() != wrapped_inner.unsafeGetTensorImpl()) {
     if (unwrapped.sym_nbytes() != wrapped_inner.sym_nbytes()) {
       // Functions might resize zero-sized inputs, which we need to reflect
-      // ehre.
+      // here.
       unwrapped.resize__symint(wrapped_inner.sym_sizes());
     }
     // If the input tensor's metadata was mutated, then use as_strided_()
