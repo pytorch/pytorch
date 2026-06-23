@@ -254,6 +254,9 @@ jobs:
             -e TESTS_TO_INCLUDE \
             -e HUGGING_FACE_HUB_TOKEN \
             -e DASHBOARD_TAG \
+            -e AMD_SERIALIZE_KERNEL=3 \
+            -e TORCH_SHOW_CPP_STACKTRACES=1 \
+            -e PYTHONUNBUFFERED=1 \
             --env-file="${RUNNER_TEMP}/github_env_${GITHUB_RUN_ID}" \
             --ulimit stack=10485760:83886080 \
             --ulimit core=0 \
