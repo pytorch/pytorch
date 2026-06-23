@@ -1554,7 +1554,7 @@ def linspace(
 ) -> DTensor:
     """
     Returns a :class:`DTensor` of size ``steps`` whose values are evenly spaced from
-    :sup:`start` to :sup:`end`.
+    `start` to `end`.
 
     Args:
         start (float or :class:`DTensor`): the starting value for the set of points. If
