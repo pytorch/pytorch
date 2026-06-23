@@ -243,10 +243,6 @@ static at::Tensor& copy_to_mps_(at::Tensor& dst_, const at::Tensor& src_, bool n
   copy_to_mps_stride_contig(dst, src, non_blocking && !needs_copy, /*is_direct=*/!needs_copy);
   if (needs_copy) {
     dst_.copy_(dst);
-    // The scatter above reads from dst (an intermediate buffer that is freed when
-    // this function returns). Commit and wait while dst is still alive so the MPS
-    // driver cannot reuse its physical GPU memory before the scatter executes.
-    getCurrentMPSStream()->synchronize(SyncType::COMMIT_AND_WAIT);
     return dst_;
   }
   return dst_;
