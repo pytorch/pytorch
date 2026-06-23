@@ -958,6 +958,13 @@ loop_index_inversion_in_fusion: bool = True
 # For the cases loop ordering after fusion does not help, we don't lose much.
 score_fusion_memory_threshold = 10
 
+# Allow choices that Inductor's peak-memory heuristics would otherwise block.
+# This is intentionally on by default so existing fusion behavior stays unchanged
+# unless a caller explicitly opts into peak-memory-aware restrictions.
+allow_peak_memory_increasing_fusion = (
+    os.environ.get("TORCHINDUCTOR_ALLOW_PEAK_MEMORY_INCREASING_FUSION", "1") == "1"
+)
+
 # For Triton Templates, select fastest of best template + epilogue vs best template + separate epilogue kernel
 benchmark_epilogue_fusion = (
     os.environ.get("TORCHINDUCTOR_BENCHMARK_EPILOGUE_FUSION", "1") == "1"

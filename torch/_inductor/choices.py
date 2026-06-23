@@ -666,6 +666,14 @@ class InductorChoices:
                 "Nodes are too far away. Fusing them may increase peak memory."
             )
             return False
+        if not config.allow_peak_memory_increasing_fusion:
+            if scheduler.fusion_would_materialize_disjoint_branches(
+                node1, node2, shared_data_score
+            ):
+                WhyNoFuse(node1, node2)(
+                    "Fusion materializes disjoint branch outputs and may increase peak memory."
+                )
+                return False
         return True
 
     @staticmethod
