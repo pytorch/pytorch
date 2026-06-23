@@ -715,8 +715,32 @@ Tensor where(const Tensor& condition, const Tensor& self, const Tensor& other) {
   return ret;
 }
 
+// scalar_tensor for reduced-precision types uses a relaxed cast (no overflow
+// check) to match torch.tensor() semantics. Verify the scalar is in range here
+// so torch.where raises consistently with fill_/full_like on non-scalar
+// tensors, which go through the kernel path that does use checked_convert. The
+// guard is limited to Half/BFloat16 -- the domain of
+// AT_DISPATCH_REDUCED_FLOATING_TYPES -- so float8/float4 result types keep
+// their existing behavior instead of falling through to the dispatch default
+// and raising. Symbolic scalars are skipped: their value is unknown at trace
+// time (so there is nothing to range-check), and calling Scalar::to<scalar_t>()
+// would force a guard_float specialization on an otherwise data-dependent
+// value.
+static void check_scalar_in_reduced_float_range(
+    const Scalar& scalar,
+    ScalarType result_type) {
+  if ((result_type == kHalf || result_type == kBFloat16) &&
+      !scalar.isSymbolic()) {
+    AT_DISPATCH_REDUCED_FLOATING_TYPES(
+        result_type, "where_scalar_bounds_check", [&] {
+          (void)scalar.to<scalar_t>();
+        });
+  }
+}
+
 Tensor where(const Tensor& condition, const Scalar& self, const Tensor& other) {
   auto result_type = at::native::result_type(other, self);
+  check_scalar_in_reduced_float_range(self, result_type);
   auto self_converted =
       at::scalar_tensor(self, other.options().dtype(result_type));
   auto other_converted = other.to(result_type);
@@ -725,6 +749,7 @@ Tensor where(const Tensor& condition, const Scalar& self, const Tensor& other) {
 
 Tensor where(const Tensor& condition, const Tensor& self, const Scalar& other) {
   auto result_type = at::native::result_type(self, other);
+  check_scalar_in_reduced_float_range(other, result_type);
   auto other_converted =
       at::scalar_tensor(other, self.options().dtype(result_type));
   auto self_converted = self.to(result_type);
