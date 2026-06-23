@@ -341,7 +341,8 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
             if w is None:
                 return
             w["cpu"] = os.fspath(cpu_trace_path)
-            # Monitor traces are always gzipped; the writer keys gzip off the .gz suffix.
+            # Monitor traces are always gzipped (chrome JSON or .pftrace alike); the writer
+            # keys gzip + format off the suffix.
             out = os.fspath(output_path)
             w["out"] = out if out.endswith(".gz") else out + ".gz"
         self._maybe_write(window_id)

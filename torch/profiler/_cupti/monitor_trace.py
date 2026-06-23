@@ -9,6 +9,8 @@ from typing import Any, cast, TYPE_CHECKING
 
 import numpy as np
 
+import torch
+
 
 # orjson serializes ~3-8x faster than stdlib json on large traces and emits bytes; not a
 # torch dep (absent in CI), so use it when present and fall back to json.
@@ -300,7 +302,7 @@ def _trace_window_entries(
         if linked is not None and linked[0] == process_id:
             return linked[1]
         process_map = thread_resource_map.get(process_id, {})
-        return int(process_map.get(normalized_thread_id, normalized_thread_id))
+        return process_map.get(normalized_thread_id, normalized_thread_id)
 
     # Drop the trailing "Activity Buffer Request" overhead that lands after the last
     # real activity: the cutoff is the max non-overhead end (converted ns).
@@ -771,6 +773,497 @@ def _gpu_user_annotation_events(
     return gpu_user_events
 
 
+# --- Perfetto-native (.pftrace) encoding -------------------------------------
+# The wire encoding is done natively (protozero via the perfetto SDK) in
+# torch/csrc/profiler/cupti/monitor_pftrace.cpp; here we only shape the window into the
+# flat arrays + track list it consumes.
+
+
+def _window_to_pftrace(
+    cpu_data: dict, trace_window: dict, base_ns: int, output_path: str
+) -> None:
+    """Encode the monitor's columnar window straight to a Perfetto-native trace (.pftrace),
+    concatenated with the Kineto CPU events -- NO chrome-dict materialization. Full parity with
+    the chrome path's per-event args, ac2g flows, and collective metadata, emitted as
+    TrackEvent debug_annotations + flow_ids by the native encoder. The GPU kinds are assembled
+    vectorized from their numpy columns into per-kind groups; runtime/driver use a per-record
+    CPU-thread join (as the chrome path does)."""
+    columns = cast("dict[str, dict[str, Any]]", trace_window.get("columns", {}))
+    thread_resource_map = cast(
+        "dict[int, dict[int, int]]", trace_window.get("thread_resource_map", {})
+    )
+    uuids: dict = {}
+    pid_ints: dict = {}
+    proc_name: dict = {}
+    thr_name: dict = {}
+    tracks: list = []
+    groups: list = []  # raw group dicts; name_iid filled in after global name interning
+
+    def _col(ks):
+        c = columns.get(ks)
+        return c if c and len(next(iter(c.values()))) else None
+
+    def pid_int(pid):
+        # int32 descriptor id (cosmetic); map any id to a stable NON-negative value.
+        if isinstance(pid, int):
+            return pid & 0x7FFFFFFF
+        return pid_ints.setdefault(pid, len(pid_ints) + 1)
+
+    def add_track(uuid, parent, is_proc, pid, tid, name):
+        tracks.append((uuid, parent, is_proc, pid_int(pid), pid_int(tid), str(name)))
+
+    def track_for(pid, tid, proc_label="", thr_label=""):
+        if ("p", pid) not in uuids:
+            uuids[("p", pid)] = len(uuids) + 1
+            add_track(
+                uuids[("p", pid)],
+                0,
+                True,
+                pid,
+                0,
+                str(proc_name.get(pid) or proc_label or pid),
+            )
+        key = ("t", pid, tid)
+        if key not in uuids:
+            uuids[key] = len(uuids) + 1
+            add_track(
+                uuids[key],
+                uuids[("p", pid)],
+                False,
+                pid,
+                tid,
+                str(thr_name.get(key) or thr_label or tid),
+            )
+        return uuids[key]
+
+    def gpu_uuids(pid_arr, tid_arr, proc_fmt, thr_fmt):
+        # (pid, tid) -> uuid for whole columns: unique pairs (packed into one int64 key) each
+        # register a track; map back via the inverse index (no per-event Python).
+        key = (pid_arr.astype(np.int64) << np.int64(32)) | (
+            tid_arr.astype(np.int64) & 0xFFFFFFFF
+        )
+        uniq, inv = np.unique(key, return_inverse=True)
+        ids = np.empty(len(uniq), dtype=np.uint64)
+        for j, k in enumerate(uniq.tolist()):
+            pid = int(k >> 32)
+            tid = int(k & 0xFFFFFFFF)
+            if tid >= 0x80000000:  # sign-extend the packed int32 tid
+                tid -= 0x100000000
+            ids[j] = track_for(pid, tid, proc_fmt.format(pid), thr_fmt.format(tid))
+        return ids[inv]
+
+    def int_anno(key, col, skip_zero=False, present=None):
+        # present: optional per-slice uint8 mask (emit the int only where set).
+        return (
+            key,
+            np.ascontiguousarray(col, dtype=np.int64),
+            skip_zero,
+            None if present is None else np.ascontiguousarray(present, dtype=np.uint8),
+        )
+
+    def enum_anno(key, col, mapping):
+        # Match the chrome path's mapping.get(x, x): a name (string) where the value is in
+        # the map, the raw int otherwise. Returns (str_spec, int_spec|None): the string
+        # table covers the mapped values (idx -1 => slice skipped), and the int_spec (present
+        # only on the unmapped slices) carries the raw value, so a column with unmapped
+        # values stays a faithful mix of string + int annotations.
+        col = np.ascontiguousarray(col, dtype=np.int64)
+        uniq, inv = np.unique(col, return_inverse=True)
+        mapped_u = np.array([int(u) in mapping for u in uniq.tolist()], dtype=bool)
+        tab_pos = np.full(len(uniq), -1, dtype=np.int64)
+        table = []
+        for j, u in enumerate(uniq.tolist()):
+            if mapped_u[j]:
+                tab_pos[j] = len(table)
+                table.append(str(mapping[int(u)]))
+        str_spec = (key, tab_pos[inv], table)
+        if mapped_u.all():
+            return str_spec, None
+        return str_spec, int_anno(key, col, present=(~mapped_u)[inv])
+
+    def arr_anno(key, cols):
+        return (key, [np.ascontiguousarray(c, dtype=np.int64) for c in cols])
+
+    def collect_enums(pairs):
+        # (key, col, mapping) specs -> (str_specs, int_specs): each enum yields a string
+        # annotation plus, if any value is unmapped, an int annotation for those slices.
+        strs, ints = [], []
+        for k, col, m in pairs:
+            s, i = enum_anno(k, col, m)
+            strs.append(s)
+            if i is not None:
+                ints.append(i)
+        return strs, ints
+
+    def json_anno(blobs):
+        # blobs: per-slice str/None -> a CSR (offsets, buffer) varlen column; empty for None.
+        enc = [b"" if b is None else b.encode() for b in blobs]
+        lengths = np.fromiter((len(b) for b in enc), dtype=np.int32, count=len(enc))
+        offsets = np.zeros(len(enc) + 1, dtype=np.int32)
+        np.cumsum(lengths, out=offsets[1:])
+        return (offsets, b"".join(enc))
+
+    def graph_meta(c):
+        # graph ids + annotation + collective-metadata, patched onto every GPU op kind
+        # (kernel/memcpy/memset) exactly as the chrome path does -- sparse, present only
+        # where the column carries data.
+        extra, jsons = [], []
+        if c["graph_id"].any():
+            extra.append(int_anno("graph id", c["graph_id"], skip_zero=True))
+        if c["graph_node_id"].any():
+            extra.append(int_anno("graph node id", c["graph_node_id"], skip_zero=True))
+        ann = c.get("annotation")
+        if ann is not None and any(x is not None for x in ann.tolist()):
+            jsons.append(json_anno(ann.tolist()))
+        meta = c.get("metadata")
+        if meta is not None and any(x is not None for x in meta.tolist()):
+            jsons.append(json_anno(meta.tolist()))
+        return extra, jsons
+
+    def add_group(ts, end, uu, names, ints=(), strs=(), arrs=(), jsons=(), flow=None):
+        groups.append(
+            {
+                "ts": np.ascontiguousarray(ts, dtype=np.int64),
+                "end": np.ascontiguousarray(end, dtype=np.int64),
+                "uuid": np.ascontiguousarray(uu, dtype=np.uint64),
+                "names": names,
+                "ints": list(ints),
+                "strs": list(strs),
+                "arrs": list(arrs),
+                "jsons": list(jsons),
+                "flow": None
+                if flow is None
+                else np.ascontiguousarray(flow, dtype=np.int64),
+            }
+        )
+
+    # --- joins shared with the chrome path ---
+    context_to_device: dict = {}
+    for ks in ("kernel", "gpu_memcpy", "gpu_memset", "cuda_event"):
+        c = _col(ks)
+        if c is None or "context_id" not in c:
+            continue
+        for ctx, dev in zip(c["context_id"].tolist(), c["device_id"].tolist()):
+            context_to_device.setdefault(ctx, dev)
+    event_sync_to_corr: dict = {}
+    ce = _col("cuda_event")
+    if ce is not None:
+        event_sync_to_corr = {
+            sid: corr
+            for sid, corr in zip(
+                ce["cuda_event_sync_id"].tolist(), ce["correlation_id"].tolist()
+            )
+            if sid
+        }
+
+    # --- CPU side: Kineto chrome events (M names + X slices with their args) ---
+    for e in cpu_data.get("traceEvents", []):
+        if isinstance(e, dict) and e.get("ph") == "M":
+            a = e.get("args") or {}
+            if e.get("name") == "process_name":
+                proc_name[e.get("pid")] = a.get("name", "")
+            elif e.get("name") == "thread_name":
+                thr_name[("t", e.get("pid"), e.get("tid"))] = a.get("name", "")
+    cpu_thread_by_external_id: dict = {}
+    cpu_ts: list = []
+    cpu_end: list = []
+    cpu_uuid: list = []
+    cpu_names: list = []
+    cpu_args: list = []
+    for e in cpu_data.get("traceEvents", []):
+        if not isinstance(e, dict) or e.get("ph") != "X" or e.get("cat") == "Trace":
+            continue
+        a = e.get("args") if isinstance(e.get("args"), dict) else {}
+        if e.get("cat") in ("cpu_op", "user_annotation") and "External id" in a:
+            try:
+                cpu_thread_by_external_id[int(a["External id"])] = (
+                    e.get("pid"),
+                    e.get("tid"),
+                )
+            except (TypeError, ValueError):
+                pass
+        ts = base_ns + round(_as_float(e.get("ts")) * 1000.0)
+        cpu_ts.append(ts)
+        cpu_end.append(ts + round(_as_float(e.get("dur")) * 1000.0))
+        cpu_uuid.append(track_for(e.get("pid"), e.get("tid")))
+        cpu_names.append(str(e.get("name", "")))
+        cpu_args.append(json.dumps(a) if a else None)
+    if cpu_ts:
+        jsons = [json_anno(cpu_args)] if any(a is not None for a in cpu_args) else ()
+        add_group(cpu_ts, cpu_end, cpu_uuid, cpu_names, jsons=jsons)
+
+    # corr -> CPU thread, for the runtime/driver thread remap (via the external-corr column).
+    cpu_thread_by_correlation_id: dict = {}
+    ext = _col("external_correlation")
+    if ext is not None:
+        for corr, eid in zip(
+            ext["correlation_id"].tolist(), ext["external_id"].tolist()
+        ):
+            if corr and eid in cpu_thread_by_external_id:
+                cpu_thread_by_correlation_id[corr] = cpu_thread_by_external_id[eid]
+
+    # --- kernel: pid=device, tid=stream; full launch args + flow + collective metadata ---
+    c = _col("kernel")
+    if c is not None:
+        uu = gpu_uuids(c["device_id"], c["stream_id"], "GPU {}", "stream {}")
+        ints = [
+            int_anno("device", c["device_id"]),
+            int_anno("context", c["context_id"]),
+            int_anno("stream", c["stream_id"]),
+            int_anno("correlation", c["correlation_id"]),
+            int_anno("registers per thread", c["registers_per_thread"]),
+            int_anno(
+                "shared memory", c["static_shared_memory"] + c["dynamic_shared_memory"]
+            ),
+            int_anno("priority", c["priority"]),
+            int_anno("queued", c["queued"]),
+            int_anno("channel", c["channel"]),
+            int_anno("channel_type", c["channel_type"]),
+        ]
+        arrs = [
+            arr_anno("grid", [c["grid_x"], c["grid_y"], c["grid_z"]]),
+            arr_anno("block", [c["block_x"], c["block_y"], c["block_z"]]),
+        ]
+        extra, jsons = graph_meta(c)
+        add_group(
+            c["start_ns"],
+            c["end_ns"],
+            uu,
+            c["name"].tolist(),
+            ints + extra,
+            (),
+            arrs,
+            jsons,
+            c["correlation_id"],
+        )
+
+    # --- memcpy / memset: pid=device, tid=stream; transfer args + flow ---
+    c = _col("gpu_memcpy")
+    if c is not None:
+        uu = gpu_uuids(c["device_id"], c["stream_id"], "GPU {}", "stream {}")
+        ints = [
+            int_anno("device", c["device_id"]),
+            int_anno("context", c["context_id"]),
+            int_anno("stream", c["stream_id"]),
+            int_anno("correlation", c["correlation_id"]),
+            int_anno("bytes", c["bytes"]),
+            int_anno("flags", c["flags"]),
+        ]
+        strs, enum_ints = collect_enums(
+            [
+                ("copy kind", c["copy_kind"], _MEMCPY_KIND_NAMES),
+                ("src kind", c["src_kind"], _MEMORY_KIND_NAMES),
+                ("dst kind", c["dst_kind"], _MEMORY_KIND_NAMES),
+            ]
+        )
+        extra, jsons = graph_meta(c)
+        names = ["Memcpy"] * len(c["start_ns"])
+        add_group(
+            c["start_ns"],
+            c["end_ns"],
+            uu,
+            names,
+            ints + extra + enum_ints,
+            strs,
+            jsons=jsons,
+            flow=c["correlation_id"],
+        )
+    c = _col("gpu_memset")
+    if c is not None:
+        uu = gpu_uuids(c["device_id"], c["stream_id"], "GPU {}", "stream {}")
+        # "memory kind" is a raw int in the chrome path (it name-maps only memcpy's
+        # src/dst kind, not memset's memory kind), so it stays an int annotation.
+        ints = [
+            int_anno("device", c["device_id"]),
+            int_anno("context", c["context_id"]),
+            int_anno("stream", c["stream_id"]),
+            int_anno("correlation", c["correlation_id"]),
+            int_anno("bytes", c["bytes"]),
+            int_anno("value", c["value"]),
+            int_anno("memory kind", c["memory_kind"]),
+            int_anno("flags", c["flags"]),
+        ]
+        extra, jsons = graph_meta(c)
+        names = ["Memset"] * len(c["start_ns"])
+        add_group(
+            c["start_ns"],
+            c["end_ns"],
+            uu,
+            names,
+            ints + extra,
+            (),
+            jsons=jsons,
+            flow=c["correlation_id"],
+        )
+
+    # --- runtime / driver API: registered names only, remapped onto their CPU thread ---
+    for ks in ("cuda_runtime", "cuda_driver"):
+        c = _col(ks)
+        if c is None:
+            continue
+        is_rt = ks == "cuda_runtime"
+        namer = _runtime_cbid_name if is_rt else _driver_cbid_name
+        is_reg = _runtime_is_registered if is_rt else _driver_is_registered
+        req_flow = _runtime_requires_flow if is_rt else _driver_requires_flow
+        uniq_cb, inv = np.unique(c["cbid"], return_inverse=True)
+        names_u = [namer(int(x)) for x in uniq_cb.tolist()]
+        reg_u = np.array([is_reg(nm) for nm in names_u], dtype=bool)
+        flow_u = np.array([req_flow(nm) for nm in names_u], dtype=bool)
+        keep = np.nonzero(reg_u[inv])[0]
+        if not len(keep):
+            continue
+        pid = c["process_id"][keep].tolist()
+        corr = c["correlation_id"][keep]
+        normtid = (
+            c["thread_id"][keep].astype(np.uint32).astype(np.int32).astype(np.int64)
+        )
+        tid = np.fromiter(
+            (
+                cpu_thread_by_correlation_id[cc][1]
+                if cc in cpu_thread_by_correlation_id
+                and cpu_thread_by_correlation_id[cc][0] == p
+                else thread_resource_map.get(p, {}).get(nt, nt)
+                for p, cc, nt in zip(pid, corr.tolist(), normtid.tolist())
+            ),
+            dtype=np.int64,
+            count=len(keep),
+        )
+        uu = gpu_uuids(c["process_id"][keep], tid, "process {}", "thread {}")
+        names = [names_u[i] for i in inv[keep].tolist()]
+        flow = np.where(flow_u[inv[keep]], corr, 0)
+        ints = [int_anno("cbid", c["cbid"][keep]), int_anno("correlation", corr)]
+        add_group(c["start_ns"][keep], c["end_ns"][keep], uu, names, ints, flow=flow)
+
+    # --- overhead (own lane), dropping the trailing buffer-request artifact ---
+    c = _col("overhead")
+    if c is not None:
+        max_non_overhead_end = 0
+        for ks, col in columns.items():
+            if ks in ("overhead", "external_correlation", "cuda_event"):
+                continue
+            if col and "end_ns" in col and len(col["end_ns"]):
+                max_non_overhead_end = max(
+                    max_non_overhead_end, int(col["end_ns"].max())
+                )
+        name_l = c["name"].tolist()
+        starts = c["start_ns"]
+        keep = np.array(
+            [
+                not (
+                    nm == "Activity Buffer Request"
+                    and max_non_overhead_end > 0
+                    and int(starts[i]) > max_non_overhead_end
+                )
+                for i, nm in enumerate(name_l)
+            ],
+            dtype=bool,
+        )
+        idx = np.nonzero(keep)[0]
+        if len(idx):
+            u = track_for(_OVERHEAD_PID, 0, "Overhead", "Overhead")
+            uu = np.full(len(idx), u, dtype=np.uint64)
+            add_group(
+                starts[idx], c["end_ns"][idx], uu, [name_l[i] for i in idx.tolist()]
+            )
+
+    # --- cuda_sync: device via context, stream via the sync record, wait_on join ---
+    c = _col("cuda_sync")
+    if c is not None:
+        st = c["sync_type"]
+        ctx = c["context_id"]
+        device = np.fromiter(
+            (context_to_device.get(int(x), 0) for x in ctx.tolist()),
+            dtype=np.int64,
+            count=len(ctx),
+        )
+        stream = np.where(c["stream_id"] == _SYNC_INVALID, -1, c["stream_id"]).astype(
+            np.int64
+        )
+        corr = c["correlation_id"]
+        # Split on wait-bearing sync types (Event Sync / Stream Wait Event) so only those rows
+        # carry the wait_on_* annotations, matching the chrome path.
+        wait = np.isin(st, (1, 2))
+        for sub in (np.nonzero(~wait)[0], np.nonzero(wait)[0]):
+            if not len(sub):
+                continue
+            uu = gpu_uuids(device[sub], stream[sub], "GPU {}", "stream {}")
+            names = [
+                _SYNC_TYPE_NAMES.get(int(s), f"sync_{int(s)}") for s in st[sub].tolist()
+            ]
+            ints = [
+                int_anno("stream", stream[sub]),
+                int_anno("correlation", corr[sub]),
+                int_anno("device", device[sub]),
+                int_anno("context", ctx[sub]),
+            ]
+            # cuda_sync_kind is the slice name (string, with the sync_<n> fallback) -- not
+            # the raw-int fallback the copy/memory enums use.
+            uniqn, name_inv = np.unique(
+                np.asarray(names, dtype=object), return_inverse=True
+            )
+            strs = [
+                (
+                    "cuda_sync_kind",
+                    name_inv.astype(np.int64),
+                    [str(n) for n in uniqn.tolist()],
+                )
+            ]
+            if np.isin(st[sub], (1, 2)).all():
+                rec_corr = np.fromiter(
+                    (
+                        event_sync_to_corr.get(int(s), -1)
+                        for s in c["cuda_event_sync_id"][sub].tolist()
+                    ),
+                    dtype=np.int64,
+                    count=len(sub),
+                )
+                ints += [
+                    int_anno("wait_on_stream", np.full(len(sub), -1, dtype=np.int64)),
+                    int_anno("wait_on_cuda_event_id", c["cuda_event_id"][sub]),
+                    int_anno("wait_on_cuda_event_record_corr_id", rec_corr),
+                ]
+            add_group(c["start_ns"][sub], c["end_ns"][sub], uu, names, ints, strs)
+
+    # Global name interning: one EventName table across all groups; each slice carries a
+    # name_iid into it (vectorized via np.unique, no per-event Python).
+    name_cols = [
+        np.asarray(g["names"], dtype=object)
+        if not isinstance(g["names"], np.ndarray)
+        else g["names"].astype(object)
+        for g in groups
+    ]
+    if name_cols:
+        all_names = np.concatenate(name_cols)
+        uniq, inv = np.unique(all_names, return_inverse=True)
+        name_table = [str(x) for x in uniq.tolist()]
+        iid = (inv + 1).astype(np.uint64)
+    else:
+        name_table, iid = [], np.empty(0, dtype=np.uint64)
+    group_tuples = []
+    off = 0
+    for g in groups:
+        n = len(g["ts"])
+        group_tuples.append(
+            (
+                g["ts"],
+                g["end"],
+                g["uuid"],
+                iid[off : off + n],
+                g["ints"],
+                g["strs"],
+                g["arrs"],
+                g["jsons"],
+                g["flow"],
+            )
+        )
+        off += n
+    out = torch._C._profiler._cupti_monitor.encode_pftrace(
+        tracks, name_table, group_tuples
+    )
+    with gzip.open(output_path, "wb", compresslevel=1) as f:
+        f.write(out)
+
+
 def merge_trace_window_into_chrome_trace(
     cpu_trace_path: str | os.PathLike[str],
     output_path: str | os.PathLike[str],
@@ -786,6 +1279,11 @@ def merge_trace_window_into_chrome_trace(
     data = _orjson.loads(raw) if _orjson is not None else json.loads(raw)
 
     base_ns = int(data.get("baseTimeNanoseconds", _default_base_ns()))
+    # Perfetto-native output: encode straight from the columnar window (skip building the
+    # chrome event dicts entirely -- that build dominates the JSON path).
+    if ".pftrace" in output_path:
+        _window_to_pftrace(data, trace_window, base_ns, output_path)
+        return
     original_events = list(data.get("traceEvents", []))
     cpu_thread_by_external_id: dict[int, tuple[int, int]] = {}
     for event in original_events:
@@ -885,12 +1383,13 @@ def merge_trace_window_into_chrome_trace(
     data["traceEvents"] = events
     data["traceName"] = trace_name or output_path
 
-    # Encode once and write the whole buffer (json.dump streaming through gzip's text wrapper
-    # is ~3-5x slower on large traces). compresslevel=1 favors throughput over file size.
+    # (.pftrace is handled earlier, straight from the columnar window.)
     if _orjson is not None:
         payload = _orjson.dumps(data)
     else:
         payload = json.dumps(data, separators=(",", ":")).encode()
+    # Encode once and write the whole buffer, gzipped when the path ends .gz (compresslevel=1
+    # favors throughput over size).
     if output_path.endswith(".gz"):
         with gzip.open(output_path, "wb", compresslevel=1) as f:
             f.write(payload)

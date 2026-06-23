@@ -1,7 +1,10 @@
 #include <torch/csrc/profiler/cupti/monitor_python.h>
 
 #include <torch/csrc/profiler/cupti/monitor_native.h>
+#include <torch/csrc/profiler/cupti/monitor_pftrace.h>
 #include <torch/csrc/utils/pybind.h>
+
+#include <pybind11/numpy.h>
 
 #include <c10/util/ApproximateClock.h>
 
@@ -266,6 +269,135 @@ void initCuptiMonitorBindings(py::module& m) {
     }
     return py::make_tuple(std::move(out), std::move(ext_meta));
   });
+
+  // Encode the prepared columnar window into a Perfetto-native trace (raw
+  // TracePacket stream, uncompressed) via protozero. See monitor_pftrace.h. The
+  // Python side (monitor_trace.py) shapes the window and gzips the result.
+  //  - tracks: list of (uuid, parent, is_process, pid, tid, name)
+  //  - name_table: list of distinct slice names (iid == index + 1)
+  //  - groups: list of per-kind groups, each a tuple
+  //      (ts, end, track_uuid, name_iid,
+  //       int_annos:  [(key, int64_col, skip_zero), ...],
+  //       str_annos:  [(key, idx_int64_col, [str, ...]), ...],
+  //       arr_annos:  [(key, [int64_col, ...]), ...],
+  //       json_annos: [(int32_offsets_col, blob_bytes), ...],
+  //       flow: int64_col | None)
+  // All columns are numpy arrays; they are kept alive for the encode.
+  cupti_monitor.def(
+      "encode_pftrace",
+      [](const py::list& tracks,
+         const py::list& name_table,
+         const py::list& groups) -> py::bytes {
+        using torch::profiler::impl::PftraceGroup;
+        using torch::profiler::impl::PftraceTrack;
+
+        constexpr auto kFlags = py::array::c_style | py::array::forcecast;
+        using A64 = py::array_t<int64_t, kFlags>;
+        using AU64 = py::array_t<uint64_t, kFlags>;
+        using A32 = py::array_t<int32_t, kFlags>;
+        std::vector<py::object> keepalive;
+        auto i64 = [&](const py::handle& h) -> const int64_t* {
+          A64 a = py::cast<A64>(h);
+          const int64_t* p = a.data();
+          keepalive.push_back(std::move(a));
+          return p;
+        };
+        auto u64 = [&](const py::handle& h) -> const uint64_t* {
+          AU64 a = py::cast<AU64>(h);
+          const uint64_t* p = a.data();
+          keepalive.push_back(std::move(a));
+          return p;
+        };
+        auto i32 = [&](const py::handle& h) -> const int32_t* {
+          A32 a = py::cast<A32>(h);
+          const int32_t* p = a.data();
+          keepalive.push_back(std::move(a));
+          return p;
+        };
+        using AU8 = py::array_t<uint8_t, kFlags>;
+        auto u8 = [&](const py::handle& h) -> const uint8_t* {
+          if (h.is_none()) {
+            return nullptr;
+          }
+          AU8 a = py::cast<AU8>(h);
+          const uint8_t* p = a.data();
+          keepalive.push_back(std::move(a));
+          return p;
+        };
+
+        std::vector<PftraceTrack> track_vec;
+        track_vec.reserve(tracks.size());
+        for (const auto& item : tracks) {
+          auto t = item.cast<py::tuple>();
+          track_vec.push_back(
+              {t[0].cast<uint64_t>(),
+               t[1].cast<uint64_t>(),
+               t[2].cast<bool>(),
+               t[3].cast<int32_t>(),
+               t[4].cast<int32_t>(),
+               t[5].cast<std::string>()});
+        }
+        std::vector<std::string> name_vec;
+        name_vec.reserve(name_table.size());
+        for (const auto& item : name_table) {
+          name_vec.push_back(item.cast<std::string>());
+        }
+
+        std::vector<PftraceGroup> group_vec;
+        group_vec.reserve(groups.size());
+        for (const auto& gobj : groups) {
+          auto g = gobj.cast<py::tuple>();
+          PftraceGroup pg{};
+          pg.ts = i64(g[0]);
+          pg.end = i64(g[1]);
+          pg.track_uuid = u64(g[2]);
+          pg.name_iid = u64(g[3]);
+          pg.n = static_cast<size_t>(py::len(g[0]));
+          for (const auto& s : g[4].cast<py::list>()) {
+            auto t = s.cast<py::tuple>();
+            pg.int_annos.push_back(
+                {t[0].cast<std::string>(),
+                 i64(t[1]),
+                 t[2].cast<bool>(),
+                 u8(t[3])});
+          }
+          for (const auto& s : g[5].cast<py::list>()) {
+            auto t = s.cast<py::tuple>();
+            pg.str_annos.push_back(
+                {t[0].cast<std::string>(),
+                 i64(t[1]),
+                 t[2].cast<std::vector<std::string>>()});
+          }
+          for (const auto& s : g[6].cast<py::list>()) {
+            auto t = s.cast<py::tuple>();
+            std::vector<const int64_t*> cols;
+            for (const auto& col : t[1].cast<py::list>()) {
+              cols.push_back(i64(col));
+            }
+            pg.arr_annos.push_back({t[0].cast<std::string>(), std::move(cols)});
+          }
+          for (const auto& s : g[7].cast<py::list>()) {
+            auto t = s.cast<py::tuple>();
+            const int32_t* offsets = i32(t[0]);
+            auto blob = t[1].cast<py::bytes>();
+            keepalive.push_back(blob);
+            pg.json_annos.push_back({offsets, PyBytes_AS_STRING(blob.ptr())});
+          }
+          pg.flow = g[8].is_none() ? nullptr : i64(g[8]);
+          group_vec.push_back(std::move(pg));
+        }
+
+        std::string out;
+        {
+          py::gil_scoped_release release;
+          out = torch::profiler::impl::cuptiMonitorEncodePftrace(
+              track_vec, name_vec, group_vec);
+        }
+        return py::bytes(out);
+      },
+      py::arg("tracks"),
+      py::arg("name_table"),
+      py::arg("groups"));
 }
 
 } // namespace torch::profiler::impl

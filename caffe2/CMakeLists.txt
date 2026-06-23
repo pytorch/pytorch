@@ -1349,6 +1349,19 @@ target_include_directories(torch_cpu PRIVATE
 target_include_directories(torch_cpu PRIVATE
   ${TORCH_ROOT}/third_party/nlohmann/include)
 
+# Perfetto SDK amalgamation: the CUPTI monitor's native .pftrace encoder
+# (monitor_pftrace.cpp) builds traces via protozero. perfetto.cc is one
+# self-contained TU; --gc-sections drops the unused tracing SDK so only the
+# protozero runtime (~15KB) survives in the final binary. Warnings are
+# suppressed for the vendored source (torch_cpu builds with -Werror).
+target_include_directories(torch_cpu PRIVATE
+  ${TORCH_ROOT}/third_party/perfetto/sdk)
+target_sources(torch_cpu PRIVATE
+  ${TORCH_ROOT}/third_party/perfetto/sdk/perfetto.cc)
+set_source_files_properties(
+  ${TORCH_ROOT}/third_party/perfetto/sdk/perfetto.cc
+  PROPERTIES COMPILE_FLAGS "-w")
+
 install(DIRECTORY
   "${TORCH_SRC_DIR}/csrc"
   "${TORCH_SRC_DIR}/headeronly"

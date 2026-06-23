@@ -856,6 +856,74 @@ _cupti_monitor.enable_hes_early()
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     @_isolated
+    def test_cupti_monitor_pftrace_export(self):
+        # A .pftrace output path makes the cupti_monitor backend emit a Perfetto-native
+        # trace (protobuf) instead of chrome JSON: each event becomes a slice on its
+        # (pid, tid) track. Requires the optional perfetto package.
+        try:
+            from perfetto.protos.perfetto.trace.perfetto_trace_pb2 import (  # type: ignore[import]
+                Trace,
+                TrackEvent,
+            )
+        except ImportError:
+            self.skipTest("perfetto package not installed")
+        cfg = _ExperimentalConfig(custom_profiler_config='{"backend":"cupti_monitor"}')
+        with TemporaryFileName(mode="w+", suffix=".pftrace") as path:
+            with profile(
+                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                experimental_config=cfg,
+            ) as prof:
+                a = torch.randn(128, 128, device="cuda")
+                with torch.autograd.profiler.record_function("region"):
+                    (a @ a).relu().sum().item()
+                torch.cuda.synchronize()
+            prof.export_chrome_trace(path)
+            out = path + ".gz"  # the monitor always gzips
+            self.assertTrue(os.path.exists(out))
+            trace = Trace()
+            with gzip.open(out, "rb") as fh:
+                trace.ParseFromString(fh.read())  # valid protobuf (gzip-wrapped)
+            slices = sum(
+                1
+                for p in trace.packet
+                if p.HasField("track_event")
+                and p.track_event.type == TrackEvent.TYPE_SLICE_BEGIN
+            )
+            tracks = sum(1 for p in trace.packet if p.HasField("track_descriptor"))
+            # names are interned: resolve each slice's name_iid via the InternedData table
+            iid_name = {
+                en.iid: en.name
+                for p in trace.packet
+                if p.HasField("interned_data")
+                for en in p.interned_data.event_names
+            }
+            names = {
+                iid_name.get(p.track_event.name_iid)
+                for p in trace.packet
+                if p.HasField("track_event") and p.track_event.name_iid
+            }
+            self.assertGreater(slices, 0)
+            self.assertGreater(tracks, 0)
+            # the record_function region shows up as a slice
+            self.assertIn("region", names)
+            # full parity: GPU ops carry their args as debug_annotations and an ac2g flow.
+            anno_keys = {
+                a.name
+                for p in trace.packet
+                if p.HasField("track_event")
+                for a in p.track_event.debug_annotations
+            }
+            self.assertIn("correlation", anno_keys)
+            self.assertIn("stream", anno_keys)
+            flows = sum(
+                len(p.track_event.flow_ids)
+                for p in trace.packet
+                if p.HasField("track_event")
+            )
+            self.assertGreater(flows, 0)
+
+    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @_isolated
     def test_cupti_monitor_async_export_defers(self):
         # cupti_monitor_async_export=true hands the export off: a background poll thread
         # is spawned and the file is written off-thread, joined by wait_for_exports.

@@ -16,6 +16,10 @@ off-thread. Reported per mode:
 Each ``--mode`` runs in its own process so the monitor gets a clean CUPTI subscriber.
 ``--kernels`` scales the eager workload's kernel count -> the trace's event count.
 
+``--pftrace`` (cupti_monitor only) exports the Perfetto-native ``.pftrace`` (encoded from
+the columnar window via protozero) instead of chrome JSON, to compare the two export paths
+(``format`` in the output distinguishes them; trace_events counts SLICE_BEGINs for pftrace).
+
 ``--trace-file PATH`` runs the real ``--mode monitor`` ``export_chrome_trace`` over a
 loaded chrome trace's *exact* events, measuring export at a real trace's scale/shape: a
 stand-in Kineto profiler emits the trace's CPU-side events as the base, a stand-in
@@ -45,15 +49,43 @@ from torch._C._profiler import _ExperimentalConfig
 from torch.profiler import profile, ProfilerActivity
 
 
+def _read_back(out_path: str, pftrace: bool) -> tuple[int, float, str]:
+    """Return (event_count, MB, actual_path) for an exported trace. The monitor backend
+    gzips to ``<path>.gz`` unless the path already ends in .gz; .pftrace is the Perfetto-
+    native variant (event_count is its SLICE_BEGIN count), otherwise chrome JSON."""
+    actual = out_path if out_path.endswith(".gz") else out_path + ".gz"
+    size_mb = os.path.getsize(actual) / 1e6
+    if pftrace:
+        from perfetto.protos.perfetto.trace.perfetto_trace_pb2 import (  # pyrefly: ignore[missing-import]
+            Trace,
+            TrackEvent,
+        )
+
+        t = Trace()
+        with gzip.open(actual, "rb") as f:
+            t.ParseFromString(f.read())
+        n = sum(
+            1
+            for p in t.packet
+            if p.HasField("track_event")
+            and p.track_event.type == TrackEvent.TYPE_SLICE_BEGIN
+        )
+    else:
+        with gzip.open(actual, "rt") as f:
+            n = len(json.load(f)["traceEvents"])
+    return n, size_mb, actual
+
+
 def run_export(
     mode: str,
     kernels: int,
     iters: int,
     trace_file: str | None = None,
     async_export: bool = False,
+    pftrace: bool = False,
 ) -> dict:
     if trace_file is not None:
-        return _run_export_trace_file(mode, trace_file, iters, async_export)
+        return _run_export_trace_file(mode, trace_file, iters, async_export, pftrace)
     use_monitor = mode == "monitor"
     backend: dict = {"backend": "cupti_monitor"} if use_monitor else {}
     if use_monitor and async_export:
@@ -71,7 +103,7 @@ def run_export(
     n_events = 0
     out_mb = 0.0
     with tempfile.TemporaryDirectory() as td:
-        trace_path = str(Path(td) / "trace.json.gz")
+        trace_path = str(Path(td) / ("trace.pftrace" if pftrace else "trace.json.gz"))
         for _ in range(iters):
             with profile(
                 activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
@@ -88,15 +120,14 @@ def run_export(
             prof.wait_for_exports()  # no-op for stock Kineto
             wait_ms.append((time.perf_counter() - t1) * 1e3)
 
-            out_mb = os.path.getsize(trace_path) / 1e6
-            with gzip.open(trace_path, "rt") as f:
-                n_events = len(json.load(f)["traceEvents"])
-            os.remove(trace_path)
+            n_events, out_mb, actual = _read_back(trace_path, pftrace)
+            os.remove(actual)
 
     em = statistics.median(export_ms)
     wm = statistics.median(wait_ms)
     return {
         "mode": mode,
+        "format": "pftrace" if pftrace else "json",
         "kernels": kernels,
         "iters": iters,
         "trace_events": n_events,
@@ -301,7 +332,7 @@ class _LoadedWindowObserver:
 
 
 def _run_export_trace_file(
-    mode: str, path: str, iters: int, async_export: bool = False
+    mode: str, path: str, iters: int, async_export: bool = False, pftrace: bool = False
 ) -> dict:
     """Run the real ``export_chrome_trace`` over a loaded trace's state: a stand-in
     profiler emits its CPU events and a stand-in observer holds its GPU window, so the
@@ -324,7 +355,7 @@ def _run_export_trace_file(
     n_events = 0
     out_mb = 0.0
     with tempfile.TemporaryDirectory() as td:
-        out = str(Path(td) / "trace.json.gz")
+        out = str(Path(td) / ("trace.pftrace" if pftrace else "trace.json.gz"))
         for _ in range(iters):
             prof = types.SimpleNamespace(
                 profiler=_LoadedCpuProfiler(cpu_data),
@@ -342,13 +373,12 @@ def _run_export_trace_file(
             t1 = time.perf_counter()
             profile.wait_for_exports(prof)
             wait_ms.append((time.perf_counter() - t1) * 1e3)
-            out_mb = os.path.getsize(out) / 1e6
-            with gzip.open(out, "rt") as f:
-                n_events = len(json.load(f)["traceEvents"])
+            n_events, out_mb, _ = _read_back(out, pftrace)
     em = statistics.median(export_ms)
     wm = statistics.median(wait_ms)
     return {
         "mode": "monitor",
+        "format": "pftrace" if pftrace else "json",
         "async_export": async_export,
         "trace_file": path,
         "iters": iters,
@@ -381,6 +411,12 @@ def main() -> None:
         help="cupti_monitor only: defer the merge off-thread (export_chrome_trace is just "
         "the handoff; the merge + write is timed under wait_exports_ms).",
     )
+    parser.add_argument(
+        "--pftrace",
+        action="store_true",
+        help="cupti_monitor only: export the Perfetto-native .pftrace (encoded from the "
+        "columnar window via protozero) instead of chrome JSON, to compare the two paths.",
+    )
     args = parser.parse_args()
 
     if args.trace_file and args.mode != "monitor":
@@ -388,6 +424,10 @@ def main() -> None:
             "--trace-file supports --mode monitor only: stock Kineto exports off a live "
             "in-memory profile and cannot re-export a saved trace. For the kineto "
             "baseline, run synthetic --mode trunk."
+        )
+    if args.pftrace and args.mode != "monitor":
+        raise SystemExit(
+            "--pftrace is cupti_monitor only (stock Kineto emits chrome JSON)."
         )
     if not args.trace_file:
         torch.cuda.init()
@@ -399,6 +439,7 @@ def main() -> None:
                 args.iters,
                 trace_file=args.trace_file,
                 async_export=args.async_export,
+                pftrace=args.pftrace,
             ),
             indent=2,
             sort_keys=True,

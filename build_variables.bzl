@@ -114,6 +114,7 @@ libtorch_profiler_sources = [
     "torch/csrc/autograd/profiler_kineto.cpp",
     "torch/csrc/profiler/collection.cpp",
     "torch/csrc/profiler/cupti/monitor_native.cpp",
+    "torch/csrc/profiler/cupti/monitor_pftrace.cpp",
     "torch/csrc/profiler/cupti/nccl_profiler.cpp",
     "torch/csrc/profiler/data_flow.cpp",
     "torch/csrc/profiler/kineto_shim.cpp",
