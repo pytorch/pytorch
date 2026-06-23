@@ -18,6 +18,7 @@ from torch._inductor.comm_analysis import (
     NCCL_COLL,
 )
 from torch._inductor.fx_passes.utils import BitsetAncestors
+from torch._inductor.fx_utils import evaluate_compile_time_value
 from torch._inductor.runtime.runtime_utils import dynamo_timed
 from torch._logging import trace_structured
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -41,13 +42,17 @@ def _resolve_group_name(group_name: Any) -> "GroupName":
     In compile-on-one-rank graphs, collective ops receive their
     group_name argument as an FX Node reference (pointing to a
     mesh_get_process_group call) rather than a string literal. For
-    bucketing key purposes we resolve via the ProcessGroup stored in
-    node.meta["val"].
+    bucketing key purposes we evaluate compile-time FX values to get
+    the underlying ProcessGroup object or group-name string.
     """
+    group_name = evaluate_compile_time_value(group_name)
     if isinstance(group_name, str):
         return group_name  # pyrefly: ignore [bad-return]
-    pg = group_name.meta["val"]
-    return pg.group_name
+    if not hasattr(group_name, "group_name"):
+        raise AssertionError(
+            f"could not resolve collective group name from {group_name!r}"
+        )
+    return group_name.group_name
 
 
 BucketMode: TypeAlias = Literal[
