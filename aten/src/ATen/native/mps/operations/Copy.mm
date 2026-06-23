@@ -188,12 +188,13 @@ static void copy_to_mps_stride_contig(at::Tensor& dst,
     // Preserve stream ordering semantics for blocking copy_: previous queued GPU writes to
     // destination must complete before direct CPU write, otherwise later completion of those
     // writes can clobber memcpy results (e.g. zeros_like + copy_(scalar) in compiled flows).
-    stream->synchronize(SyncType::COMMIT_AND_WAIT);
-
-    void* contents = [destBuffer contents];
-    TORCH_INTERNAL_ASSERT(contents != nullptr, "MTLBuffer contents is null");
-    void* dst_ptr = static_cast<char*>(contents) + dst_byte_offset;
-    std::memcpy(dst_ptr, host_src, size_to_copy);
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      stream->synchronize(SyncType::COMMIT_AND_WAIT);
+      void* contents = [destBuffer contents];
+      TORCH_INTERNAL_ASSERT(contents != nullptr, "MTLBuffer contents is null");
+      void* dst_ptr = static_cast<char*>(contents) + dst_byte_offset;
+      std::memcpy(dst_ptr, host_src, size_to_copy);
+    });
     return;
   }
 
