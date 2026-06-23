@@ -5,6 +5,7 @@
 #include <ATen/SequenceNumber.h>
 #include <ATen/autocast_mode.h>
 #include <ATen/core/PythonFallbackKernel.h>
+#include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/record_function.h>
 #include <c10/core/DeviceType.h>
 #include <c10/core/InferenceMode.h>
@@ -1283,7 +1284,8 @@ static PyObject* any_output_is_alias_to_input_or_output(
 // ~tls.excluded) that the caller should pass to autograd_impl.
 static PyObject* custom_op_fast_path_check(
     PyObject* _unused,
-    PyObject* py_args) {
+    PyObject* const* args,
+    Py_ssize_t nargs) {
   HANDLE_TH_ERRORS
 
   // The set of dispatch keys that a plain dense eager tensor can have:
@@ -1299,9 +1301,23 @@ static PyObject* custom_op_fast_path_check(
       c10::autograd_dispatch_keyset |
       c10::DispatchKeySet(c10::DispatchKeySet::RAW, c10::full_backend_mask);
 
-  TORCH_CHECK(PyTuple_Check(py_args), "arg must be a tuple");
+  TORCH_CHECK(nargs == 3, "_custom_op_fast_path_check expects 3 args");
+
+  PyObject* py_args = args[0];
+  PyObject* py_handle = args[1];
+  PyObject* py_gen = args[2];
+
+  TORCH_CHECK(PyTuple_Check(py_args), "args must be a tuple");
+  TORCH_CHECK(PyLong_Check(py_gen), "gen_snapshot must be an int");
 
   if (at::impl::torch_function_mode_enabled()) {
+    Py_RETURN_NONE;
+  }
+
+  // Check generation counter against snapshot
+  auto& handle = py::handle(py_handle).cast<c10::OperatorHandle&>();
+  size_t gen_snapshot = PyLong_AsSize_t(py_gen);
+  if (handle.implGeneration() != gen_snapshot) {
     Py_RETURN_NONE;
   }
 
@@ -1936,7 +1952,11 @@ static PyMethodDef methods[] = {
      len_torch_dispatch_stack,
      METH_NOARGS,
      nullptr},
-    {"_custom_op_fast_path_check", custom_op_fast_path_check, METH_O, nullptr},
+    {"_custom_op_fast_path_check",
+     reinterpret_cast<PyCFunction>(
+         reinterpret_cast<void (*)()>(custom_op_fast_path_check)),
+     METH_FASTCALL,  // not METH_VARARGS: avoids per-call tuple allocation
+     nullptr},
     {"_set_dispatch_mode", set_dispatch_mode, METH_O, nullptr},
     {"_get_dispatch_mode", get_dispatch_mode, METH_O, nullptr},
     {"_unset_dispatch_mode", unset_dispatch_mode, METH_O, nullptr},

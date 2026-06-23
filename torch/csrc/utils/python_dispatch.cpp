@@ -226,6 +226,7 @@ void initDispatchBindings(PyObject* module) {
   py::class_<c10::OperatorHandle>(m, "_DispatchOperatorHandle")
       .def("schema", &c10::OperatorHandle::schema)
       .def("debug", &c10::OperatorHandle::debug)
+      .def("impl_generation", &c10::OperatorHandle::implGeneration)
       .def(
           "redispatch_boxed",
           [](const py::object& self,

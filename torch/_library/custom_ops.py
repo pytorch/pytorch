@@ -302,6 +302,11 @@ class CustomOpDef:
         self._backend_impls: dict[str | None, Callable] = {}
         self._fast_path: Callable | None = None
         self._fast_path_hits: int = 0
+        # Tracks the dispatcher's impl_generation counter as of our last known
+        # registration. The fast path compares this against the live counter on
+        # each call; a mismatch means an external override was registered and
+        # the fast path must bail to the C++ dispatcher.
+        self._impl_gen_snapshot: int | None = None
         self._autograd_impl: Callable | None = None
         self._adinplaceorview_impl: Callable | None = None
         self._abstract_fn: Callable | None = None
@@ -443,6 +448,8 @@ class CustomOpDef:
                 dtypes: list[str | None] = [device_types]
             else:
                 dtypes = list(device_types)
+            if _FAST_CUSTOM_OPS_ENABLED and self._fast_path is None:
+                self._install_fast_path()
             for device_type in dtypes:
                 if device_type not in self._backend_fns:
 
@@ -500,6 +507,11 @@ class CustomOpDef:
                             backend_impl,
                             _C._dispatch_key_for_device(device_type),
                         )
+                    # Advance snapshot by 1 rather than re-reading the live
+                    # counter: re-reading would absorb external overrides that
+                    # happened between our registrations and mask the mismatch.
+                    if self._fast_path is not None:
+                        self._impl_gen_snapshot += 1
 
                     self._backend_impls[device_type] = backend_impl
 
@@ -513,8 +525,6 @@ class CustomOpDef:
                         return fn(*args, **kwargs)
 
                 self._backend_fns[device_type] = wrapped_fn
-            if _FAST_CUSTOM_OPS_ENABLED:
-                self._install_fast_path()
             return fn
 
         if device_types is not None and not utils.has_tensor_arg(
@@ -872,6 +882,8 @@ class CustomOpDef:
         Dispatch chain (all in Python, no C++ dispatcher hops):
         autograd_impl -> [adinplaceorview_impl ->] backend_dispatch
         Connected via TLS-based redispatch interception in OpOverload.redispatch."""
+        if self._fast_path is not None:
+            raise AssertionError("fast path already installed")
         schema = self._opoverload._schema
         if schema._is_view_op():
             return
@@ -907,9 +919,10 @@ class CustomOpDef:
                 return None
 
             # Returns (device_type, keyset_raw) or None; rejects subclasses,
-            # modes, autocast, multi-device, nested/sparse/quantized
+            # modes, autocast, multi-device, nested/sparse/quantized,
+            # AND checks generation counter for external kernel overrides
             check = _C._custom_op_fast_path_check(  # pyrefly: ignore[missing-attribute]
-                args
+                args, op_handle, opdef._impl_gen_snapshot
             )
             if check is None:
                 return None
@@ -925,13 +938,11 @@ class CustomOpDef:
                 return None
             return (device_type, keyset_raw, backend_impl)
 
-        # Install fast path on the OpOverload's `_op` (read by `torch.ops.ns.name.default(x)`).
-        # Save the original entry once so repeated `_install_fast_path` invocations
-        # (e.g. registering kernels for different devices) don't nest wrappers.
-        # The OpOverloadPacket (torch.ops.ns.name) is NOT wrapped.
         overload = self._opoverload
-        if not hasattr(overload, "_orig_op"):
-            overload._orig_op = overload._op  # pyrefly: ignore[missing-attribute]
+        overload._orig_op = overload._op  # pyrefly: ignore[missing-attribute]
+
+        op_handle = self._opoverload._handle
+        self._impl_gen_snapshot = op_handle.impl_generation()
 
         def fast_op(*args, **kwargs):
             info = _check_fast_path(args, kwargs)
@@ -949,6 +960,10 @@ class CustomOpDef:
                     return op.redispatch(keyset, *args)
                 finally:
                     _ops._unset_fast_redispatch(prev)
+
+            # _check_fast_path returned None: normal bail (subclass, autocast,
+            # etc.) or generation mismatch. If generation mismatched, the C++
+            # check will keep returning None on every subsequent call anyway.
             return overload._orig_op(  # pyrefly: ignore[missing-attribute]
                 *args, **kwargs
             )
@@ -1148,6 +1163,8 @@ class CustomOpDef:
 
         if need_register:
             self._lib.impl(self._name, kernel, autocast_key, with_keyset=True)
+            if self._fast_path is not None:
+                self._impl_gen_snapshot += 1
 
         return kernel
 

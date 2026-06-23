@@ -6235,8 +6235,15 @@ class TestCustomOpFastPath(TestCase):
         self.assertEqual(result.device, x.device)
 
     def test_custom_op_fast_path_check_c_api(self):
+        @torch.library.custom_op("_torch_testing::fp_capi", mutates_args=())
+        def fp_capi(x: Tensor, y: Tensor) -> Tensor:
+            return x + y
+
+        op_handle = fp_capi._opoverload._handle
+        gen = op_handle.impl_generation()
+
         args = (torch.randn(4), torch.randn(4))
-        result = torch._C._custom_op_fast_path_check(args)
+        result = torch._C._custom_op_fast_path_check(args, op_handle, gen)
         if TEST_WITH_CROSSREF:
             # CrossRefMode is a TorchFunctionMode; the C API correctly rejects it
             self.assertIsNone(result)
@@ -6250,16 +6257,16 @@ class TestCustomOpFastPath(TestCase):
         self.assertIn("ADInplaceOrView", ks_str)
 
         args_grad = (torch.randn(4, requires_grad=True),)
-        result = torch._C._custom_op_fast_path_check(args_grad)
+        result = torch._C._custom_op_fast_path_check(args_grad, op_handle, gen)
         keyset = torch._C.DispatchKeySet.from_raw_repr(result[1])
         self.assertIn("AutogradCPU", str(keyset))
 
         with torch.autocast("cpu"):
-            result = torch._C._custom_op_fast_path_check(args)
+            result = torch._C._custom_op_fast_path_check(args, op_handle, gen)
             self.assertIsNone(result)
 
         with torch.inference_mode():
-            result = torch._C._custom_op_fast_path_check(args)
+            result = torch._C._custom_op_fast_path_check(args, op_handle, gen)
             self.assertIsNone(result)
 
         class MyMode(torch.overrides.TorchFunctionMode):
@@ -6267,19 +6274,31 @@ class TestCustomOpFastPath(TestCase):
                 return func(*args, **(kwargs or {}))
 
         with MyMode():
-            result = torch._C._custom_op_fast_path_check(args)
+            result = torch._C._custom_op_fast_path_check(args, op_handle, gen)
             self.assertIsNone(result)
 
     def test_custom_op_fast_path_check_rejects_sparse(self):
+        @torch.library.custom_op("_torch_testing::fp_sparse", mutates_args=())
+        def fp_sparse(x: Tensor) -> Tensor:
+            return x.clone()
+
+        op_handle = fp_sparse._opoverload._handle
+        gen = op_handle.impl_generation()
         sparse = torch.randn(3, 3).to_sparse()
-        result = torch._C._custom_op_fast_path_check((sparse,))
+        result = torch._C._custom_op_fast_path_check((sparse,), op_handle, gen)
         self.assertIsNone(result)
 
     def test_custom_op_fast_path_check_rejects_torch_dispatch_subclass(self):
         from torch.testing._internal.two_tensor import TwoTensor
 
+        @torch.library.custom_op("_torch_testing::fp_subclass", mutates_args=())
+        def fp_subclass(x: Tensor) -> Tensor:
+            return x.clone()
+
+        op_handle = fp_subclass._opoverload._handle
+        gen = op_handle.impl_generation()
         tt = TwoTensor(torch.randn(3), torch.randn(3))
-        result = torch._C._custom_op_fast_path_check((tt,))
+        result = torch._C._custom_op_fast_path_check((tt,), op_handle, gen)
         self.assertIsNone(result)
 
     def test_fast_path_falls_back_for_torch_dispatch_subclass(self):
@@ -6388,8 +6407,10 @@ class TestCustomOpFastPath(TestCase):
             return x.clone()
 
         # C++ checker rejects mixed-device inputs
+        op_handle = fp_mixed._opoverload._handle
+        gen = op_handle.impl_generation()
         result = torch._C._custom_op_fast_path_check(
-            (torch.randn(3, device="cpu"), torch.randn(3, device="meta"))
+            (torch.randn(3, device="cpu"), torch.randn(3, device="meta")), op_handle, gen
         )
         self.assertIsNone(result)
 
@@ -6418,6 +6439,178 @@ class TestCustomOpFastPath(TestCase):
         self.assertEqual(grad, 3 * x**2)
         grad.sum().backward()
         self.assertIsNotNone(x.grad)
+
+    def test_fast_path_disabled_by_kernel_override(self):
+        @torch.library.custom_op("_torch_testing::fp_override", mutates_args=())
+        def fp_override(x: Tensor) -> Tensor:
+            return x.clone()
+
+        @fp_override.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        handle = fp_override._opoverload._handle
+        x = torch.randn(3)
+
+        gen_before = handle.impl_generation()
+        with self._assert_fast_path_taken(fp_override):
+            result = fp_override(x)
+        self.assertEqual(result, x)
+        self.assertEqual(handle.impl_generation(), gen_before)
+
+        # Override the CPU kernel via Python Library.impl
+        lib = torch.library.Library("_torch_testing", "IMPL")
+        lib.impl("fp_override", lambda x: x * 2, "CPU")
+        self.assertEqual(handle.impl_generation(), gen_before + 1)
+
+        # Fast path should be disabled; call uses the new kernel
+        with self._assert_fast_path_not_taken(fp_override):
+            result = fp_override(x)
+        self.assertEqual(result, x * 2)
+
+    @unittest.skipIf(IS_WINDOWS, "cpp_extension not available on Windows")
+    def test_fast_path_disabled_by_cpp_override(self):
+        from torch.utils.cpp_extension import load_inline
+
+        @torch.library.custom_op("_torch_testing::fp_cpp_override", mutates_args=())
+        def fp_cpp_override(x: Tensor) -> Tensor:
+            return x.clone()
+
+        @fp_cpp_override.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        handle = fp_cpp_override._opoverload._handle
+        x = torch.randn(3)
+
+        gen_before = handle.impl_generation()
+        with self._assert_fast_path_taken(fp_cpp_override):
+            result = fp_cpp_override(x)
+        self.assertEqual(result, x)
+        self.assertEqual(handle.impl_generation(), gen_before)
+
+        load_inline(
+            name="fp_cpp_override_ext",
+            cpp_sources="""
+torch::Tensor foo_cpu(const torch::Tensor& x) {
+  return x * 2;
+}
+TORCH_LIBRARY_IMPL(_torch_testing, CPU, m) {
+  m.impl("fp_cpp_override", foo_cpu);
+}
+""",
+            is_python_module=False,
+            verbose=False,
+        )
+        self.assertEqual(handle.impl_generation(), gen_before + 1)
+
+        with self._assert_fast_path_not_taken(fp_cpp_override):
+            result = fp_cpp_override(x)
+        expected = x * 2
+        self.assertEqual(result, expected)
+
+    def test_fast_path_not_masked_by_subsequent_register_kernel(self):
+        @torch.library.custom_op("_torch_testing::fp_mask", mutates_args=())
+        def fp_mask(x: Tensor) -> Tensor:
+            return x.clone()
+
+        @fp_mask.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        op_name = "_torch_testing::fp_mask"
+        x = torch.randn(3)
+
+        # Fast path works initially
+        with self._assert_fast_path_taken(fp_mask):
+            self.assertEqual(fp_mask(x), x)
+
+        # External override
+        lib = torch.library.Library("_torch_testing", "IMPL")
+        lib.impl("fp_mask", lambda x: x * 2, "CPU")
+
+        # Registering another device must not mask the override
+        @fp_mask.register_kernel("cuda")
+        def _(x):
+            return x * 3
+
+        # Fast path should still be disabled, override kernel used
+        with self._assert_fast_path_not_taken(fp_mask):
+            result = fp_mask(x)
+        self.assertEqual(result, x * 2)
+
+    def test_impl_generation_counter(self):
+        @torch.library.custom_op("_torch_testing::fp_gen", mutates_args=())
+        def fp_gen(x: Tensor) -> Tensor:
+            return x.clone()
+
+        handle = fp_gen._opoverload._handle
+        gen0 = handle.impl_generation()
+
+        # Calling the op does not bump the counter
+        fp_gen(torch.randn(3))
+        self.assertEqual(handle.impl_generation(), gen0)
+
+        # register_kernel bumps exactly once
+        @fp_gen.register_kernel("cpu")
+        def _(x):
+            return x * 2
+
+        gen1 = handle.impl_generation()
+        self.assertEqual(gen1, gen0 + 1)
+
+        # External Library.impl bumps exactly once
+        lib = torch.library.Library("_torch_testing", "IMPL")
+        lib.impl("fp_gen", lambda x: x * 3, "CUDA")
+        gen2 = handle.impl_generation()
+        self.assertEqual(gen2, gen1 + 1)
+
+        # Deregistration (del lib) bumps exactly once
+        del lib
+        gen3 = handle.impl_generation()
+        self.assertEqual(gen3, gen2 + 1)
+
+    def test_impl_generation_snapshot_updated_by_register_autocast(self):
+        @torch.library.custom_op("_torch_testing::fp_gen_ac", mutates_args=())
+        def fp_gen_ac(x: Tensor) -> Tensor:
+            return x.clone()
+
+        handle = fp_gen_ac._opoverload._handle
+        snapshot_before = fp_gen_ac._impl_gen_snapshot
+        fp_gen_ac.register_autocast("cpu", torch.float16)
+        snapshot_after = fp_gen_ac._impl_gen_snapshot
+
+        # register_autocast bumps generation by 1 and snapshot tracks it
+        self.assertEqual(snapshot_after, snapshot_before + 1)
+        self.assertEqual(snapshot_after, handle.impl_generation())
+
+    def test_override_one_op_does_not_disable_another(self):
+        @torch.library.custom_op("_torch_testing::fp_iso_a", mutates_args=())
+        def fp_iso_a(x: Tensor) -> Tensor:
+            return x.clone()
+
+        @torch.library.custom_op("_torch_testing::fp_iso_b", mutates_args=())
+        def fp_iso_b(x: Tensor) -> Tensor:
+            return x * 2
+
+        x = torch.randn(3)
+
+        # Both take fast path
+        with self._assert_fast_path_taken(fp_iso_a):
+            fp_iso_a(x)
+        with self._assert_fast_path_taken(fp_iso_b):
+            fp_iso_b(x)
+
+        # Override only fp_iso_a
+        lib = torch.library.Library("_torch_testing", "IMPL")
+        lib.impl("fp_iso_a", lambda x: x * 10, "CPU")
+
+        # fp_iso_a should bail, fp_iso_b should still take fast path
+        with self._assert_fast_path_not_taken(fp_iso_a):
+            fp_iso_a(x)
+        with self._assert_fast_path_taken(fp_iso_b):
+            fp_iso_b(x)
+
 
     def test_fast_path_disabled_by_flag(self):
         import torch._library.custom_ops as co

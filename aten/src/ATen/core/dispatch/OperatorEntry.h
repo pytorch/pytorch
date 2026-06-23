@@ -96,6 +96,10 @@ class TORCH_API OperatorEntry final {
     return is_observed_;
   }
 
+  size_t implGeneration() const {
+    return impl_generation_;
+  }
+
   // We may allocate an OperatorEntry for an operator even when we don't
   // have a schema.  When we receive the schema registration, we post
   // facto register a schema.
@@ -300,6 +304,13 @@ class TORCH_API OperatorEntry final {
 
   // A Python custom error handler for OperatorEntry::reportError
   std::unique_ptr<c10::SafePyObject> report_error_callback_;
+
+  // Incremented each time a kernel is registered or deregistered for this
+  // operator. Used by the custom_op fast path to detect external overrides:
+  // the fast path snapshots this value at install time and bails out if it
+  // changes. Not atomic: all callers hold the GIL (Python fast path) or the
+  // dispatcher mutex (registerKernel).
+  size_t impl_generation_ = 0;
 
   // Whether this operator needs to be observed with RecordFunction
   const bool is_observed_;
