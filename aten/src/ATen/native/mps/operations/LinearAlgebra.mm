@@ -1202,7 +1202,11 @@ static Tensor& addbmm_or_baddbmm_out_mps_impl(const Tensor& input,
     if (result.numel() == 0) {
       return result;
     } else if (batch1.size(2) == 0) {
-      beta.toComplexDouble() == 0.0 ? result.zero_() : result.mul_(beta);
+      if (beta.toComplexDouble() == 0.0) {
+        result.zero_();
+      } else {
+        result.mul_(beta);
+      }
       return result;
     }
   }
