@@ -2599,8 +2599,8 @@ def device_hint(tensor) -> "str":
         and tensor.device.type != "meta"
     ):
         return tensor.device.type
-    elif torch.accelerator.current_accelerator():
-        return torch.accelerator.current_accelerator().type
+    elif (accelerator := torch.accelerator.current_accelerator()) is not None:
+        return accelerator.type
     else:
         return "cuda"  # default to cuda
 
