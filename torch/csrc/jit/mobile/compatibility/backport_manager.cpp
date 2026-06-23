@@ -500,7 +500,7 @@ std::stringstream backport_v9_to_v8(std::stringstream& input_model_stream) {
       torch::jit::load(input_model_stream, std::nullopt, extra_files);
   std::stringstream intermediate_model_stream;
   // TODO(@pavithran) : Check if debug info is available and use load/save while
-  // backporting hardcode debaug info to be false until supported.
+  // backporting hardcode debug info to be false until supported.
   bool hasBytecodeDebug = false;
   {
     BytecodeEmitModeGuard argNumGuard(
@@ -628,7 +628,7 @@ bool BackportManager::backport(
   input_model_stream << oss.rdbuf();
   std::stringstream output_model_stream;
 
-  // 2) backport model, backport_v{i}_to_v{i-1} function's argurment is
+  // 2) backport model, backport_v{i}_to_v{i-1} function's argument is
   // (input_model_stream and output_model_stream)
   while (bytecode_version > to_version) {
     // Swap input and output if it's not the first time and output_model_stream

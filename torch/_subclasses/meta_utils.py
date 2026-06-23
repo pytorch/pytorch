@@ -2351,7 +2351,7 @@ class MetaConverter(Generic[_TensorT]):
                 t.is_quantized
                 or
                 # Views out of sparse tensors not currently supported (plain
-                # sparse is supported htough)
+                # sparse is supported though)
                 (t._is_view() and t._base is not None and t._base.is_sparse)
             ):
                 self.miss += 1
