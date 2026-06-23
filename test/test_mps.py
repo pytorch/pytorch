@@ -11937,7 +11937,7 @@ class TestSDPA(TestCaseMPS):
         with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
             with self.assertRaisesRegex(
                 RuntimeError,
-                r"_scaled_dot_product_attention: Explicit attn_mask should not be set when is_causal=True",
+                r"Explicit attn_mask should not be set when is_causal=True",
             ):
                 F.scaled_dot_product_attention(q, k, v, attn_mask=mask, is_causal=True)
 
