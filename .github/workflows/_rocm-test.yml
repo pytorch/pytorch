@@ -284,8 +284,8 @@ jobs:
           fi
           docker exec -t "${container_name}" sh -c "pip install dist/*.whl && ${PREFLIGHT}${TEST_COMMAND}"
 
-      - name: Restore workspace owner (for gfx1100 only)
-        if: always() && contains(matrix.runner, 'gfx1100')
+      - name: Restore workspace owner
+        if: always()
         shell: bash
         run: |
           docker exec -t "${CONTAINER_NAME}" sh -c \
