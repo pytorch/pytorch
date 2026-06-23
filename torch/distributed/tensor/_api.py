@@ -1581,6 +1581,11 @@ def linspace(
     if placements is not None and any(isinstance(p, _StridedShard) for p in placements):
         raise AssertionError("linspace does not support _StridedShard placements")
 
+    if isinstance(start, torch.Tensor):
+        start = start.item()
+    if isinstance(end, torch.Tensor):
+        end = end.item()
+
     torch_size = normalize_to_torch_size((steps,))
 
     return _dtensor_init_helper(
@@ -1638,6 +1643,11 @@ def logspace(
     """
     if placements is not None and any(isinstance(p, _StridedShard) for p in placements):
         raise AssertionError("logspace does not support _StridedShard placements")
+
+    if isinstance(start, torch.Tensor):
+        start = start.item()
+    if isinstance(end, torch.Tensor):
+        end = end.item()
 
     torch_size = normalize_to_torch_size((steps,))
 

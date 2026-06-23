@@ -157,10 +157,18 @@ class DTensorConstructorTest(DTensorTestBase):
 
         for placements in ([Replicate()], [Shard(0)]):
             dist_tensor = linspace(
-                1.0, 2.0, steps, device_mesh=mesh, placements=placements
+                1.0,
+                2.0,
+                steps,
+                dtype=torch.float64,
+                device_mesh=mesh,
+                placements=placements,
             )
             self.assertEqual(dist_tensor.size(), torch.Size([steps]))
-            self.assertEqual(dist_tensor.full_tensor(), torch.linspace(1.0, 2.0, steps))
+            self.assertEqual(
+                dist_tensor.full_tensor(),
+                torch.linspace(1.0, 2.0, steps, dtype=torch.float64),
+            )
 
             dist_tensor = linspace(
                 0.0, 1.0, steps, device_mesh=mesh, placements=placements
@@ -174,6 +182,22 @@ class DTensorConstructorTest(DTensorTestBase):
             dist_tensor = linspace(1.0, 2.0, 0, device_mesh=mesh, placements=placements)
             self.assertEqual(dist_tensor.size(), torch.Size([0]))
 
+            dist_tensor = linspace(
+                2.0, -2.0, 5, device_mesh=mesh, placements=placements
+            )
+            self.assertEqual(dist_tensor.full_tensor(), torch.linspace(2.0, -2.0, 5))
+
+            start = DTensor.from_local(
+                torch.tensor(1.0, device=self.device_type), mesh, [Replicate()]
+            )
+            end = DTensor.from_local(
+                torch.tensor(2.0, device=self.device_type), mesh, [Replicate()]
+            )
+            dist_tensor = linspace(
+                start, end, steps, device_mesh=mesh, placements=placements
+            )
+            self.assertEqual(dist_tensor.full_tensor(), torch.linspace(1.0, 2.0, steps))
+
     @with_comms
     def test_logspace(self):
         mesh = self.build_device_mesh()
@@ -181,10 +205,18 @@ class DTensorConstructorTest(DTensorTestBase):
 
         for placements in ([Replicate()], [Shard(0)]):
             dist_tensor = logspace(
-                1.0, 2.0, steps, device_mesh=mesh, placements=placements
+                1.0,
+                2.0,
+                steps,
+                dtype=torch.float64,
+                device_mesh=mesh,
+                placements=placements,
             )
             self.assertEqual(dist_tensor.size(), torch.Size([steps]))
-            self.assertEqual(dist_tensor.full_tensor(), torch.logspace(1.0, 2.0, steps))
+            self.assertEqual(
+                dist_tensor.full_tensor(),
+                torch.logspace(1.0, 2.0, steps, dtype=torch.float64),
+            )
 
             dist_tensor = logspace(
                 0.0, 1.0, steps, base=2.0, device_mesh=mesh, placements=placements
@@ -199,6 +231,22 @@ class DTensorConstructorTest(DTensorTestBase):
 
             dist_tensor = logspace(1.0, 2.0, 0, device_mesh=mesh, placements=placements)
             self.assertEqual(dist_tensor.size(), torch.Size([0]))
+
+            dist_tensor = logspace(
+                2.0, -2.0, 5, device_mesh=mesh, placements=placements
+            )
+            self.assertEqual(dist_tensor.full_tensor(), torch.logspace(2.0, -2.0, 5))
+
+            start = DTensor.from_local(
+                torch.tensor(1.0, device=self.device_type), mesh, [Replicate()]
+            )
+            end = DTensor.from_local(
+                torch.tensor(2.0, device=self.device_type), mesh, [Replicate()]
+            )
+            dist_tensor = logspace(
+                start, end, steps, device_mesh=mesh, placements=placements
+            )
+            self.assertEqual(dist_tensor.full_tensor(), torch.logspace(1.0, 2.0, steps))
 
     @with_comms
     def test_zeros(self):
