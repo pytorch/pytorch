@@ -1774,6 +1774,36 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         self.assertEqual(partition_guards[0].overlapping_indices, ())
         self.assertGreater(len(partition_guards[0].input_sources), 2)
 
+    @torch._dynamo.config.patch(
+        recompile_limit=2,
+        fail_on_recompile_limit_hit=True,
+        specialize_float=False,
+    )
+    def test_input_mutation_storage_overlap_allows_runtime_scalar_inputs(self):
+        counter = CompileCounterWithBackend("aot_eager")
+
+        def scaling_step(update, dummy_tensor, lr):
+            dummy_tensor.mul_(0.5 * lr)
+
+            r, c = update.size(-2), update.size(-1)
+            scaling_factor = max(1, r / c) ** 0.5
+            update.mul_(scaling_factor * lr)
+
+            return update
+
+        compiled = torch.compile(scaling_step, backend=counter, fullgraph=True)
+        base_update = torch.randn(128, 128)
+        base_dummy = torch.randn(324, 64)
+
+        for i in range(8):
+            lr = 1e-4 * (i + 1)
+            self.assertEqual(
+                compiled(base_update.clone(), base_dummy.clone(), lr),
+                scaling_step(base_update.clone(), base_dummy.clone(), lr),
+            )
+
+        self.assertLessEqual(counter.frame_count, 2)
+
     def test_input_mutation_storage_overlap_with_module_buffer_recompiles(self):
         class Module(torch.nn.Module):
             def __init__(self) -> None:

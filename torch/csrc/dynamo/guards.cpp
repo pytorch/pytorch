@@ -2800,7 +2800,6 @@ class StorageOverlapPartitionChecker {
         _inputs(expected_inputs, nullptr) {}
 
   void add(PyObject* obj, size_t input_index) {
-    TORCH_CHECK(THPVariable_CheckExact(obj) || THPVariable_Check(obj));
     TORCH_CHECK(input_index < _inputs.size());
     TORCH_CHECK(_inputs[input_index] == nullptr);
     Py_INCREF(obj);
@@ -2823,13 +2822,25 @@ class StorageOverlapPartitionChecker {
     }
 
     std::vector<Tensor> tensors;
+    std::vector<int64_t> tensor_positions;
     tensors.reserve(_inputs.size());
-    for (auto* obj : _inputs) {
+    tensor_positions.reserve(_inputs.size());
+    for (const auto i : c10::irange(_inputs.size())) {
+      auto* obj = _inputs[i];
       TORCH_CHECK(obj != nullptr);
-      tensors.push_back(THPVariable_Unpack(obj));
+      if (THPVariable_CheckExact(obj) || THPVariable_Check(obj)) {
+        tensors.push_back(THPVariable_Unpack(obj));
+        tensor_positions.push_back(static_cast<int64_t>(i));
+      }
     }
-    return compute_overlapping_tensor_groups<StaticMeta>(tensors) ==
-        _expected_partition;
+
+    auto partition = compute_overlapping_tensor_groups<StaticMeta>(tensors);
+    for (auto& group : partition) {
+      for (auto& index : group) {
+        index = tensor_positions[index];
+      }
+    }
+    return partition == _expected_partition;
   }
 
  private:
