@@ -5332,14 +5332,12 @@
   structured_inherits: TensorIteratorBase
   python_module: nn
   dispatch:
-    CPU, CUDA, XPU: mish_out
-    MPS: mish_out_mps
+    CPU, CUDA, MPS, XPU: mish_out
 
 - func: mish_backward(Tensor grad_output, Tensor self) -> Tensor
   python_module: nn
   dispatch:
-    CPU, CUDA, XPU: mish_backward
-    MPS: mish_backward_mps
+    CPU, CUDA, MPS, XPU: mish_backward
     CompositeImplicitAutograd: math_mish_backward
 
 - func: sigmoid(Tensor self) -> Tensor
