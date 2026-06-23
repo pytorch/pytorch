@@ -285,6 +285,9 @@ at::Tensor LazyNativeFunctions::empty_symint(
                                   .layout(layout)
                                   .pinned_memory(pin_memory)
                                   .dtype(dtype);
+  if (x_result.dim() == 0 && x_result.numel() == 1) {
+    x_result.zero_();
+  }
   auto x_result = at::empty(size, options, memory_format);
   auto tensor = CreateLtcTensor(x_result, GetLtcDevice(device));
   // See Note [Lazy Tensor Functionalization]

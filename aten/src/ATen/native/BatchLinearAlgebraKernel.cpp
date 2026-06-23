@@ -44,6 +44,7 @@ void apply_cholesky(const Tensor& input, const Tensor& info, bool upper) {
       "Calling torch.linalg.cholesky on a CPU tensor requires compiling ",
       "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
 #else
+  info.zero_();
   char uplo = upper ? 'U' : 'L';
   auto input_data = input.data_ptr<scalar_t>();
   auto info_data = info.data_ptr<int>();
@@ -250,7 +251,7 @@ void apply_linalg_eig(Tensor& values, Tensor& vectors, Tensor& input, Tensor& in
   }
 
   // call lapackEig once to get the optimal size for work data
-  scalar_t work_query;
+  scalar_t work_query = 0;
   lapackEig<scalar_t, value_t>(jobvl, jobvr, n, input_data, lda, values_data,
     lvectors_data, ldvl, rvectors_data, ldvr, &work_query, -1, rwork_data, &infos_data[0]);
 
@@ -326,8 +327,8 @@ void apply_lapack_eigh(const Tensor& values, const Tensor& vectors, const Tensor
   int lwork = -1;
   int lrwork = -1;
   int liwork = -1;
-  scalar_t lwork_query;
-  value_t rwork_query;
+  scalar_t lwork_query = 0;
+  value_t rwork_query = 0;
   int iwork_query = 0;
 
   // call lapackSyevd once to get the optimal size for work data
@@ -422,7 +423,7 @@ void apply_geqrf(const Tensor& input, const Tensor& tau) {
   // the loop saves (batch_size - 1) workspace queries which would provide the same result
   // and (batch_size - 1) calls to allocate and deallocate workspace using at::empty()
   int lwork = -1;
-  scalar_t wkopt;
+  scalar_t wkopt = 0;
   lapackGeqrf<scalar_t>(m, n, input_data, lda, tau_data, &wkopt, lwork, &info);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info == 0);
 
@@ -496,7 +497,7 @@ inline void apply_orgqr(Tensor& self, const Tensor& tau) {
   // the loop saves (batch_size - 1) workspace queries which would provide the same result
   // and (batch_size - 1) calls to allocate and deallocate workspace using at::empty()
   int lwork = -1;
-  scalar_t wkopt;
+  scalar_t wkopt = 0;
   lapackOrgqr<scalar_t>(m, n, k, self_data, lda, const_cast<scalar_t*>(tau_data), &wkopt, lwork, &info);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info == 0);
   lwork = lapack_work_to_int(wkopt);
@@ -603,8 +604,8 @@ void apply_lstsq(const Tensor& A, Tensor& B, Tensor& rank, Tensor& singular_valu
 
   // Run once the driver, first to get the optimal workspace size
   int lwork = -1; // default value to decide the opt size for workspace arrays
-  scalar_t work_opt;
-  value_t rwork_opt;
+  scalar_t work_opt = 0;
+  value_t rwork_opt = 0;
   int iwork_opt = 0;
   lapack_func(trans, m, n, nrhs,
     A_data, lda,
@@ -749,7 +750,7 @@ void apply_ormqr(const Tensor& input, const Tensor& tau, const Tensor& other, bo
 
   // Query for the optimal size of the workspace tensor
   int lwork = -1;
-  scalar_t wkopt;
+  scalar_t wkopt = 0;
   lapackOrmqr<scalar_t>(side, trans, m, n, k, const_cast<scalar_t*>(input_data), lda, const_cast<scalar_t*>(tau_data), other_data, ldc, &wkopt, lwork, &info);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info == 0);
   lwork = std::max<int>(1, real_impl<scalar_t, value_t>(wkopt));
@@ -859,7 +860,7 @@ void apply_ldl_factor(
   auto ldl_func =
       hermitian ? lapackLdlHermitian<scalar_t> : lapackLdlSymmetric<scalar_t>;
 
-  scalar_t wkopt;
+  scalar_t wkopt = 0;
   ldl_func(uplo, n, a_data, leading_dim, pivots_data, &wkopt, -1, info_data);
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
   int lwork = std::max<int>(1, real_impl<scalar_t, value_t>(wkopt));
@@ -994,6 +995,8 @@ void apply_lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& in
 #else
   TORCH_CHECK(compute_pivots, "linalg.lu_factor: LU without pivoting is not implemented on the CPU");
 
+  pivots.zero_();
+  infos.zero_();
   auto input_data = input.data_ptr<scalar_t>();
   auto pivots_data = pivots.data_ptr<int>();
   auto infos_data = infos.data_ptr<int>();
@@ -1123,6 +1126,12 @@ void apply_svd(const Tensor& A,
   TORCH_CHECK(false, "svd: LAPACK library not found in compilation");
 #else
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
+  S.zero_();
+  if (compute_uv) {
+    U.zero_();
+    Vh.zero_();
+  }
+  info.zero_();
   const auto A_data = A.data_ptr<scalar_t>();
   const auto U_data = compute_uv ? U.data_ptr<scalar_t>() : nullptr;
   const auto S_data = S.data_ptr<value_t>();
@@ -1154,7 +1163,7 @@ void apply_svd(const Tensor& A,
   // Query svd for the optimal lwork size
   int lwork = -1;
   {
-    scalar_t wkopt;
+    scalar_t wkopt = 0;
     lapackSvd<scalar_t, value_t>(jobz, m, n, A_data, lda, S_data, U_data, ldu, Vh_data, ldvh, &wkopt, lwork, rwork_data, iwork_data, info_data);
     lwork = lapack_work_to_int(wkopt);
   }
