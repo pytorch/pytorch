@@ -6,6 +6,7 @@ from torch.distributed._local_tensor import maybe_run_for_local_tensor
 from torch.distributed.tensor import (
     DeviceMesh,
     DTensor,
+    linspace,
     logspace,
     Replicate,
     Shard,
@@ -148,6 +149,30 @@ class DTensorConstructorTest(DTensorTestBase):
             123.4,
             requires_grad=True,
         )
+
+    @with_comms
+    def test_linspace(self):
+        mesh = self.build_device_mesh()
+        steps = 8
+
+        for placements in ([Replicate()], [Shard(0)]):
+            dist_tensor = linspace(
+                1.0, 2.0, steps, device_mesh=mesh, placements=placements
+            )
+            self.assertEqual(dist_tensor.size(), torch.Size([steps]))
+            self.assertEqual(dist_tensor.full_tensor(), torch.linspace(1.0, 2.0, steps))
+
+            dist_tensor = linspace(
+                0.0, 1.0, steps, device_mesh=mesh, placements=placements
+            )
+            self.assertEqual(dist_tensor.full_tensor(), torch.linspace(0.0, 1.0, steps))
+
+            dist_tensor = linspace(1.0, 2.0, 1, device_mesh=mesh, placements=placements)
+            self.assertEqual(dist_tensor.size(), torch.Size([1]))
+            self.assertEqual(dist_tensor.full_tensor(), torch.linspace(1.0, 2.0, 1))
+
+            dist_tensor = linspace(1.0, 2.0, 0, device_mesh=mesh, placements=placements)
+            self.assertEqual(dist_tensor.size(), torch.Size([0]))
 
     @with_comms
     def test_logspace(self):
