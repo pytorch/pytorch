@@ -189,7 +189,9 @@ static void copy_to_mps_stride_contig(at::Tensor& dst,
     // writes can clobber memcpy results (e.g. zeros_like + copy_(scalar) in compiled flows).
     stream->synchronize(SyncType::COMMIT_AND_WAIT);
 
-    void* dst_ptr = static_cast<char*>([destBuffer contents]) + dst_byte_offset;
+    void* contents = [destBuffer contents];
+    TORCH_INTERNAL_ASSERT(contents != nullptr, "MTLBuffer contents is null");
+    void* dst_ptr = static_cast<char*>(contents) + dst_byte_offset;
     std::memcpy(dst_ptr, host_src, size_to_copy);
     return;
   }
