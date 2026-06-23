@@ -11,7 +11,6 @@ matrix_t = torch.randn(3, 2)
 cube = torch.randn(2, 3, 4)
 indices = torch.tensor([0, 1], dtype=torch.long)
 
-
 reveal_type(torch.relu(x))  # E: {Tensor}
 reveal_type(torch.abs(x))  # E: {Tensor}
 reveal_type(torch.clamp(x, min=0.0, max=1.0))  # E: {Tensor}
