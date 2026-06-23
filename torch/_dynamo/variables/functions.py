@@ -824,7 +824,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             tx.output._emit_debugger_breakpoint = True
             return variables.ConstantVariable.create(None)
         # Handle a `nonstrict_trace(fn)` call
-        elif self.fn is torch._dynamo.nonstrict_trace:
+        elif self.fn in (torch._dynamo.nonstrict_trace, torch.compiler.nonstrict_trace):
             bound = inspect.signature(self.fn).bind(*args, **kwargs)
             fn_var = bound.args[0]
             if not isinstance(fn_var, BaseUserFunctionVariable):
@@ -2486,8 +2486,8 @@ class SkipFunctionVariable(VariableTracker):
                         "If it is a third-party C/C++ Python extension, please "
                         "either wrap it into a PyTorch-understood custom operator "
                         "(see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html "
-                        "for more details) or, if it is traceable, use "
-                        "`torch.compiler.allow_in_graph`.",
+                        "for more details) or, if it is traceable, wrap it with "
+                        "`torch.compiler.nonstrict_trace`.",
                     ]
                     # also warn on it because most users won't see the graph break message
                     torch._dynamo.utils.warn_once(explanation + "\n" + "\n".join(hints))

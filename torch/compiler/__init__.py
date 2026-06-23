@@ -18,6 +18,7 @@ __all__ = [
     "assume_constant_result",
     "reset",
     "allow_in_graph",
+    "nonstrict_trace",
     "substitute_in_graph",
     "list_backends",
     "disable",
@@ -151,6 +152,31 @@ def allow_in_graph(fn):
     import torch._dynamo
 
     return torch._dynamo.allow_in_graph(fn)
+
+
+def nonstrict_trace(traceable_fn: Callable[_P, _R]) -> Callable[_P, _R]:
+    """
+    Mark a function as nonstrict-traceable for :func:`torch.compile`.
+
+    A nonstrict-traced function appears as an opaque call in the Dynamo graph,
+    but AOTAutograd traces through it. This is similar to
+    :func:`allow_in_graph`, with enhanced support for user-defined classes,
+    ``nn.Module`` arguments, and captured tensors.
+
+    Args:
+        traceable_fn: A callable to mark as nonstrict-traceable.
+
+    Example::
+
+        @torch.compiler.nonstrict_trace
+        def traced_forward(model, x):
+            torch._dynamo.graph_break()
+            return model(x) + x
+
+    """
+    import torch._dynamo
+
+    return torch._dynamo.nonstrict_trace(traceable_fn)
 
 
 def substitute_in_graph(
