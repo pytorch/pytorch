@@ -45,6 +45,7 @@ class TestMaxAutotuneBlackwell(TestCase):
     @parametrize("dynamic", (False, True))
     @parametrize("tma_store", (False, True))
     @parametrize("epilogue_subtile", (1, 2, 4))
+    @parametrize("host_side_tma", (False, True))
     def test_blackwell_max_autotune_regular_mm_persistent_tma(
         self,
         a_transposed: bool,
@@ -52,6 +53,7 @@ class TestMaxAutotuneBlackwell(TestCase):
         dynamic: bool,
         tma_store: bool,
         epilogue_subtile: int,
+        host_side_tma: bool,
     ):
         def mm(a, b):
             # TMA requires 16-byte alignment: here we repeat the dims
@@ -84,7 +86,8 @@ class TestMaxAutotuneBlackwell(TestCase):
                 "max_autotune": True,
                 "triton.enable_persistent_tma_matmul": True,
                 "triton.enable_template_tma_store": tma_store,
-                "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_device_tma",
+                "triton.enable_host_side_tma": host_side_tma,
+                "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
                 "test_configs.autotune_choice_desc_regex": epilogue_subtile_regex,
             }
         ):
@@ -99,9 +102,53 @@ class TestMaxAutotuneBlackwell(TestCase):
             write_api = "tma_descriptor0.store"
         else:
             write_api = "tl.store"
-        FileCheck().check("triton_tem_fused_mm").check(
-            "triton.language.make_tensor_descriptor"
-        ).check("tl.load_tensor_descriptor").check(write_api).run(code[0])
+        fc = FileCheck().check("triton_tem_fused_mm")
+        if host_side_tma:
+            fc.check_not("tl.make_tensor_descriptor")
+            fc.check_not("tl.load_tensor_descriptor")
+        else:
+            fc.check("tl.make_tensor_descriptor")
+            fc.check("tl.load_tensor_descriptor")
+        fc.check(write_api).run(code[0])
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @parametrize("op", ("mm", "addmm"))
+    def test_blackwell_host_side_tma_transposed_b(self, op: str):
+        # Regression test for host-side TMA with a column-major / transposed B
+        # operand (B_ROW_MAJOR=False, the nn.Linear `x @ W.t()` case).
+        # Previously the host launcher re-permuted the runtime tensor's own
+        # dims -- which are in base layout for a transposed operand -- producing
+        # an incorrect result. Also covers addmm host-side TMA, previously
+        # untested.
+        M, N, K = 512, 256, 512
+        a = torch.randn(M, K).to(torch.float16).to(GPU_TYPE)
+        # b is [N, K]; b.t() is the [K, N] column-major operand.
+        b = torch.randn(N, K).to(torch.float16).to(GPU_TYPE)
+        bias = torch.randn(N).to(torch.float16).to(GPU_TYPE)
+
+        def fn(a, b, bias):
+            if op == "addmm":
+                return torch.addmm(bias, a, b.t())
+            return torch.mm(a, b.t())
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "triton.enable_persistent_tma_matmul": True,
+                "triton.enable_host_side_tma": True,
+                "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
+            }
+        ):
+            c_actual, code = run_and_get_code(torch.compile(fn), a, b, bias)
+        c_expected = fn(a, b, bias)
+        torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
+        # host-side TMA: descriptors come from the launcher, none built in-kernel
+        FileCheck().check("triton_tem_fused").check_not(
+            "tl.make_tensor_descriptor"
+        ).run(code[0])
 
     # NOTE: the current Inductor template verifies that the scaling mode is either per-tensor or per-row
     # TODO: support additional scaling modes for Blackwell
@@ -143,7 +190,7 @@ class TestMaxAutotuneBlackwell(TestCase):
                 "max_autotune": True,
                 "triton.enable_persistent_tma_matmul": True,
                 "triton.enable_template_tma_store": tma_store,
-                "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_device_tma",
+                "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
             }
         ):
             c_actual, code = run_and_get_code(
@@ -209,7 +256,7 @@ class TestMaxAutotuneBlackwell(TestCase):
                 "max_autotune": True,
                 "triton.enable_persistent_tma_matmul": True,
                 "triton.enable_template_tma_store": tma_store,
-                "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_device_tma",
+                "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
             }
         ):
             c_actual, code = run_and_get_code(
@@ -280,16 +327,16 @@ class TestMaxAutotuneBlackwell(TestCase):
                 "max_autotune": True,
                 "triton.enable_persistent_tma_matmul": True,
                 "triton.enable_template_tma_store": tma_store,
-                "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_device_tma",
+                "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
                 "test_configs.autotune_choice_desc_regex": epilogue_subtile_regex,
                 # If we dynamically disable pipelining,
-                # triton_blackwell_ws_persistent_device_tma template will
+                # triton_blackwell_ws_persistent_tma template will
                 # be picked and then cause mis-aligned memory access.
                 # If we don't dynamically disable pipelining,
                 # this template is skipped and triton_tem_fused_addmm_repeat_3
                 # is used.
                 #
-                # Fundamentally we should fix the triton_blackwell_ws_persistent_device_tma template
+                # Fundamentally we should fix the triton_blackwell_ws_persistent_tma template
                 # The flag below work around the problem.
                 #
                 # This only happens in fbcode https://www.internalfb.com/diff/D101855575.
@@ -367,8 +414,8 @@ class TestBlackwellTMAStoreFusion(TestCase):
         from torch._inductor.template_heuristics.registry import get_template_heuristic
 
         _cache_keys = [
-            ("triton::blackwell_ws_persistent_device_tma", "cuda", "mm"),
-            ("triton::blackwell_ws_persistent_device_tma", "cuda", "addmm"),
+            ("triton::blackwell_ws_persistent_tma", "cuda", "mm"),
+            ("triton::blackwell_ws_persistent_tma", "cuda", "addmm"),
         ]
         orig_configs_by_key = {}
         for key in _cache_keys:
@@ -381,7 +428,7 @@ class TestBlackwellTMAStoreFusion(TestCase):
                     "max_autotune": True,
                     "triton.enable_persistent_tma_matmul": True,
                     "triton.enable_template_tma_store": True,
-                    "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_device_tma",
+                    "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
                 }
             ):
                 actual, code = run_and_get_code(torch.compile(fn), x, W)
@@ -424,8 +471,8 @@ class TestBlackwellTMAStoreFusion(TestCase):
         from torch._inductor.template_heuristics.registry import get_template_heuristic
 
         _cache_keys = [
-            ("triton::blackwell_ws_persistent_device_tma", "cuda", "mm"),
-            ("triton::blackwell_ws_persistent_device_tma", "cuda", "addmm"),
+            ("triton::blackwell_ws_persistent_tma", "cuda", "mm"),
+            ("triton::blackwell_ws_persistent_tma", "cuda", "addmm"),
         ]
         orig_configs_by_key = {}
         for key in _cache_keys:
@@ -438,7 +485,7 @@ class TestBlackwellTMAStoreFusion(TestCase):
                     "max_autotune": True,
                     "triton.enable_persistent_tma_matmul": True,
                     "triton.enable_template_tma_store": True,
-                    "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_device_tma",
+                    "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
                 }
             ):
                 actual, code = run_and_get_code(torch.compile(fn), x, W, bias)
@@ -497,8 +544,8 @@ class TestBlackwellTMALoadFusion(TestCase):
         from torch._inductor.template_heuristics.registry import get_template_heuristic
 
         _cache_keys = [
-            ("triton::blackwell_ws_persistent_device_tma", "cuda", "mm"),
-            ("triton::blackwell_ws_persistent_device_tma", "cuda", "addmm"),
+            ("triton::blackwell_ws_persistent_tma", "cuda", "mm"),
+            ("triton::blackwell_ws_persistent_tma", "cuda", "addmm"),
         ]
         orig_configs_by_key = {}
         for key in _cache_keys:
@@ -511,7 +558,7 @@ class TestBlackwellTMALoadFusion(TestCase):
                     "max_autotune": True,
                     "triton.enable_persistent_tma_matmul": True,
                     "triton.enable_tma_load_for_template_epilogue": True,
-                    "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_device_tma",
+                    "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
                 }
             ):
                 actual, code = run_and_get_code(torch.compile(fn), x, W)
@@ -553,8 +600,8 @@ class TestBlackwellTMALoadFusion(TestCase):
         from torch._inductor.template_heuristics.registry import get_template_heuristic
 
         _cache_keys = [
-            ("triton::blackwell_ws_persistent_device_tma", "cuda", "mm"),
-            ("triton::blackwell_ws_persistent_device_tma", "cuda", "addmm"),
+            ("triton::blackwell_ws_persistent_tma", "cuda", "mm"),
+            ("triton::blackwell_ws_persistent_tma", "cuda", "addmm"),
         ]
         orig_configs_by_key = {}
         for key in _cache_keys:
@@ -567,7 +614,7 @@ class TestBlackwellTMALoadFusion(TestCase):
                     "max_autotune": True,
                     "triton.enable_persistent_tma_matmul": True,
                     "triton.enable_tma_load_for_template_epilogue": True,
-                    "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_device_tma",
+                    "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
                 }
             ):
                 actual, code = run_and_get_code(torch.compile(fn), x, W, scale, bias)
@@ -608,8 +655,8 @@ class TestBlackwellTMALoadFusion(TestCase):
         from torch._inductor.template_heuristics.registry import get_template_heuristic
 
         _cache_keys = [
-            ("triton::blackwell_ws_persistent_device_tma", "cuda", "mm"),
-            ("triton::blackwell_ws_persistent_device_tma", "cuda", "addmm"),
+            ("triton::blackwell_ws_persistent_tma", "cuda", "mm"),
+            ("triton::blackwell_ws_persistent_tma", "cuda", "addmm"),
         ]
         orig_configs_by_key = {}
         for key in _cache_keys:
@@ -622,7 +669,7 @@ class TestBlackwellTMALoadFusion(TestCase):
                     "max_autotune": True,
                     "triton.enable_persistent_tma_matmul": True,
                     "triton.enable_tma_load_for_template_epilogue": True,
-                    "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_device_tma",
+                    "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
                 }
             ):
                 actual, code = run_and_get_code(torch.compile(fn), bias, x, W)

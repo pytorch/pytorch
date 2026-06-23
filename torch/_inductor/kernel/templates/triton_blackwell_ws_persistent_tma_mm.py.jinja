@@ -11,24 +11,15 @@
     k_tiles = tl.cdiv(K, BLOCK_K)
     num_tiles = grid_m * grid_n
 
-    # Note: We require TMA_EXPERIMENTAL_API == False, which
-    # we will check before invoking this template.
-    stride_am = {{stride("A", 0)}}
-    stride_ak = {{stride("A", 1)}}
-    stride_bk = {{stride("B", 0)}}
-    stride_bn = {{stride("B", 1)}}
-    a_desc = triton.language.make_tensor_descriptor(
-        base=A,
-        shape=[M, K] if A_ROW_MAJOR else [K, M],
-        strides=[stride_am, 1] if A_ROW_MAJOR else [stride_ak, 1],
-        block_shape=[BLOCK_M, BLOCK_K] if A_ROW_MAJOR else [BLOCK_K, BLOCK_M],
-    )
-    b_desc = triton.language.make_tensor_descriptor(
-        base=B,
-        shape=[K, N] if B_ROW_MAJOR else [N, K],
-        strides=[stride_bk, 1] if B_ROW_MAJOR else [stride_bn, 1],
-        block_shape=[BLOCK_K, BLOCK_N] if B_ROW_MAJOR else [BLOCK_N, BLOCK_K],
-    )
+    {{tma_descriptor("a_desc", "A",
+        [BLOCK_M, BLOCK_K] if A_ROW_MAJOR else [BLOCK_K, BLOCK_M],
+        [0, 1] if A_ROW_MAJOR else [1, 0]
+    )}}
+    {{tma_descriptor("b_desc", "B",
+        [BLOCK_K, BLOCK_N] if B_ROW_MAJOR else [BLOCK_N, BLOCK_K],
+        [0, 1] if B_ROW_MAJOR else [1, 0]
+    )}}
+
     # tile_id_c is used in the epilogue to break the dependency between
     # the prologue and the epilogue
     tile_id_c = start_pid - NUM_SMS
@@ -49,6 +40,18 @@
         for ki in range(k_tiles):
             offs_k = ki * BLOCK_K
             offs_k_desc = offs_k.to(tl.int32)
+            {%- if HOST_SIDE_TMA %}
+            a = a_desc.load(
+                [offs_am_desc, offs_k_desc]
+                if A_ROW_MAJOR
+                else [offs_k_desc, offs_am_desc],
+            )
+            b = b_desc.load(
+                [offs_k_desc, offs_bn_desc]
+                if B_ROW_MAJOR
+                else [offs_bn_desc, offs_k_desc],
+            )
+            {%- else %}
             a = tl.load_tensor_descriptor(
                 a_desc,
                 [offs_am_desc, offs_k_desc]
@@ -61,6 +64,7 @@
                 if B_ROW_MAJOR
                 else [offs_bn_desc, offs_k_desc],
             )
+            {%- endif %}
             accumulator += tl.dot(
                 a if A_ROW_MAJOR else a.T,
                 b if B_ROW_MAJOR else b.T,
