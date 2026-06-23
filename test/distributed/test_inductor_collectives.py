@@ -10,6 +10,7 @@ import torch
 import torch._dynamo
 import torch._dynamo.logging
 import torch._dynamo.test_case
+import torch._inductor.comms as comms
 import torch.distributed as c10d
 
 # for some reason importing functional collectives after dynamo breaks collectives handling!
@@ -24,6 +25,7 @@ from torch._inductor.comms import (
     sink_waits_iterative,
 )
 from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
+from torch._inductor.dependencies import WeakDep
 from torch._inductor.fx_passes.bucketing import (
     _insert_fn_trace_before_node,
     _trace as bucketing_trace,
@@ -34,6 +36,7 @@ from torch._inductor.fx_passes.bucketing import (
     is_reduce_scatter_tensor,
     reduce_scatter_merge_fn_to_trace_custom_ops,
 )
+from torch._inductor.memory import SNodeMemory
 from torch._inductor.scheduler import (
     _get_benchmarkable_extern_fn,
     BaseSchedulerNode,
@@ -195,6 +198,62 @@ class TestBucketingTrace(torch._dynamo.test_case.TestCase):
         )
 
         self.assertEqual(transposed.meta["val"].stride(), (1, 8))
+
+
+class TestSimpleOverlap(torch._dynamo.test_case.TestCase):
+    def test_preserves_fake_dep_ordering(self):
+        class FakeBuffer:
+            def __init__(self, name):
+                self.name = name
+
+            def get_name(self):
+                return self.name
+
+        class FakeSNode:
+            def __init__(self, name, kind, outputs, deps=()):
+                self.name = name
+                self.kind = kind
+                self.outputs = [FakeBuffer(output) for output in outputs]
+                self.unmet_dependencies = deps
+
+            def get_outputs(self):
+                return self.outputs
+
+            def get_name(self):
+                return self.name
+
+        sync_coll = FakeSNode("sync_coll", "sync_collective", ["sync_out"])
+        compute = FakeSNode("compute", "compute", ["compute_out"])
+        async_coll = FakeSNode(
+            "async_coll",
+            "async_collective",
+            ["async_out"],
+            [WeakDep("sync_out", mutating_buf="async_out", is_fake=True)],
+        )
+
+        def memory_tracking(snodes):
+            return (
+                0,
+                dict.fromkeys(snodes, (0, 0)),
+                {snode: SNodeMemory(0, 0) for snode in snodes},
+                {},
+                {},
+                {},
+            )
+
+        with (
+            mock.patch.object(comms, "_initialize_memory_tracking", memory_tracking),
+            mock.patch.object(
+                comms,
+                "contains_async_collective",
+                lambda snode: snode.kind == "async_collective",
+            ),
+            mock.patch.object(comms, "contains_wait", lambda snode: False),
+        ):
+            self.assertEqual(
+                comms.simple_overlap([sync_coll, compute, async_coll]),
+                [sync_coll, async_coll, compute],
+            )
 
 
 @requires_accelerator_dist_backend(["nccl", "xccl"])
