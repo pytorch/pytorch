@@ -111,6 +111,8 @@
     CUDAGraph
     graph
     make_graphed_callables
+    export_dot
+    export_graph_data
 ```
 
 (cuda-memory-management-api)=

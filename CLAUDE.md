@@ -158,6 +158,19 @@ If uncertain, choose the simpler, more concise implementation.
 Use `torch.cuda._utils._check_cuda_bindings` to error-check `cuda.bindings`
 runtime calls. Do not write inline error-checking helpers.
 
+# cuda.bindings Raw Handles
+
+`cuda.bindings` runtime functions accept a raw handle passed as a Python `int`
+directly as their handle argument. Whenever you already have an int handle --
+from `CUDAGraph.raw_cuda_graph()` / `raw_cuda_graph_exec()`, a stream's
+`.cuda_stream`, `int(node)`, or any other source -- pass it straight in. Do NOT
+construct a typed wrapper (`cudaGraph_t(init_value=...)`,
+`cudaGraphExec_t(init_value=...)`, `cudaStream_t(init_value=...)`, etc.) just to
+hand an int you already have to a bindings call. For example
+`_cuda_runtime.cudaGraphGetId(g.raw_cuda_graph())`, not
+`cudaGraphGetId(cudaGraph_t(init_value=g.raw_cuda_graph()))`. Only build the
+typed object when you genuinely need it as a value in its own right.
+
 # Dynamo Config
 
 Use `torch._dynamo.config.patch` for temporarily changing config. It can be used as a decorator on test methods or as a context manager:

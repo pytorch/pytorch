@@ -665,6 +665,40 @@ class TestGetGraphData(TestCase):
             self.assertIsNotNone(kn["kernel_name"])
             self.assertIsInstance(kn["kernel_name"], str)
 
+    def test_export_graph_data_hook(self):
+        import os
+        import pickle
+        import tempfile
+
+        x = torch.zeros([2000], device="cuda")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # keep_graph=True: instantiate() explicitly fires the hook; the
+            # template persists so we can also compare against get_graph_data().
+            g = torch.cuda.CUDAGraph(keep_graph=True)
+            with torch.cuda.graph(g, capture_error_mode="relaxed"):
+                _ = (x + 1).relu()
+            kept_path = os.path.join(tmpdir, "kept.pkl")
+            g.register_post_instantiate_hook(torch.cuda.export_graph_data(kept_path))
+            g.instantiate()
+            self.assertGreater(os.path.getsize(kept_path), 0)
+            with open(kept_path, "rb") as f:
+                self.assertEqual(pickle.load(f), g.get_graph_data())
+
+            # keep_graph=False: capture_end instantiates (firing the hook) before
+            # it destroys the template, so get_graph_data still sees both the
+            # template and the exec graph. Register before capture.
+            g2 = torch.cuda.CUDAGraph()
+            free_path = os.path.join(tmpdir, "free.pkl")
+            g2.register_post_instantiate_hook(torch.cuda.export_graph_data(free_path))
+            with torch.cuda.graph(g2, capture_error_mode="relaxed"):
+                _ = (x + 1).relu()
+            self.assertGreater(os.path.getsize(free_path), 0)
+            with open(free_path, "rb") as f:
+                data = pickle.load(f)
+            self.assertIn("exec_graph_id", data)
+            self.assertGreater(len(data["nodes"]), 0)
+
     def test_edges(self):
         g = torch.cuda.CUDAGraph(keep_graph=True)
         x = torch.zeros([2000], device="cuda")
