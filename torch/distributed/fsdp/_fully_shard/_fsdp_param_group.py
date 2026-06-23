@@ -561,6 +561,8 @@ class FSDPParamGroup:
                 self._training_state = TrainingState.FORWARD
                 self.unshard(self.unshard_async_op)
                 self.wait_for_unshard()
+            for fsdp_param in self.fsdp_params:
+                fsdp_param._restore_spmd_types(fsdp_param.unsharded_param)
             if entering_forward_pass:
                 args, kwargs = self._register_post_backward_hook(args, kwargs)
             return args, kwargs
@@ -1160,3 +1162,9 @@ class RegisterPostBackwardFunction(torch.autograd.Function):
         # Drop the non-tensor param_group tangent. The output pre-backward hook
         # queues final post-backward after all primal/tangent paths finish.
         return grad_inputs
+
+
+if dist._is_spmd_types_available():
+    import spmd_types
+
+    spmd_types.register_local_autograd_function(RegisterPostBackwardFunction)
