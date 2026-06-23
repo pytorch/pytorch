@@ -207,6 +207,46 @@ def forward(self, a_1):
         out2.sum().backward()
         self.assertEqual(a1.grad, a2.grad)
 
+    def test_pre_dispatch_autograd_grad_reuses_saved_forward_tensor(self):
+        def f(x):
+            y = torch.sqrt(x)
+            (grad,) = torch.autograd.grad(y, x, torch.ones_like(y))
+            return y, grad
+
+        x = (torch.rand(4, 4) + 0.1).requires_grad_()
+        ref_y, ref_grad = f(x)
+
+        grad_enabled = torch.is_grad_enabled()
+
+        @torch._dynamo.disable
+        def trace_f():
+            # compiled_autograd wraps the backward formula with Dynamo in
+            # dynamo_wrapped CI, which cannot be nested inside FX tracing.
+            with torch._dynamo.compiled_autograd._disable():
+                return make_fx(f, tracing_mode="fake", pre_dispatch=True)(x)
+
+        try:
+            # Non-strict export uses fake pre-dispatch make_fx tracing.
+            fx_g = trace_f()
+            self.assertEqual(torch.is_grad_enabled(), grad_enabled)
+        finally:
+            torch.set_grad_enabled(grad_enabled)
+        graph = str(fx_g.graph)
+        self.assertNotIn("get_attr", graph)
+        self.assertNotIn("_tensor_constant", graph)
+        self.assertIn("torch.ops.aten.sqrt.default", graph)
+
+        x_test = x.detach().clone().requires_grad_(True)
+        try:
+            y, grad = fx_g(x_test)
+            self.assertEqual(torch.is_grad_enabled(), grad_enabled)
+        finally:
+            torch.set_grad_enabled(grad_enabled)
+        self.assertEqual(y, ref_y)
+        self.assertEqual(grad, ref_grad)
+        self.assertEqual(grad.requires_grad, ref_grad.requires_grad)
+        self.assertIsNone(grad.grad_fn)
+
     def test_make_fx_simple(self):
         def f(x):
             return torch.sin(x)
