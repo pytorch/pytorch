@@ -562,7 +562,7 @@ bool Context::ckSDPASupported() {
 #ifdef USE_ROCM
   // CK SDPA is only built for a subset of architectures to limit compile time.
   static const std::vector<std::string> supported_archs = {
-      "gfx942", "gfx950",
+    "gfx90a", "gfx942", "gfx950", "gfx1250",
   };
   for (auto index : c10::irange(detail::getCUDAHooks().deviceCount())) {
     if (!detail::getCUDAHooks().isGPUArch(supported_archs, index)) {
