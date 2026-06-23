@@ -144,12 +144,6 @@ dtensor_fails = {
     xfail("linalg.lstsq", "grad_oriented"),
     xfail("masked_select"),
     xfail("nn.functional.ctc_loss"),
-    # weighted cross_entropy mean reduction over a sharded batch:
-    # DTensor averages per-rank means instead of computing a global
-    # weighted mean, so any per-rank ``sum(weight[target])`` imbalance
-    # produces drift. Compiled DTensor handles it; see
-    # dtensor_numeric_only_fails for the subtraction.
-    xfail("nn.functional.linear_cross_entropy"),
     # 0-dim tensor edge cases: strategies don't handle scalar tensors
     xfail("transpose"),
     # conv stride+padding: TP convolution rejects stride != 1 with padding
@@ -294,7 +288,6 @@ dtensor_compiled_fails = {
     skip("norm", "nuc"),
     # Flaky in CI: https://github.com/pytorch/pytorch/issues/176973
     skip("histc"),
-    xfail("nn.functional.linear_cross_entropy"),
     xfail("nn.functional.linear_cross_entropy", "chunked"),
     xfail("nn.functional.linear_cross_entropy", "chunked_none"),
 }
@@ -311,7 +304,6 @@ dtensor_numeric_only_fails = {
     xfail("linspace"),
     xfail("logspace"),
     xfail("nn.functional.huber_loss"),
-    xfail("nn.functional.linear_cross_entropy"),
     xfail("nn.functional.max_unpool3d", "grad"),
     xfail("nn.functional.smooth_l1_loss"),
     xfail("nn.functional.softshrink"),
