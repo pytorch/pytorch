@@ -356,7 +356,7 @@ def cudagraph_partition_post_compile(
             if config.triton.cudagraph_or_error:
                 raise RuntimeError(
                     "skipping cudagraphs as len(compiled_graph.partition_maps) == 0"
-                    )
+                )
             log_cudagraph_skip_and_bump_counter(
                 "skipping cudagraphs as len(compiled_graph.partition_maps) == 0"
             )
