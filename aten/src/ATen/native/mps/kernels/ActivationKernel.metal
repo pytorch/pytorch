@@ -230,6 +230,36 @@ REGISTER_BINARY_OP(silu_backward, float, float);
 REGISTER_BINARY_OP(silu_backward, half, half);
 REGISTER_BINARY_OP(silu_backward, bfloat, bfloat);
 
+struct mish_functor {
+  template <typename T>
+  inline T operator()(const T x) {
+    float xf = float(x);
+    return static_cast<T>(
+        xf *
+        ::metal::precise::tanh(::c10::metal::log1p(::metal::precise::exp(xf))));
+  }
+};
+
+REGISTER_UNARY_OP(mish, float, float);
+REGISTER_UNARY_OP(mish, half, half);
+REGISTER_UNARY_OP(mish, bfloat, bfloat);
+
+struct mish_backward_functor {
+  template <typename T>
+  inline T operator()(const T grad_output, const T self) {
+    float sf = float(self);
+    float sig = 1.0f / (1.0f + ::metal::precise::exp(-sf));
+    float tsp =
+        ::metal::precise::tanh(::c10::metal::log1p(::metal::precise::exp(sf)));
+    return static_cast<T>(
+        float(grad_output) * (tsp + sf * sig * (1.0f - tsp * tsp)));
+  }
+};
+
+REGISTER_BINARY_OP(mish_backward, float, float);
+REGISTER_BINARY_OP(mish_backward, half, half);
+REGISTER_BINARY_OP(mish_backward, bfloat, bfloat);
+
 template <typename T>
 static inline float gelu_dispatch_tanh(float x) {
   if IF_CONSTEXPR (::metal::is_same_v<T, float>) {
