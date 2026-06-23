@@ -829,16 +829,14 @@ class TestProfiler(TestCase):
             current.update(previous)
 
     @skipIfTorchDynamo("native ctypes/CUPTI probe; nothing to compile")
-    @parametrize("version", [1, 2])
-    def test_cupti_monitor_buffer_pool_reuse(self, version):
+    def test_cupti_monitor_buffer_pool_reuse(self):
         # The CUPTI monitor's buffer pool is pure C++ (no CUDA/cupti-python), so
         # drive its native buffer-requested / buffer-completed callbacks directly
         # via ctypes to verify returned buffers are recycled rather than
-        # reallocated. Both the v1 (cuptiActivityRegisterCallbacks) and v2
-        # (cuptiActivityRegisterCallbacks_v2) callback signatures feed the same
-        # pool/queue; v2's request appends an (ignored) info pointer, and v2's
-        # complete reorders args and drops the (CUcontext, streamId) that v1
-        # carries, so v2-completed buffers report ctx/stream of 0.
+        # reallocated. The callbacks match cuptiActivityRegisterCallbacks_v2: the
+        # request takes a trailing (ignored) info pointer, and the completion takes
+        # the buffer + a complete-info pointer (no CUcontext/streamId -- those are
+        # selectable record fields -- so completed buffers report ctx/stream of 0).
         import ctypes
 
         pyprof = torch._C._profiler
@@ -847,63 +845,37 @@ class TestProfiler(TestCase):
         buffer_size = 64 * 1024
         pyprof._cupti_monitor.configure_buffers(buffer_size)
 
-        if version == 1:
-            request_t = ctypes.CFUNCTYPE(
-                None,
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_size_t),
-                ctypes.POINTER(ctypes.c_size_t),
-            )
-            complete_t = ctypes.CFUNCTYPE(
-                None,
-                ctypes.c_void_p,
-                ctypes.c_uint32,
-                ctypes.c_void_p,
-                ctypes.c_size_t,
-                ctypes.c_size_t,
-            )
-        else:
-            request_t = ctypes.CFUNCTYPE(
-                None,
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_size_t),
-                ctypes.POINTER(ctypes.c_size_t),
-                ctypes.c_void_p,
-            )
-            complete_t = ctypes.CFUNCTYPE(
-                None,
-                ctypes.c_void_p,
-                ctypes.c_size_t,
-                ctypes.c_size_t,
-                ctypes.c_void_p,
-            )
-        request = request_t(
-            pyprof._cupti_monitor.buffer_request_callback_address(version)
+        request_t = ctypes.CFUNCTYPE(
+            None,
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_size_t),
+            ctypes.POINTER(ctypes.c_size_t),
+            ctypes.c_void_p,
         )
-        complete = complete_t(
-            pyprof._cupti_monitor.buffer_complete_callback_address(version)
+        complete_t = ctypes.CFUNCTYPE(
+            None,
+            ctypes.c_void_p,
+            ctypes.c_size_t,
+            ctypes.c_size_t,
+            ctypes.c_void_p,
         )
+        request = request_t(pyprof._cupti_monitor.buffer_request_callback_address())
+        complete = complete_t(pyprof._cupti_monitor.buffer_complete_callback_address())
 
         def do_request():
             buf = ctypes.c_void_p()
             size = ctypes.c_size_t()
             max_records = ctypes.c_size_t()
-            args = [ctypes.byref(buf), ctypes.byref(size), ctypes.byref(max_records)]
-            if version == 2:
-                args.append(None)  # CUpti_BufferCallbackRequestInfo*
-            request(*args)
+            request(
+                ctypes.byref(buf),
+                ctypes.byref(size),
+                ctypes.byref(max_records),
+                None,  # CUpti_BufferCallbackRequestInfo*
+            )
             return buf.value, size.value
 
         def do_complete(ptr):
-            if version == 1:
-                complete(
-                    ctypes.c_void_p(0xABCD), 7, ctypes.c_void_p(ptr), buffer_size, 4096
-                )
-            else:
-                complete(ctypes.c_void_p(ptr), buffer_size, 4096, None)
-
-        # v1 carries ctx/stream through to the completed record; v2 reports 0.
-        expected_ctx, expected_stream = (0xABCD, 7) if version == 1 else (0, 0)
+            complete(ctypes.c_void_p(ptr), buffer_size, 4096, None)
 
         # First request has an empty free list, so it allocates.
         ptr_a, size_a = do_request()
@@ -914,8 +886,9 @@ class TestProfiler(TestCase):
         do_complete(ptr_a)
         self.assertEqual(pyprof._cupti_monitor.pending_buffers(), 1)
         item = pyprof._cupti_monitor.get_completed()
-        # 5th field is layout_epoch, 0 here (no reconfiguration in this test).
-        self.assertEqual(item, (ptr_a, 4096, expected_ctx, expected_stream, 0))
+        # (ptr, valid_size, ctx, stream, layouts): ctx/stream 0 (not delivered to the
+        # completion callback) and layouts empty (driven with a null complete_info).
+        self.assertEqual(item, (ptr_a, 4096, 0, 0, []))
         self.assertEqual(pyprof._cupti_monitor.pending_buffers(), 0)
         pyprof._cupti_monitor.return_buffer(ptr_a)
 
@@ -931,13 +904,12 @@ class TestProfiler(TestCase):
 
     @skipIfTorchDynamo("native ctypes/CUPTI probe; nothing to compile")
     def test_cupti_monitor_v2_record_layout_capture(self):
-        # The v2 complete callback snapshots the CUPTI user-defined record layout
-        # (valid only during the callback) into the current layout epoch, so the
-        # decode thread can parse records afterward and reconfiguring (a new
-        # epoch) does not clobber the layout of buffers still queued under the old
-        # one. Build the CUPTI >= 13.2 complete-info / record-layout structs with
-        # ctypes and drive the native v2 callbacks directly (no CUDA/cupti-python);
-        # this also pins the C++ ABI mirror of those structs.
+        # The v2 complete callback parses the CUPTI user-defined record layout
+        # (pBufferCompleteInfo->ppRecordLayouts, valid only during the callback) and
+        # attaches it to the completed buffer, so the decode thread parses records
+        # against each buffer's own layout. Build the CUPTI >= 13.3 complete-info /
+        # record-layout structs with ctypes and drive the native v2 callbacks
+        # directly (no CUDA/cupti-python); this also pins the C++ ABI mirror.
         import ctypes
 
         pyprof = torch._C._profiler
@@ -1006,8 +978,8 @@ class TestProfiler(TestCase):
             ctypes.c_size_t,
             ctypes.c_void_p,
         )
-        request = request_t(pyprof._cupti_monitor.buffer_request_callback_address(2))
-        complete = complete_t(pyprof._cupti_monitor.buffer_complete_callback_address(2))
+        request = request_t(pyprof._cupti_monitor.buffer_request_callback_address())
+        complete = complete_t(pyprof._cupti_monitor.buffer_complete_callback_address())
 
         buf = ctypes.c_void_p()
         size = ctypes.c_size_t()
@@ -1019,19 +991,15 @@ class TestProfiler(TestCase):
             16,
             ctypes.cast(ctypes.pointer(info), ctypes.c_void_p),
         )
-        # Drain the completed buffer so the pool is tidy for the reset cleanup.
+        # The completed buffer carries CUPTI's parsed layout as its 5th field: the
+        # per-kind (kind, record_size, [(field_id, offset, size), ...]) list (here
+        # kind 9). No epoch / shared state -- the layout travels with the buffer.
         item = pyprof._cupti_monitor.get_completed()
+        self.assertEqual(item[4], [(9, 16, [(0, 0, 4), (5, 8, 8)])])
         pyprof._cupti_monitor.return_buffer(item[0])
-        # Captured under the initial epoch 0, and the buffer is tagged with it.
-        self.assertEqual(item[4], 0)
-        self.assertEqual(
-            pyprof._cupti_monitor.record_layouts(0),
-            [(9, 16, [(0, 0, 4), (5, 8, 8)])],
-        )
 
-        # Reconfiguring opens a new epoch with a different layout; the old epoch's
-        # layout is retained so buffers still queued under it decode correctly.
-        self.assertEqual(pyprof._cupti_monitor.next_layout_epoch(), 1)
+        # A second buffer with a different selection carries its own layout -- each
+        # buffer decodes against the layout it was completed with.
         entries_b = (FieldEntry * 1)(FieldEntry(ctypes.sizeof(FieldEntry), 0, 0, 4, 4))
         layout_b = RecordLayout(
             ctypes.sizeof(RecordLayout),
@@ -1055,17 +1023,8 @@ class TestProfiler(TestCase):
             ctypes.cast(ctypes.pointer(info_b), ctypes.c_void_p),
         )
         item_b = pyprof._cupti_monitor.get_completed()
+        self.assertEqual(item_b[4], [(3, 8, [(0, 0, 4)])])
         pyprof._cupti_monitor.return_buffer(item_b[0])
-        self.assertEqual(item_b[4], 1)
-        self.assertEqual(
-            pyprof._cupti_monitor.record_layouts(1),
-            [(3, 8, [(0, 0, 4)])],
-        )
-        # Epoch 0 still holds the original layout.
-        self.assertEqual(
-            pyprof._cupti_monitor.record_layouts(0),
-            [(9, 16, [(0, 0, 4), (5, 8, 8)])],
-        )
 
     def test_build_flow_mapping_supports_sparse_flow_ids(self):
         flow_id = 1_000_000_000
