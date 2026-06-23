@@ -842,6 +842,7 @@ def estimate_nccl_collective_runtime_from_fx_node(
     from torch._inductor.fx_passes.bucketing import _resolve_group_name
 
     group_name = _resolve_group_name(kwargs["group_name"])
+    kwargs["group_name"] = group_name
     group_size = _get_group_size_by_name(group_name)
     if not isinstance(fx_node.target, torch._ops.OpOverload):
         raise AssertionError(
