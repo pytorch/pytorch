@@ -100,6 +100,42 @@ def copy_libraries(torch_dir: Path, libtorch_lib: Path, platform: str) -> None:
                     shutil.copy2(item, libtorch_lib / item.name)
 
 
+def fix_rpath(libtorch_lib: Path) -> None:
+    """Rewrite RPATH on all shared libraries to $ORIGIN using patchelf.
+
+    The wheel sets RPATH relative to the pip site-packages layout
+    (e.g. $ORIGIN/../../nvidia/nvshmem/lib).  For libtorch, libraries
+    live in a flat lib/ directory and NVIDIA deps come from the user's
+    system CUDA installation, so $ORIGIN is sufficient.
+
+    Requires patchelf to be available (present in manylinux2_28-builder
+    Docker images at /usr/local/bin/patchelf).
+    """
+    if sys.platform != "linux":
+        raise RuntimeError(f"fix_rpath is only supported on Linux, got {sys.platform}")
+
+    patchelf = shutil.which("patchelf")
+    if not patchelf:
+        raise FileNotFoundError(
+            "patchelf not found; the extraction job must run inside a "
+            "manylinux2_28-builder container that ships patchelf"
+        )
+
+    for item in libtorch_lib.iterdir():
+        if item.is_file() and (item.name.endswith(".so") or ".so." in item.name):
+            result = subprocess.run(
+                [patchelf, "--set-rpath", "$ORIGIN", "--force-rpath", str(item)],
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode == 0:
+                print(f"  Fixed rpath: {item.name}")
+            else:
+                raise RuntimeError(
+                    f"patchelf failed on {item.name}: {result.stderr.strip()}"
+                )
+
+
 def copy_includes(torch_dir: Path, libtorch_include: Path) -> None:
     torch_include = torch_dir / "include"
     if not torch_include.is_dir():
@@ -319,6 +355,8 @@ def main() -> None:
 
         # Copy components
         copy_libraries(torch_dir, libtorch_dir / "lib", args.platform)
+        if args.platform == "linux":
+            fix_rpath(libtorch_dir / "lib")
         copy_includes(torch_dir, libtorch_dir / "include")
         copy_cmake(torch_dir, libtorch_dir / "share")
         copy_bin(torch_dir, libtorch_dir / "bin", args.platform)
