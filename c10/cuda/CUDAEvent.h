@@ -7,6 +7,8 @@
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
+#include <limits>
+
 /*
  * `cudaEventExternal` is a torch-specific flag that is used to
  * indicate that the CUDAEvent will be used only for synchronization
@@ -62,11 +64,11 @@ struct CUDAEvent {
   CUDAEvent& operator=(const CUDAEvent&) = delete;
 
   CUDAEvent(CUDAEvent&& other) noexcept {
-    moveHelper(std::move(other));
+    moveHelper(other);
   }
   CUDAEvent& operator=(CUDAEvent&& other) noexcept {
     if (this != &other) {
-      moveHelper(std::move(other));
+      moveHelper(other);
     }
     return *this;
   }
@@ -268,7 +270,7 @@ struct CUDAEvent {
     is_created_ = true;
   }
 
-  void moveHelper(CUDAEvent&& other) {
+  void moveHelper(CUDAEvent& other) {
     // Transfer ownership of all state from other to this
     flags_ = other.flags_;
     is_created_ = other.is_created_;
@@ -347,12 +349,16 @@ class CUDAEventPool {
   // cudaEventCreate() from invoking during steady-state execution.
   void reserve_events_on_pools(size_t num_events) {
     for (const auto device : c10::irange(pools_.size())) {
+      TORCH_INTERNAL_ASSERT(
+          device <=
+          static_cast<size_t>(std::numeric_limits<DeviceIndex>::max()));
+      const auto device_index = static_cast<DeviceIndex>(device);
       std::vector<Event> temp_events;
       temp_events.reserve(num_events);
       pools_[device].event_pool_.reserve(num_events);
       for ([[maybe_unused]] const auto _ : c10::irange(num_events)) {
-        auto event = get(device);
-        event->create(device);
+        auto event = get(device_index);
+        event->create(device_index);
         temp_events.emplace_back(std::move(event));
       }
       // Events will be returned to pool when temp_events is destroyed.
