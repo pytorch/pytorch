@@ -1261,8 +1261,9 @@ class LocalTensorMode(TorchDispatchMode):
         self._per_rank_rng_states: dict[
             int, tuple[torch.Tensor, dict[int, torch.Tensor]]
         ] = {}
-        # Cache for get_coordinate results, keyed by mesh id
-        # Protected by _coordinate_cache_lock for thread safety in MPMD contexts
+        # Cache for get_coordinate results, keyed by the inputs used to compute them:
+        # (ndim, flattened rank map, layout).
+        # Protected by _coordinate_cache_lock for thread safety in MPMD contexts.
         self._coordinate_cache: dict[
             tuple[int, tuple, torch.distributed._mesh_layout._MeshLayout], list[SymInt]
         ] = {}
