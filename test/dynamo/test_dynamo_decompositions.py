@@ -45,11 +45,11 @@ class TestDynamoDecompositions(torch._dynamo.test_case.TestCase):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_: "f32[4]", L_tensor1_: "f32[4]", L_tensor2_: "f32[4]", L_value_: "f32[]"):
-        l_x_ = L_x_
+    def forward(self, L_tensor1_: "f32[4]", L_tensor2_: "f32[4]", L_value_: "f32[]", L_x_: "f32[4]"):
         l_tensor1_ = L_tensor1_
         l_tensor2_ = L_tensor2_
         l_value_ = L_value_
+        l_x_ = L_x_
 
         mul: "f32[4]" = torch.mul(l_tensor1_, l_tensor2_);  l_tensor1_ = l_tensor2_ = None
         fma_default: "f32[4]" = torch.ops.prims.fma.default(mul, l_value_, l_x_);  mul = l_value_ = None
@@ -83,10 +83,10 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_: "f32[4]", L_tensor1_: "f32[4]", L_tensor2_: "f32[4]"):
-        l_x_ = L_x_
+    def forward(self, L_tensor1_: "f32[4]", L_tensor2_: "f32[4]", L_x_: "f32[4]"):
         l_tensor1_ = L_tensor1_
         l_tensor2_ = L_tensor2_
+        l_x_ = L_x_
 
         addcmul_: "f32[4]" = l_x_.addcmul_(l_tensor1_, l_tensor2_, value = 0.5);  l_x_ = l_tensor1_ = l_tensor2_ = None
         return (addcmul_,)
@@ -118,10 +118,10 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_: "f32[4]", L_tensor1_: "f32[4]", L_tensor2_: "f32[4]"):
-        l_x_ = L_x_
+    def forward(self, L_tensor1_: "f32[4]", L_tensor2_: "f32[4]", L_x_: "f32[4]"):
         l_tensor1_ = L_tensor1_
         l_tensor2_ = L_tensor2_
+        l_x_ = L_x_
 
         addcmul_: "f32[4]" = l_x_.addcmul_(l_tensor1_, l_tensor2_, value = 0.5);  l_x_ = l_tensor1_ = l_tensor2_ = None
         return (addcmul_,)
@@ -149,10 +149,10 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_: "f32[4]", L_other_: "f32[4]", L_alpha_: "f32[]"):
-        l_x_ = L_x_
-        l_other_ = L_other_
+    def forward(self, L_alpha_: "f32[]", L_other_: "f32[4]", L_x_: "f32[4]"):
         l_alpha_ = L_alpha_
+        l_other_ = L_other_
+        l_x_ = L_x_
 
         fma_default: "f32[4]" = torch.ops.prims.fma.default(l_other_, l_alpha_, l_x_);  l_other_ = l_alpha_ = None
         copy_: "f32[4]" = l_x_.copy_(fma_default);  l_x_ = fma_default = None
@@ -184,9 +184,9 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_: "f32[4]", L_other_: "f32[4]"):
-        l_x_ = L_x_
+    def forward(self, L_other_: "f32[4]", L_x_: "f32[4]"):
         l_other_ = L_other_
+        l_x_ = L_x_
 
         add_: "f32[4]" = l_x_.add_(l_other_, alpha = 2.0);  l_x_ = l_other_ = None
         return (add_,)
@@ -217,9 +217,9 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_: "f32[4]", L_other_: "f32[4]"):
-        l_x_ = L_x_
+    def forward(self, L_other_: "f32[4]", L_x_: "f32[4]"):
         l_other_ = L_other_
+        l_x_ = L_x_
 
         add_: "f32[4]" = l_x_.add_(l_other_, alpha = 2.0);  l_x_ = l_other_ = None
         return (add_,)
@@ -251,11 +251,11 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_: "f32[4]", L_tensor1_: "f32[4]", L_tensor2_: "f32[4]", L_value_: "f32[]"):
-        l_x_ = L_x_
+    def forward(self, L_tensor1_: "f32[4]", L_tensor2_: "f32[4]", L_value_: "f32[]", L_x_: "f32[4]"):
         l_tensor1_ = L_tensor1_
         l_tensor2_ = L_tensor2_
         l_value_ = L_value_
+        l_x_ = L_x_
 
         div: "f32[4]" = torch.div(l_tensor1_, l_tensor2_);  l_tensor1_ = l_tensor2_ = None
         fma_default: "f32[4]" = torch.ops.prims.fma.default(div, l_value_, l_x_);  div = l_value_ = None
@@ -289,10 +289,10 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_: "f32[4]", L_tensor1_: "f32[4]", L_tensor2_: "f32[4]"):
-        l_x_ = L_x_
+    def forward(self, L_tensor1_: "f32[4]", L_tensor2_: "f32[4]", L_x_: "f32[4]"):
         l_tensor1_ = L_tensor1_
         l_tensor2_ = L_tensor2_
+        l_x_ = L_x_
 
         addcdiv_: "f32[4]" = l_x_.addcdiv_(l_tensor1_, l_tensor2_, value = 0.5);  l_x_ = l_tensor1_ = l_tensor2_ = None
         return (addcdiv_,)
@@ -324,10 +324,10 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_: "f32[4]", L_tensor1_: "f32[4]", L_tensor2_: "f32[4]"):
-        l_x_ = L_x_
+    def forward(self, L_tensor1_: "f32[4]", L_tensor2_: "f32[4]", L_x_: "f32[4]"):
         l_tensor1_ = L_tensor1_
         l_tensor2_ = L_tensor2_
+        l_x_ = L_x_
 
         addcdiv_: "f32[4]" = l_x_.addcdiv_(l_tensor1_, l_tensor2_, value = 0.5);  l_x_ = l_tensor1_ = l_tensor2_ = None
         return (addcdiv_,)
@@ -364,26 +364,26 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_weight_: "f32[]", L_end_tensors_0_: "f32[4]", L_end_tensors_1_: "f32[4]", L_tensors_0_: "f32[4]", L_tensors_1_: "f32[4]"):
-        l_weight_ = L_weight_
+    def forward(self, L_end_tensors_0_: "f32[4]", L_end_tensors_1_: "f32[4]", L_tensors_0_: "f32[4]", L_tensors_1_: "f32[4]", L_weight_: "f32[]"):
         l_end_tensors_0_ = L_end_tensors_0_
         l_end_tensors_1_ = L_end_tensors_1_
         l_tensors_0_ = L_tensors_0_
         l_tensors_1_ = L_tensors_1_
+        l_weight_ = L_weight_
 
         _foreach_sub = torch._foreach_sub([l_end_tensors_0_, l_end_tensors_1_], [l_tensors_0_, l_tensors_1_])
-        getitem: "f32[4]" = _foreach_sub[0]
-        getitem_1: "f32[4]" = _foreach_sub[1];  _foreach_sub = None
         abs_1: "f32[]" = l_weight_.abs()
         mask: "b8[]" = abs_1 >= 0.5;  abs_1 = None
+        getitem: "f32[4]" = _foreach_sub[0]
+        getitem_1: "f32[4]" = _foreach_sub[1];  _foreach_sub = None
         sub: "f32[]" = 1.0 - l_weight_
-        neg_omw: "f32[]" = -sub;  sub = None
-        w: "f32[]" = torch.where(mask, neg_omw, l_weight_);  neg_omw = l_weight_ = None
-        b: "f32[4]" = torch.where(mask, l_end_tensors_0_, l_tensors_0_);  l_end_tensors_0_ = None
-        b_1: "f32[4]" = torch.where(mask, l_end_tensors_1_, l_tensors_1_);  mask = l_end_tensors_1_ = None
-        _foreach_addcmul_ = torch._foreach_addcmul_([b, b_1], [w, w], (getitem, getitem_1));  w = getitem = getitem_1 = _foreach_addcmul_ = None
-        copy_: "f32[4]" = l_tensors_0_.copy_(b);  l_tensors_0_ = b = copy_ = None
-        copy__1: "f32[4]" = l_tensors_1_.copy_(b_1);  l_tensors_1_ = b_1 = copy__1 = None
+        neg: "f32[]" = -sub;  sub = None
+        where: "f32[4]" = torch.where(mask, l_end_tensors_0_, l_tensors_0_);  l_end_tensors_0_ = None
+        where_1: "f32[4]" = torch.where(mask, l_end_tensors_1_, l_tensors_1_);  l_end_tensors_1_ = None
+        where_2: "f32[]" = torch.where(mask, neg, l_weight_);  mask = neg = l_weight_ = None
+        _foreach_addcmul_ = torch._foreach_addcmul_([where, where_1], [where_2, where_2], (getitem, getitem_1));  where_2 = getitem = getitem_1 = _foreach_addcmul_ = None
+        copy_: "f32[4]" = l_tensors_0_.copy_(where);  l_tensors_0_ = where = copy_ = None
+        copy__1: "f32[4]" = l_tensors_1_.copy_(where_1);  l_tensors_1_ = where_1 = copy__1 = None
         return ()
 """,
         )
@@ -409,11 +409,11 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_tensors_0_: "f32[4]", L_tensors_1_: "f32[4]", L_end_tensors_0_: "f32[4]", L_end_tensors_1_: "f32[4]"):
-        l_tensors_0_ = L_tensors_0_
-        l_tensors_1_ = L_tensors_1_
+    def forward(self, L_end_tensors_0_: "f32[4]", L_end_tensors_1_: "f32[4]", L_tensors_0_: "f32[4]", L_tensors_1_: "f32[4]"):
         l_end_tensors_0_ = L_end_tensors_0_
         l_end_tensors_1_ = L_end_tensors_1_
+        l_tensors_0_ = L_tensors_0_
+        l_tensors_1_ = L_tensors_1_
 
         _foreach_lerp_ = torch._foreach_lerp_([l_tensors_0_, l_tensors_1_], [l_end_tensors_0_, l_end_tensors_1_], 0.1);  l_tensors_0_ = l_tensors_1_ = l_end_tensors_0_ = l_end_tensors_1_ = _foreach_lerp_ = None
         return ()
@@ -445,11 +445,11 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_tensors_0_: "f32[4]", L_tensors_1_: "f32[4]", L_end_tensors_0_: "f32[4]", L_end_tensors_1_: "f32[4]"):
-        l_tensors_0_ = L_tensors_0_
-        l_tensors_1_ = L_tensors_1_
+    def forward(self, L_end_tensors_0_: "f32[4]", L_end_tensors_1_: "f32[4]", L_tensors_0_: "f32[4]", L_tensors_1_: "f32[4]"):
         l_end_tensors_0_ = L_end_tensors_0_
         l_end_tensors_1_ = L_end_tensors_1_
+        l_tensors_0_ = L_tensors_0_
+        l_tensors_1_ = L_tensors_1_
 
         _foreach_lerp_ = torch._foreach_lerp_([l_tensors_0_, l_tensors_1_], [l_end_tensors_0_, l_end_tensors_1_], 0.5);  l_tensors_0_ = l_tensors_1_ = l_end_tensors_0_ = l_end_tensors_1_ = _foreach_lerp_ = None
         return ()
@@ -481,11 +481,11 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_tensors_0_: "f32[4]", L_tensors_1_: "f32[4]", L_end_tensors_0_: "f32[4]", L_end_tensors_1_: "f32[4]"):
-        l_tensors_0_ = L_tensors_0_
-        l_tensors_1_ = L_tensors_1_
+    def forward(self, L_end_tensors_0_: "f32[4]", L_end_tensors_1_: "f32[4]", L_tensors_0_: "f32[4]", L_tensors_1_: "f32[4]"):
         l_end_tensors_0_ = L_end_tensors_0_
         l_end_tensors_1_ = L_end_tensors_1_
+        l_tensors_0_ = L_tensors_0_
+        l_tensors_1_ = L_tensors_1_
 
         _foreach_lerp_ = torch._foreach_lerp_([l_tensors_0_, l_tensors_1_], [l_end_tensors_0_, l_end_tensors_1_], 0.5);  l_tensors_0_ = l_tensors_1_ = l_end_tensors_0_ = l_end_tensors_1_ = _foreach_lerp_ = None
         return ()
@@ -511,13 +511,12 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_scalar_: "f32[]", L_exps_0_: "f32[4]", L_exps_1_: "f32[4]"):
-        l_scalar_ = L_scalar_
+    def forward(self, L_exps_0_: "f32[4]", L_exps_1_: "f32[4]", L_scalar_: "f32[]"):
         l_exps_0_ = L_exps_0_
         l_exps_1_ = L_exps_1_
+        l_scalar_ = L_scalar_
 
-        _foreach_pow = torch._foreach_pow([l_scalar_, l_scalar_], [l_exps_0_, l_exps_1_]);  \
-l_scalar_ = l_exps_0_ = l_exps_1_ = None
+        _foreach_pow = torch._foreach_pow([l_scalar_, l_scalar_], [l_exps_0_, l_exps_1_]);  l_scalar_ = l_exps_0_ = l_exps_1_ = None
         getitem: "f32[4]" = _foreach_pow[0]
         getitem_1: "f32[4]" = _foreach_pow[1];  _foreach_pow = None
         return (getitem, getitem_1)
