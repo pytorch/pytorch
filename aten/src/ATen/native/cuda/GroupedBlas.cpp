@@ -100,6 +100,7 @@ bool _scaled_mm_allowed_device(bool sm90_only=false, bool sm100_only=false) {
 bool should_use_cublaslt_grouped_gemm(
     const Tensor& mat_a,
     const Tensor& mat_b,
+    const std::optional<Tensor>& offs,
     std::optional<c10::ScalarType> out_dtype) {
   const auto dprops = at::cuda::getCurrentDeviceProperties();
   const bool sm10_or_sm11 =
@@ -110,6 +111,18 @@ bool should_use_cublaslt_grouped_gemm(
   const bool bf16_grouped_gemm =
       mat_a.dtype() == at::kBFloat16 && mat_b.dtype() == at::kBFloat16 &&
       out_dtype.value_or(at::kBFloat16) == at::kBFloat16;
+
+  // The arg-packing kernel launches one thread per group in a single block, so
+  // cuBLASLt grouped GEMM only handles [1, 1024] groups. Fall back otherwise.
+  const bool a_is_2d = mat_a.dim() == 2;
+  const bool b_is_2d = mat_b.dim() == 2;
+  const int64_t batchCount = (a_is_2d || b_is_2d)
+      ? (offs.has_value() ? offs->size(0) : 0)
+      : mat_a.size(0);
+  if (batchCount < 1 || batchCount > 1024) {
+    return false;
+  }
+
   const bool use_fp16_by_default = sm10_or_sm11
 #if CUDA_VERSION >= 13030
       || dprops->major == 9
@@ -125,7 +138,10 @@ bool should_use_cublaslt_grouped_gemm(
     return false;
 #endif
   }
-  return bf16_grouped_gemm && at::globalContext().preferCublasltGroupedGemm();
+  // Only SM 9.0-11.0 are supported; on any other arch fall back so we don't
+  // dispatch to a kernel that hard-errors on the device check.
+  return sm10_or_sm11 && bf16_grouped_gemm &&
+      at::globalContext().preferCublasltGroupedGemm();
 }
 #endif
 
@@ -792,7 +808,7 @@ const std::optional<at::Tensor>& bias,
 std::optional<c10::ScalarType> out_dtype) {
   _grouped_mm_validate_inputs(mat_a, mat_b, offs, bias, out_dtype);
 #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
-  if (should_use_cublaslt_grouped_gemm(mat_a, mat_b, out_dtype)) {
+  if (should_use_cublaslt_grouped_gemm(mat_a, mat_b, offs, out_dtype)) {
     return grouped_mm_cublaslt(mat_a, mat_b, offs, bias, out_dtype);
   }
 #endif
