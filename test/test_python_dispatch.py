@@ -495,6 +495,29 @@ class TestPythonRegistration(TestCase):
             "into C++) for ops that were never cached on the namespace",
         )
 
+    def test_define_normalizes_namespaced_schema_name(self):
+        # Library.define() takes a bare op name in the schema, but C++ also
+        # accepts a name prefixed with the matching namespace ("ns::foo"). In
+        # that case the qualname recorded in _op_defs must not double-prepend the
+        # namespace. Regression: it used to produce "ns::ns::foo", which later
+        # broke teardown's _clear_torch_ops_cache with "too many values to
+        # unpack (expected 2)".
+        lib = Library(self.test_ns, "DEF")  # noqa: SCOPED_LIBRARY
+        lib.define(f"{self.test_ns}::my_op(Tensor x) -> Tensor")
+        self.assertIn(f"{self.test_ns}::my_op", lib._op_defs)
+        self.assertNotIn(f"{self.test_ns}::{self.test_ns}::my_op", lib._op_defs)
+        # Teardown must not raise.
+        lib._destroy()
+
+    def test_clear_torch_ops_cache_tolerates_malformed_qualname(self):
+        # Defense-in-depth: _clear_torch_ops_cache runs in a shutdown-time
+        # finalizer and must never raise, even on a qualname that does not split
+        # into exactly "namespace::name".
+        from torch.library import _clear_torch_ops_cache
+
+        # Must not raise.
+        _clear_torch_ops_cache({"a::b::c", "no_separator"})
+
     def test_register_check_mem_op_survives_gc(self):
         # Regression guard for the autorevert of #181785: inductor's
         # `register_check_mem_op` is an lru_cache-decorated registration whose
