@@ -96,6 +96,39 @@ bool _scaled_mm_allowed_device(bool sm90_only=false, bool sm100_only=false) {
 #endif
 }
 
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+bool should_use_cublaslt_grouped_gemm(
+    const Tensor& mat_a,
+    const Tensor& mat_b,
+    std::optional<c10::ScalarType> out_dtype) {
+  const auto dprops = at::cuda::getCurrentDeviceProperties();
+  const bool sm10_or_sm11 =
+      dprops->major == 10 || dprops->major == 11;
+  const bool fp16_grouped_gemm =
+      mat_a.dtype() == at::kHalf && mat_b.dtype() == at::kHalf &&
+      out_dtype.value_or(at::kHalf) == at::kHalf;
+  const bool bf16_grouped_gemm =
+      mat_a.dtype() == at::kBFloat16 && mat_b.dtype() == at::kBFloat16 &&
+      out_dtype.value_or(at::kBFloat16) == at::kBFloat16;
+  const bool use_fp16_by_default = sm10_or_sm11
+#if CUDA_VERSION >= 13030
+      || dprops->major == 9
+#endif
+      ;
+  if (use_fp16_by_default && fp16_grouped_gemm) {
+    return true;
+  }
+  if (dprops->major == 9) {
+#if CUDA_VERSION >= 13030
+    return bf16_grouped_gemm && at::globalContext().preferCublasltGroupedGemm();
+#else
+    return false;
+#endif
+  }
+  return bf16_grouped_gemm && at::globalContext().preferCublasltGroupedGemm();
+}
+#endif
+
 // 2d-2d and 2d-3d
 // scaling=MXFP8
 // CUDA-only
@@ -759,7 +792,7 @@ const std::optional<at::Tensor>& bias,
 std::optional<c10::ScalarType> out_dtype) {
   _grouped_mm_validate_inputs(mat_a, mat_b, offs, bias, out_dtype);
 #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
-  if (at::globalContext().preferCublasltGroupedGemm()) {
+  if (should_use_cublaslt_grouped_gemm(mat_a, mat_b, out_dtype)) {
     return grouped_mm_cublaslt(mat_a, mat_b, offs, bias, out_dtype);
   }
 #endif
