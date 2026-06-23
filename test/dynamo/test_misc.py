@@ -13413,12 +13413,21 @@ ShapeEnv not equal: field values don't match:
             foo()
 
     def test_numpy_ufunc_out(self):
-        @torch.compile(backend="eager")
+        @torch.compile(backend="eager", fullgraph=True)
         def foo():
             x = np.arange(5)
             out = np.empty((x.shape[0], x.shape[0]))
             res_out = np.sin(x, out=out)
             assert res_out is out  # noqa: S101
+
+            x_0d = np.array(1.0)
+            out_0d = np.empty(())
+            res_out_0d = np.sin(x_0d, out=out_0d)
+            assert res_out_0d is out_0d  # noqa: S101
+
+            out_0d_pos = np.empty(())
+            res_out_0d_pos = np.sin(x_0d, out_0d_pos)
+            assert res_out_0d_pos is out_0d_pos  # noqa: S101
 
         foo()
 

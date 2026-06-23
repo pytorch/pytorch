@@ -166,19 +166,29 @@ class LoggingTestCase(torch._dynamo.test_case.TestCase):
         # registered logs are the only ones with handlers, so patch those
         for log_qname in torch._logging._internal.log_registry.get_log_qnames():
             logger = logging.getLogger(log_qname)
-            num_handlers = len(logger.handlers)
+            torch_handlers = [
+                handler
+                for handler in logger.handlers
+                if torch._logging._internal._is_torch_handler(handler)
+            ]
+            num_handlers = len(torch_handlers)
             self.assertLessEqual(
                 num_handlers,
                 2,
-                "All pt2 loggers should only have at most two handlers (debug artifacts and messages above debug level).",
+                f"{log_qname} should only have at most two torch handlers "
+                "(debug artifacts and messages above debug level).",
             )
 
-            self.assertGreater(num_handlers, 0, "All pt2 loggers should have more than zero handlers")
+            self.assertGreater(
+                num_handlers,
+                0,
+                f"{log_qname} should have more than zero torch handlers",
+            )
 
-            for handler in logger.handlers:
+            for handler in torch_handlers:
                 old_emit = handler.emit
 
-                def new_emit(record):
+                def new_emit(record, old_emit=old_emit):
                     old_emit(record)
                     emit_post_hook(record)
 

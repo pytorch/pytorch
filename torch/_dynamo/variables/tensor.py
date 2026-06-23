@@ -74,7 +74,12 @@ from ..utils import (
     set_example_value,
     tensortype_to_dtype,
 )
-from .base import AttributeMutationNew, ValueMutationNew, VariableTracker
+from .base import (
+    AttributeMutationNew,
+    NO_SUCH_SUBOBJ,
+    ValueMutationNew,
+    VariableTracker,
+)
 from .constant import ConstantVariable
 from .lists import ListIteratorVariable, SizeVariable
 from .script_object import TorchScriptObjectVariable
@@ -3004,16 +3009,54 @@ class NumpyNdarrayVariable(TensorVariable):
     Use this for Tensor.numpy() call.
     """
 
+    _nonvar_fields = {
+        "is_numpy_ndarray",
+        "numpy_identity_alias",
+        "python_value",
+        *TensorVariable._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        proxy: torch.fx.Proxy,
+        *,
+        is_numpy_ndarray: bool = False,
+        numpy_identity_alias: VariableTracker | None = None,
+        python_value: Any = NO_SUCH_SUBOBJ,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(proxy, **kwargs)
+        self.is_numpy_ndarray = is_numpy_ndarray
+        self.numpy_identity_alias = numpy_identity_alias
+        self.python_value = python_value
+
+    def get_real_python_backed_value(self) -> object:
+        if self.python_value is not NO_SUCH_SUBOBJ:
+            return self.python_value
+        return super().get_real_python_backed_value()
+
     @staticmethod
     def create(
-        tx: "InstructionTranslatorBase", proxy: torch.fx.Proxy, **options: Any
+        tx: "InstructionTranslatorBase",
+        proxy: torch.fx.Proxy,
+        example_value: Any | None = None,
+        **options: Any,
     ) -> "NumpyNdarrayVariable":
         from .builder import wrap_fx_proxy_cls
+
+        if options.get("python_value") is NO_SUCH_SUBOBJ:
+            options.pop("python_value")
+
+        if example_value is not None and not isinstance(example_value, torch.Tensor):
+            options.pop("is_numpy_ndarray", None)
+            options.pop("numpy_identity_alias", None)
+            options.pop("python_value", None)
 
         return wrap_fx_proxy_cls(
             target_cls=NumpyNdarrayVariable,
             tx=tx,
             proxy=proxy,
+            example_value=example_value,
             **options,
         )
 

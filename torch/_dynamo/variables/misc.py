@@ -22,6 +22,7 @@ import functools
 import inspect
 import itertools
 import logging
+import operator
 import random
 import re
 import sys
@@ -37,7 +38,7 @@ import torch._C
 import torch._numpy as tnp
 import torch.utils._pytree as pytree
 from torch._dynamo.variables.base import MutationType
-from torch._dynamo.variables.lists import TupleVariable
+from torch._dynamo.variables.lists import ListVariable, SizeVariable, TupleVariable
 from torch._guards import Source
 
 from .. import config, graph_break_hints, trace_rules, variables
@@ -66,21 +67,163 @@ from ..source import (
 from ..utils import (
     check_unspec_or_constant_args,
     cmp_name_to_op_mapping,
+    extract_fake_example_value,
+    get_fake_value,
     identity,
+    is_namedtuple,
     istype,
     proxy_args_kwargs,
     raise_args_mismatch,
+    set_example_value,
     unpack_iterable,
 )
-from .base import AsPythonConstantNotImplementedError, NO_SUCH_SUBOBJ, VariableTracker
+from .base import (
+    AsPythonConstantNotImplementedError,
+    NO_SUCH_SUBOBJ,
+    ValueMutationNew,
+    VariableTracker,
+)
 from .constant import ConstantVariable
 from .functions import NestedUserFunctionVariable, UserFunctionVariable
-from .user_defined import call_random_fn, is_standard_setattr, UserDefinedObjectVariable
+from .user_defined import (
+    call_random_fn,
+    is_standard_setattr,
+    UserDefinedObjectVariable,
+    UserDefinedTupleVariable,
+)
 
 
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+
+
+_NUMPY_SCALAR_METADATA_CONSTANT_TYPES = (
+    bool,
+    int,
+    float,
+    complex,
+    str,
+    bytes,
+    type(None),
+)
+
+
+def _is_non_scalar_numpy_fake_value(value: object) -> bool:
+    if hasattr(value, "ndim"):
+        return value.ndim != 0
+
+    if isinstance(value, (list, tuple)):
+        return bool(value) and all(_is_non_scalar_numpy_fake_value(x) for x in value)
+
+    return False
+
+
+def _is_numpy_ndarray_container_value(value: object) -> bool:
+    return hasattr(value, "ndim")
+
+
+def _numpy_container_identity_alias(
+    value: object,
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> VariableTracker | None:
+    def visit(arg: VariableTracker) -> VariableTracker | None:
+        if isinstance(arg, variables.NumpyNdarrayVariable):
+            fake_value = extract_fake_example_value(arg.as_proxy().node, required=False)
+            if fake_value is value:
+                return arg
+        if isinstance(arg, (ListVariable, TupleVariable)):
+            for item in arg.items:
+                if (result := visit(item)) is not None:
+                    return result
+        return None
+
+    for arg in args:
+        if (result := visit(arg)) is not None:
+            return result
+    for arg in kwargs.values():
+        if (result := visit(arg)) is not None:
+            return result
+    return None
+
+
+def _wrap_numpy_container_result(
+    tx: "InstructionTranslatorBase",
+    proxy: torch.fx.Proxy,
+    fake_value: list[object] | tuple[object, ...],
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> VariableTracker:
+    from .builder import wrap_fx_proxy_cls
+    from .tensor import NumpyNdarrayVariable
+
+    set_example_value(proxy.node, fake_value)
+    items: list[VariableTracker] = []
+    for i, value in enumerate(fake_value):
+        proxy_i = proxy.tracer.create_proxy(
+            kind="call_function",
+            target=operator.getitem,
+            args=(proxy, i),
+            kwargs={},
+        )
+        if _is_numpy_ndarray_container_value(value):
+            item = NumpyNdarrayVariable.create(
+                tx=tx,
+                proxy=proxy_i,
+                example_value=value,
+                is_numpy_ndarray=True,
+                numpy_identity_alias=_numpy_container_identity_alias(
+                    value, args, kwargs
+                ),
+            )
+        else:
+            item = wrap_fx_proxy_cls(
+                target_cls=NumpyNdarrayVariable,
+                tx=tx,
+                proxy=proxy_i,
+                example_value=value,
+            )
+        items.append(item)
+
+    if type(fake_value) is list:
+        return ListVariable(items)
+    tuple_vt = TupleVariable(items, mutation_type=ValueMutationNew())
+    if type(fake_value) is tuple:
+        return tuple_vt
+    if istype(fake_value, torch.Size):
+        return SizeVariable(items, proxy)
+    if not is_namedtuple(fake_value):
+        raise AssertionError(
+            f"expected namedtuple or structseq but got {type(fake_value)}"
+        )
+    return UserDefinedTupleVariable.get_vt_cls(type(fake_value))(
+        fake_value,
+        tuple_vt=tuple_vt,
+    )
+
+
+def _safe_numpy_scalar_constructor_arg(arg: VariableTracker) -> object:
+    try:
+        import numpy as np
+    except ModuleNotFoundError:
+        return NO_SUCH_SUBOBJ
+
+    if arg.source is not None:
+        return NO_SUCH_SUBOBJ
+
+    if isinstance(arg, variables.NumpyNdarrayVariable):
+        value = arg.get_real_python_backed_value()
+        if isinstance(value, np.generic):
+            return value
+        return NO_SUCH_SUBOBJ
+
+    if isinstance(arg, ConstantVariable):
+        value = arg.as_python_constant()
+        if type(value) in _NUMPY_SCALAR_METADATA_CONSTANT_TYPES:
+            return value
+
+    return NO_SUCH_SUBOBJ
 
 
 class SuperVariable(VariableTracker):
@@ -1825,6 +1968,115 @@ class NumpyVariable(VariableTracker):
             )
         return np_constant_collections_map.get(fn)
 
+    def _python_scalar_value(
+        self, args: list[VariableTracker], kwargs: dict[str, VariableTracker]
+    ) -> object:
+        try:
+            import numpy as np
+        except ModuleNotFoundError:
+            return NO_SUCH_SUBOBJ
+
+        if not (isinstance(self.value, type) and issubclass(self.value, np.generic)):
+            return NO_SUCH_SUBOBJ
+
+        python_args = []
+        for arg in args:
+            value = _safe_numpy_scalar_constructor_arg(arg)
+            if value is NO_SUCH_SUBOBJ:
+                return NO_SUCH_SUBOBJ
+            python_args.append(value)
+
+        python_kwargs = {}
+        for key, arg in kwargs.items():
+            value = _safe_numpy_scalar_constructor_arg(arg)
+            if value is NO_SUCH_SUBOBJ:
+                return NO_SUCH_SUBOBJ
+            python_kwargs[key] = value
+
+        try:
+            return self.value(*python_args, **python_kwargs)
+        except Exception:
+            return NO_SUCH_SUBOBJ
+
+    def _numpy_result_kinds(
+        self,
+        tx: "InstructionTranslatorBase",
+        proxy: torch.fx.Proxy,
+        python_value: object,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> bool:
+        try:
+            import numpy as np
+        except ModuleNotFoundError:
+            return False
+
+        if python_value is not NO_SUCH_SUBOBJ:
+            return False
+
+        if isinstance(self.value, type) and issubclass(self.value, np.generic):
+            fake_value = get_fake_value(proxy.node, tx, allow_non_graph_fake=True)
+            if fake_value is None:
+                return False
+            return _is_non_scalar_numpy_fake_value(fake_value)
+
+        if self.value in {
+            np.array,
+            np.asarray,
+            np.empty,
+            np.zeros,
+            np.ones,
+            np.full,
+        }:
+            return True
+
+        if not isinstance(self.value, np.ufunc):
+            fake_value = get_fake_value(proxy.node, tx, allow_non_graph_fake=True)
+            if fake_value is None:
+                return False
+            return _is_non_scalar_numpy_fake_value(fake_value)
+
+        def is_none(arg: VariableTracker) -> bool:
+            return (
+                isinstance(arg, ConstantVariable) and arg.as_python_constant() is None
+            )
+
+        if "out" in kwargs and not is_none(kwargs["out"]):
+            return True
+
+        if len(args) > self.value.nin and not is_none(args[self.value.nin]):
+            return True
+
+        fake_value = get_fake_value(proxy.node, tx, allow_non_graph_fake=True)
+        if fake_value is None:
+            return False
+        return _is_non_scalar_numpy_fake_value(fake_value)
+
+    def _numpy_ufunc_out_arg(
+        self, args: list[VariableTracker], kwargs: dict[str, VariableTracker]
+    ) -> VariableTracker | None:
+        try:
+            import numpy as np
+        except ModuleNotFoundError:
+            return None
+
+        if not isinstance(self.value, np.ufunc):
+            return None
+
+        def is_none(arg: VariableTracker) -> bool:
+            return (
+                isinstance(arg, ConstantVariable) and arg.as_python_constant() is None
+            )
+
+        out_arg = kwargs.get("out")
+        if out_arg is None and len(args) > self.value.nin:
+            out_arg = args[self.value.nin]
+        if out_arg is None or is_none(out_arg):
+            return None
+        if isinstance(out_arg, variables.NumpyNdarrayVariable):
+            return out_arg
+        return None
+
     def call_function(
         self,
         tx: "InstructionTranslatorBase",
@@ -1913,12 +2165,26 @@ class NumpyVariable(VariableTracker):
                 )
 
             # TODO Add all the functions that go from constants to constants to can_constant_fold_through
+            python_value = self._python_scalar_value(args, kwargs)
             proxy = tx.output.create_proxy(
                 "call_function",
                 numpy_to_tensor_wrapper(func),
                 *proxy_args_kwargs(args, kwargs),
             )
-            return NumpyNdarrayVariable.create(tx, proxy)
+            fake_value = get_fake_value(proxy.node, tx, allow_non_graph_fake=True)
+            if isinstance(fake_value, (list, tuple)):
+                return _wrap_numpy_container_result(tx, proxy, fake_value, args, kwargs)
+            is_numpy_ndarray = self._numpy_result_kinds(
+                tx, proxy, python_value, args, kwargs
+            )
+            return NumpyNdarrayVariable.create(
+                tx,
+                proxy,
+                example_value=fake_value,
+                is_numpy_ndarray=is_numpy_ndarray,
+                numpy_identity_alias=self._numpy_ufunc_out_arg(args, kwargs),
+                python_value=python_value,
+            )
 
     def call_method(
         self,

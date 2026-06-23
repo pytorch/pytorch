@@ -59,6 +59,7 @@ from ..source import (
     GetItemSource,
     GlobalSource,
     is_constant_source,
+    NumpyTensorSource,
     Source,
     TypeSource,
 )
@@ -150,6 +151,269 @@ if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
 log = logging.getLogger(__name__)
+
+
+_NUMPY_SCALAR_METADATA_FNS: frozenset[Callable[..., Any]] = frozenset(
+    {
+        operator.add,
+        operator.and_,
+        operator.eq,
+        operator.floordiv,
+        operator.ge,
+        operator.gt,
+        operator.invert,
+        operator.le,
+        operator.lshift,
+        operator.lt,
+        operator.mod,
+        operator.mul,
+        operator.ne,
+        operator.neg,
+        operator.or_,
+        operator.pos,
+        operator.pow,
+        operator.rshift,
+        operator.sub,
+        operator.truediv,
+        operator.xor,
+    }
+)
+_NUMPY_SCALAR_METADATA_CONSTANT_TYPES = (
+    bool,
+    int,
+    float,
+    complex,
+    str,
+    bytes,
+    type(None),
+)
+_NUMPY_USER_DEFINED_BINOP_FNS: frozenset[Callable[..., Any]] = frozenset({operator.or_})
+
+
+def _safe_numpy_scalar_metadata_arg(arg: VariableTracker) -> object:
+    try:
+        import numpy as np
+    except ModuleNotFoundError:
+        return NO_SUCH_SUBOBJ
+
+    if arg.source is not None:
+        return NO_SUCH_SUBOBJ
+
+    if isinstance(arg, variables.NumpyNdarrayVariable):
+        value = arg.get_real_python_backed_value()
+        if isinstance(value, np.generic):
+            return value
+        return NO_SUCH_SUBOBJ
+
+    if isinstance(arg, ConstantVariable):
+        value = arg.as_python_constant()
+        if type(value) in _NUMPY_SCALAR_METADATA_CONSTANT_TYPES:
+            return value
+
+    return NO_SUCH_SUBOBJ
+
+
+def _numpy_scalar_python_value(
+    fn: Callable[..., Any],
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> object:
+    try:
+        import numpy as np
+    except ModuleNotFoundError:
+        return NO_SUCH_SUBOBJ
+
+    if fn not in _NUMPY_SCALAR_METADATA_FNS or kwargs:
+        return NO_SUCH_SUBOBJ
+
+    python_args: list[object] = []
+    for arg in args:
+        value = _safe_numpy_scalar_metadata_arg(arg)
+        if value is NO_SUCH_SUBOBJ:
+            return NO_SUCH_SUBOBJ
+        python_args.append(value)
+
+    try:
+        result = fn(*python_args)
+    except Exception:
+        return NO_SUCH_SUBOBJ
+
+    if isinstance(result, np.generic):
+        return result
+    return NO_SUCH_SUBOBJ
+
+
+def _numpy_operator_result_kinds(
+    tx: "InstructionTranslatorBase",
+    proxy: torch.fx.Proxy,
+    python_value: object,
+    fake_value: object | None = None,
+) -> bool:
+    if python_value is not NO_SUCH_SUBOBJ:
+        return False
+
+    if fake_value is None:
+        fake_value = get_fake_value(proxy.node, tx, allow_non_graph_fake=True)
+    if fake_value is None:
+        return False
+    if not hasattr(fake_value, "ndim"):
+        return False
+    if fake_value.ndim != 0:
+        return True
+
+    return False
+
+
+def _call_numpy_user_defined_binop(
+    tx: "InstructionTranslatorBase",
+    fn: Callable[..., Any],
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> VariableTracker | None:
+    if kwargs or len(args) != 2 or fn not in _NUMPY_USER_DEFINED_BINOP_FNS:
+        return None
+
+    left, right = args
+    if not (
+        isinstance(left, UserDefinedVariable) or isinstance(right, UserDefinedVariable)
+    ):
+        return None
+
+    try:
+        import numpy as np
+    except ModuleNotFoundError:
+        np = None  # type: ignore[assignment]
+
+    if (
+        np is not None
+        and isinstance(left, variables.NumpyNdarrayVariable)
+        and isinstance(right, UserDefinedVariable)
+    ):
+        left_value = left.get_real_python_backed_value()
+        if isinstance(left_value, np.generic):
+            _install_numpy_identity_guards(left)
+            return binary_op(
+                tx,
+                ConstantVariable.create(left_value.item()),
+                right,
+                "nb_or",
+                "|",
+            )
+
+    unimplemented(
+        gb_type="unsupported NumPy operator with user-defined operand",
+        context=f"{fn.__name__}({left}, {right})",
+        explanation=(
+            "Dynamo does not model NumPy scalar/array binary dispatch to "
+            "user-defined operands."
+        ),
+        hints=[*graph_break_hints.SUPPORTABLE],
+    )
+
+
+def _numpy_identity_compare(
+    left: VariableTracker, right: VariableTracker
+) -> bool | None:
+    if not isinstance(left, variables.NumpyNdarrayVariable) or not isinstance(
+        right, variables.NumpyNdarrayVariable
+    ):
+        raise AssertionError(
+            "_numpy_identity_compare expects NumpyNdarrayVariable arguments"
+        )
+
+    left = _numpy_identity_alias_root(left)
+    right = _numpy_identity_alias_root(right)
+    if not isinstance(left, variables.NumpyNdarrayVariable) or not isinstance(
+        right, variables.NumpyNdarrayVariable
+    ):
+        raise AssertionError("NumPy identity alias must be a NumPy variable")
+
+    if left is right:
+        return True
+
+    left_value = left.get_real_python_backed_value()
+    right_value = right.get_real_python_backed_value()
+    if left_value is not NO_SUCH_SUBOBJ and right_value is not NO_SUCH_SUBOBJ:
+        return left_value is right_value
+
+    left_fake = extract_fake_example_value(left.as_proxy().node, required=False)
+    right_fake = extract_fake_example_value(right.as_proxy().node, required=False)
+    if (
+        left_fake is not None
+        and right_fake is not None
+        and left.is_numpy_ndarray
+        and right.is_numpy_ndarray
+    ):
+        return id(left_fake) == id(right_fake)
+
+    return None
+
+
+def _numpy_identity_alias_root(arg: VariableTracker) -> VariableTracker:
+    seen: set[int] = set()
+    while (
+        isinstance(arg, variables.NumpyNdarrayVariable)
+        and arg.numpy_identity_alias is not None
+    ):
+        if id(arg) in seen:
+            raise AssertionError("Cycle in NumPy identity alias")
+        seen.add(id(arg))
+        arg = arg.numpy_identity_alias
+    return arg
+
+
+def _is_known_non_numpy_type(arg: VariableTracker) -> bool:
+    try:
+        typ = arg.python_type()
+    except NotImplementedError:
+        return False
+
+    try:
+        import numpy as np
+    except ModuleNotFoundError:
+        np = None  # type: ignore[assignment]
+
+    if np is not None and (issubclass(typ, np.ndarray) or issubclass(typ, np.generic)):
+        return False
+
+    return typ is not object
+
+
+def _mixed_numpy_identity_compare(
+    left: VariableTracker, right: VariableTracker
+) -> tuple[bool | None, bool]:
+    numpy_arg, other = (
+        (left, right)
+        if isinstance(left, variables.NumpyNdarrayVariable)
+        else (right, left)
+    )
+
+    if _is_known_non_numpy_type(other):
+        return False, False
+
+    numpy_value = numpy_arg.get_real_python_backed_value()
+    other_value = other.get_real_python_backed_value()
+    if numpy_value is not NO_SUCH_SUBOBJ and other_value is not NO_SUCH_SUBOBJ:
+        return numpy_value is other_value, True
+
+    return None, False
+
+
+def _install_numpy_identity_guards(*args: VariableTracker) -> None:
+    for arg in args:
+        arg = _numpy_identity_alias_root(arg)
+        source = arg.source
+        if source is None:
+            continue
+        if isinstance(source, NumpyTensorSource):
+            source = source.base
+        if not isinstance(arg, variables.NumpyNdarrayVariable) and (
+            arg.get_real_python_backed_value() is NO_SUCH_SUBOBJ
+        ):
+            continue
+        guard_type = arg.get_id_guard_type()
+        if guard_type is not None:
+            install_guard(source.make_guard(guard_type))
 
 
 IN_PLACE_DESUGARING_MAP = {
@@ -1495,13 +1759,31 @@ class BuiltinVariable(BaseBuiltinVariable):
             if check_numpy_ndarray_args(args, kwargs) and not any(
                 type(arg) is TensorVariable for arg in args
             ):
+                if (
+                    user_defined_result := _call_numpy_user_defined_binop(
+                        tx, fn, args, kwargs
+                    )
+                ) is not None:
+                    return user_defined_result
+
+                python_value = _numpy_scalar_python_value(fn, args, kwargs)
                 proxy = tx.output.create_proxy(
                     "call_function",
                     numpy_operator_wrapper(fn),
                     *proxy_args_kwargs(args, kwargs),
                 )
 
-                return wrap_fx_proxy_cls(variables.NumpyNdarrayVariable, tx, proxy)
+                fake_value = get_fake_value(proxy.node, tx, allow_non_graph_fake=True)
+                is_numpy_ndarray = _numpy_operator_result_kinds(
+                    tx, proxy, python_value, fake_value
+                )
+                return variables.NumpyNdarrayVariable.create(
+                    tx,
+                    proxy,
+                    example_value=fake_value,
+                    is_numpy_ndarray=is_numpy_ndarray,
+                    python_value=python_value,
+                )
 
             if (
                 fn in _OPERATOR_TO_DUNDER
@@ -2566,6 +2848,43 @@ class BuiltinVariable(BaseBuiltinVariable):
             )
         arg = args[0]
 
+        if isinstance(arg, variables.NumpyNdarrayVariable):
+            arg = _numpy_identity_alias_root(arg)
+            if not isinstance(arg, variables.NumpyNdarrayVariable):
+                raise AssertionError("NumPy identity alias must be a NumPy variable")
+
+            value = arg.get_real_python_backed_value()
+            if value is not NO_SUCH_SUBOBJ:
+                if arg.source is not None:
+                    _install_numpy_identity_guards(arg)
+                    return VariableTracker.build(tx, id(value))
+                try:
+                    import numpy as np
+                except ModuleNotFoundError:
+                    np = None  # type: ignore[assignment]
+
+                if np is not None and isinstance(value, np.bool_):
+                    return VariableTracker.build(tx, id(value))
+
+            source = arg.source
+            if isinstance(source, NumpyTensorSource):
+                source = source.base
+            if arg.is_numpy_ndarray and source is not None:
+                install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+                return VariableTracker.build(
+                    tx, id(tx.output.resolve_source_value(source))
+                )
+
+            unimplemented(
+                gb_type="unsupported NumPy id",
+                context=f"id({arg})",
+                explanation=(
+                    "Dynamo cannot determine id() for NumPy results without "
+                    "preserved Python identity."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+
         real_id = arg.get_id(tx)
         if real_id is not None:
             if arg.source:
@@ -2601,6 +2920,56 @@ class BuiltinVariable(BaseBuiltinVariable):
         op = self.fn
 
         if op in [operator.is_, operator.is_not]:
+            left_is_numpy = isinstance(left, variables.NumpyNdarrayVariable)
+            right_is_numpy = isinstance(right, variables.NumpyNdarrayVariable)
+            if left_is_numpy and right_is_numpy:
+                is_result = _numpy_identity_compare(left, right)
+                if is_result is None:
+                    unimplemented(
+                        gb_type="unsupported NumPy identity comparison",
+                        context=f"{op.__name__}({left}, {right})",
+                        explanation=(
+                            "Dynamo cannot determine NumPy object identity for "
+                            "values without preserved Python identity."
+                        ),
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
+                if left is not right:
+                    _install_numpy_identity_guards(left, right)
+                if op is operator.is_:
+                    return VariableTracker.build(tx, is_result)
+                else:
+                    return VariableTracker.build(tx, not is_result)
+
+            if left_is_numpy or right_is_numpy:
+                is_result, needs_identity_guards = _mixed_numpy_identity_compare(
+                    left, right
+                )
+                if is_result is None:
+                    unimplemented(
+                        gb_type="unsupported NumPy identity comparison",
+                        context=f"{op.__name__}({left}, {right})",
+                        explanation=(
+                            "Dynamo cannot determine NumPy object identity for "
+                            "values without preserved Python identity."
+                        ),
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
+                if needs_identity_guards:
+                    _install_numpy_identity_guards(left, right)
+                if op is operator.is_:
+                    return VariableTracker.build(tx, is_result)
+                else:
+                    return VariableTracker.build(tx, not is_result)
+
+            identity_result = vt_identity_compare(left, right)
+            if identity_result is not None:
+                is_result = identity_result.as_python_constant()
+                if op is operator.is_:
+                    return VariableTracker.build(tx, is_result)
+                else:
+                    return VariableTracker.build(tx, not is_result)
+
             is_result = (
                 left.is_tensor()
                 and right.is_tensor()
