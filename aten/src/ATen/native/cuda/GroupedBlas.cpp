@@ -20,6 +20,7 @@
 #include <c10/util/MaybeOwned.h>
 #include <ATen/native/GroupedMMUtils.h>
 #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+#include <ATen/cuda/detail/CublasLtUtils.h>
 #include <ATen/native/cuda/CublasGroupedArgs.h>
 #endif
 #include <ATen/native/cuda/RowwiseScaledMM.h>
@@ -103,8 +104,15 @@ bool should_use_cublaslt_grouped_gemm(
     const std::optional<Tensor>& offs,
     std::optional<c10::ScalarType> out_dtype) {
   const auto dprops = at::cuda::getCurrentDeviceProperties();
+  const bool sm90 = dprops->major == 9;
   const bool sm10_or_sm11 =
       dprops->major == 10 || dprops->major == 11;
+#if CUBLAS_VERSION >= 130401
+  const bool sm90_cublaslt_grouped_gemm_supported =
+      sm90 && cublasLtGetVersion() >= 130401;
+#else
+  constexpr bool sm90_cublaslt_grouped_gemm_supported = false;
+#endif
   const bool fp16_grouped_gemm =
       mat_a.dtype() == at::kHalf && mat_b.dtype() == at::kHalf &&
       out_dtype.value_or(at::kHalf) == at::kHalf;
@@ -123,20 +131,16 @@ bool should_use_cublaslt_grouped_gemm(
     return false;
   }
 
-  const bool use_fp16_by_default = sm10_or_sm11
-#if CUDA_VERSION >= 13030
-      || dprops->major == 9
-#endif
-      ;
+  const bool use_fp16_by_default =
+      sm10_or_sm11 || sm90_cublaslt_grouped_gemm_supported;
   if (use_fp16_by_default && fp16_grouped_gemm) {
     return true;
   }
-  if (dprops->major == 9) {
-#if CUDA_VERSION >= 13030
+  if (sm90) {
+    if (!sm90_cublaslt_grouped_gemm_supported) {
+      return false;
+    }
     return bf16_grouped_gemm && at::globalContext().preferCublasltGroupedGemm();
-#else
-    return false;
-#endif
   }
   // Only SM 9.0-11.0 are supported; on any other arch fall back so we don't
   // dispatch to a kernel that hard-errors on the device check.

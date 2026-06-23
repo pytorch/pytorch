@@ -8368,10 +8368,6 @@ def _meta_grouped_mm_common(
             mat_b.dtype == mat_a.dtype,
             lambda: f"Expected mat_b dtype to match mat_a dtype, got mat_a.dtype={mat_a.dtype} and mat_b.dtype={mat_b.dtype}.",
         )
-        torch._check(
-            _grouped_mm_fp16_cublaslt_supported(mat_a, mat_b),
-            lambda: "Float16 grouped_mm requires cuBLASLt grouped GEMM support.",
-        )
     else:
         torch._check(
             False,
@@ -8543,6 +8539,12 @@ def _meta_grouped_mm_common(
             lambda: "Offsets tensor provided, but is not needed for 3D/3D multiplicand layouts.",
         )
 
+    if mat_a.dtype == torch.float16:
+        torch._check(
+            _grouped_mm_fp16_cublaslt_supported(mat_a, mat_b, offs),
+            lambda: "Float16 grouped_mm requires cuBLASLt grouped GEMM support.",
+        )
+
     torch._check(
         bias is None,
         lambda: "Bias tensor provided, but it is not supported yet.",
@@ -8563,22 +8565,27 @@ def _meta_grouped_mm_common(
     return _create_grouped_mm_output_tensor(mat_a, mat_b, offs, out_dtype)
 
 
-def _torch_cuda_version_ge(major: int, minor: int) -> bool:
-    if not torch.version.cuda:
-        return False
-    cuda_major, cuda_minor = torch.version.cuda.split(".")[:2]
-    return (int(cuda_major), int(cuda_minor)) >= (major, minor)
-
-
-def _grouped_mm_fp16_cublaslt_supported(mat_a: Tensor, mat_b: Tensor) -> bool:
+def _grouped_mm_fp16_cublaslt_supported(
+    mat_a: Tensor, mat_b: Tensor, offs: Tensor | None
+) -> bool:
     if device_hint(mat_a) != "cuda" or device_hint(mat_b) != "cuda":
         return False
     if not torch.cuda.is_available():
         return False
+    mat_a_is_2d = mat_a.dim() == 2
+    mat_b_is_2d = mat_b.dim() == 2
+    batch_count = offs.size(0) if mat_a_is_2d or mat_b_is_2d else mat_a.size(0)
+    if batch_count < 1 or batch_count > 1024:
+        return False
     device_capability = torch.cuda.get_device_capability()
+    cuda_version = (
+        tuple(int(x) for x in torch.version.cuda.split(".")[:2])
+        if torch.version.cuda
+        else (0, 0)
+    )
     if device_capability[0] == 9:
-        return _torch_cuda_version_ge(13, 3)
-    return _torch_cuda_version_ge(13, 2) and (
+        return cuda_version >= (13, 3)
+    return cuda_version >= (13, 2) and (
         device_capability[0] == 10 or device_capability == (11, 0)
     )
 

@@ -2223,10 +2223,6 @@ void grouped_gemm(
 #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   const bool sm90 = prop->major == 9;
-  if (sm90) {
-    TORCH_CHECK(CUBLAS_VERSION >= 130401 && cublasLtGetVersion() >= 130401,
-        "grouped cublasLtMatmul on SM 9.0 requires cuBLAS >= 13.4.1 (CUDA Toolkit 13.2 Update 1)");
-  }
   TORCH_CHECK(prop->major >= 9 && prop->major < 12, "grouped cublasLtMatmul requires SM 9.0-11.0");
 
   const auto computeType = CUBLAS_COMPUTE_32F;
