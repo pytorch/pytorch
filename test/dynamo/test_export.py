@@ -1337,11 +1337,11 @@ def forward(self, x, y):
         found_prefixed = False
         for node in out_graph.graph.nodes:
             stack = node.meta.get("nn_module_stack") or {}
-            for _key, (path, _cls) in stack.items():
+            for path, _cls in stack.values():
                 if isinstance(path, str) and path.startswith("L['self']."):
                     found_prefixed = True
                     # After prefix, should have valid dotted module path
-                    clean = path[len("L['self']."):]
+                    clean = path[len("L['self'].") :]
                     self.assertTrue(
                         len(clean) > 0,
                         "Module path after L['self']. prefix should not be empty",
@@ -1384,7 +1384,7 @@ def forward(self, x, y):
         found_class = False
         for node in out_graph.graph.nodes:
             stack = node.meta.get("nn_module_stack") or {}
-            for _key, (_path, cls) in stack.items():
+            for _path, cls in stack.values():
                 found_class = True
                 self.assertTrue(
                     isinstance(cls, type),
@@ -1430,13 +1430,12 @@ def forward(self, x, y):
         layer_indices = set()
         for node in out_graph.graph.nodes:
             stack = node.meta.get("nn_module_stack") or {}
-            for _key, (path, _cls) in stack.items():
+            for path, _cls in stack.values():
                 if not isinstance(path, str):
                     continue
                 # Strip L['self']. if present
                 clean = path
-                if clean.startswith("L['self']."):
-                    clean = clean[len("L['self']."):]
+                clean = clean.removeprefix("L['self'].")
                 # Match "layers.N" components
                 if clean.startswith("layers."):
                     parts = clean.split(".")
@@ -1444,7 +1443,8 @@ def forward(self, x, y):
                         layer_indices.add(int(parts[1]))
 
         self.assertEqual(
-            layer_indices, set(range(n_blocks)),
+            layer_indices,
+            set(range(n_blocks)),
             f"Expected all {n_blocks} ModuleList children to appear in nn_module_stack paths",
         )
 
@@ -1497,11 +1497,11 @@ def forward(self, x, y):
                         continue
                     max_stack_len = max(max_stack_len, len(stack))
                     paths = []
-                    for _key, (path, _cls) in stack.items():
+                    for path, _cls in stack.values():
                         if isinstance(path, str):
                             clean = path
                             if clean.startswith("L['self']."):
-                                clean = clean[len("L['self']."):]
+                                clean = clean[len("L['self'].") :]
                             elif clean == "L['self']":
                                 clean = ""
                             paths.append(clean)
@@ -1509,12 +1509,14 @@ def forward(self, x, y):
                     depths = [p.count(".") if p else -1 for p in paths]
                     for k in range(1, len(depths)):
                         self.assertGreaterEqual(
-                            depths[k], depths[k - 1],
-                            f"nn_module_stack not ordered outermost→innermost: {paths}",
+                            depths[k],
+                            depths[k - 1],
+                            f"nn_module_stack not ordered outermost->innermost: {paths}",
                         )
                 # The deepest node should reflect the full nesting chain
                 self.assertGreaterEqual(
-                    max_stack_len, depth,
+                    max_stack_len,
+                    depth,
                     f"Expected max nn_module_stack depth >= {depth} for model with depth={depth}",
                 )
 
@@ -1555,7 +1557,8 @@ def forward(self, x, y):
             for entry in sfn_stack:
                 self.assertIsInstance(entry, (list, tuple))
                 self.assertGreaterEqual(
-                    len(entry), 2,
+                    len(entry),
+                    2,
                     f"source_fn_stack entry should have >= 2 elements: {entry}",
                 )
                 # First element is a string name

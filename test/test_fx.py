@@ -2732,7 +2732,7 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
         self.assertEqual(stack_list, expected_stack)
 
     def test_nn_module_stack_deep_nesting(self):
-        """nn_module_stack records every level for ≥3 nesting depths.
+        """nn_module_stack records every level for >=3 nesting depths.
 
         Many downstream passes (e.g. ONNX exporter, quantisation, custom
         backends) reconstruct a module tree from nn_module_stack.  They
@@ -2838,8 +2838,8 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
 
         # Verify numeric indices appear in the paths
         numeric_paths_seen = set()
-        for _name, stack in stacks_by_node.items():
-            for _key, (path, _cls) in stack.items():
+        for stack in stacks_by_node.values():
+            for path, _cls in stack.values():
                 # Look for "blocks.0", "blocks.1", "blocks.2" style paths
                 if "blocks." in path:
                     parts = path.split(".")
@@ -2871,7 +2871,7 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
         found_any_stack = False
         for node in gm.graph.nodes:
             stack = node.meta.get("nn_module_stack") or {}
-            for _key, (_path, cls) in stack.items():
+            for _path, cls in stack.values():
                 found_any_stack = True
                 self.assertTrue(
                     isinstance(cls, type),
