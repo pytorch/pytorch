@@ -8796,6 +8796,36 @@ def get_params(dtypes: list[torch.dtype]) -> list[Params]:
     return params
 
 
+ROCM_FLAKY_LEARNABLE_BIAS_CASES = {
+    "head_specific_gate": {
+        (2, 4, 37, 16, torch.float16, "max-autotune-no-cudagraphs"),
+        (2, 4, 37, 16, torch.float32, "max-autotune-no-cudagraphs"),
+        (2, 4, 256, 16, torch.bfloat16, "max-autotune-no-cudagraphs"),
+        (2, 4, 256, 16, torch.float16, "max-autotune-no-cudagraphs"),
+        (2, 4, 256, 16, torch.float32, "max-autotune-no-cudagraphs"),
+        (2, 4, 277, 16, torch.bfloat16, "max-autotune-no-cudagraphs"),
+        (2, 4, 277, 16, torch.float32, "max-autotune-no-cudagraphs"),
+    },
+    "relative_1d_bias": {
+        (2, 4, 37, 16, torch.bfloat16, "max-autotune-no-cudagraphs"),
+        (2, 4, 256, 16, torch.bfloat16, "max-autotune-no-cudagraphs"),
+        (2, 4, 256, 16, torch.float16, "max-autotune-no-cudagraphs"),
+        (2, 4, 277, 16, torch.bfloat16, "max-autotune-no-cudagraphs"),
+        (2, 4, 277, 16, torch.float16, "max-autotune-no-cudagraphs"),
+        (2, 4, 277, 16, torch.float32, "max-autotune-no-cudagraphs"),
+    },
+    "symmetric_bias": {
+        (2, 4, 37, 16, torch.bfloat16, "max-autotune-no-cudagraphs"),
+        (2, 4, 37, 16, torch.float16, "max-autotune-no-cudagraphs"),
+        (2, 4, 37, 16, torch.float32, "max-autotune-no-cudagraphs"),
+        (2, 4, 256, 16, torch.float16, "max-autotune-no-cudagraphs"),
+        (2, 4, 277, 16, torch.bfloat16, "max-autotune-no-cudagraphs"),
+        (2, 4, 277, 16, torch.float16, "max-autotune-no-cudagraphs"),
+        (2, 4, 277, 16, torch.float32, "max-autotune-no-cudagraphs"),
+    },
+}
+
+
 supports_learnable_bias = unittest.skipUnless(
     (
         (torch.xpu.is_available() and has_triton())
@@ -8828,6 +8858,23 @@ class TestLearnableBiases(InductorTestCase):
             requires_grad=True,
         )
         return (make_tensor(), make_tensor(), make_tensor())
+
+    def skip_rocm_flaky_learnable_bias_case(
+        self, test_name: str, params: Params, mode: str
+    ):
+        """Skips parameterized ROCm flakes tracked by disabled-test issues."""
+        case = (
+            params.batch_size,
+            params.num_heads,
+            params.seq_length,
+            params.head_dim,
+            params.dtype,
+            mode,
+        )
+        if TEST_WITH_ROCM and case in ROCM_FLAKY_LEARNABLE_BIAS_CASES[test_name]:
+            self.skipTest(
+                "Flaky on ROCm: https://github.com/pytorch/pytorch/issues/167271 and https://github.com/pytorch/pytorch/issues/167296"
+            )
 
     @torch.no_grad()
     def _gold_check(self, eager, compiled, gold, tensor_name, fudge_factor=1.35):
@@ -8886,6 +8933,7 @@ class TestLearnableBiases(InductorTestCase):
     )
     @common_utils.parametrize("mode", ["default", "max-autotune-no-cudagraphs"])
     def test_relative_1d_bias(self, device, params, mode: str):
+        self.skip_rocm_flaky_learnable_bias_case("relative_1d_bias", params, mode)
         query, key, value = self._init_tensors(params, device=device)
         bias = torch.randn(
             2 * params.seq_length,
@@ -9203,6 +9251,7 @@ class TestLearnableBiases(InductorTestCase):
     )
     @common_utils.parametrize("mode", ["default", "max-autotune-no-cudagraphs"])
     def test_symmetric_bias(self, device, params, mode: str):
+        self.skip_rocm_flaky_learnable_bias_case("symmetric_bias", params, mode)
         query, key, value = self._init_tensors(params, device=device)
         bias = torch.randn(
             params.seq_length,
@@ -9275,6 +9324,7 @@ class TestLearnableBiases(InductorTestCase):
     )
     @common_utils.parametrize("mode", ["default", "max-autotune-no-cudagraphs"])
     def test_head_specific_gate(self, device, params, mode: str):
+        self.skip_rocm_flaky_learnable_bias_case("head_specific_gate", params, mode)
         query, key, value = self._init_tensors(params, device=device)
         gate_score = torch.randn(
             params.num_heads,
