@@ -56,7 +56,7 @@ pip install torch==2.12.0 torchvision==0.26.0 torchaudio==2.12.0 --index-url htt
 **v2.11.0**
 
 ```bash
-pip install torch==2.11.0 torchvision==0.26.0 torchaudio==2.11.0 --index-url https://download.pytorch.org/whl/xpu
+pip3 install torch==2.11.0 torchvision==0.26.0 torchaudio==2.11.0 --index-url https://download.pytorch.org/whl/xpu
 ```
 
 ```{note}
