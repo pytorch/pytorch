@@ -621,10 +621,11 @@ class graph:
         # pyrefly: ignore [missing-attribute]
         torch._C._host_emptyCache()
 
-        if self._enable_annotations:
-            from torch.cuda._graph_annotations import enable_annotations as _enable_ann
+        # Scope annotation recording to this capture: stamp/mark_kernels gate on
+        # this flag, and __exit__ always clears it.
+        from torch.cuda._graph_annotations import _set_annotations_enabled
 
-            _enable_ann()
+        _set_annotations_enabled(self._enable_annotations)
 
         # Stackoverflow seems comfortable with this pattern
         # https://stackoverflow.com/questions/26635684/calling-enter-and-exit-manually#39172487
@@ -640,16 +641,23 @@ class graph:
         )
 
     def __exit__(self, *args: object) -> None:
-        if self._enable_annotations:
-            from torch.cuda._graph_annotations import resolve_pending_annotations
+        from torch.cuda._graph_annotations import (
+            _set_annotations_enabled,
+            resolve_pending_annotations,
+        )
 
-            resolve_pending_annotations()
+        try:
+            if self._enable_annotations:
+                resolve_pending_annotations()
 
-        # capture_end stamps the capture id and, for keep_graph=False,
-        # instantiates (which remaps annotations to the exec id). For
-        # keep_graph=True the remap is owned by the later instantiate()/replay().
-        self.cuda_graph.capture_end()
-        self.stream_ctx.__exit__(*args)
+            # capture_end stamps the capture id and, for keep_graph=False,
+            # instantiates (which remaps annotations to the exec id). For
+            # keep_graph=True the remap is owned by the later instantiate()/replay().
+            self.cuda_graph.capture_end()
+            self.stream_ctx.__exit__(*args)
+        finally:
+            # Annotation recording is capture-scoped; clear it unconditionally.
+            _set_annotations_enabled(False)
         # returning None should propagate exceptions from either capture_end or stream_ctx.__exit__()
 
 
