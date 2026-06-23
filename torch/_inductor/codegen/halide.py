@@ -665,7 +665,8 @@ class HalideOverrides(OpOverrides):
 
     @staticmethod
     def device_assert_async(cond, msg):
-        raise NotImplementedError("device_assert_async")
+        # Halide codegen does not support runtime device assertions yet.
+        return None
 
     @staticmethod
     # pyrefly: ignore [bad-override]
@@ -1841,6 +1842,9 @@ class HalideKernel(SIMDKernel):
     def check_bounds(
         self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
     ):
+        pass  # TODO(jansel): support asserts
+
+    def device_assert_async(self, cond: CSEVariable, msg: str) -> None:
         pass  # TODO(jansel): support asserts
 
 

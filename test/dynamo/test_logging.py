@@ -33,6 +33,7 @@ from torch.testing._internal.inductor_utils import (
     HAS_XPU_AND_TRITON,
 )
 from torch.testing._internal.logging_utils import (
+    log_settings,
     LoggingTestCase,
     make_logging_test,
     make_settings_test,
@@ -167,6 +168,32 @@ class LoggingTests(LoggingTestCase):
     test_output_code = multi_record_test(3, output_code=True)
     test_aot_graphs = multi_record_test(3, aot_graphs=True)
 
+    def test_handler_watcher_ignores_external_handlers(self):
+        records = []
+        logger = logging.getLogger(torch._dynamo.__name__)
+        external_handlers = [logging.NullHandler() for _ in range(3)]
+        expected_records = None
+
+        with log_settings("dynamo"):
+            for handler in external_handlers:
+                logger.addHandler(handler)
+
+            try:
+                with self._handler_watcher(records):
+                    expected_records = len(
+                        [
+                            handler
+                            for handler in logger.handlers
+                            if torch._logging._internal._is_torch_handler(handler)
+                        ]
+                    )
+                    logger.info("test external handler")
+            finally:
+                for handler in external_handlers:
+                    logger.removeHandler(handler)
+
+        self.assertEqual(len(records), expected_records)
+
     @requires_gpu
     @make_logging_test(schedule=True)
     def test_schedule(self, records):
@@ -224,16 +251,17 @@ class LoggingTests(LoggingTestCase):
             "[file_path]",
             "\n".join(r.getMessage() for r in records),
         )
+        record_str = re.sub(r"line \d+", "line [line]", record_str)
         self.assertIn(
             """\
     - User stack trace:
-    -   File [file_path], line 201, in outmost_fn
+    -   File [file_path], line [line], in outmost_fn
     -     return outer_fn(x, ys, zs)
-    -   File [file_path], line 204, in outer_fn
+    -   File [file_path], line [line], in outer_fn
     -     return fn(x, ys, zs)
-    -   File [file_path], line 207, in fn
+    -   File [file_path], line [line], in fn
     -     return inner(x, ys, zs)
-    -   File [file_path], line 210, in inner
+    -   File [file_path], line [line], in inner
     -     for y, z in zip(ys, zs):""",
             record_str,
         )

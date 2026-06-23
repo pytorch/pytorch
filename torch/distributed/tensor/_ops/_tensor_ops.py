@@ -1403,6 +1403,27 @@ def index_fill_tensor_single_dim_strategy(
 
 
 @register_single_dim_strategy(
+    [aten.index_add.default, aten.index_add_.default],
+    schema_info=RuntimeSchemaInfo(1),
+)
+def index_add_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    # index_add(self, dim, index, source) adds source into self at index
+    # positions. The source/indexed update is linear for sum/avg partials.
+    return _index_dim_strategy(
+        args_schema,
+        lambda d: [
+            _ShardingPlaceholder(d),  # result
+            _ShardingPlaceholder(d),  # self
+            Replicate(),  # index
+            _ShardingPlaceholder(d),  # source
+        ],
+        [[Partial(op), Partial(op), Replicate(), Partial(op)] for op in ("sum", "avg")],
+    )
+
+
+@register_single_dim_strategy(
     [aten.index_reduce.default, aten.index_reduce_.default],
     schema_info=RuntimeSchemaInfo(1),
 )

@@ -27656,7 +27656,6 @@ python_ref_db = [
         skips=(
             # no _refs support for Tensor.__setitem__
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
         ),
     ),
     PythonRefInfo(

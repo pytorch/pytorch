@@ -85,6 +85,12 @@ class PlacementTrackingMode(TorchDispatchMode):
         self.mesh = mesh
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        if func in (
+            torch.ops.aten._assert_async.default,
+            torch.ops.aten._assert_async.msg,
+        ):
+            return func(*args, **(kwargs or {}))
+
         args_schema, kwargs_schema = tree_map(
             lambda x: getattr(x, "_spec", x) if isinstance(x, torch.Tensor) else x,
             (args, kwargs or {}),

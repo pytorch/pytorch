@@ -5258,6 +5258,17 @@ for dtype in (torch.int32, torch.int64):
         self.assertEqual(torch.compile(fn)(x1, y), fn(x1, y))
         self.assertEqual(torch.compile(fn)(x2, y), fn(x2, y))
 
+    @skip_if_pallas  # device assertions are not implemented for Pallas
+    def test_assert_async_true(self):
+        if self.device != "cpu":
+            raise unittest.SkipTest("CPU-only assert codegen coverage")
+
+        def fn(x):
+            torch.ops.aten._assert_async.msg(torch.all(x >= 0), "x must be nonnegative")
+            return x + 1
+
+        self.common(fn, (torch.ones(4, device=self.device),))
+
     def test_slice1(self):
         def fn(a):
             return (
@@ -10764,7 +10775,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             src = torch.ones(3, 8, device=self.device)
             self.common(fn, (idx, src), check_lowp=False)
 
-        check(lambda idx, src: make_input(src).index_add(0, idx, src))
+        # Halide generator emits no outputs for this index_add lowering.
+        if not is_halide_backend(self.device):
+            check(lambda idx, src: make_input(src).index_add(0, idx, src))
         check(lambda idx, src: make_input(src).index_copy(0, idx[:2], src[:2]))
         check(lambda idx, src: make_input(src).index_fill(0, idx[:2], 1.0))
         check(lambda idx, src: make_input(src).index_put((idx,), src, accumulate=True))
@@ -10774,6 +10787,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             )
         )
 
+    @skip_if_halide  # Halide generator emits no outputs for this index_add lowering
+    @skip_if_pallas  # device assertions are not implemented for Pallas
     def test_index_ops_on_expanded_tensor_dim1(self):
         def fn(idx, src):
             x = torch.zeros(src.size(0), 1, device=src.device).expand(
@@ -13340,6 +13355,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.assertEqual(y, compiled_y)
 
+    @skip_if_halide  # Halide generator emits no outputs for this graph
     def test_unfold_backward_overlapping_windows(self):
         def forward(grad, input_sizes):
             return torch.ops.aten.unfold_backward(
@@ -14318,6 +14334,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             (torch.randn(32), torch.randn(32)),
         )
 
+    @skip_if_halide  # Halide autoscheduler compile failure
     def test_conv_with_as_strided(self):
         class Model(nn.Module):
             def __init__(self) -> None:
@@ -16103,7 +16120,133 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         with self.assertRaises(RuntimeError):
             torch.compile(fn)(x, source)
 
-    @skip_if_gpu_halide  # cuda error
+    @parametrize("inplace", [False, True])
+    def test_index_add_source_shape_mismatch(self, inplace):
+        def fn(x, source):
+            index = torch.arange(source.numel(), device=x.device)
+            if inplace:
+                x = x.clone()
+                x.index_add_(0, index, source)
+                return x
+            return torch.index_add(x, 0, index, source)
+
+        x = torch.randn(10, 5, device=self.device)
+        source = torch.randn(5, device=self.device)
+        msg = "source tensor shape must match self tensor shape"
+
+        with self.assertRaisesRegex(RuntimeError, msg):
+            fn(x, source)
+
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.compile(fn)(x, source)
+
+    @skip_if_halide  # cpp-only RuntimeError contract
+    @skip_if_pallas  # cpp-only RuntimeError contract
+    @skip_if_triton_cpu  # cpp-only RuntimeError contract
+    @config.patch({"cpp.threads": 1})
+    def test_index_add_out_of_bounds_indices(self):
+        if self.device != "cpu":
+            raise unittest.SkipTest("CPU bounds check regression")
+
+        def fn(x, index, source):
+            out = x.clone()
+            out.index_add_(-1, index, source)
+            return out
+
+        x = torch.zeros(1, 4, 4, device=self.device)
+        source = torch.ones(1, 4, 4, device=self.device)
+        valid_index = torch.tensor([0, 1, 2, 3], device=self.device)
+        with torch._dynamo.config.patch(suppress_errors=True):
+            compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+            self.assertEqual(
+                compiled_fn(x, valid_index, source), fn(x, valid_index, source)
+            )
+
+            for bad_index in (
+                torch.tensor([0, 1, 4, 2], device=self.device),
+                torch.tensor([0, 1, -1, 2], device=self.device),
+            ):
+                with self.assertRaisesRegex(
+                    RuntimeError, "index_add\\(\\): index out of bounds"
+                ):
+                    compiled_fn(x, bad_index, source)
+
+            def computed_bad_index_fn(x):
+                out = x.clone()
+                source = torch.ones_like(out)
+                index = torch.full((4,), 5, dtype=torch.long, device=out.device)
+                out.index_add_(-1, index, source)
+                return out
+
+            compiled_computed_bad_index_fn = torch.compile(
+                computed_bad_index_fn, backend="inductor", fullgraph=True
+            )
+            with self.assertRaisesRegex(
+                RuntimeError, "index_add\\(\\): index out of bounds"
+            ):
+                compiled_computed_bad_index_fn(x)
+
+            empty_source = torch.empty(1, 4, 0, device=self.device)
+            for dtype in (torch.float32, torch.bool, torch.int16):
+                bad_index = torch.empty(0, dtype=dtype, device=self.device)
+                with self.assertRaisesRegex(RuntimeError, "Expected dtype int32/int64"):
+                    fn(x, bad_index, empty_source)
+                with self.assertRaisesRegex(RuntimeError, "Expected dtype int32/int64"):
+                    compiled_fn(x, bad_index, empty_source)
+
+    @skip_if_halide  # cpp-only ComplexHalf coverage
+    @skip_if_pallas  # cpp-only ComplexHalf coverage
+    @skip_if_triton_cpu  # cpp-only ComplexHalf coverage
+    def test_index_add_complex_half(self):
+        if self.device != "cpu":
+            raise unittest.SkipTest("CPU ComplexHalf regression")
+
+        def fn(x, index, source):
+            out = x.clone()
+            out.index_add_(0, index, source)
+            return out
+
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore", "ComplexHalf support is experimental", UserWarning
+            )
+            warnings.filterwarnings(
+                "ignore",
+                "Torchinductor does not support code generation for complex operators",
+                UserWarning,
+            )
+            x = torch.zeros(4, dtype=torch.complex32, device=self.device)
+            source = torch.ones(2, dtype=torch.complex32, device=self.device)
+            index = torch.tensor([0, 2], device=self.device)
+            compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+            self.assertEqual(compiled_fn(x, index, source), fn(x, index, source))
+            with self.assertRaisesRegex(
+                RuntimeError, "index_add\\(\\): index out of bounds"
+            ):
+                compiled_fn(x, torch.tensor([0, -1], device=self.device), source)
+
+    @skip_if_halide  # cpp-only bool index_put accumulation coverage
+    @skip_if_pallas  # cpp-only bool index_put accumulation coverage
+    @skip_if_triton_cpu  # cpp-only bool index_put accumulation coverage
+    @parametrize("inplace", [False, True])
+    def test_index_add_bool_alpha(self, inplace):
+        def fn(x, index, source, alpha):
+            if inplace:
+                x = x.clone()
+                x.index_add_(0, index, source, alpha=alpha)
+                return x
+            return torch.index_add(x, 0, index, source, alpha=alpha)
+
+        x = torch.zeros(3, dtype=torch.bool, device=self.device)
+        index = torch.tensor([0, 1], device=self.device)
+        source = torch.tensor([True, True], dtype=torch.bool, device=self.device)
+        compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        for alpha in (0, 0.5, 2, -1):
+            self.assertEqual(
+                compiled_fn(x, index, source, alpha), fn(x, index, source, alpha)
+            )
+
+    @skip_if_halide  # Halide codegen failure for index_add scatter_add lowering
     def test_mutations_loop_fusion(self):
         def fn(tensor, index, source):
             out = tensor.index_add(0, index, source, alpha=2.0) / 2
@@ -18525,6 +18668,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             out2 = run_session(100, 16, 64, self.device)
             self.assertEqual(out2.device.type, self.device)
 
+    @skip_if_halide  # Halide codegen failure for index_reduce on sliced view input
     def test_index_reduce_on_view_input(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/144846
         def fn(x, index, source):
