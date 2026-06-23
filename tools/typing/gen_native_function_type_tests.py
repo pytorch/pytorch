@@ -170,7 +170,7 @@ def main() -> None:
         tags_yaml_path=args.tags_yaml_path,
         deprecated_yaml_path=args.deprecated_yaml_path,
     )
-    args.output.write_text(rendered)
+    args.output.write_text(rendered, encoding="utf-8")
 
 
 if __name__ == "__main__":

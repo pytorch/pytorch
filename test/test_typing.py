@@ -257,7 +257,7 @@ class TestGeneratedTypingFiles(TestCase):
             render_native_function_type_tests,
         )
 
-        with open(DEFAULT_OUTPUT) as f:
+        with open(DEFAULT_OUTPUT, encoding="utf-8") as f:
             actual = f.read()
         self.assertEqual(actual, render_native_function_type_tests())
 
