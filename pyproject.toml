@@ -295,6 +295,9 @@ select = [
 "test/export/**" = [
     "PGH004",
 ]
+"test/profiler/test_cupti_comms.py" = [
+    "S101",  # mp.spawn subprocess workers assert + re-raise in the parent
+]
 "test/typing/**" = [
     "PGH004"
 ]
