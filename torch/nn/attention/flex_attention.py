@@ -433,9 +433,13 @@ def _dense_to_ordered(dense_mask: Tensor) -> tuple[Tensor, Tensor]:
 
 
 def _transpose_ordered(
-    num_blocks_in_row: Tensor, col_indices: Tensor
+    num_blocks_in_row: Tensor, col_indices: Tensor, num_cols: int | None = None
 ) -> tuple[Tensor, Tensor]:
-    dense = _ordered_to_dense(num_blocks_in_row, col_indices, col_indices.shape[-1])
+    dense = _ordered_to_dense(
+        num_blocks_in_row,
+        col_indices,
+        col_indices.shape[-1] if num_cols is None else num_cols,
+    )
     return _dense_to_ordered(dense.transpose(-2, -1))
 
 
@@ -1033,21 +1037,6 @@ class BlockMask:
                 "full_kv_num_blocks and full_kv_indices must be both provided or omitted"
             )
 
-        # Generate q_num_blocks and q_indices
-        if compute_q_blocks:
-            q_num_blocks, q_indices = _transpose_ordered(kv_num_blocks, kv_indices)
-            if full_kv_num_blocks is not None:
-                if full_kv_indices is None:
-                    raise AssertionError("full_kv_indices must not be None")
-                full_q_num_blocks, full_q_indices = _transpose_ordered(
-                    full_kv_num_blocks, full_kv_indices
-                )
-            else:
-                full_q_num_blocks, full_q_indices = None, None
-        else:
-            q_num_blocks, q_indices = None, None
-            full_q_num_blocks, full_q_indices = None, None
-
         if isinstance(BLOCK_SIZE, int):
             BLOCK_SIZE = (BLOCK_SIZE, BLOCK_SIZE)
 
@@ -1056,6 +1045,24 @@ class BlockMask:
             q_length = kv_indices.shape[-2] * BLOCK_SIZE[0]
             kv_length = kv_indices.shape[-1] * BLOCK_SIZE[1]
             seq_lengths = (q_length, kv_length)
+        kv_num_cols = (seq_lengths[1] + BLOCK_SIZE[1] - 1) // BLOCK_SIZE[1]
+
+        # Generate q_num_blocks and q_indices
+        if compute_q_blocks:
+            q_num_blocks, q_indices = _transpose_ordered(
+                kv_num_blocks, kv_indices, kv_num_cols
+            )
+            if full_kv_num_blocks is not None:
+                if full_kv_indices is None:
+                    raise AssertionError("full_kv_indices must not be None")
+                full_q_num_blocks, full_q_indices = _transpose_ordered(
+                    full_kv_num_blocks, full_kv_indices, kv_num_cols
+                )
+            else:
+                full_q_num_blocks, full_q_indices = None, None
+        else:
+            q_num_blocks, q_indices = None, None
+            full_q_num_blocks, full_q_indices = None, None
 
         if dq_kv_order is not None and not isinstance(dq_kv_order, (bool, Tensor)):
             raise ValueError("dq_kv_order must be a bool, Tensor, or None")
