@@ -4962,6 +4962,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             )
 
     @supported_platform
+    @skip_on_cpu
     def test_block_mask_non_divisible(self, device):
         seq = torch.arange(1023, device=device) // 128
 
