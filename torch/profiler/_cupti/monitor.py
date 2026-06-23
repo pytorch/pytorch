@@ -34,7 +34,7 @@ from .cupti_python import (
     CUPTI_SUCCESS,
     disabled_driver_cbids,
     disabled_runtime_cbids,
-    find_cupti_library,
+    LIBCUPTI_SONAME,
     OVERHEAD_KIND_NAMES,
 )
 
@@ -176,7 +176,7 @@ class CuptiMonitor:
             annotation_resolver or _default_graph_annotation_resolver
         )
 
-        self._lib = ctypes.CDLL(find_cupti_library())
+        self._lib = ctypes.CDLL(LIBCUPTI_SONAME)
         self._setup_prototypes()
 
         self._lock = threading.Lock()
@@ -594,7 +594,7 @@ class CuptiMonitor:
             "flush_period_ns": int(self.flush_period_s * 1e9),
             "raw_buffer_dump": True,
             "activities": list(self.activities),
-            "libcupti_path": find_cupti_library(),
+            "libcupti": LIBCUPTI_SONAME,
         }
         payload = _safe_json_dumps(meta)
         with open(self.output_dir / _META_FILE, "wb") as fp:
@@ -981,7 +981,7 @@ def enable_hes_early() -> None:
     # imported, that path causes subsequent cuptiActivityRegisterCallbacks() to
     # fail with CUPTI_ERROR_MULTIPLE_SUBSCRIBERS_NOT_SUPPORTED in this process,
     # while the direct ctypes call below works.
-    lib = ctypes.CDLL(find_cupti_library())
+    lib = ctypes.CDLL(LIBCUPTI_SONAME)
     lib.cuptiActivityEnableHWTrace.argtypes = [ctypes.c_uint8]
     lib.cuptiActivityEnableHWTrace.restype = ctypes.c_int
     rc = lib.cuptiActivityEnableHWTrace(1)
