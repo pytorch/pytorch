@@ -23,5 +23,5 @@ reveal_type(torch.permute(cube, (2, 0, 1)))  # E: {Tensor}
 reveal_type(torch.transpose(matrix, 0, 1))  # E: {Tensor}
 reveal_type(torch.sum(matrix, dim=1, keepdim=True, dtype=torch.float64))  # E: {Tensor}
 reveal_type(torch.amax(cube, dim=(1, 2), keepdim=True))  # E: {Tensor}
-reveal_type(torch.empty((2, 3), dtype=torch.float32, device=torch.device('cpu')))  # E: {Tensor}
+reveal_type(torch.empty((2, 3), dtype=torch.float32, device=None))  # E: {Tensor}
 reveal_type(torch.zeros(2, 3, out=torch.empty(2, 3)))  # E: {Tensor}

@@ -57,7 +57,7 @@ TEST_CASES: tuple[NativeFunctionTypeTestCase, ...] = (
     NativeFunctionTypeTestCase("amax", "torch.amax(cube, dim=(1, 2), keepdim=True)"),
     NativeFunctionTypeTestCase(
         "empty",
-        "torch.empty((2, 3), dtype=torch.float32, device=torch.device('cpu'))",
+        "torch.empty((2, 3), dtype=torch.float32, device=None)",
     ),
     NativeFunctionTypeTestCase("zeros", "torch.zeros(2, 3, out=torch.empty(2, 3))"),
 )
