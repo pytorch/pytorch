@@ -7049,6 +7049,70 @@ class TestBlockMask(InductorTestCase):
         self.assertEqual(block_mask.shape, (B, H, Q_LEN, KV_LEN))
 
     @supported_platform
+    def test_getitem_query_slice_updates_shape(self, device):
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        block_mask = create_block_mask(
+            causal_mask,
+            B=None,
+            H=None,
+            Q_LEN=8,
+            KV_LEN=9,
+            BLOCK_SIZE=4,
+            device=device,
+        )
+
+        first_q_block = block_mask[:, :, :1]
+        self.assertEqual(first_q_block.shape, (1, 1, 4, 9))
+        self.assertEqual(first_q_block.seq_lengths, (4, 9))
+        self.assertEqual(block_mask[:, :, 0].shape, (1, 1, 4, 9))
+
+        second_q_block = block_mask[:, :, 1]
+        self.assertEqual(second_q_block.shape, (1, 1, 4, 9))
+        self.assertEqual(second_q_block.to_dense(), block_mask.to_dense()[:, :, 1:2, :])
+
+        q = torch.empty(1, 1, 8, 2, device=device)
+        self.assertEqual(q[:, :, :4, :].shape[-2], first_q_block.shape[-2])
+        self.assertEqual(q[:, :, 4:8, :].shape[-2], second_q_block.shape[-2])
+
+        with self.assertRaisesRegex(IndexError, "batch, head, and Q-block"):
+            block_mask[:, :, :, :1]
+
+        block_mask = create_block_mask(
+            causal_mask,
+            B=None,
+            H=None,
+            Q_LEN=9,
+            KV_LEN=10,
+            BLOCK_SIZE=4,
+            device=device,
+        )
+
+        self.assertEqual(block_mask[:, :, :].shape, (1, 1, 9, 10))
+        self.assertEqual(block_mask[:, :, 1].shape, (1, 1, 4, 10))
+        self.assertEqual(block_mask[:, :, 1:].shape, (1, 1, 5, 10))
+        self.assertEqual(block_mask[:, :, :0].shape, (1, 1, 0, 10))
+        self.assertEqual(block_mask[:, :, ::2].shape, (1, 1, 5, 10))
+        self.assertEqual(
+            block_mask[:, :, ::2].to_dense(), block_mask.to_dense()[:, :, ::2, :]
+        )
+
+        tail_q_block = block_mask[:, :, 2]
+        self.assertEqual(tail_q_block.shape, (1, 1, 1, 10))
+        self.assertEqual(block_mask[:, :, -1].shape, tail_q_block.shape)
+        self.assertEqual(tail_q_block.seq_lengths, (1, 10))
+        self.assertEqual(tail_q_block.to_dense(), block_mask.to_dense()[:, :, 2:3, :])
+        if tail_q_block.q_indices is None:
+            raise AssertionError("Expected q_indices to be recomputed")
+        self.assertEqual(
+            tail_q_block.q_indices, torch.zeros_like(tail_q_block.q_indices)
+        )
+
+        tail_q_block_tensor_index = block_mask[:, :, torch.tensor([2], device=device)]
+        self.assertEqual(tail_q_block_tensor_index.shape, (1, 1, 4, 10))
+
+    @supported_platform
     def test_getitem(self, device):
         offset = torch.zeros(8, device=device)
 
