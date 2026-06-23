@@ -307,6 +307,72 @@ mha_fwd_aot(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x 
           softmax_fa_t};// debug_attn_mask
 }
 
+#if !AOTRITON_COMPACT_VARLEN_LSE
+namespace {
+
+// pytorch/pytorch#187872: AOTriton builds without compact-varlen-LSE support
+// make the varlen attention kernel write the log-sum-exp in a per-sequence
+// padded layout (batch_size, num_heads, max_seqlen_q). The CUDA backend and the
+// ROCm CK backend instead return the packed (num_heads, total_q) layout aligned
+// with the packed out (total_q, num_heads, head_size). These helpers convert
+// between the two with a vectorized on-device gather/scatter (no host
+// synchronization), so the ROCm varlen path exposes the same packed contract on
+// every AOTriton version.
+at::Tensor compact_varlen_lse(
+    const at::Tensor& lse_padded, // (batch_size, num_heads, max_seqlen_q)
+    const at::Tensor& cu_seqlens_q, // (batch_size + 1)
+    int64_t total_q) {
+  const int64_t batch_size = lse_padded.size(0);
+  const int64_t num_heads = lse_padded.size(1);
+  const int64_t max_seqlen_q = lse_padded.size(2);
+  // Dtype-cast only; stays on device and avoids the host sync of a .to(kCPU).
+  auto cu = cu_seqlens_q.to(at::kLong);
+  auto opts_idx =
+      at::TensorOptions().dtype(at::kLong).device(lse_padded.device());
+  auto seqlens = cu.slice(0, 1, batch_size + 1) - cu.slice(0, 0, batch_size);
+  // Passing output_size = total_q lets repeat_interleave skip the
+  // data-dependent sum (.item()) that would otherwise force a device-to-host
+  // synchronization.
+  auto batch_id = at::repeat_interleave(
+      at::arange(batch_size, opts_idx), seqlens, 0, total_q);
+  auto pos = at::arange(total_q, opts_idx) - cu.index_select(0, batch_id);
+  auto idx = batch_id * max_seqlen_q + pos;
+  auto src = lse_padded.permute({1, 0, 2}).reshape(
+      {num_heads, batch_size * max_seqlen_q});
+  return src.index_select(1, idx).contiguous(); // (num_heads, total_q)
+}
+
+// Inverse of compact_varlen_lse: re-pad a packed (num_heads, total_q) LSE back
+// to (batch_size, num_heads, max_seqlen_q) for the AOTriton varlen backward
+// kernel, using the same vectorized on-device scatter (no host
+// synchronization). The pad region is zero-initialized so the unused tail is
+// deterministic.
+at::Tensor uncompact_varlen_lse(
+    const at::Tensor& lse_packed, // (num_heads, total_q)
+    const at::Tensor& cu_seqlens_q, // (batch_size + 1)
+    int64_t batch_size,
+    int64_t num_heads,
+    int64_t max_seqlen_q) {
+  const int64_t total_q = lse_packed.size(1);
+  auto cu = cu_seqlens_q.to(at::kLong);
+  auto opts_idx =
+      at::TensorOptions().dtype(at::kLong).device(lse_packed.device());
+  auto seqlens = cu.slice(0, 1, batch_size + 1) - cu.slice(0, 0, batch_size);
+  auto batch_id = at::repeat_interleave(
+      at::arange(batch_size, opts_idx), seqlens, 0, total_q);
+  auto pos = at::arange(total_q, opts_idx) - cu.index_select(0, batch_id);
+  auto idx = batch_id * max_seqlen_q + pos;
+  auto flat =
+      at::zeros({num_heads, batch_size * max_seqlen_q}, lse_packed.options());
+  flat.index_copy_(1, idx, lse_packed);
+  return flat.view({num_heads, batch_size, max_seqlen_q})
+      .permute({1, 0, 2})
+      .contiguous(); // (batch_size, num_heads, max_seqlen_q)
+}
+
+} // namespace
+#endif // !AOTRITON_COMPACT_VARLEN_LSE
+
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor>
 mha_varlen_fwd_aot(const at::Tensor &q,  // total_q x num_heads x head_size, total_q := \sum_{i=0}^{b} s_i
                const at::Tensor &k,  // total_k x num_heads_k x head_size, total_k := \sum_{i=0}^{b} s_i
@@ -511,6 +577,14 @@ mha_varlen_fwd_aot(const at::Tensor &q,  // total_q x num_heads x head_size, tot
     out.zero_();
     softmax_lse.fill_(std::numeric_limits<float>::infinity());
   }
+
+#if !AOTRITON_COMPACT_VARLEN_LSE
+  // Normalize the per-sequence padded LSE to the packed (num_heads, total_q)
+  // layout that the CUDA and CK backends return, aligned with out
+  // (total_q, num_heads, head_size). The repack is a vectorized on-device
+  // gather with no host synchronization. See pytorch/pytorch#187872.
+  softmax_lse = compact_varlen_lse(softmax_lse, cu_seqlens_q, total_q);
+#endif
 
   return {out, q, k, v, softmax_lse, seed_t, offset_t, softmax_fa_t};
 }
@@ -770,7 +844,14 @@ mha_varlen_bwd_aot(const at::Tensor &dout,  // total_q x num_heads, x head_size
 #if AOTRITON_COMPACT_VARLEN_LSE
   at::Tensor softmax_lse_cont = softmax_lse.view({num_heads, total_q}).contiguous();
 #else
-  at::Tensor softmax_lse_cont = softmax_lse.view({batch_size * num_heads, max_seqlen_q}).contiguous();
+  // pytorch/pytorch#187872: the forward returns the packed (num_heads, total_q)
+  // LSE; re-pad it to (batch_size, num_heads, max_seqlen_q) for the AOTriton
+  // varlen backward kernel with a vectorized on-device scatter (no host sync).
+  at::Tensor softmax_lse_cont =
+      uncompact_varlen_lse(
+          softmax_lse, cu_seqlens_q, batch_size, num_heads, max_seqlen_q)
+          .view({batch_size * num_heads, max_seqlen_q})
+          .contiguous();
 #endif
 
   at::Tensor q_padded, k_padded, v_padded;

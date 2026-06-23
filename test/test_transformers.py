@@ -4879,6 +4879,44 @@ class TestSDPACudaOnly(NNTestCase):
             }
         )
 
+    @unittest.skipIf(not TEST_WITH_ROCM, "ROCm-only: AOTriton varlen flash-attention LSE layout (issue #187872)")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention was not built for this system")
+    def test_flash_attention_varlen_lse_packed_layout(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/187872.
+        # On ROCm the varlen flash-attention path (AOTriton) must return the
+        # packed (num_heads, total_q) log-sum-exp that the CUDA and CK backends
+        # return, aligned with the packed (total_q, num_heads, head_dim) output --
+        # not the per-sequence padded (batch, num_heads, max_seqlen) layout. A 3-D
+        # LSE breaks callers that combine the output with the LSE (e.g.
+        # attention-sink rescaling) on ROCm.
+        dtype = torch.float16
+        num_heads, head_dim = 4, 64
+        seqlens = [128, 64, 192]
+        total_q = sum(seqlens)
+        max_seqlen = max(seqlens)
+        cu_seqlens = torch.tensor(
+            [0, *itertools.accumulate(seqlens)], device=device, dtype=torch.int32
+        )
+        q = torch.randn(total_q, num_heads, head_dim, device=device, dtype=dtype)
+        k = torch.randn(total_q, num_heads, head_dim, device=device, dtype=dtype)
+        v = torch.randn(total_q, num_heads, head_dim, device=device, dtype=dtype)
+        # Pass only the required positional arguments so the call stays portable
+        # across releases (optional kwargs such as scale/window_size/seqused_k
+        # default to None).
+        output, softmax_lse = torch.ops.aten._flash_attention_forward(
+            q, k, v, cu_seqlens, cu_seqlens, max_seqlen, max_seqlen, 0.0, False, False
+        )[:2]
+        self.assertEqual(output.shape, (total_q, num_heads, head_dim))
+        # The packed contract: 2-D (num_heads, total_q), not 3-D per-seq padded.
+        self.assertEqual(
+            softmax_lse.dim(),
+            2,
+            f"varlen flash-attention LSE must be packed 2-D (num_heads, total_q); "
+            f"got {softmax_lse.dim()}-D {tuple(softmax_lse.shape)} "
+            f"(per-sequence padded layout, issue #187872)",
+        )
+        self.assertEqual(softmax_lse.shape, (num_heads, total_q))
+
 class TestSDPAXpuOnly(NNTestCase):
     """ Used to test XPU only functionality of scaled_dot_product_attention
     Mostly migrate from TestSDPACudaOnly in test/test_transformers.py
