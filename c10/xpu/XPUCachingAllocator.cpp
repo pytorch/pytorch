@@ -502,8 +502,22 @@ class DeviceCachingAllocator {
   RecordContext record_context_ = RecordContext::NEVER;
   RingBuffer<TraceEntry> alloc_buffer;
   std::unordered_set<TraceEntry::Action> skip_actions_list;
+
+  // Active pool-diversion scopes. Each entry routes allocations matching its
+  // filter into a private mempool. Populated by beginAllocateToPool /
+  // endAllocateToPool, including from XPUGraph capture and MemPool usage. A
+  // non-empty list does NOT imply an active capture; for that, see
+  // num_active_captures_ below. Usually empty, so get_pool can short-circuit.
   std::vector<std::pair<MempoolId_t, std::function<bool(sycl::queue*)>>>
-      captures_underway;
+      allocation_scopes_;
+
+  // Count of in-progress SYCL graph captures on this device. Bumped by
+  // XPUGraph's capture_begin / capture_end around begin_recording /
+  // end_recording. Distinct from allocation_scopes_, which tracks pool routing
+  // and can be populated without an active capture (e.g. MemPool usage).
+  // Plain int because all access is serialized through `mutex`.
+  int num_active_captures_ = 0;
+
   ska::flat_hash_map<MempoolId_t, std::unique_ptr<PrivatePool>, MempoolIdHash>
       graph_pools;
   // Pools no longer referenced by any graph.
@@ -679,8 +693,8 @@ class DeviceCachingAllocator {
   }
 
   BlockPool& get_pool(size_t size, sycl::queue* queue) {
-    if (C10_UNLIKELY(!captures_underway.empty())) {
-      for (auto& entry : captures_underway) {
+    if (C10_UNLIKELY(!allocation_scopes_.empty())) {
+      for (auto& entry : allocation_scopes_) {
         // lookup for mempool id matching current capture graph
         if (entry.second(queue)) {
           auto it1 = graph_pools.find(entry.first);
@@ -1141,7 +1155,7 @@ class DeviceCachingAllocator {
       MempoolId_t mempool_id) {
     bool streams_synced = false;
     if (mempool_id.first == 0 && mempool_id.second == 0 &&
-        captures_underway.empty()) {
+        !is_capture_context()) {
       synchronize_and_free_events(context);
       // See Note [Safe to Free Blocks on BlockPool]
       c10::xpu::syncStreamsOnDevice(device_index);
@@ -1302,8 +1316,27 @@ class DeviceCachingAllocator {
     }
   }
 
+  // Returns true iff the calling thread's current stream is actively recording
+  // into a SYCL command-graph. Allocator paths that gate on capture safety
+  // (event insertion, deferred-free, OOM-time release_cached_blocks) use this
+  // instead of a bare allocation_scopes_.empty() check, so that a private
+  // mempool diversion (e.g. via MemPool) is not mistaken for a real capture.
+  //
+  // Two layers, from cheapest to most expensive:
+  //   1. Device-wide counter: num_active_captures_ == 0 means no capture is in
+  //      progress anywhere on this device, so the answer is trivially false.
+  //      This is the common case and the hot path.
+  //   2. Per-stream query: ext_oneapi_get_state on the current stream, only
+  //      paid when some capture is active on this device. Distinguishes a
+  //      non-capturing stream on a device that has another stream capturing
+  //      from the capturing stream itself (which must follow capture rules).
+  //
+  // The counter read is safe because all callers hold `mutex`.
   bool is_capture_context() const {
-    return !captures_underway.empty();
+    if (C10_LIKELY(num_active_captures_ == 0)) {
+      return false;
+    }
+    return xpu::getCurrentXPUStream(device_index).is_capturing();
   }
 
   // Removes stream uses that were recorded onto `block` during capture.
@@ -1407,7 +1440,7 @@ class DeviceCachingAllocator {
     auto context = maybeGatherContext(RecordContext::STATE);
 
     std::scoped_lock<std::recursive_mutex> lock(mutex);
-    if (C10_LIKELY(captures_underway.empty())) {
+    if (C10_LIKELY(!is_capture_context())) {
       process_events(context);
     }
     size_t size = round_size(orig_size);
@@ -1804,12 +1837,12 @@ class DeviceCachingAllocator {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     create_or_incref_pool(mempool_id);
     auto not_found = std::all_of(
-        captures_underway.begin(),
-        captures_underway.end(),
+        allocation_scopes_.begin(),
+        allocation_scopes_.end(),
         [&](const auto& entry) { return entry.first != mempool_id; });
     TORCH_CHECK(
         not_found, "beginAllocateToPool: already recording to mempool_id");
-    captures_underway.emplace_back(mempool_id, std::move(filter));
+    allocation_scopes_.emplace_back(mempool_id, std::move(filter));
   }
 
   // Called by XPUGraph::capture_end
@@ -1847,13 +1880,33 @@ class DeviceCachingAllocator {
     }
 
     auto it = std::find_if(
-        captures_underway.begin(),
-        captures_underway.end(),
+        allocation_scopes_.begin(),
+        allocation_scopes_.end(),
         [&](const auto& entry) { return entry.first == mempool_id; });
     TORCH_INTERNAL_ASSERT(
-        it != captures_underway.end(),
+        it != allocation_scopes_.end(),
         "endAllocatePool: not currently recording to mempool_id");
-    captures_underway.erase(it);
+    allocation_scopes_.erase(it);
+  }
+
+  // Called by XPUGraph::capture_begin after begin_recording succeeds. Tracks
+  // real captures separately from the pool-routing list allocation_scopes_, so
+  // that allocator paths gated on "is a capture in progress" can distinguish a
+  // real capture (where event queries are illegal) from a private mempool
+  // diversion (where they are fine). Assumes begin/end for one capture are not
+  // racing each other.
+  void markCaptureBegin() {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    num_active_captures_++;
+  }
+
+  // Called by XPUGraph::capture_end after end_recording.
+  void markCaptureEnd() {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    TORCH_INTERNAL_ASSERT(
+        num_active_captures_ > 0,
+        "markCaptureEnd called with no captures in progress");
+    num_active_captures_--;
   }
 
   // Called by XPUGraph::reset and MemPool::~MemPool()
@@ -2129,6 +2182,16 @@ class NativeCachingAllocator : public XPUAllocator {
     device_allocators[device]->endAllocateToPool(mempool_id);
   }
 
+  void markCaptureBegin(c10::DeviceIndex device) {
+    assertValidDevice(device);
+    device_allocators[device]->markCaptureBegin();
+  }
+
+  void markCaptureEnd(c10::DeviceIndex device) {
+    assertValidDevice(device);
+    device_allocators[device]->markCaptureEnd();
+  }
+
   void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) {
     assertValidDevice(device);
     device_allocators[device]->releasePool(std::move(mempool_id));
@@ -2210,6 +2273,14 @@ void beginAllocateToPool(
 
 void endAllocateToPool(c10::DeviceIndex device, MempoolId_t mempool_id) {
   return native_allocator.endAllocateToPool(device, mempool_id);
+}
+
+void markCaptureBegin(c10::DeviceIndex device) {
+  return native_allocator.markCaptureBegin(device);
+}
+
+void markCaptureEnd(c10::DeviceIndex device) {
+  return native_allocator.markCaptureEnd(device);
 }
 
 void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) {
