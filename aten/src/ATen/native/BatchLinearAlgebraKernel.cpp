@@ -980,7 +980,9 @@ void ldl_solve_kernel(
               [out] the LU decomposition
   * `pivots` - [out] the pivot indices
   * `infos` - [out] error codes, positive values indicate singular matrices
-  * `compute_pivots` - should always be true (can be false only for CUDA)
+  * `compute_pivots` - when true, factor with partial pivoting via LAPACK GETRF.
+                       When false, factor without pivoting (LAPACK has no such
+                       routine, so it is done in place here).
 
   For further details, please see the LAPACK documentation for GETRF.
 */
@@ -992,34 +994,74 @@ void apply_lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& in
       "Calling torch.linalg.lu_factor on a CPU tensor requires compiling ",
       "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
 #else
-  TORCH_CHECK(compute_pivots, "linalg.lu_factor: LU without pivoting is not implemented on the CPU");
-
   auto input_data = input.data_ptr<scalar_t>();
-  auto pivots_data = pivots.data_ptr<int>();
   auto infos_data = infos.data_ptr<int>();
   auto input_matrix_stride = matrixStride(input);
-  auto pivots_stride = pivots.size(-1);
   auto batch_size = batchCount(input);
   auto m = input.size(-2);
   auto n = input.size(-1);
   auto leading_dimension = std::max<int64_t>(1, m);
-
-  const auto loop = [&](int64_t start, int64_t end) {
-    for (const auto i : c10::irange(start, end)) {
-      scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
-      int* pivots_working_ptr = &pivots_data[i * pivots_stride];
-      int* infos_working_ptr = &infos_data[i];
-      lapackLu<scalar_t>(
-          m,
-          n,
-          input_working_ptr,
-          leading_dimension,
-          pivots_working_ptr,
-          infos_working_ptr);
-    }
-  };
   // avoid overflow
   auto matrix_rank = std::min(m, n);
+
+  const auto loop = [&](int64_t start, int64_t end) {
+    if (compute_pivots) {
+      auto pivots_data = pivots.data_ptr<int>();
+      auto pivots_stride = pivots.size(-1);
+      for (const auto i : c10::irange(start, end)) {
+        scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
+        int* pivots_working_ptr = &pivots_data[i * pivots_stride];
+        int* infos_working_ptr = &infos_data[i];
+        lapackLu<scalar_t>(
+            m,
+            n,
+            input_working_ptr,
+            leading_dimension,
+            pivots_working_ptr,
+            infos_working_ptr);
+      }
+    } else {
+      // LAPACK GETRF always pivots, so factor without pivoting in place using a
+      // right-looking LU. This matches the unpivoted path supported on CUDA.
+      // pivots is the identity permutation; some callers (e.g. linalg.lu) pass
+      // an empty pivots tensor when not pivoting, so only fill it when sized.
+      const bool fill_pivots = pivots.numel() == batch_size * matrix_rank;
+      int* pivots_data = fill_pivots ? pivots.data_ptr<int>() : nullptr;
+      auto pivots_stride = fill_pivots ? pivots.size(-1) : 0;
+      for (const auto i : c10::irange(start, end)) {
+        scalar_t* A = &input_data[i * input_matrix_stride];
+        int& info = infos_data[i];
+        info = 0;
+        for (const auto j : c10::irange(matrix_rank)) {
+          scalar_t diag = A[j + j * leading_dimension];
+          // A zero pivot means the matrix is singular for this unpivoted
+          // factorization. Skip scaling (as CUDA does) to avoid producing NaNs.
+          if (diag == scalar_t(0)) {
+            if (info == 0) {
+              info = static_cast<int>(j + 1);
+            }
+            continue;
+          }
+          for (const auto row : c10::irange(j + 1, m)) {
+            A[row + j * leading_dimension] /= diag;
+          }
+          for (const auto col : c10::irange(j + 1, n)) {
+            scalar_t u = A[j + col * leading_dimension];
+            for (const auto row : c10::irange(j + 1, m)) {
+              A[row + col * leading_dimension] -=
+                  A[row + j * leading_dimension] * u;
+            }
+          }
+        }
+        if (fill_pivots) {
+          int* pivots_working_ptr = &pivots_data[i * pivots_stride];
+          for (const auto j : c10::irange(matrix_rank)) {
+            pivots_working_ptr[j] = static_cast<int>(j + 1);
+          }
+        }
+      }
+    }
+  };
   // A heuristic tested on a 32 core/socket ICX system
   // https://github.com/pytorch/pytorch/pull/93037#discussion_r1090112948
   int64_t chunk_size_per_thread = static_cast<int64_t>(

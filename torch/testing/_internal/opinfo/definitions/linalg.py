@@ -41,7 +41,6 @@ from torch.testing._internal.common_utils import (
     slowTest,
     TEST_WITH_ROCM,
     TEST_WITH_TORCHINDUCTOR,
-    TEST_XPU,
 )
 from torch.testing._internal.opinfo.core import (
     clone_sample,
@@ -1926,13 +1925,6 @@ op_db: list[OpInfo] = [
         sample_inputs_func=sample_inputs_linalg_lu,
         decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
         skips=(
-            # linalg.lu_factor: LU without pivoting is not implemented on the CPU
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_compare_cpu",
-                active_if=(not TEST_XPU),
-            ),
             # Exception: Resizing an out= argument with no elements threw a resize warning!
             DecorateInfo(
                 unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
@@ -1961,13 +1953,6 @@ op_db: list[OpInfo] = [
         sample_inputs_func=sample_inputs_linalg_lu,
         decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
         skips=(
-            # linalg.lu_factor: LU without pivoting is not implemented on the CPU
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_compare_cpu",
-                active_if=(not TEST_XPU),
-            ),
             # Exception: Resizing an out= argument with no elements threw a resize warning!
             DecorateInfo(
                 unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
@@ -1997,13 +1982,6 @@ op_db: list[OpInfo] = [
         sample_inputs_func=sample_inputs_linalg_lu,
         decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
         skips=(
-            # linalg.lu_factor: LU without pivoting is not implemented on the CPU
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_compare_cpu",
-                active_if=(not TEST_XPU),
-            ),
             # AssertionError: Resizing an out= argument with no elements threw a resize warning!
             DecorateInfo(
                 unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"

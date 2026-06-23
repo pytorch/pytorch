@@ -5606,7 +5606,7 @@ class TestLinalg(TestCase):
 
         sizes = ((3, 3), (5, 5), (4, 2), (3, 4), (0, 0), (0, 1), (1, 0))
         batches = ((0,), (), (1,), (2,), (3,), (1, 0), (3, 5))
-        pivots = (True, False) if self.device_type != "cpu" else (True,)
+        pivots = (True, False)
         fns = (partial(torch.lu, get_infos=True), torch.linalg.lu_factor, torch.linalg.lu_factor_ex)
         for ms, batch, pivot, singular, fn in itertools.product(sizes, batches, pivots, (True, False), fns):
             shape = batch + ms
@@ -5628,12 +5628,31 @@ class TestLinalg(TestCase):
         A = torch.ones(5, 3, 3, device=device)
         self.assertTrue((torch.linalg.lu_factor_ex(A, pivot=True).info >= 0).all())
 
-        if self.device_type == 'cpu':
-            # Error checking, no pivoting variant on CPU
-            fns = [torch.lu, torch.linalg.lu_factor, torch.linalg.lu_factor_ex, torch.linalg.lu]
-            for f in fns:
-                with self.assertRaisesRegex(RuntimeError, 'LU without pivoting is not implemented on the CPU'):
-                    f(torch.empty(1, 2, 2), pivot=False)
+    @onlyCPU
+    @skipCPUIfNoLapack
+    @dtypes(*floating_and_complex_types())
+    def test_lu_factor_no_pivot(self, device, dtype):
+        # Regression test for https://github.com/pytorch/pytorch/issues/134459:
+        # LU without pivoting used to raise "LU without pivoting is not
+        # implemented on the CPU" while it worked on CUDA. It now factors in
+        # place on the CPU as well, matching the CUDA behavior.
+        make_arg = partial(make_tensor, dtype=dtype, device=device)
+
+        # The matrix from the issue report.
+        A = torch.tensor([[1, 1, 1], [1, 2, 2], [1, 2, 3]], dtype=dtype, device=device)
+        P, L, U = torch.linalg.lu(A, pivot=False)
+        self.assertEqual(P.numel(), 0)  # no permutation when pivot=False
+        self.assertEqual(L @ U, A)
+
+        LU, pivots = torch.linalg.lu_factor(A, pivot=False)
+        # Pivots encode the identity permutation (1-based, like LAPACK getrf).
+        self.assertEqual(pivots, torch.arange(1, 1 + A.size(-1), device=device, dtype=torch.int32))
+
+        # Square (batched), tall and wide inputs all round-trip to L @ U.
+        for shape in ((5, 4, 4), (6, 3), (3, 6)):
+            M = make_arg(shape)
+            _, L, U = torch.linalg.lu(M, pivot=False)
+            self.assertEqual(L @ U, M)
 
     @precisionOverride({torch.float32: 1e-2, torch.complex64: 1e-2})
     @skipCUDAIfNoCusolver
