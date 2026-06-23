@@ -86,18 +86,9 @@ void THCPGraph_init(PyObject* module) {
           "pool",
           torch::wrap_pybind_function_no_gil(&at::cuda::CUDAGraph::pool))
       .def(
-          "debug_dump",
-          torch::wrap_pybind_function_no_gil(
-              &::at::cuda::CUDAGraph::debug_dump))
-      .def(
           "enable_debug_mode",
           torch::wrap_pybind_function_no_gil(
               &::at::cuda::CUDAGraph::enable_debug_mode))
-      .def(
-          "debug_dump",
-          torch::wrap_pybind_function_no_gil(
-              &::at::cuda::CUDAGraph::debug_dump),
-          py::arg("debug_path"))
       .def(
           "raw_cuda_graph",
           [](::at::cuda::CUDAGraph& self) {

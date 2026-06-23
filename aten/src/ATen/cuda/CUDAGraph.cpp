@@ -14,8 +14,6 @@
 
 namespace at::cuda {
 
-static bool _cuda_graphs_debug = false;
-
 // To support stream capture across multiple threads, we use a global
 // hashmap mapping cuda stream capture IDs to CUDAGraph objects. This
 // was originally a thread_local std::stack<CUDAGraph*>, but that was
@@ -168,8 +166,10 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode 
 // capture_end is split so callers can run work on the captured cudaGraph_t
 // (e.g. read its id, dump it, transform it) in the window between the end of
 // capture and finalization, when graph_ is live for both keep_graph modes.
-// capture_end_post finalizes (instantiate + destroy for keep_graph=false);
-// capture_end runs the two back to back for callers that don't need the window.
+// capture_end_post finalizes by destroying the template for keep_graph=false;
+// instantiation is driven separately (by capture_end for C++ callers, or by the
+// Python wrapper) so it has a single entry point. capture_end runs the whole
+// sequence for callers that don't need the window.
 void CUDAGraph::capture_end_pre() {
   auto stream = at::cuda::getCurrentCUDAStream();
 
@@ -217,17 +217,20 @@ void CUDAGraph::capture_end_pre() {
 }
 
 void CUDAGraph::capture_end_post() {
-  if (!keep_graph_) {
-    instantiate();
-    if (!_cuda_graphs_debug) {
-      AT_CUDA_CHECK(cudaGraphDestroy(graph_));
-    }
+  // Destroy-only: when keep_graph=false the template is not retained. The graph
+  // must already be instantiated (capture_end and the Python wrapper instantiate
+  // before calling this).
+  if (!keep_graph_ && has_graph_) {
+    AT_CUDA_CHECK(cudaGraphDestroy(graph_));
     has_graph_ = false;
   }
 }
 
 void CUDAGraph::capture_end() {
   capture_end_pre();
+  if (!keep_graph_) {
+    instantiate();
+  }
   capture_end_post();
 }
 
@@ -281,23 +284,11 @@ void CUDAGraph::replay() {
 }
 
 void CUDAGraph::enable_debug_mode() {
-  _cuda_graphs_debug = true;
-}
-
-void CUDAGraph::debug_dump(const std::string& debug_path) {
-  if (_cuda_graphs_debug || keep_graph_) {
-    TORCH_WARN("DEBUG: calling debug_dump()");
-    if (has_graph_) {
-      TORCH_WARN("DEBUG: calling cudaGraphDebugDotPrint() with ", debug_path);
-      C10_CUDA_CHECK_WARN(cudaGraphDebugDotPrint(graph_, debug_path.c_str(), cudaGraphDebugDotFlagsVerbose)); // most verbose output
-      if (!keep_graph_) {
-        AT_CUDA_CHECK(cudaGraphDestroy(graph_));
-        has_graph_ = false;
-      }
-    }
-  } else {
-    TORCH_WARN("CUDA Graphs debug not enabled, set with [graph].enable_debug_mode()");
-  }
+  // Debug mode just retains the template after capture so it can be inspected
+  // (e.g. dumped); that is exactly what keep_graph does. Unify on keep_graph_
+  // rather than a second flag. dot dumping itself lives in Python now
+  // (torch.cuda.CUDAGraph.debug_dump via cuda.bindings).
+  keep_graph_ = true;
 }
 
 cudaGraph_t CUDAGraph::raw_cuda_graph() {

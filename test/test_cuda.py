@@ -3076,29 +3076,82 @@ torch.cuda.synchronize()
         del g
 
     @unittest.skipIf(
-        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+        not TEST_CUDA_GRAPH or not TEST_CUDA_PYTHON_BINDINGS,
+        "CUDA >= 11.0 or ROCM >= 5.3 required for graphs; "
+        "cuda-bindings required for debug_dump",
     )
     def test_graph_debugdump(self):
         torch.cuda.empty_cache()
-        x = torch.randn(10240000, device="cuda")
+        x = torch.randn(1024, device="cuda")
         y = torch.rand_like(x)
-        g = torch.cuda.CUDAGraph()
-        g.enable_debug_mode()
-        s0 = torch.cuda.Stream()
-        s1 = torch.cuda.Stream()
-        s0.wait_stream(torch.cuda.current_stream())
-        with torch.cuda.stream(s0):
-            g.capture_begin()
-            z = x + y
-            with torch.cuda.stream(s1):
-                s1.wait_stream(s0)
-                z + y
-            s0.wait_stream(s1)
-            g.capture_end()
-        s0.synchronize()
-        torch.cuda.synchronize()
+
+        def capture(g):
+            s0 = torch.cuda.Stream()
+            s1 = torch.cuda.Stream()
+            s0.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(s0):
+                g.capture_begin()
+                z = x + y
+                with torch.cuda.stream(s1):
+                    s1.wait_stream(s0)
+                    z + y
+                s0.wait_stream(s1)
+                g.capture_end()
+            s0.synchronize()
+            torch.cuda.synchronize()
+
         with tempfile.TemporaryDirectory() as tempdir:
-            g.debug_dump(os.path.join(tempdir, "out_multi_stream.dot"))
+            # enable_debug_mode retains the template (== keep_graph), so dump works.
+            g = torch.cuda.CUDAGraph()
+            g.enable_debug_mode()
+            capture(g)
+            p = os.path.join(tempdir, "debug_mode.dot")
+            g.debug_dump(p)
+            self.assertGreater(os.path.getsize(p), 0)
+
+            # keep_graph=True: template persists, dump works.
+            g2 = torch.cuda.CUDAGraph(keep_graph=True)
+            capture(g2)
+            p2 = os.path.join(tempdir, "keep_graph.dot")
+            g2.debug_dump(p2)
+            self.assertGreater(os.path.getsize(p2), 0)
+
+            # keep_graph=False: the template is destroyed at finalize, so a plain
+            # debug_dump after capture raises -- but export_dot as a capture-end
+            # hook runs while the template is still live.
+            g3 = torch.cuda.CUDAGraph()
+            p3 = os.path.join(tempdir, "hook.dot")
+            g3.register_capture_end_hook(torch.cuda.graphs.export_dot(p3))
+            capture(g3)
+            self.assertGreater(os.path.getsize(p3), 0)
+            with self.assertRaisesRegex(
+                RuntimeError, r"No (cuda|hip)Graph_t is available"
+            ):
+                g3.debug_dump(os.path.join(tempdir, "nope.dot"))
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_graph_capture_and_instantiate_hooks(self):
+        x = torch.randn(8, device="cuda")
+
+        # capture-end hooks fire in registration order; removable.
+        order = []
+        g = torch.cuda.CUDAGraph(keep_graph=True)
+        g.register_capture_end_hook(lambda _g: order.append("a"))
+        h = g.register_capture_end_hook(lambda _g: order.append("b"))
+        h.remove()
+        g.register_capture_end_hook(lambda _g: order.append("c"))
+        with torch.cuda.graph(g):
+            x + 1
+        self.assertEqual(order, ["a", "c"])
+
+        # post-instantiate hooks fire on each instantiate, including re-instantiate.
+        instantiated = []
+        g.register_post_instantiate_hook(lambda _g: instantiated.append(1))
+        g.instantiate()
+        g.instantiate()
+        self.assertEqual(len(instantiated), 2)
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH,
