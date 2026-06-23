@@ -1668,6 +1668,8 @@ jobs:
             libtorch_config: "release"
             source_wheel_build_name: "manywheel-py3_10-cpu"
             build_name: "libtorch-cpu-shared-with-deps-release"
+            container_image: "manylinux2_28-builder"
+            container_image_tag_prefix: "cpu"
           - desired_cuda: "cu126"
             gpu_arch_type: "cuda"
             gpu_arch_version: "12.6"
@@ -1675,6 +1677,8 @@ jobs:
             libtorch_config: "release"
             source_wheel_build_name: "manywheel-py3_10-cuda12_6"
             build_name: "libtorch-cuda12_6-shared-with-deps-release"
+            container_image: "manylinux2_28-builder"
+            container_image_tag_prefix: "cuda12.6"
           - desired_cuda: "cu130"
             gpu_arch_type: "cuda"
             gpu_arch_version: "13.0"
@@ -1682,6 +1686,8 @@ jobs:
             libtorch_config: "release"
             source_wheel_build_name: "manywheel-py3_10-cuda13_0"
             build_name: "libtorch-cuda13_0-shared-with-deps-release"
+            container_image: "manylinux2_28-builder"
+            container_image_tag_prefix: "cuda13.0"
           - desired_cuda: "cu132"
             gpu_arch_type: "cuda"
             gpu_arch_version: "13.2"
@@ -1689,6 +1695,8 @@ jobs:
             libtorch_config: "release"
             source_wheel_build_name: "manywheel-py3_10-cuda13_2"
             build_name: "libtorch-cuda13_2-shared-with-deps-release"
+            container_image: "manylinux2_28-builder"
+            container_image_tag_prefix: "cuda13.2"
           - desired_cuda: "rocm7.1"
             gpu_arch_type: "rocm"
             gpu_arch_version: "7.1"
@@ -1696,6 +1704,8 @@ jobs:
             libtorch_config: "release"
             source_wheel_build_name: "manywheel-py3_10-rocm7_1"
             build_name: "libtorch-rocm7_1-shared-with-deps-release"
+            container_image: "manylinux2_28-builder"
+            container_image_tag_prefix: "rocm7.1"
           - desired_cuda: "rocm7.2"
             gpu_arch_type: "rocm"
             gpu_arch_version: "7.2"
@@ -1703,6 +1713,10 @@ jobs:
             libtorch_config: "release"
             source_wheel_build_name: "manywheel-py3_10-rocm7_2"
             build_name: "libtorch-rocm7_2-shared-with-deps-release"
+            container_image: "manylinux2_28-builder"
+            container_image_tag_prefix: "rocm7.2"
+    container:
+      image: pytorch/${{ matrix.container_image }}:${{ matrix.container_image_tag_prefix }}
     env:
       DESIRED_CUDA: ${{ matrix.desired_cuda }}
       LIBTORCH_VARIANT: ${{ matrix.libtorch_variant }}
@@ -1720,6 +1734,8 @@ jobs:
         with:
           name: ${{ matrix.source_wheel_build_name }}
           path: "${{ runner.temp }}/wheel_artifact/"
+      - name: Test libtorch extraction logic
+        run: python3 -m pytest .ci/libtorch/smoke_test_extract_libtorch.py -v
       - name: Extract libtorch from wheel
         run: |
           set -eux

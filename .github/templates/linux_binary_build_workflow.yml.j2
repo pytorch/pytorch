@@ -557,7 +557,13 @@ jobs:
             libtorch_config: "!{{ lt_config['libtorch_config'] }}"
             source_wheel_build_name: "!{{ lt_config['source_wheel_build_name'] }}"
             build_name: "!{{ lt_config['build_name'] }}"
+          {%- if 'container_image' in lt_config %}
+            container_image: "!{{ lt_config['container_image'] }}"
+            container_image_tag_prefix: "!{{ lt_config['container_image_tag_prefix'] }}"
+          {%- endif %}
         {%- endfor %}
+    container:
+      image: pytorch/${{ matrix.container_image }}:${{ matrix.container_image_tag_prefix }}
     env:
       DESIRED_CUDA: ${{ matrix.desired_cuda }}
       LIBTORCH_VARIANT: ${{ matrix.libtorch_variant }}
@@ -575,6 +581,8 @@ jobs:
         with:
           name: ${{ matrix.source_wheel_build_name }}
           path: "${{ runner.temp }}/wheel_artifact/"
+      - name: Test libtorch extraction logic
+        run: python3 -m pytest .ci/libtorch/smoke_test_extract_libtorch.py -v
       - name: Extract libtorch from wheel
         run: |
           set -eux
