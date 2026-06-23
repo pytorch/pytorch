@@ -709,28 +709,3 @@ _COLUMN_BUILDERS: dict[int, tuple[str, Any, bool]] = {
     int(ActivityKind.SYNCHRONIZATION): ("cuda_sync", _sync_columns, True),
     int(ActivityKind.CUDA_EVENT): ("cuda_event", _cuda_event_columns, False),
 }
-
-
-# The active ProfilerObserver that record_function annotations route to. The CUPTI push is
-# global (the monitor owns the stack); this just names which observer records the id->name
-# metadata. Set by the torch.profiler backend per session (a ProfilerObserver concern).
-_active_observer: ProfilerObserver | None = None
-
-
-def set_active_profiler_observer(observer: ProfilerObserver | None) -> None:
-    """Set (or clear, with None) the observer that push_user_annotation routes to."""
-    global _active_observer
-    _active_observer = observer
-
-
-def push_user_annotation(name: str) -> int | None:
-    """Push a record_function user annotation onto the active ProfilerObserver (if
-    any). No-op returning None when no observer is active."""
-    observer = _active_observer
-    return observer.push_annotation(name) if observer is not None else None
-
-
-def pop_user_annotation() -> int | None:
-    """Pop the most recent user annotation off the active ProfilerObserver."""
-    observer = _active_observer
-    return observer.pop_annotation() if observer is not None else None
