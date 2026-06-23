@@ -151,11 +151,18 @@ def _cuda_arch_with_compile_suffix(arch: str) -> str:
     return arch
 
 
-def _nvcc_arch_as_compile_option() -> str:
+def _nvcc_arch_as_compile_option() -> str | None:
     arch = cuda_env.get_cuda_arch()
     if arch is None:
         return arch
     return _cuda_arch_with_compile_suffix(arch)
+
+
+def _nvcc_arch_as_compile_option_or_raise() -> str:
+    arch = _nvcc_arch_as_compile_option()
+    if arch is None:
+        raise RuntimeError("Unable to determine CUDA architecture")
+    return arch
 
 
 def _normalize_cuda_arch(arch: str) -> str:
@@ -194,7 +201,7 @@ def _cuda_arch_is_compatible_with_current(arch: str, current_arch: str) -> bool:
 def _aoti_cuda_target_arch() -> str:
     if config.cuda.arch is not None:
         return _cuda_arch_with_compile_suffix(str(config.cuda.arch))
-    return _nvcc_arch_as_compile_option()
+    return _nvcc_arch_as_compile_option_or_raise()
 
 
 def _parse_gencode_options(flags: list[str]) -> OrderedSet[tuple[str, str]]:
@@ -231,7 +238,9 @@ def _cuda_multi_arch_gencode_options(current_arch: str | None = None) -> list[st
     ones, so explicit TORCH_CUDA_ARCH_LIST entries below the current target are
     intentionally ignored.
     """
-    current_arch = _normalize_cuda_arch(current_arch or _nvcc_arch_as_compile_option())
+    if not current_arch:
+        current_arch = _nvcc_arch_as_compile_option_or_raise()
+    current_arch = _normalize_cuda_arch(current_arch)
     options: OrderedSet[tuple[str, str]] = OrderedSet()
 
     arch_list = os.environ.get("TORCH_CUDA_ARCH_LIST")
@@ -275,7 +284,9 @@ def _cuda_multi_arch_gencode_options(current_arch: str | None = None) -> list[st
 def _cuda_gencode_options_have_non_current_sass(
     gencode_options: list[str], current_arch: str | None = None
 ) -> bool:
-    current_arch = _normalize_cuda_arch(current_arch or _nvcc_arch_as_compile_option())
+    if not current_arch:
+        current_arch = _nvcc_arch_as_compile_option_or_raise()
+    current_arch = _normalize_cuda_arch(current_arch)
     for kind, arch in _parse_gencode_options(
         [f"-gencode={option}" for option in gencode_options]
     ):
@@ -285,7 +296,7 @@ def _cuda_gencode_options_have_non_current_sass(
 
 
 def _nvcc_compiler_options() -> list[str]:
-    arch = _nvcc_arch_as_compile_option()
+    arch = _nvcc_arch_as_compile_option_or_raise()
     code = [f"sm_{arch}", f"compute_{arch}"]
     if config.cuda.enable_cuda_lto:
         code += [f"lto_{arch}"]
