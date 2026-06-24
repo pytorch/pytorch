@@ -977,7 +977,7 @@ test_perf_for_dashboard() {
         if [[ "${EXPORT_PROFILER_TRACE:-0}" == "1" && "$target" == "performance" ]]; then
           profiler_trace_flags=(--export-profiler-trace --profiler-trace-name "$TEST_REPORTS_DIR/profiler_traces/${backend}_aot_inductor_${suite}_${dtype}_${mode}_${device}")
         fi
-        $TASKSET python "benchmarks/dynamo/$suite.py" \
+        AOTI_RUNTIME_CHECK_INPUTS=1 $TASKSET python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --export-aot-inductor --disable-cudagraphs "$@" \
             "${profiler_trace_flags[@]}" \
             --output "$TEST_REPORTS_DIR/${backend}_aot_inductor_${suite}_${dtype}_${mode}_${device}_${target}.csv"
