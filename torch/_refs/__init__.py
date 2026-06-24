@@ -4732,7 +4732,19 @@ def diagonal_scatter(
 ) -> TensorLikeType:
     from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_or
 
-    out = utils.clone_preserve_strides(input)
+    # Mirror at::native::clone_preserve_strides: when the input has internal
+    # memory overlap (e.g. an expand from a scalar with stride 0), we cannot
+    # preserve its strides because copy_to() below would write through aliased
+    # storage and corrupt non-diagonal positions. This arises in the backward
+    # of diagonal_scatter(x, src).sum(), where grad_output is expanded. Fall
+    # back to a plain clone, which materializes a contiguous buffer.
+    if builtins.any(
+        guard_or_false(sz > 1) and guard_or_false(s == 0)
+        for sz, s in zip(input.size(), input.stride())
+    ):
+        out = input.clone()
+    else:
+        out = utils.clone_preserve_strides(input)
     diag = out.diagonal(offset, dim1, dim2)
     # Use sym_or + guard_or_false to handle unbacked symbolic dimensions.
     torch._check(
