@@ -109,6 +109,11 @@ def _trace(proxy_mode, func_overload, node_args):
     return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
 
 
+# The mutation HOP returns None; its only effect is the in-place write into args.
+# Like triton_kernel_wrapper_mutation it is not registered as side-effectful, so a
+# bare eliminate_dead_code() would drop it -- but the Inductor FX backend's output
+# graph (where these nodes live) is never DCE'd: the eliminate_dead_code passes run
+# on the pre-codegen aten graph, not on the converted GraphModule.
 @compiled_kernel_wrapper_mutation.py_impl(DispatchKey.CompositeExplicitAutograd)
 def _mutation_dense(
     *, kernel_idx: int, mutated_arg_indices: tuple[int, ...], args: tuple
