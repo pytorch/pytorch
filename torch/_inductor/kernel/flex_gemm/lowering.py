@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 import torch
+import torch.utils._pytree as pytree
 from torch._higher_order_ops.flex_gemm import (
     _SUPPORTED_FLEX_GEMM_OP_NAMES,
     flex_gemm_hop,
@@ -12,8 +13,71 @@ from torch._higher_order_ops.flex_gemm import (
 from torch.utils._ordered_set import OrderedSet
 
 from ... import ir
-from ...ir import TensorBox
+from ...ir import IRNode, TensorBox
 from ...lowering import process_subgraph_nodes, register_lowering
+
+
+def flex_gemm_tensor_placeholders(
+    graph_module: torch.fx.GraphModule,
+) -> list[torch.fx.Node]:
+    """Return placeholders QuACK can bind as tensor epilogue arguments.
+
+    FlexGEMM identifies the GEMM A/B inputs from the mm node, then treats the
+    remaining tensor-valued placeholders as closed-over epilogue tensors. Scalar
+    SymInt placeholders are shape values, not tensor arguments; the current QuACK
+    FlexGEMM entrypoint has no scalar epilogue-argument slots for them.
+    """
+    return [
+        node
+        for node in graph_module.graph.nodes
+        if node.op == "placeholder" and isinstance(node.meta.get("val"), torch.Tensor)
+    ]
+
+
+def flex_gemm_epilogue_arg_placeholders(
+    graph_module: torch.fx.GraphModule, gemm_fx_node: torch.fx.Node
+) -> tuple[torch.fx.Node, ...]:
+    """Find tensor inputs captured by epilogue loads, excluding GEMM operands."""
+    gemm_placeholders = OrderedSet(
+        arg
+        for arg in pytree.tree_leaves((gemm_fx_node.args, gemm_fx_node.kwargs))
+        if isinstance(arg, torch.fx.Node)
+    )
+    return tuple(
+        node
+        for node in flex_gemm_tensor_placeholders(graph_module)
+        if node not in gemm_placeholders
+    )
+
+
+def infer_flex_gemm_epilogue_arg_kinds(
+    gemm_op: torch._ops.OpOverload,
+    epilogue_args: list[IRNode],
+    output_size: list[Any],
+) -> tuple[str, ...]:
+    """Classify realized captured epilogue tensors for static wrapper kwargs."""
+    if not epilogue_args:
+        return ()
+    if gemm_op is not torch.ops.aten.mm.default:
+        raise NotImplementedError(
+            "FlexGEMM generated epilogues with captured tensor reads currently support only aten.mm"
+        )
+    m, n = output_size[-2], output_size[-1]
+    epilogue_arg_kinds = []
+    for epilogue_arg in epilogue_args:
+        epilogue_arg_size = epilogue_arg.get_size()
+        if epilogue_arg_size == output_size:
+            epilogue_arg_kinds.append("tile")
+        elif epilogue_arg_size == [1, n]:
+            epilogue_arg_kinds.append("row")
+        elif epilogue_arg_size == [m, 1]:
+            epilogue_arg_kinds.append("col")
+        else:
+            raise NotImplementedError(
+                "FlexGEMM captured tensor epilogue args currently must match "
+                "the GEMM output shape or broadcast as [1, N] / [M, 1]"
+            )
+    return tuple(epilogue_arg_kinds)
 
 
 @register_lowering(flex_gemm_hop, type_promotion_kind=None)
@@ -61,6 +125,17 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         if not isinstance(gemm_arg, TensorBox):
             raise NotImplementedError("FlexGEMM lowering expects tensor GEMM operands")
         gemm_args.append(gemm_arg)
+    epilogue_arg_placeholders = flex_gemm_epilogue_arg_placeholders(
+        subgraph.graph_module, gemm_fx_node
+    )
+    epilogue_args: list[TensorBox] = []
+    for arg in epilogue_arg_placeholders:
+        epilogue_arg = placeholder_args[arg]
+        if not isinstance(epilogue_arg, TensorBox):
+            raise NotImplementedError(
+                "FlexGEMM lowering expects tensor epilogue operands"
+            )
+        epilogue_args.append(epilogue_arg)
     alpha = gemm_fx_node.kwargs.get("alpha", gemm_kwargs.get("alpha", 1.0))
     beta = gemm_fx_node.kwargs.get("beta", gemm_kwargs.get("beta", 1.0))
     if not isinstance(alpha, (int, float)) or not isinstance(beta, (int, float)):
@@ -70,16 +145,26 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         raise NotImplementedError(
             "FlexGEMM generated epilogues require output metadata"
         )
+    output_size = ir.convert_shape_to_inductor(output_meta.shape)
     layout = ir.FixedLayout(
         gemm_args[mat1_index].get_device_or_error(),
         output_meta.dtype,
-        ir.convert_shape_to_inductor(output_meta.shape),
+        output_size,
         ir.convert_shape_to_inductor(output_meta.stride()),
     )
-    epilogue_name, epilogue_source = materialize_flex_gemm_epilogue(
-        subgraph.graph_module, gemm_op
+    gemm_input_nodes = [
+        ir.TemplateBuffer.realize_template_input(arg) for arg in gemm_args
+    ]
+    epilogue_input_nodes = [
+        ir.TemplateBuffer.realize_template_input(arg) for arg in epilogue_args
+    ]
+    input_nodes = [*gemm_input_nodes, *epilogue_input_nodes]
+    epilogue_arg_kinds = infer_flex_gemm_epilogue_arg_kinds(
+        gemm_op, epilogue_input_nodes, output_size
     )
-    input_nodes = [ir.TemplateBuffer.realize_template_input(arg) for arg in gemm_args]
+    epilogue_name, epilogue_source = materialize_flex_gemm_epilogue(
+        subgraph.graph_module, gemm_op, epilogue_arg_placeholders
+    )
     if tuned:
         from torch._inductor.template_heuristics.flex_gemm import (
             candidate_gemm_configs_for_device,
@@ -116,6 +201,10 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
                 beta=float(beta),
                 out_dtype=output_meta.dtype,
                 quack_config_key=quack_config_key,
+                epilogue_arg_indices=tuple(
+                    range(len(gemm_input_nodes), len(input_nodes))
+                ),
+                epilogue_arg_kinds=epilogue_arg_kinds,
             ),
         )
         if error is not None:

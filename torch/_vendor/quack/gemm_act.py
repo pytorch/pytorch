@@ -210,16 +210,19 @@ class GemmActMixin(ComposableEpiMixin):
                 col_arg_index = 0
                 tile_arg_index = 0
                 for arg_kind in params.tensor_epilogue_arg_kinds:
-                    tRS_rEpilogueAux = cute.make_rmem_tensor_like(tRS_rD, self.acc_dtype)
                     if const_expr(arg_kind == 1):
-                        tRS_rEpilogueAux.store(tRsTileAuxes[tile_arg_index].load().to(self.acc_dtype))
+                        epilogue_aux = tRsTileAuxes[tile_arg_index]
                         tile_arg_index += 1
                     elif const_expr(arg_kind == 2):
-                        tRS_rEpilogueAux.store(tDrRowVecs[row_arg_index].load().to(self.acc_dtype))
+                        epilogue_aux = tDrRowVecs[row_arg_index]
                         row_arg_index += 1
                     else:
-                        tRS_rEpilogueAux.store(tDrColVecs[col_arg_index].load().to(self.acc_dtype))
+                        epilogue_aux = tDrColVecs[col_arg_index]
                         col_arg_index += 1
+                    tRS_rEpilogueAux = cute.make_rmem_tensor_like(
+                        tRS_rD, epilogue_aux.element_type
+                    )
+                    tRS_rEpilogueAux.store(epilogue_aux.load())
                     epilogue_aux_values.append(tRS_rEpilogueAux.load())
                 epilogue_result = params.tensor_epilogue_fn(
                     tRS_rEpilogueIn.load(), *tuple(epilogue_aux_values)
