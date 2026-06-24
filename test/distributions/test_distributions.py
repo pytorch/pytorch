@@ -162,6 +162,18 @@ def is_all_nan(tensor):
     return (tensor != tensor).all()
 
 
+def _get_rng_state_accessors_for_default_device():
+    default_device = torch.device(torch.get_default_device())
+    if default_device.type == "cpu":
+        return torch.get_rng_state, torch.set_rng_state
+
+    device_module = torch.get_device_module(default_device.type)
+    return (
+        lambda: device_module.get_rng_state(default_device),
+        lambda state: device_module.set_rng_state(state, default_device),
+    )
+
+
 Example = namedtuple("Example", ["Dist", "params"])
 
 
@@ -2301,9 +2313,10 @@ class TestDistributions(DistributionsTestCase):
         self._gradcheck_log_prob(Uniform, (low, 1.0))
         self._gradcheck_log_prob(Uniform, (0.0, high))
 
-        state = torch.get_rng_state()
+        get_rng_state, set_rng_state = _get_rng_state_accessors_for_default_device()
+        state = get_rng_state()
         rand = low.new(low.size()).uniform_()
-        torch.set_rng_state(state)
+        set_rng_state(state)
         u = Uniform(low, high).rsample()
         u.backward(torch.ones_like(u))
         self.assertEqual(low.grad, 1 - rand)
@@ -2354,9 +2367,10 @@ class TestDistributions(DistributionsTestCase):
         self._gradcheck_log_prob(Cauchy, (loc, 1.0))
         self._gradcheck_log_prob(Cauchy, (0.0, scale))
 
-        state = torch.get_rng_state()
+        get_rng_state, set_rng_state = _get_rng_state_accessors_for_default_device()
+        state = get_rng_state()
         eps = loc.new(loc.size()).cauchy_()
-        torch.set_rng_state(state)
+        set_rng_state(state)
         c = Cauchy(loc, scale).rsample()
         c.backward(torch.ones_like(c))
         self.assertEqual(loc.grad, torch.ones_like(scale))
@@ -2383,9 +2397,10 @@ class TestDistributions(DistributionsTestCase):
         self._gradcheck_log_prob(HalfCauchy, (scale,))
         self._gradcheck_log_prob(HalfCauchy, (1.0,))
 
-        state = torch.get_rng_state()
+        get_rng_state, set_rng_state = _get_rng_state_accessors_for_default_device()
+        state = get_rng_state()
         eps = scale.new(scale.size()).cauchy_().abs_()
-        torch.set_rng_state(state)
+        set_rng_state(state)
         c = HalfCauchy(scale).rsample()
         c.backward(torch.ones_like(c))
         self.assertEqual(scale.grad, eps)
@@ -2770,9 +2785,10 @@ class TestDistributions(DistributionsTestCase):
         self._gradcheck_log_prob(Normal, (loc, 1.0))
         self._gradcheck_log_prob(Normal, (0.0, scale))
 
-        state = torch.get_rng_state()
+        get_rng_state, set_rng_state = _get_rng_state_accessors_for_default_device()
+        state = get_rng_state()
         eps = torch.normal(torch.zeros_like(loc), torch.ones_like(scale))
-        torch.set_rng_state(state)
+        set_rng_state(state)
         z = Normal(loc, scale).rsample()
         z.backward(torch.ones_like(z))
         self.assertEqual(loc.grad, torch.ones_like(loc))
@@ -3473,9 +3489,10 @@ class TestDistributions(DistributionsTestCase):
         self.assertEqual(Exponential(50.0).sample((1,)).size(), (1,))
 
         self._gradcheck_log_prob(Exponential, (rate,))
-        state = torch.get_rng_state()
+        get_rng_state, set_rng_state = _get_rng_state_accessors_for_default_device()
+        state = get_rng_state()
         eps = rate.new(rate.size()).exponential_()
-        torch.set_rng_state(state)
+        set_rng_state(state)
         z = Exponential(rate).rsample()
         z.backward(torch.ones_like(z))
         self.assertEqual(rate.grad, -eps / rate**2)
@@ -3541,9 +3558,10 @@ class TestDistributions(DistributionsTestCase):
         self._gradcheck_log_prob(Laplace, (loc, 1.0))
         self._gradcheck_log_prob(Laplace, (0.0, scale))
 
-        state = torch.get_rng_state()
+        get_rng_state, set_rng_state = _get_rng_state_accessors_for_default_device()
+        state = get_rng_state()
         eps = torch.ones_like(loc).uniform_(-0.5, 0.5)
-        torch.set_rng_state(state)
+        set_rng_state(state)
         z = Laplace(loc, scale).rsample()
         z.backward(torch.ones_like(z))
         self.assertEqual(loc.grad, torch.ones_like(loc))
