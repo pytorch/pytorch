@@ -35,6 +35,7 @@ class FlexGemmEpilogueConfig:
         quack_config_key: Lossless key for the selected QuACK GEMM config.
         epilogue_arg_indices: Template input indices for read-only epilogue captures.
         epilogue_arg_kinds: Broadcast kind for each captured epilogue tensor.
+        aux_out_index: Template input index for the single supported aux output.
     """
 
     epilogue_name: str
@@ -46,6 +47,7 @@ class FlexGemmEpilogueConfig:
     quack_config_key: tuple[Any, ...] | None = None
     epilogue_arg_indices: tuple[int, ...] = ()
     epilogue_arg_kinds: tuple[str, ...] = ()
+    aux_out_index: int | None = None
 
 
 class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
@@ -81,7 +83,7 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
         template_input_arg_names = [
             arg_name for arg_name, _ in self._template_input_args
         ]
-        # Template inputs include GEMM operands plus closed-over epilogue tensors for reads.
+        # Template inputs include GEMM operands plus closed-over epilogue tensors for reads and aux writes.
         call_args, call_kwargs = self._gemm_call_args(template_input_arg_names, config)
         call_kwargs += self._epilogue_kwargs(template_input_arg_names, config)
         call_kwargs += (
@@ -170,14 +172,17 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
     def _epilogue_kwargs(
         self, input_args: list[str], config: FlexGemmEpilogueConfig
     ) -> str:
-        """Render captured tensor kwargs for runtime dispatch."""
+        """Render captured tensor and aux-output kwargs for runtime dispatch."""
         epilogue_args = [input_args[index] for index in config.epilogue_arg_indices]
-        if not epilogue_args:
-            return ""
-        return (
-            f", epilogue_args=({', '.join(epilogue_args)},), "
-            f"epilogue_arg_kinds={config.epilogue_arg_kinds!r}"
-        )
+        kwargs: list[str] = []
+        if epilogue_args:
+            kwargs.append(
+                f", epilogue_args=({', '.join(epilogue_args)},), "
+                f"epilogue_arg_kinds={config.epilogue_arg_kinds!r}"
+            )
+        if config.aux_out_index is not None:
+            kwargs.append(f", aux_out={input_args[config.aux_out_index]}")
+        return "".join(kwargs)
 
 
 class FlexGemmEpilogueCaller(CuteDSLTemplateCaller):

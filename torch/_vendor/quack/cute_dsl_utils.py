@@ -54,6 +54,7 @@ _converter_module._convert_single_arg = _patched_convert_single_arg
 
 
 torch2cute_dtype_map = {
+    torch.bool: Uint8,
     torch.uint8: Uint8,
     torch.float16: Float16,
     torch.bfloat16: BFloat16,
