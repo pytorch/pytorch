@@ -6,6 +6,7 @@ import math
 import re
 import unittest
 from importlib import import_module
+from types import SimpleNamespace
 
 import torch
 import torch._dynamo.config
@@ -21,13 +22,21 @@ from functorch.compile import (
     nop,
 )
 from torch._dynamo.backends.common import aot_autograd
+from torch._dynamo.source import ConstantSource
 from torch._dynamo.testing import (
     AotEagerAndRecordGraphs,
     CompileCounterWithBackend,
     normalize_gm,
 )
+from torch._functorch.partitioners import has_recomputable_rng_ops, is_rng_op
 from torch._higher_order_ops.wrap import tag_activation_checkpoint
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_MEM_EFF_ATTENTION
+from torch.fx.experimental.sym_node import SymNode
+from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_CUDNN_ATTENTION,
+    PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+)
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import IS_WINDOWS, parametrize, skipIfHpu
 from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
@@ -2773,6 +2782,190 @@ def forward(self, arg0_1, arg1_1):
             "Activation checkpoint rematerialization in `forward-loss-backward` graph does not support RNG ops in recompute regions.",
         ):
             self._compile_and_capture(fwd_bwd_with_rng, True, (x,))
+
+    def test_ac_rematerialize_sdpa_rng_classification(self):
+        sdpa_ops = [
+            torch.ops.aten.scaled_dot_product_attention.default,
+            torch.ops.aten._scaled_dot_product_attention_math_for_mps.default,
+            torch.ops.aten._scaled_dot_product_cudnn_attention.default,
+            torch.ops.aten._scaled_dot_product_cudnn_attention_backward.default,
+            torch.ops.aten._scaled_dot_product_flash_attention.default,
+            torch.ops.aten._scaled_dot_product_flash_attention.quantized,
+            torch.ops.aten._scaled_dot_product_efficient_attention.default,
+            torch.ops.aten._scaled_dot_product_efficient_attention_backward.default,
+            torch.ops.aten._scaled_dot_product_fused_attention_overrideable.default,
+            torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default,
+            torch.ops.aten._flash_attention_forward.default,
+            torch.ops.aten._flash_attention_forward.quantized,
+            torch.ops.aten._flash_attention_forward_no_dropout_inplace.default,
+            torch.ops.aten._efficient_attention_forward.default,
+            torch.ops.aten._cudnn_attention_forward.default,
+        ]
+        shape_env = ShapeEnv()
+        zero_symbol = shape_env.create_symbol(
+            0.0,
+            source=ConstantSource("dropout_zero"),
+            dynamic_dim=DimDynamic.DUCK,
+            constraint_dim=None,
+        )
+        nonzero_symbol = shape_env.create_symbol(
+            0.1,
+            source=ConstantSource("dropout_nonzero"),
+            dynamic_dim=DimDynamic.DUCK,
+            constraint_dim=None,
+        )
+        symfloat_zero = torch.SymFloat(SymNode(zero_symbol, shape_env, float, hint=0.0))
+        symfloat_nonzero = torch.SymFloat(
+            SymNode(nonzero_symbol, shape_env, float, hint=0.1)
+        )
+        dropout_cases = [
+            (0, False),
+            (0.0, False),
+            (-0.0, False),
+            (1e-12, True),
+            (0.1, True),
+            (float("nan"), True),
+        ]
+
+        for op in sdpa_ops:
+            dropout_arg_idx = next(
+                idx
+                for idx, arg in enumerate(op._schema.arguments)
+                if arg.name == "dropout_p"
+            )
+            for dropout_p, expected in dropout_cases:
+                with self.subTest(op=op, dropout_p=dropout_p):
+                    graph = torch.fx.Graph()
+                    q = graph.placeholder("q")
+                    args = [q] * (dropout_arg_idx + 1)
+                    args[dropout_arg_idx] = dropout_p
+                    node = graph.call_function(op, tuple(args), {})
+                    node.meta["recompute"] = (
+                        torch.utils.checkpoint.CheckpointPolicy.PREFER_RECOMPUTE
+                    )
+                    graph.output(node)
+                    gm = torch.fx.GraphModule({}, graph)
+
+                    self.assertEqual(has_recomputable_rng_ops(gm), expected)
+
+            with self.subTest(op=op, dropout_p="dynamic"):
+                graph = torch.fx.Graph()
+                q = graph.placeholder("q")
+                dropout_p = graph.placeholder("dropout_p")
+                args = [q] * (dropout_arg_idx + 1)
+                args[dropout_arg_idx] = dropout_p
+                node = graph.call_function(op, tuple(args), {})
+                node.meta["recompute"] = (
+                    torch.utils.checkpoint.CheckpointPolicy.PREFER_RECOMPUTE
+                )
+                graph.output(node)
+                gm = torch.fx.GraphModule({}, graph)
+
+                self.assertTrue(has_recomputable_rng_ops(gm))
+
+            for dropout_p, expected in dropout_cases:
+                with self.subTest(op=op, kwarg_dropout_p=dropout_p):
+                    graph = torch.fx.Graph()
+                    q = graph.placeholder("q")
+                    node = graph.call_function(
+                        op, tuple([q] * dropout_arg_idx), {"dropout_p": dropout_p}
+                    )
+                    node.meta["recompute"] = (
+                        torch.utils.checkpoint.CheckpointPolicy.PREFER_RECOMPUTE
+                    )
+                    graph.output(node)
+                    gm = torch.fx.GraphModule({}, graph)
+
+                    self.assertEqual(has_recomputable_rng_ops(gm), expected)
+
+            for dropout_p, expected in [
+                (symfloat_zero, False),
+                (symfloat_nonzero, True),
+            ]:
+                with self.subTest(op=op, symfloat_dropout_p=dropout_p):
+                    args = [None] * (dropout_arg_idx + 1)
+                    args[dropout_arg_idx] = dropout_p
+                    node = SimpleNamespace(target=op, args=tuple(args), kwargs={})
+
+                    self.assertEqual(is_rng_op(node), expected)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    def test_ac_rematerialize_with_sdpa_dropout_zero(self):
+        from torch.nn.attention import sdpa_kernel, SDPBackend
+
+        cases = []
+        if PLATFORM_SUPPORTS_MEM_EFF_ATTENTION:
+            cases.append((SDPBackend.EFFICIENT_ATTENTION, torch.float32))
+        if PLATFORM_SUPPORTS_FLASH_ATTENTION:
+            cases.append((SDPBackend.FLASH_ATTENTION, torch.float16))
+        if PLATFORM_SUPPORTS_CUDNN_ATTENTION:
+            cases.append((SDPBackend.CUDNN_ATTENTION, torch.float16))
+        if not cases:
+            self.skipTest("No fused SDPA backends available")
+        sdpa_ops = {
+            torch.ops.aten.scaled_dot_product_attention.default,
+            torch.ops.aten._scaled_dot_product_cudnn_attention.default,
+            torch.ops.aten._scaled_dot_product_flash_attention.default,
+            torch.ops.aten._scaled_dot_product_efficient_attention.default,
+            torch.ops.aten._scaled_dot_product_fused_attention_overrideable.default,
+        }
+
+        def policy_fn(ctx, op, *args, **kwargs):
+            if op in sdpa_ops:
+                return torch.utils.checkpoint.CheckpointPolicy.PREFER_RECOMPUTE
+            return torch.utils.checkpoint.CheckpointPolicy.PREFER_SAVE
+
+        context_fn = functools.partial(
+            torch.utils.checkpoint.create_selective_checkpoint_contexts, policy_fn
+        )
+
+        for backend, dtype in cases:
+            with self.subTest(backend=backend, dtype=dtype):
+                torch._dynamo.reset()
+                q = torch.randn(
+                    2, 4, 128, 64, device="cuda", dtype=dtype, requires_grad=True
+                )
+                k = torch.randn(
+                    2, 4, 128, 64, device="cuda", dtype=dtype, requires_grad=True
+                )
+                v = torch.randn(
+                    2, 4, 128, 64, device="cuda", dtype=dtype, requires_grad=True
+                )
+
+                def fwd_bwd_with_sdpa(q, k, v):
+                    with sdpa_kernel(backend):
+                        z = torch.utils.checkpoint.checkpoint(
+                            lambda q, k, v: F.scaled_dot_product_attention(
+                                q, k, v, dropout_p=0.0
+                            ),
+                            q,
+                            k,
+                            v,
+                            use_reentrant=False,
+                            context_fn=context_fn,
+                        )
+                        loss = z.sum()
+                        dq, dk, dv = _grad(loss, (q, k, v))
+
+                    return z.detach(), dq, dk, dv
+
+                result_with, gm_with = self._compile_and_capture(
+                    fwd_bwd_with_sdpa, True, (q, k, v)
+                )
+                torch._dynamo.reset()
+                result_without, _ = self._compile_and_capture(
+                    fwd_bwd_with_sdpa, False, (q, k, v)
+                )
+                eager_inputs = tuple(
+                    t.detach().clone().requires_grad_(True) for t in (q, k, v)
+                )
+                result_eager = fwd_bwd_with_sdpa(*eager_inputs)
+
+                for actual, expected in zip(result_with, result_without):
+                    self.assertEqual(actual, expected)
+                for actual, expected in zip(result_with, result_eager):
+                    self.assertEqual(actual, expected)
+                self.assertEqual(sum(self.count_op(gm_with, op) for op in sdpa_ops), 2)
 
     def test_ac_rematerialize_with_no_annotations(self):
         x = torch.randn(4, 4, requires_grad=True)
