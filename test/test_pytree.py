@@ -16,6 +16,7 @@ from enum import auto
 from typing import Any, NamedTuple
 
 import torch
+import torch._dynamo.config
 import torch.utils._pytree as python_pytree
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.testing._internal.common_utils import (
@@ -201,6 +202,7 @@ class TestGenericPytree(TestCase):
                 lambda values, keys: MyDict(zip(keys, values)),
             )
 
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     @parametrize_pytree_module
     def test_flatten_unflatten_leaf(self, pytree):
         def run_test_with_leaf(leaf):
