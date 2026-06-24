@@ -194,7 +194,7 @@ def evaluate_platform_supports_fp8_grouped_gemm():
                 if arch in torch.cuda.get_device_properties(0).gcnArchName:
                     return True
         else:
-            return SM90OrLater and not SM100OrLater
+            return torch.cuda.get_device_capability()[0] in (9, 10)
     return False
 
 def evaluate_platform_supports_mx_gemm():
