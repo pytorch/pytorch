@@ -107,39 +107,6 @@ jobs:
       compiler: gcc11
     secrets: inherit
 
-  inductor-pallas-cpu-build:
-    name: inductor-pallas-cpu-build
-    uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
-    with:
-      build-environment: linux-jammy-py3.12-gcc11-pallas
-      docker-image-name: ci-image:pytorch-linux-jammy-py3.12-pallas
-      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      test-matrix: |
-        { include: [
-          { config: "inductor-pallas-cpu", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge" },
-        ]}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
-      python-version: "3.12"
-      compiler: gcc11
-    secrets: inherit
-
-  inductor-pallas-cpu-test:
-    name: inductor-pallas-cpu-test
-    uses: ./.github/workflows/_linux-test.yml
-    needs:
-      - inductor-pallas-cpu-build
-      - get-label-type
-    with:
-      build-environment: ${{ needs.inductor-pallas-cpu-build.outputs.build-environment }}
-      docker-image: ${{ needs.inductor-pallas-cpu-build.outputs.docker-image }}
-      test-matrix: ${{ needs.inductor-pallas-cpu-build.outputs.test-matrix }}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
-      python-version: "3.12"
-      compiler: gcc11
-    secrets: inherit
-
   inductor-triton-cpu-build:
     name: inductor-triton-cpu-build
     uses: ./.github/workflows/_linux-build.yml
