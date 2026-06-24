@@ -101,6 +101,7 @@ from .bytecode_transformation import (
     create_rot_n,
     create_swap,
     Instruction,
+    make_compiled_fn_name,
     unique_id,
 )
 from .code_context import code_context
@@ -2824,7 +2825,7 @@ class OutputGraph(OutputGraphCommon):
             if count_calls(self.graph) == 0 and len(rv) == 0:
                 return [], None
 
-            name = unique_id("__compiled_fn", with_uuid=True)
+            name = make_compiled_fn_name()
 
             if not isinstance(rv, list):
                 raise AssertionError(f"rv must be a list, got {type(rv)}")
@@ -2890,6 +2891,8 @@ class OutputGraph(OutputGraphCommon):
             # placeholder layout that must not be reordered.
             if (
                 config.canonicalize_output_graph_node_order
+                and not self.export
+                and not torch.compiler.is_exporting()
                 and not torch._dynamo.compiled_autograd.in_compiled_autograd_region
             ):
                 _canonicalize_graph(self.graph)

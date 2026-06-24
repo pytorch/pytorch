@@ -3297,6 +3297,42 @@ class CommonTemplate:
         actual = torch.compile(fn)(x)
         self.assertEqual(actual, expected)
 
+    def test_add_scalar_type_promotion_bf16(self):
+        # https://github.com/pytorch/pytorch/issues/185517
+        def fwd(x):
+            return x + 1.7, x - 1.7
+
+        x = torch.tensor(
+            [-1.703125, 1.703125, 0.5], dtype=torch.bfloat16, device=self.device
+        )
+        self.assertEqual(torch.compile(fwd)(x), fwd(x))
+
+        # Eager CPU/MPS round margin to bf16, making the pre-clamp value of
+        # margin_ranking_loss exactly 0.0, so the clamp_min backward passes
+        # gradient at the boundary. The compiled backward must agree.
+        def loss_fn(a, b, t):
+            return torch.nn.functional.margin_ranking_loss(
+                a, b, t, margin=1.7, reduction="mean"
+            )
+
+        def grads(f):
+            a = torch.tensor(
+                [1.703125] * 2,
+                dtype=torch.bfloat16,
+                device=self.device,
+                requires_grad=True,
+            )
+            b = torch.zeros(
+                2, dtype=torch.bfloat16, device=self.device, requires_grad=True
+            )
+            t = torch.ones(2, dtype=torch.bfloat16, device=self.device)
+            f(a, b, t).backward()
+            return a.grad, b.grad
+
+        expected = grads(loss_fn)
+        actual = grads(torch.compile(loss_fn))
+        self.assertEqual(actual, expected)
+
     @skip_if_gpu_halide
     @xfail_if_triton_cpu
     def test_dist(self):
@@ -11023,6 +11059,30 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 self.assertEqual(out, out_ref)
                 self.assertEqual(x.grad, x_ref.grad)
                 self.assertEqual(y.grad, y_ref.grad)
+
+    def test_diagonal_scatter_overlap_input(self):
+        # The decomposition for diagonal_scatter (and the other *_scatter ops)
+        # uses clone_preserve_strides, which must materialize a contiguous
+        # buffer when the input has internal memory overlap (e.g. an expand
+        # of a scalar with stride 0). Otherwise the diagonal write aliases
+        # the entire output and corrupts non-diagonal positions. This pattern
+        # arises naturally in the backward of diagonal_scatter(x, src).sum().
+        def fn(x, src):
+            return torch.diagonal_scatter(x, src, 0).sum()
+
+        x = torch.randn(8, 8, device=self.device, requires_grad=True)
+        src = torch.randn(8, device=self.device, requires_grad=True)
+
+        x_eager = x.clone().detach().requires_grad_(True)
+        src_eager = src.clone().detach().requires_grad_(True)
+        fn(x_eager, src_eager).backward()
+
+        x_compiled = x.clone().detach().requires_grad_(True)
+        src_compiled = src.clone().detach().requires_grad_(True)
+        torch.compile(fn)(x_compiled, src_compiled).backward()
+
+        self.assertEqual(x_eager.grad, x_compiled.grad)
+        self.assertEqual(src_eager.grad, src_compiled.grad)
 
     @skip_if_gpu_halide  # accuracy issue
     def test_slice_scatter(self):

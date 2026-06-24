@@ -1199,6 +1199,15 @@ class _collective:
 class aten_distributed_optimizations:
     """Configuration for distributed optimization passes on ATen FX graphs."""
 
+    # Move collectives earlier and waits later in the inductor schedule
+    # to overlap communication with compute.
+    #
+    # Guarantees:
+    #   - No collective reordering (preserves NCCL stream ordering)
+    #   - No memory regression (each move verified individually)
+    #   - Predictable (no runtime estimation, no heuristics)
+    enable_simple_overlap: bool = False
+
     # Enable overlap scheduling pass
     enable_overlap_scheduling: bool = False
 
@@ -1819,6 +1828,11 @@ class triton:
     """
     Config specific to codegen/triton.py
     """
+
+    # Select the two-pass variance algorithm for CUDA inputs whose total input
+    # working set is no larger than this fraction of the device L2 cache.
+    # Set to 0 to disable the L2-aware heuristic.
+    two_pass_variance_l2_fraction = 0.5
 
     # Use cudagraphs on output code
     cudagraphs = os.environ.get("TORCHINDUCTOR_CUDAGRAPHS") == "1"

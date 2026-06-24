@@ -8007,12 +8007,9 @@ class TestMemPool(TestCase):
             num_expandable_segments, 1, "Expected to have 1 expandable segment only"
         )
 
-    @unittest.skipIf(
-        IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
-        "https://github.com/pytorch/pytorch/issues/153460",
-    )
     @serialTest()
     def test_mempool_ctx_multithread(self):
+        torch._C._cuda_clearCublasWorkspaces()
         torch.cuda.empty_cache()
         segments = torch.cuda.memory._snapshot()["segments"]
         self.assertEqual(len(segments), 0, "Expected empty pool in the beginning")

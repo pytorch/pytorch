@@ -4329,6 +4329,24 @@ class Scheduler:
                     ),
                 )
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
+
+        if config.aten_distributed_optimizations.enable_simple_overlap:
+            if (
+                not config.reorder_for_peak_memory
+                and not config.reorder_for_compute_comm_overlap
+            ):
+                from .memory import assign_memory_planning_info_for_scheduler_buffers
+
+                assign_memory_planning_info_for_scheduler_buffers(
+                    self.nodes, self.name_to_buf
+                )
+            with dynamo_timed(
+                "Scheduler.simple_overlap",
+                log_pt2_compile_event=True,
+                log_waitcounter=True,
+            ):
+                self.nodes = comms.simple_overlap(self.nodes)
+
         self.process_grouped_nodes()
 
         if (
