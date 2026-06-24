@@ -1748,6 +1748,13 @@ class LeafGuard {
     return check_nopybind((PyObject*)map->to_dict());
   }
 
+  // True only for SYMBOLIC_SHAPE_GUARD. Lets IndexedGuardAccessor feed symbol
+  // values to it directly by index, avoiding a (index, value) tuple allocation
+  // per symbol on every guard evaluation. See SYMBOLIC_SHAPE_GUARD::accumulate.
+  virtual bool is_symbolic_shape_guard() const {
+    return false;
+  }
+
   virtual ~LeafGuard() = default;
 
  protected:
@@ -2655,7 +2662,19 @@ class SYMBOLIC_SHAPE_GUARD : public RelationalGuard {
     // the value is a Tuple[int, int].
     PyObject* py_idx = PyTuple_GET_ITEM(value, 0);
     PyObject* py_val = PyTuple_GET_ITEM(value, 1);
-    size_t iarg = PyLong_AsSize_t(py_idx);
+    return accumulate(PyLong_AsSize_t(py_idx), py_val);
+  }
+
+  bool is_symbolic_shape_guard() const override {
+    return true;
+  }
+
+  // Accumulate one symbol value by index, evaluating the compiled guard once
+  // all values have arrived. IndexedGuardAccessor calls this directly so it
+  // does not have to allocate a (index, value) tuple per symbol on every guard
+  // evaluation (the generic check_nopybind tuple path above is kept for the
+  // python-facing check() and verbose paths).
+  bool accumulate(size_t iarg, PyObject* py_val) {
     if (iarg < _nargs_int) {
       if (!PyLong_Check(py_val)) {
         return false;
@@ -2672,10 +2691,9 @@ class SYMBOLIC_SHAPE_GUARD : public RelationalGuard {
     if (_args_seen == _nargs) {
       _args_seen = 0;
       return _guard_check_fn(_args_int.data(), _args_float.data());
-    } else {
-      // We don't have all the values yet. Return true until we get all.
-      return true;
     }
+    // We don't have all the values yet. Return true until we get all.
+    return true;
   }
 
   GuardDebugInfo check_verbose_nopybind(PyObject* value) override {
@@ -5995,11 +6013,23 @@ class IndexedGuardAccessor : public GuardAccessor {
             std::move(source),
             example_value,
             guard_manager_enum),
-        _index(index) {}
+        _index(index),
+        _index_val(py::cast<size_t>(index)) {}
   // NB: Intentional duplication between check_nopybind and
   // check_verbose_nopybind.
   bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
       override { // borrowed ref
+    // IndexedSource is only ever used to feed a single shared
+    // SYMBOLIC_SHAPE_GUARD. When the child manager is exactly that, hand the
+    // value to it directly by index, avoiding a (index, value) tuple
+    // allocation per symbol on every guard evaluation. NB: this bypasses the
+    // child manager, so its _fail_count is not bumped on failure; that is fine
+    // here because all symbols must be accumulated before the guard evaluates,
+    // so fail-fast reordering of the indexed siblings has no early-exit value.
+    SYMBOLIC_SHAPE_GUARD* shape_guard = get_shape_guard();
+    if (shape_guard != nullptr) {
+      return shape_guard->accumulate(_index_val, obj);
+    }
     PyObject* tuple = PyTuple_Pack(2, _index.ptr(), obj); // New reference
     bool result = _guard_manager->check_nopybind(tuple);
     Py_DECREF(tuple);
@@ -6034,10 +6064,37 @@ class IndexedGuardAccessor : public GuardAccessor {
 
   void clone_visitor(IndexedGuardAccessor* to) {
     to->_index = _index;
+    to->_index_val = _index_val;
+    // _shape_guard is intentionally not copied: the clone re-resolves it
+    // lazily against its own (cloned) child guard manager.
   }
 
  private:
+  // Resolve (once) the shared SYMBOLIC_SHAPE_GUARD that this accessor feeds, if
+  // any. IndexedSource is only used for the C++ symbolic shape guard, whose
+  // child manager holds exactly that one leaf guard and no accessors. A
+  // manager's leaf guards/accessors are fixed at construction (added before any
+  // check runs), so this one-shot resolution can never become stale, and the
+  // cached raw pointer stays valid for this accessor's lifetime: the child
+  // manager (which co-owns the guard via shared_ptr) is owned by and lives as
+  // long as this accessor.
+  SYMBOLIC_SHAPE_GUARD* get_shape_guard() {
+    if (!_shape_guard_resolved) {
+      _shape_guard_resolved = true;
+      if (_guard_manager->has_no_accessors()) {
+        std::vector<LeafGuard*> leaves = _guard_manager->get_leaf_guards();
+        if (leaves.size() == 1 && leaves[0]->is_symbolic_shape_guard()) {
+          _shape_guard = static_cast<SYMBOLIC_SHAPE_GUARD*>(leaves[0]);
+        }
+      }
+    }
+    return _shape_guard;
+  }
+
   py::int_ _index{-1};
+  size_t _index_val{0};
+  SYMBOLIC_SHAPE_GUARD* _shape_guard{nullptr};
+  bool _shape_guard_resolved{false};
 };
 
 /**
