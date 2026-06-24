@@ -791,6 +791,7 @@ ops_unbacked_dtensor_dde = {
     xfail("histc"),
     xfail("index_add"),
     xfail("index_copy"),
+    xfail("index_fill"),
     xfail("index_put"),
     xfail("index_reduce", "amax"),
     xfail("index_reduce", "amin"),

@@ -6475,7 +6475,7 @@ class AOTInductorTestsTemplate:
         expected_scalar_args = [
             "buf3, u0",
             "buf4, u0",
-            "buf4, buf5, buf3, u0",
+            "buf4, buf5, RAIIAtenTensorHandle(tmp_buf3_0), u0",
         ]
         if full_aoti_runtime_assert():
             # we'll have one more assertion

@@ -14035,6 +14035,31 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(out.stride(), compiled_out.stride())
         self.assertEqual(out, compiled_out)
 
+    def test_like_preserves_dense_size_one_strides(self):
+        def f(x):
+            full = torch.full_like(x, 2)
+            ones = torch.ones_like(x)
+            rand = torch.rand_like(x)
+            return (
+                full,
+                torch.tensor(full.stride(1), device=x.device),
+                ones,
+                torch.tensor(ones.stride(1), device=x.device),
+                rand,
+                torch.tensor(rand.stride(1), device=x.device),
+            )
+
+        x = torch.empty_strided((5, 1), (1, 5), device=self.device)
+        expected = f(x)
+        actual = torch.compile(f, fullgraph=True)(x)
+
+        self.assertEqual(expected[0].stride(), actual[0].stride())
+        self.assertEqual(expected[1], actual[1])
+        self.assertEqual(expected[2].stride(), actual[2].stride())
+        self.assertEqual(expected[3], actual[3])
+        self.assertEqual(expected[4].stride(), actual[4].stride())
+        self.assertEqual(expected[5], actual[5])
+
     @unittest.skipIf(IS_X86 and not HAS_AVX2, "Requires AVX2")
     def test_pixel_shuffle_channels_last(self):
         def fn(x):

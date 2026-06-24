@@ -693,6 +693,15 @@ class TestDecomp(TestCase):
         for dim in (-1, 0, 1):
             self.assertEqual(torch.cat(inps, dim), cat_inductor(inps, dim))
 
+    def test_rand_like_decomp_preserves_requires_grad_after_stride_copy(self, device):
+        x = torch.empty_strided((5, 1), (1, 5), device=device)
+        result = torch._inductor.decomposition.rand_like(x, requires_grad=True)
+
+        self.assertEqual(result.stride(), x.stride())
+        self.assertTrue(result.requires_grad)
+        result.sum().backward()
+        self.assertEqual(result.grad, torch.ones_like(result))
+
     @suppress_warnings
     @tf32_off()
     # only tests RNNs since we have py dispsatcher decomps for them

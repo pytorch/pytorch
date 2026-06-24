@@ -104,7 +104,11 @@ from torch._library.opaque_object import is_opaque_type
 from torch._logging import trace_structured
 from torch._utils_internal import compile_time_strobelight_meta
 from torch.fx import GraphModule
-from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymExprPrinter
+from torch.fx.experimental.symbolic_shapes import (
+    free_unbacked_symbols,
+    guard_or_false,
+    SymExprPrinter,
+)
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch.monitor import _WaitCounter
 from torch.utils._ordered_set import OrderedSet
@@ -508,6 +512,326 @@ def _get_subgraph_names(
     yield from fx_subgraph_names
 
 
+def _get_node_tensor_meta(node: object) -> torch.Tensor | None:
+    if not isinstance(node, torch.fx.Node):
+        return None
+
+    val = node.meta.get("val", node.meta.get("example_value"))
+    if isinstance(val, torch.Tensor):
+        return val
+    return None
+
+
+_WhileLoopCarrySpec = tuple[
+    tuple[int | torch.SymInt, ...], tuple[int | torch.SymInt, ...]
+]
+
+
+# while_loop body outputs become the next iteration's carried inputs. Joint
+# passes can erase metadata-only views or introduce padded strides, so snapshot
+# the loop-carried metadata before those passes and restore the HOP boundary.
+def _get_while_loop_carried_input_specs(
+    gm: GraphModule,
+) -> dict[str, tuple[_WhileLoopCarrySpec | None, ...]]:
+    carried_input_specs = {}
+    while_loop_targets = (
+        torch.ops.higher_order.while_loop,
+        torch.ops.higher_order.while_loop_stack_output,
+    )
+
+    for node in gm.graph.nodes:
+        if node.op != "call_function" or node.target not in while_loop_targets:
+            continue
+
+        body_arg = node.args[1]
+        carried_inputs = node.args[2]
+        if (
+            not isinstance(body_arg, torch.fx.Node)
+            or body_arg.op != "get_attr"
+            or not isinstance(body_arg.target, str)
+            or not isinstance(carried_inputs, (tuple, list))
+        ):
+            continue
+
+        carried_input_specs[body_arg.target] = tuple(
+            (tuple(meta.shape), tuple(meta.stride()))
+            if (meta := _get_node_tensor_meta(inp)) is not None
+            else None
+            for inp in carried_inputs
+        )
+
+    return carried_input_specs
+
+
+def _get_live_while_loop_body_names(gm: GraphModule) -> OrderedSet[str]:
+    while_loop_targets = (
+        torch.ops.higher_order.while_loop,
+        torch.ops.higher_order.while_loop_stack_output,
+    )
+    body_names = OrderedSet()
+
+    for node in gm.graph.nodes:
+        if node.op != "call_function" or node.target not in while_loop_targets:
+            continue
+
+        body_arg = node.args[1]
+        if (
+            isinstance(body_arg, torch.fx.Node)
+            and body_arg.op == "get_attr"
+            and isinstance(body_arg.target, str)
+        ):
+            body_names.add(body_arg.target)
+
+    return body_names
+
+
+def _statically_known_equal(a: object, b: object) -> bool:
+    result = a == b
+    if isinstance(result, torch.SymBool):
+        return guard_or_false(result)
+    return bool(result)
+
+
+def _statically_known_leq(a: object, b: object) -> bool:
+    result = a <= b  # type: ignore[operator]
+    if isinstance(result, torch.SymBool):
+        return guard_or_false(result)
+    return bool(result)
+
+
+def _same_shape(meta: torch.Tensor, size: tuple[int | torch.SymInt, ...]) -> bool:
+    return len(meta.shape) == len(size) and all(
+        _statically_known_equal(meta_dim, expected_dim)
+        for meta_dim, expected_dim in zip(meta.shape, size)
+    )
+
+
+def _same_stride(meta: torch.Tensor, stride: tuple[int | torch.SymInt, ...]) -> bool:
+    return len(meta.stride()) == len(stride) and all(
+        _statically_known_equal(meta_stride, expected_stride)
+        for meta_stride, expected_stride in zip(meta.stride(), stride)
+    )
+
+
+def _only_size_one_stride_diffs(
+    meta: torch.Tensor, stride: tuple[int | torch.SymInt, ...]
+) -> bool:
+    return len(meta.shape) == len(stride) and all(
+        _statically_known_equal(meta_stride, expected_stride)
+        or _statically_known_leq(meta_dim, 1)
+        for meta_dim, meta_stride, expected_stride in zip(
+            meta.shape, meta.stride(), stride
+        )
+    )
+
+
+def _make_strided_meta(
+    meta: torch.Tensor,
+    size: tuple[int | torch.SymInt, ...],
+    stride: tuple[int | torch.SymInt, ...],
+) -> torch.Tensor:
+    fake_mode = detect_fake_mode((meta,))
+    ctx = fake_mode if fake_mode is not None else contextlib.nullcontext()
+    with ctx:
+        return torch.empty_strided(
+            size,
+            stride,
+            dtype=meta.dtype,
+            layout=meta.layout,
+            device=meta.device,
+        )
+
+
+def _set_strided_meta(
+    node: torch.fx.Node,
+    source_node: torch.fx.Node,
+    meta: torch.Tensor,
+    size: tuple[int | torch.SymInt, ...],
+    stride: tuple[int | torch.SymInt, ...],
+) -> None:
+    restored_meta = _make_strided_meta(meta, size, stride)
+    node.meta = copy.copy(source_node.meta)
+    node.meta["val"] = restored_meta
+    node.meta["example_value"] = restored_meta
+    node.meta.pop("tensor_meta", None)
+
+
+def _copy_to_strides(
+    gm: GraphModule,
+    input_node: torch.fx.Node,
+    meta: torch.Tensor,
+    size: tuple[int | torch.SymInt, ...],
+    stride: tuple[int | torch.SymInt, ...],
+    insert_before: torch.fx.Node,
+) -> torch.fx.Node:
+    with gm.graph.inserting_before(insert_before):
+        empty = gm.graph.call_function(
+            torch.ops.aten.empty_strided.default,
+            (list(size), list(stride)),
+            {
+                "dtype": meta.dtype,
+                "layout": meta.layout,
+                "device": meta.device,
+                "pin_memory": False,
+            },
+        )
+        new_node = gm.graph.call_function(
+            torch.ops.aten.copy.default,
+            (empty, input_node),
+        )
+        for node in (empty, new_node):
+            _set_strided_meta(node, input_node, meta, size, stride)
+        return new_node
+
+
+def _restore_node_strides(
+    gm: GraphModule,
+    input_node: torch.fx.Node,
+    meta: torch.Tensor,
+    size: tuple[int | torch.SymInt, ...],
+    stride: tuple[int | torch.SymInt, ...],
+    insert_before: torch.fx.Node,
+) -> torch.fx.Node:
+    if _only_size_one_stride_diffs(meta, stride):
+        with gm.graph.inserting_before(insert_before):
+            new_node = gm.graph.call_function(
+                torch.ops.aten.as_strided.default,
+                (input_node, list(size), list(stride)),
+            )
+            _set_strided_meta(new_node, input_node, meta, size, stride)
+            return new_node
+    return _copy_to_strides(gm, input_node, meta, size, stride, insert_before)
+
+
+def _refresh_graph_meta_from_placeholders(gm: GraphModule) -> None:
+    inputs = []
+    for node in gm.graph.nodes:
+        if node.op != "placeholder":
+            continue
+        if "val" in node.meta:
+            inputs.append(node.meta["val"])
+        elif "example_value" in node.meta:
+            inputs.append(node.meta["example_value"])
+        else:
+            return
+
+    fake_mode = detect_fake_mode(inputs)
+    if fake_mode is None:
+        return
+
+    with (
+        enable_python_dispatcher(),
+        mock.patch.object(fake_mode, "allow_non_fake_inputs", True),
+    ):
+        FakeTensorProp(gm, mode=fake_mode).propagate_dont_convert_inputs(*inputs)
+
+
+def _enforce_subgraph_output_strides(
+    gm: GraphModule, output_specs: Sequence[_WhileLoopCarrySpec | None]
+) -> None:
+    _refresh_graph_meta_from_placeholders(gm)
+    output_node = gm.graph.find_nodes(op="output")[0]
+    if isinstance(output_node.args[0], torch.fx.Node):
+        output_args = list(output_node.args)
+        output_is_single_node = True
+    else:
+        output_args = list(output_node.args[0])
+        output_is_single_node = False
+
+    if len(output_args) != len(output_specs):
+        return
+
+    changed = False
+    new_output_args: list[object] = []
+    for output, spec in zip(output_args, output_specs):
+        meta = _get_node_tensor_meta(output)
+        if spec is None or meta is None or not isinstance(output, torch.fx.Node):
+            new_output_args.append(output)
+            continue
+
+        size, stride = spec
+        if not _same_shape(meta, size) or _same_stride(meta, stride):
+            new_output_args.append(output)
+            continue
+
+        new_output_args.append(
+            _restore_node_strides(gm, output, meta, size, stride, output_node)
+        )
+        changed = True
+
+    if not changed:
+        return
+
+    if output_is_single_node:
+        output_node.args = tuple(new_output_args)
+    else:
+        output_node.args = (tuple(new_output_args),)
+    gm.graph.lint()
+    gm.recompile()
+
+
+def _enforce_while_loop_carried_input_strides(
+    gm: GraphModule,
+    carried_input_specs: dict[str, tuple[_WhileLoopCarrySpec | None, ...]],
+) -> None:
+    while_loop_targets = (
+        torch.ops.higher_order.while_loop,
+        torch.ops.higher_order.while_loop_stack_output,
+    )
+    changed = False
+
+    for node in gm.graph.nodes:
+        if node.op != "call_function" or node.target not in while_loop_targets:
+            continue
+
+        body_arg = node.args[1]
+        carried_inputs = node.args[2]
+        if (
+            not isinstance(body_arg, torch.fx.Node)
+            or body_arg.op != "get_attr"
+            or not isinstance(body_arg.target, str)
+            or body_arg.target not in carried_input_specs
+            or not isinstance(carried_inputs, (tuple, list))
+        ):
+            continue
+
+        specs = carried_input_specs[body_arg.target]
+        if len(carried_inputs) != len(specs):
+            continue
+
+        node_changed = False
+        new_carried_inputs: list[object] = []
+        for carried_input, spec in zip(carried_inputs, specs):
+            meta = _get_node_tensor_meta(carried_input)
+            if (
+                spec is None
+                or meta is None
+                or not isinstance(carried_input, torch.fx.Node)
+            ):
+                new_carried_inputs.append(carried_input)
+                continue
+
+            size, stride = spec
+            if not _same_shape(meta, size) or _same_stride(meta, stride):
+                new_carried_inputs.append(carried_input)
+                continue
+
+            new_carried_inputs.append(
+                _restore_node_strides(gm, carried_input, meta, size, stride, node)
+            )
+            node_changed = True
+            changed = True
+
+        if node_changed:
+            new_args = list(node.args)
+            new_args[2] = tuple(new_carried_inputs)
+            node.args = tuple(new_args)
+
+    if changed:
+        gm.graph.lint()
+        gm.recompile()
+
+
 def _recursive_pre_grad_passes(
     gm: GraphModule,
     example_inputs: Sequence[InputType],
@@ -535,11 +859,17 @@ def _recursive_joint_graph_passes(
     skip_invoke_subgraph: bool = False,
     input_device: torch.device | None = None,
 ) -> GraphModule:
+    while_loop_carried_input_specs = _get_while_loop_carried_input_specs(gm)
+
     def _run_on_sub_graph_module(subgraph_name: str) -> None:
         subgraph = getattr(gm, subgraph_name)
         new_subgraph = _recursive_joint_graph_passes(
             subgraph, skip_invoke_subgraph, input_device
         )
+        if subgraph_name in while_loop_carried_input_specs:
+            _enforce_subgraph_output_strides(
+                new_subgraph, while_loop_carried_input_specs[subgraph_name]
+            )
         setattr(gm, subgraph_name, new_subgraph)
 
     with dynamo_timed(
@@ -561,6 +891,21 @@ def _recursive_joint_graph_passes(
             _run_on_sub_graph_module(subgraph_name)
 
         out_gm = joint_graph_passes(gm, input_device)
+        _enforce_while_loop_carried_input_strides(
+            out_gm, while_loop_carried_input_specs
+        )
+        for subgraph_name in _get_live_while_loop_body_names(out_gm):
+            if subgraph_name not in while_loop_carried_input_specs:
+                continue
+            if not hasattr(out_gm, subgraph_name):
+                raise AssertionError(
+                    f"while_loop body subgraph {subgraph_name!r} is referenced "
+                    "but missing"
+                )
+            _enforce_subgraph_output_strides(
+                getattr(out_gm, subgraph_name),
+                while_loop_carried_input_specs[subgraph_name],
+            )
 
         # Some joint graph passes may create new sub graph module. Run one round
         # for the newly created graph modules.
