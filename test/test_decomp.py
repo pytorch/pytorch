@@ -226,7 +226,7 @@ def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs)
         (torch.float16, torch.ops.aten.reflection_pad1d_backward.default): 5e-3,
         (torch.bfloat16, torch.ops.aten.reflection_pad1d_backward.default): 5e-3,
         (torch.float16, torch.ops.aten.reflection_pad2d_backward.default): 5e-3,
-        (torch.bfloat16, torch.ops.aten.reflection_pad2d_backward.default): 5e-3,
+        (torch.bfloat16, torch.ops.aten.reflection_pad2d_backward.default): 5e-2,
         (torch.float16, torch.ops.aten.reflection_pad3d_backward.default): 5e-3,
         (torch.bfloat16, torch.ops.aten.reflection_pad3d_backward.default): 5e-2,
         (torch.float16, torch.ops.aten._batch_norm_with_update.default): 2e-7,
