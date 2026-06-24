@@ -616,10 +616,7 @@ struct ExpandableSegment {
 #endif
         // Roll back the handles created in this call (none are mapped yet)
         // and report no progress so the caller treats it as OOM.
-        for (auto j : c10::irange(begin, i)) {
-          handles_.at(j).release();
-        }
-        trimHandles();
+        releaseHandles(begin, i);
         return rangeFromHandles(begin, begin);
       }
       // Throws on any other error; a no-op on success.
@@ -992,9 +989,7 @@ struct ExpandableSegment {
             ptr_ + begin * segment_size_, (mapped - begin) * segment_size_);
 #endif
       }
-      for (auto i : c10::irange(begin, end)) {
-        handles_.at(i).release();
-      }
+      releaseHandles(begin, end);
     });
     for (auto i : c10::irange(begin, end)) {
       auto& handle = handles_.at(i);
@@ -1038,6 +1033,11 @@ struct ExpandableSegment {
     C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemUnmap_(
         ptr_ + segment_size_ * begin, (end - begin) * segment_size_));
 #endif
+    releaseHandles(begin, end);
+  }
+  // Release the handles in [begin, end) and drop trailing empty slots. Callers
+  // must have unmapped any mapped slots in the range first (see release()).
+  void releaseHandles(size_t begin, size_t end) {
     for (auto i : c10::irange(begin, end)) {
       handles_.at(i).release();
     }
