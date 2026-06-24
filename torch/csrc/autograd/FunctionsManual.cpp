@@ -5088,6 +5088,10 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
       auto node = c10::make_intrusive<DelayedError>(
           "batch_norm does not support 3rd+ order derivatives.",
           /* num inputs */ 3);
+      // input is passed so the node is executable: save_mean/save_invstd do
+      // not require grad, so without a grad-requiring input wrap_outputs would
+      // mark the node non-executable and never install the Error grad_fn. Its
+      // wrapped output (result[2]) is unused.
       auto result = node->apply({mean, invstd, input});
       mean = std::move(result[0]);
       invstd = std::move(result[1]);
