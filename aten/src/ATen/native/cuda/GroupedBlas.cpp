@@ -107,9 +107,8 @@ bool should_use_cublaslt_grouped_gemm(
   const bool sm90 = dprops->major == 9;
   const bool sm10_or_sm11 =
       dprops->major == 10 || dprops->major == 11;
-#if CUBLAS_VERSION >= 130401
-  const bool sm90_cublaslt_grouped_gemm_supported =
-      sm90 && cublasLtGetVersion() >= 130401;
+#if CUDA_VERSION >= 13030
+  const bool sm90_cublaslt_grouped_gemm_supported = sm90;
 #else
   constexpr bool sm90_cublaslt_grouped_gemm_supported = false;
 #endif

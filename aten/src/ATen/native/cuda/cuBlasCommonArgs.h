@@ -19,10 +19,6 @@ c10::MaybeOwned<Tensor> inline resolve_conj_if_indicated(const Tensor& tensor, b
 }
 
 c10::MaybeOwned<Tensor> inline prepare_matrix_for_cublas(const Tensor& tensor, bool& transpose_tensor, bool transpose_result) {
-  if (tensor.is_non_overlapping_and_dense()) { // common case
-      transpose_tensor = tensor.is_contiguous();
-      return resolve_conj_if_indicated(tensor, transpose_result ? transpose_tensor : !transpose_tensor);
-  }
   IntArrayRef tensor_strides = tensor.strides();
   IntArrayRef tensor_sizes = tensor.sizes();
   const auto leading_dim = tensor.dim() - 2;
@@ -33,6 +29,9 @@ c10::MaybeOwned<Tensor> inline prepare_matrix_for_cublas(const Tensor& tensor, b
   } else if ((tensor_strides[trailing_dim] == 1) && (tensor_strides[leading_dim] >= std::max<int64_t>(1, tensor_sizes[trailing_dim]))) {
     transpose_tensor = true;
     return resolve_conj_if_indicated(tensor, transpose_result);
+  } else if (tensor.is_non_overlapping_and_dense()) {
+    transpose_tensor = tensor.is_contiguous();
+    return resolve_conj_if_indicated(tensor, transpose_result ? transpose_tensor : !transpose_tensor);
   } else {
     transpose_tensor = true;
     return c10::MaybeOwned<Tensor>::owned(tensor.clone(at::MemoryFormat::Contiguous));
@@ -40,11 +39,6 @@ c10::MaybeOwned<Tensor> inline prepare_matrix_for_cublas(const Tensor& tensor, b
 }
 
 c10::MaybeOwned<Tensor> inline prepare_matrix_for_cublas(const Tensor& tensor, bool& transpose_tensor) {
-  if (tensor.is_non_overlapping_and_dense()) { // common case
-      transpose_tensor = tensor.is_contiguous();
-      return resolve_conj_if_indicated(tensor, true);
-  }
-
   IntArrayRef tensor_strides = tensor.strides();
   IntArrayRef tensor_sizes = tensor.sizes();
   const auto leading_dim = tensor.dim() - 2;
@@ -54,6 +48,9 @@ c10::MaybeOwned<Tensor> inline prepare_matrix_for_cublas(const Tensor& tensor, b
     return resolve_conj_if_indicated(tensor, true);
   } else if ((tensor_strides[trailing_dim] == 1) && (tensor_strides[leading_dim] >= std::max<int64_t>(1, tensor_sizes[trailing_dim]))) {
     transpose_tensor = true;
+    return resolve_conj_if_indicated(tensor, true);
+  } else if (tensor.is_non_overlapping_and_dense()) {
+    transpose_tensor = tensor.is_contiguous();
     return resolve_conj_if_indicated(tensor, true);
   } else {
     transpose_tensor = true;
