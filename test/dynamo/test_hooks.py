@@ -574,6 +574,175 @@ def forward(self, L_x_ : torch.Tensor):
         self.assertEqual(x0.grad, x1.grad)
         self.assertEqual(x0.grad, x2.grad)
 
+    def test_output_hook_on_dependent_output_after_return_aot_eager(self):
+        def fn(x):
+            y = x * x
+            z = y * x * x * x
+            return y, z
+
+        x0 = torch.tensor(1.0, requires_grad=True)
+        y0, z0 = fn(x0)
+        y0.register_hook(lambda grad: 3.14 * grad)
+        (expected,) = torch.autograd.grad(z0, x0)
+
+        x1 = torch.tensor(1.0, requires_grad=True)
+        y1, z1 = torch.compile(fn, backend="aot_eager")(x1)
+        y1.register_hook(lambda grad: 3.14 * grad)
+        (result,) = torch.autograd.grad(z1, x1)
+
+        self.assertEqual(result, expected)
+
+    def test_output_hook_on_dependent_output_after_return_inductor(self):
+        from torch._dynamo.utils import counters
+
+        def fn(x):
+            y = x * x
+            z = y * x * x * x
+            return y, z
+
+        x0 = torch.tensor(1.0, requires_grad=True)
+        y0, z0 = fn(x0)
+        y0.register_hook(lambda grad: 3.14 * grad)
+        (expected,) = torch.autograd.grad(z0, x0)
+
+        torch._dynamo.reset()
+        counters.clear()
+        x1 = torch.tensor(1.0, requires_grad=True)
+        y1, z1 = torch.compile(fn, backend="inductor")(x1)
+        y1.register_hook(lambda grad: 3.14 * grad)
+        (result,) = torch.autograd.grad(z1, x1)
+
+        self.assertEqual(result, expected)
+        self.assertEqual(
+            counters["aot_autograd"].get("graph_has_dependent_outputs", 0), 1
+        )
+
+    def test_output_hook_on_dependent_view_output_after_return_aot_eager(self):
+        def fn(x):
+            y = x.view(2, 2)
+            z = y.view(4)
+            return y, z
+
+        x0 = torch.arange(4.0, requires_grad=True)
+        y0, z0 = fn(x0)
+        y0.register_hook(lambda grad: 3.14 * grad)
+        (expected,) = torch.autograd.grad(z0.sum(), x0)
+
+        x1 = torch.arange(4.0, requires_grad=True)
+        y1, z1 = torch.compile(fn, backend="aot_eager")(x1)
+        y1.register_hook(lambda grad: 3.14 * grad)
+        (result,) = torch.autograd.grad(z1.sum(), x1)
+
+        self.assertEqual(result, expected)
+
+    def test_output_hook_on_dependent_output_gm_wrapper_aot_autograd(self):
+        from torch._dynamo.backends.common import aot_autograd
+        from torch._dynamo.utils import GmWrapper
+
+        def fn(xs):
+            x = xs[0]
+            y = x * x
+            z = y * x * x * x
+            return y, z
+
+        def grad_with_hook(compiled_fn, x):
+            y, z = compiled_fn([x])
+            y.register_hook(lambda grad: 3.14 * grad)
+            (result,) = torch.autograd.grad(z, x)
+            return result
+
+        x0 = torch.tensor(1.0, requires_grad=True)
+        expected = grad_with_hook(fn, x0)
+
+        gm = torch.fx.symbolic_trace(fn)
+
+        x1 = torch.tensor(1.0, requires_grad=True)
+        compiled = aot_autograd(fw_compiler=nop)(gm, ([x1],))
+        result = grad_with_hook(compiled, x1)
+        self.assertEqual(result, expected)
+
+        x2 = torch.tensor(1.0, requires_grad=True)
+        wrapped_gm = GmWrapper(gm, lambda flat_args: ([flat_args[0]],))
+        boxed_compiled = aot_autograd(fw_compiler=nop)(wrapped_gm, [x2])
+        result = grad_with_hook(boxed_compiled, x2)
+        self.assertEqual(result, expected)
+
+    def test_tensor_and_shape_output_does_not_fallback_aot_autograd(self):
+        from torch._dynamo.backends.common import aot_autograd
+        from torch._dynamo.utils import counters
+
+        def fn(x):
+            y = x * x
+            return y, y.shape[0]
+
+        gm = torch.fx.symbolic_trace(fn)
+        x = torch.randn(4, requires_grad=True)
+        for node in gm.graph.nodes:
+            if node.name == "x":
+                node.meta["example_value"] = x
+            elif node.name == "mul":
+                node.meta["example_value"] = x * x
+            elif node.name == "getitem":
+                node.meta["example_value"] = 4
+
+        torch._dynamo.reset()
+        counters.clear()
+        compiled = aot_autograd(fw_compiler=nop)(gm, (x,))
+        y, size = compiled(x)
+
+        self.assertEqual(y, x * x)
+        self.assertEqual(size, 4)
+        self.assertEqual(
+            counters["aot_autograd"].get("graph_has_dependent_outputs", 0), 0
+        )
+        self.assertEqual(counters["aot_autograd"]["total"], 1)
+
+    def test_independent_outputs_do_not_fallback_aot_autograd(self):
+        from torch._dynamo.backends.common import aot_autograd
+        from torch._dynamo.utils import counters
+
+        def fn(x):
+            return x * x, x + x
+
+        gm = torch.fx.symbolic_trace(fn)
+        x = torch.randn(4, requires_grad=True)
+        for node in gm.graph.nodes:
+            if node.name == "x":
+                node.meta["example_value"] = x
+            elif node.name == "mul":
+                node.meta["example_value"] = x * x
+            elif node.name == "add":
+                node.meta["example_value"] = x + x
+
+        torch._dynamo.reset()
+        counters.clear()
+        compiled = aot_autograd(fw_compiler=nop)(gm, (x,))
+        y, z = compiled(x)
+
+        self.assertEqual(y, x * x)
+        self.assertEqual(z, x + x)
+        self.assertEqual(
+            counters["aot_autograd"].get("graph_has_dependent_outputs", 0), 0
+        )
+        self.assertEqual(counters["aot_autograd"]["total"], 1)
+
+    def test_output_hook_on_dependent_output_after_graph_break_aot_eager(self):
+        def fn(x):
+            y = x * x
+            z = y * x * x * x
+            torch._dynamo.graph_break()
+            y.register_hook(lambda grad: grad if grad is None else 3.14 * grad)
+            (result,) = torch.autograd.grad(z, x)
+            return result
+
+        x0 = torch.tensor(1.0, requires_grad=True)
+        expected = fn(x0)
+
+        x1 = torch.tensor(1.0, requires_grad=True)
+        result = torch.compile(fn, backend="aot_eager")(x1)
+
+        self.assertEqual(result, expected)
+
     def test_input_hooks_same(self):
         backends = ["eager", "aot_eager", "inductor"]
         for backend in backends:
