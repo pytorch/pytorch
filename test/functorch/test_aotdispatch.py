@@ -10444,6 +10444,57 @@ class TestAOTModuleSimplified(AOTTestCase):
         res = compiled_f(*inputs)
         res[0].sum().backward()
 
+    def test_aot_joint_print_readable_marks_backward_stack_trace(self):
+        class MockModule(torch.nn.Module):
+            def forward(self, x):
+                y = x.to(dtype=torch.float32)
+                return ((y * y).sum(),)
+
+        mod = torch.fx.symbolic_trace(MockModule())
+        for node in mod.graph.nodes:
+            if node.name == "to":
+                node.stack_trace = (
+                    '  File "/tmp/model.py", line 5, in forward\n'
+                    "    y = x.to(dtype=torch.float32)\n"
+                )
+            elif node.name in {"mul", "sum_1"}:
+                node.stack_trace = (
+                    '  File "/tmp/model.py", line 6, in forward\n'
+                    "    return ((y * y).sum(),)\n"
+                )
+
+        def compiler(gm: torch.fx.GraphModule, _):
+            return make_boxed_func(gm.forward)
+
+        joint_graph: str | None = None
+
+        def partition_fn(gm: torch.fx.GraphModule, inputs, **kwargs):
+            nonlocal joint_graph
+            joint_graph = gm.print_readable(print_output=False)
+            return default_partition(gm, inputs, **kwargs)
+
+        x = torch.randn(4, dtype=torch.bfloat16, requires_grad=True)
+        compiled_f = aot_module_simplified(
+            mod,
+            [x],
+            fw_compiler=compiler,
+            bw_compiler=compiler,
+            partition_fn=partition_fn,
+        )
+        compiled_f(x)[0].backward()
+
+        self.assertIsNotNone(joint_graph)
+        fwd_to_comment = (
+            "# File: /tmp/model.py:5 in forward, code: y = x.to(dtype=torch.float32)"
+        )
+        bw_to_comment = (
+            "# Backward of forward node: File: /tmp/model.py:5 in forward, "
+            "code: y = x.to(dtype=torch.float32)"
+        )
+        FileCheck().check(fwd_to_comment).check("_to_copy").check(bw_to_comment).check(
+            "_to_copy_1"
+        ).run(joint_graph)
+
     def test_aot_module_simplified_preserves_stack_trace_from_mutation(self):
         class MockModule(torch.nn.Module):
             def __init__(self) -> None:
