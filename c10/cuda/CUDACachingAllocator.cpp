@@ -879,13 +879,13 @@ struct ExpandableSegment {
     // Non-throwing: runs during unwinding.
     size_t mapped = begin;
     auto rollback = c10::make_scope_exit([&] {
-      for (auto i : c10::irange(begin, mapped)) {
+      if (mapped > begin) {
 #ifdef USE_ROCM
-        C10_CUDA_IGNORE_ERROR(
-            hipMemUnmap(ptr() + i * segment_size_, segment_size_));
+        C10_CUDA_IGNORE_ERROR(hipMemUnmap(
+            ptr() + begin * segment_size_, (mapped - begin) * segment_size_));
 #else
         (void)DriverAPI::get()->cuMemUnmap_(
-            ptr_ + i * segment_size_, segment_size_);
+            ptr_ + begin * segment_size_, (mapped - begin) * segment_size_);
 #endif
       }
       for (auto i : c10::irange(begin, end)) {
