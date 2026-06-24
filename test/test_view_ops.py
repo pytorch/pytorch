@@ -12,7 +12,6 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfMPS,
     instantiate_device_type_tests,
-    onlyCPU,
     onlyNativeDeviceTypes,
     skipLazy,
     skipMeta,
@@ -107,7 +106,11 @@ class TestViewOps(TestCase):
             return False
         # Note: only validates storage on native device types
         # because some accelerators, like XLA, do not expose storage
-        if base.device.type in ["cpu", "cuda", "xpu"]:
+        native_devices = ["cpu", "cuda", "xpu"]
+        pu1 = torch._C._get_privateuse1_backend_name()
+        if pu1:
+            native_devices.append(pu1)
+        if base.device.type in native_devices:
             if base.untyped_storage().data_ptr() != other.untyped_storage().data_ptr():
                 return False
 
@@ -1248,7 +1251,6 @@ class TestOldViewOps(TestCase):
         self.assertEqual((1, 0, 6, 1, 1), x.view(1, 0, 6, 1, 1).shape)
 
     # TODO: this should be refactored into the view ops test suite
-    @onlyNativeDeviceTypes
     def test_reshape(self, device):
         x = torch.randn(3, 3, device=device)
         self.assertEqual(x.data_ptr(), x.reshape(-1).data_ptr())
@@ -1349,8 +1351,6 @@ class TestOldViewOps(TestCase):
             ):
                 src.flatten(2, 0)
 
-    # TODO: update to work on CUDA, too
-    @onlyCPU
     def test_narrow(self, device):
         x = torch.tensor([[0, 1, 2], [3, 4, 5], [6, 7, 8]])
         self.assertEqual(x.narrow(0, 0, 1), torch.tensor([[0, 1, 2]]))
@@ -1364,8 +1364,6 @@ class TestOldViewOps(TestCase):
         self.assertEqual(x.narrow(-1, -1, 1), torch.tensor([[2], [5], [8]]))
         self.assertEqual(x.narrow(-2, -1, 1), torch.tensor([[6, 7, 8]]))
 
-    # TODO: update to work on CUDA, too
-    @onlyCPU
     def test_narrow_tensor(self, device):
         x = torch.tensor([[0, 1, 2], [3, 4, 5], [6, 7, 8]])
         self.assertEqual(x.narrow(0, torch.tensor(0), 1), torch.tensor([[0, 1, 2]]))
@@ -1376,8 +1374,6 @@ class TestOldViewOps(TestCase):
         with self.assertRaises(Exception):
             x.narrow(0, torch.tensor([0, 1]), 1)
 
-    # TODO: make work on CUDA, too
-    @onlyCPU
     def test_t(self, device):
         # Test 0D tensors
         x = torch.randn(())
@@ -1409,7 +1405,6 @@ class TestOldViewOps(TestCase):
         ):
             x.t()
 
-    @onlyCPU
     def test_split(self, device):
         tensor = torch.rand(7, 4)
         split_size = 3
@@ -1450,7 +1445,6 @@ class TestOldViewOps(TestCase):
             )
             start = start + target_size[dim]
 
-    @onlyCPU
     def test_chunk(self, device):
         tensor = torch.rand(4, 7)
         num_chunks = 3
@@ -1472,9 +1466,7 @@ class TestOldViewOps(TestCase):
         with self.assertRaisesRegex(RuntimeError, error_regex):
             tensor.chunk(-2)
 
-    # TODO: make work on CUDA, too
     @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
-    @onlyCPU
     def test_unsqueeze(self, device) -> None:
         x = torch.randn(2, 3, 4)
         y = x.unsqueeze(1)
@@ -1575,7 +1567,6 @@ class TestOldViewOps(TestCase):
             (3, 10, 3, 32, 32), 3 * 10 * 3 * 32 * 32, torch.channels_last_3d, device
         )
 
-    @onlyNativeDeviceTypes
     @dtypes(torch.int64, torch.float, torch.complex128)
     def test_transpose_invalid(self, device, dtype):
         for fn in (torch.swapdims, torch.swapaxes, torch.transpose):
@@ -1697,7 +1688,6 @@ class TestOldViewOps(TestCase):
         self._test_atleast(device, torch.atleast_2d)
         self._test_atleast(device, torch.atleast_3d)
 
-    @onlyCPU
     @dtypes(torch.float)
     def test_broadcast_tensors(self, device, dtype):
         x0 = torch.randn(2, 1, 3, dtype=dtype, device=device)
@@ -1710,7 +1700,6 @@ class TestOldViewOps(TestCase):
         self.assertTrue(y1.size() == expected_size)
         self.assertTrue(y2.size() == expected_size)
 
-    @onlyCPU
     def test_broadcast_shapes(self, device):
         examples = [(), (1,), (2,), (1, 1), (3, 1), (3, 2), (4, 1, 1), (4, 3, 2)]
         for s0 in examples:
@@ -1925,7 +1914,6 @@ class TestOldViewOps(TestCase):
         x.set_(x.storage(), 0, x.size(), stride)
         self.assertTrue(x.is_contiguous())
 
-    @onlyNativeDeviceTypes
     # Skip BFloat16 since numpy does not support it
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool))
     def test_tensor_split_sections(self, device, dtype):
@@ -1958,7 +1946,6 @@ class TestOldViewOps(TestCase):
                         self.assertEqual(result_n, result1, msg=msg)
                         self.assertEqual(result_n, result2, msg=msg)
 
-    @onlyNativeDeviceTypes
     # Skip BFloat16 since numpy does not support it
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool))
     def test_tensor_split_indices(self, device, dtype):
@@ -2005,7 +1992,6 @@ class TestOldViewOps(TestCase):
                         self.assertEqual(result_n, result_1, msg=msg)
                         self.assertEqual(result_n, result_2, msg=msg)
 
-    @onlyNativeDeviceTypes
     def test_tensor_split_errors(self, device):
         S = 10
         test_cases = [
@@ -2085,7 +2071,6 @@ class TestOldViewOps(TestCase):
             x.resize_as_(y)
             self.assertEqual(y.shape, x.shape)
 
-    @onlyNativeDeviceTypes
     def test_resize_overflow(self, device):
         x = torch.empty((), dtype=torch.float64)
         with self.assertRaisesRegex(
@@ -2097,7 +2082,6 @@ class TestOldViewOps(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Stride calculation overflowed"):
             x.resize_([0, 4, 2305843009213693952])
 
-    @onlyNativeDeviceTypes
     def test_as_strided_overflow_storage_offset(self, device):
         t = torch.randn(2, 3, device=device)
         with self.assertRaisesRegex(
@@ -2115,7 +2099,6 @@ class TestOldViewOps(TestCase):
             self.assertEqual(x.view(6).shape, [6])
 
     @skipIfTorchDynamo("conj bit not implemented in TensorVariable yet")
-    @onlyCPU
     def test_conj_neg_view_numpy_error(self, device):
         self.assertRaisesRegex(
             RuntimeError,
@@ -2138,7 +2121,6 @@ class TestOldViewOps(TestCase):
             lambda: torch.tensor([1 + 2j]).conj().imag.view(torch.int32),
         )
 
-    @onlyCPU
     def test_crow_col_indices(self, device):
         crow_indices = (0, 1, 2)
         col_indices = (1, 0)
