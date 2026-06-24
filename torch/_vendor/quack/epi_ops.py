@@ -292,6 +292,7 @@ class VecLoad(EpiOp):
     """
 
     dim = None  # 0 for col (M), 1 for row (N)
+    convert_to_acc_dtype = True
 
     def param_fields(self):
         return [(self.name, object, None)]
@@ -371,7 +372,12 @@ class VecLoad(EpiOp):
             tDsV = ctx.tiled_copy_r2s.retile(tDsV)
         # Pre-allocate register tensor reused across begin_loop calls
         tDsV_sub = cute.group_modes(tDsV, 3, cute.rank(tDsV))[None, None, None, 0]
-        tDrV_cvt = cute.make_rmem_tensor(tDsV_sub.layout, gemm.acc_dtype)
+        register_dtype = (
+            gemm.acc_dtype
+            if const_expr(self.convert_to_acc_dtype)
+            else tDsV_sub.element_type
+        )
+        tDrV_cvt = cute.make_rmem_tensor(tDsV_sub.layout, register_dtype)
         return [tDsV, tDrV_cvt]
 
     @cute.jit
@@ -388,7 +394,10 @@ class VecLoad(EpiOp):
             tDsV_cur = cute.group_modes(tDsV, 3, cute.rank(tDsV))[None, None, None, epi_coord]
             tDrV = cute.make_rmem_tensor(tDsV_cur.layout, tDsV_cur.element_type)
             cute.autovec_copy(cute.filter_zeros(tDsV_cur), cute.filter_zeros(tDrV))
-            tDrV_cvt.store(tDrV.load().to(gemm.acc_dtype))
+            if const_expr(self.convert_to_acc_dtype):
+                tDrV_cvt.store(tDrV.load().to(gemm.acc_dtype))
+            else:
+                tDrV_cvt.store(tDrV.load())
         return tDrV_cvt
 
 
@@ -452,7 +461,12 @@ class ColVecLoad(VecLoad):
             tDsV = ctx.tiled_copy_r2s.retile(tDsV)
         # Pre-allocate register tensor reused across begin_loop calls
         tDsV_sub = cute.group_modes(tDsV, 3, cute.rank(tDsV))[None, None, None, 0]
-        tDrV_cvt = cute.make_rmem_tensor(tDsV_sub.layout, gemm.acc_dtype)
+        register_dtype = (
+            gemm.acc_dtype
+            if const_expr(self.convert_to_acc_dtype)
+            else tDsV_sub.element_type
+        )
+        tDrV_cvt = cute.make_rmem_tensor(tDsV_sub.layout, register_dtype)
         return [tDsV, tDrV_cvt]
 
 
@@ -527,12 +541,20 @@ class VecTupleLoad(EpiOp):
         return tuple(values)
 
 
+class CapturedRowVecLoad(RowVecLoad):
+    convert_to_acc_dtype = False
+
+
+class CapturedColVecLoad(ColVecLoad):
+    convert_to_acc_dtype = False
+
+
 class RowVecTupleLoad(VecTupleLoad):
-    vec_op_cls = RowVecLoad
+    vec_op_cls = CapturedRowVecLoad
 
 
 class ColVecTupleLoad(VecTupleLoad):
-    vec_op_cls = ColVecLoad
+    vec_op_cls = CapturedColVecLoad
 
 
 class TileStore(EpiOp):
