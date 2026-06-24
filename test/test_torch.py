@@ -10787,6 +10787,21 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(y1, y1_expect.tolist())
         self.assertEqual(y2, y1_expect.imag.tolist())
 
+    def test_stream_compare_with_non_stream(self):
+        # Comparing a Stream against a non-Stream (including None) has to be
+        # safe and well defined: a Stream is never equal to a non-Stream, and
+        # != is its negation. Regression test for #188033, where richcompare
+        # reinterpret_cast `other` to THPStream* without checking its type
+        # first (reading off the end of a foreign object) and the None branch
+        # returned False for every op, so `stream != None` was wrongly False.
+        s = torch.Stream()
+        for other in (None, 42, "x", 3.14, object(), [s]):
+            self.assertFalse(s == other)
+            self.assertTrue(s != other)
+        # A Stream still compares equal to itself.
+        self.assertTrue(s == s)
+        self.assertFalse(s != s)
+
     @unittest.skipIf(torch.backends.cuda.is_built(), "Skipped for cuda-enabled build")
     def test_no_cuda_monkeypatch(self):
         # Note that this is not in test_cuda.py as this whole file is skipped when cuda

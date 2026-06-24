@@ -435,8 +435,23 @@ static PyObject* THPStream_richcompare(
     PyObject* other,
     int op) {
   PyObject* result = nullptr;
-  if (Py_IsNone(other)) {
-    result = Py_False;
+  // `other` can be any Python object. Only reinterpret_cast it to THPStream*
+  // once we know it really is a Stream; doing so for a foreign object and
+  // reading stream_id/device_index/device_type walks off the end of it (an
+  // out-of-bounds read). A non-Stream, including None, is never equal to a
+  // Stream, so equality is well defined and ordering is unsupported.
+  if (!THPStream_Check(other)) {
+    switch (op) {
+      case Py_EQ:
+        result = Py_False;
+        break;
+      case Py_NE:
+        result = Py_True;
+        break;
+      default:
+        result = Py_False;
+        break;
+    }
   } else {
     switch (op) {
       case Py_EQ:
