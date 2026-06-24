@@ -1173,6 +1173,17 @@ class UnspecModuleWithIntAttr(torch.nn.Module):
         return self.layer(x) + self.step
 
 
+class ModuleWithFloatAttr(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layer = torch.nn.Linear(4, 4)
+        self.scale = 0.5
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = x + 1
+        return self.layer(x) * self.scale
+
+
 def make_test(fn, expected_ops=None):
     def test_fn(self):
         return torch._dynamo.testing.standard_test(
@@ -1813,6 +1824,36 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             res3 = opt_mod(x)
             self.assertTrue(torch.allclose(ref3, res3))
             self.assertEqual(cnt.frame_count, ifdynstaticdefault(2, 1))
+
+    def test_nn_module_float_attr_specialized(self):
+        # Float attributes of nn.Modules are specialized (treated as static
+        # constants) by default, mirroring the int heuristic: the value is baked
+        # into the graph rather than lifted to a symbolic-float input, so a
+        # stable value compiles once and changing the value recompiles.
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        mod = ModuleWithFloatAttr()
+        opt_mod = torch.compile(backend=backend, dynamic=True)(copy.deepcopy(mod))
+        x = torch.rand(3, 4)
+
+        # A stable value compiles exactly once (subsequent calls are cache hits).
+        for _ in range(3):
+            self.assertTrue(torch.allclose(mod(x), opt_mod(x)))
+        self.assertEqual(len(backend.graphs), 1)
+
+        # The float is baked in as a constant, not lifted to a symfloat input
+        # (which is what regressed guard eval -- see issue #185886). A symfloat
+        # would appear as a graph placeholder named after the `scale` source.
+        placeholders = [
+            str(node.target)
+            for node in backend.graphs[0].graph.find_nodes(op="placeholder")
+        ]
+        self.assertFalse(any("scale" in name for name in placeholders))
+
+        # Changing the value invalidates the EQUALS_MATCH guard and recompiles.
+        mod.scale = 0.7
+        opt_mod.scale = 0.7
+        self.assertTrue(torch.allclose(mod(x), opt_mod(x)))
+        self.assertEqual(len(backend.graphs), 2)
 
 
 class NNModuleTestsDevice(torch._dynamo.test_case.TestCase):

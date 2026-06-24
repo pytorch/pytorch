@@ -2727,6 +2727,32 @@ class VariableBuilder:
             if not isinstance(value, float):
                 raise AssertionError(f"Expected float, got {type(value)}")
             if not config.specialize_float:
+                # Specialize float attributes of nn.Modules (mirrors the int
+                # heuristic above): we don't expect users to mutate module
+                # float attributes on the fly, and unspecializing them emits a
+                # NaN-specialization guard per attribute, which is expensive for
+                # models with many repeated submodules. Unlike the int path, we
+                # do not call process_automatic_dynamic here: there is no opt-in
+                # to unspecialize module floats, so a fluctuating float churns
+                # recompiles (and is never recorded in PGO / automatic-dynamic
+                # state) rather than being promoted to dynamic -- the
+                # recompile_hint below points such users to use a tensor.
+                guard_source = self.source.guard_source
+                if (
+                    guard_source.is_specialized_nn_module()
+                    or guard_source.is_unspecialized_nn_module()
+                ):
+                    recompile_hint = (
+                        "torch.compile considers float attributes of nn.Modules to be static. "
+                        "If you are observing recompilation, this float attribute is changing "
+                        "across calls; convert it into a tensor to avoid specialization."
+                    )
+                    self.install_guards(
+                        functools.partial(
+                            GuardBuilder.EQUALS_MATCH, recompile_hint=recompile_hint
+                        )
+                    )
+                    return ConstantVariable.create(value=value, source=self.source)
                 return self._wrap_lazy_constant(value, self._wrap_symfloat_for_lazy)
 
             return self._wrap_lazy_constant(value)
