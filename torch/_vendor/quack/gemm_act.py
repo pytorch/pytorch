@@ -78,6 +78,7 @@ class GemmActMixin(ComposableEpiMixin):
         ("act_fn", cutlass.Constexpr, None),
         ("tensor_epilogue_fn", cutlass.Constexpr, None),
         ("tensor_epilogue_arg_kinds", cutlass.Constexpr, ()),
+        ("tensor_epilogue_returns_aux", cutlass.Constexpr, False),
     )
 
     @mlir_namedtuple
@@ -86,6 +87,7 @@ class GemmActMixin(ComposableEpiMixin):
         act_fn: cutlass.Constexpr[Optional[Callable]] = None
         tensor_epilogue_fn: cutlass.Constexpr[Optional[Callable]] = None
         tensor_epilogue_arg_kinds: cutlass.Constexpr[tuple] = ()
+        tensor_epilogue_returns_aux: cutlass.Constexpr[bool] = False
         alpha: Optional[Float32 | cute.Tensor] = None
         beta: Optional[Float32 | cute.Tensor] = None
         mRowVecBroadcast: Optional[cute.Tensor] = None
@@ -107,6 +109,7 @@ class GemmActMixin(ComposableEpiMixin):
         d["act_fn"] = args.act_fn
         d["tensor_epilogue_fn"] = args.tensor_epilogue_fn
         d["tensor_epilogue_arg_kinds"] = args.tensor_epilogue_arg_kinds
+        d["tensor_epilogue_returns_aux"] = args.tensor_epilogue_returns_aux
         for key in ("mRowVecBroadcast", "mColVecBroadcast"):
             if key in self.concat_layout and key in d:
                 d[key] = layout_utils.concat_to_interleave(d[key], 1)
@@ -229,10 +232,17 @@ class GemmActMixin(ComposableEpiMixin):
                 )
             else:
                 epilogue_result = params.tensor_epilogue_fn(tRS_rEpilogueIn.load())
-            tRS_rAuxOut = cute.make_rmem_tensor(
+            if const_expr(params.tensor_epilogue_returns_aux):
+                tRS_rD.store(epilogue_result[0])
+                tRS_rAuxOut = cute.make_rmem_tensor(
+                    epilogue_result[1].shape, epilogue_result[1].element_type
+                )
+                tRS_rAuxOut.store(epilogue_result[1])
+            else:
+                tRS_rAuxOut = cute.make_rmem_tensor(
                     epilogue_result.shape, self.acc_dtype
                 )
-            tRS_rAuxOut.store(epilogue_result)
+                tRS_rAuxOut.store(epilogue_result)
         elif const_expr(params.act_fn is not None):
             tRS_rAuxOut = cute.make_rmem_tensor(tRS_rD.layout.shape, self.acc_dtype)
             if const_expr(self.arch != 100):
@@ -416,6 +426,7 @@ def _compile_gemm_act(
     activation,
     tensor_epilogue_key,
     tensor_epilogue_arg_kinds,
+    tensor_epilogue_returns_aux,
     tensor_epilogue_rowvec_dtypes,
     tensor_epilogue_colvec_dtypes,
     tensor_epilogue_colvec_ndims,
@@ -523,6 +534,7 @@ def _compile_gemm_act(
         act_fn,
         tensor_epilogue_fn,
         tensor_epilogue_arg_kinds,
+        tensor_epilogue_returns_aux,
         alpha=fake_scalar(alpha_mode, Float32),
         beta=fake_scalar(beta_mode, Float32),
         mRowVecBroadcast=mRowVec,
@@ -588,6 +600,7 @@ def gemm_act(
     concat_layout: tuple | None = None,
     tensor_epilogue_fn: Optional[Callable] = None,
     tensor_epilogue_key: Optional[str] = None,
+    tensor_epilogue_returns_aux: bool = False,
     tensor_epilogue_arg_kinds: tuple[str, ...] = (),
     tensor_epilogue_rowvec_biases: tuple[Tensor, ...] = (),
     tensor_epilogue_colvec_biases: tuple[Tensor, ...] = (),
@@ -710,6 +723,7 @@ def gemm_act(
         activation,
         tensor_epilogue_key,
         tensor_epilogue_arg_kind_codes,
+        tensor_epilogue_returns_aux,
         tuple(torch2cute_dtype_map[tensor.dtype] for tensor in tensor_epilogue_rowvec_biases),
         tuple(torch2cute_dtype_map[tensor.dtype] for tensor in tensor_epilogue_colvec_biases),
         tuple(tensor.ndim for tensor in tensor_epilogue_colvec_biases),
@@ -747,6 +761,7 @@ def gemm_act(
 
     epi_args = GemmActMixin.EpilogueArguments(
         PostAct_p,
+        None,
         None,
         None,
         None,

@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import dataclasses
 import hashlib
 from typing import Any
 
@@ -100,16 +101,30 @@ class FlexGemmCuteDSLOpOverrides(CuteDSLOpOverrides):
         return CuteDSLOpOverrides.to_dtype(x, dtype)
 
 
-def output_node(graph_module: torch.fx.GraphModule) -> torch.fx.Node:
+@dataclasses.dataclass(frozen=True)
+class FlexGemmOutputPlan:
+    """Classify the FlexGEMM body output into a main result and aux returns."""
+
+    output: torch.fx.Node
+    aux_outputs: tuple[torch.fx.Node, ...] = ()
+
+
+def output_plan(
+    graph_module: torch.fx.GraphModule,
+) -> FlexGemmOutputPlan:
     output_nodes = [node for node in graph_module.graph.nodes if node.op == "output"]
     if len(output_nodes) != 1:
         raise NotImplementedError("FlexGEMM expects one output node")
     output_value = output_nodes[0].args[0]
-    if isinstance(output_value, (tuple, list)) and len(output_value) == 1:
-        output_value = output_value[0]
+    if isinstance(output_value, (tuple, list)):
+        if len(output_value) == 1:
+            output_value = output_value[0]
+        else:
+            output, *aux_outputs = output_value
+            return FlexGemmOutputPlan(output, tuple(aux_outputs))
     if not isinstance(output_value, torch.fx.Node):
         raise NotImplementedError("FlexGEMM expects one tensor output")
-    return output_value
+    return FlexGemmOutputPlan(output_value)
 
 
 def gemm_node(
@@ -173,7 +188,7 @@ def materialize_flex_gemm_epilogue(
 ) -> tuple[str, str]:
     """Build the generated CuTeDSL epilogue callable from the traced FX body."""
     gemm = gemm_node(graph_module, gemm_op)
-    output = output_node(graph_module)
+    outputs = output_plan(graph_module)
     kernel = FlexGemmCuteDSLKernel()
     env: dict[torch.fx.Node, Any] = {
         gemm: CuteDSLCSEVariable(
@@ -220,7 +235,10 @@ def materialize_flex_gemm_epilogue(
         body += "\n"
     aux_args = [f"aux{index}" for index in range(len(epilogue_arg_placeholders))]
     epilogue_params = ", ".join(["acc", *aux_args])
-    result = _cute_arg(output, env)
+    result = _cute_arg(outputs.output, env)
+    if outputs.aux_outputs:
+        aux_results = [_cute_arg(aux_output, env) for aux_output in outputs.aux_outputs]
+        result = f"({', '.join(str(item) for item in (result, *aux_results))})"
     key_payload = f"{graph_module.code}\n{body}\nreturn {result}"
     key = hashlib.sha256(key_payload.encode()).hexdigest()[:16]
     name = f"flex_gemm_epilogue_{key}"

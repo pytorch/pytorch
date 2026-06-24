@@ -20,10 +20,11 @@ index 2090fb978d1..f54fdf41733 100644
  from cutlass.base_dsl.tvm_ffi_builder import spec
  from cutlass.cutlass_dsl import NumericMeta
  
-@@ -54,6 +54,7 @@ _converter_module._convert_single_arg = _patched_convert_single_arg
+@@ -54,6 +54,8 @@ _converter_module._convert_single_arg = _patched_convert_single_arg
  
  
  torch2cute_dtype_map = {
++    torch.bool: Uint8,
 +    torch.uint8: Uint8,
      torch.float16: Float16,
      torch.bfloat16: BFloat16,
