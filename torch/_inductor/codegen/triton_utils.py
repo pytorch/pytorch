@@ -299,6 +299,7 @@ def config_of(
     *,
     indices: list[int] | None = None,
     pointer_range_override: tuple[int, ...] | None = None,
+    skip_cpp_wrapper_input_tensor_alignment: bool = False,
 ) -> Any:
     if indices is None:
         indices = list(range(len(args)))
@@ -334,11 +335,31 @@ def config_of(
             return False
         raise NotImplementedError(f"unhandled {type(x)}: {x}")
 
+    def include_tensor_alignment(arg: KernelArgType) -> bool:
+        if (
+            not skip_cpp_wrapper_input_tensor_alignment
+            or not V.graph.cpp_wrapper
+            or V.graph.aot_mode
+            or not isinstance(arg, TensorArg)
+            or arg.buffer not in V.graph.graph_inputs
+        ):
+            return True
+
+        try:
+            input_idx = V.graph.graph_input_names.index(arg.buffer)
+        except ValueError:
+            return True
+        return input_idx not in (V.graph.inputs_to_check or ())
+
     if config.triton.divisible_by_16:
         divisible_by_16 = tuple(
             i
             for i, arg in zip(indices, args)
-            if is_aligned(arg, alignment=16, include_tensor=True)
+            if is_aligned(
+                arg,
+                alignment=16,
+                include_tensor=include_tensor_alignment(arg),
+            )
         )
     else:
         divisible_by_16 = ()
