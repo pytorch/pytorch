@@ -8,6 +8,7 @@ from contextlib import nullcontext
 import torch
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    IS_LINUX,
     NoTest,
     run_tests,
     TEST_ACCELERATOR,
@@ -269,6 +270,50 @@ class TestAccelerator(TestCase):
         free_bytes, total_bytes = torch.accelerator.get_memory_info()
         self.assertGreaterEqual(free_bytes, 0)
         self.assertGreaterEqual(total_bytes, 0)
+
+    @unittest.skipIf(TEST_MPS, "MPS doesn't support torch.accelerator memory API!")
+    @unittest.skipUnless(IS_LINUX, "cpp contexts are linux only")
+    def test_tensor_cycles(self):
+        from torch.utils.viz._cycles import observe_tensor_cycles
+
+        acc = torch.accelerator.current_accelerator()
+        mem_mod = getattr(torch.get_device_module(acc), "memory", None)
+        if mem_mod is None or not hasattr(mem_mod, "_record_memory_history"):
+            self.skipTest("Backend doesn't support memory history")
+
+        fired = False
+
+        def observer(html):
+            nonlocal fired
+            fired = True
+            self.assertIn("torch.Tensor", html)
+            self.assertIn("cell_contents", html)
+
+        disarm = observe_tensor_cycles(observer)
+
+        def noop():
+            pass
+
+        try:
+
+            def create():
+                x = torch.empty(3, 4, device=acc)
+
+                def foo(p):
+                    if p:
+                        return foo(not p)
+                    else:
+                        return x
+
+                return foo
+
+            create()
+            gc.collect()
+            # the callback fires outside of the collect call, not during it
+            noop()
+            self.assertTrue(fired)
+        finally:
+            disarm()
 
     @unittest.skipIf(
         TEST_XPU,
