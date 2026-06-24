@@ -54,6 +54,7 @@ from torch._higher_order_ops.while_loop import while_loop
 from torch._inductor.compile_fx import split_const_gm
 from torch._library.opaque_object import _OPAQUE_TYPES_BY_NAME
 from torch._subclasses import FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensor
 from torch.export import default_decompositions, Dim, export, unflatten
 from torch.export._patches import register_lstm_while_loop_decomposition
 from torch.export._trace import (
@@ -1823,6 +1824,33 @@ graph():
         _ = export(foo, (torch.ones(4, 4),), strict=False)
         self.assertTrue(foo.bar._tensor_cache is None)
 
+    def test_none_initialized_buffer_mutation_no_fake_tensor_leak(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("tensor_cache", None)
+
+            def forward(self, x):
+                if self.tensor_cache is None:
+                    self.tensor_cache = x + 2
+                return self.tensor_cache + x
+
+        m = M()
+        ep = export(m, (torch.ones(2, 2),), strict=False)
+        self.assertIsNone(m.tensor_cache)
+
+        real_x = torch.ones(2, 2)
+        out = m(real_x)
+        self.assertFalse(isinstance(m.tensor_cache, FakeTensor))
+        self.assertFalse(isinstance(out, FakeTensor))
+        self.assertEqual(out, torch.ones(2, 2) * 4)
+
+        exported_x = torch.ones(2, 2)
+        exported_out = ep.module()(exported_x)
+        self.assertFalse(isinstance(exported_out, FakeTensor))
+        self.assertEqual(exported_out, torch.ones(2, 2) * 4)
+        self.assertEqual(exported_x, torch.ones(2, 2))
+
     def test_export_leak_compile(self):
         class BaseModule(torch.nn.Module):
             def forward(self, *args, **kwargs):
@@ -3450,11 +3478,15 @@ class GraphModule(torch.nn.Module):
                 hook_removed = True
                 self.handle.remove()
 
-        def register_buffer_assignment_hook(mod, assigned_buffers):
+        def register_buffer_assignment_hook(
+            mod, assigned_buffers, tracked_buffer_names=None
+        ):
             nonlocal hook_registered_on
             hook_registered_on = mod
             return HookHandle(
-                real_register_buffer_assignment_hook(mod, assigned_buffers)
+                real_register_buffer_assignment_hook(
+                    mod, assigned_buffers, tracked_buffer_names
+                )
             )
 
         def fail_graph_capture(*args, **kwargs):
