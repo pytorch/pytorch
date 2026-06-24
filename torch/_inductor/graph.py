@@ -781,6 +781,92 @@ class GraphLowering(torch.fx.Interpreter):
         if nconv == 0:
             return False
 
+        # ROCm-specific layout-opt gates.  Two cases skip channels_last:
+        #   1. RDNA (gfx11xx/gfx12xx): NHWC convs are still experimental there.
+        #   2. CDNA grouped convs that fall back to MIOpen's slow naive kernel.
+        # These run for training too (is_inference=False), which the inference
+        # FLOP-weighted heuristic further below never covers.
+        if torch.version.hip:
+
+            def _conv_device_index(n: torch.fx.Node) -> int:
+                # Derive the device from the conv's own input tensor rather than
+                # hard-coding device 0; fall back to the current device. meta
+                # ["val"] is trusted here as it is everywhere else in this method
+                # (the heuristics below read it unguarded too).
+                dev = n.args[0].meta["val"].device  # type: ignore[union-attr]
+                if dev.index is not None:
+                    return dev.index
+                return torch.cuda.current_device()
+
+            # RDNA (gfx10xx/gfx11xx/gfx12xx) NHWC convs are experimental on every ROCm
+            # version, so this exclusion is intentionally NOT gated on the HIP
+            # version (unlike CDNA enablement). Skip layout opt for RDNA graphs.
+            if all(
+                n.args[idx].meta["val"].device.type == "cuda"
+                for n in conv_nodes
+                for idx in [0, 1]
+            ):
+                gcn_arch = torch.cuda.get_device_properties(
+                    _conv_device_index(conv_nodes[0])
+                ).gcnArchName.split(":", 1)[0]
+                if any(arch in gcn_arch for arch in ["gfx10", "gfx11", "gfx12"]):
+                    return False
+
+            # On CDNA (ROCm), some grouped convolutions fall back to a slow MIOpen
+            # naive kernel (fp64 accumulate -- the observed kernel is named
+            # naive_conv_ab_nonpacked_fwd_nchw_ushort_double_ushort, where
+            # "double" denotes double-precision accumulate) instead of a tuned
+            # NHWC XDL/MFMA kernel.  For those, channels_last cannot accelerate
+            # the kernel and only adds layout-conversion kernels -- a measured
+            # regression on MI355 (depthwise mobilenet/mnasnet/shufflenet:
+            # +10-17% in training).
+            #
+            # Whether a grouped conv takes the naive path depends on both total
+            # channels and groups, not channels-per-group alone. We approximate
+            # "naive-bound" with channels-per-group < MIOPEN_XDL_MIN_CHANNELS_PER_GROUP:
+            # a deliberately conservative proxy that errs toward skipping layout opt
+            # (avoiding regressions) at the cost of leaving some wins on the table for
+            # grouped convs with channels-per-group in the 4-7 range at large channel
+            # counts.
+            MIOPEN_XDL_MIN_CHANNELS_PER_GROUP = 8
+
+            def _rocm_naive_bound(n: torch.fx.Node) -> bool:
+                # Only applies to real aten convolutions; mkldnn conv nodes that
+                # were appended to conv_nodes use a different arg schema.
+                if n.target is not torch.ops.aten.convolution.default:
+                    return False
+                # aten.convolution args:
+                # (input, weight, bias, stride, padding, dilation,
+                #  transposed, output_padding, groups)
+                # Read defensively so a short args list / kwargs cannot IndexError.
+                transposed = (
+                    n.args[6] if len(n.args) > 6 else n.kwargs.get("transposed", False)
+                )
+                groups = n.args[8] if len(n.args) > 8 else n.kwargs.get("groups", 1)
+                # Skip transposed convs: their weight is (C_in, C_out/groups, ...),
+                # so size(1) is not channels-per-group and the heuristic would
+                # misclassify them.
+                if transposed:
+                    return False
+                # Forward conv weight is (C_out, C_in/groups, kH, kW), so
+                # size(1) == channels-per-group. Only grouped convs (groups > 1)
+                # hit the naive fallback; a groups==1 dense conv (e.g. the
+                # 3-channel RGB stem) still uses the fast XDL kernel.
+                return (
+                    groups > 1  # type: ignore[operator]
+                    and n.args[1].meta["val"].size(1)  # type: ignore[union-attr, operator]
+                    < MIOPEN_XDL_MIN_CHANNELS_PER_GROUP
+                )
+
+            if any(_rocm_naive_bound(n) for n in conv_nodes):
+                log.debug(
+                    "Skip layout opt on ROCm: graph has grouped conv(s) with "
+                    "channels/group < %d that fall back to MIOpen naive kernels "
+                    "(channels_last regresses these).",
+                    MIOPEN_XDL_MIN_CHANNELS_PER_GROUP,
+                )
+                return False
+
         # For cpu backend and mkldnn enabled, we always use channels_last for better performance.
         if (
             torch.backends.mkldnn.enabled  # pyrefly: ignore [unbound-name]
