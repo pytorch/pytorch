@@ -44,6 +44,34 @@ __global__ void populate_cublas_grouped_args_kernel(
     int32_t end = offs[i];
     int32_t start_val = (i == 0) ? 0 : offs[i - 1];
     delta = end - start_val;
+    CUDA_KERNEL_ASSERT(delta >= 0 && "expected gemm dimension to be greater or equal 0\n");
+
+    if (m_is_delta) {
+      CUDA_KERNEL_ASSERT(end <= cublas_m && "expected offset to be less than tensor size\n");
+    } else if (n_is_delta) {
+      CUDA_KERNEL_ASSERT(end <= cublas_n && "expected offset to be less than tensor size\n");
+    } else if (k_is_delta) {
+      CUDA_KERNEL_ASSERT(end <= cublas_k && "expected offset to be less than tensor size\n");
+    }
+
+    if (i < blockDim.x - 1) {
+      if (a_offs_stride != 0) {
+        CUDA_KERNEL_ASSERT(
+            (static_cast<int64_t>(delta) * a_offs_stride) % 16 == 0 &&
+            "expected input tensor dynamic dimension byte size to be non-negative multiple of 16\n");
+      }
+      if (b_offs_stride != 0) {
+        CUDA_KERNEL_ASSERT(
+            (static_cast<int64_t>(delta) * b_offs_stride) % 16 == 0 &&
+            "expected input tensor dynamic dimension byte size to be non-negative multiple of 16\n");
+      }
+      if (m_is_delta && d_offs_stride != 0) {
+        CUDA_KERNEL_ASSERT(
+            (static_cast<int64_t>(delta) * d_offs_stride) % 16 == 0 &&
+            "expected output tensor dynamic dimension byte size to be non-negative multiple of 16\n");
+      }
+    }
+
     group_start = static_cast<int64_t>(start_val);
   }
 
