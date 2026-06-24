@@ -106,8 +106,11 @@ runner_mapping:
   linux.rocm.gpu.2: linux.rocm.gpu.2
   linux.rocm.gpu.mi210.1: linux.rocm.gpu.mi210.1
   linux.rocm.gpu.mi210.2: linux.rocm.gpu.mi210.2
+  linux.rocm.gpu.gfx942.1: linux.rocm.gpu.gfx942.1
+  linux.rocm.gpu.gfx942.4: linux.rocm.gpu.gfx942.4
   linux.rocm.gpu.gfx950.1: linux.rocm.gpu.gfx950.1
   linux.rocm.gpu.gfx950.2: linux.rocm.gpu.gfx950.2
+  linux.rocm.gpu.gfx1100: linux.rocm.gpu.gfx1100
 
 # Runners whose hardware exists only on the Meta fleet (no LF / no AWS EC2
 # equivalent). The mapper forces the 'mt-' prefix on these regardless of which
