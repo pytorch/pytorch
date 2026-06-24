@@ -959,11 +959,11 @@ struct TORCH_API Node {
   typename T::ValueType& getAttr(Symbol name) const {
     AT_ASSERT(name.is_attr());
     auto it = findAttr(name, true);
-    auto* child = dynamic_cast<T*>(it->get());
-    if (child == nullptr) {
+    auto* child = it->get();
+    if (child->kind() != T::Kind) {
       throw IRAttributeError(name, true);
     }
-    return child->value();
+    return static_cast<T*>(child)->value();
   }
   using AVPtr = AttributeValue::Ptr;
   // NB: For determinism, we use a vector rather than a hash map.  This does

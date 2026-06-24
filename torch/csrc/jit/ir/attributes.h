@@ -62,8 +62,9 @@ struct AttributeValue {
   virtual ~AttributeValue() = default;
 };
 
-template <typename T, AttributeKind Kind>
+template <typename T, AttributeKind AttrKind>
 struct ScalarAttributeValue : public AttributeValue {
+  static constexpr AttributeKind Kind = AttrKind;
   using ConstructorType = T;
   using ValueType = T;
   ScalarAttributeValue(Symbol name, ConstructorType value_)
@@ -82,8 +83,9 @@ struct ScalarAttributeValue : public AttributeValue {
   ValueType value_;
 };
 
-template <typename T, AttributeKind Kind>
+template <typename T, AttributeKind AttrKind>
 struct VectorAttributeValue : public AttributeValue {
+  static constexpr AttributeKind Kind = AttrKind;
   using ConstructorType = std::vector<T>;
   using ValueType = std::vector<T>;
   VectorAttributeValue(Symbol name, ConstructorType value_)
@@ -124,6 +126,7 @@ struct Graph;
 // We special case Graph attributes like this because we want to ensure that
 // Graph::copy() is called when we clone() these attributes.
 struct TORCH_API GraphAttr : public AttributeValue {
+  static constexpr AttributeKind Kind = AttributeKind::g;
   using ConstructorType = std::shared_ptr<Graph>;
   using ValueType = std::shared_ptr<Graph>;
   GraphAttr(Symbol name, ConstructorType value_)
@@ -141,6 +144,7 @@ struct TORCH_API GraphAttr : public AttributeValue {
 };
 
 struct TORCH_API GraphsAttr : public AttributeValue {
+  static constexpr AttributeKind Kind = AttributeKind::gs;
   using ConstructorType = std::vector<std::shared_ptr<Graph>>;
   using ValueType = std::vector<std::shared_ptr<Graph>>;
   GraphsAttr(Symbol name, ConstructorType value_)
