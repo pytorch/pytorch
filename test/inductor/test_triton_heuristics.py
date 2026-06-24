@@ -991,6 +991,91 @@ class TestRecheckAutotuneCache(TestCase):
 
 
 @triton.jit
+def mtia_sqr_kernel(in_ptr, out_ptr, numel, BLOCK_SIZE: tl.constexpr):
+    pid = tl.program_id(0)
+    offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+    data = tl.load(in_ptr + offsets, mask=offsets < numel)
+    sqr = data * data
+    tl.store(out_ptr + offsets, sqr, mask=offsets < numel)
+
+
+class TestMTIASpecialConfigArgs(TestCase):
+    """Unit tests for the MTIA branch of CachingAutotuner._create_compile_meta /
+    _create_compile_options.
+
+    The MTIA Triton backend is built on the AMD backend, so AMD-only autotune
+    kwargs (waves_per_eu/matrix_instr_nonkdim/kpack) leak into a config's kwargs
+    even though they are not MTIA kernel signature args. They must be stripped
+    out of the compile-meta constants (constexprs) and forwarded as Triton
+    backend options instead, exactly like the HIP path. These tests construct a
+    CachingAutotuner directly with a mocked mtia device so they need no GPU/MTIA
+    hardware and no real Triton compilation.
+    """
+
+    @staticmethod
+    def _make_mtia_autotuner():
+        device = DeviceProperties(
+            type="mtia",
+            index=0,
+            multi_processor_count=64,
+            cc=0,
+            max_threads_per_block=1024,
+            warp_size=64,
+        )
+        triton_meta = {
+            "signature": {
+                "in_ptr": "*fp32",
+                "out_ptr": "*fp32",
+                "numel": "i32",
+                "BLOCK_SIZE": "constexpr",
+            },
+            "device": device,
+            "constants": {},
+            "configs": [
+                AttrsDescriptorWrapper(divisible_by_16=(0, 1, 2), equal_to_1=())
+            ],
+        }
+        # waves_per_eu is an AMD-only backend option. It is present in the config
+        # kwargs but intentionally absent from the kernel signature above.
+        cfg = triton.Config(
+            {"BLOCK_SIZE": 64, "waves_per_eu": 3}, num_warps=4, num_stages=1
+        )
+        autotuner = CachingAutotuner(
+            fn=mtia_sqr_kernel,
+            triton_meta=triton_meta,
+            configs=[cfg],
+            save_cache_hook=False,
+            mutated_arg_names=[],
+            reset_to_zero_arg_names=[],
+            optimize_mem=False,
+            heuristic_type=HeuristicType.POINTWISE,
+            inductor_meta={},
+        )
+        return autotuner, cfg
+
+    def test_create_compile_meta_strips_special_arg_from_constants(self):
+        autotuner, cfg = self._make_mtia_autotuner()
+        compile_meta = autotuner._create_compile_meta(cfg)
+
+        # waves_per_eu is not a signature arg, so it must not leak into the
+        # constexpr constants (this is what previously made ASTSource raise
+        # "'waves_per_eu' is not in list" on MTIA).
+        self.assertNotIn("waves_per_eu", compile_meta["constants"])
+        # A real signature kwarg (BLOCK_SIZE) is still materialized as a constant.
+        self.assertEqual(compile_meta["constants"]["BLOCK_SIZE"], 64)
+        # And the backend-only option is stashed separately for forwarding.
+        self.assertEqual(compile_meta["backend_options"], {"waves_per_eu": 3})
+
+    def test_create_compile_options_forwards_special_arg(self):
+        autotuner, cfg = self._make_mtia_autotuner()
+        compile_meta = autotuner._create_compile_meta(cfg)
+        options = autotuner._create_compile_options(cfg, compile_meta)
+
+        # The AMD-only option must be forwarded as a Triton backend option.
+        self.assertEqual(options["waves_per_eu"], 3)
+
+
+@triton.jit
 def hip_autotune_kernel(
     in_ptr,
     out_ptr,

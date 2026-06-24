@@ -1106,12 +1106,18 @@ class CachingAutotuner(KernelInterface):
         compile_meta["num_stages"] = cfg.num_stages
 
         cfg_kwargs = {**cfg.kwargs}
-        if self.device_props.type == "hip":
+        if self.device_props.type in ("hip", "mtia"):
             # `compile_meta["signature"]` contains the actual Triton kernel argument
             # names, including constexprs such as XBLOCK_0/XBLOCK_1 for combo kernels.
-            # Any HIP config kwarg that is *not* in that signature is not a kernel
+            # Any HIP/MTIA config kwarg that is *not* in that signature is not a kernel
             # argument at all; it is a backend compile option that should be forwarded
-            # to triton.compile via `options`, not materialized as a constexpr.
+            # to triton.compile via `options`, not materialized as a constexpr. The MTIA
+            # Triton backend is built on the AMD backend, so AMD-only autotune kwargs
+            # (waves_per_eu/matrix_instr_nonkdim/kpack) leak into cfg.kwargs for MTIA as
+            # well; they are not MTIA kernel args, so leaving them in constants makes
+            # ASTSource raise "'waves_per_eu' is not in list". Stripping them here (and
+            # forwarding as backend options below, where MTIA drops the AMD-only ones)
+            # mirrors the HIP path and fixes MTIA inductor kernel compilation.
             signature_arg_names = OrderedSet(compile_meta["signature"])
             backend_options = {
                 key: value
@@ -1193,9 +1199,12 @@ class CachingAutotuner(KernelInterface):
             for k in tlx_only_cuda_options():
                 if v := getattr(cfg, k, None):
                     options[k] = v
-        if self.device_props.type == "hip":
-            # HIP backend options are consumed by Triton out-of-band from the kernel
-            # signature. They are intentionally *not* present in `constants`.
+        if self.device_props.type in ("hip", "mtia"):
+            # HIP/MTIA backend options are consumed by Triton out-of-band from the kernel
+            # signature. They are intentionally *not* present in `constants`. The MTIA
+            # backend filters out any option that is not a real MTIAOptions field (e.g.
+            # the AMD-only waves_per_eu/matrix_instr_nonkdim/kpack), so forwarding them
+            # here is safe.
             options.update(compile_meta.get("backend_options", {}))
 
         if self.device_props.type == "xpu" and XPU_KERNEL_FORMAT == "zebin":
