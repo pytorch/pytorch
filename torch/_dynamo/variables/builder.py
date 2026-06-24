@@ -1467,8 +1467,8 @@ class VariableBuilder:
             )
         elif (
             isinstance(value, types.MethodType)
-            and value.__name__ in ("shuffle", "sample")
             and isinstance(value.__self__, random.Random)
+            and getattr(value, "__name__", None) in ("shuffle", "sample")
             and RandomVariable.is_supported_random_obj(value.__self__)
         ):
             # Module-level random.shuffle/random.sample are methods bound to the

@@ -2,6 +2,7 @@
 # Owner(s): ["module: complex"]
 
 import torch
+import torch._dynamo.config
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
@@ -62,6 +63,7 @@ class TestComplexTensor(TestCase):
 
     @onlyCPU
     @dtypes(*complex_types())
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_eq(self, device, dtype):
         "Test eq on complex types"
         nan = float("nan")
@@ -241,6 +243,7 @@ class TestComplexTensor(TestCase):
                 actual, expected, msg=f"\neq(out)\nactual {actual}\nexpected {expected}"
             )
 
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     @onlyCPU
     @dtypes(*complex_types())
     def test_ne(self, device, dtype):

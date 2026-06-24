@@ -4,6 +4,7 @@ from copy import deepcopy
 from itertools import product
 
 import torch
+import torch._dynamo.config
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.init as init
@@ -1732,6 +1733,7 @@ class TestNNParametrization(NNTestCase):
         torch.nn.utils.parametrize.remove_parametrizations(m, "weight")
 
     @swap([True, False])
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_weight_norm_state_dict_compat(self):
         m = nn.Linear(4, 5)
         m = torch.nn.utils.weight_norm(m)
