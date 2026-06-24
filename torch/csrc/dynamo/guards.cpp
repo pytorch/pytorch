@@ -2159,9 +2159,7 @@ void stop_recording_dict_pointers(
 bool is_recording_dict_pointers(RootGuardManager* root);
 void record_dict_pointer(RootGuardManager* root, PyObject* dict_pointer);
 void record_tensor_pointer(RootGuardManager* root, PyObject* tensor_pointer);
-void record_tensor_requires_grad(
-    RootGuardManager* root,
-    PyObject* tensor_pointer);
+void record_tensor_metadata(RootGuardManager* root, PyObject* tensor_pointer);
 
 GuardManager* clone_guard_manager(
     GuardManager* from,
@@ -2172,12 +2170,53 @@ void add_relational_guard_resetter_to_cloned_root(
     std::shared_ptr<RelationalGuard> guard);
 std::shared_ptr<RelationalGuard> get_no_tensor_aliasing_guard(
     RootGuardManager* _root);
+const LocalState& get_local_state(RootGuardManager* root);
 // std::string get_compile_id(RootGuardManager* root);
 
 struct WeakEntry {
   PyObject* wr; // weakref
   PyObject* cap; // capsule whose m_self is used by the callback
 };
+
+// Convert concrete sizes/strides to the optional<SymInt> vectors that
+// TensorCheck expects.  All dimensions are treated as static (no nullopt).
+inline std::vector<std::optional<c10::SymInt>> to_opt_symint(
+    c10::IntArrayRef vals) {
+  std::vector<std::optional<c10::SymInt>> out;
+  out.reserve(vals.size());
+  for (auto v : vals) {
+    out.emplace_back(c10::SymInt(v));
+  }
+  return out;
+}
+
+// Build a TensorCheck that validates all concrete metadata (dispatch key,
+// dtype, device, requires_grad, sizes, strides) for the dict-tag fast path.
+inline TensorCheck make_tensor_check(
+    const LocalState& state,
+    const at::Tensor& tensor) {
+  auto layout = tensor.layout();
+  bool sparse = layout == c10::kSparseCsr || layout == c10::kSparseCsc ||
+      layout == c10::kSparseBsc || layout == c10::kSparseBsr;
+  // Sparse layouts don't support strides; use nullopt per dim so
+  // TensorCheck skips stride comparison for each dimension.
+  auto strides = sparse
+      ? std::vector<std::optional<c10::SymInt>>(tensor.dim(), std::nullopt)
+      : to_opt_symint(tensor.strides());
+  return TensorCheck(
+      state,
+      /*pt=*/nullptr,
+      tensor,
+      tensor.key_set(),
+      to_opt_symint(tensor.sizes()),
+      std::move(strides));
+}
+
+struct RecordedTensorMetadata {
+  PyObject* tensor_ptr;
+  TensorCheck check;
+};
+
 /**
  * Base class representing a pair of accessor and the associated guard
  * manager. The accessor defines how to access the child value from the
@@ -2462,10 +2501,10 @@ class GuardManager {
     _tensor_pointers[value] = tensor_pointers;
   }
 
-  void stash_tensor_requires_grad(
+  void stash_tensor_metadata(
       PyObject* value,
-      std::vector<std::pair<PyObject*, bool>>&& tensor_requires_grad) {
-    _tensor_requires_grad_pointers[value] = std::move(tensor_requires_grad);
+      std::vector<RecordedTensorMetadata>&& tensor_metadata) {
+    _tensor_metadata_pointers[value] = std::move(tensor_metadata);
   }
 
   void disable_recursive_dict_tag_optimization() {
@@ -2608,15 +2647,16 @@ class GuardManager {
     return true;
   }
 
-  bool check_tensor_requires_grad_fast(PyObject* value) const {
-    auto it = _tensor_requires_grad_pointers.find(value);
-    if (it == _tensor_requires_grad_pointers.end()) {
+  bool check_tensor_metadata_fast(PyObject* value) {
+    auto it = _tensor_metadata_pointers.find(value);
+    if (it == _tensor_metadata_pointers.end()) {
       return true;
     }
-    for (const auto& [tensor_ptr, expected_requires_grad] : it->second) {
-      if (THPVariable_Check(tensor_ptr) &&
-          THPVariable_Unpack(tensor_ptr).requires_grad() !=
-              expected_requires_grad) {
+    for (auto& recorded_tensor : it->second) {
+      if (!THPVariable_Check(recorded_tensor.tensor_ptr) ||
+          !recorded_tensor.check.check(
+              get_local_state(_root),
+              THPVariable_Unpack(recorded_tensor.tensor_ptr))) {
         return false;
       }
     }
@@ -2649,15 +2689,17 @@ class GuardManager {
     // For a `tag_safe_root`, the input pointer called `value`, the object the
     // guard is inspecting, serves as a proxy for the entire nested dictionary
     // structure beneath that node.  If this `value` pointer is one we have
-    // already recorded, then verifying each dictionary’s tag is sufficient to
-    // prove that nothing inside the subtree has changed.
+    // already recorded, then verifying each dictionary’s tag plus the cached
+    // tensor metadata is sufficient to prove that nothing inside the subtree
+    // has changed.
     //
     // Runtime flow
     // -------------
     // 1) Previously‑seen `value` pointer
     //    • Look up the current `value` pointer in our cache.
-    //    • If found, perform a recursive tag comparison on the cached subtree.
-    //      All tags match means guard passes with no further traversal.
+    //    • If found, perform a recursive tag comparison on the cached subtree
+    //      and revalidate recorded tensor metadata.
+    //      All checks passing means guard passes with no further traversal.
     //
     // 2) First‑time `value` pointer
     //    • Enter recording mode; walk the subtree, each tag safe root collects
@@ -2700,7 +2742,7 @@ class GuardManager {
           // Check for fast path
           // if (is_weakref_valid(value) && check_dict_pointer_tags(value)) {
           if (check_dict_pointer_tags(value) &&
-              check_tensor_requires_grad_fast(value)) {
+              check_tensor_metadata_fast(value)) {
             if (check_no_tensor_aliasing_guards_fast(value)) {
               return true;
             } else {
@@ -2730,9 +2772,9 @@ class GuardManager {
         } else if (_is_tensor && _has_no_tensor_aliasing_guard) {
           record_tensor_pointer(_root, value);
         }
-        // Record tensor requires_grad for all tensors in the subtree.
+        // Tensor metadata can mutate in-place without changing dict tags.
         if (_is_immutable && THPVariable_Check(value)) {
-          record_tensor_requires_grad(_root, value);
+          record_tensor_metadata(_root, value);
         }
       }
     }
@@ -3138,8 +3180,8 @@ class GuardManager {
   std::unordered_map<PyObject*, std::vector<std::pair<PyObject*, uint64_t>>>
       _dict_pointers;
   std::unordered_map<PyObject*, std::vector<PyObject*>> _tensor_pointers;
-  std::unordered_map<PyObject*, std::vector<std::pair<PyObject*, bool>>>
-      _tensor_requires_grad_pointers;
+  std::unordered_map<PyObject*, std::vector<RecordedTensorMetadata>>
+      _tensor_metadata_pointers;
   std::vector<WeakEntry> _tag_safe_entries;
 
 
@@ -3401,7 +3443,7 @@ class RootGuardManager : public GuardManager {
     _current_tag_safe_root = nullptr;
     _recorded_dict_pointers.clear();
     _recorded_tensor_pointers.clear();
-    _recorded_tensor_requires_grad.clear();
+    _recorded_tensor_metadata.clear();
   }
 
   void stop_recording_dict_pointers(PyObject* value, bool result) {
@@ -3411,8 +3453,8 @@ class RootGuardManager : public GuardManager {
           value, _recorded_dict_pointers);
       _current_tag_safe_root->stash_tensor_pointers(
           value, _recorded_tensor_pointers);
-      _current_tag_safe_root->stash_tensor_requires_grad(
-          value, std::move(_recorded_tensor_requires_grad));
+      _current_tag_safe_root->stash_tensor_metadata(
+          value, std::move(_recorded_tensor_metadata));
     }
     reset_dict_tag_recording_variables();
   }
@@ -3430,9 +3472,11 @@ class RootGuardManager : public GuardManager {
     _recorded_tensor_pointers.push_back(tensor_pointer);
   }
 
-  void record_tensor_requires_grad(PyObject* tensor_pointer) {
-    bool rg = THPVariable_Unpack(tensor_pointer).requires_grad();
-    _recorded_tensor_requires_grad.emplace_back(tensor_pointer, rg);
+  void record_tensor_metadata(PyObject* tensor_pointer) {
+    _recorded_tensor_metadata.push_back(RecordedTensorMetadata{
+        tensor_pointer,
+        make_tensor_check(_local_state, THPVariable_Unpack(tensor_pointer)),
+    });
   }
 
  public:
@@ -3492,7 +3536,7 @@ class RootGuardManager : public GuardManager {
   GuardManager* _current_tag_safe_root{nullptr};
   std::vector<std::pair<PyObject*, uint64_t>> _recorded_dict_pointers;
   std::vector<PyObject*> _recorded_tensor_pointers;
-  std::vector<std::pair<PyObject*, bool>> _recorded_tensor_requires_grad;
+  std::vector<RecordedTensorMetadata> _recorded_tensor_metadata;
 };
 
 /*
@@ -3937,15 +3981,17 @@ void record_tensor_pointer(RootGuardManager* root, PyObject* tensor_pointer) {
   root->record_tensor_pointer(tensor_pointer);
 }
 
-void record_tensor_requires_grad(
-    RootGuardManager* root,
-    PyObject* tensor_pointer) {
-  root->record_tensor_requires_grad(tensor_pointer);
+void record_tensor_metadata(RootGuardManager* root, PyObject* tensor_pointer) {
+  root->record_tensor_metadata(tensor_pointer);
 }
 
 std::shared_ptr<RelationalGuard> get_no_tensor_aliasing_guard(
     RootGuardManager* _root) {
   return _root->get_no_tensor_aliasing_guard();
+}
+
+const LocalState& get_local_state(RootGuardManager* root) {
+  return root->_local_state;
 }
 
 // std::string get_compile_id(RootGuardManager* root) {
@@ -4431,10 +4477,7 @@ class FrameLocalsGuardAccessor : public GuardAccessor {
         _key(key[0].ptr()),
         _framelocals_idx(key[1].cast<int>()),
         _is_immutable_object(is_immutable_object(example_value)),
-        _is_tensor(THPVariable_Check(example_value.ptr())),
-        _tensor_requires_grad(
-            _is_tensor ? THPVariable_Unpack(example_value.ptr()).requires_grad()
-                       : false) {}
+        _is_tensor(THPVariable_Check(example_value.ptr())) {}
 
   // Run as a result of calling run_root_guard_manager/check_nopybind
   // NB: Intentional duplication between check_nopybind and
@@ -4442,18 +4485,8 @@ class FrameLocalsGuardAccessor : public GuardAccessor {
   bool check_nopybind(
       FrameLocalsMapping* obj,
       bool matches_dict_tag = false) override { // borrowed ref
-    if (matches_dict_tag && _is_immutable_object) {
-      // Tensors are treated as immutable for the dict-tag optimization, but
-      // their metadata (e.g. requires_grad) can be mutated in-place without
-      // changing the parent dict's version tag. For now we only check
-      // requires_grad since it is the most common mutation; other metadata
-      // changes (dtype, device, etc.) are possible but rare in practice.
-      if (!_is_tensor) {
-        return true;
-      }
-      if (!tensor_requires_grad_changed(obj->get(_framelocals_idx))) {
-        return true;
-      }
+    if (matches_dict_tag && _is_immutable_object && !_is_tensor) {
+      return true;
     }
 
     PyObject* x = obj->get(_framelocals_idx);
@@ -4476,19 +4509,8 @@ class FrameLocalsGuardAccessor : public GuardAccessor {
           "FrameLocalsGuardAccessor check expected dict() input");
     }
 
-    if (matches_dict_tag && _is_immutable_object) {
-      // Tensors are treated as immutable for the dict-tag optimization, but
-      // their metadata (e.g. requires_grad) can be mutated in-place without
-      // changing the parent dict's version tag. For now we only check
-      // requires_grad since it is the most common mutation; other metadata
-      // changes (dtype, device, etc.) are possible but rare in practice.
-      if (!_is_tensor) {
-        return true;
-      }
-      PyObject* x = PyDict_GetItem(obj, _key); // borrowed ref
-      if (!tensor_requires_grad_changed(x)) {
-        return true;
-      }
+    if (matches_dict_tag && _is_immutable_object && !_is_tensor) {
+      return true;
     }
 
     PyObject* x = PyDict_GetItem(obj, _key); // borrowed ref
@@ -4546,15 +4568,9 @@ class FrameLocalsGuardAccessor : public GuardAccessor {
     to->_framelocals_idx = _framelocals_idx;
     to->_is_immutable_object = _is_immutable_object;
     to->_is_tensor = _is_tensor;
-    to->_tensor_requires_grad = _tensor_requires_grad;
   }
 
  private:
-
-  bool tensor_requires_grad_changed(PyObject* x) const {
-    return x != nullptr && THPVariable_Check(x) &&
-        THPVariable_Unpack(x).requires_grad() != _tensor_requires_grad;
-  }
 
   PyObject* _key{nullptr};
   int _framelocals_idx{-1};
@@ -4563,7 +4579,6 @@ class FrameLocalsGuardAccessor : public GuardAccessor {
   // return true.
   bool _is_immutable_object{false};
   bool _is_tensor{false};
-  bool _tensor_requires_grad{false};
 };
 
 /**
@@ -4587,31 +4602,16 @@ class DictGetItemGuardAccessor : public GuardAccessor {
             guard_manager_enum),
         _key(key.ptr()),
         _is_immutable_object(is_immutable_object(example_value)),
-        _is_tensor(THPVariable_Check(example_value.ptr())),
-        _tensor_requires_grad(
-            _is_tensor ? THPVariable_Unpack(example_value.ptr()).requires_grad()
-                       : false) {}
+        _is_tensor(THPVariable_Check(example_value.ptr())) {}
 
   // NB: Intentional duplication between check_nopybind and
   // check_verbose_nopybind.
   bool check_nopybind(PyObject* obj, bool matches_dict_tag = false) override {
-    if (matches_dict_tag && _is_immutable_object &&
+    if (matches_dict_tag && _is_immutable_object && !_is_tensor &&
         !is_recording_dict_pointers(get_guard_manager()->get_root()) &&
         _guard_manager->has_no_accessors()) {
 
-      // Tensors are treated as immutable for the dict-tag optimization, but
-      // their metadata (e.g. requires_grad) can be mutated in-place without
-      // changing the parent dict's version tag. For now we only check
-      // requires_grad since it is the most common mutation; other metadata
-      // changes (dtype, device, etc.) are possible but rare in practice.
-      if (!_is_tensor) {
-        return true;
-      }
-      PyObject* x = PyDict_GetItem(obj, _key); // borrowed ref
-      if (!tensor_requires_grad_changed(x)) {
-        return true;
-      }
-      // Fall through to full check - requires_grad changed.
+      return true;
     }
 
     PyObject* x = PyDict_GetItem(obj, _key); // borrowed ref
@@ -4659,15 +4659,9 @@ class DictGetItemGuardAccessor : public GuardAccessor {
     to->_key = _key;
     to->_is_immutable_object = _is_immutable_object;
     to->_is_tensor = _is_tensor;
-    to->_tensor_requires_grad = _tensor_requires_grad;
   }
 
  private:
-
-  bool tensor_requires_grad_changed(PyObject* x) const {
-    return x != nullptr && THPVariable_Check(x) &&
-        THPVariable_Unpack(x).requires_grad() != _tensor_requires_grad;
-  }
 
   PyObject* _key{nullptr};
 
@@ -4675,7 +4669,6 @@ class DictGetItemGuardAccessor : public GuardAccessor {
   // return true.
   bool _is_immutable_object{false};
   bool _is_tensor{false};
-  bool _tensor_requires_grad{false};
 };
 
 /**
