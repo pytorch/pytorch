@@ -78,18 +78,26 @@ jobs:
         include:
           - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc15
             buildkit_addr: "tcp://buildkitd-arm64.buildkit:1234"
-            runner_label: mt-rel-l-arm64g4-16-62
+            runner_label: mt-l-arm64g4-16-62
           - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc15-inductor-benchmarks
             buildkit_addr: "tcp://buildkitd-arm64.buildkit:1234"
             timeout-minutes: 600
-            runner_label: mt-rel-l-arm64g4-16-62
-    # Use the release runner pool: its nodes carry osdc.io/runner-class=release,
-    # which exempts them from the cache-enforcer DaemonSet's iptables block on
-    # outbound ghcr.io traffic so the "Mirror image to GHCR" step can succeed.
-    # The regular mt-l-* pool blocks ghcr.io egress at the host iptables layer.
+            runner_label: mt-l-arm64g4-16-62
+    # Regular OSDC pool on the `default` group (the arc-cbr-production cluster),
+    # which deploys BuildKit. The orchestrator runner only streams build context
+    # to the remote BuildKit, so the smallest pools fit both arches
+    # (x86: mt-l-x86iavx512-2-4, arm64: mt-l-arm64g4-16-62).
+    #
+    # CAVEAT: regular mt-l-* nodes are subject to the cache-enforcer DaemonSet,
+    # which blocks outbound ghcr.io egress at the host iptables layer (release
+    # runners are exempt via osdc.io/runner-class=release). The "Login to GHCR"
+    # and "Mirror image to GHCR" steps below talk to ghcr.io and will FAIL on
+    # this pool. They are gated to push+branch events, so PR / workflow_dispatch
+    # test runs (which only build and push to ECR) are unaffected -- but the
+    # production push path needs a ghcr.io egress solution before this can land.
     runs-on:
-      group: release-runners
-      labels: ${{ matrix.runner_label || 'mt-rel-l-x86iavx512-8-64' }}
+      group: default
+      labels: ${{ matrix.runner_label || 'mt-l-x86iavx512-2-4' }}
     container:
       image: ghcr.io/actions/actions-runner:latest
     steps:
