@@ -2148,7 +2148,9 @@ class MetaConverter(Generic[_TensorT]):
                             self.set_storage_memo(s, r.untyped_storage())
                             if self.copy_data:
                                 if not _is_fake_tensor(r):
-                                    raise AssertionError("Expected r to be a FakeTensor")
+                                    raise AssertionError(
+                                        "Expected r to be a FakeTensor"
+                                    )
                                 if r.real_tensor is None:
                                     raise AssertionError(
                                         "r.real_tensor must not be None when copy_data is True"
@@ -2175,7 +2177,9 @@ class MetaConverter(Generic[_TensorT]):
                                         real_storage = _clone_real_storage_from_tensor(
                                             t.data
                                         )
-                                        _set_real_storage(r.untyped_storage(), real_storage)
+                                        _set_real_storage(
+                                            r.untyped_storage(), real_storage
+                                        )
                                         r.real_tensor.set_(
                                             real_storage,
                                             t.storage_offset,
@@ -2221,7 +2225,9 @@ class MetaConverter(Generic[_TensorT]):
 
                             mb_fake_mode = maybe_get_fake_mode(r)
                             if mb_fake_mode is not None:
-                                maybe_fake_mgr = in_kernel_invocation_manager(mb_fake_mode)
+                                maybe_fake_mgr = in_kernel_invocation_manager(
+                                    mb_fake_mode
+                                )
                             with torch.no_grad(), maybe_suppress():
                                 with maybe_fake_mgr:
                                     r.set_(r_s, storage_offset, sizes, strides)
