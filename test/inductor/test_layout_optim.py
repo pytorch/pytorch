@@ -423,7 +423,7 @@ class TestLayoutOptimROCmMultipliers(TestCase):
         GROUPED=1.358, DEFAULT=0.823, IN_OUT=0.725, SMALL=0.783
     On gfx942 (MI300) channels-last regresses small/grouped convs, so the
     override sets SMALL=1.25, GROUPED=1.05 (DEFAULT/IN_OUT unchanged). On gfx950
-    (MI350) channels-last is favorable, so GROUPED=0.629, DEFAULT=0.813,
+    (MI350) channels-last is favorable, so GROUPED=0.553, DEFAULT=0.813,
     IN_OUT=0.642, SMALL=0.795. decide_layout_opt enables channels-last iff
     weighted_flops <= total_flops, so the re-tuned weights flip the decision for
     the affected graphs while leaving default-dominated graphs unchanged.
@@ -633,7 +633,7 @@ class TestLayoutOptimROCmMultipliers(TestCase):
     # --- M4: gfx950 has its own (favorable) weights; grouped graph flips -----
     def test_grouped_graph_flips_decision_on_gfx950(self):
         # Same resnext-like graph as the gfx942 grouped test (grouped ~2/3):
-        #   gfx950:  0.823*0.333 + 0.629*0.667 ~= 0.69 <= 1  => ENABLE
+        #   gfx950:  0.823*0.333 + 0.553*0.667 ~= 0.64 <= 1  => ENABLE
         #   nvidia:  0.823*0.333 + 1.358*0.667 ~= 1.18 >  1  => SKIP
         class GroupedFlipNet(nn.Module):
             def __init__(self):
@@ -656,10 +656,10 @@ class TestLayoutOptimROCmMultipliers(TestCase):
         self.assertGreater(total, 0.0)
         self.assertGreater(fc["grouped"] / total, 0.55)
 
-        # gfx950 GROUPED=0.629 ENABLES; NVIDIA GROUPED=1.358 SKIPS.
+        # gfx950 GROUPED=0.553 ENABLES; NVIDIA GROUPED=1.358 SKIPS.
         self.assertTrue(
             self._decide(gm, self.GFX950_ARCH),
-            "gfx950 GROUPED=0.629 should ENABLE this resnext-like graph",
+            "gfx950 GROUPED=0.553 should ENABLE this resnext-like graph",
         )
         self.assertFalse(
             self._decide(gm, self.NON_GFX942_ARCH),
