@@ -32,22 +32,23 @@ install_ubuntu() {
         rm -rf /opt/rocm
       fi
 
-      # Install the multi-arch wheel set from staging. TheRock's promoted
-      # nightly index can be partial while per-target tests finish, but staging
-      # contains all device packages needed by the device-all extra.
       if [[ -z "${THEROCK_NIGHTLY_INDEX_URL:-}" ]]; then
-        THEROCK_NIGHTLY_INDEX_URL="https://rocm.nightlies.amd.com/whl-staging-multi-arch/"
+        THEROCK_NIGHTLY_INDEX_URL="https://rocm.nightlies.amd.com/whl-multi-arch/"
       fi
+      # WIP: temporarily pin TheRock nightly ROCm to the June 12 build while
+      # the rolling nightly index is unstable.
+      THEROCK_NIGHTLY_VERSION="7.14.0a20260612"
 
       echo "=============================================="
       echo "ROCm Multi-Arch Wheel Installation (TheRock nightly)"
       echo "=============================================="
       echo "Index URL: ${THEROCK_NIGHTLY_INDEX_URL}"
+      echo "TheRock nightly version: ${THEROCK_NIGHTLY_VERSION}"
       echo "=============================================="
 
       python3 -m pip install \
         --index-url "${THEROCK_NIGHTLY_INDEX_URL}" \
-        "rocm[libraries,devel,device-all]"
+        "rocm[libraries,devel,device-all]==${THEROCK_NIGHTLY_VERSION}"
 
       # Use the rocm-sdk CLI helper to discover install paths
       ROCM_HOME="$(rocm-sdk path --root)"
