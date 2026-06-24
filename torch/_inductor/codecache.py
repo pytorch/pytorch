@@ -4164,6 +4164,17 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
     def cache_clear() -> None:
         CppWrapperCodeCache.cache.clear()
 
+    @classmethod
+    def load_pybinding(cls, *args: Any, **kwargs: Any) -> Any:
+        # The cpp_wrapper host glue is compiled synchronously here (in the JIT
+        # torch.compile path this runs while importing the generated wrapper
+        # module, and in AOTI it runs during the autotune pass). Time it under a
+        # dedicated key so the host C++ cold-compile cost is attributed to
+        # cpp_wrapper instead of being hidden inside the generic
+        # PyCodeCache.load_by_key_path timer.
+        with dynamo_timed("cpp_wrapper_compile", log_pt2_compile_event=True):
+            return super().load_pybinding(*args, **kwargs)
+
     cpp_compile_command_flags = {
         "include_pytorch": True,
         "shared": True,
