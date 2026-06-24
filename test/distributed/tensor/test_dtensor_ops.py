@@ -161,8 +161,6 @@ dtensor_fails = {
     xfail("sparse.mm", "reduce"),
     # meta tensor data not allocated yet during tensor_split
     xfail("tensor_split"),
-    # output_specs count mismatch in unsafe_split strategy
-    xfail("unsafe_split"),
     # /TODO(whc) debug/triage
     # ops inside this might even fail without dtensor
     # tests, as we rescale op db common test size factor (i.e. L, M, S)
@@ -1001,11 +999,12 @@ class TestSingleDimStrategies(DTensorOpTestBase):
     @ops(op_db, allowed_dtypes=(torch.float,))
     @skipOps(
         {
-            # Stochastic: each shard gets independent RNG, so
-            # op(full) != cat(op(shard0), op(shard1)).
+            # Value validation cannot compare nondeterministic or
+            # uninitialized outputs shard-by-shard.
             skip("exponential"),
             skip("geometric"),
             skip("log_normal"),
+            skip("nn.functional.rrelu"),
             skip("normal", "in_place"),
             skip("uniform"),
         },
