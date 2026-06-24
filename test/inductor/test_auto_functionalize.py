@@ -108,6 +108,46 @@ class AutoFunctionalizeTests(torch._inductor.test_case.TestCase):
             f(*eager_args)
             self.assertEqual(compiled_args, eager_args)
 
+    def test_auto_functionalize_optional_tensorlist_with_none(self):
+        # Regression test: a mutable Tensor(a!)?[] arg may hold None elements.
+        # The shared clone helper must skip None instead of cloning it, which
+        # previously raised "AttributeError: 'NoneType' object has no attribute
+        # 'size'" inside auto_functionalized_dense.
+        from torch._higher_order_ops.auto_functionalize import auto_functionalized
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::foo",
+                "(Tensor(a!)?[] xs) -> ()",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo", "CompositeExplicitAutograd", lib=lib)
+            def foo_impl(xs):
+                for x in xs:
+                    if x is not None:
+                        x.add_(1.0)
+
+            x0 = torch.ones(3)
+            x2 = torch.ones(2)
+
+            # The None element in the middle used to crash the clone step.
+            result = auto_functionalized(torch.ops.mylib.foo.default, xs=[x0, None, x2])
+
+            # Functionalization clones the mutable args, so the original inputs
+            # are left unchanged.
+            self.assertEqual(x0, torch.ones(3))
+            self.assertEqual(x2, torch.ones(2))
+
+            # The returned clones keep the None element in place and apply the
+            # in-place mutation to the cloned tensors.
+            cloned_xs = result[-1]
+            self.assertEqual(len(cloned_xs), 3)
+            self.assertIsNone(cloned_xs[1])
+            self.assertEqual(cloned_xs[0], torch.full((3,), 2.0))
+            self.assertEqual(cloned_xs[2], torch.full((2,), 2.0))
+
     def test_can_auto_functionalize(self):
         from torch._higher_order_ops.auto_functionalize import can_auto_functionalize
 
