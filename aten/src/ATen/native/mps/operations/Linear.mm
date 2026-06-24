@@ -243,8 +243,10 @@ static Tensor _mps_linear_backward_input(IntArrayRef input_size, const Tensor& g
       newCachedGraph->gradOutputTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, grad_output);
 
       // MPS matrixMultiplication crashes for 5D+ tensors on 14.2.1 with `New volume should match old volume`
-      // See https://github.com/pytorch/pytorch/issues/114942 for more details
-      bool needReshape = grad_output.dim() > 4;
+      // (https://github.com/pytorch/pytorch/issues/114942), so flatten >4D to 2D first. macOS 27 handles N-D
+      // matmul directly and instead crashes the MLIR pass manager on the in-graph reshape -> matmul -> reshape
+      // (https://github.com/pytorch/pytorch/issues/187201), so skip the reshape there.
+      bool needReshape = grad_output.dim() > 4 && !is_macos_13_or_newer(MacOSVersion::MACOS_VER_27_0_PLUS);
       auto gradOutputTensor = needReshape
           ? [mpsGraph flatten2DTensor:newCachedGraph->gradOutputTensor_ axis:-1 name:nil]
           : newCachedGraph->gradOutputTensor_;
