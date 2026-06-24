@@ -1,7 +1,6 @@
 import torch
 import torch.fx as fx
 
-
 try:
     # Newer PyTorch exposes make_fx under torch.func
     from torch.func import make_fx
@@ -13,20 +12,20 @@ from torch._functorch.compile_utils import fx_graph_cse
 from torch.profiler import profile, ProfilerActivity
 
 
-# This benchmark requires CUDA
-if not torch.cuda.is_available():
-    raise RuntimeError("CUDA is required to run this benchmark script")
-
-
 def profile_it(f, inp):
-    """Profile function `f` on `inp` and return the average device time per iteration in microseconds.
+    """Profile function f on inp and return the average device time per iteration in microseconds.
 
     Improvements over the original:
     - Warm up the CUDA context and kernels to avoid measuring one-time setup costs.
     - Synchronize after warm-up and after each measured iteration to ensure we capture GPU execution time.
     - Increase iteration count for more stable averages.
-    - Use a compatibility fallback for profiler timing attributes.
+    - Use a compatibility fallback for profiler timing attributes, skipping events
+      that don't expose either attribute instead of failing the whole run.
     """
+    # This benchmark requires CUDA
+    if not torch.cuda.is_available():
+        raise RuntimeError("CUDA is required to run this benchmark script")
+
     # 1. Warm-up to initialize CUDA context and internal buffers
     for _ in range(10):
         _ = f(inp)
@@ -37,14 +36,12 @@ def profile_it(f, inp):
     with profile(activities=[ProfilerActivity.CUDA], record_shapes=False) as prof:
         for _ in range(itr):
             f(inp)
-            # Ensure the GPU work finishes before proceeding to the next iteration
+            # Ensures the GPU work finishes before proceeding to the next iteration
             torch.cuda.synchronize()
 
     timing = prof.key_averages()
 
-    # Compatibility fallback for profiler time attribute names across PyTorch versions
-    # Branch on device_time_total first and only touch cuda_time_total in the fallback path
-    # to keep the output clean and avoid FutureWarning
+
     def _dev_time(e):
         if hasattr(e, "device_time_total"):
             return e.device_time_total
@@ -54,25 +51,26 @@ def profile_it(f, inp):
             return None
 
     times = [_dev_time(e) for e in timing]
-    if any(t is None for t in times):
-        # If the profiler events don't expose the expected fields, fail early with a helpful message
+    valid_times = [t for t in times if t is not None]
+
+    if not valid_times:
+
         raise RuntimeError(
-            "Profiler timing attributes not found on events (expected device_time_total or cuda_time_total)"
+            "Profiler timing attributes not found on any events (expected device_time_total or cuda_time_total)"
         )
 
-    cuda_time_total = sum(times)
-    # Return average per-iteration time in microseconds (profiler reports in microseconds)
+    cuda_time_total = sum(valid_times)
+    #profiler reports in microseconds
     return cuda_time_total / itr
 
 
 def profile_function(name, f, inp):
     fx_g = make_fx(f)(inp)
 
-    # Apply common-subexpression-elimination (CSE) to the fx graph
+    # Applying common-subexpression-elimination (CSE) to the fx graph
     new_g_graph = fx_graph_cse(fx_g.graph)
     new_g = fx.GraphModule(fx_g, new_g_graph)
 
-    # Do not benchmark against the scripted version because script already does some CSE
     # script_f = torch.jit.script(fx_g)
     # script_g = torch.jit.script(new_g)
     # avg_cuda_time_f = profile_it(script_f, inp)
