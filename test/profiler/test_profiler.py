@@ -5,7 +5,6 @@ import collections
 import contextlib
 import copy
 import gc
-import gzip
 import json
 import mmap
 import os
@@ -48,7 +47,7 @@ from torch.profiler import (
     record_function,
     supported_activities,
 )
-from torch.testing._internal.common_cuda import SM100OrLater, TEST_MULTIGPU
+from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
