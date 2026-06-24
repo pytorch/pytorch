@@ -177,7 +177,7 @@ class TestOverlapSchedulingRuntimeEstimation(TestCase):
         self.assertNotIn(getitem, estimations)
         mock_estimate_roofline.assert_not_called()
 
-    def test_manual_overlap_scheduler_uses_noop_default_estimator(self):
+    def test_manual_overlap_scheduler_skips_runtime_estimations(self):
         from torch._inductor.fx_passes import overlap_manual_scheduling
 
         graph = fx.Graph()
@@ -185,19 +185,10 @@ class TestOverlapSchedulingRuntimeEstimation(TestCase):
         graph.output(x)
         gm = fx.GraphModule({}, graph)
 
-        captured_kwargs = {}
-
-        def fake_overlap_scheduler_init(self, *args, **kwargs):
-            captured_kwargs.update(kwargs)
-            self.graph = gm.graph
-            self.collective_info = {}
-
         with (
-            patch.object(
-                overlap_manual_scheduling.OverlapScheduler,
-                "__init__",
-                fake_overlap_scheduler_init,
-            ),
+            patch(
+                "torch._inductor.fx_passes.overlap_scheduling.gather_node_runtime_estimations"
+            ) as mock_gather,
             patch.object(
                 overlap_manual_scheduling,
                 "ManualOverlapPreservingBucketer",
@@ -209,9 +200,7 @@ class TestOverlapSchedulingRuntimeEstimation(TestCase):
                 insert_overlap_deps=False,
             )
 
-        estimator = captured_kwargs["custom_runtime_estimation"]
-        self.assertIsNotNone(estimator)
-        self.assertEqual(estimator(x, None), 0.0)
+        mock_gather.assert_not_called()
 
 
 if __name__ == "__main__":

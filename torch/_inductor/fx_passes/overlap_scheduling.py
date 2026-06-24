@@ -415,6 +415,7 @@ class OverlapScheduler:
         max_off_bucket_gb: float | None = 0.5,
         prioritize_bucketing_during_scheduling: bool = True,
         pge_profile_path: str | None = None,
+        skip_runtime_estimations: bool = False,
     ):
         self.gm = gm
         self.graph = gm.graph
@@ -470,12 +471,15 @@ class OverlapScheduler:
         # Compute initial node runtime estimates. Compute nodes use roofline model
         # here; the alignment step in run() replaces them with benchmarked +
         # cross-rank-aligned values.
-        self.node_estimations = gather_node_runtime_estimations(
-            gm,
-            custom_runtime_estimation,
-            enable_fusion_regions=enable_fusion_regions,
-            log_estimations=log_runtime_estimations,
-        )
+        if skip_runtime_estimations:
+            self.node_estimations = {}
+        else:
+            self.node_estimations = gather_node_runtime_estimations(
+                gm,
+                custom_runtime_estimation,
+                enable_fusion_regions=enable_fusion_regions,
+                log_estimations=log_runtime_estimations,
+            )
         # Build structures
         stable_topological_sort(self.graph)
         self.nodes = list(self.graph.nodes)

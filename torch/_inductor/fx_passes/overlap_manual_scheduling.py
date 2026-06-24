@@ -43,13 +43,6 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def default_custom_runtime_estimation(
-    node: fx.Node,
-    size: int | None,
-) -> float | None:
-    return 0.0
-
-
 def _collect_nodes_must_be_after(node: fx.Node) -> list[fx.Node]:
     """BFS forward collecting node and its transitive users with no external inputs."""
     result: list[fx.Node] = [node]
@@ -401,14 +394,8 @@ class ManualOverlapScheduler(OverlapScheduler):
         # Manual overlap historically used "custom_ops" mode for bucketing
         bucket_mode = bucket_mode or "custom_ops"
 
-        # ManualOverlapScheduler is plan-driven rather than estimation-driven.
-        # Keep a no-op estimator by default so the inherited OverlapScheduler
-        # initialization path does not enter analytical NCCL estimation for
-        # compile-on-one-rank graphs where group_name may be an FX Node.
-
-        if custom_runtime_estimation is None:
-            custom_runtime_estimation = default_custom_runtime_estimation
-
+        # ManualOverlapScheduler is plan-driven, so it skips runtime estimation
+        # during OverlapScheduler initialization.
         super().__init__(
             gm,
             max_in_flight_gb=0.0,
@@ -417,8 +404,6 @@ class ManualOverlapScheduler(OverlapScheduler):
             insert_overlap_deps=insert_overlap_deps,
             compute_overlap_multipler=0.0,
             max_coll_distance=0,
-            # ManualOverlapScheduler schedules from module_bucket_plans and
-            # overrides _identify_collectives() to assign zero collective cost.
             custom_runtime_estimation=custom_runtime_estimation,
             collective_estimator=collective_estimator,
             compute_estimator=compute_estimator,
@@ -426,6 +411,7 @@ class ManualOverlapScheduler(OverlapScheduler):
             max_memory_increase_gb=None,
             max_memory_increase_ratio=None,
             bucket_mode=bucket_mode,
+            skip_runtime_estimations=True,
         )
         self.module_bucket_plans = module_bucket_plans
         self.nodes_in_subgraph: list[list[fx.Node]] = []
@@ -658,8 +644,6 @@ def manual_overlap_bucketing(
     """
 
     # decode abbreviated FQNs to actual FQNs
-    if custom_runtime_estimation is None:
-        custom_runtime_estimation = default_custom_runtime_estimation
     overlapped_gm = ManualOverlapScheduler(
         gm,
         module_bucket_plans,
