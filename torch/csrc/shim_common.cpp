@@ -79,8 +79,9 @@ static StableIValue from_ivalue(
     uint64_t extension_build_version) {
   switch (type->kind()) {
     case c10::TypeKind::TensorType: {
-      AtenTensorHandle ath = torch::aot_inductor::new_tensor_handle(
-          std::move(const_cast<at::Tensor&>(ivalue.toTensor())));
+      at::Tensor tensor = ivalue.toTensor();
+      AtenTensorHandle ath =
+          torch::aot_inductor::new_tensor_handle(std::move(tensor));
       return torch::stable::detail::_from(ath, extension_build_version);
     }
     case c10::TypeKind::IntType: {
@@ -147,8 +148,9 @@ static StableIValue from_ivalue(
         return torch::stable::detail::_from(
             std::nullopt, extension_build_version);
       }
-      const StableIValue value =
-          from_ivalue(inner_type, ivalue, extension_build_version);
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+      const StableIValue value{
+          from_ivalue(inner_type, ivalue, extension_build_version)};
       StableIValue* sivp = nullptr;
       TORCH_ERROR_CODE_CHECK(torch_new_stable_ivalue(&sivp));
       *sivp = value;
@@ -325,8 +327,7 @@ class StableIValueBoxedKernel : public c10::OperatorKernel {
     const auto num_returns = schema.returns().size();
     const auto num_arguments = schema.arguments().size();
 
-    auto ministack =
-        std::make_unique<StableIValue[]>(std::max(num_arguments, num_returns));
+    std::vector<StableIValue> ministack(std::max(num_arguments, num_returns));
 
     for (const auto idx : c10::irange(num_arguments)) {
       const auto ministack_idx = num_arguments - idx - 1;
@@ -338,7 +339,7 @@ class StableIValueBoxedKernel : public c10::OperatorKernel {
 
     // boxed function is going to take a stack of StableIValues, cast them to
     // our schema values, and run the function and modify the StableIValue stack
-    fn_(ministack.get(), num_arguments, num_returns);
+    fn_(ministack.data(), num_arguments, num_returns);
 
     // read the output from the end of the stack and wrap that back into
     // IValue from StableIValue
@@ -375,6 +376,7 @@ AOTI_TORCH_EXPORT AOTITorchError torch_parse_device_string(
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     c10::Device device{std::string(device_string)};
     *out_device_type = static_cast<uint32_t>(device.type());
+    // NOLINTNEXTLINE(bugprone-signed-char-misuse)
     *out_device_index = static_cast<int32_t>(device.index());
   });
 }
@@ -424,7 +426,7 @@ AOTITorchError aoti_torch_call_dispatcher(
     // we will convert to StableIValue and repopulate user input stack
     for (const auto idx : c10::irange(num_returns)) {
       const auto stack_idx = num_returns - idx - 1;
-      const c10::TypePtr& ret_type = schema.returns()[idx].real_type();
+      const c10::TypePtr& ret_type = schema.returns()[stack_idx].real_type();
       stack[stack_idx] = from_ivalue(
           ret_type, torch::jit::pop(ivalue_stack), TORCH_ABI_VERSION);
     }
@@ -579,7 +581,7 @@ AOTI_TORCH_EXPORT AOTITorchError torch_call_dispatcher(
     // we will convert to StableIValue and repopulate user input stack
     for (const auto idx : c10::irange(num_returns)) {
       const auto stack_idx = num_returns - idx - 1;
-      const c10::TypePtr& ret_type = schema.returns()[idx].real_type();
+      const c10::TypePtr& ret_type = schema.returns()[stack_idx].real_type();
       stack[stack_idx] = from_ivalue(
           ret_type, torch::jit::pop(ivalue_stack), extension_build_version);
     }

@@ -9528,12 +9528,16 @@ class FallbackKernel(ExternKernelAlloc):
         kernel = self.op_overload
         if kernel is None:
             raise AssertionError("Expected kernel is not None")
+        route_through_call_dispatcher = False
         if kernel.namespace == "aten":
             # Aten Fallback Ops
             if not isinstance(kernel, torch._ops.OpOverload):
                 raise AssertionError(type(kernel))
             if V.graph.cpp_wrapper:
-                from torchgen.aoti.fallback_ops import inductor_fallback_ops
+                from torchgen.aoti.fallback_ops import (
+                    inductor_fallback_ops,
+                    only_for_kernel_backends_allowed_devices,
+                )
 
                 if str(kernel) not in inductor_fallback_ops:
                     # C shim v2 is torchgen-ed, which should cover all aten ops.
@@ -9543,6 +9547,17 @@ class FallbackKernel(ExternKernelAlloc):
                         kernel,
                     )
                     self.use_runtime_dispatch = True
+                elif (
+                    allowed_devices := only_for_kernel_backends_allowed_devices.get(
+                        str(kernel)
+                    )
+                ) is not None:
+                    device = self.get_device()
+                    device_type = device.type if device is not None else None
+
+                    if device_type not in allowed_devices:
+                        self.use_runtime_dispatch = True
+                        route_through_call_dispatcher = True
         elif kernel.namespace == "_quantized":
             # Internal Quantized Fallback Ops
             if not isinstance(kernel, torch._ops.OpOverload):
@@ -9588,7 +9603,16 @@ class FallbackKernel(ExternKernelAlloc):
 
         self.codegen_comment(wrapper)
         if self.use_runtime_dispatch:
-            exported_args = self.export_extern_kernel_node()
+            if route_through_call_dispatcher:
+                args, kwargs = self.unflatten_args(self.inputs, self.constant_args)
+                args = self.fill_non_provided_args(args, kwargs)
+                ordered_kwargs = [
+                    self.get_kwargs_value(key, **kwargs)
+                    for key in self.ordered_kwargs_for_cpp_kernel
+                ]
+                exported_args = [*args, *ordered_kwargs]
+            else:
+                exported_args = self.export_extern_kernel_node()
             if self.python_kernel_name is None:
                 raise AssertionError("Expected self.python_kernel_name is not None")
             if self.op_overload is None:
@@ -9602,6 +9626,7 @@ class FallbackKernel(ExternKernelAlloc):
                 exported_args,
                 # NOTE: [special handling of all_reduce_coalesced_'s return value]
                 self.outputs if self.outputs else self.mutation_outputs,
+                route_through_call_dispatcher=route_through_call_dispatcher,
             )
         else:
             wrapper.generate_fallback_kernel(self)

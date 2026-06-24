@@ -80,8 +80,12 @@ inductor_fallback_ops: dict[str, dict[str, str | dict[str, list[str] | str]]] = 
     "aten._scaled_dot_product_flash_attention.quantized": {
         "since": "TORCH_VERSION_2_11_0"
     },
-    "aten._scaled_dot_product_fused_attention_overrideable_backward.default": {},
-    "aten._scaled_dot_product_fused_attention_overrideable.default": {},
+    "aten._scaled_dot_product_fused_attention_overrideable_backward.default": {
+        "only_for_kernel_backends": "1"
+    },
+    "aten._scaled_dot_product_fused_attention_overrideable.default": {
+        "only_for_kernel_backends": "1"
+    },
     "aten._scaled_mm.default": {},
     "aten._scaled_grouped_mm.default": {"since": "TORCH_VERSION_2_10_0"},
     "aten._scaled_mm.out": {},
@@ -213,6 +217,32 @@ inductor_fallback_ops: dict[str, dict[str, str | dict[str, list[str] | str]]] = 
     "aten.view.dtype": {},
     "aten._weight_int4pack_mm_with_scales_and_zeros.default": {},
 }
+
+# New AOTI artifacts should only use a generated C shim for these ops on
+# devices with real backend kernels. Other devices must route through the
+# runtime dispatcher so TORCH_LIBRARY_IMPL overrides remain observable. The
+# generated legacy shim symbols are still retained for ABI with older artifacts.
+only_for_kernel_backends_allowed_devices: dict[str, frozenset[str]] = {
+    "aten._scaled_dot_product_fused_attention_overrideable_backward.default": frozenset(),
+    "aten._scaled_dot_product_fused_attention_overrideable.default": frozenset({"xpu"}),
+}
+
+_only_for_kernel_backends_ops = frozenset(
+    name
+    for name, metadata in inductor_fallback_ops.items()
+    if metadata.get("only_for_kernel_backends") == "1"
+)
+if _only_for_kernel_backends_ops != only_for_kernel_backends_allowed_devices.keys():
+    missing = (
+        _only_for_kernel_backends_ops - only_for_kernel_backends_allowed_devices.keys()
+    )
+    extra = (
+        only_for_kernel_backends_allowed_devices.keys() - _only_for_kernel_backends_ops
+    )
+    raise AssertionError(
+        "only_for_kernel_backends_allowed_devices is out of sync with "
+        f"inductor_fallback_ops. Missing: {sorted(missing)}. Extra: {sorted(extra)}."
+    )
 
 # `python torchgen/gen.py --update-aoti-c-shim` will automatically generate
 # c_shim_aten.{h/cpp} based on the list below.

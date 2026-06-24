@@ -346,7 +346,7 @@ def gen_declaration_and_definition(
     indexed_op_metadata: dict[int, list[str]] = {1: []}
     for ver_str, payload in sorted(op_metadata.items()):
         # since will get processed later per op
-        if ver_str == "since":
+        if ver_str in ("since", "only_for_kernel_backends"):
             continue
         if not ver_str.startswith("v"):
             raise AssertionError(
@@ -532,7 +532,11 @@ def get_header_for_aoti(
     extend_aoti_c_shim: bool,
 ) -> str | None:
     backend_index = get_backend_index_for_aoti(
-        func, func_group_mapping, dispatch_key, backend_indices, extend_aoti_c_shim
+        func,
+        func_group_mapping,
+        dispatch_key,
+        backend_indices,
+        extend_aoti_c_shim,
     )
     if backend_index is None:
         if dispatch_key is None:
@@ -560,7 +564,11 @@ def gen_c_shim(
     extend_aoti_c_shim: bool,
 ) -> str | None:
     backend_index = get_backend_index_for_aoti(
-        func, func_group_mapping, dispatch_key, backend_indices, extend_aoti_c_shim
+        func,
+        func_group_mapping,
+        dispatch_key,
+        backend_indices,
+        extend_aoti_c_shim,
     )
     if backend_index is None and dispatch_key is not None:
         return None
