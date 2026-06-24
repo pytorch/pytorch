@@ -769,6 +769,30 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @patches
     @torch.no_grad
     @requires_mkl
+    @parametrize("batch_size", (384,))
+    @parametrize("features", (196,))
+    @parametrize("bias", (True, False))
+    @dtypes(torch.bfloat16)
+    def test_linear_binary_same_input(self, batch_size, features, bias, dtype):
+        class M(torch.nn.Module):
+            def __init__(self, bias):
+                super().__init__()
+                self.linear = torch.nn.Linear(features, features, bias)
+
+            def forward(self, x):
+                return self.linear(x) + x
+
+        counters.clear()
+        v = torch.randn(batch_size, features).to(dtype=dtype)
+        mod = M(bias=bias).to(dtype=dtype).eval()
+        with verify(dtype) as (atol, rtol):
+            self.common(mod, (v,), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
+
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @requires_mkl
     @requires_onednn
     @set_num_threads(1)
     @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
