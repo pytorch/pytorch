@@ -11,8 +11,10 @@ def _today(value: date) -> type[date]:
     math in ``parse_older_than`` is deterministic regardless of the real clock."""
 
     class PinnedDate(date):
+        # date.today is typed to return Self; this stub pins it to a fixed
+        # date so the relative-date math is deterministic.
         @classmethod
-        def today(cls) -> date:
+        def today(cls) -> date:  # pyrefly: ignore [bad-override]
             return value
 
     return PinnedDate
