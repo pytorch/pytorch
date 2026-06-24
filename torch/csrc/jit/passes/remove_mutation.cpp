@@ -30,18 +30,14 @@ Node* MutationRemover::createSpecialMappedOp(Node* n) {
   auto inputs = n->inputs();
   Node* new_node = nullptr;
   if (n->matches(
-          "aten::fill_.Scalar(Tensor(a!) self, Scalar value) -> Tensor(a!)")) {
-    auto dtype = graph_->insert(prim::dtype, {inputs.at(0)});
-    new_node = graph_
-                   ->insert(
-                       aten::full_like,
-                       {inputs.at(0), inputs.at(1)},
-                       {NamedValue("dtype", dtype)})
-                   ->node();
+          "aten::fill_.Scalar(Tensor(a!) self, Scalar value) -> Tensor(a!)") ||
+      n->matches(
+          "aten::fill_.Tensor(Tensor(a!) self, Tensor value) -> Tensor(a!)")) {
+    new_node = graph_->insert(aten::fill, {inputs.at(0), inputs.at(1)})->node();
     new_node->copyMetadata(n);
     new_node->output()->setType(n->output()->type());
   } else if (n->matches("aten::zero_(Tensor(a!) self) -> Tensor(a!)")) {
-    new_node = graph_->insert(aten::zeros_like, {n->inputs().at(0)})->node();
+    new_node = graph_->insert(aten::zero, {n->inputs().at(0)})->node();
   } else if (
       n->matches(
           "aten::normal_(Tensor(a!) self, float mean=0, float std=1, *, Generator? generator=None) -> Tensor(a!)")) {

@@ -387,6 +387,15 @@ class TestTracer(JitTestCase):
         ft = torch.jit.trace(f, x, _force_outplace=True)
         self.assertEqual(f(x), ft(x))
 
+    def test_force_outplace_check_fill_tensor(self):
+        def f(x, y):
+            return torch.empty(x.shape).fill_(y)
+
+        x = torch.randn(10, 15)
+        y = torch.tensor(3.14)
+        ft_tensor = torch.jit.trace(f, (x, y), _force_outplace=True)
+        self.assertEqual(f(x, y), ft_tensor(x, y))
+
     def test_force_outplace_check_zero(self):
         def f(x):
             return torch.empty(x.shape).zero_()

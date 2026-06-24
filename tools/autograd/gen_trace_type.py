@@ -105,12 +105,6 @@ op_name = c10::Symbol::fromQualString("aten::${trace_name}");
 """
 )
 
-# These functions have their names recorded under trace renamed,
-RENAME_TRACE = {
-    "zero": "zeros_like",  # replacing aten::zero_ with aten::zeros_like
-    "fill": "full_like",  # replacing aten::fill_ with aten::full_like
-}
-
 
 def format_trace_op_name(f: NativeFunction) -> str:
     # TODO: byte-for-byte compatible with old codegen behavior - should clean up
@@ -121,15 +115,12 @@ def format_trace_op_name(f: NativeFunction) -> str:
         # special case for *_out functions: the in-place and out-of-place ops
         # are overloaded with the same name in the JIT
         trace_name = str(f.func.name.name)
-        trace_name = RENAME_TRACE.get(trace_name, trace_name)
         return OP_NAME.substitute(trace_name=trace_name)
 
     # otherwise, this is an in-place op and we need to emit both in- and
     # out-of-place versions
     outplace_trace_name = f.func.name.name.base
     inplace_trace_name = cpp.name(f.func)
-    outplace_trace_name = RENAME_TRACE.get(outplace_trace_name, outplace_trace_name)
-    inplace_trace_name = RENAME_TRACE.get(inplace_trace_name, inplace_trace_name)
 
     return SELECT.substitute(
         cond="tracer_state->force_outplace",
@@ -234,47 +225,6 @@ def format_trace_inputs(f: NativeFunction) -> str:
     return "\n".join(trace_inputs)
 
 
-# `torch.jit.trace` have undocumented keyword argument `_force_outplace`,
-# which force jit to replace functions with outplace variants (for
-# example `aten::add_` becomes `aten::add`).
-#
-# This replacement implemented in-place with minimum modifications of
-# arguments stack (as it assumes that outplace call has the same arguments
-# as inplace version).
-#
-# However there are no such substitutions available for `aten::fill_`
-# and `aten::zero_` operators, as we never implemented `aten::fill`
-# and `aten::zero`. So jit tracing hack replacing `aten::zero_` with
-# `aten::zeros_like` and replacing `aten::fill_` with `aten::full_like`.
-#
-# But as they potentially can have different arguments, we also have
-# to hack into the stack and add missing ones.
-#
-# A possible alternative would be:
-#
-#  - Add `aten::fill` and `aten::zero`
-#
-#  - Or keep `aten::zeros_like` arguments aligned with `aten::zero_`
-# arguments (inside of the `native_functions.yaml`)
-RENAME_TRACE_ADD_ARGS = {
-    "fill": """\
-    jit::tracer::addInputs(node, "options", ::std::optional<ScalarType>());
-    jit::tracer::addInputs(node, "options", layout_or_default(::std::nullopt));
-    jit::tracer::addInputs(node, "options", device_or_default(::std::nullopt));
-    jit::tracer::addInputs(node, "options", pinned_memory_or_default(::std::nullopt));
-    ::std::optional<MemoryFormat> memory_format = c10::MemoryFormat::Preserve;
-    jit::tracer::addInputs(node, "memory_format", memory_format);
-""",
-    "zero": """\
-    jit::tracer::addInputs(node, "options", ::std::optional<ScalarType>());
-    jit::tracer::addInputs(node, "options", layout_or_default(::std::nullopt));
-    jit::tracer::addInputs(node, "options", device_or_default(::std::nullopt));
-    jit::tracer::addInputs(node, "options", pinned_memory_or_default(::std::nullopt));
-    ::std::optional<MemoryFormat> memory_format = c10::MemoryFormat::Preserve;
-    jit::tracer::addInputs(node, "memory_format", memory_format);
-""",
-}
-
 INPLACE_GUARD = CodeTemplate(
     """\
 jit::tracer::ensureUniqueIfOutOfPlaced("${name}", ${mutable_input});
@@ -309,22 +259,10 @@ def format_prerecord_trace(f: NativeFunction) -> str:
         f.func.kind() in (SchemaKind.inplace, SchemaKind.out)
         and not f.func.name.name.dunder_method
     )
-    add_args = (
-        RENAME_TRACE_ADD_ARGS.get(f.func.name.name.base, "") if is_inplace else ""
-    )
-    additional_inputs = (
-        SELECT.substitute(
-            cond="tracer_state->force_outplace",
-            true=add_args,
-            false="",
-        )
-        if add_args
-        else ""
-    )
 
     return PRE_RECORD_TRACE.substitute(
         set_op_name=format_trace_op_name(f),
-        add_trace_inputs=format_trace_inputs(f) + additional_inputs,
+        add_trace_inputs=format_trace_inputs(f),
         inplace_guard=INPLACE_GUARD.substitute(
             name=cpp.name(f.func),
             mutable_input=f.func.arguments.out[0].name

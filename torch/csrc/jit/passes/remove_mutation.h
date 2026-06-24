@@ -28,6 +28,8 @@ struct TORCH_API MutationRemover {
         n->matches(
             "aten::fill_.Scalar(Tensor(a!) self, Scalar value) -> Tensor(a!)") ||
         n->matches(
+            "aten::fill_.Tensor(Tensor(a!) self, Tensor value) -> Tensor(a!)") ||
+        n->matches(
             "aten::normal_(Tensor(a!) self, float mean=0, float std=1, *, Generator? generator=None) -> Tensor(a!)");
   }
 

@@ -9,16 +9,8 @@ static const std::unordered_map<NodeKind, NodeKind> inPlaceToOutOfPlace = {
     {aten::div_, aten::div},
     {aten::mul_, aten::mul},
     {aten::masked_fill_, aten::masked_fill},
-    {aten::zero_, aten::zeros_like},
-    {aten::fill_, aten::full_like}};
-
-// This is a horrible no good awful hack to "fill in" the TensorOptions
-// arguments of zeros_like and full_like so that the defaults are filled
-// in.  Ugh.  Would be better to just run the frontend to get the correct
-// arity here.
-static const std::unordered_map<NodeKind, int> expectedInputCount = {
-    {aten::zero_, 6},
-    {aten::fill_, 7}};
+    {aten::zero_, aten::zero},
+    {aten::fill_, aten::fill}};
 
 bool isInplaceOp(const Node* node) {
   return inPlaceToOutOfPlace.count(node->kind()) != 0;
@@ -51,18 +43,6 @@ void RemoveInplaceOps(Block* block) {
       // copy inputs
       for (auto input : node->inputs()) {
         newNode->addInput(input);
-      }
-
-      int additionalInputCount = 0;
-      if (expectedInputCount.find(node->kind()) != expectedInputCount.end()) {
-        additionalInputCount = expectedInputCount.at(node->kind()) -
-            static_cast<int>(newNode->inputs().size());
-      }
-
-      for (int i = 0; i < additionalInputCount; ++i) {
-        auto noneNode = graph->createNone();
-        noneNode->insertBefore(newNode);
-        newNode->addInput(noneNode->output());
       }
 
       // Create a new output node and replace all uses of self with it
