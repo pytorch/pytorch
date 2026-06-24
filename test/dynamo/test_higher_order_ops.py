@@ -7355,6 +7355,7 @@ xfail_hops_compile = {
     # inductor
     "while_loop",  # LoweringException: AssertionError
     "flex_attention",  # LoweringException: AssertionError
+    "switch",  # no inductor lowering registered
 }
 
 
