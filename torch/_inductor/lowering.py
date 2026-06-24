@@ -615,12 +615,13 @@ def promote_constants(
     tensor_dtype = ex.get_dtype()
 
     # Round scalar to tensor's dtype to match eager
-    if (
+    should_round_scalars = (
         override_return_dtype == torch.bool or round_scalar_constants
     ) and tensor_dtype in (
         torch.bfloat16,
         torch.float16,
-    ):
+    )
+    if should_round_scalars:
         _round_scalar = lambda v: torch.tensor(v, dtype=tensor_dtype).item()  # noqa: E731
     else:
         _round_scalar = lambda v: v  # noqa: E731
@@ -7622,6 +7623,7 @@ def div(a, b):
 
 @register_lowering([aten.fmod, prims.fmod], broadcast=True)
 def fmod(a, b):
+    a, b = promote_constants((a, b), round_scalar_constants=True)
     is_integral = is_boolean_type(a) or is_integer_type(a)
 
     if is_integral:
