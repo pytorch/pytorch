@@ -1125,7 +1125,12 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         self.assertTrue(same(out, correct))
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @torch._inductor.config.patch(debug=True)
+    @torch._inductor.config.patch(
+        {
+            "debug": True,
+            "aten_distributed_optimizations.enable_simple_overlap": False,
+        }
+    )
     def test_inductor_steal_buffer(self):
         """
         it's ok and optimal if inductor allreduce mutates the buffer of an intermediate
@@ -1159,6 +1164,9 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         correct = func(inputs, **self.get_world_trs())
         self.assertTrue(same(out, correct))
 
+    @torch._inductor.config.patch(
+        {"aten_distributed_optimizations.enable_simple_overlap": False}
+    )
     def _test_inductor_doesnt_mutate_shared(self):
         """
         make sure that an intermediate that's going to be reuse isn't mutated unless copied
