@@ -4156,6 +4156,9 @@ class Scheduler:
             ]
         )
         self.nodes = [self.create_scheduler_node(n) for n in nodes]
+        # Cached (per-step live memory, peak) for peak-aware fusion guards; set per
+        # fuse_nodes() call.
+        self._memory_timeline: tuple[list[int], int] | None = None
         self.previous_node: BaseSchedulerNode | None = None
         self.current_node: BaseSchedulerNode | None = None
         self.update_zero_dim_cpu_tensor()
@@ -5106,6 +5109,10 @@ class Scheduler:
         with dynamo_timed(
             "Scheduler.fused_nodes", log_pt2_compile_event=True, log_waitcounter=True
         ):
+            # Pre-fusion memory timeline, used by the peak-aware fusion guards.
+            # Computed lazily on first use over the (stable) pre-fusion self.nodes
+            # order, where step == node.min_order.
+            self._memory_timeline = None
             for i in range(10):
                 old_len = len(nodes)
                 fusion_log.debug(
@@ -6875,7 +6882,18 @@ class Scheduler:
         if node1_external_users & node2_external_users:
             return False
 
-        return min(node1_output_bytes, node2_output_bytes) >= shared_data_score
+        if min(node1_output_bytes, node2_output_bytes) < shared_data_score:
+            return False
+
+        # Only block if co-materializing the smaller of the two disjoint outputs
+        # would push the memory peak over the interval the fusion spans.
+        extra_bytes = min(node1_output_bytes, node2_output_bytes)
+        lo = min(node1.min_order, node2.min_order)
+        hi = max(node1.max_order, node2.max_order)
+        hi = max(
+            hi, self._fusion_users_max_step(node1_external_users | node2_external_users)
+        )
+        return self._fusion_would_increase_peak_memory(extra_bytes, lo, hi)
 
     def _materialized_external_outputs(
         self,
@@ -6977,20 +6995,93 @@ class Scheduler:
         ) in materialized_outputs:
             if not early_is_extern:
                 continue
-            if any(
-                later_side != early_side
-                and later_bytes >= early_bytes
-                and later_order > early_order
-                and not (early_users & later_users)
-                for (
-                    later_side,
-                    later_bytes,
-                    later_order,
-                    _,
-                    later_users,
-                ) in materialized_outputs
-            ):
-                return True
+            for (
+                later_side,
+                later_bytes,
+                later_order,
+                _,
+                later_users,
+            ) in materialized_outputs:
+                if not (
+                    later_side != early_side
+                    and later_bytes >= early_bytes
+                    and later_order > early_order
+                    and not (early_users & later_users)
+                ):
+                    continue
+                # The later output is forced live across the extern from the
+                # extern point to its own last user; block only if that crosses
+                # the memory peak.
+                hi = max(later_order, self._fusion_users_max_step(later_users))
+                if self._fusion_would_increase_peak_memory(
+                    later_bytes, early_order, hi
+                ):
+                    return True
+        return False
+
+    def _fusion_users_max_step(self, user_names: OrderedSet[str]) -> int:
+        """Latest scheduler position (min_order) among the given user buffers."""
+        hi = -1
+        for name in user_names:
+            fused = self.name_to_fused_node.get(name)
+            if fused is not None and fused.min_order > hi:
+                hi = fused.min_order
+        return hi
+
+    def _build_memory_timeline(self) -> tuple[list[int], int]:
+        """Build the per-step live-memory timeline and peak over the current
+        (pre-fusion) self.nodes order, reusing the standard peak-memory estimator
+        (the same estimate_peak_memory_allocfree used by the comm/compute overlap
+        reorder). Returns (post_alloc_memory_per_step, peak); step == node.min_order.
+
+        Fusion runs before memory planning, so assign memory-planning info from the
+        current graph first. Nothing reads mpi_buffer during fusion and the
+        reorder/codegen passes re-assign it afterwards."""
+        from .memory import (
+            assign_memory_planning_info_for_scheduler_buffers,
+            estimate_peak_memory_allocfree,
+            get_freeable_input_buf,
+        )
+
+        graph_inputs = OrderedSet(V.graph.graph_inputs.keys())
+        graph_outputs = OrderedSet(V.graph.get_output_names())
+        name_to_freeable_input_buf = get_freeable_input_buf(self.nodes, graph_inputs)
+        assign_memory_planning_info_for_scheduler_buffers(self.nodes, self.name_to_buf)
+        peak, snodes_curr_memory, _, _ = estimate_peak_memory_allocfree(
+            self.nodes, name_to_freeable_input_buf, graph_outputs
+        )
+        # post-allocation live memory at each step (peak happens after alloc)
+        return [post_alloc for post_alloc, _ in snodes_curr_memory], peak
+
+    def _fusion_would_increase_peak_memory(
+        self, extra_bytes: int, lo_step: int, hi_step: int
+    ) -> bool:
+        """Whether adding ``extra_bytes`` live across steps [lo_step, hi_step] would
+        push the memory peak. Used to let peak-aware fusion guards allow fusions whose
+        interval stays below the peak.
+
+        The cached timeline is a *live* timeline: when a fusion is allowed, its extra
+        bytes are booked into it so later fusions see the accumulated pressure. This
+        caps the total extra at the original peak, so many individually-cheap fusions
+        cannot collectively cross it. Worst case this degrades to the previous
+        always-block behavior; it never allows the modeled peak above the original."""
+        if extra_bytes <= 0:
+            return False
+        if self._memory_timeline is None:
+            self._memory_timeline = self._build_memory_timeline()
+        curve, peak = self._memory_timeline
+        n = len(curve)
+        lo = max(0, min(lo_step, hi_step))
+        hi = min(n - 1, max(lo_step, hi_step))
+        if lo > hi:
+            # Could not localize the affected interval; keep the conservative block.
+            return True
+        if max(curve[lo : hi + 1]) + extra_bytes > peak:
+            return True
+        # Allow the fusion, but book its extra bytes so subsequent fusions over this
+        # interval see the accumulated memory pressure.
+        for t in range(lo, hi + 1):
+            curve[t] += extra_bytes
         return False
 
     def are_long_distant_nodes(

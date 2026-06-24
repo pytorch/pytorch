@@ -647,6 +647,16 @@ class TestScheduler(TestCase):
             "B": self._create_mock_buffer_users(["use_b"]),
             "C": self._create_mock_buffer_users(["use_c"]),
         }
+        scheduler.name_to_fused_node = {}
+        # peak == 0 makes the curve check a pass-through, so the guard blocks iff it
+        # detects the disjoint materialization.
+        scheduler._memory_timeline = ([0], 0)
+        scheduler._fusion_users_max_step = Scheduler._fusion_users_max_step.__get__(
+            scheduler, Scheduler
+        )
+        scheduler._fusion_would_increase_peak_memory = (
+            Scheduler._fusion_would_increase_peak_memory.__get__(scheduler, Scheduler)
+        )
 
         node1 = self._create_mock_node(name="node1", reads=["A"], writes=["B"])
         node2 = self._create_mock_node(name="node2", reads=["A"], writes=["C"])
@@ -656,6 +666,35 @@ class TestScheduler(TestCase):
                 scheduler, node1, node2, shared_data_score=100
             )
         )
+
+    def test_fusion_would_increase_peak_memory_only_blocks_at_peak(self):
+        scheduler = Mock(spec=Scheduler)
+        # approximate live-memory curve over steps 0..3, peak 90 at step 2
+        scheduler._memory_timeline = ([10, 50, 90, 30], 90)
+        check = Scheduler._fusion_would_increase_peak_memory.__get__(
+            scheduler, Scheduler
+        )
+        # interval below the peak: 10 + 50 = 60 <= 90 -> allow the fusion
+        self.assertFalse(check(50, 0, 0))
+        # interval over the peak: 90 + 5 = 95 > 90 -> block the fusion
+        self.assertTrue(check(5, 1, 2))
+        # interval stays under the peak: 30 + 50 = 80 <= 90 -> allow
+        self.assertFalse(check(50, 3, 3))
+        # no extra memory -> never blocks
+        self.assertFalse(check(0, 1, 2))
+        # un-localizable interval -> conservative block
+        self.assertTrue(check(50, 5, 4))
+
+    def test_fusion_would_increase_peak_memory_accumulates(self):
+        scheduler = Mock(spec=Scheduler)
+        scheduler._memory_timeline = ([10, 10, 10, 10], 50)
+        check = Scheduler._fusion_would_increase_peak_memory.__get__(
+            scheduler, Scheduler
+        )
+        # repeated cheap fusions over the same interval accumulate toward the peak
+        self.assertFalse(check(20, 0, 0))  # 10+20=30 <= 50 -> allow, books to 30
+        self.assertFalse(check(15, 0, 0))  # 30+15=45 <= 50 -> allow, books to 45
+        self.assertTrue(check(15, 0, 0))  # 45+15=60 > 50 -> block (accumulated)
 
     def test_fusion_would_materialize_disjoint_branches_allows_internal_output(self):
         scheduler = Mock(spec=Scheduler)
@@ -718,6 +757,15 @@ class TestScheduler(TestCase):
             output_users={"B": ["mm"], "C": ["later"]},
             user_orders={"mm": 10, "later": 20},
             extern_users={"mm"},
+        )
+        # peak == 0 makes the curve check a pass-through, so the guard blocks iff it
+        # detects the cross-extern materialization.
+        scheduler._memory_timeline = ([0], 0)
+        scheduler._fusion_users_max_step = Scheduler._fusion_users_max_step.__get__(
+            scheduler, Scheduler
+        )
+        scheduler._fusion_would_increase_peak_memory = (
+            Scheduler._fusion_would_increase_peak_memory.__get__(scheduler, Scheduler)
         )
         node1 = self._create_mock_node(name="node1", reads=["A"], writes=["B"])
         node2 = self._create_mock_node(name="node2", reads=["A"], writes=["C"])
@@ -908,6 +956,8 @@ class TestScheduler(TestCase):
         node.is_reduction = Mock(return_value=is_reduction)
         node.is_template = Mock(return_value=False)
         node.is_foreach = Mock(return_value=False)
+        node.min_order = 0
+        node.max_order = 0
 
         # Create mock Dep objects for reads and writes
         read_deps = OrderedSet()
