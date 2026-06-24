@@ -76,8 +76,8 @@ elif [[ "$image" == *cuda*linter* ]]; then
 elif [[ "$image" == *linter* ]]; then
   # Use a separate Dockerfile for linter to keep a small image size
   DOCKERFILE="linter/Dockerfile"
-elif [[ "$image" == *riscv* ]]; then
-  # Use RISC-V specific Dockerfile
+elif [[ "$image" == *riscv*cross* ]]; then
+  # Use RISC-V cross-compilation specific Dockerfile
   DOCKERFILE="ubuntu-cross-riscv/Dockerfile"
 fi
 
@@ -475,7 +475,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
 fi
 
 if [ -n "$GCC_VERSION" ]; then
-  if [[ "$image" == *riscv* ]]; then
+  if [[ "$image" == *riscv*cross* ]]; then
     # Check RISC-V cross-compilation toolchain version
     if !(drun riscv64-linux-gnu-gcc-${GCC_VERSION} --version 2>&1 | grep -q " $GCC_VERSION\\W"); then
       echo "RISC-V GCC_VERSION=$GCC_VERSION, but:"
