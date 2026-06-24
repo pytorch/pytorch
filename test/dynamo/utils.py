@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import importlib
+import inspect
 import os
 import sys
 import types
@@ -56,7 +57,13 @@ def create_dummy_module_and_function():
 def install_guard_manager_testing_hook(hook_fn):
     old_value = torch._dynamo.guards.guard_manager_testing_hook_fn
     try:
-        torch._dynamo.guards.guard_manager_testing_hook_fn = hook_fn
+        if len(inspect.signature(hook_fn).parameters) == 2:
+            def hook_wrapper(guard_manager_wrapper, f_locals, builder):
+                return hook_fn(guard_manager_wrapper, f_locals)
+
+            torch._dynamo.guards.guard_manager_testing_hook_fn = hook_wrapper
+        else:
+            torch._dynamo.guards.guard_manager_testing_hook_fn = hook_fn
         yield
     finally:
         torch._dynamo.guards.guard_manager_testing_hook_fn = old_value

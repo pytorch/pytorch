@@ -25,33 +25,6 @@ NO_TENSOR_ALIASING = guards.NO_TENSOR_ALIASING
 install_no_tensor_aliasing_guard = guards.install_no_tensor_aliasing_guard
 
 
-class _GuardManagerTestLookup:
-    def __init__(self, root, f_locals):
-        self.root = root
-        self.f_locals = f_locals
-
-    def get(self, name):
-        return eval(name, {"L": self.f_locals})
-
-    def get_guard_manager_from_source(self, source):
-        target = source.name()
-        stack = [self.root]
-        seen = set()
-        while stack:
-            node = stack.pop()
-            if id(node) in seen:
-                continue
-            seen.add(id(node))
-            if node.get_source() == target:
-                return node
-            if isinstance(node, DictGuardManager):
-                for key_mgr, value_mgr in node.get_key_value_managers().values():
-                    stack.append(key_mgr)
-                    stack.append(value_mgr)
-            stack.extend(node.get_child_managers())
-        raise AssertionError(f"Guard manager for {target} not found")
-
-
 x = torch.tensor(4)
 weakref_x = weakref.ref(x)
 
@@ -995,8 +968,7 @@ class TypePropagationTests(torch._dynamo.test_case.TestCase):
         except ImportError:
             from utils import install_guard_manager_testing_hook
 
-        def hook(guard_wrapper, f_locals):
-            builder = _GuardManagerTestLookup(guard_wrapper.root, f_locals)
+        def hook(guard_wrapper, f_locals, builder):
             from torch._dynamo.source import AttrSource, DictGetItemSource, LocalSource
 
             foo_source = LocalSource("foo")
@@ -1078,8 +1050,7 @@ class TagSafetyChecks(RecursiveDictTagTests):
         except ImportError:
             from utils import install_guard_manager_testing_hook
 
-        def hook(guard_wrapper, f_locals):
-            builder = _GuardManagerTestLookup(guard_wrapper.root, f_locals)
+        def hook(guard_wrapper, f_locals, builder):
             from torch._dynamo.source import AttrSource, LocalSource
 
             foo_source = LocalSource("foo")
@@ -1170,8 +1141,7 @@ class TagSafetyChecks(RecursiveDictTagTests):
         except ImportError:
             from utils import install_guard_manager_testing_hook
 
-        def hook(guard_wrapper, f_locals):
-            builder = _GuardManagerTestLookup(guard_wrapper.root, f_locals)
+        def hook(guard_wrapper, f_locals, builder):
             from torch._dynamo.source import DictGetItemSource, LocalSource
 
             outer_source = LocalSource("outer_dict")
@@ -1267,8 +1237,7 @@ class TagSafetyChecks(RecursiveDictTagTests):
         except ImportError:
             from utils import install_guard_manager_testing_hook
 
-        def hook(guard_wrapper, f_locals):
-            builder = _GuardManagerTestLookup(guard_wrapper.root, f_locals)
+        def hook(guard_wrapper, f_locals, builder):
             from torch._C._dynamo.guards import GetGenericDictGuardAccessor
             from torch._dynamo.source import LocalSource
 
@@ -1359,8 +1328,7 @@ class RecursiveDictGuardTests(RecursiveDictTagTests):
         except ImportError:
             from utils import install_guard_manager_testing_hook
 
-        def basic_hook_test(guard_wrapper, f_locals):
-            builder = _GuardManagerTestLookup(guard_wrapper.root, f_locals)
+        def basic_hook_test(guard_wrapper, f_locals, builder):
             from torch._dynamo.source import LocalSource
 
             mod_source = LocalSource("mod")
@@ -1393,8 +1361,7 @@ class RecursiveDictGuardTests(RecursiveDictTagTests):
         mod = Mod()
         mod_to_fail = Mod()
 
-        def disable_on_dict_tag_match_failure(guard_wrapper, f_locals):
-            builder = _GuardManagerTestLookup(guard_wrapper.root, f_locals)
+        def disable_on_dict_tag_match_failure(guard_wrapper, f_locals, builder):
             from torch._dynamo.source import LocalSource
 
             mod_source = LocalSource("mod")
@@ -1425,8 +1392,7 @@ class RecursiveDictGuardTests(RecursiveDictTagTests):
         mod = Mod()
         mod_to_fail = Mod()
 
-        def max_size_test(guard_wrapper, f_locals):
-            builder = _GuardManagerTestLookup(guard_wrapper.root, f_locals)
+        def max_size_test(guard_wrapper, f_locals, builder):
             from torch._dynamo.source import LocalSource
 
             mod_source = LocalSource("mod")

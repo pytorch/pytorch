@@ -155,7 +155,7 @@ from .utils import (
 )
 
 
-guard_manager_testing_hook_fn: Optional[Callable[[Any, Any], Any]] = None
+guard_manager_testing_hook_fn: Optional[Callable[[Any, Any, Any], Any]] = None
 
 try:
     import numpy as np
@@ -2682,7 +2682,7 @@ class CheckFunctionManager:
 
             if guard_manager_testing_hook_fn is not None:
                 guard_manager_testing_hook_fn(
-                    self.guard_manager, output_graph.local_scope
+                    self.guard_manager, output_graph.local_scope, self
                 )
 
             # NB for developers: n_iters is chosen to be 50 to achieve
