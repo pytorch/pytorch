@@ -18,6 +18,7 @@ from torch._inductor.comm_analysis import (
     NCCL_COLL,
 )
 from torch._inductor.fx_passes.utils import BitsetAncestors
+from torch._inductor.fx_utils import evaluate_compile_time_value
 from torch._inductor.runtime.runtime_utils import dynamo_timed
 from torch._logging import trace_structured
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -36,18 +37,14 @@ overlap_log = torch._logging.getArtifactLogger(__name__, "overlap")
 
 
 def _resolve_group_name(group_name: Any) -> "GroupName":
-    """Resolve group_name to a GroupName string.
-
-    In compile-on-one-rank graphs, collective ops receive their
-    group_name argument as an FX Node reference (pointing to a
-    mesh_get_process_group call) rather than a string literal. For
-    bucketing key purposes we resolve via the ProcessGroup stored in
-    node.meta["val"].
+    """Resolve group_name to a GroupName string. In compile-on-one-rank graphs
+    collective ops can receive group_name as an FX node (a ProcessGroup via
+    meta["val"] or a get_attr) rather than a string literal.
     """
+    group_name = evaluate_compile_time_value(group_name)
     if isinstance(group_name, str):
         return group_name  # pyrefly: ignore [bad-return]
-    pg = group_name.meta["val"]
-    return pg.group_name
+    return group_name.group_name
 
 
 BucketMode: TypeAlias = Literal[

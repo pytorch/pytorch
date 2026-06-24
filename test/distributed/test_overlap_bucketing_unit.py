@@ -101,6 +101,31 @@ def build_collective_info(graph, hiding_annotations):
     return collective_info
 
 
+class TestProcessGroupNameResolution(TestCase):
+    def test_evaluate_compile_time_process_group_get_attr_without_meta_val(self):
+        from torch._inductor.fx_passes.bucketing import _resolve_group_name
+        from torch._inductor.fx_utils import evaluate_compile_time_value
+
+        class ProcessGroupLike:
+            group_name = "fake_group"
+
+        class Root(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self._test_pg = ProcessGroupLike()
+
+        graph = torch.fx.Graph()
+        pg_node = graph.get_attr("_test_pg")
+        graph.output(pg_node)
+        torch.fx.GraphModule(Root(), graph)
+
+        self.assertNotIn("val", pg_node.meta)
+        self.assertIs(
+            evaluate_compile_time_value(pg_node), graph.owning_module._test_pg
+        )
+        self.assertEqual(_resolve_group_name(pg_node), "fake_group")
+
+
 @requires_accelerator_dist_backend()
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
 @instantiate_parametrized_tests
