@@ -2682,7 +2682,7 @@ class CheckFunctionManager:
 
             if guard_manager_testing_hook_fn is not None:
                 guard_manager_testing_hook_fn(
-                    self.guard_manager, output_graph.local_scope, self
+                    self.guard_manager, output_graph.local_scope, builder
                 )
 
             # NB for developers: n_iters is chosen to be 50 to achieve
