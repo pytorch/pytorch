@@ -745,6 +745,46 @@ class SubclassTests(_SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
         res, _ = fn(input)
         self.assertFalse(res)
 
+    def test_enable_torch_function_no_tls_leak(self):
+        @torch.compile(backend="eager")
+        def fn():
+            with torch._C.DisableTorchFunctionSubclass():
+                g = torch._C._EnableTorchFunction()
+                del g
+
+        self._check_enable_torch_function_no_tls_leak(fn)
+
+    def test_enable_torch_function_starargs_no_tls_leak(self):
+        @torch.compile(backend="eager")
+        def fn():
+            with torch._C.DisableTorchFunctionSubclass():
+                g = torch._C._EnableTorchFunction(*())
+                del g
+
+        self._check_enable_torch_function_no_tls_leak(fn)
+
+    def _check_enable_torch_function_no_tls_leak(self, fn):
+        torch._dynamo.utils.counters.clear()
+
+        fn()
+        self.assertTrue(
+            any(
+                "pybind11_object.__new__" in msg
+                for msg in torch._dynamo.utils.counters["graph_break"]
+            )
+        )
+        self.assertTrue(
+            any(
+                "_EnableTorchFunction" in msg
+                for msg in torch._dynamo.utils.counters["unimplemented"]
+            )
+        )
+        self.assertTrue(torch._C._is_torch_function_enabled())
+        self.assertEqual(
+            torch._C._get_torch_function_state(),
+            torch._C._TorchFunctionState.ENABLED,
+        )
+
     def test_disable_all_torch_function(self):
         @torch.compile(backend="eager")
         def fn(x):
