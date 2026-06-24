@@ -2397,6 +2397,7 @@ class GuardManager {
         _type_str(get_type_str(example_value)) {
     if (_is_dict) {
       _dict_tag = get_dict_version_unchecked(example_value.ptr());
+      _is_empty_dict = PyDict_Size(example_value.ptr()) == 0;
     }
 
     py::object config_module = py::module_::import("torch._dynamo.config");
