@@ -227,6 +227,34 @@ class TestBinaryUfuncs(TestCase):
                 expected = torch.lerp(xref, yref, wref).to(dtype)
                 self.assertEqual(actual, expected, atol=0.0, rtol=0.0)
 
+    def test_chebyshev_polynomial_nan_propagation(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/187761.
+        # When x is NaN and n >= 2, these functions returned uninitialized memory
+        # instead of NaN because `T r` was declared without initialization and the
+        # recurrence loop was never entered (the loop guard is !isnan(q)).
+        nan = float("nan")
+        ops = [
+            torch.special.chebyshev_polynomial_u,
+            torch.special.chebyshev_polynomial_v,
+            torch.special.chebyshev_polynomial_w,
+            torch.special.shifted_chebyshev_polynomial_t,
+            torch.special.shifted_chebyshev_polynomial_u,
+            torch.special.shifted_chebyshev_polynomial_v,
+            torch.special.shifted_chebyshev_polynomial_w,
+        ]
+        for op in ops:
+            with self.subTest(op=op.__name__):
+                x = torch.tensor([nan, nan], dtype=torch.float64)
+                n = torch.tensor([5, 5], dtype=torch.float64)
+                # Contiguous input
+                result = op(x, n)
+                self.assertTrue(result.isnan().all())
+                # Non-contiguous input (non-contiguous inputs were the primary repro)
+                x_nc = x[::1].clone().as_strided((1,), (2,))
+                n_nc = n[::1].clone().as_strided((1,), (2,))
+                result_nc = op(x_nc, n_nc)
+                self.assertTrue(result_nc.isnan().all())
+
 
 class TestBinaryUfuncsDevice(TestCase):
     # Generic tests for elementwise binary (AKA binary universal (u) functions (funcs))
