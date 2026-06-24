@@ -2,13 +2,18 @@
 from __future__ import annotations
 
 import logging
+import operator
 from typing import TYPE_CHECKING, TypedDict
 
 import torch
 from torch._inductor.codegen.rocm.ck_conv_template import CKGroupedConvFwdTemplate
+from torch.utils._ordered_set import OrderedSet
 
 from .. import config, ir
 from ..lowering import (
+    _cpu_erf_feeds_normalize_neg_one,
+    _node_arg,
+    _node_has_target,
     add_layout_constraint,
     constrain_to_fx_strides,
     fallback_handler,
@@ -42,6 +47,101 @@ log = logging.getLogger(__name__)
 
 
 aten = torch.ops.aten
+
+
+def _users_matching(input_node, targets):
+    return [
+        user
+        for user in input_node.users
+        if _node_has_target(user, targets) and _node_arg(user, "self", 0) is input_node
+    ]
+
+
+def _fake_tensor_from_fx_arg(fx_arg):
+    if isinstance(fx_arg, torch.fx.Node):
+        fx_arg = fx_arg.meta.get("val")
+    return fx_arg if isinstance(fx_arg, torch.Tensor) else None
+
+
+def _layout_from_fx_node(node, device, dtype):
+    fake_val = node.meta.get("val") if isinstance(node, torch.fx.Node) else None
+    if not isinstance(fake_val, torch.Tensor):
+        return None
+    return ir.FixedLayout(
+        device,
+        dtype,
+        ir.convert_shape_to_inductor(fake_val.size()),
+        ir.convert_shape_to_inductor(fake_val.stride()),
+    )
+
+
+def _cpu_conv_feeds_erf_normalize_neg_one(node):
+    # Match the issue-185589 chain where any 1 ULP difference before normalize
+    # is amplified by the p=-1 norm on rows with zeros from diag_embed.
+    if not isinstance(node, torch.fx.Node):
+        return False
+
+    bn_targets = (
+        aten._native_batch_norm_legit.default,
+        aten._native_batch_norm_legit.no_stats,
+        aten._native_batch_norm_legit_functional.default,
+    )
+    relu_targets = (aten.relu.default,)
+    erf_targets = (aten.erf.default, aten.special_erf.default)
+
+    def is_diaglike_user(input_node, user):
+        if _node_has_target(user, (aten.diag_embed.default,)):
+            return _node_arg(user, "self", 0) is input_node
+        if not _node_has_target(user, (aten.where.self,)):
+            return False
+        zero_fill_targets = (
+            aten.full.default,
+            aten.full_like.default,
+            aten.zeros.default,
+            aten.zeros_like.default,
+        )
+        return _node_arg(user, "self", 1) is input_node and _node_has_target(
+            _node_arg(user, "other", 2), zero_fill_targets
+        )
+
+    def erf_normalize_reachable_from(
+        input_node, saw_diaglike=False, depth=0, seen=None
+    ):
+        if seen is None:
+            seen = OrderedSet()
+        key = (input_node, saw_diaglike)
+        if not isinstance(input_node, torch.fx.Node) or key in seen or depth > 8:
+            return False
+        seen.add(key)
+        for user in input_node.users:
+            user_saw_diaglike = saw_diaglike or is_diaglike_user(input_node, user)
+            if (
+                user_saw_diaglike
+                and _node_has_target(user, erf_targets)
+                and _cpu_erf_feeds_normalize_neg_one(user)
+            ):
+                return True
+            if (
+                isinstance(user, torch.fx.Node)
+                and user.op == "call_function"
+                and erf_normalize_reachable_from(
+                    user, user_saw_diaglike, depth + 1, seen
+                )
+            ):
+                return True
+        return False
+
+    for bn_node in _users_matching(node, bn_targets):
+        for getitem_node in bn_node.users:
+            if (
+                _node_has_target(getitem_node, (operator.getitem,))
+                and _node_arg(getitem_node, "obj", 0) is bn_node
+                and _node_arg(getitem_node, "index", 1) == 0
+            ):
+                for relu_node in _users_matching(getitem_node, relu_targets):
+                    if erf_normalize_reachable_from(relu_node):
+                        return True
+    return False
 
 
 @SymbolicGridFn
@@ -490,6 +590,11 @@ def convolution(
     }
 
     device_type = ir.get_device_type(x)
+    # Keep eager-layout convolution numerics for the narrow chain where the
+    # downstream normalize(p=-1) would magnify tiny layout/template differences.
+    force_eager_conv = device_type == "cpu" and _cpu_conv_feeds_erf_normalize_neg_one(
+        V.graph.current_node
+    )
 
     if len(x.get_size()) == len(weight.get_size()) - 1:
         # add batch dimension to simplify rest of function
@@ -543,6 +648,7 @@ def convolution(
 
     if (
         (config.conv_1x1_as_mm or (autotuning_gemm and channels_last_conv()))
+        and not force_eager_conv
         and is_ones(kernel_shape)
         and is_ones(stride)
         and is_zeros(padding)
@@ -570,7 +676,20 @@ def convolution(
     # ndim can be 1 for convolution in models such as demucs
     # TODO: check if it's beneficial to convert Conv1d to Conv2d and then
     # apply channels last.
-    if V.graph.layout_opt and ndim == 2:
+    if force_eager_conv:
+        fx_args = V.graph.current_node.args
+        fake_x = _fake_tensor_from_fx_arg(fx_args[0])
+        fake_weight = _fake_tensor_from_fx_arg(fx_args[1])
+        if fake_x is not None:
+            x = ir.ExternKernel.require_exact_strides(x, fake_x.stride())  # type: ignore[assignment]
+        if fake_weight is not None:
+            weight = ir.ExternKernel.require_exact_strides(  # type: ignore[assignment]
+                weight, fake_weight.stride()
+            )
+        layout = _layout_from_fx_node(
+            V.graph.current_node, x.get_device_or_error(), x.get_dtype()
+        ) or conv_layout(x, weight, None, **kwargs)
+    elif V.graph.layout_opt and ndim == 2:
         V.graph.num_channels_last_conv += 1
         x = ir.ExternKernel.require_channels_last(x)  # type: ignore[assignment]
         # TODO maybe we can convert weights to channels last just once before
@@ -608,7 +727,7 @@ def convolution(
         V.graph.sizevars.guard_int_seq(bias.get_size())
 
     choices = []
-    if torch._inductor.utils._use_conv_autotune_backend("ATEN"):
+    if force_eager_conv or torch._inductor.utils._use_conv_autotune_backend("ATEN"):
         choices = [
             aten_convolution.bind(
                 args,
@@ -619,7 +738,8 @@ def convolution(
         ]
 
     if (
-        torch._inductor.utils._use_conv_autotune_backend("TRITON")
+        not force_eager_conv
+        and torch._inductor.utils._use_conv_autotune_backend("TRITON")
         and use_triton_template(layout)
         # templates only support these:
         and is_ones(dilation)
@@ -710,7 +830,8 @@ def convolution(
                     **cfg.kwargs,
                 )
     if (
-        torch._inductor.utils._use_conv_autotune_backend("TRITON")
+        not force_eager_conv
+        and torch._inductor.utils._use_conv_autotune_backend("TRITON")
         and use_triton_template(layout)
         and transposed
         and ndim == 2
@@ -745,7 +866,7 @@ def convolution(
                 **cfg.kwargs,
             )
 
-    if use_ck_conv_template(layout):
+    if not force_eager_conv and use_ck_conv_template(layout):
         CKGroupedConvFwdTemplate.add_ck_conv_choices(
             choices,
             layout,
@@ -795,7 +916,7 @@ def _convolution(
 def constrain_conv_to_fx_strides(fx_node, *args, **kwargs):
     if fx_node.target is not torch.ops.aten.convolution.default:
         raise AssertionError(f"Expected aten.convolution.default, got {fx_node.target}")
-    if V.graph.layout_opt:
+    if V.graph.layout_opt and not _cpu_conv_feeds_erf_normalize_neg_one(fx_node):
         return args, kwargs
     else:
         return constrain_to_fx_strides(fx_node, *args, **kwargs)
