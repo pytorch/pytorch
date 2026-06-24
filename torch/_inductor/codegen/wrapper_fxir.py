@@ -139,18 +139,18 @@ class CompiledKernelBackend(abc.ABC):
     """
 
     @abc.abstractmethod
-    def handles_definition(self, line: "KernelDefinitionLine") -> bool:
+    def handles_definition(self, line: KernelDefinitionLine) -> bool:
         """True if this backend owns the given kernel definition."""
 
     @abc.abstractmethod
     def compile_kernel(
-        self, converter: "FxConverter", line: "KernelDefinitionLine"
+        self, converter: "FxConverter", line: KernelDefinitionLine
     ) -> Callable[..., Any]:
         """Compile the kernel to a callable taking the flat positional args and
         writing its outputs in place (the contract the HOP's dense impl calls)."""
 
     @abc.abstractmethod
-    def mutated_arg_indices(self, line: "KernelCallLine") -> tuple[int, ...]:
+    def mutated_arg_indices(self, line: KernelCallLine) -> tuple[int, ...]:
         """Positions in the call args the kernel writes (for functionalization)."""
 
 
@@ -164,7 +164,7 @@ def register_compiled_kernel_backend(backend: CompiledKernelBackend) -> None:
 
 
 def _select_compiled_kernel_backend(
-    line: "KernelDefinitionLine",
+    line: KernelDefinitionLine,
 ) -> CompiledKernelBackend | None:
     for backend in _compiled_kernel_backends:
         if backend.handles_definition(line):
@@ -175,11 +175,11 @@ def _select_compiled_kernel_backend(
 class CppCompiledKernelBackend(CompiledKernelBackend):
     """Built-in backend for CPU cpp_fused_* pybinding kernels."""
 
-    def handles_definition(self, line: "KernelDefinitionLine") -> bool:
+    def handles_definition(self, line: KernelDefinitionLine) -> bool:
         return not line.gpu
 
     def compile_kernel(
-        self, converter: "FxConverter", line: "KernelDefinitionLine"
+        self, converter: "FxConverter", line: KernelDefinitionLine
     ) -> Callable[..., Any]:
         kernel_code = PythonWrapperCodegen._format_kernel_definition(
             line.kernel_name, line.kernel_body, metadata=line.metadata
@@ -190,9 +190,11 @@ class CppCompiledKernelBackend(CompiledKernelBackend):
             kernel = kernel.result()
         return kernel
 
-    def mutated_arg_indices(self, line: "KernelCallLine") -> tuple[int, ...]:
-        # cpp_argdefs() emits writeable buffers (inplace + output) as non-const
-        # pointers and read-only inputs as 'const T*'; sizevars have no '*'.
+    def mutated_arg_indices(self, line: KernelCallLine) -> tuple[int, ...]:
+        # cpp_argdefs() emits writeable buffers (inplace + output) as 'T*' and
+        # read-only inputs with a leading-const 'const T*'; sizevars have no '*'.
+        # This classification keys on that leading-'const' form and must stay
+        # consistent with what cpp_argdefs() produces.
         return tuple(
             i
             for i, t in enumerate(line.arg_types)
