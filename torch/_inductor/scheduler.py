@@ -6929,6 +6929,70 @@ class Scheduler:
             external_users.update(users)
         return total_bytes, external_users, len(outputs)
 
+    def fusion_would_materialize_outputs_across_extern_branch(
+        self,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+    ) -> bool:
+        if node1.is_template() or node2.is_template():
+            return False
+
+        fused_node_names = OrderedSet(
+            [node.get_name() for node in node1.get_nodes()]
+            + [node.get_name() for node in node2.get_nodes()]
+        )
+        node1_outputs = self._materialized_external_outputs(node1, fused_node_names)
+        node2_outputs = self._materialized_external_outputs(node2, fused_node_names)
+        outputs = [
+            *((1, output_bytes, users) for output_bytes, users in node1_outputs),
+            *((2, output_bytes, users) for output_bytes, users in node2_outputs),
+        ]
+        if len(outputs) < 2:
+            return False
+
+        materialized_outputs: list[tuple[int, int, int, bool, OrderedSet[str]]] = []
+        for side, output_bytes, users in outputs:
+            user_nodes = [
+                self.name_to_fused_node[user_name]
+                for user_name in users
+                if user_name in self.name_to_fused_node
+            ]
+            if not user_nodes:
+                continue
+            first_user_order = min(user.min_order for user in user_nodes)
+            first_user_is_extern = any(
+                user.min_order == first_user_order and user.is_extern()
+                for user in user_nodes
+            )
+            materialized_outputs.append(
+                (side, output_bytes, first_user_order, first_user_is_extern, users)
+            )
+
+        for (
+            early_side,
+            early_bytes,
+            early_order,
+            early_is_extern,
+            early_users,
+        ) in materialized_outputs:
+            if not early_is_extern:
+                continue
+            if any(
+                later_side != early_side
+                and later_bytes >= early_bytes
+                and later_order > early_order
+                and not (early_users & later_users)
+                for (
+                    later_side,
+                    later_bytes,
+                    later_order,
+                    _,
+                    later_users,
+                ) in materialized_outputs
+            ):
+                return True
+        return False
+
     def are_long_distant_nodes(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:

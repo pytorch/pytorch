@@ -623,6 +623,15 @@ class InductorChoices:
             WhyNoFuse(node1, node2)("Fusion will increase peak memory")
             return False
 
+        if not config.allow_peak_memory_increasing_fusion:
+            if scheduler.fusion_would_materialize_outputs_across_extern_branch(
+                node1, node2
+            ):
+                WhyNoFuse(node1, node2)(
+                    "Fusion materializes outputs across an extern branch."
+                )
+                return False
+
         if (
             config.max_fusion_unique_io_buffers is not None
             and scheduler.fusion_prevent_too_many_reads_and_writes(

@@ -710,6 +710,127 @@ class TestScheduler(TestCase):
             )
         )
 
+    def test_fusion_would_materialize_outputs_across_extern_branch_prevents_fusion(
+        self,
+    ):
+        scheduler = self._create_materialized_output_scheduler(
+            output_sizes={"B": 100, "C": 100},
+            output_users={"B": ["mm"], "C": ["later"]},
+            user_orders={"mm": 10, "later": 20},
+            extern_users={"mm"},
+        )
+        node1 = self._create_mock_node(name="node1", reads=["A"], writes=["B"])
+        node2 = self._create_mock_node(name="node2", reads=["A"], writes=["C"])
+
+        self.assertTrue(
+            Scheduler.fusion_would_materialize_outputs_across_extern_branch(
+                scheduler, node1, node2
+            )
+        )
+
+    def test_fusion_would_materialize_outputs_across_extern_branch_allows_shared_user(
+        self,
+    ):
+        scheduler = self._create_materialized_output_scheduler(
+            output_sizes={"B": 100, "C": 100},
+            output_users={"B": ["mm", "join"], "C": ["later", "join"]},
+            user_orders={"mm": 10, "later": 20, "join": 30},
+            extern_users={"mm"},
+        )
+        node1 = self._create_mock_node(name="node1", reads=["A"], writes=["B"])
+        node2 = self._create_mock_node(name="node2", reads=["A"], writes=["C"])
+
+        self.assertFalse(
+            Scheduler.fusion_would_materialize_outputs_across_extern_branch(
+                scheduler, node1, node2
+            )
+        )
+
+    def test_fusion_would_materialize_outputs_across_extern_branch_allows_small_later_output(
+        self,
+    ):
+        scheduler = self._create_materialized_output_scheduler(
+            output_sizes={"B": 200, "C": 100},
+            output_users={"B": ["mm"], "C": ["later"]},
+            user_orders={"mm": 10, "later": 20},
+            extern_users={"mm"},
+        )
+        node1 = self._create_mock_node(name="node1", reads=["A"], writes=["B"])
+        node2 = self._create_mock_node(name="node2", reads=["A"], writes=["C"])
+
+        self.assertFalse(
+            Scheduler.fusion_would_materialize_outputs_across_extern_branch(
+                scheduler, node1, node2
+            )
+        )
+
+    def test_fusion_would_materialize_outputs_across_extern_branch_requires_both_sides(
+        self,
+    ):
+        scheduler = self._create_materialized_output_scheduler(
+            output_sizes={"B": 100, "C": 100},
+            output_users={"B": ["mm"], "C": ["later"]},
+            user_orders={"mm": 10, "later": 20},
+            extern_users={"mm"},
+        )
+        node1 = self._create_mock_node(name="node1", reads=["A"], writes=["B", "C"])
+        node2 = self._create_mock_node(name="node2", reads=["A"], writes=["D"])
+
+        self.assertFalse(
+            Scheduler.fusion_would_materialize_outputs_across_extern_branch(
+                scheduler, node1, node2
+            )
+        )
+
+    def test_fusion_would_materialize_outputs_across_extern_branch_requires_extern_user(
+        self,
+    ):
+        scheduler = self._create_materialized_output_scheduler(
+            output_sizes={"B": 100, "C": 100},
+            output_users={"B": ["pointwise"], "C": ["later"]},
+            user_orders={"pointwise": 10, "later": 20},
+            extern_users=set(),
+        )
+        node1 = self._create_mock_node(name="node1", reads=["A"], writes=["B"])
+        node2 = self._create_mock_node(name="node2", reads=["A"], writes=["C"])
+
+        self.assertFalse(
+            Scheduler.fusion_would_materialize_outputs_across_extern_branch(
+                scheduler, node1, node2
+            )
+        )
+
+    @inductor_config.patch("allow_peak_memory_increasing_fusion", False)
+    def test_can_fuse_blocks_cross_extern_branch_materialization(self):
+        scheduler = Mock(spec=Scheduler)
+        scheduler.can_fusion_increase_peak_memory = Mock(return_value=False)
+        scheduler.fusion_would_materialize_outputs_across_extern_branch = Mock(
+            return_value=True
+        )
+        node1 = self._create_mock_node(name="node1", reads=["A"], writes=["B"])
+        node2 = self._create_mock_node(name="node2", reads=["A"], writes=["C"])
+
+        self.assertFalse(InductorChoices.can_fuse(scheduler, node1, node2, 1))
+
+        check = scheduler.fusion_would_materialize_outputs_across_extern_branch
+        check.assert_called_once_with(node1, node2)
+
+    def test_can_fuse_allows_peak_memory_increasing_fusion_when_configured(self):
+        scheduler = Mock(spec=Scheduler)
+        scheduler.can_fusion_increase_peak_memory = Mock(return_value=False)
+        scheduler.fusion_would_materialize_outputs_across_extern_branch = Mock(
+            return_value=True
+        )
+        node1 = self._create_mock_node(name="node1", reads=["A"], writes=["B"])
+        node2 = self._create_mock_node(name="node2", reads=["A"], writes=["C"])
+
+        with inductor_config.patch("allow_peak_memory_increasing_fusion", True):
+            self.assertTrue(InductorChoices.can_fuse(scheduler, node1, node2, 100))
+
+        scheduler.can_fusion_increase_peak_memory.assert_called_once_with(node1, node2)
+        check = scheduler.fusion_would_materialize_outputs_across_extern_branch
+        check.assert_not_called()
+
     @inductor_config.patch("allow_peak_memory_increasing_fusion", False)
     def test_can_fuse_horizontal_blocks_disjoint_branch_materialization(self):
         scheduler = Mock(spec=Scheduler)
@@ -821,6 +942,32 @@ class TestScheduler(TestCase):
             user.get_name = Mock(return_value=name)
             buf.users.append(user)
         return buf
+
+    def _create_materialized_output_scheduler(
+        self,
+        output_sizes: dict[str, int],
+        output_users: dict[str, list[str]],
+        user_orders: dict[str, int],
+        extern_users: set[str],
+    ) -> Mock:
+        scheduler = Mock(spec=Scheduler)
+        scheduler.mutation_renames = {}
+        scheduler.can_buffer_be_removed_through_fusion = Mock(return_value=False)
+        scheduler._materialized_external_outputs = (
+            Scheduler._materialized_external_outputs.__get__(scheduler, Scheduler)
+        )
+        scheduler.dep_size_hint = Mock(side_effect=lambda dep: output_sizes[dep.name])
+        scheduler.name_to_buf = {
+            name: self._create_mock_buffer_users(users)
+            for name, users in output_users.items()
+        }
+        scheduler.name_to_fused_node = {}
+        for name, order in user_orders.items():
+            user_node = Mock(spec=BaseSchedulerNode)
+            user_node.min_order = order
+            user_node.is_extern = Mock(return_value=name in extern_users)
+            scheduler.name_to_fused_node[name] = user_node
+        return scheduler
 
     def test_prologue_fusion_uses_template_aliasing_hook(self):
         def make_prologue_and_template(hook_blocks: bool):
