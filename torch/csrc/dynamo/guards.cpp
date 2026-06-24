@@ -2221,7 +2221,7 @@ inline TensorCheck make_tensor_check(
 }
 
 struct RecordedTensorMetadata {
-  PyObject* tensor_ptr;
+  PyObject* tensor_wr; // weak reference to the tensor (owned)
   TensorCheck check;
 };
 
@@ -2524,6 +2524,12 @@ class GuardManager {
   void stash_tensor_metadata(
       PyObject* value,
       std::vector<RecordedTensorMetadata>&& tensor_metadata) {
+    auto it = _tensor_metadata_pointers.find(value);
+    if (it != _tensor_metadata_pointers.end()) {
+      for (auto& old_entry : it->second) {
+        Py_DECREF(old_entry.tensor_wr);
+      }
+    }
     _tensor_metadata_pointers[value] = std::move(tensor_metadata);
   }
 
@@ -2537,6 +2543,15 @@ class GuardManager {
   void disable_recursive_dict_tag_optimization(DictToGuardManagersMap& map) {
     unwatch_all_saved_dict_pointers(map);
     _disable_dict_tag_matching = true;
+    if (!Py_IsFinalizing()) {
+      for (auto& [key, vec] : _tensor_metadata_pointers) {
+        for (auto& entry : vec) {
+          Py_DECREF(entry.tensor_wr);
+        }
+      }
+    }
+    _tensor_pointers.clear();
+    _tensor_metadata_pointers.clear();
   }
 
  public:
@@ -2681,10 +2696,15 @@ class GuardManager {
       return true;
     }
     for (auto& recorded_tensor : it->second) {
-      if (!THPVariable_Check(recorded_tensor.tensor_ptr) ||
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-cstyle-cast)
+      PyObject* tensor_obj = PyWeakref_GET_OBJECT(recorded_tensor.tensor_wr);
+      if (tensor_obj == Py_None) {
+        // Tensor was collected; metadata cannot be verified.
+        return false;
+      }
+      if (!THPVariable_Check(tensor_obj) ||
           !recorded_tensor.check.check(
-              get_local_state(_root),
-              THPVariable_Unpack(recorded_tensor.tensor_ptr))) {
+              get_local_state(_root), THPVariable_Unpack(tensor_obj))) {
         return false;
       }
     }
@@ -3494,6 +3514,9 @@ class RootGuardManager : public GuardManager {
     _current_tag_safe_root = nullptr;
     _recorded_dict_pointers.clear();
     _recorded_tensor_pointers.clear();
+    for (auto& entry : _recorded_tensor_metadata) {
+      Py_DECREF(entry.tensor_wr);
+    }
     _recorded_tensor_metadata.clear();
   }
 
@@ -3503,7 +3526,7 @@ class RootGuardManager : public GuardManager {
       _current_tag_safe_root->stash_dict_pointers(
           value, _recorded_dict_pointers);
       _current_tag_safe_root->stash_tensor_pointers(
-          value, _recorded_tensor_pointers);
+          value, std::move(_recorded_tensor_pointers));
       _current_tag_safe_root->stash_tensor_metadata(
           value, std::move(_recorded_tensor_metadata));
     }
@@ -3525,8 +3548,13 @@ class RootGuardManager : public GuardManager {
   }
 
   void record_tensor_metadata(PyObject* tensor_pointer) {
+    PyObject* wr = PyWeakref_NewRef(tensor_pointer, nullptr);
+    if (!wr) {
+      PyErr_Clear();
+      return;
+    }
     _recorded_tensor_metadata.push_back(RecordedTensorMetadata{
-        tensor_pointer,
+        wr,
         make_tensor_check(_local_state, THPVariable_Unpack(tensor_pointer)),
     });
   }

@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import functools
+import gc
 import unittest
 import weakref
 
@@ -9,6 +10,7 @@ import torch._dynamo.test_case
 from torch._C._dynamo import guards
 from torch._dynamo.convert_frame import GlobalStateGuard
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+from torch._dynamo.testing import CompileCounter
 from torch.testing._internal.common_utils import set_default_dtype
 
 
@@ -1271,6 +1273,37 @@ class TagSafetyChecks(RecursiveDictTagTests):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         with install_guard_manager_testing_hook(hook):
             opt_fn(torch.randn(4, 4))
+
+    def test_recorded_tensor_freed_gracefully(self):
+        """Tensors recorded by the dict-tag fast path must not be prevented
+        from being garbage-collected.  When they *are* collected, the guard
+        should fall back to the slow path (return False) instead of crashing."""
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        mod = Mod()
+        weight_ref = weakref.ref(mod.linear.weight)
+        mod_ref = weakref.ref(mod)
+
+        cnt = CompileCounter()
+        opt_fn = torch.compile(mod, backend=cnt)
+        x = torch.randn(4, 4)
+        opt_fn(x)
+        self.assertEqual(cnt.frame_count, 1)
+
+        # The guard system must not prevent the module from being freed.
+        del mod, opt_fn, x
+        gc.collect()
+        self.assertIsNone(mod_ref(), "Module was kept alive by the guard system")
+        self.assertIsNone(
+            weight_ref(), "Weight tensor was kept alive by the guard system"
+        )
 
 
 class RecursiveDictGuardTests(RecursiveDictTagTests):
