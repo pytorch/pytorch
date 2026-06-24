@@ -2380,9 +2380,14 @@ class GuardAccessor {
 class GuardManager {
  public:
   GuardManager() = delete;
+
+ protected:
+  // Root-only constructor. Child guard managers must pass example_value so
+  // recursive dict-tag metadata stays populated.
   GuardManager(RootGuardManager* root, std::string source)
       : _root(root), _source(std::move(source)), _is_dict(false) {}
 
+ public:
   GuardManager(
       RootGuardManager* root,
       std::string source,
