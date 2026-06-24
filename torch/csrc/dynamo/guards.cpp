@@ -3712,7 +3712,7 @@ class DictGuardManager : public GuardManager {
       RootGuardManager* root,
       std::string source,
       py::handle example_value)
-      : GuardManager(root, std::move(source)),
+      : GuardManager(root, std::move(source), example_value),
         _size(PyDict_Size(example_value.ptr())),
         _expected_type(Py_TYPE(example_value.ptr())),
         _is_exact_dict_type(PyDict_CheckExact(example_value.ptr())) {}
@@ -4125,7 +4125,7 @@ std::unique_ptr<GuardManager> make_guard_manager(
       throw py::type_error("Invalid guard manager enum");
     }
   }
-  return std::make_unique<GuardManager>(root, std::move(source));
+  return std::make_unique<GuardManager>(root, std::move(source), example_value);
 }
 
 void start_recording_dict_pointers(
