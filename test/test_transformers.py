@@ -2234,6 +2234,48 @@ class TestSDPAFailureModes(NNTestCase):
         # before the fix, all rows past 2**32 // seq_len were garbage
         self.assertEqual(out, ref, atol=5e-3, rtol=5e-3)
 
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support Efficient Attention")
+    def test_mem_eff_attention_dropout_rng_offset_no_overflow(self):
+        # The per-(batch, head) dropout RNG offset is
+        #   (batch_id * num_heads + head_id) * num_queries * num_keys
+        # and used to be computed in 32-bit. At seq_len == 65536 the product
+        # num_queries * num_keys is exactly 2**32, so every (batch, head)
+        # offset wraps to 0 and all heads end up drawing the same dropout mask.
+        # Feed the heads identical q/k/v so that any difference in the output
+        # can only come from the dropout RNG: with the overflow the two heads
+        # are masked identically, after the fix they are masked independently.
+        device = torch.device("cuda")
+        dtype = torch.bfloat16
+
+        seq_len = 65536  # num_queries * num_keys == 2**32 exactly
+        num_heads = 2
+        head_dim = 8
+        torch.manual_seed(0)
+        qk = torch.randn(1, 1, seq_len, head_dim, device=device, dtype=dtype)
+        query = qk.expand(1, num_heads, seq_len, head_dim).contiguous()
+        key = query.clone()
+        value = (
+            torch.randn(1, 1, seq_len, head_dim, device=device, dtype=dtype)
+            .expand(1, num_heads, seq_len, head_dim)
+            .contiguous()
+        )
+
+        with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
+            # Sanity: identical inputs and no dropout -> identical heads.
+            no_dropout = torch.nn.functional.scaled_dot_product_attention(
+                query, key, value, dropout_p=0.0
+            )
+            self.assertEqual(no_dropout[:, 0], no_dropout[:, 1])
+
+            torch.manual_seed(0)
+            out = torch.nn.functional.scaled_dot_product_attention(
+                query, key, value, dropout_p=0.5
+            )
+        # The heads must be dropped independently; with the 32-bit overflow
+        # both offsets wrapped to 0 and the two heads came out identical.
+        self.assertFalse(torch.allclose(out[:, 0], out[:, 1]))
+
 
 def _get_block_size_n(device, head_dim, is_dropout, is_causal):
     # This should match the block sizes in the CUDA kernel

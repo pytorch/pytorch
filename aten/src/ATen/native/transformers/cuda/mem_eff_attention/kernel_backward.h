@@ -763,9 +763,13 @@ struct AttentionBackwardKernel {
       // Advance pointers that depend on the total concatenated
       // number of queries, as `num_queries` is modified in the block
       // below
+      // `batch_id` is int64_t here, but the `num_heads * num_queries *
+      // num_keys` product is evaluated in 32-bit and wraps once it exceeds
+      // 2^32. Widen it so this matches the forward pass, which indexes the
+      // same dropout RNG sequence.
       dropout_batch_head_rng_offset =
-          batch_id * (num_heads * num_queries * num_keys) +
-          head_id * (num_queries * num_keys);
+          batch_id * int64_t(num_heads) * num_queries * num_keys +
+          int64_t(head_id) * num_queries * num_keys;
       logsumexp_ptr += batch_id * lse_strideB + head_id * lse_strideH;
 
       if (cu_seqlens_q_ptr != nullptr) {

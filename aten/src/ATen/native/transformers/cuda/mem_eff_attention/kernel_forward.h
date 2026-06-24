@@ -203,9 +203,13 @@ struct AttentionKernel {
       auto lse_dim = ceil_div((int32_t)num_queries, kAlignLSE) * kAlignLSE;
 
       if (kSupportsDropout) {
+        // `batch_id`/`head_id` are 32-bit, so compute the per-(batch, head)
+        // RNG offset in 64-bit to avoid wraparound when
+        // num_queries * num_keys > 2^32. The backward pass indexes the same
+        // dropout RNG sequence, so the two must agree (see below).
         dropout_batch_head_rng_offset =
-            batch_id * num_heads * num_queries * num_keys +
-            head_id * num_queries * num_keys;
+            int64_t(batch_id) * num_heads * num_queries * num_keys +
+            int64_t(head_id) * num_queries * num_keys;
       }
 
       int64_t q_start = 0, k_start = 0;
