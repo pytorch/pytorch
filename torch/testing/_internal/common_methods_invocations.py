@@ -14654,12 +14654,11 @@ op_db: list[OpInfo] = [
            supports_out=False),
     OpInfo('sparse.sampled_addmm',
            dtypes=floating_and_complex_types(),
-           # CUDA forward also supports float16 (native cuSPARSE SDDMM) and
-           # bfloat16 (computed in float32; cuSPARSE SDDMM has no bf16 kernel).
+           # CUDA forward and backward also support float16 (native cuSPARSE
+           # SDDMM) and bfloat16 (computed in float32; cuSPARSE SDDMM has no
+           # bf16 kernel). backward_dtypesIfCUDA is omitted so it inherits
+           # dtypesIfCUDA, matching what test_dtypes observes at runtime.
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
-           # Backward for float16/bfloat16 is not fully supported across all
-           # samples yet, so keep backward at floating_and_complex_types only.
-           backward_dtypesIfCUDA=floating_and_complex_types(),
            supports_autograd=True,
            sample_inputs_func=sample_inputs_sparse_sampled_addmm,
            decorators=[
