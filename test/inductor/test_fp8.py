@@ -1154,6 +1154,17 @@ class TestFP8Lowering(TestCase):
         bias = None
 
         am, ak, bn, bk = scaling_block_sizes
+        if IS_SM90:
+            if (bn, bk) == (1, 128):
+                self.skipTest(
+                    "SM90 cuBLAS scaled_mm expects non-transposed RHS "
+                    "BlockWise1x128 scales"
+                )
+            if K < 512 and ((am, ak) == (128, 128) or (bn, bk) == (128, 128)):
+                self.skipTest(
+                    "SM90 cuBLAS pads 128x128 scales when K < 512, which "
+                    "Inductor TMA main-loop scaling does not support"
+                )
 
         # quantize weight (prior to inference)
         w_fp8, w_inverse_scale = _quantize_blockwise(
