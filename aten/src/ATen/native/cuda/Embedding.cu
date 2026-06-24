@@ -123,7 +123,8 @@ __global__ void embedding_backward_feature_kernel
         }
       }
     }
-    // Make sure updates are done before indices_batch is updated in the next iter.
+    // Wait for every warp to finish consuming the current indices_batch before
+    // any thread reloads it for the next batch.
     __syncthreads();
   }
 }
