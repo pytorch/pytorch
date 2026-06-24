@@ -382,6 +382,7 @@ function install_cutlass_api() {
 }
 
 function print_sccache_stats() {
+  if ! which sccache &> /dev/null; then echo "sccache not installed, skipping stats"; return; fi
   echo 'PyTorch Build Statistics'
   sccache --show-stats
 
