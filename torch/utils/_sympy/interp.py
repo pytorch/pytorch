@@ -130,6 +130,11 @@ def _run_sympy_handler(analysis, args, expr, index_dtype=torch.int64):
         return analysis.sqrt(args[0])
     if isinstance(expr, ToFloat):
         return analysis.to_dtype(args[0], torch.float64)
+    # sympy rewrites Piecewise over booleans into ITE (If-Then-Else) internally;
+    # decompose back into primitives the interpreter already handles.
+    if expr.func is sympy.logic.boolalg.ITE:
+        c, t, f = args
+        return analysis.or_(analysis.and_(c, t), analysis.and_(analysis.not_(c), f))
 
     # These handlers are special because they take an extra dtype argument
     # specifying what they should convert to, and we need to appropriately set
