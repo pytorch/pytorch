@@ -534,6 +534,13 @@ AOTITorchError aoti_torch_create_tensor_from_blob(
                                 .strides(strides)
                                 .storage_offset(storage_offset)
                                 .options(options)
+                                // Set the device explicitly so make_tensor()
+                                // skips getDeviceFromPtr (cudaPointerGetAttributes):
+                                // that driver query is illegal during CUDA graph
+                                // capture and a needless round-trip on the hot
+                                // path. The device is caller-provided and already
+                                // required to match opts above.
+                                .target_device(device)
                                 .make_tensor()
                           : at::empty_strided(sizes, strides, options));
   });
