@@ -12,6 +12,7 @@ struct THFloatTensor;
 
 #include <iostream>
 #include <chrono>
+#include <limits>
 // NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <string.h>
 #include <sstream>
@@ -534,4 +535,18 @@ TEST(BasicTest, TestForBlobStridesResizeCPU) {
   auto t = at::for_blob(storage.data(), {3,}).strides({1,}).storage_offset(3).options(c10::TensorOptions(kInt)).make_tensor();
   auto te = *at::expand_size(t, {3, 3});
   ASSERT_EQ(te[1][1].item<int32_t>(), 5);
+}
+
+TEST(BasicTest, TestForBlobStridesOverflow) {
+  std::array<int32_t, 6> storage;
+  // Mismatched sizes/strides dimensionality throws on all builds.
+  ASSERT_THROWS(
+      at::for_blob(storage.data(), {2, 3}).strides({1,}).options(c10::TensorOptions(kInt)).make_tensor());
+#ifndef C10_MOBILE
+  // Strides large enough to overflow the storage size computation also throw;
+  // overflow checks are compiled out on mobile.
+  const auto huge = std::numeric_limits<int64_t>::max();
+  ASSERT_THROWS(
+      at::for_blob(storage.data(), {2,}).strides({huge,}).options(c10::TensorOptions(kInt)).make_tensor());
+#endif
 }
