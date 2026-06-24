@@ -16293,6 +16293,35 @@ class TestReduceOpsMetal(TestCaseMPS):
         with self.assertRaises(RuntimeError):
             torch.prod(x, dim=1)
 
+    def test_prod_metal_wide_inner_few_rows(self):
+        # Few rows of a huge reduced dim (M < 64) route to the wide inner kernel
+        # (one threadgroup per row); must match CPU. Values near 1 keep the
+        # product in range.
+        torch.manual_seed(0)
+        for M, N in [(2, 2_000_000), (8, 500_000)]:
+            x = (1.0 + 0.001 * torch.randn(M, N)).to("mps")
+            self.assertEqual(torch.prod(x, dim=1).cpu(),
+                             torch.prod(x.cpu(), dim=1), rtol=1e-3, atol=1e-3)
+        # int wide path is exact (long accumulator)
+        xi = torch.ones(2, 1_000_000, dtype=torch.int32)
+        xi[:, ::500] = 2
+        self.assertEqual(torch.prod(xi.to("mps"), dim=1).cpu(),
+                         torch.prod(xi, dim=1))
+
+    def test_prod_metal_thin_inner_small_n(self):
+        # Tall-thin (small N, large M) routes to the thread-per-row thin kernel
+        # (N<=32); must match CPU across dtypes and across the N=32/33 boundary.
+        torch.manual_seed(0)
+        for M, N in [(100000, 8), (20000, 32), (20000, 33)]:
+            for dt in (torch.float32, torch.float16, torch.bfloat16):
+                x = (1.0 + 0.001 * torch.randn(M, N)).to(dt)
+                self.assertEqual(torch.prod(x.to("mps"), dim=1).cpu(),
+                                 torch.prod(x, dim=1), rtol=1e-2, atol=1e-2)
+        # int thin path is exact (long accumulator)
+        xi = torch.ones(100000, 8, dtype=torch.int32)
+        xi[:, ::4] = 2
+        self.assertEqual(torch.prod(xi.to("mps"), dim=1).cpu(), torch.prod(xi, dim=1))
+
 instantiate_parametrized_tests(TestReduceOpsMetal)
 
 instantiate_device_type_tests(TestConsistency, globals(), allow_mps=True, only_for="mps")

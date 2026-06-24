@@ -579,6 +579,139 @@ static void prod_kernel_mps(const Tensor& input,
     return;
   }
 
+  bool is_single = reduce_dims.size() == 1 && output.numel() != 1;
+  bool is_outer = is_single && reduce_dims[0] == 0 && input.is_contiguous() && output.is_contiguous();
+  bool is_inner = is_single && reduce_dims[0] == input.dim() - 1 && input.is_contiguous() && output.is_contiguous();
+
+  // The specialized outer/inner prod kernels carry M and N as 32-bit sizes, so
+  // fall back to the generic 64-bit NormParams path when a single dimension (or
+  // the non-reduced product) exceeds uint32.
+  if (is_single) {
+    constexpr int64_t kU32Max = std::numeric_limits<uint32_t>::max();
+    int64_t rd_size = input.size(reduce_dims[0]);
+    if (rd_size > kU32Max || input.numel() / std::max<int64_t>(rd_size, 1) > kU32Max) {
+      is_outer = false;
+      is_inner = false;
+    }
+  }
+
+  if (is_outer) {
+    uint32_t M = input.size(0);
+    uint32_t N = input.numel() / M;
+    uint32_t TG_X, TG_Y;
+    std::string kernel;
+    // Small-M kernels are instantiated same-dtype only; a mixed-dtype
+    // prod(..., dtype=...) request must fall through to the generic outer path
+    // (which covers all input/output combos) to avoid an unregistered kernel.
+    bool small_m_supported = input.scalar_type() == output.scalar_type() &&
+        (input.scalar_type() == at::kFloat || input.scalar_type() == at::kHalf || input.scalar_type() == at::kBFloat16);
+    if (small_m_supported && M <= 16) {
+      // Grid-stride small-M path (COLS=2 columns/thread): no barrier tree, and a
+      // bounded threadgroup count for large N. Wins over the generic outer
+      // kernel and one-thread-per-column for tiny M.
+      constexpr uint32_t COLS = 2, TG = 256;
+      auto sm_kernel = fmt::format("prod_reduction_outer_smallm_{}_{}", type_str, out_str);
+      // 64-bit grid: N may be up to kU32Max, so ceil_div(N, ...) * TG would wrap
+      // a uint32 to 0 (silently dispatching nothing) for N near 2^32.
+      const int64_t gthreads = c10::metal::ceil_div<int64_t>(N, COLS * TG) * TG;
+      dispatch_sync_with_rethrow(stream->queue(), ^() {
+        @autoreleasepool {
+          id<MTLComputeCommandEncoder> enc = stream->commandEncoder();
+          auto ps = lib.getPipelineStateForFunc(sm_kernel);
+          getMPSProfiler().beginProfileKernel(ps, "prod_reduction_outer_smallm", {input});
+          [enc setComputePipelineState:ps];
+          // Pad to 4 uints: Metal requires 16 bytes for a `constant uint3&`
+          // argument, and a 12-byte struct aborts under MTL_DEBUG_LAYER.
+          const std::array<uint32_t, 4> sizes_s{M, N, 1, 0};
+          mtl_setArgs(enc, input, output, sizes_s);
+          [enc dispatchThreads:MTLSizeMake(gthreads, 1, 1) threadsPerThreadgroup:MTLSizeMake(TG, 1, 1)];
+          getMPSProfiler().endProfileKernel(ps);
+        }
+      });
+      return;
+    }
+    // M > 16: generic 2D outer kernel (TG_X x TG_Y row-workers + tree reduce).
+    TG_X = 32;
+    TG_Y = 32;
+    kernel = fmt::format("prod_reduction_outer_{}_{}", type_str, out_str);
+    // 64-bit: ceil_div(N, TG_X) and the num_tg_x * TG_X grid width below would
+    // both wrap a uint32 to 0 for N near 2^32.
+    const int64_t num_tg_x = c10::metal::ceil_div<int64_t>(N, TG_X);
+
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      @autoreleasepool {
+        id<MTLComputeCommandEncoder> enc = stream->commandEncoder();
+        auto ps = lib.getPipelineStateForFunc(kernel);
+        getMPSProfiler().beginProfileKernel(ps, "prod_reduction_outer", {input});
+        [enc setComputePipelineState:ps];
+        // Pad to 4 uints: Metal requires 16 bytes for a `constant uint3&`
+        // argument, and a 12-byte struct aborts under MTL_DEBUG_LAYER.
+        const std::array<uint32_t, 4> sizes_s{M, N, 1, 0};
+        mtl_setArgs(enc, input, output, sizes_s);
+        [enc dispatchThreads:MTLSizeMake(num_tg_x * TG_X, TG_Y, 1) threadsPerThreadgroup:MTLSizeMake(TG_X, TG_Y, 1)];
+        getMPSProfiler().endProfileKernel(ps);
+      }
+    });
+    return;
+  }
+
+  if (is_inner) {
+    uint32_t N = input.size(input.dim() - 1);
+    uint32_t M = input.numel() / N;
+    // Enough rows -> one SIMD group per row (pack rows_per_tg rows per TG).
+    // Few rows (small M) -> the "wide" kernel (one whole TG per row, up to 1024
+    // threads), since only M simdgroups on few rows idles most of the GPU. This
+    // gates on M only, not N: unlike welford, prod's simd-per-row still wins at
+    // moderate M with large N (e.g. M=256, N=65536), so a low N cap would
+    // regress it.
+    // Tall-thin (small N, large M) -> one thread per row: a 32-lane SIMD group
+    // on N<=32 leaves most lanes idle and pays simd-reduction overhead for under
+    // one element of work per lane.
+    bool use_thin = (M >= 64 && N <= 32);
+    bool use_simd_per_row = (M >= 64);
+    uint32_t tg_size;
+    // 64-bit: M may be up to kU32Max, so ceil_div(M, ...) would wrap a uint32 to
+    // 0 for M near 2^32, dispatching no threadgroups.
+    int64_t num_tgs;
+    std::string kernel;
+    if (use_thin) {
+      kernel = fmt::format("prod_reduction_inner_thin_{}_{}", type_str, out_str);
+      tg_size = 256;
+      num_tgs = c10::metal::ceil_div<int64_t>(M, tg_size); // one thread per row
+    } else if (use_simd_per_row) {
+      kernel = fmt::format("prod_reduction_inner_{}_{}", type_str, out_str);
+      tg_size = (N <= 512) ? 1024u : 256u;
+      num_tgs = c10::metal::ceil_div<int64_t>(M, tg_size / 32);
+    } else {
+      kernel = fmt::format("prod_reduction_inner_wide_{}_{}", type_str, out_str);
+      tg_size = std::min(1024u, c10::metal::ceil_div(N, 32u) * 32u);
+      if (N >= 2048) {
+        tg_size = c10::metal::ceil_div(N / (4u * 16u), 32u) * 32u;
+        tg_size = std::clamp(tg_size, 32u, 1024u);
+      }
+      num_tgs = M; // one TG per row
+    }
+    // 64-bit total dispatch thread count: num_tgs * tg_size can exceed 2^32 for
+    // a tall input (many rows).
+    const int64_t total_threads = num_tgs * tg_size;
+
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      @autoreleasepool {
+        id<MTLComputeCommandEncoder> enc = stream->commandEncoder();
+        auto ps = lib.getPipelineStateForFunc(kernel);
+        getMPSProfiler().beginProfileKernel(ps, "prod_reduction_inner", {input});
+        [enc setComputePipelineState:ps];
+        struct {
+          uint32_t M, N;
+        } sizes_s = {M, N};
+        mtl_setArgs(enc, input, output, sizes_s);
+        [enc dispatchThreads:MTLSizeMake(total_threads, 1, 1) threadsPerThreadgroup:MTLSizeMake(tg_size, 1, 1)];
+        getMPSProfiler().endProfileKernel(ps);
+      }
+    });
+    return;
+  }
+
   auto kernel = fmt::format("prod_reduction_{}_{}", type_str, out_str);
   // The generic NormParams path indexes per-dim arrays sized by max_ndim; a
   // higher-rank input would index past the struct/stack storage. (The outer/

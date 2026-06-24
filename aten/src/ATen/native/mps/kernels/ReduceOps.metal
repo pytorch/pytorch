@@ -1569,3 +1569,354 @@ REGISTER_PROD(uchar, uchar);
 REGISTER_PROD(uchar, long);
 REGISTER_PROD(bool, long);
 REGISTER_PROD(bool, int);
+
+// ---- prod shape specializations: outer/inner/wide/thin + small-M (C3) ----
+template <
+    typename TI,
+    typename TO,
+    uint TG_X = 32,
+    uint TG_Y = 32,
+    uint NCHAINS = SUM_NCHAINS>
+kernel void prod_reduction_outer(
+    constant TI* input [[buffer(0)]],
+    device TO* output [[buffer(1)]],
+    constant uint3& sizes [[buffer(2)]],
+    uint2 tid_tg [[thread_position_in_threadgroup]],
+    uint2 tg_pos [[threadgroup_position_in_grid]]) {
+  using TA = opmath_t<TO>;
+  const uint M = sizes.x;
+  const uint N = sizes.y;
+  const uint out_stride = sizes.z;
+
+  uint col = tg_pos.x * TG_X + tid_tg.x;
+  if (col >= N)
+    return;
+
+  // 64-bit: M may be up to kU32Max, so ceil_div(M, TG_Y) would wrap to 0 (the
+  // kernel then processes no rows and returns the identity), and row_start +
+  // rows_per_y can exceed 2^32 on the last y-worker before the min clamps it.
+  // Compute both in ulong; rows_per_y and row_end (<= M) fit 32 bits.
+  uint rows_per_y = ceil_div<ulong>(M, TG_Y);
+  uint row_start = tid_tg.y * rows_per_y;
+  uint row_end = min((ulong)row_start + rows_per_y, (ulong)M);
+
+  metal::array<TA, NCHAINS> acc;
+  for (uint j = 0; j < NCHAINS; j++)
+    acc[j] = 1;
+
+  // 64-bit accumulated global offset: row * N can exceed 2^32 for a logically
+  // [M, N] input with more than 2^32 elements. row/col/N stay 32-bit.
+  uint row = row_start;
+  for (; row + NCHAINS <= row_end; row += NCHAINS) {
+    for (uint j = 0; j < NCHAINS; j++) {
+      acc[j] *= static_cast<TA>(input[static_cast<ulong>(row + j) * N + col]);
+    }
+  }
+  for (; row < row_end; row++) {
+    acc[row % NCHAINS] *=
+        static_cast<TA>(input[static_cast<ulong>(row) * N + col]);
+  }
+
+  TA prod = acc[0];
+  for (uint j = 1; j < NCHAINS; j++)
+    prod *= acc[j];
+
+  threadgroup TA shmem[TG_Y][TG_X];
+  shmem[tid_tg.y][tid_tg.x] = prod;
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  for (uint s = TG_Y / 2; s > 0; s >>= 1) {
+    if (tid_tg.y < s)
+      shmem[tid_tg.y][tid_tg.x] *= shmem[tid_tg.y + s][tid_tg.x];
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+
+  if (tid_tg.y == 0) {
+    output[static_cast<ulong>(col) * out_stride] =
+        static_cast<TO>(shmem[0][tid_tg.x]);
+  }
+}
+
+template <typename TI, typename TO, uint NCHAINS = SUM_NCHAINS>
+kernel void prod_reduction_inner(
+    constant TI* input [[buffer(0)]],
+    device TO* output [[buffer(1)]],
+    constant uint2& sizes [[buffer(2)]],
+    uint tid [[thread_index_in_threadgroup]],
+    uint tptg [[threads_per_threadgroup]],
+    uint tgid [[threadgroup_position_in_grid]],
+    uint simd_lane_id [[thread_index_in_simdgroup]],
+    uint simdgroup_id [[simdgroup_index_in_threadgroup]]) {
+  using TA = opmath_t<TO>;
+  const uint M = sizes.x;
+  const uint N = sizes.y;
+  const uint num_simd_groups = tptg / 32;
+
+  // One SIMD group reduces one row; num_simd_groups rows share a TG (mirrors
+  // sum_reduction_inner). Avoids one whole TG per row, which idles most threads
+  // and over-subscribes the GPU when there are many short rows.
+  uint row = tgid * num_simd_groups + simdgroup_id;
+  if (row >= M)
+    return;
+
+  // 64-bit accumulated global offset: row * N can exceed 2^32 for a logically
+  // [M, N] input with more than 2^32 elements. row/N stay 32-bit.
+  constant TI* row_ptr = input + static_cast<ulong>(row) * N;
+
+  metal::array<TA, NCHAINS> acc;
+  for (uint j = 0; j < NCHAINS; j++)
+    acc[j] = 1;
+
+  const uint stride = 32 * NCHAINS;
+  const uint aligned_N = (N / stride) * stride;
+  uint base = simd_lane_id * NCHAINS;
+  for (; base < aligned_N; base += stride) {
+    for (uint j = 0; j < NCHAINS; j++) {
+      acc[j] *= static_cast<TA>(row_ptr[base + j]);
+    }
+  }
+  for (uint i = aligned_N + simd_lane_id; i < N; i += 32) {
+    acc[0] *= static_cast<TA>(row_ptr[i]);
+  }
+
+  TA prod = acc[0];
+  for (uint j = 1; j < NCHAINS; j++)
+    prod *= acc[j];
+  // Reduce across the 32 lanes of this SIMD group (no shared memory needed).
+  prod = c10::metal::simd_prod(prod);
+
+  if (simd_lane_id == 0) {
+    output[row] = static_cast<TO>(prod);
+  }
+}
+
+// Wide inner-dim prod: one whole threadgroup (up to 1024 threads) products one
+// row, used for few/huge rows (small M, large N) where the simd-per-row variant
+// leaves only 32 lanes on a giant row and idles most of the GPU (e.g. M=2,
+// N~8M is ~25x slower there). Mirrors welford_reduction_inner_wide.
+template <typename TI, typename TO, int NCHAINS>
+kernel void prod_reduction_inner_wide(
+    constant TI* input [[buffer(0)]],
+    device TO* output [[buffer(1)]],
+    constant uint2& sizes [[buffer(2)]],
+    uint tid [[thread_index_in_threadgroup]],
+    uint tptg [[threads_per_threadgroup]],
+    uint tgid [[threadgroup_position_in_grid]],
+    uint simd_lane_id [[thread_index_in_simdgroup]],
+    uint simdgroup_id [[simdgroup_index_in_threadgroup]]) {
+  using TA = opmath_t<TO>;
+  const uint M = sizes.x;
+  const uint N = sizes.y;
+  const uint num_simd_groups = tptg / 32;
+  uint row = tgid;
+  if (row >= M)
+    return;
+  // 64-bit base: row * N can exceed 2^32 for a >2^32-element input; the in-row
+  // offsets below stay 32-bit (a single row has at most N <= uint32 elements).
+  constant TI* row_ptr = input + static_cast<ulong>(row) * N;
+
+  metal::array<TA, NCHAINS> acc;
+  for (uint j = 0; j < NCHAINS; j++)
+    acc[j] = 1;
+  const uint stride = tptg * NCHAINS;
+  const uint aligned_N = (N / stride) * stride;
+  uint base = tid;
+  for (uint i = base; i < aligned_N; i += stride) {
+    for (uint c = 0; c < NCHAINS; c++)
+      acc[c] *= static_cast<TA>(row_ptr[i + c * tptg]);
+  }
+  for (uint i = base + aligned_N; i < N; i += tptg)
+    acc[0] *= static_cast<TA>(row_ptr[i]);
+  TA p = acc[0];
+  for (uint j = 1; j < NCHAINS; j++)
+    p *= acc[j];
+
+  // Reduce across the simdgroup, then a shared-memory tree across simdgroups.
+  p = c10::metal::simd_prod(p);
+  threadgroup TA shared[32];
+  if (simd_lane_id == 0)
+    shared[simdgroup_id] = p;
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  if (simdgroup_id == 0) {
+    // Padding lanes (>= num_simd_groups) carry the prod identity 1; the final
+    // simdgroup has 32 active lanes so simd_prod<long>'s shuffle-fill is
+    // benign.
+    p = (simd_lane_id < num_simd_groups) ? shared[simd_lane_id] : TA(1);
+    p = c10::metal::simd_prod(p);
+    if (simd_lane_id == 0)
+      output[row] = static_cast<TO>(p);
+  }
+}
+
+// Thin inner-dim prod: ONE thread products a full row, serially over N. For
+// small N the simd-per-row variant leaves 32-N of its 32 lanes idle and pays
+// simd-reduction overhead for under one element of work per lane;
+// thread-per-row has neither. Dispatched for small N with M large enough to
+// fill the GPU.
+template <typename TI, typename TO>
+kernel void prod_reduction_inner_thin(
+    constant TI* input [[buffer(0)]],
+    device TO* output [[buffer(1)]],
+    constant uint2& sizes [[buffer(2)]],
+    uint gid [[thread_position_in_grid]]) {
+  using TA = opmath_t<TO>;
+  const uint M = sizes.x;
+  const uint N = sizes.y;
+  if (gid >= M)
+    return;
+  constant TI* row_ptr = input + static_cast<ulong>(gid) * N;
+  TA p = 1;
+  for (uint i = 0; i < N; i++)
+    p *= static_cast<TA>(row_ptr[i]);
+  output[gid] = static_cast<TO>(p);
+}
+
+#define REGISTER_PROD_OUTER(TI, TO)                              \
+  template [[host_name("prod_reduction_outer_" #TI "_" #TO)]]    \
+  kernel void prod_reduction_outer<TI, TO, 32, 32, SUM_NCHAINS>( \
+      constant TI * input [[buffer(0)]],                         \
+      device TO * output [[buffer(1)]],                          \
+      constant uint3 & sizes [[buffer(2)]],                      \
+      uint2 tid_tg [[thread_position_in_threadgroup]],           \
+      uint2 tg_pos [[threadgroup_position_in_grid]]);
+
+#define REGISTER_PROD_INNER(TI, TO)                           \
+  template [[host_name("prod_reduction_inner_" #TI "_" #TO)]] \
+  kernel void prod_reduction_inner<TI, TO, SUM_NCHAINS>(      \
+      constant TI * input [[buffer(0)]],                      \
+      device TO * output [[buffer(1)]],                       \
+      constant uint2 & sizes [[buffer(2)]],                   \
+      uint tid [[thread_index_in_threadgroup]],               \
+      uint tptg [[threads_per_threadgroup]],                  \
+      uint tgid [[threadgroup_position_in_grid]],             \
+      uint simd_lane_id [[thread_index_in_simdgroup]],        \
+      uint simdgroup_id [[simdgroup_index_in_threadgroup]]);
+
+REGISTER_PROD_OUTER(float, float);
+REGISTER_PROD_OUTER(half, half);
+REGISTER_PROD_OUTER(half, float);
+REGISTER_PROD_OUTER(bfloat, bfloat);
+REGISTER_PROD_OUTER(bfloat, float);
+REGISTER_PROD_OUTER(int, int);
+REGISTER_PROD_OUTER(int, long);
+REGISTER_PROD_OUTER(long, long);
+REGISTER_PROD_OUTER(short, short);
+REGISTER_PROD_OUTER(short, long);
+REGISTER_PROD_OUTER(char, char);
+REGISTER_PROD_OUTER(char, long);
+REGISTER_PROD_OUTER(uchar, uchar);
+REGISTER_PROD_OUTER(uchar, long);
+REGISTER_PROD_OUTER(bool, long);
+REGISTER_PROD_OUTER(bool, int);
+
+REGISTER_PROD_INNER(float, float);
+REGISTER_PROD_INNER(half, half);
+REGISTER_PROD_INNER(half, float);
+REGISTER_PROD_INNER(bfloat, bfloat);
+REGISTER_PROD_INNER(bfloat, float);
+REGISTER_PROD_INNER(int, int);
+REGISTER_PROD_INNER(int, long);
+REGISTER_PROD_INNER(long, long);
+REGISTER_PROD_INNER(short, short);
+REGISTER_PROD_INNER(short, long);
+REGISTER_PROD_INNER(char, char);
+REGISTER_PROD_INNER(char, long);
+REGISTER_PROD_INNER(uchar, uchar);
+REGISTER_PROD_INNER(uchar, long);
+REGISTER_PROD_INNER(bool, long);
+REGISTER_PROD_INNER(bool, int);
+
+#define REGISTER_PROD_INNER_WIDE(TI, TO)                           \
+  template [[host_name("prod_reduction_inner_wide_" #TI "_" #TO)]] \
+  kernel void prod_reduction_inner_wide<TI, TO, SUM_NCHAINS>(      \
+      constant TI * input [[buffer(0)]],                           \
+      device TO * output [[buffer(1)]],                            \
+      constant uint2 & sizes [[buffer(2)]],                        \
+      uint tid [[thread_index_in_threadgroup]],                    \
+      uint tptg [[threads_per_threadgroup]],                       \
+      uint tgid [[threadgroup_position_in_grid]],                  \
+      uint simd_lane_id [[thread_index_in_simdgroup]],             \
+      uint simdgroup_id [[simdgroup_index_in_threadgroup]]);
+
+REGISTER_PROD_INNER_WIDE(float, float);
+REGISTER_PROD_INNER_WIDE(half, half);
+REGISTER_PROD_INNER_WIDE(half, float);
+REGISTER_PROD_INNER_WIDE(bfloat, bfloat);
+REGISTER_PROD_INNER_WIDE(bfloat, float);
+REGISTER_PROD_INNER_WIDE(int, int);
+REGISTER_PROD_INNER_WIDE(int, long);
+REGISTER_PROD_INNER_WIDE(long, long);
+REGISTER_PROD_INNER_WIDE(short, short);
+REGISTER_PROD_INNER_WIDE(short, long);
+REGISTER_PROD_INNER_WIDE(char, char);
+REGISTER_PROD_INNER_WIDE(char, long);
+REGISTER_PROD_INNER_WIDE(uchar, uchar);
+REGISTER_PROD_INNER_WIDE(uchar, long);
+REGISTER_PROD_INNER_WIDE(bool, long);
+REGISTER_PROD_INNER_WIDE(bool, int);
+
+#define REGISTER_PROD_INNER_THIN(TI, TO)                           \
+  template [[host_name("prod_reduction_inner_thin_" #TI "_" #TO)]] \
+  kernel void prod_reduction_inner_thin<TI, TO>(                   \
+      constant TI * input [[buffer(0)]],                           \
+      device TO * output [[buffer(1)]],                            \
+      constant uint2 & sizes [[buffer(2)]],                        \
+      uint gid [[thread_position_in_grid]]);
+
+REGISTER_PROD_INNER_THIN(float, float);
+REGISTER_PROD_INNER_THIN(half, half);
+REGISTER_PROD_INNER_THIN(half, float);
+REGISTER_PROD_INNER_THIN(bfloat, bfloat);
+REGISTER_PROD_INNER_THIN(bfloat, float);
+REGISTER_PROD_INNER_THIN(int, int);
+REGISTER_PROD_INNER_THIN(int, long);
+REGISTER_PROD_INNER_THIN(long, long);
+REGISTER_PROD_INNER_THIN(short, short);
+REGISTER_PROD_INNER_THIN(short, long);
+REGISTER_PROD_INNER_THIN(char, char);
+REGISTER_PROD_INNER_THIN(char, long);
+REGISTER_PROD_INNER_THIN(uchar, uchar);
+REGISTER_PROD_INNER_THIN(uchar, long);
+REGISTER_PROD_INNER_THIN(bool, long);
+REGISTER_PROD_INNER_THIN(bool, int);
+
+// Small-M outer prod (M <= 16): grid-stride over columns, each thread reduces
+// COLS columns over all M rows. The generic outer kernel splits the tiny M
+// across TG_Y row-workers and pays a shared-memory barrier tree; that overhead
+// dominates when M is small. One-thread-per-column instead over-subscribes the
+// GPU for large N. sum dim=0 uses a tensor-core simdgemm path that products
+// cannot, so prod needs this dedicated layout. COLS=2 won a config sweep.
+template <typename TI, typename TO, uint COLS = 2>
+kernel void prod_reduction_outer_smallm(
+    constant TI* input [[buffer(0)]],
+    device TO* output [[buffer(1)]],
+    constant uint3& sizes [[buffer(2)]],
+    uint gid [[thread_position_in_grid]],
+    uint gsize [[threads_per_grid]]) {
+  using TA = opmath_t<TO>;
+  const uint M = sizes.x;
+  const uint N = sizes.y;
+  const uint out_stride = sizes.z;
+  for (uint col = gid; col < N; col += gsize) {
+    TA acc = 1;
+    // 64-bit accumulated global offset: row * N can exceed 2^32 for a logically
+    // [M, N] input with more than 2^32 elements. row/col/N stay 32-bit.
+    for (uint row = 0; row < M; row++) {
+      acc *= static_cast<TA>(input[static_cast<ulong>(row) * N + col]);
+    }
+    output[static_cast<ulong>(col) * out_stride] = static_cast<TO>(acc);
+  }
+}
+
+#define REGISTER_PROD_OUTER_SMALLM(TI, TO)                                  \
+  template                                                                  \
+      [[host_name("prod_reduction_outer_smallm_" #TI "_" #TO)]] kernel void \
+      prod_reduction_outer_smallm<TI, TO, 2>(                               \
+          constant TI * input [[buffer(0)]],                                \
+          device TO * output [[buffer(1)]],                                 \
+          constant uint3 & sizes [[buffer(2)]],                             \
+          uint gid [[thread_position_in_grid]],                             \
+          uint gsize [[threads_per_grid]]);
+REGISTER_PROD_OUTER_SMALLM(float, float);
+REGISTER_PROD_OUTER_SMALLM(half, half);
+REGISTER_PROD_OUTER_SMALLM(bfloat, bfloat);
