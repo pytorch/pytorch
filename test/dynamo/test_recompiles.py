@@ -2,6 +2,7 @@
 from unittest.mock import patch
 
 import torch
+import torch._dynamo.guards
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo import config as dc
@@ -197,6 +198,109 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cmp_result, eager_result)
         # Recompile, alias changed
         self.assertEqual(cnt.frame_count, 2)
+
+    def test_aliasing_guard_failure_with_unavailable_list_tensor_source(self):
+        def fn(a, b, data):
+            x = a + b
+            if data is not None:
+                x = x + data[0] + data[1]
+            return x
+
+        failure_reasons = []
+
+        def guard_fail_fn(failure):
+            failure_reasons.append(failure.reason)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled_fn = torch._dynamo.optimize(backend=cnt, guard_fail_fn=guard_fail_fn)(
+            fn
+        )
+
+        t1, t2 = torch.randn(4), torch.randn(4)
+        data = [torch.randn(4), torch.randn(4)]
+        self.assertEqual(compiled_fn(t1, t2, data), fn(t1, t2, data))
+
+        t = torch.randn(4)
+        self.assertEqual(compiled_fn(t, t, None), fn(t, t, None))
+
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(len(failure_reasons), 1)
+        self.assertIn("Duplicate tensors found", failure_reasons[0])
+        self.assertIn(
+            "NO_TENSOR_ALIASING guard source(s) no longer evaluate",
+            failure_reasons[0],
+        )
+        # debug_force_nested_calls rewrites top-level argument names in the
+        # nested-graph-breaks wrapper, but the same indexed source must fail.
+        for source in ("[0]", "[1]"):
+            self.assertTrue(
+                f"data{source}" in failure_reasons[0]
+                or f"args[2]{source}" in failure_reasons[0],
+                failure_reasons[0],
+            )
+
+    def test_aliasing_guard_recompile_reason_with_unavailable_sources(self):
+        class MissingAttr:
+            pass
+
+        manager = torch._dynamo.guards.GuardManagerWrapper()
+        manager.global_scope = {"G": {}}
+        manager.no_tensor_aliasing_sources = [
+            "L['duplicate_a']",
+            "L['duplicate_b']",
+            "L['missing_attr'].value",
+            "L['missing_index'][0]",
+            "L['missing_key']['key']",
+            "L['not_subscriptable'][0]",
+            "list.__getitem__(L['not_list'], 0)",
+        ]
+        duplicate = torch.randn(4)
+        scope = {
+            "L": {
+                "duplicate_a": duplicate,
+                "duplicate_b": duplicate,
+                "missing_attr": MissingAttr(),
+                "missing_index": [],
+                "missing_key": {},
+                "not_subscriptable": None,
+                "not_list": None,
+            }
+        }
+
+        reasons = (
+            torch._dynamo.guards.recompilation_reason_for_no_tensor_aliasing_guard(
+                manager, scope
+            )
+        )
+
+        self.assertEqual(len(reasons), 2)
+        self.assertIn("Duplicate tensors found", reasons[0])
+        self.assertIn("duplicate_a", reasons[0])
+        self.assertIn("duplicate_b", reasons[0])
+        self.assertIn(
+            "NO_TENSOR_ALIASING guard source(s) no longer evaluate", reasons[1]
+        )
+        for source, exception_type in (
+            ("missing_attr", "AttributeError"),
+            ("missing_index", "IndexError"),
+            ("missing_key", "KeyError"),
+            ("not_subscriptable", "TypeError"),
+            ("not_list", "TypeError"),
+        ):
+            self.assertIn(source, reasons[1])
+            self.assertIn(exception_type, reasons[1])
+
+        manager.no_tensor_aliasing_sources = ["len(1)"]
+        with self.assertRaisesRegex(TypeError, "has no len"):
+            torch._dynamo.guards.recompilation_reason_for_no_tensor_aliasing_guard(
+                manager, scope
+            )
+
+        manager.no_tensor_aliasing_sources = ["1 / 0"]
+        with self.assertRaisesRegex(ZeroDivisionError, "division by zero"):
+            torch._dynamo.guards.recompilation_reason_for_no_tensor_aliasing_guard(
+                manager, scope
+            )
 
     def test_object_alias_relation_guards_without_lambda(self):
         class Box:

@@ -5148,6 +5148,30 @@ def make_torch_function_mode_stack_guard(
 Scope = TypeAliasType("Scope", dict[str, object])
 
 
+def _is_scope_lookup_subscript(node: ast.AST) -> bool:
+    return (
+        isinstance(node, ast.Subscript)
+        and isinstance(node.value, ast.Name)
+        and node.value.id in ("L", "G")
+    )
+
+
+def _guard_source_uses_indexing(tensor_source: str) -> bool:
+    def is_getitem_call(node: ast.Call) -> bool:
+        if isinstance(node.func, ast.Attribute):
+            return node.func.attr == "__getitem__"
+        return isinstance(node.func, ast.Name) and node.func.id.endswith("getitem")
+
+    def visit(node: ast.AST) -> bool:
+        if isinstance(node, ast.Subscript) and not _is_scope_lookup_subscript(node):
+            return True
+        if isinstance(node, ast.Call) and is_getitem_call(node):
+            return True
+        return any(visit(child) for child in ast.iter_child_nodes(node))
+
+    return visit(ast.parse(tensor_source, mode="eval"))
+
+
 def recompilation_reason_for_no_tensor_aliasing_guard(
     guard_manager: GuardManagerWrapper, scope: Scope
 ) -> list[str]:
@@ -5155,17 +5179,45 @@ def recompilation_reason_for_no_tensor_aliasing_guard(
         raise AssertionError("guard_manager.global_scope must not be None")
     global_scope = dict(guard_manager.global_scope)
     ids_to_source = collections.defaultdict(list)
+    source_eval_failures: list[str] = []
     for tensor_source in guard_manager.no_tensor_aliasing_sources:
         global_scope["__compile_source__"] = tensor_source
-        tensor_id = id(eval(tensor_source, global_scope, scope))
+        try:
+            tensor = eval(tensor_source, global_scope, scope)
+        except (AttributeError, LookupError) as e:
+            # The compiled source path may no longer exist after container
+            # structure or object type changes; keep explaining other sources.
+            source_eval_failures.append(f"{tensor_source} ({type(e).__name__}: {e})")
+            continue
+        except TypeError as e:
+            # Indexed sources can fail with TypeError when their base changes
+            # type, e.g. L['data'][0] with data=None. Keep unrelated TypeErrors
+            # visible instead of classifying them by exception text.
+            if not _guard_source_uses_indexing(tensor_source):
+                raise
+            # The compiled source path may no longer exist after container
+            # structure or object type changes; keep explaining other sources.
+            source_eval_failures.append(f"{tensor_source} ({type(e).__name__}: {e})")
+            continue
+        tensor_id = id(tensor)
         ids_to_source[tensor_id].append(tensor_source)
 
     duplicate_tensors = [
         f"{ids_to_source[key]}" for key in ids_to_source if len(ids_to_source[key]) > 1
     ]
 
-    reason = ", ".join(duplicate_tensors)
-    return [f"Duplicate tensors found: {reason}"]
+    reasons: list[str] = []
+    if duplicate_tensors:
+        reason = ", ".join(duplicate_tensors)
+        reasons.append(f"Duplicate tensors found: {reason}")
+    if source_eval_failures:
+        reason = ", ".join(source_eval_failures)
+        reasons.append(
+            "NO_TENSOR_ALIASING guard source(s) no longer evaluate: " + reason
+        )
+    if not reasons:
+        reasons.append("NO_TENSOR_ALIASING guard failed")
+    return reasons
 
 
 def strip_local_scope(s: str) -> str:
