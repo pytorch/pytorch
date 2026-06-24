@@ -134,6 +134,7 @@ from .source import (
     DefaultsSource,
     DictGetItemSource,
     DictSubclassGetItemSource,
+    DynamicDictGetItemSource,
     DynamicScalarSource,
     FlattenScriptObjectSource,
     FloatTensorSource,
@@ -999,6 +1000,32 @@ def getitem_on_dict_manager(
     )
 
 
+def make_dynamic_dict_getitem_accessor(
+    source: DynamicDictGetItemSource, runtime_global_scope: dict[str, object]
+) -> Any:
+    closure_vars = _get_closure_vars()
+    make_accessor_args = ", ".join(
+        ["G", *closure_vars.keys(), "___key_type", "___invalid"]
+    )
+    pycode = f"""
+def ___make_dynamic_dict_getitem_accessor({make_accessor_args}):
+    def accessor(L):
+        key = {source.index.name}
+        if type(key) is not ___key_type:
+            # The guard tree has value guards for successful lookups. Returning
+            # this sentinel makes those guards fail without invoking user key
+            # __hash__ or __eq__ methods via dict.__getitem__.
+            return ___invalid
+        return dict.__getitem__({source.base.name}, key)
+    return accessor
+"""
+    out: dict[str, Any] = {}
+    exec(pycode, {"__builtins__": builtins.__dict__}, out)
+    return out["___make_dynamic_dict_getitem_accessor"](
+        runtime_global_scope, *closure_vars.values(), source.key_type, object()
+    )
+
+
 def match_on_id_for_tensor(guard: Guard) -> bool:
     source = guard.originating_source
     # For numpy tensors, always use TENSOR_MATCH because __from_numpy leads
@@ -1264,6 +1291,8 @@ class GuardBuilder(GuardBuilderBase):
         # guards.
         self.no_tensor_aliasing_names: list[str] = []
         self.no_tensor_aliasing_guard_managers: list[GuardManager] = []
+        self.no_tensor_aliasing_sources: list[Source] = []
+        self.no_tensor_aliasing_tensor_ids: list[int] = []
 
         self.check_fn_manager: CheckFunctionManager = check_fn_manager
 
@@ -1785,6 +1814,15 @@ class GuardBuilder(GuardBuilderBase):
                     example_value=example_value,
                     guard_manager_enum=guard_manager_enum,
                 )
+        elif istype(source, DynamicDictGetItemSource):
+            out = root_guard_manager.lambda_manager(
+                python_lambda=make_dynamic_dict_getitem_accessor(
+                    source, self.runtime_global_scope
+                ),
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
         elif istype(source, TensorPropertySource):
             out = getattr(
                 base_guard_manager,
@@ -3600,6 +3638,8 @@ class GuardBuilder(GuardBuilderBase):
                     # NoAliasing check at the end.
                     self.no_tensor_aliasing_names.append(tensor_name)
                     self.no_tensor_aliasing_guard_managers.append(guard_manager)
+                    self.no_tensor_aliasing_sources.append(guard.originating_source)
+                    self.no_tensor_aliasing_tensor_ids.append(id(value))
 
                 output_graph = self.check_fn_manager.output_graph
                 metadata = output_graph.input_source_to_sizes_strides[
@@ -4906,14 +4946,79 @@ class CheckFunctionManager:
         check_tensors_verbose_fn = None
 
         if len(no_tensor_aliasing_names) > 1:
-            # Install tensor aliasing guard. TENSOR_MATCH guards are already
-            # installed for cpp guard manager.
-            install_no_tensor_aliasing_guard(
-                builder.no_tensor_aliasing_guard_managers,
-                no_tensor_aliasing_names,
-                ["check_no_aliasing(" + ", ".join(no_tensor_aliasing_names) + ")"],
-                None,
-            )
+            no_tensor_aliasing_sources = builder.no_tensor_aliasing_sources
+            no_tensor_aliasing_tensor_ids = builder.no_tensor_aliasing_tensor_ids
+
+            if any(
+                isinstance(source, DynamicDictGetItemSource)
+                for source in no_tensor_aliasing_sources
+            ):
+                dynamic_indices = [
+                    i
+                    for i, source in enumerate(no_tensor_aliasing_sources)
+                    if isinstance(source, DynamicDictGetItemSource)
+                ]
+                static_indices = [
+                    i
+                    for i, source in enumerate(no_tensor_aliasing_sources)
+                    if not isinstance(source, DynamicDictGetItemSource)
+                ]
+                seen_dynamic_pairs: set[tuple[int, int]] = set()
+                for dynamic_i in dynamic_indices:
+                    for other_i in range(len(no_tensor_aliasing_names)):
+                        if dynamic_i == other_i:
+                            continue
+                        i, j = sorted((dynamic_i, other_i))
+                        if (i, j) in seen_dynamic_pairs:
+                            continue
+                        seen_dynamic_pairs.add((i, j))
+                        name_i = no_tensor_aliasing_names[i]
+                        name_j = no_tensor_aliasing_names[j]
+                        if (
+                            no_tensor_aliasing_tensor_ids[i]
+                            == no_tensor_aliasing_tensor_ids[j]
+                        ):
+                            code_part = f"{name_i} is {name_j}"
+                            install_object_aliasing_guard(
+                                builder.no_tensor_aliasing_guard_managers[i],
+                                builder.no_tensor_aliasing_guard_managers[j],
+                                [code_part],
+                                None,
+                            )
+                            add_code_part(code_part, None, True)
+                            # If the dynamic lookup aliases another tensor at
+                            # trace time, preserve that aliasing relation instead
+                            # of installing a no-alias guard for this pair.
+                            continue
+                        install_no_tensor_aliasing_guard(
+                            [
+                                builder.no_tensor_aliasing_guard_managers[i],
+                                builder.no_tensor_aliasing_guard_managers[j],
+                            ],
+                            [name_i, name_j],
+                            [f"check_no_aliasing({name_i}, {name_j})"],
+                            None,
+                        )
+                if len(static_indices) > 1:
+                    static_names = [no_tensor_aliasing_names[i] for i in static_indices]
+                    install_no_tensor_aliasing_guard(
+                        [
+                            builder.no_tensor_aliasing_guard_managers[i]
+                            for i in static_indices
+                        ],
+                        static_names,
+                        ["check_no_aliasing(" + ", ".join(static_names) + ")"],
+                        None,
+                    )
+            else:
+                # Install tensor aliasing guard. TENSOR_MATCH guards are already
+                # installed for cpp guard manager.
+                install_no_tensor_aliasing_guard(
+                    builder.no_tensor_aliasing_guard_managers,
+                    no_tensor_aliasing_names,
+                    ["check_no_aliasing(" + ", ".join(no_tensor_aliasing_names) + ")"],
+                    None,
+                )
 
         # Note - On Lambda guarding of object aliasing
         # We previously installed object-aliasing guards as relational guards,
@@ -5545,7 +5650,11 @@ def make_dupe_guard(
         # reconcile guards builder scopes in compile_check_fn. This technically means we miss a guard here,
         # so maybe we should do this refactor before we land this...
         # TODO(voz): Combine local and global guard builders.
-        if ser_source_is_local == source_is_local:
+        if (
+            ser_source_is_local == source_is_local
+            or isinstance(obj_source, DynamicDictGetItemSource)
+            or isinstance(dupe_source, DynamicDictGetItemSource)
+        ):
             # Note - this is a little aggressive - these being duplicate input does not always matter.
             # However, this should always be a sound guard to add here.
             return functools.partial(GuardBuilder.DUPLICATE_INPUT, source_b=dupe_source)

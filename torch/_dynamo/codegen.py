@@ -39,7 +39,13 @@ from .bytecode_transformation import (
     Instruction,
 )
 from .exc import unimplemented
-from .source import AttrSource, ChainedSource, DictGetItemSource, Source
+from .source import (
+    AttrSource,
+    ChainedSource,
+    DictGetItemSource,
+    DynamicDictGetItemSource,
+    Source,
+)
 from .utils import is_safe_constant, rot_n_helper
 from .variables.base import ValueMutationExisting, VariableTracker
 from .variables.functions import (
@@ -683,9 +689,9 @@ class PyCodegen:
             nested_sources: list[Source] = []
             if isinstance(source, ChainedSource):
                 nested_sources.append(source.base)
-            if isinstance(source, DictGetItemSource) and isinstance(
-                source.index, Source
-            ):
+            if isinstance(
+                source, (DictGetItemSource, DynamicDictGetItemSource)
+            ) and isinstance(source.index, Source):
                 nested_sources.append(source.index)
             return nested_sources
 

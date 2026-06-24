@@ -1023,6 +1023,13 @@ class BuiltinVariable(BaseBuiltinVariable):
                     kwargs,
                 )
 
+            keep_const_dict_key_lazy = (
+                fn is operator.getitem
+                and not has_kwargs
+                and len(arg_types) == 2
+                and issubclass(arg_types[0], ConstDictVariable)
+            )
+
             # Only LazyConstantVariable lazy types.  Install type guards
             # and resolve the dispatch type.  If the resolved type is
             # ConstantVariable (the common case), delegate to a handler
@@ -1043,19 +1050,26 @@ class BuiltinVariable(BaseBuiltinVariable):
                 args: list[VariableTracker],
                 kwargs: dict[str, VariableTracker],
             ) -> VariableTracker | None:
-                for a in args:
-                    if isinstance(a, LazyConstantVariable):
-                        if a.get_handler_type_for_dispatch() is not ConstantVariable:
-                            return obj.call_function(
-                                tx,
-                                [
-                                    v.realize()
-                                    if isinstance(v, LazyConstantVariable)
-                                    else v
-                                    for v in args
-                                ],
-                                kwargs,
-                            )
+                # ConstDictVariable can consume a LazyConstantVariable key
+                # directly and decide whether to emit a runtime lookup.  Do not
+                # realize floats here just to choose ConstantVariable dispatch.
+                if not keep_const_dict_key_lazy:
+                    for a in args:
+                        if isinstance(a, LazyConstantVariable):
+                            if (
+                                a.get_handler_type_for_dispatch()
+                                is not ConstantVariable
+                            ):
+                                return obj.call_function(
+                                    tx,
+                                    [
+                                        v.realize()
+                                        if isinstance(v, LazyConstantVariable)
+                                        else v
+                                        for v in args
+                                    ],
+                                    kwargs,
+                                )
                 return inner_handler(tx, args, kwargs)
 
             return lazy_constant_handler
