@@ -584,7 +584,19 @@ def promote_constants(
     override_return_dtype: torch.dtype | None = None,
     type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND | None = None,
     round_scalar_constants: bool = False,
+    round_scalars_to_tensor_dtype: bool = False,
 ) -> Sequence[_T | BaseView | BaseConstant]:
+    """Convert raw Python scalars and sympy expressions in inputs to IR constants.
+
+    When a tensor input is present, scalars become Constants of the tensor's
+    dtype, broadcast to its size. For bf16/fp16 tensors, the scalar value is
+    additionally rounded to the tensor dtype to match eager kernels that cast
+    scalar operands to the common dtype: always for comparison ops
+    (override_return_dtype == torch.bool) and for callers passing
+    round_scalar_constants (e.g. remainder); on CPU and MPS only for ops
+    passing round_scalars_to_tensor_dtype (e.g. add/sub, whose CUDA eager
+    kernels keep scalars at opmath precision).
+    """
     if not (override_return_dtype is None or type_promotion_kind is None):
         raise AssertionError(
             "only one of override_return_dtype or type_promotion_kind may be given"
@@ -614,12 +626,17 @@ def promote_constants(
     ex = next(x for x in inputs if isinstance(x, (TensorBox, ExpandView, ir.Constant)))
     tensor_dtype = ex.get_dtype()
 
-    # Round scalar to tensor's dtype to match eager
-    if (
-        override_return_dtype == torch.bool or round_scalar_constants
-    ) and tensor_dtype in (
+    # Round scalars to the tensor's dtype where eager does; see docstring.
+    if tensor_dtype in (
         torch.bfloat16,
         torch.float16,
+    ) and (
+        override_return_dtype == torch.bool
+        or round_scalar_constants
+        or (
+            round_scalars_to_tensor_dtype
+            and ex.get_device_or_error().type in ("cpu", "mps")
+        )
     ):
         _round_scalar = lambda v: torch.tensor(v, dtype=tensor_dtype).item()  # noqa: E731
     else:
@@ -719,6 +736,7 @@ def make_pointwise(
     allow_alpha: bool = False,
     use_fma_for_alpha: bool = False,
     triton_fallback: Callable[..., _T] | None = None,
+    round_scalars_to_tensor_dtype: bool = False,
 ) -> Callable[..., TensorBox | _T]:
     """Wraps a pointwise fn and returns a function representing the pointwise in
     the define-by-run IR."""
@@ -732,7 +750,11 @@ def make_pointwise(
             return triton_fallback(*inputs)
 
         # pyrefly: ignore [bad-assignment]
-        inputs = promote_constants(inputs, override_return_dtype)
+        inputs = promote_constants(
+            inputs,
+            override_return_dtype,
+            round_scalars_to_tensor_dtype=round_scalars_to_tensor_dtype,
+        )
         if allow_alpha:
             if alpha is not None and alpha != 1:
                 # Use FMA for add-with-alpha on CUDA floating-point.
@@ -1084,6 +1106,7 @@ def register_pointwise(
     allow_alpha=False,
     use_fma_for_alpha=False,
     triton_fallback=None,
+    round_scalars_to_tensor_dtype=False,
 ):
     """A pointwise function that maps ops.{name} to inputs"""
     name = name or aten_fn.__name__
@@ -1103,6 +1126,7 @@ def register_pointwise(
         allow_alpha=allow_alpha,
         use_fma_for_alpha=use_fma_for_alpha,
         triton_fallback=triton_fallback,
+        round_scalars_to_tensor_dtype=round_scalars_to_tensor_dtype,
     )
     fn = register_lowering(
         aten_fn,
@@ -7869,6 +7893,7 @@ add = register_pointwise(
     allow_alpha=True,
     use_fma_for_alpha=True,
     override_fn_when_input_bool="logical_or",
+    round_scalars_to_tensor_dtype=True,
 )
 
 sort_fallback = fallback_handler(aten.sort.stable, add_to_fallback_set=False)
@@ -8147,7 +8172,7 @@ relu = register_pointwise(aten.relu)
 sigmoid = register_pointwise_numeric_ldf64(aten.sigmoid)
 sqrt = register_pointwise_numeric_ldf64(aten.sqrt)
 square = register_pointwise(aten.square)
-sub = register_pointwise(aten.sub, allow_alpha=True)
+sub = register_pointwise(aten.sub, allow_alpha=True, round_scalars_to_tensor_dtype=True)
 
 
 @register_lowering(aten.addcmul, broadcast=True)
