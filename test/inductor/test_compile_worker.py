@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 import types
 import unittest
 from threading import Event
@@ -18,8 +19,17 @@ from torch._inductor.compile_worker.subproc_pool import (
 )
 from torch._inductor.compile_worker.timer import Timer
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_utils import IS_FBCODE, IS_LINUX, skipIfWindows
+from torch.testing._internal.common_utils import IS_FBCODE, skipIfWindows
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_TRITON
+
+
+def _wait_for_path(path, timeout):
+    deadline = time.monotonic() + timeout
+    while not os.path.exists(path):
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.01)
+    return True
 
 
 class TestCompileWorker(TestCase):
@@ -79,7 +89,6 @@ class TestCompileWorker(TestCase):
         finally:
             pool.shutdown()
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/176968")
     @skipIfWindows(msg="pass_fds not supported on Windows.")
     def test_quiesce_repeatedly(self):
         pool = SubprocPool(2)
@@ -156,6 +165,108 @@ class TestCompileWorker(TestCase):
             f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}",
         )
         self.assertIn("shutdown returned", result.stdout)
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_shutdown_terminates_while_quiescing(self):
+        code = textwrap.dedent(
+            """
+            import operator
+            import subprocess
+            import time
+
+            from torch._inductor.compile_worker.subproc_pool import SubprocPool
+
+            pool = SubprocPool(2)
+            assert pool.submit(operator.add, 1, 2).result() == 3
+            pool.submit(time.sleep, 5)
+            time.sleep(0.5)
+            pool.quiesce()
+
+            wait = pool.process.wait
+
+            def short_wait(timeout=None):
+                return wait(timeout=2)
+
+            pool.process.wait = short_wait
+
+            try:
+                pool.shutdown()
+            except subprocess.TimeoutExpired:
+                pool.process.kill()
+                pool.process.wait()
+                raise
+
+            print("shutdown returned")
+            """
+        )
+        with tempfile.TemporaryDirectory() as cwd:
+            result = subprocess.run(
+                [sys.executable, "-c", code],
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+        self.assertEqual(
+            result.returncode,
+            0,
+            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+        )
+        self.assertIn("shutdown returned", result.stdout)
+
+
+class TestCompileWorkerQuiesceOrdering(TestCase):
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_quiesce_drains_inflight_work_before_wakeup(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            started_path = os.path.join(tmpdir, "started")
+            release_path = os.path.join(tmpdir, "release")
+            wait_for_barrier_code = textwrap.dedent(
+                """
+                import os
+                import sys
+                import time
+
+                started_path, release_path, timeout = sys.argv[1:]
+                open(started_path, "wb").close()
+                deadline = time.monotonic() + float(timeout)
+                while not os.path.exists(release_path):
+                    if time.monotonic() >= deadline:
+                        sys.exit(1)
+                    time.sleep(0.01)
+                """
+            )
+            pool = SubprocPool(2)
+            try:
+                slow = pool.submit(
+                    subprocess.call,
+                    [
+                        sys.executable,
+                        "-c",
+                        wait_for_barrier_code,
+                        started_path,
+                        release_path,
+                        "1.0",
+                    ],
+                )
+                self.assertTrue(_wait_for_path(started_path, 10.0))
+
+                pool.quiesce()
+                pool.wakeup()
+                fast = pool.submit(
+                    subprocess.call,
+                    [
+                        sys.executable,
+                        "-c",
+                        "import sys; open(sys.argv[1], 'wb').close()",
+                        release_path,
+                    ],
+                )
+
+                self.assertEqual(slow.result(timeout=10.0), 1)
+                self.assertEqual(fast.result(timeout=10.0), 0)
+            finally:
+                pool.shutdown()
 
 
 @config.patch("quiesce_async_compile_time", 0.1)
