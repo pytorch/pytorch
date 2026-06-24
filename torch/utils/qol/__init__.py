@@ -1,2 +1,4 @@
 from .smartsummary import SmartSummary
-__all__ = ["SmartSummary"]
+from .trainingmonitor import TrainingMonitor
+
+__all__ = ["SmartSummary", "TrainingMonitor"]
