@@ -5,6 +5,11 @@
 // C ABI defined in torch/csrc/inductor/aoti_torch/c/shim.h. The same rule
 // applies to other files under torch/csrc/inductor/aoti_runtime/.
 #include <torch/csrc/inductor/aoti_runtime/model_base.h>
+#ifdef USE_CUDA
+// Header-only over the stable C ABI (shim.h), so it is safe to include here per
+// the rule above. Provides the per-instance cuda-graph tree manager member below.
+#include <torch/csrc/inductor/aoti_runtime/cudagraph_tree.h>
+#endif
 
 struct AOTInductorArrayRefTensor;
 
@@ -65,6 +70,24 @@ class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
 
  private:
   std::unique_ptr<AOTInductorModelKernelsBase> kernels_;
+#ifdef USE_CUDA
+  // Per-instance cuda-graph manager: owns THIS model's private graph pool
+  // + capture stream, so concurrent instances in a model_container are isolated.
+  // Lazily created by the generated run_impl on the first captured partition;
+  // stays null for models with no cuda-graph partitions. Destroyed with the
+  // model (no leak). See cudagraph_tree.h.
+  std::unique_ptr<AOTICUDAGraphTreeManager> cudagraph_mgr_;
+  // Per-instance cuda-graph memory_planning slab cache. Keyed by a packed
+  // (pool id, partition id) int64; each value owns the persistent slab whose
+  // base address the captured partitions bake into their reinterpret_tensor
+  // views, so the address stays stable across forwards. The slab is sized to the
+  // dynamic-shape upper bounds and shared across shapes (single max slab). Lives
+  // per AOTInductorModel instance (NOT process-static) so concurrent instances
+  // in a model_container have isolated slabs; the RAII handles free the slabs at
+  // model destruction. Populated by the generated memory_planning codegen (see
+  // _codegen_create_cudagraph_cached in memory_planning.py).
+  std::unordered_map<int64_t, RAIIAtenTensorHandle> cudagraph_slabs_;
+#endif
 };
 
 } // namespace torch::aot_inductor
