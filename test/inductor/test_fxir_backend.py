@@ -42,7 +42,6 @@ from torch.testing._internal.inductor_utils import (
     HAS_GPU,
     patch_custom_fallback_pass,
     requires_gpu,
-    TRITON_HAS_CPU,
 )
 from torch.utils._sympy.functions import FloorDiv
 
@@ -152,6 +151,19 @@ class FxirTestCase(InductorTestCase):
     def test_basic(self):
         args = [torch.randn(8, device=self.device) for _ in range(2)]
         self._compile_and_check(torch.add, args)
+
+    def test_standard_kernel_omits_empty_launch_kwargs(self):
+        args = [torch.randn(8, device=self.device) for _ in range(2)]
+        (gm,) = self._compile_and_check(torch.add, args)
+        (triton_node,) = gm.graph.find_nodes(
+            op="call_function", target=triton_kernel_wrapper_mutation
+        )
+
+        # launch_kwargs is only needed when user Triton backend options must be
+        # replayed. Omitting the empty case keeps standard FXIR HOP calls
+        # compatible with downstream py_impls that have fixed keyword-only
+        # signatures matching the original HOP payload.
+        self.assertNotIn("launch_kwargs", triton_node.kwargs)
 
     def test_device_type(self):
         """
@@ -1465,5 +1477,5 @@ class TestReplaceFloorDiv(InductorTestCase):
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_GPU or TRITON_HAS_CPU:
+    if HAS_GPU:
         run_tests(needs="filelock")
