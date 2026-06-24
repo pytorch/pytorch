@@ -865,8 +865,8 @@ class TestMatmulCuda(InductorTestCase):
 
     def grouped_gemm_cublaslt_common(self, op, jagged_size, a_row_major, b_row_major, dtype):
         device = "cuda"
-        esz = dtype.itemsize
-        align = 16 // esz  # 8 for bf16
+        element_size = dtype.itemsize
+        align = 16 // element_size  # 8 for bf16
 
         if op == "2d/2d":
             # Jagged K with non-multiple-of-8 total, but all offsets

@@ -524,13 +524,13 @@ std::optional<c10::ScalarType> out_dtype) {
 
   cublasGroupedArgs args(mat_a, mat_b, offs, out, batchCount, needs_int64);
   at::cuda::blas::grouped_gemm(args.transa, args.transb,
-                               args.mArray, args.avgM,
-                               args.nArray, args.avgN,
-                               args.kArray, args.avgK,
-                               args.alphaPtrArray, args.alphaScalar, args.A_dtype,
+                               args.mArray, args.m,
+                               args.nArray, args.n,
+                               args.kArray, args.k,
+                               args.alphaPtrArray, args.alphaScalar, args.mata->scalar_type(),
                                args.APtrArray, args.ldaArray,
                                args.BPtrArray, args.ldbArray,
-                               args.betaPtrArray, args.betaScalar, args.result_dtype,
+                               args.betaPtrArray, args.betaScalar, args.result->scalar_type(),
                                args.DPtrArray, args.lddArray,
                                args.DPtrArray, args.lddArray,
                                args.batchCount, args.use_int64);

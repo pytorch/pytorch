@@ -2,7 +2,7 @@
 
 #include <ATen/BlasBackend.h>
 #include <ATen/core/Tensor.h>
-#include <c10/core/ScalarType.h>
+#include <ATen/native/cuda/cuBlasCommonArgs.h>
 
 #if !defined(USE_ROCM)
 #include <cuda.h>
@@ -11,7 +11,7 @@
 namespace at::native {
 
 #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
-struct cublasGroupedArgs {
+struct cublasGroupedArgs : public cublasCommonArgs {
   cublasGroupedArgs(
       const Tensor& mat1,
       const Tensor& mat2,
@@ -20,9 +20,8 @@ struct cublasGroupedArgs {
       int batchCount,
       bool needs_int64);
 
-  char transa, transb;
-  int64_t avgM, avgN, avgK;
-  ScalarType A_dtype, B_dtype, result_dtype;
+  // In grouped GEMM, inherited m/n/k are the cuBLASLt heuristic averages.
+  // The actual per-group dimensions live in mArray, nArray, and kArray.
   int batchCount;
   bool use_int64;
 

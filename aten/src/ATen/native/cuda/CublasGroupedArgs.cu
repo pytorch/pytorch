@@ -158,50 +158,26 @@ cublasGroupedArgs::cublasGroupedArgs(
     const std::optional<Tensor>& offs,
     Tensor& c,
     int batchCount_,
-    bool needs_int64) {
+    bool needs_int64)
+    : cublasCommonArgs(mat1, mat2, c) {
   const bool a_is_2d = mat1.dim() == 2;
   const bool b_is_2d = mat2.dim() == 2;
   if (a_is_2d || b_is_2d) {
     TORCH_CHECK(offs.has_value(), "Offsets tensor must be provided when at least one input is 2D");
   }
 
-  A_dtype = mat2.scalar_type();
-  B_dtype = mat1.scalar_type();
-  result_dtype = c.scalar_type();
-  const int64_t esz = mat1.element_size();
-  const int64_t out_esz = c.element_size();
+  const int64_t element_size = mata->element_size();
+  const int64_t out_element_size = result->element_size();
 
   batchCount = batchCount_;
   use_int64 = needs_int64;
 
-  // cuBLAS is column-major. To get a row-major result C = mat1 × mat2,
-  // we use the identity C^T = mat2^T × mat1^T. So cuBLAS-A = mat2 and
-  // cuBLAS-B = mat1. The transpose flags depend on inner-dim layout:
-  //   row-major (stride(-1)==1): cuBLAS sees it as col-major "already
-  //     transposed" → after the B^T×A^T flip, the op flag is 'n'
-  //   col-major (stride(-2)==1): cuBLAS sees it naturally → after
-  //     the flip, the op flag is 't'
-  const bool mat2_row_major = mat2.stride(-1) == 1;
-  const bool mat1_row_major = mat1.stride(-1) == 1;
-  transa = mat2_row_major ? 'n' : 't';
-  transb = mat1_row_major ? 'n' : 't';
-
-  // User-space dimensions
-  const int64_t user_M = mat1.size(-2);
-  const int64_t user_N = mat2.size(-1);
-  const int64_t user_K = mat1.size(-1);
-
-  // In the cuBLAS B^T×A^T convention:
-  //   cublas_m = user_N, cublas_n = user_M, cublas_k = user_K
-  const int64_t cublas_m = user_N;
-  const int64_t cublas_n = user_M;
-  const int64_t cublas_k = user_K;
-
-  // Leading dimensions (constant across groups, from inner-dim strides)
-  // cuBLAS-A = mat2, cuBLAS-B = mat1
-  const int64_t lda_val = transa != 'n' ? mat2.stride(-1) : mat2.stride(-2);
-  const int64_t ldb_val = transb != 'n' ? mat1.stride(-1) : mat1.stride(-2);
-  const int64_t ldd_val = c.stride(-2);
+  const int64_t cublas_m = m;
+  const int64_t cublas_n = n;
+  const int64_t cublas_k = k;
+  const int64_t lda_val = lda;
+  const int64_t ldb_val = ldb;
+  const int64_t ldd_val = result_ld;
 
   // Determine per-case which dimensions are variable (delta-based)
   // and how pointer strides work
@@ -213,38 +189,38 @@ cublasGroupedArgs::cublasGroupedArgs(
   if (a_is_2d && b_is_2d) {
     // 2D x 2D: jagged K
     k_is_delta = true;
-    a_offs_stride = mat2.stride(-2) * esz;
-    b_offs_stride = mat1.stride(-1) * esz;
-    d_idx_stride = c.stride(0) * out_esz;
-    avgM = cublas_m;
-    avgN = cublas_n;
-    avgK = user_K / batchCount;
+    a_offs_stride = mata->stride(-2) * element_size;
+    b_offs_stride = matb->stride(-1) * element_size;
+    d_idx_stride = result->stride(0) * out_element_size;
+    m = cublas_m;
+    n = cublas_n;
+    k = cublas_k / batchCount;
   } else if (a_is_2d && !b_is_2d) {
     // 2D x 3D: jagged M (user M varies, cublas n varies)
     n_is_delta = true;
-    a_idx_stride = mat2.stride(0) * esz;
-    b_offs_stride = mat1.stride(-2) * esz;
-    d_offs_stride = c.stride(-2) * out_esz;
-    avgM = cublas_m;
-    avgN = user_M / batchCount;
-    avgK = cublas_k;
+    a_idx_stride = mata->stride(0) * element_size;
+    b_offs_stride = matb->stride(-2) * element_size;
+    d_offs_stride = result->stride(-2) * out_element_size;
+    m = cublas_m;
+    n = cublas_n / batchCount;
+    k = cublas_k;
   } else if (!a_is_2d && b_is_2d) {
     // 3D x 2D: jagged N (user N varies, cublas m varies)
     m_is_delta = true;
-    a_offs_stride = mat2.stride(-1) * esz;
-    b_idx_stride = mat1.stride(0) * esz;
-    d_offs_stride = c.stride(-1) * out_esz;
-    avgM = user_N / batchCount;
-    avgN = cublas_n;
-    avgK = cublas_k;
+    a_offs_stride = mata->stride(-1) * element_size;
+    b_idx_stride = matb->stride(0) * element_size;
+    d_offs_stride = result->stride(-1) * out_element_size;
+    m = cublas_m / batchCount;
+    n = cublas_n;
+    k = cublas_k;
   } else {
     // 3D x 3D: all dimensions fixed
-    a_idx_stride = mat2.stride(0) * esz;
-    b_idx_stride = mat1.stride(0) * esz;
-    d_idx_stride = c.stride(0) * out_esz;
-    avgM = cublas_m;
-    avgN = cublas_n;
-    avgK = cublas_k;
+    a_idx_stride = mata->stride(0) * element_size;
+    b_idx_stride = matb->stride(0) * element_size;
+    d_idx_stride = result->stride(0) * out_element_size;
+    m = cublas_m;
+    n = cublas_n;
+    k = cublas_k;
   }
 
   // Determine element size for dimension arrays
@@ -258,11 +234,11 @@ cublasGroupedArgs::cublasGroupedArgs(
       static_cast<int64_t>(batchCount) * 6 * dim_elem_size +
       static_cast<int64_t>(batchCount) * 5 * sizeof(int64_t) +
       2 * sizeof(float);
-  buf = at::empty({buf_bytes}, mat1.options().dtype(at::kByte));
+  buf = at::empty({buf_bytes}, mata->options().dtype(at::kByte));
 
-  const int64_t base_A = reinterpret_cast<int64_t>(mat2.data_ptr());
-  const int64_t base_B = reinterpret_cast<int64_t>(mat1.data_ptr());
-  const int64_t base_D = reinterpret_cast<int64_t>(c.data_ptr());
+  const int64_t base_A = reinterpret_cast<int64_t>(mata->data_ptr());
+  const int64_t base_B = reinterpret_cast<int64_t>(matb->data_ptr());
+  const int64_t base_D = reinterpret_cast<int64_t>(result->data_ptr());
 
   const int32_t* offs_ptr = offs.has_value()
       ? static_cast<const int32_t*>(offs.value().data_ptr())
