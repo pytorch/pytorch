@@ -835,6 +835,11 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
 
         # If the OpOverload was constructed from a Library.def in Python.
         self._defined_in_python = self.__qualname__ in torch.library._defs
+        self._schema_specialization_warning = (
+            torch.library._schema_specialization_metadata(
+                self.__qualname__, self._schema
+            )
+        )
 
         # Logic replicated from aten/src/ATen/native/MathBitsFallback.h
         is_write = None
@@ -873,6 +878,10 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
     # Use positional-only argument to avoid naming collision with aten ops arguments
     # that are named "self". This way, all the aten ops can be called by kwargs.
     def __call__(self, /, *args: _P.args, **kwargs: _P.kwargs) -> _T:
+        if self._schema_specialization_warning is not None:
+            torch.library._maybe_warn_for_schema_specialization(
+                self._schema_specialization_warning, args, kwargs
+            )
         return self._op(*args, **kwargs)
 
     # Use positional-only argument to avoid naming collision with aten ops arguments
@@ -1093,7 +1102,7 @@ class TorchBindOpOverload(OpOverload[_P, _T]):
             # skip c++ dispatcher and dispatch in python through _get_dispatch of python_dispatcher
             # because C++ dispatcher will check the schema and cannot recognize FakeScriptObject.
             return self._dispatch_in_python(self._fallthrough_keys(), *args, **kwargs)
-        return self._op(*args, **kwargs)
+        return super().__call__(*args, **kwargs)
 
     def _dispatch_in_python(
         self, fallthrough_keys: list[DispatchKey], *args: _P.args, **kwargs: _P.kwargs
@@ -1183,6 +1192,11 @@ class OpOverloadPacket(Generic[_P, _T]):
         self._dir: list[str] = []
         self._has_torchbind_op_overload = any(
             _has_script_object_arg(schema) for schema in self._schemas.values()
+        )
+        self._schema_specialization_warning = (
+            torch.library._packet_schema_specialization_metadata(
+                self._qualified_op_name, self._overload_names
+            )
         )
 
     # it's a no-op since OpOverloadPacket object is immutable and must be unique for a given op.
@@ -1277,6 +1291,10 @@ class OpOverloadPacket(Generic[_P, _T]):
         if self._has_torchbind_op_overload and _must_dispatch_in_python(args, kwargs):
             # pyrefly: ignore [bad-argument-type]
             return _call_overload_packet_from_python(self, *args, **kwargs)
+        if self._schema_specialization_warning is not None:
+            torch.library._maybe_warn_for_schema_specialization(
+                self._schema_specialization_warning, args, kwargs
+            )
         return self._op(*args, **kwargs)
 
     # TODO: use this to make a __dir__
@@ -1428,6 +1446,11 @@ def _refresh_packet(packet):
         raise AssertionError(f"failed to get packet for {packet._qualified_op_name}")
     packet._op = op
     packet._overload_names = overload_names
+    packet._schema_specialization_warning = (
+        torch.library._packet_schema_specialization_metadata(
+            packet._qualified_op_name, packet._overload_names
+        )
+    )
 
 
 class _HigherOrderNamespace(types.ModuleType):

@@ -2,6 +2,7 @@
 import contextlib
 import functools
 import inspect
+import logging
 import re
 import sys
 import weakref
@@ -52,9 +53,122 @@ _P = ParamSpec("_P")
 # libraries calling into kernels not intended to be called.
 _impls: set[str] = set()
 _defs: set[str] = set()
+_def_sources: dict[str, str] = {}
+_warned_schema_symint_args: set[tuple[str, str]] = set()
+_ops_log = logging.getLogger("torch._ops")
+# Diagnostic state is best-effort: concurrent define/destroy can duplicate or
+# drop a warning, but must not affect dispatch.
 
 # prim is reserved by TorchScript interpreter
 _reserved_namespaces = ["prim"]
+
+
+_SchemaSpecializationWarning = tuple[str, str, str, tuple[tuple[int, str, str], ...]]
+
+
+def _plain_int_schema_type(type_: Any) -> str | None:
+    if isinstance(type_, torch.SymIntType):
+        return None
+    if isinstance(type_, torch.IntType):
+        return "int"
+    if isinstance(type_, torch.OptionalType):
+        inner = _plain_int_schema_type(type_.getElementType())
+        return f"{inner}?" if inner is not None else None
+    if isinstance(type_, torch.ListType):
+        inner = _plain_int_schema_type(type_.getElementType())
+        return f"{inner}[]" if inner is not None else None
+    return None
+
+
+def _schema_specialization_metadata(
+    qualname: str, schema: torch._C.FunctionSchema
+) -> _SchemaSpecializationWarning | None:
+    source = _def_sources.get(qualname)
+    if source is None:
+        return None
+
+    int_args = tuple(
+        (idx, arg.name, arg_type)
+        for idx, arg in enumerate(schema.arguments)
+        if (arg_type := _plain_int_schema_type(arg.real_type)) is not None
+    )
+    if not int_args:
+        return None
+    return qualname, source, str(schema), int_args
+
+
+def _packet_schema_specialization_metadata(
+    qualified_op_name: str, overload_names: list[str]
+) -> _SchemaSpecializationWarning | None:
+    # Packet calls do not expose the overload chosen by C++ dispatch. Warn only
+    # when the packet has one unambiguous overload; exact overload calls still
+    # use _schema_specialization_metadata directly.
+    if len(overload_names) != 1:
+        return None
+    overload_name = overload_names[0]
+    qualname = qualified_op_name
+    if overload_name:
+        qualname += "." + overload_name
+    schema = torch._C._get_schema(qualified_op_name, overload_name)
+    return _schema_specialization_metadata(qualname, schema)
+
+
+_MISSING = object()
+
+
+def _contains_symint(value: object) -> bool:
+    if isinstance(value, torch.SymInt):
+        return True
+    if isinstance(value, (tuple, list)):
+        return any(_contains_symint(item) for item in value)
+    return False
+
+
+def _maybe_warn_for_schema_specialization(
+    warning: _SchemaSpecializationWarning,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> None:
+    qualname, source, schema, int_args = warning
+    if _def_sources.get(qualname) != source:
+        return
+
+    for idx, arg_name, arg_type in int_args:
+        warning_key = (qualname, arg_name)
+        if warning_key in _warned_schema_symint_args:
+            continue
+
+        value = args[idx] if idx < len(args) else kwargs.get(arg_name, _MISSING)
+        if value is _MISSING or not _contains_symint(value):
+            continue
+
+        _warned_schema_symint_args.add(warning_key)
+
+        suggested_type = arg_type.replace("int", "SymInt", 1)
+        _ops_log.warning(
+            "Operator %s was called with a SymInt value for argument %r but "
+            "its schema defines this argument as %s. This forces the "
+            "symbolic value to be specialized and can cause torch.compile "
+            "recompilation. Use %s in the operator schema for shape-like "
+            "values. The operator schema was defined at %s: %s",
+            qualname,
+            arg_name,
+            arg_type,
+            suggested_type,
+            source,
+            schema,
+        )
+
+
+def _clear_schema_definition_sources(
+    op_defs: set[str],
+    def_sources: dict[str, str],
+    warned_schema_symint_args: set[tuple[str, str]],
+) -> None:
+    for qualname in op_defs:
+        def_sources.pop(qualname, None)
+    keys_to_clear = {key for key in warned_schema_symint_args if key[0] in op_defs}
+    warned_schema_symint_args.difference_update(keys_to_clear)
 
 
 def fallthrough_kernel():
@@ -261,6 +375,8 @@ class Library:
             self._op_impls,
             _defs,
             self._op_defs,
+            _def_sources,
+            _warned_schema_symint_args,
             self._registration_handles,
             self.m,
             _SCHEMA_TO_SIGNATURE_CACHE,
@@ -269,7 +385,7 @@ class Library:
     def __repr__(self):
         return f"Library(kind={self.kind}, ns={self.ns}, dispatch_key={self.dispatch_key})>"
 
-    def define(self, schema, alias_analysis="", *, tags=()):
+    def define(self, schema, alias_analysis="", *, tags=(), _stacklevel=1):
         r"""Defines a new operator and its semantics in the ns namespace.
 
         Args:
@@ -313,6 +429,7 @@ class Library:
         result = self.m.define(schema, alias_analysis, tuple(tags))
         name = schema.split("(")[0]
         qualname = self.ns + "::" + name
+        _def_sources[qualname] = torch._library.utils.get_source(_stacklevel + 1)
 
         # If the OpOverloadPacket exists already, then this means we're adding a
         # new OpOverload for it. Refresh the packet to include the new OpOverload.
@@ -608,6 +725,9 @@ class Library:
         global _impls
         _impls -= self._op_impls
         _clear_torch_ops_cache(self._op_defs)
+        _clear_schema_definition_sources(
+            self._op_defs, _def_sources, _warned_schema_symint_args
+        )
 
 
 def _clear_torch_ops_cache(op_defs):
@@ -641,6 +761,8 @@ def _del_library(
     op_impls,
     captured_defs,
     op_defs,
+    def_sources,
+    warned_schema_symint_args,
     registration_handles,
     m,
     schema_to_signature_cache,
@@ -665,6 +787,7 @@ def _del_library(
         m.reset()
 
     _clear_torch_ops_cache(op_defs)
+    _clear_schema_definition_sources(op_defs, def_sources, warned_schema_symint_args)
 
 
 @contextlib.contextmanager
@@ -746,7 +869,7 @@ def define(qualname, schema, *, lib=None, tags=()):
             f'to look like e.g. "(Tensor x) -> Tensor" but '
             f'got "{schema}"'
         )
-    lib.define(name + schema, alias_analysis="", tags=tags)
+    lib.define(name + schema, alias_analysis="", tags=tags, _stacklevel=2)
 
 
 @define.register
@@ -756,7 +879,7 @@ def _(lib: Library, schema, alias_analysis=""):
     """
 
     def wrap(f):
-        name = lib.define(schema, alias_analysis)
+        name = lib.define(schema, alias_analysis, _stacklevel=2)
         lib.impl(name, f)
         return f
 

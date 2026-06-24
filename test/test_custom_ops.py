@@ -663,6 +663,87 @@ class TestCustomOp(CustomOpTestCaseBase):
         with self.assertRaisesRegex(AssertionError, "Invalid function schema: foo"):
             custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo", "(")
 
+    def test_plain_int_schema_type(self):
+        schema = torch._C.parse_schema(
+            "foo(Tensor w, int x = 2, *, SymInt y, int[][] z) -> Tensor"
+        )
+        self.assertEqual(
+            torch.library._plain_int_schema_type(schema.arguments[1].real_type),
+            "int",
+        )
+        self.assertEqual(
+            torch.library._plain_int_schema_type(schema.arguments[3].real_type),
+            "int[][]",
+        )
+        self.assertIsNone(
+            torch.library._plain_int_schema_type(schema.arguments[2].real_type)
+        )
+
+        optional_list_schema = torch._C.parse_schema(
+            "foo(int[]? sizes, int?[] maybe_sizes, SymInt[] sym_sizes) -> Tensor"
+        )
+        self.assertEqual(
+            torch.library._plain_int_schema_type(
+                optional_list_schema.arguments[0].real_type
+            ),
+            "int[]?",
+        )
+        self.assertEqual(
+            torch.library._plain_int_schema_type(
+                optional_list_schema.arguments[1].real_type
+            ),
+            "int?[]",
+        )
+        self.assertIsNone(
+            torch.library._plain_int_schema_type(
+                optional_list_schema.arguments[2].real_type
+            )
+        )
+
+        dict_schema = torch._C.parse_schema(
+            "foo(Dict(str, Tensor) values, int dim) -> Tensor"
+        )
+        self.assertIsNone(
+            torch.library._plain_int_schema_type(dict_schema.arguments[0].real_type)
+        )
+        self.assertEqual(
+            torch.library._plain_int_schema_type(dict_schema.arguments[1].real_type),
+            "int",
+        )
+
+        tuple_schema = torch._C.parse_schema(
+            "foo((int, int) coords, int dim) -> Tensor"
+        )
+        self.assertIsNone(
+            torch.library._plain_int_schema_type(tuple_schema.arguments[0].real_type)
+        )
+        self.assertEqual(
+            torch.library._plain_int_schema_type(tuple_schema.arguments[1].real_type),
+            "int",
+        )
+
+        type_name = "torch.testing.OpaqueObjectForPlainIntSchemaTest"
+        if torch._C._is_opaque_type_registered(type_name):
+            torch._C._unregister_opaque_type(type_name)
+        torch._C._register_opaque_type(type_name)
+        try:
+            opaque_schema = torch._C.parse_schema(
+                f"foo({type_name} mesh, int dim) -> Tensor"
+            )
+            self.assertIsNone(
+                torch.library._plain_int_schema_type(
+                    opaque_schema.arguments[0].real_type
+                )
+            )
+            self.assertEqual(
+                torch.library._plain_int_schema_type(
+                    opaque_schema.arguments[1].real_type
+                ),
+                "int",
+            )
+        finally:
+            torch._C._unregister_opaque_type(type_name)
+
     def test_invalid_qualname(self):
         with self.assertRaisesRegex(ValueError, "overload"):
             custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo.Tensor", "() -> ()")
