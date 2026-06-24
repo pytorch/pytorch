@@ -444,6 +444,72 @@ class GraphModule(torch.nn.Module):
 
 instantiate_parametrized_tests(TestFakeDistributedP2P)
 
+
+@skipIf(not dist.is_available(), "requires distributed")
+class TestFakeDistributedP2PSubgroup(DynamoTestCase):
+    # Regression test: on a sub-group, the functional P2P helpers must pass a
+    # GROUP-LOCAL peer rank to the _c10d_functional ops (which, like the eager
+    # ProcessGroup send/recv path, expect a group-local rank). Previously a
+    # global rank was passed, which is out of range on a proper sub-group.
+    def setUp(self):
+        super().setUp()
+        dist.init_process_group(backend="fake", rank=0, world_size=4)
+        # Sub-group [0, 2]: group-local rank 1 corresponds to global rank 2.
+        self.subgroup = dist.new_group([0, 2])
+
+    def tearDown(self):
+        dist.destroy_process_group()
+
+    @torch._dynamo.config.patch(enable_p2p_compilation=True)
+    def test_compiled_isend_subgroup_uses_group_local_rank(self):
+        backend = EagerAndRecordGraphs()
+
+        @torch.compile(fullgraph=True, backend=backend)
+        def fn(tensor):
+            req = dist.isend(tensor, group_dst=1, group=self.subgroup)
+            req.wait()
+
+        fn(torch.ones(10))
+        self.assertEqual(len(backend.graphs), 1)
+        graph = normalize_graph(backend.graphs[0])
+        self.assertIn("_c10d_functional.isend(l_tensor_, 1,", graph)
+        self.assertNotIn("_c10d_functional.isend(l_tensor_, 2,", graph)
+
+    @torch._dynamo.config.patch(enable_p2p_compilation=True)
+    def test_compiled_irecv_subgroup_uses_group_local_rank(self):
+        backend = EagerAndRecordGraphs()
+
+        @torch.compile(fullgraph=True, backend=backend)
+        def fn(tensor):
+            req = dist.irecv(tensor, group_src=1, group=self.subgroup)
+            req.wait()
+
+        fn(torch.zeros(10))
+        self.assertEqual(len(backend.graphs), 1)
+        graph = normalize_graph(backend.graphs[0])
+        self.assertIn("_c10d_functional.irecv(l_tensor_, 1,", graph)
+        self.assertNotIn("_c10d_functional.irecv(l_tensor_, 2,", graph)
+
+    @torch._dynamo.config.patch(enable_p2p_compilation=True)
+    def test_compiled_batch_isend_irecv_subgroup_uses_group_local_rank(self):
+        backend = EagerAndRecordGraphs()
+
+        @torch.compile(fullgraph=True, backend=backend)
+        def fn(send_tensor, recv_tensor):
+            ops = [
+                dist.P2POp(dist.isend, send_tensor, group_peer=1, group=self.subgroup),
+                dist.P2POp(dist.irecv, recv_tensor, group_peer=1, group=self.subgroup),
+            ]
+            for w in dist.batch_isend_irecv(ops):
+                w.wait()
+
+        fn(torch.ones(10), torch.zeros(10))
+        self.assertEqual(len(backend.graphs), 1)
+        graph = normalize_graph(backend.graphs[0])
+        self.assertIn("['isend', 'irecv'], [1, 1],", graph)
+        self.assertNotIn("[2, 2]", graph)
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
