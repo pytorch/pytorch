@@ -958,6 +958,19 @@ std::string get_exception_message() {
   return std::string(exc_message);
 }
 
+bool is_nn_module(py::handle example_value) {
+  py::object torch_module_cls = py::module_::import("torch.nn").attr("Module");
+  return py::isinstance(example_value, torch_module_cls);
+}
+
+std::string get_type_str(py::handle example_value) {
+  try {
+    return py::str(py::type::of(example_value)).cast<std::string>();
+  } catch (const py::error_already_set&) {
+    return "<unprintable-type>";
+  }
+}
+
 bool is_immutable_object(py::handle example_value) {
   py::object config_module = py::module_::import("torch._dynamo.config");
 
@@ -2217,7 +2230,6 @@ inline TensorCheck make_tensor_check(
       state,
       /*pt=*/nullptr,
       tensor,
-      tensor.key_set(),
       to_opt_symint(tensor.sizes()),
       std::move(strides));
 }
