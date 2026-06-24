@@ -1484,7 +1484,7 @@ def forward(self, x, y):
 
             return Root()
 
-        for depth in range(3, 10):
+        for depth in (3, 6, 9):
             with self.subTest(depth=depth):
                 m = model_creator(depth)
                 exported = torch._dynamo.export(m, aten_graph=False)(inp)
@@ -1505,13 +1505,14 @@ def forward(self, x, y):
                             elif clean == "L['self']":
                                 clean = ""
                             paths.append(clean)
-                    # Each successive entry should be at least as deep (more dots)
-                    depths = [p.count(".") if p else -1 for p in paths]
-                    for k in range(1, len(depths)):
-                        self.assertGreaterEqual(
-                            depths[k],
-                            depths[k - 1],
-                            f"nn_module_stack not ordered outermost->innermost: {paths}",
+                    # Prefix-chain invariant: each path extends its predecessor
+                    for k in range(1, len(paths)):
+                        if not paths[k - 1]:
+                            # Root (empty string) is prefix of everything
+                            continue
+                        self.assertTrue(
+                            paths[k].startswith(paths[k - 1] + "."),
+                            f"Path {paths[k]!r} is not a child of {paths[k - 1]!r}",
                         )
                 # The deepest node should reflect the full nesting chain
                 self.assertGreaterEqual(

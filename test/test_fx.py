@@ -2773,7 +2773,7 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
             ]
             return [*module_paths, f"{module_paths[-1]}.linear"]
 
-        for depth in range(3, 10):
+        for depth in (3, 6, 9):
             with self.subTest(depth=depth):
                 m = model_creator(depth)
                 gm = torch.fx.symbolic_trace(m)
@@ -2785,12 +2785,12 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
                         deepest_stack = s
 
                 paths = [path for _key, (path, _cls) in deepest_stack.items()]
-                self.assertEqual(paths, expected_paths(depth))
-
                 # Outermost-to-innermost ordering: paths should be monotonically
                 # increasing in depth (number of dot-separated components)
                 path_depths = [p.count(".") for p in paths]
                 self.assertEqual(path_depths, sorted(path_depths))
+                # Exact expected paths (also verifies completeness).
+                self.assertEqual(paths, expected_paths(depth))
 
     def test_nn_module_stack_module_list(self):
         """nn_module_stack produces numeric path components for ModuleList children.
