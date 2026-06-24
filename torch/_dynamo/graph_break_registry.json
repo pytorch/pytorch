@@ -565,6 +565,17 @@
       ]
     }
   ],
+  "GB2191": [
+    {
+      "Gb_type": "copy.copy() on Tensor requiring grad",
+      "Context": "copy.copy({copy_arg})",
+      "Explanation": "torch.export does not support copy.copy() on tensors with requires_grad=True.",
+      "Hints": [
+        "Avoid calling copy.copy() on tensors that require grad.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0042": [
     {
       "Gb_type": "Encountered non user function variable during invoke_subgraph HOP tracing",
@@ -3008,6 +3019,17 @@
       "Explanation": "Cannot perform sort with non-constant key. First non-constant key type: {python_type}. Most notably, we cannot sort with Tensor or SymInt keys, but we can sort ints.",
       "Hints": [
         "Use something else as the key."
+      ]
+    }
+  ],
+  "GB3979": [
+    {
+      "Gb_type": "copy.copy() on Tensor",
+      "Context": "copy.copy({copy_arg})",
+      "Explanation": "Dynamo does not support copy.copy() on tensors outside export because preserving shallow-copy tensor identity across compiled backends is not currently supported.",
+      "Hints": [
+        "Avoid calling copy.copy() on tensors inside compiled regions.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],

@@ -611,6 +611,109 @@ class TestExport(TestCase):
 
         self.assertIsNotNone(guards_fn)
 
+    def test_export_copy_copy_input(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return copy.copy(x)
+
+        inp = (torch.randn(2, 2),)
+        for strict in (False, True):
+            ep = export(M(), inp, strict=strict)
+            self.assertEqual(ep.module()(*inp), inp[0])
+            self.assertEqual(
+                [node.op for node in ep.graph_module.graph.nodes],
+                ["placeholder", "call_function", "output"],
+            )
+            self.assertEqual(
+                [
+                    node.target
+                    for node in ep.graph_module.graph.nodes
+                    if node.op == "call_function"
+                ],
+                [torch.ops.aten.detach.default],
+            )
+
+    def test_export_copy_copy_input_kwarg(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return copy.copy(x=x)
+
+        inp = (torch.randn(2, 2),)
+        for strict in (False, True):
+            ep = export(M(), inp, strict=strict)
+            self.assertEqual(ep.module()(*inp), inp[0])
+            self.assertEqual(
+                [node.op for node in ep.graph_module.graph.nodes],
+                ["placeholder", "call_function", "output"],
+            )
+            self.assertEqual(
+                [
+                    node.target
+                    for node in ep.graph_module.graph.nodes
+                    if node.op == "call_function"
+                ],
+                [torch.ops.aten.detach.default],
+            )
+
+    def test_export_copy_copy_input_alias(self):
+        shallow_copy = copy.copy
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return shallow_copy(x)
+
+        inp = (torch.randn(2, 2),)
+        for strict in (False, True):
+            ep = export(M(), inp, strict=strict)
+            self.assertEqual(ep.module()(*inp), inp[0])
+            self.assertEqual(
+                [
+                    node.target
+                    for node in ep.graph_module.graph.nodes
+                    if node.op == "call_function"
+                ],
+                [torch.ops.aten.detach.default],
+            )
+
+    def test_export_copy_copy_requires_grad_unsupported(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return copy.copy(x)
+
+        inp = (torch.randn(2, 2, requires_grad=True),)
+        for strict in (False, True):
+            with self.assertRaisesRegex(
+                (torch._dynamo.exc.UserError, torch._dynamo.exc.Unsupported),
+                "copy.copy\\(\\) on tensors with requires_grad=True",
+            ):
+                export(M(), inp, strict=strict)
+
+    def test_export_copy_copy_metadata_mutation(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                y = copy.copy(x)
+                y.resize_(4)
+                return x, y
+
+        inp = (torch.randn(2, 2),)
+        ep = export(M(), inp, strict=False)
+        self.assertEqual(
+            [out.shape for out in ep.module()(*inp)],
+            [out.shape for out in M()(*inp)],
+        )
+        call_function_targets = [
+            node.target
+            for node in ep.graph_module.graph.nodes
+            if node.op == "call_function"
+        ]
+        self.assertEqual(len(call_function_targets), 2)
+        self.assertEqual(call_function_targets[0], torch.ops.aten.detach.default)
+        # Training IR decomposition rewrites resize_ to as_strided.
+        self.assertIn(
+            call_function_targets[1],
+            (torch.ops.aten.resize_.default, torch.ops.aten.as_strided.default),
+        )
+
     def _check_dynamic_shapes_specs_and_shapes(
         self,
         model,

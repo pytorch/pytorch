@@ -13,6 +13,7 @@ from typing import Any, cast, TYPE_CHECKING, TypeGuard
 
 import torch
 import torch.utils._pytree as pytree
+from torch._dynamo.exc import UserError, UserErrorType
 from torch._dynamo.source import (
     AttrSource,
     GetItemSource,
@@ -27,7 +28,7 @@ from torch._guards import Source
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_opaque_value
 from torch._opaque_base import OpaqueBase
-from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.export import Constraint
 from torch.export.dynamic_shapes import (
     _check_dynamic_shapes,
@@ -394,11 +395,22 @@ def _tensor_min_max(*args, real_callable, tensor_callable, **kwargs):
     return real_callable(*args, **kwargs)
 
 
+def _copy_fake_tensor_for_export(t):
+    if t.requires_grad:
+        raise UserError(
+            UserErrorType.ANTI_PATTERN,
+            "torch.export does not support copy.copy() on tensors with "
+            "requires_grad=True.",
+        )
+    return torch.ops.aten.detach.default(t)
+
+
 @contextmanager
 def _override_builtin_ops():
     original_max = builtins.max
     original_min = builtins.min
     original_pow = math.pow
+    original_fake_tensor_copy = FakeTensor.__dict__.get("__copy__")
 
     # pyrefly: ignore [bad-assignment]
     builtins.max = functools.partial(
@@ -411,6 +423,7 @@ def _override_builtin_ops():
     )
 
     math.pow = lambda x, y: x**y  # type: ignore[operator]
+    FakeTensor.__copy__ = _copy_fake_tensor_for_export  # type: ignore[attr-defined]
 
     try:
         yield
@@ -418,6 +431,10 @@ def _override_builtin_ops():
         builtins.max = original_max
         builtins.min = original_min
         math.pow = original_pow
+        if original_fake_tensor_copy is None:
+            del FakeTensor.__copy__  # type: ignore[attr-defined]
+        else:
+            FakeTensor.__copy__ = original_fake_tensor_copy  # type: ignore[attr-defined]
 
 
 def _make_fake_inputs_with_spec(
