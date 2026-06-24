@@ -519,8 +519,7 @@ struct ExpandableSegment {
         // Unlike the corresponding CUDA Driver API.
         (void)hipGetLastError();
 #endif
-        // Roll back the handles created in this call (none are mapped yet)
-        // and report no progress so the caller treats it as OOM.
+        // Roll back unmapped handles created here; no progress signals OOM.
         releaseHandles(begin, i);
         return rangeFromHandles(begin, begin);
       }
@@ -756,9 +755,7 @@ struct ExpandableSegment {
       }
 #endif
     }
-    // Publish imported handles only after every import succeeds; on any throw
-    // above, `imported` releases them via ~Handle and the segment stays empty,
-    // so no partial state is mapped or leaked.
+    // Publish after all imports succeed; `imported` releases on throw.
     segment->handles_ = std::move(imported);
     segment->mapAndSetAccess(0, header.num_handles);
     return segment;
@@ -870,10 +867,7 @@ struct ExpandableSegment {
   }
 
   void mapAndSetAccess(size_t begin, size_t end) {
-    // Map/setAccess can fail partway. On failure, unmap the prefix we mapped
-    // and release every handle in [begin, end) so no active-but-unmapped slot
-    // survives; otherwise teardown would later unmap a never-mapped range.
-    // Non-throwing: runs during unwinding.
+    // On failure, unmap the prefix and release the range.
     size_t mapped = begin;
     auto rollback = c10::make_scope_exit([&] {
       if (mapped > begin) {
@@ -931,8 +925,7 @@ struct ExpandableSegment {
 #endif
     releaseHandles(begin, end);
   }
-  // Release the handles in [begin, end) and drop trailing empty slots. Callers
-  // must have unmapped any mapped slots in the range first (see release()).
+  // Release handles in [begin, end) and trim; caller must unmap first.
   void releaseHandles(size_t begin, size_t end) {
     for (auto i : c10::irange(begin, end)) {
       handles_.at(i).release();
@@ -978,10 +971,7 @@ struct ExpandableSegment {
   size_t segment_size_;
   size_t mapped_size_;
   size_t max_handles_;
-  // An engaged `handle` marks ownership; a default-constructed Handle is an
-  // empty slot. `shareable_handle` is a separate, producer-only export artifact
-  // (a POSIX fd or fabric handle) that coexists with `handle` and must also be
-  // closed.
+  // Move-only RAII owner; closes shareable_handle on free.
   struct Handle {
     std::optional<CUmemGenericAllocationHandle> handle;
     std::optional<std::variant<int, CUmemFabricHandle>> shareable_handle;
@@ -998,8 +988,7 @@ struct ExpandableSegment {
           shareable_handle(
               std::exchange(other.shareable_handle, std::nullopt)) {}
     Handle& operator=(Handle&& other) noexcept {
-      // Swap so `other` carries away our previous resources and releases them
-      // when it is destroyed.
+      // Swap so `other` releases our old resources on destruction.
       handle.swap(other.handle);
       shareable_handle.swap(other.shareable_handle);
       return *this;
@@ -1016,9 +1005,7 @@ struct ExpandableSegment {
     CUmemGenericAllocationHandle get() const {
       return handle.value();
     }
-    // Free the physical handle (and close the shareable fd) and reset to an
-    // empty slot; callers must unmap the slot first. No-op when inactive. Must
-    // not throw: may run during unwinding, so release errors are ignored.
+    // Free handle + shareable fd (caller must unmap first).
     void release() noexcept {
       if (!active()) {
         return;
