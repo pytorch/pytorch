@@ -594,6 +594,7 @@ graph_partition: bool = (
     == "1"
 )
 
+
 # Pluggable CUDAGraph wrapping policy.  When set to a ``CUDAGraphPolicy``
 # instance, ``post_compile`` delegates cudagraph wrapping to the policy
 # instead of the built-in ``cudagraphify`` pipeline.  This allows custom
@@ -2299,6 +2300,19 @@ class aot_inductor:
 
     # flag to decide whether to create a submodule for constant graph.
     use_runtime_constant_folding: bool = False
+
+    # Enable regional CUDA graph for AOTI. Partitions the graph at compile
+    # time into cudagraph-eligible and non-eligible subgraphs. The generated
+    # C++ code lazily captures eligible partitions as CUDA graphs and replays
+    # them on subsequent calls.
+    enable_cuda_graph: bool = (
+        os.environ.get("AOT_INDUCTOR_ENABLE_CUDA_GRAPH", "0") == "1"
+    )
+
+    # Regional cuda-graph behavior (single max-sized per-instance slab with
+    # cg-aware slab reuse, eager/passthrough chaining, and in-slab partition
+    # handoff) is unconditional when enable_cuda_graph is set; there are no
+    # separate tuning flags.
 
     # flag to force weight to be appended to the shared library and mapped by the runtime
     # rather than embedded into the data section. Needed to support 1B+ parameter models
