@@ -172,7 +172,8 @@ def can_match_buffer_size(input_buf: BufferLike, output_buf: BufferLike):
         # NB: this is symbolic so that we don't try to reuse a buffer
         # for s0 for s1, just because they happen to share the same
         # size hint
-        sympy_str(input_size) == sympy_str(output_size)
+        sympy_str(input_size)
+        == sympy_str(output_size)
     ) or (
         # statically known that 0.95 * input_size <= output_size <= input_size
         V.graph.sizevars.statically_known_geq(output_size, 0.95 * input_size)
@@ -1915,6 +1916,12 @@ class PythonWrapperCodegen(CodeGen):
         return name
 
     def get_codegened_graph(self):
+        # Under trace_aot_inductor_module=True lowering (e.g. generate_merge_net_file)
+        # with graph-partition / cuda-graph codegen, the outer allocation codegen runs
+        # without a pushed graph, leaving this stack empty. Fall back to the active
+        # top-level GraphLowering instead of raising IndexError.
+        if not self.codegened_graph_stack:
+            return V.graph
         return self.codegened_graph_stack[-1]
 
     def push_codegened_graph(self, graph):
@@ -2722,17 +2729,20 @@ class PythonWrapperCodegen(CodeGen):
     def codegen_alloc_from_pool(
         self, name, offset, dtype, shape, stride
     ) -> tuple[str, list[str]]:
-        return "alloc_from_pool({})".format(
-            ", ".join(
-                [
-                    name,
-                    pexpr(offset),  # bytes not numel
-                    str(dtype),
-                    self.codegen_python_shape_tuple(shape),
-                    self.codegen_python_shape_tuple(stride),
-                ]
-            )
-        ), []
+        return (
+            "alloc_from_pool({})".format(
+                ", ".join(
+                    [
+                        name,
+                        pexpr(offset),  # bytes not numel
+                        str(dtype),
+                        self.codegen_python_shape_tuple(shape),
+                        self.codegen_python_shape_tuple(stride),
+                    ]
+                )
+            ),
+            [],
+        )
 
     def codegen_reinterpret_view(
         self,
@@ -4316,9 +4326,12 @@ class PythonWrapperCodegen(CodeGen):
                         # In this case, we strip the first key path away.
                         return go(
                             outputs[0].get_name(),
-                            keypath[1:]
-                            if isinstance(out, ir.MultiOutput) and len(out.indices) != 0
-                            else keypath,
+                            (
+                                keypath[1:]
+                                if isinstance(out, ir.MultiOutput)
+                                and len(out.indices) != 0
+                                else keypath
+                            ),
                         )
                     else:
                         if not isinstance(keypath[0], pytree.SequenceKey):

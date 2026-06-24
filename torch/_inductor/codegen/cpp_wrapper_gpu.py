@@ -6,15 +6,14 @@ import re
 import sys
 from itertools import count, zip_longest
 from typing import Any
-from typing_extensions import Self
 
 import sympy
-
 import torch
 from torch import dtype as torch_dtype
 from torch._inductor.codecache import get_cpp_wrapper_cubin_path_name
 from torch._inductor.runtime.runtime_utils import dynamo_timed
 from torch.utils._ordered_set import OrderedSet
+from typing_extensions import Self
 
 from .. import config
 from ..codecache import CudaKernelParamCache
@@ -78,10 +77,12 @@ def generate_aoti_kernel_config_header(kernel_names: list[str]) -> str:
         return "{" + ", ".join(str(v) for v in values) + "}"
 
     buf = IndentedBuffer()
-    buf.splice("""
+    buf.splice(
+        """
         #pragma once
         // Auto-generated kernel configurations for AOTInductor lazy compile.
-    """)
+    """
+    )
 
     for kernel_name in kernel_names:
         params = CudaKernelParamCache.get(kernel_name)
@@ -154,7 +155,8 @@ def generate_aoti_kernel_config_header(kernel_names: list[str]) -> str:
         ps = params.get("profile_scratch", -1) or -1
 
         buf.writeline("")
-        buf.splice(f"""
+        buf.splice(
+            f"""
             // Kernel: {kernel_name}
             #define {macro_prefix}_CUBIN_PATH {cubin_path}
             #define {macro_prefix}_MANGLED_NAME {mangled_name}
@@ -169,7 +171,8 @@ def generate_aoti_kernel_config_header(kernel_names: list[str]) -> str:
             #define {macro_prefix}_CONFIG_INDEX {ci}
             #define {macro_prefix}_GLOBAL_SCRATCH {gs}
             #define {macro_prefix}_PROFILE_SCRATCH {ps}
-        """)
+        """
+        )
 
     return buf.getvalue()
 
@@ -1107,8 +1110,12 @@ class CppWrapperGpu(CppWrapperCpu):
         parent_wrapper: PythonWrapperCodegen | None,
         partition_signatures: GraphPartitionSignature | None = None,
     ):
-        # TODO - support subgraph codegen by lifting functions. Check the
-        # comment at CppWrapperCpu `codegen_subgraph` function.
+        if is_subgraph and partition_signatures is not None:
+            assert subgraph_name is not None
+            assert parent_wrapper is not None
+            return SubgraphCppWrapperGpu(
+                subgraph_name, parent_wrapper, partition_signatures
+            )
         return CppWrapperGpu()
 
     def write_header(self):
@@ -1125,6 +1132,15 @@ class CppWrapperGpu(CppWrapperCpu):
             self.header.splice_jit(kernel_driver)
         else:
             self.header.splice(kernel_driver)
+        if config.aot_inductor.enable_cuda_graph and V.graph.aot_mode:
+            # The AOTI regional cuda-graph runtime: flat per-(partition, shape)
+            # capture + replay over one private pool, with slab-resident outputs
+            # (no tree, no allocator checkpoint). See cudagraph_tree.h.
+            self.header.splice(
+                """
+                #include <torch/csrc/inductor/aoti_runtime/cudagraph_tree.h>
+                """
+            )
 
     @cache_on_self
     def write_tma_descriptor_helpers_once(self):
@@ -1670,6 +1686,428 @@ static inline void ensure_triton_kernel_compiles_started() {{
 
     def make_zero_buffer(self, name):
         return f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_zero_({name}.get()));"
+
+    def codegen_partition_call(
+        self,
+        partition_id: int,
+        partition_signatures: GraphPartitionSignature,
+    ):
+        skip_cudagraph = partition_signatures.skip_cudagraph
+        use_cudagraph = (
+            config.aot_inductor.enable_cuda_graph
+            and V.graph.aot_mode
+            and not skip_cudagraph
+        )
+
+        if not use_cudagraph:
+            return super().codegen_partition_call(partition_id, partition_signatures)
+
+        # Emit the per-symbol handoff slabs ONCE, before any partition lambda is
+        # defined, so each partition body's [&] capture sees the slab handle
+        # (cudagraph_handoff_pool_<sym>) in scope. Each slab is routed through
+        # AllocationPool.codegen_create -> the per-instance cached-slab path
+        # (this->cudagraph_slabs_), so the base address is address-stable across
+        # forwards. Emitted only when memory_planning published handoff pools;
+        # none -> no lines.
+        if not getattr(self, "_cg_handoff_slab_emitted", False):
+            handoff_pools = getattr(V.graph, "_cudagraph_handoff_pools", None) or {}
+            for _pool_name, pool in handoff_pools.items():
+                pool.codegen_create(self, self)
+            self._cg_handoff_slab_emitted = True
+
+        # When enable_cuda_graph is on, we handle ALL partitions ourselves
+        # to properly track outer-scope variables for deallocation.
+        # The base class emits .reset() for all input_deallocation entries,
+        # but some buffers are only declared inside the partition lambda
+        # (e.g., SDPA auxiliary outputs) and don't exist in the outer scope.
+        input_deallocation = partition_signatures.input_deallocation
+        output_nodes = partition_signatures.output_nodes
+        output_names = [node.get_name() for node in output_nodes]
+        num_tensor_inputs = len(input_deallocation)
+        num_outputs = len(output_names)
+        partition_name = f"partition_{partition_id}"
+        partition_bodies = getattr(self, "_partition_bodies", [])
+        partition_code = (
+            partition_bodies[partition_id]
+            if partition_id < len(partition_bodies)
+            else None
+        )
+        if partition_code is not None:
+            self.writeline(f"auto {partition_name} = [&](")
+            self.writeline(
+                f"    AtenTensorHandle* partition_inputs, int32_t num_inputs,"
+            )
+            self.writeline(
+                f"    AtenTensorHandle* partition_outputs, int32_t num_outputs"
+            )
+            self.writeline(") {")
+            self.writeline(partition_code)
+            self.writeline("};")
+
+        for i, name in enumerate(list(input_deallocation.keys())):
+            self.writeline(f"AtenTensorHandle p{partition_id}_in_{i} = {name}.get();")
+        inputs_list = ", ".join(
+            f"p{partition_id}_in_{i}" for i in range(num_tensor_inputs)
+        )
+        self.writeline(
+            f"AtenTensorHandle p{partition_id}_inputs[] = {{{inputs_list}}};"
+        )
+        self.writeline(f"AtenTensorHandle p{partition_id}_outputs[{num_outputs}];")
+
+        # Per-AOTInductorModel-instance manager (a model member declared in
+        # model.h), lazily created so each instance owns its own private graph pool
+        # + capture stream -> concurrent instances in a model_container are
+        # isolated.
+        if not getattr(self, "_cg_mgr_emitted", False):
+            self.writeline("if (!this->cudagraph_mgr_) {")
+            self.writeline(
+                "  this->cudagraph_mgr_ = std::make_unique<"
+                "torch::aot_inductor::AOTICUDAGraphTreeManager>(this->device_idx_);"
+            )
+            self.writeline("}")
+            self._cg_mgr_emitted = True
+
+        # Single dynamic symbol (enforced by the scheduler) is the per-shape key.
+        sym_vars = [s.name for s in partition_signatures.symbol_inputs]
+        if len(sym_vars) == 1:
+            shape_key = f"(int64_t){sym_vars[0]}"
+        elif len(sym_vars) == 0:
+            shape_key = "0LL"
+        else:
+            raise RuntimeError(
+                f"AOTI cuda graph partition has {len(sym_vars)} dynamic symbols "
+                f"({sym_vars}), expected at most 1; scheduler should have demoted it."
+            )
+
+        # Compile-time liveness from the scheduler pre-pass: chained (no-copy)
+        # inputs and escaping outputs. An input is "chained" (read in-place, no
+        # per-replay copy) when its memory is at a stable address for this
+        # partition's capture to bake; otherwise it must copy_in into the
+        # captured region's static slot, which is refreshed per replay via
+        # aoti_torch_copy_. There are three chain cases, all unconditional:
+        #
+        #   1. Real captured producer: real_producer_pid[name] = the lowest
+        #      captured cpid that truly allocates `name` (name in
+        #      cap_out_names[cpid] AND NOT in cap_in_names[cpid], so it is NOT a
+        #      passthrough re-export). Chain when that producer runs EARLIER than
+        #      this partition. A global-name classifier (`name in
+        #      captured_outputs`) would be wrong: that set includes passthrough
+        #      re-exports whose real allocator is eager, so a captured downstream
+        #      kernel would bake the eager-fresh address and read stale memory on
+        #      later forwards. This per-edge classifier is the only correct path.
+        #   2. Passthrough re-export: the runtime's output_meta[i] for such a
+        #      re-export points at the emitting partition's static_inputs[i]
+        #      address -- stable across replays, refreshed each replay by the
+        #      FIRST eager->CG copy_in. So a downstream captured consumer Y can
+        #      chain B from the earliest passthrough emitter A (cpid < Y) instead
+        #      of issuing its own copy_in. Correctness-safe: valid only AFTER A
+        #      has materialized its slot for B, and requires the passthrough
+        #      output handoff below to ALSO reassign outer-scope B to A's slot
+        #      view -- the two stay in sync.
+        #   3. Eager->CG edge: an intermediate produced by an eager(skip)
+        #      partition is slab-resident at a stable address (re-written fresh
+        #      each forward by the eager re-run), so the captured consumer reads
+        #      it in place. Excluded: graph inputs (reallocate each forward) and
+        #      extern-kernel outputs (not pooled -> not slab-stable). Relies on
+        #      cg-aware reuse keeping the boundary buffers' offsets stable.
+        input_names = list(input_deallocation.keys())
+        graph_input_names = set(getattr(V.graph, "graph_inputs", {}) or {})
+        extern_output_names = (
+            getattr(V.graph, "_cudagraph_extern_output_names", None) or set()
+        )
+        real_producer_pid = getattr(V.graph, "_cudagraph_real_producer_pid", None) or {}
+        passthrough_producer_pid = (
+            getattr(V.graph, "_cudagraph_passthrough_producer_pid", None) or {}
+        )
+
+        def _is_chained(name: str) -> bool:
+            if name in real_producer_pid and real_producer_pid[name] < partition_id:
+                return True
+            if name in passthrough_producer_pid:
+                return passthrough_producer_pid[name] < partition_id
+            return name not in graph_input_names and name not in extern_output_names
+
+        copy_in = [i for i, name in enumerate(input_names) if not _is_chained(name)]
+        escape_outs = (getattr(V.graph, "_cudagraph_escape_outs", {}) or {}).get(
+            partition_id, []
+        )
+
+        def _vec_i32(xs: list[int]) -> str:
+            return "std::vector<int32_t>{" + ", ".join(str(x) for x in xs) + "}"
+
+        self.writeline(
+            f"this->cudagraph_mgr_->run_partition({partition_id}, {shape_key}, "
+            f"p{partition_id}_inputs, {num_tensor_inputs}, "
+            f"p{partition_id}_outputs, {num_outputs}, "
+            f"{_vec_i32(copy_in)}, {_vec_i32(escape_outs)}, "
+            "[&](AtenTensorHandle* in, AtenTensorHandle* out, void* cs) {"
+        )
+        self.writeline(
+            f"  auto p{partition_id}_saved = stream; "
+            "stream = reinterpret_cast<decltype(stream)>(cs);"
+        )
+        self.writeline(
+            f"  {partition_name}(in, {num_tensor_inputs}, out, {num_outputs});"
+        )
+        self.writeline(f"  stream = p{partition_id}_saved;")
+        self.writeline("});")
+
+        # Unpack outputs. Every output (model or internal) hands off a stable
+        # non-owning view of its recorded output address -- no clone. For a
+        # slab-resident output that address is the durable model slab, so the
+        # view stays valid across forwards; model outputs additionally have their
+        # deleter neutralized (escape_outs) so the caller keeps owning them.
+        # Contract (consume-before-next-run): an output must be read before the
+        # next run of its (partition, shape) -- the next replay overwrites the
+        # memory in place. Inference serving copies outputs into the response
+        # within the request, satisfying this; only harnesses that hold outputs
+        # across forwards (e.g. multi-shape accuracy collection) see stale values.
+        if not hasattr(self, "_outer_scope_vars"):
+            self._outer_scope_vars = set()
+        self._outer_scope_vars.update(input_deallocation.keys())
+        passthrough_names = set(input_deallocation.keys())
+        # Passthrough outputs (output name == one of this partition's input
+        # names): run_partition returned a NON-OWNING view at output_meta[i],
+        # which for an eager-copied input is THIS partition's static_inputs[i]
+        # address. When THIS partition is the EARLIEST captured passthrough
+        # emitter for `name`, reassign outer-scope `name` to that stable
+        # static-slot view so downstream captured consumers can chain (see
+        # _is_chained above). Otherwise the view is dropped (the original input
+        # handle stays in scope).
+        passthrough_producer_pid_map = (
+            getattr(V.graph, "_cudagraph_passthrough_producer_pid", None) or {}
+        )
+        for i, name in enumerate(output_names):
+            src = f"p{partition_id}_outputs[{i}]"
+            if name in passthrough_names:
+                if passthrough_producer_pid_map.get(name) == partition_id:
+                    if name in self._outer_scope_vars:
+                        self.writeline(f"{name} = RAIIAtenTensorHandle({src});")
+                    else:
+                        self.writeline(f"RAIIAtenTensorHandle {name}({src});")
+                    self._outer_scope_vars.add(name)
+                else:
+                    self.writeline(f"aoti_torch_delete_tensor_object({src});")
+                continue
+            if name in self._outer_scope_vars:
+                self.writeline(f"{name} = RAIIAtenTensorHandle({src});")
+            else:
+                self.writeline(f"RAIIAtenTensorHandle {name}({src});")
+            self._outer_scope_vars.add(name)
+
+        # Only free buffers that exist in the outer scope. Buffers
+        # declared only inside the partition lambda (e.g., SDPA auxiliary
+        # outputs) are freed when the lambda returns -- emitting .reset()
+        # for them would be an "undeclared identifier" error.
+        for name, deallocate in input_deallocation.items():
+            if deallocate and name in self._outer_scope_vars:
+                self.writeline(f"{name}.reset();")
+
+    def define_subgraph_launcher_fn(self, name: str, subgraph_code):
+        if not hasattr(self, "_partition_bodies"):
+            self._partition_bodies = []
+        code = (
+            subgraph_code.value
+            if hasattr(subgraph_code, "value")
+            else (
+                subgraph_code.getvalue()
+                if hasattr(subgraph_code, "getvalue")
+                else str(subgraph_code)
+            )
+        )
+        self._partition_bodies.append(code)
+
+    def set_all_partition_names(self, num_partitions: int):
+        self.all_partition_names = [f"partition_{idx}" for idx in range(num_partitions)]
+
+    def generate_after_suffix(self, result: IndentedBuffer) -> None:
+        pass
+
+
+class SubgraphCppWrapperGpu(CppWrapperGpu):
+    """
+    Generates a separate C++ function for a graph partition.
+    Analogous to SubgraphPythonWrapperCodegen for the Python wrapper.
+    """
+
+    def __init__(
+        self,
+        subgraph_name: str,
+        parent_wrapper: PythonWrapperCodegen,
+        partition_signatures: GraphPartitionSignature,
+    ) -> None:
+        self.subgraph_name = subgraph_name
+        self.parent_wrapper = parent_wrapper
+        self.partition_signatures = partition_signatures
+        super().__init__()
+        root = self._get_root_wrapper()
+        self.src_to_kernel = root.src_to_kernel
+        self._triton_call_wrappers = root._triton_call_wrappers
+        self._kernel_name_to_body = root._kernel_name_to_body
+        self.used_cached_dtypes = root.used_cached_dtypes
+        self.used_cached_devices = root.used_cached_devices
+        self.used_cached_layouts = root.used_cached_layouts
+        self.used_cached_memory_formats = root.used_cached_memory_formats
+        self.kernel_declarations = root.kernel_declarations
+        self.initialized_kernels = root.initialized_kernels
+        self.user_defined_kernel_cache = root.user_defined_kernel_cache
+        self.kernel_autotune_defs = root.kernel_autotune_defs
+        self.kernel_autotune_calls = root.kernel_autotune_calls
+        self.kernel_autotune_names = root.kernel_autotune_names
+        self.kernel_autotune_example_args = root.kernel_autotune_example_args
+
+    def _get_root_wrapper(self) -> PythonWrapperCodegen:
+        w = self.parent_wrapper
+        while isinstance(w, SubgraphCppWrapperGpu):
+            w = w.parent_wrapper
+        return w
+
+    def generate(self, is_inference):
+        # Use parent's generate which populates all buffers.
+        # This subgraph wrapper has a fresh, empty codegened_graph_stack and
+        # partition codegen never pushes onto it, so nothing pops it either
+        # (the scheduler must not pop here -- that would pop an empty stack).
+        result_obj, kernel_code = super().generate(is_inference)
+        # Strip #include, namespace, and closing brace from result
+        # since this code goes inside a lambda body
+        if hasattr(result_obj, "value"):
+            raw = result_obj.value
+        elif hasattr(result_obj, "getvalue"):
+            raw = result_obj.getvalue()
+        else:
+            raw = str(result_obj)
+        lines = raw.split("\n")
+        filtered = []
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith("#include"):
+                continue
+            if stripped.startswith("namespace "):
+                continue
+            if stripped.startswith("} // namespace"):
+                continue
+            if stripped.startswith("using namespace"):
+                continue
+            filtered.append(line)
+        clean = IndentedBuffer()
+        clean.writelines(filtered)
+        return clean, kernel_code
+
+    def set_launcher_fn_name(self) -> None:
+        self.launcher_fn_name = self.subgraph_name
+
+    def write_header(self) -> None:
+        pass
+
+    def add_benchmark_harness(self, output):
+        pass
+
+    def benchmark_compiled_module(self, output):
+        pass
+
+    def write_async_compile_wait(self):
+        pass
+
+    def generate_and_run_autotune_block(self):
+        pass
+
+    def next_kernel_suffix(self) -> str:
+        return self.parent_wrapper.next_kernel_suffix()
+
+    def generate_after_suffix(self, result: IndentedBuffer) -> None:
+        return
+
+    def write_wrapper_decl(self) -> None:
+        inputs = self.partition_signatures.input_deallocation
+
+        # Emit input unpacking from partition_inputs array (lambda body)
+        for idx, input_name in enumerate(inputs.keys()):
+            if isinstance(
+                self.partition_signatures.input_nodes.get(input_name),
+                sympy.Expr,
+            ):
+                from ..graph import may_get_constant_buffer_dtype
+
+                dtype = may_get_constant_buffer_dtype(
+                    self.partition_signatures.input_nodes[input_name]
+                )
+                assert dtype is not None
+                self.codegen_tensor_item(
+                    dtype,
+                    f"wrap_with_raii_handle_if_needed(partition_inputs[{idx}])",
+                    input_name,
+                    self.prefix,
+                )
+            else:
+                self.prefix.writeline(
+                    f"auto {input_name} = "
+                    f"wrap_with_raii_handle_if_needed(partition_inputs[{idx}]);"
+                )
+
+            # Unpack symbol inputs
+            for sym in self.partition_signatures.symbol_inputs:
+                # Symbol inputs are passed after tensor inputs
+                pass
+
+    def finalize_prefix(self):
+        pass
+
+    def generate_input_output_runtime_checks(self):
+        pass
+
+    def get_graph_inputs(self):
+        if sig := self.partition_signatures:
+            return sig.input_nodes | {str(s): s for s in sig.symbol_inputs}
+        return V.graph.graph_inputs
+
+    def get_graph_input_names(self) -> list[str]:
+        if sig := self.partition_signatures:
+            return list(sig.input_nodes.keys()) + [s.name for s in sig.symbol_inputs]
+        return V.graph.graph_input_names
+
+    def get_graph_outputs(self):
+        if sig := self.partition_signatures:
+            return sig.output_nodes
+        return V.graph.graph_outputs
+
+    def codegen_allocation(self, buffer):
+        from ..ir import Buffer
+
+        if isinstance(buffer, Buffer):
+            name = buffer.get_name()
+            if (
+                self.partition_signatures
+                and name in self.partition_signatures.input_nodes
+            ):
+                return
+        super().codegen_allocation(buffer)
+
+    def generate_return(self, output_refs: list[str]):
+        output2idx: dict[str, int] = {}
+        output_refs = [
+            self.create_tmp_raii_handle_var_if_needed(o, self.wrapper_call)
+            for o in output_refs
+        ]
+        for idx, output in enumerate(output_refs):
+            if output == "nullptr":
+                continue
+            if output in output2idx:
+                src_idx = output2idx[output]
+                self.wrapper_call.writeline(
+                    f"partition_outputs[{idx}] = partition_outputs[{src_idx}];"
+                )
+            else:
+                self.wrapper_call.writeline(
+                    f"partition_outputs[{idx}] = {output}.release();"
+                )
+            if output not in output2idx:
+                output2idx[output] = idx
+
+    def generate_before_suffix(self, result):
+        pass
+
+    def write_suffix(self, result):
+        pass
 
 
 @dataclasses.dataclass
