@@ -7,6 +7,10 @@ from torch.testing._internal.autocast_test_lists import (
     AutocastCPUTestLists,
     TestAutocast,
 )
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
 from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -190,17 +194,18 @@ class TestAutocastCPU(TestAutocast):
 
 class CustomLinear(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, x, w_t):
+    def forward(ctx, x, w_t, device_type="cuda"):
         ctx.save_for_backward(x, w_t)
+        ctx.device_type = device_type
         return torch.nn.functional.linear(x, w_t)
 
     @staticmethod
     def backward(ctx, grad_output):
         x, w_t = ctx.saved_tensors
-        with torch.autocast(device_type="cuda"):
+        with torch.autocast(device_type=ctx.device_type):
             dL_dX = torch.matmul(grad_output, w_t)
             dL_dW = torch.matmul(x.transpose(0, 1), grad_output).transpose(0, 1)
-        return dL_dX, dL_dW
+        return dL_dX, dL_dW, None
 
 
 class WeightDTypeCastCounterMode(TorchDispatchMode):
@@ -228,9 +233,9 @@ class WeightDTypeCastCounterMode(TorchDispatchMode):
         return super().__exit__(exc_type, exc_val, exc_tb)
 
 
-@unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-class TestAutocastGPU(TestCase):
-    def test_cast_cache_is_global(self):
+class TestAutocastDevice(TestCase):
+    @onlyAccelerator
+    def test_cast_cache_is_global(self, device):
         """
         Verifies that the autocast cache is global. This is done by
         mocking out cache clearing at the end of the forward pass,
@@ -238,28 +243,29 @@ class TestAutocastGPU(TestCase):
         backward, and verifying that the weight only get cast to float16 once.
         """
 
-        data = torch.randn(2, 3).cuda()
-        weight = torch.nn.Parameter(torch.randn(4, 3).cuda())
+        data = torch.randn(2, 3).to(device)
+        weight = torch.nn.Parameter(torch.randn(4, 3).to(device))
 
         with WeightDTypeCastCounterMode(weight) as mode:
-            with torch.autocast(device_type="cuda"):
-                output = CustomLinear.apply(data, weight)
+            with torch.autocast(device_type=device):
+                output = CustomLinear.apply(data, weight, device)
                 s = output.sum()
             s.backward()
 
         self.assertEqual(mode.dtype_cast_counter, 1)
 
-    def test_cache_disabled(self):
-        data = torch.randn(2, 3).cuda()
-        weight = torch.nn.Parameter(torch.randn(4, 3).cuda())
+    @onlyAccelerator
+    def test_cache_disabled(self, device):
+        data = torch.randn(2, 3).to(device)
+        weight = torch.nn.Parameter(torch.randn(4, 3).to(device))
 
         try:
             torch._C._set_cached_tensors_enabled(True)
             torch._C._add_cached_tensor(weight)
 
             with WeightDTypeCastCounterMode(weight) as mode:
-                with torch.autocast(device_type="cuda"):
-                    output = CustomLinear.apply(data, weight)
+                with torch.autocast(device_type=device):
+                    output = CustomLinear.apply(data, weight, device)
                     s = output.sum()
                 s.backward()
 
@@ -279,8 +285,8 @@ class TestAutocastGPU(TestCase):
     # and due to the multi-threaded nature of the autograd, the forward pass is being run in bfloat16, while the backward
     # pass defaults to float16. The dtype mismatch leads to the error in the policy, as the criteria (3) is not satisfied.
     # For more info see https://github.com/pytorch/pytorch/issues/132715.
-    def test_autocast_prioritize(self):
-        device = "cuda"
+    @onlyAccelerator
+    def test_autocast_prioritize(self, device):
         dtype = torch.bfloat16
 
         with torch.autocast(device_type=device, enabled=True, dtype=dtype):
@@ -360,6 +366,127 @@ class TestAutocastMPS(TestCase):
             self.assertEqual(result.dtype, torch.bfloat16)
 
 
+def _test_autocast_nograd_caching_issue_158232_impl(self, device, dtype):
+    """
+    Regression test for issue #158232: autocast + no_grad incompatibility
+    """
+    model = torch.nn.Linear(2, 2).to(device)
+    inp = torch.randn(8, 2, device=device)
+
+    with torch.autocast(device, dtype=dtype, enabled=True):
+        # First forward pass in no_grad context (e.g., shape inference)
+        with torch.no_grad():
+            out1 = model(inp)
+            self.assertFalse(
+                out1.requires_grad, "Output in no_grad should not require grad"
+            )
+
+        # Second forward pass with gradients enabled (e.g., training)
+        out2 = model(inp)
+        self.assertTrue(
+            out2.requires_grad,
+            "Output should require gradients after exiting no_grad",
+        )
+        self.assertIsNotNone(
+            out2.grad_fn, "Output should have grad_fn after exiting no_grad"
+        )
+
+        # Backward pass should work
+        loss = out2.mean()
+        loss.backward()
+
+    # Verify gradients were computed
+    self.assertIsNotNone(model.weight.grad)
+    self.assertIsNotNone(model.bias.grad)
+
+
+def _test_autocast_inference_mode_interaction_impl(self, device, dtype):
+    """
+    Test that autocast works correctly with torch.inference_mode()
+    """
+    model = torch.nn.Linear(2, 2).to(device)
+    inp = torch.randn(8, 2, device=device)
+
+    # Test 1: inference_mode inside autocast
+    with torch.autocast(device, dtype=dtype, enabled=True):
+        torch.clear_autocast_cache()
+        with torch.inference_mode():
+            out1 = model(inp)
+            self.assertFalse(out1.requires_grad)
+            self.assertEqual(out1.dtype, dtype)
+
+        # After exiting inference_mode, gradients should work
+        out2 = model(inp)
+        self.assertTrue(out2.requires_grad)
+        out2.mean().backward()
+
+    # Test 2: autocast inside inference_mode
+    with torch.inference_mode():
+        with torch.autocast(device, dtype=dtype, enabled=True):
+            out = model(inp)
+            self.assertFalse(out.requires_grad)
+            self.assertEqual(out.dtype, dtype)
+
+
+def _test_autocast_caching_still_works_with_gradients_impl(self, device, dtype):
+    """
+    Verify that autocast caching still functions correctly when gradients ARE enabled.
+    """
+    model = torch.nn.Linear(2, 2).to(device)
+    inp = torch.randn(8, 2, device=device)
+
+    with torch.autocast(device, dtype=dtype, enabled=True):
+        # Multiple forward passes with gradients enabled
+        out1 = model(inp)
+        out2 = model(inp)
+        out3 = model(inp)
+
+        # All should have gradients
+        self.assertTrue(out1.requires_grad)
+        self.assertTrue(out2.requires_grad)
+        self.assertTrue(out3.requires_grad)
+
+        # All should have grad_fn
+        self.assertIsNotNone(out1.grad_fn)
+        self.assertIsNotNone(out2.grad_fn)
+        self.assertIsNotNone(out3.grad_fn)
+
+        # Backward should work on all
+        out1.mean().backward(retain_graph=True)
+        out2.mean().backward(retain_graph=True)
+        out3.mean().backward()
+
+
+def _test_autocast_mixed_grad_contexts_impl(self, device, dtype):
+    """
+    Test complex nesting of gradient contexts within autocast.
+    """
+    model = torch.nn.Linear(2, 2).to(device)
+    inp = torch.randn(8, 2, device=device)
+
+    with torch.autocast(device, dtype=dtype, enabled=True):
+        # Pass 1: no_grad
+        with torch.no_grad():
+            out1 = model(inp)
+            self.assertFalse(out1.requires_grad)
+
+        # Pass 2: gradients enabled
+        out2 = model(inp)
+        self.assertTrue(out2.requires_grad)
+
+        # Pass 3: no_grad again
+        with torch.no_grad():
+            out3 = model(inp)
+            self.assertFalse(out3.requires_grad)
+
+        # Pass 4: gradients enabled again
+        out4 = model(inp)
+        self.assertTrue(out4.requires_grad)
+
+        # Backward on gradient-enabled outputs
+        (out2.mean() + out4.mean()).backward()
+
+
 class TestTorchAutocast(TestCase):
     def test_autocast_fast_dtype(self):
         gpu_fast_dtype = torch.get_autocast_dtype(device_type="cuda")
@@ -384,162 +511,23 @@ class TestTorchAutocast(TestCase):
         with self.assertRaisesRegex(expected_exception=ValueError, expected_regex=msg):
             torch.autocast(device_type=dev)
 
-    def _test_autocast_nograd_caching_issue_158232_impl(self, device, dtype):
-        """
-        Regression test for issue #158232: autocast + no_grad incompatibility
-        """
-        model = torch.nn.Linear(2, 2).to(device)
-        inp = torch.randn(8, 2, device=device)
-
-        with torch.autocast(device, dtype=dtype, enabled=True):
-            # First forward pass in no_grad context (e.g., shape inference)
-            with torch.no_grad():
-                out1 = model(inp)
-                self.assertFalse(
-                    out1.requires_grad, "Output in no_grad should not require grad"
-                )
-
-            # Second forward pass with gradients enabled (e.g., training)
-            out2 = model(inp)
-            self.assertTrue(
-                out2.requires_grad,
-                "Output should require gradients after exiting no_grad",
-            )
-            self.assertIsNotNone(
-                out2.grad_fn, "Output should have grad_fn after exiting no_grad"
-            )
-
-            # Backward pass should work
-            loss = out2.mean()
-            loss.backward()
-
-        # Verify gradients were computed
-        self.assertIsNotNone(model.weight.grad)
-        self.assertIsNotNone(model.bias.grad)
-
     def test_autocast_nograd_caching_issue_158232_cpu(self):
         """Regression test for issue #158232 on CPU"""
-        self._test_autocast_nograd_caching_issue_158232_impl("cpu", torch.bfloat16)
-
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
-    def test_autocast_nograd_caching_issue_158232_cuda(self):
-        """Regression test for issue #158232 on CUDA"""
-        self._test_autocast_nograd_caching_issue_158232_impl("cuda", torch.float16)
-
-    def _test_autocast_inference_mode_interaction_impl(self, device, dtype):
-        """
-        Test that autocast works correctly with torch.inference_mode()
-        """
-        model = torch.nn.Linear(2, 2).to(device)
-        inp = torch.randn(8, 2, device=device)
-
-        # Test 1: inference_mode inside autocast
-        with torch.autocast(device, dtype=dtype, enabled=True):
-            torch.clear_autocast_cache()
-            with torch.inference_mode():
-                out1 = model(inp)
-                self.assertFalse(out1.requires_grad)
-                self.assertEqual(out1.dtype, dtype)
-
-            # After exiting inference_mode, gradients should work
-            out2 = model(inp)
-            self.assertTrue(out2.requires_grad)
-            out2.mean().backward()
-
-        # Test 2: autocast inside inference_mode
-        with torch.inference_mode():
-            with torch.autocast(device, dtype=dtype, enabled=True):
-                out = model(inp)
-                self.assertFalse(out.requires_grad)
-                self.assertEqual(out.dtype, dtype)
+        _test_autocast_nograd_caching_issue_158232_impl(self, "cpu", torch.bfloat16)
 
     def test_autocast_inference_mode_interaction_cpu(self):
         """Test autocast + inference_mode interaction on CPU"""
-        self._test_autocast_inference_mode_interaction_impl("cpu", torch.bfloat16)
-
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
-    def test_autocast_inference_mode_interaction_cuda(self):
-        """Test autocast + inference_mode interaction on CUDA"""
-        self._test_autocast_inference_mode_interaction_impl("cuda", torch.float16)
-
-    def _test_autocast_caching_still_works_with_gradients_impl(self, device, dtype):
-        """
-        Verify that autocast caching still functions correctly when gradients ARE enabled.
-        """
-        model = torch.nn.Linear(2, 2).to(device)
-        inp = torch.randn(8, 2, device=device)
-
-        with torch.autocast(device, dtype=dtype, enabled=True):
-            # Multiple forward passes with gradients enabled
-            out1 = model(inp)
-            out2 = model(inp)
-            out3 = model(inp)
-
-            # All should have gradients
-            self.assertTrue(out1.requires_grad)
-            self.assertTrue(out2.requires_grad)
-            self.assertTrue(out3.requires_grad)
-
-            # All should have grad_fn
-            self.assertIsNotNone(out1.grad_fn)
-            self.assertIsNotNone(out2.grad_fn)
-            self.assertIsNotNone(out3.grad_fn)
-
-            # Backward should work on all
-            out1.mean().backward(retain_graph=True)
-            out2.mean().backward(retain_graph=True)
-            out3.mean().backward()
+        _test_autocast_inference_mode_interaction_impl(self, "cpu", torch.bfloat16)
 
     def test_autocast_caching_still_works_with_gradients_cpu(self):
         """Test caching with gradients on CPU"""
-        self._test_autocast_caching_still_works_with_gradients_impl(
-            "cpu", torch.bfloat16
+        _test_autocast_caching_still_works_with_gradients_impl(
+            self, "cpu", torch.bfloat16
         )
-
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
-    def test_autocast_caching_still_works_with_gradients_cuda(self):
-        """Test caching with gradients on CUDA"""
-        self._test_autocast_caching_still_works_with_gradients_impl(
-            "cuda", torch.float16
-        )
-
-    def _test_autocast_mixed_grad_contexts_impl(self, device, dtype):
-        """
-        Test complex nesting of gradient contexts within autocast.
-        """
-        model = torch.nn.Linear(2, 2).to(device)
-        inp = torch.randn(8, 2, device=device)
-
-        with torch.autocast(device, dtype=dtype, enabled=True):
-            # Pass 1: no_grad
-            with torch.no_grad():
-                out1 = model(inp)
-                self.assertFalse(out1.requires_grad)
-
-            # Pass 2: gradients enabled
-            out2 = model(inp)
-            self.assertTrue(out2.requires_grad)
-
-            # Pass 3: no_grad again
-            with torch.no_grad():
-                out3 = model(inp)
-                self.assertFalse(out3.requires_grad)
-
-            # Pass 4: gradients enabled again
-            out4 = model(inp)
-            self.assertTrue(out4.requires_grad)
-
-            # Backward on gradient-enabled outputs
-            (out2.mean() + out4.mean()).backward()
 
     def test_autocast_mixed_grad_contexts_cpu(self):
         """Test mixed grad contexts on CPU"""
-        self._test_autocast_mixed_grad_contexts_impl("cpu", torch.bfloat16)
-
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
-    def test_autocast_mixed_grad_contexts_cuda(self):
-        """Test mixed grad contexts on CUDA"""
-        self._test_autocast_mixed_grad_contexts_impl("cuda", torch.float16)
+        _test_autocast_mixed_grad_contexts_impl(self, "cpu", torch.bfloat16)
 
     def test_autocast_called_with_non_callable(self):
         """Test that autocast gives a clear error when misused as a function wrapper"""
@@ -548,6 +536,31 @@ class TestTorchAutocast(TestCase):
         with self.assertRaisesRegex(TypeError, msg):
             torch.autocast(device_type="cpu")(x)
 
+
+class TestTorchAutocastDevice(TestCase):
+    @onlyAccelerator
+    def test_autocast_nograd_caching_issue_158232(self, device):
+        dtype = torch.get_autocast_dtype(device_type=device)
+        _test_autocast_nograd_caching_issue_158232_impl(self, device, dtype)
+
+    @onlyAccelerator
+    def test_autocast_inference_mode_interaction(self, device):
+        dtype = torch.get_autocast_dtype(device_type=device)
+        _test_autocast_inference_mode_interaction_impl(self, device, dtype)
+
+    @onlyAccelerator
+    def test_autocast_caching_still_works_with_gradients(self, device):
+        dtype = torch.get_autocast_dtype(device_type=device)
+        _test_autocast_caching_still_works_with_gradients_impl(self, device, dtype)
+
+    @onlyAccelerator
+    def test_autocast_mixed_grad_contexts(self, device):
+        dtype = torch.get_autocast_dtype(device_type=device)
+        _test_autocast_mixed_grad_contexts_impl(self, device, dtype)
+
+
+instantiate_device_type_tests(TestAutocastDevice, globals())
+instantiate_device_type_tests(TestTorchAutocastDevice, globals())
 
 if __name__ == "__main__":
     run_tests()
