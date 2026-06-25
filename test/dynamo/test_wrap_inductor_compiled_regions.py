@@ -285,6 +285,34 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
 
         self.assertIn("Unexpected type", str(cm.exception))
 
+    def test_wrap_with_forward_ad_dual_input(self):
+        if not torch._dynamo.is_inductor_supported():
+            raise unittest.SkipTest("requires inductor")
+
+        def fn(x):
+            return (x**2).sum()
+
+        compiled_fn = torch.compile(
+            fn,
+            backend="inductor",
+            options={"wrap_inductor_compiled_regions": True},
+            fullgraph=True,
+        )
+
+        x = torch.tensor([0.1, 0.2, 0.3])
+        v = torch.ones(3)
+        self.assertEqual(compiled_fn(x), fn(x))
+
+        counters.clear()
+        with torch.autograd.forward_ad.dual_level():
+            dual_input = torch.autograd.forward_ad.make_dual(x, v)
+            out = compiled_fn(dual_input)
+            tangent = torch.autograd.forward_ad.unpack_dual(out).tangent
+
+        self.assertIsNotNone(tangent)
+        self.assertEqual(tangent, torch.tensor(1.2))
+        self.assertEqual(counters["inductor"]["forward_ad_fallback"], 1)
+
     @requires_cuda_and_triton
     def test_wrap_per_compilation(self):
         """Test that wrap option is per-compilation, not global"""

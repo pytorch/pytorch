@@ -1571,6 +1571,10 @@ class FxGraphHashDetails:
         )
         # TODO: change to more holistic config rather than bundled_autograd_cache
         self.precompile_enabled = torch._functorch.config.bundled_autograd_cache
+        # Some runtime wrappers/fallbacks need the original FX graph after the
+        # compiled artifact has been serialized. Include that requirement in
+        # the key so entries saved without it are not reused for those paths.
+        self.runtime_original_gm = True
         self.post_grad_custom_post_pass = self._get_custom_pass_detail(
             config.post_grad_custom_post_pass
         )
@@ -2229,10 +2233,9 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
             )
         except Exception:
             pass
-        disk_compiled_graph = copy(compiled_graph)
-        disk_compiled_graph.prepare_for_serialization()
-
         try:
+            disk_compiled_graph = copy(compiled_graph)
+            disk_compiled_graph.prepare_for_serialization()
             content = pickle.dumps(disk_compiled_graph)
         except Exception:
             log.warning(

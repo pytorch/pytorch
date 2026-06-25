@@ -2,11 +2,11 @@
 
 """Tests that CompiledFxGraph serializes _original_gm via GraphPickler.
 
-_original_gm is a deepcopy of the pre-compiled FX graph, stored when
-wrap_inductor_compiled_regions is enabled. It is used for FakeTensor
-shape inference (inductor_compiled_code_fake). Regular pickle cannot
-serialize GraphModules containing higher-order ops with lifted buffers
-(e.g. flex_attention with BlockMask mask_mod_other_buffers), because
+_original_gm is a metadata-stripped copy of the pre-compiled FX graph.
+It is used for FakeTensor shape inference (inductor_compiled_code_fake)
+and for forward AD fallback execution. Regular pickle cannot serialize
+GraphModules containing higher-order ops with lifted buffers (e.g.
+flex_attention with BlockMask mask_mod_other_buffers), because
 deserialization retraces via KeepModules().trace() which calls
 validate_subgraph_args_types on Proxy-typed arguments.
 
