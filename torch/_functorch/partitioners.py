@@ -3258,7 +3258,9 @@ def choose_saved_values_set(
         recomputable_banned_nodes, key=_size_of, reverse=True
     )
     if len(all_recomputable_banned_nodes) == 0:
-        return node_info.inputs + must_save_nodes
+        # Nothing left for the knapsack to trade off, so this is the same cut the
+        # knapsack would return with an empty dont_ban.
+        return aggressive_recomputation_saved_values
     memories_banned_nodes = [
         get_normalized_size(_size_of(i)) for i in all_recomputable_banned_nodes
     ]
