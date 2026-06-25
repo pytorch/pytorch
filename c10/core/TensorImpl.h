@@ -1894,9 +1894,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         "tried to directly modify sizes for customized tensor");
     sizes_and_strides_.set_sizes(new_size);
 
-    refresh_numel();
-    empty_tensor_restride(
-        MemoryFormat::Contiguous); // calls refresh_contiguous()
+    if (C10_UNLIKELY(has_symbolic_sizes_strides_)) {
+      _set_sizes_contiguous_symbolic();
+      return;
+    }
+    _set_sizes_contiguous_nonsymbolic(new_size.size());
   }
 
   C10_ALWAYS_INLINE const impl::SizesAndStrides& sizes_and_strides() {
@@ -2418,19 +2420,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         // dim_ is a virtual call, don't repeat it
         const auto dim_ = dim();
         sizes_and_strides_.resize(dim_);
-        if (dim_ > 0) {
-          bool overflowed = false;
-          const auto last_idx = dim_ - 1;
-          sizes_and_strides_.stride_at_unchecked(last_idx) = 1;
-          for (auto i = last_idx - 1; i >= 0; --i) {
-            overflowed |= c10::mul_overflows(
-                sizes_and_strides_.stride_at_unchecked(i + 1),
-                std::max<int64_t>(
-                    sizes_and_strides_.size_at_unchecked(i + 1), 1),
-                std::addressof(sizes_and_strides_.stride_at_unchecked(i)));
-          }
-          TORCH_CHECK(!overflowed, "Stride calculation overflowed");
-        }
+        _fill_contiguous_strides(static_cast<size_t>(dim_));
         break;
       }
       case MemoryFormat::ChannelsLast: {
@@ -2684,6 +2674,43 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     is_non_overlapping_and_dense_ = b;
   }
 
+  C10_ALWAYS_INLINE void _set_sizes_contiguous_symbolic() {
+    refresh_numel();
+    empty_tensor_restride(MemoryFormat::Contiguous);
+  }
+
+  C10_ALWAYS_INLINE void _set_sizes_contiguous_nonsymbolic(size_t dim) {
+    numel_ = compute_numel();
+    _fill_contiguous_strides(dim);
+    _update_contiguity_flags_for_contiguous(dim);
+  }
+
+  C10_ALWAYS_INLINE void _fill_contiguous_strides(size_t dim) {
+    if (dim == 0) {
+      return;
+    }
+
+    bool overflowed = false;
+    auto* const strides = sizes_and_strides_.strides_data();
+    const auto* const sizes = sizes_and_strides_.sizes_data();
+    const auto last_idx = dim - 1;
+    strides[last_idx] = 1;
+    for (size_t i = last_idx; i > 0; --i) {
+      overflowed |= c10::mul_overflows(
+          strides[i], std::max<int64_t>(sizes[i], 1), &strides[i - 1]);
+    }
+    TORCH_CHECK(!overflowed, "Stride calculation overflowed");
+  }
+
+  // Fast path: strides were just written contiguous, so is_contiguous_ and
+  // is_non_overlapping_and_dense_ are true by construction and we skip the
+  // compute_*() calls that _refresh_contiguous() would otherwise make.
+  C10_ALWAYS_INLINE void _update_contiguity_flags_for_contiguous(size_t dim) {
+    _set_is_contiguous(true);
+    _set_is_non_overlapping_and_dense(true);
+    _update_channels_last_flags(static_cast<int64_t>(dim));
+  }
+
   // These are little wrappers over the real compute_ functions that
   // can make use of other contiguity fields to short circuit.
 
@@ -2715,32 +2742,30 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return is_contiguous_ || compute_non_overlapping_and_dense();
   }
 
-  void _refresh_contiguous() {
+  // Sets the four channels-last suggestion/contiguity flags from dim. Shared
+  // by _refresh_contiguous() and the contiguous fast path so the per-dim cases
+  // cannot drift. NB: within case 5 the order matters -- each compute_*_dim5()
+  // reads a flag set on the line(s) above it.
+  C10_ALWAYS_INLINE void _update_channels_last_flags(int64_t dim) {
     // Note:
     // Dim 0, 1, 2 will never be a channels last 2d/3d format
     // Dim 3+ is possibly be a channels last 2d format (Dim 4 only at this
     // point) Dim 4+ is possibly be a channels last 3d format (Dim 5 only at
     // this point)
-    switch (dim()) {
+    switch (dim) {
       case 4: {
-        _set_is_contiguous(compute_contiguous());
         _set_is_channels_last_contiguous(compute_channels_last_contiguous_2d());
         _set_is_channels_last_3d_contiguous(false);
         _set_is_channels_last(compute_strides_like_channels_last_2d());
         _set_is_channels_last_3d(false);
-        _set_is_non_overlapping_and_dense(
-            compute_is_non_overlapping_and_dense_dim4());
         break;
       }
       case 5: {
-        _set_is_contiguous(compute_contiguous());
         _set_is_channels_last_contiguous(compute_channels_last_contiguous_2d());
         _set_is_channels_last_3d_contiguous(
             compute_channels_last_contiguous_3d_dim5());
         _set_is_channels_last(compute_channels_last_2d_dim5());
         _set_is_channels_last_3d(compute_channels_last_3d_dim5());
-        _set_is_non_overlapping_and_dense(
-            compute_is_non_overlapping_and_dense_dim5());
         break;
       }
       default:
@@ -2749,11 +2774,30 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         // mean the tensor is strided like channels_last: for strides on channel
         // dimension could suggest desired memory_layout, but it doesn't affect
         // memory storage
-        _set_is_contiguous(compute_contiguous());
         _set_is_channels_last_contiguous(false);
         _set_is_channels_last_3d_contiguous(false);
         _set_is_channels_last(false);
         _set_is_channels_last_3d(false);
+        break;
+    }
+  }
+
+  void _refresh_contiguous() {
+    const auto dim_ = dim();
+    _set_is_contiguous(compute_contiguous());
+    _update_channels_last_flags(dim_);
+    // compute_is_non_overlapping_and_dense_dim{4,5}() read is_contiguous_ and
+    // the channels-last flags set above, so this must run last.
+    switch (dim_) {
+      case 4:
+        _set_is_non_overlapping_and_dense(
+            compute_is_non_overlapping_and_dense_dim4());
+        break;
+      case 5:
+        _set_is_non_overlapping_and_dense(
+            compute_is_non_overlapping_and_dense_dim5());
+        break;
+      default:
         _set_is_non_overlapping_and_dense(
             compute_is_non_overlapping_and_dense_anydim());
         break;
