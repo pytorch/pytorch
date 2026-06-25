@@ -10787,6 +10787,26 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(y1, y1_expect.tolist())
         self.assertEqual(y2, y1_expect.imag.tolist())
 
+    def test_dtype_info_compare_with_non_dtype_info(self):
+        # Comparing a finfo/iinfo against a non-finfo/iinfo (including None) has
+        # to be safe and well defined: it is never equal to such an object and
+        # != is its negation. Regression test for THPDTypeInfo_compare, which
+        # reinterpret_cast `other` to THPDTypeInfo* and read other->type without
+        # checking its type first, reading off the end of a foreign object
+        # (e.g. torch.finfo(torch.float32) == "x").
+        for info in (torch.finfo(torch.float32), torch.iinfo(torch.int32)):
+            for other in (None, 42, "x", 3.14, object(), [info]):
+                self.assertFalse(info == other)
+                self.assertTrue(info != other)
+            # An info object still compares equal to itself.
+            self.assertTrue(info == info)
+            self.assertFalse(info != info)
+        # finfo/iinfo of different dtypes are not equal, including across kinds.
+        self.assertFalse(torch.finfo(torch.float32) == torch.finfo(torch.float64))
+        self.assertTrue(torch.finfo(torch.float32) != torch.finfo(torch.float64))
+        self.assertFalse(torch.finfo(torch.float32) == torch.iinfo(torch.int32))
+        self.assertTrue(torch.finfo(torch.float32) != torch.iinfo(torch.int32))
+
     @unittest.skipIf(torch.backends.cuda.is_built(), "Skipped for cuda-enabled build")
     def test_no_cuda_monkeypatch(self):
         # Note that this is not in test_cuda.py as this whole file is skipped when cuda
