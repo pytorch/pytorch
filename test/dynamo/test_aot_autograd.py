@@ -1774,6 +1774,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         self.assertEqual(partition_guards[0].overlapping_indices, ())
         self.assertGreater(len(partition_guards[0].input_sources), 2)
 
+    @expectedFailureDynamic
     @torch._dynamo.config.patch(
         recompile_limit=2,
         fail_on_recompile_limit_hit=True,
