@@ -13,9 +13,8 @@ from torch._higher_order_ops.flat_apply import (
     to_graphable,
 )
 from torch._higher_order_ops.strict_mode import strict_mode
-from torch._higher_order_ops.utils import autograd_not_implemented
+from torch._higher_order_ops.utils import autograd_not_implemented, register_fake
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     PreDispatchTorchFunctionMode,
     ProxyTorchDispatchMode,
@@ -46,10 +45,9 @@ def export_tracepoint_dispatch_mode(mode, *args, **kwargs):
     return track_tensor_tree(args, proxy, constant=None, tracer=mode.tracer)
 
 
-@_export_tracepoint.py_impl(FakeTensorMode)
-def export_tracepoint_fake_tensor_mode(mode, *args, **kwargs):
-    with mode:
-        return args
+@register_fake(_export_tracepoint, skip_cache=True)
+def export_tracepoint_fake_tensor_mode(*args, **kwargs):
+    return args
 
 
 @_export_tracepoint.py_functionalize_impl

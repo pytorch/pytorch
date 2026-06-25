@@ -274,14 +274,6 @@ static PyObject* THPEngine_run_backward(
     PyObject* grad = PyTuple_GET_ITEM(grad_tensors, i);
     if (THPVariable_Check(grad)) {
       const Variable& grad_var = THPVariable_Unpack(grad);
-      if (grad_var.has_names()) {
-        TORCH_WARN(
-            "Autograd was passed a named grad tensor with dims ",
-            grad_var.names(),
-            ". Autograd does not yet support named tensor semantics, so all names ",
-            "will be ignored. In practice all computed gradients will still be correct "
-            "according to regular tensor semantics.");
-      }
       grads.push_back(grad_var);
     } else {
       TORCH_CHECK(
@@ -335,7 +327,7 @@ static PyObject* THPEngine_run_backward(
             "One of the differentiated Tensors does not require grad");
         if (!grad_fn) {
           // NOTE [ Autograd Unreachable Input ]
-          // Since input has no grad_accumulator, its guaranteed to be
+          // Since input has no grad_accumulator, it's guaranteed to be
           // unreachable. We initialize an edge pointing to a non-nullptr Node
           // so nodes in the graph (e.g., mul when an operand is scalar) that
           // have edges pointing to nullptr don't get erroneously assigned

@@ -463,10 +463,13 @@ coverage_ignore_functions = [
     "recv",
     "reduce",
     "reduce_scatter",
+    # deprecated aliases of all_gather_single / reduce_scatter_single
+    "all_gather_into_tensor",
     "reduce_scatter_tensor",
     "scatter",
     "scatter_object_list",
     "send",
+    "set_timeout",
     "supports_complex",
     # torch.distributed.elastic.events.handlers
     "get_logging_handler",
@@ -1854,6 +1857,8 @@ coverage_ignore_classes = [
     "linalg_lu_factor_ex_out",
     "linalg_lu_factor_out",
     "linalg_lu_out",
+    "linalg_polar",
+    "linalg_polar_out",
     "linalg_qr",
     "linalg_qr_out",
     "linalg_slogdet",
@@ -1896,6 +1901,8 @@ coverage_ignore_classes = [
     # torch.torch_version
     "TorchVersion",
     # torch.types
+    "SymBool",
+    "SymFloat",
     "SymInt",
     # torch.utils.benchmark.examples.compare
     "FauxTorch",

@@ -160,7 +160,8 @@ def detect_interconnect(group_size: int) -> InterconnectType:
 
 
 def get_collective_type_from_kernel_name(kernel_name: str) -> NCCL_COLL:
-    assert kernel_name is not None
+    if kernel_name is None:
+        raise AssertionError("kernel_name must not be None")
     if "all_reduce" in kernel_name:
         return NCCL_COLL.ALL_REDUCE
     elif "all_gather" in kernel_name:
@@ -180,7 +181,8 @@ def get_collective_type(node: ir.IRNode) -> NCCL_COLL:
         raise ValueError(f"node is not a collective kernel: {node}")
 
     name = node.python_kernel_name
-    assert name is not None
+    if name is None:
+        raise AssertionError("node.python_kernel_name must not be None")
     return get_collective_type_from_kernel_name(name)
 
 
@@ -455,7 +457,8 @@ def _log2i(n: int) -> int:
 
 def estimate_nccl_collective_runtime_nccl_estimator(snode) -> float | None:  # type: ignore[no-untyped-def]
     kernel = snode.node
-    assert kernel is not None
+    if kernel is None:
+        raise AssertionError("snode.node must not be None")
     py_kernel_name = getattr(kernel, "python_kernel_name", "")
     pg_name = kernel.constant_args[-1]  # type: ignore[attr-defined]
     from torch.distributed.distributed_c10d import _resolve_process_group
@@ -696,9 +699,10 @@ def compute_min_saturation_bytes(
     protocol, channel selection) rather than the analytical model.
     """
     _SUPPORTED = (NCCL_COLL.ALL_GATHER, NCCL_COLL.REDUCE_SCATTER, NCCL_COLL.ALL_REDUCE)
-    assert coll in _SUPPORTED, (
-        f"Unsupported collective {coll}, expected one of {_SUPPORTED}"
-    )
+    if coll not in _SUPPORTED:
+        raise AssertionError(
+            f"Unsupported collective {coll}, expected one of {_SUPPORTED}"
+        )
 
     if group_size <= 1:
         return 0
@@ -823,21 +827,26 @@ def estimate_nccl_collective_runtime_from_fx_node(
     else:
         tensor_storage_size_bytes = override_size
 
-    assert not isinstance(fx_node.target, str)
+    if isinstance(fx_node.target, str):
+        raise AssertionError(f"fx_node.target must not be a str, got {fx_node.target}")
     opt_args_kwargs = normalize_function(
         fx_node.target,
         args=fx_node.args,
         kwargs=fx_node.kwargs,
         normalize_to_only_use_kwargs=True,
     )
-    assert opt_args_kwargs is not None
+    if opt_args_kwargs is None:
+        raise AssertionError("normalize_function returned None")
     args, kwargs = opt_args_kwargs
 
     from torch._inductor.fx_passes.bucketing import _resolve_group_name
 
     group_name = _resolve_group_name(kwargs["group_name"])
     group_size = _get_group_size_by_name(group_name)
-    assert isinstance(fx_node.target, torch._ops.OpOverload)
+    if not isinstance(fx_node.target, torch._ops.OpOverload):
+        raise AssertionError(
+            f"expected fx_node.target to be an OpOverload, got {type(fx_node.target)}"
+        )
     coll = get_collective_type_from_kernel_name(fx_node.target.name())
 
     def _nccl_estimate() -> float | None:
@@ -877,7 +886,10 @@ def estimate_nccl_collective_runtime_from_fx_node(
         real_args, real_kwargs = pytree.tree_unflatten(flat_args, flat_args_pytree_spec)
 
         fn = fx_node.target
-        assert isinstance(fn, torch._ops.OpOverload)
+        if not isinstance(fn, torch._ops.OpOverload):
+            raise AssertionError(
+                f"expected fx_node.target to be an OpOverload, got {type(fn)}"
+            )
         with torch.distributed._time_estimator(
             group=pg, device=device
         ) as time_estimator:

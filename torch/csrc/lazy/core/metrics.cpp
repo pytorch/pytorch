@@ -324,7 +324,7 @@ std::string MetricFnValue(double value) {
   std::stringstream ss;
   ss.precision(2);
   ss << std::fixed << value;
-  return ss.str();
+  return std::move(ss).str();
 }
 
 std::string MetricFnBytes(double value) {
@@ -337,7 +337,7 @@ std::string MetricFnBytes(double value) {
   std::stringstream ss;
   ss.precision(2);
   ss << std::fixed << value << kSizeSuffixes[sfix];
-  return ss.str();
+  return std::move(ss).str();
 }
 
 std::string MetricFnTime(double value) {
@@ -385,7 +385,7 @@ std::string CreateMetricReport() {
 
   // Append the backend metrics report
   ss << getBackend()->CreateMetricReport();
-  return ss.str();
+  return std::move(ss).str();
 }
 
 std::string CreateMetricReport(
@@ -418,7 +418,7 @@ std::string CreateMetricReport(
       EmitCounterInfo(name, data, &ss);
     }
   });
-  return ss.str();
+  return std::move(ss).str();
 }
 
 std::vector<std::string> GetMetricNames() {

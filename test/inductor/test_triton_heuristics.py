@@ -7,7 +7,7 @@ import tempfile
 import types
 import unittest
 from unittest import skipUnless
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, PropertyMock
 
 import torch
 from torch._dynamo.testing import rand_strided
@@ -49,7 +49,9 @@ from torch._inductor.runtime.hints import (
 )
 from torch._inductor.runtime.triton_helpers import math as tl_math
 from torch._inductor.runtime.triton_heuristics import (
+    _check_max_grid_x,
     _enforce_reduction_config_block_minimums,
+    _num_warps,
     _persistent_reduction_configs,
     _reduction_configs,
     autotune_hints_to_configs,
@@ -324,6 +326,8 @@ class TestTritonHeuristics(TestCase):
             num_stages=None,
             num_elements_per_warp=None,
             min_elem_per_thread=None,
+            *,
+            warp_size=32,
         ):
             seen_num_elements_per_warp.add(num_elements_per_warp)
             return None
@@ -459,6 +463,33 @@ class TestTritonHeuristics(TestCase):
 _PLUGIN_FACTORY_PATH = (
     "torch._inductor.runtime.triton_heuristics.get_caching_autotuner_plugins"
 )
+
+
+class TestCachingAutotunerPrecompileDriverSetup(TestCase):
+    @skipIfRocm
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    def test_warm_cache_only_precompile_skips_driver_setup_in_context(self):
+        from torch._inductor.runtime import triton_helpers
+
+        args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
+        num_configs = len(args["configs"])
+        self.assertGreaterEqual(num_configs, 2)
+        autotuner = CachingAutotuner(**args)
+
+        with (
+            triton_helpers.skip_gpu_driver_setup(),
+            patch.object(
+                type(triton.runtime.driver),
+                "active",
+                new_callable=PropertyMock,
+                side_effect=RuntimeError("driver.active should not be read"),
+            ) as mock_driver_active,
+        ):
+            autotuner.precompile(warm_cache_only=True)
+
+        # Covers every synchronous _precompile_config() iteration.
+        mock_driver_active.assert_not_called()
+        self.assertEqual(len(autotuner.compile_results), num_configs)
 
 
 # Triton's HIP MLIR pipeline raises AttributeError("'NoneType' object has no
@@ -1112,7 +1143,7 @@ class TestFastLauncherDeviceSupport(TestCase):
         return CachingAutotuner(
             fn=triton_,
             triton_meta=triton_meta,
-            configs=[triton_config({"x": 1}, 1)],
+            configs=[triton_config({"x": 1}, 1, warp_size=device.warp_size_or_default)],
             save_cache_hook=False,
             mutated_arg_names=[],
             reset_to_zero_arg_names=[],
@@ -1414,6 +1445,79 @@ class TestCheckLauncherCallArgs(TestCase):
         autotuner = self._make_autotuner()
         # Should not raise, even with many args.
         autotuner._check_launcher_call_args(raw_launcher, (1, 2, 3, 4, 5))
+
+
+class TestWarpSizeUnification(TestCase):
+    """Tests for the unified warp_size threading through config helpers."""
+
+    def test_warp_size_or_default(self):
+        none_props = DeviceProperties(
+            type="cuda", index=0, multi_processor_count=80, cc=80, warp_size=None
+        )
+        with self.assertRaisesRegex(
+            RuntimeError, "cuda device properties must report warp_size"
+        ):
+            none_props.warp_size_or_default
+
+        cpu_props = DeviceProperties(
+            type="cpu", index=0, multi_processor_count=80, cc=80, warp_size=None
+        )
+        self.assertEqual(cpu_props.warp_size_or_default, 32)
+
+        w32 = DeviceProperties(
+            type="cuda", index=0, multi_processor_count=80, cc=80, warp_size=32
+        )
+        self.assertEqual(w32.warp_size_or_default, 32)
+
+        w64 = DeviceProperties(
+            type="hip", index=0, multi_processor_count=80, cc=80, warp_size=64
+        )
+        self.assertEqual(w64.warp_size_or_default, 64)
+
+    def test_num_warps_halves_on_wave64(self):
+        # wave64 (AMD CDNA/gfx9) halves the range so total threads match wave32.
+        self.assertEqual(_num_warps(8, max_num_warps=8, warp_size=64), 4)
+
+    def test_num_warps_does_not_halve_on_wave32(self):
+        # wave32 (NVIDIA and AMD RDNA) must not halve.
+        self.assertEqual(_num_warps(8, max_num_warps=8, warp_size=32), 8)
+        # Default warp_size is 32; confirm the default path matches wave32.
+        self.assertEqual(_num_warps(8, max_num_warps=8), 8)
+
+    def test_check_max_grid_x_respects_warp_size_hip(self):
+        # _check_max_grid_x only uses warp_size on the HIP path, where the
+        # bound is on total threads (num_blocks * num_warps * warp_size).
+        # Force the HIP branch so the assertion exercises that path even on
+        # a non-HIP build.
+        size_hints = {"x": 2**32}
+        with patch.object(torch.version, "hip", "6.0.0"):
+            x32, _ = _check_max_grid_x(size_hints, x=1, num_warps=8, warp_size=32)
+            x64, _ = _check_max_grid_x(size_hints, x=1, num_warps=8, warp_size=64)
+        # Doubling warp_size halves the per-block thread budget, so x must
+        # double to keep total threads under 2**31 - 1.
+        self.assertEqual(x64, 2 * x32)
+        self.assertLessEqual(x32, TRITON_MAX_BLOCK["X"])
+        self.assertLessEqual(x64, TRITON_MAX_BLOCK["X"])
+
+    def test_check_max_grid_x_ignores_warp_size_on_nvidia(self):
+        # NVIDIA bounds num_blocks directly, so warp_size must not change x.
+        size_hints = {"x": 2**32}
+        with patch.object(torch.version, "hip", None):
+            x32, _ = _check_max_grid_x(size_hints, x=1, num_warps=8, warp_size=32)
+            x64, _ = _check_max_grid_x(size_hints, x=1, num_warps=8, warp_size=64)
+        self.assertEqual(x32, x64)
+
+    def test_triton_config_uses_warp_size_for_min_elem(self):
+        # min_elem_per_thread * warp_size * num_warps drives the floor for
+        # block_size; doubling warp_size should at least double the XBLOCK.
+        size_hints = {"x": 4096}
+        cfg32 = triton_config(
+            size_hints, 128, num_warps=1, min_elem_per_thread=4, warp_size=32
+        )
+        cfg64 = triton_config(
+            size_hints, 128, num_warps=1, min_elem_per_thread=4, warp_size=64
+        )
+        self.assertEqual(cfg64.kwargs["XBLOCK"], 2 * cfg32.kwargs["XBLOCK"])
 
 
 if __name__ == "__main__":

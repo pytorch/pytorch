@@ -31,7 +31,14 @@ from torch.utils._dtype_abbrs import dtype_abbrs
 from . import _pytree as fx_pytree
 from ._compatibility import compatibility
 from .immutable_collections import immutable_dict
-from .node import _get_qualified_name, _type_repr, Argument, Node, Target
+from .node import (
+    _device_annotation,
+    _get_qualified_name,
+    _type_repr,
+    Argument,
+    Node,
+    Target,
+)
 from .tensor_type import TensorType
 
 
@@ -616,6 +623,12 @@ class CodeGen:
                 cls = arg.__class__
                 clsname = add_global(cls.__name__, cls)
                 return f"{clsname}.{arg.name}"
+            elif isinstance(arg, complex):
+                if arg.real == 0.0 or arg.imag == 0.0:
+                    # complex.__repr__ is not a safe source representation for
+                    # signed zero components, e.g. eval("(-0-1j)") loses the sign.
+                    return f"complex({_get_repr(arg.real)}, {_get_repr(arg.imag)})"
+                return blue(repr(arg))
             elif isinstance(arg, torch.Tensor):
                 size = list(arg.size())
                 dtype = str(arg.dtype).split(".")[-1]
@@ -722,6 +735,10 @@ class CodeGen:
                 if stack_trace := node.stack_trace:
                     if parsed_stack_trace := _parse_stack_trace(stack_trace):
                         stack_trace_str = parsed_stack_trace.get_summary_str()
+                        if node.meta.get("autograd_backward", False):
+                            stack_trace_str = (
+                                f"Backward of forward node: {stack_trace_str}"
+                            )
 
                 maybe_recompute_info = ""
                 if hasattr(node, "meta") and node.meta:
@@ -776,7 +793,7 @@ class CodeGen:
 
                 def _tensor_annotation(t: torch.Tensor) -> str:
                     stride = stringify_shape(t.stride()) if include_stride else ""
-                    device = f"{t.device}" if include_device else ""
+                    device = _device_annotation(t.device) if include_device else ""
                     return (
                         f"{red(dtype_abbrs[t.dtype])}"
                         f"{blue(stringify_shape(t.shape))}"
@@ -910,9 +927,68 @@ class CodeGen:
                         f"{repr(node)}{maybe_type_annotation} = {_format_target(_get_repr(node.args[0]), node.args[1])}"
                     )
                     return
-                body.append(
-                    f"{repr(node)}{maybe_type_annotation} = {global_name}({_format_args(node.args, node.kwargs)})"
-                )
+                meta = node.meta
+                boxed_arg_indices = getattr(node.target, "_boxed_arg_indices", ())
+                boxed_arg_indices = meta.get("boxed_arg_indices", boxed_arg_indices)
+                boxed_arg_names: dict[int, str] = {}
+                for i in boxed_arg_indices:
+                    name = f"{node.name}_boxed_arg_{i}"
+                    boxed_arg_names[i] = namespace.create_name(name, None)
+
+                if boxed_arg_names:
+                    # Generate the boxed arguments on separate lines so the
+                    # original node locals can be cleared before the call.
+                    boxed_assignments = []
+                    for i, name in boxed_arg_names.items():
+                        boxed_assignments.append(f"{name} = {_get_repr(node.args[i])}")
+                    body.append("\n".join(boxed_assignments))
+
+                    # If this call is the last use of nodes inside the boxed
+                    # args, clear those node locals after creating the boxed
+                    # args and before emitting the call.
+                    boxed_nodes: set[Node] = set()
+                    unboxed_nodes: set[Node] = set()
+                    boxed_args = tuple(node.args[i] for i in boxed_arg_names)
+                    unboxed_args = []
+                    for i, arg in enumerate(node.args):
+                        if i not in boxed_arg_names:
+                            unboxed_args.append(arg)
+                    map_arg(boxed_args, boxed_nodes.add)
+                    map_arg((unboxed_args, node.kwargs), unboxed_nodes.add)
+
+                    last_uses = user_to_last_uses.get(node, [])
+                    only_in_boxes = boxed_nodes - unboxed_nodes
+                    nodes_to_delete = [n for n in last_uses if n in only_in_boxes]
+                    if nodes_to_delete:
+                        last_uses = [n for n in last_uses if n not in nodes_to_delete]
+                        user_to_last_uses[node] = last_uses
+                        to_delete_str = " = ".join(
+                            [repr(n) for n in nodes_to_delete] + ["None"]
+                        )
+                        body.append(f";  {dim(to_delete_str)}")
+                    body.append("\n")
+
+                    # Rewrite the generated call to use the boxed arg locals
+                    # instead of rebuilding the boxed args inline.
+                    kwargs = node.kwargs.items()
+                    call_args = [_get_repr(arg) for arg in node.args]
+                    for i, name in boxed_arg_names.items():
+                        call_args[i] = name
+                    call_args.extend(f"{k} = {_get_repr(v)}" for k, v in kwargs)
+                    formatted_args_str = ", ".join(call_args)
+                else:
+                    formatted_args_str = _format_args(node.args, node.kwargs)
+
+                lhs = f"{repr(node)}{maybe_type_annotation}"
+                rhs = f"{global_name}({formatted_args_str})"
+                body.append(f"{lhs} = {rhs}")
+
+                if boxed_arg_names:
+                    # Clear the generated boxed arg locals after the call. The
+                    # call is their only generated use, and these locals are not
+                    # FX nodes tracked by normal last-use cleanup.
+                    boxed_names_str = " = ".join([*boxed_arg_names.values(), "None"])
+                    body.append(f";  {dim(boxed_names_str)}")
                 if node.meta.get("is_wrapped", False):
                     wrapped_fns.setdefault(global_name)
                 return
@@ -1113,7 +1189,8 @@ class _PyTreeCodeGen(CodeGen):
         if expanded_def:
             return "\n    " + "\n    ".join(has_annotation)
         else:
-            return "\n    " + "".join(x + "; " for x in has_annotation) + "\n"
+            # Use join() to avoid trailing whitespace (breaks expecttest snapshots).
+            return "\n    " + "; ".join(has_annotation) + ";\n"
 
     def gen_var_bindings(
         self, fn_args: list[str], free_vars: list[str], expanded_def: bool
@@ -1547,12 +1624,14 @@ class Graph:
         if op in ("call_function", "call_method", "call_module") and (args or kwargs):
             for val in pytree.tree_iter((args, kwargs)):
                 if isinstance(val, (torch.SymInt, torch.SymFloat, torch.SymBool)):
-                    raise RuntimeError(
+                    warnings.warn(
                         f"Raw {type(val).__name__} value ({val}) passed as argument to "
                         f"Graph.create_node(op='{op}', target={target}). "
                         f"Use create_*_node() helpers for tensor metadata queries "
-                        f"or materialize_symints() for general symbolic expressions."
+                        f"or materialize_symints() for general symbolic expressions.",
+                        stacklevel=2,
                     )
+                    break
 
         candidate = name if name is not None else self._target_to_str(target)
         name = self._graph_namespace.create_name(candidate, None)
@@ -2054,9 +2133,18 @@ class Graph:
         (orphaned). Callers typically scope this in
         ``with graph.inserting_before(graph.output_node()):`` so the new
         nodes land in the body.
+
+        Performance: each call performs an O(graph_size) producer-discovery
+        scan and builds a per-call ``expr_to_proxy`` hash-cons cache. Prefer
+        batching every SymInt you need to lift into a single call (or as few
+        calls as possible) over calling it once per value -- this amortises
+        the graph scan and lets symints with shared sub-expressions get
+        hash-consed into a single subgraph.
         """
         # Local imports keep sympy off the ``import torch`` path; the helper
         # is only invoked from passes that already depend on symbolic shapes.
+        import operator
+
         import sympy
 
         from torch.utils._sympy.interp import _run_sympy_handler, sympy_interp
@@ -2064,16 +2152,25 @@ class Graph:
 
         # TODO: consider caching `expr_to_proxy` / `sym_size_sources` across
         # calls.
-        # Probe the graph's meta-key convention once -- in practice a graph
-        # uses either "val" (export / proxy_tensor) or "example_value"
-        # (dynamo) uniformly, not a mix.
-        meta_key = "val"
-        for node in self.nodes:
-            if "example_value" in node.meta:
-                meta_key = "example_value"
-                break
-            if "val" in node.meta:
-                break
+        # Read tensor/SymInt metadata with fallback. Edge graphs can have
+        # a mixed convention: lifted parameters carry both ``"val"`` and
+        # ``"example_value"`` (dynamo-style) while real user inputs carry
+        # only ``"val"`` (export-style). Probing the graph for a single
+        # key would lock onto one convention and silently miss symbols on
+        # the others; reading per-node with fallback handles both.
+        def _node_val(n: Node) -> Any:
+            val = n.meta.get("val")
+            if val is not None:
+                return val
+            return n.meta.get("example_value")
+
+        def _set_node_val(n: Node, val: Any) -> None:
+            """Set ``n.meta['val']`` and, if any of ``n``'s input nodes carry
+            ``"example_value"``, mirror it there too so the new node matches
+            the surrounding graph's meta-key convention."""
+            n.meta["val"] = val
+            if any(isinstance(a, Node) and "example_value" in a.meta for a in n.args):
+                n.meta["example_value"] = val
 
         # Build the symbol -> Proxy map once; shared across all inputs so common
         # sub-expressions across symints get hash-consed into single subgraphs.
@@ -2085,15 +2182,41 @@ class Graph:
         # Populates:
         #   - ``expr_to_proxy``: SymInt placeholders -> Proxy (direct).
         #   - ``sym_size_sources``: tensor placeholder shape symbol
-        #     -> (placeholder, dim) (lazy, used by Pass 2).
+        #     -> (placeholder, dim, divisor) (lazy, used by Pass 2).
+        #     divisor=1 when the placeholder dim IS the bare ``Symbol``;
+        #     divisor>1 when the dim is ``Symbol * c`` (the ``Dim("h")*N``
+        #     derived-shape pattern). Recovery emits
+        #     ``sym_size.int(ph, dim) // divisor``.
         #   - ``sym_to_binding``: unbacked symbol -> (producer node, keypath)
         #     from ``node.meta["unbacked_bindings"]`` (lazy, used by Pass 2).
-        sym_size_sources: dict[sympy.Symbol, tuple[Node, int]] = {}
+        sym_size_sources: dict[sympy.Symbol, tuple[Node, int, int]] = {}
         sym_to_binding: dict[sympy.Symbol, tuple[Node, tuple[object, ...]]] = {}
+
+        def _record_shape_source(expr: sympy.Expr, node: Node, dim: int) -> None:
+            """Register ``(node, dim)`` as a recoverable source for ``expr``.
+
+            - bare ``Symbol``: divisor = 1.
+            - ``Symbol * c`` (positive integer constant): divisor = c.
+              Recovery is ``sym_size.int(ph, dim) // c``.
+            - anything else: skipped (general inverse needs sympy.solve).
+            """
+            if isinstance(expr, sympy.Symbol):
+                sym_size_sources.setdefault(expr, (node, dim, 1))
+                return
+            if isinstance(expr, sympy.Mul) and len(expr.args) == 2:
+                a, b = expr.args
+                if isinstance(b, sympy.Symbol) and isinstance(a, sympy.Integer):
+                    a, b = b, a  # normalize to (Symbol, Integer) order
+                if (
+                    isinstance(a, sympy.Symbol)
+                    and isinstance(b, sympy.Integer)
+                    and int(b) > 0
+                ):
+                    sym_size_sources.setdefault(a, (node, dim, int(b)))
 
         for node in self.nodes:
             if node.op == "placeholder":
-                val = node.meta.get(meta_key)
+                val = _node_val(node)
                 if isinstance(val, py_sym_types):
                     expr = val.node.expr
                     if isinstance(expr, sympy.Symbol) and expr not in expr_to_proxy:
@@ -2101,12 +2224,7 @@ class Graph:
                 elif isinstance(val, torch.Tensor):
                     for dim, s in enumerate(val.shape):
                         if isinstance(s, torch.SymInt):
-                            expr = s.node.expr
-                            if (
-                                isinstance(expr, sympy.Symbol)
-                                and expr not in expr_to_proxy
-                            ):
-                                sym_size_sources.setdefault(expr, (node, dim))
+                            _record_shape_source(s.node.expr, node, dim)
             else:
                 bindings = node.meta.get("unbacked_bindings")
                 if bindings:
@@ -2122,7 +2240,7 @@ class Graph:
 
         def _arg_meta_val(a: Any) -> Any:
             if isinstance(a, torch.fx.Node):
-                return a.meta.get(meta_key)
+                return _node_val(a)
             return a
 
         def _sympy_interp_cached(expr: sympy.Expr) -> Any:
@@ -2150,7 +2268,7 @@ class Graph:
             try:
                 fake_args = tuple(_arg_meta_val(a) for a in node.args)
                 fake_kwargs = {k: _arg_meta_val(v) for k, v in node.kwargs.items()}
-                node.meta[meta_key] = target(*fake_args, **fake_kwargs)
+                _set_node_val(node, target(*fake_args, **fake_kwargs))
             except (TypeError, ValueError, AttributeError) as e:
                 log.debug(
                     "materialize_symints: skipping meta annotation for %s: %s",
@@ -2177,12 +2295,23 @@ class Graph:
             if sym in expr_to_proxy:
                 return
             if sym in sym_size_sources:
-                ph, dim = sym_size_sources[sym]
+                ph, dim, divisor = sym_size_sources[sym]
                 sym_node = self.call_function(torch.ops.aten.sym_size.int, (ph, dim))
-                tensor = ph.meta.get(meta_key)
+                tensor = _node_val(ph)
                 if isinstance(tensor, torch.Tensor):
-                    sym_node.meta[meta_key] = tensor.shape[dim]
-                expr_to_proxy[sym] = torch.fx.Proxy(sym_node, tracer=tracer)
+                    _set_node_val(sym_node, tensor.shape[dim])
+                if divisor != 1:
+                    # Placeholder dim was ``sym * divisor`` (e.g. from
+                    # ``Dim("h") * N``); recover the underlying symbol as
+                    # ``sym_size.int(ph, dim) // divisor``.
+                    div_node = self.call_function(
+                        operator.floordiv, (sym_node, divisor)
+                    )
+                    if isinstance(tensor, torch.Tensor):
+                        _set_node_val(div_node, tensor.shape[dim] // divisor)
+                    expr_to_proxy[sym] = torch.fx.Proxy(div_node, tracer=tracer)
+                else:
+                    expr_to_proxy[sym] = torch.fx.Proxy(sym_node, tracer=tracer)
                 return
             if sym in sym_to_binding:
                 if not free_unbacked_symbols(sym):
@@ -2235,7 +2364,7 @@ class Graph:
                 out.append(int(result))
                 continue
             out_node = result.node
-            out_node.meta[meta_key] = s
+            _set_node_val(out_node, s)
             out.append(out_node)
         return out
 
@@ -2356,7 +2485,7 @@ class Graph:
         # When generating Python code, we need to make sure to name things
         # appropriately. In particular:
         # - All names should be unique, to avoid weird shadowing bugs.
-        # - These names need to be consistent, e.g. a object should always be
+        # - These names need to be consistent, e.g. an object should always be
         #   referenced by the same name.
         #
         # To do this, we create a new namespace just for this source. All names

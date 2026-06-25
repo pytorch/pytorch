@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: pt2"]
 name: inductor-A100-perf-compare
 
 on:
@@ -48,7 +49,7 @@ jobs:
           { config: "inductor_torchbench_perf_compare", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
         ]}
       build-additional-packages: "vision audio fbgemm torchao"
-      use-arc: ${{ needs.get-default-label-prefix.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.10"
       compiler: gcc11
       cuda-version: "13.0"
@@ -69,7 +70,7 @@ jobs:
       monitor-log-interval: 15
       monitor-data-collect-interval: 4
       export-profiler-trace: "1"
-      use-arc: ${{ needs.get-default-label-prefix.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.10"
       compiler: gcc11
       cuda-version: "13.0"

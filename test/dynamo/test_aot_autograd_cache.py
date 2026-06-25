@@ -237,9 +237,13 @@ class CacheKeyEquivalenceMixin:
             captured_gt_key = captured_gt_debug_lines = None
             real_cache_key = autograd_cache.autograd_cache_key
 
-            def capturing_cache_key(mod, ei, config, compiler_config_extra=None):
+            def capturing_cache_key(
+                mod, ei, config, compiler_config_extra=None, act_input_paths=()
+            ):
                 nonlocal captured_gt_key, captured_gt_debug_lines
-                result = real_cache_key(mod, ei, config, compiler_config_extra)
+                result = real_cache_key(
+                    mod, ei, config, compiler_config_extra, act_input_paths
+                )
                 captured_gt_key, captured_gt_debug_lines = result
                 return result
 
@@ -504,6 +508,46 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch({"fx_graph_cache": True, "compile_threads": 1})
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
+    def test_act_input_paths_cache_hit(self):
+        import torch.distributed._functional_collectives as funcol
+        from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
+        def fn(x):
+            return x + 1
+
+        compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        wait_calls = []
+        orig_wait_tensor = funcol.wait_tensor
+
+        def counting_wait_tensor(t):
+            wait_calls.append(1)
+            return orig_wait_tensor(t)
+
+        with patch.object(funcol, "wait_tensor", counting_wait_tensor):
+            elem = torch.randn(4)
+            act = AsyncCollectiveTensor(elem)
+            self.assertFalse(act.completed)
+            self.assertEqual(compiled_fn(act), elem + 1)
+            self.assertTrue(act.completed)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+
+            wait_calls.clear()
+            self._clear_dynamo_and_codecache()
+
+            elem = torch.randn(4)
+            act = AsyncCollectiveTensor(elem)
+            self.assertFalse(act.completed)
+            self.assertEqual(compiled_fn(act), elem + 1)
+            self.assertTrue(act.completed)
+            self.assertGreaterEqual(len(wait_calls), 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
 
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
@@ -3294,6 +3338,96 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
             self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 0)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
 
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_region_activation_memory_budget_causes_cache_miss(self):
+        """Changing the budget set via torch.autograd.graph.region_activation_memory_budget
+        invalidates the AOTAutograd cache."""
+
+        def make_fn(budget):
+            def fn(x, y):
+                with torch.autograd.graph.region_activation_memory_budget(budget):
+                    return (torch.mm(x, y) + 1).relu()
+
+            return fn
+
+        with fresh_cache():
+            compiled_fn1 = torch.compile(make_fn(0.3), backend="inductor")
+            x1 = torch.randn(10, 10, requires_grad=True)
+            y1 = torch.randn(10, 10, requires_grad=True)
+            compiled_fn1(x1, y1).sum().backward()
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+
+            self._clear_dynamo_and_codecache()
+
+            compiled_fn2 = torch.compile(make_fn(0.8), backend="inductor")
+            x2 = torch.randn(10, 10, requires_grad=True)
+            y2 = torch.randn(10, 10, requires_grad=True)
+            compiled_fn2(x2, y2).sum().backward()
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+
+            self._clear_dynamo_and_codecache()
+
+            # Same budget as the first compile -> cache hit.
+            compiled_fn3 = torch.compile(make_fn(0.3), backend="inductor")
+            x3 = torch.randn(10, 10, requires_grad=True)
+            y3 = torch.randn(10, 10, requires_grad=True)
+            compiled_fn3(x3, y3).sum().backward()
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_region_activation_memory_budget_graph_break_cache(self):
+        """With graph breaks, changing one graph's budget causes a miss for
+        that graph but a hit for the unchanged graph."""
+
+        def make_fn(budget_a, budget_b):
+            def fn(x):
+                with torch.autograd.graph.region_activation_memory_budget(budget_a):
+                    x = (x + 1).relu()
+                torch._dynamo.graph_break()
+                with torch.autograd.graph.region_activation_memory_budget(budget_b):
+                    return (x * 2).relu()
+
+            return fn
+
+        with fresh_cache():
+            # First run: (0.3, 0.5) -> 2 misses (one per graph)
+            compiled = torch.compile(make_fn(0.3, 0.5), backend="inductor")
+            x = torch.randn(10, 10, requires_grad=True)
+            compiled(x).sum().backward()
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+
+            self._clear_dynamo_and_codecache()
+
+            # Change only graph B: (0.3, 0.8) -> 1 hit (A), 1 miss (B)
+            compiled = torch.compile(make_fn(0.3, 0.8), backend="inductor")
+            x = torch.randn(10, 10, requires_grad=True)
+            compiled(x).sum().backward()
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 3)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
+            self._clear_dynamo_and_codecache()
+
+            # Change only graph A: (0.7, 0.8) -> 1 miss (A), 1 hit (B)
+            compiled = torch.compile(make_fn(0.7, 0.8), backend="inductor")
+            x = torch.randn(10, 10, requires_grad=True)
+            compiled(x).sum().backward()
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 4)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 2)
+
 
 @functorch_config.patch({"bundled_autograd_cache": True})
 class AOTAutogradCacheBundledTests(AOTAutogradCacheTests):
@@ -3352,7 +3486,7 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         result = g(*args, **kwargs)
         return (result, fx_graph, example_inputs)
 
-    def gen_cache_key(self, f, config, inputs=None):
+    def gen_cache_key(self, f, config, inputs=None, act_input_paths=()):
         if inputs is None:
             inputs = [torch.ones(3)]
         _, fx_g, example_inputs = self._get_dynamo_output(f, *inputs)
@@ -3362,7 +3496,13 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         # Not needed for actual key calculation.
         with torch._guards.tracing(ctx):
             with sanitize_gm_for_cache(fx_g):
-                return autograd_cache_key(fx_g, example_inputs, config, None)
+                return autograd_cache_key(
+                    fx_g,
+                    example_inputs,
+                    config,
+                    None,
+                    act_input_paths=act_input_paths,
+                )
 
     def test_basic_hash_key(self):
         def fn(x):
@@ -3428,6 +3568,20 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             config_with_backend, precompile_backend_id="backend"
         )
         self.assertNotEqual(base, self.gen_cache_key(fn, config_with_backend))
+
+    def test_different_act_input_paths(self):
+        def fn(x):
+            return x.sin().cos()
+
+        config = self.default_config()
+        base = self.gen_cache_key(fn, config)
+        top_level_act = self.gen_cache_key(fn, config, act_input_paths=[(0, ())])
+        nested_act = self.gen_cache_key(
+            fn, config, act_input_paths=[(0, ("_local_tensor",))]
+        )
+
+        self.assertNotEqual(base, top_level_act)
+        self.assertNotEqual(top_level_act, nested_act)
 
     def test_different_graphs(self):
         def fn(x):
@@ -4410,9 +4564,13 @@ class CacheKeyAPITests(torch._dynamo.test_case.TestCase):
 
         real_cache_key = autograd_cache.autograd_cache_key
 
-        def capturing_cache_key(mod, ei, config, compiler_config_extra=None):
+        def capturing_cache_key(
+            mod, ei, config, compiler_config_extra=None, act_input_paths=()
+        ):
             nonlocal captured_key
-            result = real_cache_key(mod, ei, config, compiler_config_extra)
+            result = real_cache_key(
+                mod, ei, config, compiler_config_extra, act_input_paths
+            )
             captured_key = result[0]
             return result
 
@@ -4672,9 +4830,13 @@ class CacheKeyAPITests(torch._dynamo.test_case.TestCase):
         real_cache_key_fn = autograd_cache.autograd_cache_key
         captured_key = None
 
-        def capturing_cache_key(mod, ei, config, compiler_config_extra=None):
+        def capturing_cache_key(
+            mod, ei, config, compiler_config_extra=None, act_input_paths=()
+        ):
             nonlocal captured_key
-            captured_key, _ = real_cache_key_fn(mod, ei, config, compiler_config_extra)
+            captured_key, _ = real_cache_key_fn(
+                mod, ei, config, compiler_config_extra, act_input_paths
+            )
             return captured_key, _
 
         with outer_context:

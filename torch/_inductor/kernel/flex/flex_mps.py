@@ -7,6 +7,7 @@ import torch
 from torch._inductor.virtualized import V
 
 from ...ir import FixedLayout, TensorBox
+from ...lowering import empty_strided
 from ...select_algorithm import realize_inputs
 from .common import infer_dense_strides, maybe_realize
 
@@ -30,12 +31,6 @@ def lower_mps(
         _generate_metal_shader,
         MetalFlexAttentionNode,
     )
-
-    if score_mod_other_buffers or mask_mod_other_buffers:
-        raise NotImplementedError(
-            "flex_attention on MPS does not yet support score_mod / mask_mod "
-            "with captured buffers"
-        )
 
     (
         _,  # q_length
@@ -66,11 +61,7 @@ def lower_mps(
             "Mixed dtypes for query, key, value not supported on MPS"
         )
 
-    if kernel_options.get("OUTPUT_LOGSUMEXP", False):
-        raise NotImplementedError(
-            "flex_attention backward (return_lse=True) is not yet supported on MPS. "
-            "Use torch.no_grad() or torch.inference_mode() for inference."
-        )
+    write_lse = bool(kernel_options.get("OUTPUT_LOGSUMEXP", False))
     if kernel_options.get("OUTPUT_MAX", False):
         raise NotImplementedError(
             "flex_attention on MPS does not yet support returning max scores "
@@ -115,16 +106,8 @@ def lower_mps(
         )
 
     sizevars = V.graph.sizevars
-    # Kernel indexes K/V with the same b_idx as Q; no broadcast logic for Bkv=1 yet.
-    # check_equals adds a runtime guard B == Bkv; it raises AssertionError if it
-    # can prove they differ — convert to NIE so callers see the right error.
-    try:
-        sizevars.check_equals(B, Bkv)
-    except AssertionError:
-        raise NotImplementedError(
-            f"flex_attention on MPS does not yet support batch broadcasting "
-            f"between query and key/value (Bq != Bkv); got Bq={B} Bkv={Bkv}"
-        ) from None
+    if not sizevars.evaluate_expr(sympy.Eq(B, Bkv) | sympy.Eq(Bkv, 1)):
+        raise AssertionError(f"Bq and Bkv must broadcastable. Got Bq={B} and Bkv={Bkv}")
 
     SPARSE_KV_BLOCK_SIZE_val = sizevars.guard_int(SPARSE_KV_BLOCK_SIZE)
     SPARSE_Q_BLOCK_SIZE_val = sizevars.guard_int(SPARSE_Q_BLOCK_SIZE)
@@ -146,6 +129,30 @@ def lower_mps(
 
     scale_val = float(scale)
 
+    # Captured tensors become extra Metal buffers; their sizes/strides are baked
+    # into the index offset math. maybe_realize passes SymInts through untouched;
+    # SymInt captures (from dynamic-shape closures) are not supported yet.
+    def _capture_meta(items):
+        metas, tensors = [], []
+        for cap in maybe_realize(list(items)):
+            if isinstance(cap, sympy.Expr):
+                raise NotImplementedError(
+                    "flex_attention on MPS does not yet support SymInt captures "
+                    "in score_mod/mask_mod (dynamic-shape closures)"
+                )
+            metas.append(
+                (
+                    [sizevars.guard_int(s) for s in cap.get_size()],
+                    [sizevars.guard_int(s) for s in cap.get_stride()],
+                    cap.get_dtype(),
+                )
+            )
+            tensors.append(cap)
+        return metas, tensors
+
+    score_meta, score_tensors = _capture_meta(score_mod_other_buffers)
+    mask_meta, mask_tensors = _capture_meta(mask_mod_other_buffers)
+
     shader_source = _generate_metal_shader(
         dtype=dtype,
         d_qk=d_qk,
@@ -155,6 +162,9 @@ def lower_mps(
         has_full_blocks=has_full_blocks,
         block_m=BLOCK_M,
         scale=scale_val,
+        score_captured=score_meta,
+        mask_captured=mask_meta,
+        write_lse=write_lse,
     )
 
     out_size = [B, Hq, seq_len_q, v_head_dim]
@@ -172,10 +182,12 @@ def lower_mps(
     full_kv_idx_strides = _get_strides(full_kv_indices) if has_full_blocks else []
 
     # Buffer order: 0=Out, 1=Q, 2=K, 3=V, 4=kv_num_blocks, 5=kv_indices,
-    # 6=(full_kv_num_blocks), 7=(full_kv_indices), then packed scalar buffer.
+    # 6=(full_kv_num_blocks), 7=(full_kv_indices), then score/mask captured
+    # buffers, then the packed scalar buffer.
     input_nodes = [query, key, value, kv_num_blocks, kv_indices]
     if has_full_blocks:
         input_nodes += [full_kv_num_blocks, full_kv_indices]
+    input_nodes += [*score_tensors, *mask_tensors]
 
     realized_inputs = realize_inputs(*input_nodes)
 
@@ -189,6 +201,7 @@ def lower_mps(
     # Order must match the unpack in metal_flex_attention_template's `scalar_names`.
     scalar_args = [
         B,
+        Bkv,
         Hq,
         Hkv,
         seq_len_q,
@@ -218,16 +231,29 @@ def lower_mps(
         B,
     )
 
+    lse_shape = [B, Hq, seq_len_q]
+    logsumexp = empty_strided(
+        lse_shape, None, dtype=torch.float32, device=query.get_device()
+    )
+    max_scores = empty_strided(
+        lse_shape, None, dtype=torch.float32, device=query.get_device()
+    )
+    node_inputs = realized_inputs
+    if write_lse:
+        logsumexp.realize()
+        node_inputs = [*realized_inputs, logsumexp]
+
     node = MetalFlexAttentionNode(
         layout=layout,
-        inputs=realized_inputs,
+        inputs=node_inputs,
         shader_source=shader_source,
         scalar_args=scalar_args,
         grid=grid,
         block_m=BLOCK_M,
+        mutates_lse=write_lse,
     )
 
-    return (TensorBox.create(node),)
+    return (TensorBox.create(node), logsumexp, max_scores)
 
 
 def _get_strides(node):

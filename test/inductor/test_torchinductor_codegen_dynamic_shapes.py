@@ -1,13 +1,17 @@
 # Owner(s): ["module: inductor"]
+import contextlib
 import importlib
 import os
 import sys
 
 import torch
+from torch._inductor import config
 from torch._inductor.compile_fx import compile_fx
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import (
     IS_LINUX,
+    MI350_ARCH,
+    skipIfRocmArch,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
 )
@@ -47,6 +51,7 @@ def check_codegen(
     *,
     device: torch.types.Device,
     is_cpp_code: bool,
+    copy_to_gpu: bool = True,
 ):
     kwargs = kwargs or {}
 
@@ -62,7 +67,8 @@ def check_codegen(
                 x.size(), x.stride(), device=device, dtype=x.dtype
             ).copy_(x)
 
-        example_inputs = tuple(copy_fn(x) for x in example_inputs)
+        if copy_to_gpu:
+            example_inputs = tuple(copy_fn(x) for x in example_inputs)
 
     torch._dynamo.reset()
     torch._inductor.codecache.FxGraphCache.clear()
@@ -448,6 +454,8 @@ test_failures = {
     # Refinement means we don't actually generate dynamic shapes (but only on
     # cpu apparently?!)
     "test_nonzero_unbacked_refinement_dynamic_shapes": TestFailure(("cpu",)),
+    # The scalar (1,) case intentionally does not generate dynamic code.
+    "test_floordiv_int_min_neg_one_cpu_dynamic_shapes": TestFailure(("cpu",)),
     "test_bucketize_scalar_various_values_dynamic_shapes": TestFailure(
         ("cpu", "cuda", "xpu"), is_skip=True
     ),
@@ -470,6 +478,26 @@ if not TEST_WITH_ROCM:
 DynamicShapesCodegenCommonTemplate = make_dynamic_cls(
     CommonTemplate, xfail_prop="_expected_failure_codegen_dynamic"
 )
+
+
+class DynamicShapesCodegenTestCase(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._triton_assert_stack = contextlib.ExitStack()
+        cls._triton_assert_stack.enter_context(
+            config.patch(
+                {
+                    "test_configs.runtime_triton_dtype_assert": True,
+                    "test_configs.runtime_triton_shape_assert": True,
+                }
+            )
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._triton_assert_stack.close()
+        super().tearDownClass()
 
 
 if HAS_CPU:
@@ -498,11 +526,18 @@ if HAS_CPU:
 
 if HAS_GPU and not TEST_WITH_ASAN:
 
-    class DynamicShapesCodegenGPUTests(TestCase):
+    class DynamicShapesCodegenGPUTests(DynamicShapesCodegenTestCase):
         maxDiff = None
         device = GPU_TYPE
 
-        def common(self: TestCase, model, example_inputs, kwargs=None, **_rest):
+        def common(
+            self: TestCase,
+            model,
+            example_inputs,
+            kwargs=None,
+            copy_to_gpu=True,
+            **_rest,
+        ):
             return check_codegen(
                 self=self,
                 model=model,
@@ -510,6 +545,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 device=self.device,
                 kwargs=kwargs,
                 is_cpp_code=False,
+                copy_to_gpu=copy_to_gpu,
             )
 
     copy_tests(
@@ -518,6 +554,15 @@ if HAS_GPU and not TEST_WITH_ASAN:
         GPU_TYPE,
         test_failures,
     )
+
+    if HAS_GPU and hasattr(
+        DynamicShapesCodegenGPUTests,
+        "test_randint_distribution_dynamic_shapes_cuda",
+    ):
+        # gfx950 shows a deterministic randint64 distribution mismatch for high bounds.
+        DynamicShapesCodegenGPUTests.test_randint_distribution_dynamic_shapes_cuda = skipIfRocmArch(
+            MI350_ARCH
+        )(DynamicShapesCodegenGPUTests.test_randint_distribution_dynamic_shapes_cuda)
 
 
 if __name__ == "__main__":

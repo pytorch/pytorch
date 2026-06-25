@@ -222,6 +222,28 @@ class MPSBasicTests(TestCase):
         torch._dynamo.mark_dynamic(x, 1)
         self.assertEqual(fn(x), x.var(dim=-1))
 
+    def test_while_loop_kernel_naming(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/187852
+        # while_loop compiles cond and body as separate MetalScheduling instances,
+        # each of which used to reset _kernel_fn_counter to 0, producing duplicate
+        # "generated_kernel_0" names that caused a Metal mangled-name collision.
+        def fn(iterations):
+            def cond(i):
+                return i < iterations
+
+            def body(i):
+                return (i + 2,)
+
+            (out_i,) = torch._higher_order_ops.while_loop(
+                cond, body, (torch.tensor(0, dtype=torch.int32, device=self.device),)
+            )
+            return out_i
+
+        iters = torch.tensor(4, dtype=torch.int32, device=self.device)
+        compiled_fn = torch.compile(fn, backend="inductor")
+        result = compiled_fn(iters)
+        self.assertEqual(result, torch.tensor(4, dtype=torch.int32, device=self.device))
+
     def test_welford_multistage_sibling_redeclare(self):
         # Regression test: BatchNorm2d-train emits two codegen passes on
         # the same multistage reduction root (welford + running-stats
@@ -256,6 +278,23 @@ class MPSBasicTests(TestCase):
             )
 
         self.common(fn, (q, k, v), atol=1e-4, rtol=1e-4, check_lowp=False)
+
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_sdpa_prefill_strided(self, dtype):
+        torch.manual_seed(0)
+        B, H, S, D = 1, 16, 1179, 128
+
+        def fn(q, k, v, mask):
+            q, k, v = (t.transpose(1, 2) for t in (q, k, v))
+            return torch.nn.functional.scaled_dot_product_attention(
+                q, k, v, attn_mask=mask
+            )
+
+        q, k, v = (
+            torch.randn(B, S, H, D, device=self.device, dtype=dtype) for _ in range(3)
+        )
+        mask = torch.zeros(B, 1, S, S, device=self.device, dtype=dtype)
+        self.assertEqual(torch.compile(fn)(q, k, v, mask), fn(q, k, v, mask))
 
     def test_nested_masked_cat(self):
         # Regression test for YOLOv3 compilation failure on MPS.

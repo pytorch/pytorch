@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <stdint.h>
 
 #ifdef _WIN32
 #define OPENREG_EXPORT __declspec(dllexport)
@@ -96,6 +97,12 @@ OPENREG_EXPORT orError_t orEventSynchronize(orEvent_t event);
 OPENREG_EXPORT orError_t orEventQuery(orEvent_t event);
 OPENREG_EXPORT orError_t
 orEventElapsedTime(float* ms, orEvent_t start, orEvent_t end);
+
+// Activity tracing
+OPENREG_EXPORT orError_t orActivityEnableTracing(void);
+OPENREG_EXPORT orError_t orActivityDisableTracing(void);
+OPENREG_EXPORT orError_t orActivityPushExternalCorrelationId(uint64_t id);
+OPENREG_EXPORT orError_t orActivityPopExternalCorrelationId(uint64_t* id);
 
 #ifdef __cplusplus
 } // extern "C"

@@ -1,3 +1,4 @@
+# Owner(s): ["module: sanitizers"]
 name: TSan
 
 on:
@@ -41,7 +42,7 @@ jobs:
         { include: [
           { config: "tsan", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
         ]}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.14t"
       compiler: clang18
     secrets: inherit
@@ -56,7 +57,7 @@ jobs:
       build-environment: linux-jammy-py3.14t-clang18-tsan
       docker-image: ${{ needs.linux-jammy-py3_14t-clang18-tsan-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_14t-clang18-tsan-build.outputs.test-matrix }}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.14t"
       compiler: clang18
     secrets: inherit

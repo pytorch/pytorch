@@ -921,7 +921,7 @@ class JitRpcTest(
 
         # rpc_sync does not accept script module method.
         # Python 3.5 and Python 3.6 throw different error message, the only
-        # common word can be greped is "pickle".
+        # common word can be grepped is "pickle".
         with self.assertRaisesRegex(TypeError, "pickle"):
             rpc.rpc_async(dst_worker_name, my_local_script_module.forward, args=())
 

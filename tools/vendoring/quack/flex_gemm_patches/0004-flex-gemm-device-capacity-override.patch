@@ -1,0 +1,29 @@
+# FlexGEMM generated precompile runs QuACK under FakeTensorMode inside Inductor
+# compile workers. Those workers may be forked after CUDA initialization, so they
+# cannot safely call torch.cuda.get_device_capability(). Let generated precompile
+# pass the parent-computed capability while normal runtime dispatch keeps using
+# QuACK's device query.
+diff --git a/gemm_act.py b/gemm_act.py
+--- a/gemm_act.py
++++ b/gemm_act.py
+@@ -597,6 +597,7 @@ def gemm_act(
+     tensor_epilogue_tile_biases: tuple[Tensor, ...] = (),
+     alpha: float | Tensor = 1.0,
+     beta: float | Tensor = 1.0,
++    device_capacity_override: tuple[int, int] | None = None,
+ ) -> None:
+     if tensor_epilogue_fn is not None:
+         assert activation is None, "tensor_epilogue_fn and activation are mutually exclusive"
+@@ -671,7 +672,11 @@ def gemm_act(
+     )
+     colvec_ndim = colvec_bias.ndim if colvec_bias is not None else 0
+ 
+-    device_capacity = get_device_capacity(A.device)
++    device_capacity = (
++        device_capacity_override
++        if device_capacity_override is not None
++        else get_device_capacity(A.device)
++    )
+     assert device_capacity[0] in [8, 9, 10, 11, 12], (
+         "Only SM8x, SM90, SM100, SM110, and SM120 are supported"
+     )

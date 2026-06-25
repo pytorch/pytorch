@@ -6,7 +6,6 @@
 # NOTE: this file may be removed once we move to a dynamo frontend
 
 import contextlib
-import functools
 from collections.abc import Callable, Generator, Sequence
 from contextlib import contextmanager
 from typing import Any, TypeAlias
@@ -17,11 +16,12 @@ from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
     clone_outputs_aliasing_inputs,
     redirect_to_mode,
+    register_fake,
     save_values_for_backward,
     saved_values,
 )
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensor
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx import GraphModule
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
@@ -556,43 +556,60 @@ def functional_mode_key(
         return ctx.wrap_tensors(out)
 
 
-@local_map_hop.py_impl(FakeTensorMode)
+@register_fake(local_map_hop, skip_cache=True)
 def fake_mode_key(
-    mode: FakeTensorMode,
     gm: GraphModule,
     *args: Any,
     **kwargs: Any,
 ) -> GraphArg:
-    with mode:
-        if not _DEFER_INLINING:
-            return gm(*args, **kwargs)
+    if not _DEFER_INLINING:
+        return gm(*args, **kwargs)
 
-        # otherwise, we need to convert to local shapes for AP
-        is_backward = gm.meta["is_backward"]
-        redistribute_inputs = (
-            redistribute_bw_inputs if is_backward else redistribute_fw_inputs
+    # otherwise, we need to convert to local shapes for AP
+    # invoke_subgraph runs its body below Autograd, so local_map_hop's Autograd
+    # key may not have partitioned the body or set fw/bw metadata.
+    is_backward = gm.meta.get("is_backward", False)
+    num_activations = gm.meta.get("num_activations", 0)
+    redistribute_inputs = (
+        redistribute_bw_inputs if is_backward else redistribute_fw_inputs
+    )
+    local_args = redistribute_inputs(
+        args,
+        gm.meta["local_map_kwargs"]["in_placements"],
+        gm.meta["local_map_kwargs"]["device_mesh"],
+        num_activations,
+    )
+    local_outs = gm(*local_args)
+    redistribute_outputs = (
+        redistribute_bw_outputs if is_backward else redistribute_fw_outputs
+    )
+    global_outs = redistribute_outputs(
+        local_outs,
+        gm.meta["local_map_kwargs"]["out_placements"],
+        gm.meta["local_map_kwargs"]["device_mesh"],
+        num_activations,
+    )
+    return global_outs
+
+
+def _proxy_mode_arg(
+    proxy_mode: ProxyTorchDispatchMode,
+    arg: Any,
+) -> Any:
+    if isinstance(arg, torch.fx.GraphModule):
+        # Install local_map bodies as real submodules so FX source emission can
+        # reload them through self instead of closing over a local Python target.
+        registered = any(
+            arg is submod
+            for _, submod in proxy_mode.tracer.root.named_modules()  # type: ignore[union-attr]
         )
-        local_args = redistribute_inputs(
-            args,
-            gm.meta["local_map_kwargs"]["in_placements"],
-            gm.meta["local_map_kwargs"]["device_mesh"],
-            gm.meta["num_activations"],
-        )
-        local_outs = gm(*local_args)
-        redistribute_outputs = (
-            redistribute_bw_outputs if is_backward else redistribute_fw_outputs
-        )
-        global_outs = redistribute_outputs(
-            local_outs,
-            gm.meta["local_map_kwargs"]["out_placements"],
-            gm.meta["local_map_kwargs"]["device_mesh"],
-            gm.meta["num_activations"],
-        )
-        return global_outs
+        if not registered:
+            qualname = proxy_mode.tracer.get_fresh_qualname("local_map_body")  # type: ignore[union-attr]
+            proxy_mode.tracer.root.register_module(qualname, arg)  # type: ignore[union-attr]
+    return proxy_mode.tracer.unwrap_proxy(arg)  # type: ignore[union-attr]
 
 
 def proxy_mode_key_common(
-    call_hop: Callable[..., Any],
     proxy_mode: ProxyTorchDispatchMode,
     gm: GraphModule,
     *args: Any,
@@ -603,11 +620,14 @@ def proxy_mode_key_common(
     if len(kwargs) != 0:
         raise AssertionError(f"kwargs must be empty, got {kwargs}")
 
-    example_out = call_hop(*args, **kwargs)
-    proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, args)  # type: ignore[union-attr]
+    example_out = local_map_hop(gm, *args, **kwargs)
+    proxy_args = pytree.tree_map(
+        lambda arg: _proxy_mode_arg(proxy_mode, arg),
+        (gm, *args),
+    )
 
     out_proxy = proxy_mode.tracer.create_proxy(
-        "call_function", call_hop, proxy_args, {}
+        "call_function", local_map_hop, proxy_args, {}
     )
 
     # extract local_map args, post-dispatch operates on GraphModules
@@ -630,11 +650,7 @@ def proxy_mode_key(
     *args: Any,
     **kwargs: Any,
 ) -> tuple[torch.Tensor]:
-    # TODO: get rid of this when we can install as a subgraph
-    def call_local_map(*_args: Any, **_kwargs: Any) -> Any:
-        return functools.partial(local_map_hop, gm)(*_args, **_kwargs)
-
-    return proxy_mode_key_common(call_local_map, proxy_mode, gm, *args, **kwargs)
+    return proxy_mode_key_common(proxy_mode, gm, *args, **kwargs)
 
 
 # Running HOP in eager with real tensors

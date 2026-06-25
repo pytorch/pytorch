@@ -666,22 +666,10 @@ MPSScalar getMPSScalar(const Scalar& scalar, ScalarType type) {
 }
 
 MPSGraphTensorData* getMPSGraphTensorFromScalar(MPSStream* mpsStream, MPSScalar& scalar) {
-  MPSGraphTensorData* result = nullptr;
-  // Scalar pools are only supported on devices with unified memory
-  if (mpsStream->device().hasUnifiedMemory) {
-    scalar.buffer = getIMPSAllocator()->allocScalarBufferWithValue(&scalar.value, scalar.size);
-    result = [[[MPSGraphTensorData alloc] initWithMTLBuffer:scalar.getMTLBuffer()
-                                                      shape:@[ @1 ]
-                                                   dataType:getMPSScalarType(scalar.type)] autorelease];
-  } else {
-    MPSNDArrayDescriptor* tensorDesc = [MPSNDArrayDescriptor descriptorWithDataType:getMPSScalarType(scalar.type)
-                                                                              shape:@[ @1 ]];
-    MPSNDArray* tensorNDArray = [[[MPSNDArray alloc] initWithDevice:mpsStream->device()
-                                                         descriptor:tensorDesc] autorelease];
-    [tensorNDArray writeBytes:&scalar.value strideBytes:nil];
-    result = [[[MPSGraphTensorData alloc] initWithMPSNDArray:tensorNDArray] autorelease];
-  }
-  return result;
+  scalar.buffer = getIMPSAllocator()->allocScalarBufferWithValue(&scalar.value, scalar.size);
+  return [[[MPSGraphTensorData alloc] initWithMTLBuffer:scalar.getMTLBuffer()
+                                                  shape:@[ @1 ]
+                                               dataType:getMPSScalarType(scalar.type)] autorelease];
 }
 
 void resize_tensor(Tensor* output) {
@@ -1035,8 +1023,10 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
   // cheap ops (neg/abs/sqr/bitwise_not) where the smaller threadgroup count
   // from the wider per-thread tile regresses real-world sizes, and complex
   // outputs lose because the wide per-thread state spills out of registers.
-  const bool ilp_eligible_dtype = c10::isFloatingType(outputTensor.scalar_type());
-  bool dense_ilp = is_contiguous && !alpha.has_value() && ilp_eligible_dtype && length >= ILP_DISPATCH_THRESHOLD;
+  // Opt-in ILP for non-floating (bool/int) output if ilp_threshold_specified
+  const bool ilp_eligible_dtype = c10::isFloatingType(outputTensor.scalar_type()) || ilp_threshold.has_value();
+  bool dense_ilp = is_contiguous && !alpha.has_value() && ilp_eligible_dtype &&
+      length >= ilp_threshold.value_or(ILP_DISPATCH_THRESHOLD);
   // Bench-only override: force ILP or scalar dispatch.
   if (is_contiguous && !alpha.has_value()) {
     if (auto force = c10::utils::get_env("PYTORCH_UNARY_FORCE_FLAVOR")) {

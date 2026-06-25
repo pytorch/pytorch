@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: distributed"]
 name: torchtitan-test
 
 on:
@@ -70,7 +71,7 @@ jobs:
           { config: "torchtitan_features_integration", shard: 1, num_shards: 1, runner: "linux.g5.48xlarge.nvidia.gpu" },
           { config: "torchtitan_models_integration", shard: 1, num_shards: 1, runner: "linux.g5.48xlarge.nvidia.gpu" }
         ]}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.10"
       compiler: gcc11
       cuda-version: ${{ needs.get-cuda-version.outputs.stable-cuda }}
@@ -87,7 +88,7 @@ jobs:
       build-environment: linux-jammy-cuda${{ needs.get-cuda-version.outputs.stable-cuda }}-py3-gcc11
       docker-image: ${{ needs.build.outputs.docker-image }}
       test-matrix: ${{ needs.build.outputs.test-matrix }}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.10"
       compiler: gcc11
       cuda-version: ${{ needs.get-cuda-version.outputs.stable-cuda }}

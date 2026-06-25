@@ -1284,6 +1284,52 @@ std::tuple<Tensor, std::optional<int64_t>> index_fill_int_tensor_batch_rule(
   return index_fill_int_tensor_batch_rule_impl(self_, self_bdim, dim, index, index_bdim, value, value_bdim, false);
 }
 
+std::tuple<Tensor, std::optional<int64_t>> repeat_interleave_Tensor_batch_rule(
+    const Tensor& repeat, std::optional<int64_t> repeat_bdim,
+    std::optional<c10::SymInt> output_size) {
+  if (!repeat_bdim.has_value()) {
+    // `repeat` is not batched, so the output length (the sum of `repeat`) is
+    // the same for every element of the batch. Re-dispatch to the regular
+    // implementation, which also handles any outer vmap levels correctly.
+    auto result = at::repeat_interleave_symint(repeat, std::move(output_size));
+    return std::make_tuple(std::move(result), std::nullopt);
+  }
+  // When `repeat` is batched the output length is data-dependent (it equals the
+  // sum of `repeat`, which may differ between batch elements), so vmap cannot
+  // infer a single static output shape. Require the user to pass `output_size`.
+  TORCH_CHECK(
+      output_size.has_value(),
+      "repeat_interleave: vmapping over the `repeats` tensor requires the "
+      "`output_size` argument to be specified, because the size of the output "
+      "equals the sum of `repeats`, which is data-dependent and may differ "
+      "between batch elements. Please pass output_size, e.g. "
+      "output_size=int(repeats.sum(-1).max()).");
+
+  const auto repeat_ = moveBatchDimToFront(repeat, repeat_bdim);
+  TORCH_CHECK(
+      repeat_.dim() == 2,
+      "repeat_interleave: the `repeats` tensor must be 1-dimensional for each "
+      "batch element, but got a ", repeat_.dim() - 1, "-dimensional tensor.");
+
+  auto out_size = output_size.value();
+  // Construct the gather indices without any data-dependent shapes so the rule
+  // is a regular batched computation. For each batch element b:
+  //   marks[b, cumsum(repeat[b])] += 1
+  //   out[b] = marks[b, :output_size].cumsum()
+  // which yields index i repeated repeat[b, i] times, e.g.
+  //   repeat = [4, 0, 8] -> [0, 0, 0, 0, 2, 2, 2, 2, 2, 2, 2, 2].
+  const auto batch_size = repeat_.sym_size(0);
+  // Accumulate in int64 to avoid overflowing `repeat_`'s dtype for large
+  // outputs, and to keep the gather indices in the dtype repeat_interleave
+  // is expected to return.
+  const auto cumsum = repeat_.cumsum(-1, at::kLong);
+  auto marks = at::zeros_symint(
+      {batch_size, out_size + 1}, repeat_.options().dtype(at::kLong));
+  marks = marks.scatter_add(-1, cumsum, at::ones_like(cumsum));
+  auto result = marks.narrow_symint(-1, 0, std::move(out_size)).cumsum(-1);
+  return std::make_tuple(std::move(result), 0);
+}
+
 }
 
 TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
@@ -1304,6 +1350,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(index_add, index_add_batch_rule);
   VMAP_SUPPORT(diagonal_scatter, diagonal_scatter_batch_rule);
   VMAP_SUPPORT(gather, gather_batch_rule);
+  VMAP_SUPPORT2(repeat_interleave, Tensor, repeat_interleave_Tensor_batch_rule);
   VMAP_SUPPORT2(scatter, value, scatter_value_batch_rule);
   VMAP_SUPPORT2(scatter, src, scatter_src_batch_rule);
   VMAP_SUPPORT(scatter_add, scatter_add_batch_rule);

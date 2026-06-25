@@ -1719,7 +1719,7 @@ if HAS_CUDA_AND_TRITON:
             self.assertEqual(len(list(node.path_live_weakrefs())), 0)
             self.assertFalse(self.get_manager().new_graph_id().id == 0)
 
-        def test_aliasing_static_ref(self):
+        def _test_aliasing_static_ref(self):
             class Mod(torch.nn.Linear):
                 def forward(self, x):
                     return self.weight.T @ x, self.weight.T, self.weight[0:4]
@@ -1756,6 +1756,13 @@ if HAS_CUDA_AND_TRITON:
             else:
                 self.assertFalse(first_node.unaliased_in_all_paths[0])
                 self.assertTrue(first_node.cached_tensor_outputs[0] is None)
+
+        def test_aliasing_static_ref(self):
+            self._test_aliasing_static_ref()
+
+        @torch._inductor.config.patch("graph_partition", False)
+        def test_aliasing_static_ref_no_graph_partition(self):
+            self._test_aliasing_static_ref()
 
         @torch._inductor.config.patch("implicit_fallbacks", True)
         def test_multinomial(self):
@@ -2093,7 +2100,7 @@ if HAS_CUDA_AND_TRITON:
         @blas_library_context("cublas")
         @unittest.mock.patch.dict(os.environ, {"TORCH_DISABLE_ADDR2LINE": "0"})
         def test_workspace_allocation_error(self):
-            torch._C._cuda_clearCublasWorkspaces()
+            torch.cuda._clear_cublas_workspaces()
 
             prev = torch._inductor.cudagraph_trees.clear_cublas_manager
 
@@ -2133,7 +2140,7 @@ if HAS_CUDA_AND_TRITON:
                 self.assertTrue(thrown)
 
             finally:
-                torch._C._cuda_clearCublasWorkspaces()
+                torch.cuda._clear_cublas_workspaces()
                 torch._inductor.cudagraph_trees.clear_cublas_manager = prev
                 torch._inductor.cudagraph_trees.get_container(
                     self.device_idx
@@ -3897,6 +3904,53 @@ if HAS_CUDA_AND_TRITON:
                 _out = f_compiled(x, y)
             self.assertEqual(self.get_manager() is None, True)
 
+        @torch._inductor.config.patch("graph_partition", False)
+        def test_view_only_cuda_graph_suppresses_empty_warning(self):
+            counters.clear()
+
+            def fn(x):
+                return x.reshape(1, -1, 4)
+
+            x = torch.randn(6, 4, device="cuda")
+            compiled_fn = torch.compile(fn, fullgraph=True)
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                for _ in range(3):
+                    actual = compiled_fn(x)
+                    torch.cuda.synchronize()
+
+            self.assertEqual(actual, fn(x))
+            self.assertFalse(
+                any("CUDA Graph is empty" in str(w.message) for w in caught)
+            )
+            self.assertEqual(
+                counters["inductor"]["cudagraph_recorded_non_static_inputs"], 1
+            )
+            self.assertIsNotNone(self.get_manager())
+
+        @torch._inductor.config.patch("triton.slow_path_cudagraph_asserts", True)
+        def test_kernel_free_allocation_uses_cudagraph_pool(self):
+            def fn(x):
+                return torch.empty_like(x)
+
+            for graph_partition in (False, True):
+                torch._dynamo.reset()
+                x = torch.randn(6, 4, device="cuda")
+                with (
+                    torch._inductor.config.patch("graph_partition", graph_partition),
+                    warnings.catch_warnings(record=True) as caught,
+                ):
+                    warnings.simplefilter("always")
+                    compiled_fn = torch.compile(fn, fullgraph=True)
+                    for _ in range(3):
+                        actual = compiled_fn(x)
+                        torch.cuda.synchronize()
+
+                self.assertEqual(actual.shape, x.shape)
+                self.assertFalse(
+                    any("CUDA Graph is empty" in str(w.message) for w in caught)
+                )
+
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_forward_backward(self):
             class Mod(torch.nn.Module):
@@ -5310,6 +5364,41 @@ if HAS_CUDA_AND_TRITON:
             run(10)
             run(25)
 
+        def test_dealloc_handles_tensor_weakrefs_stack_traces_mismatch(self):
+            """Verify dealloc_current_path_weakrefs handles tensor_weakrefs /
+            stack_traces length mismatch without asserting.
+
+            This injects the mismatch directly so the deallocation path is
+            deterministic. The fix replaces the hard assert with a warning and
+            relies on zip(), matching the existing defensive pattern for
+            outputs_weakrefs in the same function.
+            """
+
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return x + 1
+
+            inp = torch.rand([4], device="cuda")
+
+            # First call: warmup phase creates and runs a CUDAWarmupNode.
+            torch.compiler.cudagraph_mark_step_begin()
+            foo(inp)
+
+            # Simulate the tensor_weakrefs / stack_traces length divergence.
+            node = self.curr_node()
+            self.assertEqual(len(node.tensor_weakrefs), len(node.stack_traces))
+            node.tensor_weakrefs.append(None)
+
+            # Second call: transitions warmup -> recording, which invokes
+            # try_end_curr_warmup -> dealloc_current_path_weakrefs.
+            # cudagraph_mark_step_begin ensures can_start_new_generation()
+            # returns True so dealloc is actually called.
+            # Without the fix, this would hit:
+            #   assert len(node.tensor_weakrefs) == len(node.stack_traces)
+            # With the fix, zip() safely truncates to the shorter list.
+            torch.compiler.cudagraph_mark_step_begin()
+            foo(inp)
+
         @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
         def test_opaque_value_input_cudagraph(self):
             """Opaque reference-type objects (e.g. DeviceMesh, ProcessGroup)
@@ -5637,9 +5726,6 @@ if HAS_CUDA_AND_TRITON:
                 new_state = old_state.clone_state()
 
                 if capture_cuda_graph:
-                    # state should be register to the graph
-                    graph.register_generator_state(new_state)
-
                     # only capturing the backward
                     with torch.cuda.graph(graph):
                         repro_perm = graphsafe_backward(generator, new_state)

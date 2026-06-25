@@ -343,6 +343,38 @@ if HAS_CPU and not torch.backends.mps.is_available():
         device = "cpu"
         autocast = torch.cpu.amp.autocast
 
+        @torch.no_grad()
+        def test_conv_binary_folding_rejects_dynamic_bias(self):
+            class ConvWithDynamicBias(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.weight = nn.Parameter(torch.randn(4, 3, 3, 3))
+                    self.other = nn.Parameter(torch.randn(1, 4, 1, 1))
+
+                def forward(self, x, bias):
+                    x = aten.convolution.default(
+                        x,
+                        self.weight,
+                        bias,
+                        [1, 1],
+                        [0, 0],
+                        [1, 1],
+                        False,
+                        [0, 0],
+                        1,
+                    )
+                    return torch.add(x, self.other)
+
+            torch._dynamo.reset()
+            counters.clear()
+            mod = ConvWithDynamicBias().eval()
+            x = torch.randn(2, 3, 8, 8)
+            bias = torch.randn(4)
+            expected = mod(x, bias)
+            actual = torch.compile(mod, fullgraph=True)(x, bias)
+            self.assertEqual(actual, expected)
+            self.assertEqual(counters["inductor"]["binary_folding"], 0)
+
     copy_tests(BinaryFoldingTemplate, FreezingCpuTests, "cpu")
 
 if HAS_GPU:

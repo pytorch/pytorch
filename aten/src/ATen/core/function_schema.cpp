@@ -254,7 +254,7 @@ std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema) {
   if (returns.size() == 1 && !schema.is_varret()) {
     std::stringstream return_ss;
     return_ss << returns.at(0);
-    auto return_str = return_ss.str();
+    auto return_str = std::move(return_ss).str();
 
     // enclosing the single return item with parenthesis if the return type
     // starts with a left parenthesis.

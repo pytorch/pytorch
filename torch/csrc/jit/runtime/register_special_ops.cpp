@@ -42,7 +42,7 @@ void checkListInputType(const c10::TypePtr& elem_type, bool empty_list) {
                  "is the type of elements in the list for Python 2)";
       }
     }
-    throw std::runtime_error(error.str());
+    throw std::runtime_error(std::move(error).str());
   }
 }
 

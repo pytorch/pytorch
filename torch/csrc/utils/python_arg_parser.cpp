@@ -50,8 +50,6 @@ static std::unordered_map<std::string, ParameterType> type_map = {
     {"c10::string_view", ParameterType::STRING},
     {"std::string_view", ParameterType::STRING},
     {"::std::string_view", ParameterType::STRING},
-    {"Dimname", ParameterType::DIMNAME},
-    {"DimnameList", ParameterType::DIMNAME_LIST},
     {"ScalarList", ParameterType::SCALAR_LIST},
     {"DispatchKeySet", ParameterType::DISPATCH_KEY_SET},
 };
@@ -487,7 +485,7 @@ static std::tuple<py::object, py::object> dispatch_on_mode(
       if (ret.ptr() == nullptr) {
         throw python_error();
       }
-      return std::make_tuple(ret, mode_obj);
+      return std::make_tuple(std::move(ret), std::move(mode_obj));
     }
   }
 
@@ -515,7 +513,7 @@ static std::tuple<py::object, py::object> dispatch_on_mode(
   if (ret.ptr() == nullptr) {
     throw python_error();
   }
-  return std::make_tuple(ret, mode_obj);
+  return std::make_tuple(std::move(ret), std::move(mode_obj));
 }
 
 // See Note: [Overloaded args] for what they hold
@@ -688,7 +686,7 @@ auto handle_torch_function_no_python_arg_parser(
          << '\n';
     }
     ss << "\nFor more information, try re-running with TORCH_LOGS=not_implemented";
-    const std::string& tmp = ss.str();
+    const std::string& tmp = std::move(ss).str();
     PyErr_SetString(PyExc_TypeError, tmp.c_str());
     throw python_error();
   }
@@ -1170,16 +1168,6 @@ auto FunctionParameter::_check(
       }
       return false;
     }
-    case ParameterType::DIMNAME:
-      return THPUtils_checkDimname(obj);
-    case ParameterType::DIMNAME_LIST: {
-      if (THPUtils_checkDimnameList(obj)) {
-        return true;
-      }
-      // if a size is specified (e.g. DimnameList[1]) we also allow passing a
-      // single Dimname
-      return size == 1 && THPUtils_checkDimname(obj);
-    }
     case ParameterType::TENSOR_LIST: {
       return is_tensor_list_and_append_overloaded(
           obj, &overloaded_args, argnum, true /* throw_error */);
@@ -1269,10 +1257,6 @@ std::string FunctionParameter::type_name() const {
       return "torch.device";
     case ParameterType::STRING:
       return "str";
-    case ParameterType::DIMNAME:
-      return "name";
-    case ParameterType::DIMNAME_LIST:
-      return "tuple of names";
     case ParameterType::SCALAR_LIST:
       return "tuple of Scalars";
     case ParameterType::SYM_INT_LIST:
@@ -1467,10 +1451,6 @@ void FunctionParameter::set_default_str(const std::string& str) {
     // throw std::runtime_error("ParameterType::PYOBJECT");
   } else if (type_ == ParameterType::MEMORY_FORMAT) { // NOLINT
     // throw std::runtime_error("ParameterType::MEMORY_FORMAT");
-  } else if (type_ == ParameterType::DIMNAME) { // NOLINT
-    // throw std::runtime_error("ParameterType::DIMNAME");
-  } else if (type_ == ParameterType::DIMNAME_LIST) { // NOLINT
-    // throw std::runtime_error("ParameterType::DIMNAME_LIST");
   } else if (type_ == ParameterType::SCALAR_LIST) { // NOLINT
     // throw std::runtime_error("ParameterType::SCALAR_LIST");
   } else if (type_ == ParameterType::STORAGE) { // NOLINT
@@ -1619,7 +1599,7 @@ std::string FunctionSignature::toString() const {
           signature.name,
           num_missing,
           num_missing == 1 ? "s" : "",
-          ss.str()));
+          std::move(ss).str()));
 }
 
 static Py_ssize_t find_param(FunctionSignature& signature, PyObject* name) {
@@ -1699,7 +1679,7 @@ bool FunctionSignature::parse(
 
   if (static_cast<size_t>(nargs) > max_pos_args && !allow_varargs_intlist) {
     if (raise_exception) {
-      // foo() takes takes 2 positional arguments but 3 were given
+      // foo() takes 2 positional arguments but 3 were given
       extra_args(*this, nargs);
     }
     return false;

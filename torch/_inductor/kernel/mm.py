@@ -28,6 +28,7 @@ from ..codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
 from ..ir import Buffer, ChoiceCaller, is_triton, Layout
 from ..kernel_inputs import MMKernelInputs
 from ..lowering import (
+    fallback_handler,
     lowerings,
     make_pointwise,
     make_reduction,
@@ -773,7 +774,8 @@ def tuned_sparse_semi_structured_mm(
             [n, 1],
         )
     else:
-        assert out_dtype is None, "out_dtype is ignored if layout is specified."
+        if out_dtype is not None:
+            raise AssertionError("out_dtype is ignored if layout is specified.")
 
     choices = (
         [
@@ -892,6 +894,15 @@ def get_scaling_options(
     )  # verify that shapes are supported by at least one existing pairing
 
 
+# Inductor has no template or extern choice that understands swizzled scale
+# layouts for _scaled_mm_v2 yet; defer those to the eager op. add_to_fallback_set
+# is False because this handler is invoked manually from the lowering below, not
+# registered as the op's global fallback.
+scaled_mm_v2_fallback = fallback_handler(
+    aten._scaled_mm_v2.default, add_to_fallback_set=False
+)
+
+
 @register_lowering(aten._scaled_mm_v2.default, type_promotion_kind=None)
 def tuned_scaled_mm_v2(
     mat_a,
@@ -916,6 +927,28 @@ def tuned_scaled_mm_v2(
     swizzle patterns alongside the scale tensors, and supports multi-level
     scaling via lists.
     """
+    # Swizzling is not yet wired into any Inductor template or extern choice
+    # here. Rather than failing compilation, defer swizzled scale layouts
+    # (e.g. blockwise MXFP8/NVFP4 on Blackwell) to the eager op so they still
+    # produce correct results.
+    if any(s != 0 for s in swizzle_a) or any(s != 0 for s in swizzle_b):
+        # contraction_dim is a non-optional int[] in the schema (default []);
+        # this lowering defaults it to None, so coerce before the eager call.
+        fallback_contraction_dim = [] if contraction_dim is None else contraction_dim
+        return scaled_mm_v2_fallback(
+            mat_a,
+            mat_b,
+            scale_a,
+            recipe_a,
+            swizzle_a,
+            scale_b,
+            recipe_b,
+            swizzle_b,
+            bias,
+            out_dtype,
+            fallback_contraction_dim,
+            use_fast_accum,
+        )
     # TODO(coconutruben): integrate into MMKernelInputs when all callsites use that
     m, n, k, layout, mat_a, mat_b = mm_args(
         mat_a, mat_b, layout=layout, out_dtype=out_dtype
@@ -934,19 +967,10 @@ def tuned_scaled_mm_v2(
     name = "scaled_mm"
     check_supported_striding(mat_a, mat_b)
 
-    assert len(scale_a) >= 1 and len(scale_b) >= 1, (
-        "scale_a and scale_b must each have at least one entry"
-    )
+    if not (len(scale_a) >= 1 and len(scale_b) >= 1):
+        raise AssertionError("scale_a and scale_b must each have at least one entry")
 
     is_single_level_scale = len(scale_a) == 1 and len(scale_b) == 1
-
-    # Swizzling is not yet wired into any template here; reject anything other
-    # than NO_SWIZZLE (=0) so we don't silently produce wrong results once a
-    # caller starts passing real swizzle patterns.
-    assert all(s == 0 for s in swizzle_a) and all(s == 0 for s in swizzle_b), (
-        "Inductor _scaled_mm_v2 lowering does not yet support non-trivial "
-        f"swizzles (got swizzle_a={list(swizzle_a)}, swizzle_b={list(swizzle_b)})"
-    )
 
     def check_supported_recipe(recipe: list[int]) -> bool:
         disallowed = OrderedSet([ScalingType.BlockWise1x16, ScalingType.BlockWise1x32])
@@ -987,7 +1011,7 @@ def tuned_scaled_mm_v2(
     _, is_nonzero = _is_static_problem(layout)
 
     if (
-        # We dont have triton lowerings for the MX variants yet
+        # We don't have triton lowerings for the MX variants yet
         is_single_level_scale
         and supported_recipe
         and scale_a[0].dtype == torch.float32

@@ -24,6 +24,11 @@ name: !{{ build_environment }}
 {%- set unified_build_configs = build_configs | selectattr('gpu_arch_type', 'in', unified_arch_types) | list %}
 {%- set matrix_build_configs = build_configs | rejectattr('gpu_arch_type', 'in', unified_arch_types) | list %}
 
+{#- Standard (non-ROCm/XPU) configs that are built by the manywheel-build matrix
+    rather than an inline unified job (e.g. cpu-s390x). manywheel-test consumes
+    these, so it must wait on manywheel-build only when such configs exist. -#}
+{%- set matrix_standard_configs = matrix_build_configs | rejectattr('gpu_arch_type', 'in', ['rocm', 'xpu']) | list %}
+
 {#- Group unified configs by (gpu_arch_type, desired_cuda). Containers differ
     per CUDA version, so each (arch, cuda) needs its own job; within a group
     only the Python version varies. -#}
@@ -168,7 +173,10 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 2
+          # Full fetch on tag pushes so the release tag is visible to
+          # `git describe --tags --exact`; nightlies stay shallow for speed.
+          fetch-depth: ${{ github.ref_type != 'tag' && 2 || 0 }}
+          fetch-tags: ${{ github.ref_type == 'tag' }}
           submodules: recursive
           show-progress: false
       - name: Populate binary env
@@ -247,11 +255,15 @@ jobs:
 {%- endif %}
 
 {%- if test_standard_configs %}
-
+{# manywheel-test depends only on the builds it actually consumes: the unified
+   cpu/cuda jobs, plus manywheel-build only when that matrix builds a standard
+   (non-ROCm/XPU) config such as cpu-s390x. ROCm/XPU are tested by
+   manywheel-test-rocm / manywheel-test-xpu, so a ROCm/XPU build failure must not
+   skip the cpu/cuda tests. #}
   manywheel-test:
     name: ${{ matrix.build_name }}-test
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: [get-label-type{%- if matrix_build_configs %}, manywheel-build{%- endif %}{%- for n in unified_job_names %}, !{{ n }}{%- endfor %}]
+    needs: [get-label-type{%- if matrix_standard_configs %}, manywheel-build{%- endif %}{%- for n in unified_job_names %}, !{{ n }}{%- endfor %}]
     uses: ./.github/workflows/_binary-test-linux.yml
     strategy:
       fail-fast: false

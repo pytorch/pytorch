@@ -1918,14 +1918,17 @@ def module_inputs_torch_nn_LinearCrossEntropyLoss(module_info, device, dtype, re
                         target = torch.full_like(target, ii)
                         yield module_args, module_kwargs, (input, target)
 
-        # Minimal bias=True coverage: one sample per (size, out_features)
-        # with the rest of the parametrization fixed at defaults. Bias is
-        # orthogonal to reduction / ignore_index / label_smoothing /
-        # weight / target_dtype (linear adds a constant to every logit
-        # element regardless of how cross_entropy reduces or weights
-        # them), so we don't expand against those axes. ``options=None``
-        # only -- the chunked path warns + falls back on linear_bias and
-        # gets covered by a dedicated unit test.
+        # Minimal bias=True coverage: one sample per (size, out_features,
+        # options-variant) with the rest of the parametrization fixed at
+        # defaults. Bias is orthogonal to reduction / ignore_index /
+        # label_smoothing / weight / target_dtype (linear adds a
+        # constant to every logit element regardless of how
+        # cross_entropy reduces or weights them), so we don't expand
+        # against those axes. We DO emit one chunked variant
+        # (``options != None``) per (size, out_features) so the chunked
+        # ``linear_bias`` path -- including the mixed-precision
+        # acc_dtype scratch + post-yield commit on fp16/bf16 inputs --
+        # gets gradient coverage through ``_test_linear_cross_entropy_loss``.
         for sizes in [(8, 5, 4), (None, 8, 4)]:
             num_batches, in_features, num_classes = sizes
             batch_dims = () if num_batches is None else (num_batches,)
@@ -1933,7 +1936,7 @@ def module_inputs_torch_nn_LinearCrossEntropyLoss(module_info, device, dtype, re
                 if num_batches is None and of:
                     continue  # K-dim loss requires a batch dim.
                 module_args = (in_features, num_classes)
-                module_kwargs = dict(
+                base_module_kwargs = dict(
                     out_features=of,
                     bias=True,
                     device=device,
@@ -1942,11 +1945,31 @@ def module_inputs_torch_nn_LinearCrossEntropyLoss(module_info, device, dtype, re
                     weight=None,
                     ignore_index=None,
                     label_smoothing=0.0,
-                    options=None,
                 )
-                input = make_input(batch_dims, in_features)
-                target = make_target(num_classes, (*batch_dims, *of), torch.int64)
-                yield module_args, module_kwargs, (input, target)
+                # options=None: reference-path bias coverage.
+                # options=LinearCrossEntropyOptions(...): chunked-path
+                #   bias coverage (only fires when out_features == ();
+                #   K-dim chunked + bias falls back to the reference
+                #   path with a warning -- not a useful test sample).
+                #   ``batch_chunk_size=2`` forces >=2 chunks on every
+                #   device so the post-yield ``bias_grad_acc.zero_()``
+                #   reset between chunks gets exercised even on CPU
+                #   (where the ``aspect_ratio`` auto-heuristic for the
+                #   small (8, 5, 4) shape would otherwise produce a
+                #   single chunk).
+                options_variants = [None]
+                if not of:
+                    options_variants.append(
+                        torch.nn.LinearCrossEntropyOptions(
+                            allow_retain_graph=allow_retain_graph,
+                            batch_chunk_size=2,
+                        )
+                    )
+                for options in options_variants:
+                    module_kwargs = dict(base_module_kwargs, options=options)
+                    input = make_input(batch_dims, in_features)
+                    target = make_target(num_classes, (*batch_dims, *of), torch.int64)
+                    yield module_args, module_kwargs, (input, target)
 
     module_inputs = []
     for module_args, module_kwargs, (input, target) in samples():
@@ -4024,6 +4047,52 @@ def module_error_inputs_torch_nn_Pad3d(module_info, device, dtype, requires_grad
         ),
     ]
 
+def module_error_inputs_torch_nn_HuberLoss(module_info, device, dtype, requires_grad, training, **kwargs):
+    return [
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(delta=1.0 + 0.0j),
+            ),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=TypeError,
+            error_regex=r"delta must be a float or int, got: <class 'complex'>",
+        ),
+    ]
+
+
+def module_error_inputs_torch_nn_Softmax(module_info, device, dtype, requires_grad, training, **kwargs):
+    return [
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(dim=True),
+            ),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=TypeError,
+            error_regex=r"dim must be an int or None",
+        ),
+    ]
+
+
+def module_error_inputs_torch_nn_LogSoftmax(module_info, device, dtype, requires_grad, training, **kwargs):
+    return [
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(dim=1.0),
+            ),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=TypeError,
+            error_regex=r"dim must be an int or None",
+        ),
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(dim=True),
+            ),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=TypeError,
+            error_regex=r"dim must be an int or None",
+        ),
+    ]
+
 
 _macos15_or_newer = torch.backends.mps.is_available() and torch.backends.mps.is_macos_or_newer(15, 0)
 
@@ -4554,6 +4623,7 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.HuberLoss,
                module_inputs_func=module_inputs_torch_nn_HuberLoss,
+               module_error_inputs_func=module_error_inputs_torch_nn_HuberLoss,
                skips=(
                    # No channels_last support for loss functions.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
@@ -4624,6 +4694,13 @@ module_db: list[ModuleInfo] = [
                                 "test_save_load", device_type="cuda", dtypes=[torch.bfloat16]),
                ),
                skips=(
+                   # The chunked reduction='none' backward recomputes grads
+                   # via in-place buffer accumulation, which gradcheck's
+                   # batched-grad path (vmapped cotangent) cannot handle.
+                   # Grad correctness is covered by the fp64 gradcheck and
+                   # ULP comparisons in test_nn.py and the OpInfo variants.
+                   DecorateInfo(unittest.skip("chunked none backward not batched-grad compatible"),
+                                'TestModule', 'test_grad'),
                    DecorateInfo(unittest.skip("jacobian mismatch"), 'TestModule', 'test_gradgrad'),),
                ),
     ModuleInfo(torch.nn.CTCLoss,
@@ -4838,28 +4915,26 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.Sigmoid,
                module_inputs_func=module_inputs_torch_nn_Sigmoid,
-               skips=None if _macos15_or_newer else (
-                   # Fails on backward check on MPS
-                   # See https://github.com/pytorch/pytorch/issues/107214
-                   DecorateInfo(
-                       unittest.expectedFailure,
-                       'TestModule',
-                       'test_memory_format',
-                       active_if=operator.itemgetter('training'),
-                       device_type='mps',
-                   ),)
                ),
     ModuleInfo(torch.nn.LogSigmoid,
                module_inputs_func=module_inputs_torch_nn_LogSigmoid,
-               skips=(
-                   # See #119108: tolerance issue
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_forward", device_type='mps', dtypes=[torch.float16]),)
+               decorators=(
+                   # The test's reference_fn is `i.sigmoid().log()`, which in fp16
+                   # loses precision as sigmoid(x) saturates near 1 for moderate x.
+                   # log_sigmoid uses the stable `min(0,x) - log1p(exp(-|x|))`
+                   # in fp32, so it can differ from the naive reference by up to
+                   # ~1 ULP of sigmoid(x) (~4e-3 for x in fp16's mid-range).
+                   DecorateInfo(toleranceOverride({torch.float16: tol(atol=5e-3, rtol=1e-3)}),
+                                "TestModule", "test_forward",
+                                device_type='mps', dtypes=[torch.float16]),
+               ),
                ),
     ModuleInfo(torch.nn.SiLU,
                module_inputs_func=module_inputs_torch_nn_SiLU,
                ),
     ModuleInfo(torch.nn.Softmax,
                module_inputs_func=module_inputs_torch_nn_Softmax,
+               module_error_inputs_func=module_error_inputs_torch_nn_Softmax,
                ),
     ModuleInfo(torch.nn.Softmax2d,
                module_inputs_func=module_inputs_torch_nn_Softmax2d,
@@ -4871,6 +4946,7 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.LogSoftmax,
                module_inputs_func=module_inputs_torch_nn_LogSoftmax,
+               module_error_inputs_func=module_error_inputs_torch_nn_LogSoftmax,
                skips=(
                    # no channels last support for LogSoftmax currently
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),

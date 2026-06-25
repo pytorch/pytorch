@@ -79,7 +79,6 @@ bool isRegisteredOpaqueType(const std::string& type_name) {
 TypePtr SchemaTypeParser::parseBaseType() {
   static std::unordered_map<std::string, TypePtr> type_map = {
       {"Generator", c10::TypeFactory::get<GeneratorType>()},
-      {"Dimname", c10::TypeFactory::get<StringType>()},
       {"ScalarType", c10::TypeFactory::get<ScalarTypeType>()},
       {"Layout", c10::TypeFactory::get<LayoutType>()},
       {"MemoryFormat", c10::TypeFactory::get<MemoryFormatType>()},
@@ -337,7 +336,7 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
         });
         return;
       }
-      throw(ErrorReport(L.cur()) << "Unexpected specifier '" << field << "'");
+      throw(ErrorReport(L.cur()) << "Unexpected specifier '" << field << '\'');
     }
     if (device.has_value() || requires_grad.has_value()) {
       throw(

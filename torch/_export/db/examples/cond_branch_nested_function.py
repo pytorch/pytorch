@@ -15,7 +15,7 @@ class CondBranchNestedFunction(torch.nn.Module):
 
     This example demonstrates using nested function in cond().
 
-    NOTE: If the `pred` is test on a dim with batch size < 2, it will be specialized.
+    NOTE: If the `pred` is tested on a dim with batch size < 2, it will be specialized.
     """
 
     def forward(self, x):

@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: pt2"]
 # Workflow: Dynamo Unit Test
 # runs unit tests for dynamo.
 name: dynamo-unittest
@@ -53,7 +54,7 @@ jobs:
           { config: "dynamo_wrapped", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
           { config: "dynamo_wrapped", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
         ]}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: ${{ matrix.python-version }}
       compiler: clang18
       cuda-version: cpu
@@ -71,7 +72,7 @@ jobs:
       build-environment: linux-jammy-py${{ matrix.python-version }}-clang18
       docker-image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/ci-image:pytorch-linux-jammy-py${{ matrix.python-version }}-clang18-${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: ${{ needs.dynamo-build.outputs.test-matrix }}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: ${{ matrix.python-version }}
       compiler: clang18
       cuda-version: cpu

@@ -9,15 +9,14 @@ import torch.fx.graph
 
 if TYPE_CHECKING:
     from torch._functorch.partitioners import NodeInfo
+    from torch._inductor.scheduler import BaseSchedulerNode
 
 
-class CustomGraphPass(ABC):
+class CustomPassBase(ABC):
     """
-    Implement this interface for custom Graph passes:
+    Implement this interface for custom passes:
 
-    1) The __call__() method contains the implementation of the custom pass.
-
-    2) The uuid() method enables inductor to cache compiled graphs when your custom
+    The uuid() method enables inductor to cache compiled graphs when your custom
     passes are applied. This method can return any identifier as long as it uniquely
     identifies your implementation (and can be pickled). The caching logic includes this
     identifier in its key calculation, i.e., any new value will effectively invalidate
@@ -44,12 +43,6 @@ class CustomGraphPass(ABC):
     """
 
     @abstractmethod
-    def __call__(self, graph: torch.fx.graph.Graph) -> None:
-        """
-        Implementation of the custom pass.
-        """
-
-    @abstractmethod
     def uuid(self) -> Any | None:
         """
         Return an ID to uniquely identify your custom pass implementation. Return None
@@ -57,22 +50,40 @@ class CustomGraphPass(ABC):
         """
 
 
-class CustomGraphModulePass(ABC):
+class CustomGraphPass(CustomPassBase):
     """
     Implement this interface for custom Graph passes:
 
     1) The __call__() method contains the implementation of the custom pass.
 
-    2) The uuid() method enables inductor to cache compiled graphs when your custom
-    passes are applied. This method can return any identifier as long as it uniquely
-    identifies your implementation (and can be pickled). The caching logic includes this
-    identifier in its key calculation, i.e., any new value will effectively invalidate
-    existing entries. We expect custom passes would typically depend purely on the
-    textual representation of the implementation. In that case, we recommend using the
-    'get_hash_for_files' helper below to compute a unique hash from the contents of a
-    static list of source files, i.e., the source(s) containing the custom pass
-    implementation. That approach ensures that any change to the implementation will
-    mean a new uuid.
+    2) See CustomPassBase.uuid() docstring for implementing the uuid() method.
+
+    EXAMPLE:
+
+    class MyCustomGraphPass(CustomGraphPass):
+        def __call__(self, graph: torch.fx.graph.Graph) -> None:
+            # my custom graph optimization pass
+            #     ...
+
+        def uuid(self) -> Optional[Any]:
+            return get_hash_for_files((__file__,))
+
+    """
+
+    @abstractmethod
+    def __call__(self, graph: torch.fx.graph.Graph) -> None:
+        """
+        Implementation of the custom pass.
+        """
+
+
+class CustomGraphModulePass(CustomPassBase):
+    """
+    Implement this interface for custom passes that operate on GraphModule:
+
+    1) The __call__() method contains the implementation of the custom pass.
+
+    2) See CustomPassBase.uuid() docstring for implementing the uuid() method.
     """
 
     @abstractmethod
@@ -81,18 +92,26 @@ class CustomGraphModulePass(ABC):
         Implementation of the custom pass.
         """
 
+
+class CustomSchedulerPass(CustomPassBase):
+    """
+    Implement this interface for custom Scheduler passes:
+
+    1) The __call__() method contains the implementation of the custom pass.
+
+    2) See CustomPassBase.uuid() docstring for implementing the uuid() method.
+    """
+
     @abstractmethod
-    def uuid(self) -> Any | None:
+    def __call__(self, nodes: list["BaseSchedulerNode"]) -> list["BaseSchedulerNode"]:
         """
-        Return an ID to uniquely identify your custom pass implementation. Return None
-        to skip inductor code caching entirely.
+        Implementation of the custom pass.
         """
 
 
 class CustomInferenceAwareGraphPass(CustomGraphPass):
     """
     Implement this interface for custom inference aware Graph passes.
-
     """
 
     @abstractmethod
@@ -110,6 +129,11 @@ CustomGraphPassType: TypeAlias = (
     | list[CustomGraphPassCallable]
     | tuple[CustomGraphPassCallable, ...]
     | None
+)
+
+CustomSchedulerPassCallable: TypeAlias = (
+    CustomSchedulerPass
+    | Callable[[list["BaseSchedulerNode"]], list["BaseSchedulerNode"]]
 )
 
 
@@ -136,22 +160,13 @@ def get_hash_for_files(paths: tuple[str, ...], extra: str = "") -> bytes:
     return hasher.digest()
 
 
-class CustomPartitionerFn(ABC):
+class CustomPartitionerFn(CustomPassBase):
     """
     Implement this interface for custom partitioner:
 
     1) The __call__() method contains the implementation of the custom partitioner.
 
-    2) The uuid() method enables inductor to cache compiled graphs when your custom
-    partitioner are applied. This method can return any identifier as long as it uniquely
-    identifies your implementation (and can be pickled). The caching logic includes this
-    identifier in its key calculation, i.e., any new value will effectively invalidate
-    existing entries. We expect custom partitioner would typically depend purely on the
-    textual representation of the implementation. In that case, we recommend using the
-    'get_hash_for_files' helper below to compute a unique hash from the contents of a
-    static list of source files, i.e., the source(s) containing the custom partitioner
-    implementation. That approach ensures that any change to the implementation will
-    mean a new uuid.
+    2) See CustomPassBase.uuid() docstring for implementing the uuid() method.
 
     EXAMPLE:
 
@@ -191,25 +206,13 @@ class CustomPartitionerFn(ABC):
 CustomPartitionerFnType: TypeAlias = CustomPartitionerFn | None
 
 
-class CustomRuntimeEstimator(ABC):
+class CustomRuntimeEstimator(CustomPassBase):
     """
     Implement this interface for custom runtime estimators:
 
     1) The __call__() method contains the implementation of the runtime estimation.
 
-    2) The uuid() method enables AOTAutograd to cache compiled graphs when your custom
-    runtime estimator is used. This method can return any identifier as long as it uniquely
-    identifies your implementation (and can be pickled). The caching logic includes this
-    identifier in its key calculation, i.e., any new value will effectively invalidate
-    existing entries. We expect custom runtime estimators would typically depend purely on the
-    textual representation of the implementation. In that case, we recommend using the
-    'get_hash_for_files' helper below to compute a unique hash from the contents of a
-    static list of source files, i.e., the source(s) containing the custom runtime estimator
-    implementation. That approach ensures that any change to the implementation will
-    mean a new uuid.
-
-    ** IMPORTANT ** If your custom runtime estimator's behavior depends on some external state,
-    then you'll need to implement something more complicated (or disable caching).
+    2) See CustomPassBase.uuid() docstring for implementing the uuid() method.
 
     EXAMPLE:
 
@@ -234,33 +237,14 @@ class CustomRuntimeEstimator(ABC):
             float: The estimated runtime for the node.
         """
 
-    @abstractmethod
-    def uuid(self) -> Any | None:
-        """
-        Return an ID to uniquely identify your custom runtime estimator implementation.
-        Return None to skip AOTAutograd caching entirely.
-        """
 
-
-class CustomKnapsackSolver(ABC):
+class CustomKnapsackSolver(CustomPassBase):
     """
     Implement this interface for custom knapsack solvers:
 
     1) The __call__() method contains the implementation of the knapsack solver.
 
-    2) The uuid() method enables AOTAutograd to cache compiled graphs when your custom
-    knapsack solver is used. This method can return any identifier as long as it uniquely
-    identifies your implementation (and can be pickled). The caching logic includes this
-    identifier in its key calculation, i.e., any new value will effectively invalidate
-    existing entries. We expect custom knapsack solvers would typically depend purely on the
-    textual representation of the implementation. In that case, we recommend using the
-    'get_hash_for_files' helper below to compute a unique hash from the contents of a
-    static list of source files, i.e., the source(s) containing the custom knapsack solver
-    implementation. That approach ensures that any change to the implementation will
-    mean a new uuid.
-
-    ** IMPORTANT ** If your custom knapsack solver's behavior depends on some external state,
-    then you'll need to implement something more complicated (or disable caching).
+    2) See CustomPassBase.uuid() docstring for implementing the uuid() method.
 
     EXAMPLE:
 
@@ -291,11 +275,4 @@ class CustomKnapsackSolver(ABC):
     ) -> tuple[list[int], list[int]]:
         """
         Implementation of the custom knapsack solver.
-        """
-
-    @abstractmethod
-    def uuid(self) -> Any | None:
-        """
-        Return an ID to uniquely identify your custom knapsack solver implementation.
-        Return None to skip AOTAutograd caching entirely.
         """

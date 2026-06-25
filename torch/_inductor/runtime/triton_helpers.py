@@ -3,6 +3,8 @@
 import math as pymath
 import warnings
 from collections.abc import Callable
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any, TypeVar
 
 from .triton_compat import (
@@ -18,6 +20,20 @@ from .triton_compat import (
 
 _T = TypeVar("_T")
 _LOG_2_E: tl.constexpr = tl.constexpr(pymath.log2(pymath.e))
+_skip_gpu_driver_setup: ContextVar[bool] = ContextVar(
+    "_skip_gpu_driver_setup", default=False
+)
+
+
+@contextmanager
+def skip_gpu_driver_setup():
+    # Scoped no-op for set_driver_to_gpu(). ContextVar keeps nested/thread-local
+    # uses isolated.
+    token = _skip_gpu_driver_setup.set(True)
+    try:
+        yield
+    finally:
+        _skip_gpu_driver_setup.reset(token)
 
 
 def set_driver_to_cpu():
@@ -52,6 +68,9 @@ def _is_backend_active(name, backend):
 
 
 def set_driver_to_gpu():
+    if _skip_gpu_driver_setup.get():
+        return
+
     driver = triton.runtime.driver
     for name, backend in triton.backends.backends.items():
         if _is_backend_active(name, backend) and name != "cpu":
@@ -69,13 +88,73 @@ def set_driver_to_gpu():
     raise RuntimeError("Could not find an active GPU backend")
 
 
+def get_backend_options_for_target(target, options=None):
+    options = {} if options is None else dict(options)
+    backend = triton.compiler.compiler.make_backend(target)
+    return backend.parse_options(options).__dict__
+
+
 def get_backend_options():
     from triton.runtime import driver
 
     target = driver.active.get_current_target()
-    backend = triton.compiler.compiler.make_backend(target)
-    options = backend.parse_options(dict())
-    return options.__dict__
+    return get_backend_options_for_target(target)
+
+
+def _is_concrete_backend_option_value(value: Any) -> bool:
+    import sympy
+
+    import torch
+
+    if isinstance(
+        value,
+        (
+            torch.Tensor,
+            torch.SymInt,
+            torch.SymFloat,
+            torch.SymBool,
+            sympy.Expr,
+        ),
+    ):
+        return False
+    if isinstance(value, (tuple, list)):
+        return all(_is_concrete_backend_option_value(item) for item in value)
+    if isinstance(value, dict):
+        return all(
+            _is_concrete_backend_option_value(key)
+            and _is_concrete_backend_option_value(item)
+            for key, item in value.items()
+        )
+    return True
+
+
+def try_filter_backend_options_for_target(target, options, kernel_arg_names=()):
+    parsed_options = get_backend_options_for_target(target)
+    kernel_arg_names = tuple(kernel_arg_names)
+    filtered_options = {
+        name: value for name, value in options.items() if name in parsed_options
+    }
+    invalid_options = [
+        name
+        for name in options
+        if name not in parsed_options and name not in kernel_arg_names
+    ]
+    if invalid_options:
+        raise RuntimeError(
+            "Triton launch kwargs must be kernel parameters or valid backend options: "
+            f"{sorted(invalid_options)!r}."
+        )
+    dynamic_options = [
+        name
+        for name, value in filtered_options.items()
+        if not _is_concrete_backend_option_value(value)
+    ]
+    if dynamic_options:
+        raise RuntimeError(
+            "Triton backend options must be concrete values: "
+            f"{sorted(dynamic_options)!r}."
+        )
+    return filtered_options
 
 
 def get_constexprs(kernel: JITFunction) -> list[int]:
@@ -86,6 +165,25 @@ def get_constexprs(kernel: JITFunction) -> list[int]:
 def promote_to_tensor(x):
     # Addition promotes to tensor for us
     return x + tl.zeros((1,), tl.int1)
+
+
+@triton.jit
+def fp8e4m3fn_to_float32(x):
+    x_u32 = x.to(tl.uint32)
+    sign = (x_u32 & 0x80) << 24
+    exp = (x_u32 >> 3) & 0xF
+    mant = x_u32 & 0x7
+
+    normal_bits = sign | ((exp + 120) << 23) | (mant << 20)
+    normal = normal_bits.to(tl.float32, bitcast=True)
+
+    subnormal_abs = mant.to(tl.float32) * 0.001953125
+    subnormal_bits = subnormal_abs.to(tl.uint32, bitcast=True) | sign
+    subnormal = subnormal_bits.to(tl.float32, bitcast=True)
+
+    nan = (sign | 0x7FF00000).to(tl.float32, bitcast=True)
+    result = tl.where(exp == 0, subnormal, normal)
+    return tl.where((exp == 0xF) & (mant == 0x7), nan, result)
 
 
 @triton.jit
@@ -328,6 +426,37 @@ def rand_eager_kernel(seed, offset_blocks, tid: tl.tensor, VEC: tl.constexpr):
     rand_int = tl.where((lane == 0) | (lane == 1), v01, v23)
 
     return 1.0 - (rand_int.to(tl.float32) * inv + half)
+
+
+@triton.jit
+def _random_4x_to_block(r0, r1, r2, r3):
+    # Pack lanes by logical offset so the random stream is independent of XBLOCK.
+    size: tl.constexpr = r0.numel
+    return tl.reshape(tl.join(tl.join(r0, r2), tl.join(r1, r3)), [size * 4])
+
+
+@triton.jit
+def rand4x(seed, offsets, BLOCK: tl.constexpr):
+    offsets = offsets.to(tl.uint32)
+    seed = tl.min(seed + offsets * 0, axis=0)
+    if BLOCK >= 4 and BLOCK % 4 == 0:
+        base = tl.min(offsets, axis=0)
+        reduced_offsets = base // 4 + tl.arange(0, BLOCK // 4)
+        r0, r1, r2, r3 = tl.rand4x(seed, reduced_offsets)
+        return _random_4x_to_block(r0, r1, r2, r3)
+    return tl.rand(seed, offsets)
+
+
+@triton.jit
+def randn4x(seed, offsets, BLOCK: tl.constexpr):
+    offsets = offsets.to(tl.uint32)
+    seed = tl.min(seed + offsets * 0, axis=0)
+    if BLOCK >= 4 and BLOCK % 4 == 0:
+        base = tl.min(offsets, axis=0)
+        reduced_offsets = base // 4 + tl.arange(0, BLOCK // 4)
+        r0, r1, r2, r3 = tl.randn4x(seed, reduced_offsets)
+        return _random_4x_to_block(r0, r1, r2, r3)
+    return tl.randn(seed, offsets)
 
 
 @triton.jit
@@ -834,7 +963,8 @@ def constexpr_next_power_of_2(
     """
     A version triton.next_power_of_two that can be used within a kernel on constants.
     """
-    assert isinstance(n, tl.constexpr)
+    if not isinstance(n, tl.constexpr):
+        raise AssertionError(f"Expected tl.constexpr, got {type(n)}")
     return tl.constexpr(triton.next_power_of_2(n.value))
 
 

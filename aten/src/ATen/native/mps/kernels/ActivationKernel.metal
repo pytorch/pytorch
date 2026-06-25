@@ -230,12 +230,44 @@ REGISTER_BINARY_OP(silu_backward, float, float);
 REGISTER_BINARY_OP(silu_backward, half, half);
 REGISTER_BINARY_OP(silu_backward, bfloat, bfloat);
 
+struct mish_functor {
+  template <typename T>
+  inline T operator()(const T x) {
+    float xf = float(x);
+    return static_cast<T>(
+        xf *
+        ::metal::precise::tanh(::c10::metal::log1p(::metal::precise::exp(xf))));
+  }
+};
+
+REGISTER_UNARY_OP(mish, float, float);
+REGISTER_UNARY_OP(mish, half, half);
+REGISTER_UNARY_OP(mish, bfloat, bfloat);
+
+struct mish_backward_functor {
+  template <typename T>
+  inline T operator()(const T grad_output, const T self) {
+    float sf = float(self);
+    float sig = 1.0f / (1.0f + ::metal::precise::exp(-sf));
+    float tsp =
+        ::metal::precise::tanh(::c10::metal::log1p(::metal::precise::exp(sf)));
+    return static_cast<T>(
+        float(grad_output) * (tsp + sf * sig * (1.0f - tsp * tsp)));
+  }
+};
+
+REGISTER_BINARY_OP(mish_backward, float, float);
+REGISTER_BINARY_OP(mish_backward, half, half);
+REGISTER_BINARY_OP(mish_backward, bfloat, bfloat);
+
 template <typename T>
 static inline float gelu_dispatch_tanh(float x) {
   if IF_CONSTEXPR (::metal::is_same_v<T, float>) {
     return ::metal::tanh(x);
   } else {
-    return ::metal::fast::tanh(x);
+    // Clamp to avoid fast::tanh's internals overflowing to NaN,
+    // tanh is already saturated here.
+    return ::metal::fast::tanh(::metal::clamp(x, -10.0f, 10.0f));
   }
 }
 
@@ -301,3 +333,53 @@ REGISTER_BINARY_OP(gelu_backward, bfloat, bfloat);
 REGISTER_BINARY_OP(gelu_tanh_backward, float, float);
 REGISTER_BINARY_OP(gelu_tanh_backward, half, half);
 REGISTER_BINARY_OP(gelu_tanh_backward, bfloat, bfloat);
+
+struct sigmoid_backward_functor {
+  template <typename T, enable_if_t<is_scalar_floating_point_v<T>, bool> = true>
+  inline T operator()(const T grad_output, const T output) {
+    const float of = float(output);
+    return static_cast<T>(float(grad_output) * (1.0f - of) * of);
+  }
+  template <typename T, enable_if_t<is_complex_v<T>, bool> = true>
+  inline T operator()(const T grad_output, const T output) {
+    return c10::metal::mul(
+        grad_output,
+        c10::metal::conj(c10::metal::mul(T(1, 0) - output, output)));
+  }
+};
+
+REGISTER_BINARY_OP(sigmoid_backward, float, float);
+REGISTER_BINARY_OP(sigmoid_backward, half, half);
+REGISTER_BINARY_OP(sigmoid_backward, bfloat, bfloat);
+REGISTER_BINARY_OP(sigmoid_backward, float2, float2);
+REGISTER_BINARY_OP(sigmoid_backward, half2, half2);
+
+struct log_sigmoid_forward_functor {
+  template <typename T>
+  inline T operator()(const T self) {
+    const float x = float(self);
+    const float m = ::metal::min(0.0f, x);
+    const float z = ::metal::precise::exp(-::metal::abs(x));
+    return static_cast<T>(m - log1p(z));
+  }
+};
+
+REGISTER_UNARY_OP(log_sigmoid_forward, float, float);
+REGISTER_UNARY_OP(log_sigmoid_forward, half, half);
+REGISTER_UNARY_OP(log_sigmoid_forward, bfloat, bfloat);
+
+struct log_sigmoid_backward_functor {
+  template <typename T>
+  inline T operator()(const T self, const T grad_output) {
+    // d/dx log(sigmoid(x)) = 1 - sigmoid(x) = sigmoid(-x); compute it stably
+    // via z = exp(-|x|), splitting on sign(x) to avoid overflow.
+    const float in = float(self);
+    const float z = ::metal::precise::exp(-::metal::abs(in));
+    const float t = z / (1.0f + z);
+    return static_cast<T>(float(grad_output) * (in < 0.0f ? 1.0f - t : t));
+  }
+};
+
+REGISTER_BINARY_OP(log_sigmoid_backward, float, float);
+REGISTER_BINARY_OP(log_sigmoid_backward, half, half);
+REGISTER_BINARY_OP(log_sigmoid_backward, bfloat, bfloat);
