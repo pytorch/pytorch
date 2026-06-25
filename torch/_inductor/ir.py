@@ -27,7 +27,15 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import assert_never, Never, override, ParamSpec, Self, TypeIs
+from typing_extensions import (
+    assert_never,
+    Never,
+    override,
+    ParamSpec,
+    Self,
+    TypedDict,
+    TypeIs,
+)
 from unittest.mock import patch
 
 import sympy
@@ -161,6 +169,13 @@ _IntLike: TypeAlias = int | Expr
 _NumLike: TypeAlias = int | float | Expr
 
 _OpOverloads: TypeAlias = torch._ops.OpOverload | torch._ops.HigherOrderOperator
+
+
+class ArgProperty(TypedDict, total=False):
+    name: str
+    type: torch.JitType
+    default_value: object
+
 
 log = logging.getLogger(__name__)
 indent = functools.partial(textwrap.indent, prefix="  ")
@@ -581,7 +596,7 @@ class IRNode:
     traceback: list[str] | None = dataclasses.field(init=False)
     origin_node: torch.fx.Node | None = dataclasses.field(init=False)
     # Annotations dict for storing metadata (e.g., KernelTemplateChoice)
-    annotations: dict[str, Any] = dataclasses.field(init=False)
+    annotations: dict[str, object] = dataclasses.field(init=False)
     # User-annotated stream index from FX node metadata (set during lowering)
     stream_idx: int | None = dataclasses.field(init=False)
 
@@ -5811,7 +5826,7 @@ class TemplateBuffer(OperationBuffer):
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
         # Annotations dict for storing metadata (e.g., KernelTemplateChoice)
-        self.annotations: dict[str, Any] = {}
+        self.annotations: dict[str, object] = {}
 
         # Output buffer names eligible for epilogue fusion.
         # Maps buffer name → kernel parameter name (e.g. "buf3" → "result").
@@ -6125,11 +6140,11 @@ class ChoiceCaller:
         # A place to store annotations that can be read post benchmarking
         # Use this to shuttle information between ChoieCaller generation
         # and the end of benchmarking
-        self.annotations: dict[Any, Any] = {}
+        self.annotations: dict[str, object] = {}
         # Subclass-overridden attributes for subgraph-based choices
         self.gm: torch.fx.GraphModule | None = None
         self.decomposition: Callable[..., Any] | None = None
-        self.decomposition_kwargs: dict[str, Any] = {}
+        self.decomposition_kwargs: dict[str, object] = {}
         self.config_patches: dict[str, Any] = {}
 
     def benchmark(self, *args: Any, out: torch.Tensor) -> float:
@@ -6892,11 +6907,9 @@ class ExternKernel(InputsKernel):
         default_factory=list
     )
     op_overload: _OpOverloads | None = None
-    arg_properties: list[dict[str, Any]] | None = None
-    allarg_properties: dict[str, dict[str, Any]] = dataclasses.field(
-        default_factory=dict
-    )
-    kwarg_properties: dict[str, dict[str, Any]] | None = None
+    arg_properties: list[ArgProperty] | None = None
+    allarg_properties: dict[str, ArgProperty] = dataclasses.field(default_factory=dict)
+    kwarg_properties: dict[str, ArgProperty] | None = None
     unbacked_bindings: dict[sympy.Symbol, pytree.KeyPath] = dataclasses.field(
         default_factory=dict
     )
@@ -6932,7 +6945,7 @@ class ExternKernel(InputsKernel):
         self.mutation_outputs = []
         self.fx_node = V.graph.current_node
         # Annotations dict for storing metadata (e.g., KernelTemplateChoice)
-        self.annotations: dict[str, Any] = {}
+        self.annotations: dict[str, object] = {}
 
     def get_outputs(self) -> list[Buffer]:
         return [self, *self.mutation_outputs]
@@ -7690,14 +7703,16 @@ class ExternKernel(InputsKernel):
             # in which case the following 'len(self.inputs) + i' logic works. But this
             # may not be true for other ops, and if that is the case, caller needs to
             # pass in a list of const arg names for arg_properties lookup.
-            name_to_arg_properties = None
+            name_to_arg_properties: dict[str, ArgProperty] | None = None
             if names and self.arg_properties:
                 if len(self.constant_args) != len(names):
                     raise AssertionError(
                         "names passed to codegen_const_args does not match self.constant_args"
                     )
                 name_to_arg_properties = {
-                    arg.get("name"): arg for arg in self.arg_properties
+                    name: arg
+                    for arg in self.arg_properties
+                    if (name := arg.get("name")) is not None
                 }
 
             for i, x in enumerate(self.constant_args):
@@ -9725,12 +9740,7 @@ class FallbackKernel(ExternKernelAlloc):
                 out_op = lookup_manual_out_variant(kernel)
 
             if out_op is not None and len(get_out_arg_names(out_op)) == 1:
-                layout = FixedLayout(
-                    device=example_output.device,
-                    dtype=example_output.dtype,
-                    size=[*example_output.shape],
-                    stride=[*example_output.stride()],
-                )
+                layout = cls.tensor_to_layout(example_output)
                 return ExternKernelOut(  # type: ignore[return-value]
                     layout=layout,
                     inputs=list(tensor_args),

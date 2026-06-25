@@ -5,6 +5,10 @@ import tempfile
 from collections.abc import Callable
 from functools import wraps
 from typing import Any
+from unittest.mock import patch
+
+import fsspec
+import fsspec.implementations.memory
 
 import torch
 import torch.distributed as dist
@@ -207,6 +211,49 @@ class TestFileSystem(TestCase):
             with fs.create_stream(read_file, "r") as s:
                 raise OSError("fail")
         self.assertTrue(fs.exists(read_file))
+
+    @patch("os.sync")
+    def test_fsspec_without_fileno_support(self, mock_os_sync):
+        """
+        fsspec's "memory://" protocol simulates cloud storage
+        by not supporting .fileno() and raising io.UnsupportedOperation.
+        This tests that the stream is flushed and fsync degrades gracefully.
+        """
+        checkpoint_dir = "memory://test_checkpoint_with_no_file_no"
+
+        # Create a dummy state dict
+        state_dict = {"tensor": torch.randn(10)}
+
+        # Spy on the MemoryFile flush method to ensure it gets called
+        with patch.object(
+            fsspec.implementations.memory.MemoryFile, "flush", autospec=True
+        ) as mock_flush:
+            # Save using FsspecWriter
+            dcp.save(
+                state_dict=state_dict,
+                storage_writer=FsspecWriter(checkpoint_dir),
+                planner=dcp.DefaultSavePlanner(),
+                no_dist=True,
+            )
+
+            # Assert that flush() was explicitly called on the stream
+            self.assertTrue(
+                mock_flush.called, "Expected stream.flush() to be called explicitly."
+            )
+
+        # Verify it saved properly and can be loaded
+        load_dict = {"tensor": torch.zeros(10)}
+        dcp.load(
+            state_dict=load_dict,
+            storage_reader=FsspecReader(checkpoint_dir),
+            planner=dcp.DefaultLoadPlanner(),
+            no_dist=True,
+        )
+
+        self.assertTrue(torch.allclose(state_dict["tensor"], load_dict["tensor"]))
+
+        # Assert that os.sync() was NEVER called
+        mock_os_sync.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@ from functools import partial
 from unittest import expectedFailure
 
 import torch
+import torch._dynamo.config
 from torch import nn
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.nn.utils.parametrize import (
@@ -168,6 +169,7 @@ class TestSubclass(TestCase):
         m(create_fn()).sum().backward(torch.tensor(1))
         optimizer.step()
 
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     @parametrize_tensor_cls
     @parametrize("leave_parametrized", [False, True])
     def test_parametrization(self, tensor_cls, leave_parametrized):

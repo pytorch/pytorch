@@ -155,6 +155,38 @@ def fuse_as_graphmodule(
     ] = {}  # mapping of nodes from old graph to placeholder in new graph
     node_map: dict[Node, Node] = {}  # mapping of nodes from old graph to new graph
 
+    def create_placeholder(input_node: Node) -> None:
+        placeholder_node = subgraph.placeholder(
+            input_node.name, type_expr=input_node.type
+        )
+        # copy all meta fields, even if some fields might be irrelevant for the placeholder node
+        placeholder_node.meta = copy.copy(input_node.meta)
+        node_to_placeholder[input_node] = placeholder_node
+
+    external_inputs: list[Node] = []
+    external_inputs_set: set[Node] = set()
+    for node in nodes:
+        for input_node in node.all_input_nodes:
+            if (
+                input_node not in partition_lookup_table
+                and input_node not in external_inputs_set
+            ):
+                external_inputs.append(input_node)
+                external_inputs_set.add(input_node)
+
+    if external_inputs and all(
+        input_node.op == "placeholder" for input_node in external_inputs
+    ):
+        # True graph placeholders have a stable original input order. Keep the
+        # historical encounter order for mixed or intermediate boundaries,
+        # because downstream lowering may derive its own call args from the
+        # submodule placeholder order.
+        graph_order = {node: i for i, node in enumerate(gm.graph.nodes)}
+        external_inputs.sort(key=lambda node: graph_order[node])
+
+    for input_node in external_inputs:
+        create_placeholder(input_node)
+
     # handles inputs through graph.node_copy's arg_transform functions
     def remap_inputs(x: Node) -> Node:
         if x.op == "get_attr":
@@ -166,13 +198,6 @@ def fuse_as_graphmodule(
             # x is inside subgraph, return the copied node
             # the node should have been copied already, as we are copying graph in the topological order
             return node_map[x]
-
-        if x not in node_to_placeholder:
-            # x is not in subgraph, create a new placeholder for subgraph
-            placeholder_node = subgraph.placeholder(x.name, type_expr=x.type)
-            # copy all meta fields, even if some fields might be irrelevant for the placeholder node
-            placeholder_node.meta = copy.copy(x.meta)
-            node_to_placeholder[x] = placeholder_node
 
         return node_to_placeholder[x]
 

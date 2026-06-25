@@ -506,7 +506,6 @@ class FakeTensorTest(TestCase):
         fake_t = mode.from_tensor(t)
         self.assertEqual(fake_t.requires_grad, t.requires_grad)
 
-    @expectedFailurePropagateRealTensors
     def test_non_parameter_grad_tensor_subclass_stateful_context(self):
         mode = FakeTensorMode(shape_env=ShapeEnv())
         t = torch.ones(2, requires_grad=True)
@@ -1709,11 +1708,14 @@ def forward(self, x_1):
     def test_embedding_meta_indices(self):
         with FakeTensorMode():
             weight = torch.empty(20, 8)
-            indices = torch.empty(2, 3, dtype=torch.long, device="meta")
+            # Indices must be in range: under propagate_real_tensors the real
+            # embedding gather runs, and uninitialized (torch.empty) indices read
+            # out of bounds -- a hard GPU fault on some backends (e.g. ROCm).
+            indices = torch.zeros(2, 3, dtype=torch.long, device="meta")
             out = torch.nn.functional.embedding(indices, weight)
 
             meta_weight = torch.empty(20, 8, dtype=torch.float64, device="meta")
-            cpu_indices = torch.empty(4, 5, dtype=torch.long)
+            cpu_indices = torch.zeros(4, 5, dtype=torch.long)
             meta_weight_out = torch.nn.functional.embedding(cpu_indices, meta_weight)
 
             run_cuda_cases = (
@@ -1722,7 +1724,7 @@ def forward(self, x_1):
             )
             if run_cuda_cases:
                 cuda_weight = torch.empty(20, 8, device="cuda")
-                cuda_indices = torch.empty(2, 3, dtype=torch.long, device="cuda")
+                cuda_indices = torch.zeros(2, 3, dtype=torch.long, device="cuda")
                 cuda_out = torch.nn.functional.embedding(cuda_indices, cuda_weight)
 
         self.assertIsInstance(out, FakeTensor)

@@ -16875,12 +16875,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             with self.assertRaisesRegex(RuntimeError, "Output size is too small"):
                 _ = torch.compile(model)(inputs)
 
-    @skipIfRocm
     @requires_cuda
     def test_conv_transpose_zero_size_output(self):
-        # Only CUDA (cuDNN) supports zero-sized spatial outputs for conv_transpose.
-        # ROCm/miopen fails with miopenStatusBadParm, MPS fails with empty placeholder assert.
-        # This test ensures compiled mode matches eager behavior on CUDA.
+        # CUDA/HIP support zero-sized spatial outputs for conv_transpose by
+        # short-circuiting before backend libraries see empty tensor descriptors.
+        # This test ensures compiled mode matches eager behavior.
         class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()

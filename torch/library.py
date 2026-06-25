@@ -312,7 +312,9 @@ class Library:
 
         result = self.m.define(schema, alias_analysis, tuple(tags))
         name = schema.split("(")[0]
-        qualname = self.ns + "::" + name
+        # C++ accepts a name prefixed with the matching namespace ("ns::foo");
+        # don't double-prepend the namespace in that case.
+        qualname = name if "::" in name else f"{self.ns}::{name}"
 
         # If the OpOverloadPacket exists already, then this means we're adding a
         # new OpOverload for it. Refresh the packet to include the new OpOverload.
@@ -620,7 +622,13 @@ def _clear_torch_ops_cache(op_defs):
     # That's OK - the next time torch.ops.ns.foo gets called, it'll be
     # recomputed to point at the right collection of overloads.
     for qualname in op_defs:
-        ns, name_with_overload = qualname.split("::")
+        splits = qualname.split("::")
+        if len(splits) != 2:
+            # Defense-in-depth: this runs in a shutdown-time finalizer that must
+            # never raise, so tolerate any qualname that isn't a clean
+            # "namespace::name" instead of unpacking blindly.
+            continue
+        ns, name_with_overload = splits
         name = name_with_overload.split(".")[0]
         if not hasattr(torch.ops, ns):
             continue

@@ -28,6 +28,7 @@ _gradcheck_ops = partial(
 @unMarkDynamoStrictTest
 class TestBwdGradients(TestGradients):
     # Tests that gradients are computed correctly
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     @_gradcheck_ops(op_db + hop_db + custom_op_db)
     def test_fn_grad(self, device, dtype, op):
         # This is verified by test_dtypes in test_ops.py
@@ -64,6 +65,7 @@ class TestBwdGradients(TestGradients):
             )
 
     # Test that gradients of gradients are computed correctly
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     @_gradcheck_ops(op_db + hop_db + custom_op_db)
     def test_fn_gradgrad(self, device, dtype, op):
         self._skip_helper(op, device, dtype)

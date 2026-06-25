@@ -650,6 +650,9 @@ class TestFxGraphCache(TestCase):
         with config.patch(
             bundle_triton_into_fx_graph_cache=bundle_triton,
             use_static_triton_launcher=use_static_triton_launcher,
+            # Avoid non-deterministic pad_mm benchmarking changing numerics or
+            # the number of bundled Triton static autotuners across runs.
+            shape_padding=False,
         ):
             compiled_fn = torch.compile(fn, dynamic=dynamic)
 

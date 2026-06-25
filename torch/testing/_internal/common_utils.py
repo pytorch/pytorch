@@ -1175,7 +1175,6 @@ def discover_test_cases_recursively(suite_or_case):
         return [suite_or_case]
     rc = []
     for element in suite_or_case:
-        print(element)
         rc.extend(discover_test_cases_recursively(element))
     return rc
 
@@ -1807,6 +1806,8 @@ if TEST_WITH_TORCHDYNAMO:
     torch._dynamo.config.log_compilation_metrics = False
     # Silence 3.13.0 guard performance warnings
     torch._dynamo.config.issue_3_13_0_warning = False
+    # Enable nested graph breaks for dynamo-wrapped tests
+    torch._dynamo.config.nested_graph_breaks = True
     if TEST_WITH_TORCHINDUCTOR:
         import torch._inductor.config
         torch._inductor.config.fallback_random = True
