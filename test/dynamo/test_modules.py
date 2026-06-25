@@ -2454,6 +2454,33 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled_func(inp), outer_func(inp))
         self.assertEqual(compiled_func(inp).item(), 16)
 
+    def test_forward_hook_handle_attr_in_hasattr(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.encoder = torch.nn.Linear(8, 4)
+                self.decoder = torch.nn.Linear(4, 8)
+
+            def forward(self, x):
+                if not hasattr(self, "_forward_hook"):
+                    self._forward_hook = self.register_forward_hook(
+                        lambda module, inputs, output: output + 1
+                    )
+                return self.decoder(self.encoder(x))
+
+        model = TestModule().eval()
+        x = torch.randn(2, 8)
+
+        with torch.no_grad():
+            model(x)
+            expected = model(x)
+
+        compiled_model = torch.compile(model, backend="eager", fullgraph=True)
+        with torch.no_grad():
+            actual = compiled_model(x)
+
+        self.assertEqual(actual, expected)
+
     def _forward_hook_test_helper(self, model):
         forward_handles = {}
         compiled_activations = {}

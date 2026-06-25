@@ -2513,6 +2513,33 @@ class GeneratedCodeCacheEntry(NamedTuple):
     events: list[Any]
 
 
+def template_subgraph_index_dtype_nodes(
+    subgraphs: Sequence[Any] | None,
+) -> tuple[ir.IRNode, ...]:
+    """Return graph buffers referenced by template subgraphs for index-width selection."""
+    if subgraphs is None:
+        return ()
+
+    nodes: list[ir.IRNode] = []
+    seen_names: OrderedSet[str] = OrderedSet()
+    pending: list[Any] = list(reversed(subgraphs))
+    while pending:
+        subgraph = pending.pop()
+        if isinstance(subgraph, (list, tuple)):
+            pending.extend(reversed(subgraph))
+            continue
+        if subgraph is None:
+            continue
+        for dep in subgraph.get_read_writes().reads_and_writes():
+            if dep.name in seen_names:
+                continue
+            buffer = V.graph.try_get_buffer(dep.name)
+            if isinstance(buffer, ir.IRNode):
+                nodes.append(buffer)
+                seen_names.add(dep.name)
+    return tuple(nodes)
+
+
 class GeneratedCodeCache:
     """
     Cache for generated code. The cache key is a string representation of the input nodes,
@@ -2568,8 +2595,8 @@ class GeneratedCodeCache:
             if isinstance(layout, ir.FlexibleLayout):
                 return True
 
-            for input in input_nodes:
-                if isinstance(input.get_layout(), ir.FlexibleLayout):
+            for input_node in input_nodes:
+                if isinstance(input_node.get_layout(), ir.FlexibleLayout):
                     return True
             return False
 
@@ -2771,7 +2798,11 @@ class TritonTemplate(KernelTemplate):
         kernel_name = f"triton_{self.name}"
 
         numel = sympy_product(layout.size)
-        buffers = itertools.chain(input_nodes, (fake_out,))
+        buffers = itertools.chain(
+            input_nodes,
+            template_subgraph_index_dtype_nodes(subgraphs),
+            (fake_out,),
+        )
 
         if TritonScheduling.can_use_32bit_indexing(numel, buffers):
             index_dtype = "tl.int32"

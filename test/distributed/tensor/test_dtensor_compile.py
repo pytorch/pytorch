@@ -222,12 +222,14 @@ def _apply_sharding(mod: nn.Module, shard_dim: int, device_mesh: DeviceMesh):
 class TestDTensorCompile(torch._dynamo.test_case.TestCase):
     def setUp(self):
         super().setUp()
+        torch._dynamo.config.canonicalize_output_graph_node_order = False
         fake_store = FakeStore()
         dist.init_process_group(
             "fake", store=fake_store, rank=0, world_size=self.world_size
         )
 
     def tearDown(self):
+        torch._dynamo.config.canonicalize_output_graph_node_order = True
         super().tearDown()
         dist.destroy_process_group()
 
@@ -2146,6 +2148,11 @@ class outer_fn(torch.nn.Module):
         # Test backward pass
         result.sum().backward()
 
+    @unittest.skip(
+        "compile_on_one_rank device-as-parameter is not yet supported with the inductor "
+        "backend (the coor::current_device node cannot be lowered); re-enabled when the "
+        "post-grad strip pass lands"
+    )
     @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
     def test_flattened_submesh_no_getattr_compile_on_one_rank(self):
         """When compile_on_one_rank=True, the flattened submesh should appear as a

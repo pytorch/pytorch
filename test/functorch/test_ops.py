@@ -641,6 +641,11 @@ class TestOperators(TestCase):
             tol1("svd_lowrank", {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
             tol1("pca_lowrank", {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
             tol1(
+                "nn.functional.linear_cross_entropy",
+                {torch.float32: tol(atol=2e-05, rtol=3e-06)},
+                device_type="cuda",
+            ),
+            tol1(
                 "nn.functional.multi_head_attention_forward",
                 {torch.float32: tol(atol=6e-05, rtol=2e-05)},
             ),

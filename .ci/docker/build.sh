@@ -241,11 +241,6 @@ case "$tag" in
     HALIDE=yes
     TRITON=yes
     ;;
-  pytorch-linux-jammy-py3.12-pallas)
-    ANACONDA_PYTHON_VERSION=3.12
-    GCC_VERSION=11
-    PALLAS=yes
-    ;;
   pytorch-linux-jammy-cuda12.8-py3.12-pallas)
     CUDA_VERSION=12.8.1
     ANACONDA_PYTHON_VERSION=3.12
@@ -335,6 +330,14 @@ case "$tag" in
     fi
   ;;
 esac
+
+# ubuntu/Dockerfile provisions Python from a deadsnakes venv keyed on
+# PYTHON_VERSION, while the rocm/xpu images still express it as
+# ANACONDA_PYTHON_VERSION (they keep conda). Mirror the value so both flavors
+# get what they expect.
+if [ -z "${PYTHON_VERSION}" ]; then
+  PYTHON_VERSION="${ANACONDA_PYTHON_VERSION}"
+fi
 
 tmp_tag=$(basename "$(mktemp -u)" | tr '[:upper:]' '[:lower:]')
 

@@ -2837,6 +2837,15 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                         traceable_fn, self
                     ).call_function(tx, args, kwargs)
 
+        if name == "__call__":
+            unimplemented(
+                gb_type="call to a callable object with no traceable __call__",
+                context=f"object={self.value}",
+                explanation="Dynamo could not trace a Python `__call__` method on "
+                "this object.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+
         return super().call_method(tx, name, args, kwargs)
 
     def sq_concat_impl(
@@ -3744,6 +3753,23 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     functools.partial(GuardBuilder.HASATTR, attr=name)
                 )
             )
+
+        if not self._object_has_getattribute:
+            type_attr = self.lookup_class_mro_attr(name)
+            if (
+                (type_attr is NO_SUCH_SUBOBJ or not is_data_descriptor(type_attr))
+                and hasattr(self.value, "__dict__")
+                and not tx.output.side_effects.has_pending_mutation_of_attr(
+                    self,
+                    name,
+                    (AttrMutationKind.INSTANCE_DICT, AttrMutationKind.GENERIC_SETATTR),
+                )
+                and not tx.output.side_effects.has_pending_mutation_of_attr(
+                    self, "__dict__", AttrMutationKind.GENERIC_SETATTR
+                )
+                and self.has_key_in_generic_dict(tx, name)
+            ):
+                return variables.ConstantVariable.create(True)
 
         try:
             var_vt = self.var_getattr(tx, name)

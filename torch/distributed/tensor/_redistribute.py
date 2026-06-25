@@ -318,7 +318,9 @@ def _get_flattened_mesh_by_layout(
     input) rather than as a get_attr constant holding an unpicklable
     ProcessGroup.
     """
-    if _are_we_tracing() and torch.distributed.config.compile_on_one_rank:
+    import torch.compiler.config
+
+    if _are_we_tracing() and torch.compiler.config.compile_on_one_rank:
         # Pre-check: the custom op can't return None (torch.library doesn't
         # support Optional opaque return types), so guard here first.
         if _get_flattened_mesh_by_layout_impl(mesh, mesh_dims) is None:

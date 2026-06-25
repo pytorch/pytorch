@@ -32,6 +32,8 @@ from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 from torch.utils._sympy.functions import (
     FloorDiv,
     Identity,
+    Max,
+    Min,
     Mod,
     ModularIndexing,
     PythonMod,
@@ -249,6 +251,18 @@ class TestIndexingSimplification(InductorTestCase):
             sizevars.simplify_with_ranges(FloorDiv(ModularIndexing(i0, 1, 10), 10), {}),
             sympy.S.Zero,
         )
+
+    def test_simplify_with_ranges_forwards_local_ranges_to_shape_env(self):
+        sizevars = SizeVarAllocator()
+        q3 = sympy.Symbol("q3", integer=True, nonnegative=True)
+        base = Min(
+            Min(28, FloorDiv(q3, 2) + 1) - 1,
+            Max(0, FloorDiv(q3 - 1, 2)),
+        )
+        expr = ModularIndexing(base, 1, 14)
+
+        self.assertNotIn(q3, sizevars.shape_env.var_to_range)
+        self.assertEqual(sizevars.simplify_with_ranges(expr, {q3: 28}), base)
 
     def test_remove_zero_terms_generalized(self):
         sizevars = SizeVarAllocator()

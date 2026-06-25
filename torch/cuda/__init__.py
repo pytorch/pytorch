@@ -30,6 +30,8 @@ from . import _device_limits, gds
 from ._utils import _get_device_index
 from .graphs import (
     CUDAGraph,
+    export_dot,
+    export_graph_data,
     graph,
     graph_pool_handle,
     is_current_stream_capturing,
@@ -312,13 +314,23 @@ DEVICE_REQUIREMENT: dict[int, _CompatSet | _CompatInterval] = {
     89: _CompatInterval(start=89),
     90: _CompatInterval(start=90),
     100: _CompatInterval(start=100, exclude={101}),
-    101: _CompatSet({101, 110}),
+    101: _CompatSet({101, 110}),  # 101 was renamed to 110
     103: _CompatInterval(start=103),
-    110: _CompatInterval(start=110),
+    110: _CompatSet({101, 110}),  # 101 was renamed to 110
     120: _CompatInterval(start=120),
     121: _CompatInterval(start=121),
 }
 
+# CUDA 13.2 allows SBSA binaries to run on Jetson devices.
+# This dict can be combined with DEVICE_REQUIREMENT once
+# the minimum supported CUDA version is 13.2.
+DEVICE_REQUIREMENT_POST_JETSON_SBSA_UNIFICATION: dict[
+    int, _CompatSet | _CompatInterval
+] = DEVICE_REQUIREMENT | {
+    70: _CompatInterval(start=70),
+    80: _CompatInterval(start=80),
+    86: _CompatInterval(start=86),
+}
 
 # TORCH_CUDA_ARCH_LIST for PyTorch releases, keyed by host arch.
 # Kept in sync with .ci/manywheel/build_cuda.sh by the validator in
@@ -339,20 +351,32 @@ PYTORCH_RELEASES_CODE_CC: dict[str, dict[str, set[int]]] = {
 }
 
 
+def _device_requirement(code_cc):
+    if torch.version.cuda is None:
+        return None
+    requirement = (
+        DEVICE_REQUIREMENT_POST_JETSON_SBSA_UNIFICATION
+        if tuple(int(x) for x in torch.version.cuda.split(".")) >= (13, 2)
+        else DEVICE_REQUIREMENT
+    )
+    return requirement.get(code_cc, None)
+
+
 def _host_arch_key() -> str:
     machine = platform.machine().lower()
     return "aarch64" if machine == "aarch64" else "x86_64"
 
 
 def _code_compatible_with_device(device_cc: int, code_cc: int):
-    if code_cc not in DEVICE_REQUIREMENT:
+    compatible_devices = _device_requirement(code_cc)
+    if compatible_devices is None:
         warnings.warn(
             f"PyTorch was compiled with an unknown compute capability {code_cc // 10}.{code_cc % 10}. "
             + " Please create an issue on Github if this is a valid compute capability.",
             stacklevel=2,
         )
         return device_cc in _CompatInterval(start=code_cc)
-    return device_cc in DEVICE_REQUIREMENT[code_cc]
+    return device_cc in compatible_devices
 
 
 def _warn_unsupported_code(device_index: int, device_cc: int, code_ccs: list[int]):
@@ -369,7 +393,7 @@ def _warn_unsupported_code(device_index: int, device_cc: int, code_ccs: list[int
         f"Found GPU{device_index} {name} which is of compute capability (CC) {device_cc // 10}.{device_cc % 10}.",
         "The following list shows the CCs this version of PyTorch was built for and the hardware CCs it supports:",
     ] + [
-        f"- {cc // 10}.{cc % 10} which supports hardware CC {DEVICE_REQUIREMENT[cc]}"
+        f"- {cc // 10}.{cc % 10} which supports hardware CC {_device_requirement(cc)}"
         for cc in code_ccs
     ]
 
@@ -2114,6 +2138,8 @@ __all__ = [
     "device_memory_used",
     "device_of",
     "empty_cache",
+    "export_dot",
+    "export_graph_data",
     "get_allocator_backend",
     "CUDAPluggableAllocator",
     "change_current_allocator",

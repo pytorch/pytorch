@@ -20,6 +20,7 @@
 #include <cuda_runtime.h>
 #endif
 #if defined(USE_CUDA) || defined(USE_ROCM)
+#include <c10/cuda/CUDAStream.h>
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cuda.h>
 #endif
 #include <torch/script.h>
@@ -1150,6 +1151,77 @@ void test_concurrent_run_with_const_fold(const std::string& device) {
   ASSERT_FALSE(failed.load())
       << "One or more threads produced incorrect output";
 }
+
+// S638065 regression: with runtime constant folding, update_constant_buffer
+// copies the new weights into the (inactive) constant buffer on the default
+// stream (async device-to-device cudaMemcpy), while run_const_fold reads those
+// constants on a separate stream. On ROCm the default stream is not implicitly
+// ordered with other streams, so without a barrier the fold can read
+// not-yet-copied weights and bake stale values into the folded constants.
+// This exercises that exact edge: fold on a dedicated pool stream, then check
+// the folded result against an independently computed reference. Each iteration
+// uses fresh random weights so a stale read produces a detectably wrong output.
+// The race is timing-dependent (the copy usually wins), hence the loop; a clean
+// run depends on the cudaStreamSynchronize(0) at the end of
+// update_constant_buffer (model_container.h). On NVIDIA the legacy default
+// stream implicitly serializes, so this passes regardless.
+void test_aoti_const_fold_separate_stream() {
+  torch::NoGradGuard no_grad;
+
+  // Use the large (size=4096) model so the per-weight D2D copy is big enough to
+  // still be in flight when the fold starts reading.
+  std::string data_path =
+      (std::filesystem::path(
+           STRINGIZE(CMAKE_CURRENT_BINARY_DIR)) / "large_data.pt")
+           .string();
+  torch::jit::script::Module data_loader = torch::jit::load(data_path);
+  const auto& model_so_path =
+      data_loader.attr("model_so_path_use_runtime_constant_folding")
+          .toStringRef();
+  auto input_tensors = data_loader.attr("inputs").toTensorList().vec();
+  const auto& x = input_tensors[0];
+  const int64_t size = x.size(1);
+
+  auto runner = std::make_unique<torch::inductor::AOTIModelContainerRunnerCuda>(
+      model_so_path);
+
+  // Dedicated non-blocking pool stream for folding, distinct from the default
+  // stream that update_constant_buffer copies the weights on.
+  c10::cuda::CUDAStream fold_stream = c10::cuda::getStreamFromPool();
+
+  constexpr int kIters = 100;
+  for (int i = 0; i < kIters; ++i) {
+    at::Tensor w_pre = at::randn({size, size}, x.options());
+    at::Tensor w_add = at::randn({size, size}, x.options());
+    // Independent reference, mirroring Net.forward in test.py.
+    at::Tensor expected =
+        at::matmul(x, at::relu(at::transpose(w_pre, 0, 1)) + w_add);
+
+    torch::inductor::TensorConstantMap weight_map;
+    weight_map.emplace("L__self___w_pre", &w_pre);
+    weight_map.emplace("L__self___w_add", &w_add);
+
+    // Copy weights into the inactive buffer (default stream), then fold on a
+    // separate stream. We deliberately do NOT synchronize between these two:
+    // ordering the copy before the fold is exactly what the fix must guarantee.
+    runner->update_inactive_constant_buffer(weight_map);
+    runner->run_const_fold(
+        /* use_inactive = */ true,
+        reinterpret_cast<AOTInductorStreamHandle>(fold_stream.stream()));
+    // Isolate the copy->fold edge (under test) from the fold->inference edge by
+    // finishing the fold before swapping the freshly folded buffer in.
+    fold_stream.synchronize();
+    runner->swap_constant_buffer();
+
+    auto actual = runner->run(input_tensors);
+    ASSERT_TRUE(torch::allclose(
+        expected, actual[0], /* rtol = */ 1e-2, /* atol = */ 1e-2))
+        << "iter " << i
+        << ": folded constants reflect stale weights (S638065); the const-fold "
+           "read the constant buffer before the default-stream weight copy "
+           "completed";
+  }
+}
 #endif // USE_CUDA || USE_ROCM
 } // namespace
 
@@ -1246,5 +1318,13 @@ TEST_F(AotInductorTest, ConcurrentRunConstFoldCuda) {
   test_concurrent_run_with_const_fold("cuda");
 }
 #endif
+
+// Registered for ROCm as well as CUDA: the S638065 race only manifests on AMD
+// (on NVIDIA the legacy default stream implicitly orders with the fold stream).
+#if defined(USE_CUDA) || defined(USE_ROCM)
+TEST_F(AotInductorTest, ConstFoldSeparateStreamCuda) {
+  test_aoti_const_fold_separate_stream();
+}
+#endif // USE_CUDA || USE_ROCM
 
 } // namespace torch::aot_inductor

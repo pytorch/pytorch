@@ -111,6 +111,8 @@
     CUDAGraph
     graph
     make_graphed_callables
+    export_dot
+    export_graph_data
 ```
 
 (cuda-memory-management-api)=
@@ -291,7 +293,12 @@ See the docs for {class}`~torch.cuda.gds.GdsFile` for an example of how to use t
 `torch.cuda.green_contexts` provides thin wrappers around the CUDA Green Context APIs
 to enable more general carveout of SM resources for CUDA kernels.
 
-These APIs can be used in PyTorch with CUDA versions greater than or equal to 12.8.
+These APIs require the `cuda.bindings` package and can be used in PyTorch with
+CUDA versions greater than or equal to 12.8. Workqueue configuration requires
+CUDA 13.1 or newer.
+
+Install instructions for `cuda.bindings` can be found here:
+https://nvidia.github.io/cuda-python/
 
 See the docs for {class}`~torch.cuda.green_contexts.GreenContext` for an example of how to use these.
 

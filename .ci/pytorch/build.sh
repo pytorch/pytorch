@@ -259,7 +259,7 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
   # or building non-XLA tests.
   if [[ "$BUILD_ENVIRONMENT" != *rocm*  && "$BUILD_ENVIRONMENT" != *xla* && "$BUILD_ENVIRONMENT" != *riscv64*  && "$BUILD_ENVIRONMENT" != *s390x* && "$BUILD_ENVIRONMENT" != *xpu* ]]; then
     # TODO: Remove me and may be just focus on numpy-2.x testing
-    if [[ "$ANACONDA_PYTHON_VERSION" =~ ^3\.1[0-2]$ ]]; then
+    if [[ "$PYTHON_VERSION" =~ ^3\.1[0-2]$ ]]; then
       # Install numpy-2.0.2 for builds which are backward compatible with 1.X
       # In relality it's only needed for numpy_2_x and vllm shards (where vllm depends on numpy-2)
       python -mpip install numpy==2.0.2
@@ -435,7 +435,7 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
   # don't do this for libtorch as libtorch is C++ only and thus won't have python tests run on its build
   PYTHONPATH=. python tools/stats/export_test_times.py
 fi
-# don't do this for s390x as they don't use sccache
-if [[ "$BUILD_ENVIRONMENT" != *s390x* ]]; then
+# don't do this for s390x or riscv64 as they don't use sccache
+if [[ "$BUILD_ENVIRONMENT" != *s390x* && "$BUILD_ENVIRONMENT" != *riscv64*cross* ]]; then
   print_sccache_stats
 fi

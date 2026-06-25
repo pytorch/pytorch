@@ -802,8 +802,12 @@ class TestSqAssItem(torch._dynamo.test_case.TestCase):
     @make_dynamo_test
     def test_error_slice_non_iterable_simple(self):
         lst = [1, 2, 3]
+        # CPython 3.12.5+ reports "must assign iterable to extended slice" even
+        # for simple slices; earlier versions say "can only assign an iterable".
+        # See https://github.com/pytorch/pytorch/issues/187774.
         with self.assertRaisesRegex(
-            TypeError, "must assign iterable to extended slice"
+            TypeError,
+            "must assign iterable to extended slice|can only assign an iterable",
         ):
             lst[1:2] = 99  # type: ignore[assignment]
 

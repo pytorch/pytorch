@@ -25517,9 +25517,12 @@ python_ref_db = [
         torch_opinfo_name="nn.functional.threshold",
         supports_out=True,
         skips=(
-            # RuntimeError: [srcBuf length] > 0
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='mps'),
+            # MPS threshold maps NaN to `value` (uses x > threshold), but the
+            # reference keeps NaN; mismatch only on float dtypes.
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                         device_type='mps', dtypes=(torch.float16, torch.bfloat16, torch.float32)),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                         device_type='mps', dtypes=(torch.float16, torch.bfloat16, torch.float32)),
         ),
     ),
     PythonRefInfo(
