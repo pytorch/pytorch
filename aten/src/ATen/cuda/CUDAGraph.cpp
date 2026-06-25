@@ -80,6 +80,35 @@ void CUDAGraph::register_generator_state(
   captured_generator_states_[std::move(state)] = 0;
 }
 
+bool CUDAGraph::has_retained_pool(MempoolId_t pool) const {
+  for (const auto& retained_pool : retained_mempool_ids_) {
+    if (retained_pool == pool) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void CUDAGraph::record_retained_pool(MempoolId_t pool) {
+  if (!has_retained_pool(pool)) {
+    retained_mempool_ids_.push_back(pool);
+  }
+}
+
+void CUDAGraph::retain_pool(MempoolId_t pool) {
+  TORCH_CHECK(
+      capture_id_ != 0 && !capture_ended_,
+      "CUDAGraph::retain_pool may only be called during capture.");
+  TORCH_CHECK(
+      pool.first != 0 || pool.second != 0,
+      "CUDAGraph::retain_pool expected a non-default memory pool.");
+  if (has_retained_pool(pool)) {
+    return;
+  }
+  c10::cuda::CUDACachingAllocator::createOrIncrefPool(capture_dev_, pool);
+  record_retained_pool(pool);
+}
+
 template <>
 std::function<bool(cudaStream_t)> CUDAGraph::create_allocate_filter<cudaStream_t>() const {
   return [this](cudaStream_t stream) {
@@ -143,6 +172,7 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode 
   // due to the capture status being updated _after_ a capture had already started.
   c10::cuda::CUDACachingAllocator::beginAllocateToPool(
       capture_dev_, mempool_id_, create_allocate_filter<cudaStream_t>());
+  record_retained_pool(mempool_id_);
 
   at::getHostAllocator(at::kCUDA)->begin_allocate_to_pool(mempool_id_, create_allocate_filter<c10::Stream>());
 
@@ -349,7 +379,10 @@ void CUDAGraph::reset() {
     clearCublasWorkspacesForStream(capture_stream_.stream());
 
     // notifyCaptureDestroy may throw. How should we handle this?
-    c10::cuda::CUDACachingAllocator::releasePool(capture_dev_, mempool_id_);
+    for (const auto& pool : retained_mempool_ids_) {
+      c10::cuda::CUDACachingAllocator::releasePool(capture_dev_, pool);
+    }
+    retained_mempool_ids_.clear();
     at::getHostAllocator(at::kCUDA)->release_pool(mempool_id_);
     capture_ended_ = false;
   }
@@ -373,6 +406,12 @@ MempoolId_t CUDAGraph::pool() {
   TORCH_CHECK(capture_ended_,
               "Called CUDAGraph::pool() without a preceding successful capture.");
   return mempool_id_;
+}
+
+std::vector<MempoolId_t> CUDAGraph::pools() {
+  TORCH_CHECK(capture_ended_,
+              "Called CUDAGraph::pools() without a preceding successful capture.");
+  return retained_mempool_ids_;
 }
 
 CUDAGraph::~CUDAGraph() {

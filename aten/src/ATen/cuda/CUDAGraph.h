@@ -11,6 +11,7 @@
 #include <limits>
 #include <optional>
 #include <stack>
+#include <vector>
 
 #if defined(USE_ROCM) || !(defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
 // this type is not defined until CUDA 12.4, but we use it as a
@@ -90,6 +91,8 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   void replay();
   void reset();
   MempoolId_t pool();
+  std::vector<MempoolId_t> pools();
+  void retain_pool(MempoolId_t pool);
   void enable_debug_mode();
   cudaGraph_t raw_cuda_graph();
   cudaGraphExec_t raw_cuda_graph_exec();
@@ -105,6 +108,8 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   template <typename StreamType>
   std::function<bool(StreamType)> create_allocate_filter() const;
   std::function<bool(cudaStream_t)> create_child_allocate_filter();
+  void record_retained_pool(MempoolId_t pool);
+  bool has_retained_pool(MempoolId_t pool) const;
 
  protected:
   cudaGraph_t graph_ = nullptr;
@@ -138,6 +143,7 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   // Sharing a mempool across graphs saves memory, and it's safe if you
   // know you'll replay those graphs in the same order you captured them.
   MempoolId_t mempool_id_;
+  std::vector<MempoolId_t> retained_mempool_ids_;
 
   // Stream on which capture began
   at::cuda::CUDAStream capture_stream_;
