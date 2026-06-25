@@ -916,6 +916,24 @@ torch.cuda.synchronize()
         with self.assertRaisesRegex(RuntimeError, "value cannot be converted to type"):
             avgpool(inp)
 
+    def test_lp_pool_norm_type_zero(self, device):
+        err = "norm_type must be a non-zero value"
+        x1 = torch.randn(1, 4, 8, device=device)
+        x2 = torch.randn(1, 4, 8, 8, device=device)
+        x3 = torch.randn(1, 4, 8, 8, 8, device=device)
+        with self.assertRaisesRegex(ValueError, err):
+            F.lp_pool1d(x1, norm_type=0, kernel_size=3)
+        with self.assertRaisesRegex(ValueError, err):
+            F.lp_pool2d(x2, norm_type=0, kernel_size=3)
+        with self.assertRaisesRegex(ValueError, err):
+            F.lp_pool3d(x3, norm_type=0, kernel_size=3)
+        with self.assertRaisesRegex(ValueError, err):
+            torch.nn.LPPool1d(norm_type=0, kernel_size=3)
+        with self.assertRaisesRegex(ValueError, err):
+            torch.nn.LPPool2d(norm_type=0, kernel_size=3)
+        with self.assertRaisesRegex(ValueError, err):
+            torch.nn.LPPool3d(norm_type=0, kernel_size=3)
+
     def test_AvgPool2d_empty(self, device):
         avgpool = torch.nn.AvgPool2d(3, stride=2).to(device)
         inp = torch.randn(0, 16, 20, 32, device=device)
