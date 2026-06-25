@@ -96,6 +96,13 @@ def _manual_list_update(list_from: list[Any], list_to: list[Any]) -> None:
     list.extend(list_to, list_from)
 
 
+def _manual_deque_update(deque_from: Any, deque_to: Any) -> None:
+    # Call the deque methods directly, not any overridden subclass methods.
+    # deque_to keeps its (read-only) maxlen, so extend re-applies eviction.
+    collections.deque.clear(deque_to)
+    collections.deque.extend(deque_to, deque_from)
+
+
 class SideEffects:
     """
     Maintain records of mutations and provide methods to apply them during code generation.
@@ -578,6 +585,7 @@ class SideEffects:
             str.__getattribute__,
             list.__getattribute__,
             tuple.__getattribute__,
+            collections.deque.__getattribute__,
             BaseException.__getattribute__,
         )
 
@@ -713,6 +721,8 @@ class SideEffects:
                 variable_cls = variables.UserDefinedTupleVariable
         elif issubclass(user_cls, list):
             variable_cls = variables.UserDefinedListVariable
+        elif issubclass(user_cls, collections.deque):
+            variable_cls = variables.UserDefinedDequeVariable
         elif issubclass(user_cls, MutableMapping):
             variable_cls = variables.MutableMappingVariable
         elif is_frozen_dataclass(user_cls):
@@ -1599,6 +1609,49 @@ class SideEffects:
                     suffixes.append(
                         [
                             *list_update_insts,
+                            create_instruction("POP_TOP"),
+                        ]
+                    )
+                    _maybe_log_side_effect(
+                        var._base_vt  # pyrefly: ignore[bad-argument-type]
+                    )
+                elif isinstance(
+                    var,
+                    variables.UserDefinedDequeVariable,
+                ) and self.is_modified(
+                    var._base_vt  # pyrefly: ignore[bad-argument-type]
+                ):
+                    # Update the deque to the updated items. Be careful in
+                    # calling the deque methods and not the overridden methods.
+                    varname_map = {}
+                    for name in _manual_deque_update.__code__.co_varnames:
+                        varname_map[name] = cg.tx.output.new_var()
+
+                    cg(var.source)  # type: ignore[attr-defined]
+                    cg.extend_output(
+                        [
+                            create_instruction(
+                                "STORE_FAST", argval=varname_map["deque_to"]
+                            )
+                        ]
+                    )
+
+                    cg(var._base_vt, allow_cache=False)  # Don't codegen via source
+                    cg.extend_output(
+                        [
+                            create_instruction(
+                                "STORE_FAST", argval=varname_map["deque_from"]
+                            )
+                        ]
+                    )
+
+                    deque_update_insts = bytecode_from_template(
+                        _manual_deque_update, varname_map=varname_map
+                    )
+
+                    suffixes.append(
+                        [
+                            *deque_update_insts,
                             create_instruction("POP_TOP"),
                         ]
                     )

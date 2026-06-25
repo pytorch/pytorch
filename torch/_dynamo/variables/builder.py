@@ -244,6 +244,7 @@ from .iter import CountIteratorVariable, ItertoolsVariable
 from .lazy import LazyConstantVariable, LazyVariableTracker
 from .lists import (
     BaseListVariable,
+    DequeVariable,
     ListIteratorVariable,
     ListVariable,
     RangeVariable,
@@ -320,6 +321,7 @@ from .user_defined import (
     SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
     UserDefinedConstantVariable,
+    UserDefinedDequeVariable,
     UserDefinedDictVariable,
     UserDefinedExceptionClassVariable,
     UserDefinedListVariable,
@@ -2165,6 +2167,34 @@ class VariableBuilder:
                 mutation_type=ValueMutationExisting(),
             )
             result = UserDefinedListVariable(value, list_vt=list_vt, source=self.source)
+            return self.tx.output.side_effects.track_object_existing(value, result)
+        elif isinstance(value, collections.deque):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
+            # maxlen is baked into the DequeVariable as a constant, so guard on
+            # it to recompile if a same-typed deque with a different maxlen
+            # appears.
+            install_guard(
+                AttrSource(self.source, "maxlen").make_guard(GuardBuilder.EQUALS_MATCH)
+            )
+
+            output = [
+                LazyVariableTracker.create(
+                    collections.deque.__getitem__(value, i),
+                    source=GetItemSource(self.get_source(), i),
+                    tx=self.tx,
+                )
+                for i in range(collections.deque.__len__(value))
+            ]
+            deque_vt = DequeVariable(
+                output,  # type: ignore[arg-type]
+                maxlen=ConstantVariable.create(value.maxlen),
+                source=self.source,
+                mutation_type=ValueMutationExisting(),
+            )
+            result = UserDefinedDequeVariable(
+                value, deque_vt=deque_vt, source=self.source
+            )
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif isinstance(value, (set, frozenset)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
