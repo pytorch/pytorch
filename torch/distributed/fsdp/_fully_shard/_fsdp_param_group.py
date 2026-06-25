@@ -19,7 +19,7 @@ from torch.distributed.fsdp._common_utils import (
 from torch.profiler import record_function
 from torch.utils.hooks import RemovableHandle
 
-from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
+from ._fsdp_api import MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_collectives import (
     AllGather,
     AllGatherResult,
@@ -163,11 +163,20 @@ class FSDPParamGroup:
         device: torch.device,
         shard_placement_fn: Callable[[nn.Parameter], ShardPlacementFnResult] | None,
         mp_policy: MixedPrecisionPolicy,
-        offload_policy: OffloadPolicy,
+        offload_policy: OffloadPolicy | dict[nn.Parameter, OffloadPolicy],
     ):
         self.modules = modules  # permit ref cycle because 1:1 lifetime
         param_module_infos = _get_param_module_infos(params, modules)
 
+        # ``offload_policy`` is either a single policy applied to every
+        # parameter or a per-parameter mapping (FQNs already resolved to
+        # parameter objects upstream); absent parameters are not offloaded.
+        if isinstance(offload_policy, OffloadPolicy):
+            per_param_offload = [offload_policy for _ in params]
+        else:
+            per_param_offload = [
+                offload_policy.get(param, OffloadPolicy()) for param in params
+            ]
         self.fsdp_params = [
             FSDPParam(
                 param,
@@ -177,9 +186,11 @@ class FSDPParamGroup:
                 device,
                 shard_placement_fn,
                 mp_policy,
-                offload_policy,
+                param_offload,
             )
-            for param, module_info in zip(params, param_module_infos)
+            for param, module_info, param_offload in zip(
+                params, param_module_infos, per_param_offload
+            )
         ]
         self.mesh_info = mesh_info
         self.post_forward_mesh_info = post_forward_mesh_info
@@ -1065,12 +1076,13 @@ class FSDPParamGroup:
             )
 
     def _validate_cpu_offload_params(self):
-        if not isinstance(self.offload_policy, CPUOffloadPolicy):
-            return
+        # Validate per parameter rather than per group: a group may mix
+        # offloaded and on-device parameters under a per-FQN offload policy.
         fsdp_params_not_on_cpu = [
             fsdp_param
             for fsdp_param in self.fsdp_params
-            if fsdp_param.sharded_param.device.type != "cpu"
+            if fsdp_param.offload_to_cpu
+            and fsdp_param.sharded_param.device.type != "cpu"
         ]
         if fsdp_params_not_on_cpu:
             raise RuntimeError(
