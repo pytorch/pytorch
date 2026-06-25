@@ -362,6 +362,8 @@ package = 'torch'
 
 [tool.spin.commands]
 "Build" = [
+  ".spin/cmds.py:build",
+  ".spin/cmds.py:install",
   ".spin/cmds.py:clean",
   ".spin/cmds.py:lint",
   ".spin/cmds.py:fixlint",
