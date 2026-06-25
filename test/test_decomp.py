@@ -513,16 +513,13 @@ def any_unsupported(args, kwargs):
 
 core_backward_failures = {
     skip("_softmax_backward_data"),  # slow: fails with --timeout=360 secs
-    xfail("addcdiv"),
     skip("addcmul"),  # slow: fails with --timeout=360 secs
     skip("deg2rad"),  # slow: fails with --timeout=360 secs
     skip("diag_embed"),  # slow: fails with --timeout=360 secs
     skip("frac"),  # slow: fails with --timeout=360 secs
     skip("grid_sampler_2d"),  # slow: fails with --timeout=360 secs
-    xfail("lerp"),
     skip("logaddexp"),  # slow: fails with --timeout=360 secs
     skip("native_dropout_backward"),  # slow: fails with --timeout=360 secs
-    xfail("nn.functional.binary_cross_entropy_with_logits"),
     skip("nn.functional.glu"),  # slow: fails with --timeout=360 secs
     xfail("nn.functional.hardshrink"),
     xfail("nn.functional.softshrink"),
@@ -849,7 +846,7 @@ def forward(self, scores_1, mask_1, value_1):
             # Stuff we shouldn't bother testing
             # (TODO: remove detach from the decomp table?)
             # N.b. Testing in-place ops would need dedicated logic
-            in_place = func.name()[-1] == "_"
+            in_place = func._schema.name.endswith("_")
             ignored_ops = [
                 torch.ops.aten.detach.default,
                 # non-deterministic ops
@@ -980,6 +977,39 @@ def forward(self, scores_1, mask_1, value_1):
                 f"by updating CROSS_REF_EXCLUDE_SET."
             ),
         )
+
+    @onlyCPU
+    @skipIfCrossRef
+    def test_decomp_crossref_mode_skips_overloaded_inplace(self, device):
+        x = torch.tensor(2.0, device=device)
+        mode = self.DecompCrossRefMode(
+            self, self.precision, self.rel_tol, x.dtype, run_all=False
+        )
+        with mode, enable_python_dispatcher():
+            aten.pow_.Scalar(x, 3.0)
+
+        self.assertIn(aten.pow_.Scalar, mode.called)
+        self.assertNotIn(aten.pow_.Scalar, mode.decomposed)
+
+    @onlyCPU
+    @skipIfCrossRef
+    def test_decomp_crossref_mode_decomposes_mutable_functional_ops(self, device):
+        x = torch.randn(2, 3, 4, 4, device=device)
+        weight = torch.randn(3, device=device)
+        bias = torch.randn(3, device=device)
+        running_mean = torch.randn(3, device=device)
+        running_var = torch.rand(3, device=device) + 1
+        mode = self.DecompCrossRefMode(
+            self, self.precision, self.rel_tol, x.dtype, run_all=False
+        )
+
+        with mode, enable_python_dispatcher():
+            aten._batch_norm_with_update.default(
+                x, weight, bias, running_mean, running_var, 0.1, 1e-5
+            )
+
+        self.assertIn(aten._batch_norm_with_update.default, mode.called)
+        self.assertIn(aten._batch_norm_with_update.default, mode.decomposed)
 
     @skipIfTorchDynamo("Test does not work with TorchDynamo")
     def do_cross_ref(self, device, dtype, op, *, run_all):
@@ -1419,6 +1449,58 @@ class DecompOneOffTests(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "same dtype"):
             addmv_decomp(input, mat, vec)
+
+    @onlyCPU
+    @skipIfCrossRef
+    def test_linalg_vector_norm_decomp_correctness(self, device):
+        decomp = decomposition_table[aten.linalg_vector_norm.default]
+
+        def make_input(shape, dtype):
+            if dtype.is_complex:
+                real = torch.randn(shape, device=device)
+                imag = torch.randn(shape, device=device)
+                return (real + 1j * imag).to(dtype)
+            return torch.randn(shape, device=device, dtype=dtype)
+
+        cases = [
+            ((2, 3), torch.float32, 2, None, False, None),
+            ((2, 3), torch.float32, 0, 1, True, torch.float64),
+            ((2, 1, 3), torch.float64, float("inf"), (-2, -1), False, None),
+            ((2, 3), torch.float32, 3.5, (), True, None),
+            ((1,), torch.float64, 6, (), False, None),
+            ((2, 3), torch.complex64, 1, 1, True, torch.complex128),
+            ((2, 3), torch.complex64, float("-inf"), None, False, None),
+        ]
+        for shape, input_dtype, ord, dim, keepdim, dtype in cases:
+            x = make_input(shape, input_dtype)
+            actual = decomp(x, ord=ord, dim=dim, keepdim=keepdim, dtype=dtype)
+            expected = torch.linalg.vector_norm(
+                x, ord=ord, dim=dim, keepdim=keepdim, dtype=dtype
+            )
+            self.assertEqual(actual, expected)
+
+        gradcheck_cases = [
+            (
+                torch.tensor(-4.826984902407649, device=device, dtype=torch.float64),
+                6,
+                None,
+                False,
+            ),
+            (
+                torch.randn(2, 3, device=device, dtype=torch.float64) + 0.5,
+                3.5,
+                (),
+                True,
+            ),
+            (torch.randn(2, 3, device=device, dtype=torch.float64) + 0.5, 2, 1, True),
+        ]
+        for x, ord, dim, keepdim in gradcheck_cases:
+            x.requires_grad_()
+            self.assertTrue(
+                torch.autograd.gradcheck(
+                    lambda x: decomp(x, ord=ord, dim=dim, keepdim=keepdim), (x,)
+                )
+            )
 
 
 instantiate_device_type_tests(DecompOneOffTests, globals())
