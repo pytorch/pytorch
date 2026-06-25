@@ -61,7 +61,7 @@ def _all_gather_sharded_tensor(
         dtype=local_tensor.dtype,
         device=pg_device,
     )
-    dist.all_gather_into_tensor(tensor, local_tensor, group=pg)
+    dist.all_gather_single(tensor, local_tensor, group=pg)
 
     tensor = tensor.narrow(0, 0, tensor_numel).reshape(sharded_tensor.size())
     return tensor
@@ -494,7 +494,7 @@ def _check_state_dict_similarity(
     """
     Given two state_dicts, check if the structures are the same. And
     if a [key, tensor] pair exist in one state_dict there must be
-    the a corresponding pait, [key, other_tensor], in the other state_dict,
+    a corresponding pair, [key, other_tensor], in the other state_dict,
     where tensor and other_tensor have the same size and dtype.
 
     Return the check result.

@@ -13,6 +13,7 @@ It is lazily initialized, so you can always import it, and use
 
 import importlib
 import os
+import platform
 import threading
 import traceback
 import warnings
@@ -29,6 +30,8 @@ from . import _device_limits, gds
 from ._utils import _get_device_index
 from .graphs import (
     CUDAGraph,
+    export_dot,
+    export_graph_data,
     graph,
     graph_pool_handle,
     is_current_stream_capturing,
@@ -194,7 +197,7 @@ def is_bf16_supported(including_emulation: bool = True):
     if torch.version.hip:
         return True
 
-    # If CUDA is not available, than it does not support bf16 either
+    # If CUDA is not available, then it does not support bf16 either
     if not is_available():
         return False
 
@@ -311,38 +314,78 @@ DEVICE_REQUIREMENT: dict[int, _CompatSet | _CompatInterval] = {
     89: _CompatInterval(start=89),
     90: _CompatInterval(start=90),
     100: _CompatInterval(start=100, exclude={101}),
-    101: _CompatSet({101, 110}),
+    101: _CompatSet({101, 110}),  # 101 was renamed to 110
     103: _CompatInterval(start=103),
-    110: _CompatInterval(start=110),
+    110: _CompatSet({101, 110}),  # 101 was renamed to 110
     120: _CompatInterval(start=120),
     121: _CompatInterval(start=121),
 }
 
+# CUDA 13.2 allows SBSA binaries to run on Jetson devices.
+# This dict can be combined with DEVICE_REQUIREMENT once
+# the minimum supported CUDA version is 13.2.
+DEVICE_REQUIREMENT_POST_JETSON_SBSA_UNIFICATION: dict[
+    int, _CompatSet | _CompatInterval
+] = DEVICE_REQUIREMENT | {
+    70: _CompatInterval(start=70),
+    80: _CompatInterval(start=80),
+    86: _CompatInterval(start=86),
+}
 
-# TORCH_CUDA_ARCH_LIST for PyTorch releases
-PYTORCH_RELEASES_CODE_CC: dict[str, set[int]] = {
-    "12.6": {50, 60, 70, 80, 86, 90},
-    "12.8": {70, 80, 86, 90, 100, 120},
-    "13.0": {75, 80, 86, 90, 100, 110, 120},
+# TORCH_CUDA_ARCH_LIST for PyTorch releases, keyed by host arch.
+# Kept in sync with .ci/manywheel/build_cuda.sh by the validator in
+# .github/scripts/generate_binary_build_matrix.py.
+PYTORCH_RELEASES_CODE_CC: dict[str, dict[str, set[int]]] = {
+    "12.6": {
+        "x86_64": {50, 60, 70, 75, 80, 86, 90},
+        "aarch64": {80, 90},
+    },
+    "13.0": {
+        "x86_64": {75, 80, 86, 90, 100, 120},
+        "aarch64": {80, 90, 100, 110, 120},
+    },
+    "13.2": {
+        "x86_64": {75, 80, 86, 90, 100, 120},
+        "aarch64": {80, 90, 100, 110, 120},
+    },
 }
 
 
+def _device_requirement(code_cc):
+    if torch.version.cuda is None:
+        return None
+    requirement = (
+        DEVICE_REQUIREMENT_POST_JETSON_SBSA_UNIFICATION
+        if tuple(int(x) for x in torch.version.cuda.split(".")) >= (13, 2)
+        else DEVICE_REQUIREMENT
+    )
+    return requirement.get(code_cc, None)
+
+
+def _host_arch_key() -> str:
+    machine = platform.machine().lower()
+    return "aarch64" if machine == "aarch64" else "x86_64"
+
+
 def _code_compatible_with_device(device_cc: int, code_cc: int):
-    if code_cc not in DEVICE_REQUIREMENT:
+    compatible_devices = _device_requirement(code_cc)
+    if compatible_devices is None:
         warnings.warn(
             f"PyTorch was compiled with an unknown compute capability {code_cc // 10}.{code_cc % 10}. "
             + " Please create an issue on Github if this is a valid compute capability.",
             stacklevel=2,
         )
         return device_cc in _CompatInterval(start=code_cc)
-    return device_cc in DEVICE_REQUIREMENT[code_cc]
+    return device_cc in compatible_devices
 
 
 def _warn_unsupported_code(device_index: int, device_cc: int, code_ccs: list[int]):
     name = get_device_name(device_index)
 
+    arch = _host_arch_key()
     compatible_releases: list[str] = []
-    for cuda, build_ccs in PYTORCH_RELEASES_CODE_CC.items():
+    for cuda, by_arch in PYTORCH_RELEASES_CODE_CC.items():
+        build_ccs = by_arch.get(arch, set())
         if any(_code_compatible_with_device(device_cc, cc) for cc in build_ccs):
             compatible_releases.append(cuda)
 
@@ -350,15 +393,32 @@ def _warn_unsupported_code(device_index: int, device_cc: int, code_ccs: list[int
         f"Found GPU{device_index} {name} which is of compute capability (CC) {device_cc // 10}.{device_cc % 10}.",
         "The following list shows the CCs this version of PyTorch was built for and the hardware CCs it supports:",
     ] + [
-        f"- {cc // 10}.{cc % 10} which supports hardware CC {DEVICE_REQUIREMENT[cc]}"
+        f"- {cc // 10}.{cc % 10} which supports hardware CC {_device_requirement(cc)}"
         for cc in code_ccs
     ]
 
     if len(compatible_releases) > 0:
-        releases_str = ", ".join(compatible_releases)
+        version = torch.__version__
+        base_version = version.split("+")[0]
+        is_nightly = "dev" in base_version
+        index_root = (
+            "https://download.pytorch.org/whl/nightly"
+            if is_nightly
+            else "https://download.pytorch.org/whl"
+        )
         lines.append(
-            "Please follow the instructions at https://pytorch.org/get-started/locally/ to "
-            + f"install a PyTorch release that supports one of these CUDA versions: {releases_str}"
+            f"Your installed torch=={version} does not include kernels for this GPU. "
+            "Reinstall the same version against a CUDA build that does, e.g.:"
+        )
+        for cuda in compatible_releases:
+            cu_tag = "cu" + cuda.replace(".", "")
+            lines.append(
+                f"  For CUDA {cuda} use pip install torch=={base_version} --index-url {index_root}/{cu_tag}"
+            )
+    else:
+        lines.append(
+            f"No published PyTorch CUDA builds for release {torch.__version__} support this GPU. "
+            "Visit https://pytorch.org/get-started/locally/ to find a compatible release."
         )
 
     warnings.warn("\n".join(lines), stacklevel=2)
@@ -1138,7 +1198,7 @@ def device_count() -> int:
 
 def get_arch_list() -> list[str]:
     r"""Return list CUDA architectures this library was compiled for."""
-    if not is_available():
+    if not _is_compiled():
         return []
     arch_flags = torch._C._cuda_getArchFlags()
     if arch_flags is None:
@@ -1258,6 +1318,82 @@ def current_blas_handle():
     r"""Return cublasHandle_t pointer to current cuBLAS handle"""
     _lazy_init()
     return torch._C._cuda_getCurrentBlasHandle()
+
+
+def current_solver_handle():
+    r"""Return cusolverDnHandle_t pointer to current cuSOLVER handle"""
+    _lazy_init()
+    return torch._C._cuda_getCurrentSolverHandle()
+
+
+_ClearCublasWorkspaces = None
+
+
+def _clear_cublas_workspaces(device: Device = None) -> None:
+    r"""Clear cuBLAS workspaces on this thread and CUDA autograd worker threads.
+    Note that this enables multithreaded autograd during cleanup to reach
+    worker threads.
+    """
+    if not hasattr(torch._C, "_cuda_clearCublasWorkspaces"):
+        return
+
+    torch._C._cuda_clearCublasWorkspaces()
+    if not is_initialized():
+        return
+
+    if device is None:
+        device_indices = range(device_count())
+    else:
+        device_index = _get_device_index(device)
+        if device_index < 0:
+            return
+        device_indices = (device_index,)
+
+    global _ClearCublasWorkspaces
+    if _ClearCublasWorkspaces is None:
+        from torch.autograd import Function
+
+        class ClearCublasWorkspaces(Function):
+            @staticmethod
+            def forward(ctx, dummy):
+                return dummy
+
+            @staticmethod
+            def backward(ctx: Any, *grad_outputs: Any) -> Any:
+                torch._C._cuda_clearCublasWorkspaces()
+                return None
+
+        _ClearCublasWorkspaces = ClearCublasWorkspaces
+
+    # This synthetic backward is internal cleanup; keep it out of compiled
+    # autograd to avoid tracing it while still routing through autograd worker threads.
+    compiled_autograd = getattr(
+        getattr(torch._C, "_dynamo", None), "compiled_autograd", None
+    )
+    set_autograd_compiler = (
+        getattr(compiled_autograd, "set_autograd_compiler", None)
+        if compiled_autograd is not None
+        else None
+    )
+    prior_compiler = prior_dynamic = None
+    if set_autograd_compiler is not None:
+        prior_compiler, prior_dynamic = set_autograd_compiler(None, False)
+
+    try:
+        for device_index in device_indices:
+            with (
+                torch.cuda.device(device_index),
+                torch.autograd.set_multithreading_enabled(True),
+                torch.inference_mode(False),
+                torch.enable_grad(),
+            ):  # Just so we have something to call backward on
+                dummy = torch.empty(
+                    (), device=f"cuda:{device_index}", requires_grad=True
+                )
+                _ClearCublasWorkspaces.apply(dummy).backward()
+    finally:
+        if set_autograd_compiler is not None:
+            set_autograd_compiler(prior_compiler, prior_dynamic)
 
 
 def set_sync_debug_mode(debug_mode: int | str) -> None:
@@ -1622,6 +1758,7 @@ def _get_rng_state_offset(device: int | str | torch.device = "cuda") -> int:
 
 # pyrefly: ignore [deprecated]
 from .memory import *  # noqa: F403
+from .memory import _use_uvm
 from .random import *  # noqa: F403
 
 
@@ -1991,6 +2128,7 @@ __all__ = [
     "cudaStatus",
     "cudart",
     "current_blas_handle",
+    "current_solver_handle",
     "current_device",
     "current_stream",
     "default_generators",
@@ -2000,6 +2138,8 @@ __all__ = [
     "device_memory_used",
     "device_of",
     "empty_cache",
+    "export_dot",
+    "export_graph_data",
     "get_allocator_backend",
     "CUDAPluggableAllocator",
     "change_current_allocator",

@@ -1,3 +1,4 @@
+# Owner(s): ["module: ci"]
 name: test-scripts-and-ci-tools
 
 on:
@@ -41,7 +42,7 @@ jobs:
           set -ex
           python3 -m venv /tmp/venv
           source /tmp/venv/bin/activate
-          pip install -e .ci/lumen_cli/
+          pip install -e '.ci/lumen_cli/[test]'
           pytest -v -s .ci/lumen_cli/tests/*
 
   lumen-cli-compatible-python39:

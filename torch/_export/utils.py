@@ -216,6 +216,9 @@ def _collect_param_buffer_metadata(mod: torch.fx.GraphModule) -> dict[str, Any]:
 
 
 def _maybe_find_pre_dispatch_tf_mode_for_export():
+    if not torch.compiler.is_exporting():
+        return None
+
     if not torch._C._is_torch_function_mode_enabled():
         return None
 
@@ -253,15 +256,17 @@ def _populate_param_buffer_metadata_to_new_gm(
         metadata.pop("nn_module_stack", None)
         metadata.pop("stack_trace", None)
 
+    inputs_to_parameters = new_sig.inputs_to_parameters
+    inputs_to_buffers = new_sig.inputs_to_buffers
     for node in gm.graph.nodes:
         if node.op == "placeholder":
-            if node.target in new_sig.inputs_to_parameters:
-                param_name = new_sig.inputs_to_parameters[node.target]
+            if node.target in inputs_to_parameters:
+                param_name = inputs_to_parameters[node.target]
                 if param_name in params_buffers_to_node_meta:
                     for k, v in params_buffers_to_node_meta[param_name].items():
                         node.meta[k] = v
-            if node.target in new_sig.inputs_to_buffers:
-                buffer_name = new_sig.inputs_to_buffers[node.target]
+            if node.target in inputs_to_buffers:
+                buffer_name = inputs_to_buffers[node.target]
                 if buffer_name in params_buffers_to_node_meta:
                     for k, v in params_buffers_to_node_meta[buffer_name].items():
                         node.meta[k] = v
@@ -845,6 +850,14 @@ def node_inline_(call_mod_node: torch.fx.Node) -> torch.fx.GraphModule | None:
         for node in body:
             new_node = gm.graph.node_copy(node)
             if node.op == "get_attr":
+                if not isinstance(new_node.target, str):
+                    raise AssertionError(
+                        f"Expected str target for get_attr, got {type(new_node.target)}"
+                    )
+                if not isinstance(node.target, str):
+                    raise AssertionError(
+                        f"Expected str target for get_attr, got {type(node.target)}"
+                    )
                 new_target_name = new_node.target
                 if hasattr(gm, new_target_name):
                     # Loop through and find the "submod_{i}" that have no name collision
@@ -1311,7 +1324,7 @@ def _materialize_cpp_cia_ops() -> None:
 
 def _special_op_to_preserve_cia(*args, **kwargs):
     """
-    This is an special marker that tells our infra that we shouldn't decompose this op.
+    This is a special marker that tells our infra that we shouldn't decompose this op.
     """
     return NotImplemented
 
@@ -1361,8 +1374,7 @@ def _collect_all_valid_cia_ops_for_namespace(
     cia_ops = set()
     for op in op_namespace:
         op_packet = getattr(op_namespace, op)
-        for overload in op_packet.overloads():
-            op_overload = getattr(op_packet, overload)
+        for op_overload in op_packet.op_overloads():
             if _is_preservable_cia_op(op_overload):
                 cia_ops.add(op_overload)
     return cia_ops

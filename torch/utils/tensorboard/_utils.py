@@ -42,7 +42,7 @@ def _prepare_video(V):
     """
     Convert a 5D tensor into 4D tensor.
 
-    Convesrion is done from [batchsize, time(frame), channel(color), height, width]  (5D tensor)
+    Conversion is done from [batchsize, time(frame), channel(color), height, width]  (5D tensor)
     to [time(frame), new_width, new_height, channel] (4D tensor).
 
     A batch of images are spread to a grid, which forms a frame.
@@ -104,7 +104,7 @@ def make_grid(I, ncols=8):
 
 def convert_to_HWC(tensor, input_format):  # tensor: numpy array
     if len(set(input_format)) != len(input_format):
-        raise AssertionError(f"You can not use the same dimension shordhand twice. \
+        raise AssertionError(f"You can not use the same dimension shorthand twice. \
             input_format: {input_format}")
     if len(tensor.shape) != len(input_format):
         raise AssertionError(f"size of input tensor and input format are different. \

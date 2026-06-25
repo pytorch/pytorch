@@ -7,9 +7,10 @@ from __future__ import annotations
 
 import collections
 import functools
+from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from enum import Enum
-from typing import Any, NewType, Protocol, TYPE_CHECKING, TypeVar
+from typing import Any, NewType, Protocol, TYPE_CHECKING, TypeAlias, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -28,7 +29,7 @@ from .utils import strict_zip
 
 if TYPE_CHECKING:
     import contextlib
-    from collections.abc import Callable, Iterable, Sequence
+    from collections.abc import Callable, Iterable
 
     from torch._guards import Source
     from torch._inductor.output_code import OutputCode
@@ -42,6 +43,9 @@ if TYPE_CHECKING:
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
 zip = strict_zip
+
+ActInputPath: TypeAlias = tuple[int, tuple[str, ...]]
+ActInputPaths: TypeAlias = Sequence[ActInputPath]
 
 
 OutputType = Enum(
@@ -203,6 +207,15 @@ class MemoryFormatMeta:
         if not use_memory_format:
             use_memory_format = t._has_symbolic_sizes_strides
 
+        if (
+            not use_memory_format
+            and t.layout == torch.strided
+            and torch._debug_has_internal_overlap(t) == 1
+        ):
+            # An internally overlapping output, e.g. from expand(), cannot
+            # represent arbitrary incoming gradients with its own strides.
+            use_memory_format = True
+
         if use_memory_format:
             return MemoryFormatMeta(
                 # pyrefly: ignore [unbound-name]
@@ -270,6 +283,8 @@ class SubclassCreationMeta:
     # Used at runtime to determine the subclass type, so we don't need to save the original subclass
     original_subclass_type: type | None = None
     memory_format: MemoryFormatMeta | None = None
+    outer_size_from_attr: str | None = None
+    outer_stride_from_attr: str | None = None
 
     def compute_outer_size_and_stride(
         self,
@@ -346,6 +361,16 @@ class SubclassCreationMeta:
                 all_args,
                 curr_start_idx=curr_start_idx,
             )
+            if self.outer_size_from_attr is not None:
+                size_attr = inner_tensors[self.outer_size_from_attr]
+                if not isinstance(size_attr, Tensor):
+                    raise AssertionError("Tensor expected")
+                outer_size = size_attr.size()
+            if self.outer_stride_from_attr is not None:
+                stride_attr = inner_tensors[self.outer_stride_from_attr]
+                if not isinstance(stride_attr, Tensor):
+                    raise AssertionError("Tensor expected")
+                outer_stride = stride_attr.stride()
         else:
             outer_size, outer_stride = self.outer_size, self.outer_stride
 
@@ -494,10 +519,11 @@ class ViewAndMutationMeta:
     # Keeps track of which input indices store parameters (which we will treat as static)
     static_input_indices: list[int] = field(default_factory=list)
 
-    # Input indices that held AsyncCollectiveTensors at compile time.
-    # Used to emit direct trigger_wait() calls at runtime instead of
+    # Input paths that held AsyncCollectiveTensors at compile time. A path is
+    # (input_index, attr_path), where an empty attr_path means the top-level
+    # input. Used to emit direct trigger_wait() calls at runtime instead of
     # scanning every arg on every graph invocation.
-    act_input_indices: list[int] = field(default_factory=list)
+    act_input_paths: list[ActInputPath] = field(default_factory=list)
 
     # Map of effect type (ex. _EffectType.ORDERED) to token.  If there are
     # side-effectful operators, FunctionalTensorMode will populate this
@@ -528,6 +554,9 @@ class ViewAndMutationMeta:
     num_graphsafe_rng_states: int = 0
 
     graphsafe_rng_state_index: int | None = None
+
+    # Device for graphsafe RNG states (supports CUDA, TPU, etc.)
+    graphsafe_rng_device: torch.device | None = None
 
     # Stream indices for mutated inputs in the epilogue
     # Maps from index in mutated_inp_runtime_indices to the stream index that last touched
@@ -1092,6 +1121,30 @@ class AOTAutogradCacheInfo:
 
 
 @dataclass
+class CacheableAOTConfig:
+    """
+    Serializable subset of AOTConfig used by cache keys and cached entries.
+    """
+
+    num_params_buffers: int
+    aot_id: int
+    keep_inference_input_mutations: bool
+    is_export: bool = False
+    no_tangents: bool = False
+    dynamic_shapes: bool = False
+    aot_autograd_arg_pos_to_source: list[Source] | None = None
+    static_input_indices: list[int] | None = None
+    enable_log: bool = True
+    # this is always false outside of export.
+    pre_dispatch: bool = False
+    precompile_backend_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.pre_dispatch and not self.is_export:
+            raise AssertionError("Can only have pre_dispatch IR for export.")
+
+
+@dataclass(frozen=True)
 class AOTConfig:
     """
     Configuration for AOTDispatcher
@@ -1130,6 +1183,21 @@ class AOTConfig:
     # This mode is used to track torch_fn metadata but can interfere with
     # certain tracing scenarios.
     _disable_torch_fn_metadata_mode: bool = False
+
+    def to_cacheable(self) -> CacheableAOTConfig:
+        return CacheableAOTConfig(
+            num_params_buffers=self.num_params_buffers,
+            aot_id=self.aot_id,
+            keep_inference_input_mutations=self.keep_inference_input_mutations,
+            is_export=self.is_export,
+            no_tangents=self.no_tangents,
+            dynamic_shapes=self.dynamic_shapes,
+            aot_autograd_arg_pos_to_source=self.aot_autograd_arg_pos_to_source,
+            static_input_indices=self.static_input_indices,
+            enable_log=self.enable_log,
+            pre_dispatch=self.pre_dispatch,
+            precompile_backend_id=self.precompile_backend_id,
+        )
 
     def __post_init__(self) -> None:
         if self.pre_dispatch:
@@ -1189,8 +1257,8 @@ class AOTState:
     # detected by doing an initial trace when we created this state.
     fw_metadata: ViewAndMutationMeta
 
-    # Top-level configuration
-    # This is morally immutable but sometimes we are naughty and mutate it.
+    # Top-level configuration. Stage-local compiler choices are threaded
+    # explicitly rather than mutating this object in place.
     aot_config: AOTConfig
 
     # When performing AOTAutograd traces and other passes, we typically
@@ -1223,7 +1291,7 @@ class CompilerWrapper:
     us factor these into compositional stages so we can handle each transformation incrementally
     instead of having to do it all at once.
 
-    Since there is a calling convention change, there are two parts to the wrpaper:
+    Since there is a calling convention change, there are two parts to the wrapper:
 
     1. The prologue, which is about compile-time behavior: given this original function, what
        is the new function with modified calling convention that we should trace with AOTAutograd

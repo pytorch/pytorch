@@ -313,9 +313,9 @@ class TestInputAttrTracking(torch._dynamo.test_case.TestCase):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_y_: "f32[2, 2]", L_x_: "f32[2, 2]"):
-        l_y_ = L_y_
+    def forward(self, L_x_: "f32[2, 2]", L_y_: "f32[2, 2]"):
         l_x_ = L_x_
+        l_y_ = L_y_
 
         _get_data_attr: "f32[2, 2]" = torch._C._autograd._get_data_attr(l_y_)
 
@@ -332,9 +332,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    # Note - this does not actually get captured in the graph yet.
-    # The plan of record is to introduce a set_data op, entirely subsume the operation into a call_function
-    # in the fx graph, and let aot_autograd handle it.
+    # See [Note: set_data_on_scoped_tensor] This does not actually get captured in the graph yet.
     def test_set_data_on_scoped_tensor(self):
         def fn(x):
             z = torch.zeros([4, 4])

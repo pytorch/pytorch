@@ -312,7 +312,7 @@ def export(
             as arguments, with the ordering as specified by ``model.state_dict().values()``
         verbose: if True, prints a description of the
             model being exported to stdout. In addition, the final ONNX graph will include the
-            field ``doc_string``` from the exported model which mentions the source code locations
+            field ``doc_string`` from the exported model which mentions the source code locations
             for ``model``. If True, ONNX exporter logging will be turned on.
         training:
             * ``TrainingMode.EVAL``: export the model in inference mode.
@@ -344,13 +344,8 @@ def export(
                 `ATen <https://pytorch.org/cppdocs/#aten>`_ is PyTorch's built-in tensor library, so
                 this instructs the runtime to use PyTorch's implementation of these ops.
 
-                .. warning::
-
-                    Models exported this way are probably runnable only by Caffe2.
-
-                    This may be useful if the numeric differences in implementations of operators are
-                    causing large differences in behavior between PyTorch and Caffe2 (which is more
-                    common on untrained models).
+                Note: Caffe2 support has been removed as of PyTorch 2.9. This export type
+                    is primarily intended for debugging ATen operator execution.
 
             * ``OperatorExportTypes.ONNX_ATEN_FALLBACK``: Try to export each ATen op
                 (in the TorchScript namespace "aten") as a regular ONNX op. If we are unable to do so
@@ -379,7 +374,7 @@ def export(
 
                 .. warning::
 
-                    Models exported this way are probably runnable only by Caffe2.
+                    Note: Caffe2 support has been removed as of PyTorch 2.9.
 
         opset_version (int, default 18): The version of the
             `default (ai.onnx) opset <https://github.com/onnx/onnx/blob/master/docs/Operators.md>`_
@@ -1218,7 +1213,7 @@ def unconvertible_ops(
     training: _C_onnx.TrainingMode = _C_onnx.TrainingMode.EVAL,
     opset_version: int | None = None,
 ) -> tuple[_C.Graph, list[str]]:
-    """Returns an approximated list of all ops that are yet supported by :mod:`torch.onnx`.
+    """Returns an approximated list of all ops that are not yet supported by :mod:`torch.onnx`.
 
     .. deprecated:: 2.5
         Unconvertible ops are not definitive. Please remove usage of this function.
@@ -1704,7 +1699,7 @@ def _should_aten_fallback(
 
 
 def _get_aten_op_overload_name(n: _C.Node) -> str:
-    # Returns `overload_name` attribute to ATen ops on non-Caffe2 builds
+    # Returns `overload_name` attribute to ATen ops
     schema = n.schema()
     if not schema.startswith("aten::"):
         return ""
@@ -1806,7 +1801,7 @@ def _run_symbolic_function(
         if operator_export_type == _C_onnx.OperatorExportTypes.ONNX_FALLTHROUGH:
             return None
         elif operator_export_type == _C_onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
-            # Emit ATen op for non-Caffe2 builds when `operator_export_type==ONNX_ATEN_FALLBACK`
+            # Emit ATen op when `operator_export_type==ONNX_ATEN_FALLBACK`
             attrs = {
                 k + "_" + node.kindOf(k)[0]: symbolic_helper._node_get(node, k)
                 for k in node.attributeNames()
@@ -1831,7 +1826,7 @@ def _verify_custom_op_name(symbolic_name: str) -> None:
             f"Failed to register operator {symbolic_name}. "
             "The symbolic name must match the format domain::name, "
             "and should start with a letter and contain only "
-            "alphanumerical characters"
+            "alphanumeric characters"
         )
 
     ns, _ = jit_utils.parse_node_kind(symbolic_name)
@@ -1890,7 +1885,7 @@ def unregister_custom_op_symbolic(symbolic_name: str, opset_version: int) -> Non
 
 
 def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names) -> None:
-    """Ensures dynamic axes argument is follows the expected format."""
+    """Ensures dynamic axes argument follows the expected format."""
     if len(dynamic_axes) == 0:
         return
 

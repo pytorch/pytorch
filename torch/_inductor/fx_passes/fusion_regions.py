@@ -1,50 +1,8 @@
 """Detect fusion regions for overlap scheduling."""
 
-import operator
-from dataclasses import dataclass, field
-
 import torch
 import torch.fx as fx
-from torch._logging import trace_structured
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._runtime_estimation import get_num_bytes
-
-
-@dataclass
-class FusionRegion:
-    """Represents a connected set of fusible operations that will fuse together."""
-
-    subgraph_node: fx.Node  # The call_module node for this fusion
-    subgraph_module: fx.GraphModule  # The subgraph module
-    total_bytes: int = field(default=0, init=False)  # Total input + output bytes
-    cost_ms: float = field(default=0.0, init=False)  # Estimated cost in milliseconds
-
-    def __post_init__(self) -> None:
-        """Compute cost based on subgraph's placeholder inputs and output node."""
-        self.total_bytes, self.cost_ms = self._compute_cost()
-
-    def _compute_cost(self) -> tuple[int, float]:
-        from torch.utils._pytree import tree_flatten
-        from torch.utils._runtime_estimation import get_transfer_time
-
-        subgraph = self.subgraph_module
-        input_vals = [
-            n.meta.get("val") for n in subgraph.graph.find_nodes(op="placeholder")
-        ]
-        output_vals = [
-            n.meta.get("val")
-            for n in torch._inductor.utils.output_node(subgraph).all_input_nodes
-        ]
-        flat_inputs, _ = tree_flatten(input_vals)
-        flat_outputs, _ = tree_flatten(output_vals)
-
-        transfer_time_ns = get_transfer_time(flat_inputs, flat_outputs)
-        total_bytes = sum(
-            get_num_bytes(t)
-            for t in flat_inputs + flat_outputs
-            if isinstance(t, torch.Tensor)
-        )
-        return total_bytes, transfer_time_ns / 1e6
 
 
 def is_view_node(n: fx.Node) -> bool:
@@ -208,133 +166,52 @@ def build_fusion_regions(
     return region_of
 
 
-def collapse_fusion_regions(
-    gm: fx.GraphModule,
+def estimate_fused_node_costs(
     region_of: dict[fx.Node, OrderedSet[fx.Node]],
-) -> dict[fx.Node, FusionRegion]:
-    """
-    Collapse fusion regions into call_module nodes using fuse_by_partitions.
-    Returns new_region_of mapping module nodes to FusionRegions.
-    """
-    from torch.fx.passes.utils.fuser_utils import fuse_by_partitions
+) -> dict[fx.Node, float]:
+    """Estimate per-node costs accounting for fusion (no graph collapse).
 
-    if not region_of:
-        return {}
+    For each node in a fusion region, only count I/O that crosses the
+    region boundary (external reads/writes). Internal intermediates
+    won't be materialized by inductor, so they shouldn't count.
 
-    # Get unique node sets (regions with <2 nodes already filtered in build_fusion_regions)
-    unique_regions: list[tuple[OrderedSet[fx.Node], int]] = []
-    seen_region_ids: OrderedSet[int] = OrderedSet()
+    Nodes with only internal I/O get cost 0. Nodes with external I/O
+    get the bandwidth cost of just those external tensors.
+    """
+    from torch.utils._pytree import tree_flatten
+    from torch.utils._runtime_estimation import get_transfer_time
+
+    costs: dict[fx.Node, float] = {}
+    seen: OrderedSet[int] = OrderedSet()
+
     for node_set in region_of.values():
-        region_id = id(node_set)
-        if region_id not in seen_region_ids:
-            seen_region_ids.add(region_id)
-            unique_regions.append((node_set, region_id))
-
-    if not unique_regions:
-        return {}
-
-    # Log graph before fusion
-    trace_structured(
-        "artifact",
-        metadata_fn=lambda: {
-            "name": "fusion_regions_before",
-            "encoding": "string",
-        },
-        payload_fn=lambda: gm.print_readable(print_output=False),
-    )
-
-    # Build partitions list for fuse_by_partitions
-    partitions = [dict.fromkeys(nodes) for nodes, _ in unique_regions]
-
-    # Fuse all partitions at once
-    fuse_by_partitions(gm, partitions, prefix="_fusion_region_")
-
-    # Log graph after fusion
-    trace_structured(
-        "artifact",
-        metadata_fn=lambda: {
-            "name": "fusion_regions_after",
-            "encoding": "string",
-        },
-        payload_fn=lambda: gm.print_readable(print_output=False),
-    )
-
-    # Build new_region_of by finding the call_module nodes
-    new_region_of: dict[fx.Node, FusionRegion] = {}
-
-    for region_idx in range(len(unique_regions)):
-        subgraph_name = f"_fusion_region_{region_idx}"
-
-        # Find the call_module node
-        module_nodes = list(gm.graph.find_nodes(op="call_module", target=subgraph_name))
-        assert len(module_nodes) == 1, (
-            f"Expected 1 call_module for {subgraph_name}, got {len(module_nodes)}"
-        )
-        module_node = module_nodes[0]
-
-        subgraph_module = getattr(gm, subgraph_name)
-
-        # Create FusionRegion with all required info
-        region = FusionRegion(
-            subgraph_node=module_node,
-            subgraph_module=subgraph_module,
-        )
-
-        new_region_of[module_node] = region
-
-    return new_region_of
-
-
-def expand_fusion_regions(
-    gm: fx.GraphModule,
-    region_of: dict[fx.Node, FusionRegion],
-) -> dict[fx.Node, fx.Node | None]:
-    """
-    Expand call_module nodes back to their original nodes using _inline_module.
-
-    Returns a mapping from erased module nodes to their replacement (last inlined node).
-    This is used with transfer_erased_node_deps to update dependencies.
-    """
-    from torch.fx.experimental.const_fold import _inline_module
-
-    result: dict[fx.Node, fx.Node | None] = {}
-
-    if not region_of:
-        return result
-
-    for module_node, region in list(region_of.items()):
-        if module_node.op != "call_module":
+        rid = id(node_set)
+        if rid in seen:
             continue
+        seen.add(rid)
 
-        subgraph_name = module_node.target
-        assert isinstance(subgraph_name, str)
-        assert hasattr(gm, subgraph_name), (
-            f"Expected submodule {subgraph_name} to exist"
-        )
+        for n in node_set:
+            # External inputs: values from nodes outside this region
+            ext_inputs = []
+            for inp in n.all_input_nodes:
+                if inp not in node_set:
+                    val = inp.meta.get("val")
+                    if val is not None:
+                        ext_inputs.append(val)
 
-        # Users of module_node are get_items that will be removed from the graph
-        for user in module_node.users:
-            if user.op == "call_function" and user.target == operator.getitem:
-                result[user] = None
+            # External outputs: this node's value is used outside the region
+            ext_outputs = []
+            has_external_user = any(u not in node_set for u in n.users)
+            if has_external_user:
+                val = n.meta.get("val")
+                if val is not None:
+                    ext_outputs.append(val)
 
-        # Get the output arg from the subgraph to determine what will replace module_node
-        output_arg = torch._inductor.utils.output_node(region.subgraph_module).args[0]
+            if not ext_inputs and not ext_outputs:
+                costs[n] = 0.0
+            else:
+                flat_in, _ = tree_flatten(ext_inputs)
+                flat_out, _ = tree_flatten(ext_outputs)
+                costs[n] = get_transfer_time(flat_in, flat_out) / 1e6
 
-        # Inline the module and get the mapping from subgraph nodes to new nodes.
-        # Skip DCE since the graph may not be in a topo ordered state
-        subgraph_to_new = _inline_module(gm, subgraph_name, run_dce=False)
-
-        # Map module_node to the replacement for the output arg
-        # For multi-output (tuple), use the last element (latest in topo order)
-        # so dependencies are only satisfied after all outputs are computed
-        if isinstance(output_arg, (list, tuple)):
-            if output_arg:
-                last_arg = output_arg[-1]
-                assert isinstance(last_arg, fx.Node)
-                result[module_node] = subgraph_to_new[last_arg]
-        elif isinstance(output_arg, fx.Node) and output_arg in subgraph_to_new:
-            result[module_node] = subgraph_to_new[output_arg]
-
-        delattr(gm, subgraph_name)
-
-    return result
+    return costs

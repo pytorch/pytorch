@@ -2,6 +2,7 @@
 # flake8: noqa
 import contextlib
 import copy
+import functools
 import types
 import unittest
 import warnings
@@ -523,6 +524,66 @@ def forward(self, args_0):
         out_export = gm(*params, x)[0]
         self.assertEqual(out_eager.shape, out_export.shape)
         self.assertTrue(torch.allclose(out_eager, out_export, atol=1e-5))
+
+    @unittest.skipUnless(
+        IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED and not torch.version.hip,
+        "Requires CUDA with SM >= 8.0, Triton, and not ROCm",
+    )
+    def test_aot_export_flex_attention_with_blockmask_placeholders(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+
+        _register_blockmask_pytree()
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.wq = torch.nn.Linear(64, 64, bias=False)
+                self.block_mask = create_block_mask(
+                    lambda b, h, q, kv: q >= kv,
+                    B=None,
+                    H=None,
+                    Q_LEN=16,
+                    KV_LEN=16,
+                    device="cuda",
+                )
+
+            def forward(self, x):
+                q = self.wq(x).view(1, 16, 4, 16).transpose(1, 2)
+                return flex_attention(q, q, q, block_mask=self.block_mask).sum()
+
+        with torch.device("meta"):
+            model = Model()
+
+        fake_mode = FakeTensorMode()
+        with fake_mode:
+            for name, param in list(model.named_parameters()):
+                parts = name.split(".")
+                mod = model
+                for part in parts[:-1]:
+                    mod = getattr(mod, part)
+                setattr(
+                    mod,
+                    parts[-1],
+                    torch.nn.Parameter(
+                        torch.empty(param.shape, dtype=param.dtype, device="cuda"),
+                        requires_grad=param.requires_grad,
+                    ),
+                )
+            x = torch.randn(1, 16, 64, device="cuda")
+
+        gm = dynamo_graph_capture_for_export(model)(x)
+        block_mask_placeholders = [
+            node
+            for node in gm.graph.nodes
+            if node.op == "placeholder" and "block_mask" in node.name
+        ]
+        self.assertGreater(len(block_mask_placeholders), 0)
+
+        with contextlib.ExitStack() as stack:
+            joint_with_descriptors = aot_export_joint_with_descriptors(stack, gm, (x,))
+
+        self.assertIsNotNone(joint_with_descriptors.graph_module)
 
     def test_joint_dynamic(self) -> None:
         from torch.export import Dim
@@ -1357,8 +1418,10 @@ def forward(self, arg0_1):
     add = torch.ops.aten.add.Tensor(arange_3, 4);  arange_3 = None
     view = torch.ops.aten.view.default(arange_2, [64, 1]);  arange_2 = None
     ge = torch.ops.aten.ge.Tensor(view, add);  view = add = None
-    expand = torch.ops.aten.expand.default(ge, [1, 64, 64]);  ge = None
-    expand_1 = torch.ops.aten.expand.default(expand, [1, 1, 64, 64]);  expand = None
+    unsqueeze = torch.ops.aten.unsqueeze.default(ge, 0);  ge = None
+    expand = torch.ops.aten.expand.default(unsqueeze, [1, 64, 64]);  unsqueeze = None
+    unsqueeze_1 = torch.ops.aten.unsqueeze.default(expand, 0);  expand = None
+    expand_1 = torch.ops.aten.expand.default(unsqueeze_1, [1, 1, 64, 64]);  unsqueeze_1 = None
     constant_pad_nd = torch.ops.aten.constant_pad_nd.default(expand_1, [0, 64, 0, 64], 0.0);  expand_1 = None
     view_1 = torch.ops.aten.view.default(constant_pad_nd, [1, 1, 1, 128, 1, 128]);  constant_pad_nd = None
     permute = torch.ops.aten.permute.default(view_1, [0, 1, 2, 4, 3, 5]);  view_1 = None
@@ -1383,22 +1446,22 @@ def forward(self, arg0_1):
     _to_copy_7 = torch.ops.aten._to_copy.default(getitem_3, dtype = torch.int32, memory_format = torch.contiguous_format);  getitem_3 = None
     new_zeros = torch.ops.aten.new_zeros.default(_to_copy_4, [1, 1, 1, 2], dtype = torch.int32, pin_memory = False)
     arange_4 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='cuda', index=0), pin_memory = False)
-    unsqueeze = torch.ops.aten.unsqueeze.default(arange_4, -1);  arange_4 = None
+    unsqueeze_2 = torch.ops.aten.unsqueeze.default(arange_4, -1);  arange_4 = None
     arange_5 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='cuda', index=0), pin_memory = False)
-    unsqueeze_1 = torch.ops.aten.unsqueeze.default(_to_copy_3, 3)
-    lt_1 = torch.ops.aten.lt.Tensor(arange_5, unsqueeze_1);  arange_5 = unsqueeze_1 = None
+    unsqueeze_3 = torch.ops.aten.unsqueeze.default(_to_copy_3, 3)
+    lt_1 = torch.ops.aten.lt.Tensor(arange_5, unsqueeze_3);  arange_5 = unsqueeze_3 = None
     scalar_tensor = torch.ops.aten.scalar_tensor.default(1, dtype = torch.int32, layout = torch.strided, device = device(type='cuda', index=0))
     where = torch.ops.aten.where.self(lt_1, _to_copy_4, scalar_tensor);  lt_1 = scalar_tensor = None
     new_ones = torch.ops.aten.new_ones.default(new_zeros, [1, 1], pin_memory = False)
     arange_6 = torch.ops.aten.arange.default(1, dtype = torch.int64, layout = torch.strided, device = device(type='cuda', index=0))
-    unsqueeze_2 = torch.ops.aten.unsqueeze.default(arange_6, -1);  arange_6 = None
-    unsqueeze_3 = torch.ops.aten.unsqueeze.default(unsqueeze_2, -1);  unsqueeze_2 = None
+    unsqueeze_4 = torch.ops.aten.unsqueeze.default(arange_6, -1);  arange_6 = None
+    unsqueeze_5 = torch.ops.aten.unsqueeze.default(unsqueeze_4, -1);  unsqueeze_4 = None
     view_2 = torch.ops.aten.view.default(new_ones, [1, 1, 1, 1]);  new_ones = None
     arange_7 = torch.ops.aten.arange.default(1, dtype = torch.int64, layout = torch.strided, device = device(type='cuda', index=0))
-    unsqueeze_4 = torch.ops.aten.unsqueeze.default(arange_7, -1);  arange_7 = None
-    unsqueeze_5 = torch.ops.aten.unsqueeze.default(unsqueeze_4, -1);  unsqueeze_4 = None
-    unsqueeze_6 = torch.ops.aten.unsqueeze.default(unsqueeze_5, -1);  unsqueeze_5 = None
-    index_put = torch.ops.aten.index_put.default(new_zeros, [unsqueeze_6, unsqueeze_3, unsqueeze, where], view_2);  new_zeros = unsqueeze_6 = unsqueeze_3 = unsqueeze = where = view_2 = None
+    unsqueeze_6 = torch.ops.aten.unsqueeze.default(arange_7, -1);  arange_7 = None
+    unsqueeze_7 = torch.ops.aten.unsqueeze.default(unsqueeze_6, -1);  unsqueeze_6 = None
+    unsqueeze_8 = torch.ops.aten.unsqueeze.default(unsqueeze_7, -1);  unsqueeze_7 = None
+    index_put = torch.ops.aten.index_put.default(new_zeros, [unsqueeze_8, unsqueeze_5, unsqueeze_2, where], view_2);  new_zeros = unsqueeze_8 = unsqueeze_5 = unsqueeze_2 = where = view_2 = None
     slice_3 = torch.ops.aten.slice.Tensor(index_put, 3, 0, 1);  index_put = None
     transpose_1 = torch.ops.aten.transpose.int(slice_3, -2, -1);  slice_3 = None
     sum_4 = torch.ops.aten.sum.dim_IntList(transpose_1, [-1])
@@ -1408,22 +1471,22 @@ def forward(self, arg0_1):
     _to_copy_9 = torch.ops.aten._to_copy.default(getitem_5, dtype = torch.int32, memory_format = torch.contiguous_format);  getitem_5 = None
     new_zeros_1 = torch.ops.aten.new_zeros.default(_to_copy_7, [1, 1, 1, 2], dtype = torch.int32, pin_memory = False)
     arange_8 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='cuda', index=0), pin_memory = False)
-    unsqueeze_7 = torch.ops.aten.unsqueeze.default(arange_8, -1);  arange_8 = None
+    unsqueeze_9 = torch.ops.aten.unsqueeze.default(arange_8, -1);  arange_8 = None
     arange_9 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='cuda', index=0), pin_memory = False)
-    unsqueeze_8 = torch.ops.aten.unsqueeze.default(_to_copy_6, 3)
-    lt_2 = torch.ops.aten.lt.Tensor(arange_9, unsqueeze_8);  arange_9 = unsqueeze_8 = None
+    unsqueeze_10 = torch.ops.aten.unsqueeze.default(_to_copy_6, 3)
+    lt_2 = torch.ops.aten.lt.Tensor(arange_9, unsqueeze_10);  arange_9 = unsqueeze_10 = None
     scalar_tensor_1 = torch.ops.aten.scalar_tensor.default(1, dtype = torch.int32, layout = torch.strided, device = device(type='cuda', index=0))
     where_1 = torch.ops.aten.where.self(lt_2, _to_copy_7, scalar_tensor_1);  lt_2 = scalar_tensor_1 = None
     new_ones_1 = torch.ops.aten.new_ones.default(new_zeros_1, [1, 1], pin_memory = False)
     arange_10 = torch.ops.aten.arange.default(1, dtype = torch.int64, layout = torch.strided, device = device(type='cuda', index=0))
-    unsqueeze_9 = torch.ops.aten.unsqueeze.default(arange_10, -1);  arange_10 = None
-    unsqueeze_10 = torch.ops.aten.unsqueeze.default(unsqueeze_9, -1);  unsqueeze_9 = None
+    unsqueeze_11 = torch.ops.aten.unsqueeze.default(arange_10, -1);  arange_10 = None
+    unsqueeze_12 = torch.ops.aten.unsqueeze.default(unsqueeze_11, -1);  unsqueeze_11 = None
     view_3 = torch.ops.aten.view.default(new_ones_1, [1, 1, 1, 1]);  new_ones_1 = None
     arange_11 = torch.ops.aten.arange.default(1, dtype = torch.int64, layout = torch.strided, device = device(type='cuda', index=0))
-    unsqueeze_11 = torch.ops.aten.unsqueeze.default(arange_11, -1);  arange_11 = None
-    unsqueeze_12 = torch.ops.aten.unsqueeze.default(unsqueeze_11, -1);  unsqueeze_11 = None
-    unsqueeze_13 = torch.ops.aten.unsqueeze.default(unsqueeze_12, -1);  unsqueeze_12 = None
-    index_put_1 = torch.ops.aten.index_put.default(new_zeros_1, [unsqueeze_13, unsqueeze_10, unsqueeze_7, where_1], view_3);  new_zeros_1 = unsqueeze_13 = unsqueeze_10 = unsqueeze_7 = where_1 = view_3 = None
+    unsqueeze_13 = torch.ops.aten.unsqueeze.default(arange_11, -1);  arange_11 = None
+    unsqueeze_14 = torch.ops.aten.unsqueeze.default(unsqueeze_13, -1);  unsqueeze_13 = None
+    unsqueeze_15 = torch.ops.aten.unsqueeze.default(unsqueeze_14, -1);  unsqueeze_14 = None
+    index_put_1 = torch.ops.aten.index_put.default(new_zeros_1, [unsqueeze_15, unsqueeze_12, unsqueeze_9, where_1], view_3);  new_zeros_1 = unsqueeze_15 = unsqueeze_12 = unsqueeze_9 = where_1 = view_3 = None
     slice_6 = torch.ops.aten.slice.Tensor(index_put_1, 3, 0, 1);  index_put_1 = None
     transpose_3 = torch.ops.aten.transpose.int(slice_6, -2, -1);  slice_6 = None
     sum_5 = torch.ops.aten.sum.dim_IntList(transpose_3, [-1])
@@ -1488,12 +1551,202 @@ def forward(self, arg0_1):
         _, spec_c = pytree.tree_flatten(mask_c)
         self.assertNotEqual(spec_a, spec_c)
 
+    def _assert_blockmask_partial_replays_bound_tensors(self, make_mask_mod):
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch.nn.attention.flex_attention import BlockMask, create_block_mask
+
+        query_indices = torch.arange(8, dtype=torch.int32)[:, None]
+        key_indices = torch.arange(8, dtype=torch.int32)[None, :]
+        document_ids = torch.zeros(8, dtype=torch.int64)
+        batch0_attn_regions = torch.tensor([0, 0, 0, 0, 1, 1, 1, 1], dtype=torch.int32)
+        batch1_attn_regions = torch.tensor([0, 0, 1, 1, 0, 0, 1, 1], dtype=torch.int32)
+
+        def mask_rule(batch, head, query_idx, key_idx, attn_regions, document_ids):
+            return (
+                (query_idx >= key_idx)
+                & (attn_regions[query_idx] == attn_regions[key_idx])
+                & (document_ids[query_idx] == document_ids[key_idx])
+            )
+
+        def build_block_mask(attn_regions):
+            return create_block_mask(
+                make_mask_mod(mask_rule, attn_regions, document_ids),
+                B=1,
+                H=1,
+                Q_LEN=8,
+                KV_LEN=8,
+                device="cpu",
+                BLOCK_SIZE=4,
+            )
+
+        def trace_mask_mod(attn_regions):
+            block_mask = build_block_mask(attn_regions)
+            flat_leaves, spec = block_mask._flatten()
+            return make_fx(
+                lambda *flat_leaves: BlockMask._unflatten(flat_leaves, spec).mask_mod(
+                    0, 0, query_indices, key_indices
+                )
+            )(*flat_leaves)
+
+        traced_mask_mod = trace_mask_mod(batch0_attn_regions)
+        replayed_batch1 = traced_mask_mod(
+            *build_block_mask(batch1_attn_regions)._flatten()[0]
+        )
+        expected_batch0 = build_block_mask(batch0_attn_regions).mask_mod(
+            0, 0, query_indices, key_indices
+        )
+        expected_batch1 = build_block_mask(batch1_attn_regions).mask_mod(
+            0, 0, query_indices, key_indices
+        )
+
+        self.assertFalse(torch.equal(replayed_batch1, expected_batch0))
+        self.assertTrue(torch.equal(replayed_batch1, expected_batch1))
+
+    def test_blockmask_partial_extraction_replays_bound_tensors(self):
+        self._assert_blockmask_partial_replays_bound_tensors(
+            lambda mask_rule, attn_regions, document_ids: functools.partial(
+                mask_rule,
+                attn_regions=attn_regions,
+                document_ids=document_ids,
+            )
+        )
+
+    def test_blockmask_recursive_partial_extraction_replays_bound_tensors(self):
+        self._assert_blockmask_partial_replays_bound_tensors(
+            lambda mask_rule, attn_regions, document_ids: functools.partial(
+                functools.partial(mask_rule, attn_regions=attn_regions),
+                document_ids=document_ids,
+            )
+        )
+
+    def test_mask_mod_wrapper_eq_for_partials(self):
+        from torch.nn.attention.flex_attention import (
+            _extract_callable_pytree,
+            _MaskModWrapper,
+        )
+
+        def mask_rule(batch, head, query_idx, key_idx, attn_regions, document_ids):
+            return (
+                (query_idx >= key_idx)
+                & (attn_regions[query_idx] == attn_regions[key_idx])
+                & (document_ids[query_idx] == document_ids[key_idx])
+            )
+
+        document_ids = torch.zeros(8, dtype=torch.int64)
+        batch0_attn_regions = torch.tensor([0, 0, 0, 0, 1, 1, 1, 1], dtype=torch.int32)
+        batch1_attn_regions = torch.tensor([0, 0, 1, 1, 0, 0, 1, 1], dtype=torch.int32)
+
+        def wrap(mask_mod):
+            _, spec, stripped = _extract_callable_pytree(mask_mod)
+            return _MaskModWrapper(stripped, spec)
+
+        partial_a = functools.partial(
+            mask_rule,
+            attn_regions=batch0_attn_regions,
+            document_ids=document_ids,
+        )
+        partial_b = functools.partial(
+            mask_rule,
+            attn_regions=batch1_attn_regions,
+            document_ids=document_ids,
+        )
+        recursive_partial_a = functools.partial(
+            functools.partial(mask_rule, attn_regions=batch0_attn_regions),
+            document_ids=document_ids,
+        )
+        recursive_partial_b = functools.partial(
+            functools.partial(mask_rule, attn_regions=batch1_attn_regions),
+            document_ids=document_ids,
+        )
+
+        wrapped_partial_a = wrap(partial_a)
+        wrapped_partial_b = wrap(partial_b)
+        wrapped_recursive_partial_a = wrap(recursive_partial_a)
+        wrapped_recursive_partial_b = wrap(recursive_partial_b)
+
+        self.assertEqual(wrapped_partial_a, wrapped_partial_b)
+        self.assertEqual(hash(wrapped_partial_a), hash(wrapped_partial_b))
+        self.assertEqual(wrapped_recursive_partial_a, wrapped_recursive_partial_b)
+        self.assertEqual(
+            hash(wrapped_recursive_partial_a), hash(wrapped_recursive_partial_b)
+        )
+        with self.assertRaisesRegex(RuntimeError, "stripped callable is not callable"):
+            wrapped_partial_a(
+                torch.tensor(0),
+                torch.tensor(0),
+                torch.tensor(0),
+                torch.tensor(0),
+            )
+
+    def test_mask_mod_wrapper_eq_for_plain_functions(self):
+        from torch.nn.attention.flex_attention import (
+            _extract_callable_pytree,
+            _MaskModWrapper,
+        )
+
+        def make_mask_mod():
+            def mask_mod(batch, head, query_idx, key_idx):
+                del batch, head
+                return query_idx >= key_idx
+
+            return mask_mod
+
+        def wrap(mask_mod):
+            _, spec, stripped = _extract_callable_pytree(mask_mod)
+            return _MaskModWrapper(stripped, spec)
+
+        wrapped_a = wrap(make_mask_mod())
+        wrapped_b = wrap(make_mask_mod())
+
+        self.assertEqual(wrapped_a, wrapped_b)
+        self.assertEqual(hash(wrapped_a), hash(wrapped_b))
+
+    def test_blockmask_self_referential_function_closure_extraction(self):
+        from torch.nn.attention.flex_attention import create_block_mask
+
+        _register_blockmask_pytree()
+
+        def make_mask_mod():
+            def helper():
+                return helper
+
+            def mask_mod(batch, head, query_idx, key_idx):
+                del batch, head
+                _ = helper
+                return query_idx >= key_idx
+
+            return mask_mod
+
+        mask_a = create_block_mask(
+            make_mask_mod(), B=1, H=1, Q_LEN=8, KV_LEN=8, device="cpu", BLOCK_SIZE=4
+        )
+        mask_b = create_block_mask(
+            make_mask_mod(), B=1, H=1, Q_LEN=8, KV_LEN=8, device="cpu", BLOCK_SIZE=4
+        )
+
+        leaves_a, spec_a = pytree.tree_flatten(mask_a)
+        leaves_b, spec_b = pytree.tree_flatten(mask_b)
+
+        self.assertEqual(spec_a, spec_b)
+
+        restored = pytree.tree_unflatten(leaves_a, spec_a)
+        self.assertTrue(
+            torch.equal(
+                restored.mask_mod(
+                    0, 0, torch.arange(8)[:, None], torch.arange(8)[None, :]
+                ),
+                mask_a.mask_mod(
+                    0, 0, torch.arange(8)[:, None], torch.arange(8)[None, :]
+                ),
+            )
+        )
+
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_blockmask_and_masks_closure_extraction(self):
         """and_masks closure tensors are recursively extracted into pytree leaves.
 
         and_masks(fn1, fn2) returns a closure capturing a tuple of functions.
-        _extract_closure_pytree must recursively process these functions
+        _extract_callable_pytree must recursively process these functions
         (extracting their closure tensors) rather than emitting the functions
         themselves as leaves, since functions are not supported export input
         types.
@@ -1521,9 +1774,11 @@ def forward(self, arg0_1):
 
         leaves, spec = pytree.tree_flatten(block_mask)
 
-        # 8 regular BlockMask tensor attrs + offset extracted from
+        # Present BlockMask tensor attrs + offset extracted from
         # offset_mask's closure
-        n_regular = len(BlockMask._TENSOR_ATTRS)
+        n_regular = sum(
+            getattr(block_mask, attr) is not None for attr in BlockMask._TENSOR_ATTRS
+        )
         self.assertEqual(len(leaves), n_regular + 1)
         self.assertTrue(all(isinstance(l, torch.Tensor) for l in leaves))
         self.assertIs(leaves[n_regular], offset)

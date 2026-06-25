@@ -18,8 +18,8 @@ __all__ = [
 
 
 @substitute_in_graph(struct.pack, can_constant_fold_through=True)  # type: ignore[arg-type]
-def pack(fmt: bytes | str, /, *v: Any) -> bytes:
-    return struct.pack(fmt, *v)
+def pack(format: bytes | str, /, *v: Any) -> bytes:
+    return struct.pack(format, *v)
 
 
 @substitute_in_graph(struct.unpack, can_constant_fold_through=True)  # type: ignore[arg-type]

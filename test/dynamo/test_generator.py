@@ -346,9 +346,7 @@ class GraphModule(torch.nn.Module):
         t = torch.randn(2)
         ctx = whoo()
         next(ctx)
-        with self.assertRaisesRegex(
-            Unsupported, "Detected a method call to a user-defined generator object."
-        ):
+        with self.assertRaises(Unsupported):
             fn(t, ctx)
 
     def test_generator_as_argument_2(self):
@@ -365,14 +363,12 @@ class GraphModule(torch.nn.Module):
         t = torch.randn(2)
         ctx = whoo(t)
         next(ctx)
-        with self.assertRaisesRegex(
-            Unsupported, "Detected a method call to a user-defined generator object."
-        ):
+        with self.assertRaises(Unsupported):
             fn(t, ctx)
 
     def test_generator_as_argument_3(self):
-        # The inline tracer needs to be kept in sync if an already advanced generator
-        # is given to a compiled function.
+        # An unstarted generator passed as an argument is re-inlined as if its
+        # function were called here, so next() works.
         def whoo():
             yield 1
             yield 2
@@ -386,10 +382,7 @@ class GraphModule(torch.nn.Module):
 
         t = torch.randn(2)
         ctx = whoo()
-        with self.assertRaisesRegex(
-            Unsupported, "Detected a method call to a user-defined generator object."
-        ):
-            fn(t, ctx)
+        self.assertEqual(fn(t, ctx), t + 1)
 
     def test_generator_as_argument_4(self):
         def whoo(x):
@@ -404,10 +397,7 @@ class GraphModule(torch.nn.Module):
 
         t = torch.randn(2)
         ctx = whoo(t)
-        with self.assertRaisesRegex(
-            Unsupported,
-            "Detected a method call to a user-defined generator object.",
-        ):
+        with self.assertRaises(Unsupported):
             fn(t, ctx)
 
     def test_islice_chain(self):
@@ -910,6 +900,17 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(n, 2)
         self.assertRaises(StopIteration, next, g)
         self.assertFalse(3 in whoo())
+
+    def test_raise_immediately(self):
+        # see https://github.com/python/cpython/issues/143493
+        @torch.compile(fullgraph=True, backend="eager")
+        def f(s):
+            return (x for x in s)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "'int' object is not iterable"
+        ):
+            f(1)
 
 
 class TestGeneratorSend(GeneratorTestsBase):

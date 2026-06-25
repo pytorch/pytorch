@@ -155,7 +155,7 @@ class LaunchConfig:
 
 class elastic_launch:
     """
-    Launches an torchelastic agent on the container that invoked the entrypoint.
+    Launches a torchelastic agent on the container that invoked the entrypoint.
 
         1. Pass the ``entrypoint`` arguments as non ``kwargs`` (e.g. no named parameters)/
            ``entrypoint`` can be a function or a command.

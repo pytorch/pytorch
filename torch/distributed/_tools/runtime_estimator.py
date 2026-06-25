@@ -141,13 +141,13 @@ class RuntimeEstimator(TorchDispatchMode):
             warmup_iters, actual_iters = 2, 3
             for _ in range(warmup_iters):
                 func(*args, **kwargs)
-            start_event = torch.cuda.Event(enable_timing=True)
-            end_event = torch.cuda.Event(enable_timing=True)
-            start_event.record(torch.cuda.current_stream())
+            start_event = torch.Event(enable_timing=True)
+            end_event = torch.Event(enable_timing=True)
+            start_event.record(torch.accelerator.current_stream())
             for _ in range(actual_iters):
                 func(*args, **kwargs)
-            end_event.record(torch.cuda.current_stream())
-            torch.cuda.synchronize()
+            end_event.record(torch.accelerator.current_stream())
+            torch.accelerator.synchronize()
             cuda_time = start_event.elapsed_time(end_event)
             mean_op_time = cuda_time / actual_iters
 
@@ -233,7 +233,7 @@ class RuntimeEstimator(TorchDispatchMode):
             Tuple[Any, float]: A tuple containing the result of the function and
                 the mean operation time in milliseconds.
         """
-        if not torch.cuda.is_available():
+        if not torch.accelerator.is_available():
             raise AssertionError(
                 "Roofline estimation needs to access CUDA capabilities to make estimations"
             )
@@ -361,7 +361,7 @@ class RuntimeEstimator(TorchDispatchMode):
         fake_mode = active_fake_mode()
         if not isinstance(fake_mode, FakeTensorMode):
             raise AssertionError(
-                "No FakeTensorMode found, designed to used under FakeTensorMode"
+                "No FakeTensorMode found, designed to be used under FakeTensorMode"
             )
         RuntimeEstimator.fake_mode = fake_mode
         self.total_runtime = 0.0

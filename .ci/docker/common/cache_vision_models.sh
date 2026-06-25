@@ -11,8 +11,8 @@ as_jenkins echo 'import torchvision; torchvision.models.mobilenet_v2(pretrained=
 pip_install --pre torch torchvision --index-url https://download.pytorch.org/whl/nightly/cpu
 # Very weird quoting behavior here https://github.com/conda/conda/issues/10972,
 # so echo the command to a file and run the file instead
-conda_run python "${IMPORT_SCRIPT_FILENAME}"
+env_run python "${IMPORT_SCRIPT_FILENAME}"
 
 # Cleaning up
-conda_run pip uninstall -y torch torchvision
+env_run pip uninstall -y torch torchvision
 rm "${IMPORT_SCRIPT_FILENAME}" || true

@@ -19,7 +19,9 @@ from torch._functorch import config as functorch_config
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_LINUX,
     parametrize,
+    TEST_WITH_TORCHDYNAMO,
 )
 from torch.testing._internal.inductor_utils import (
     HAS_CUDA_AND_TRITON,
@@ -29,6 +31,10 @@ from torch.testing._internal.inductor_utils import (
 
 def compute_loss_helper(x):
     return reduce_to_scalar_loss(x)
+
+
+def compiled_region_with_backend_id_for_package_test():
+    return __compiled_fn_0_00000000_0000_0000_0000_000000000000()  # noqa: F821
 
 
 @functorch_config.patch("bundled_autograd_cache", True)
@@ -61,6 +67,22 @@ class TestPackage(torch._inductor.test_case.TestCase):
         self.assertEqual(len(debug_info["backends"]), expected_backends)
         torch._dynamo.reset()
         PrecompileContext.clear()
+
+    def test_guarded_code_records_backend_ids_from_bytecode(self):
+        def fn(x):
+            return x + 1
+
+        (backend_id,) = (
+            compiled_region_with_backend_id_for_package_test.__code__.co_names
+        )
+        package = CompilePackage(fn)
+        with package.code_context(fn.__code__):
+            package.add_guarded_code(
+                b"", compiled_region_with_backend_id_for_package_test.__code__
+            )
+
+        cache_entry = package.cache_entry()
+        self.assertEqual(cache_entry.codes[0].backend_ids, [backend_id])
 
     @unittest.expectedFailure  # FUNCTION_MATCH guard not serializable today
     def test_nn_module(self):
@@ -457,6 +479,10 @@ def add(x, y):
         self.assertEqual(result2, expected2)
         self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO or IS_LINUX,
+        "https://github.com/pytorch/pytorch/issues/183810",
+    )
     @parametrize("device", ("cpu", "cuda", "xpu"))
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_automatic_dynamo_graph_breaks(self, device):
@@ -503,6 +529,7 @@ def add(x, y):
             # Should have same number of frames as on cold start
             self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/184832")
     @parametrize("device", ("cpu", "cuda", "xpu"))
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_automatic_dynamo_lazy_backward(self, device):

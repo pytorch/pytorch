@@ -14,7 +14,8 @@ from .common_utils import (
 )
 from .dsl_registry import dsl_registry, DSLModuleProtocol
 from .registry import (
-    _OpFn,
+    _OpCondFn,
+    _OpImplFn,
     deregister_op_overrides as _deregister_op_overrides_impl,
     register_op_override as _register_op_override_impl,
 )
@@ -47,7 +48,10 @@ def _check_runtime_available() -> tuple[bool, Version | None]:
         available = True
         version = _available_version("triton")
     else:
-        log.warning("triton native DSL ops require: `triton` %s", reason)
+        # info, not warning: see cutedsl_utils._check_runtime_available for
+        # rationale (missing optional deps is the common case; surface via
+        # TORCH_LOGS=+native_dsl when needed).
+        log.info("triton native DSL ops require: `triton` %s", reason)
         available = False
         version = None
     return available, version
@@ -77,7 +81,7 @@ def _version_is_sufficient() -> bool:
     if (major_ok and minor_ok) or check_native_version_skip():
         return True
 
-    log.warning(
+    log.info(
         "triton version %s is not sufficient (>= (%s.%s.*)); "
         "set TORCH_NATIVE_SKIP_VERSION_CHECK=1 to override",
         version,
@@ -98,7 +102,8 @@ def register_op_override(
     lib_symbol: str,
     op_symbol: str,
     dispatch_key: str,
-    impl: _OpFn,
+    cond: _OpCondFn | None,
+    impl: _OpImplFn,
     *,
     allow_multiple_override: bool = False,
     unconditional_override: bool = False,
@@ -120,6 +125,7 @@ def register_op_override(
         lib_symbol,
         op_symbol,
         dispatch_key,
+        cond,
         impl,
         allow_multiple_override=allow_multiple_override,
         unconditional_override=unconditional_override,

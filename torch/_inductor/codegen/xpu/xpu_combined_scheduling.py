@@ -85,7 +85,8 @@ class XPUCombinedScheduling(BaseScheduling):
         prologue_nodes: Sequence[BaseSchedulerNode],
     ) -> str | None:
         if self._cutlass_scheduling.is_cutlass_template(template_node):
-            assert not prologue_nodes
+            if prologue_nodes:
+                raise AssertionError("cutlass template does not support prologue_nodes")
             return self._cutlass_scheduling.codegen_template(
                 template_node, epilogue_nodes, prologue_nodes
             )
@@ -96,6 +97,9 @@ class XPUCombinedScheduling(BaseScheduling):
 
     def codegen_mix_order_reduction(self, node):
         return self._triton_scheduling.codegen_mix_order_reduction(node)
+
+    def codegen_nested_reduction(self, node):
+        return self._triton_scheduling.codegen_nested_reduction(node)
 
     def codegen_node(self, node: FusedSchedulerNode | SchedulerNode) -> None:
         return self._triton_scheduling.codegen_node(node)

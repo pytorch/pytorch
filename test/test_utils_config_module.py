@@ -26,7 +26,10 @@ class TestConfigModule(TestCase):
         # Config changes get persisted between test cases
         for k in config._config:
             config._config[k].user_override.set(_UNSET_SENTINEL)
-        config._hash_digest = None
+            config._config[k].hide = False
+        config._hash_cache_var.set(None)
+        config._get_dict_dirty_keys_var.set(None)
+        config._get_dict_cache_var.set(None)
         # Reset deprecation warning flags
         for k in config._config:
             config._config[k]._deprecation_warned = False
@@ -284,8 +287,8 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
                 hash_value,
             )
 
-        config._hash_digest = "fake"
-        self.assertEqual(config.get_hash(), "fake")
+        config._hash_cache_var.set(b"fake")
+        self.assertEqual(config.get_hash(), b"fake")
 
         config.e_bool = False
         self.assertNotEqual(
@@ -663,6 +666,177 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
             self.assertEqual(config.e_int, 2)
         self.assertEqual(config.e_int, 1)
         self.assertEqual(config.e_string, "string")
+
+    def test_get_dict_readonly_values_caching(self):
+        """readonly_values=True should return cached results on repeated calls."""
+        d1 = config._get_dict(readonly_values=True)
+        d2 = config._get_dict(readonly_values=True)
+        self.assertEqual(d1, d2)
+
+    def test_get_dict_readonly_values_cache_invalidation(self):
+        """Mutating a config key should be reflected in subsequent cached calls."""
+        d1 = config._get_dict(readonly_values=True)
+        self.assertEqual(d1["e_int"], 1)
+        config.e_int = 42
+        d2 = config._get_dict(readonly_values=True)
+        self.assertEqual(d2["e_int"], 42)
+
+    def test_get_dict_readonly_values_does_not_mutate_prior_result(self):
+        """Mutating config after a cached call should not affect the prior result."""
+        d1 = config._get_dict(readonly_values=True)
+        self.assertEqual(d1["e_int"], 1)
+        config.e_int = 42
+        d2 = config._get_dict(readonly_values=True)
+        self.assertEqual(d1["e_int"], 1)
+        self.assertEqual(d2["e_int"], 42)
+
+    def test_get_dict_readonly_values_multiple_cache_keys(self):
+        """Different filter arguments should produce independent cached results."""
+        d_all = config._get_dict(readonly_values=True)
+        d_filtered = config._get_dict(ignored_keys=["e_int"], readonly_values=True)
+        self.assertIn("e_int", d_all)
+        self.assertNotIn("e_int", d_filtered)
+
+        # Mutate and verify both cache entries update correctly
+        config.e_string = "changed"
+        d_all2 = config._get_dict(readonly_values=True)
+        d_filtered2 = config._get_dict(ignored_keys=["e_int"], readonly_values=True)
+        self.assertEqual(d_all2["e_string"], "changed")
+        self.assertEqual(d_filtered2["e_string"], "changed")
+
+    def test_get_dict_readonly_values_full_dirty_clears_cache(self):
+        """Exceeding the dirty keys cap should trigger a full cache rebuild."""
+        config._get_dict(readonly_values=True)
+        # Mutate more distinct keys than the cap to force fully dirty state.
+        all_keys = [k for k in config._config if config._config[k].alias is None]
+        self.assertGreater(len(all_keys), config._GET_DICT_DIRTY_KEYS_CAP)
+        for key in all_keys[: config._GET_DICT_DIRTY_KEYS_CAP + 1]:
+            setattr(config, key, config._config[key].default)
+        self.assertIsNone(config._get_dict_dirty_keys_var.get())
+        d = config._get_dict(readonly_values=True)
+        self.assertIsNotNone(d)
+
+    def test_get_dict_non_readonly_ignores_cache(self):
+        """Non-readonly calls should not use or pollute the cache."""
+        d1 = config._get_dict(readonly_values=False)
+        self.assertIsNone(config._get_dict_cache_var.get())
+        config.e_int = 42
+        d2 = config._get_dict(readonly_values=False)
+        self.assertEqual(d2["e_int"], 42)
+        self.assertEqual(d1["e_int"], 1)
+
+    def test_get_dict_cache_not_poisoned_by_caller_mutation(self):
+        """Mutating a returned dict must not affect subsequent cached calls."""
+        d1 = config._get_dict(readonly_values=True)
+        d1["e_int"] = 999
+        d2 = config._get_dict(readonly_values=True)
+        self.assertEqual(d2["e_int"], 1)
+
+    def test_get_dict_cache_invalidated_by_delattr(self):
+        """Deleting a config key should invalidate the cache."""
+        config.e_int = 42
+        d1 = config._get_dict(readonly_values=True)
+        self.assertEqual(d1["e_int"], 42)
+        del config.e_int
+        d2 = config._get_dict(readonly_values=True)
+        # __delattr__ resets user_override, so the default is returned
+        self.assertEqual(d2["e_int"], 1)
+
+    def test_get_dict_cache_invalidated_by_patch(self):
+        """Config changes via patch() should be reflected in cached results."""
+        d1 = config._get_dict(readonly_values=True)
+        self.assertEqual(d1["e_int"], 1)
+        with config.patch(e_int=42):
+            d2 = config._get_dict(readonly_values=True)
+            self.assertEqual(d2["e_int"], 42)
+        d3 = config._get_dict(readonly_values=True)
+        self.assertEqual(d3["e_int"], 1)
+
+    def test_get_dict_cache_invalidated_by_closure_patcher(self):
+        """Config changes via _make_closure_patcher should be reflected in cached results."""
+        d1 = config._get_dict(readonly_values=True)
+        self.assertEqual(d1["e_int"], 1)
+        change_fn = config._make_closure_patcher(e_int=42)
+        revert = change_fn()
+        try:
+            d2 = config._get_dict(readonly_values=True)
+            self.assertEqual(d2["e_int"], 42)
+        finally:
+            revert()
+        d3 = config._get_dict(readonly_values=True)
+        self.assertEqual(d3["e_int"], 1)
+
+    def test_get_hash_per_thread_isolation(self):
+        """Each thread should compute its own hash based on its own config values."""
+        import threading
+
+        base_hash = config.get_hash()
+
+        thread_hash = [None]
+        error = [None]
+
+        def thread_fn():
+            try:
+                config.e_int = 999
+                thread_hash[0] = config.get_hash()
+            except Exception as e:
+                error[0] = e
+
+        t = threading.Thread(target=thread_fn)
+        t.start()
+        t.join()
+        if error[0] is not None:
+            raise error[0]
+
+        # The main thread's hash should be unchanged (e_int still at default)
+        self.assertEqual(config.get_hash(), base_hash)
+        # The child thread should have gotten a different hash
+        self.assertNotEqual(thread_hash[0], base_hash)
+
+    def test_hash_dirty_on_setattr(self):
+        """Direct config assignment should mark the hash dirty."""
+        config.get_hash()
+        self.assertFalse(config._hash_dirty_var.get())
+        config.e_int = 42
+        self.assertTrue(config._hash_dirty_var.get())
+
+    def test_hash_dirty_on_delattr(self):
+        """Deleting a config key should mark the hash dirty."""
+        config.get_hash()
+        self.assertFalse(config._hash_dirty_var.get())
+        del config.e_int
+        self.assertTrue(config._hash_dirty_var.get())
+
+    def test_hash_dirty_on_patch(self):
+        """Entering and exiting a patch should mark the hash dirty."""
+        config.get_hash()
+        self.assertFalse(config._hash_dirty_var.get())
+        with config.patch(e_int=42):
+            self.assertTrue(config._hash_dirty_var.get())
+            config.get_hash()
+            self.assertFalse(config._hash_dirty_var.get())
+        # Exiting the patch restores old values via __setattr__, which marks dirty
+        self.assertTrue(config._hash_dirty_var.get())
+
+    def test_hash_dirty_on_closure_patcher(self):
+        """_make_closure_patcher should mark the hash dirty on apply and revert."""
+        config.get_hash()
+        self.assertFalse(config._hash_dirty_var.get())
+        change_fn = config._make_closure_patcher(e_int=42)
+        revert = change_fn()
+        self.assertTrue(config._hash_dirty_var.get())
+        config.get_hash()
+        self.assertFalse(config._hash_dirty_var.get())
+        revert()
+        self.assertTrue(config._hash_dirty_var.get())
+
+    def test_hash_dirty_on_load_config(self):
+        """Loading a saved config should mark the hash dirty."""
+        saved = config.save_config()
+        config.get_hash()
+        self.assertFalse(config._hash_dirty_var.get())
+        config.load_config(saved)
+        self.assertTrue(config._hash_dirty_var.get())
 
 
 if __name__ == "__main__":

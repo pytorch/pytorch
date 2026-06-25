@@ -1,12 +1,14 @@
-# mypy: allow-untyped-defs
 """Various linear algebra utility methods for internal use."""
 
 import torch
 from torch import Tensor
 
 
-def is_sparse(A):
-    """Check if tensor A is a sparse COO tensor. All other sparse storage formats (CSR, CSC, etc...) will return False."""
+def is_sparse(A: Tensor) -> bool:
+    """Check if tensor A is a sparse COO tensor.
+
+    All other sparse storage formats (CSR, CSC, etc...) will return False.
+    """
     if isinstance(A, torch.Tensor):
         return A.layout == torch.sparse_coo
 
@@ -16,7 +18,7 @@ def is_sparse(A):
     raise TypeError(error_str)
 
 
-def get_floating_dtype(A):
+def get_floating_dtype(A: Tensor) -> torch.dtype:
     """Return the floating point dtype of tensor A.
 
     Integer types map to float32.
@@ -45,12 +47,12 @@ def bform(X: Tensor, A: Tensor | None, Y: Tensor) -> Tensor:
     return matmul(X.mT, matmul(A, Y))
 
 
-def qform(A: Tensor | None, S: Tensor):
+def qform(A: Tensor | None, S: Tensor) -> Tensor:
     """Return quadratic form :math:`S^T A S`."""
     return bform(S, A, S)
 
 
-def basis(A):
+def basis(A: Tensor) -> Tensor:
     """Return orthogonal basis of A columns."""
     return torch.linalg.qr(A).Q
 
@@ -69,6 +71,17 @@ def symeig(A: Tensor, largest: bool | None = False) -> tuple[Tensor, Tensor]:
 
 # These functions were deprecated and removed
 # This nice error message can be removed in version 1.13+
+def cholesky(input: Tensor, upper: bool = False, *, out=None) -> Tensor:
+    raise RuntimeError(
+        "This function was deprecated since version 1.9 and is now removed. "
+        "`torch.cholesky` is deprecated in favor of `torch.linalg.cholesky`.\n"
+        "L = torch.cholesky(A) should be replaced with:\n"
+        "L = torch.linalg.cholesky(A)\n"
+        "U = torch.cholesky(A, upper=True) should be replaced with:\n"
+        "U = torch.linalg.cholesky(A).mH"
+    )
+
+
 def matrix_rank(input, tol=None, symmetric=False, *, out=None) -> Tensor:
     raise RuntimeError(
         "This function was deprecated since version 1.9 and is now removed.\n"

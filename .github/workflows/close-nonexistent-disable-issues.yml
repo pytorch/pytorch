@@ -1,3 +1,4 @@
+# Owner(s): ["module: ci"]
 name: Close nonexistent disable issues
 
 on:

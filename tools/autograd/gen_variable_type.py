@@ -251,7 +251,6 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "split_with_sizes_backward",
     "dot",
     "vdot",
-    "cholesky",
     "triangular_solve",
     "mm",
     "_unsafe_view",
@@ -937,7 +936,7 @@ def gen_variable_type(
             + f"generated from {fm.template_dir_for_comments()}/VariableType.cpp",
         },
         env_callable=gen_variable_type_func,
-        num_shards=5,
+        num_shards=10,
         sharded_keys=sharded_keys,
     )
 

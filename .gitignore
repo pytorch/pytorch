@@ -8,7 +8,6 @@
 
 ## PyTorch
 
-agent_space/
 .dmypy.json
 .gradle
 .hypothesis
@@ -301,6 +300,9 @@ cmake-build-debug
 # BEGIN NOT-CLEAN-FILES (setup.py handles this marker. Do not change.)
 #
 # Below files are not deleted by "setup.py clean".
+
+# Scratch space for agent-authored throwaway files
+agent_space/
 
 # Downloaded bazel
 tools/bazel

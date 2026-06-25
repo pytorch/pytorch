@@ -1,3 +1,4 @@
+import contextlib
 import math
 from collections.abc import Callable, Sequence
 from typing import Any
@@ -28,6 +29,7 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
 )
 from torch.fx.graph_module import GraphModule
+from torch.fx.traceback import annotate, current_meta
 from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispatchMode
 
 
@@ -734,6 +736,12 @@ def create_fw_bw_graph(
             args = [score, b, h, m, n] + list(other_buffers)
             optional_grad = [example_grad] if example_grad.requires_grad else []
             _, grads = joint(args, optional_grad)
+            if grads[0] is None:
+                raise RuntimeError(
+                    "flex_attention backward requires the output of score_mod to "
+                    "depend on score. Got a score_mod whose output does not "
+                    "require gradients with respect to score."
+                )
 
             return grads
 
@@ -761,6 +769,8 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
         *score_mod_other_buffers: tuple[Any, ...],
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         ctx.set_materialize_grads(False)
+        # Capture sparsity_hint from tracing metadata so backward can re-annotate
+        ctx._sparsity_hint = current_meta.get("custom", {}).get("sparsity_hint", 0.0)
         any_buffer_requires_grad = any(
             buffer.requires_grad
             for buffer in mask_mod_other_buffers
@@ -831,6 +841,10 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
             q_indices,
             full_q_num_blocks,
             full_q_indices,
+            dq_write_order,
+            dq_write_order_full,
+            dq_kv_order,
+            dq_kv_order_spt,
             Q_BLOCK_SIZE,
             KV_BLOCK_SIZE,
             *other_buffers,
@@ -849,41 +863,51 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
         # We have asserted that mask_mod_other_buffers do not require grad,
         # but score_mod_other_buffers can require grad.
         none_grads = [None] * 6
-        (
-            grad_query,
-            grad_key,
-            grad_value,
-            grad_score_mod_captured,
-        ) = flex_attention_backward(
-            query,
-            key,
-            value,
-            out,
-            logsumexp,
-            grad_out,
-            grad_logsumexp,
-            fw_graph,
-            joint_graph,
-            (
-                query_lengths,
-                kv_lengths,
-                kv_num_blocks,
-                kv_indices,
-                full_kv_num_blocks,
-                full_kv_indices,
-                q_num_blocks,
-                q_indices,
-                full_q_num_blocks,
-                full_q_indices,
-                Q_BLOCK_SIZE,
-                KV_BLOCK_SIZE,
-                mask_graph,
-            ),
-            scale,
-            kernel_options,
-            score_mod_other_buffers,
-            mask_mod_other_buffers,
+        _sparsity_ctx = (
+            annotate({"sparsity_hint": ctx._sparsity_hint})
+            if ctx._sparsity_hint > 0
+            else contextlib.nullcontext()
         )
+        with _sparsity_ctx:
+            (
+                grad_query,
+                grad_key,
+                grad_value,
+                grad_score_mod_captured,
+            ) = flex_attention_backward(
+                query,
+                key,
+                value,
+                out,
+                logsumexp,
+                grad_out,
+                grad_logsumexp,
+                fw_graph,
+                joint_graph,
+                (
+                    query_lengths,
+                    kv_lengths,
+                    kv_num_blocks,
+                    kv_indices,
+                    full_kv_num_blocks,
+                    full_kv_indices,
+                    q_num_blocks,
+                    q_indices,
+                    full_q_num_blocks,
+                    full_q_indices,
+                    dq_write_order,
+                    dq_write_order_full,
+                    dq_kv_order,
+                    dq_kv_order_spt,
+                    Q_BLOCK_SIZE,
+                    KV_BLOCK_SIZE,
+                    mask_graph,
+                ),
+                scale,
+                kernel_options,
+                score_mod_other_buffers,
+                mask_mod_other_buffers,
+            )
         return grad_query, grad_key, grad_value, *none_grads, *grad_score_mod_captured
 
 
@@ -1449,10 +1473,19 @@ def flex_attention_backward_fake_tensor_mode(
     broadcasted_grad_value = value.new_empty((Bq, Hkv, seq_len_kv, v_head_dim))
     broadcasted_grad_value = _permute_strides(broadcasted_grad_value, value.stride())
 
-    if Bq > 1 and Bkv == 1:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_and
+
+    # This branch chooses fake tensor metadata, including strides. Guarding is
+    # valid for backed symbolic sizes, while unbacked/data-dependent predicates
+    # conservatively fall through to the non-broadcast contract below.
+    if guard_or_false(sym_and(Bkv == 1, Bq > 1)):
         grad_key = torch.sum(broadcasted_grad_key, dim=0, keepdim=True)
         grad_value = torch.sum(broadcasted_grad_value, dim=0, keepdim=True)
     else:
+        torch._check(
+            Bq == Bkv,
+            lambda: "grad_key/grad_value batch must match key/value batch.",
+        )
         grad_key = broadcasted_grad_key
         grad_value = broadcasted_grad_value
 

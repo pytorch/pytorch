@@ -17,8 +17,7 @@ struct C10_API AutogradState {
       bool inference_mode,
       bool fw_grad_mode,
       bool multithreading_enabled)
-      : graph_exec_group_(std::nullopt),
-        grad_mode_(grad_mode),
+      : grad_mode_(grad_mode),
         inference_mode_(inference_mode),
         fw_grad_mode_(fw_grad_mode),
         multithreading_enabled_(multithreading_enabled) {}
@@ -43,8 +42,12 @@ struct C10_API AutogradState {
     view_replay_enabled_ = view_replay_enabled;
   }
 
-  void set_graph_exec_group(std::optional<SafePyObject> group) {
-    graph_exec_group_ = std::move(group);
+  void set_grad_layout_enforcement_enabled(bool enabled) {
+    grad_layout_enforcement_enabled_ = enabled;
+  }
+
+  void set_graph_exec_group(const std::optional<SafePyObject>& group) {
+    graph_exec_group_ = group;
   }
 
   bool get_grad_mode() const {
@@ -67,17 +70,22 @@ struct C10_API AutogradState {
     return view_replay_enabled_;
   }
 
+  bool get_grad_layout_enforcement_enabled() const {
+    return grad_layout_enforcement_enabled_;
+  }
+
   const std::optional<SafePyObject>& get_graph_exec_group() const {
     return graph_exec_group_;
   }
 
  private:
   std::optional<SafePyObject> graph_exec_group_;
-  bool grad_mode_ : 1;
-  bool inference_mode_ : 1;
-  bool fw_grad_mode_ : 1;
-  bool multithreading_enabled_ : 1;
+  bool grad_mode_ : 1 = true;
+  bool inference_mode_ : 1 = false;
+  bool fw_grad_mode_ : 1 = true;
+  bool multithreading_enabled_ : 1 = true;
   bool view_replay_enabled_ : 1 = false;
+  bool grad_layout_enforcement_enabled_ : 1 = true;
 };
 
 } // namespace c10

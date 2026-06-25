@@ -216,7 +216,7 @@ PyObject* THCPModule_nccl_broadcast(PyObject* self, PyObject* args) {
 
   {
     pybind11::gil_scoped_release no_gil;
-    torch::cuda::nccl::broadcast(inputs, streams, user_comms);
+    torch::cuda::nccl::broadcast(inputs, root, streams, user_comms);
   }
 
   Py_RETURN_NONE;

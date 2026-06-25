@@ -547,7 +547,7 @@ Example::
 add_docstr(
     torch.addmm,
     r"""
-addmm(input, mat1, mat2, out_dtype=None, *, beta=1, alpha=1, out=None) -> Tensor
+addmm(input, mat1, mat2, *, beta=1, alpha=1, out=None) -> Tensor
 
 Performs a matrix multiplication of the matrices :attr:`mat1` and :attr:`mat2`.
 The matrix :attr:`input` is added to the final result.
@@ -584,9 +584,6 @@ Args:
     input (Tensor): matrix to be added
     mat1 (Tensor): the first matrix to be matrix multiplied
     mat2 (Tensor): the second matrix to be matrix multiplied
-    out_dtype (dtype, optional): the dtype of the output tensor,
-        Supported only on CUDA and for torch.float32 given
-        torch.float16/torch.bfloat16 input dtypes
 
 Keyword args:
     beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
@@ -601,6 +598,22 @@ Example::
     >>> torch.addmm(M, mat1, mat2)
     tensor([[-4.8716,  1.4671, -1.3746],
             [ 0.7573, -3.9555, -2.8681]])
+
+.. function:: addmm(input, mat1, mat2, out_dtype, *, beta=1, alpha=1, out=None) -> Tensor
+   :noindex:
+
+Args:
+    input (Tensor): matrix to be added
+    mat1 (Tensor): the first matrix to be matrix multiplied
+    mat2 (Tensor): the second matrix to be matrix multiplied
+    out_dtype (dtype): the dtype of the output tensor.
+        Supported only on CUDA and for torch.float32 given
+        torch.float16/torch.bfloat16 input dtypes.
+
+Keyword args:
+    beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
+    alpha (Number, optional): multiplier for :math:`mat1 @ mat2` (:math:`\alpha`)
+    {out}
 """.format(**common_args, **tf32_notes, **rocm_fp16_notes, **sparse_support_notes),
 )
 
@@ -1353,7 +1366,7 @@ Example::
 add_docstr(
     torch.baddbmm,
     r"""
-baddbmm(input, batch1, batch2, out_dtype=None, *, beta=1, alpha=1, out=None) -> Tensor
+baddbmm(input, batch1, batch2, *, beta=1, alpha=1, out=None) -> Tensor
 
 Performs a batch matrix-matrix product of matrices in :attr:`batch1`
 and :attr:`batch2`.
@@ -1387,9 +1400,6 @@ Args:
     input (Tensor): the tensor to be added
     batch1 (Tensor): the first batch of matrices to be multiplied
     batch2 (Tensor): the second batch of matrices to be multiplied
-    out_dtype (dtype, optional): the dtype of the output tensor,
-        Supported only on CUDA and for torch.float32 given
-        torch.float16/torch.bfloat16 input dtypes
 
 Keyword args:
     beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
@@ -1403,6 +1413,22 @@ Example::
     >>> batch2 = torch.randn(10, 4, 5)
     >>> torch.baddbmm(M, batch1, batch2).size()
     torch.Size([10, 3, 5])
+
+.. function:: baddbmm(input, batch1, batch2, out_dtype, *, beta=1, alpha=1, out=None) -> Tensor
+   :noindex:
+
+Args:
+    input (Tensor): the tensor to be added
+    batch1 (Tensor): the first batch of matrices to be multiplied
+    batch2 (Tensor): the second batch of matrices to be multiplied
+    out_dtype (dtype): the dtype of the output tensor.
+        Supported only on CUDA and for torch.float32 given
+        torch.float16/torch.bfloat16 input dtypes.
+
+Keyword args:
+    beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
+    alpha (Number, optional): multiplier for :math:`\text{{batch1}} \mathbin{{@}} \text{{batch2}}` (:math:`\alpha`)
+    {out}
 """.format(**common_args, **tf32_notes, **rocm_fp16_notes),
 )
 
@@ -1532,7 +1558,7 @@ Example::
 add_docstr(
     torch.bmm,
     r"""
-bmm(input, mat2, out_dtype=None, *, out=None) -> Tensor
+bmm(input, mat2, *, out=None) -> Tensor
 
 Performs a batch matrix-matrix product of matrices stored in :attr:`input`
 and :attr:`mat2`.
@@ -1558,9 +1584,6 @@ If :attr:`input` is a :math:`(b \times n \times m)` tensor, :attr:`mat2` is a
 Args:
     input (Tensor): the first batch of matrices to be multiplied
     mat2 (Tensor): the second batch of matrices to be multiplied
-    out_dtype (dtype, optional): the dtype of the output tensor,
-        Supported only on CUDA and for torch.float32 given
-        torch.float16/torch.bfloat16 input dtypes
 
 Keyword Args:
     {out}
@@ -1572,6 +1595,19 @@ Example::
     >>> res = torch.bmm(input, mat2)
     >>> res.size()
     torch.Size([10, 3, 5])
+
+.. function:: bmm(input, mat2, out_dtype, *, out=None) -> Tensor
+   :noindex:
+
+Args:
+    input (Tensor): the first batch of matrices to be multiplied
+    mat2 (Tensor): the second batch of matrices to be multiplied
+    out_dtype (dtype): the dtype of the output tensor.
+        Supported only on CUDA and for torch.float32 given
+        torch.float16/torch.bfloat16 input dtypes.
+
+Keyword Args:
+    {out}
 """.format(**common_args, **tf32_notes, **rocm_fp16_notes),
 )
 
@@ -1900,25 +1936,32 @@ along dimension :attr:`dim` according to the indices or number of sections speci
 by :attr:`indices_or_sections`. This function is based on NumPy's
 :func:`numpy.array_split`.
 
+.. function:: tensor_split(input, sections, dim=0) -> List of Tensors
+   :noindex:
+
+   Splits :attr:`input` into :attr:`sections` sections along dimension :attr:`dim`.
+   If :attr:`input` is divisible by :attr:`sections` along dimension :attr:`dim`, each
+   section will be of equal size, :code:`input.size(dim) / sections`. If :attr:`input`
+   is not divisible by :attr:`sections`, the sizes of the first
+   :code:`int(input.size(dim) % sections)` sections will have size
+   :code:`int(input.size(dim) / sections) + 1`, and the rest will have size
+   :code:`int(input.size(dim) / sections)`.
+
+   :attr:`sections` can also be a zero-dimensional long tensor.
+
+.. function:: tensor_split(input, indices, dim=0) -> List of Tensors
+   :noindex:
+
+   Splits :attr:`input` along dimension :attr:`dim` at each of the indices in
+   :attr:`indices`. For instance, :code:`indices=[2, 3]` and :code:`dim=0`
+   would result in the tensors :code:`input[:2]`, :code:`input[2:3]`, and
+   :code:`input[3:]`.
+
+   :attr:`indices` can be a list or tuple of ints, or a one-dimensional long
+   tensor on the CPU.
+
 Args:
     input (Tensor): the tensor to split
-    indices_or_sections (Tensor, int or list or tuple of ints):
-        If :attr:`indices_or_sections` is an integer ``n`` or a zero dimensional long tensor
-        with value ``n``, :attr:`input` is split into ``n`` sections along dimension :attr:`dim`.
-        If :attr:`input` is divisible by ``n`` along dimension :attr:`dim`, each
-        section will be of equal size, :code:`input.size(dim) / n`. If :attr:`input`
-        is not divisible by ``n``, the sizes of the first :code:`int(input.size(dim) % n)`
-        sections will have size :code:`int(input.size(dim) / n) + 1`, and the rest will
-        have size :code:`int(input.size(dim) / n)`.
-
-        If :attr:`indices_or_sections` is a list or tuple of ints, or a one-dimensional long
-        tensor, then :attr:`input` is split along dimension :attr:`dim` at each of the indices
-        in the list, tuple or tensor. For instance, :code:`indices_or_sections=[2, 3]` and :code:`dim=0`
-        would result in the tensors :code:`input[:2]`, :code:`input[2:3]`, and :code:`input[3:]`.
-
-        If :attr:`indices_or_sections` is a tensor, it must be a zero-dimensional or one-dimensional
-        long tensor on the CPU.
-
     dim (int, optional): dimension along which to split the tensor. Default: ``0``
 
 Example::
@@ -2575,88 +2618,6 @@ Example::
 )
 
 add_docstr(
-    torch.cholesky,
-    r"""
-cholesky(input, upper=False, *, out=None) -> Tensor
-
-Computes the Cholesky decomposition of a symmetric positive-definite
-matrix :math:`A` or for batches of symmetric positive-definite matrices.
-
-If :attr:`upper` is ``True``, the returned matrix ``U`` is upper-triangular, and
-the decomposition has the form:
-
-.. math::
-
-  A = U^TU
-
-If :attr:`upper` is ``False``, the returned matrix ``L`` is lower-triangular, and
-the decomposition has the form:
-
-.. math::
-
-    A = LL^T
-
-If :attr:`upper` is ``True``, and :math:`A` is a batch of symmetric positive-definite
-matrices, then the returned tensor will be composed of upper-triangular Cholesky factors
-of each of the individual matrices. Similarly, when :attr:`upper` is ``False``, the returned
-tensor will be composed of lower-triangular Cholesky factors of each of the individual
-matrices.
-
-.. warning::
-
-    :func:`torch.cholesky` is deprecated in favor of :func:`torch.linalg.cholesky`
-    and will be removed in a future PyTorch release.
-
-    ``L = torch.cholesky(A)`` should be replaced with
-
-    .. code:: python
-
-        L = torch.linalg.cholesky(A)
-
-    ``U = torch.cholesky(A, upper=True)`` should be replaced with
-
-    .. code:: python
-
-        U = torch.linalg.cholesky(A).mH
-
-    This transform will produce equivalent results for all valid (symmetric positive definite) inputs.
-
-Args:
-    input (Tensor): the input tensor :math:`A` of size :math:`(*, n, n)` where `*` is zero or more
-                batch dimensions consisting of symmetric positive-definite matrices.
-    upper (bool, optional): flag that indicates whether to return a
-                            upper or lower triangular matrix. Default: ``False``
-
-Keyword args:
-    out (Tensor, optional): the output matrix
-
-Example::
-
-    >>> a = torch.randn(3, 3)
-    >>> a = a @ a.mT + 1e-3 # make symmetric positive-definite
-    >>> l = torch.cholesky(a)
-    >>> a
-    tensor([[ 2.4112, -0.7486,  1.4551],
-            [-0.7486,  1.3544,  0.1294],
-            [ 1.4551,  0.1294,  1.6724]])
-    >>> l
-    tensor([[ 1.5528,  0.0000,  0.0000],
-            [-0.4821,  1.0592,  0.0000],
-            [ 0.9371,  0.5487,  0.7023]])
-    >>> l @ l.mT
-    tensor([[ 2.4112, -0.7486,  1.4551],
-            [-0.7486,  1.3544,  0.1294],
-            [ 1.4551,  0.1294,  1.6724]])
-    >>> a = torch.randn(3, 2, 2) # Example for batched input
-    >>> a = a @ a.mT + 1e-03 # make symmetric positive-definite
-    >>> l = torch.cholesky(a)
-    >>> z = l @ l.mT
-    >>> torch.dist(z, a)
-    tensor(2.3842e-07)
-""",
-)
-
-add_docstr(
     torch.cholesky_solve,
     r"""
 cholesky_solve(B, L, upper=False, *, out=None) -> Tensor
@@ -3190,10 +3151,6 @@ Example::
     >>> torch.cosh(a)
     tensor([ 1.0133,  1.7860,  1.2536,  1.2805])
 
-.. note::
-   When :attr:`input` is on the CPU, the implementation of torch.cosh may use
-   the Sleef library, which rounds very large results to infinity or negative
-   infinity. See `here <https://sleef.org/purec.xhtml>`_ for details.
 """.format(**common_args),
 )
 
@@ -7517,7 +7474,7 @@ Example::
 add_docstr(
     torch.mm,
     r"""
-mm(input, mat2, out_dtype=None, *, out=None) -> Tensor
+mm(input, mat2, *, out=None) -> Tensor
 
 Performs a matrix multiplication of the matrices :attr:`input` and :attr:`mat2`.
 
@@ -7543,9 +7500,6 @@ layout will be deduced from that of :attr:`input`.
 Args:
     input (Tensor): the first matrix to be matrix multiplied
     mat2 (Tensor): the second matrix to be matrix multiplied
-    out_dtype (dtype, optional): the dtype of the output tensor,
-        Supported only on CUDA and for torch.float32 given
-        torch.float16/torch.bfloat16 input dtypes
 
 Keyword args:
     {out}
@@ -7557,6 +7511,19 @@ Example::
     >>> torch.mm(mat1, mat2)
     tensor([[ 0.4851,  0.5037, -0.3633],
             [-0.0760, -3.6705,  2.4784]])
+
+.. function:: mm(input, mat2, out_dtype, *, out=None) -> Tensor
+   :noindex:
+
+Args:
+    input (Tensor): the first matrix to be matrix multiplied
+    mat2 (Tensor): the second matrix to be matrix multiplied
+    out_dtype (dtype): the dtype of the output tensor.
+        Supported only on CUDA and for torch.float32 given
+        torch.float16/torch.bfloat16 input dtypes.
+
+Keyword args:
+    {out}
 """.format(**common_args, **tf32_notes, **rocm_fp16_notes, **sparse_support_notes),
 )
 
@@ -8306,6 +8273,58 @@ Example::
 )
 
 add_docstr(
+    torch.nonzero_static,
+    r"""
+nonzero_static(input, *, size, fill_value=-1) -> Tensor
+
+Returns a 2-D tensor where each row is the index for a non-zero value.
+The returned Tensor has the same `torch.dtype` as `torch.nonzero()`.
+
+Args:
+    {input}
+
+Keyword args:
+    size (int): the size of non-zero elements expected to be included in the out
+        tensor. Pad the out tensor with `fill_value` if the `size` is larger
+        than total number of non-zero elements, truncate out tensor if `size`
+        is smaller. The size must be a non-negative integer.
+    fill_value (int, optional): the value to fill the output tensor with when `size` is larger
+        than the total number of non-zero elements. Default is `-1` to represent
+        invalid index.
+
+Example::
+
+    # Example 1: Padding
+    >>> input_tensor = torch.tensor([[1, 0], [3, 2]])
+    >>> static_size = 4
+    >>> t = torch.nonzero_static(input_tensor, size=static_size)
+    tensor([[  0,   0],
+            [  1,   0],
+            [  1,   1],
+            [  -1, -1]], dtype=torch.int64)
+
+    # Example 2: Truncating
+    >>> input_tensor = torch.tensor([[1, 0], [3, 2]])
+    >>> static_size = 2
+    >>> t = torch.nonzero_static(input_tensor, size=static_size)
+    tensor([[  0,   0],
+            [  1,   0]], dtype=torch.int64)
+
+    # Example 3: 0 size
+    >>> input_tensor = torch.tensor([10])
+    >>> static_size = 0
+    >>> t = torch.nonzero_static(input_tensor, size=static_size)
+    tensor([], size=(0, 1), dtype=torch.int64)
+
+    # Example 4: 0 rank input
+    >>> input_tensor = torch.tensor(10)
+    >>> static_size = 2
+    >>> t = torch.nonzero_static(input_tensor, size=static_size)
+    tensor([], size=(2, 0), dtype=torch.int64)
+""".format(**common_args),
+)
+
+add_docstr(
     torch.normal,
     r"""
 normal(mean, std, *, generator=None, out=None) -> Tensor
@@ -8329,8 +8348,8 @@ total number of elements in each tensor need to be the same.
           its device with the CPU.
 
 Args:
-    mean (Tensor): the tensor of per-element means
-    std (Tensor): the tensor of per-element standard deviations
+    mean (float or Tensor): per-element mean(s). Only floating point types are supported.
+    std (float or Tensor): per-element standard deviation(s). Only floating point types are supported.
 
 Keyword args:
     {generator}
@@ -10013,10 +10032,6 @@ Example::
     >>> torch.sinh(a)
     tensor([ 0.5644, -0.9744, -0.1268,  1.0845])
 
-.. note::
-   When :attr:`input` is on the CPU, the implementation of torch.sinh may use
-   the Sleef library, which rounds very large results to infinity or negative
-   infinity. See `here <https://sleef.org/purec.xhtml>`_ for details.
 """.format(**common_args),
 )
 
@@ -10533,7 +10548,7 @@ Keyword args:
         coalesced tensor.  If the :attr:`check_invariants` flag is
         False, no error will be raised if the prerequisites are not
         met and this will lead to silently incorrect results. To force
-        coalescion please use :meth:`coalesce` on the resulting
+        coalescing please use :meth:`coalesce` on the resulting
         Tensor.
         Default: None: except for trivial cases (e.g. nnz < 2) the
         resulting Tensor has is_coalesced set to ``False```.
@@ -11015,8 +11030,7 @@ always be real-valued, even if :attr:`input` is complex.
 
 .. note:: The implementation of :func:`torch.linalg.svd` on CPU uses LAPACK's routine `?gesdd`
           (a divide-and-conquer algorithm) instead of `?gesvd` for speed. Analogously,
-          on GPU, it uses cuSOLVER's routines `gesvdj` and `gesvdjBatched` on CUDA 10.1.243
-          and later, and MAGMA's routine `gesdd` on earlier versions of CUDA.
+          on GPU, it uses cuSOLVER's routines `gesvdj` and `gesvdjBatched`.
 
 .. note:: The returned `U` will not be contiguous. The matrix (or batch of matrices) will
           be represented as a column-major matrix (i.e. Fortran-contiguous).

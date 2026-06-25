@@ -45,14 +45,17 @@ from torch._library.opaque_object import (
     register_opaque_type,
 )
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.fx._graph_pickler import GraphPickler, Options
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.fx.graph import _illegal_char_regex
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_LINUX,
     parametrize,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.utils._import_utils import import_dill
 
 
 class Color(OpaqueBase):
@@ -444,7 +447,7 @@ class TestOpaqueObject(TestCase):
         # raises. Any registrations before this would leak into the next test.
         super().setUp()
 
-        self.lib = torch.library.Library("_TestOpaqueObject", "FRAGMENT")  # noqa: TOR901
+        self.lib = torch.library.Library("_TestOpaqueObject", "FRAGMENT")  # noqa: SCOPED_LIBRARY
         self._opaque_types_before_test = set(_OPAQUE_TYPES_BY_NAME.keys())
 
         torch.library.define(
@@ -1192,7 +1195,7 @@ def forward(self, x_1, cfg_1):
             return out
 
         torch.library.register_fake(
-            "_TestOpaqueObject::bad_fake", bad_fake1, lib=self.lib, allow_override=True
+            "_TestOpaqueObject::bad_fake", bad_fake1, lib=self.lib
         )
 
         with self.assertRaisesRegex(
@@ -1206,7 +1209,7 @@ def forward(self, x_1, cfg_1):
             return torch.empty_like(x)
 
         torch.library.register_fake(
-            "_TestOpaqueObject::bad_fake", bad_fake2, lib=self.lib, allow_override=True
+            "_TestOpaqueObject::bad_fake", bad_fake2, lib=self.lib
         )
 
         with self.assertRaisesRegex(
@@ -1368,6 +1371,7 @@ def forward(self, arg0_1, arg1_1):
         res = torch.compile(foo, fullgraph=True, backend="inductor")(rng, x)
         self.assertFalse(torch.allclose(res, x * x + x))
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/184597")
     def test_reference_type_recompile(self):
         cnt = CompileCounter()
 
@@ -3268,6 +3272,7 @@ def forward(self, L_x_ : torch.Tensor):
         result.backward(grad_o)
         self.assertEqual(x2.grad, grad_o * 1.5)
 
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     def test_invoke_subgraph(self):
         @torch.compiler.nested_compile_region
         def fn(scale_obj, x):
@@ -3973,6 +3978,46 @@ class GraphModule(torch.nn.Module):
             "Forward graph should have opaque placeholder nodes",
         )
 
+    def test_hoisted_opaque_with_graphpickler(self):
+        if import_dill() is None:
+            self.skipTest("dill not available")
+
+        backend = EagerAndRecordGraphs()
+
+        def fn(x):
+            return torch.ops.mylib.op_with_string(x, HoistedString("double"))
+
+        compiled = torch.compile(fn, fullgraph=True, backend=backend)
+        compiled(torch.randn(3, 4))
+
+        self.assertEqual(len(backend.graphs), 1)
+        captured_gm = backend.graphs[0]
+
+        placeholders = [n for n in captured_gm.graph.nodes if n.op == "placeholder"]
+        opaque_ph = None
+        for ph in placeholders:
+            ev = ph.meta.get("example_value")
+            if isinstance(ev, FakeScriptObject):
+                opaque_ph = ph
+                break
+        self.assertIsNotNone(opaque_ph, "no placeholder with FakeScriptObject found")
+
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        options = Options(ops_filter=None, node_metadata_key_filter=None)
+        data = GraphPickler.dumps(captured_gm, options)
+        restored_gm = GraphPickler.loads(data, fake_mode)
+
+        restored_phs = [n for n in restored_gm.graph.nodes if n.op == "placeholder"]
+        restored_opaque = None
+        for ph in restored_phs:
+            ev = ph.meta.get("example_value")
+            if isinstance(ev, FakeScriptObject):
+                restored_opaque = ph
+                break
+        restored_real = restored_opaque.meta["example_value"].real_obj
+        self.assertIsInstance(restored_real, HoistedString)
+        self.assertEqual(restored_real.val, "double")
+
 
 instantiate_parametrized_tests(TestOpaqueObject)
 
@@ -4059,6 +4104,21 @@ class fn(torch.nn.Module):
         return randn
 """,
         )
+
+    def test_set_generator_metaclass_is_idempotent(self):
+        """Calling _set_generator_metaclass twice is a no-op, not an error"""
+        from torch._opaque_base import OpaqueBaseMeta
+
+        # Already called during import; second call should be a no-op.
+        torch._C._set_generator_metaclass(OpaqueBaseMeta)
+        self.assertIsInstance(torch._C.Generator, OpaqueBaseMeta)
+
+    def test_generator_metaclass_is_set(self):
+        """Generator's metaclass should be OpaqueBaseMeta after import"""
+        from torch._opaque_base import OpaqueBaseMeta
+
+        self.assertIsInstance(torch._C.Generator, OpaqueBaseMeta)
+        self.assertEqual(torch._C.Generator.__module__, "torch._C")
 
 
 if __name__ == "__main__":

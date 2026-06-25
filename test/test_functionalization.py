@@ -1,6 +1,7 @@
 # Owner(s): ["module: codegen"]
 # ruff: noqa: F841
 
+import pickle
 import unittest
 from contextlib import nullcontext
 
@@ -2270,6 +2271,20 @@ def forward(self, arg0_1):
 
         self.assertNotEqual(unlifted.untyped_storage(), lifted.untyped_storage())
 
+    def test_python_functionalization_lift_functional_tensor(self):
+        def f(x):
+            tmp = x + 1
+            return torch.ops.aten.lift.default(tmp)
+
+        x = torch.randn(4)
+        out_ref = f(x)
+        out_test = dispatch_functionalize(f)(x)
+        out_test_cpp = _functionalize(
+            f, reapply_views=True, crossref=False, skip_input_mutations=True
+        )(x)
+        self.assertEqual(out_ref, out_test)
+        self.assertEqual(out_ref, out_test_cpp)
+
     def test_python_functionalization_lift_fresh(self):
         def f(x):
             tmp = torch.tensor([0.0])
@@ -2322,6 +2337,94 @@ def forward(self, arg0_1):
 )
 class TestCrossRefFunctionalization(TestFunctionalization):
     crossref = True
+
+
+class TestViewMetaSerialization(TestCase):
+    # Exercise to_serializable_tuple() via as_tuple() and pickle, covering each
+    # element kind that used to be a dangling reference: std::vector (resize_/
+    # _unsafe_view_), const at::Tensor& (_make_dual), and const
+    # std::optional<at::Tensor>& (_nested_view_from_jagged). Deterministic UAF
+    # under ASAN before the fix; the tensor cases segfault even without ASAN.
+
+    def _make_dual_view_meta(self, tangent, level=0):
+        # _make_dual_ViewMeta's SerializableTuple is (has_symbolic_inputs,
+        # reapply_views, inverse_return_mode, tangent, level); the tangent
+        # element is the `const at::Tensor&` reference that used to dangle.
+        return torch._C._functionalization._make_dual_ViewMeta(
+            (
+                False,
+                True,
+                torch._C._functionalization.InverseReturnMode.AlwaysView,
+                tangent,
+                level,
+            )
+        )
+
+    def _nested_jagged_view_meta(self, offsets, lengths):
+        # _nested_view_from_jagged_ViewMeta's SerializableTuple is
+        # (has_symbolic_inputs, reapply_views, inverse_return_mode, offsets,
+        # dummy, lengths, ragged_idx, min_seqlen, max_seqlen). lengths/min_seqlen/
+        # max_seqlen are `const std::optional<at::Tensor>&` elements; this covers
+        # the optional<Tensor> decay path (min_seqlen/max_seqlen left as None).
+        return torch._C._functionalization._nested_view_from_jagged_ViewMeta(
+            (
+                False,
+                True,
+                torch._C._functionalization.InverseReturnMode.AlwaysView,
+                offsets,
+                torch.zeros(offsets.shape[0] - 1),
+                lengths,
+                1,
+                None,
+                None,
+            )
+        )
+
+    def test_resize_view_meta_as_tuple(self):
+        view_meta = torch._C._functionalization.resize__ViewMeta((True, [3, 4, 5]))
+        reapply_views, size = view_meta.as_tuple()
+        self.assertEqual(reapply_views, True)
+        self.assertEqual(size, [3, 4, 5])
+
+    def test_unsafe_view_meta_as_tuple(self):
+        view_meta = torch._C._functionalization._unsafe_view_ViewMeta((False, [2, 6]))
+        has_symbolic_inputs, size = view_meta.as_tuple()
+        self.assertEqual(has_symbolic_inputs, False)
+        self.assertEqual(size, [2, 6])
+
+    def test_make_dual_view_meta_tensor_element_as_tuple(self):
+        tangent = torch.arange(6.0).reshape(2, 3)
+        view_meta = self._make_dual_view_meta(tangent, level=0)
+        has_symbolic_inputs, reapply_views, _, restored_tangent, level = (
+            view_meta.as_tuple()
+        )
+        self.assertEqual(has_symbolic_inputs, False)
+        self.assertEqual(reapply_views, True)
+        self.assertEqual(level, 0)
+        self.assertEqual(restored_tangent, tangent)
+
+    def test_nested_jagged_view_meta_optional_tensor_elements_as_tuple(self):
+        offsets = torch.tensor([0, 2, 4])
+        lengths = torch.tensor([2, 2])
+        view_meta = self._nested_jagged_view_meta(offsets, lengths)
+        restored = view_meta.as_tuple()
+        self.assertEqual(restored[3], offsets)
+        # present optional<Tensor> round-trips, absent ones stay None
+        self.assertEqual(restored[5], lengths)
+        self.assertEqual(restored[7], None)
+        self.assertEqual(restored[8], None)
+
+    def test_view_meta_pickle_roundtrip(self):
+        for view_meta in (
+            torch._C._functionalization.resize__ViewMeta((True, [3, 4, 5])),
+            torch._C._functionalization._unsafe_view_ViewMeta((False, [2, 6])),
+            self._make_dual_view_meta(torch.arange(6.0).reshape(2, 3)),
+            self._nested_jagged_view_meta(
+                torch.tensor([0, 2, 4]), torch.tensor([2, 2])
+            ),
+        ):
+            restored = pickle.loads(pickle.dumps(view_meta))
+            self.assertEqual(restored.as_tuple(), view_meta.as_tuple())
 
 
 if __name__ == "__main__":

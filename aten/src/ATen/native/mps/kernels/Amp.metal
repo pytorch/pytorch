@@ -21,7 +21,7 @@ kernel void ampNonFiniteCheckAndUnscale(
     constant AmpNonFiniteCheckAndUnscaleArgs<T>& pointerArgs [[buffer(0)]],
     constant MetadataArguments& metadata [[buffer(1)]],
     device float& foundInf [[buffer(2)]],
-    constant T& invScale [[buffer(3)]],
+    constant float& invScale [[buffer(3)]],
     uint local_tid [[thread_position_in_threadgroup]],
     uint tgSize [[threads_per_threadgroup]],
     uint group_id [[threadgroup_position_in_grid]]) {
@@ -38,11 +38,11 @@ kernel void ampNonFiniteCheckAndUnscale(
 
   for (uint i = local_tid; i < chunk_size; i += threadGroupSize) {
     uint index = offset + i;
-    T val = data[index];
+    float val = static_cast<float>(data[index]);
     if (!isfinite(val)) {
       foundInf = 1.0f;
     }
-    data[index] = (invScale == static_cast<T>(1.0) ? val : val * invScale);
+    data[index] = static_cast<T>(invScale == 1.0f ? val : val * invScale);
   }
 }
 
@@ -50,13 +50,13 @@ template <typename T>
 kernel void ampNonFiniteCheckAndUnscaleSingle(
     device T* data [[buffer(0)]],
     device float& foundInf [[buffer(1)]],
-    constant T& invScale [[buffer(2)]],
+    constant float& invScale [[buffer(2)]],
     uint tid [[thread_position_in_grid]]) {
-  T val = data[tid];
+  float val = static_cast<float>(data[tid]);
   if (!isfinite(val)) {
     foundInf = 1.0f;
   }
-  data[tid] = (invScale == T(1.0) ? val : val * invScale);
+  data[tid] = static_cast<T>(invScale == 1.0f ? val : val * invScale);
 }
 
 template <typename T>
@@ -87,7 +87,7 @@ kernel void ampUpdateScale(
           pointerArgs [[buffer(0)]],                                        \
       constant MetadataArguments & metadata [[buffer(1)]],                  \
       device float& foundInf [[buffer(2)]],                                 \
-      constant DTYPE& invScale [[buffer(3)]],                               \
+      constant float& invScale [[buffer(3)]],                               \
       uint local_tid [[thread_position_in_threadgroup]],                    \
       uint tgSize [[threads_per_threadgroup]],                              \
       uint group_id [[threadgroup_position_in_grid]])
@@ -98,7 +98,7 @@ kernel void ampUpdateScale(
       ampNonFiniteCheckAndUnscaleSingle<DTYPE>(                              \
           device DTYPE * data [[buffer(0)]],                                 \
           device float& foundInf [[buffer(1)]],                              \
-          constant DTYPE& invScale [[buffer(2)]],                            \
+          constant float& invScale [[buffer(2)]],                            \
           uint tid [[thread_position_in_grid]])
 
 #define INSTANTIATE_AMP_UPDATE_SCALE(DTYPE)                    \

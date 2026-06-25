@@ -79,11 +79,13 @@ class ROCmCPPScheduling(BaseScheduling):
         """
         Codegen a ROCm template, possibly with fused epilogues
         """
-        assert self.is_rocm_cpp_template(template_node), (
-            "Template node passed to ROCmScheduler.codegen_template must be a SchedulerNode that wraps a ROCmTemplateBuffer"
-        )
+        if not self.is_rocm_cpp_template(template_node):
+            raise AssertionError(
+                "Template node passed to ROCmScheduler.codegen_template must be a SchedulerNode that wraps a ROCmTemplateBuffer"
+            )
         _, (_numel, rnumel) = template_node.group
-        assert rnumel == 1
+        if rnumel != 1:
+            raise AssertionError(f"expected rnumel == 1, got {rnumel}")
         ctb: ROCmTemplateBuffer = cast(ROCmTemplateBuffer, template_node.node)
         kernel, render = ctb.make_kernel_render(ctb)  # type: ignore[misc]
         with kernel:

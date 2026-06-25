@@ -136,6 +136,35 @@ class GraphModule(torch.nn.Module):
         # No recompile
         self.assertEqual(counter.frame_count, 1)
 
+    def test_graph_break_recovers_missing_python_tls_snapshot(self):
+        @torch.compile(backend="eager_noexcept")
+        def fn(x):
+            torch._C._dispatch_tls_set_dispatch_key_included(
+                torch._C.DispatchKey.Python, True
+            )
+            torch._C._dispatch_tls_set_dispatch_key_included(
+                torch._C.DispatchKey.PythonTLSSnapshot, False
+            )
+            torch._dynamo.graph_break()
+            return torch.sin(x)
+
+        saved_python = torch._C._dispatch_tls_is_dispatch_key_included(
+            torch._C.DispatchKey.Python
+        )
+        saved_python_tls_snapshot = torch._C._dispatch_tls_is_dispatch_key_included(
+            torch._C.DispatchKey.PythonTLSSnapshot
+        )
+        try:
+            x = torch.randn(3)
+            self.assertEqual(fn(x), x.sin())
+        finally:
+            torch._C._dispatch_tls_set_dispatch_key_included(
+                torch._C.DispatchKey.Python, saved_python
+            )
+            torch._C._dispatch_tls_set_dispatch_key_included(
+                torch._C.DispatchKey.PythonTLSSnapshot, saved_python_tls_snapshot
+            )
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

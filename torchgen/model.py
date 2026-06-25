@@ -133,6 +133,7 @@ class DispatchKey(Enum):
     Autocast = auto()
     AutocastCPU = auto()
     AutocastCUDA = auto()
+    AutocastXPU = auto()
     Batched = auto()
     VmapMode = auto()
     FuncTorchGradWrapper = auto()
@@ -758,6 +759,10 @@ class NativeFunction:
         # All out= ops receive the "out" tag.
         if func.is_out_fn() and "out" in valid_tags:
             tags_inp.append("out")
+
+        # All inplace ops receive the "inplace" tag.
+        if func.name.name.inplace and "inplace" in valid_tags:
+            tags_inp.append("inplace")
 
         tags: set[str] = set()
         for t in tags_inp:
@@ -2039,7 +2044,6 @@ class BaseTy(Enum):
     ScalarType = auto()
     Tensor = auto()
     int = auto()
-    Dimname = auto()
     DimVector = auto()
     float = auto()
     str = auto()

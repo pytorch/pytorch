@@ -156,7 +156,7 @@ class ShapeEnvEvent:
                 raise AssertionError(f"Node {x.name} not found in name_to_node")
             return name_to_node[x.name]
 
-        # Replaces the value of an specific argument by the result of fn.
+        # Replaces the value of a specific argument by the result of fn.
         def replacearg(index: int, key: str, fn: Callable[..., Any]) -> None:
             if index < len(args):
                 args[index] = fn(args[index])
@@ -222,6 +222,7 @@ def _extract_shape_env_and_assert_equal(
         if isinstance(val, ShapeEnv):
             shape_env = assert_equal(shape_env, val)
         if isinstance(val, SymTypes) and is_symbolic(val):
+            # pyrefly: ignore [bad-argument-type]
             shape_env = assert_equal(shape_env, val.node.shape_env)
 
     return shape_env

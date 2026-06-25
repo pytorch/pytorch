@@ -7,6 +7,7 @@ import torch
 import torch._inductor
 import torch._inductor.fx_passes.group_batch_fusion
 from torch._dynamo.utils import counters
+from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.inductor_utils import GPU_TYPE, requires_gpu
 
@@ -459,6 +460,148 @@ class TestGroupBatchFusion(TestCase):
             counters.clear()
 
     @requires_gpu()
+    def test_as_strided_storage_offset_after_mm_fusion(self):
+        """
+        Post-grad batch linear fusion rewrites parallel mm nodes into a
+        batched bmm followed by select views. The select outputs preserve the
+        original row stride, but they inherit a non-zero storage offset.
+        Downstream as_strided must inherit that offset instead of resetting to
+        the base storage offset.
+        """
+        import copy
+
+        from torch._dynamo.backends.common import aot_autograd
+        from torch._inductor.compile_fx import compile_fx_inner
+        from torch._inductor.decomposition import select_decomp_table
+        from torch._inductor.fx_passes.group_batch_fusion import (
+            graph_search_options,
+            PostGradBatchLinearFusion,
+        )
+        from torch._inductor.pattern_matcher import stable_topological_sort
+
+        fused_counts = []
+
+        def fusing_compiler(gm, example_inputs):
+            opts = graph_search_options.copy()
+            opts["min_fuse_set_size"] = 3
+            rule = PostGradBatchLinearFusion(graph_search_options=opts)
+            mm_nodes = [n for n in gm.graph.nodes if rule.match(n) is not None]
+            fused_counts.append(len(mm_nodes))
+            if len(mm_nodes) >= 3:
+                rule.fuse(gm.graph, mm_nodes[:3])
+                stable_topological_sort(gm.graph)
+                gm.graph.lint()
+                gm.recompile()
+            return compile_fx_inner(gm, example_inputs)
+
+        fusing_backend = aot_autograd(
+            fw_compiler=fusing_compiler,
+            decompositions=select_decomp_table(),
+        )
+
+        class QKVModel(torch.nn.Module):
+            def __init__(self, hidden_size=64, num_heads=4):
+                super().__init__()
+                self.hidden_size = hidden_size
+                self.num_heads = num_heads
+                self.head_dim = hidden_size // num_heads
+                self.q_proj = torch.nn.Linear(hidden_size, hidden_size, bias=False)
+                self.k_proj = torch.nn.Linear(hidden_size, hidden_size, bias=False)
+                self.v_proj = torch.nn.Linear(hidden_size, hidden_size, bias=False)
+                self.scale = self.head_dim**0.5
+
+            def forward(self, x):
+                # Reduced-size version of the issue author's QKV repro.
+                x = x.permute(1, 0, 2)
+                q = self.q_proj(x)
+                k = self.k_proj(x)
+                v = self.v_proj(x)
+                seq_len, batch_size, _ = q.shape
+
+                q = q / self.scale
+                q = q.view(seq_len, batch_size, self.num_heads, self.head_dim)
+                q = q.permute(2, 1, 0, 3)
+                q = q.reshape(self.num_heads, batch_size * seq_len, self.head_dim)
+                q = q.as_strided(
+                    (self.num_heads, batch_size * seq_len, self.head_dim),
+                    (self.head_dim, self.num_heads * self.head_dim, 1),
+                )
+
+                k = k.view(seq_len, batch_size, self.num_heads, self.head_dim)
+                k = k.permute(2, 1, 0, 3)
+                k = k.reshape(self.num_heads, batch_size * seq_len, self.head_dim)
+                k = k.as_strided(
+                    (self.num_heads, batch_size * seq_len, self.head_dim),
+                    (self.head_dim, self.num_heads * self.head_dim, 1),
+                )
+                k = k.permute(0, 2, 1)
+
+                v = v.view(seq_len, batch_size, self.num_heads, self.head_dim)
+                v = v.permute(2, 1, 0, 3)
+                v = v.reshape(self.num_heads, batch_size * seq_len, self.head_dim)
+                v = v.as_strided(
+                    (self.num_heads, batch_size * seq_len, self.head_dim),
+                    (self.head_dim, self.num_heads * self.head_dim, 1),
+                )
+                v = v.permute(0, 2, 1)
+
+                return torch.bmm(q, k), k, v
+
+        torch.manual_seed(42)
+        model = QKVModel().to(GPU_TYPE).eval()
+        x = torch.randn(1, 8, 64, device=GPU_TYPE)
+
+        torch._dynamo.reset()
+        with torch.no_grad():
+            ref = model(x)
+
+        torch._dynamo.reset()
+        compiled = torch.compile(copy.deepcopy(model), backend=fusing_backend)
+        with torch.no_grad():
+            res = compiled(x)
+
+        self.assertEqual(fused_counts, [3])
+        for ref_t, res_t in zip(ref, res):
+            self.assertEqual(ref_t, res_t, rtol=1e-3, atol=1e-3)
+
+    @requires_gpu()
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={"batch_linear_lhs": {}},
+        post_grad_fusion_options={},
+    )
+    def test_batch_linear_lhs_fusion_nn_linear_inlined(self):
+        # Same shape pattern as test_batch_linear_lhs_fusion, but the linears
+        # are produced through nn.Linear modules. Dynamo inlines those to
+        # torch._C._nn.linear, which the upstream matcher used to miss.
+        class M(torch.nn.Module):
+            def __init__(self, z, n, has_bias):
+                super().__init__()
+                self.linears = torch.nn.ModuleList(
+                    [torch.nn.Linear(z, z - i % 5, bias=has_bias) for i in range(n)]
+                )
+
+            def forward(self, x):
+                x = x + 1.2
+                outs = [lin(x) for lin in self.linears]
+                return torch.sigmoid(torch.cat(outs, dim=1))
+
+        z, n = 10, 10
+        for has_bias in [True, False]:
+            counters.clear()
+            module = M(z, n, has_bias).to(GPU_TYPE)
+            input = [torch.randn(20, z, device=GPU_TYPE)]
+            traced = torch.compile(module)
+            ref = module(*input)
+            res = traced(*input)
+            self.compare_pred(module, traced, input)
+            self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
+            ref.sum().backward()
+            res.sum().backward()
+            self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
+            self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
+            counters.clear()
+
+    @requires_gpu()
     @torch._inductor.config.patch(
         pre_grad_fusion_options={"batch_linear": {}},
         post_grad_fusion_options={},
@@ -630,6 +773,106 @@ class TestGroupBatchFusion(TestCase):
         traced(*input)
         self.assertEqual(counters["inductor"]["normalization_pass"], 1)
         self.assertEqual(counters["inductor"]["batch_dropout"], 1)
+        counters.clear()
+
+    @unittest.skipUnless(
+        torch.xpu.is_available(),
+        "batch_linear_lhs auto-enable is XPU-only for now",
+    )
+    def test_xpu_auto_enable_batch_linear_lhs(self):
+        # Verify that batch_linear_lhs fusion is auto-enabled when example inputs
+        # contain XPU tensors, driven by the "devices" key in the default
+        # config.pre_grad_fusion_options.
+        default_options = config.pre_grad_fusion_options
+        self.assertIn("batch_linear_lhs", default_options)
+        self.assertEqual(default_options["batch_linear_lhs"]["devices"], ("xpu",))
+        z = 10
+        for has_bias in [True, False]:
+            orig_fusion_options = dict(config.pre_grad_fusion_options)
+            counters.clear()
+            module = MyModule4(z, "xpu", has_bias)
+            input = [torch.randn(20, z, device="xpu")]
+            traced = torch.compile(module)
+            ref = module(*input)
+            res = traced(*input)
+            self.compare_pred(module, traced, input)
+            self.assertGreater(counters["inductor"]["batch_linear_lhs"], 0)
+            self.assertEqual(ref, res)
+            ref.sum().backward()
+            res.sum().backward()
+            self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
+            self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
+            self.assertEqual(
+                orig_fusion_options,
+                dict(config.pre_grad_fusion_options),
+                "config.pre_grad_fusion_options should not be mutated by auto-enable",
+            )
+            counters.clear()
+
+    @requires_gpu()
+    @torch._inductor.config.patch(
+        is_predispatch=True,
+        pre_grad_fusion_options={
+            "batch_linear_lhs": {"devices": (GPU_TYPE,), "min_fuse_set_size": 2},
+        },
+    )
+    def test_predispatch_device_aware_batch_linear_lhs(self):
+        # Verify that the predispatch path (_run_pre_dispatch_passes) routes
+        # through _resolve_pre_grad_fusion_options and applies device filtering.
+        # The default config has devices=("xpu",) which was previously bypassed
+        # in the predispatch path (review #181854#issuecomment-4705071437).
+        # This test uses devices=(GPU_TYPE,) to confirm the wrapper closure
+        # correctly resolves and filters fusion options.
+        z = 10
+        module = MyModule4(z, GPU_TYPE, has_bias=True)
+        input = [torch.randn(20, z, device=GPU_TYPE)]
+
+        counters.clear()
+        traced = torch.compile(module, fullgraph=True)
+        ref = module(*input)
+        res = traced(*input)
+        self.compare_pred(module, traced, input)
+        self.assertGreater(
+            counters["inductor"]["batch_linear_lhs"],
+            0,
+            "batch_linear_lhs should fire in predispatch mode when devices match GPU_TYPE",
+        )
+        self.assertEqual(ref, res)
+        ref.sum().backward()
+        res.sum().backward()
+        self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
+        self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
+        counters.clear()
+
+    @torch._inductor.config.patch(
+        is_predispatch=True,
+        pre_grad_fusion_options={
+            "batch_linear_lhs": {"min_fuse_set_size": 2},
+        },
+    )
+    def test_predispatch_cpu_device_agnostic_batch_linear_lhs(self):
+        # Verify that the predispatch path correctly enables batch_linear_lhs
+        # when no "devices" key is present (user explicitly opts in).
+        # This test runs on CPU so it can be verified in local dev without GPU.
+        z = 10
+        module = MyModule4(z, "cpu", has_bias=True)
+        input = [torch.randn(20, z, device="cpu")]
+
+        counters.clear()
+        traced = torch.compile(module, fullgraph=True)
+        ref = module(*input)
+        res = traced(*input)
+        self.compare_pred(module, traced, input)
+        self.assertGreater(
+            counters["inductor"]["batch_linear_lhs"],
+            0,
+            "batch_linear_lhs should fire in predispatch mode when no devices key restricts it",
+        )
+        self.assertEqual(ref, res)
+        ref.sum().backward()
+        res.sum().backward()
+        self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
+        self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
         counters.clear()
 
 

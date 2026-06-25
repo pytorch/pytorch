@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/core/LegacyTypeDispatch.h>
 #include <torch/csrc/distributed/c10d/Backend.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/utils.h>
@@ -46,6 +47,12 @@ class FakeProcessGroup : public Backend {
     return c10::static_intrusive_pointer_cast<Backend::Options>(options_);
   }
 
+  void setTimeout(std::chrono::milliseconds /* timeout */) override {
+    // FakeProcessGroup does no real communication, so there is no timeout to
+    // configure. Override as a no-op so callers don't hit the warning the
+    // Backend base class emits for unsupported backends.
+  }
+
   c10::intrusive_ptr<Work> broadcast(
       std::vector<at::Tensor>& /* tensors */,
       const BroadcastOptions& /* opts */ = BroadcastOptions()) override {
@@ -83,29 +90,34 @@ class FakeProcessGroup : public Backend {
   }
 
   // NOTE [FakeProcessGroup collective semantics]
-  // All collectives copy input to output following single-rank semantics
-  // (rank 0 communicating with itself). This avoids returning uninitialized
-  // memory and enables single-process validation of distributed code paths.
-  //
-  // Limitation: scatter on non-root rank leaves output uninitialized because
-  // the root's data is unavailable in single-process simulation. This only
-  // triggers when explicitly calling scatter with src != rank.
+  // Collectives use deterministic single-process approximations. When output
+  // can be derived from local inputs, fake collectives copy those values into
+  // local outputs so tests do not consume uninitialized memory. For scatter on
+  // non-root ranks, the root's input list is unavailable in this single-process
+  // simulation, so the output tensor is left unchanged.
   c10::intrusive_ptr<Work> allgather(
       std::vector<std::vector<at::Tensor>>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& /* opts */ = AllgatherOptions()) override {
     checkCollectiveError();
+    // See note in _allgather_base below.
+    at::AutoDispatchBelowAutograd guard;
     for (auto& tensor : outputTensors[0]) {
       tensor.copy_(inputTensors[0]);
     }
     return c10::make_intrusive<FakeWork>();
   }
 
-  c10::intrusive_ptr<Work> _allgather_base(
+  c10::intrusive_ptr<Work> all_gather_single(
       at::Tensor& outputBuffer,
       at::Tensor& inputBuffer,
       const AllgatherOptions& /* opts */ = AllgatherOptions()) override {
     checkCollectiveError();
+    // Real collective backends (e.g. NCCL) write into the output from C++
+    // kernels that autograd never sees. We emulate that here: chunk() produces
+    // multi-output views, and without this guard autograd would reject the
+    // subsequent copy_() when the input requires grad.
+    at::AutoDispatchBelowAutograd guard;
     auto chunks = outputBuffer.chunk(size_);
     for (auto& tensor : chunks) {
       tensor.copy_(inputBuffer);
@@ -118,26 +130,29 @@ class FakeProcessGroup : public Backend {
       std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& /* opts */ = AllgatherOptions()) override {
     checkCollectiveError();
-    TORCH_CHECK(
-        outputTensorLists.size() == inputTensors.size(),
-        "allgather_coalesced: output tensor lists (",
-        outputTensorLists.size(),
-        ") must have the same length as input tensor list (",
-        inputTensors.size(),
-        ")");
-    for (size_t i = 0; i < inputTensors.size(); ++i) {
-      for (auto& tensor : outputTensorLists[i]) {
-        tensor.copy_(inputTensors[i]);
+    auto invalidArgument = [](const std::string& msg) {
+      TORCH_CHECK(false, "FakeProcessGroup::allgather_coalesced: ", msg);
+    };
+    assertNonEmptyInputTensorList(invalidArgument, inputTensors.size());
+    assertAllgatherCoalescedOutputTensorLists(
+        invalidArgument, outputTensorLists, inputTensors.size(), size_);
+    // See note in _allgather_base above.
+    at::AutoDispatchBelowAutograd guard;
+    for (auto& outputTensorList : outputTensorLists) {
+      for (size_t i = 0; i < inputTensors.size(); ++i) {
+        outputTensorList[i].copy_(inputTensors[i]);
       }
     }
     return c10::make_intrusive<FakeWork>();
   }
 
-  c10::intrusive_ptr<Work> allgather_into_tensor_coalesced(
+  c10::intrusive_ptr<Work> all_gather_single_coalesced(
       std::vector<at::Tensor>& outputs,
       std::vector<at::Tensor>& inputs,
       const AllgatherOptions& /* opts */ = AllgatherOptions()) override {
     checkCollectiveError();
+    // See note in _allgather_base above.
+    at::AutoDispatchBelowAutograd guard;
     for (size_t i = 0; i < outputs.size(); ++i) {
       auto chunks = outputs[i].chunk(size_);
       for (auto& chunk : chunks) {
@@ -150,12 +165,23 @@ class FakeProcessGroup : public Backend {
   c10::intrusive_ptr<Work> gather(
       std::vector<std::vector<at::Tensor>>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
-      const GatherOptions& /* opts */ = GatherOptions()) override {
+      const GatherOptions& opts = GatherOptions()) override {
     checkCollectiveError();
-    if (!outputTensors.empty()) {
+    auto invalidArgument = [](const std::string& msg) {
+      TORCH_CHECK(false, "FakeProcessGroup::gather: ", msg);
+    };
+    assertRootRank(invalidArgument, opts.rootRank, size_);
+    assertSingleElementInput(invalidArgument, inputTensors);
+
+    if (rank_ == opts.rootRank) {
+      assertGatherOutputTensorList(invalidArgument, outputTensors, size_);
+      // See note in _allgather_base above.
+      at::AutoDispatchBelowAutograd guard;
       for (auto& tensor : outputTensors[0]) {
         tensor.copy_(inputTensors[0]);
       }
+    } else {
+      assertEmptyOutputTensorList(invalidArgument, outputTensors);
     }
     return c10::make_intrusive<FakeWork>();
   }
@@ -163,17 +189,21 @@ class FakeProcessGroup : public Backend {
   c10::intrusive_ptr<Work> scatter(
       std::vector<at::Tensor>& outputTensors,
       std::vector<std::vector<at::Tensor>>& inputTensors,
-      const ScatterOptions& /* opts */ = ScatterOptions()) override {
+      const ScatterOptions& opts = ScatterOptions()) override {
     checkCollectiveError();
-    if (!inputTensors.empty()) {
-      TORCH_CHECK(
-          static_cast<int>(inputTensors[0].size()) == size_,
-          "Incorrect input list size ",
-          inputTensors[0].size(),
-          ". Input list size should be ",
-          size_,
-          ", same as size of the process group.");
+    auto invalidArgument = [](const std::string& msg) {
+      TORCH_CHECK(false, "FakeProcessGroup::scatter: ", msg);
+    };
+    assertRootRank(invalidArgument, opts.rootRank, size_);
+    assertSingleElementOutput(invalidArgument, outputTensors);
+
+    if (rank_ == opts.rootRank) {
+      assertScatterInputTensorList(invalidArgument, inputTensors, size_);
+      // See note in _allgather_base above.
+      at::AutoDispatchBelowAutograd guard;
       outputTensors[0].copy_(inputTensors[0][rank_]);
+    } else {
+      assertEmptyInputTensorList(invalidArgument, inputTensors);
     }
     return c10::make_intrusive<FakeWork>();
   }
@@ -184,16 +214,22 @@ class FakeProcessGroup : public Backend {
       const ReduceScatterOptions& /* opts */ =
           ReduceScatterOptions()) override {
     checkCollectiveError();
+    auto invalidArgument = [](const std::string& msg) {
+      TORCH_CHECK(false, "FakeProcessGroup::reduce_scatter: ", msg);
+    };
+    assertInputOutputTensorListsSameSize(
+        invalidArgument, outputTensors.size(), inputTensors.size());
+    // See note in _allgather_base above.
+    at::AutoDispatchBelowAutograd guard;
     for (size_t i = 0; i < outputTensors.size(); ++i) {
-      TORCH_CHECK(
-          static_cast<int>(inputTensors[i].size()) == size_,
-          "invalid input tensor list size, must be world size");
+      assertInputTensorListSizeEqualsWorldSize(
+          invalidArgument, inputTensors[i].size(), size_);
       outputTensors[i].copy_(inputTensors[i][rank_]);
     }
     return c10::make_intrusive<FakeWork>();
   }
 
-  c10::intrusive_ptr<Work> _reduce_scatter_base(
+  c10::intrusive_ptr<Work> reduce_scatter_single(
       at::Tensor& outputBuffer,
       at::Tensor& inputBuffer,
       const ReduceScatterOptions& /* opts */ =
@@ -202,17 +238,27 @@ class FakeProcessGroup : public Backend {
     TORCH_CHECK(
         inputBuffer.numel() == outputBuffer.numel() * size_,
         "input tensor must be the same size as output size times world size");
+    // See note in _allgather_base above.
+    at::AutoDispatchBelowAutograd guard;
     auto chunks = inputBuffer.chunk(size_);
     outputBuffer.copy_(chunks[rank_]);
     return c10::make_intrusive<FakeWork>();
   }
 
-  c10::intrusive_ptr<Work> reduce_scatter_tensor_coalesced(
+  c10::intrusive_ptr<Work> reduce_scatter_single_coalesced(
       std::vector<at::Tensor>& outputs,
       std::vector<at::Tensor>& inputs,
       const ReduceScatterOptions& /* opts */ =
           ReduceScatterOptions()) override {
     checkCollectiveError();
+    auto invalidArgument = [](const std::string& msg) {
+      TORCH_CHECK(
+          false, "FakeProcessGroup::reduce_scatter_tensor_coalesced: ", msg);
+    };
+    assertInputOutputTensorListsSameSize(
+        invalidArgument, outputs.size(), inputs.size());
+    // See note in _allgather_base above.
+    at::AutoDispatchBelowAutograd guard;
     for (size_t i = 0; i < outputs.size(); ++i) {
       TORCH_CHECK(
           inputs[i].numel() == outputs[i].numel() * size_,
@@ -223,7 +269,7 @@ class FakeProcessGroup : public Backend {
     return c10::make_intrusive<FakeWork>();
   }
 
-  c10::intrusive_ptr<Work> alltoall_base(
+  c10::intrusive_ptr<Work> all_to_all_single(
       at::Tensor& outputBuffer,
       at::Tensor& inputBuffer,
       std::vector<int64_t>& outputSplitSizes,
@@ -232,19 +278,25 @@ class FakeProcessGroup : public Backend {
     checkCollectiveError();
     c10d::checkSplitSizes(inputSplitSizes, inputBuffer, size_);
     c10d::checkSplitSizes(outputSplitSizes, outputBuffer, size_);
+    // See note in _allgather_base above.
+    at::AutoDispatchBelowAutograd guard;
     if (outputSplitSizes.empty() && inputSplitSizes.empty()) {
       outputBuffer.copy_(inputBuffer);
     } else {
-      // We receive outputSplitSizes[j] elements from rank j. In reality,
-      // rank j would send from an offset determined by rank j's own
-      // inputSplitSizes, which we don't have. As an approximation, we
-      // copy from input[0:min(outputSplitSizes[j], inputSize)] for each
-      // output slot, repeating input as needed when the slot is larger
-      // than the input buffer.
+      // Approximation: rank j's inputSplitSizes are unavailable here, so
+      // each output slot is filled by repeating inputBuffer[0:slot]. The
+      // values are deterministic but arbitrary; do not assert on them.
       int64_t out_offset = 0;
       auto in_size = inputBuffer.size(0);
       for (int j = 0; j < size_; ++j) {
         int64_t remaining = outputSplitSizes[j];
+        if (remaining > 0) {
+          TORCH_CHECK(
+              in_size > 0,
+              "alltoall_base: inputBuffer is empty but outputSplitSizes[",
+              j,
+              "] > 0");
+        }
         int64_t dst = out_offset;
         while (remaining > 0) {
           auto chunk = std::min(remaining, in_size);
@@ -264,6 +316,13 @@ class FakeProcessGroup : public Backend {
       std::vector<at::Tensor>& inputTensors,
       const AllToAllOptions& /* opts */ = AllToAllOptions()) override {
     checkCollectiveError();
+    auto invalidArgument = [](const std::string& msg) {
+      TORCH_CHECK(false, "FakeProcessGroup::alltoall: ", msg);
+    };
+    assertAllToAllTensorListSizes(
+        invalidArgument, outputTensors.size(), inputTensors.size(), size_);
+    // See note in _allgather_base above.
+    at::AutoDispatchBelowAutograd guard;
     for (size_t i = 0; i < outputTensors.size(); ++i) {
       outputTensors[i].copy_(inputTensors[i]);
     }

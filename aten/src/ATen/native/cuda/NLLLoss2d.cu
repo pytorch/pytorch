@@ -13,6 +13,8 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/cuda/block_reduce.cuh>
 
+#include <utility>
+
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
@@ -253,6 +255,8 @@ void nll_loss2d_forward_out_cuda_template(
   total_weight.resize_({});
 
   if (reduction == at::Reduction::None) {
+    total_weight.zero_();
+
     int64_t batch_size = input.size(0);
     int64_t H = input.size(2);
     int64_t W = input.size(3);
@@ -489,7 +493,7 @@ std::tuple<Tensor, Tensor> nll_loss2d_forward_cuda(
   auto total_weight = at::empty({0}, self.options());
   nll_loss2d_forward_out_cuda_template(
       output, total_weight, self, target, weight_opt, reduction, ignore_index);
-  return std::make_tuple(output, total_weight);
+  return std::make_tuple(std::move(output), std::move(total_weight));
 }
 
 Tensor& nll_loss2d_backward_out_cuda(

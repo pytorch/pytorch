@@ -742,7 +742,7 @@ def apply_in_graph_mutations(
     # There are 3 cases:
     # (1) We mutate inp *after* the set_() call. other is a graph intermediate.
     #     In this case, we're not really mutating the input storage of "inp";
-    #     we're mutating the storage of an intermdiate value (other),
+    #     we're mutating the storage of an intermediate value (other),
     #     and slamming that storage into the input tensor. So no data mutation is necessary.
     # (2) We mutate inp *after* the set_() call. other is a graph *input*.
     #     In this case, the data mutation will be properly handled in the runtime
@@ -1294,7 +1294,7 @@ def handle_effect_tokens_fn(
     return inner_fn, args, args_descs
 
 
-# Given a function operating on Subclass -> Subclass, returns an function that operates on Tensor -> Tensor
+# Given a function operating on Subclass -> Subclass, returns a function that operates on Tensor -> Tensor
 # Also returns:
 # - the new set of arguments to pass into this function (now that tensor subclasses have been eliminated)
 # - the updated ViewAndMutationMeta for this dense -> dense function.

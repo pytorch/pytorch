@@ -23,11 +23,9 @@ include docker.Makefile
 include pyrefly.toml
 include ubsan.supp
 
-# Include bazel and BUCK related files
-include BUILD.bazel BUCK.oss
-include WORKSPACE
+# Include BUCK related files
+include BUCK.oss
 include *.bzl
-include .bazelignore .bazelrc .bazelversion
 
 # Include general configuration files
 include *.ini
@@ -60,8 +58,6 @@ graft third_party
 graft tools
 graft torch
 graft torchgen
-# FIXME: torch-xla build during codegen will fail if include this file in wheel
-exclude torchgen/BUILD.bazel
 
 # The following exclusions omit parts from third-party dependencies that
 # contain invalid symlinks[1] and that are not needed for pytorch, such as

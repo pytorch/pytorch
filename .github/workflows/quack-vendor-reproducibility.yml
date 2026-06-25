@@ -1,0 +1,55 @@
+# Owner(s): ["module: ci"]
+# Reproducibility guard for the vendored quack subset (torch/_vendor/quack).
+#
+# Runs tools/vendoring/quack/vendor.sh --check against the SHA pinned in
+# tools/vendoring/quack/vendor.sh. The script first verifies that the pinned
+# SHA is reachable from Dao-AILab/quack main, then re-renders the subset into a
+# tempdir and diffs it against the committed tree. This catches hand-edits to
+# vendored files that bypass the patch set. Fix drift by editing the FlexGEMM
+# patchset or PyTorch vendoring patches, not the vendored files.
+#
+# Run it yourself (needs only git + patch + bash; no torch / CUTLASS / GPU):
+#
+#   tools/vendoring/quack/vendor.sh --check                 # clones upstream main
+#   tools/vendoring/quack/vendor.sh --check --src /path/to/quack  # or reuse a local checkout
+#
+# The pinned SHA is the PINNED_SHA constant in tools/vendoring/quack/vendor.sh;
+# no SHA is passed on the command line, and the SHA must be on upstream main.
+#
+# A pytest entry wraps the same check for local use (skips unless opted in):
+#
+#   QUACK_VENDOR_ALLOW_CLONE=1 pytest test/python_native/test_quack_vendor.py -k test_vendor_script
+
+name: Vendored quack reproducibility
+
+on:
+  pull_request:
+    paths:
+      - torch/_vendor/quack/**
+      - tools/vendoring/quack/**
+      - test/python_native/test_quack_vendor.py
+      - .github/workflows/quack-vendor-reproducibility.yml
+      - .gitattributes
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  reproduce:
+    if: github.repository_owner == 'pytorch'
+    name: re-vendor and diff
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout pytorch
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+          persist-credentials: false
+
+      - name: Re-vendor and assert no drift
+        run: tools/vendoring/quack/vendor.sh --check
