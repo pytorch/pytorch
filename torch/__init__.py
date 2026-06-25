@@ -2549,7 +2549,7 @@ if TYPE_CHECKING:
 
 # Ops not to be exposed in `torch` namespace,
 # mostly helper ops.
-PRIVATE_OPS = ("unique_dim",)
+PRIVATE_OPS = ("unique_dim", "nanmedian")
 
 __name, __obj = "", None
 for __name in dir(_C._VariableFunctions):
@@ -2567,6 +2567,24 @@ for __name in dir(_C._VariableFunctions):
         __all__.append(__name)
 
 del __name, __obj
+
+
+def nanmedian(
+    input: Tensor,
+    dim: builtins.int | None = None,
+    keepdim: builtins.bool = False,
+    *,
+    out: Tensor | None = None,
+) -> Tensor | tuple[Tensor, Tensor]:
+    if dim is None:
+        if out is not None:
+            return _VF.nanmedian(input, out=out)  # type: ignore[arg-type]
+        return _VF.nanmedian(input)
+
+    return _VF.nanmedian(input, dim, keepdim, out=out)
+
+
+__all__.append("nanmedian")
 
 ################################################################################
 # Add torch.dtype instances to the public API
