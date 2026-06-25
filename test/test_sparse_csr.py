@@ -3502,6 +3502,12 @@ class TestSparseCSR(TestCase):
             if "Calling linear solver with sparse tensors requires compiling " in str(e):
                 self.skipTest("PyTorch was not built with cuDSS support")
 
+        A = torch.eye(3, dtype=dtype, device=device).to_sparse_csr()
+        b = torch.rand(1, 3, 1, dtype=dtype, device=device)
+        out = torch.empty_like(b)
+        with self.assertRaisesRegex(RuntimeError, "b must be a 1D or 2D tensor"):
+            torch.linalg.solve(A, b, out=out)
+
         samples = sample_inputs_linalg_solve(None, device, dtype)
 
         for sample in samples:
@@ -3509,11 +3515,6 @@ class TestSparseCSR(TestCase):
                 continue
 
             out = torch.zeros(sample.args[0].size(), dtype=dtype, device=device)
-
-            if sample.args[0].ndim not in [1, 2]:
-                with self.assertRaisesRegex(RuntimeError, "b must be a 1D or 2D tensor"):
-                    torch.linalg.solve(sample.input.to_sparse_csr(), *sample.args, **sample.kwargs, out=out)
-                continue
 
             if not sample.args[0].numel():
                 with self.assertRaisesRegex(RuntimeError,
