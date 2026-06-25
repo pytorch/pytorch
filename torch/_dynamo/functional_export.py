@@ -987,13 +987,13 @@ def _dynamo_graph_capture_for_export(
 
             # If a user spec was supplied, re-key it to the intermediate
             # ModuleToTrace.forward(*flat_args) layout and expose via
-            # ``torch._dynamo.config._shapes_spec`` for the variable
+            # ``torch._dynamo.config._dynamic_shapes_spec`` for the variable
             # builder.
             shapes_spec_in_use = user_spec is not None
             shapes_spec_ctx = nullcontext()
             if flattened_spec is not None:
                 shapes_spec_ctx = torch._dynamo.config.patch(
-                    _shapes_spec=flattened_spec
+                    _dynamic_shapes_spec=flattened_spec
                 )
 
             with (
