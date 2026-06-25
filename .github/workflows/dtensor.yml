@@ -47,7 +47,7 @@ jobs:
         { include: [
           { config: "dtensor", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.12xlarge.nvidia.gpu" },
         ]}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.10"
       compiler: gcc11
       cuda-version: "13.0"
@@ -61,7 +61,7 @@ jobs:
       build-environment: linux-jammy-cuda13.0-py3.10-gcc11
       docker-image: ${{ needs.dtensor-build.outputs.docker-image }}
       test-matrix: ${{ needs.dtensor-build.outputs.test-matrix }}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.10"
       compiler: gcc11
       cuda-version: "13.0"

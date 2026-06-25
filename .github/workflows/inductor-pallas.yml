@@ -45,7 +45,7 @@ jobs:
         { include: [
           { config: "inductor-pallas-gpu", shard: 1, num_shards: 1, runner: "linux.aws.h100" },
         ]}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.12"
       compiler: gcc11
       cuda-version: "13.0"
@@ -61,7 +61,7 @@ jobs:
       build-environment: ${{ needs.linux-jammy-py3_12-inductor-pallas-gpu-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-py3_12-inductor-pallas-gpu-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_12-inductor-pallas-gpu-build.outputs.test-matrix }}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.12"
       compiler: gcc11
       cuda-version: "13.0"
@@ -80,7 +80,7 @@ jobs:
         { include: [
           { config: "inductor-pallas-tpu", shard: 1, num_shards: 1, runner: "linux.google.tpuv7x.1" },
         ]}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.12"
     secrets: inherit
 

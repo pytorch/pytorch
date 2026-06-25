@@ -62,7 +62,7 @@ jobs:
           { config: "slow", shard: 2, num_shards: 3, runner: "linux.g5.4xlarge.nvidia.gpu" },
           { config: "slow", shard: 3, num_shards: 3, runner: "linux.g5.4xlarge.nvidia.gpu" },
         ]}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.10"
       compiler: gcc11
       cuda-version: "13.0"
@@ -79,7 +79,7 @@ jobs:
       build-environment: linux-jammy-cuda13.0-py3.10-gcc11-sm86
       docker-image: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-sm86-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-sm86-build.outputs.test-matrix }}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.10"
       compiler: gcc11
       cuda-version: "13.0"
@@ -99,7 +99,7 @@ jobs:
           { config: "slow", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
           { config: "slow", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
         ]}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.10"
       compiler: clang18
     secrets: inherit
@@ -115,7 +115,7 @@ jobs:
       build-environment: ${{ needs.linux-jammy-py3_10-clang18-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-py3_10-clang18-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_10-clang18-build.outputs.test-matrix }}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.10"
       compiler: clang18
     secrets: inherit
@@ -137,7 +137,7 @@ jobs:
           { config: "slow", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
         ]}
       sync-tag: asan-build
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.10"
       compiler: clang18
     secrets: inherit
@@ -154,7 +154,7 @@ jobs:
       docker-image: ${{ needs.linux-jammy-py3_10-clang18-asan-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_10-clang18-asan-build.outputs.test-matrix }}
       sync-tag: asan-test
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.10"
       compiler: clang18
     secrets: inherit
