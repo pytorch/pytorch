@@ -506,7 +506,6 @@ class FakeTensorTest(TestCase):
         fake_t = mode.from_tensor(t)
         self.assertEqual(fake_t.requires_grad, t.requires_grad)
 
-    @expectedFailurePropagateRealTensors
     def test_non_parameter_grad_tensor_subclass_stateful_context(self):
         mode = FakeTensorMode(shape_env=ShapeEnv())
         t = torch.ones(2, requires_grad=True)
