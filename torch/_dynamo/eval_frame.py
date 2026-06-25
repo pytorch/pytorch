@@ -58,8 +58,8 @@ from torch import _guards
 # see discussion at https://github.com/pytorch/pytorch/issues/120699
 from torch._C._dynamo.eval_frame import (  # noqa: F401
     get_eval_frame_isolate_recompiles_id,
-    reset_code,
-    set_code_exec_strategy,
+    reset_code as _reset_code,
+    set_code_exec_strategy as _set_code_exec_strategy,
     set_eval_frame,
     set_eval_frame_isolate_recompiles_id,
     set_fullgraph_compiled_frame_count,
@@ -385,6 +385,96 @@ DONT_WRAP_FILES = {
     join(dirname(dirname(__file__)), "onnx/_internal/fx/dynamo_graph_extractor.py"),
 }
 
+_skipped_code_objects = utils.ExactWeakKeyDictionary()
+_get_code_exec_strategy = getattr(
+    torch._C._dynamo.eval_frame, "get_code_exec_strategy", None
+)
+_set_skip_code_override = getattr(
+    torch._C._dynamo.eval_frame, "set_skip_code_override", None
+)
+
+
+def _discard_skipped_code(code: types.CodeType) -> None:
+    _skipped_code_objects._remove_id(id(code))
+
+
+def reset_code(code: types.CodeType) -> None:
+    _discard_skipped_code(code)
+    _reset_code(code)
+
+
+def set_code_exec_strategy(code: types.CodeType, strategy: FrameExecStrategy) -> None:
+    if strategy.cur_action == FrameAction.SKIP:
+        _skipped_code_objects[code] = True
+    else:
+        _discard_skipped_code(code)
+    _set_code_exec_strategy(code, strategy)
+
+
+def _is_code_skipped(code: types.CodeType | None) -> bool:
+    if code is None:
+        return False
+    if _get_code_exec_strategy is not None:
+        return _get_code_exec_strategy(code).cur_action == FrameAction.SKIP
+    return code in _skipped_code_objects
+
+
+@contextlib.contextmanager
+def _temporarily_unskip_code(
+    code: types.CodeType | None,
+    *,
+    ignore_trace_rules: bool = False,
+) -> Generator[None, None, None]:
+    if code is None:
+        yield
+        return
+
+    with contextlib.ExitStack() as stack:
+        if ignore_trace_rules:
+            # Skipfile decisions live in trace_rules, so override exactly the
+            # explicit target code instead of recursively unskipping the trace.
+            stack.enter_context(trace_rules._skipfile_code_override_context(code))
+
+        if _is_code_skipped(code):
+            # Prefer the C++ thread-local override so that we do not mutate code
+            # strategy metadata that is shared with existing cache entries.
+            if _set_skip_code_override is not None:
+                prior_code = _set_skip_code_override(code)
+                stack.callback(_set_skip_code_override, prior_code)
+            else:
+                prior_strategy = (
+                    _get_code_exec_strategy(code)
+                    if _get_code_exec_strategy is not None
+                    else FrameExecStrategy(FrameAction.SKIP, FrameAction.DEFAULT)
+                )
+                set_code_exec_strategy(
+                    code,
+                    FrameExecStrategy(
+                        FrameAction.DEFAULT, prior_strategy.recursive_action
+                    ),
+                )
+                stack.callback(set_code_exec_strategy, code, prior_strategy)
+
+        yield
+
+
+def _skipped_forward_code_for_call_impl(
+    fn: Callable[..., Any],
+) -> tuple[types.CodeType | None, bool]:
+    if getattr(fn, "__name__", None) not in {"_call_impl", "_wrapped_call_impl"}:
+        return None, False
+
+    mod = getattr(fn, "__self__", None)
+    forward = getattr(mod, "forward", None)
+    if not isinstance(forward, types.MethodType):
+        return None, False
+
+    forward_code = forward.__code__
+    forward_is_skipfile = trace_rules.check(forward)
+    if _is_code_skipped(forward_code) or forward_is_skipfile:
+        return forward_code, forward_is_skipfile
+    return None, False
+
 
 def _debug_get_cache_entry_list(
     code: types.CodeType | Callable[..., Any],
@@ -484,17 +574,36 @@ class OptimizedModule(torch.nn.Module):
         if isinstance(self.dynamo_ctx, DisableContext):
             # No need to check trace rules
             self.forward = self.dynamo_ctx(self._orig_mod.__call__)
-        elif config.wrap_top_frame or (
-            isinstance(self._orig_mod.forward, types.MethodType)
-            and (trace_rules.check(self._orig_mod.forward))
-        ):
-            # This may be a torch.nn.* instance in trace_rules.py which
-            # won't trigger a frame evaluation workaround to add an extra
-            # frame we can capture
-            self.forward = self.dynamo_ctx(external_utils.wrap_inline(self._orig_mod))
         else:
-            # Invoke hooks outside of dynamo then pickup the inner frame
-            self.forward = self.dynamo_ctx(self._orig_mod.__call__)
+            forward_is_method = isinstance(self._orig_mod.forward, types.MethodType)
+            forward_is_skipfile = forward_is_method and trace_rules.check(
+                self._orig_mod.forward
+            )
+            if forward_is_method and _is_code_skipped(self._orig_mod.forward.__code__):
+                prior_code = self.dynamo_ctx._skip_code_override_code
+                prior_ignore_trace_rules = (
+                    self.dynamo_ctx._skip_code_override_ignore_trace_rules
+                )
+                self.dynamo_ctx._skip_code_override_code = (
+                    self._orig_mod.forward.__code__
+                )
+                self.dynamo_ctx._skip_code_override_ignore_trace_rules = (
+                    forward_is_skipfile
+                )
+                try:
+                    self.forward = self.dynamo_ctx(self._orig_mod.__call__)
+                finally:
+                    self.dynamo_ctx._skip_code_override_code = prior_code
+                    self.dynamo_ctx._skip_code_override_ignore_trace_rules = (
+                        prior_ignore_trace_rules
+                    )
+            elif config.wrap_top_frame or forward_is_skipfile:
+                self.forward = self.dynamo_ctx(
+                    external_utils.wrap_inline(self._orig_mod)
+                )
+            else:
+                # Invoke hooks outside of dynamo then pickup the inner frame
+                self.forward = self.dynamo_ctx(self._orig_mod.__call__)
 
         if hasattr(self._orig_mod, "_initialize_hook"):
             self._forward = self.forward
@@ -843,6 +952,8 @@ class _TorchDynamoContext:
         self.enter_exit_hooks = []
         self._package = package
         self._hooks = hooks
+        self._skip_code_override_code: types.CodeType | None = None
+        self._skip_code_override_ignore_trace_rules = False
         self._isolate_recompiles_id = (
             next(_next_isolate_recompiles_id) if isolate_recompiles else -1
         )
@@ -1030,6 +1141,7 @@ class _TorchDynamoContext:
         # Similarly, functions registered via substitute_in_graph have a polyfill
         # that Dynamo can trace, so they also need wrap_inline.
         from .variables import TorchInGraphFunctionVariable
+        from .variables.functions import CollectiveFunctionRewriteVariable
 
         rule = trace_rules.lookup(fn)
         top_level_in_graph = isinstance(rule, type) and issubclass(
@@ -1041,6 +1153,31 @@ class _TorchDynamoContext:
             filename = inspect.getsourcefile(fn)
         except TypeError:
             filename = None
+        fn_code = getattr(fn, "__code__", None)
+        unskip_code = self._skip_code_override_code
+        ignore_trace_rules = self._skip_code_override_ignore_trace_rules
+        has_collective_rewrite = CollectiveFunctionRewriteVariable.can_rewrite(fn)
+        is_module_wrapper = getattr(fn, "__name__", "") in [
+            "_call_impl",
+            "_wrapped_call_impl",
+            "_lazy_forward",
+        ]
+        # Only explicit Python function targets should override skipfile rules.
+        # Module wrappers, forbidden callables, and distributed collective
+        # rewrites have special handling that tracing as ordinary Python breaks.
+        is_skipfile_target = (
+            fn_code is not None
+            and inspect.isfunction(fn)
+            and not is_module_wrapper
+            and not trace_rules.is_forbidden(fn)
+            and not has_collective_rewrite
+            and trace_rules.check(fn)
+        )
+        if unskip_code is None:
+            unskip_code, ignore_trace_rules = _skipped_forward_code_for_call_impl(fn)
+        if unskip_code is None and (_is_code_skipped(fn_code) or is_skipfile_target):
+            unskip_code = fn_code
+            ignore_trace_rules = is_skipfile_target
         if config.debug_force_nested_calls and filename not in DONT_WRAP_FILES:
             fn = external_utils.wrap_inline(fn)
             # Create a new code object for `fn` so that functions have different
@@ -1053,14 +1190,11 @@ class _TorchDynamoContext:
                 # but can be traced directly; wrapping collapses them onto
                 # wrap_inline's shared `inner` code (#124269).
                 (filename is None and not inspect.isfunction(fn))
-                or trace_rules.check(fn)
+                or (trace_rules.check(fn) and not is_skipfile_target)
                 or top_level_in_graph
                 or has_polyfill
             )
-            and (
-                getattr(fn, "__name__", "")
-                not in ["_call_impl", "_wrapped_call_impl", "_lazy_forward"]
-            )
+            and (not is_module_wrapper)
             and filename not in DONT_WRAP_FILES
         ):
             # call to a builtin without a frame for us to capture
@@ -1159,66 +1293,73 @@ class _TorchDynamoContext:
                 saved_include_set = torch._C._dispatch_tls_local_include_set()
                 saved_exclude_set = torch._C._dispatch_tls_local_exclude_set()
 
-                _maybe_set_eval_frame(_callback_from_stance(callback))
-
-                with torch._C._ForceDispatchKeyGuard(
-                    saved_include_set, saved_exclude_set
+                with _temporarily_unskip_code(
+                    unskip_code, ignore_trace_rules=ignore_trace_rules
                 ):
-                    call_succeeded = False
-                    try:
-                        result = fn(*args, **kwargs)
-                        call_succeeded = True
-                    except (Unsupported, UncapturedHigherOrderOpError, UserError) as e:
-                        if config.verbose:
-                            raise
-                        # strip internal tracebacks from causes
-                        cur_exn: BaseException = e
-                        while cur_exn.__cause__ is not None:
-                            cur_exn.__cause__.with_traceback(None)
-                            cur_exn = cur_exn.__cause__
+                    _maybe_set_eval_frame(_callback_from_stance(callback))
 
-                        raise e.with_traceback(
-                            None
-                        ) from e.__cause__  # User compiler error
-                    except ShortenTraceback as e:
-                        # Failures in the backend likely don't have useful
-                        # data in the TorchDynamo frames, so we strip them out.
-                        raise e.remove_dynamo_frames() from None  # see TORCHDYNAMO_VERBOSE=1
-                    finally:
-                        # Restore the dynamic layer stack depth if necessary.
-                        set_eval_frame(None)
-                        if fullgraph_count_enabled and call_succeeded:
-                            count = set_fullgraph_compiled_frame_count(-1)
-                            if count == 0 and _stance.stance == "default":
-                                skip_reasons = get_skip_reasons()
-                                msg = "torch.compile with fullgraph=True found no compiled frames."
-                                if skip_reasons:
-                                    reasons_str = "\n".join(
-                                        f"  - {r}" for r in skip_reasons
-                                    )
-                                    msg += f" Skipped frames:\n{reasons_str}"
-                                else:
-                                    msg += (
-                                        " Compilation was not attempted and no cached compiled"
-                                        " code was found."
-                                    )
-                                raise RuntimeError(msg)
-                        if prior_error_on_graph_break is not None:
-                            _set_error_on_graph_break(prior_error_on_graph_break)
-                        if prior_error_on_nested_compile is not None:
-                            set_fullgraph_error_on_nested_compile(
-                                prior_error_on_nested_compile
+                    with torch._C._ForceDispatchKeyGuard(
+                        saved_include_set, saved_exclude_set
+                    ):
+                        call_succeeded = False
+                        try:
+                            result = fn(*args, **kwargs)
+                            call_succeeded = True
+                        except (
+                            Unsupported,
+                            UncapturedHigherOrderOpError,
+                            UserError,
+                        ) as e:
+                            if config.verbose:
+                                raise
+                            # strip internal tracebacks from causes
+                            cur_exn: BaseException = e
+                            while cur_exn.__cause__ is not None:
+                                cur_exn.__cause__.with_traceback(None)
+                                cur_exn = cur_exn.__cause__
+
+                            raise e.with_traceback(
+                                None
+                            ) from e.__cause__  # User compiler error
+                        except ShortenTraceback as e:
+                            # Failures in the backend likely don't have useful
+                            # data in the TorchDynamo frames, so we strip them out.
+                            raise e.remove_dynamo_frames() from None  # see TORCHDYNAMO_VERBOSE=1
+                        finally:
+                            # Restore the dynamic layer stack depth if necessary.
+                            set_eval_frame(None)
+                            if fullgraph_count_enabled and call_succeeded:
+                                count = set_fullgraph_compiled_frame_count(-1)
+                                if count == 0 and _stance.stance == "default":
+                                    skip_reasons = get_skip_reasons()
+                                    msg = "torch.compile with fullgraph=True found no compiled frames."
+                                    if skip_reasons:
+                                        reasons_str = "\n".join(
+                                            f"  - {r}" for r in skip_reasons
+                                        )
+                                        msg += f" Skipped frames:\n{reasons_str}"
+                                    else:
+                                        msg += (
+                                            " Compilation was not attempted and no cached compiled"
+                                            " code was found."
+                                        )
+                                    raise RuntimeError(msg)
+                            if prior_error_on_graph_break is not None:
+                                _set_error_on_graph_break(prior_error_on_graph_break)
+                            if prior_error_on_nested_compile is not None:
+                                set_fullgraph_error_on_nested_compile(
+                                    prior_error_on_nested_compile
+                                )
+                            torch._C._functorch.pop_dynamic_layer_stack_and_undo_to_depth(
+                                saved_dynamic_layer_stack_depth
                             )
-                        torch._C._functorch.pop_dynamic_layer_stack_and_undo_to_depth(
-                            saved_dynamic_layer_stack_depth
-                        )
 
-                        set_skip_guard_eval_unsafe(prior_skip_guard_eval_unsafe)
-                        set_eval_frame_isolate_recompiles_id(
-                            prior_isolate_recompiles_id
-                        )
-                        for cleanup in cleanups:
-                            cleanup()
+                            set_skip_guard_eval_unsafe(prior_skip_guard_eval_unsafe)
+                            set_eval_frame_isolate_recompiles_id(
+                                prior_isolate_recompiles_id
+                            )
+                            for cleanup in cleanups:
+                                cleanup()
                 return result
             finally:
                 if fullgraph_count_enabled:

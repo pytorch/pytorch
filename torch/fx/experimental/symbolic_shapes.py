@@ -9196,21 +9196,25 @@ def _symbolic_context_from_shapes_spec(
     view_base_context: SymbolicContext | None,
     shape_env_to_source_to_symbol_cache: dict[Any, Any],
 ) -> StatefulSymbolicContext:
-    if tensor_spec is not None and len(tensor_spec) != e.dim():
+    with torch._C.DisableTorchFunctionSubclass():
+        e_dim = e.dim()
+        e_size = e.size()
+
+    if tensor_spec is not None and len(tensor_spec) != e_dim:
         raise ValueError(
             f"TensorSpec has {len(tensor_spec)} dims but tensor {source.name} "
-            f"has {e.dim()} dims"
+            f"has {e_dim} dims"
         )
     dynamic_sizes = []
-    dynamic_strides = [DimDynamic.INFER_STRIDE] * e.dim()
+    dynamic_strides = [DimDynamic.INFER_STRIDE] * e_dim
 
-    for i in range(e.dim()):
+    for i in range(e_dim):
         if tensor_spec is None:
             dynamic_sizes.append(DimDynamic.STATIC)
         else:
             dim_spec = tensor_spec[i]
             if isinstance(dim_spec, int):
-                actual_size = e.size(i)
+                actual_size = e_size[i]
                 if actual_size != dim_spec:
                     raise ValueError(
                         f"shapes_spec declares dim {i} as static with value "

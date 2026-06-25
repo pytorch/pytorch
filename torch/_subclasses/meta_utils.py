@@ -315,6 +315,18 @@ class MetaTensorDescriber:
         layout = t.layout
         is_nested = t.is_nested
         is_traceable_wrapper_subclass_v = is_traceable_wrapper_subclass(t)
+        base = t._base if is_view else None
+        if (
+            is_view
+            and base is not None
+            and base.is_nested
+            and not is_traceable_wrapper_subclass(base)
+        ):
+            # Views produced from jagged NestedTensor wrappers can have raw
+            # strided nested bases, whose metadata cannot be described with
+            # size().
+            is_view = False
+            base = None
         is_functorch_wrapped = is_functorch_wrapped_tensor(t)
         is_mkldnn = t.is_mkldnn
         is_batchedtensor_v = is_batchedtensor(t)
@@ -507,7 +519,7 @@ class MetaTensorDescriber:
                 else None
             ),
             creation_meta=(
-                torch._C._autograd._get_creation_meta(t) if t._is_view() else None
+                torch._C._autograd._get_creation_meta(t) if is_view else None
             ),
             unwrapped=unwrapped,
             level=(
@@ -517,8 +529,8 @@ class MetaTensorDescriber:
             ),
             bdim=maybe_get_bdim(t) if is_batchedtensor_v else None,
             base=(
-                self.describe_tensor(t._base, trace=trace)
-                if recurse and t._is_view() and t._base is not None
+                self.describe_tensor(base, trace=trace)
+                if recurse and is_view and base is not None
                 else None
             ),
             fake_mode=torch._subclasses.fake_tensor.maybe_get_fake_mode(t),

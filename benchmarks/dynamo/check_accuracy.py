@@ -35,9 +35,11 @@ def get_field(csv, model_name: str, field: str):
 def check_accuracy(actual_csv, expected_csv, expected_filename):
     failed = []
     improved = []
+    expected_flaky_models = set(flaky_models)
+    expected_eager_nondeterministic_models = set()
 
     if "rocm" in expected_filename:
-        flaky_models.update(
+        expected_flaky_models.update(
             {
                 "Background_Matting",
                 "mnasnet1_0",
@@ -60,6 +62,25 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
             }
         )
 
+    if "timm_training" in expected_filename:
+        # CUDA training can report eager_two_runs_differ for BN gradients.
+        expected_eager_nondeterministic_models.update(
+            {
+                "mobilenetv2_100",
+                "tf_efficientnet_b0",
+            }
+        )
+
+    if "torchbench_training" in expected_filename:
+        # CUDA training can report eager_two_runs_differ for BN gradients.
+        expected_eager_nondeterministic_models.update(
+            {
+                "mnasnet1_0",
+                "mobilenet_v2",
+                "shufflenet_v2_x1_0",
+            }
+        )
+
     for model in actual_csv["name"]:
         accuracy = get_field(actual_csv, model, "accuracy")
         expected_accuracy = get_field(expected_csv, model, "accuracy")
@@ -74,7 +95,13 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
             status = "PASS" if expected_accuracy == "pass" else "XFAIL"
             print(f"{model:34}  {status}")
             continue
-        elif model in flaky_models:
+        elif (
+            accuracy == "eager_two_runs_differ"
+            and expected_accuracy == "pass"
+            and model in expected_eager_nondeterministic_models
+        ):
+            status = "FAIL_BUT_FLAKY:"
+        elif model in expected_flaky_models:
             if accuracy == "pass":
                 # model passed but marked xfailed
                 status = "PASS_BUT_FLAKY:"

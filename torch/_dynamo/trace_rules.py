@@ -33,6 +33,7 @@ import os
 import random
 import re
 import sys
+import threading
 import types
 import typing
 import unittest
@@ -3904,6 +3905,23 @@ we don't want to inline the lower level function call (e.g, f3) by default.
 """
 
 _force_inline_flag = False
+_skipfile_code_override = threading.local()
+
+
+def _get_skipfile_code_override() -> types.CodeType | None:
+    return getattr(_skipfile_code_override, "code", None)
+
+
+@contextlib.contextmanager
+def _skipfile_code_override_context(
+    code: types.CodeType | None,
+) -> Iterator[None]:
+    prior_code = _get_skipfile_code_override()
+    _skipfile_code_override.code = code
+    try:
+        yield
+    finally:
+        _skipfile_code_override.code = prior_code
 
 
 # pyrefly: ignore [deprecated]
@@ -4008,6 +4026,12 @@ def check_verbose(
         raise AssertionError(
             f"lookup_inner returned None for {fi.name} in {fi.filename}"
         )
+    if (
+        rule is SkipFunctionVariable
+        and fi.code is not None
+        and fi.code is _get_skipfile_code_override()
+    ):
+        return SkipResult(False, "explicit torch.compile skipfile target")
     if issubclass(
         rule,
         (

@@ -1821,8 +1821,7 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
         cnts = torch._dynamo.testing.CompileCounter()
 
         # make sure test_dont_skip_tracing_functions is actually skipped by trace rules
-        torch.compile(f1, backend=cnts)(torch.randn(3))
-        self.assertEqual(cnts.frame_count, 0)
+        self.assertTrue(torch._dynamo.trace_rules.check(f1))
 
         f1_unskip = torch._dynamo.dont_skip_tracing(f1)
 
