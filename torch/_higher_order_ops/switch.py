@@ -12,6 +12,7 @@ from torch._functorch.utils import exposed_in
 from torch._higher_order_ops.utils import (
     _maybe_compile_and_run_fn,
     _maybe_run_with_interpreter,
+    check_input_alias_and_mutation_return_outputs,
     reenter_make_fx,
     unique_graph_id,
     validate_subgraph_args_types,
@@ -33,6 +34,44 @@ class SwitchOp(HigherOrderOperator):
         validate_subgraph_args_types(operands)
         # pyrefly: ignore [missing-attribute]
         return super().__call__(index, branches, operands)
+
+    # pyrefly: ignore [bad-override]
+    def gen_schema(self, index, branches, operands):
+        from torch._higher_order_ops.schema import HopSchemaGenerator
+        from torch._higher_order_ops.utils import materialize_as_graph
+
+        branch_gms: list[torch.fx.GraphModule] = [
+            branch
+            if isinstance(branch, torch.fx.GraphModule)
+            else materialize_as_graph(branch, operands)
+            for branch in branches
+        ]
+
+        mutated_inputs: set[int] = set()
+        first_branch_outputs: tuple[Any, ...] | list[Any] = ()
+        for i, gm in enumerate(branch_gms):
+            (
+                _,
+                _,
+                _,
+                branch_mutated_inputs,
+                branch_outputs,
+            ) = check_input_alias_and_mutation_return_outputs(gm)
+            mutated_inputs |= set(branch_mutated_inputs)
+            if i == 0:
+                first_branch_outputs = branch_outputs
+
+        schema_gen = HopSchemaGenerator(self)
+        schema_gen.add_arg("index", index)
+        for i, gm in enumerate(branch_gms):
+            schema_gen.add_arg(f"branch{i}_fn", gm)
+        for idx, arg in enumerate(operands):
+            schema_gen.add_arg(f"operand{idx}", arg, is_mutated=idx in mutated_inputs)
+
+        for out in first_branch_outputs:
+            schema_gen.add_output(out)
+        schema_gen.add_schema_tree_spec(index, branches, operands)
+        return schema_gen.gen_schema()
 
 
 switch_op = SwitchOp()
