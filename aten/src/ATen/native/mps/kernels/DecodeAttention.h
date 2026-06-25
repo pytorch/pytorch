@@ -113,9 +113,8 @@ template <typename T, int D, int V = D, bool is_causal = false, bool HAS_MASK = 
         score += static_cast<U>(mask[0]);
       }
 
-      // (score != score) keeps a NaN score that max() would drop, so a NaN in
-      // Q/K propagates instead of collapsing the row max to -inf.
-      U new_max = (score != score) ? score : max(max_score, score);
+      // c10::metal::max propagates NaN (plain max drops it -> row max -inf -> 0).
+      U new_max = c10::metal::max(max_score, score);
       U factor;
       U exp_score;
       if (new_max == -INFINITY) {
@@ -284,9 +283,8 @@ template <typename T, int D, int V = D, bool is_causal = false, bool HAS_MASK = 
         score += static_cast<U>(mask[0]);
       }
 
-      // (score != score) keeps a NaN score that max() would drop, so a NaN in
-      // Q/K propagates instead of collapsing the row max to -inf.
-      U new_max = (score != score) ? score : max(max_score, score);
+      // c10::metal::max propagates NaN (plain max drops it -> row max -inf -> 0).
+      U new_max = c10::metal::max(max_score, score);
       U factor;
       U exp_score;
       if (new_max == -INFINITY) {
