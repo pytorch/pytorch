@@ -50,6 +50,12 @@ def pytest_addoption(parser: Parser) -> None:
     group.addoption("--scs", action="store", default=None, dest="stepcurrent_skip")
     group.addoption("--sc", action="store", default=None, dest="stepcurrent")
     group.addoption("--rs", action="store", default=None, dest="run_single")
+    group.addoption(
+        "--list-markers",
+        action="store_true",
+        default=False,
+        help="list collected tests and their pytest markers as JSON, then exit.",
+    )
 
     parser.addoption("--use-main-module", action="store_true")
     group = parser.getgroup("terminal reporting")
@@ -140,8 +146,15 @@ class HardwareClassificationPytestPlugin:
         items[:] = filtered
 
 
+@pytest.hookimpl(trylast=True)
 def pytest_configure(config: Config) -> None:
     parse_cmd_line_args()
+
+    if config.getoption("list_markers"):
+        terminal_reporter = config.pluginmanager.getplugin("terminalreporter")
+        if terminal_reporter is not None:
+            config.pluginmanager.unregister(terminal_reporter)
+        config.pluginmanager.register(ListMarkersPlugin(), "listmarkersplugin")
 
     xmlpath = config.option.xmlpath_reruns
     # Prevent opening xmllog on worker nodes (xdist).
@@ -262,6 +275,34 @@ class LogXMLReruns(LogXML):
         self.node_reporters_ordered.append(reporter)
 
         return reporter
+
+
+class ListMarkersPlugin:
+    @pytest.hookimpl(tryfirst=True)
+    def pytest_collection_finish(self, session) -> None:
+        missing_paths = []
+        for arg in session.config.args:
+            path = arg.split("::", 1)[0]
+            if not os.path.exists(path):
+                missing_paths.append(arg)
+        if missing_paths:
+            missing_path = missing_paths[0]
+            print(
+                f"ERROR: file or directory not found: {missing_path}", file=sys.stderr
+            )
+            pytest.exit(returncode=4)
+        if session.testsfailed:
+            print("ERROR: collection failed", file=sys.stderr)
+            pytest.exit(returncode=2)
+
+        markers_by_test = {
+            session.config.cwd_relative_nodeid(item.nodeid): sorted(
+                {marker.name for marker in item.iter_markers()}
+            )
+            for item in session.items
+        }
+        print(json.dumps(markers_by_test, indent=2, sort_keys=True))
+        pytest.exit(returncode=0)
 
 
 # imitating summary_failures in pytest's terminal.py
