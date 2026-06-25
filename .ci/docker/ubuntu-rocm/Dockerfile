@@ -112,7 +112,7 @@ RUN rm install_openmpi.sh
 # Install rocm-origami
 COPY ./common/common_utils.sh common_utils.sh
 COPY ci_commit_pins/rocm-origami.txt rocm-origami.txt
-RUN bash -c 'source common_utils.sh && env_run pip install "rocm-origami==$(cat rocm-origami.txt)"' && rm -f common_utils.sh rocm-origami.txt
+RUN bash -c 'source common_utils.sh && source /etc/rocm_env.sh && env_run env "CMAKE_PREFIX_PATH=${ROCM_PATH}:${CMAKE_PREFIX_PATH:-}" pip install "rocm-origami==$(cat rocm-origami.txt)"' && rm -f common_utils.sh rocm-origami.txt
 
 ARG BUILD_ENVIRONMENT
 ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
