@@ -3,7 +3,6 @@ import pickle
 import unittest
 
 import torch
-import torch._dynamo.config
 import torch.nn as nn
 from torch.nn import Buffer, Parameter
 from torch.nn.parameter import UninitializedBuffer, UninitializedParameter
@@ -280,7 +279,6 @@ class TestLazyModules(TestCase):
         output = module(torch.zeros(2, 2))
         self.assertEqual(output, torch.ones(2, 2))
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_lazy_forward_hook(self):
         """
         This test is to test whether lazymodule can register other forward hook
@@ -729,7 +727,6 @@ class TestLazyModules(TestCase):
         self._check_lazy_instancenorm_state(nn.InstanceNorm3d, nn.LazyInstanceNorm3d)
         self._check_lazy_instancenorm_state(nn.InstanceNorm3d, nn.LazyInstanceNorm3d)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_lazy_batchnorm_with_dict_input(self):
         self._check_lazy_norm_with_dict_input(
             nn.BatchNorm1d, nn.LazyBatchNorm1d, (16, 3, 6)

@@ -5,7 +5,6 @@ import unittest
 from typing import NamedTuple
 
 import torch
-import torch._dynamo.config
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import \
@@ -29,15 +28,6 @@ if torch.get_default_dtype() is not torch.float32:
 #   like torch.scatter and torch.gather.
 
 class TestScatterGather(TestCase):
-    def setUp(self):
-        super().setUp()
-        self._prior_ngb = torch._dynamo.config.nested_graph_breaks
-        torch._dynamo.config.nested_graph_breaks = False
-
-    def tearDown(self):
-        torch._dynamo.config.nested_graph_breaks = self._prior_ngb
-        super().tearDown()
-
     # Fills an index tensor with valid indices
     def _fill_indices(self, idx, dim, dim_size, elems_per_row, m, n, o, unique_indices=True):
         for i in range(1 if dim == 0 else m):
