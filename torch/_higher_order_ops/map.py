@@ -1,16 +1,34 @@
 # mypy: allow-untyped-defs
 import functools
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
+from typing import Any
 from typing_extensions import TypeVarTuple
 
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._dispatch.python import suspend_functionalization
+from torch._higher_order_ops.auto_functionalize import (
+    can_auto_functionalize,
+    do_auto_functionalize_v2,
+)
 from torch._higher_order_ops.utils import (
+    _from_fun,
     _maybe_run_with_interpreter,
+    _stack_pytree,
+    _unstack_pytree,
+    create_bw_fn,
+    fill_none_with_masks,
+    filter_with_masks,
+    first_slice_copy,
+    get_graph_output_example_values,
+    HopInstance,
+    materialize_as_graph,
     reenter_make_fx,
     register_fake,
+    save_values_for_backward,
+    saved_values,
+    split_into_chunks,
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses.functional_tensor import disable_functional_mode
@@ -20,33 +38,42 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
 )
 
-from .utils import (
-    _from_fun,
-    _stack_pytree,
-    _unstack_pytree,
-    check_input_alias_and_mutation_return_outputs,
-    create_bw_fn,
-    fill_none_with_masks,
-    filter_with_masks,
-    first_slice_copy,
-    materialize_as_graph,
-    save_values_for_backward,
-    saved_values,
-    split_into_chunks,
-)
-
 
 class MapImpl(HigherOrderOperator):
     def __init__(self):
         super().__init__("map_impl")
 
-    def __call__(self, *args, **kwargs):
+    def __call__(
+        self,
+        f: Callable[..., Any],
+        xs: Sequence[torch.Tensor],
+        pos_args: Sequence[torch.fx.node.BaseArgumentTypes],
+        *,
+        mutated_arg_indices: str = "",
+    ) -> Any:
         # pyrefly: ignore [missing-attribute]
-        return super().__call__(*args, **kwargs)
+        return super().__call__(
+            f, xs, pos_args, mutated_arg_indices=mutated_arg_indices
+        )
 
     # pyrefly: ignore [bad-override]
-    def gen_schema(self, f, xs, pos_args):
+    def gen_schema(self, f, xs, pos_args, mutated_arg_indices: str = ""):
         from torch._higher_order_ops.schema import HopSchemaGenerator
+
+        all_inputs = tuple(
+            [
+                torch.empty_strided(
+                    x.shape[1:],
+                    x.stride()[1:],
+                    dtype=x.dtype,
+                    device=x.device,
+                    requires_grad=x.requires_grad,
+                )
+                for x in xs
+            ]
+            + list(pos_args)
+        )
+        body_gm = materialize_as_graph(f, all_inputs)
 
         # Mutation semantics for map:
         # - xs is mutable: each iteration sees a storage-disjoint slice
@@ -59,30 +86,8 @@ class MapImpl(HigherOrderOperator):
         #   data race under any parallel lowering. Users who need a
         #   shared mutable buffer should use scan / while_loop, where
         #   sequential iteration is part of the contract.
-        xs_slices = [first_slice_copy(x) for x in xs]
-        all_inputs = tuple(xs_slices + list(pos_args))
-
-        body_gm: torch.fx.GraphModule = materialize_as_graph(f, all_inputs)
-        (
-            _,
-            _,
-            _,
-            mutated_inputs,
-            outputs,
-        ) = check_input_alias_and_mutation_return_outputs(body_gm)
-
-        n_xs = len(xs)
-        pos_args_mutated = [i for i in mutated_inputs if i >= n_xs]
-        if pos_args_mutated:
-            raise RuntimeError(
-                "For map, f cannot mutate pos_args inputs but found "
-                f"{[i - n_xs for i in pos_args_mutated]}-th pos_args inputs "
-                "are mutated. Map iterations are independent, so mutating "
-                "a shared pos_args buffer is undefined under parallel "
-                "lowering. Use scan or while_loop if sequential buffer "
-                "updates are required."
-            )
-        mutated_set = set(mutated_inputs)
+        outputs = get_graph_output_example_values(body_gm)
+        mutated_set = {int(i) for i in mutated_arg_indices.split(",") if i}
 
         schema_gen = HopSchemaGenerator(self)
         schema_gen.add_arg("f", body_gm)
@@ -300,28 +305,36 @@ def _broadcast_to_batch(output, batch_size):
     return pytree.tree_map(expand_with_batch, output)
 
 
-def trace_map(proxy_mode, func_overload, f, xs, pos_args):
-    from torch._higher_order_ops.utils import first_slice_copy
-
+def trace_map(
+    proxy_mode,
+    func_overload: HigherOrderOperator,
+    f: Callable[..., Any],
+    xs: Sequence[torch.Tensor],
+    pos_args: Sequence[torch.fx.node.BaseArgumentTypes],
+    mutated_arg_indices: str = "",
+) -> Any:
     with disable_proxy_modes_tracing():
         # Use first_slice_copy instead of _unstack_pytree to avoid
         # iterating over batch dim, which would guard on symbolic sizes.
         example_input = pytree.tree_map(first_slice_copy, xs)
 
-        body_graph = f
-
-        body_graph = reenter_make_fx(body_graph)(*example_input, *pos_args)
+        body_graph = reenter_make_fx(f)(*example_input, *pos_args)
 
     next_name = proxy_mode.tracer.get_fresh_qualname("body_graph_")
-
     proxy_mode.tracer.root.register_module(next_name, body_graph)
 
-    fake_outs = map_impl(body_graph, xs, pos_args)
+    fake_outs = map_impl(
+        body_graph, xs, pos_args, mutated_arg_indices=mutated_arg_indices
+    )
 
     node_args = (body_graph, list(xs), list(pos_args))
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, node_args)
     out_proxy = proxy_mode.tracer.create_proxy(
-        "call_function", func_overload, proxy_args, {}, name="map_impl"
+        "call_function",
+        func_overload,
+        proxy_args,
+        {"mutated_arg_indices": mutated_arg_indices} if mutated_arg_indices else {},
+        name="map_impl",
     )
     return track_tensor_tree(
         fake_outs, out_proxy, constant=None, tracer=proxy_mode.tracer
@@ -329,31 +342,31 @@ def trace_map(proxy_mode, func_overload, f, xs, pos_args):
 
 
 @map_impl.py_impl(DispatchKey.CompositeExplicitAutograd)
-def map_dense(f, xs, pos_args):
+def map_dense(f, xs, pos_args, mutated_arg_indices=""):
     pytrees = [f(*inp, *pos_args) for inp in _unstack_pytree(xs)]
     return _stack_pytree(pytrees)
 
 
 @map_impl.py_autograd_impl
-def map_autograd(f, xs, pos_args):
+def map_autograd(f, xs, pos_args, mutated_arg_indices=""):
     num_mapped_args = len(xs)
     flat_out = MapAutogradOp.apply(f, num_mapped_args, *xs, *pos_args)
     return flat_out
 
 
 @map_impl.py_impl(ProxyTorchDispatchMode)
-def map_proxy_torch_dispatch_mode(mode, f, xs, args):
-    return trace_map(mode, map_impl, f, xs, args)
+def map_proxy_torch_dispatch_mode(mode, f, xs, pos_args, mutated_arg_indices=""):
+    return trace_map(
+        mode, map_impl, f, xs, pos_args, mutated_arg_indices=mutated_arg_indices
+    )
 
 
 @register_fake(map_impl, skip_cache=True)
-def map_fake_tensor_mode(f, xs, args):
-    from torch._higher_order_ops.utils import first_slice_copy
-
+def map_fake_tensor_mode(f, xs, pos_args, mutated_arg_indices=""):
     # Use first_slice_copy instead of _unstack_pytree to avoid
     # iterating over batch dim, which would guard on symbolic sizes.
     first_row = pytree.tree_map(first_slice_copy, xs)
-    example_output = f(*first_row, *args)
+    example_output = f(*first_row, *pos_args)
 
     flat_xs, _ = pytree.tree_flatten(xs)
     batch_size = flat_xs[0].shape[0]
@@ -362,11 +375,24 @@ def map_fake_tensor_mode(f, xs, args):
 
 
 @map_impl.py_functionalize_impl
-def map_functionalize(ctx, f, xs, pos_args):
-    from torch._higher_order_ops.utils import (
-        _check_alias_and_mutation,
-        first_slice_copy,
-    )
+def map_functionalize(ctx, f, xs, pos_args, mutated_arg_indices=""):
+    from torch._higher_order_ops.utils import _check_alias_and_mutation
+
+    if hasattr(ctx, "mode"):
+        hop_instance = HopInstance.create(
+            map_impl,
+            f,
+            xs,
+            pos_args,
+            mutated_arg_indices=mutated_arg_indices,
+        )
+        if can_auto_functionalize(hop_instance):
+            return do_auto_functionalize_v2(
+                ctx.mode,
+                hop_instance,
+                tuple(pytree.tree_flatten((f, xs, pos_args))[0]),
+                {},
+            )
 
     unwrapped_xs = ctx.unwrap_tensors(xs)
     unwrapped_args = ctx.unwrap_tensors(pos_args)
@@ -381,7 +407,12 @@ def map_functionalize(ctx, f, xs, pos_args):
         )
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
         _check_alias_and_mutation(f, example_inputs, "map", pre_dispatch)
-        map_return = map_impl(wrapped_fn, unwrapped_xs, unwrapped_args)
+        map_return = map_impl(
+            wrapped_fn,
+            unwrapped_xs,
+            unwrapped_args,
+            mutated_arg_indices=mutated_arg_indices,
+        )
         return ctx.wrap_tensors(map_return)
 
 
