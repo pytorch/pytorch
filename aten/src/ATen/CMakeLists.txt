@@ -203,7 +203,7 @@ if(USE_FLASH_ATTENTION)
     # empty HIP_ARCHITECTURES and CMake errors out.
     if(USE_ROCM_CK_SDPA)
       set(_have_ck_sdpa_arch FALSE)
-      foreach(ARCH gfx942 gfx950)
+      foreach(ARCH gfx942 gfx950 gfx1200 gfx1201)
         if("${ARCH}" IN_LIST PYTORCH_ROCM_ARCH)
           set(_have_ck_sdpa_arch TRUE)
           break()
@@ -298,10 +298,8 @@ if(USE_FLASH_ATTENTION)
 
     set_source_files_properties(${ck_sdpa_sources_hip} PROPERTIES LANGUAGE HIP)
 
-    # Only build for MI3xx series architectures as building for all targets takes too long
-    # We will selectively add supported architectures when/if needed
     set(_ck_sdpa_hip_arches "")
-    foreach(ARCH gfx942 gfx950)
+    foreach(ARCH gfx942 gfx950 gfx1200 gfx1201)
       if("${ARCH}" IN_LIST PYTORCH_ROCM_ARCH)
         list(APPEND _ck_sdpa_hip_arches ${ARCH})
       endif()
