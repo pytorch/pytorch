@@ -1,15 +1,9 @@
 name: Upload test artifacts
 
 description: |
-  Upload various artifacts produced by our testing process.
-  Attempts to upload to S3 first, and falls back to GitHub Actions artifacts if S3 upload fails.
+  Upload various artifacts produced by our testing process to GitHub Actions artifacts.
 
 inputs:
-  use-gha:
-    description: |
-      Deprecated: This input is no longer used. The action now automatically
-      attempts S3 upload first and falls back to GHA if S3 fails.
-    required: false
   file-suffix:
     description: |
       Suffix to add to the filename of the artifacts. This should include the
@@ -19,20 +13,11 @@ inputs:
     description: S3 bucket to upload artifacts to
     required: false
     default: "gha-artifacts"
-  skip-s3:
-    description: |
-      If 'true', skip the S3 upload entirely and upload directly to GitHub
-      Actions artifacts. Set this on runners that have no credentials capable
-      of writing to the S3 bucket (e.g. ROCm runners, which only assume the
-      read-only ECR login role) to avoid noisy s3:PutObject "not authorized"
-      errors.
-    required: false
-    default: "false"
 
 runs:
   using: composite
   steps:
-    # Always set up uv and zip files first (needed for S3, reusable for GHA fallback)
+    # Always set up uv and zip files first
     - name: Setup uv
       if: ${{ runner.os != 'Windows' && !env.UV_PYTHON }}
       uses: pytorch/test-infra/.github/actions/setup-uv@main
@@ -108,109 +93,9 @@ runs:
         7z a "logs-$Env:FILE_SUFFIX.zip" 'usage_log.txt' -ir'!test\test-reports\*.log'
 
     # ===========================================
-    # S3 upload (primary path)
+    # GHA upload
     # ===========================================
-    - name: Store Test Downloaded JSONs on S3
-      id: s3-upload-jsons
-      if: ${{ inputs.skip-s3 != 'true' }}
-      uses: seemethere/upload-artifact-s3@v5
-      continue-on-error: true
-      with:
-        s3-bucket: ${{ inputs.s3-bucket }}
-        s3-prefix: |
-          ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
-        retention-days: 14
-        if-no-files-found: warn
-        path: test-jsons-*.zip
-
-    - name: Store Test Reports on S3
-      id: s3-upload-reports
-      if: ${{ inputs.skip-s3 != 'true' }}
-      uses: seemethere/upload-artifact-s3@v5
-      continue-on-error: true
-      with:
-        s3-bucket: ${{ inputs.s3-bucket }}
-        s3-prefix: |
-          ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
-        retention-days: 14
-        if-no-files-found: warn
-        path: test-reports-*.zip
-
-    - name: Store Usage Logs on S3
-      id: s3-upload-logs
-      if: ${{ inputs.skip-s3 != 'true' }}
-      uses: seemethere/upload-artifact-s3@v5
-      continue-on-error: true
-      with:
-        s3-bucket: ${{ inputs.s3-bucket }}
-        s3-prefix: |
-          ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
-        retention-days: 14
-        if-no-files-found: ignore
-        path: logs-*.zip
-
-    - name: Store Debug Artifacts on S3
-      id: s3-upload-debug
-      if: ${{ inputs.skip-s3 != 'true' }}
-      uses: seemethere/upload-artifact-s3@v5
-      continue-on-error: true
-      with:
-        s3-bucket: ${{ inputs.s3-bucket }}
-        s3-prefix: |
-          ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
-        retention-days: 14
-        if-no-files-found: ignore
-        path: debug-*.zip
-
-    - name: Store Profiler Traces on S3
-      id: s3-upload-profiler-traces
-      if: ${{ inputs.skip-s3 != 'true' }}
-      uses: seemethere/upload-artifact-s3@v5
-      continue-on-error: true
-      with:
-        s3-bucket: ${{ inputs.s3-bucket }}
-        s3-prefix: |
-          ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
-        retention-days: 14
-        if-no-files-found: ignore
-        path: profiler-traces-*.zip
-
-    - name: Store TLParse Output on S3
-      id: s3-upload-tlparse
-      if: ${{ inputs.skip-s3 != 'true' }}
-      uses: seemethere/upload-artifact-s3@v5
-      continue-on-error: true
-      with:
-        s3-bucket: ${{ inputs.s3-bucket }}
-        s3-prefix: |
-          ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
-        retention-days: 14
-        if-no-files-found: ignore
-        path: tlparse-*.zip
-
-    # Check if S3 upload failed (test-reports is the critical one)
-    - name: Check S3 upload status
-      id: check-s3
-      shell: bash
-      env:
-        SKIP_S3: ${{ inputs.skip-s3 }}
-        S3_REPORTS_OUTCOME: ${{ steps.s3-upload-reports.outcome }}
-      run: |
-        if [[ "${SKIP_S3}" == "true" ]]; then
-          echo "S3 upload skipped, uploading to GHA"
-          echo "s3-failed=true" >> "$GITHUB_OUTPUT"
-        elif [[ "${S3_REPORTS_OUTCOME}" == "failure" ]]; then
-          echo "S3 upload failed, will fallback to GHA"
-          echo "s3-failed=true" >> "$GITHUB_OUTPUT"
-        else
-          echo "S3 upload succeeded"
-          echo "s3-failed=false" >> "$GITHUB_OUTPUT"
-        fi
-
-    # ===========================================
-    # GHA upload (fallback path if S3 failed)
-    # ===========================================
-    - name: Store Test Downloaded JSONs on Github (fallback)
+    - name: Store Test Downloaded JSONs on Github
       uses: actions/upload-artifact@v4
       continue-on-error: true
       with:
@@ -220,7 +105,7 @@ runs:
         if-no-files-found: warn
         path: test/**/*.json
 
-    - name: Store Test Reports on Github (fallback)
+    - name: Store Test Reports on Github
       uses: actions/upload-artifact@v4
       continue-on-error: true
       with:
@@ -232,7 +117,7 @@ runs:
           test/**/*.xml
           test/**/*.csv
 
-    - name: Store Usage Logs on Github (fallback)
+    - name: Store Usage Logs on Github
       uses: actions/upload-artifact@v4
       continue-on-error: true
       with:
