@@ -7,6 +7,9 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/operator.h>
+#ifdef FBCODE_CAFFE2
+#include <folly/container/Reserve.h>
+#endif
 #include <fstream>
 #include <iostream>
 
@@ -1040,7 +1043,11 @@ void AliasDb::analyzeCreator(Node* node) {
 // For nodes that extract values from a composite type. Right now, this just
 // gives up and creates wildcards for everything.
 void AliasDb::analyzeExtractor(Node* node) {
-  for (const auto output : node->outputs()) {
+  const auto outputs = node->outputs();
+#ifdef FBCODE_CAFFE2
+  folly::grow_capacity_by(wildcards_, outputs.size());
+#endif
+  for (const auto output : outputs) {
     setWildcard(output);
   }
 }
