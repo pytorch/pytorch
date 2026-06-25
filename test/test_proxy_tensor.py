@@ -3,7 +3,6 @@
 
 from torch.testing._internal.common_utils import TestCase, run_tests, xfailIfNoAcceleratorTriton
 import torch
-import torch._dynamo.config
 import torch._dynamo
 import unittest
 import warnings
@@ -405,7 +404,6 @@ def forward(self, x_1):
             self.assertTrue("square" not in str(n.target))
             self.assertTrue("norm" not in str(n.target))
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
     def test_resnet18_backward_trace(self):
         mod = torchvision.models.resnet18()
@@ -434,7 +432,6 @@ def forward(self, x_1):
 
         self._test(f, [torch.randn(2), torch.randn(2)])
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_proxy_tensor(self):
         def f_grad(x):
             val = x.cos().cos().sum()

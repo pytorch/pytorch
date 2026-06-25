@@ -60,7 +60,6 @@ class NumaBindingTest(TestCase):
             patch("torch.cuda.is_available", self._mock_is_available),
             # Implicitly used by dynamo
             patch("torch.cuda.get_rng_state"),
-            patch("torch.cuda.set_rng_state"),
             patch("builtins.open", new=self._mock_open),
             patch("os.listdir", new=self._mock_listdir),
             patch("os.sched_getaffinity", new=self._mock_sched_getaffinity),
