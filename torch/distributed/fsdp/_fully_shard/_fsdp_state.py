@@ -290,10 +290,10 @@ class FSDPState(_State):
     def _pre_forward(
         self, module: nn.Module, args: tuple[Any, ...], kwargs: dict[str, Any]
     ) -> tuple[tuple[Any, ...], dict[str, Any]]:
-        with _spmd_no_typecheck():
-            # When composing with module-hook-based activation checkpointing, the
-            # pre-backward hook is responsible for the unshard
-            if self._training_state == TrainingState.PRE_BACKWARD:
+        # When composing with module-hook-based activation checkpointing, the
+        # pre-backward hook is responsible for the unshard
+        if self._training_state == TrainingState.PRE_BACKWARD:
+            with _spmd_no_typecheck():
                 # With nested FSDP and multiple forward passes before backward,
                 # the params might have been resharded by a previous post_backward.
                 # We need to ensure params are unsharded for AC recomputation.
@@ -301,18 +301,21 @@ class FSDPState(_State):
                     if not fsdp_param_group.is_unsharded:
                         fsdp_param_group.unshard()
                         fsdp_param_group.wait_for_unshard()
-                return self._cast_forward_inputs(args, kwargs)
-            # With grouped ``fully_shard([a, b, ...])`` the pre-hook fires per
-            # module (so ``cast_forward_inputs`` and ``fsdp_param_group.pre_forward``
-            # run for each). Root setup and forward prefetch are one-shot, gated
-            # on the first module's entry.
+            return self._cast_forward_inputs(args, kwargs)
+
+        # With grouped ``fully_shard([a, b, ...])`` the pre-hook fires per
+        # module (so ``cast_forward_inputs`` and ``fsdp_param_group.pre_forward``
+        # run for each). Root setup and forward prefetch are one-shot, gated
+        # on the first module's entry.
+        with _spmd_no_typecheck():
             state_first_in_pass = self._training_state != TrainingState.FORWARD
             self._training_state = TrainingState.FORWARD
             if state_first_in_pass:
                 args, kwargs = self._root_pre_forward(module, args, kwargs)
-            args, kwargs = self._cast_forward_inputs(args, kwargs)
-            for fsdp_param_group in self._fsdp_param_groups:
-                args, kwargs = fsdp_param_group.pre_forward(module, args, kwargs)
+        args, kwargs = self._cast_forward_inputs(args, kwargs)
+        for fsdp_param_group in self._fsdp_param_groups:
+            args, kwargs = fsdp_param_group.pre_forward(module, args, kwargs)
+        with _spmd_no_typecheck():
             if state_first_in_pass:
                 for fsdp_state in self._states_to_forward_prefetch:
                     # Forward order (not reversed) to match forward execution

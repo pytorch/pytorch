@@ -3914,14 +3914,30 @@ if (!custom_op_wrapper) {
             }}
             """)
 
-        if len(output_args) == 1 and (output := output_args[0]) is not None:
+        if raw_outputs:
+            num_returned_outputs = 0
+            returned_output_slots = []
+            for output_arg, raw_output_arg in zip(output_args, raw_outputs):
+                if isinstance(raw_output_arg, ir.MutationOutput):
+                    continue
+                if output_arg is not None:
+                    returned_output_slots.append((num_returned_outputs, output_arg))
+                num_returned_outputs += 1
+        else:
+            num_returned_outputs = len(output_args)
+            returned_output_slots = [
+                (idx, output_arg)
+                for idx, output_arg in enumerate(output_args)
+                if output_arg is not None
+            ]
+
+        if num_returned_outputs == 1 and returned_output_slots:
             # result is a single tensor
+            _, output = returned_output_slots[0]
             lines += f"{output} = reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(py_{buf_name}.get(), NULL));\n"
         else:
             # result is a tuple of tensors
-            for idx, output_arg in enumerate(output_args):
-                if output_arg is None:
-                    continue
+            for idx, output_arg in returned_output_slots:
                 lines += f"{output_arg} = reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(PyList_GET_ITEM(py_{buf_name}.get(), {idx}), NULL));\n"
 
         if raw_outputs:

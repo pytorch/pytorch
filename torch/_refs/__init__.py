@@ -3430,6 +3430,66 @@ def native_group_norm(
     return (out, mean, rstd)
 
 
+_SCALAR_TYPE_NAME_OVERRIDES = {
+    "uint8": "Byte",
+    "int8": "Char",
+    "int16": "Short",
+    "int32": "Int",
+    "int64": "Long",
+    "float16": "Half",
+    "float32": "Float",
+    "float64": "Double",
+    "complex32": "ComplexHalf",
+    "complex64": "ComplexFloat",
+    "complex128": "ComplexDouble",
+    "bool": "Bool",
+    "qint8": "QInt8",
+    "quint8": "QUInt8",
+    "qint32": "QInt32",
+    "bfloat16": "BFloat16",
+    "quint4x2": "QUInt4x2",
+    "quint2x4": "QUInt2x4",
+    "bcomplex32": "BComplex32",
+}
+
+
+def _scalar_type_name(dtype: torch.dtype) -> str:
+    dtype_name = str(dtype).removeprefix("torch.")
+    if dtype_name in _SCALAR_TYPE_NAME_OVERRIDES:
+        return _SCALAR_TYPE_NAME_OVERRIDES[dtype_name]
+    if dtype_name.startswith("uint"):
+        return "UInt" + dtype_name.removeprefix("uint")
+    return dtype_name[:1].upper() + dtype_name[1:]
+
+
+def _check_native_layer_norm_cuda_param_dtype(
+    input: Tensor,
+    normalized_ndim: int,
+    weight: Tensor | None,
+    bias: Tensor | None,
+) -> None:
+    if input.device.type != "cuda":
+        return
+
+    mismatched_dtype = None
+    if weight is not None and weight.dtype != input.dtype:
+        mismatched_dtype = weight.dtype
+    elif bias is not None and bias.dtype != input.dtype:
+        mismatched_dtype = bias.dtype
+
+    if mismatched_dtype is None:
+        return
+
+    axis = input.ndim - normalized_ndim
+    num_rows = math.prod(input.shape[:axis])
+    expected_dtype = _scalar_type_name(input.dtype)
+    found_dtype = _scalar_type_name(mismatched_dtype)
+    torch._check(
+        num_rows == 0,
+        lambda: f"expected scalar type {expected_dtype} but found {found_dtype}",
+    )
+
+
 @register_decomposition(aten.native_layer_norm)
 @out_wrapper("out0", "out1", "out2")
 def native_layer_norm(
@@ -3486,6 +3546,7 @@ def native_layer_norm(
         not input.is_complex(),
         lambda: "native_layer_norm does not support complex inputs",
     )
+    _check_native_layer_norm_cuda_param_dtype(input, normalized_ndim, weight, bias)
 
     input = contiguous(input)
     if weight is not None:
@@ -4671,7 +4732,19 @@ def diagonal_scatter(
 ) -> TensorLikeType:
     from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_or
 
-    out = utils.clone_preserve_strides(input)
+    # Mirror at::native::clone_preserve_strides: when the input has internal
+    # memory overlap (e.g. an expand from a scalar with stride 0), we cannot
+    # preserve its strides because copy_to() below would write through aliased
+    # storage and corrupt non-diagonal positions. This arises in the backward
+    # of diagonal_scatter(x, src).sum(), where grad_output is expanded. Fall
+    # back to a plain clone, which materializes a contiguous buffer.
+    if builtins.any(
+        guard_or_false(sz > 1) and guard_or_false(s == 0)
+        for sz, s in zip(input.size(), input.stride())
+    ):
+        out = input.clone()
+    else:
+        out = utils.clone_preserve_strides(input)
     diag = out.diagonal(offset, dim1, dim2)
     # Use sym_or + guard_or_false to handle unbacked symbolic dimensions.
     torch._check(

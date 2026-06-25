@@ -1,32 +1,36 @@
-# mypy: ignore-errors
-
 from __future__ import annotations
 
 import functools
 import math
-from typing import TYPE_CHECKING
+from typing import ParamSpec, TYPE_CHECKING, TypeVar
 
 import torch
 
 from . import _dtypes_impl, _util
-from ._normalizations import ArrayLike, KeepDims, normalizer
+from ._normalizations import ArrayLike, KeepDims, normalizer, OutArray
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
+
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 
 class LinAlgError(Exception):
     pass
 
 
-def _atleast_float_1(a):
+def _atleast_float_1(a: torch.Tensor) -> torch.Tensor:
     if not (a.dtype.is_floating_point or a.dtype.is_complex):
         a = a.to(_dtypes_impl.default_dtypes().float_dtype)
     return a
 
 
-def _atleast_float_2(a, b):
+def _atleast_float_2(
+    a: torch.Tensor, b: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor]:
     dtyp = _dtypes_impl.result_type_impl(a, b)
     if not (dtyp.is_floating_point or dtyp.is_complex):
         dtyp = _dtypes_impl.default_dtypes().float_dtype
@@ -36,12 +40,12 @@ def _atleast_float_2(a, b):
     return a, b
 
 
-def linalg_errors(func):
+def linalg_errors(func: Callable[_P, _R]) -> Callable[_P, _R]:
     @functools.wraps(func)
-    def wrapped(*args, **kwds):
+    def wrapped(*args: _P.args, **kwds: _P.kwargs) -> _R:
         try:
             return func(*args, **kwds)
-        except torch._C._LinAlgError as e:
+        except torch._C._LinAlgError as e:  # pyrefly: ignore[missing-attribute]  # TODO
             raise LinAlgError(*e.args)  # noqa: B904
 
     return wrapped
@@ -52,14 +56,16 @@ def linalg_errors(func):
 
 @normalizer
 @linalg_errors
-def matrix_power(a: ArrayLike, n):
+def matrix_power(a: ArrayLike, n: int) -> torch.Tensor:
     a = _atleast_float_1(a)
     return torch.linalg.matrix_power(a, n)
 
 
 @normalizer
 @linalg_errors
-def multi_dot(inputs: Sequence[ArrayLike], *, out=None):
+def multi_dot(
+    inputs: Sequence[ArrayLike], *, out: OutArray | None = None
+) -> torch.Tensor:
     return torch.linalg.multi_dot(inputs)
 
 
@@ -68,14 +74,16 @@ def multi_dot(inputs: Sequence[ArrayLike], *, out=None):
 
 @normalizer
 @linalg_errors
-def solve(a: ArrayLike, b: ArrayLike):
+def solve(a: ArrayLike, b: ArrayLike) -> torch.Tensor:
     a, b = _atleast_float_2(a, b)
     return torch.linalg.solve(a, b)
 
 
 @normalizer
 @linalg_errors
-def lstsq(a: ArrayLike, b: ArrayLike, rcond=None):
+def lstsq(
+    a: ArrayLike, b: ArrayLike, rcond: float | None = None
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     a, b = _atleast_float_2(a, b)
     # NumPy is using gelsd: https://github.com/numpy/numpy/blob/v1.24.0/numpy/linalg/umath_linalg.cpp#L3991
     # on CUDA, only `gels` is available though, so use it instead
@@ -85,7 +93,7 @@ def lstsq(a: ArrayLike, b: ArrayLike, rcond=None):
 
 @normalizer
 @linalg_errors
-def inv(a: ArrayLike):
+def inv(a: ArrayLike) -> torch.Tensor:
     a = _atleast_float_1(a)
     result = torch.linalg.inv(a)
     return result
@@ -93,21 +101,23 @@ def inv(a: ArrayLike):
 
 @normalizer
 @linalg_errors
-def pinv(a: ArrayLike, rcond=1e-15, hermitian=False):
+def pinv(a: ArrayLike, rcond: float = 1e-15, hermitian: bool = False) -> torch.Tensor:
     a = _atleast_float_1(a)
     return torch.linalg.pinv(a, rtol=rcond, hermitian=hermitian)
 
 
 @normalizer
 @linalg_errors
-def tensorsolve(a: ArrayLike, b: ArrayLike, axes=None):
+def tensorsolve(
+    a: ArrayLike, b: ArrayLike, axes: Sequence[int] | None = None
+) -> torch.Tensor:
     a, b = _atleast_float_2(a, b)
     return torch.linalg.tensorsolve(a, b, dims=axes)
 
 
 @normalizer
 @linalg_errors
-def tensorinv(a: ArrayLike, ind=2):
+def tensorinv(a: ArrayLike, ind: int = 2) -> torch.Tensor:
     a = _atleast_float_1(a)
     return torch.linalg.tensorinv(a, ind=ind)
 
@@ -117,21 +127,21 @@ def tensorinv(a: ArrayLike, ind=2):
 
 @normalizer
 @linalg_errors
-def det(a: ArrayLike):
+def det(a: ArrayLike) -> torch.Tensor:
     a = _atleast_float_1(a)
     return torch.linalg.det(a)
 
 
 @normalizer
 @linalg_errors
-def slogdet(a: ArrayLike):
+def slogdet(a: ArrayLike) -> tuple[torch.Tensor, torch.Tensor]:
     a = _atleast_float_1(a)
     return torch.linalg.slogdet(a)
 
 
 @normalizer
 @linalg_errors
-def cond(x: ArrayLike, p=None):
+def cond(x: ArrayLike, p: int | str | None = None) -> torch.Tensor:
     x = _atleast_float_1(x)
 
     # check if empty
@@ -149,7 +159,9 @@ def cond(x: ArrayLike, p=None):
 
 @normalizer
 @linalg_errors
-def matrix_rank(a: ArrayLike, tol=None, hermitian=False):
+def matrix_rank(
+    a: ArrayLike, tol: float | None = None, hermitian: bool = False
+) -> torch.Tensor | int:
     a = _atleast_float_1(a)
 
     if a.ndim < 2:
@@ -166,7 +178,12 @@ def matrix_rank(a: ArrayLike, tol=None, hermitian=False):
 
 @normalizer
 @linalg_errors
-def norm(x: ArrayLike, ord=None, axis=None, keepdims: KeepDims = False):
+def norm(
+    x: ArrayLike,
+    ord: int | float | str | None = None,
+    axis: int | tuple[int, ...] | None = None,
+    keepdims: KeepDims = False,
+) -> torch.Tensor:
     x = _atleast_float_1(x)
     return torch.linalg.norm(x, ord=ord, dim=axis)
 
@@ -176,25 +193,32 @@ def norm(x: ArrayLike, ord=None, axis=None, keepdims: KeepDims = False):
 
 @normalizer
 @linalg_errors
-def cholesky(a: ArrayLike):
+def cholesky(a: ArrayLike) -> torch.Tensor:
     a = _atleast_float_1(a)
     return torch.linalg.cholesky(a)
 
 
 @normalizer
 @linalg_errors
-def qr(a: ArrayLike, mode="reduced"):
+def qr(
+    a: ArrayLike, mode: str = "reduced"
+) -> tuple[torch.Tensor, torch.Tensor] | torch.Tensor:
     a = _atleast_float_1(a)
     result = torch.linalg.qr(a, mode=mode)
     if mode == "r":
         # match NumPy
-        result = result.R
+        return result.R
     return result
 
 
 @normalizer
 @linalg_errors
-def svd(a: ArrayLike, full_matrices=True, compute_uv=True, hermitian=False):
+def svd(
+    a: ArrayLike,
+    full_matrices: bool = True,
+    compute_uv: bool = True,
+    hermitian: bool = False,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor] | torch.Tensor:
     a = _atleast_float_1(a)
     if not compute_uv:
         return torch.linalg.svdvals(a)
@@ -209,7 +233,7 @@ def svd(a: ArrayLike, full_matrices=True, compute_uv=True, hermitian=False):
 
 @normalizer
 @linalg_errors
-def eig(a: ArrayLike):
+def eig(a: ArrayLike) -> tuple[torch.Tensor, torch.Tensor]:
     a = _atleast_float_1(a)
     w, vt = torch.linalg.eig(a)
 
@@ -221,14 +245,14 @@ def eig(a: ArrayLike):
 
 @normalizer
 @linalg_errors
-def eigh(a: ArrayLike, UPLO="L"):
+def eigh(a: ArrayLike, UPLO: str = "L") -> tuple[torch.Tensor, torch.Tensor]:
     a = _atleast_float_1(a)
     return torch.linalg.eigh(a, UPLO=UPLO)
 
 
 @normalizer
 @linalg_errors
-def eigvals(a: ArrayLike):
+def eigvals(a: ArrayLike) -> torch.Tensor:
     a = _atleast_float_1(a)
     result = torch.linalg.eigvals(a)
     if not a.is_complex() and result.is_complex() and (result.imag == 0).all():
@@ -238,6 +262,6 @@ def eigvals(a: ArrayLike):
 
 @normalizer
 @linalg_errors
-def eigvalsh(a: ArrayLike, UPLO="L"):
+def eigvalsh(a: ArrayLike, UPLO: str = "L") -> torch.Tensor:
     a = _atleast_float_1(a)
     return torch.linalg.eigvalsh(a, UPLO=UPLO)

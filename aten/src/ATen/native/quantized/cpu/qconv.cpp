@@ -802,7 +802,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl_xnnp(
   // Setup the operator
   status = at::native::xnnp_utils::xnnp_setup_convolution2d_nhwc(
       xnnp_convolution_op.get(),
-      reinterpret_cast<const underlying_t*>(act_nhwc.template data_ptr<scalar_t>()),
+      reinterpret_cast<const underlying_t*>(act_nhwc.template const_data_ptr<scalar_t>()),
       reinterpret_cast<underlying_t*>(output.template data_ptr<scalar_t>()),
       per_channel(),
       transpose());
@@ -898,7 +898,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
     auto weight_contig = orig_weight.contiguous(channels_last);
     auto bias_fp32 = bias;
     int8_t* w_data =
-        reinterpret_cast<int8_t*>(weight_contig.template data_ptr<c10::qint8>());
+        reinterpret_cast<int8_t*>(weight_contig.template mutable_data_ptr<c10::qint8>());
 
     float* weight_scales_data = w_scales.data_ptr<float>();
     // We calculate requant scale here as the vector holding the requant scale
@@ -1672,7 +1672,8 @@ static at::Tensor _quantized_convolution_onednn(
     weight_scales.ndimension() == 0 ||
     (weight_scales.strides().size() == 1 || weight_scales.stride(0) == 1),
     "weight_scales should be scalar tensor or contiguous 1D tensor.");
-  ideep::scale_t weights_scales(weight_scales.data_ptr<float>(), weight_scales.data_ptr<float>()+weight_scales.numel());
+  const float* weight_scales_ptr = weight_scales.const_data_ptr<float>();
+  ideep::scale_t weights_scales(weight_scales_ptr, weight_scales_ptr + weight_scales.numel());
 #elif IDEEP_PREREQ(3, 1, 0, 0)
   // TODO (leslie): optimize the performance here:
   // 1. Remove the reciprocal of weight scale, we have done the reciprocal of weight scale back in Ideep:

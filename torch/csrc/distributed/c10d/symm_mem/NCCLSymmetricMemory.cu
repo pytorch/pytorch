@@ -378,7 +378,28 @@ void* NCCLSymmetricMemory::get_multicast_ptr() {
 }
 
 void NCCLSymmetricMemory::barrier(int channel, size_t timeout_ms) {
+#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+  TORCH_CHECK(
+      pai_->signal_pads_dev_ != nullptr,
+      "NCCLSymmetricMemory::barrier requires peer signal pad pointers, which "
+      "are only populated when peers are accessible over the symmetric-memory "
+      "(LSA/NVLink) domain.");
+  check_channel(channel, world_size_, get_signal_pad_size());
+  c10::cuda::CUDAGuard device_guard(device_idx_);
+  barrier_kernel<<<
+      1,
+      std::max(at::cuda::warp_size(), world_size_),
+      0,
+      at::cuda::getCurrentCUDAStream()>>>(
+      reinterpret_cast<uint32_t**>(pai_->signal_pads_dev_),
+      channel,
+      rank_,
+      world_size_,
+      timeout_ms);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+#else
   TORCH_CHECK(false, "NYI");
+#endif
 }
 
 void NCCLSymmetricMemory::put_signal(int dst_rank, int channel, size_t timeout_ms) {
@@ -476,10 +497,16 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     // A single window is registered over the whole region at rendezvous
     // time, so only the base pointer (already granularity-aligned by
     // ncclMemAlloc) needs to satisfy NCCL's window-alignment requirement.
+    const size_t aligned_buffer_size = at::round_up(size, 16UL);
     const size_t signal_pad_size = get_signal_pad_size();
-    const size_t total_size = at::round_up(size, 16UL) + signal_pad_size;
+    const size_t total_size = aligned_buffer_size + signal_pad_size;
     void* ptr;
     C10D_NCCL_CHECK(ncclMemAlloc(&ptr, total_size), "ncclMemAlloc");
+    // ncclMemAlloc does not zero memory. Zero the signal pad so the CAS-based
+    // barrier() protocol starts from a known (all-zero) state on first use
+    // (CUDASymmetricMemory zeroes its whole allocation for the same reason).
+    C10_CUDA_CHECK(cudaMemset(
+        static_cast<char*>(ptr) + aligned_buffer_size, 0, signal_pad_size));
     {
       std::lock_guard<std::mutex> lock(mutex_);
       allocations_.emplace(

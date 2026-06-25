@@ -269,7 +269,6 @@ dependencies as well as the nightly binaries into the repo directory.
   * [cpp](test/cpp) - C++ unit tests for PyTorch C++ frontend.
     * [api](test/cpp/api) - [README](test/cpp/api/README.md)
     * [jit](test/cpp/jit) - [README](test/cpp/jit/README.md)
-    * [tensorexpr](test/cpp/tensorexpr) - [README](test/cpp/tensorexpr/README.md)
   * [expect](test/expect) - Automatically generated "expect" files
     which are used to compare against expected output.
   * [onnx](test/onnx) - Tests for ONNX export functionality,

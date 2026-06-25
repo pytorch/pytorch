@@ -6,9 +6,9 @@ from torch._dynamo.test_minifier_common import MinifierTestBase
 from torch.testing._internal.common_utils import (
     IS_JETSON,
     IS_MACOS,
+    skipIfRocm,
     skipIfWindows,
     TEST_WITH_ASAN,
-    TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.triton_utils import requires_gpu
@@ -38,15 +38,12 @@ inner(torch.randn(2, 2).to("{device}"))
     def test_after_aot_cpu_runtime_error(self):
         self._test_after_aot_runtime_error("cpu", "")
 
+    @skipIfRocm
     @requires_gpu
     @inductor_config.patch("triton.inject_relu_bug_TESTING_ONLY", "runtime_error")
     def test_after_aot_gpu_runtime_error(self):
-        # CUDA's __assertfail surfaces through PyTorch as "device-side assert";
-        # ROCm's Triton AMD lowering prints the injected assertion text before trapping.
         expected_error = (
-            "injected assert fail"
-            if GPU_TYPE == "xpu" or TEST_WITH_ROCM
-            else "device-side assert"
+            "injected assert fail" if GPU_TYPE == "xpu" else "device-side assert"
         )
         self._test_after_aot_runtime_error(GPU_TYPE, expected_error)
 

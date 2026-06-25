@@ -1261,9 +1261,12 @@ class LocalTensorMode(TorchDispatchMode):
         self._per_rank_rng_states: dict[
             int, tuple[torch.Tensor, dict[int, torch.Tensor]]
         ] = {}
-        # Cache for get_coordinate results, keyed by mesh id
-        # Protected by _coordinate_cache_lock for thread safety in MPMD contexts
-        self._coordinate_cache: dict[int, list[SymInt]] = {}
+        # Cache for get_coordinate results, keyed by the inputs used to compute them:
+        # (ndim, flattened rank map, layout).
+        # Protected by _coordinate_cache_lock for thread safety in MPMD contexts.
+        self._coordinate_cache: dict[
+            tuple[int, tuple, torch.distributed._mesh_layout._MeshLayout], list[SymInt]
+        ] = {}
         self._coordinate_cache_lock = threading.Lock()
 
     def __enter__(self) -> "LocalTensorMode":
@@ -1632,16 +1635,17 @@ class _LocalDeviceMesh:
         if lm is None:
             raise AssertionError("Unexpectedly not in LocalTensorMode")
 
+        # Include all attributes used below in the cache key
+        cache_key = (self.ndim, self._flatten_rank_map, self._layout)
         # Check cache first (fast path without lock)
-        mesh_id = id(self)
-        if mesh_id in lm._coordinate_cache:
-            return lm._coordinate_cache[mesh_id]
+        if cache_key in lm._coordinate_cache:
+            return lm._coordinate_cache[cache_key]
 
         # Acquire lock for thread safety in MPMD contexts
         with lm._coordinate_cache_lock:
             # Double-check after acquiring lock
-            if mesh_id in lm._coordinate_cache:
-                return lm._coordinate_cache[mesh_id]
+            if cache_key in lm._coordinate_cache:
+                return lm._coordinate_cache[cache_key]
 
             coords: list[dict[int, int]] = [{} for _ in range(self.ndim)]
             # Clone rank_map to avoid "Cannot set version_counter for inference tensor"
@@ -1657,7 +1661,7 @@ class _LocalDeviceMesh:
 
             out = [torch.SymInt(LocalIntNode(c)) for c in coords]
             # Cache the result
-            lm._coordinate_cache[mesh_id] = out
+            lm._coordinate_cache[cache_key] = out
             # The output contains coordinates for each of the ranks with respect to
             # their meshes formed from root mesh and selecting the same dimensions
             # as the current mesh.

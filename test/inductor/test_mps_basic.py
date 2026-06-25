@@ -222,6 +222,28 @@ class MPSBasicTests(TestCase):
         torch._dynamo.mark_dynamic(x, 1)
         self.assertEqual(fn(x), x.var(dim=-1))
 
+    def test_while_loop_kernel_naming(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/187852
+        # while_loop compiles cond and body as separate MetalScheduling instances,
+        # each of which used to reset _kernel_fn_counter to 0, producing duplicate
+        # "generated_kernel_0" names that caused a Metal mangled-name collision.
+        def fn(iterations):
+            def cond(i):
+                return i < iterations
+
+            def body(i):
+                return (i + 2,)
+
+            (out_i,) = torch._higher_order_ops.while_loop(
+                cond, body, (torch.tensor(0, dtype=torch.int32, device=self.device),)
+            )
+            return out_i
+
+        iters = torch.tensor(4, dtype=torch.int32, device=self.device)
+        compiled_fn = torch.compile(fn, backend="inductor")
+        result = compiled_fn(iters)
+        self.assertEqual(result, torch.tensor(4, dtype=torch.int32, device=self.device))
+
     def test_welford_multistage_sibling_redeclare(self):
         # Regression test: BatchNorm2d-train emits two codegen passes on
         # the same multistage reduction root (welford + running-stats

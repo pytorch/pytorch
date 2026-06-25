@@ -1347,12 +1347,19 @@ def use_mem_pool(pool: MemPool, device: "Device" = None):
         the given pool. If a new thread is spawned inside the context manager
         (e.g. by calling backward) the allocations in that thread will not
         route to the given pool.
+
+    .. note::
+        When used during :class:`~torch.cuda.CUDAGraph` capture, the graph
+        retains the pool until the graph is reset or destroyed.
     """
     device_index = (
         torch.cuda.current_device() if device is None else _get_device_index(device)
     )
     _cuda_beginAllocateCurrentThreadToPool(device_index, pool.id)
     try:
+        if torch.cuda.is_current_stream_capturing():
+            graph = torch.cuda.CUDAGraph.get_currently_capturing_graph()
+            graph._retain_pool(pool)
         yield
     finally:
         _cuda_endAllocateToPool(device_index, pool.id)
@@ -1436,12 +1443,33 @@ def _use_uvm(device: "Device" = None):
                 _advise_uses_struct = False
         return _runtime.cudaMemAdvise(ptr, size, advice, device_id)
 
+    _uvm_advise_supported_cache: dict[tuple[int, int], bool] = {}
+
+    def _device_supports_uvm_advise(device_id, _runtime=_rt):
+        cache_key = (device_id, id(_runtime))
+        if cache_key in _uvm_advise_supported_cache:
+            return _uvm_advise_supported_cache[cache_key]
+        attr = getattr(
+            _runtime.cudaDeviceAttr, "cudaDevAttrConcurrentManagedAccess", None
+        )
+        if attr is None:
+            supported = False
+        else:
+            result = _runtime.cudaDeviceGetAttribute(attr, device_id)
+            err = result if not isinstance(result, tuple) else result[0]
+            if err != _runtime.cudaError_t.cudaSuccess:
+                supported = False
+            else:
+                supported = bool(result[1])
+        _uvm_advise_supported_cache[cache_key] = supported
+        return supported
+
     def _uvm_alloc(size, device, stream, _runtime=_rt):
         try:
             err, ptr = _runtime.cudaMallocManaged(size, _runtime.cudaMemAttachGlobal)
             _check(err, f"cudaMallocManaged({size})")
             ptr = int(ptr)
-            if device >= 0:
+            if device >= 0 and _device_supports_uvm_advise(device, _runtime):
                 _check(
                     _mem_advise(
                         ptr,

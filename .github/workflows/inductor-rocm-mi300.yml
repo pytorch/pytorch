@@ -42,7 +42,9 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner_prefix: "mt-"
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+      use-arc: true
       build-environment: linux-noble-rocm-py3.12-mi300
       docker-image-name: ci-image:pytorch-linux-noble-rocm-n-py3
       test-matrix: |

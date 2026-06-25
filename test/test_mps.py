@@ -12187,8 +12187,9 @@ class TestSDPA(TestCaseMPS):
             attn_mask[1, :, qL // 2:, :] = False
         elif variant == "causal_with_inf":
             attn_mask = torch.zeros(B, NH, qL, kL, dtype=dtype, device="mps")
+            causal_mask = torch.ones(qL, kL, dtype=torch.bool, device="mps").tril()
+            attn_mask.masked_fill_(causal_mask.logical_not(), float("-inf"))
             attn_mask[..., 0, 0] = float("-inf")
-            is_causal = True
         self._run_prefill_test(q, k, v, attn_mask=attn_mask, is_causal=is_causal)
 
     def test_caching_scale(self):

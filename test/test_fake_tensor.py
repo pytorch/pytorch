@@ -1709,11 +1709,14 @@ def forward(self, x_1):
     def test_embedding_meta_indices(self):
         with FakeTensorMode():
             weight = torch.empty(20, 8)
-            indices = torch.empty(2, 3, dtype=torch.long, device="meta")
+            # Indices must be in range: under propagate_real_tensors the real
+            # embedding gather runs, and uninitialized (torch.empty) indices read
+            # out of bounds -- a hard GPU fault on some backends (e.g. ROCm).
+            indices = torch.zeros(2, 3, dtype=torch.long, device="meta")
             out = torch.nn.functional.embedding(indices, weight)
 
             meta_weight = torch.empty(20, 8, dtype=torch.float64, device="meta")
-            cpu_indices = torch.empty(4, 5, dtype=torch.long)
+            cpu_indices = torch.zeros(4, 5, dtype=torch.long)
             meta_weight_out = torch.nn.functional.embedding(cpu_indices, meta_weight)
 
             run_cuda_cases = (
@@ -1722,7 +1725,7 @@ def forward(self, x_1):
             )
             if run_cuda_cases:
                 cuda_weight = torch.empty(20, 8, device="cuda")
-                cuda_indices = torch.empty(2, 3, dtype=torch.long, device="cuda")
+                cuda_indices = torch.zeros(2, 3, dtype=torch.long, device="cuda")
                 cuda_out = torch.nn.functional.embedding(cuda_indices, cuda_weight)
 
         self.assertIsInstance(out, FakeTensor)
@@ -2412,6 +2415,110 @@ class FakeTensorConverterTest(TestCase):
         del y_conv
         self.assertEqual(len(converter.tensor_memo), 0)
         self.assertEqual(len(converter.meta_converter.storage_memo), 0)
+
+    def test_parameter_views_keep_full_storage(self):
+        base = torch.arange(12, dtype=torch.float16)
+        x = torch.nn.Parameter(base[:6].view(2, 3))
+        y = torch.nn.Parameter(base[6:].view(2, 3))
+        self.assertFalse(x._is_view())
+        self.assertFalse(y._is_view())
+
+        mode = FakeTensorMode()
+        x_conv = mode.from_tensor(x, static_shapes=True)
+        y_conv = mode.from_tensor(y, static_shapes=True)
+
+        self.assertEqual(torch._C._storage_id(x_conv), torch._C._storage_id(y_conv))
+        self.assertEqual(
+            x_conv.untyped_storage().nbytes(), base.untyped_storage().nbytes()
+        )
+        self.assertEqual(y_conv.storage_offset(), y.storage_offset())
+        if torch._functorch.config.fake_tensor_propagate_real_tensors:
+            self.assertEqual(
+                x_conv.real_tensor.untyped_storage().nbytes(),
+                base.untyped_storage().nbytes(),
+            )
+            self.assertEqual(y_conv.real_tensor.storage_offset(), y.storage_offset())
+            self.assertEqual(x_conv.real_tensor, x)
+            self.assertEqual(y_conv.real_tensor, y)
+
+    def test_parameter_views_keep_full_storage_symbolic_propagate_real(self):
+        base = torch.arange(12, dtype=torch.float16)
+        x = torch.nn.Parameter(base[:6].view(2, 3))
+        y = torch.nn.Parameter(base[6:].view(2, 3))
+
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            mode = FakeTensorMode(shape_env=ShapeEnv())
+            x_conv = mode.from_tensor(x)
+            y_conv = mode.from_tensor(y)
+
+        self.assertEqual(torch._C._storage_id(x_conv), torch._C._storage_id(y_conv))
+        self.assertEqual(
+            x_conv.real_tensor.untyped_storage().nbytes(),
+            base.untyped_storage().nbytes(),
+        )
+        self.assertEqual(
+            y_conv.real_tensor.untyped_storage().nbytes(),
+            base.untyped_storage().nbytes(),
+        )
+        self.assertEqual(y_conv.real_tensor.storage_offset(), y.storage_offset())
+        self.assertEqual(x_conv.real_tensor, x)
+        self.assertEqual(y_conv.real_tensor, y)
+
+    def test_strided_parameter_views_keep_real_storage_data(self):
+        base = torch.arange(11, dtype=torch.float32)
+        x = torch.nn.Parameter(base[::2])
+        y = torch.nn.Parameter(base[1::2])
+        self.assertFalse(x._is_view())
+        self.assertFalse(y._is_view())
+
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            mode = FakeTensorMode()
+            x_conv = mode.from_tensor(x, static_shapes=True)
+            y_conv = mode.from_tensor(y, static_shapes=True)
+
+        self.assertEqual(torch._C._storage_id(x_conv), torch._C._storage_id(y_conv))
+        self.assertEqual(x_conv.real_tensor, x)
+        self.assertEqual(y_conv.real_tensor, y)
+
+    def test_functional_tensor_offset_storage_copy(self):
+        from torch._subclasses.functional_tensor import (
+            FunctionalTensor,
+            FunctionalTensorMode,
+        )
+
+        base = torch.arange(12, dtype=torch.float32)
+        y = torch.nn.Parameter(base[6:].view(2, 3))
+
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            mode = FakeTensorMode()
+            y_fake = mode.from_tensor(y, static_shapes=True)
+            with FunctionalTensorMode():
+                y_functional = FunctionalTensor.to_functional(y_fake)
+                refake_mode = FakeTensorMode()
+                y_refake = refake_mode.from_tensor(y_functional, static_shapes=True)
+
+        self.assertEqual(y_refake.storage_offset(), y.storage_offset())
+        self.assertEqual(y_refake.real_tensor, y)
+
+    def test_refake_unbacked_storage_static_shapes(self):
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=False):
+            shape_env = ShapeEnv()
+            fake_mode = FakeTensorMode(shape_env=shape_env)
+            with shape_env.ignore_fresh_unbacked_symbols():
+                fake = fake_mode.from_tensor(
+                    torch.randn(2, 3),
+                    source=LocalSource("x", is_input=True),
+                    symbolic_context=StatelessSymbolicContext(
+                        dynamic_sizes=[DimDynamic.UNBACKED, DimDynamic.STATIC],
+                        constraint_sizes=[None, None],
+                    ),
+                )
+
+            refake_mode = FakeTensorMode()
+            refake = refake_mode.from_tensor(fake, static_shapes=True)
+
+        self.assertTrue(free_unbacked_symbols(refake.shape[0]))
+        self.assertEqual(refake.shape[1], 3)
 
     def test_dead_weak_ref(self):
         x = torch.rand(2, 2, 2)

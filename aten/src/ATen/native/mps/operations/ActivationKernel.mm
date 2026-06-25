@@ -129,6 +129,14 @@ static void silu_backward_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "silu_backward");
 }
 
+static void mish_kernel(TensorIteratorBase& iter) {
+  lib.exec_unary_kernel(iter, "mish");
+}
+
+static void mish_backward_kernel(TensorIterator& iter) {
+  lib.exec_binary_kernel(iter, "mish_backward");
+}
+
 static void leaky_relu_kernel(TensorIteratorBase& iter, const Scalar& negative_slope) {
   lib.exec_unary_kernel(iter, "leaky_relu", negative_slope);
 }
@@ -203,6 +211,8 @@ REGISTER_DISPATCH(leaky_relu_stub, leaky_relu_kernel);
 REGISTER_DISPATCH(leaky_relu_backward_stub, leaky_relu_backward_kernel);
 REGISTER_DISPATCH(silu_stub, silu_kernel);
 REGISTER_DISPATCH(silu_backward_stub, silu_backward_kernel);
+REGISTER_DISPATCH(mish_stub, mish_kernel);
+REGISTER_DISPATCH(mish_backward_stub, mish_backward_kernel);
 REGISTER_DISPATCH(GeluKernel, gelu_kernel);
 REGISTER_DISPATCH(GeluBackwardKernel, gelu_backward_kernel);
 REGISTER_DISPATCH(sigmoid_backward_stub, sigmoid_backward_kernel);

@@ -135,6 +135,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: update-commit-hash
     strategy:
+      fail-fast: false
       matrix:
         include:
           - repo-name: vision
