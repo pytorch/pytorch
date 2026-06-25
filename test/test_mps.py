@@ -9637,6 +9637,26 @@ class TestMPS(TestCaseMPS):
         y = x / 64
         self.assertEqual(y, torch.tensor([0., 1023.9844], device="mps"))
 
+    def test_igamma_complex_not_implemented(self):
+        a = torch.randn(2, device="mps", dtype=torch.complex64)
+        b = torch.randn(2, device="mps", dtype=torch.complex64)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "igamma.*not implemented",
+        ):
+            torch.igamma(a, b)
+
+    def test_igammac_complex_not_implemented(self):
+        a = torch.randn(2, device="mps", dtype=torch.complex64)
+        b = torch.randn(2, device="mps", dtype=torch.complex64)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "igammac.*not implemented",
+        ):
+            torch.igammac(a, b)
+
 
 # Conformance suite for the MPS binary TensorIterator dispatcher: two
 # synthetic kernels (simple_add for arithmetic, simple_ge for comparison)
