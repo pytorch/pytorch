@@ -41,6 +41,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_init import (
     _get_post_forward_mesh_info,
     _init_default_fully_shard_mesh,
 )
+from torch.distributed.fsdp._fully_shard._mori_sdma_allgather import MoriSdmaAllGather
 from torch.distributed.fsdp._fully_shard._fsdp_param import ShardedState
 from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
 from torch.distributed.tensor import DTensor
@@ -92,6 +93,36 @@ from torch.testing._internal.common_fsdp import get_devtype
 
 device_type = torch.device(get_devtype())
 device_module = torch.get_device_module(device_type)
+
+
+class _RankMajorTestAllGather(AllGather):
+    def __init__(self) -> None:
+        self.outputs: list[torch.Tensor] = []
+
+    def allocate(
+        self,
+        size: Sequence[int | torch.SymInt],
+        *,
+        dtype: torch.dtype,
+        device: torch.device,
+    ) -> torch.Tensor:
+        output = torch.empty(size, dtype=dtype, device=device)
+        self.outputs.append(output)
+        return output
+
+    def __call__(
+        self,
+        output_tensor: torch.Tensor,
+        input_tensor: torch.Tensor,
+        group: dist.ProcessGroup,
+        async_op: bool = False,
+    ) -> dist.distributed_c10d.Work | None:
+        return dist.all_gather_single(
+            output_tensor,
+            input_tensor,
+            group=group,
+            async_op=async_op,
+        )
 
 
 class TestFullyShardCollectiveOps(FSDPTestMultiThread):
@@ -176,6 +207,57 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
                 all_gather_copy_in_stream=all_gather_copy_in_stream,
                 all_gather_stream=all_gather_stream,
             )
+
+    @skip_if_lt_x_gpu(1)
+    def test_custom_all_gather_backend_substitution(self):
+        param_sizes = [torch.Size([self.world_size, 2]), torch.Size([self.world_size])]
+        orig_params = self._init_params(param_sizes)
+        fsdp_param_group = self._init_fsdp_param_group(orig_params, True)
+        comm = _RankMajorTestAllGather()
+        group = fsdp_param_group.mesh_info.shard_process_group
+        default_stream = device_module.current_stream()
+
+        all_gather_result = foreach_all_gather(
+            fsdp_param_group.fsdp_params,
+            group,
+            async_op=False,
+            all_gather_copy_in_stream=default_stream,
+            all_gather_stream=default_stream,
+            device=self.device,
+            all_gather_comm=comm,
+        )
+        self.assertIsNotNone(all_gather_result)
+        foreach_all_gather_copy_out(
+            all_gather_result, fsdp_param_group.fsdp_params, group
+        )
+        rank_major_storage_ptr = comm.outputs[-1].untyped_storage().data_ptr()
+        for fsdp_param in fsdp_param_group.fsdp_params:
+            self.assertNotEqual(
+                fsdp_param.all_gather_outputs[0].untyped_storage().data_ptr(),
+                rank_major_storage_ptr,
+            )
+
+        for fsdp_param in fsdp_param_group.fsdp_params:
+            fsdp_param.init_unsharded_param()
+        fsdp_param_group._to_unsharded()
+        for orig_param, param in zip(
+            orig_params, fsdp_param_group.modules[0].parameters()
+        ):
+            self.assertEqual(param, orig_param)
+
+    @skip_if_lt_x_gpu(1)
+    def test_mori_sdma_all_gather_env_gate(self):
+        old_value = os.environ.get("MORI_FSDP_ENABLE_SDMA")
+        os.environ["MORI_FSDP_ENABLE_SDMA"] = "1"
+        try:
+            orig_params = self._init_params([torch.Size([self.world_size])])
+            fsdp_param_group = self._init_fsdp_param_group(orig_params, True)
+        finally:
+            if old_value is None:
+                os.environ.pop("MORI_FSDP_ENABLE_SDMA", None)
+            else:
+                os.environ["MORI_FSDP_ENABLE_SDMA"] = old_value
+        self.assertIsInstance(fsdp_param_group._all_gather_comm, MoriSdmaAllGather)
 
     def _test_all_gather(
         self,
