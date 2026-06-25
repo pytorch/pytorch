@@ -108,6 +108,71 @@ __device__ __forceinline__ void wait_signal(uint32_t* addr) {
     ;
 }
 
+// Validates the channel argument for barrier(), put_signal() and
+// wait_signal(). Shared by the CUDA and NCCL symmetric-memory backends.
+// ``signal_pad_size`` is passed in (rather than calling get_signal_pad_size()
+// here) so this header doesn't need to include SymmetricMemory.hpp.
+inline void check_channel(int channel, int world_size, size_t signal_pad_size) {
+  TORCH_CHECK(
+      channel >= 0,
+      "channel for barrier(), put_signal() and wait_signal() ",
+      "must be greater than 0 (got ",
+      channel,
+      ")");
+  const size_t num_channels =
+      signal_pad_size / sizeof(uint32_t) * world_size;
+  TORCH_CHECK(
+      static_cast<size_t>(channel) < num_channels,
+      "The maximum supported channel for barrier(), put_signal() and wait_signal() is ",
+      num_channels - 1,
+      " (got ",
+      channel,
+      ")");
+}
+
+// All-to-all signal barrier over the symmetric-memory signal pads, shared by
+// the CUDA and NCCL backends. Each rank sets a flag in every peer's signal pad
+// (at its own slot) and waits for every peer to set the matching flag in its
+// own pad. The try_put_signal/try_wait_signal CAS protocol toggles each slot
+// 0->1 then 1->0, so the pads return to zero and the barrier is reusable.
+[[maybe_unused]] static __global__ void barrier_kernel(
+    uint32_t** signal_pads,
+    int channel,
+    int rank,
+    int world_size,
+    size_t timeout_ms) {
+  if (threadIdx.x < world_size) {
+    auto target_rank = threadIdx.x;
+    if (target_rank == rank) {
+      return;
+    }
+    auto put_success = try_put_signal<std::memory_order_release>(
+        signal_pads[target_rank] + world_size * channel + rank, timeout_ms);
+    if (!put_success) {
+      printf(
+          "[FATAL] SymmetricMemory::barrier: rank %d failed to send signal "
+          "to rank %d on channel %d after %lu milliseconds\n",
+          rank,
+          target_rank,
+          channel,
+          timeout_ms);
+      trap();
+    }
+    auto wait_success = try_wait_signal<std::memory_order_acquire>(
+        signal_pads[rank] + world_size * channel + target_rank, timeout_ms);
+    if (!wait_success) {
+      printf(
+          "[FATAL] SymmetricMemory::barrier: rank %d failed to receive signal "
+          "from rank %d on channel %d after %lu milliseconds\n",
+          rank,
+          target_rank,
+          channel,
+          timeout_ms);
+      trap();
+    }
+  }
+}
+
 // Synchronizes blocks with matching blockIdx across participating devices.
 // Note: sync_remote_block itself is not a system level barrier/fence. It is a
 // building block for expressing different synchronization patterns.
