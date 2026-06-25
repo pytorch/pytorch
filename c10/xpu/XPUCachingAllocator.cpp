@@ -1993,7 +1993,6 @@ class DeviceCachingAllocator {
       auto pool_it = graph_pools.find(mempool_id);
       if (pool_it != graph_pools.end()) {
         auto* private_pool = pool_it->second.get();
-        auto context = maybeGatherContext(RecordContext::ALL);
         std::vector<Block*> blocks_to_erase;
         for (auto* block : deferred_blocks) {
           if (block->pool->owner_PrivatePool == private_pool) {
