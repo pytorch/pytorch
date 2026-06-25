@@ -1108,6 +1108,13 @@ class Tensor(torch._C.TensorBase):
             self, return_inverse=return_inverse, return_counts=return_counts, dim=dim
         )
 
+    def nanmedian(self, dim=None, keepdim=False):
+        if has_torch_function_unary(self):
+            return handle_torch_function(
+                Tensor.nanmedian, (self,), self, dim=dim, keepdim=keepdim
+            )
+        return torch.nanmedian(self, dim=dim, keepdim=keepdim)
+
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rsub__(self, other: Union["Tensor", int, float, bool, complex]) -> "Tensor":
         return _C._VariableFunctions.rsub(self, other)
