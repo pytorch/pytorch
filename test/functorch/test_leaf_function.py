@@ -2120,6 +2120,7 @@ class GraphModule(torch.nn.Module):
 
         t: "f32[3, 3]" = torch.ops.aten.t.default(primals_3);  primals_3 = None
         addmm: "f32[3, 3]" = torch.ops.aten.addmm.default(primals_2, primals_4, t);  primals_2 = None
+
         t_1: "f32[3, 3]" = torch.ops.aten.t.default(t);  t = None
         return (getitem, addmm, primals_4, t_1)
 """,

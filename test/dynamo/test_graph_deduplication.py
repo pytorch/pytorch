@@ -229,6 +229,7 @@ class GraphModule(torch.nn.Module):
         getitem_1: "f32[10, 10]" = invoke_subgraph_6[0];  invoke_subgraph_6 = None
 
         sin: "f32[10, 10]" = torch.ops.aten.sin.default(getitem_1)
+
         cos_1: "f32[10, 10]" = torch.ops.aten.cos.default(getitem_1);  getitem_1 = None
 
         sin_1: "f32[10, 10]" = torch.ops.aten.sin.default(getitem);  getitem = None
