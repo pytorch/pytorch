@@ -69,6 +69,27 @@
     }                                                                         \
   } while (0)
 
+// Non-throwing variant of C10_CUDA_DRIVER_CHECK: warns instead of throwing, so
+// it is safe to call from noexcept teardown / unwinding paths.
+#define C10_CUDA_DRIVER_WARN(EXPR)                                           \
+  do {                                                                       \
+    c10::cuda::CUDAErrorLogCapture __cuda_error_log;                         \
+    CUresult __err = EXPR;                                                   \
+    if (__err != CUDA_SUCCESS) {                                             \
+      const auto __cuda_error_log_message =                                  \
+          __cuda_error_log.get_error_log_suffix();                           \
+      const char* err_str;                                                   \
+      CUresult get_error_str_err [[maybe_unused]] =                          \
+          c10::cuda::DriverAPI::get()->cuGetErrorString_(__err, &err_str);   \
+      if (get_error_str_err != CUDA_SUCCESS) {                               \
+        TORCH_WARN(                                                          \
+            "CUDA driver error: unknown error", __cuda_error_log_message);   \
+      } else {                                                               \
+        TORCH_WARN("CUDA driver error: ", err_str, __cuda_error_log_message);\
+      }                                                                      \
+    }                                                                        \
+  } while (0)
+
 // The integer in the second column specifies the requested CUDA Driver API
 // version. The dynamic loader will accept a driver with a newer version, but it
 // ensures that the requested symbol exists in *at least* the specified version
