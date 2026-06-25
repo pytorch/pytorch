@@ -1556,10 +1556,12 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
         return self.item_dict[name]
 
     def __setitem__(self, key: kV, value: VariableTracker) -> None:
-        # Find a way to not hash the key using HashableTracker
+        # Find a way to not hash the key using HashableTracker. CPython's
+        # instance __dict__ accepts arbitrary hashable keys when set via the
+        # mapping API (only attribute access via setattr requires str), and
+        # instance-dict mutations replay with object_setattr_ignore_descriptor
+        # (a plain __dict__ store), so a non-str constant key is fine.
         name = self._maybe_unwrap_key(key)
-        if not istype(name, str):
-            raise AssertionError(f"Expected str key, got {type(name)}")
         self.side_effects.store_instance_dict_attr(self.item, name, value)
 
     def __delitem__(self, key: kV) -> None:

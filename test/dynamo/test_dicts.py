@@ -3458,6 +3458,44 @@ class DunderDictVariableTests(torch._dynamo.test_case.TestCase):
         # This should not raise Unsupported
         fn()
 
+    def test_dunder_dict_non_str_key_setitem(self):
+        # CPython's instance __dict__ accepts arbitrary hashable keys when set
+        # via the mapping API; only attribute access via setattr requires str.
+        # Mirrors test_dict.DictTest.test_object_set_item_single_instance_non_str_key.
+        class Foo:
+            pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            f = Foo()
+            f.__dict__[1] = 1
+            f.a = "a"
+            return dict(f.__dict__), list(f.__dict__)
+
+        d, keys = fn()
+        self.assertEqual(d, {1: 1, "a": "a"})
+        self.assertEqual(keys, [1, "a"])
+
+    def test_dunder_dict_non_str_key_roundtrip(self):
+        # Non-str instance-dict keys must read back and delete correctly.
+        class Foo:
+            pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            f = Foo()
+            d = f.__dict__
+            d[1] = 10
+            d[2.5] = 20
+            d[(3, 4)] = 30
+            got = (d[1], d[2.5], d[(3, 4)])
+            del d[2.5]
+            return got, dict(d)
+
+        got, d = fn()
+        self.assertEqual(got, (10, 20, 30))
+        self.assertEqual(d, {1: 10, (3, 4): 30})
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
