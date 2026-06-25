@@ -8484,7 +8484,7 @@ Example::
     tensor([ 1.1552,  2.6148,  2.6535,  5.8318,  4.2361])
 
 .. function:: normal(mean, std, size, *, generator=None, out=None, dtype=None, \
-layout=torch.strided, device=None, requires_grad=False, pin_memory=False) -> Tensor
+    layout=torch.strided, device=None, requires_grad=False, pin_memory=False) -> Tensor
    :noindex:
 
 Similar to the function above, but the means and standard deviations are shared
