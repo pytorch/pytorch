@@ -283,53 +283,53 @@ jobs:
   #     runner: windows.4xlarge.nonephemeral
   #   secrets: inherit
 
-  linux-jammy-rocm-py3_10-build:
-    name: linux-jammy-rocm-py3.10-mi355
-    uses: ./.github/workflows/_linux-build.yml
-    needs:
-      - get-label-type
-      - job-filter
-    with:
-      # Only set the prefix when use-arc is set to true, they go together
-      runner_prefix: ""
-      build-environment: linux-jammy-rocm-py3.10-mi355
-      docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3
-      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
-      # TODO (huydhn): Add this back once other workflow migrates
-      # sync-tag: rocm-build
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 8, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "default", shard: 2, num_shards: 8, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "default", shard: 3, num_shards: 8, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "default", shard: 4, num_shards: 8, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "default", shard: 5, num_shards: 8, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "default", shard: 6, num_shards: 8, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "default", shard: 7, num_shards: 8, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "default", shard: 8, num_shards: 8, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "inductor", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "inductor", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "distributed", shard: 1, num_shards: 3, runner: "linux.rocm.gpu.gfx950.2" },
-          { config: "distributed", shard: 2, num_shards: 3, runner: "linux.rocm.gpu.gfx950.2" },
-          { config: "distributed", shard: 3, num_shards: 3, runner: "linux.rocm.gpu.gfx950.2" },
-        ]}
-      use-arc: false
-      python-version: "3.10"
-    secrets: inherit
+  # linux-jammy-rocm-py3_10-build:
+  #   name: linux-jammy-rocm-py3.10-mi355
+  #   uses: ./.github/workflows/_linux-build.yml
+  #   needs:
+  #     - get-label-type
+  #     - job-filter
+  #   with:
+  #     # Only set the prefix when use-arc is set to true, they go together
+  #     runner_prefix: ""
+  #     build-environment: linux-jammy-rocm-py3.10-mi355
+  #     docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3
+  #     ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+  #     # TODO (huydhn): Add this back once other workflow migrates
+  #     # sync-tag: rocm-build
+  #     test-matrix: |
+  #       { include: [
+  #         { config: "default", shard: 1, num_shards: 8, runner: "linux.rocm.gpu.gfx950.1" },
+  #         { config: "default", shard: 2, num_shards: 8, runner: "linux.rocm.gpu.gfx950.1" },
+  #         { config: "default", shard: 3, num_shards: 8, runner: "linux.rocm.gpu.gfx950.1" },
+  #         { config: "default", shard: 4, num_shards: 8, runner: "linux.rocm.gpu.gfx950.1" },
+  #         { config: "default", shard: 5, num_shards: 8, runner: "linux.rocm.gpu.gfx950.1" },
+  #         { config: "default", shard: 6, num_shards: 8, runner: "linux.rocm.gpu.gfx950.1" },
+  #         { config: "default", shard: 7, num_shards: 8, runner: "linux.rocm.gpu.gfx950.1" },
+  #         { config: "default", shard: 8, num_shards: 8, runner: "linux.rocm.gpu.gfx950.1" },
+  #         { config: "inductor", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
+  #         { config: "inductor", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
+  #         { config: "distributed", shard: 1, num_shards: 3, runner: "linux.rocm.gpu.gfx950.2" },
+  #         { config: "distributed", shard: 2, num_shards: 3, runner: "linux.rocm.gpu.gfx950.2" },
+  #         { config: "distributed", shard: 3, num_shards: 3, runner: "linux.rocm.gpu.gfx950.2" },
+  #       ]}
+  #     use-arc: false
+  #     python-version: "3.10"
+  #   secrets: inherit
 
-  linux-jammy-rocm-py3_10-test:
-    name: linux-jammy-rocm-py3.10-mi355
-    uses: ./.github/workflows/_rocm-test.yml
-    needs:
-      - linux-jammy-rocm-py3_10-build
-      - target-determination
-      - job-filter
-    with:
-      build-environment: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.build-environment }}
-      docker-image: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.test-matrix }}
-      tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
-    secrets: inherit
+  # linux-jammy-rocm-py3_10-test:
+  #   name: linux-jammy-rocm-py3.10-mi355
+  #   uses: ./.github/workflows/_rocm-test.yml
+  #   needs:
+  #     - linux-jammy-rocm-py3_10-build
+  #     - target-determination
+  #     - job-filter
+  #   with:
+  #     build-environment: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.build-environment }}
+  #     docker-image: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.docker-image }}
+  #     test-matrix: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.test-matrix }}
+  #     tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
+  #   secrets: inherit
 
 #   inductor-build:
 #     if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' inductor-build ') }}
