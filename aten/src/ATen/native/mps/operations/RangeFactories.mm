@@ -59,7 +59,7 @@ Tensor& arange_mps_out(const Scalar& start, const Scalar& end, const Scalar& ste
     auto xend = end.to<accscalar_t>();
     auto xstep = step.to<accscalar_t>();
 
-    TORCH_CHECK(xstep != 0, "step must be nonzero and representable in the target dtype");
+    TORCH_CHECK_VALUE(xstep != 0, "step must be nonzero");
 
     double size_d;
     if constexpr (std::is_same_v<scalar_t, int64_t>) {
@@ -135,7 +135,7 @@ Tensor& range_mps_out(const Scalar& start, const Scalar& end, const Scalar& step
     auto xend = end.to<accscalar_t>();
     auto xstep = step.to<accscalar_t>();
 
-    TORCH_CHECK(xstep != 0, "step must be nonzero and representable in the target dtype");
+    TORCH_CHECK_VALUE(xstep != 0, "step must be nonzero");
 
     // double size_d = ((xend - xstart) / xstep) + 1;
     double size_d;
