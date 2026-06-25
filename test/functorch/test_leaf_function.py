@@ -773,7 +773,7 @@ class outer(torch.nn.Module):
 
     class repeated_subgraph0(torch.nn.Module):
         def forward(self, arg0_1: "f32[3, 3]"):
-            add: "f32[3, 3]" = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
+            add: "f32[3, 3]" = torch.ops.aten.add.Scalar(arg0_1, 1);  arg0_1 = None
             return (add,)
 """,
         )

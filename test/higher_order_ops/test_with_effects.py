@@ -689,7 +689,7 @@ def forward(self, arg0_1):
             fw_graph.code.strip(),
             """\
 def forward(self, arg0_1, arg1_1):
-    mul = torch.ops.aten.mul.Tensor(arg1_1, 2);  arg1_1 = None
+    mul = torch.ops.aten.mul.Scalar(arg1_1, 2);  arg1_1 = None
     with_effects = torch.ops.higher_order.with_effects(arg0_1, torch.ops.aten._print.default, 'effect');  arg0_1 = None
     getitem = with_effects[0];  with_effects = None
     return (getitem, mul, mul)""",

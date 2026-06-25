@@ -479,10 +479,9 @@ def _fuse_ddp_communication(
             break
 
     def ddp_reducer_filter(block: CommBlock) -> bool:
-        if (
-            not isinstance(block.comm_node.args[0], fx.Node)
-            or block.comm_node.args[0].target != aten.div.Tensor
-        ):
+        if not isinstance(block.comm_node.args[0], fx.Node) or block.comm_node.args[
+            0
+        ].target not in (aten.div.Tensor, aten.div.Scalar):
             return False
 
         if len(block.wait_nodes[0].users) != 1:

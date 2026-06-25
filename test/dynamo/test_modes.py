@@ -1063,7 +1063,7 @@ class outer_fn(torch.nn.Module):
 
     class repeated_subgraph0(torch.nn.Module):
         def forward(self, arg0_1: "f32[3, 3]", arg1_1: "f32[3, 3]"):
-            mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg0_1, 2);  arg0_1 = None
+            mul: "f32[3, 3]" = torch.ops.aten.mul.Scalar(arg0_1, 2);  arg0_1 = None
             add: "f32[3, 3]" = torch.ops.aten.add.Tensor(mul, arg1_1);  mul = arg1_1 = None
             return (add,)
 """,
@@ -1118,7 +1118,7 @@ class outer_fn(torch.nn.Module):
 
     class repeated_subgraph0(torch.nn.Module):
         def forward(self, arg0_1: "f32[3, 3]"):
-            mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg0_1, 2);  arg0_1 = None
+            mul: "f32[3, 3]" = torch.ops.aten.mul.Scalar(arg0_1, 2);  arg0_1 = None
             return (mul,)
 """,
         )
@@ -1220,7 +1220,7 @@ class outer_fn(torch.nn.Module):
 class GraphModule(torch.nn.Module):
     def forward(self, primals_1: "f32[3, 3]"):
         # Annotation: {'seq_nr': 13} No stacktrace found for following nodes
-        add: "f32[3, 3]" = torch.ops.aten.add.Tensor(primals_1, 1);  primals_1 = None
+        add: "f32[3, 3]" = torch.ops.aten.add.Scalar(primals_1, 1);  primals_1 = None
 
         # Annotation: {'seq_nr': 14} No stacktrace found for following nodes
         repeated_subgraph0 = self.repeated_subgraph0
@@ -1238,7 +1238,7 @@ class GraphModule(torch.nn.Module):
             cos: "f32[3, 3]" = torch.ops.aten.cos.default(arg0_1)
 
             # Annotation: {'seq_nr': 10} File: test_modes.py:921 in inner_fn, code: return y / 2
-            div: "f32[3, 3]" = torch.ops.aten.div.Tensor(cos, 2);  cos = None
+            div: "f32[3, 3]" = torch.ops.aten.div.Scalar(cos, 2);  cos = None
             return (div, arg0_1)
         """,
             ignore_comments=True,
@@ -1259,7 +1259,7 @@ class GraphModule(torch.nn.Module):
         return (getitem_2,)
     class repeated_subgraph1(torch.nn.Module):
         def forward(self, arg0_1: "f32[3, 3]", arg1_1: "f32[3, 3]"):
-            div: "f32[3, 3]" = torch.ops.aten.div.Tensor(arg1_1, 2);  arg1_1 = None
+            div: "f32[3, 3]" = torch.ops.aten.div.Scalar(arg1_1, 2);  arg1_1 = None
             sin: "f32[3, 3]" = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
             neg: "f32[3, 3]" = torch.ops.aten.neg.default(sin);  sin = None
             mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(div, neg);  div = neg = None
@@ -1316,12 +1316,12 @@ class outer_fn(torch.nn.Module):
 
     class repeated_subgraph0(torch.nn.Module):
         def forward(self, arg0_1: "f32[3, 3]"):
-            mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg0_1, 2);  arg0_1 = None
+            mul: "f32[3, 3]" = torch.ops.aten.mul.Scalar(arg0_1, 2);  arg0_1 = None
             return (mul,)
 
     class repeated_subgraph1(torch.nn.Module):
         def forward(self, arg0_1: "f32[3, 3]"):
-            mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg0_1, 3);  arg0_1 = None
+            mul: "f32[3, 3]" = torch.ops.aten.mul.Scalar(arg0_1, 3);  arg0_1 = None
             return (mul,)
 """,
         )

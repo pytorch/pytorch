@@ -174,9 +174,13 @@ class BinaryFoldingTemplate(TestCase):
 
             aten_binary = [
                 aten.add.Tensor,
+                aten.add.Scalar,
                 aten.sub.Tensor,
+                aten.sub.Scalar,
                 aten.mul.Tensor,
+                aten.mul.Scalar,
                 aten.div.Tensor,
+                aten.div.Scalar,
             ]
             n_binary_ops = 0
 
