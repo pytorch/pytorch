@@ -41,6 +41,7 @@ from torch.testing._internal.common_utils import (
     IS_JETSON,
     IS_WINDOWS,
     MI200_ARCH,
+    MI300_ARCH,
     NAVI_ARCH,
     getRocmVersion,
     isRocmArchAnyOf,
@@ -287,6 +288,28 @@ class TestMatmulCuda(InductorTestCase):
                 self.assertEqual(norm_squared, 50 + 0j)
 
             self.assertEqual(torch.corrcoef(x), ref_corrcoef)
+
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    @runOnRocmArch(MI300_ARCH)
+    def test_hipblaslt_high_precision_uses_fp32_on_mi300(self):
+        orig_precision = torch.get_float32_matmul_precision()
+        try:
+            torch.manual_seed(42)
+            size = 512
+            a = torch.rand(size, size, device="cuda", dtype=torch.float32)
+            b = torch.rand(size, size, device="cuda", dtype=torch.float32)
+
+            with blas_library_context("cublaslt"):
+                torch.set_float32_matmul_precision("high")
+                out_high = a @ b
+
+                torch.set_float32_matmul_precision("highest")
+                out_highest = a @ b
+
+            self.assertLessEqual((out_high - out_highest).abs().max().item(), 1e-4)
+        finally:
+            torch.set_float32_matmul_precision(orig_precision)
 
     @onlyCUDA
     # imported 'tol' as 'xtol' to avoid aliasing in code above

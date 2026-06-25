@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <type_traits>
 
@@ -258,6 +259,15 @@ struct CublasLtTypeInfo {
   cudaDataType_t scale_type = CUDA_R_32F;
 };
 
+#ifdef USE_ROCM
+inline bool allowHipblasLtTF32Compute() {
+  // MI300/CDNA3 exposes hipBLASLt fast-TF32 compute, but that path has
+  // architecture-specific precision loss that is not seen on gfx950.
+  const auto* prop = at::cuda::getCurrentDeviceProperties();
+  return std::strncmp(prop->gcnArchName, "gfx942", 6) != 0;
+}
+#endif
+
 template <typename T, typename C_Dtype = T>
 CublasLtTypeInfo<T, C_Dtype> getCublasLtTypeInfo() {
   CublasLtTypeInfo<T, C_Dtype> info;
@@ -270,7 +280,13 @@ CublasLtTypeInfo<T, C_Dtype> getCublasLtTypeInfo() {
     if (at::globalContext().float32Precision(
             at::Float32Backend::CUDA,
             at::Float32Op::MATMUL) == at::Float32Precision::TF32) {
+#ifndef USE_ROCM
       info.compute_type = CUBLAS_COMPUTE_32F_FAST_TF32;
+#else
+      if (allowHipblasLtTF32Compute()) {
+        info.compute_type = CUBLAS_COMPUTE_32F_FAST_TF32;
+      }
+#endif
     }
   } else if constexpr (std::is_same_v<T, c10::complex<double>>) {
     info.ab_type = CUDA_C_64F;
