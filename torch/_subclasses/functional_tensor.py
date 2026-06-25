@@ -383,25 +383,34 @@ class FunctionalTensor(torch.Tensor):
         masked_grad: builtins.bool | None = None,
     ) -> torch.Tensor:
         if self.layout == torch.strided:
-            if dtype is None:
-                return self
-            return self.to(dtype=dtype)
+            return self.to(dtype=dtype) if dtype is not None else self
 
-        out = self.elem.to_dense(dtype=dtype, masked_grad=masked_grad)
-        if isinstance(out, torch.Tensor) and torch._is_functional_tensor(out):
-            functional_mode = _detect_infra_mode(
-                torch._C._TorchDispatchModeKey.FUNCTIONAL
-            )
-            if functional_mode is None:
-                raise AssertionError("functional_mode must not be None")
-            with functional_mode:
-                return FunctionalTensor(out, functional_mode)
-        return out
+        inner = torch._from_functional_tensor(self.elem)
+        if not isinstance(inner, torch._subclasses.FakeTensor):
+            out = self.elem.to_dense(dtype=dtype, masked_grad=masked_grad)
+            if isinstance(out, torch.Tensor) and torch._is_functional_tensor(out):
+                functional_mode = _detect_infra_mode(
+                    torch._C._TorchDispatchModeKey.FUNCTIONAL
+                )
+                if functional_mode is None:
+                    raise AssertionError("functional_mode must not be None")
+                with functional_mode:
+                    return FunctionalTensor(out, functional_mode)
+            return out
+
+        return torch.ops.aten.to_dense.default(
+            self, dtype=dtype, masked_grad=masked_grad
+        )
+
+    @property
+    # pyrefly: ignore[bad-override]
+    def is_mkldnn(self) -> builtins.bool:
+        return torch._from_functional_tensor(self.elem).is_mkldnn
 
     @property
     # pyrefly: ignore[bad-override]
     def layout(self) -> torch.layout:
-        return self.elem.layout
+        return torch._from_functional_tensor(self.elem).layout
 
     def __bool__(self) -> builtins.bool:
         return bool(self.item())
@@ -642,6 +651,29 @@ class FunctionalTensorMode(TorchDispatchMode):
         _assert_functionalize_not_active(
             "Functionalization should not already be enabled above this mode after dispatch"
         )
+
+        if (
+            (
+                func is torch.ops.aten.alias.default
+                or func is torch.ops.aten.detach.default
+            )
+            and len(args) == 1
+            and isinstance(args[0], FunctionalTensor)
+        ):
+            input_unwrapped = torch._from_functional_tensor(args[0].elem)
+            if (
+                isinstance(input_unwrapped, torch._subclasses.FakeTensor)
+                and input_unwrapped.dispatch_keys is not None
+            ):
+                input_dispatch_keys = input_unwrapped.dispatch_keys
+
+                def preserve_dispatch_keys(out: object) -> None:
+                    if isinstance(out, FunctionalTensor):
+                        unwrapped = torch._from_functional_tensor(out.elem)
+                        if isinstance(unwrapped, torch._subclasses.FakeTensor):
+                            unwrapped.dispatch_keys = input_dispatch_keys
+
+                pytree.tree_map_(preserve_dispatch_keys, outs_wrapped)
 
         if (
             # If no outputs are our functional subclass, then don't try to fix up aliasing
