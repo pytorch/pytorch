@@ -1115,6 +1115,49 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref, res)
         self.assertEqual(d.keys(), mp.keys())
 
+    def test_dict_view_mapping(self):
+        # dict_keys/values/items expose a read-only mappingproxy via .mapping
+        mappingproxy = type(type.__dict__)
+
+        def fn(x):
+            d = {"a": 1, "b": 2}
+            m_keys = d.keys().mapping
+            m_values = d.values().mapping
+            m_items = d.items().mapping
+            y = torch.sin(x)
+            for m in (m_keys, m_values, m_items):
+                if isinstance(m, mappingproxy) and m == d:
+                    y = y + 1
+            return y, m_keys, m_values, m_items
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref[0], res[0])
+        for m in res[1:]:
+            self.assertTrue(type(m) is mappingproxy)
+            self.assertEqual(m, {"a": 1, "b": 2})
+
+    def test_dict_view_mapping_reflects_mutation(self):
+        # The mappingproxy returned by .mapping proxies the live dict, so a
+        # later mutation must be visible through it.
+        mappingproxy = type(type.__dict__)
+
+        def fn(x):
+            d = {}
+            m = d.keys().mapping
+            d["foo"] = "bar"
+            return torch.sin(x), isinstance(m, mappingproxy), dict(m)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref[0], res[0])
+        self.assertTrue(res[1])
+        self.assertEqual(res[2], {"foo": "bar"})
+
     def test_move_to_end(self):
         def fn(x):
             d = OrderedDict({"a": torch.cos(x), "b": 3, "c": 5})
