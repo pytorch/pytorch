@@ -1136,6 +1136,8 @@ def lp_pool3d(
             stride=stride,
             ceil_mode=ceil_mode,
         )
+    if norm_type == 0:
+        raise ValueError("norm_type must be non-zero")
     kd, kw, kh = _triple(kernel_size)
     if isinstance(norm_type, (int, float)):
         if norm_type == float("inf"):
@@ -1183,6 +1185,8 @@ def lp_pool2d(
             stride=stride,
             ceil_mode=ceil_mode,
         )
+    if norm_type == 0:
+        raise ValueError("norm_type must be non-zero")
     kw, kh = _pair(kernel_size)
     if isinstance(norm_type, (int, float)):
         if norm_type == float("inf"):
@@ -1233,6 +1237,8 @@ def lp_pool1d(
         if norm_type == -float("inf"):
             return -max_pool1d(-input.abs(), kernel_size, stride, 0, 1, ceil_mode)
 
+    if norm_type == 0:
+        raise ValueError("norm_type must be non-zero")
     if stride is not None:
         out = avg_pool1d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
     else:
