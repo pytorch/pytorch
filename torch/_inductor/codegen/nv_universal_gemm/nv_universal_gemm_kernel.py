@@ -310,6 +310,11 @@ def _nvgemm_precompile(
     if max_active_clusters is None:
         return
 
+    # cutlass_api queries device occupancy while compiling. In async-compile
+    # workers forked from a CUDA-initialized parent, skip precompile.
+    if torch.cuda._is_in_bad_fork():
+        return
+
     device = f"cuda:{device_index}"
     with FakeTensorMode():
         tensors = {}
@@ -350,7 +355,8 @@ def _nvgemm_precompile(
         cache_key = _create_gemm_cache_key(input_tensors, out)
         mem_key = (cache_key, device_index)
         if mem_key not in compiled_cache:
-            artifact = kernel.compile(args)
+            with torch.cuda.device(device_index):
+                artifact = kernel.compile(args)
             disk_cache_set(
                 disk_fn_cache,
                 module_path,
