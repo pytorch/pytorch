@@ -1819,22 +1819,24 @@ def module_inputs_torch_nn_LinearCrossEntropyLoss(module_info, device, dtype, re
             )
 
     def sizes_and_options():
+        # APPEND-ONLY: never reorder/insert/remove entries -- each consumes
+        # fixed RNG draws, so a mid-stream change shifts later samples and
+        # moves the cancellation-sensitive index-target ULP caps in test_nn.py.
         for sizes in [(8, 5, 4), (None, 8, 4)]:
             yield sizes, None
             num_batches, in_features, num_classes = sizes
             if acc_dtype is not None:
                 yield sizes, dict(acc_dtype=acc_dtype, chunking_method="aspect_ratio")
                 continue
-            # unspecified chunk sizes default maximal chunk sizes for
-            # best processing performance:
+            # unspecified options use the auto resolution (aspect_ratio
+            # factor 1, capped to stay at or below the reference peak):
             yield sizes, dict()
 
             if num_batches is not None:
                 # fixed chunk size reduces memory usage but may reduce
                 # processing performance:
                 yield sizes, dict(batch_chunk_size=2)
-                # alternatively to fixing chunk sizes, chunk sizes can be
-                # determined by a chunking method:
+                # alternatively, chunk sizes via an explicit chunking method:
                 yield sizes, dict(chunking_method="aspect_ratio:2")
                 yield sizes, dict(chunking_method="aspect_ratio:4")
 

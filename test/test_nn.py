@@ -7455,12 +7455,12 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         ]
         # ``_adjust`` is called without a ``device`` argument here.
         # That makes ``acc_policy="auto"`` (the dataclass default)
-        # resolve to ``_AUTO_FALLBACK`` instead of a per-device pick,
-        # but this test only asserts on ``batch_chunk_size`` and each
-        # case sets ``chunking_method`` to an explicit
-        # ``aspect_ratio[:N]`` literal, so the auto-resolution of
-        # ``acc_policy`` is intentionally irrelevant to the
-        # assertion.
+        # resolve to the ``"compact"`` fallback instead of a per-device
+        # pick, but this test only asserts on ``batch_chunk_size`` and
+        # each case sets ``chunking_method`` to an explicit
+        # ``aspect_ratio[:N]`` literal (so the cap, which applies only to
+        # auto chunking, never engages), making the auto-resolution of
+        # ``acc_policy`` intentionally irrelevant to the assertion.
         for num_batches, in_features, num_classes, factor, expected in cases:
             method = "aspect_ratio" if factor == 1 else f"aspect_ratio:{factor}"
             options = nn.LinearCrossEntropyOptions(chunking_method=method)
@@ -7560,21 +7560,23 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(opts.acc_policy, "auto")
         self.assertEqual(opts.chunking_method, "auto")
 
-        # Known pair: CUDA + bf16 -> ("compact", "aspect_ratio:2").
+        # Known pair: CUDA + bf16 -> ("compact", "aspect_ratio"). These
+        # vocab shapes (num_classes >> in_features) leave the N*V/4D cap
+        # inert; the budget regime is covered in the memory-cap test.
         adjusted = opts._adjust(
             128, 4096, 50000, torch.bfloat16, torch.device("cuda"),
         )
         self.assertEqual(adjusted.acc_policy, "compact")
-        self.assertEqual(adjusted.chunking_method, "aspect_ratio:2")
+        self.assertEqual(adjusted.chunking_method, "aspect_ratio")
 
-        # Known pair: CUDA + fp16 -> ("compact", "aspect_ratio:2").
+        # Known pair: CUDA + fp16 -> ("compact", "aspect_ratio").
         # Same pick as bf16 -- a single CUDA policy across dtypes
         # post-``weight_chunk_dtype=acc_dtype`` fix.
         adjusted = opts._adjust(
             128, 4096, 50000, torch.float16, torch.device("cuda"),
         )
         self.assertEqual(adjusted.acc_policy, "compact")
-        self.assertEqual(adjusted.chunking_method, "aspect_ratio:2")
+        self.assertEqual(adjusted.chunking_method, "aspect_ratio")
 
         # Known pair: CPU + bf16 -> ("accurate", "aspect_ratio").
         # CPU has no hardware low-precision matmul, so the only
@@ -7593,18 +7595,20 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(adjusted.acc_policy, "accurate")
         self.assertEqual(adjusted.chunking_method, "aspect_ratio")
 
-        # Unknown pair (cpu + fp32) -> _AUTO_FALLBACK.
+        # CPU + fp32: "accurate" is only for CPU low-precision input (its
+        # emulated low-precision GEMM); fp32/fp64 GEMM is native at any policy,
+        # so auto picks the memory-frugal "compact".
         adjusted = opts._adjust(
             128, 4096, 50000, torch.float32, torch.device("cpu"),
         )
         self.assertEqual(adjusted.acc_policy, "compact")
-        self.assertEqual(adjusted.chunking_method, "aspect_ratio:2")
+        self.assertEqual(adjusted.chunking_method, "aspect_ratio")
 
-        # No device given -> _AUTO_FALLBACK (back-compat with callers
+        # No device given -> "compact" fallback (back-compat with callers
         # / tests that don't pass device).
         adjusted = opts._adjust(128, 4096, 50000, torch.float32)
         self.assertEqual(adjusted.acc_policy, "compact")
-        self.assertEqual(adjusted.chunking_method, "aspect_ratio:2")
+        self.assertEqual(adjusted.chunking_method, "aspect_ratio")
 
         # Partial override: acc_policy explicit, chunking_method auto.
         opts = nn.LinearCrossEntropyOptions(acc_policy="accurate")
@@ -7612,7 +7616,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             128, 4096, 50000, torch.bfloat16, torch.device("cuda"),
         )
         self.assertEqual(adjusted.acc_policy, "accurate")
-        self.assertEqual(adjusted.chunking_method, "aspect_ratio:2")
+        self.assertEqual(adjusted.chunking_method, "aspect_ratio")
 
         # Partial override: chunking_method explicit, acc_policy auto.
         opts = nn.LinearCrossEntropyOptions(chunking_method="aspect_ratio")
@@ -7645,6 +7649,44 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 opts._adjust(128, 4096, 50000, torch.float16, cuda).acc_dtype,
                 torch.float32 if major >= 7 else torch.float16,
             )
+
+    def test_linear_cross_entropy_options_auto_memory_cap(self):
+        """``auto`` + ``compact`` caps the chunk at a per-target ``B_ref`` so
+        the chunked peak never exceeds the unchunked reference in the budget
+        regime (``in_features >= num_classes``, where aspect_ratio degenerates
+        to a single chunk): ``floor_pow2(N*V/4D)`` for index targets,
+        ``floor_pow2(N/2)`` for prob (whose fatter reference clears the
+        single-chunk excess with two chunks). The cap is inert in the vocab
+        regime, and skipped for non-``compact`` policies (e.g. CPU's
+        ``accurate``) and explicit (non-auto) ``chunking_method``. Pure
+        resolution arithmetic -- no GPU.
+        """
+        opts = nn.LinearCrossEntropyOptions()
+        cuda = torch.device("cuda")
+
+        def b(N, D, V, prob_target=False, device=cuda):
+            return opts._adjust(
+                N, D, V, torch.bfloat16, device, prob_target=prob_target
+            ).batch_chunk_size
+
+        # Vocab regime (V >> D): cap inert; equals the factor-1 aspect_ratio chunk.
+        self.assertEqual(b(4096, 4096, 32000), 512)
+        # Budget regime (D >= V): cap binds at floor_pow2(N*V/4D).
+        self.assertEqual(b(4096, 16384, 4096), 256)
+        self.assertEqual(b(4096, 8192, 8192), 1024)  # crossing D == V
+        # Prob target: capped at N/2 (its fatter reference clears the
+        # single-chunk excess with two chunks); vocab regime stays inert.
+        self.assertEqual(b(4096, 16384, 4096, prob_target=True), 2048)
+        self.assertEqual(b(4096, 8192, 8192, prob_target=True), 2048)  # crossing: N/2
+        self.assertEqual(b(4096, 4096, 32000, prob_target=True), 512)  # vocab inert
+        # CPU auto resolves to "accurate" (non-compact): uncapped.
+        self.assertEqual(b(4096, 16384, 4096, device=torch.device("cpu")), 4096)
+        # Explicit (non-auto) chunking_method is never capped.
+        explicit = nn.LinearCrossEntropyOptions(chunking_method="aspect_ratio")
+        self.assertEqual(
+            explicit._adjust(4096, 16384, 4096, torch.bfloat16, cuda).batch_chunk_size,
+            4096,
+        )
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_convert_sync_batchnorm(self):
@@ -14784,14 +14826,10 @@ if __name__ == '__main__':
         # receive "auto" (so _adjust performs the real resolution), but
         # the test's ULP bounds need to track whichever policy was
         # resolved. Read the dispatch table directly so the test stays
-        # in lock-step with future _AUTO_DEFAULTS edits.
+        # in lock-step with future _auto_acc_policy edits.
         if acc_policy == "auto":
-            from torch.nn.modules.linear_cross_entropy_options import (
-                _AUTO_DEFAULTS, _AUTO_FALLBACK,
-            )
-            _resolved_policy, _ = _AUTO_DEFAULTS.get(
-                (torch.device(device).type, dtype, prob_target), _AUTO_FALLBACK,
-            )
+            from torch.nn.modules.linear_cross_entropy_options import _auto_acc_policy
+            _resolved_policy = _auto_acc_policy(torch.device(device).type, dtype)
         else:
             _resolved_policy = acc_policy
 
@@ -15764,20 +15802,17 @@ if __name__ == '__main__':
             )
         self.assertEqual(out.dtype, torch.float32)
 
-        # auto heuristic, below the crossing region (num_classes >>
-        # in_features): probability targets resolve to aspect_ratio
-        # factor 1, index targets to aspect_ratio:2.
+        # auto heuristic resolves chunking_method to aspect_ratio (factor 1)
+        # for both probability and index targets; below the crossing region
+        # (num_classes >> in_features) the N*V/4D cap is inert, so the
+        # resolved batch_chunk_size is the plain aspect_ratio chunk.
         if "cuda" in device:
-            adjusted = nn.LinearCrossEntropyOptions()._adjust(
-                num_batches=4096, in_features=2048, num_classes=32000,
-                dtype=torch.float16, device=inp.device, prob_target=True,
-            )
-            self.assertEqual(adjusted.chunking_method, "aspect_ratio")
-            adjusted = nn.LinearCrossEntropyOptions()._adjust(
-                num_batches=4096, in_features=2048, num_classes=32000,
-                dtype=torch.float16, device=inp.device, prob_target=False,
-            )
-            self.assertEqual(adjusted.chunking_method, "aspect_ratio:2")
+            for prob in (True, False):
+                adjusted = nn.LinearCrossEntropyOptions()._adjust(
+                    num_batches=4096, in_features=2048, num_classes=32000,
+                    dtype=torch.float16, device=inp.device, prob_target=prob,
+                )
+                self.assertEqual(adjusted.chunking_method, "aspect_ratio")
 
         # Empty batch on the chunked path: mean is NaN, sum is 0
         # (matches the reference).
