@@ -1347,12 +1347,19 @@ def use_mem_pool(pool: MemPool, device: "Device" = None):
         the given pool. If a new thread is spawned inside the context manager
         (e.g. by calling backward) the allocations in that thread will not
         route to the given pool.
+
+    .. note::
+        When used during :class:`~torch.cuda.CUDAGraph` capture, the graph
+        retains the pool until the graph is reset or destroyed.
     """
     device_index = (
         torch.cuda.current_device() if device is None else _get_device_index(device)
     )
     _cuda_beginAllocateCurrentThreadToPool(device_index, pool.id)
     try:
+        if torch.cuda.is_current_stream_capturing():
+            graph = torch.cuda.CUDAGraph.get_currently_capturing_graph()
+            graph._retain_pool(pool)
         yield
     finally:
         _cuda_endAllocateToPool(device_index, pool.id)
