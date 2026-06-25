@@ -119,3 +119,11 @@ dtensor_dispatch_random,instruction_count,592800,0.1
 
 
 dtensor_dispatch_custom_handler,instruction_count,34910,0.1
+
+
+
+nn_module_guard_eval,instruction_count,80120,0.1
+
+
+
+nn_module_guard_eval_dynamic,instruction_count,111714,0.1
