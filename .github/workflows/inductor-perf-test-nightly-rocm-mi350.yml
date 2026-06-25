@@ -93,7 +93,7 @@ jobs:
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       use-arc: true
       build-environment: linux-jammy-rocm-py3.10-mi350
-      docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3-benchmarks
+      docker-image-name: ci-image:pytorch-linux-noble-rocm-nightly-py3
       test-matrix: |
         { include: [
           { config: "inductor_huggingface_perf_rocm_mi350", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
