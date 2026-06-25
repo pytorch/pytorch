@@ -1516,6 +1516,16 @@
   structured_delegate: clamp.Tensor_out
   tags: [core, pointwise]
 
+- func: clamp.Tensor_Scalar(Tensor self, Tensor? min, Scalar? max) -> Tensor
+  device_check: NoCheck   # Tensor and Scalar inputs don't need cross-device checks here
+  dispatch:
+    CompositeImplicitAutograd: clamp
+
+- func: clamp.Scalar_Tensor(Tensor self, Scalar? min, Tensor? max) -> Tensor
+  device_check: NoCheck
+  dispatch:
+    CompositeImplicitAutograd: clamp
+
 - func: clamp_(Tensor(a!) self, Scalar? min=None, Scalar? max=None) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: function, method
@@ -1527,6 +1537,16 @@
   variants: function, method
   structured_delegate: clamp.Tensor_out
   tags: pointwise
+
+- func: clamp_.Tensor_Scalar(Tensor(a!) self, Tensor? min, Scalar? max) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CompositeImplicitAutograd: clamp_
+
+- func: clamp_.Scalar_Tensor(Tensor(a!) self, Scalar? min, Tensor? max) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CompositeImplicitAutograd: clamp_
 
 - func: clamp.out(Tensor self, Scalar? min=None, Scalar? max=None, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -1544,6 +1564,16 @@
   dispatch:
     CPU, CUDA, MPS, XPU: clamp_Tensor_out
   tags: pointwise
+
+- func: clamp.Tensor_Scalar_out(Tensor self, Tensor? min, Scalar? max, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CompositeImplicitAutograd: clamp_out
+
+- func: clamp.Scalar_Tensor_out(Tensor self, Scalar? min, Tensor? max, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CompositeImplicitAutograd: clamp_out
 
 - func: clamp_max(Tensor self, Scalar max) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -1631,6 +1661,16 @@
   variants: function, method
   tags: pointwise
 
+- func: clip.Tensor_Scalar(Tensor self, Tensor? min, Scalar? max) -> Tensor
+  device_check: NoCheck
+  dispatch:
+    CompositeImplicitAutograd: clip
+
+- func: clip.Scalar_Tensor(Tensor self, Scalar? min, Tensor? max) -> Tensor
+  device_check: NoCheck
+  dispatch:
+    CompositeImplicitAutograd: clip
+
 - func: clip_(Tensor(a!) self, Scalar? min=None, Scalar? max=None) -> Tensor(a!)
   cpp_no_default_args: ['min']
   variants: function, method
@@ -1640,11 +1680,31 @@
   variants: function, method
   tags: pointwise
 
+- func: clip_.Tensor_Scalar(Tensor(a!) self, Tensor? min, Scalar? max) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CompositeImplicitAutograd: clip_
+
+- func: clip_.Scalar_Tensor(Tensor(a!) self, Scalar? min, Tensor? max) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CompositeImplicitAutograd: clip_
+
 - func: clip.out(Tensor self, Scalar? min=None, Scalar? max=None, *, Tensor(a!) out) -> Tensor(a!)
   cpp_no_default_args: ['min']
   tags: pointwise
 
 - func: clip.Tensor_out(Tensor self, Tensor? min=None, Tensor? max=None, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: clip.Tensor_Scalar_out(Tensor self, Tensor? min, Scalar? max, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CompositeImplicitAutograd: clip_out
+
+- func: clip.Scalar_Tensor_out(Tensor self, Scalar? min, Tensor? max, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  dispatch:
+    CompositeImplicitAutograd: clip_out
 
 - func: cudnn_is_acceptable(Tensor self) -> bool
   device_check: NoCheck
