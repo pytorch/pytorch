@@ -715,6 +715,37 @@ _cupti_monitor.enable_hes_early()
         self.assertIn("monitor_region", user_names)
 
     @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
+    def test_cupti_monitor_observer_registration_failure_is_graceful(self):
+        # If the per-cycle ProfilerObserver fails to register with the CUPTI monitor (an
+        # intermittent CUPTI condition), the profiler must degrade gracefully: with no
+        # observer / trace window, stop_trace and export_chrome_trace skip the trace instead
+        # of asserting and taking down the run.
+        from torch.profiler._cupti import monitor as _cupti_monitor
+
+        cfg = _ExperimentalConfig(custom_profiler_config='{"backend":"cupti_monitor"}')
+        with patch.object(
+            _cupti_monitor.CuptiMonitor,
+            "register",
+            side_effect=RuntimeError("simulated observer registration failure"),
+        ):
+            with TemporaryFileName(mode="w+") as trace_path:
+                # Exiting the profiler runs stop_trace -- it must not raise even though the
+                # observer never registered.
+                with profile(
+                    activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                    experimental_config=cfg,
+                ) as prof:
+                    a = torch.randn(64, 64, device="cuda")
+                    _ = (a @ a).cpu()
+                    torch.cuda.synchronize()
+                # Registration failed -> observer unavailable, no trace window.
+                obs = prof._cupti_profiler_observer
+                self.assertTrue(obs is None or not obs.available)
+                # Must skip the export rather than assert/crash.
+                prof.export_chrome_trace(trace_path)
+                prof.wait_for_exports()
+
+    @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
     def test_cupti_monitor_record_shapes(self):
         cfg = _ExperimentalConfig(
             custom_profiler_config='{"backend":"cupti_monitor"}',

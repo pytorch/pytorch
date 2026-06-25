@@ -429,10 +429,23 @@ class _KinetoProfile:
                 "Profiler must be initialized before exporting chrome trace"
             )
         if self._use_cupti_monitor:
-            if self._monitor_window_id is None or self._cupti_profiler_observer is None:
-                raise AssertionError(
-                    "CUPTI monitor trace window must be closed before exporting"
+            obs = self._cupti_profiler_observer
+            if obs is None or not obs.available or self._monitor_window_id is None:
+                # Nothing to export this cycle: the per-cycle ProfilerObserver didn't register
+                # with the CUPTI monitor (available is False -- the intermittent case), or its
+                # window wasn't opened/closed (window id None). Skip rather than crash -- a
+                # profiler-trace hiccup must not take down a training run -- and clean up below.
+                _warn_once(
+                    "CUPTI monitor observer unavailable; skipping chrome trace export"
                 )
+                # join() tears down the poll thread + monitor registration, which exist only
+                # when the observer registered (available). An unavailable observer never
+                # started either, so just drop the reference and let it be GC'd.
+                if obs is not None and obs.available:
+                    obs.join()
+                self._cupti_profiler_observer = None
+                self._monitor_window_id = None
+                return
             # Capture the profiler's CPU-side trace (cheap, no device sync) and hand it + the
             # output path to the observer. Async: the poller merges + writes `path` once the
             # GPU records arrive; wait_for_exports() blocks for it.
