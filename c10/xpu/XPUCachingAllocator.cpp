@@ -974,6 +974,9 @@ class DeviceCachingAllocator {
   void synchronize_and_free_events(
       const std::shared_ptr<GatheredContext>& context,
       PrivatePool* pool = nullptr) {
+    // This function syncs (event.wait()), so graph capture must not be
+    // underway.
+    TORCH_INTERNAL_ASSERT(!is_capture_context());
     insert_events_deferred_until_no_capture(context);
     for (auto& xe : xpu_events) {
       for (auto& e : xe.second) {
@@ -1317,7 +1320,7 @@ class DeviceCachingAllocator {
   }
 
   // Returns true iff the calling thread's current stream is actively recording
-  // into a SYCL command-graph. Allocator paths that gate on capture safety
+  // into a XPU graph. Allocator paths that gate on capture safety
   // (event insertion, deferred-free, OOM-time release_cached_blocks) use this
   // instead of a bare allocation_scopes_.empty() check, so that a private
   // mempool diversion (e.g. via MemPool) is not mistaken for a real capture.
@@ -1848,12 +1851,12 @@ class DeviceCachingAllocator {
   // Called by XPUGraph::capture_end
   void endAllocateToPool(MempoolId_t mempool_id) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
-
+    // Outside mutex to avoid deadlocks.
+    auto context = maybeGatherContext(RecordContext::ALL);
     if (!deferred_blocks.empty()) {
       auto pool_it = graph_pools.find(mempool_id);
       if (pool_it != graph_pools.end()) {
         auto* private_pool = pool_it->second.get();
-        auto context = maybeGatherContext(RecordContext::ALL);
         std::vector<Block*> blocks_to_erase;
         for (auto* block : deferred_blocks) {
           if (block->pool->owner_PrivatePool == private_pool) {
