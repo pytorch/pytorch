@@ -62,6 +62,16 @@
       ]
     }
   ],
+  "GB4774": [
+    {
+      "Gb_type": "torch.map: f mutates pos_args",
+      "Context": "pos_args={pos_args_mutated}",
+      "Explanation": "map only supports in-place mutation of xs (each iteration sees a storage-disjoint slice). pos_args are loop-invariant: every iteration sees the same tensor, so a mutation makes iterations depend on each other, breaking map's independence contract and introducing a data race under any parallel lowering. Use scan or while_loop if sequential buffer updates are required.",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
   "GB2861": [
     {
       "Gb_type": "Untraceable C tp_hash",
@@ -2979,6 +2989,16 @@
       "Explanation": "Dynamo requires the autograd.Function context to be initialized with a proxy.",
       "Hints": [
         "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB6183": [
+    {
+      "Gb_type": "torch.map: f mutates a captured tensor",
+      "Context": "freevars={freevars_mutated}",
+      "Explanation": "map only supports in-place mutation of xs. A tensor captured from the enclosing scope (lifted parameter) is loop-invariant: every iteration sees the same tensor, so a mutation makes iterations depend on each other, breaking map's independence contract and introducing a data race under any parallel lowering. Pass the buffer through xs, or use scan / while_loop if sequential buffer updates are required.",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
