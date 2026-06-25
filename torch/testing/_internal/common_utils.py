@@ -115,12 +115,41 @@ class ProfilingMode(Enum):
     PROFILING = 3
 
 class HardwareClassification(Enum):
-    # Class-level metadata describing the hardware classification of a test.
+    """Hardware classification metadata for test classes.
+
+    Test classes can declare a ``hw_classification`` class attribute to
+    describe the kind of hardware required to run the tests in that class.
+    When the ``--hw-classification`` CLI flag is passed, only tests whose
+    classification matches one of the requested values are executed.
+
+    Currently there are three hardware classification categories:
+
+    * ``GENERIC`` – tests for shared logic that do not require device
+    execution.
+    * ``DEVICE_GENERIC`` – tests that require device execution but are
+    expected to run on any supported device type.
+    * ``CPU``, ``CUDA``, ``MPS``, ``XPU`` – tests that require a specific
+    device type.
+
+    Usage::
+
+        class TestFoo(TestCase):
+            hw_classification = HardwareClassification.GENERIC
+
+            def test_bar(self):
+                ...
+
+    Run only GENERIC and DEVICE_GENERIC tests::
+
+        python test/test_torch.py --hw-classification GENERIC DEVICE_GENERIC
+
+    """
     GENERIC = "generic"
     DEVICE_GENERIC = "device_generic"
+    CPU = "cpu"
     CUDA = "cuda"
-    XPU = "xpu"
     MPS = "mps"
+    XPU = "xpu"
 
 
 # Set by parse_cmd_line_args() if called

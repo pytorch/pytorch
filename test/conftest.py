@@ -50,7 +50,7 @@ def pytest_addoption(parser: Parser) -> None:
         nargs="+",
         default=None,
         metavar="SCOPE",
-        help="filter tests by hardware classification categories (e.g., GENERIC DEVICE_GENERIC CUDA XPU MPS)",
+        help="filter tests by hardware classification categories (e.g., GENERIC DEVICE_GENERIC CPU CUDA MPS XPU)",
     )
 
     parser.addoption("--use-main-module", action="store_true")

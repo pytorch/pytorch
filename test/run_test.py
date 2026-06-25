@@ -103,7 +103,9 @@ try:
 
     _HC_CHOICES = [e.name for e in HardwareClassification]
 except ImportError:
-    _HC_CHOICES = ["GENERIC", "DEVICE_GENERIC", "CUDA", "XPU", "MPS"]
+    # Temporary fallback for CI jobs that run the PR's test/run_test.py against a
+    # previous nightly torch package that doesn't have HardwareClassification yet.
+    _HC_CHOICES = ["GENERIC", "DEVICE_GENERIC", "CPU", "CUDA", "MPS", "XPU"]
 
 
 # Make sure to remove REPO_ROOT after import is done
@@ -1517,7 +1519,7 @@ def parse_args():
         type=str.upper,
         default=None,
         metavar="SCOPE",
-        help="filter tests by hardware classification categories (e.g., GENERIC DEVICE_GENERIC CUDA XPU MPS)",
+        help="filter tests by hardware classification categories (e.g., GENERIC DEVICE_GENERIC CPU CUDA MPS XPU)",
     )
     parser.add_argument(
         "-x",
