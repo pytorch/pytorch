@@ -1210,15 +1210,21 @@ class ListVariable(CommonListMethodsVariable):
             return ConstantVariable.create(None)
 
         if name == "__init__" and self.is_mutable():
-            if kwargs:
-                raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
-            if len(args) == 0:
-                return ConstantVariable.create(None)
-            elif len(args) == 1:
-                (arg,) = args
-                tx.output.side_effects.mutation(self)
-                self.items[:] = unpack_iterable(tx, arg)
-                return ConstantVariable.create(None)
+            # list___init___impl: clear the list, then extend with the optional
+            # iterable arg.
+            # https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L2966-L2986
+            if kwargs or len(args) > 1:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "at most 1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+            tx.output.side_effects.mutation(self)
+            self.items.clear()
+            if len(args) == 1:
+                self.call_method(tx, "extend", args, {})
+            return ConstantVariable.create(None)
 
         return super().call_method(tx, name, args, kwargs)
 
