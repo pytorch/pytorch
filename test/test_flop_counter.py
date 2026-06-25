@@ -18,6 +18,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
+    xfailIfNoAcceleratorTriton,
 )
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 from torch.utils.flop_counter import sdpa_backward_flop_count, sdpa_flop_count
@@ -1370,6 +1371,7 @@ class TestFlexAttentionEstimation(TestCase):
         expected_flops = sdpa_flop_count(q_shape, k_shape, v_shape)
         self.assertEqual(fwd_flops, expected_flops)
 
+    @xfailIfNoAcceleratorTriton
     @unittest.skipIf(not HAS_CUDA, "requires CUDA")
     def test_flex_attention_roofline_estimate(self):
         """estimate_roofline_runtime_ms works for flex_attention with mixed-dtype output."""
