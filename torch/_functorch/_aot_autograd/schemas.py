@@ -1132,7 +1132,7 @@ class CacheableAOTConfig:
     is_export: bool = False
     no_tangents: bool = False
     dynamic_shapes: bool = False
-    aot_autograd_arg_pos_to_source: list[Source] | None = None
+    aot_autograd_arg_pos_to_source: list[Source | None] | None = None
     static_input_indices: list[int] | None = None
     enable_log: bool = True
     # this is always false outside of export.
@@ -1160,7 +1160,7 @@ class AOTConfig:
     is_export: bool = False
     no_tangents: bool = False
     dynamic_shapes: bool = False
-    aot_autograd_arg_pos_to_source: list[Source] | None = None
+    aot_autograd_arg_pos_to_source: list[Source | None] | None = None
     static_input_indices: list[int] | None = None
     inference_compiler: Callable[..., Any] | None = None
     enable_log: bool = True

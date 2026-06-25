@@ -66,6 +66,7 @@ from torch.compiler._cache import (
 from torch.fx.experimental.symbolic_shapes import guarding_hint_or_throw
 from torch.fx.node import Node
 from torch.fx.traceback import _get_memory_budget_annotation
+from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._triton import has_triton_package
 
 from .aot_autograd_result import (
@@ -446,6 +447,38 @@ def _get_custom_estimator_solver_uuids(
     return runtime_estimator_uuid, solver_uuid
 
 
+def _storage_offset_for_cache_key(input: torch.Tensor) -> int:
+    storage_offset = input.storage_offset()
+    if isinstance(storage_offset, torch.SymInt):
+        try:
+            storage_offset = guarding_hint_or_throw(storage_offset)
+        except Exception as e:
+            raise BypassAOTAutogradCache(
+                "Cannot cache graph with unbacked symbolic input storage offset"
+            ) from e
+    return int(storage_offset)
+
+
+def _shared_storage_input_groups(
+    example_inputs: Sequence[object],
+) -> tuple[tuple[tuple[int, int], ...], ...]:
+    storage_ref_to_offsets: dict[StorageWeakRef, list[tuple[int, int]]] = {}
+    for i, input in enumerate(example_inputs):
+        if not isinstance(input, torch.Tensor):
+            continue
+
+        storage_ref = StorageWeakRef(input.untyped_storage())
+        storage_ref_to_offsets.setdefault(storage_ref, []).append(
+            (i, _storage_offset_for_cache_key(input))
+        )
+
+    return tuple(
+        tuple(offsets)
+        for offsets in storage_ref_to_offsets.values()
+        if len(offsets) > 1
+    )
+
+
 class AOTAutogradCacheDetails(FxGraphHashDetails):
     """
     Object to capture all the details for a dynamo graph module relevant to computing
@@ -513,6 +546,7 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
             _collect_saved_tensors_hooks_fx_wrap_cache_hashes(gm)
         )
         self.sac_context_fn_hashes = _collect_context_fn_hashes(gm)
+        self.shared_storage_input_groups = _shared_storage_input_groups(example_inputs)
 
         # region_activation_memory_budget is graph-wide (the partitioner enforces
         # a single value across the graph) and propagates to every node, so the

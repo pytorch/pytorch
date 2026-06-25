@@ -5220,6 +5220,61 @@ for dtype in (torch.int32, torch.int64):
 
         self.common(fn, (torch.randn(4, 2), torch.randn(4, 2)), check_lowp=False)
 
+    @skip_if_pallas  # pre-existing synthetic-base shape mismatch, see #188133
+    def test_mutated_aliased_inputs_recompile_on_overlap_change(self):
+        def fn(x, y):
+            x.add_(10)
+            return y * 1
+
+        def overlapping_inputs():
+            base = torch.arange(8, dtype=torch.float32, device=self.device)
+            return base[:4], base[1:5]
+
+        def overlapping_inputs_different_offset():
+            base = torch.arange(8, dtype=torch.float32, device=self.device)
+            return base[:4], base[2:6]
+
+        def non_overlapping_inputs():
+            base = torch.arange(8, dtype=torch.float32, device=self.device)
+            return base[:4], base[4:8]
+
+        opt_fn = torch.compile(fn)
+
+        expected = fn(*overlapping_inputs())
+        actual = opt_fn(*overlapping_inputs())
+        self.assertEqual(actual, expected)
+
+        expected = fn(*overlapping_inputs_different_offset())
+        actual = opt_fn(*overlapping_inputs_different_offset())
+        self.assertEqual(actual, expected)
+
+        expected = fn(*non_overlapping_inputs())
+        actual = opt_fn(*non_overlapping_inputs())
+        self.assertEqual(actual, expected)
+
+        def topology_fn(a, b, c, d):
+            a.add_(1)
+            return b.clone() + c.clone() + d.clone()
+
+        def one_storage():
+            base = torch.arange(20, dtype=torch.float32, device=self.device)
+            return base[0:4], base[2:6], base[10:14], base[12:16]
+
+        def two_storages():
+            base = torch.arange(20, dtype=torch.float32, device=self.device)
+            y = base + 100
+            return base[0:4], base[2:6], y[10:14], y[12:16]
+
+        opt_topology_fn = torch.compile(topology_fn)
+
+        expected = topology_fn(*one_storage())
+        actual = opt_topology_fn(*one_storage())
+        self.assertEqual(actual, expected)
+
+        expected = topology_fn(*two_storages())
+        actual = opt_topology_fn(*two_storages())
+        self.assertEqual(actual, expected)
+
     def test_slice_view_with_graph_break(self):
         def fn():
             a = torch.tensor([1], device=self.device)

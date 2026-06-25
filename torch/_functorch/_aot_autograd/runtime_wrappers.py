@@ -63,6 +63,7 @@ from .descriptors import (
 from .functional_utils import gen_alias_from_base
 from .graph_capture_wrappers import aot_dispatch_subclass
 from .input_output_analysis import (
+    add_storage_aliasing_guard,
     compute_overlapping_inputs,
     create_synthetic_base_metadata,
     remove_dupe_metadata,
@@ -1705,10 +1706,9 @@ class AOTDedupeWrapper(CompilerWrapper):
             fw_metadata, keep_arg_mask, add_dupe_map
         )
 
-        if (
-            tracing_context := TracingContext.try_get()
-            and aot_config.aot_autograd_arg_pos_to_source
-        ):
+        tracing_context = TracingContext.try_get()
+        sources = aot_config.aot_autograd_arg_pos_to_source
+        if tracing_context is not None and sources:
             # TODO(voz): This structure is 1:1, we could consider an alternate structure like
             # kept_pos:[dupe_arg_pos], however, add_dupe_map is 1:1 so we would need a new structure there,
             # which feels like needless complexity for a tiny bit of efficiency at this point.
@@ -1716,12 +1716,10 @@ class AOTDedupeWrapper(CompilerWrapper):
                 zip(add_dupe_map, keep_arg_mask)
             ):
                 if not keep_arg:
-                    dupe_arg_source = aot_config.aot_autograd_arg_pos_to_source[
-                        dupe_arg_pos
-                    ]
-                    kept_arg_source = aot_config.aot_autograd_arg_pos_to_source[
-                        kept_pos
-                    ]
+                    dupe_arg_source = sources[dupe_arg_pos]
+                    kept_arg_source = sources[kept_pos]
+                    if dupe_arg_source is None or kept_arg_source is None:
+                        continue
                     tracing_context.guards_context.aotautograd_guards.append(  # type: ignore[attr-defined]
                         DuplicateInputs(kept_arg_source, dupe_arg_source)
                     )
@@ -2191,15 +2189,12 @@ def merge_view_inputs(
         return True
 
     def _format_input(idx: int) -> str:
-        if (
-            aot_config.aot_autograd_arg_pos_to_source is not None
-            and idx < len(aot_config.aot_autograd_arg_pos_to_source)
-            and aot_config.aot_autograd_arg_pos_to_source[idx] is not None
-        ):
-            source = aot_config.aot_autograd_arg_pos_to_source[idx]
-            name = getattr(source, "local_name", source.name)
-        else:
-            name = fwd_inputs_descs[idx].expr()
+        name = fwd_inputs_descs[idx].expr()
+        sources = aot_config.aot_autograd_arg_pos_to_source
+        if sources is not None and idx < len(sources):
+            source = sources[idx]
+            if source is not None:
+                name = getattr(source, "local_name", source.name)
         return f"input {idx} ({name})"
 
     if len(fwd_inputs) != len(mutated_input_info):
@@ -2380,6 +2375,8 @@ def merge_view_inputs(
         # If no synthetic bases are necessary, just return the original inputs.
         return fwd_inputs, fwd_inputs_descs, None
     else:
+        add_storage_aliasing_guard(aot_config, list(storage_ref_to_idx.values()))
+
         from torch.fx.experimental.symbolic_shapes import SymIntEqByExpr
 
         def make_hashable(arg: Any) -> Any:

@@ -97,6 +97,8 @@ from torch._guards import (
     GuardEnvExpr,
     GuardSource,
     Source,
+    StorageAliasing,
+    StorageOffset,
     StorageOverlap,
 )
 from torch._inductor.utils import IndentedBuffer
@@ -759,6 +761,41 @@ def uninteresting_files() -> set[str]:
 _CLOSURE_VARS: dict[str, object] | None = None
 
 
+def storage_id(tensor: torch.Tensor) -> int | None:
+    try:
+        storage = tensor.untyped_storage()
+    except (AttributeError, RuntimeError, TypeError):
+        return None
+    return storage._cdata
+
+
+def check_same_storage_groups(groups: list[list[torch.Tensor]]) -> bool:
+    """
+    Return True when each group shares one storage and groups are distinct.
+
+    The guard expression is emitted with one list per same-storage input group.
+    Every tensor in a group must share storage with the others in that group,
+    and no two groups may share storage with each other.
+    """
+    storage_ids: list[int] = []
+    for group in groups:
+        if not group:
+            continue
+
+        group_storage_id = storage_id(group[0])
+        if group_storage_id is None:
+            return False
+
+        for tensor in group[1:]:
+            tensor_storage_id = storage_id(tensor)
+            if tensor_storage_id is None or tensor_storage_id != group_storage_id:
+                return False
+
+        storage_ids.append(group_storage_id)
+
+    return len(storage_ids) == len(set(storage_ids))
+
+
 def _get_closure_vars() -> dict[str, object]:
     global _CLOSURE_VARS
     if _CLOSURE_VARS is None:
@@ -785,6 +822,7 @@ def _get_closure_vars() -> dict[str, object]:
             "device": torch.device,
             "___from_numpy": from_numpy,
             "___as_tensor": torch._as_tensor_fullprec,
+            "___check_same_storage_groups": check_same_storage_groups,
             "torch": torch,
             "inspect": inspect,
         }
@@ -4974,6 +5012,21 @@ class CheckFunctionManager:
                     [code_part],
                     None,
                 )
+                add_code_part(code_part, None, True)
+            elif isinstance(guard, StorageAliasing):
+                groups = [
+                    "[" + ", ".join(source.name for source in group) + "]"
+                    for group in guard.source_groups
+                ]
+                code_part = f"___check_same_storage_groups([{', '.join(groups)}])"
+                builder.add_python_lambda_leaf_guard_to_root([code_part], [code_part])
+                add_code_part(code_part, None, True)
+            elif isinstance(guard, StorageOffset):
+                code_part = (
+                    f"{guard.input_source.name}.storage_offset() == "
+                    f"{guard.storage_offset}"
+                )
+                builder.add_python_lambda_leaf_guard_to_root([code_part], [code_part])
                 add_code_part(code_part, None, True)
             else:
                 raise RuntimeError(f"Unknown GuardEnvExpr: {guard}")
