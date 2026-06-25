@@ -8397,7 +8397,8 @@ Example::
     >>> torch.normal(mean=torch.arange(1., 6.))
     tensor([ 1.1552,  2.6148,  2.6535,  5.8318,  4.2361])
 
-.. function:: normal(mean, std, size, *, out=None) -> Tensor
+.. function:: normal(mean, std, size, *, generator=None, out=None, dtype=None, \
+    layout=torch.strided, device=None, requires_grad=False, pin_memory=False) -> Tensor
    :noindex:
 
 Similar to the function above, but the means and standard deviations are shared
@@ -8409,13 +8410,19 @@ Args:
     size (int...): a sequence of integers defining the shape of the output tensor.
 
 Keyword args:
+    {generator}
     {out}
+    {dtype}
+    {layout}
+    {device}
+    {requires_grad}
+    {pin_memory}
 
 Example::
 
     >>> torch.normal(2, 3, size=(1, 4))
     tensor([[-1.3987, -1.9544,  3.6048,  0.7909]])
-""".format(**common_args),
+""".format(**factory_common_args),
 )
 
 add_docstr(
