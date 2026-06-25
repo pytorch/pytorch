@@ -15,7 +15,9 @@ from torch._dynamo.utils import counters
 from torch._higher_order_ops.flex_gemm import _PRESERVE_FLEX_GEMM_GEMM_OP
 from torch._inductor.constant_folding import ConstantFolder
 from torch._inductor.fx_passes.dedupe_symint_uses import _SymHashingDict
+from torch._inductor.fx_utils import get_node_storage
 from torch._inductor.utils import get_gpu_type
+from torch._library.utils import zip_schema
 from torch.fx.experimental.symbolic_shapes import (
     guard_or_false,
     guard_or_true,
@@ -304,6 +306,7 @@ class UniformValueConstantFolder(ConstantFolder):
         super().__init__(gm, skip_constructors)
         self.node_storages_ptrs: dict[torch.fx.Node, int] = {}
         self.constant_data_ptrs: dict[torch.fx.Node, StorageWeakRef] = {}
+        self.mutated_storages = self._collect_mutated_storages()
         # we may constant fold a tensor which in the graph has a sym size
         # see: [constant folding refining of symints]
         self.node_replacements_shapes: dict[torch.fx.Node, list[int]] = {}
@@ -377,6 +380,41 @@ class UniformValueConstantFolder(ConstantFolder):
             )
             self.add_node_replacement(op, t)
 
+    def _collect_mutated_storages(self) -> OrderedSet[int]:
+        mutated_storages: OrderedSet[int] = OrderedSet()
+
+        def add_mutated_storage(arg: torch.fx.Node) -> None:
+            storage = get_node_storage(arg)
+            if storage is not None:
+                mutated_storages.add(storage)
+
+        graph = typing.cast(torch.fx.Graph, self.module.graph)
+        for op, target in graph._find_nodes_lookup_table.table:
+            if (
+                op != "call_function"
+                or not isinstance(target, torch._ops.OpOverload)
+                or not target._schema.is_mutable
+            ):
+                continue
+
+            for node in graph.find_nodes(op=op, target=target, sort=False):
+                for schema_arg, arg in zip_schema(
+                    target._schema, node.args, node.kwargs
+                ):
+                    if (
+                        schema_arg.alias_info is None
+                        or not schema_arg.alias_info.is_write
+                    ):
+                        continue
+
+                    pytree.tree_map_only(torch.fx.Node, add_mutated_storage, arg)
+
+        return mutated_storages
+
+    def _aliases_mutated_storage(self, node: torch.fx.Node) -> bool:
+        storage = get_node_storage(node)
+        return storage is not None and storage in self.mutated_storages
+
     def _support_dynamic_shape(self):
         return True
 
@@ -402,6 +440,11 @@ class UniformValueConstantFolder(ConstantFolder):
         # 3. for pointwise ops, run node to get the substitute value
         # 4. deal with some special ops
         # otherwise, stop deduce value and return unknown value
+
+        # Values read from a mutated storage must remain runtime reads. Folding
+        # them would make later calls reuse the compile-time value.
+        if self._aliases_mutated_storage(node):
+            return self.unknown_value
 
         # TODO: cat, more indexing
         # TODO - do on cpu to avoid syncs
