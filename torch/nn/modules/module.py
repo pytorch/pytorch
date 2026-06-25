@@ -2582,7 +2582,9 @@ class Module:
             state_dict._metadata = metadata  # type: ignore[attr-defined]
 
         def load(module, local_state_dict, prefix="") -> None:
-            local_metadata = {} if metadata is None else metadata.get(prefix[:-1], {})
+            local_metadata = (
+                {} if metadata is None else metadata.get(prefix[:-1], {}).copy()
+            )
             if assign:
                 local_metadata["assign_to_params_buffers"] = assign
             module._load_from_state_dict(

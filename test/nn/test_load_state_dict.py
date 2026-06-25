@@ -436,6 +436,27 @@ class TestLoadStateDict(NNTestCase):
             net2.load_state_dict(state_dict, strict=False, assign=True)
 
     @swap([True, False])
+    def test_load_state_dict_assign_does_not_mutate_metadata(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p = torch.nn.Parameter(torch.ones(1))
+
+        sd = M().state_dict()
+        orig_metadata = deepcopy(sd._metadata)
+
+        M().load_state_dict(sd, assign=True)
+
+        # assign=True should not mutate the caller's metadata.
+        self.assertEqual(sd._metadata, orig_metadata)
+
+        # A later default load should still preserve the existing parameter.
+        m = M()
+        old_param = m.p
+        m.load_state_dict(sd)
+        self.assertIs(m.p, old_param)
+
+    @swap([True, False])
     def test_load_state_dict_warn_assign(self):
         with torch.device("meta"):
             m = torch.nn.Linear(3, 5)
