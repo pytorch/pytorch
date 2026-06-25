@@ -162,6 +162,168 @@ def reject_current_device_nodes(graph: torch.fx.Graph) -> None:
         )
 
 
+def _is_foreach_op(node: torch.fx.Node) -> bool:
+    return (
+        node.op == "call_function"
+        and isinstance(node.target, torch._ops.OpOverload)
+        and node.target.name().startswith("aten::_foreach_")
+    )
+
+
+def _get_foreach_copy_candidate(
+    node: torch.fx.Node, mutation_targets: OrderedSet[torch.fx.Node]
+) -> tuple[torch.fx.Node, torch.fx.Node, torch.fx.Node, int] | None:
+    if (
+        node.op != "call_function"
+        or node.target is not aten.copy_.default
+        or node.kwargs
+        or len(node.args) != 2
+        or node.users
+    ):
+        return None
+
+    dst, src = node.args
+    if not (
+        isinstance(dst, torch.fx.Node)
+        and dst in mutation_targets
+        and isinstance(src, torch.fx.Node)
+    ):
+        return None
+    if src.op != "call_function" or src.target is not operator.getitem:
+        return None
+
+    parent, index = src.args
+    if not (isinstance(parent, torch.fx.Node) and isinstance(index, int)):
+        return None
+    if not _is_foreach_op(parent):
+        return None
+
+    return parent, dst, src, index
+
+
+def _foreach_input_count(parent: torch.fx.Node) -> int | None:
+    if not parent.args:
+        return None
+    tensor_list = parent.args[0]
+    if not isinstance(tensor_list, (list, tuple)):
+        return None
+    return len(tensor_list)
+
+
+def _device(node: torch.fx.Node) -> torch.device | None:
+    val = node.meta.get("val")
+    if not isinstance(val, torch.Tensor):
+        return None
+    return val.device
+
+
+def _can_fold_foreach_copy_group(
+    group: list[tuple[torch.fx.Node, torch.fx.Node, torch.fx.Node, torch.fx.Node, int]],
+) -> bool:
+    parent = group[0][1]
+    foreach_input_count = _foreach_input_count(parent)
+    # Inductor fuses foreach nodes pairwise only when both foreach lists have
+    # the same length. Keep individual copy_ nodes for partial groups.
+    if foreach_input_count is None or foreach_input_count != len(group):
+        return False
+
+    indices = [index for *_, index in group]
+    if indices != list(range(foreach_input_count)):
+        return False
+
+    dsts = [dst for _, _, dst, _, _ in group]
+    srcs = [src for _, _, _, src, _ in group]
+
+    device = _device(dsts[0])
+    if device is None:
+        return False
+    if any(_device(node) != device for node in (*dsts, *srcs)):
+        return False
+
+    dst_storages: list[int] = []
+    for dst in dsts:
+        storage = get_node_storage(dst)
+        if storage is None:
+            return False
+        dst_storages.append(storage)
+
+    src_storages: list[int] = []
+    for src in srcs:
+        storage = get_node_storage(src)
+        if storage is None:
+            return False
+        src_storages.append(storage)
+
+    # _foreach_copy_ is not guaranteed to preserve copy-by-copy sequencing when
+    # writes overlap or when a write reads from any destination.
+    for idx, dst_storage in enumerate(dst_storages):
+        if any(dst_storage == other for other in dst_storages[idx + 1 :]):
+            return False
+        if any(dst_storage == src_storage for src_storage in src_storages):
+            return False
+
+    return True
+
+
+def fold_foreach_input_mutation_ops(graph: torch.fx.Graph) -> None:
+    mutation_targets = OrderedSet(
+        [node for node in graph.nodes if node.op in ("placeholder", "get_attr")]
+    )
+    groups: list[
+        list[tuple[torch.fx.Node, torch.fx.Node, torch.fx.Node, torch.fx.Node, int]]
+    ] = []
+    current_group: list[
+        tuple[torch.fx.Node, torch.fx.Node, torch.fx.Node, torch.fx.Node, int]
+    ] = []
+    current_key: tuple[torch.fx.Node, str | None] | None = None
+
+    def flush() -> None:
+        nonlocal current_key
+        if len(current_group) > 1 and _can_fold_foreach_copy_group(current_group):
+            groups.append(current_group.copy())
+        current_group.clear()
+        current_key = None
+
+    for node in graph.nodes:
+        candidate = _get_foreach_copy_candidate(node, mutation_targets)
+        if candidate is None:
+            # The folded _foreach_copy_ is inserted before the first copy_ in a
+            # group, so all source getitems must already appear before it.
+            # Flush on any non-candidate to avoid folding across interleaved
+            # getitem/copy_ sequences or unrelated nodes.
+            flush()
+            continue
+
+        parent, dst, src, index = candidate
+        candidate_key = (parent, node.meta.get("partitioner_tag"))
+        if current_group and candidate_key != current_key:
+            flush()
+
+        if current_key is None:
+            current_key = candidate_key
+        current_group.append((node, parent, dst, src, index))
+
+    flush()
+
+    for group in groups:
+        first_copy = group[0][0]
+        dsts = [dst for _, _, dst, _, _ in group]
+        srcs = [src for _, _, _, src, _ in group]
+
+        with graph.inserting_before(first_copy):
+            foreach_copy = graph.call_function(
+                aten._foreach_copy_.default, args=(dsts, srcs)
+            )
+
+        foreach_copy.meta.update(first_copy.meta)
+        foreach_copy.meta["val"] = None
+        foreach_copy.meta.pop("tensor_meta", None)
+        foreach_copy.meta["original_aten"] = aten._foreach_copy_.default
+
+        for copy_node, *_ in group:
+            graph.erase_node(copy_node)
+
+
 def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     """
     Passes that run on after grad.  This is called once on the forwards
@@ -448,6 +610,9 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     # ./fx_passes/README.md for a discussion of mutation invariants.
     GraphTransformObserver(gm, "reinplace_inplaceable_ops").apply_graph_pass(
         functools.partial(reinplace_inplaceable_ops, fake_tensor_updater),
+    )
+    GraphTransformObserver(gm, "fold_foreach_input_mutation_ops").apply_graph_pass(
+        fold_foreach_input_mutation_ops
     )
 
     # Fix aliasing detection for dtype views AFTER reinplace determines cloning needs

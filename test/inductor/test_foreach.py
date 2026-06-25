@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 
+import operator
 import sys
 import unittest
 import unittest.mock as mock
@@ -7,9 +8,10 @@ import unittest.mock as mock
 import torch
 import torch._inductor
 from torch._higher_order_ops import foreach_map
-from torch._inductor import config
+from torch._inductor import config, fx_passes
+from torch._inductor.fx_passes.post_grad import fold_foreach_input_mutation_ops
 from torch._inductor.test_case import TestCase
-from torch._inductor.utils import run_fw_bw_and_get_code
+from torch._inductor.utils import run_and_get_code, run_fw_bw_and_get_code
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
@@ -226,6 +228,204 @@ class ForeachTests(TestCase):
     def tearDown(self):
         super().tearDown()
         torch._inductor.metrics.reset()
+
+    def _make_foreach_copy_graph(
+        self,
+        *,
+        copied_indices: list[int],
+        num_inputs: int,
+        interleaved: bool = False,
+        used_copy_idx: int | None = None,
+        aliased_inputs: bool = False,
+    ):
+        graph = torch.fx.Graph()
+        inputs = [graph.placeholder(f"x{i}") for i in range(num_inputs)]
+        foreach_mul = graph.call_function(
+            torch.ops.aten._foreach_mul.Scalar, args=(inputs, 2)
+        )
+
+        getitems = {}
+        copies = []
+        if interleaved:
+            for index in copied_indices:
+                getitem = graph.call_function(
+                    operator.getitem, args=(foreach_mul, index)
+                )
+                getitems[index] = getitem
+                copies.append(
+                    graph.call_function(
+                        torch.ops.aten.copy_.default, args=(inputs[index], getitem)
+                    )
+                )
+        else:
+            for index in copied_indices:
+                getitems[index] = graph.call_function(
+                    operator.getitem, args=(foreach_mul, index)
+                )
+            for index in copied_indices:
+                copies.append(
+                    graph.call_function(
+                        torch.ops.aten.copy_.default,
+                        args=(inputs[index], getitems[index]),
+                    )
+                )
+
+        if used_copy_idx is None:
+            graph.output(())
+        else:
+            graph.output((copies[used_copy_idx],))
+
+        values = [torch.ones(2) for _ in range(num_inputs)]
+        if aliased_inputs:
+            base = torch.ones(4)
+            values[0] = base[:2]
+            values[1] = base[1:3]
+        for inp, value in zip(inputs, values, strict=True):
+            inp.meta["val"] = value
+        for getitem in getitems.values():
+            getitem.meta["val"] = torch.ones(2)
+        for copy_node in copies:
+            copy_node.meta["val"] = copy_node.args[0].meta["val"]
+
+        return graph
+
+    def _count_nodes(self, graph, target):
+        return len(list(graph.find_nodes(op="call_function", target=target)))
+
+    def test_fold_foreach_input_mutation_ops(self):
+        graph = self._make_foreach_copy_graph(copied_indices=[0, 1], num_inputs=2)
+
+        fold_foreach_input_mutation_ops(graph)
+
+        self.assertEqual(
+            self._count_nodes(graph, torch.ops.aten._foreach_copy_.default), 1
+        )
+        self.assertEqual(self._count_nodes(graph, torch.ops.aten.copy_.default), 0)
+        foreach_copy = next(
+            iter(
+                graph.find_nodes(
+                    op="call_function", target=torch.ops.aten._foreach_copy_.default
+                )
+            )
+        )
+        dsts, srcs = foreach_copy.args[:2]
+        self.assertEqual([dst.name for dst in dsts], ["x0", "x1"])
+        self.assertEqual([src.args[1] for src in srcs], [0, 1])
+        torch.fx.GraphModule({}, graph)
+
+    def test_fold_foreach_input_mutation_ops_keeps_used_copy_result(self):
+        graph = self._make_foreach_copy_graph(
+            copied_indices=[0, 1], num_inputs=2, used_copy_idx=0
+        )
+
+        fold_foreach_input_mutation_ops(graph)
+
+        self.assertEqual(
+            self._count_nodes(graph, torch.ops.aten._foreach_copy_.default), 0
+        )
+        self.assertEqual(self._count_nodes(graph, torch.ops.aten.copy_.default), 2)
+
+    def test_fold_foreach_input_mutation_ops_skips_aliased_group(self):
+        graph = self._make_foreach_copy_graph(
+            copied_indices=[0, 1], num_inputs=2, aliased_inputs=True
+        )
+
+        fold_foreach_input_mutation_ops(graph)
+
+        self.assertEqual(
+            self._count_nodes(graph, torch.ops.aten._foreach_copy_.default), 0
+        )
+        self.assertEqual(self._count_nodes(graph, torch.ops.aten.copy_.default), 2)
+
+    def test_fold_foreach_input_mutation_ops_skips_interleaved_getitems(self):
+        graph = self._make_foreach_copy_graph(
+            copied_indices=[0, 1], num_inputs=2, interleaved=True
+        )
+
+        fold_foreach_input_mutation_ops(graph)
+
+        self.assertEqual(
+            self._count_nodes(graph, torch.ops.aten._foreach_copy_.default), 0
+        )
+        self.assertEqual(self._count_nodes(graph, torch.ops.aten.copy_.default), 2)
+        torch.fx.GraphModule({}, graph)
+
+    def test_fold_foreach_input_mutation_ops_skips_partial_group(self):
+        graph = self._make_foreach_copy_graph(copied_indices=[0, 2], num_inputs=3)
+
+        fold_foreach_input_mutation_ops(graph)
+
+        self.assertEqual(
+            self._count_nodes(graph, torch.ops.aten._foreach_copy_.default), 0
+        )
+        self.assertEqual(self._count_nodes(graph, torch.ops.aten.copy_.default), 2)
+
+    def test_foreach_input_mutation_inductor_prefers_reinplace(self):
+        pass_counts = []
+        orig_fold = fx_passes.post_grad.fold_foreach_input_mutation_ops
+
+        def counting_fold(graph):
+            before_copy = self._count_nodes(graph, torch.ops.aten.copy_.default)
+            orig_fold(graph)
+            pass_counts.append(
+                (
+                    before_copy,
+                    self._count_nodes(graph, torch.ops.aten.copy_.default),
+                    self._count_nodes(graph, torch.ops.aten._foreach_copy_.default),
+                )
+            )
+
+        def fn(args):
+            torch._foreach_mul_(args, 2)
+
+        inps = [torch.ones(13) for _ in range(4)]
+        torch._dynamo.reset()
+        with (
+            config.patch({"fx_graph_cache": False}),
+            mock.patch.object(
+                fx_passes.post_grad, "fold_foreach_input_mutation_ops", counting_fold
+            ),
+        ):
+            _, code = run_and_get_code(torch.compile(fn, fullgraph=True), inps)
+
+        for inp in inps:
+            self.assertEqual(inp, torch.full((13,), 2.0))
+        self.assertIn((0, 0, 0), pass_counts)
+        self.assertNotIn((len(inps), 0, 1), pass_counts)
+        self.assertIn("foreach", "\n".join(code))
+
+    def test_foreach_input_mutation_fold_runs_after_reinplace(self):
+        pass_counts = []
+        orig_fold = fx_passes.post_grad.fold_foreach_input_mutation_ops
+
+        def counting_fold(graph):
+            before_copy = self._count_nodes(graph, torch.ops.aten.copy_.default)
+            orig_fold(graph)
+            pass_counts.append(
+                (
+                    before_copy,
+                    self._count_nodes(graph, torch.ops.aten.copy_.default),
+                    self._count_nodes(graph, torch.ops.aten._foreach_copy_.default),
+                )
+            )
+
+        def fn(args):
+            torch._foreach_sub_(args, 2)
+
+        inps = [torch.ones(13) for _ in range(4)]
+        torch._dynamo.reset()
+        with (
+            config.patch({"fx_graph_cache": False}),
+            mock.patch.object(
+                fx_passes.post_grad, "fold_foreach_input_mutation_ops", counting_fold
+            ),
+        ):
+            _, code = run_and_get_code(torch.compile(fn, fullgraph=True), inps)
+
+        for inp in inps:
+            self.assertEqual(inp, torch.full((13,), -1.0))
+        self.assertIn((len(inps), 0, 1), pass_counts)
+        self.assertIn("_foreach_copy", "\n".join(code))
 
     def _test_single_list(self, op):
         if op in un_ops_under_test:
