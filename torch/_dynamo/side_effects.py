@@ -456,6 +456,20 @@ class SideEffects:
     def store_instance_dict_attr(
         self, item: VariableTracker, name: str, value: VariableTracker
     ) -> None:
+        # `obj.__dict__` ordering is observable (e.g. list(obj.__dict__)). When a
+        # key is re-added after being deleted, CPython appends it at the end
+        # rather than reusing its old slot. store_attr_mutations is an
+        # insertion-ordered dict, so a plain re-store of an existing key would
+        # keep the stale position; drop the deleted entry first so the new value
+        # re-inserts at the end.
+        if not isinstance(value, variables.DeletedVariable):
+            existing = self.store_attr_mutations.get(item, {}).get(name)
+            if isinstance(existing, variables.DeletedVariable):
+                # store_attr always writes both maps together, so the
+                # attr_mutation_kinds entry is guaranteed present here; use del
+                # for both to surface any invariant violation.
+                del self.store_attr_mutations[item][name]
+                del self.attr_mutation_kinds[item][name]
         self.store_attr(item, name, value, AttrMutationKind.INSTANCE_DICT)
 
     def get_attr_mutation_kind(
