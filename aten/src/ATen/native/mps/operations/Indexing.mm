@@ -43,7 +43,6 @@
 #include <ATen/ops/nonzero_native.h>
 #include <ATen/ops/nonzero_static_native.h>
 #include <ATen/ops/ones_like.h>
-#include <ATen/ops/view_as_real.h>
 #endif
 
 namespace at::native {
@@ -537,6 +536,22 @@ Tensor flip_mps(const Tensor& self, IntArrayRef dims) {
   return result;
 }
 
+// Validate index in [0, dim_size) once (one thread per index) on the given
+// encoder, so the following gather/scatter kernel can clamp instead of
+// branch-and-report per element. Out-of-bounds surfaces as an async
+// AcceleratorError on the next stream sync.
+static void encodeIndexBoundsCheck(id<MTLComputeCommandEncoder> encoder,
+                                   at::mps::MPSStream* stream,
+                                   const Tensor& index,
+                                   int64_t dim_size) {
+  using namespace mps;
+  auto pso = lib.getPipelineStateForFunc(fmt::format("index_check_bounds_{}", scalarToMetalTypeString(index)));
+  [encoder setComputePipelineState:pso];
+  mtl_setArgs(encoder, index);
+  mtl_setArgs<1>(encoder, static_cast<uint32_t>(index.stride(0)), dim_size, stream->getErrorBuffer());
+  mtl_dispatch1DJob(encoder, pso, index.numel());
+}
+
 TORCH_IMPL_FUNC(index_add_mps_out)
 (const Tensor& self,
  int64_t dim,
@@ -545,22 +560,20 @@ TORCH_IMPL_FUNC(index_add_mps_out)
  const Scalar& alpha,
  const Tensor& result) {
   using namespace mps;
-  MPSStream* stream = getCurrentMPSStream();
   dim = maybe_wrap_dim(dim, self.dim());
-  if (index.numel() == 0) {
+
+  // Structured out variant: result is a distinct tensor that must start as self.
+  if (!result.is_same(self)) {
+    result.copy_(self);
+  }
+  if (index.numel() == 0 || source.numel() == 0) {
     return;
   }
 
-  bool use_deterministic_algorithm = globalContext().deterministicAlgorithms();
-
-  // TODO: Do not use deterministic algorithm for long/complex but rather implement it as Metal shader
-  use_deterministic_algorithm |= source.scalar_type() == ScalarType::Long;
-  use_deterministic_algorithm |= c10::isComplexType(source.scalar_type());
-
-  if (use_deterministic_algorithm) {
-    if (!result.is_same(self)) {
-      result.copy_(self);
-    }
+  // Floating-point atomic add is non-associative, so the Metal kernel's
+  // accumulation order is non-deterministic. Fall back to index_put_ with
+  // accumulate=true when deterministic algorithms are requested.
+  if (globalContext().deterministicAlgorithms()) {
     torch::List<std::optional<Tensor>> indices;
     indices.reserve(dim + 1);
     for (const auto i : c10::irange(dim)) {
@@ -573,74 +586,65 @@ TORCH_IMPL_FUNC(index_add_mps_out)
     return;
   }
 
-  auto casted_type = isFloatingType(source.scalar_type()) ? ScalarType::Float : ScalarType::Int;
+  const Tensor result_ = (result.dim() == 0) ? result.view(1) : result;
+  const Tensor source_ = (source.dim() == 0) ? source.view(1) : source;
+  const Tensor index_ = (index.dim() == 0) ? index.view(1) : index;
 
-  bool needs_gather = needsGather(result);
-  Tensor output;
-  if (needs_gather) {
-    output = at::empty_like(result, MemoryFormat::Contiguous);
-    output.copy_(result);
+  // Empty indexed dim: CPU index_add early-returns on an empty self without
+  // range-checking, so match that (no error) and skip the scatter, whose clamp
+  // to self_sizes[dim] - 1 == -1 would otherwise compute an invalid offset.
+  if (result_.size(dim) == 0) {
+    return;
   }
 
-  struct CachedGraph : public MPSCachedGraph {
-    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor* inputTensor_ = nil;
-    MPSGraphTensor* indexTensor_ = nil;
-    MPSGraphTensor* sourceTensor_ = nil;
-    MPSGraphTensor* alphaTensor_ = nil;
-    MPSGraphTensor* outputTensor_ = nil;
-  };
+  // fp16/bf16/chalf atomic add is emulated with a compare-and-swap loop that
+  // collapses under index contention, while fp32/cfloat have a native atomic
+  // add. Upcast the accumulation only when many indices map into few slots:
+  // the measured crossover is ~16 indices per slot (M4 Max), below which the
+  // in-place low-precision atomic is faster and avoids the cast plus the extra
+  // fp32 buffers. Upcasting also matches the pre-Metal cast-to-float numerics.
+  const auto contention = index_.numel() / std::max<int64_t>(1, result_.size(dim));
+  ScalarType acc_type = result_.scalar_type();
+  if (contention >= 16) {
+    if (acc_type == kHalf || acc_type == kBFloat16) {
+      acc_type = kFloat;
+    } else if (acc_type == kComplexHalf) {
+      acc_type = kComplexFloat;
+    }
+  }
+  const bool needs_acc_cast = acc_type != result_.scalar_type();
+  const Tensor acc_result = needs_acc_cast ? result_.to(acc_type) : result_;
+  const Tensor acc_source = needs_acc_cast ? source_.to(acc_type) : source_;
 
-  @autoreleasepool {
-    std::string key = "index_add_mps_out" + getTensorsStringKey({self, index, source}) + ":" + std::to_string(dim);
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
-      MPSGraphTensor* indexTensor = mpsGraphRankedPlaceHolder(mpsGraph, index);
-      MPSGraphTensor* sourceTensor = mpsGraphRankedPlaceHolder(mpsGraph, source);
-      MPSGraphTensor* alphaTensor = mpsGraphScalarPlaceHolder(mpsGraph, getMPSScalarType(casted_type));
-      MPSGraphTensor* castedInputTensor = inputTensor;
-      MPSGraphTensor* castedSourceTensor = sourceTensor;
-      if (source.scalar_type() != casted_type) {
-        castedInputTensor = castMPSTensor(mpsGraph, castedInputTensor, casted_type);
-        castedSourceTensor = castMPSTensor(mpsGraph, castedSourceTensor, casted_type);
-      }
-      MPSGraphTensor* alphaSourceSlice = [mpsGraph multiplicationWithPrimaryTensor:castedSourceTensor
-                                                                   secondaryTensor:alphaTensor
-                                                                              name:nil];
-
-      MPSGraphTensor* outputTensor = [mpsGraph scatterWithDataTensor:castedInputTensor
-                                                       updatesTensor:alphaSourceSlice
-                                                       indicesTensor:indexTensor
-                                                                axis:dim
-                                                                mode:MPSGraphScatterModeAdd
-                                                                name:nil];
-      if (source.scalar_type() != casted_type) {
-        outputTensor = castMPSTensor(mpsGraph, outputTensor, source.scalar_type());
-      }
-      newCachedGraph->inputTensor_ = inputTensor;
-      newCachedGraph->indexTensor_ = indexTensor;
-      newCachedGraph->sourceTensor_ = sourceTensor;
-      newCachedGraph->alphaTensor_ = alphaTensor;
-      newCachedGraph->outputTensor_ = outputTensor;
-    });
-
-    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
-    Placeholder indexPlaceholder = Placeholder(cachedGraph->indexTensor_, index);
-    Placeholder sourcePlaceholder = Placeholder(cachedGraph->sourceTensor_, source);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, needs_gather ? output : result);
-    MPSScalar alpha_scalar = getMPSScalar(alpha, casted_type);
-
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData(),
-      indexPlaceholder.getMPSGraphTensor() : indexPlaceholder.getMPSGraphTensorData(),
-      sourcePlaceholder.getMPSGraphTensor() : sourcePlaceholder.getMPSGraphTensorData(),
-      cachedGraph->alphaTensor_ : getMPSGraphTensorFromScalar(stream, alpha_scalar),
-    };
-    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
+  IndexReduceParams params;
+  params.index_stride = index_.stride(0);
+  params.reduce_dim = dim;
+  params.ndim = acc_result.dim();
+  for (const auto d : c10::irange(acc_result.dim())) {
+    params.self_strides[d] = acc_result.stride(d);
+    params.self_sizes[d] = acc_result.size(d);
+    params.source_strides[d] = acc_source.stride(d);
+    params.source_sizes[d] = acc_source.size(d);
   }
 
-  if (needs_gather) {
-    result.copy_(output);
+  MPSStream* stream = getCurrentMPSStream();
+  auto num_threads = acc_source.numel();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      id<MTLComputeCommandEncoder> computeEncoder = stream->commandEncoder();
+      encodeIndexBoundsCheck(computeEncoder, stream, index_, acc_result.size(dim));
+      auto pipeline_state = lib.getPipelineStateForFunc(
+          fmt::format("index_add_{}_{}", scalarToMetalTypeString(acc_result), scalarToMetalTypeString(index_)));
+      getMPSProfiler().beginProfileKernel(pipeline_state, "index_add", {acc_result, index_, acc_source});
+      [computeEncoder setComputePipelineState:pipeline_state];
+      mtl_setArgs(computeEncoder, acc_result, index_, acc_source, params);
+      mtl_setBytes(computeEncoder, getMPSScalar(alpha, acc_type), 4);
+      mtl_dispatch1DJob(computeEncoder, pipeline_state, num_threads);
+      getMPSProfiler().endProfileKernel(pipeline_state);
+    }
+  });
+  if (needs_acc_cast) {
+    result_.copy_(acc_result);
   }
 }
 
@@ -676,8 +680,24 @@ Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& inde
   }
   at::native::resize_output(output, output_size);
 
-  // Empty index
-  if (num_indices == 0 || self.numel() == 0) {
+  // Empty index: nothing to gather and no indices to range-check.
+  if (num_indices == 0) {
+    return output;
+  }
+
+  const Tensor index_ = (index.dim() == 0) ? index.view(1) : index;
+
+  // Empty input/output (a non-indexed dim is 0): there is nothing to gather, but
+  // still range-check the indices against self.size(dim) to match CPU/CUDA --
+  // indexing into a 0-sized dim is out of bounds. Skips dispatching a 0-sized
+  // gather grid.
+  if (self.numel() == 0) {
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      @autoreleasepool {
+        id<MTLComputeCommandEncoder> computeEncoder = stream->commandEncoder();
+        encodeIndexBoundsCheck(computeEncoder, stream, index_, self.size(dim));
+      }
+    });
     return output;
   }
 
@@ -687,66 +707,86 @@ Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& inde
     return output;
   }
 
-  // As of MacOS 14.4 gatherWithUpdatesTensor: still does not support complex
-  // So back to old view_as_real trick
-  if (self.is_complex()) {
-    auto out_view = at::view_as_real(output);
-    index_select_out_mps(at::view_as_real(self), dim, index, out_view);
+  // Fast path: contiguous tensors viewed as [outer, dim, inner], gathered with a
+  // 3D grid so each thread copies one element with no coordinate decomposition.
+  // Compute inner from size products (not stride(dim)): for size-1 dims a tensor
+  // is contiguous regardless of stride, so stride(dim) can overcount.
+  if (self.is_contiguous() && output.is_contiguous() && index_.is_contiguous()) {
+    uint32_t inner = 1;
+    for (const auto d : c10::irange(dim + 1, self.dim())) {
+      inner *= static_cast<uint32_t>(self.size(d));
+    }
+    const uint32_t in_dim_size = self.size(dim);
+    const auto outer = self.numel() / (static_cast<int64_t>(in_dim_size) * inner);
+
+    // A gathered slice (inner contiguous elements) is copied verbatim, so widen
+    // the copy unit to the largest power-of-two byte size dividing the slice span
+    // (and both base offsets) to maximize memory throughput, esp. for fp16.
+    const uint32_t elem_size = output.element_size();
+    const uint64_t row_bytes = static_cast<uint64_t>(inner) * elem_size;
+    const uint64_t self_off_bytes = static_cast<uint64_t>(self.storage_offset()) * elem_size;
+    const uint64_t out_off_bytes = static_cast<uint64_t>(output.storage_offset()) * elem_size;
+    uint32_t copy_bytes = 8;
+    while (copy_bytes > elem_size &&
+           ((row_bytes % copy_bytes) || (self_off_bytes % copy_bytes) || (out_off_bytes % copy_bytes))) {
+      copy_bytes /= 2;
+    }
+    const uint32_t inner_units = static_cast<uint32_t>(row_bytes / copy_bytes);
+
+    IndexSelectParams params;
+    params.inner = inner_units;
+    params.in_dim_size = in_dim_size;
+    params.out_dim_size = static_cast<uint32_t>(num_indices);
+    params.index_stride = static_cast<uint32_t>(index_.stride(0));
+
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      @autoreleasepool {
+        id<MTLComputeCommandEncoder> computeEncoder = stream->commandEncoder();
+        encodeIndexBoundsCheck(computeEncoder, stream, index_, self.size(dim));
+        auto pipeline_state = lib.getPipelineStateForFunc(
+            fmt::format("index_select_dim_dense_{}bit_{}", copy_bytes * 8, scalarToMetalTypeString(index_)));
+        getMPSProfiler().beginProfileKernel(pipeline_state, "index_select", {self, index_});
+        [computeEncoder setComputePipelineState:pipeline_state];
+        mtl_setArgs(computeEncoder, output, index_, self, params);
+        const MTLSize grid = MTLSizeMake(inner_units, num_indices, outer);
+        const NSUInteger maxTG = [pipeline_state maxTotalThreadsPerThreadgroup];
+        const NSUInteger tgX = std::min<NSUInteger>(inner_units, maxTG);
+        const NSUInteger tgY = std::min<NSUInteger>(num_indices, std::max<NSUInteger>(1, maxTG / tgX));
+        const NSUInteger tgZ = std::min<NSUInteger>(outer, std::max<NSUInteger>(1, maxTG / (tgX * tgY)));
+        [computeEncoder dispatchThreads:grid threadsPerThreadgroup:MTLSizeMake(tgX, tgY, tgZ)];
+        getMPSProfiler().endProfileKernel(pipeline_state);
+      }
+    });
     return output;
   }
 
-  // Derive from MPSCachedGraph
-  struct CachedGraph : public MPSCachedGraph {
-    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor* inputTensor_ = nil;
-    MPSGraphTensor* indexTensor_ = nil;
-    MPSGraphTensor* outputTensor_ = nil;
-  };
-
-  auto inputType = getMPSDataType(self);
-  auto outputType = getMPSDataType(output);
-  if (inputType == MPSDataTypeUInt8) {
-    inputType = MPSDataTypeInt8;
-  }
-  if (outputType == MPSDataTypeUInt8) {
-    outputType = MPSDataTypeInt8;
+  // Strided fallback: one thread per output element, offsets from strides.
+  // params.source_* describe the output (iterated), params.self_* the input.
+  IndexReduceParams params;
+  params.index_stride = index_.stride(0);
+  params.reduce_dim = dim;
+  params.ndim = output.dim();
+  for (const auto d : c10::irange(output.dim())) {
+    params.source_strides[d] = output.stride(d);
+    params.source_sizes[d] = output.size(d);
+    params.self_strides[d] = self.stride(d);
+    params.self_sizes[d] = self.size(d);
   }
 
-  @autoreleasepool {
-    std::string key = "index_select_out_mps" + getTensorsStringKey({self, index}) + ":" + std::to_string(dim);
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, inputType, getMPSShape(self));
-      MPSGraphTensor* indexTensor = mpsGraphRankedPlaceHolder(mpsGraph, index);
-
-      MPSGraphTensor* outputTensor = [mpsGraph gatherWithUpdatesTensor:inputTensor
-                                                         indicesTensor:indexTensor
-                                                                  axis:dim
-                                                       batchDimensions:0
-                                                                  name:nil];
-
-      newCachedGraph->inputTensor_ = inputTensor;
-      newCachedGraph->indexTensor_ = indexTensor;
-      newCachedGraph->outputTensor_ = outputTensor;
-    });
-
-    // MPS TODO: MPS Gather is failing with MPS strided API. Fallback to old gather.
-    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_,
-                                              self,
-                                              /*mpsShape=*/nullptr,
-                                              /*gatherTensorData=*/true,
-                                              /*dataType=*/inputType,
-                                              /*useStridedAPI=*/false);
-    Placeholder indexPlaceholder = Placeholder(cachedGraph->indexTensor_, index, nil, true, MPSDataTypeInvalid, false);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_,
-                                                output,
-                                                /*mpsShape=*/nullptr,
-                                                /*gatherTensorData=*/false,
-                                                /*dataType=*/outputType,
-                                                /*useStridedAPI=*/false);
-
-    auto feeds = dictionaryFromPlaceholders(selfPlaceholder, indexPlaceholder);
-    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
-  }
+  auto num_threads = output.numel();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      id<MTLComputeCommandEncoder> computeEncoder = stream->commandEncoder();
+      encodeIndexBoundsCheck(computeEncoder, stream, index_, self.size(dim));
+      auto pipeline_state = lib.getPipelineStateForFunc(
+          fmt::format("index_select_dim_{}_{}", getBitSizeString(output), scalarToMetalTypeString(index_)));
+      getMPSProfiler().beginProfileKernel(pipeline_state, "index_select", {self, index_});
+      [computeEncoder setComputePipelineState:pipeline_state];
+      mtl_setArgs(computeEncoder, output, index_, self, params);
+      mtl_dispatch1DJob(computeEncoder, pipeline_state, num_threads);
+      getMPSProfiler().endProfileKernel(pipeline_state);
+    }
+  });
 
   return output;
 }

@@ -344,6 +344,7 @@ def _tensorify_impl(
                         # sweep does not incorrectly restart analysis for them.
                         tensorified_symbols.update(
                             s
+                            # pyrefly: ignore [missing-attribute]
                             for s in a.meta["val"].node._expr.free_symbols
                             if symbol_is_type(s, SymT.FLOAT)
                         )

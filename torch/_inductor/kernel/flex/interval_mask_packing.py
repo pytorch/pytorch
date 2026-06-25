@@ -94,7 +94,8 @@ class PackedMaskInterval:
 
     def _render(self, expr: sympy.Expr) -> str:
         rendered = sympy_to_cute_index(expr, self.symbol_codes)
-        assert rendered is not None
+        if rendered is None:
+            raise AssertionError(f"failed to render expr to cute index: {expr}")
         return rendered
 
 
@@ -223,6 +224,8 @@ class PackedMaskAnalyzer:
     kv_symbol: SymPy symbol used for the packed window base KV index.
     lane_symbol: SymPy symbol for the lane offset within the packed window.
     symbol_codes: CuTe renderings for temporary symbols introduced for aux loads.
+    placeholder_codes: CuTe renderings for captured scalar and tensor placeholders.
+    placeholder_exprs: SymPy expressions for captured scalar placeholders.
     aux_load_symbols: Stable symbols assigned to supported lane-uniform aux loads.
     next_symbol_id: Counter for naming temporary aux-load symbols.
     """
@@ -242,6 +245,12 @@ class PackedMaskAnalyzer:
         )
     )
     symbol_codes: dict[sympy.Symbol, str] = dataclasses.field(default_factory=dict)
+    placeholder_codes: Mapping[torch.fx.Node, str] = dataclasses.field(
+        default_factory=dict
+    )
+    placeholder_exprs: Mapping[torch.fx.Node, sympy.Expr] = dataclasses.field(
+        default_factory=dict
+    )
     aux_load_symbols: dict[torch.fx.Node, sympy.Symbol] = dataclasses.field(
         default_factory=dict
     )
@@ -426,14 +435,12 @@ class PackedMaskAnalyzer:
 
     def fx_mask_expr_to_sympy(self, expr: object) -> sympy.Expr | None:
         """Translate a mask expression with kv_idx expanded by mask_lane."""
-        return fx_aux_index_to_sympy(
-            expr,
-            {
-                self.q_idx: self.q_symbol,
-                self.kv_idx: self.kv_symbol + self.lane_symbol,
-            },
-            self.mask_aux_load_to_symbol,
-        )
+        index_symbols = {
+            self.q_idx: self.q_symbol,
+            self.kv_idx: self.kv_symbol + self.lane_symbol,
+        }
+        index_symbols.update(self.placeholder_exprs)
+        return fx_aux_index_to_sympy(expr, index_symbols, self.mask_aux_load_to_symbol)
 
     def mask_aux_load_to_symbol(self, node: torch.fx.Node) -> sympy.Expr | None:
         """Assign a temporary SymPy symbol to a supported aux tensor load."""
@@ -477,9 +484,8 @@ class PackedMaskAnalyzer:
                 return "b_idx[0]"
             if expr is self.placeholders[1]:
                 return "h_idx[0]"
-        for aux_idx, placeholder in enumerate(self.placeholders[4:]):
-            if expr is placeholder:
-                return f"aux_tensors[{aux_idx}]"
+        if expr in self.placeholder_codes:
+            return self.placeholder_codes[expr]
 
         if is_aten_index_node(expr):
             return self._render_lane_uniform_index_expr(expr, for_index=for_index)
@@ -559,8 +565,44 @@ class PackedMaskAnalyzer:
         return f"cutlass.Int32({load})"
 
 
+@dataclasses.dataclass(frozen=True)
+class PackedMaskAuxPlaceholderMap:
+    """Maps mask_mod aux placeholders to runtime scalar expressions or tensors."""
+
+    codes: Mapping[torch.fx.Node, str]
+    exprs: Mapping[torch.fx.Node, sympy.Expr]
+
+    @classmethod
+    def from_placeholders(
+        cls,
+        placeholders: Sequence[torch.fx.Node],
+        other_buffers: Sequence[object],
+        symbol_codes: Mapping[sympy.Symbol, str],
+    ) -> "PackedMaskAuxPlaceholderMap | None":
+        """Render lane-uniform mask_mod captures for packed interval analysis."""
+        codes: dict[torch.fx.Node, str] = {}
+        exprs: dict[torch.fx.Node, sympy.Expr] = {}
+        tensor_idx = 0
+        for placeholder, buffer in zip(placeholders[4:], other_buffers):
+            if isinstance(buffer, sympy.Expr):
+                rendered = sympy_to_cute_index(buffer, symbol_codes)
+                if rendered is None:
+                    return None
+                codes[placeholder] = rendered
+                exprs[placeholder] = buffer
+            else:
+                codes[placeholder] = f"aux_tensors[{tensor_idx}]"
+                tensor_idx += 1
+        for placeholder in placeholders[4 + len(other_buffers) :]:
+            codes[placeholder] = f"aux_tensors[{tensor_idx}]"
+            tensor_idx += 1
+        return cls(codes, exprs)
+
+
 def select_packed_mask_intervals(
     graph_module: GraphModule,
+    other_buffers: Sequence[object] = (),
+    aux_scalar_symbol_codes: Mapping[sympy.Symbol, str] | None = None,
 ) -> MaybeIntervalSet:
     """Entry point for selecting packed mask intervals from a mask_mod graph.
 
@@ -580,10 +622,20 @@ def select_packed_mask_intervals(
     if not isinstance(output_val, torch.fx.Node):
         return None
 
+    symbol_codes = dict(aux_scalar_symbol_codes or {})
+    placeholder_map = PackedMaskAuxPlaceholderMap.from_placeholders(
+        placeholders, other_buffers, symbol_codes
+    )
+    if placeholder_map is None:
+        return None
+
     analyzer = PackedMaskAnalyzer(
         placeholders=placeholders,
         q_idx=q_idx,
         kv_idx=kv_idx,
+        symbol_codes=symbol_codes,
+        placeholder_codes=placeholder_map.codes,
+        placeholder_exprs=placeholder_map.exprs,
     )
     intervals = analyzer.node_to_intervals(output_val)
     if intervals is None:

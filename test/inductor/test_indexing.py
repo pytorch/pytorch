@@ -1,15 +1,19 @@
 # Owner(s): ["module: inductor"]
 import os
 import sys
+import types
 import unittest
+from types import SimpleNamespace
 
 import sympy
 
 import torch
 from torch._dynamo.source import ConstantSource
 from torch._inductor.codegen.cpp import cexpr
+from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
 from torch._inductor.codegen.triton import texpr
 from torch._inductor.codegen.wrapper import pexpr
+from torch._inductor.dependencies import MemoryDep
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.sizevars import (
     simplify_index_in_vec_range,
@@ -28,6 +32,8 @@ from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 from torch.utils._sympy.functions import (
     FloorDiv,
     Identity,
+    Max,
+    Min,
     Mod,
     ModularIndexing,
     PythonMod,
@@ -245,6 +251,18 @@ class TestIndexingSimplification(InductorTestCase):
             sizevars.simplify_with_ranges(FloorDiv(ModularIndexing(i0, 1, 10), 10), {}),
             sympy.S.Zero,
         )
+
+    def test_simplify_with_ranges_forwards_local_ranges_to_shape_env(self):
+        sizevars = SizeVarAllocator()
+        q3 = sympy.Symbol("q3", integer=True, nonnegative=True)
+        base = Min(
+            Min(28, FloorDiv(q3, 2) + 1) - 1,
+            Max(0, FloorDiv(q3 - 1, 2)),
+        )
+        expr = ModularIndexing(base, 1, 14)
+
+        self.assertNotIn(q3, sizevars.shape_env.var_to_range)
+        self.assertEqual(sizevars.simplify_with_ranges(expr, {q3: 28}), base)
 
     def test_remove_zero_terms_generalized(self):
         sizevars = SizeVarAllocator()
@@ -706,6 +724,55 @@ class ExprPrinterTests(InductorTestCase):
 instantiate_parametrized_tests(ExprPrinterTests)
 
 
+class TestIndexConstOverflowInt32(InductorTestCase):
+    """Tests for
+    ``SIMDKernelFeatures.any_index_expr_const_overflows_int32``."""
+
+    def make_feats(self, indices):
+        # Bypass __init__ (needs V.graph) and shadow scheduler_nodes().
+        deps = [MemoryDep(f"buf{i}", idx, (), ()) for i, idx in enumerate(indices)]
+        node = types.SimpleNamespace(
+            read_writes=types.SimpleNamespace(reads=deps, writes=[])
+        )
+        feats = SIMDKernelFeatures.__new__(SIMDKernelFeatures)
+        feats.scheduler_nodes = lambda: [node]
+        return feats
+
+    def check(self, indices):
+        return self.make_feats(indices).any_index_expr_const_overflows_int32()
+
+    def test_production_constant_detected(self):
+        x0, x1 = sympy.symbols("x0 x1", integer=True)
+        expr = sympy.Integer(-2_779_057_358) + x0 + 310 * x1
+        self.assertTrue(self.check([expr]))
+
+    def test_small_constant_not_flagged(self):
+        x0, x1 = sympy.symbols("x0 x1", integer=True)
+        expr = sympy.Integer(-1_000_000) + x0 + 310 * x1
+        self.assertFalse(self.check([expr]))
+
+    def test_boundary_at_int32_limits(self):
+        # int32 range is asymmetric: [-2**31, 2**31 - 1].
+        x0 = sympy.Symbol("x0", integer=True)
+        self.assertFalse(self.check([sympy.Integer(2**31 - 1) + x0]))
+        self.assertFalse(self.check([sympy.Integer(-(2**31)) + x0]))
+
+    def test_boundary_just_outside_int32_limits(self):
+        x0 = sympy.Symbol("x0", integer=True)
+        self.assertTrue(self.check([sympy.Integer(2**31) + x0]))
+        self.assertTrue(self.check([sympy.Integer(-(2**31) - 1) + x0]))
+
+    def test_pure_constant_expression(self):
+        self.assertTrue(self.check([sympy.Integer(-(2**31) - 10)]))
+        self.assertFalse(self.check([sympy.Integer(0)]))
+
+    def test_any_offender_triggers_detection(self):
+        x0 = sympy.Symbol("x0", integer=True)
+        good = sympy.Integer(42) + x0
+        bad = sympy.Integer(-(2**31) - 1) + x0
+        self.assertTrue(self.check([good, bad]))
+
+
 class TestEvaluateMinMax(InductorTestCase):
     def test_evaluate_min_multiple(self):
         """min(u0, k*u0) resolves via GCD: gcd(u0, k*u0)=u0.
@@ -921,6 +988,15 @@ class TestWideExpressionThresholds(InductorTestCase):
         wide = sum(syms)
         self.assertTrue(sizevars.statically_known_multiple_of(wide, wide))
 
+    def test_statically_known_multiple_of_factorable_add_floordiv(self):
+        sizevars = SizeVarAllocator()
+        s52, s97 = sympy.symbols("s52 s97", integer=True, positive=True)
+        k = FloorDiv(s97, s52)
+        denominator = s52 * k + k
+        numerator = 128 * s52 * k + 128 * k
+
+        self.assertTrue(sizevars.statically_known_multiple_of(numerator, denominator))
+
     def test_wide_modular_indexing_not_decomposed(self):
         """ModularIndexing with a wide base should not enter the per-term
         simplification loop (its result would feed into sympy.expand which
@@ -983,6 +1059,52 @@ class TestOptimizationHintZeroDivision(InductorTestCase):
         expr = ModularIndexing(u0 + 1, u1, 4)
         hint = sizevars.optimization_hint(expr, fallback=8192)
         self.assertEqual(hint, 1)
+
+
+class TestOptimizationHintWideUnbackedSubstitution(InductorTestCase):
+    """Tests for bounded unbacked replacement canonicalization in optimization_hint."""
+
+    def test_expression_replacements_still_apply_for_small_expr(self):
+        sizevars = SizeVarAllocator()
+        shape_env = sizevars.shape_env
+        u0 = shape_env.create_unbacked_symint().node.expr
+        u1 = shape_env.create_unbacked_symint().node.expr
+        shape_env.deferred_runtime_asserts.setdefault(u1, []).append(
+            SimpleNamespace(expr=sympy.Eq(u1 + 1, u0 + 2))
+        )
+
+        self.assertEqual(sizevars.optimization_hint(u0 + 2, fallback=0), 1)
+
+    def test_expression_replacements_precede_symbol_replacements(self):
+        sizevars = SizeVarAllocator()
+        shape_env = sizevars.shape_env
+        u0 = shape_env.create_unbacked_symint().node.expr
+        u1 = shape_env.create_unbacked_symint().node.expr
+        u2 = shape_env.create_unbacked_symint().node.expr
+        shape_env.guard_or_defer_runtime_assert(sympy.Eq(u0, u1), "u0 == u1")
+        shape_env.guard_or_defer_runtime_assert(sympy.Eq(u1 + 1, u2), "u1 + 1 == u2")
+
+        self.assertEqual(
+            sizevars.optimization_hint(u1 + 1, fallback=0),
+            sizevars.optimization_hint(u2, fallback=0),
+        )
+
+    def test_wide_expression_skips_expensive_expr_subs(self):
+        sizevars = SizeVarAllocator()
+        shape_env = sizevars.shape_env
+        unbacked = [shape_env.create_unbacked_symint().node.expr for _ in range(128)]
+        for i, sym in enumerate(unbacked[1:], start=1):
+            shape_env.deferred_runtime_asserts.setdefault(sym, []).append(
+                SimpleNamespace(expr=sympy.Eq(sym + 1, unbacked[0] + i + 1))
+            )
+
+        expr = sum((i + 1) * sym for i, sym in enumerate(unbacked))
+
+        def fail_subs(*args, **kwargs):
+            raise AssertionError("wide optimization_hint should avoid sympy subs")
+
+        with unittest.mock.patch.object(sympy.Basic, "subs", fail_subs):
+            self.assertEqual(sizevars.optimization_hint(expr, fallback=0), 0)
 
 
 class TestOptimizationHintIdentityExpansion(InductorTestCase):

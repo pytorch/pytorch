@@ -82,14 +82,7 @@ class ComposableEpiMixin:
         directly. After this runs, op hook methods can assume their
         `param`/`arg_tensor` is non-None."""
         self._epi_ops = tuple(
-            op
-            for op in type(self)._epi_ops
-            if getattr(args, op.name, None) is not None
-            or (
-                op.name == "mRowVecReduce"
-                and args.local_reduce_feeds_main
-                and args.local_reduce_dim == 0
-            )
+            op for op in type(self)._epi_ops if getattr(args, op.name, None) is not None
         )
 
     def _epi_ops_to_params_dict(self, args):

@@ -931,7 +931,7 @@ def _pad_mm_init(input_device: torch.device | None = None) -> None:
         else:
             device = "cpu"
 
-    # sizes/values dont actually matter for initial trace
+    # sizes/values don't actually matter for initial trace
     # once we get a possible match we re-trace with the actual values and verify the match still holds
 
     dim2a = functools.partial(torch.empty, (4, 4), device=device, requires_grad=True)
@@ -969,7 +969,12 @@ def _pad_mm_init(input_device: torch.device | None = None) -> None:
             should_pad_addmm,
         ),
     ]:
-        assert isinstance(workaround, dict)  # mypy is unable to infer the type properly
+        if not isinstance(
+            workaround, dict
+        ):  # mypy is unable to infer the type properly
+            raise AssertionError(
+                f"expected workaround to be a dict, got {type(workaround)}"
+            )
         name = pattern.__name__
 
         gen_register_replacement(

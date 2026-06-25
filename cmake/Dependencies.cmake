@@ -501,7 +501,6 @@ if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(s390x|ppc64le)$")
     # them into a shared library for Caffe2, so they need PIC.
     set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
   endif()
-  list(APPEND Caffe2_DEPENDENCY_LIBS cpuinfo)
 endif()
 
 
@@ -1156,6 +1155,16 @@ if(USE_NCCL)
     include(${CMAKE_CURRENT_LIST_DIR}/External/rccl.cmake)
     list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS __caffe2_nccl)
   endif()
+endif()
+
+# ---[ NCCL EP
+# Defines the __caffe2_nccl_ep interface target (libnccl_ep.so + headers). It is
+# NOT added to Caffe2_CUDA_DEPENDENCY_LIBS: the EP code lives in its own optional
+# extension (torch._nccl_ep, see torch/CMakeLists.txt), which links it, so
+# libtorch_cuda does not depend on libnccl_ep and torch imports without nccl4py.
+if(USE_NCCL_EP)
+  message(STATUS "USE_NCCL_EP is ON")
+  include(${CMAKE_CURRENT_LIST_DIR}/External/nccl_ep.cmake)
 endif()
 
 # ---[ XCCL

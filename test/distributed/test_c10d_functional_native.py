@@ -902,6 +902,28 @@ class ProcessGroupArgTest(TestCase):
         torch.ops._c10d_functional.wait_tensor(out)
 
 
+class ProcessGroupOpaqueTypeRegistrationTest(TestCase):
+    def test_process_group_is_registered_on_distributed_import(self) -> None:
+        from torch._library.opaque_object import (
+            get_member_type,
+            is_opaque_type,
+            MemberType,
+        )
+
+        self.assertTrue(is_opaque_type(dist.ProcessGroup))
+        self.assertEqual(
+            get_member_type(dist.ProcessGroup, "size"), MemberType.USE_REAL
+        )
+
+        def f(x: torch.Tensor, pg: dist.ProcessGroup) -> torch.Tensor:
+            return x
+
+        self.assertEqual(
+            torch.library.infer_schema(f, mutates_args=()),
+            "(Tensor x, torch.distributed.distributed_c10d.ProcessGroup pg) -> Tensor",
+        )
+
+
 def find_buffer_assignments(code):
     pattern = r"buf(\d+) = empty_strided_"
     matches = re.finditer(pattern, code)
@@ -987,6 +1009,9 @@ class CompileTest(TestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
+    @torch._inductor.config.patch(
+        {"aten_distributed_optimizations.enable_simple_overlap": False}
+    )
     def test_inductor_all_reduce_single(self):
         def func(arg: torch.Tensor) -> torch.Tensor:
             buf0 = arg + 42
@@ -1396,6 +1421,9 @@ class CompileTest(TestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
+    @torch._inductor.config.patch(
+        {"aten_distributed_optimizations.enable_simple_overlap": False}
+    )
     def test_inductor_broadcast(self):
         def func(arg: torch.Tensor) -> torch.Tensor:
             buf0 = arg + 42
@@ -1609,6 +1637,28 @@ class ACTCompileTest(TestCase):
         act2 = AsyncCollectiveTensor(elem2)
         r2 = compiled_fn(act2)
         self.assertEqual(r2, elem2 * 2)
+
+    def test_direct_aot_top_level_act_path_accepts_plain_runtime_input(self):
+        """
+        Unlike torch.compile, direct AOTAutograd entry points do not have
+        Dynamo input-type guards to force a recompile when a top-level ACT input
+        is later a plain tensor. The runtime wait path must therefore guard
+        before calling trigger_wait() on the recorded ACT input path.
+        """
+        from torch._functorch.aot_autograd import aot_function
+
+        def fw_compiler(gm, example_inputs):
+            return gm
+
+        compiled_fn = aot_function(lambda x: x * 2, fw_compiler=fw_compiler)
+
+        elem = torch.randn(4, 4)
+        r1 = compiled_fn(AsyncCollectiveTensor(elem))
+        self.assertEqual(r1, elem * 2)
+
+        plain = torch.randn(4, 4)
+        r2 = compiled_fn(plain)
+        self.assertEqual(r2, plain * 2)
 
     def test_act_guard_recompiles(self):
         """

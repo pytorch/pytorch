@@ -149,7 +149,11 @@ def _fuse_activations(code: str) -> str:
         ):
             assigns[stmt.targets[0].id] = stmt.value
 
-    def inline(node: ast.expr, seen: OrderedSet[str] = OrderedSet()) -> ast.expr:
+    _EMPTY_SET: OrderedSet[str] = OrderedSet()
+
+    def inline(node: ast.expr, seen: OrderedSet[str] | None = None) -> ast.expr:
+        if seen is None:
+            seen = _EMPTY_SET
         # Fully inline temporary assignments so the expression tree only refers
         # to function parameters (accum / read buffers) and literal constants.
         if isinstance(node, ast.Name) and node.id in assigns:
@@ -284,6 +288,12 @@ class CutlassEVTOpsMixIn:
         return str(float(value))
 
     @staticmethod
+    def neg(x0: str) -> str:
+        # Use subtraction from zero instead of unary minus because the
+        # CUTLASS PythonASTFrontend has visit_BinOp but no visit_UnaryOp.
+        return f"(0.0 - {x0})"
+
+    @staticmethod
     def mul(x0: str, x1: str) -> str:
         return CutlassEVTOpsMixIn._infix_bin_op("*", x0, x1)
 
@@ -378,9 +388,9 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
         self.accumulator_node_name: str = accumulator_node_name  #
         self.body: IndentedBuffer = IndentedBuffer(1)  # The body buffer for codegen
         self.var_counter: Iterator[int] = itertools.count()
-        self.store_name_to_value: dict[str, OpsValue] = (
-            dict()
-        )  # Aliases for subexpression functors
+        self.store_name_to_value: dict[
+            str, OpsValue
+        ] = {}  # Aliases for subexpression functors
         self.reads: OrderedSet[str] = OrderedSet([])
         # Used for creating example tensors
         self.var_name_to_buffer_name: dict[str, str] = {
@@ -408,6 +418,8 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
         cutlass_template_node_name: str,
         epilogue_nodes: list[BaseSchedulerNode],
         removed_buffers: OrderedSet[str],
+        fn_name: str = "fn",
+        as_standalone_function: bool = False,
     ) -> tuple[list[str], list[str], dict[str, Any], str]:
         codegen = CutlassEVTCodegen(cutlass_template_node_name, removed_buffers)
         handler = _AssignmentFormatter(codegen)
@@ -415,7 +427,10 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
         with virtualized.V.set_ops_handler(handler):
             for s_node in epilogue_nodes:
                 node = s_node.node
-                assert isinstance(node, ComputedBuffer)
+                if not isinstance(node, ComputedBuffer):
+                    raise AssertionError(
+                        f"expected node to be a ComputedBuffer, got {type(node)}"
+                    )
                 with codegen.set_cur_node(node):
                     index_vars = CutlassEVTCodegen.get_index_vars(node)
                     node.get_store_function()(index_vars)
@@ -426,16 +441,26 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
             codegen.get_reads(),
             codegen.get_writes(),
             codegen.get_renames(),
-            codegen.get_value(),
+            codegen.get_value(
+                fn_name=fn_name,
+                as_standalone_function=as_standalone_function,
+            ),
         )
 
-    def get_value(self) -> str:
+    def get_value(
+        self,
+        fn_name: str = "fn",
+        as_standalone_function: bool = False,
+    ) -> str:
+        ret = self._render_return_statement()
+        if as_standalone_function:
+            ret = "    " + ret
         return _fuse_activations(
             linesep.join(
                 [
-                    self._render_input_signature(),
+                    self._render_input_signature(fn_name),
                     self.body.getvalue(),
-                    self._render_return_statement(),
+                    ret,
                 ]
             )
         )
@@ -486,23 +511,24 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
         if name not in self.removed_buffers:
             if index:
                 self._check_indexing(name, index)
-            assert value.value != _ACCUMULATOR_ARG_NAME, (
-                "Cannot store accumulator arg name"
-            )
+            if value.value == _ACCUMULATOR_ARG_NAME:
+                raise AssertionError("Cannot store accumulator arg name")
             self.var_name_to_buffer_name[value.value] = name
             self.store_name_to_value[name] = value
             self.last_stored_var_name = value.value
         return None
 
     def _get_cur_node(self) -> ComputedBuffer:
-        assert self.cur_node
+        if not self.cur_node:
+            raise AssertionError("expected cur_node to be set")
         return self.cur_node
 
     @staticmethod
     def get_index_vars(node: ComputedBuffer) -> Sequence[sympy.Expr]:
         data = node.data
         # TODO mlazos: relax this, cutlass supports reductions and other ops
-        assert isinstance(data, Pointwise)
+        if not isinstance(data, Pointwise):
+            raise AssertionError(f"expected data to be Pointwise, got {type(data)}")
         return data._index(data.ranges)
 
     def _get_current_index_vars(self) -> Sequence[sympy.Expr]:
@@ -549,7 +575,7 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
         # Same length: direct comparison
         if len(left_list) == len(right_list):
             return all(
-                _provably_equal_or_zero(l, r) for l, r in zip(left_list, right_list)
+                _provably_equal_or_zero(lv, rv) for lv, rv in zip(left_list, right_list)
             )
         # Different lengths: allow compatible reshapes where trailing strides match.
         # This handles view/reshape between template output and consumer, e.g.,
@@ -566,18 +592,19 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
             for i in range(n)
         )
 
-    def _render_input_signature(self) -> str:
+    def _render_input_signature(self, fn_name: str = "fn") -> str:
         arguments = ", ".join(
             [_ACCUMULATOR_ARG_NAME]
             + [name for name in self.reads if name != self.accumulator_node_name]
         )
-        return f"def fn({arguments}):"
+        return f"def {fn_name}({arguments}):"
 
     def _render_return_statement(self) -> str:
         return_vars = OrderedSet(
             op_v.value for op_v in self.store_name_to_value.values()
         )
-        assert "D" in return_vars
+        if "D" not in return_vars:
+            raise AssertionError(f"expected 'D' in return_vars, got {return_vars}")
         return f"return {', '.join(return_vars)}"
 
     def _tmp_var(self) -> str:

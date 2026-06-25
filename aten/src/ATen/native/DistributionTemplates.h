@@ -299,8 +299,8 @@ at::Tensor& uniform_impl_(at::Tensor& self, double from, double to, std::optiona
             "uniform_ expects to-from <= std::numeric_limits<", toString(self.scalar_type()),
             ">::max(), but found to=", to, " and from=", from,
             " which result in to-from to exceed the limit");
-      from = std::min(std::max(from, min), max);
-      to = std::max(std::min(to, max), min);
+      from = std::clamp(from, min, max);
+      to = std::clamp(to, min, max);
     });
     CHECK_EMPTY_AND_RETURN(self);
     auto iter = at::TensorIterator::borrowing_nullary_op(self);

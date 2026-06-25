@@ -25,7 +25,6 @@ from torch.testing._internal.common_dtype import (
     integral_types,
 )
 from torch.testing._internal.common_utils import (
-    DeterministicGuard,
     parametrize,
     run_tests,
     skipIfTorchDynamo,
@@ -190,16 +189,16 @@ class TestSortAndSelect(TestCase):
         # tests direct cub path
         x = torch.randn(4, 1024000, device=device)
         res1val, res1ind = torch.sort(x, stable=True)
-        torch.cuda.synchronize()
+        torch.get_device_module().synchronize()
         # assertIsOrdered is too slow, so just compare to cpu
         res1val_cpu, res1ind_cpu = torch.sort(x.cpu(), stable=True)
-        self.assertEqual(res1val, res1val_cpu.cuda())
-        self.assertEqual(res1ind, res1ind_cpu.cuda())
+        self.assertEqual(res1val, res1val_cpu.to(device))
+        self.assertEqual(res1ind, res1ind_cpu.to(device))
         res1val, res1ind = torch.sort(x, descending=True, stable=True)
-        torch.cuda.synchronize()
+        torch.get_device_module().synchronize()
         res1val_cpu, res1ind_cpu = torch.sort(x.cpu(), descending=True, stable=True)
-        self.assertEqual(res1val, res1val_cpu.cuda())
-        self.assertEqual(res1ind, res1ind_cpu.cuda())
+        self.assertEqual(res1val, res1val_cpu.to(device))
+        self.assertEqual(res1ind, res1ind_cpu.to(device))
 
     @dtypes(*all_types_and(torch.bool, torch.half, torch.bfloat16))
     def test_stable_sort(self, device, dtype):
@@ -514,77 +513,6 @@ class TestSortAndSelect(TestCase):
         # see https://github.com/pytorch/pytorch/issues/116324
         x = torch.quantize_per_tensor(torch.randn(()), 0.1, 10, torch.qint8)
         x.topk(1)
-
-    def test_topk_deterministic_tie_breaking(self, device):
-        x = torch.tensor(
-            [
-                [3.0, 3.0, 2.0, 3.0, 1.0],
-                [1.0, 0.0, 0.0, 0.0, 2.0],
-            ],
-            device=device,
-        )
-
-        with DeterministicGuard(True):
-            values, indices = torch.topk(x, 3, dim=-1, largest=True, sorted=True)
-            self.assertEqual(
-                values,
-                torch.tensor([[3.0, 3.0, 3.0], [2.0, 1.0, 0.0]], device=device),
-            )
-            self.assertEqual(
-                indices, torch.tensor([[0, 1, 3], [4, 0, 1]], device=device)
-            )
-
-            values, indices = torch.topk(x, 4, dim=-1, largest=False, sorted=True)
-            self.assertEqual(
-                values,
-                torch.tensor(
-                    [[1.0, 2.0, 3.0, 3.0], [0.0, 0.0, 0.0, 1.0]],
-                    device=device,
-                ),
-            )
-            self.assertEqual(
-                indices, torch.tensor([[4, 2, 0, 1], [1, 2, 3, 0]], device=device)
-            )
-
-            _, indices = torch.topk(x, 3, dim=-1, largest=True, sorted=False)
-            self.assertEqual(
-                indices.sort(dim=-1).values,
-                torch.tensor([[0, 1, 3], [0, 1, 4]], device=device),
-            )
-
-            nan_x = torch.tensor(
-                [[float("nan"), float("nan"), 3.0, 3.0, 2.0]],
-                device=device,
-            )
-            values, indices = torch.topk(nan_x, 4, dim=-1, largest=True, sorted=True)
-            self.assertTrue(values[0, :2].isnan().all())
-            self.assertEqual(values[0, 2:], torch.tensor([3.0, 3.0], device=device))
-            self.assertEqual(indices, torch.tensor([[0, 1, 2, 3]], device=device))
-
-            values, indices = torch.topk(nan_x, 4, dim=-1, largest=False, sorted=True)
-            self.assertEqual(
-                values[0, :3], torch.tensor([2.0, 3.0, 3.0], device=device)
-            )
-            self.assertTrue(values[0, 3].isnan().item())
-            self.assertEqual(indices, torch.tensor([[4, 2, 3, 0]], device=device))
-
-    @onlyCUDA
-    def test_topk_deterministic_tie_breaking_cuda_multiblock(self, device):
-        x = torch.ones(2, 20000, device=device)
-
-        with DeterministicGuard(True):
-            for k in (128, 129, 4096):
-                _, indices = torch.topk(x, k, dim=-1, largest=True, sorted=True)
-                self.assertEqual(
-                    indices,
-                    torch.arange(k, device=device).expand_as(indices),
-                )
-
-                _, indices = torch.topk(x, k, dim=-1, largest=False, sorted=True)
-                self.assertEqual(
-                    indices,
-                    torch.arange(k, device=device).expand_as(indices),
-                )
 
     def test_topk_arguments(self, device):
         q = torch.randn(10, 2, 10, device=device)

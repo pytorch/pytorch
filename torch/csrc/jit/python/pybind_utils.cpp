@@ -455,7 +455,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
     }
     case TypeKind::InterfaceType: {
       auto interfaceType = type->expect<InterfaceType>();
-      // When converting an pyobj to an interface, we check if rhs
+      // When converting a pyobj to an interface, we check if rhs
       // is module or normal torchscript class, get the type and ivalue
       // from them correspondingly.
       c10::ClassTypePtr classType = nullptr;

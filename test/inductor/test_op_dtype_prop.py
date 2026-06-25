@@ -432,6 +432,29 @@ class TestCase(InductorTestCase):
         self.assertIn("triton_helpers.randint64", code)
         self.assertIn(".to(tl.int64)", code)
 
+    @requires_gpu()
+    @parametrize("dynamic", [True, False])
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_int64_symint_not_downcast_to_int32_index_expr(self, dynamic):
+        def fn(x, hi):
+            h = hi.item()
+            torch._check_is_size(h)
+            torch._check(h > 2**31)
+            return torch.randint(
+                0, h, (x.shape[0],), device=x.device, dtype=torch.int64
+            )
+
+        x = torch.zeros(4, device=GPU_TYPE)
+        hi = torch.tensor(2**31 + 1234, device=GPU_TYPE, dtype=torch.int64)
+        cfn = torch.compile(fn, dynamic=dynamic, fullgraph=True)
+        got, codes = run_and_get_code(cfn, x, hi)
+        code = "\n".join(codes)
+        self.assertTrue(bool((got >= 0).all()))
+        self.assertTrue(bool((got < hi.item()).all()))
+        self.assertIn("'ks1': 'i64'", code)
+        self.assertIn("triton_helpers.randint64", code)
+        self.assertIn(".to(tl.int64)", code)
+
 
 instantiate_device_type_tests(
     TestCase, globals(), only_for=("cuda", "xpu"), allow_xpu=True

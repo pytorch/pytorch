@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: releng"]
 name: nightly
 
 on:
@@ -41,6 +42,7 @@ jobs:
     uses: ./.github/workflows/_link_check.yml
     with:
       runner: ${{ needs.get-label-type.outputs.label-type }}
+      docker-image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/ci-image:pytorch-linux-jammy-linter-${{ needs.get-label-type.outputs.ci-docker-hash }}
       ref:    ${{ github.sha }}
     secrets: inherit
 
@@ -133,6 +135,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: update-commit-hash
     strategy:
+      fail-fast: false
       matrix:
         include:
           - repo-name: vision

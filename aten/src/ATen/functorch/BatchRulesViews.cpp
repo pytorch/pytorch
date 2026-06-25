@@ -88,6 +88,13 @@ namespace at::functorch {
 
 namespace{
 
+std::tuple<Tensor, std::optional<int64_t>> clone_batch_rule_result(
+    const Tensor& result,
+    std::optional<int64_t> result_bdim) {
+  return std::make_tuple(
+      result.clone(at::MemoryFormat::Contiguous), result_bdim);
+}
+
 std::tuple<Tensor, std::optional<int64_t>> unsqueeze_batch_rule(
     const Tensor& self,
     std::optional<int64_t> self_bdim,
@@ -96,6 +103,14 @@ std::tuple<Tensor, std::optional<int64_t>> unsqueeze_batch_rule(
   auto rank = rankWithoutBatchDim(self, self_bdim);
   dim = maybe_wrap_dim(dim, rank + 1) + 1;
   return std::make_tuple(self_.unsqueeze(dim), 0);
+}
+
+std::tuple<Tensor, std::optional<int64_t>> unsqueeze_copy_batch_rule(
+    const Tensor& self,
+    std::optional<int64_t> self_bdim,
+    int64_t dim) {
+  auto [result, result_bdim] = unsqueeze_batch_rule(self, self_bdim, dim);
+  return clone_batch_rule_result(result, result_bdim);
 }
 
 // NB: repeat is not actually a view, but it is in this file
@@ -219,6 +234,13 @@ std::tuple<Tensor, std::optional<int64_t>> squeeze_batch_rule(const Tensor& self
   return std::make_tuple(std::move(result), std::optional<int64_t>(new_batch_idx));
 }
 
+std::tuple<Tensor, std::optional<int64_t>> squeeze_copy_batch_rule(
+    const Tensor& self,
+    std::optional<int64_t> bdim) {
+  auto [result, result_bdim] = squeeze_batch_rule(self, bdim);
+  return clone_batch_rule_result(result, result_bdim);
+}
+
 std::tuple<Tensor, std::optional<int64_t>> squeeze_dims_batch_rule(
     const Tensor& self, std::optional<int64_t> bdim, IntArrayRef dims) {
   TORCH_INTERNAL_ASSERT(bdim.has_value());
@@ -251,9 +273,20 @@ std::tuple<Tensor, std::optional<int64_t>> squeeze_dims_batch_rule(
   return std::make_tuple(self.squeeze(adjusted_dims), std::optional<int64_t>(updated_batch_idx));
 }
 
+std::tuple<Tensor, std::optional<int64_t>> squeeze_copy_dims_batch_rule(
+    const Tensor& self, std::optional<int64_t> bdim, IntArrayRef dims) {
+  auto [result, result_bdim] = squeeze_dims_batch_rule(self, bdim, dims);
+  return clone_batch_rule_result(result, result_bdim);
+}
+
 std::tuple<Tensor, std::optional<int64_t>> squeeze_dim_batch_rule(
     const Tensor& self, std::optional<int64_t> bdim, int64_t dim) {
   return squeeze_dims_batch_rule(self, bdim, {dim});
+}
+
+std::tuple<Tensor, std::optional<int64_t>> squeeze_copy_dim_batch_rule(
+    const Tensor& self, std::optional<int64_t> bdim, int64_t dim) {
+  return squeeze_copy_dims_batch_rule(self, bdim, {dim});
 }
 
 std::tuple<Tensor, std::optional<int64_t>> select_batching_rule(const Tensor& self, std::optional<int64_t> bdim, int64_t dim, c10::SymInt index) {
@@ -370,6 +403,17 @@ transpose_int_batch_rule(
   return std::make_tuple(std::move(result), 0);
 }
 
+std::tuple<Tensor, std::optional<int64_t>>
+transpose_copy_int_batch_rule(
+    const Tensor& self,
+    std::optional<int64_t> self_bdim,
+    int64_t dim0,
+    int64_t dim1) {
+  auto [result, result_bdim] =
+      transpose_int_batch_rule(self, self_bdim, dim0, dim1);
+  return clone_batch_rule_result(result, result_bdim);
+}
+
 std::tuple<Tensor, std::optional<int64_t>> permute_batching_rule(
     const Tensor &self, std::optional<int64_t> self_bdim, IntArrayRef dims)
 {
@@ -386,6 +430,33 @@ std::tuple<Tensor, std::optional<int64_t>> permute_batching_rule(
   }
 
   return std::make_tuple(self_.permute(dims_), 0);
+}
+
+std::tuple<Tensor, std::optional<int64_t>> permute_copy_batching_rule(
+    const Tensor &self, std::optional<int64_t> self_bdim, IntArrayRef dims)
+{
+  auto [result, result_bdim] = permute_batching_rule(self, self_bdim, dims);
+  return clone_batch_rule_result(result, result_bdim);
+}
+
+std::tuple<Tensor, std::optional<int64_t>> t_copy_batching_rule(
+    const Tensor& self,
+    std::optional<int64_t> self_bdim) {
+  auto logical_rank = rankWithoutBatchDim(self, self_bdim);
+  TORCH_CHECK(
+      logical_rank <= 2,
+      "t() expects a tensor with <= 2 dimensions, but self is ",
+      logical_rank,
+      "D");
+  if (logical_rank < 2) {
+    auto self_ = moveBatchDimToFront(self, self_bdim);
+    std::optional<int64_t> result_bdim;
+    if (self_bdim.has_value()) {
+      result_bdim = 0;
+    }
+    return clone_batch_rule_result(self_, result_bdim);
+  }
+  return transpose_copy_int_batch_rule(self, self_bdim, 0, 1);
 }
 
 std::tuple<Tensor, std::optional<int64_t>> select_backward_batch_rule(
@@ -583,14 +654,19 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(repeat, repeat_batch_rule);
   VMAP_SUPPORT(_unsafe_view, _unsafe_view_batch_rule);
   VMAP_SUPPORT(unsqueeze, unsqueeze_batch_rule);
+  VMAP_SUPPORT(unsqueeze_copy, unsqueeze_copy_batch_rule);
   m.impl("resize_", resize__plumbing);
   VMAP_SUPPORT2(select, int, select_batching_rule);
   VMAP_SUPPORT(squeeze, squeeze_batch_rule);
+  VMAP_SUPPORT(squeeze_copy, squeeze_copy_batch_rule);
   VMAP_SUPPORT2(squeeze, dim, squeeze_dim_batch_rule);
+  VMAP_SUPPORT2(squeeze_copy, dim, squeeze_copy_dim_batch_rule);
   VMAP_SUPPORT2(squeeze, dims, squeeze_dims_batch_rule);
+  VMAP_SUPPORT2(squeeze_copy, dims, squeeze_copy_dims_batch_rule);
   VMAP_SUPPORT(_reshape_alias, _reshape_alias_batch_rule);
   VMAP_SUPPORT(roll, roll_batch_rule);
   VMAP_SUPPORT(permute, permute_batching_rule);
+  VMAP_SUPPORT(permute_copy, permute_copy_batching_rule);
   VMAP_SUPPORT(diagonal, diagonal_batching_rule);
   VMAP_SUPPORT(diagonal_backward, diagonal_backward_batch_rule);
   VMAP_SUPPORT(select_backward, select_backward_batch_rule);
@@ -604,8 +680,10 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(unfold, unfold_batch_rule);
   VMAP_SUPPORT2(slice, Tensor, slice_batch_rule);
   VMAP_SUPPORT2(transpose, int, transpose_int_batch_rule);
+  VMAP_SUPPORT2(transpose_copy, int, transpose_copy_int_batch_rule);
   m.impl("t", native::t);  // CompositeExplicitAutograd, should not go in BatchRulesDecompositions.cpp
   m.impl("t_", native::t_);  // CompositeExplicitAutograd, should not go in BatchRulesDecompositions.cpp
+  VMAP_SUPPORT(t_copy, t_copy_batching_rule);
   VMAP_SUPPORT(diag_embed, diag_embed_batch_rule);
   VMAP_SUPPORT(narrow_copy, narrow_copy_batch_rule);
   VMAP_SUPPORT2(unsafe_split, Tensor, unsafe_split_batch_rule);

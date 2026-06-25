@@ -273,7 +273,9 @@ def sig_for_ops(opname: str) -> list[str]:
             f"def {opname}(self, other: object) -> _bool: ...",
         ]
     elif name in asymmetric_comparison_ops:
-        return [f"def {opname}(self, other: Tensor | Number | _complex) -> Tensor: ..."]
+        return [
+            f"def {opname}(self, other: Tensor | Number | PySymType | _complex) -> Tensor: ..."
+        ]
     elif name in unary_ops:
         return [f"def {opname}(self) -> Tensor: ..."]
     if name in to_py_type_ops:
@@ -2002,6 +2004,7 @@ def gen_pyi(
             "cfloat",
             "complex128",
             "cdouble",
+            "bcomplex32",
             "quint8",
             "qint8",
             "qint32",

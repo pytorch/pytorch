@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <condition_variable>
 #include <deque>
 #include <mutex>
@@ -587,6 +588,15 @@ class AOTInductorModelContainer {
     // constant as we walk.
     size_t main_blob_idx = 0;
     size_t aux_cpu_blob_idx = 0;
+#ifdef USE_CUDA
+    // Opt-in pinned async staging pool for the delta-update H2D copies below.
+    // nullptr (default / on allocation failure) keeps the throttled path.
+    auto staging_pool = tryMakeConstantsStagingPool();
+#endif
+    auto _update_start = std::chrono::steady_clock::now();
+    AOTI_LOG_LOADING(
+        "update_constant_buffer: starting copy of " << num_constants
+                                                    << " constants");
     for (size_t idx = 0; idx < num_constants; idx++) {
       if (models_[0]->constant_from_folded(static_cast<int64_t>(idx))) {
         continue;
@@ -689,11 +699,37 @@ class AOTInductorModelContainer {
         offset = constants_internal_offset_[this_main_idx] /
             aoti_torch_dtype_element_size(dtype);
 #elif USE_CUDA
-        aoti_cuda_memcpy_throttled(
-            internal_constants_ptr,
-            user_constant_ptr,
-            static_cast<size_t>(constant_size),
-            cudaMemcpyDefault);
+        // Pinned-async staging only helps for pageable host sources (which
+        // trigger CUDA/HIP's device-wide implicit sync) and is only safe for
+        // them, since copyH2DViaStage CPU-reads the source. Device / pinned
+        // sources use the synchronous throttled copy, which serializes with
+        // prior device work on the source; the pool's private stream would not.
+        // Detect per constant: a single update may mix pageable-host and
+        // device/pinned sources, so the type cannot be cached across the loop.
+        bool use_staging = false;
+        if (staging_pool != nullptr) {
+          cudaPointerAttributes attrs{};
+          cudaError_t pointer_attrs_result =
+              cudaPointerGetAttributes(&attrs, user_constant_ptr);
+          if (pointer_attrs_result != cudaSuccess) {
+            (void)cudaGetLastError();
+            use_staging = true;
+          } else {
+            use_staging = (attrs.type == cudaMemoryTypeUnregistered);
+          }
+        }
+        if (use_staging) {
+          staging_pool->copyH2DViaStage(
+              internal_constants_ptr,
+              user_constant_ptr,
+              static_cast<size_t>(constant_size));
+        } else {
+          aoti_cuda_memcpy_throttled(
+              internal_constants_ptr,
+              user_constant_ptr,
+              static_cast<size_t>(constant_size),
+              cudaMemcpyDefault);
+        }
 #else
         memcpy(internal_constants_ptr, user_constant_ptr, constant_size);
 #endif
@@ -718,7 +754,32 @@ class AOTInductorModelContainer {
       target.map->insert_or_assign(
           constant_name, RAIIAtenTensorHandle(tensor_handle));
     }
+#ifdef USE_CUDA
+    // Synchronize the staging stream (surfacing any async copy error) and
+    // release the pinned buffers before the updated constants are observed by
+    // callers.
+    if (staging_pool != nullptr) {
+      staging_pool->finish();
+    }
+    staging_pool.reset();
+#endif
+    auto _update_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                          std::chrono::steady_clock::now() - _update_start)
+                          .count();
+    AOTI_LOG_LOADING(
+        "update_constant_buffer: copy completed in " << _update_ms << " ms");
     target.update_array(models_[0].get());
+
+#ifdef USE_CUDA
+    // S638065: the GPU constant copies above run on the default stream (raw
+    // cudaMemcpy), while run_const_fold launches the fold on
+    // getCurrentCUDAStream(). On ROCm the default stream is not implicitly
+    // ordered with the fold's stream, so without this the fold could read
+    // not-yet-copied weights and bake stale values into the folded constants.
+    // Wait for the copies to complete before returning, so any subsequent fold
+    // (on any stream) sees the updated weights.
+    AOTI_RUNTIME_CUDA_CHECK(cudaStreamSynchronize(0));
+#endif // USE_CUDA
   }
 
   void swap_constant_buffer() {

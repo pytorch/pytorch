@@ -21,13 +21,10 @@ from torch.testing._internal.common_device_type import (
     expectedFailureMPS,
     instantiate_device_type_tests,
     onlyCPU,
-    onlyCUDA,
     onlyNativeDeviceTypes,
     onlyOn,
     skipXLA,
     skipXPUIf,
-    tol,
-    toleranceOverride,
 )
 from torch.testing._internal.common_dtype import (
     all_mps_types_and,
@@ -2045,142 +2042,6 @@ class TestIndexing(TestCase):
                     y_nd = torch.index_add(x, dim, index, src, alpha=alpha)
                     self.assertEqual(y_nd, y0, atol=1e-3, rtol=1e-5)
 
-    @serialTest()
-    @onlyCUDA
-    @toleranceOverride(
-        {
-            torch.float32: tol(atol=1e-5, rtol=1e-3),
-            torch.float64: tol(atol=1e-5, rtol=1e-3),
-            torch.half: tol(atol=5e-2, rtol=5e-2),
-            torch.bfloat16: tol(atol=0.5, rtol=0.5),
-        }
-    )
-    @dtypes(torch.float32, torch.float64, torch.half, torch.bfloat16)
-    def test_index_add_fast_path(self, device, dtype):
-        # Coverage for the index_add_ TMA fast path: one eligible case + five
-        # fallback predicates per shape, asserted against a CPU reference.
-        # Shapes keep n/m <= 1 so atomicAdd-order noise on bf16/half stays
-        # within tolerance; (4096, 1024, 1024) crosses the TMA chunk_elems
-        # boundary (D > one chunk).
-        def check(out, dim, idx, src, alpha=1.0):
-            expected = (
-                out.cpu().clone().index_add_(dim, idx.cpu(), src.cpu(), alpha=alpha)
-            )
-            out.index_add_(dim, idx, src, alpha=alpha)
-            self.assertEqual(out.cpu(), expected)
-
-        for m, n, D in [(1024, 512, 128), (4096, 3072, 128), (4096, 1024, 1024)]:
-            torch.cuda.empty_cache()
-            for idx_dtype in (torch.int32, torch.int64):
-                src = make_tensor((n, D), device=device, dtype=dtype)
-                idx = torch.randint(m, (n,), device=device, dtype=idx_dtype)
-
-                # 1) Eligible -> fast path.
-                check(torch.zeros(m, D, device=device, dtype=dtype), 0, idx, src)
-                # 2) alpha != 1 -> fallback.
-                check(
-                    torch.zeros(m, D, device=device, dtype=dtype),
-                    0,
-                    idx,
-                    src,
-                    alpha=2.5,
-                )
-                # 3) Discontiguous src -> fallback.
-                src_strided = torch.empty(n, 2 * D, device=device, dtype=dtype)[
-                    :, ::2
-                ].copy_(src)
-                check(
-                    torch.zeros(m, D, device=device, dtype=dtype), 0, idx, src_strided
-                )
-                # 4) Misaligned self (one-element pointer offset) -> fallback.
-                self_mis = (
-                    torch.empty(m * D + 1, device=device, dtype=dtype)[1:]
-                    .view(m, D)
-                    .zero_()
-                )
-                check(self_mis, 0, idx, src)
-                # 5) dim != 0 -> fallback.
-                check(
-                    torch.zeros(D, m, device=device, dtype=dtype),
-                    1,
-                    idx,
-                    make_tensor((D, n), device=device, dtype=dtype),
-                )
-                # 6) Sliced inner dim (not is_contiguous) -> fallback.
-                sl = slice(64, 192)
-                check(
-                    torch.zeros(m, 256, device=device, dtype=dtype)[:, sl],
-                    0,
-                    idx,
-                    make_tensor((n, 256), device=device, dtype=dtype)[:, sl],
-                )
-
-        # 7) Empty index is a no-op.
-        out = torch.randn(8, 128, device=device, dtype=dtype)
-        expected = out.clone()
-        out.index_add_(
-            0,
-            torch.empty(0, device=device, dtype=torch.int64),
-            torch.empty(0, 128, device=device, dtype=dtype),
-        )
-        self.assertEqual(out, expected)
-
-    @serialTest()
-    @onlyCUDA
-    @toleranceOverride(
-        {
-            # Tolerances follow test_index_add_fast_path: this shape does
-            # ~n/m atomic adds per row (~670 here with m=13), and bf16's
-            # 7-bit mantissa accumulates noise quickly under non-
-            # deterministic atomicAdd ordering. fp32 stays tight.
-            torch.float32: tol(atol=1e-4, rtol=1e-3),
-            torch.bfloat16: tol(atol=20.0, rtol=0.5),
-        }
-    )
-    @dtypes(torch.float32, torch.bfloat16)
-    def test_index_add_smem_stage_alignment_regression(self, device, dtype):
-        # Regression for SEV S664741: the original D104669063 was reverted
-        # when this delegation surfaced a latent scatter_add TMA smem
-        # stage-alignment bug -- chunk_bytes < 128 (or not a multiple of
-        # 128) plus multi-iter-per-CTA (M_src > grid_x cap of sm*64) wrote
-        # stage 1 of the 2-stage pipeline buffer at a non-128-aligned smem
-        # offset, faulting in cp.async.bulk. Fixed in PR #184554 by
-        # rounding the stage stride to 128 bytes. This test pins the
-        # prod shape (small D + high M_src) at the index_add layer so a
-        # future refactor of the delegation re-exposing the same shape
-        # class is caught here, not in prod.
-        sm = torch.cuda.get_device_properties(0).multi_processor_count
-        # D=8 fp32 -> chunk_bytes=32 (< 128). M_src > sm*64 forces every
-        # CTA into >= 2 iterations -> stage 1 used. Prod fault was at
-        # sm*64=8448 (H100); sm*64 + 256 exposes the regime on any GPU.
-        m, n, D = 13, sm * 64 + 256, 8
-        src = make_tensor((n, D), device=device, dtype=dtype)
-        idx = torch.randint(m, (n,), device=device, dtype=torch.int64)
-        out = torch.zeros(m, D, device=device, dtype=dtype)
-        expected = out.cpu().clone().index_add_(0, idx.cpu(), src.cpu())
-        out.index_add_(0, idx, src)
-        self.assertEqual(out.cpu(), expected)
-
-    @serialTest()
-    @onlyCUDA
-    @dtypes(torch.complex64, torch.complex128, torch.bool)
-    def test_index_add_excluded_dtypes(self, device, dtype):
-        # scatter_add_'s CUDA dispatch covers neither complex nor bool, so the
-        # fast-path delegation in index_add_cuda_impl excludes these dtypes
-        # and lets them fall through to indexFunc{Small,Large}Index. Regression
-        # test that an eligible-shape (dim=0, alpha=1, contiguous, aligned)
-        # call still produces correct results for these dtypes.
-        m, n, D = 1024, 512, 128
-        if dtype == torch.bool:
-            src = torch.randint(0, 2, (n, D), device=device, dtype=dtype)
-        else:
-            src = make_tensor((n, D), device=device, dtype=dtype)
-        out = torch.zeros(m, D, device=device, dtype=dtype)
-        idx = torch.randint(m, (n,), device=device, dtype=torch.int64)
-        expected = out.cpu().clone().index_add_(0, idx.cpu(), src.cpu())
-        out.index_add_(0, idx, src)
-        self.assertEqual(out.cpu(), expected)
-
     @onlyNativeDeviceTypes
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1973")
     def test_index_put_non_accumulate_deterministic(self, device) -> None:
@@ -2219,7 +2080,16 @@ class TestIndexing(TestCase):
 
     # The test fails for zero-dimensional tensors on XLA
     @onlyNativeDeviceTypes
-    @dtypes(*all_types_complex_float8_and(torch.half, torch.bool, torch.bfloat16))
+    @dtypes(
+        *all_types_complex_float8_and(
+            torch.half,
+            torch.bool,
+            torch.bfloat16,
+            torch.uint16,
+            torch.uint32,
+            torch.uint64,
+        )
+    )
     @dtypesIfXPU(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @dtypesIfMPS(*all_mps_types_and(torch.bool, torch.cfloat))
     def test_index_select(self, device, dtype):

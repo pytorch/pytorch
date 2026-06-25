@@ -1439,7 +1439,7 @@ def _unflatten_orig_param_states(
     cpu_offload: bool,
 ) -> None:
     """
-    Given a output state dict, ``output_states``, which the keys are FQNs to the
+    Given an output state dict, ``output_states``, which the keys are FQNs to the
     original parameters (not FlatParameters nor parameter ID), and the values
     are gathered states, unflatten the states to the original dimensions.
 

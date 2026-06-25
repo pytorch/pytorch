@@ -21,6 +21,7 @@ import torch
 import torch._inductor.async_compile
 from torch import multiprocessing as mp, nn
 from torch._dynamo import reset
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.exc import BackendCompilerFailed
 from torch._dynamo.testing import rand_strided, reset_rng_state
 from torch._dynamo.utils import counters, same
@@ -29,8 +30,8 @@ from torch._inductor.autotune_process import (
     _TestBenchmarkRequest,
     AsyncAutotuner,
     AutotuneProcessPool,
-    CUDA_VISIBLE_DEVICES,
     ExternKernelBenchmarkRequest,
+    get_visible_devices_env_var,
     TritonBenchmarkRequest,
     TuningProcess,
     TuningProcessPool,
@@ -40,6 +41,7 @@ from torch._inductor.codegen.common import WorkspaceArg
 from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout, FlexibleLayout
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
+from torch._inductor.runtime.hints import DeviceProperties
 from torch._inductor.runtime.triton_heuristics import CachingAutotuner, pointwise
 from torch._inductor.scheduler import Scheduler
 from torch._inductor.select_algorithm import (
@@ -188,7 +190,18 @@ class TestMaxAutotune(TestCase):
         Verify that `max_autotune` includes all pointwise configs from
         `max_autotune_pointwise` for 1D, 2D, and 3D pointwise kernels.
         """
-        triton_meta = {"device": object()}
+        # Fake device properties for this unit test; no CUDA state is needed.
+        triton_meta = {
+            "device": DeviceProperties(
+                type="cuda",
+                index=0,
+                multi_processor_count=1,
+                cc=80,
+                major=8,
+                max_threads_per_block=1024,
+                warp_size=32,
+            )
+        }
         inductor_meta_common = {"autotune_pointwise": False}
 
         for size_hints in (
@@ -4295,20 +4308,22 @@ class TestTuningProcessPool(TestCase):
 
         tuning_pool.shutdown()
 
-    @skipIfXpu(msg="XPU not support VISIBLE_DEVICES")
     @config.patch({"autotune_multi_device": True})
     def test_tuning_pool_multiple_devices(self):
-        # Adapt the test to the available devices (and whether CUDA_VISIBLE_DEVICES
+        # Adapt the test to the available devices (and whether the backend-specific
+        # visible devices env var
         # is already set in the environment); use a subset of the available devices
         # to ensure only the subset are visible to the sub-processes.
-        if CUDA_VISIBLE_DEVICES in os.environ:
-            visible_devices = os.environ[CUDA_VISIBLE_DEVICES].split(",")
+        visible_devices_env_var = get_visible_devices_env_var(GPU_TYPE)
+        if visible_devices_env_var in os.environ:
+            visible_devices = os.environ[visible_devices_env_var].split(",")
         else:
-            visible_devices = [str(d) for d in range(torch.cuda.device_count())]
+            device_interface = get_interface_for_device(GPU_TYPE)
+            visible_devices = [str(d) for d in range(device_interface.device_count())]
 
-        cuda_visible_devices = ",".join(visible_devices[-2:])
+        selected_visible_devices = ",".join(visible_devices[-2:])
         with unittest.mock.patch.dict(
-            os.environ, {CUDA_VISIBLE_DEVICES: cuda_visible_devices}
+            os.environ, {visible_devices_env_var: selected_visible_devices}
         ):
             tuning_pool = TuningProcessPool()
 
@@ -4320,6 +4335,24 @@ class TestTuningProcessPool(TestCase):
         self.assertEqual(timings[choice2], choice2.bmreq.result)
 
         tuning_pool.shutdown()
+
+    def test_get_visible_devices_env_var(self):
+        self.assertEqual(get_visible_devices_env_var("cuda"), "CUDA_VISIBLE_DEVICES")
+        self.assertEqual(get_visible_devices_env_var("xpu"), "ZE_AFFINITY_MASK")
+
+    @config.patch({"autotune_multi_device": True})
+    def test_get_device_list_with_affinity_mask(self):
+        env_var = get_visible_devices_env_var(GPU_TYPE)
+        env_value = "1,3"
+
+        with (
+            mock.patch(
+                "torch._inductor.autotune_process.get_interface_for_device"
+            ) as get_interface_mock,
+            unittest.mock.patch.dict(os.environ, {env_var: env_value}, clear=False),
+        ):
+            get_interface_mock.return_value.device_count.return_value = 4
+            self.assertEqual(TuningProcessPool.get_device_list(), [1, 3])
 
     def test_add_feedback_saver(self):
         """Test that add_feedback_saver correctly adds feedback functions."""

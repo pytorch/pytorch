@@ -181,7 +181,7 @@ class TorchTensor(ir.Tensor):
         # On big-endian machines, call the super's tobytes() which returns a little-endian result.
         if sys.byteorder == "big":
             return super().tobytes()
-        # Implement tobytes to support native PyTorch types so we can use types like bloat16
+        # Implement tobytes to support native PyTorch types so we can use types like bfloat16
         # Reading from memory directly is also more efficient because
         # it avoids copying to a NumPy array
         _, data = self._get_cbytes()
@@ -271,7 +271,7 @@ def _set_shape_type(
 
         value.shape = ir.Shape(dims)
     elif isinstance(meta_val, (int, torch.SymInt)):
-        # aten::sym_size output is a int, not a tensor, which stands
+        # aten::sym_size output is an int, not a tensor, which stands
         # for the size of one dim. We treat it as a scalar.
         value.dtype = ir.DataType.INT64
         value.shape = ir.Shape([])

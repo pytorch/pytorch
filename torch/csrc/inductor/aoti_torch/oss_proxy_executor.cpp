@@ -211,9 +211,8 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
       std::string device_string = serialized_arg_val["type"].get<std::string>();
       if (serialized_arg_val.contains("index") &&
           serialized_arg_val["index"].is_number()) {
-        auto index = serialized_arg_val["index"].get<int>();
-        device_string += ":" + std::to_string(index);
-        device_->set_index(static_cast<int8_t>(index));
+        device_string +=
+            ":" + std::to_string(serialized_arg_val["index"].get<int>());
       }
 
       c10::Device device(device_string);
@@ -615,14 +614,9 @@ std::unique_ptr<OSSCallTorchBindKernel> OSSProxyExecutor::
 
 OSSProxyExecutor::OSSProxyExecutor(
     const std::string& json_path,
-    bool is_cpu,
+    const std::string& device_str,
     std::optional<std::unordered_map<std::string, c10::IValue>> custom_objs) {
-  if (is_cpu) {
-    device_ = std::make_unique<c10::Device>(c10::DeviceType::CPU);
-  } else {
-    int device_idx = -1;
-    device_ = std::make_unique<c10::Device>(c10::DeviceType::CUDA, device_idx);
-  }
+  device_ = std::make_unique<c10::Device>(device_str);
 
   // If custom_objs is provided, use it instead of loading from
   // custom_objs_config.json If custom_objs is not provided, try to load from
@@ -705,9 +699,27 @@ OSSProxyExecutor::OSSProxyExecutor(
           get_call_torch_bind_kernel(serialized_node);
       op_kernels_.emplace_back(std::move(op_kernel));
     } else {
-      c10::OperatorHandle op_handle =
-          c10::Dispatcher::singleton().findSchemaOrThrow(
+      c10::OperatorHandle op_handle = [&]() {
+        try {
+          return c10::Dispatcher::singleton().findSchemaOrThrow(
               opName.c_str(), overloadName.c_str());
+        } catch (const c10::Error&) {
+          if (serialized_node.contains("metadata") &&
+              serialized_node["metadata"].value(
+                  "torch_library_custom_op", "") == "1") {
+            TORCH_CHECK(
+                false,
+                "Could not find schema for ",
+                target,
+                ". Custom operators created via torch.library.custom_op cannot "
+                "be run via AOTI without Python environment. Consider using C++ "
+                "TORCH_LIBRARY APIs. See the Custom Operators Landing Page "
+                "https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html "
+                "for more details.");
+          }
+          throw;
+        }
+      }();
       const c10::FunctionSchema& schema = op_handle.schema();
 
       const auto& schema_args = schema.arguments();
