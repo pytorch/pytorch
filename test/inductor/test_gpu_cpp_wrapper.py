@@ -6,15 +6,20 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from typing import NamedTuple
 
 import torch
 from torch._inductor import config
 from torch._inductor.codegen.common import TritonScratchWorkspace
-from torch._inductor.codegen.cpp_wrapper_gpu import DeferredTritonCallWrapper
+from torch._inductor.codegen.cpp_wrapper_gpu import (
+    CppWrapperGpu,
+    DeferredTritonCallWrapper,
+)
 from torch._inductor.codegen.cuda.device_op_overrides import CUDADeviceOpOverrides
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import IndentedBuffer
+from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -93,6 +98,27 @@ def _register_fbcode_cpp_wrapper_arg_helper_op(m, device):
 class TestGpuWrapper(InductorTestCase):
     device = GPU_TYPE
 
+    def test_cpp_wrapper_compile_timing_recorded(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+
+        from torch._dynamo.utils import compilation_time_metrics
+        from torch._inductor.utils import fresh_cache
+
+        def fn(x, y):
+            return (x @ y).relu()
+
+        x = torch.randn(64, 64, device=self.device)
+        y = torch.randn(64, 64, device=self.device)
+        compilation_time_metrics.pop("cpp_wrapper_compile", None)
+        with fresh_cache():
+            compiled = torch.compile(options={"cpp_wrapper": True})(fn)
+            result = compiled(x, y)
+        self.assertEqual(result, fn(x, y))
+        self.assertIn("cpp_wrapper_compile", compilation_time_metrics)
+        durations = compilation_time_metrics["cpp_wrapper_compile"]
+        self.assertTrue(any(t > 0 for t in durations))
+
     def test_aoti_debug_printer_works_on_constants(self):
         batch_size = 32
         seq_length = 50
@@ -113,6 +139,70 @@ class TestGpuWrapper(InductorTestCase):
             }
         )(test_fn)
         comp()
+
+    def test_cpp_wrapper_gpu_debug_sync_codegen(self):
+        wrapper = CppWrapperGpu.__new__(CppWrapperGpu)
+        wrapper.device = "cuda"
+
+        debug_sync = IndentedBuffer()
+        wrapper.generate_debug_sync(debug_sync)
+        code = debug_sync.getvalue()
+        self.assertIn("AOTI_RUNTIME_CUDA_CHECK", code)
+        self.assertIn("DeviceSynchronize", code)
+        self.assertNotIn("torch.cuda.synchronize()", code)
+
+        wrapper.prefix = IndentedBuffer()
+        wrapper._lazy_kernel_names = []
+        graph = SimpleNamespace(is_dual_wrapper_mode=False)
+        with (
+            config.patch({"triton.debug_sync_graph": True}),
+            V.set_graph_handler(graph),
+        ):
+            wrapper._codegen_entry_impl_prologue()
+        code = wrapper.prefix.getvalue()
+        self.assertIn("AOTI_RUNTIME_CUDA_CHECK", code)
+        self.assertIn("DeviceSynchronize", code)
+        self.assertNotIn("torch.cuda.synchronize()", code)
+
+        wrapper.device = "xpu"
+        with self.assertRaisesRegex(
+            NotImplementedError, "triton debug sync is not supported"
+        ):
+            wrapper.generate_debug_sync(IndentedBuffer())
+
+    def test_debug_sync_graph(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+        if GPU_TYPE != "cuda":
+            self.skipTest("CUDA/ROCm-only cpp_wrapper debug sync")
+
+        def test_fn(x):
+            return x * 2
+
+        compiled = torch.compile(
+            options={"cpp_wrapper": True, "triton.debug_sync_graph": True}
+        )(test_fn)
+        x = torch.randn(8, device=self.device)
+        with torch.utils._device.DeviceContext(self.device):
+            result = compiled(x)
+        self.assertEqual(result, x * 2)
+
+    def test_debug_sync_kernel(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+        if GPU_TYPE != "cuda":
+            self.skipTest("CUDA/ROCm-only cpp_wrapper debug sync")
+
+        def test_fn(x):
+            return x * 2
+
+        compiled = torch.compile(
+            options={"cpp_wrapper": True, "triton.debug_sync_kernel": True}
+        )(test_fn)
+        x = torch.randn(8, device=self.device)
+        with torch.utils._device.DeviceContext(self.device):
+            result = compiled(x)
+        self.assertEqual(result, x * 2)
 
     def test_non_tensor_args_wrapped_on_cpu(self):
         if not RUN_GPU:

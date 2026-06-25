@@ -1392,8 +1392,6 @@ class TestOptimRenewed(TestCase):
         all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
             device, dtype, optim_info
         )
-        param = torch.randn((5, 1), device=device, dtype=dtype, requires_grad=True)
-        old_param = param.detach().clone()
 
         def closure():
             return torch.tensor([1], device=device, dtype=dtype)
@@ -1406,13 +1404,13 @@ class TestOptimRenewed(TestCase):
             if kwargs.get("weight_decay", 0) != 0:
                 continue
 
-            # AdamW/Muon params will be updated regardless of grads due to lr, so make lr smaller
-            if optim_cls.__name__ == "AdamW" or optim_cls.__name__ == "Muon":
-                kwargs["lr"] = (
-                    torch.tensor(1e-5)
-                    if isinstance(kwargs.get("lr", 1e-5), torch.Tensor)
-                    else 1e-5
-                )
+            # AdamW and Muon have a nonzero default weight_decay, which decays
+            # params even with zero grads; override it so the step is a true no-op.
+            if optim_cls.__name__ in ("AdamW", "Muon"):
+                kwargs["weight_decay"] = 0
+
+            param = torch.randn((5, 1), device=device, dtype=dtype, requires_grad=True)
+            old_param = param.detach().clone()
 
             if kwargs.get("differentiable", False):
                 params = [param.detach()]

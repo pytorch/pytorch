@@ -5,6 +5,7 @@ import contextlib
 import dataclasses
 import enum
 import functools
+import hashlib
 import importlib
 import inspect
 import io
@@ -46,9 +47,8 @@ from typing import (
     TYPE_CHECKING,
     TypeAlias,
     TypeGuard,
-    TypeVar,
 )
-from typing_extensions import dataclass_transform, ParamSpec, Self
+from typing_extensions import dataclass_transform, ParamSpec, Self, TypeVar
 from unittest import mock
 
 import sympy
@@ -960,7 +960,15 @@ def get_fused_kernel_name(
         ]
     else:
         raise NotImplementedError
-    return "_".join(["fused"] + sources)
+    name = "_".join(["fused"] + sources)
+    # On Windows the default MAX_PATH (260) limit means a long descriptive
+    # kernel name can push the Triton cache path past the limit, making the
+    # generated .ttir unopenable. Cap the name and append a hash to keep it
+    # both short and unique.
+    if is_windows() and len(name) > 50:
+        h = hashlib.sha256(name.encode("utf-8")).hexdigest()[:8]
+        name = f"{name[:41].rstrip('_')}_{h}"
+    return name
 
 
 def get_kernel_metadata(
@@ -1082,7 +1090,7 @@ def get_kernel_metadata(
                     continue
                 if hasattr(n.read_writes, "reads") and n.read_writes.reads is not None:
                     for r in n.read_writes.reads:
-                        # Remove the dupricated inputs
+                        # Remove the duplicated inputs
                         if r.name in all_reads:
                             continue
                         all_reads.add(r.name)
@@ -3165,9 +3173,10 @@ def get_device_tflops(dtype: torch.dtype) -> float:
     We don't want to throw errors in this function. First check to see if the device is in device_info.py,
     then fall back to the inaccurate triton estimation.
     """
-    ds_tops = datasheet_tops(
-        dtype, is_tf32=torch.backends.cuda.matmul.fp32_precision == "tf32"
-    )
+    is_tf32 = torch.backends.cuda.matmul.fp32_precision == "tf32"
+    if torch.xpu.is_available():
+        is_tf32 = torch.backends.mkldnn.allow_tf32
+    ds_tops = datasheet_tops(dtype, is_tf32=is_tf32)
     if ds_tops is not None:
         return ds_tops
 
@@ -3233,11 +3242,10 @@ def get_max_numwarps() -> int:
         max_threads_per_block = props.max_threads_per_block
         if max_threads_per_block is None:
             raise AssertionError("expected max_threads_per_block to be set")
-    else:
-        # Defaults
-        warp_size = 32
-        max_threads_per_block = 1024
-    return max_threads_per_block // warp_size
+        return max_threads_per_block // warp_size
+
+    log.debug("CUDA is not available; defaulting max num warps to 32")
+    return 32
 
 
 def is_welford_reduction(reduction_type: str) -> bool:
@@ -4079,7 +4087,7 @@ def triton_type_to_torch(dtype: str) -> torch.dtype:
 
 def is_same_tensor(data: torch.Tensor, value: torch.Tensor) -> bool:
     return (
-        not data.is_mkldnn
+        not data.is_mkldnn  # type: ignore[bad-return]
         and data.size() == value.size()
         and data.stride() == value.stride()
         and data.dtype == value.dtype

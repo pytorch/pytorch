@@ -735,6 +735,15 @@ class CppOverrides(OpOverrides):
     @staticmethod
     # pyrefly: ignore [bad-override]
     def abs(x):
+        if isinstance(x, CppCSEVariable) and x.dtype in (
+            torch.uint8,
+            torch.uint16,
+            torch.uint32,
+            torch.uint64,
+        ):
+            # abs(x) == x for unsigned types; return identity to avoid
+            # -Wtautological-compare and unsigned unary minus warnings.
+            return f"{x}"
         return f"std::abs({x})"
 
     @staticmethod
@@ -1293,6 +1302,14 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def abs(x):
+        if isinstance(x, CppCSEVariable) and x.dtype in (
+            torch.uint8,
+            torch.uint16,
+            torch.uint32,
+            torch.uint64,
+        ):
+            # Unsigned identity bypass for vectorized path
+            return f"{x}"
         return f"{x}.abs()"
 
     @staticmethod
@@ -3187,6 +3204,8 @@ class CppVecKernel(CppKernel):
                 n_idx = self._get_num_vectors(torch.int64)
                 cdtype = DTYPE_TO_CPP[dtype]
                 index = ops.index_expr(index, torch.int64).value
+                if isinstance(index, CppCSEVariable) and not index.is_vec:
+                    index = self.broadcast(index)
                 if not (isinstance(index, CppCSEVariable) and index.is_vec):
                     raise AssertionError(
                         "expected isinstance(index, CppCSEVariable) and index.is_vec"

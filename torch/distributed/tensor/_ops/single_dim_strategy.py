@@ -108,6 +108,8 @@ def _insert_single_dim_replication_strategy(
     Inserts the [Replicate(), Replicate(), ...] strategy after asserting that such strategy does not yet exist.
     For ops with masked-off outputs (e.g. backward ops with output_mask), output positions
     where output_tensor_meta is None are set to None in the all-Replicate rule.
+    Output positions that are explicitly None in every strategy are also preserved
+    as None in the inserted rule.
     """
     for strategy in single_dim_strategies_with_placeholders:
         if all(isinstance(p, Replicate) or p is None for p in strategy):
@@ -117,10 +119,17 @@ def _insert_single_dim_replication_strategy(
         Replicate()
     ] * total_len
     # Set None for masked-off output positions based on output_tensor_meta
-    if isinstance(output_tensor_meta, Sequence):
+    if isinstance(output_tensor_meta, Sequence) and not isinstance(
+        output_tensor_meta, TensorMeta
+    ):
         for i, meta in enumerate(output_tensor_meta):
             if meta is None and i < num_outputs:
                 replicate_rule[i] = None
+    for i in range(num_outputs):
+        if single_dim_strategies_with_placeholders and all(
+            strategy[i] is None for strategy in single_dim_strategies_with_placeholders
+        ):
+            replicate_rule[i] = None
     single_dim_strategies_with_placeholders.insert(0, replicate_rule)
     return single_dim_strategies_with_placeholders
 
@@ -253,11 +262,19 @@ def _build_output_specs(
         )
 
     def _spec_for_output(out_idx: int) -> DTensorSpec | None:
+        maybe_placements = tuple(out[out_idx] for out in per_mesh_dim_placements)
+        # All mesh dims agreeing on None means the whole output has no
+        # DTensorSpec, e.g. local scalar SDPA philox outputs.
+        if all(placement is None for placement in maybe_placements):
+            return None
+        if any(placement is None for placement in maybe_placements):
+            raise AssertionError(
+                f"Output {out_idx} mixes None with placements across mesh dims: "
+                f"{maybe_placements}"
+            )
         if output_metas[out_idx] is None:
             return None
-        placements = tuple(
-            cast(Placement, out[out_idx]) for out in per_mesh_dim_placements
-        )
+        placements = tuple(cast(Placement, placement) for placement in maybe_placements)
         return DTensorSpec(mesh, placements, tensor_meta=output_metas[out_idx])
 
     if num_outputs > 1:
@@ -376,13 +393,22 @@ class _PreparedSingleDimStrategy:
             func(op_schema.op, op_schema.args_meta, op_schema.kwargs_meta),
         )
 
-        # Validate strategy length against the op schema. The schema is the
-        # ground truth for num_outputs; combined with num_inputs (which counts
-        # all tensor args + kwargs), it gives the expected strategy length.
-        # A mismatch means the strategy is missing kwargs placements or has
-        # extra entries.
+        # Validate strategy length against the op outputs. Tuple outputs are
+        # aligned with output_tensor_meta so mixed Tensor/non-Tensor returns
+        # keep their None slots for wrapping the real result tuple.
         if len(strategies_with_placeholders) > 0:
-            schema_num_outputs = len(op_schema.op._schema.returns)
+            if isinstance(output_tensor_meta, Sequence) and not isinstance(
+                output_tensor_meta, TensorMeta
+            ):
+                schema_num_outputs = len(output_tensor_meta)
+            elif any(
+                isinstance(r.type, torch.ListType) for r in op_schema.op._schema.returns
+            ):
+                schema_num_outputs = len(strategies_with_placeholders[0]) - num_inputs
+            else:
+                schema_num_outputs = sum(
+                    1 for r in op_schema.op._schema.returns if "Tensor" in str(r.type)
+                )
             expected_len = schema_num_outputs + num_inputs
             actual_len = len(strategies_with_placeholders[0])
             if actual_len != expected_len:
@@ -539,6 +565,7 @@ def _schema_args_match(
     *,
     candidate_lists_are_elements: bool = False,
     allow_base_trailing_defaults: bool = False,
+    allow_kwonly_scalar_defaults: bool = False,
 ) -> bool:
     """Return whether candidate args can safely reuse the base op strategy.
 
@@ -554,7 +581,15 @@ def _schema_args_match(
         ):
             return False
         if base_arg.kwarg_only != candidate_arg.kwarg_only:
-            return False
+            base_arg_type = _normalize_schema_type(base_arg)
+            if not (
+                allow_kwonly_scalar_defaults
+                and base_arg.kwarg_only
+                and not candidate_arg.kwarg_only
+                and base_arg_type == "number"
+                and _has_default_value(base_arg)
+            ):
+                return False
 
     if len(candidate_args) == len(base_args):
         return True
@@ -623,6 +658,7 @@ def _resolve_foreach_elementwise_overload(foreach_op: OpOverload) -> OpOverload 
             foreach_args,
             candidate_lists_are_elements=True,
             allow_base_trailing_defaults=True,
+            allow_kwonly_scalar_defaults=True,
         ):
             # Prefer exact schema matches over matches that rely on defaulted
             # trailing args, e.g. add.Tensor over add.Scalar when possible.

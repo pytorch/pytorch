@@ -685,13 +685,15 @@ def get_runner_prefix(
             else:
                 prefixes.append(label)
 
-    # ARC experiment takes precedence: return a fixed label prefix
     if use_arc:
-        arc_prefix = (
-            ARC_CANARY_LABEL_PREFIX + ARC_LABEL_PREFIX
-            if is_canary
-            else ARC_LABEL_PREFIX
-        )
+        if fleet_prefix:
+            arc_prefix = "lf-"
+        else:
+            arc_prefix = (
+                ARC_CANARY_LABEL_PREFIX + ARC_LABEL_PREFIX
+                if is_canary
+                else ARC_LABEL_PREFIX
+            )
         return RunnerPrefixResult(
             prefix=arc_prefix, use_arc=True, amd_do_prefix=amd_do_prefix
         )

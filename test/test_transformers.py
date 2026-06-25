@@ -1586,6 +1586,31 @@ class TestSDPAFailureModes(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
+    @parametrize(
+        "backend",
+        [
+            None,
+            SDPBackend.ERROR,
+            SDPBackend.MATH,
+            SDPBackend.FLASH_ATTENTION,
+            SDPBackend.EFFICIENT_ATTENTION,
+            SDPBackend.CUDNN_ATTENTION,
+            SDPBackend.OVERRIDEABLE,
+        ],
+        name_fn=lambda backend: "default" if backend is None else backend.name.lower(),
+    )
+    def test_attn_mask_and_is_causal_errors_before_dispatch(self, device, backend):
+        q = torch.randn(2, 4, 8, 16, device=device)
+        k = torch.randn(2, 4, 8, 16, device=device)
+        v = torch.randn(2, 4, 8, 16, device=device)
+        attn_mask = torch.zeros(8, 8, device=device)
+
+        expected_error = "_scaled_dot_product_attention: Explicit attn_mask should not be set when is_causal=True"
+        context = contextlib.nullcontext() if backend is None else sdpa_kernel(backends=[backend])
+        with context:
+            with self.assertRaisesRegex(RuntimeError, expected_error):
+                F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask, is_causal=True)
+
     @onlyCUDA
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION or not isSM8XDevice or not isSM120Device,
@@ -2174,6 +2199,40 @@ class TestSDPAFailureModes(NNTestCase):
             # For value, since each input position contributed 1/num_queries to each output, the grad should sum accordingly
             # for all ones grad_output, each value position receives grad of 1 (because sum of all softmax weights per row is 1)
             self.assertTrue(torch.allclose(value.grad, torch.ones_like(value)))
+
+    @largeTensorTest("12GB", "cuda")
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support Efficient Attention")
+    def test_mem_eff_attention_large_seq_len_attn_mask_index_overflow(self):
+        # When an attn_mask is given and seq_len**2 > 2**32, the kernel used to
+        # compute the per-row mask offset (query_start * bias_strideM) in
+        # 32-bit arithmetic, which wraps around and silently corrupts the
+        # output of all rows past 2**32 // seq_len.
+        device = torch.device("cuda")
+        dtype = torch.bfloat16
+
+        seq_len = 66000  # seq_len**2 > 2**32
+        head_dim = 16
+        torch.manual_seed(0)
+        make_tensor = partial(
+            torch.randn, 1, 1, seq_len, head_dim, device=device, dtype=dtype
+        )
+        query, key, value = make_tensor() * 0.1, make_tensor() * 0.1, make_tensor()
+
+        # additive causal mask: 0 on/below the diagonal, -inf above
+        attn_mask = torch.full(
+            (seq_len, seq_len), float("-inf"), device=device, dtype=dtype
+        ).triu_(1)
+
+        with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
+            ref = torch.nn.functional.scaled_dot_product_attention(
+                query, key, value, is_causal=True
+            )
+            out = torch.nn.functional.scaled_dot_product_attention(
+                query, key, value, attn_mask=attn_mask
+            )
+        # before the fix, all rows past 2**32 // seq_len were garbage
+        self.assertEqual(out, ref, atol=5e-3, rtol=5e-3)
 
 
 def _get_block_size_n(device, head_dim, is_dropout, is_causal):
@@ -4178,7 +4237,11 @@ class TestSDPACudaOnly(NNTestCase):
         "Regression is specific to the ROCm CK SDPA backend",
     )
     @setSdpaBackendsToDefaultFinally
-    def test_flash_attention_ck_gqa_seqlen_q_1(self, device):
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    @parametrize("n_heads", [[8, 2], [16, 8]])
+    @parametrize("seqlen_k", [4, 256, 1024])
+    def test_flash_attention_ck_gqa_seqlen_q_1(self, device, dtype: torch.dtype,
+                                               n_heads: list[int], seqlen_k: int):
         # Regression: the CK flash-attention host wrapper mis-ported the
         # seqlenq_ngroups_swapped optimization, which triggers for GQA
         # (num_heads_q > num_heads_kv) with seqlen_q == 1 (single-query decode).
@@ -4193,43 +4256,41 @@ class TestSDPACudaOnly(NNTestCase):
         ):
             self.skipTest("CK SDPA backend not available")
         batch_size, head_dim, seqlen_q = 8, 128, 1
-        for dtype in (torch.float16, torch.bfloat16):
-            for num_heads_q, num_heads_kv in ((8, 2), (16, 8)):
-                for seqlen_k in (4, 256, 1024):
-                    q = torch.rand(
-                        batch_size, num_heads_q, seqlen_q, head_dim,
-                        device=device, dtype=dtype,
-                    )
-                    k = torch.rand(
-                        batch_size, num_heads_kv, seqlen_k, head_dim,
-                        device=device, dtype=dtype,
-                    )
-                    v = torch.rand(
-                        batch_size, num_heads_kv, seqlen_k, head_dim,
-                        device=device, dtype=dtype,
-                    )
-                    with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
-                        out = F.scaled_dot_product_attention(
-                            q, k, v, dropout_p=0.0, is_causal=False, enable_gqa=True
-                        )
-                    with sdpa_kernel(backends=[SDPBackend.MATH]):
-                        ref = F.scaled_dot_product_attention(
-                            q.double(), k.double(), v.double(),
-                            dropout_p=0.0, is_causal=False, enable_gqa=True,
-                        )
-                    msg = (
-                        f"dtype={dtype}, num_heads_q={num_heads_q}, "
-                        f"num_heads_kv={num_heads_kv}, seqlen_k={seqlen_k}"
-                    )
-                    self.assertFalse(
-                        torch.isnan(out).any().item(),
-                        f"CK GQA seqlen_q==1 produced NaN ({msg})",
-                    )
-                    self.assertFalse(
-                        torch.isinf(out).any().item(),
-                        f"CK GQA seqlen_q==1 produced Inf ({msg})",
-                    )
-                    self.assertEqual(out, ref.to(out.dtype), atol=2e-2, rtol=2e-2)
+        num_heads_q, num_heads_kv = n_heads
+        q = torch.rand(
+            batch_size, num_heads_q, seqlen_q, head_dim,
+            device=device, dtype=dtype,
+        )
+        k = torch.rand(
+            batch_size, num_heads_kv, seqlen_k, head_dim,
+            device=device, dtype=dtype,
+        )
+        v = torch.rand(
+            batch_size, num_heads_kv, seqlen_k, head_dim,
+            device=device, dtype=dtype,
+        )
+        with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
+            out = F.scaled_dot_product_attention(
+                q, k, v, dropout_p=0.0, is_causal=False, enable_gqa=True
+            )
+        with sdpa_kernel(backends=[SDPBackend.MATH]):
+            ref = F.scaled_dot_product_attention(
+                q.double(), k.double(), v.double(),
+                dropout_p=0.0, is_causal=False, enable_gqa=True,
+            )
+        msg = (
+            f"dtype={dtype}, num_heads_q={num_heads_q}, "
+            f"num_heads_kv={num_heads_kv}, seqlen_k={seqlen_k}"
+        )
+        self.assertFalse(
+            torch.isnan(out).any().item(),
+            f"CK GQA seqlen_q==1 produced NaN ({msg})",
+        )
+        self.assertFalse(
+            torch.isinf(out).any().item(),
+            f"CK GQA seqlen_q==1 produced Inf ({msg})",
+        )
+        self.assertEqual(out, ref.to(out.dtype), atol=2e-2, rtol=2e-2)
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION,
@@ -5196,7 +5257,7 @@ class TestSDPAXpuOnly(NNTestCase):
         make_tensor = partial(torch.rand, device=device, dtype=dtype, requires_grad=False)
         batch, num_heads, seqlen = 32, 2, 32
 
-        max_supported_head_dim = 192
+        max_supported_head_dim = 256
         q_shape = SdpaShape(batch, seqlen, num_heads, max_supported_head_dim)
         k_shape = SdpaShape(batch, seqlen, num_heads, max_supported_head_dim)
         v_shape = SdpaShape(batch, seqlen, num_heads, max_supported_head_dim)

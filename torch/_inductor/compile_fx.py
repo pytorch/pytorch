@@ -72,7 +72,9 @@ from torch._inductor.cudagraph_utils import (
 )
 from torch._inductor.custom_graph_pass import CustomPartitionerFn
 from torch._inductor.debug import (
+    create_kernel_information_json,
     create_mapping_pre_post_grad_nodes,
+    get_kernel_information_jsons,
     save_args_for_compile_fx_inner,
 )
 from torch._inductor.output_code import (
@@ -838,12 +840,21 @@ def compile_fx_inner(
             "inductor_compile",
             is_backward=kwargs["is_backward"],
         )
-        return wrap_compiler_debug(_compile_fx_inner, compiler_name="inductor")(
+        compiled_graph = wrap_compiler_debug(
+            _compile_fx_inner, compiler_name="inductor"
+        )(
             gm,
             example_inputs,
             compile_region_name=compile_region_name,
             **kwargs,
         )
+        if config.trace.provenance_tracking_to_timeline:
+            compile_id = torch._guards.CompileContext.current_compile_id()
+            kernel_information_jsons = get_kernel_information_jsons()
+            key = str((f"Torch-Compiled Region: {compile_id}", kwargs["is_backward"]))
+            if key not in kernel_information_jsons:
+                kernel_information_jsons[key] = create_kernel_information_json()
+        return compiled_graph
 
 
 @time_and_log(attr="compilation time (in seconds)")
@@ -1444,7 +1455,7 @@ class _InProcessFxCompile(FxCompile):
                     },
                     payload_fn=lambda: inductor_post_grad_graph_str,
                 )
-                if config.trace.provenance_tracking_level != 0:
+                if config.effective_provenance_tracking_level() != 0:
                     provenance_tracking_json = (
                         torch.fx.traceback.get_graph_provenance_json(gm.graph)
                     )
@@ -1654,7 +1665,7 @@ class _InProcessFxCompile(FxCompile):
                     # Dump provenance artifacts for debugging trace
                     inductor_provenance_tracking_node_mappings = None
                     inductor_kernel_stack_trace_str = None
-                    if config.trace.provenance_tracking_level != 0:
+                    if config.effective_provenance_tracking_level() != 0:
                         inductor_provenance_tracking_node_mappings = json.dumps(
                             torch._inductor.debug.dump_inductor_provenance_info()
                         )
@@ -1784,6 +1795,14 @@ class _InProcessFxCompile(FxCompile):
                                 V.graph.device_node_mapping
                             )
                         )
+
+                    if (
+                        cudagraphs
+                        and not V.graph.disable_cudagraphs_reason
+                        and graph.scheduler.count_kernel_nodes(graph.scheduler.nodes)
+                        == 0
+                    ):
+                        V.graph.kernel_free_cudagraph = True
 
                     self._compile_stats[type(self)].codegen_and_compile += 1
 
@@ -1938,6 +1957,7 @@ def cudagraphify(
     constants: tuple[torch.Tensor, ...] = (),
     placeholders: Sequence[PlaceholderInfo] = (),
     mutated_input_idxs: tuple[int, ...] = (),
+    kernel_free_cudagraph: bool = False,
 ) -> Callable[..., Any]:
     from torch._inductor.cudagraph_trees import (
         cudagraphify_impl as new_cudagraphify_impl,
@@ -1954,10 +1974,14 @@ def cudagraphify(
             constants=constants,
             placeholders=placeholders,
             mutated_input_idxs=mutated_input_idxs,
+            kernel_free_cudagraph=kernel_free_cudagraph,
             compile_id=torch._guards.CompileContext.current_compile_id(),
         )
     else:
-        cudagraphify_fn = cudagraphify_impl
+        cudagraphify_fn = functools.partial(
+            cudagraphify_impl,
+            kernel_free_cudagraph=kernel_free_cudagraph,
+        )
 
     thread_local = threading.local()
 
@@ -2000,10 +2024,15 @@ def cudagraphify_impl(
     model: Callable[..., Any],
     inputs: list[torch.Tensor],
     static_input_idxs: Sequence[int] = (),
+    *,
+    kernel_free_cudagraph: bool = False,
 ) -> Callable[[list[InputType]], Any]:
     """
     Assumes inputs[static_input_idxs[i]] are always the same memory address
     """
+    if kernel_free_cudagraph:
+        return model
+
     check_input_idxs = get_input_idxs_to_check(inputs, static_input_idxs)  # type: ignore[arg-type]
     # pyrefly: ignore [annotation-mismatch, redefinition]
     static_input_idxs: OrderedSet[int] = OrderedSet(
@@ -2729,7 +2758,7 @@ def run_pre_grad_passes(
     )
     torch._inductor.debug._pre_grad_graph_id = id(model_.graph)
 
-    if config.trace.provenance_tracking_level == 1:
+    if config.effective_provenance_tracking_level() == 1:
         for node in model_.graph.nodes:
             if node.stack_trace:
                 torch._inductor.debug._inductor_pre_grad_node_stack_trace[node.name] = (
@@ -2982,7 +3011,7 @@ def _compile_fx_main(
         _use_lazy_graph_module(dynamo_config.use_lazy_graph_module),
         enable_python_dispatcher(),
         torch.fx.traceback.preserve_node_meta(
-            config.trace.provenance_tracking_level == 1
+            config.effective_provenance_tracking_level() == 1
         ),
         torch._inductor.debug.reset_provenance_globals(),
     ):
@@ -3406,7 +3435,7 @@ def autograd_cache_key(
         _use_lazy_graph_module(dynamo_config.use_lazy_graph_module),
         enable_python_dispatcher(),
         torch.fx.traceback.preserve_node_meta(
-            config.trace.provenance_tracking_level == 1
+            config.effective_provenance_tracking_level() == 1
         ),
         torch._inductor.debug.reset_provenance_globals(),
         V.set_fake_mode(fake_mode),

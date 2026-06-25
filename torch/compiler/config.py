@@ -35,6 +35,7 @@ __all__ = [
     "wrap_top_frame",
     "reorderable_logging_functions",
     "force_disable_caches",
+    "compile_on_one_rank",
 ]
 
 
@@ -104,6 +105,19 @@ force_disable_caches: bool = Config(
 )
 """
 Force disables all caching -- This will take precedence over and override any other caching flag
+"""
+
+compile_on_one_rank: bool = Config(
+    default=False,
+    env_name_default=[
+        "TORCH_COMPILE_ON_ONE_RANK",
+        "TORCH_DISTRIBUTED_COMPILE_ON_ONE_RANK",
+    ],
+)
+"""
+When enabled, device- and rank-specific values (devices, process groups) are computed at
+runtime via custom ops rather than baked in at compile time, so a graph can be compiled on
+one rank and run on all ranks. Read across the stack: make_fx, inductor, and distributed.
 """
 
 dynamic_sources: str = Config(

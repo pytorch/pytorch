@@ -83,7 +83,7 @@ static void _propagate_functional_input_mutation(
   if (unwrapped.unsafeGetTensorImpl() != wrapped_inner.unsafeGetTensorImpl()) {
     if (unwrapped.sym_nbytes() != wrapped_inner.sym_nbytes()) {
       // Functions might resize zero-sized inputs, which we need to reflect
-      // ehre.
+      // here.
       unwrapped.resize__symint(wrapped_inner.sym_sizes());
     }
     // If the input tensor's metadata was mutated, then use as_strided_()
@@ -156,8 +156,10 @@ static Tensor _remove_batch_dim(
   if (!has_level(self, level)) {
     auto self_sizes = self.sym_sizes();
     VmapSymDimVector expanded_sizes(self_sizes.begin(), self_sizes.end());
-    expanded_sizes.insert(expanded_sizes.begin() + out_dim, batch_size);
-    auto result = self.expand_symint(expanded_sizes);
+    int64_t ndim = expanded_sizes.size();
+    int64_t wrapped_out_dim = at::maybe_wrap_dim(out_dim, ndim + 1);
+    expanded_sizes.insert(expanded_sizes.begin() + wrapped_out_dim, batch_size);
+    auto result = self.unsqueeze(wrapped_out_dim).expand_symint(expanded_sizes);
     return result;
   }
 

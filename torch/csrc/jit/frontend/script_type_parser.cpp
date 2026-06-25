@@ -145,7 +145,7 @@ std::optional<std::pair<TypePtr, int32_t>> ScriptTypeParser::parseBroadcastList(
   auto var = Var(subscript.value());
   auto subscript_exprs = subscript.subscript_exprs();
 
-  // handle the case where the BroadcastingList is wrapped in a Optional type
+  // handle the case where the BroadcastingList is wrapped in an Optional type
   if (var.name().name() == "Optional") {
     auto broadcast_list = parseBroadcastList(subscript_exprs[0]);
     if (broadcast_list) {

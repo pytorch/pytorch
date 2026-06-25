@@ -212,9 +212,13 @@ def associative_scan(
             raise ValueError(
                 f"Combine_mode must either 'pointwise' or 'generic', but got {cm}"
             )
-        if cm == "pointwise" and not all(l.device.type in ("cuda", "xpu") for l in lxs):
+        privateuse1_backend = torch._C._get_privateuse1_backend_name()
+        if cm == "pointwise" and not all(
+            l.device.type in ("cuda", "xpu", privateuse1_backend) for l in lxs
+        ):
             raise ValueError(
-                "For combine_mode='pointwise', all input tensors need to be on CUDA or XPU"
+                "For combine_mode='pointwise', all input tensors need to be on "
+                "CUDA, XPU, or a PrivateUse1 backend"
             )
 
         # Checks for xs

@@ -157,8 +157,8 @@ jobs:
     secrets: inherit
 
 
-  periodic-dynamo-benchmarks-cpu-build:
-    name: periodic-dynamo-benchmarks-cpu-build
+  periodic-inductor-benchmarks-cpu-build:
+    name: periodic-inductor-benchmarks-cpu-build
     uses: ./.github/workflows/_linux-build.yml
     needs: get-default-label-prefix
     with:
@@ -212,16 +212,16 @@ jobs:
       cuda-version: cpu
     secrets: inherit
 
-  periodic-dynamo-benchmarks-cpu-test:
-    name: periodic-dynamo-benchmarks-cpu-test
+  periodic-inductor-benchmarks-cpu-test:
+    name: periodic-inductor-benchmarks-cpu-test
     uses: ./.github/workflows/_linux-test.yml
     needs:
-      - periodic-dynamo-benchmarks-cpu-build
+      - periodic-inductor-benchmarks-cpu-build
       - get-default-label-prefix
     with:
-      build-environment: ${{ needs.periodic-dynamo-benchmarks-cpu-build.outputs.build-environment }}
-      docker-image: ${{ needs.periodic-dynamo-benchmarks-cpu-build.outputs.docker-image }}
-      test-matrix: ${{ needs.periodic-dynamo-benchmarks-cpu-build.outputs.test-matrix }}
+      build-environment: ${{ needs.periodic-inductor-benchmarks-cpu-build.outputs.build-environment }}
+      docker-image: ${{ needs.periodic-inductor-benchmarks-cpu-build.outputs.docker-image }}
+      test-matrix: ${{ needs.periodic-inductor-benchmarks-cpu-build.outputs.test-matrix }}
       use-arc: ${{ needs.get-default-label-prefix.outputs.use-arc == 'true' }}
       python-version: "3.10"
       compiler: gcc11

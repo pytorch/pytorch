@@ -291,6 +291,7 @@ if(USE_FLASH_ATTENTION)
         CK_USE_FNUZ_FP8
         CK_USE_GFX94
         CK_USE_XDL
+        ENABLE_CK
         __HIP_PLATFORM_AMD__=1
         __HIP_PLATFORM_HCC__=1
         CK_TILE_FMHA_FWD_FAST_EXP2=1
@@ -773,10 +774,6 @@ if(USE_MKLDNN_ACL)
     list(APPEND ATen_CPU_DEPENDENCY_LIBS ${ACL_LIBRARIES})
 endif()
 
-if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(s390x|ppc64le)$")
-  list(APPEND ATen_CPU_DEPENDENCY_LIBS cpuinfo)
-endif()
-
 if(NOT EMSCRIPTEN AND NOT INTERN_BUILD_MOBILE)
   if(NOT MSVC)
     # Bump up optimization level for sleef to -O1, since at -O0 the compiler
@@ -917,6 +914,7 @@ if(USE_MPS)
     include(../../../cmake/Metal.cmake)
 
     set(ATen_MPS_SRCS ${ATen_MPS_SRCS} ${mps_cpp} ${mps_mm} ${mps_h} ${native_mps_cpp} ${native_mps_mm} ${native_mps_h} ${native_sparse_mps_mm})
+    set(METALLIB_DEPS)
 
     if(CAN_COMPILE_METAL)
         foreach(SHADER ${native_mps_metal} ${native_mps_sparse_metal})
@@ -926,7 +924,7 @@ if(USE_MPS)
             metal_to_air(${SHADER} ${TGT_BASIC} "-std=metal3.1")
         endforeach()
         air_to_metallib(kernels_basic.metallib ${AIR_BASIC})
-        set(METALLIB_DEPS kernels_basic.metallib)
+        list(APPEND METALLIB_DEPS kernels_basic.metallib)
         if(CAN_COMPILE_METAL_40)
             foreach(SHADER ${native_mps_metal} ${native_mps_sparse_metal})
                 cmake_path(GET SHADER STEM TGT_STEM)
@@ -942,15 +940,15 @@ if(USE_MPS)
                           DEPENDS ${METALLIB_DEPS}
                           OUTPUT metallib_dummy.cpp
                           COMMENT "Updating metallibs timestamp")
-        add_custom_target(metallibs DEPENDS ${METALLIB_DEPS} metallib_dummy.cpp)
+        list(APPEND METALLIB_DEPS metallib_dummy.cpp)
     else()
-        file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/native/mps")
         foreach(SHADER ${native_mps_metal} ${native_mps_sparse_metal})
-            cmake_path(GET SHADER STEM TGT_STEM)
-            string(CONCAT SHADER_HDR_NAME  "${CMAKE_CURRENT_BINARY_DIR}" /native/mps/ ${TGT_STEM} "_metallib.h")
-            metal_to_metallib_h(${SHADER} ${SHADER_HDR_NAME})
+            metal_to_metallib_h(${SHADER})
+            list(APPEND METALLIB_DEPS ${SHADER_HDR})
         endforeach()
     endif()
+
+    add_custom_target(metallibs DEPENDS ${METALLIB_DEPS})
 endif()
 
 if(USE_ROCM)
@@ -1002,6 +1000,12 @@ foreach(HEADER ${generated_headers} ${cuda_generated_headers})
   # NB: Assumed to be flat
   install(FILES ${HEADER} DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen)
 endforeach()
+
+if(USE_XPU)
+  foreach(HEADER ${xpu_generated_headers})
+    install(FILES ${HEADER} DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen)
+  endforeach()
+endif()
 
 message("AT_INSTALL_INCLUDE_DIR ${AT_INSTALL_INCLUDE_DIR}/ATen/core")
 foreach(HEADER ${core_generated_headers})

@@ -499,7 +499,7 @@ static inline void mtl_setBuffer(encoder_t encoder, const TensorBase& t, unsigne
         [encoder setBytes:&val length:sizeof(val) atIndex:idx];
         return;
       }
-      [encoder setBytes:t.storage().data() length:t.element_size() atIndex:idx];
+      [encoder setBytes:t.const_data_ptr() length:t.element_size() atIndex:idx];
     } else {
       TORCH_CHECK(false, "Passed CPU tensor to MPS op");
     }

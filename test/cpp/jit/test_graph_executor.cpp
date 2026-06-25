@@ -47,16 +47,8 @@ TEST(GraphExecutorTest, runAsync_executor) {
   demo = DemoModule()
   torch.jit.save(torch.jit.script(demo), 'test_interpreter_async.pt')
   */
-  auto testModelFile = []() -> std::string {
-    std::string dir(__FILE__);
-    dir = dir.substr(0, dir.find_last_of("/\\") + 1);
-    auto candidate = dir + "test_interpreter_async.pt";
-    if (std::filesystem::exists(candidate))
-      return candidate;
-    // Installed binary: .pt is next to the executable.
-    auto exeDir = std::filesystem::read_symlink("/proc/self/exe").parent_path();
-    return (exeDir / "test_interpreter_async.pt").string();
-  }();
+  auto testModelFile =
+      resolveTestDataFile(__FILE__, "test_interpreter_async.pt");
   auto module = load(testModelFile);
   auto graph = module.get_method("forward").graph();
   GraphExecutor graphExecutor(graph, "");

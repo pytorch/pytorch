@@ -1,18 +1,15 @@
 # Owner(s): ["module: inductor"]
-import multiprocessing
 import operator
 import os
-import queue
 import subprocess
 import sys
 import tempfile
 import textwrap
-import traceback
+import types
 import unittest
-import warnings
 from threading import Event
+from unittest.mock import patch
 
-import torch
 import torch._inductor.config as config
 from torch._inductor.compile_worker.subproc_pool import (
     raise_testexc,
@@ -333,82 +330,68 @@ class TestSetTritonLibdevicePath(TestCase):
         self.assertEqual(knobs.nvidia.libdevice_path, expected)
 
 
-def _pin_driver_bad_fork_worker(q):
-    # Bad fork: force is_active() False (triton#9578) and check the pin makes
-    # driver.active resolve instead of raising "0 active drivers" (pytorch#184643).
-    try:
-        import triton
+class TestTritonCompileWorker(TestCase):
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    def test_worker_compile_triton_warm_cache_skips_gpu_driver_setup(self):
+        from torch._inductor.runtime import triton_helpers
+        from torch._inductor.runtime.compile_tasks import _worker_compile_triton
 
-        from torch._inductor.compile_worker.utils import _async_compile_initializer
+        class RaisingDriver:
+            @staticmethod
+            def is_active():
+                raise RuntimeError("0 active drivers ([]). There should only be one.")
 
-        nvidia = triton.backends.backends["nvidia"]
-        nvidia.driver.is_active = staticmethod(lambda: False)
-        triton.runtime.driver._active = None
+        class FakeKernel:
+            def __init__(self):
+                self.precompile_calls = []
+                self.prepared = False
 
-        _async_compile_initializer(os.getppid())
+            def precompile(self, warm_cache_only=False):
+                self.precompile_calls.append(warm_cache_only)
+                triton_helpers.set_driver_to_gpu()
 
-        active = triton.runtime.driver.active
-        is_nvidia = isinstance(active, nvidia.driver) or (
-            hasattr(active, "_obj") and isinstance(active._obj, nvidia.driver)
-        )
-        q.put(("ok", (type(active).__name__, is_nvidia)))
-    except BaseException:
-        q.put(("err", traceback.format_exc()))
+            def prepare_for_pickle(self):
+                self.prepared = True
 
+        kernel = FakeKernel()
 
-class TestPinTritonWorkerDriver(TestCase):
-    @unittest.skipIf(
-        not HAS_TRITON or not torch.cuda.is_available(), "requires triton + cuda"
-    )
-    def test_compile_worker_pins_driver_in_bad_fork(self):
-        # #184643: pin must resolve driver.active in a CUDA-forked worker.
-        if torch.version.hip is not None:
-            self.skipTest("bug and fix are nvidia-only")
-        torch.cuda.get_device_properties(0)  # CUDA init before the fork
-        ctx = multiprocessing.get_context("fork")
-        q = ctx.Queue()
-        p = ctx.Process(target=_pin_driver_bad_fork_worker, args=(q,))
-        p.daemon = True
-        with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore", message=r"os\.fork\(\) was called.*", category=RuntimeWarning
-            )
-            warnings.filterwarnings(
-                "ignore",
-                message=(
-                    r"This process .* is multi-threaded, use of fork\(\) "
-                    r"may lead to deadlocks in the child\."
-                ),
-                category=DeprecationWarning,
-            )
-            p.start()
-        p.join(60)
-        if p.is_alive():
-            p.terminate()
-            p.join()
-            self.fail("bad-fork driver worker timed out")
-        try:
-            kind, payload = q.get(timeout=5)
-        except queue.Empty:
-            self.fail(f"bad-fork driver worker exited without a result: {p.exitcode}")
-        self.assertEqual(kind, "ok", payload)
-        _name, is_nvidia = payload
-        self.assertTrue(
-            is_nvidia, f"driver.active was not the nvidia driver: {payload}"
-        )
+        def load_kernel():
+            triton_helpers.set_driver_to_gpu()
+            return kernel
+
+        fake_backends = {"nvidia": types.SimpleNamespace(driver=RaisingDriver)}
+        with patch.object(triton_helpers.triton.backends, "backends", fake_backends):
+            result, _elapsed_us = _worker_compile_triton(load_kernel, {}, {})
+            self.assertIs(result, kernel)
+            self.assertEqual(kernel.precompile_calls, [True])
+            self.assertTrue(kernel.prepared)
+
+            # The skip is scoped to the worker compile call and restored afterward.
+            with self.assertRaisesRegex(RuntimeError, "0 active drivers"):
+                triton_helpers.set_driver_to_gpu()
 
     @unittest.skipIf(not HAS_TRITON, "requires triton")
-    def test_pinned_triton_driver_api_exists(self):
-        # Fail CI if triton renames an internal the pin depends on (drift tripwire).
-        import triton
+    def test_worker_compile_triton_restores_gpu_driver_setup_after_error(self):
+        from torch._inductor.runtime import triton_helpers
+        from torch._inductor.runtime.compile_tasks import _worker_compile_triton
 
-        driver = triton.runtime.driver
-        self.assertTrue(hasattr(driver, "_active"))
-        self.assertTrue(callable(driver.set_active))
-        self.assertIsInstance(triton.backends.backends, dict)
-        if torch.cuda.is_available() and torch.version.hip is None:
-            self.assertIn("nvidia", triton.backends.backends)
-            self.assertTrue(callable(triton.backends.backends["nvidia"].driver))
+        class RaisingDriver:
+            @staticmethod
+            def is_active():
+                raise RuntimeError("0 active drivers ([]). There should only be one.")
+
+        def load_kernel():
+            triton_helpers.set_driver_to_gpu()
+            raise ValueError("compile failed")
+
+        fake_backends = {"nvidia": types.SimpleNamespace(driver=RaisingDriver)}
+        with patch.object(triton_helpers.triton.backends, "backends", fake_backends):
+            with self.assertRaisesRegex(ValueError, "compile failed"):
+                _worker_compile_triton(load_kernel, {}, {})
+
+            # The skip is restored even if worker compilation raises.
+            with self.assertRaisesRegex(RuntimeError, "0 active drivers"):
+                triton_helpers.set_driver_to_gpu()
 
 
 if __name__ == "__main__":

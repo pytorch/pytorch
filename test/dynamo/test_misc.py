@@ -8235,7 +8235,11 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             opt_fn(x, obj)
             self.assertFalse(True)
         except TypeError as e:
-            self.assertIn("__bool__ should return bool, returned float", str(e))
+            if sys.version_info >= (3, 15):
+                msg = "__bool__() must return a bool, not float"
+            else:
+                msg = "__bool__ should return bool, returned float"
+            self.assertIn(msg, str(e))
 
     def test_unpack_tensor_shape_mismatch(self):
         @torch.compile(backend="eager")

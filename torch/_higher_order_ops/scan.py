@@ -10,6 +10,10 @@ import torch
 import torch._prims_common as utils
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
+from torch._higher_order_ops.auto_functionalize import (
+    can_auto_functionalize,
+    do_auto_functionalize_v2,
+)
 from torch._higher_order_ops.partitioner import (
     _find_hop_subgraph_outputs,
     HopGraphMinCutPartitioner,
@@ -17,21 +21,22 @@ from torch._higher_order_ops.partitioner import (
 )
 from torch._higher_order_ops.utils import (
     _maybe_compile_and_run_fn,
-    check_input_alias_and_mutation_return_outputs,
     check_meta_consistency,
     fill_none_with_masks,
     filter_with_masks,
     first_slice_copy,
+    get_graph_output_example_values,
     get_tensor_mask,
+    HopInstance,
     mask_list,
     materialize_as_graph,
     reenter_make_fx,
-    register_fake,
     split_into_chunks,
     unique_graph_id,
     validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
@@ -207,7 +212,7 @@ def scan(
     )
 
     def run_flattened_scan(combine_fn, leaves_init, leaves_xs):
-        return scan_op(combine_fn, leaves_init, leaves_xs, additional_inputs=())
+        return scan_op(combine_fn, leaves_init, leaves_xs, ())
 
     carry, out = _maybe_compile_and_run_fn(
         run_flattened_scan,
@@ -233,7 +238,15 @@ class ScanOp(HigherOrderOperator):
     def __init__(self):
         super().__init__("scan")
 
-    def __call__(self, combine_fn, init, xs, additional_inputs):
+    def __call__(
+        self,
+        combine_fn,
+        init,
+        xs,
+        additional_inputs,
+        *,
+        mutated_arg_indices: str = "",
+    ):
         # There is currently an issue that the ScanOp is sometimes called with
         # the additional_inputs being a list. See https://github.com/pytorch/pytorch/issues/145785
         # Once this issue is resolved, the assertion should only allow tuples
@@ -248,27 +261,33 @@ class ScanOp(HigherOrderOperator):
             else additional_inputs
         )
         validate_subgraph_args_types(additional_inputs)
+        kwargs = {}
+        if mutated_arg_indices:
+            kwargs["mutated_arg_indices"] = mutated_arg_indices
         # pyrefly: ignore [missing-attribute]
-        return super().__call__(combine_fn, init, xs, additional_inputs)
+        return super().__call__(combine_fn, init, xs, additional_inputs, **kwargs)
 
     # pyrefly: ignore [bad-override]
-    def gen_schema(self, combine_fn, init, xs, additional_inputs):
+    def gen_schema(
+        self, combine_fn, init, xs, additional_inputs, mutated_arg_indices=""
+    ):
         from torch._higher_order_ops.schema import HopSchemaGenerator
-        from torch._higher_order_ops.utils import materialize_as_graph
 
         all_inputs = tuple(
-            list(init) + [first_slice_copy(x) for x in xs] + list(additional_inputs)
+            list(init)
+            + [
+                torch.empty_strided(
+                    x.shape[1:],
+                    x.stride()[1:],
+                    dtype=x.dtype,
+                    device=x.device,
+                    requires_grad=x.requires_grad,
+                )
+                for x in xs
+            ]
+            + list(additional_inputs)
         )
-
-        combine_gm: torch.fx.GraphModule = materialize_as_graph(combine_fn, all_inputs)
-
-        (
-            _,
-            _,
-            _,
-            mutated_inputs,
-            outputs,
-        ) = check_input_alias_and_mutation_return_outputs(combine_gm)
+        combine_gm = materialize_as_graph(combine_fn, all_inputs)
 
         # Mutation semantics for scan:
         # - additional_inputs is mutable: loop-invariant tensor identity
@@ -284,23 +303,12 @@ class ScanOp(HigherOrderOperator):
         #   already expressible via the ys output path at no extra cost.
         #   If xs-like in-place updates are required, pass the buffer via
         #   additional_inputs and index into it inside combine_fn.
-        n_init = len(init)
-        n_xs = len(xs)
-        init_mutated = [i for i in mutated_inputs if i < n_init]
-        xs_mutated = [i for i in mutated_inputs if n_init <= i < n_init + n_xs]
-        if init_mutated or xs_mutated:
-            parts = []
-            if init_mutated:
-                parts.append(f"init {init_mutated}")
-            if xs_mutated:
-                parts.append(f"xs {[i - n_init for i in xs_mutated]}")
-            raise RuntimeError(
-                "For scan, combine_fn can only mutate additional_inputs, "
-                f"but found mutations at: {', '.join(parts)}. Update the "
-                "carry via the combine_fn return value; for in-place lifted "
-                "buffers use additional_inputs."
-            )
-        mutated_set = set(mutated_inputs)
+        outputs = get_graph_output_example_values(combine_gm)
+        mutated_set = (
+            {int(i) for i in mutated_arg_indices.split(",") if i}
+            if mutated_arg_indices
+            else set()
+        )
 
         schema_gen = HopSchemaGenerator(self)
         schema_gen.add_arg("combine_fn", combine_gm)
@@ -311,11 +319,12 @@ class ScanOp(HigherOrderOperator):
         for idx, arg in enumerate(xs):
             schema_gen.add_arg(f"xs{idx}", arg)
 
+        offset = len(init) + len(xs)
         for idx, arg in enumerate(additional_inputs):
             schema_gen.add_arg(
                 f"additional_input{idx}",
                 arg,
-                is_mutated=(n_init + n_xs + idx) in mutated_set,
+                is_mutated=(offset + idx) in mutated_set,
             )
 
         for out in outputs:
@@ -415,6 +424,7 @@ def trace_scan(
     init: list[torch.Tensor],
     xs: list[torch.Tensor],
     additional_inputs: tuple[torch.Tensor],
+    mutated_arg_indices: str = "",
 ):
     from torch._dynamo.utils import clone_input
 
@@ -459,9 +469,13 @@ def trace_scan(
     proxy_mode.tracer.root.register_module(combine_graph_name, combine_graph)
 
     args = (combine_graph, init, xs, additional_inputs)
+    kwargs = {}
+    if mutated_arg_indices:
+        kwargs["mutated_arg_indices"] = mutated_arg_indices
+
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, args)
     out_proxy = proxy_mode.tracer.create_proxy(
-        "call_function", func_overload, proxy_args, {}, name="scan"
+        "call_function", func_overload, proxy_args, kwargs, name="scan"
     )
 
     with disable_proxy_modes_tracing():
@@ -478,7 +492,7 @@ def trace_scan(
 
 
 @scan_op.py_impl(DispatchKey.CompositeExplicitAutograd)
-def scan_op_dense(combine_fn, init, xs, additional_inputs):
+def scan_op_dense(combine_fn, init, xs, additional_inputs, mutated_arg_indices=""):
     mode = _get_current_dispatch_mode()
     if mode is not None:
         raise AssertionError("Mode should never be enabled for CPU/CUDA key")
@@ -905,7 +919,7 @@ class ScanAutogradImpl:
 
 
 @scan_op.py_autograd_impl
-def scan_autograd(combine_fn, init, xs, additional_inputs):
+def scan_autograd(combine_fn, init, xs, additional_inputs, mutated_arg_indices=""):
     with disable_proxy_modes_tracing():
         # If init was passed in with requires_grad=False, AOT joint creation drops it from
         # grad_primals and zero-fills, severing the carry chain and silently
@@ -944,34 +958,68 @@ def scan_autograd(combine_fn, init, xs, additional_inputs):
 
 
 @scan_op.py_impl(ProxyTorchDispatchMode)
-def scan_proxy_mode(mode, combine_fn, init, xs, additional_inputs):
-    return trace_scan(mode, scan_op, combine_fn, init, xs, additional_inputs)
+def scan_proxy_mode(
+    mode, combine_fn, init, xs, additional_inputs, mutated_arg_indices=""
+):
+    return trace_scan(
+        mode,
+        scan_op,
+        combine_fn,
+        init,
+        xs,
+        additional_inputs,
+        mutated_arg_indices=mutated_arg_indices,
+    )
 
 
-@register_fake(scan_op, skip_cache=True)
-def scan_fake_tensor_mode(combine_fn, init, xs, additional_inputs):
-    scan_length = xs[0].shape[0]
-    carry, outputs = _extract_carry_and_out(
-        combine_fn(
-            *init,
-            *[first_slice_copy(inp) for inp in xs],
-            *additional_inputs,
-        ),
-        len(init),
-    )
-    out = (
-        *carry,
-        *(stack_y(t, scan_length) for t in outputs),
-    )
-    return out
+@scan_op.py_impl(FakeTensorMode)
+def scan_fake_tensor_mode(
+    mode, combine_fn, init, xs, additional_inputs, mutated_arg_indices=""
+):
+    with mode:
+        scan_length = xs[0].shape[0]
+        carry, outputs = _extract_carry_and_out(
+            combine_fn(
+                *init,
+                *[first_slice_copy(inp) for inp in xs],
+                *additional_inputs,
+            ),
+            len(init),
+        )
+        out = (
+            *carry,
+            *(stack_y(t, scan_length) for t in outputs),
+        )
+        return out
 
 
 @scan_op.py_functionalize_impl
-def scan_functionalize(ctx, combine_fn, init, xs, additional_inputs):
+def scan_functionalize(
+    ctx, combine_fn, init, xs, additional_inputs, mutated_arg_indices=""
+):
     from torch._higher_order_ops.utils import (
         _check_alias_and_mutation,
         _maybe_run_with_interpreter,
     )
+
+    if hasattr(ctx, "mode"):
+        hop_instance = HopInstance.create(
+            scan_op,
+            combine_fn,
+            init,
+            xs,
+            additional_inputs,
+            mutated_arg_indices=mutated_arg_indices,
+        )
+        if can_auto_functionalize(hop_instance):
+            return do_auto_functionalize_v2(
+                ctx.mode,
+                hop_instance,
+                tuple(
+                    pytree.tree_flatten((combine_fn, init, xs, additional_inputs))[0]
+                ),
+                {},
+            )
 
     unwrapped_xs = ctx.unwrap_tensors(xs)
     unwrapped_init = ctx.unwrap_tensors(init)
@@ -996,12 +1044,15 @@ def scan_functionalize(ctx, combine_fn, init, xs, additional_inputs):
             unwrapped_init,
             unwrapped_xs,
             unwrapped_additional_inputs,
+            mutated_arg_indices=mutated_arg_indices,
         )
     return ctx.wrap_tensors(ret)
 
 
 @scan_op.py_impl(torch._C._functorch.TransformType.Vmap)
-def scan_batch_rule(interpreter, combine_fn, init, xs, additional_inputs):
+def scan_batch_rule(
+    interpreter, combine_fn, init, xs, additional_inputs, mutated_arg_indices=""
+):
     from torch._functorch.vmap import restore_vmap, unwrap_batched, wrap_batched
 
     unbatched_args, in_dims = unwrap_batched(
@@ -1049,8 +1100,15 @@ def scan_batch_rule(interpreter, combine_fn, init, xs, additional_inputs):
             )
             return outputs
 
+        op_kwargs = {}
+        if mutated_arg_indices:
+            op_kwargs["mutated_arg_indices"] = mutated_arg_indices
         unwrapped_out = scan_op(
-            wrapper, unbatched_init, unbatched_xs, unbatched_additional_inputs
+            wrapper,
+            unbatched_init,
+            unbatched_xs,
+            unbatched_additional_inputs,
+            **op_kwargs,
         )
 
     if out_dims is None:

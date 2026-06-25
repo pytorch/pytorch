@@ -1107,6 +1107,48 @@ class CPUReproTests(TestCase):
                 )
 
     @requires_vectorization
+    def test_cosh_near_overflow(self):
+        # https://github.com/pytorch/pytorch/issues/183765
+        def fn(x):
+            return torch.cosh(x)
+
+        x = torch.tensor([88.5, 88.85, 89.0, 89.4, -88.85, -89.0]).repeat(3, 6)
+        for dtype in [torch.float32, torch.double]:
+            with torch.no_grad():
+                torch._dynamo.reset()
+                _x = x.to(dtype)
+                self.assertFalse(torch.cosh(_x).isinf().any())
+                self.common(fn, (_x,))
+
+    @requires_vectorization
+    def test_sinh_near_overflow(self):
+        # https://github.com/pytorch/pytorch/issues/183763
+        def fn(x):
+            return torch.sinh(x)
+
+        x = torch.tensor([88.5, 88.85, 89.0, -89.0, -89.2, 0.0]).repeat(3, 6)
+        for dtype in [torch.float32, torch.double]:
+            with torch.no_grad():
+                torch._dynamo.reset()
+                _x = x.to(dtype)
+                self.assertFalse(torch.sinh(_x).isinf().any())
+                self.common(fn, (_x,))
+
+    @requires_vectorization
+    def test_acosh_near_overflow(self):
+        # https://github.com/pytorch/pytorch/issues/183768
+        def fn(x):
+            return torch.acosh(x)
+
+        x = torch.tensor([2.0, 1e10, 5e22, 7e21, 9e25, 1.0]).repeat(3, 6)
+        for dtype in [torch.float32, torch.double]:
+            with torch.no_grad():
+                torch._dynamo.reset()
+                _x = x.to(dtype)
+                self.assertFalse(torch.acosh(_x).isinf().any())
+                self.common(fn, (_x,))
+
+    @requires_vectorization
     def test_asinh_with_corner_inputs(self):
         # https://github.com/pytorch/pytorch/issues/142345
 
@@ -1515,6 +1557,34 @@ class CPUReproTests(TestCase):
             ref = fn(*inp_clone2)
             res = cfn(*inp_clone3)
             self.assertEqual(ref, res, atol=1e-3, rtol=1e-3)
+
+    def test_randperm_full_advanced_indexing_issue_158457(self):
+        def full_index(x):
+            perm = torch.randperm(x.size(0))
+            return x[perm]
+
+        x = torch.arange(12, dtype=torch.float32).reshape(3, 4)
+
+        full_actual = torch.compile(full_index, backend="inductor", fullgraph=True)(x)
+        self.assertEqual(full_actual.shape, x.shape)
+        self.assertEqual(torch.sort(full_actual[:, 0]).values, x[:, 0])
+
+    def test_randperm_sliced_advanced_indexing_issue_158457(self):
+        def sliced_index(x):
+            perm = torch.randperm(x.size(0))[:2]
+            return x[perm]
+
+        x = torch.arange(12, dtype=torch.float32).reshape(3, 4)
+
+        sliced_actual = torch.compile(sliced_index, backend="inductor", fullgraph=True)(
+            x
+        )
+        self.assertEqual(sliced_actual.shape, (2, x.size(1)))
+        self.assertEqual(sliced_actual[:, 1:], sliced_actual[:, :1] + x[0, 1:])
+        self.assertTrue((sliced_actual[:, :1] == x[:, 0]).any(dim=1).all().item())
+        self.assertEqual(
+            torch.unique(sliced_actual[:, 0]).numel(), sliced_actual.size(0)
+        )
 
     def test_ModularIndexing_range_issue_103133(self):
         def fn(q, k):
@@ -3084,6 +3154,27 @@ class CPUReproTests(TestCase):
                 raise AssertionError(
                     f"Expected 2 vec kernels, got {metrics.generated_cpp_vec_kernel_count}"
                 )
+
+    @requires_vectorization
+    def test_index_put_accumulate_atomic_add_vec_scalar_index(self):
+        def fn(values, idx0, idx1):
+            out = torch.zeros(1, 32, 1, 1)
+            return aten.index_put(out, [None, None, idx0, idx1], values, True)
+
+        inps = (
+            torch.ones(1, 32, 10, 20),
+            torch.zeros(10, 1, dtype=torch.long),
+            torch.zeros(20, dtype=torch.long),
+        )
+
+        with set_num_threads(2):
+            torch._dynamo.reset()
+            metrics.reset()
+            opt_fn = torch.compile(fn, backend="inductor")
+            actual, code = run_and_get_cpp_code(opt_fn, *inps)
+        FileCheck().check("atomic_add_vec").run(code)
+        self.assertEqual(fn(*inps), actual)
+        self.assertGreater(metrics.generated_cpp_vec_kernel_count, 0)
 
     def test_large_mean(self):
         size = (30000, 100000)
@@ -6672,13 +6763,13 @@ class CPUReproTests(TestCase):
         Original PR: https://github.com/pytorch/pytorch/pull/141766
         """
         from torch.testing._internal.common_quantization import (
-            _static_reference_quantized_linear_module,
+            _static_quantized_linear_module,
         )
 
         class Model(torch.nn.Module):
             def __init__(self, example_input):
                 super().__init__()
-                self.dense = _static_reference_quantized_linear_module(
+                self.dense = _static_quantized_linear_module(
                     N=768, K=768, bias=True, example_input=example_input
                 )
                 self.layernorm = torch.nn.LayerNorm(768, eps=1e-12)
@@ -7068,6 +7159,31 @@ class CPUReproTests(TestCase):
         )
         self.assertFalse(cpu_tanh_storage.should_realize_on_reuse(1))
         self.assertTrue(cpu_tanh_storage.should_realize_on_reuse(2))
+
+        def inner_multi_user_fn(index):
+            value = ops.load("in0", index[0])
+            for _ in range(23):
+                value = ops.mul(value, ops.constant(1.0001, torch.float32))
+                value = ops.add(value, ops.constant(0.1, torch.float32))
+            return value
+
+        cpu_multi_user_storage = StorageBox(
+            Pointwise(
+                device=torch.device("cpu"),
+                dtype=torch.float32,
+                inner_fn=inner_multi_user_fn,
+                ranges=[10],
+            )
+        )
+        self.assertEqual(cpu_multi_user_storage.data.inner_fn_opcount().num_ops, 49)
+        self.assertFalse(cpu_multi_user_storage.has_large_inner_fn())
+        self.assertFalse(cpu_multi_user_storage.should_realize_on_reuse(5))
+        self.assertTrue(cpu_multi_user_storage.should_realize_on_reuse(6))
+        self.assertFalse(
+            cpu_multi_user_storage.should_realize_on_reuse(6, graph_reuse=False)
+        )
+        with config.patch(realize_opusers_threshold=6):
+            self.assertFalse(cpu_multi_user_storage.should_realize_on_reuse(6))
 
         def inner_reads_fn(index):
             value = ops.constant(0.0, torch.float32)

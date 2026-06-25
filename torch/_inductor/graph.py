@@ -54,6 +54,7 @@ from torch.fx.passes.reinplace import _is_view_op
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.numbers import int_oo
+from torch.utils._typing_utils import not_none
 
 from . import config, ir
 from .codegen.common import (
@@ -551,6 +552,7 @@ class GraphLowering(torch.fx.Interpreter):
         ] = []  # This is the linemap used by the profiler to mark custom compiled kernels getting run
         # Used if lowering encounters cases where cudagraphs are not supported
         self.disable_cudagraphs_reason: str | None = None
+        self.kernel_free_cudagraph: bool = False
 
         # only keeping one node per device for stack trace purposes
         self.device_node_mapping: dict[torch.device, torch.fx.Node] = {}
@@ -2055,7 +2057,7 @@ class GraphLowering(torch.fx.Interpreter):
                         # require_exact_strides to handle views. But ultimately it's better to require
                         # the right strides at the tensor definition.
                         if n.meta["val"]._is_view() or isinstance(
-                            result.data,
+                            result.data,  # type: ignore[missing-attribute]
                             ir.BaseView,
                         ):
                             result = ir.ExternKernel.require_stride_order(
@@ -2532,7 +2534,7 @@ class GraphLowering(torch.fx.Interpreter):
                         return None
                     elif isinstance(x, (torch.SymInt, torch.SymFloat)):
                         # Need concrete value to run dynamic shapes and tune the result
-                        return x.node.hint
+                        return not_none(x.hint)
                     elif isinstance(x, FakeTensor):
                         return defake(x)
                     else:

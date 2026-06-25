@@ -31,7 +31,7 @@ class CondBranchNonlocalVariables(torch.nn.Module):
     return cond(x.shape[0] > 5, true_fn, false_fn, [x])
     ```
 
-    NOTE: If the `pred` is test on a dim with batch size < 2, it will be specialized.
+    NOTE: If the `pred` is tested on a dim with batch size < 2, it will be specialized.
     """
 
     def forward(self, x):

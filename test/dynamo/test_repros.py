@@ -59,11 +59,13 @@ from torch._inductor.utils import fresh_cache
 from torch.nn import functional as F
 from torch.nn.attention.flex_attention import (
     AuxRequest,
+    BlockMask,
     create_block_mask,
     flex_attention,
 )
 from torch.profiler import profile, ProfilerActivity
 from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_BF16,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FP8,
     SM70OrLater,
@@ -1007,6 +1009,7 @@ class LRUCacheWarningTests(LoggingTestCase):
 
 class ReproTests(torch._dynamo.test_case.TestCase):
     def setUp(self) -> None:
+        super().setUp()
         try:
             from .utils import install_guard_manager_testing_hook
         except ImportError:
@@ -1016,7 +1019,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.exit_stack.enter_context(
             install_guard_manager_testing_hook(self.guard_manager_clone_hook_fn)
         )
-        super().setUp()
 
     def tearDown(self) -> None:
         self.exit_stack.close()
@@ -2385,6 +2387,24 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         res = fn(y)
         self.assertTrue(same(ref, res))
 
+    def test_dropout_eval_setattr_parameter(self):
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.randn(5, 5))
+
+            def forward(self, x):
+                w = torch.nn.functional.dropout(self.weight, training=False)
+                self.foo = w
+                return x + self.weight
+
+        mod = Mod()
+        x = torch.randn(5, 5)
+        mod(x)
+        mod.compile(backend="eager", fullgraph=True)
+        self.assertTrue(same(mod(x), x + mod.weight))
+        self.assertIs(mod.foo, mod.weight)
+
     def test_setitem_boolean_mask_diff(self):
         def fn(x, b, y):
             x = x.clone()
@@ -3599,7 +3619,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     def test_inplace_unsqueeze_input(self):
         def backend(gm, example_inputs):
-            self.assertEqual(example_inputs[-1].size(), torch.Size([1, 3, 4]))
+            tensor_inputs = [x for x in example_inputs if isinstance(x, torch.Tensor)]
+            self.assertEqual(tensor_inputs[-1].size(), torch.Size([1, 3, 4]))
             return gm
 
         @torch.compile(backend=backend)
@@ -5092,12 +5113,12 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertExpectedInline(
             generated_code,
             """\
-def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
+def forward(self, L_x_ : torch.Tensor, s77 : torch.SymInt, s27 : torch.SymInt):
     l_x_ = L_x_
-    getitem_2 = l_x_[0]
-    sum_1 = getitem_2.sum();  getitem_2 = None
-    gt_1 = sum_1 > 0;  sum_1 = None
-    _assert_async = torch._assert_async(gt_1, 'assertion error');  gt_1 = _assert_async = None
+    getitem = l_x_[0]
+    sum_1 = getitem.sum();  getitem = None
+    gt = sum_1 > 0;  sum_1 = None
+    _assert_async = torch._assert_async(gt, 'assertion error');  gt = _assert_async = None
     cos = l_x_.cos();  l_x_ = None
     return (cos,)""",
         )
@@ -6166,6 +6187,21 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         torch.view_as_real(out_ref).sum().backward()
         torch.view_as_real(out_test).sum().backward()
         self.assertEqual(x_ref.grad, x_test.grad)
+
+    def test_compile_complex_tensor_constant_signed_zero(self):
+        def f(x):
+            y = torch.tensor([1e28 + 2j, -1e-28j])
+            return y.cos(), str(y)
+
+        x = torch.tensor([1e28 + 2j, -1e-28j])
+        expected_cos, expected_str = f(x)
+        actual_cos, actual_str = torch.compile(f, backend="eager")(x)
+
+        self.assertEqual(actual_cos, expected_cos)
+        self.assertEqual(
+            torch.signbit(actual_cos.imag), torch.signbit(expected_cos.imag)
+        )
+        self.assertEqual(actual_str, expected_str)
 
     @unittest.skipIf(
         not SM70OrLater,
@@ -7303,6 +7339,35 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         # One graph, so no graph breaks
         self.assertEqual(backend_counter.frame_count, 1)
         self.assertEqual(len(backend_counter.graphs), 1)
+
+    def test_flex_attention_non_strict_unbacked_sequence_length(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        seq = shape_env.create_unbacked_symint()
+        shape_env._set_unbacked_var_to_hint_override(seq, 128)
+
+        with FakeTensorMode(shape_env=shape_env, allow_non_fake_inputs=True):
+            q = torch.empty((1, 1, seq, 8), device="cpu")
+            k = torch.empty((1, 1, seq, 8), device="cpu")
+            v = torch.empty((1, 1, seq, 8), device="cpu")
+            kv_num_blocks = torch.ones((1, 1, 1), dtype=torch.int32)
+            kv_indices = torch.zeros((1, 1, 1, 1), dtype=torch.int32)
+            block_mask = BlockMask.from_kv_blocks(
+                kv_num_blocks,
+                kv_indices,
+                BLOCK_SIZE=128,
+                seq_lengths=(seq, seq),
+            )
+
+            with (
+                torch.compiler._non_strict_tracing_context(),
+                torch._dynamo.config.patch(force_compile_during_fx_trace=True),
+            ):
+                out = flex_attention(q, k, v, block_mask=block_mask)
+
+        self.assertEqual(out.shape, (1, 1, seq, 8))
 
     # https://github.com/pytorch/pytorch/issues/164990
     def test_guard_same_frame_fail_message(self):
@@ -9424,6 +9489,28 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
 
 class CUDAReproTests(torch._dynamo.test_case.TestCase):
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @torch._dynamo.config.patch(capture_scalar_outputs=False)
+    def test_aot_backward_context_reentry_after_graph_break(self):
+        def fn(x, y, scalar):
+            cpu = x.cpu()
+            other_cpu = x.cpu()
+            before_break = cpu.view_as(other_cpu)
+            scalar.item()
+            after_break = y.cos()
+            return before_break, after_break
+
+        x = torch.randn(8, device="cuda", requires_grad=True)
+        y = torch.randn(8, device="cuda", requires_grad=True)
+        scalar = torch.randn((), device="cuda")
+
+        before_break, after_break = torch.compile(fn, backend="aot_eager")(x, y, scalar)
+        loss = before_break.sum().to("cuda") + after_break.sum()
+        loss.backward()
+
+        self.assertEqual(x.grad, torch.ones_like(x))
+        self.assertEqual(y.grad, -y.detach().sin())
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_sync(self):
         def fn(x):
             y = x + 1
@@ -9475,6 +9562,59 @@ class CUDAReproTests(torch._dynamo.test_case.TestCase):
         # fix, it retained the compiled FX graph, whose FakeTensor metadata
         # retained the real CUDA scalar through FakeTensor.constant.
         self.assertIsNotNone(opt_f)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_BF16, "requires CUDA bf16 support")
+    def test_layer_norm_mixed_dtype_aot_eager_decomp_partition_errors(self):
+        # https://github.com/pytorch/pytorch/issues/151478
+        x = torch.tensor(
+            [[1.0, 2.0, 3.0, 4.0], [2.0, 4.0, 6.0, 8.0]],
+            device="cuda",
+            dtype=torch.bfloat16,
+        )
+
+        def check_error(weight_dtype, bias_dtype, error):
+            def forward(input):
+                weight = torch.ones(4, device=input.device, dtype=weight_dtype)
+                bias = torch.ones(4, device=input.device, dtype=bias_dtype)
+                return torch.layer_norm(
+                    input,
+                    (4,),
+                    weight,
+                    bias,
+                    0.1,
+                    torch.backends.cudnn.enabled,
+                )
+
+            with self.assertRaisesRegex(RuntimeError, error):
+                forward(x)
+
+            compiled_forward = torch.compile(
+                forward, backend="aot_eager_decomp_partition"
+            )
+            with self.assertRaisesRegex(RuntimeError, error):
+                compiled_forward(x)
+
+        check_error(
+            torch.float32,
+            torch.float32,
+            "expected scalar type BFloat16 but found Float",
+        )
+        check_error(
+            torch.float16,
+            torch.float32,
+            "expected scalar type BFloat16 but found Half",
+        )
+        check_error(
+            torch.bfloat16,
+            torch.float16,
+            "expected scalar type BFloat16 but found Half",
+        )
+        check_error(
+            torch.int64,
+            torch.bfloat16,
+            "expected scalar type BFloat16 but found Long",
+        )
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     @unittest.skipIf(not dist.is_available(), "test requires distributed")

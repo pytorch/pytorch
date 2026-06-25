@@ -31,19 +31,20 @@ function(air_to_metallib TARGET OBJECTS)
                        VERBATIM)
 endfunction()
 
-function(metal_to_metallib_h SRC TGT)
-    execute_process(COMMAND ${Python_EXECUTABLE} torch/utils/_cpp_embed_headers.py ${SRC}
-                    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-                    OUTPUT_VARIABLE SHADER_CONTENT
-                    RESULT_VARIABLE _exitcode)
-    if(NOT _exitcode EQUAL 0)
-        message(FATAL_ERROR "Failed to preprocess Metal shader ${SRC}")
-        return()
-    endif()
-    file(WRITE ${TGT} "#include <ATen/native/mps/OperationUtils.h>\n")
-    file(APPEND ${TGT} "static ::at::native::mps::MetalShaderLibrary lib(R\"SHDR(\n")
-    file(APPEND ${TGT} "${SHADER_CONTENT}")
-    file(APPEND ${TGT} ")SHDR\");\n")
+function(metal_to_metallib_h SHADER)
+    cmake_path(ABSOLUTE_PATH SHADER OUTPUT_VARIABLE SHADER_ABSOLUTE)
+
+    cmake_path(GET SHADER STEM SHADER_STEM)
+    cmake_path(APPEND ${CMAKE_CURRENT_BINARY_DIR} native mps ${SHADER_STEM} OUTPUT_VARIABLE SHADER_HDR)
+    cmake_path(APPEND_STRING SHADER_HDR "_metallib.h")
+
+    add_custom_command(COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/write_metallib_headers.py ${SHADER_ABSOLUTE} ${SHADER_HDR}
+                       DEPENDS ${SHADER_ABSOLUTE}
+                       OUTPUT ${SHADER_HDR}
+                       COMMENT "Generating metallib wrapper header for ${SHADER}"
+                       VERBATIM)
+
+    return(PROPAGATE SHADER_HDR)
 endfunction()
 
 set(BFLOAT_METAL_CODE "
