@@ -1877,7 +1877,9 @@ def module_inputs_torch_nn_LinearCrossEntropyLoss(module_info, device, dtype, re
                             # ignore_index is not supported for floating point target
                             continue
                         if options is not None:
-                            # chunking is not supported for floating point target
+                            # chunked probability-target samples are
+                            # appended after the main loop (so the RNG
+                            # draw order of these samples is unchanged)
                             continue
                     else:
                         target_shape = (*batch_dims, *of)
@@ -1970,6 +1972,40 @@ def module_inputs_torch_nn_LinearCrossEntropyLoss(module_info, device, dtype, re
                     input = make_input(batch_dims, in_features)
                     target = make_target(num_classes, (*batch_dims, *of), torch.int64)
                     yield module_args, module_kwargs, (input, target)
+
+        # Chunked probability-target coverage (mean/sum; reduction='none'
+        # with a probability target falls back to the reference).
+        # Appended after all other samples so the RNG draw order -- and
+        # therefore the data the calibrated index-target ULP caps were
+        # measured on -- is unchanged.
+        for sizes in [(8, 5, 4), (None, 8, 4)]:
+            num_batches, in_features, num_classes = sizes
+            batch_dims = () if num_batches is None else (num_batches,)
+            weights = [None, torch.exp(torch.randn(num_classes, device=device, dtype=dtype, requires_grad=False))]
+            for reduction, w in product(["mean", "sum"], weights):
+                if acc_dtype is not None:
+                    options = dict(acc_dtype=acc_dtype, chunking_method="aspect_ratio")
+                elif num_batches is not None:
+                    # batch_chunk_size=2 forces >=2 chunks on every device.
+                    options = dict(batch_chunk_size=2)
+                else:
+                    options = dict()
+                module_args = (in_features, num_classes)
+                module_kwargs = dict(
+                    out_features=(),
+                    device=device,
+                    dtype=dtype,
+                    reduction=reduction,
+                    weight=w,
+                    ignore_index=None,
+                    label_smoothing=0.0,
+                    options=torch.nn.LinearCrossEntropyOptions(
+                        allow_retain_graph=allow_retain_graph, **options
+                    ),
+                )
+                input = make_input(batch_dims, in_features)
+                target = make_target(num_classes, (*batch_dims, num_classes), dtype)
+                yield module_args, module_kwargs, (input, target)
 
     module_inputs = []
     for module_args, module_kwargs, (input, target) in samples():
