@@ -190,7 +190,8 @@ case "$tag" in
     ROCM_VERSION=nightly
     TRITON=yes
     KATEX=yes
-    PYTORCH_ROCM_ARCH="gfx942"
+    PYTORCH_ROCM_ARCH="gfx942;gfx950"
+    INDUCTOR_BENCHMARKS=yes
     ;;
   pytorch-linux-jammy-xpu-n-1-py3)
     ANACONDA_PYTHON_VERSION=3.10
