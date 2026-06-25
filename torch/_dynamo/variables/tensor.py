@@ -404,6 +404,13 @@ class TensorVariable(VariableTracker):
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         fake_val = self.proxy.node.meta["example_value"]
+
+        # Uncached NestedTensor sequence lengths are data-dependent tensor
+        # values, not constant subclass metadata.
+        nested_seqlen = self._try_get_uncached_nested_tensor_seqlen(tx, fake_val, name)
+        if nested_seqlen is not None:
+            return nested_seqlen
+
         # For getattrs on tensors without sources,
         # we can do better than the default (creating a GetAttrVariable)
         # if:
@@ -492,6 +499,83 @@ class TensorVariable(VariableTracker):
             self.source.make_guard(functools.partial(GuardBuilder.HASATTR, attr=name))
         )
         return VariableTracker.build(tx, real_value, attr_source)
+
+    def _try_get_uncached_nested_tensor_seqlen(
+        self,
+        tx: "InstructionTranslatorBase",
+        fake_val: torch.Tensor,
+        name: str,
+    ) -> VariableTracker | None:
+        if name not in ("_max_seqlen", "_min_seqlen"):
+            return None
+        if (
+            type(fake_val).__module__ != "torch.nested._internal.nested_tensor"
+            or type(fake_val).__name__ != "NestedTensor"
+        ):
+            return None
+
+        is_max = name == "_max_seqlen"
+        cache_name = "_max_seqlen_tensor" if is_max else "_min_seqlen_tensor"
+        if getattr(fake_val, cache_name) is not None:
+            return None
+
+        lengths = getattr(fake_val, "_lengths", None)
+        if lengths is None:
+            lengths_vt = self.dynamic_getattr(tx, "_offsets").call_method(
+                tx, "diff", [], {}
+            )
+        else:
+            lengths_vt = self.dynamic_getattr(tx, "_lengths")
+
+        fn = torch.max if is_max else torch.min
+        seqlen_tensor = VariableTracker.build(tx, fn).call_function(
+            tx, [lengths_vt], {}
+        )
+        seqlen = seqlen_tensor.call_method(tx, "item", [], {})
+        cache_tensor = VariableTracker.build(tx, torch.zeros).call_function(
+            tx, [seqlen, VariableTracker.build(tx, 0)], {}
+        )
+
+        def existing_cache_arg(cache_attr: str) -> VariableTracker:
+            return (
+                self.dynamic_getattr(tx, cache_attr)
+                if getattr(fake_val, cache_attr) is not None
+                else VariableTracker.build(tx, None)
+            )
+
+        lengths_arg = (
+            self.dynamic_getattr(tx, "_lengths")
+            if lengths is not None
+            else VariableTracker.build(tx, None)
+        )
+        min_seqlen_arg = (
+            existing_cache_arg("_min_seqlen_tensor") if is_max else cache_tensor
+        )
+        max_seqlen_arg = (
+            cache_tensor if is_max else existing_cache_arg("_max_seqlen_tensor")
+        )
+
+        # Eager _max_seqlen/_min_seqlen access also caches the seqlen tensor on
+        # the NestedTensor. Rewrap this variable so later uses and returned
+        # outputs observe the same metadata cache.
+        rewrapped_nt = VariableTracker.build(
+            tx, torch.ops.aten._nested_view_from_jagged.default
+        ).call_function(
+            tx,
+            [
+                self.dynamic_getattr(tx, "_values"),
+                self.dynamic_getattr(tx, "_offsets"),
+                self,
+                lengths_arg,
+                VariableTracker.build(tx, fake_val._ragged_idx),  # type: ignore[attr-defined]
+                min_seqlen_arg,
+                max_seqlen_arg,
+            ],
+            {},
+        )
+        self.proxy = rewrapped_nt.proxy
+        self.synchronize_attributes(tx)
+        return seqlen
 
     def method_attr_ndim(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         if self.ndim is not None:
