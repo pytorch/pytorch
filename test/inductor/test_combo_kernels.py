@@ -532,8 +532,6 @@ class ComboKernelTests(TestCase):
         # 3D poi (x, y, z) are separated from combo kernels
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180024")
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180018")
     @skipIfXpu(msg="Profiler JSON traceEvents is not supported on XPU")
     @requires_gpu_and_triton
     def test_combo_kernel_per_config_subkernel_block_size(self):
@@ -613,8 +611,6 @@ class ComboKernelTests(TestCase):
         else:
             FileCheck().check("pid_offset = pid").run(code[0])
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180023")
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180017")
     @skipIfXpu(msg="Profiler JSON traceEvents is not supported on XPU")
     @requires_gpu_and_triton
     @torch._dynamo.config.patch("assume_static_by_default", False)
@@ -757,8 +753,6 @@ class ComboKernelTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180026")
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180019")
     @skipIfXpu(msg="Profiler JSON traceEvents is not supported on XPU")
     @requires_gpu_and_triton
     @unittest.skipIf(not SM90OrLater, "Avoid oom on CI")
