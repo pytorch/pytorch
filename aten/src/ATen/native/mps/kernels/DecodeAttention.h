@@ -113,8 +113,9 @@ template <typename T, int D, int V = D, bool is_causal = false, bool HAS_MASK = 
         score += static_cast<U>(mask[0]);
       }
 
-      // Guard the (max,score)==(-inf,-inf) case: max - max is NaN otherwise.
-      U new_max = max(max_score, score);
+      // (score != score) keeps a NaN score that max() would drop, so a NaN in
+      // Q/K propagates instead of collapsing the row max to -inf.
+      U new_max = (score != score) ? score : max(max_score, score);
       U factor;
       U exp_score;
       if (new_max == -INFINITY) {
@@ -283,7 +284,9 @@ template <typename T, int D, int V = D, bool is_causal = false, bool HAS_MASK = 
         score += static_cast<U>(mask[0]);
       }
 
-      U new_max = max(max_score, score);
+      // (score != score) keeps a NaN score that max() would drop, so a NaN in
+      // Q/K propagates instead of collapsing the row max to -inf.
+      U new_max = (score != score) ? score : max(max_score, score);
       U factor;
       U exp_score;
       if (new_max == -INFINITY) {

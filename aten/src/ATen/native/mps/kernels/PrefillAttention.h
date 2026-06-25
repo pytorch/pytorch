@@ -156,7 +156,9 @@ struct TransformScale {
 struct MaxOp {
   template <typename T>
   METAL_FUNC static constexpr T apply(T x, T y) {
-    return metal::max(x, y);
+    // Propagate NaN: metal::max drops it, which collapses the row max to -inf
+    // and zeroes the output instead of yielding NaN for a NaN score.
+    return (x != x) ? x : (y != y) ? y : metal::max(x, y);
   }
 };
 
