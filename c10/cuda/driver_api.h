@@ -37,6 +37,21 @@
   } while (0)
 // clang-format on
 
+// Non-throwing variant of C10_CUDA_DRIVER_CHECK: warns instead of throwing, so
+// it is safe to call from noexcept teardown / unwinding paths.
+#define C10_CUDA_DRIVER_WARN(EXPR)                                           \
+  do {                                                                       \
+    CUresult __err = EXPR;                                                   \
+    if (__err != CUDA_SUCCESS) {                                             \
+      const char* err_str = nullptr;                                         \
+      if (c10::cuda::DriverAPI::get()->cuGetErrorString_(__err, &err_str) != \
+          CUDA_SUCCESS) {                                                    \
+        err_str = "unknown error";                                           \
+      }                                                                      \
+      TORCH_WARN("CUDA driver error: ", err_str);                            \
+    }                                                                        \
+  } while (0)
+
 #define C10_CUDA_DRIVER_CHECK_GOTO(EXPR, NEXT)                             \
   do {                                                                     \
     CUresult __err = EXPR;                                                 \

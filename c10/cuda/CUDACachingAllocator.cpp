@@ -506,12 +506,21 @@ struct ExpandableSegment {
         {
           size_t device_free = 0;
           size_t device_total = 0;
-          (void)cudaMemGetInfo(&device_free, &device_total);
-          LOG(WARNING)
-              << "expandable_segments: memory mapping failed with OOM on device "
-              << static_cast<int>(device_) << " while trying to map "
-              << segment_size_ << " bytes (free: " << device_free
-              << ", total: " << device_total << ").";
+          const cudaError_t info_status =
+              cudaMemGetInfo(&device_free, &device_total);
+          if (info_status == cudaSuccess) {
+            LOG(WARNING)
+                << "expandable_segments: memory mapping failed with OOM on device "
+                << static_cast<int>(device_) << " while trying to map "
+                << segment_size_ << " bytes (free: " << device_free
+                << ", total: " << device_total << ").";
+          } else {
+            LOG(WARNING)
+                << "expandable_segments: memory mapping failed with OOM on device "
+                << static_cast<int>(device_) << " while trying to map "
+                << segment_size_ << " bytes; cudaMemGetInfo failed: "
+                << cudaGetErrorString(info_status) << ".";
+          }
         }
 #ifdef USE_ROCM
         // hipMemCreate above returned hipErrorOutOfMemory and treated it
@@ -872,11 +881,11 @@ struct ExpandableSegment {
     auto rollback = c10::make_scope_exit([&] {
       if (mapped > begin) {
 #ifdef USE_ROCM
-        C10_CUDA_IGNORE_ERROR(hipMemUnmap(
+        C10_CUDA_CHECK_WARN(hipMemUnmap(
             ptr() + begin * segment_size_, (mapped - begin) * segment_size_));
 #else
-        (void)DriverAPI::get()->cuMemUnmap_(
-            ptr_ + begin * segment_size_, (mapped - begin) * segment_size_);
+        C10_CUDA_DRIVER_WARN(DriverAPI::get()->cuMemUnmap_(
+            ptr_ + begin * segment_size_, (mapped - begin) * segment_size_));
 #endif
       }
       releaseHandles(begin, end);
@@ -1018,9 +1027,9 @@ struct ExpandableSegment {
       }
 #endif
 #ifdef USE_ROCM
-      C10_CUDA_IGNORE_ERROR(hipMemRelease(*handle));
+      C10_CUDA_CHECK_WARN(hipMemRelease(*handle));
 #else
-      (void)DriverAPI::get()->cuMemRelease_(*handle);
+      C10_CUDA_DRIVER_WARN(DriverAPI::get()->cuMemRelease_(*handle));
 #endif
       handle = std::nullopt;
       shareable_handle = std::nullopt;
