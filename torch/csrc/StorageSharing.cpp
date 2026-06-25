@@ -258,23 +258,25 @@ static PyObject* THPStorage_newSharedFd(PyObject* _unused, PyObject* args) {
   }
   int tmp_fd = THPUtils_unpackInt(_tmp_fd);
   int64_t size = THPUtils_unpackLong(_size);
-  int fd = dup(tmp_fd);
-  if (fd == -1) {
-    THPUtils_setError("could not duplicate a shared memory file descriptor");
-    return nullptr;
-  }
 
-  int flags = at::ALLOCATOR_MAPPED_SHAREDMEM | at::ALLOCATOR_MAPPED_NOCREATE |
-      at::ALLOCATOR_MAPPED_KEEPFD | at::ALLOCATOR_MAPPED_FROMFD;
-  return THPStorage_NewWithStorage(
-      THPStorageClass,
-      c10::make_intrusive<at::StorageImpl>(
-          c10::StorageImpl::use_byte_size_t(),
-          size,
-          at::MapAllocator::makeDataPtr(
-              at::WITH_FD, "", fd, flags, size, nullptr),
-          /*allocator=*/nullptr,
-          /*resizable=*/false));
+  c10::intrusive_ptr<at::StorageImpl> storage;
+  {
+    pybind11::gil_scoped_release no_gil;
+    int fd = dup(tmp_fd);
+    TORCH_CHECK(
+        fd != -1, "could not duplicate a shared memory file descriptor");
+
+    int flags = at::ALLOCATOR_MAPPED_SHAREDMEM | at::ALLOCATOR_MAPPED_NOCREATE |
+        at::ALLOCATOR_MAPPED_KEEPFD | at::ALLOCATOR_MAPPED_FROMFD;
+    storage = c10::make_intrusive<at::StorageImpl>(
+        c10::StorageImpl::use_byte_size_t(),
+        size,
+        at::MapAllocator::makeDataPtr(
+            at::WITH_FD, "", fd, flags, size, nullptr),
+        /*allocator=*/nullptr,
+        /*resizable=*/false);
+  }
+  return THPStorage_NewWithStorage(THPStorageClass, std::move(storage));
   END_HANDLE_TH_ERRORS
 }
 

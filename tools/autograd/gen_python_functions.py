@@ -1364,10 +1364,25 @@ def emit_single_dispatch(
             else ""
         )
 
+        # For in-place method ops returning Tensor(a!), avoid copying the
+        # return value (which bumps intrusive_ptr refcount and may trigger
+        # GIL acquire via incref_pyobject). Instead, call the op for its
+        # side effect and return self_ directly. Only safe for methods where
+        # self_ is the tensor's PyObject; for functions self_ is the module.
+        self_arg = f.func.arguments.self_arg
+        is_inplace_returning_self = (
+            ps.method
+            and f.func.kind() == SchemaKind.inplace
+            and self_arg is not None
+            and not is_tensor_list_type(self_arg.argument.type)
+            and len(f.func.returns) == 1
+            and f.func.returns[0].annotation is not None
+            and f.func.returns[0].annotation.is_write
+        )
+
         if lambda_return == "void":
             # Make in-place foreach return `self` at python-binding level.
             # ref: https://github.com/pytorch/pytorch/pull/118622#pullrequestreview-1904804954
-            self_arg = f.func.arguments.self_arg
             return_stmt: str
             if (
                 str(f.func.name).startswith("_foreach_")
@@ -1394,6 +1409,18 @@ auto dispatch_{name} = []({lambda_formals}) -> {lambda_return} {{
 }};
 dispatch_{name}({lambda_args}){set_requires_grad};
 {return_stmt}
+"""
+        elif is_inplace_returning_self:
+            return f"""\
+{schema_comment}
+{inits}
+auto dispatch_{name} = []({lambda_formals}) -> void {{
+  pybind11::gil_scoped_release no_gil;
+  {dispatch_callee}({dispatch_args});
+}};
+dispatch_{name}({lambda_args}){set_requires_grad};
+Py_INCREF(self_);
+return self_;
 """
         else:
             typename = structseq_typenames.get(gen_structseq_typename_key(f))
