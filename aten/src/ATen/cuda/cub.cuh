@@ -87,11 +87,7 @@ template<class Iter>
 auto cccl_make_reverse_iterator(Iter it) { return ::thrust::make_reverse_iterator(it); }
 #endif
 
-// Pre ROCm 8.0 we require backporting of FpLimits specialization
-// for 'c10::BFloat16'. However, ROCm 8.0 lifts the compatible
-// CUB version to 3.x which uses libhipcxx and derives numerical
-// limits from there.
-#if defined(USE_ROCM) && CUB_VERSION < 300000
+#if defined(USE_ROCM)
 
 // backport https://github.com/NVIDIA/cub/pull/306 for c10::BFloat16
 
