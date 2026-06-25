@@ -470,6 +470,9 @@ struct KinetoObserverContext : public at::ObserverContext {
 
   Event* event_;
   FallbackPair* fallback_{nullptr};
+  // Global-callback path: session generation captured at begin_op;
+  // onFunctionExitGlobal drops the exit if it no longer matches (session gone).
+  uint64_t session_generation_{0};
 };
 
 constexpr int IO_ENCODER_DEFAULT_BLOCK_SIZE = 1024;
