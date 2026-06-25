@@ -468,6 +468,144 @@ class TestPinMemory(TestCase):
         self.assertTrue(shared_tensor.is_pinned())
 
 
+class TestAllocatorStats(TestCase):
+    """Test cases for OpenRegDeviceAllocator stat tracking via torch.accelerator APIs."""
+
+    def setUp(self):
+        """Reset memory state before each test."""
+        super().setUp()
+        gc.collect()
+        torch.accelerator.empty_cache()
+        torch.accelerator.reset_accumulated_memory_stats()
+        torch.accelerator.reset_peak_memory_stats()
+
+    def test_allocator_stats_basic(self):
+        """Verify getDeviceStats() returns expected keys after allocation."""
+        x = torch.empty(1024, device="openreg")
+        stats = torch.accelerator.memory_stats()
+
+        expected_keys = [
+            "allocated_bytes.all.current",
+            "allocated_bytes.all.peak",
+            "allocated_bytes.all.allocated",
+            "allocated_bytes.all.freed",
+        ]
+
+        for key in expected_keys:
+            self.assertIn(key, stats, f"Missing expected stat key: {key}")
+            self.assertGreaterEqual(stats[key], 0, f"Stat {key} should be non-negative")
+
+        del x
+        gc.collect()
+
+    def test_allocator_stats_tracks_alloc_free(self):
+        """Verify malloc() increases and free() decreases allocated_bytes counter."""
+        initial_allocated = torch.accelerator.memory_allocated()
+
+        x = torch.empty(1000, device="openreg")
+        after_alloc = torch.accelerator.memory_allocated()
+        self.assertGreater(after_alloc, initial_allocated, "memory_allocated() should increase after allocation")
+
+        del x
+        gc.collect()
+        after_free = torch.accelerator.memory_allocated()
+        self.assertEqual(after_free, initial_allocated, "memory_allocated() should decrease back after free")
+
+    def test_allocator_peak_tracking(self):
+        """Verify max_memory_allocated() records high-water mark and is not reduced by free()."""
+        torch.accelerator.reset_peak_memory_stats()
+        initial_peak = torch.accelerator.max_memory_allocated()
+
+        x = torch.empty(2000, device="openreg")
+        peak_after_alloc = torch.accelerator.max_memory_allocated()
+        self.assertGreater(peak_after_alloc, initial_peak, "Peak should increase after allocation")
+
+        del x
+        gc.collect()
+        peak_after_free = torch.accelerator.max_memory_allocated()
+        self.assertEqual(peak_after_free, peak_after_alloc, "Peak should not decrease after free")
+
+    def test_reset_peak_stats(self):
+        """Verify resetPeakStats() sets peak to current (lower than previous peak when tensors are freed)."""
+        x = torch.empty(5000, device="openreg")
+        peak_with_tensor = torch.accelerator.max_memory_allocated()
+
+        del x
+        gc.collect()
+        current_after_free = torch.accelerator.memory_allocated()
+
+        torch.accelerator.reset_peak_memory_stats()
+        new_peak = torch.accelerator.max_memory_allocated()
+
+        self.assertEqual(new_peak, current_after_free, "After reset, peak should equal current allocated")
+        self.assertLess(new_peak, peak_with_tensor, "After reset and free, peak should be lower than previous peak")
+
+    def test_reset_accumulated_stats(self):
+        """Verify resetAccumulatedStats() zeros allocated and freed counters."""
+        x = torch.empty(1000, device="openreg")
+        del x
+        gc.collect()
+
+        stats_before = torch.accelerator.memory_stats()
+        self.assertGreater(stats_before["allocated_bytes.all.allocated"], 0, "Should have allocated bytes before reset")
+        self.assertGreater(stats_before["allocated_bytes.all.freed"], 0, "Should have freed bytes before reset")
+
+        torch.accelerator.reset_accumulated_memory_stats()
+        stats_after = torch.accelerator.memory_stats()
+
+        self.assertEqual(stats_after["allocated_bytes.all.allocated"], 0, "Allocated counter should be zero after reset")
+        self.assertEqual(stats_after["allocated_bytes.all.freed"], 0, "Freed counter should be zero after reset")
+
+    def test_empty_cache(self):
+        """Verify torch.accelerator.empty_cache() dispatches to OpenReg's implementation without error."""
+        x = torch.empty(1000, device="openreg")
+        del x
+        gc.collect()
+
+        try:
+            torch.accelerator.empty_cache()
+        except Exception as e:
+            self.fail(f"empty_cache() raised unexpected exception: {e}")
+
+    def test_device_synchronize(self):
+        """Verify device-level synchronize completes without error."""
+        x = torch.randn(100, device="openreg")
+        y = x + 1
+
+        try:
+            torch.accelerator.synchronize()
+        except Exception as e:
+            self.fail(f"synchronize() raised unexpected exception: {e}")
+
+        del x, y
+        gc.collect()
+
+    def test_allocator_stats_per_device_isolation(self):
+        """Verify allocating on device 0 does not affect device 1's stats; per-device stat routing works correctly."""
+        device_count = torch.openreg.device_count()
+        if device_count < 2:
+            self.skipTest("This test requires 2 OpenReg devices")
+
+        torch.openreg.set_device(0)
+        torch.accelerator.reset_accumulated_memory_stats()
+        initial_dev0 = torch.accelerator.memory_allocated(0)
+
+        torch.openreg.set_device(1)
+        torch.accelerator.reset_accumulated_memory_stats()
+        initial_dev1 = torch.accelerator.memory_allocated(1)
+
+        x = torch.empty(1000, device="openreg:0")
+        after_dev0 = torch.accelerator.memory_allocated(0)
+        after_dev1 = torch.accelerator.memory_allocated(1)
+
+        self.assertGreater(after_dev0, initial_dev0, "Device 0 allocated should increase")
+        self.assertEqual(after_dev1, initial_dev1, "Device 1 allocated should remain unchanged")
+
+        del x
+        gc.collect()
+        torch.openreg.set_device(0)
+
+
 class TestMultiDeviceAllocation(TestCase):
     """Test basic multi-device allocation functionality."""
 
