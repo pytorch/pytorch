@@ -1582,8 +1582,17 @@ def linspace(
         raise AssertionError("linspace does not support _StridedShard placements")
 
     if isinstance(start, torch.Tensor):
+        torch._check(
+            start.dim() == 0,
+            lambda: "linspace only supports 0-dimensional start and end tensors",
+        )
         start = start.item()
+
     if isinstance(end, torch.Tensor):
+        torch._check(
+            end.dim() == 0,
+            lambda: "linspace only supports 0-dimensional start and end tensors",
+        )
         end = end.item()
 
     torch_size = normalize_to_torch_size((steps,))
@@ -1645,8 +1654,17 @@ def logspace(
         raise AssertionError("logspace does not support _StridedShard placements")
 
     if isinstance(start, torch.Tensor):
+        torch._check(
+            start.dim() == 0,
+            lambda: "logspace only supports 0-dimensional start and end tensors",
+        )
         start = start.item()
+
     if isinstance(end, torch.Tensor):
+        torch._check(
+            end.dim() == 0,
+            lambda: "logspace only supports 0-dimensional start and end tensors",
+        )
         end = end.item()
 
     torch_size = normalize_to_torch_size((steps,))

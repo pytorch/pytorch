@@ -198,6 +198,18 @@ class DTensorConstructorTest(DTensorTestBase):
             )
             self.assertEqual(dist_tensor.full_tensor(), torch.linspace(1.0, 2.0, steps))
 
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "linspace only supports 0-dimensional start and end tensors",
+            ):
+                linspace(
+                    torch.tensor([1.0, 2.0], device="cuda"),
+                    2.0,
+                    steps,
+                    device_mesh=mesh,
+                    placements=placements,
+                )
+
     @with_comms
     def test_logspace(self):
         mesh = self.build_device_mesh()
@@ -247,6 +259,18 @@ class DTensorConstructorTest(DTensorTestBase):
                 start, end, steps, device_mesh=mesh, placements=placements
             )
             self.assertEqual(dist_tensor.full_tensor(), torch.logspace(1.0, 2.0, steps))
+
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "logspace only supports 0-dimensional start and end tensors",
+            ):
+                logspace(
+                    torch.tensor([1.0, 2.0], device="cuda"),
+                    2.0,
+                    steps,
+                    device_mesh=mesh,
+                    placements=placements,
+                )
 
     @with_comms
     def test_zeros(self):
