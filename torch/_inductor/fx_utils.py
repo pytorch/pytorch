@@ -29,6 +29,7 @@ from torch.fx.experimental.symbolic_shapes import (
     statically_known_true,
     sym_eq,
 )
+from torch.fx.graph_module import _get_attr
 from torch.utils import _pytree as pytree
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
@@ -74,16 +75,18 @@ def matches_module_function_pattern(
 def _is_fake_tensor_same(
     new: Any,
     old: Any,
-    existing_storages: Mapping[int, int],
+    existing_storages: Mapping[int | None, int] | None = None,
     *,
+    check_dtype: bool = True,
     check_strides: bool = True,
     check_storage: bool = True,
     node: torch.fx.Node | None = None,
     recursive_ids: OrderedSet[tuple[int, int]] | None = None,
 ) -> bool:
-    """Validate that two FakeTensors (or iterables thereof) are the same, including
+    """Validate that two FakeTensors or collections thereof are the same, including
     storage locations if enabled.
 
+    check_dtype: disabling this flag will remove dtype checks.
     check_strides: disabling this flag will remove checks for striding.
     check_storage: disabling this flag will remove checks for storage offset and
     location.  This is useful for subgraph argument and output updating, where storage
@@ -101,7 +104,32 @@ def _is_fake_tensor_same(
         if new is None:
             return old is None
 
-        if isinstance(new, Collection):
+        if isinstance(new, Mapping):
+            if recursive_ids is None:
+                recursive_ids = OrderedSet()
+
+            id_pair = (id(new), id(old))
+            visited = id_pair in recursive_ids
+            recursive_ids.add(id_pair)
+
+            return visited or (
+                new.keys() == old.keys()
+                and all(
+                    _is_fake_tensor_same(
+                        new[key],
+                        old[key],
+                        existing_storages,
+                        check_dtype=check_dtype,
+                        check_strides=check_strides,
+                        check_storage=check_storage,
+                        node=node,
+                        recursive_ids=recursive_ids,
+                    )
+                    for key in new
+                )
+            )
+
+        if isinstance(new, Collection) and not isinstance(new, (str, bytes)):
             if recursive_ids is None:
                 recursive_ids = OrderedSet()
 
@@ -119,6 +147,7 @@ def _is_fake_tensor_same(
                         new_i,
                         old_i,
                         existing_storages,
+                        check_dtype=check_dtype,
                         check_strides=check_strides,
                         check_storage=check_storage,
                         node=node,
@@ -136,19 +165,21 @@ def _is_fake_tensor_same(
                 == sympy.true
             )
 
-        # If this is not a Collection, a sym-type, or a Tensor, then check for Python
-        # equality.  This should be fairly conservative, since an object with no
-        # implemented __eq__ method will compare IDs.
+        # If this is not a collection, a sym-type, or a Tensor, then check Python
+        # equality. This is conservative for objects without custom __eq__ methods.
         return new == old
 
     if (
         new.layout != old.layout
-        or new.dtype != old.dtype
+        or (check_dtype and new.dtype != old.dtype)
         or not is_intlist_same(new.shape, old.shape)
     ):
         return False
 
     if new.device != old.device:
+        return False
+
+    if check_dtype and new.dtype != old.dtype:
         return False
 
     if (
@@ -161,9 +192,13 @@ def _is_fake_tensor_same(
     if not check_storage:
         return True
 
-    if not statically_known_true(
-        new.storage_offset() == old.storage_offset()
-    ) or get_storage(new) != get_storage(old):
+    if not statically_known_true(new.storage_offset() == old.storage_offset()):
+        return False
+
+    if get_storage(new) == get_storage(old):
+        return True
+
+    if node is None or existing_storages is None:
         return False
 
     def any_user_may_alias(node):
@@ -180,14 +215,14 @@ def _is_fake_tensor_same(
                 return True
 
             if isinstance(user.target, torch._ops.HigherOrderOperator):
-                # HOPs that survive until inductor are all non-aliasing HOPs.  We will
-                # likely never support HOPs that are aliasing.
+                # HOPs that survive until inductor are all non-aliasing HOPs.
+                # We will likely never support HOPs that are aliasing.
                 continue
 
-            # Strategy: do a FakeTensor prop, see if the storage aliases.  If Inductor
-            # ever gets tighter invariants on OpOverloads (that is, we ban things like
-            # torch.ops.aten.reshape calls in the graph), then this could just be a fast
-            # schema lookup.
+            # Strategy: do a FakeTensor prop, see if the storage aliases.
+            # If Inductor ever gets tighter invariants on OpOverloads
+            # (that is, we ban things like torch.ops.aten.reshape calls in the graph),
+            # then this could just be a fast schema lookup.
             is_valid, args, kwargs = get_fake_args_kwargs(user)
             if not is_valid:
                 return True
@@ -197,8 +232,8 @@ def _is_fake_tensor_same(
                 enable_python_dispatcher(),
                 contextlib.ExitStack() as stack,
             ):
-                # Ignore unbacked symbols (if they exist): we're making this FakeTensor
-                # and then throwing it away.
+                # Ignore unbacked symbols (if they exist): we're making
+                # this FakeTensor and then throwing it away.
                 if (shape_env := V.fake_mode.shape_env) is not None:
                     stack.enter_context(shape_env.ignore_fresh_unbacked_symbols())
                 new_fake_tensor = user.target(*args, **kwargs)
@@ -213,10 +248,10 @@ def _is_fake_tensor_same(
         return False
 
     # This is the case where it returns a completely fresh storage that's used nowhere
-    # else.  If the FakeTensor's storage is fresh and none of the node's users can alias
+    # else. If the FakeTensor's storage is fresh and none of the node's users can alias
     # it, then we don't need to update this node.
     if (
-        existing_storages[get_storage(old)] == 1
+        existing_storages.get(get_storage(old), 0) == 1
         and get_storage(new) not in existing_storages
         and not any_user_may_alias(node)
     ):
@@ -237,17 +272,6 @@ def _extract_subgraphs_and_args(
 
     If the second yielded value is None, this function was unable to determine what args
     to pass to the subgraph."""
-
-    def get_subgraph_args(
-        subgraph: torch.fx.GraphModule,
-    ) -> tuple[torch.Tensor, ...]:
-        return tuple(
-            get_fake(n, subgraph) for n in subgraph.graph.find_nodes(op="placeholder")
-        )
-
-    def is_integer(d: torch.dtype) -> bool:
-        return not d.is_floating_point and not d.is_complex
-
     if node.target is torch.ops.higher_order.associative_scan:
         # Associative scan operates on slices of xs (see: scan), but multiple slices.
         # Use the same slice twice to account for cases where only a single slice is
@@ -257,85 +281,116 @@ def _extract_subgraphs_and_args(
         subgraph_args = tuple(args[3])
         yield args[1], subgraph_args
         yield args[2], subgraph_args
-    elif node.target is torch.ops.higher_order.flex_attention:
-        # flex_attention currently yields two subgraphs.  The first (the score
-        # calculation) has a signature starting with a scalar argument of the same dtype
-        # as the query (args[0]), followed by four scalar integer arguments and optional
-        # additional tensors.  The second (the mask calculation) looks similar, with
-        # four scalar integer arguments and optional additional (different) tensors.  We
-        # assume this format here (adding some defensive assertions), which means that
-        # the only inputs we may need to update are the optional additional tensors. See
+    elif node.target in (
+        torch.ops.higher_order.flex_attention,
+        torch.ops.higher_order.flex_attention_backward,
+    ):
+        # flex_attention subgraphs have a small fixed scalar prefix plus optional
+        # captured tensors.  The backward HOP also has a joint graph with one extra
+        # gradient scalar before the optional captured tensors.  We assume this format
+        # here (adding some defensive assertions), which means that the only inputs we
+        # may need to update are the optional additional tensors. See
         # torch._higher_order_ops.flex_attention._math_attention_inner for more details.
 
-        score_subgraph: torch.fx.GraphModule = args[3]
+        def get_subgraph_args(
+            subgraph: torch.fx.GraphModule,
+        ) -> tuple[torch.Tensor, ...]:
+            return tuple(
+                get_fake(n, subgraph)
+                for n in subgraph.graph.find_nodes(op="placeholder")
+            )
+
+        def is_integer(d: torch.dtype) -> bool:
+            return not d.is_floating_point and not d.is_complex
+
+        def new_score_arg(reference: torch.Tensor) -> torch.Tensor:
+            return args[0].new_zeros(
+                (),
+                dtype=args[0].dtype,
+                requires_grad=reference.requires_grad,
+            )
+
+        if node.target is torch.ops.higher_order.flex_attention:
+            score_subgraph_idx = 3
+            mask_subgraph = args[4][-1]
+            score_mod_other_buffers_idx = 7
+            mask_mod_other_buffers_idx = 8
+        else:
+            score_subgraph_idx = 7
+            mask_subgraph = args[9][-1]
+            score_mod_other_buffers_idx = 12
+            mask_mod_other_buffers_idx = 13
+
+        score_subgraph: torch.fx.GraphModule = args[score_subgraph_idx]
         score_subgraph_args = get_subgraph_args(score_subgraph)
-        mask_subgraph = args[4][-1]
         mask_subgraph_args = get_subgraph_args(mask_subgraph)
+        score_args = (new_score_arg(score_subgraph_args[0]), *score_subgraph_args[1:5])
 
         integer_arg_dtypes = OrderedSet[torch.dtype](
-            a.dtype for a in chain(score_subgraph_args[1:5], mask_subgraph_args[:4])
+            a.dtype for a in chain(score_args[1:], mask_subgraph_args[:4])
         )
         if not (
-            score_subgraph_args[0].dtype == args[0].dtype
-            and len(integer_arg_dtypes) == 1
+            len(integer_arg_dtypes) == 1
             and is_integer(integer_arg_dtypes.pop())
             and all(
-                len(a.size()) == 0
-                for a in chain(score_subgraph_args[:5], mask_subgraph_args[:4])
+                len(a.size()) == 0 for a in chain(score_args, mask_subgraph_args[:4])
             )
         ):
             raise AssertionError("flex_attention subgraph arg format has changed!")
 
-        yield score_subgraph, (*score_subgraph_args[:5], *args[7])
-        yield args[4][-1], (*mask_subgraph_args[:4], *args[8])
-    elif node.target is torch.ops.higher_order.flex_attention_backward:
-        fw_subgraph = args[7]
-        fw_subgraph_args = get_subgraph_args(fw_subgraph)
-        joint_subgraph = args[8]
-        joint_subgraph_args = get_subgraph_args(joint_subgraph)
-        mask_subgraph = args[9][-1]
-        mask_subgraph_args = get_subgraph_args(mask_subgraph)
-
-        integer_arg_dtypes = OrderedSet[torch.dtype](
-            a.dtype
-            for a in chain(
-                fw_subgraph_args[1:5],
-                joint_subgraph_args[1:5],
-                mask_subgraph_args[:4],
+        if score_subgraph in valid_subgraphs:
+            yield (
+                score_subgraph,
+                (
+                    *score_args,
+                    *args[score_mod_other_buffers_idx],
+                ),
             )
-        )
-        if not (
-            fw_subgraph_args[0].dtype == args[0].dtype
-            and joint_subgraph_args[0].dtype == args[0].dtype
-            and len(integer_arg_dtypes) == 1
-            and is_integer(integer_arg_dtypes.pop())
-            and all(
-                len(a.size()) == 0
-                for a in chain(
-                    fw_subgraph_args[:5],
-                    joint_subgraph_args[:6],
-                    mask_subgraph_args[:4],
-                )
-            )
-        ):
-            raise AssertionError(
-                "flex_attention_backward subgraph arg format has changed!"
-            )
-
-        if fw_subgraph in valid_subgraphs:
-            yield fw_subgraph, (*fw_subgraph_args[:5], *args[12])
-        if joint_subgraph in valid_subgraphs:
-            yield joint_subgraph, (*joint_subgraph_args[:6], *args[12])
         if mask_subgraph in valid_subgraphs:
-            yield mask_subgraph, (*mask_subgraph_args[:4], *args[13])
+            yield (
+                mask_subgraph,
+                (
+                    *mask_subgraph_args[:4],
+                    *args[mask_mod_other_buffers_idx],
+                ),
+            )
+
+        if node.target is torch.ops.higher_order.flex_attention_backward:
+            if (
+                isinstance(joint_subgraph := args[8], torch.fx.GraphModule)
+                and joint_subgraph in valid_subgraphs
+            ):
+                joint_subgraph_args = get_subgraph_args(joint_subgraph)
+                joint_args = (
+                    new_score_arg(joint_subgraph_args[0]),
+                    *joint_subgraph_args[1:5],
+                    new_score_arg(joint_subgraph_args[5]),
+                )
+                yield (
+                    joint_subgraph,
+                    (
+                        *joint_args,
+                        *args[score_mod_other_buffers_idx],
+                    ),
+                )
     elif node.target in (
         torch.ops.higher_order.foreach_map,
         torch.ops.higher_order.invoke_quant_packed,
         torch.ops.higher_order.invoke_quant,
     ):
         yield args[0], tuple(args[1:])
+    elif node.target is torch.ops.higher_order.with_effects:
+        if args[1] is torch.ops.higher_order.invoke_subgraph:
+            yield args[2], tuple(args[4:])
+        else:
+            raise AssertionError(
+                "Please add FakeTensorUpdater subgraph arg support for "
+                f"with_effects wrapping {args[1]}!"
+            )
     elif node.target is torch.ops.higher_order.invoke_subgraph:
         yield args[0], tuple(args[2:])
+    elif node.target is torch.ops.higher_order.run_const_graph:
+        yield args[0], tuple(args[1])
     elif node.target is torch.ops.higher_order.map_impl:
         # Map is applied over slices from the first dimension of each value in args[1].
         yield args[0], (*(a[0] for a in args[1]), *args[2])
@@ -441,26 +496,31 @@ class FakeTensorUpdater:
 
     Since this runs in the context of Inductor, we assume that the input and
     output semantics for the outermost graph are not subject to change after class
-    initialization, but we allow striding changes for subgraphs.  Any other changes will
-    result in errors or undefined behavior.
+    initialization, but we allow dtype and striding changes for subgraphs.  Any other
+    changes will result in errors or undefined behavior.
     """
 
     def __init__(self, gm: torch.fx.GraphModule) -> None:
         self.processed_hashes = OrderedSet[_FxNodeHash]()
         self.tracked_node_ids: OrderedSet[int] = OrderedSet()
         self.gm = gm
+        self.subgraph_updaters: dict[torch.fx.GraphModule, FakeTensorUpdater] = {}
+        self.refresh_subgraph_updaters()
 
+        for node in self.gm.graph.nodes:
+            is_valid, _, _ = get_fake_args_kwargs(node, self.gm)
+            if is_valid:
+                self.processed_hashes.add(self.hash_node(node))
+            self.tracked_node_ids.add(id(node))
+
+    def refresh_subgraph_updaters(self) -> None:
         # Import here to avoid circular import issues.
         from torch._inductor.compile_fx import _get_subgraph_names
 
-        self.subgraph_updaters: dict[torch.fx.GraphModule, FakeTensorUpdater] = {
-            (subgraph := getattr(self.gm, subgraph_name)): FakeTensorUpdater(subgraph)
-            for subgraph_name in _get_subgraph_names(self.gm)
-        }
-
-        for node in self.gm.graph.nodes:
-            self.processed_hashes.add(self.hash_node(node))
-            self.tracked_node_ids.add(id(node))
+        for subgraph_name in _get_subgraph_names(self.gm):
+            subgraph = getattr(self.gm, subgraph_name)
+            if subgraph not in self.subgraph_updaters:
+                self.subgraph_updaters[subgraph] = FakeTensorUpdater(subgraph)
 
     def hash_node(self, node: torch.fx.Node) -> _FxNodeHash:
         def get_hash_or_ids(n_iter: Iterable[Any]) -> tuple[int, ...]:
@@ -472,7 +532,7 @@ class FakeTensorUpdater:
             def get_hash_or_id(o: object) -> int:
                 try:
                     return hash(o)
-                except Exception:
+                except TypeError:
                     return id(o)
 
             return tuple(get_hash_or_id(n) for n in n_iter)
@@ -484,21 +544,29 @@ class FakeTensorUpdater:
             get_hash_or_ids(chain.from_iterable(node.kwargs.items())),
         )
 
-    def incremental_update(self) -> int:
+    def incremental_update(self, nodes_to_process: Iterable[torch.fx.Node] = ()) -> int:
         """Update FakeTensors on self.graph. We will try to do the minimum amount of work.
 
+        nodes_to_process: nodes to force update even if their hashes are unchanged.
+
         Returns the number of nodes updated, including recursive updates on subgraphs."""
-        existing_storages: defaultdict[int, int] = defaultdict(int)
+        existing_storages: defaultdict[int | None, int] = defaultdict(int)
         for node in self.gm.graph.nodes:
-            if storage := get_node_storage(node):
-                existing_storages[storage] += 1
+            existing_storages[get_node_storage(node)] += 1
 
         def should_process_node(node: torch.fx.Node) -> bool:
-            return (
-                callable(node.target)
-                # Dirty Inductor lowerings are handled by the guard below. Clean
-                # lowering nodes are skipped because their targets expect IR inputs.
-                and not hasattr(node.target, "_inductor_lowering_function")
+            if node.op != "call_function":
+                return False
+
+            if isinstance(node.target, torch._ops.HigherOrderOperator):
+                return True
+
+            return callable(node.target) and not hasattr(
+                node.target,
+                # node.target will be called with FakeTensor arguments, which are not
+                # supported by Inductor lowerings. TODO: Investigate how to remove
+                # this. See https://github.com/pytorch/pytorch/issues/164920
+                "_inductor_lowering_function",
             )
 
         def node_invokes_subgraph(
@@ -580,15 +648,7 @@ class FakeTensorUpdater:
             )
 
             def has_missing_fake_metadata(input_node: torch.fx.Node) -> bool:
-                return not (
-                    "val" in input_node.meta
-                    or "example_value" in input_node.meta
-                    or (
-                        input_node.op == "get_attr"
-                        and isinstance(input_node.target, str)
-                        and hasattr(self.gm, input_node.target)
-                    )
-                )
+                return isinstance(get_fake(input_node, self.gm), torch.fx.Node)
 
             if any(
                 isinstance(leaf, torch.fx.Node) and has_missing_fake_metadata(leaf)
@@ -601,6 +661,14 @@ class FakeTensorUpdater:
                 )
             return tree_map(partial(get_fake, gm=self.gm), raw_input)
 
+        def invalidate_fake_metadata(node: torch.fx.Node) -> bool:
+            removed = False
+            for key in ("val", "example_value", "unbacked_bindings"):
+                if key in node.meta:
+                    del node.meta[key]
+                    removed = True
+            return removed
+
         # Update self.processed_hashes every time.  This allows us to account for
         # situations where a node gets modified, updated, then reverted to its original
         # state.  Without doing this, we wouldn't update downstream nodes, because the
@@ -608,16 +676,22 @@ class FakeTensorUpdater:
         current_graph_hashes = OrderedSet[_FxNodeHash]()
 
         nodes_updated: int = 0
-        to_process = OrderedSet[int]()
+        to_process = OrderedSet(id(node) for node in nodes_to_process)
         # Value records whether subgraph outputs have been updated.
         subgraph_updatings: dict[torch.fx.GraphModule, bool] = {}
+        subgraph_nodes_to_process: dict[
+            torch.fx.GraphModule, OrderedSet[torch.fx.Node]
+        ] = {}
+        self.refresh_subgraph_updaters()
         for node in self.gm.graph.nodes:
-            current_graph_hashes.add(node_hash := self.hash_node(node))
+            node_hash = self.hash_node(node)
 
             # Lowering functions consume Inductor IR nodes, not FakeTensors, so
             # FakeTensorUpdater cannot safely recompute their metadata.
-            if hasattr(node.target, "_inductor_lowering_function") and (
-                node_hash not in self.processed_hashes or id(node) in to_process
+            if (
+                not isinstance(node.target, torch._ops.HigherOrderOperator)
+                and hasattr(node.target, "_inductor_lowering_function")
+                and (node_hash not in self.processed_hashes or id(node) in to_process)
             ):
                 if metadata_fn := getattr(
                     node.target,
@@ -636,6 +710,7 @@ class FakeTensorUpdater:
                         new_fake_tensor = metadata_fn(*args, **kwargs)
                     if update_node_fake_tensor(node, new_fake_tensor):
                         nodes_updated += 1
+                    current_graph_hashes.add(node_hash)
                     self.tracked_node_ids.add(id(node))
                     continue
                 if (
@@ -649,6 +724,7 @@ class FakeTensorUpdater:
                         node, get_lowering_input_metadata(node, metadata_input)
                     ):
                         nodes_updated += 1
+                    current_graph_hashes.add(node_hash)
                     self.tracked_node_ids.add(id(node))
                     continue
                 if id(node) in to_process:
@@ -675,11 +751,19 @@ class FakeTensorUpdater:
                         f"Encountered new node without metadata: {node.format_node()}"
                     )
                 self.tracked_node_ids.add(id(node))
+                current_graph_hashes.add(node_hash)
                 continue
 
             is_valid, args, kwargs = get_fake_args_kwargs(node, self.gm)
             if not is_valid:
+                if invalidate_fake_metadata(node):
+                    nodes_updated += 1
+                    to_process.update(id(user) for user in node.users)
                 continue
+            current_graph_hashes.add(node_hash)
+            node_needs_update = (
+                node_hash not in self.processed_hashes or id(node) in to_process
+            )
 
             # NB: Be very careful about skipping nodes (via continues) here
             # and ask for a careful review when changing this code. The
@@ -688,8 +772,7 @@ class FakeTensorUpdater:
             if (
                 # Always run updates on nodes that invoke subgraphs
                 not (invokes_subgraph := node_invokes_subgraph(node, *args, **kwargs))
-                and node_hash in self.processed_hashes
-                and id(node) not in to_process
+                and not node_needs_update
             ):
                 continue
 
@@ -730,23 +813,27 @@ class FakeTensorUpdater:
                                     raise AssertionError(
                                         "subgraph args must have consistent values!"
                                     )
-                                # Check that only the stride has changed.  Other changes
-                                # cannot be handled without manual intervention.
+                                # Check that only dtype or stride has changed.  Other
+                                # changes cannot be handled without manual intervention.
                                 if not _is_fake_tensor_same(
                                     a,
                                     p_fake,
                                     existing_storages,
+                                    check_dtype=False,
                                     check_strides=False,
                                     check_storage=False,
                                 ):
                                     raise AssertionError(
-                                        "A subgraph argument other than striding has been "
-                                        "modified; FakeTensorUpdater cannot update this "
-                                        "argument!"
+                                        "A subgraph argument other than dtype or "
+                                        "striding has been modified; "
+                                        "FakeTensorUpdater cannot update this argument!"
                                     )
 
                                 p.meta["val"] = a
                                 nodes_updated += 1
+                                subgraph_nodes_to_process.setdefault(
+                                    subgraph, OrderedSet()
+                                ).update(p.users)
 
                     if update_subgraph:
                         _, orig_output_args, _ = get_fake_args_kwargs(
@@ -754,7 +841,9 @@ class FakeTensorUpdater:
                         )
                         nodes_updated += self.subgraph_updaters[
                             subgraph
-                        ].incremental_update()
+                        ].incremental_update(
+                            subgraph_nodes_to_process.get(subgraph, ())
+                        )
                         _, new_output_args, _ = get_fake_args_kwargs(
                             subgraph.graph.output_node(), subgraph
                         )
@@ -775,7 +864,11 @@ class FakeTensorUpdater:
                 # subgraph have changed, we'll run FakeTensor propagation for every
                 # invocation of the subgraph, so that each node gets unique FakeTensor
                 # values which maintain appropriate aliasing relationships.
-                if not any_output_updated and "val" in node.meta:
+                if (
+                    not any_output_updated
+                    and not node_needs_update
+                    and "val" in node.meta
+                ):
                     continue
 
             with V.fake_mode, enable_python_dispatcher():
@@ -812,12 +905,16 @@ def get_fake(x: Any, gm: torch.fx.GraphModule | None) -> Any:
             return x.meta["val"]
         if "example_value" in x.meta:
             return x.meta["example_value"]
-        if x.op == "get_attr" and isinstance(x.target, str) and hasattr(gm, x.target):
-            return getattr(gm, x.target)
-        # If a node has no available fake values and isn't a get_attr, it either returns
-        # None or is incorrectly configured.  Since there are real nodes which return
-        # None, we can't error here.
-        return None
+        if gm is not None and x.op == "get_attr" and isinstance(x.target, str):
+            attr = _get_attr(gm, x.target)
+            if pytree.tree_any_only(torch.Tensor, lambda _: True, attr):
+                # Keep tensor-valued attributes invalid until they have fake metadata.
+                # Feeding real module tensors into FakeTensor propagation can silently
+                # mix real and fake inputs. Once metadata is attached, users are cached
+                # normally and no-op updates stay cheap.
+                return x
+            return attr
+        return x
     # If there are no example values, return x
     return x
 
@@ -901,7 +998,7 @@ def countable_fx(node: torch.fx.Node) -> bool:
     Whether or not we can count the flops of an FX node.
     """
     if not isinstance(node, torch.fx.Node):
-        raise AssertionError(f"expected torch.fx.Node, got {type(node)}")
+        raise AssertionError(f"expected torch.fx.Node, got {type(node).__name__}")
     if not hasattr(node, "target"):
         return False
     target = node.target

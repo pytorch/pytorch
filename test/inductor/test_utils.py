@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 import importlib.util
+import operator
 import unittest
 from collections.abc import Callable, Iterator
 
@@ -16,6 +17,7 @@ from torch._inductor.fx_utils import (
     countable_fx,
     FakeTensorUpdater,
     get_fake,
+    get_fake_args_kwargs,
 )
 from torch._inductor.utils import get_device_tflops, sympy_str, sympy_subs
 from torch._inductor.virtualized import V
@@ -508,19 +510,26 @@ class TestFakeTensorUpdater(TestCase):
             with V.set_fake_mode(fake_mode):
                 clone_num_updated = updater.incremental_update()
 
-            # At a minimum, we have to update the newly inserted node and all the nodes
-            # which had an input replaced.  There may be more nodes modified in
-            # subgraphs, so we can't do a strict equality assertion here.
-            self.assertGreaterEqual(clone_num_updated, len(nodes_modified) + 1)
+            # At a minimum, we have to update the newly inserted node.  The users
+            # may not need updates if the replacement has equivalent metadata, but
+            # stride-changing replacements should propagate through modified
+            # call_function users.
+            minimum_updated = 1
+            if should_shuffle_strides:
+                minimum_updated += sum(n.op == "call_function" for n in nodes_modified)
+            self.assertGreaterEqual(clone_num_updated, minimum_updated)
+            self.assertIn("val", cloned_node.meta)
+            with V.set_fake_mode(fake_mode):
+                self.assertEqual(updater.incremental_update(), 0)
 
             cloned_node.replace_all_uses_with(fn)
             gm.graph.erase_node(cloned_node)
             with V.set_fake_mode(fake_mode):
                 erase_num_updated = updater.incremental_update()
-
-            # Deleting the node should update the same number of nodes as previously,
-            # excluding the reshaped node itself.
-            self.assertEqual(clone_num_updated - 1, erase_num_updated)
+                if should_shuffle_strides:
+                    self.assertGreaterEqual(erase_num_updated, minimum_updated - 1)
+                self.assertLessEqual(erase_num_updated, clone_num_updated - 1)
+                self.assertEqual(updater.incremental_update(), 0)
 
     def test_hop_implicit_subgraph_inputs(self):
         def fn(x: torch.Tensor) -> torch.Tensor:
@@ -661,6 +670,569 @@ class TestFakeTensorUpdater(TestCase):
         self.assertIs(
             mask_placeholders[-1].meta["val"], restrided_mask_buffer_node.meta["val"]
         )
+
+    def test_hop_subgraph_dtype_change(self):
+        def true_fn(x: torch.Tensor) -> torch.Tensor:
+            return x + 1
+
+        def false_fn(x: torch.Tensor) -> torch.Tensor:
+            return x - 1
+
+        def fn(x: torch.Tensor) -> torch.Tensor:
+            y = x.view(torch.int32)
+            return torch.cond(x.sum() > 0, true_fn, false_fn, (y,))
+
+        def tensor_dtypes(gm: torch.fx.GraphModule) -> list[torch.dtype]:
+            return [
+                fake.dtype
+                for node in gm.graph.nodes
+                if isinstance((fake := node.meta.get("val")), torch.Tensor)
+            ]
+
+        graph = make_fx(fn, tracing_mode="fake")(torch.randn(4))
+        view_dtype_node = next(
+            n for n in graph.graph.nodes if n.target == torch.ops.aten.view.dtype
+        )
+        self.assertEqual(view_dtype_node.meta["val"].dtype, torch.int32)
+        for subgraph_name in _get_subgraph_names(graph):
+            self.assertEqual(
+                tensor_dtypes(getattr(graph, subgraph_name)), [torch.int32] * 2
+            )
+
+        updater = FakeTensorUpdater(graph)
+        view_dtype_node.args = (view_dtype_node.args[0], torch.float32)
+        with V.set_fake_mode(self._get_faketensormode(graph)):
+            updater.incremental_update()
+
+        self.assertEqual(view_dtype_node.meta["val"].dtype, torch.float32)
+        for subgraph_name in _get_subgraph_names(graph):
+            self.assertEqual(
+                tensor_dtypes(getattr(graph, subgraph_name)), [torch.float32] * 2
+            )
+
+    def test_auto_functionalized_dtype_change(self):
+        with torch.library._scoped_library("fake_tensor_updater", "FRAGMENT") as lib:
+            torch.library.define(
+                "fake_tensor_updater::mutate_x",
+                "(Tensor(a!) x) -> ()",
+                lib=lib,
+            )
+
+            @torch.library.impl(
+                "fake_tensor_updater::mutate_x", "CompositeExplicitAutograd", lib=lib
+            )
+            def mutate_x_impl(x: torch.Tensor) -> None:
+                x.add_(1)
+
+            @torch.library.register_fake("fake_tensor_updater::mutate_x", lib=lib)
+            def mutate_x_fake(x: torch.Tensor) -> None:
+                return None
+
+            def fn(x: torch.Tensor) -> torch.Tensor:
+                y = x.view(torch.int32)
+                _, new_y = torch.ops.higher_order.auto_functionalized(
+                    torch.ops.fake_tensor_updater.mutate_x.default, x=y
+                )
+                return new_y + 1
+
+            graph = make_fx(fn, tracing_mode="fake")(torch.randn(4))
+
+            view_dtype_node = next(
+                n for n in graph.graph.nodes if n.target == torch.ops.aten.view.dtype
+            )
+            auto_functionalized_node = next(
+                n
+                for n in graph.graph.nodes
+                if n.target == torch.ops.higher_order.auto_functionalized
+            )
+            add_node = next(
+                n for n in graph.graph.nodes if n.target == torch.ops.aten.add.Tensor
+            )
+
+            def updated_tensor_dtype() -> torch.dtype:
+                val = auto_functionalized_node.meta["val"]
+                self.assertIsNone(val[0])
+                self.assertIsInstance(val[1], torch.Tensor)
+                return val[1].dtype
+
+            self.assertEqual(view_dtype_node.meta["val"].dtype, torch.int32)
+            self.assertEqual(updated_tensor_dtype(), torch.int32)
+            self.assertEqual(add_node.meta["val"].dtype, torch.int32)
+
+            updater = FakeTensorUpdater(graph)
+            view_dtype_node.args = (view_dtype_node.args[0], torch.float32)
+
+            hop = torch.ops.higher_order.auto_functionalized
+            sentinel = object()
+            old_lowering_marker = getattr(hop, "_inductor_lowering_function", sentinel)
+            hop._inductor_lowering_function = True
+            try:
+                with V.set_fake_mode(self._get_faketensormode(graph)):
+                    updater.incremental_update()
+            finally:
+                if old_lowering_marker is sentinel:
+                    delattr(hop, "_inductor_lowering_function")
+                else:
+                    hop._inductor_lowering_function = old_lowering_marker
+
+            self.assertEqual(view_dtype_node.meta["val"].dtype, torch.float32)
+            self.assertEqual(updated_tensor_dtype(), torch.float32)
+            self.assertEqual(add_node.meta["val"].dtype, torch.float32)
+
+    def test_op_overload_packet_dtype_change(self):
+        root = torch.nn.Module()
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        view = graph.call_function(torch.ops.aten.view.dtype, (x, torch.int32))
+        add = graph.call_function(torch.ops.aten.add, (view, 1))
+        graph.output(add)
+        graph_module = torch.fx.GraphModule(root, graph)
+
+        self.assertIsInstance(add.target, torch._ops.OpOverloadPacket)
+
+        fake_mode = torch._subclasses.FakeTensorMode()
+        with fake_mode:
+            x.meta["val"] = torch.randn(4)
+            view.meta["val"] = view.target(
+                *(get_fake(arg, graph_module) for arg in view.args)
+            )
+            add.meta["val"] = add.target(get_fake(view, graph_module), 1)
+
+        self.assertEqual(view.meta["val"].dtype, torch.int32)
+        self.assertEqual(add.meta["val"].dtype, torch.int32)
+
+        updater = FakeTensorUpdater(graph_module)
+        view.args = (x, torch.float32)
+        with V.set_fake_mode(fake_mode):
+            updater.incremental_update()
+
+        self.assertEqual(view.meta["val"].dtype, torch.float32)
+        self.assertEqual(add.meta["val"].dtype, torch.float32)
+
+    def test_run_const_graph_dtype_change(self):
+        def inner_fn(y: torch.Tensor) -> torch.Tensor:
+            return y + 1
+
+        inner_graph = make_fx(inner_fn, tracing_mode="fake")(
+            torch.ones(4, dtype=torch.int32)
+        )
+
+        def fn(x: torch.Tensor) -> torch.Tensor:
+            y = x.view(torch.int32)
+            return torch.ops.higher_order.run_const_graph(inner_graph, (y,))
+
+        def tensor_dtypes(gm: torch.fx.GraphModule) -> list[torch.dtype]:
+            return [
+                fake.dtype
+                for node in gm.graph.nodes
+                if isinstance((fake := node.meta.get("val")), torch.Tensor)
+            ]
+
+        graph = make_fx(fn, tracing_mode="fake")(torch.randn(4))
+        view_dtype_node = next(
+            n for n in graph.graph.nodes if n.target == torch.ops.aten.view.dtype
+        )
+        run_const_graph_node = next(
+            n
+            for n in graph.graph.nodes
+            if n.target == torch.ops.higher_order.run_const_graph
+        )
+        subgraph = getattr(graph, next(_get_subgraph_names(graph)))
+
+        self.assertEqual(view_dtype_node.meta["val"].dtype, torch.int32)
+        self.assertEqual(run_const_graph_node.meta["val"].dtype, torch.int32)
+        self.assertEqual(tensor_dtypes(subgraph), [torch.int32] * 2)
+
+        updater = FakeTensorUpdater(graph)
+        view_dtype_node.args = (view_dtype_node.args[0], torch.float32)
+        with V.set_fake_mode(self._get_faketensormode(graph)):
+            updater.incremental_update()
+
+        self.assertEqual(view_dtype_node.meta["val"].dtype, torch.float32)
+        self.assertEqual(run_const_graph_node.meta["val"].dtype, torch.float32)
+        self.assertEqual(tensor_dtypes(subgraph), [torch.float32] * 2)
+
+    def test_new_subgraph_after_updater_init_dtype_change(self):
+        def inner_fn(y: torch.Tensor) -> torch.Tensor:
+            return y + 1
+
+        inner_graph = make_fx(inner_fn, tracing_mode="fake")(
+            torch.ones(4, dtype=torch.int32)
+        )
+
+        def tensor_dtypes(gm: torch.fx.GraphModule) -> list[torch.dtype]:
+            return [
+                fake.dtype
+                for node in gm.graph.nodes
+                if isinstance((fake := node.meta.get("val")), torch.Tensor)
+            ]
+
+        root = torch.nn.Module()
+        outer_graph = torch.fx.Graph()
+        x = outer_graph.placeholder("x")
+        view = outer_graph.call_function(torch.ops.aten.view.dtype, (x, torch.int32))
+        output = outer_graph.output(view)
+        graph = torch.fx.GraphModule(root, outer_graph)
+
+        fake_mode = torch._subclasses.FakeTensorMode()
+        with fake_mode:
+            x.meta["val"] = torch.randn(4)
+            view.meta["val"] = view.target(*(get_fake(arg, graph) for arg in view.args))
+
+        updater = FakeTensorUpdater(graph)
+
+        graph.add_module("subgraph", inner_graph)
+        with graph.graph.inserting_before(output):
+            subgraph_attr = graph.graph.get_attr("subgraph")
+        with graph.graph.inserting_before(output):
+            run_const_graph = graph.graph.call_function(
+                torch.ops.higher_order.run_const_graph,
+                (subgraph_attr, (view,)),
+            )
+        output.args = (run_const_graph,)
+        graph.graph.lint()
+
+        with fake_mode:
+            is_valid, args, kwargs = get_fake_args_kwargs(run_const_graph, graph)
+            self.assertTrue(is_valid)
+            run_const_graph.meta["val"] = run_const_graph.target(*args, **kwargs)
+
+        self.assertEqual(view.meta["val"].dtype, torch.int32)
+        self.assertEqual(run_const_graph.meta["val"].dtype, torch.int32)
+        self.assertEqual(tensor_dtypes(inner_graph), [torch.int32] * 2)
+
+        view.args = (x, torch.float32)
+        with V.set_fake_mode(fake_mode):
+            updater.incremental_update()
+
+        self.assertEqual(view.meta["val"].dtype, torch.float32)
+        self.assertEqual(run_const_graph.meta["val"].dtype, torch.float32)
+        self.assertEqual(tensor_dtypes(inner_graph), [torch.float32] * 2)
+
+    def test_with_effects_invoke_subgraph_dtype_change(self):
+        def inner_fn(y: torch.Tensor) -> tuple[torch.Tensor]:
+            return (y + 1,)
+
+        inner_graph = make_fx(inner_fn, tracing_mode="fake")(
+            torch.ones(4, dtype=torch.int32)
+        )
+
+        root = torch.nn.Module()
+        root.subgraph = inner_graph
+        outer_graph = torch.fx.Graph()
+        x = outer_graph.placeholder("x")
+        view = outer_graph.call_function(torch.ops.aten.view.dtype, (x, torch.int32))
+        token = outer_graph.call_function(torch.ops.aten._make_dep_token.default, ())
+        subgraph_attr = outer_graph.get_attr("subgraph")
+        with_effects = outer_graph.call_function(
+            torch.ops.higher_order.with_effects,
+            (
+                token,
+                torch.ops.higher_order.invoke_subgraph,
+                subgraph_attr,
+                "fake_tensor_updater",
+                view,
+            ),
+        )
+        out = outer_graph.call_function(operator.getitem, (with_effects, 1))
+        outer_graph.output(out)
+        graph = torch.fx.GraphModule(root, outer_graph)
+
+        fake_mode = torch._subclasses.FakeTensorMode()
+        with fake_mode:
+            x.meta["val"] = torch.randn(4)
+            view.meta["val"] = view.target(*(get_fake(arg, graph) for arg in view.args))
+            token.meta["val"] = token.target()
+            with_effects.meta["val"] = with_effects.target(
+                *(get_fake(arg, graph) for arg in with_effects.args)
+            )
+            out.meta["val"] = out.target(get_fake(with_effects, graph), 1)
+
+        def tensor_dtypes(gm: torch.fx.GraphModule) -> list[torch.dtype]:
+            return [
+                fake.dtype
+                for node in gm.graph.nodes
+                if isinstance((fake := node.meta.get("val")), torch.Tensor)
+            ]
+
+        self.assertEqual(view.meta["val"].dtype, torch.int32)
+        self.assertEqual(with_effects.meta["val"][1].dtype, torch.int32)
+        self.assertEqual(out.meta["val"].dtype, torch.int32)
+        self.assertEqual(tensor_dtypes(inner_graph), [torch.int32] * 2)
+
+        updater = FakeTensorUpdater(graph)
+        view.args = (x, torch.float32)
+        with V.set_fake_mode(fake_mode):
+            updater.incremental_update()
+
+        self.assertEqual(view.meta["val"].dtype, torch.float32)
+        self.assertEqual(with_effects.meta["val"][1].dtype, torch.float32)
+        self.assertEqual(out.meta["val"].dtype, torch.float32)
+        self.assertEqual(tensor_dtypes(inner_graph), [torch.float32] * 2)
+
+    def test_subgraph_hop_retraces_changed_outer_operands(self):
+        from torch._higher_order_ops.flex_attention import (
+            flex_attention as flex_attention_hop,
+        )
+        from torch.nn.attention.flex_attention import _create_empty_block_mask
+
+        def score_mod(
+            score: torch.Tensor,
+            b: torch.Tensor,
+            h: torch.Tensor,
+            q_idx: torch.Tensor,
+            kv_idx: torch.Tensor,
+        ) -> torch.Tensor:
+            return score
+
+        def fn(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+            block_mask = _create_empty_block_mask(q, k)
+            out, _, _ = flex_attention_hop(
+                q,
+                k,
+                v,
+                score_mod,
+                block_mask.as_tuple(),
+                1.0,
+                {},
+            )
+            return out
+
+        graph = make_fx(fn, tracing_mode="fake")(
+            torch.randn(2, 2, 4, 4),
+            torch.randn(2, 2, 4, 4),
+            torch.randn(2, 2, 4, 4),
+        )
+        updater = FakeTensorUpdater(graph)
+        fake_mode = self._get_faketensormode(graph)
+        query_node = next(
+            n for n in graph.graph.nodes if n.op == "placeholder" and n.name == "q_1"
+        )
+        key_node = next(
+            n for n in graph.graph.nodes if n.op == "placeholder" and n.name == "k_1"
+        )
+        value_node = next(
+            n for n in graph.graph.nodes if n.op == "placeholder" and n.name == "v_1"
+        )
+        flex_node = next(
+            n
+            for n in graph.graph.nodes
+            if n.target == torch.ops.higher_order.flex_attention
+        )
+        old_stride = flex_node.meta["val"][0].stride()
+
+        with graph.graph.inserting_after(query_node):
+            cast_query_node = graph.graph.call_function(
+                torch.ops.aten.to.dtype, (query_node, torch.float16)
+            )
+        with graph.graph.inserting_after(cast_query_node):
+            cloned_query_node = graph.graph.call_function(
+                aten.clone.default,
+                (cast_query_node,),
+                {"memory_format": torch.channels_last},
+            )
+        with graph.graph.inserting_after(key_node):
+            cast_key_node = graph.graph.call_function(
+                torch.ops.aten.to.dtype, (key_node, torch.float16)
+            )
+        with graph.graph.inserting_after(value_node):
+            cast_value_node = graph.graph.call_function(
+                torch.ops.aten.to.dtype, (value_node, torch.float16)
+            )
+        flex_node.replace_input_with(query_node, cloned_query_node)
+        flex_node.replace_input_with(key_node, cast_key_node)
+        flex_node.replace_input_with(value_node, cast_value_node)
+
+        with V.set_fake_mode(fake_mode):
+            updater.incremental_update()
+            is_valid, args, kwargs = get_fake_args_kwargs(flex_node, graph)
+            self.assertTrue(is_valid)
+            expected_fake = flex_node.target(*args, **kwargs)
+
+        self.assertNotEqual(flex_node.meta["val"][0].stride(), old_stride)
+        self.assertEqual(flex_node.meta["val"][0].dtype, torch.float16)
+        self.assertEqual(flex_node.meta["val"][0].stride(), expected_fake[0].stride())
+
+    def test_incremental_update_noop(self):
+        def true_fn(x: torch.Tensor) -> torch.Tensor:
+            return x + 1
+
+        def false_fn(x: torch.Tensor) -> torch.Tensor:
+            return x - 1
+
+        def fn(x: torch.Tensor) -> torch.Tensor:
+            return torch.cond(x.sum() > 0, true_fn, false_fn, (x,))
+
+        graph = make_fx(fn, tracing_mode="fake")(torch.randn(4))
+        updater = FakeTensorUpdater(graph)
+
+        with V.set_fake_mode(self._get_faketensormode(graph)):
+            self.assertEqual(updater.incremental_update(), 0)
+            self.assertEqual(updater.incremental_update(), 0)
+
+    def test_get_fake_args_kwargs_missing_meta_is_invalid(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.placeholder("y")
+        x.meta["val"] = torch.empty(4, device="meta")
+        add = graph.call_function(torch.ops.aten.add.Tensor, (x, y))
+
+        is_valid, args, kwargs = get_fake_args_kwargs(add)
+
+        self.assertFalse(is_valid)
+        self.assertIs(args[1], y)
+        self.assertEqual(kwargs, {})
+
+    def test_incremental_update_retries_invalid_node(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.placeholder("y")
+        z = graph.placeholder("z")
+        add = graph.call_function(torch.ops.aten.add.Tensor, (x, y))
+        mul = graph.call_function(torch.ops.aten.mul.Tensor, (x, z))
+        graph.output((add, mul))
+        graph_module = torch.fx.GraphModule(torch.nn.Module(), graph)
+
+        fake_mode = torch._subclasses.FakeTensorMode()
+        with fake_mode:
+            x.meta["val"] = torch.empty(4)
+            y_fake = torch.empty(4)
+            z_fake = torch.empty(4)
+
+        updater = FakeTensorUpdater(graph_module)
+        with V.set_fake_mode(fake_mode):
+            y.meta["val"] = y_fake
+            self.assertEqual(updater.incremental_update(), 1)
+            self.assertIn("val", add.meta)
+            self.assertNotIn("val", mul.meta)
+            z.meta["val"] = z_fake
+            self.assertEqual(updater.incremental_update(), 1)
+            self.assertEqual(updater.incremental_update(), 0)
+
+        self.assertIn("val", mul.meta)
+
+    def test_get_fake_args_kwargs_tensor_get_attr_without_meta_is_invalid(self):
+        class Root(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_buffer("buf", torch.ones(4))
+
+        root = Root()
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        buf = graph.get_attr("buf")
+        add = graph.call_function(torch.ops.aten.add.Tensor, (x, buf))
+        graph.output(add)
+        graph_module = torch.fx.GraphModule(root, graph)
+        x.meta["val"] = torch.empty(4, device="meta")
+
+        is_valid, args, kwargs = get_fake_args_kwargs(add, graph_module)
+
+        self.assertFalse(is_valid)
+        self.assertIs(args[1], buf)
+        self.assertEqual(kwargs, {})
+
+    def test_tensor_get_attr_retraces_once_after_meta_available(self):
+        class Root(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_buffer("buf", torch.ones(4))
+
+        root = Root()
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        buf = graph.get_attr("buf")
+        add = graph.call_function(torch.ops.aten.add.Tensor, (x, buf))
+        graph.output(add)
+        graph_module = torch.fx.GraphModule(root, graph)
+
+        fake_mode = torch._subclasses.FakeTensorMode()
+        with fake_mode:
+            x.meta["val"] = torch.empty(4)
+            buf_fake = fake_mode.from_tensor(root.buf)
+
+        updater = FakeTensorUpdater(graph_module)
+        with V.set_fake_mode(fake_mode):
+            self.assertEqual(updater.incremental_update(), 0)
+            self.assertNotIn("val", add.meta)
+
+            buf.meta["val"] = buf_fake
+            self.assertEqual(updater.incremental_update(), 1)
+            self.assertIn("val", add.meta)
+            self.assertEqual(updater.incremental_update(), 0)
+
+    def test_invalid_update_clears_stale_meta(self):
+        class Root(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_buffer("buf", torch.ones(4))
+
+        root = Root()
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.placeholder("y")
+        add = graph.call_function(torch.ops.aten.add.Tensor, (x, y))
+        mul = graph.call_function(torch.ops.aten.mul.Tensor, (add, x))
+        graph.output(mul)
+        graph_module = torch.fx.GraphModule(root, graph)
+        if not hasattr(graph_module, "buf"):
+            graph_module.register_buffer("buf", root.buf)
+
+        fake_mode = torch._subclasses.FakeTensorMode()
+        with fake_mode:
+            x.meta["val"] = torch.empty(4)
+            y.meta["val"] = torch.empty(4)
+            add_fake = add.target(get_fake(x, graph_module), get_fake(y, graph_module))
+            mul_fake = mul.target(add_fake, get_fake(x, graph_module))
+
+        for node, fake in ((add, add_fake), (mul, mul_fake)):
+            node.meta["val"] = fake
+            node.meta["example_value"] = fake
+            node.meta["unbacked_bindings"] = {"stale": "binding"}
+
+        updater = FakeTensorUpdater(graph_module)
+        with graph.inserting_before(add):
+            buf = graph.get_attr("buf")
+        add.args = (x, buf)
+        graph.lint()
+
+        with V.set_fake_mode(fake_mode):
+            self.assertEqual(updater.incremental_update(), 2)
+            self.assertNotIn("val", add.meta)
+            self.assertNotIn("val", mul.meta)
+            self.assertNotIn("example_value", add.meta)
+            self.assertNotIn("example_value", mul.meta)
+            self.assertNotIn("unbacked_bindings", add.meta)
+            self.assertNotIn("unbacked_bindings", mul.meta)
+            self.assertEqual(updater.incremental_update(), 0)
+
+        with fake_mode:
+            buf.meta["val"] = fake_mode.from_tensor(graph_module.buf)
+
+        with V.set_fake_mode(fake_mode):
+            self.assertEqual(updater.incremental_update(), 2)
+            self.assertIn("val", add.meta)
+            self.assertIn("val", mul.meta)
+            self.assertEqual(updater.incremental_update(), 0)
+
+    def test_get_fake_args_kwargs_tensor_container_get_attr_is_invalid(self):
+        class Root(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.values = (torch.ones(4),)
+
+        root = Root()
+        graph = torch.fx.Graph()
+        values = graph.get_attr("values")
+        getitem = graph.call_function(operator.getitem, (values, 0))
+        graph.output(getitem)
+        graph_module = torch.fx.GraphModule(root, graph)
+
+        is_valid, args, kwargs = get_fake_args_kwargs(getitem, graph_module)
+
+        self.assertFalse(is_valid)
+        self.assertIs(args[0], values)
+        self.assertEqual(kwargs, {})
 
     def test_reorder_nodes(self):
         def fn(*args: torch.Tensor) -> torch.Tensor:
@@ -865,6 +1437,38 @@ class TestFakeTensorUpdater(TestCase):
         self.assertEqual(num_updated, 2)
         self.assertEqual(tuple(neg.meta["val"].shape), (4, 5))
         self.assertEqual(tuple(lowered.meta["val"].shape), (4, 5))
+
+    def test_pass_through_inductor_lowering_node_rejects_tensor_get_attr(self):
+        class Root(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_buffer("buf", torch.ones(2, 3))
+
+        root = Root()
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        buf = graph.get_attr("buf")
+        lowered = graph.call_function(
+            self._make_inductor_lowering_function(
+                output_metadata_ignores_input_storage=True,
+                output_metadata_is_input="input_",
+            ),
+            (),
+            {"input_": buf},
+        )
+        graph.output(lowered)
+        gm = torch.fx.GraphModule(root, graph)
+
+        with torch._subclasses.FakeTensorMode() as mode, torch.no_grad():
+            x.meta["val"] = mode.from_tensor(torch.randn(2, 3))
+            lowered.meta["val"] = x.meta["val"]
+
+            updater = FakeTensorUpdater(gm)
+            with V.set_fake_mode(mode):
+                with self.assertRaisesRegex(RuntimeError, "metadata is unavailable"):
+                    updater.incremental_update()
+
+        self.assertFalse(lowered.meta["val"] is buf)
 
     def test_inductor_lowering_node_metadata_fn_updates_direct_arg_change(self):
         graph = torch.fx.Graph()
