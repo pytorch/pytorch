@@ -10574,7 +10574,6 @@ class TestNNDeviceType(NNTestCase):
                     verify_reduction_scalars(input, reduction, output)
 
     # verify that bogus reduction strings are errors
-    @expectedFailureMPS  # CTCLoss unimplemented
     @onlyNativeDeviceTypes
     def test_invalid_reduction_strings(self, device):
         input = torch.randn(3, 5, requires_grad=True, device=device)
@@ -12796,12 +12795,13 @@ class TestNNDeviceType(NNTestCase):
                                                      padding_mode=padding_mode, align_corners=False)
             self.assertEqual(sample, torch.zeros([1, 1, 1, 2], device=device, dtype=dtype))
 
-    @expectedFailureMPS  # NotImplementedError aten::_ctc_loss https://github.com/pytorch/pytorch/issues/77764
     def test_CTCLoss_empty_target(self, device):
+        dtype = torch.float if torch.device(device).type == 'mps' else torch.double
+
         target_lengths = [0, 0, 0]
         input_lengths = [50, 50, 50]
         targets = torch.randint(1, 15, (0,), dtype=torch.long, device=device)
-        log_probs = torch.randn(50, 3, 15, dtype=torch.double, device=device).log_softmax(2)
+        log_probs = torch.randn(50, 3, 15, dtype=dtype, device=device).log_softmax(2)
         loss = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths, reduction='none')
         self.assertTrue((loss >= 0).all().item())
         self.assertEqual(-log_probs.sum(0)[:, 0], loss)
@@ -12809,7 +12809,7 @@ class TestNNDeviceType(NNTestCase):
         target_lengths = [0, 9, 0]
         input_lengths = [50, 50, 50]
         targets = torch.randint(1, 15, (9,), dtype=torch.long, device=device)
-        log_probs = torch.randn(50, 3, 15, dtype=torch.double, device=device).log_softmax(2)
+        log_probs = torch.randn(50, 3, 15, dtype=dtype, device=device).log_softmax(2)
         loss = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths, reduction='none')
         self.assertTrue((loss >= 0).all().item())
         self.assertEqual(-log_probs.sum(0)[[0, 2], 0], loss[[0, 2]])
@@ -12817,7 +12817,7 @@ class TestNNDeviceType(NNTestCase):
     # Merge into OpInfo?
     @skipCUDAIf(True, """Test is flaky on Linux and Windows, typical error message:
                           https://github.com/pytorch/pytorch/issues/34870""")
-    @expectedFailureMPS  # NotImplementedError aten::_ctc_loss https://github.com/pytorch/pytorch/issues/77764
+    @expectedFailureMPS  # NotImplementedError: The operator 'aten::_ctc_loss_backward' is not currently implemented for the MPS device
     def test_ctc_loss(self, device):
         batch_size = 64
         num_labels = 101
@@ -12827,6 +12827,8 @@ class TestNNDeviceType(NNTestCase):
         ZERO_NONE = 0
         ZERO_SOME = 1
         ZERO_ALL = 2
+
+        dtype = torch.float if torch.device(device).type == 'mps' else torch.double
 
         # input_length, vary_lengths, zero_lengths
         tests = [(150, False, ZERO_NONE),
@@ -12843,7 +12845,7 @@ class TestNNDeviceType(NNTestCase):
         for input_length, vary_lengths, zero_mode in tests:
             targets = torch.randint(1, num_labels, (batch_size, target_length),
                                     device=device, dtype=torch.long)
-            x = torch.randn(gradcheck_input_size, dtype=torch.double, device=device, requires_grad=True)
+            x = torch.randn(gradcheck_input_size, dtype=dtype, device=device, requires_grad=True)
             tile_factors = torch.randn(input_length * batch_size * num_labels // gradcheck_input_size + 1,
                                        device=device)
             input_lengths = [(torch.randint(input_length // 2, input_length + 1, ()).item()
@@ -12951,7 +12953,6 @@ class TestNNDeviceType(NNTestCase):
             reduction="sum",
         )
 
-    @expectedFailureMPS
     def test_ctc_loss_error(self, device):
         log_probs = torch.rand(0, 0, 4, device=device)
         targets = torch.tensor([], device=device, dtype=torch.long)

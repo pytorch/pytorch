@@ -451,7 +451,6 @@ if torch.backends.mps.is_available():
             "nn.functional.adaptive_max_pool3d": None,
             "nn.functional.interpolatearea": None,
             "nn.functional.interpolatebicubic": [torch.uint8],
-            "nn.functional.ctc_loss": None,
             "nn.functional.local_response_norm": [
                 torch.int8,
                 torch.int16,
@@ -878,6 +877,7 @@ if torch.backends.mps.is_available():
             # On the backward pass for `sort` both are used (values and indices), thus resulting in a mismatch between CPU and MPS.
             # Running `msort` with stable `sort` passes.
             "msort": [torch.float16],
+            "nn.functional.ctc_loss": None,
             # Random ops are routed to `_assert_random_op_match` for the
             # forward leg of `test_output_grad_match`; the gradients (on the
             # `mean`/`std` parameters of `normal`, etc.) are deterministic
