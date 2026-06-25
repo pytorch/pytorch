@@ -449,11 +449,9 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
                 x = x + i
             return x
 
-        # We don't specialize on range with dynamic shapes, which
-        # means we fail to unroll the loop.
-        # TODO: Consider forcing specialization when we iterate over
-        # the loop
-        self._common(fn, ifdynstaticdefault(2, 1), ifdynstaticdefault(4, 1))
+        # Backed symbolic range bounds are guarded and materialized, so this
+        # loop can be unrolled under dynamic shapes too.
+        self._common(fn, 2, 4)
 
     def test_restore_range_iter(self):
         def fn(a, b):

@@ -2003,15 +2003,21 @@ class BuiltinVariable(BaseBuiltinVariable):
         tx: "InstructionTranslatorBase",
         *args: VariableTracker,
         **kwargs: VariableTracker,
-    ) -> VariableTracker:
+    ) -> VariableTracker | None:
         if kwargs:
             raise_type_error(tx, "range() takes no keyword arguments")
         if len(args) == 0:
             raise_type_error(tx, "range expected at least 1 argument, got 0")
         if len(args) > 3:
             raise_type_error(tx, f"range expected at most 3 arguments, got {len(args)}")
-        args = tuple(VariableTracker.build(tx, arg.nb_index_impl(tx)) for arg in args)
-        return variables.RangeVariable(list(args))
+        args = tuple(arg.nb_index_impl(tx) for arg in args)
+        if check_unspec_or_constant_args(args, {}):
+            return variables.RangeVariable(list(args))
+        elif self._dynamic_args(*args):
+            return variables.RangeVariable(list(args))
+        # Any remaining __index__ result is neither constant/unspec nor
+        # symbolic; fall back to the generic unsupported-builtin path.
+        return None
 
     def _dynamic_args(self, *args: VariableTracker, **kwargs: VariableTracker) -> bool:
         return any(isinstance(x, SymNodeVariable) for x in args) or any(

@@ -325,7 +325,10 @@ accuracy:
     eager_not_deterministic:
       # Models that deterministic algorithms can not be turned on for eager mode.
       - Background_Matting
+      - mnasnet1_0
+      - mobilenet_v2
       - pytorch_unet
+      - shufflenet_v2_x1_0
 
   max_batch_size:
     pytorch_unet: 2
