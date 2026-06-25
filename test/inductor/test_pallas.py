@@ -163,7 +163,7 @@ class PallasTestsMixin:
             except ImportError:
                 pass
 
-    def _compile(self, fn):
+    def _compile(self, fn, *, dynamic=False):
         device_to_backend_key = {
             "cuda": "cuda_backend",
             "cpu": "cpu_backend",
@@ -171,7 +171,7 @@ class PallasTestsMixin:
         }
         key = device_to_backend_key[self.DEVICE]
         return torch.compile(
-            fn, backend="inductor", options={key: "pallas"}, dynamic=False
+            fn, backend="inductor", options={key: "pallas"}, dynamic=dynamic
         )
 
     def test_simple_add(self):
@@ -1191,6 +1191,53 @@ class PallasTestsMixin:
                 result = compiled(x)
                 expected = fn(x)
                 self.assertEqual(result, expected)
+
+    @skip_if_cuda
+    def test_dynamic_softmax_symbolic_singleton_batch(self):
+        """Test dynamic singleton axes in a partial softmax reduction."""
+
+        def fn(x, y):
+            z = x.div(y * x.shape[-1])
+            return torch.nn.functional.softmax(z, dim=-1)
+
+        compiled = self._compile(fn, dynamic=True)
+
+        def check(batch):
+            with self.subTest(batch=batch):
+                query = torch.randn(batch, 10, 40, device=self.DEVICE)
+                key = torch.randn(batch, 2, 40, device=self.DEVICE)
+                x = torch.matmul(query, key.transpose(-2, -1))
+                for y in (1e-5, 1e-6):
+                    result = compiled(x, y)
+                    expected = fn(x, y)
+                    self.assertEqual(result, expected)
+
+        check(1)
+        with torch._dynamo.config.patch(error_on_recompile=True):
+            check(2)
+
+    @skip_if_cuda
+    def test_dynamic_symbolic_reduction_axes(self):
+        """Test dynamic reduction axes when warmup reduction extent is 1."""
+
+        cases = [
+            (-1, (3, 1), (3, 2)),
+            (0, (1, 4), (3, 4)),
+            (0, (1, 1), (3, 3)),
+        ]
+        for dim, first_shape, second_shape in cases:
+            with self.subTest(dim=dim):
+                torch._dynamo.reset()
+
+                def fn(x, dim=dim):
+                    return x.sum(dim=dim)
+
+                compiled = self._compile(fn, dynamic=True)
+                first = torch.randn(first_shape, device=self.DEVICE)
+                second = torch.randn(second_shape, device=self.DEVICE)
+                self.assertEqual(compiled(first), fn(first))
+                with torch._dynamo.config.patch(error_on_recompile=True):
+                    self.assertEqual(compiled(second), fn(second))
 
     @skip_if_cuda
     def test_non_stride1_reduction(self):

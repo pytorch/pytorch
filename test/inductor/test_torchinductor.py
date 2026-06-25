@@ -16799,6 +16799,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         cnts = CompileCounterWithBackend("inductor")
         optf = torch.compile(f, backend=cnts, fullgraph=True)
+        expected_four_outputs_frames = (
+            2 if torch._dynamo.config.assume_static_by_default else 1
+        )
 
         # The first run should compile once with static shapes.
         run(4)
@@ -16810,26 +16813,26 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         # recompilation.
         for i in range(2, 12):
             run(4 * i)
-        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.frame_count, expected_four_outputs_frames)
 
         # Input size: 11
         # Not a multiple of 4, but still generates 4 output tensors,
         # where the last one has size > 1.
         run(11)
-        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.frame_count, expected_four_outputs_frames)
 
         # Input size: 10
         # Even though it still generates 4 output tensors, the last
-        # one has size 1, falling into our 0/1 specialization. Thus,
-        # this one also triggers recompilation.
+        # one has size 1.  With dynamic=True size-1 dimensions remain
+        # dynamic, so this should not trigger recompilation.
         run(10)
-        self.assertEqual(cnts.frame_count, 3)
+        self.assertEqual(cnts.frame_count, expected_four_outputs_frames)
 
         # Input size: 9
         # Yields one less output tensor, which should trigger a
         # recompilation.
         run(9)
-        self.assertEqual(cnts.frame_count, 4)
+        self.assertEqual(cnts.frame_count, expected_four_outputs_frames + 1)
 
     @dynamo_config.patch(error_on_recompile=True)
     def test_no_specization_over_symbolic_value(self):

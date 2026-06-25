@@ -1279,6 +1279,7 @@ def _broadcast_in_dim_meta(
     from torch.fx.experimental.symbolic_shapes import (
         guard_or_false,
         guard_or_true,
+        statically_known_true,
         sym_or,
     )
 
@@ -1336,8 +1337,14 @@ def _broadcast_in_dim_meta(
         if idx in broadcast_dimensions:
             # Assigns a stride of zero to dimensions
             # which were actually broadcast
-            if guard_or_false(a.shape[original_idx] == 1):
-                if guard_or_false(a.shape[original_idx] == shape[idx]):
+            if statically_known_true(a.shape[original_idx] == shape[idx]):
+                new_strides.append(a.stride()[original_idx])
+            elif guard_or_false(a.shape[original_idx] == 1):
+                # If a static singleton is expanded to a symbolic size whose
+                # current hint is 1, choose the shape-polymorphic stride.
+                if statically_known_true(a.shape[original_idx] == 1):
+                    new_strides.append(0)
+                elif guard_or_false(a.shape[original_idx] == shape[idx]):
                     new_strides.append(a.stride()[original_idx])
                 else:
                     new_strides.append(0)

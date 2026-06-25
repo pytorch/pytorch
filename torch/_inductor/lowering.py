@@ -557,16 +557,39 @@ def broadcast_symbolic_shapes(a, b):
     """
     Broadcasting logic based on symbolic shapes.
 
-    We give the shapes 0 and 1 concrete values, while all other shapes
-    are symbolic sympy formulas.
+    Shapes that are statically 0 or 1 stay concrete, while dynamic=True
+    singleton dimensions can be identified from hints without installing
+    guards.
     """
     b = tuple(b)
     if not a or a == b:
         return b
 
+    def size_one_hint(x: sympy.Expr) -> bool:
+        return V.graph.sizevars.optimization_hint(x, fallback=2) == 1
+
+    def guard_chosen_broadcast_direction(
+        broadcast_dim: sympy.Expr, target_dim: sympy.Expr
+    ) -> None:
+        V.graph.sizevars.guard_or_true(
+            sympy.Or(sympy.Eq(broadcast_dim, 1), sympy.Eq(broadcast_dim, target_dim))
+        )
+
     output = []
     for x, y in itertools.zip_longest(reversed(a), reversed(b), fillvalue=sympy.S.One):
-        if V.graph.sizevars.is_size_one_or_false(y):
+        if V.graph.sizevars.statically_known_equals(x, y):
+            output.append(x)
+        elif V.graph.sizevars.statically_known_equals(y, 1):
+            output.append(x)
+        elif V.graph.sizevars.statically_known_equals(x, 1):
+            output.append(y)
+        elif size_one_hint(y):
+            if size_one_hint(x):
+                guard_chosen_broadcast_direction(y, x)
+            output.append(x)
+        elif size_one_hint(x):
+            output.append(y)
+        elif V.graph.sizevars.is_size_one_or_false(y):
             output.append(x)
         elif V.graph.sizevars.is_size_one_or_false(x):
             output.append(y)
@@ -1264,15 +1287,32 @@ def broadcast_tensors(*inputs):
     target: list[sympy.Expr] = functools.reduce(
         broadcast_symbolic_shapes, (x.get_size() for x in inputs), ()
     )
+
+    def size_one_hint(x: sympy.Expr) -> bool:
+        return V.graph.sizevars.optimization_hint(x, fallback=2) == 1
+
+    def needs_broadcast(a: sympy.Expr, b: sympy.Expr) -> bool:
+        if V.graph.sizevars.statically_known_equals(a, b):
+            return False
+        if V.graph.sizevars.statically_known_equals(
+            a, 1
+        ) or V.graph.sizevars.statically_known_equals(b, 1):
+            return True
+        a_hint_one = size_one_hint(a)
+        b_hint_one = size_one_hint(b)
+        if a_hint_one or b_hint_one:
+            return True
+        return V.graph.sizevars.is_size_one_or_false(
+            a
+        ) != V.graph.sizevars.is_size_one_or_false(b)
+
     outputs = []
     for x in inputs:
         if (sizes := tuple(x.get_size())) == target:
             pass
 
         elif len(sizes) != len(target) or any(
-            V.graph.sizevars.is_size_one_or_false(a)
-            != V.graph.sizevars.is_size_one_or_false(b)
-            for a, b in zip(sizes, target)
+            needs_broadcast(a, b) for a, b in zip(sizes, target)
         ):
             x = expand(x, target)
         outputs.append(x)

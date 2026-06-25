@@ -1745,16 +1745,72 @@ class PallasKernel(SIMDKernel):
         red_numel.  Falls back to stride-direction analysis for
         gather/flatten loads.
         """
-        if not self.load_index_exprs:
-            return (-1,)
-
         r_vars = [v for v, e in self.range_tree_nodes.items() if e.is_reduction]
         pw_vars = [v for v, e in self.range_tree_nodes.items() if not e.is_reduction]
         if not r_vars or not pw_vars:
             return (-1,)
-
+        if not self.load_index_exprs:
+            return (-1,)
         red_numel = self._compute_reduction_numel()
-        if not red_numel or red_numel <= 1:
+
+        for buf_name, load_index in self.load_index_exprs.items():
+            info = self._get_buffer_info(buf_name)
+            if info is None:
+                continue
+            buf_obj, buf_size, _, _, _ = info
+            nd = len(buf_size)
+            if nd < len(r_vars):
+                continue
+            layout = getattr(buf_obj, "get_layout", lambda: None)()
+            raw_strides = getattr(layout, "stride", None) if layout else None
+            if raw_strides is not None and len(raw_strides) == nd:
+                axes = []
+                used_dims: OrderedSet[int] = OrderedSet()
+                for r_var in r_vars:
+                    r_coeff = V.graph.sizevars.simplify(load_index.coeff(r_var))
+                    matches = [
+                        i
+                        for i, stride in enumerate(raw_strides)
+                        if i not in used_dims
+                        and V.graph.sizevars.statically_known_equals(stride, r_coeff)
+                    ]
+                    if len(matches) != 1:
+                        break
+                    axes.append(matches[0])
+                    used_dims.add(matches[0])
+                else:
+                    if (
+                        red_numel is not None
+                        and self._compute_axes_numel(buf_size, axes) != red_numel
+                    ):
+                        continue
+                    return tuple(i - nd for i in sorted(axes))
+
+            axes = []
+            used_dims: OrderedSet[int] = OrderedSet()
+            for r_var in r_vars:
+                r_len = self.range_tree_nodes[r_var].length
+                matches = [
+                    i
+                    for i, dim in enumerate(buf_size)
+                    if i not in used_dims
+                    and V.graph.sizevars.statically_known_equals(dim, r_len)
+                ]
+                if len(matches) != 1:
+                    break
+                axes.append(matches[0])
+                used_dims.add(matches[0])
+            else:
+                if (
+                    red_numel is not None
+                    and self._compute_axes_numel(buf_size, axes) != red_numel
+                ):
+                    continue
+                return tuple(i - nd for i in sorted(axes))
+
+        if red_numel is None:
+            return (-1,)
+        if red_numel <= 1:
             return (-1,)
 
         for buf_name, load_index in self.load_index_exprs.items():
@@ -1837,6 +1893,15 @@ class PallasKernel(SIMDKernel):
         if r_stride > pw_stride:
             return (0,)
         return (-1,)
+
+    def _compute_axes_numel(self, sizes: Sequence[Any], axes: list[int]) -> int | None:
+        result = 1
+        for axis in axes:
+            dim = self._safe_int(sizes[axis])
+            if dim is None:
+                return None
+            result *= dim
+        return result
 
     def _compute_prefix_numel(self, prefixes: OrderedSet) -> int | None:
         """Compute total numel for given prefixes (e.g., pointwise prefixes)."""
@@ -1991,6 +2056,35 @@ class PallasKernel(SIMDKernel):
 
         return output_numel, used_vars
 
+    def _numel_mismatch_is_current_singleton_expansion(
+        self, buf_numel: sympy.Expr, output_numel: sympy.Expr
+    ) -> bool:
+        """
+        Check if a full-rank internal buffer only has extra dimensions whose
+        current hints are 1.
+
+        dynamic=True may keep an input dimension symbolic even when the first
+        trace observes size 1.  Flattening an internal buffer would erase that
+        symbolic axis; a full-rank load keeps broadcasting correct if the axis
+        later grows.  Do not accept arbitrary equal hints such as s0/s1.
+        """
+        extra = V.graph.sizevars.simplify(sympy.cancel(buf_numel / output_numel))
+        if extra == 1:
+            return True
+
+        for power in extra.as_powers_dict().values():
+            if not power.is_integer or power < 0:
+                return False
+
+        for factor in sympy.Mul.make_args(extra):
+            if factor.is_Integer:
+                if factor != 1:
+                    return False
+                continue
+            if V.graph.sizevars.optimization_hint(factor, fallback=2) != 1:
+                return False
+        return True
+
     def _get_index_coefficients(
         self, index: sympy.Expr, used_vars: OrderedSet
     ) -> OrderedSet:
@@ -2061,6 +2155,12 @@ class PallasKernel(SIMDKernel):
 
         buf_obj, buf_size, buf_numel, actual_strides, is_contiguous = info
         output_numel, used_vars = self._compute_output_numel_from_index(index)
+        symbolic_output_numel = sympy.S.One
+        for var in used_vars:
+            if var in self.range_tree_nodes:
+                symbolic_output_numel *= self.range_tree_nodes[var].length
+        symbolic_output_numel = V.graph.sizevars.simplify(symbolic_output_numel)
+        symbolic_buf_numel = V.graph.sizevars.simplify(buf_numel)
         all_iter_vars = self._get_iter_vars()
         coefficients = self._get_index_coefficients(index, used_vars)
 
@@ -2087,11 +2187,19 @@ class PallasKernel(SIMDKernel):
         skip_for_non_contiguous = (
             is_known_non_contiguous and not is_tpu and buf_numel == output_numel
         )
+        numel_mismatch = not V.graph.sizevars.statically_known_equals(
+            symbolic_buf_numel, symbolic_output_numel
+        )
+        if numel_mismatch and name.startswith("buf"):
+            if self._numel_mismatch_is_current_singleton_expansion(
+                symbolic_buf_numel, symbolic_output_numel
+            ):
+                numel_mismatch = False
 
         # Determine if strided indexing is needed
         if (
             output_numel > 0
-            and (buf_numel != output_numel or not_all_vars_used or has_non_unit_strides)
+            and (numel_mismatch or not_all_vars_used or has_non_unit_strides)
             and len(used_vars) > 0
             and not skip_for_non_contiguous
             and not has_symbolic_coef
@@ -3349,9 +3457,10 @@ class PallasKernel(SIMDKernel):
         is_symbolic_partial = (
             has_pointwise and n_reduction_dims > 0 and pointwise_numel is None
         )
+        use_reduction_axes = is_partial_reduction or is_symbolic_partial
 
         if reduction_type == "xor_sum":
-            if is_partial_reduction:
+            if use_reduction_axes:
                 axes = self._get_reduction_axes()
                 axis_expr = axes[0] if len(axes) == 1 else axes
                 reduction_expr = f"jnp.bitwise_xor.reduce({value}, axis={axis_expr})"
@@ -3359,7 +3468,7 @@ class PallasKernel(SIMDKernel):
                 reduction_expr = f"jnp.bitwise_xor.reduce({value})"
         elif reduction_type in ("argmax", "argmin"):
             reduction_op = reduction_ops[reduction_type]
-            if is_partial_reduction:
+            if use_reduction_axes:
                 # argmax/argmin only accept a single axis
                 axes = self._get_reduction_axes()
                 reduction_expr = f"{reduction_op}({value}, axis={axes[-1]})"
@@ -3367,16 +3476,12 @@ class PallasKernel(SIMDKernel):
                 reduction_expr = f"{reduction_op}({value})"
         elif reduction_type in reduction_ops:
             reduction_op = reduction_ops[reduction_type]
-            if is_partial_reduction:
+            if use_reduction_axes:
                 axes = self._get_reduction_axes()
                 axis_expr = axes[0] if len(axes) == 1 else axes
                 reduction_expr = (
                     f"{reduction_op}({value}, axis={axis_expr}, keepdims=True)"
                 )
-            elif is_symbolic_partial:
-                # With symbolic shapes, strided loads produce a degenerate
-                # batch dim at axis=0 that just needs squeezing.
-                reduction_expr = f"{reduction_op}({value}, axis=0)"
             else:
                 reduction_expr = f"{reduction_op}({value})"
         else:

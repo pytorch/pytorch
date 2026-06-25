@@ -3725,12 +3725,15 @@ class TestGuardsExpressions(TestCase):
 
 
 def custom_pass(graph: torch.fx.Graph) -> torch.fx.Graph:
+    found_input = False
     for node in graph.nodes:
-        if node.name == "arg3_1":
-            if node.meta["val"].size()[0] != 2:
-                raise AssertionError(
-                    f"expected size()[0] == 2, got {node.meta['val'].size()[0]}"
-                )
+        val = node.meta.get("val")
+        if node.op == "placeholder" and hasattr(val, "size") and len(val.size()) == 2:
+            found_input = True
+            if val.size()[0] != 2:
+                raise AssertionError(f"expected size()[0] == 2, got {val.size()[0]}")
+    if not found_input:
+        raise AssertionError("expected a rank-2 input tensor placeholder")
     return graph
 
 

@@ -391,6 +391,7 @@ def _broadcast_shapes(*_shapes):
         guarding_hint_or_throw,
         has_guarding_hint,
         is_nested_int,
+        statically_known_true,
     )
 
     backed_so = torch.fx.experimental._config.backed_size_oblivious
@@ -445,15 +446,24 @@ def _broadcast_shapes(*_shapes):
                         torch._check(shape[idx] == 1)
                     if b == 1 and a != 1:
                         torch._check(common_shape[idx] == 1)
-                if guard_or_false(shape[idx] == common_shape[idx]):
+                if statically_known_true(shape[idx] == common_shape[idx]):
+                    continue
+                if not (
+                    statically_known_true(shape[idx] == 1)
+                    or statically_known_true(common_shape[idx] == 1)
+                ) and guard_or_false(shape[idx] == common_shape[idx]):
                     continue
 
-            if guard_or_false(common_shape[idx] == 1):
+            if statically_known_true(common_shape[idx] == 1) or (
+                not statically_known_true(shape[idx] == 1)
+                and guard_or_false(common_shape[idx] == 1)
+            ):
                 if shape[idx] < 0:
                     raise ValueError(
                         "Attempting to broadcast a dimension with negative length!"
                     )
                 common_shape[idx] = shape[idx]
+                continue
 
             if not is_nested_int(shape[idx]) and guard_or_false(shape[idx] == 1):
                 # broadcast case .
@@ -479,6 +489,7 @@ def _maybe_broadcast(*args, preserve_cpu_scalar_tensors=True):
     def should_expand(a: ShapeType, b: ShapeType) -> bool:
         from torch.fx.experimental.symbolic_shapes import (
             guard_or_false,
+            statically_known_true,
             sym_and,
             sym_or,
         )
@@ -487,6 +498,11 @@ def _maybe_broadcast(*args, preserve_cpu_scalar_tensors=True):
             return True
 
         for x, y in zip(a, b):
+            if statically_known_true(x == y):
+                continue
+            if statically_known_true(x == 1) or statically_known_true(y == 1):
+                return True
+
             if guard_or_false(x != y):
                 # We know they are not the same.
                 return True

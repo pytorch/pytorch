@@ -1961,7 +1961,7 @@ def register_fast_op_impl(
 def infer_size(
     a: Sequence[IntLikeType], b: Sequence[IntLikeType]
 ) -> tuple[IntLikeType, ...]:
-    from torch.fx.experimental.symbolic_shapes import guard_or_false
+    from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_or
 
     dimsA = len(a)
     dimsB = len(b)
@@ -1974,6 +1974,18 @@ def infer_size(
         sizeA = a[dimA] if dimA >= 0 else 1
         sizeB = b[dimB] if dimB >= 0 else 1
 
+        def check_sizes(check: Any) -> None:
+            torch._check(
+                check,
+                lambda: f"The size of tensor a ({sizeA}) "
+                f"must match the size of tensor b ({sizeB}) "
+                f"at non-singleton dimension {i})",
+            )
+
+        if statically_known_true(sizeA == sizeB):
+            expandedSizes[i] = sizeA
+            continue
+
         # NB: It is very important to test for broadcasting, before testing
         # sizeA == sizeB.  This is because the broadcasting tests are likely
         # to be statically known (in particular, if sizeA/sizeB is unbacked
@@ -1983,15 +1995,26 @@ def infer_size(
         # sizeA == sizeB is now expect_true and we can defer it as a runtime
         # assert (this works because Python will return the terminal
         # expression of an or statement as-is, without bool()'ing it; if this
-        # were not the case, we'd need to write this using torch.sym_or() or
+        # were not the case, we'd need to write this using sym_or() or
         # something like that).
-        torch._check(
-            guard_or_false(sizeA == 1) or guard_or_false(sizeB == 1) or sizeA == sizeB,
-            lambda: f"The size of tensor a ({sizeA}) "
-            f"must match the size of tensor b ({sizeB}) "
-            f"at non-singleton dimension {i})",
-        )
-        expandedSizes[i] = sizeB if guard_or_false(sizeA == 1) else sizeA
+        if statically_known_true(sizeA == 1):
+            check_sizes(sym_or(sizeA == 1, sizeA == sizeB))
+            expandedSizes[i] = sizeB
+        elif statically_known_true(sizeB == 1):
+            check_sizes(sym_or(sizeB == 1, sizeA == sizeB))
+            expandedSizes[i] = sizeA
+        else:
+            sizeA_hint = _optimization_hint_or_none(sizeA)
+            sizeB_hint = _optimization_hint_or_none(sizeB)
+            if sizeA_hint is not None and sizeA_hint == sizeB_hint and sizeA_hint != 1:
+                check_sizes(sizeA == sizeB)
+                expandedSizes[i] = sizeA
+            elif sizeA_hint == 1 and sizeB_hint != 1:
+                check_sizes(sym_or(sizeA == 1, sizeA == sizeB))
+                expandedSizes[i] = sizeB
+            else:
+                check_sizes(sym_or(sizeB == 1, sizeA == sizeB))
+                expandedSizes[i] = sizeA
     return tuple(expandedSizes)
 
 
@@ -2031,7 +2054,31 @@ def make_fast_binary_impl(
         if final_shape is None:
             raise AssertionError("final_shape must not be None")
 
-        from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq
+        from torch.fx.experimental.symbolic_shapes import (
+            guard_or_false,
+            statically_known_true,
+            sym_eq,
+        )
+
+        def shapes_match_without_negative_guard(
+            shape: Sequence[IntLikeType], target: Sequence[IntLikeType]
+        ) -> bool:
+            shape_eq = sym_eq(shape, target)  # type: ignore[arg-type]
+            if statically_known_true(shape_eq):
+                return True
+            # guard_or_false() records a guard for a concrete False result too.
+            # That is too strong for singleton broadcast warmups under
+            # dynamic=True: e.g. (1, 3) + (2, 3) must still accept (2, 3) +
+            # (2, 3).  Only ask it to prove equality when hints say the shapes
+            # are equal for the current trace.
+            if len(shape) != len(target):
+                return False
+            if any(
+                _optimization_hint_or_none(x) != _optimization_hint_or_none(y)
+                for x, y in zip(shape, target)
+            ):
+                return False
+            return guard_or_false(shape_eq)
 
         # Do some extra safety checks to see if the output
         # stride is obvious
@@ -2040,7 +2087,7 @@ def make_fast_binary_impl(
                 isinstance(op, torch.Tensor)
                 and len(op.shape) == len(final_shape)
                 # take the slow path if result is not determined.
-                and guard_or_false(sym_eq(op.shape, final_shape))  # type: ignore[arg-type]
+                and shapes_match_without_negative_guard(op.shape, final_shape)
             ):
                 break
         else:

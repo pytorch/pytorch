@@ -96,8 +96,15 @@ def coerce_tangent_and_suggest_memory_format(
     # pyrefly: ignore [missing-attribute]
     if memory_format.memory_format is not None:
         was = out
-        # pyrefly: ignore [bad-argument-type]
-        out = out.contiguous(memory_format=memory_format.memory_format)
+        maybe_suppress_guards = contextlib.nullcontext
+        tracing_context = torch._guards.TracingContext.try_get()
+        if tracing_context is not None and tracing_context.fake_mode is not None:
+            shape_env = tracing_context.fake_mode.shape_env
+            if shape_env is not None:
+                maybe_suppress_guards = shape_env.suppress_guards  # type: ignore[assignment]
+        with maybe_suppress_guards():
+            # pyrefly: ignore [bad-argument-type]
+            out = out.contiguous(memory_format=memory_format.memory_format)
         updated = was is not out
 
     # For subclass we keep memory format of outer strides at the beginning of the list

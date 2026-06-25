@@ -86,6 +86,7 @@ from torch.utils._sympy.functions import (
     Min,
     Mod,
     ModularIndexing,
+    Where,
 )
 from torch.utils._sympy.symbol import SymT
 
@@ -3445,7 +3446,22 @@ class BaseView(IRNode):
 
 @ir_dataclass
 class ExpandView(BaseView):
+    """View that expands singleton dimensions without materializing data."""
+
     size: Sequence[Expr]
+
+    @staticmethod
+    def _size_one_hint(x: Expr) -> bool:
+        return V.graph.sizevars.optimization_hint(x, fallback=2) == 1
+
+    @staticmethod
+    def _needs_dynamic_broadcast_index(actual: Expr, target: Expr) -> bool:
+        sizevars = V.graph.sizevars
+        return (
+            not sizevars.statically_known_equals(actual, target)
+            and not sizevars.statically_known_equals(actual, 1)
+            and ExpandView._size_one_hint(actual)
+        )
 
     @staticmethod
     def _normalize_size(x: IRNode, new_size: Sequence[_IntLike]) -> Sequence[_IntLike]:
@@ -3461,9 +3477,17 @@ class ExpandView(BaseView):
                 if old_size[i] is None:
                     raise AssertionError("Expected old_size[i] is not None")
                 new_size[i] = old_size[i]
-            elif old_size[i] is None or V.graph.sizevars.is_size_one_or_false(
-                old_size[i]
+            elif old_size[i] is not None and sizevars.statically_known_equals(
+                old_size[i], new_size[i]
             ):
+                pass
+            elif old_size[i] is None or sizevars.statically_known_equals(
+                old_size[i], 1
+            ):
+                pass
+            elif ExpandView._size_one_hint(old_size[i]):
+                pass
+            elif sizevars.is_size_one_or_false(old_size[i]):
                 pass
             elif not has_free_unbacked_symbols(
                 old_size
@@ -3501,11 +3525,16 @@ class ExpandView(BaseView):
             skip = len(new_size) - len(old_layout.size)
             if skip < 0:
                 raise AssertionError("Expected skip >= 0")
+            if any(
+                cls._needs_dynamic_broadcast_index(size, target)
+                for size, target in zip(old_layout.size, new_size[skip:])
+            ):
+                return ExpandView(data=x, size=new_size)
             new_stride = [sympy.S.Zero] * skip
             for stride, size in zip(old_layout.stride, old_layout.size):
                 new_stride.append(
                     stride
-                    if not V.graph.sizevars.is_size_one_or_false(size)
+                    if not V.graph.sizevars.statically_known_equals(size, 1)
                     else sympy.S.Zero
                 )
             new_layout = FixedLayout(
@@ -3537,7 +3566,19 @@ class ExpandView(BaseView):
             if len(index) != len(actual):
                 raise AssertionError("Expected len(index) == len(actual)")
             for i in range(len(actual)):
-                if actual[i] == 1:
+                target_dim = target[i + skip]
+                if V.graph.sizevars.statically_known_equals(actual[i], target_dim):
+                    continue
+                if V.graph.sizevars.statically_known_equals(actual[i], 1):
+                    # zero out broadcast dimension
+                    index[i] = sympy.S.Zero
+                elif self._size_one_hint(actual[i]):
+                    # A dynamic=True warmup may see a symbolic dimension with
+                    # current value 1, while the same graph is also valid when
+                    # that dimension later equals the target.  Encode both
+                    # cases in the index instead of baking in either stride.
+                    index[i] = Where(sympy.Eq(actual[i], target_dim), index[i], 0)
+                elif V.graph.sizevars.is_size_one_or_false(actual[i]):
                     # zero out broadcast dimension
                     index[i] = sympy.S.Zero
             return index

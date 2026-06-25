@@ -5128,7 +5128,7 @@ def forward(self, L_x_ : torch.Tensor, s77 : torch.SymInt, s27 : torch.SymInt):
             ):
                 shape_env = node.meta["example_value"].fake_mode.shape_env
                 lower_ranges = [val.lower for val in shape_env.var_to_range.values()]
-                self.assertTrue(lower_ranges == [4, 2])
+                self.assertTrue(lower_ranges == [4, 1])
 
         @torch.compile(dynamic=True, backend=record_graph)
         def f_fail(x):
