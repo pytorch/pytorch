@@ -3074,6 +3074,10 @@ tuple_methods = {method for method in tuple.__dict__.values() if callable(method
 list_methods = {method for method in list.__dict__.values() if callable(method)}
 list_getitem = list.__getitem__
 
+deque_methods = {
+    method for method in collections.deque.__dict__.values() if callable(method)
+}
+
 str_methods = {method for method in str.__dict__.values() if callable(method)}
 
 # EnumType is the metaclass for Enum classes
