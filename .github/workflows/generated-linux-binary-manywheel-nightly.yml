@@ -1735,7 +1735,7 @@ jobs:
           name: ${{ matrix.source_wheel_build_name }}
           path: "${{ runner.temp }}/wheel_artifact/"
       - name: Test libtorch extraction logic
-        run: python3 -m pytest .ci/libtorch/smoke_test_extract_libtorch.py -v
+        run: python3 -m unittest discover -s .ci/libtorch -p smoke_test_extract_libtorch.py -v
       - name: Extract libtorch from wheel
         run: |
           set -eux
