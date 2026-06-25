@@ -34,7 +34,10 @@ TORCH_META_FUNC(glu) (
   const int64_t selfSize = nIn / 2;
   Tensor firstHalf = self.narrow(wrap_dim, 0, selfSize);
   Tensor secondHalf = self.narrow(wrap_dim, selfSize, selfSize);
-  build_borrowing_binary_op(maybe_get_output(), firstHalf, secondHalf);
+  // Do not use build_borrowing_binary_op here, as self halves are stack allocated,
+  // but a structured op's iterator is reused in impl() after meta() func scope ends.
+  // Borrowing them would leave the iterator with dangling operands.
+  build_binary_op(maybe_get_output(), firstHalf, secondHalf);
 }
 } // namespace at::meta
 
