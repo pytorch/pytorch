@@ -2707,12 +2707,10 @@ def calc_conv_nd_return_shape(
                 _formula(dims[i], padding[i], dilation[i], kernel_size[i], stride[i])
             )
     # NOTE: Backend behavior for zero-sized spatial dimensions is inconsistent.
-    # CUDA (cuDNN) handles zero-sized outputs gracefully by short-circuiting,
-    # but other backends fail: CPU rejects it, ROCm/miopen returns
-    # miopenStatusBadParm, and MPS asserts "Placeholder tensor is empty".
-    # We only allow zero-sized outputs on CUDA with cuDNN (not ROCm/HIP).
+    # CUDA (cuDNN) and HIP handle zero-sized conv_transpose outputs by short-circuiting,
+    # but other backends fail: CPU rejects it and MPS asserts "Placeholder tensor is empty".
     from torch._subclasses.fake_tensor import FakeTensor
-    from torch.fx.experimental.symbolic_shapes import sym_or
+    from torch.fx.experimental.symbolic_shapes import sym_and, sym_or
 
     device = (
         input_tensor.fake_device
@@ -2720,9 +2718,18 @@ def calc_conv_nd_return_shape(
         else input_tensor.device
     )
 
-    # ROCm also reports device.type as "cuda", but miopen doesn't support zero-sized outputs
+    # ROCm reports device.type as "cuda"; keep the existing NVIDIA CUDA behavior
+    # unchanged and only apply the new check to HIP.
     is_cudnn = device.type == "cuda" and torch.version.hip is None
-    if not is_cudnn:
+    is_hip = device.type == "cuda" and torch.version.hip is not None
+    if is_hip:
+        torch._check(
+            sym_and(*[x >= 0 for x in ret_shape[2:]]),
+            lambda: f"Given input size per channel: {list(dims)}. "
+            f"Calculated output size per channel: {ret_shape[2:]}. "
+            f"Output size is too small",
+        )
+    elif not is_cudnn:
         torch._check(
             sym_or(*[x > 0 for x in ret_shape[2:]]),
             lambda: f"Given input size per channel: {list(dims)}. "
