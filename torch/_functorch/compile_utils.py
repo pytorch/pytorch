@@ -103,6 +103,37 @@ def fx_graph_cse(
         and StorageWeakRef(n.meta["val"].untyped_storage()) in output_storages
     }
 
+    # Collect the nodes that are used as the mutable base of an op that mutates
+    # in place behind a functional wrapper (auto_functionalized /
+    # auto_functionalized_v2's ``_all_bases``, or triton_kernel_wrapper_functional's
+    # cloned ``out`` tensors). Each such base is a distinct buffer that the op
+    # mutates, so two identical factory ops (e.g. the forward and backward
+    # ``aten.full`` from a pair of ``ones_like`` calls) must NOT be CSE-merged
+    # into one shared buffer. Merging them makes the later (backward) mutation
+    # alias a buffer that still has a live downstream view, which the reinplacing
+    # pass then refuses to reinplace. This mirrors why aten.empty is excluded
+    # below: each mutable destination buffer must stay independent.
+    # See pytorch/pytorch#170160.
+    auto_functionalized_targets = (
+        torch.ops.higher_order.auto_functionalized,
+        torch.ops.higher_order.auto_functionalized_v2,
+    )
+    triton_wrapper_target = torch.ops.higher_order.triton_kernel_wrapper_functional
+    nodes_used_as_mutation_base: set[fx.Node] = set()
+    for n in fx_g.nodes:
+        if n.op != "call_function":
+            continue
+        if n.target in auto_functionalized_targets:
+            for base in n.kwargs.get("_all_bases", ()):
+                if isinstance(base, fx.Node):
+                    nodes_used_as_mutation_base.add(base)
+        elif n.target is triton_wrapper_target:
+            inner_kwargs = n.kwargs.get("kwargs", {})
+            for name in n.kwargs.get("tensors_to_clone", ()):
+                base = inner_kwargs.get(name)
+                if isinstance(base, fx.Node):
+                    nodes_used_as_mutation_base.add(base)
+
     for n in fx_g.nodes:
         # The placeholder, output, and get_attr nodes are copied to the new graph without change
         # do not CSE away random operations
@@ -116,6 +147,10 @@ def fx_graph_cse(
             # so it's not worth CSEing.
             or get_aten_target(n) is aten.empty
             or n in nodes_that_alias_outputs
+            # Don't CSE-merge factory ops that feed distinct auto_functionalized
+            # mutation bases; each mutable buffer must stay independent so the
+            # reinplacing pass can reinplace each one. See pytorch/pytorch#170160.
+            or n in nodes_used_as_mutation_base
             # This CSE pass currently doesn't handle re-propagation of unbacked
             # meta where it'll sometimes eliminate a _local_scalar_dense but not
             # replace the meta of downstream users. eg. one bug we've seen is:
