@@ -12,9 +12,13 @@ module without it raises ``ModuleNotFoundError`` (catchable by optional consumer
 from __future__ import annotations
 
 import ctypes
+import logging
 from collections.abc import Iterable  # noqa: TC003
 from functools import lru_cache
 from typing import TYPE_CHECKING
+
+
+logger = logging.getLogger(__name__)
 
 
 # cupti-python enums used at runtime. cupti-python is a hard requirement of this
@@ -439,18 +443,26 @@ class _PyLibCupti:
         """Turn user-defined records back off for the subscription (the inverse of
         arm_user_defined_records' set-attribute). UDR mode changes how CUPTI lays
         out activity records, so leaving it on can leave a following classic
-        consumer (e.g. Kineto) unable to decode -- reset it before unsubscribing."""
+        consumer (e.g. Kineto) unable to decode -- reset it before unsubscribing.
+
+        Best-effort: some activity kinds (e.g. MEMCPY2) leave CUPTI rejecting the
+        UDR-off toggle with CUPTI_ERROR_INVALID_OPERATION at teardown. The trace is
+        already built by this point and we unsubscribe next regardless, so a failure
+        here is logged, not raised -- crashing teardown would lose the export."""
         disabled = ctypes.c_uint8(0)
         size = ctypes.c_size_t(1)
-        self._check(
-            self._lib.cuptiActivitySetAttribute_v2(
-                ctypes.c_void_p(sub_handle),
-                _ATTR_USER_DEFINED_RECORDS,
-                ctypes.byref(size),
-                ctypes.byref(disabled),
-            ),
-            "cuptiActivitySetAttribute_v2",
+        rc = self._lib.cuptiActivitySetAttribute_v2(
+            ctypes.c_void_p(sub_handle),
+            _ATTR_USER_DEFINED_RECORDS,
+            ctypes.byref(size),
+            ctypes.byref(disabled),
         )
+        if rc != 0:
+            logger.warning(
+                "cuptiActivitySetAttribute_v2 (disarm UDR) failed with %s; "
+                "continuing teardown",
+                self._result_string(rc),
+            )
 
     def enable_kernel_latency_timestamps(self, sub_handle: int, enable: bool) -> bool:
         """Toggle per-subscriber kernel latency-timestamp tracking (the queued/submitted

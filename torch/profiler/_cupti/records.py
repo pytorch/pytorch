@@ -106,6 +106,28 @@ class Memset:
     GRAPH_ID = Field(12)
 
 
+class Memcpy2:
+    """CUpti_ActivityMemcpyPtoP4 (MEMCPY2) -- peer-to-peer / cross-device copy. Like Memcpy but
+    with src/dst device+context fields inserted, which shifts correlation/graph ids."""
+
+    KIND = Field(0)
+    COPY_KIND = Field(1)
+    SRC_KIND = Field(2)
+    DST_KIND = Field(3)
+    FLAGS = Field(4)
+    BYTES = Field(5)
+    START = Field(6)
+    END = Field(7)
+    DEVICE_ID = Field(8)
+    CONTEXT_ID = Field(9)
+    STREAM_ID = Field(10)
+    SRC_DEVICE_ID = Field(11)
+    DST_DEVICE_ID = Field(13)
+    CORRELATION_ID = Field(15)
+    GRAPH_NODE_ID = Field(16)
+    GRAPH_ID = Field(17)
+
+
 class Api:
     """CUpti_ActivityAPI -- shared by RUNTIME and DRIVER."""
 
@@ -177,6 +199,7 @@ def _catalog(cls: type) -> tuple[Field, ...]:
 FIELDS: dict[int, tuple[Field, ...]] = {
     ActivityKind.CONCURRENT_KERNEL: _catalog(Kernel),
     ActivityKind.MEMCPY: _catalog(Memcpy),
+    ActivityKind.MEMCPY2: _catalog(Memcpy2),
     ActivityKind.MEMSET: _catalog(Memset),
     ActivityKind.RUNTIME: _catalog(Api),
     ActivityKind.DRIVER: _catalog(Api),
@@ -203,6 +226,7 @@ STRING_FIELDS: dict[int, frozenset[int]] = {
 CORRELATION_FIELD: dict[int, int] = {
     ActivityKind.CONCURRENT_KERNEL: int(Kernel.CORRELATION_ID),
     ActivityKind.MEMCPY: int(Memcpy.CORRELATION_ID),
+    ActivityKind.MEMCPY2: int(Memcpy2.CORRELATION_ID),
     ActivityKind.MEMSET: int(Memset.CORRELATION_ID),
     ActivityKind.RUNTIME: int(Api.CORRELATION_ID),
     ActivityKind.DRIVER: int(Api.CORRELATION_ID),
@@ -218,6 +242,7 @@ CORRELATION_FIELD: dict[int, int] = {
 GRAPH_NODE_FIELD: dict[int, int] = {
     ActivityKind.CONCURRENT_KERNEL: int(Kernel.GRAPH_NODE_ID),
     ActivityKind.MEMCPY: int(Memcpy.GRAPH_NODE_ID),
+    ActivityKind.MEMCPY2: int(Memcpy2.GRAPH_NODE_ID),
     ActivityKind.MEMSET: int(Memset.GRAPH_NODE_ID),
 }
 
