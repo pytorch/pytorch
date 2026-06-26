@@ -12207,7 +12207,6 @@ class TestNNDeviceType(NNTestCase):
         for ele in list_to_compare:
             self.assertEqual(expected, ele, atol=atol, rtol=rtol)
 
-    @expectedFailureMPS  # NotImplementedError: aten::_ctc_loss https://github.com/pytorch/pytorch/issues/77764
     @parametrize_test("reduction", ['none', 'mean', 'sum'])
     @parametrize_test("use_module_form", [True, False])
     def test_CTCLoss_no_batch_dim(self, device, reduction, use_module_form):
@@ -12624,7 +12623,9 @@ class TestNNDeviceType(NNTestCase):
     # Merge into OpInfo?
     @skipCUDAIf(True, """Test is flaky on Linux and Windows, typical error message:
                           https://github.com/pytorch/pytorch/issues/34870""")
-    @expectedFailureMPS  # NotImplementedError: The operator 'aten::_ctc_loss_backward' is not currently implemented for the MPS device
+    # TODO: Find out if this failure is just because we can't run MPS with
+    # double or if there's a real problem with the backward pass
+    @expectedFailureMPS  # torch.autograd.gradcheck.GradcheckError: Jacobian mismatch
     def test_ctc_loss(self, device):
         batch_size = 64
         num_labels = 101

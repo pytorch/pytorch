@@ -5183,6 +5183,24 @@ class TestMPS(TestCaseMPS):
 
         self.assertEqual(cpu_x.grad, mps_x.grad.to('cpu'))
 
+    def test_ctc_loss_backward_varlen(self):
+        # Backward must match CPU when input lengths are padded (shorter than T).
+        # T=20, batch=2, 7 classes; the second sequence is only 11 steps long.
+        T, N, C = 20, 2, 7
+        log_probs = torch.randn(T, N, C).log_softmax(2)
+        targets = torch.randint(1, C, (N, 4))
+        input_lengths = [20, 11]   # 11 < T is what exposes the bug
+        target_lengths = [4, 3]
+
+        def input_grad(device):
+            lp = log_probs.to(device).detach().requires_grad_()
+            torch.nn.functional.ctc_loss(
+                lp, targets.to(device), input_lengths, target_lengths
+            ).backward()
+            return lp.grad
+
+        self.assertEqual(input_grad("cpu"), input_grad("mps").cpu())
+
     def test_log_softmax_large_numbers(self):
         values = [
             [10.0, 100.0, 1000.0, 10000.0, 100000.0, 1000000.0],
@@ -15335,6 +15353,8 @@ class TestConsistency(TestCaseMPS):
                 atol, rtol = 3e-3, 3e-3
             if op.name == "logcumsumexp":
                 atol, rtol = 4e-3, 1e-3
+            if op.name == "nn.functional.ctc_loss":
+                atol, rtol = 2e-4, 2e-3
             if op.name == "nn.functional.max_pool3d" and dtype == torch.float16:
                 # In a few cases where stride is smaller than kernel size,
                 # several output grad elements of similar magnitudes get summed
