@@ -105,13 +105,10 @@ __global__ static void pdist_kernel_cuda_impl(scalar_t * result, const scalar_t 
     const double n2, const double n2_squared_minus_1, const int64_t total) {
   const int stride = blockDim.x;
 
-  // Grid-stride loop over outputs: the grid is bounded (see launch site), so a
-  // single huge 1-D grid is never required. This avoids unreliable dispatch of
-  // very large 1-D grids on some backends and is also better for occupancy.
   for (int64_t k = blockIdx.x; k < total; k += gridDim.x) {
-    // Recover (i, j) from the flat output index k by inverting the triangular
-    // numbering. The fp sqrt can land `i` off by one, so correct it with exact
-    // integer arithmetic, making the result independent of the device math lib.
+    // Recover (i, j) from flat index k. The fp64 sqrt can land i off by one at
+    // row boundaries (a ~1-ulp ROCm-vs-NVIDIA rounding difference); correct it
+    // with exact integer arithmetic so the result is rounding-independent.
     // row_start(i) = number of output elements before row i = n*i - i*(i+1)/2
     int64_t i = static_cast<int64_t>((n2 - device_sqrt<double>(n2_squared_minus_1 - 2 * k)));
     auto row_start = [n](int64_t ii) { return n * ii - ii * (ii + 1) / 2; };
@@ -130,11 +127,12 @@ __global__ static void pdist_kernel_cuda_impl(scalar_t * result, const scalar_t 
 
     __shared__ scalar_t agg_smem[kCUDANumThreads];
     scalar_t agg_init{0.0};
+    // BlockReduce opens with __syncthreads(), which serializes agg_smem reuse
+    // across grid-stride iterations -- no extra barrier needed here.
     agg = cuda_utils::BlockReduce(agg, DistReduceOp<scalar_t, F>{}, agg_init, agg_smem);
     if (threadIdx.x == 0) {
       result[k] = F::finish(agg, p);
     }
-    __syncthreads(); // ensure agg_smem reuse across grid-stride iterations is safe
   }
 }
 
@@ -183,7 +181,12 @@ __global__ static void pdist_backward_kernel_cuda_impl(scalar_t * buffer, const 
 
   // The -1 accounts for floating point truncation issues
   int64_t i = static_cast<int64_t>((n2 - device_sqrt<double>(n2_squared_minus_1 - 2 * k)));
-  int64_t j = k - n * i + i * (i + 1) / 2 + i + 1;
+  // Same ~1-ulp fp64-sqrt rounding fix as the forward kernel: correct i with
+  // exact integer arithmetic so gradients are correct in the large-n regime.
+  auto row_start = [n](int64_t ii) { return n * ii - ii * (ii + 1) / 2; };
+  while (row_start(i + 1) <= k) ++i;
+  while (row_start(i) > k) --i;
+  int64_t j = k - row_start(i) + i + 1;
   int64_t ib = j - i - 1;
   int64_t jb = n - 2 - i;
 
@@ -257,11 +260,13 @@ void cdist_kernel_impl(Tensor& result, const Tensor& x1, const Tensor& x2, doubl
 
 void pdist_forward_kernel_impl(Tensor& result, const Tensor& self, double p) {
   const int64_t total = result.numel();
-  // Bound the grid to a reliably-dispatchable size; the kernel uses a
-  // grid-stride loop to cover all `total` outputs. A few thousand blocks of
-  // kCUDANumThreads threads already saturate the device.
-  const int64_t max_blocks = 4096;
-  const dim3 grid(static_cast<unsigned int>(std::min<int64_t>(total, max_blocks)));
+  // Cap the grid at a multiple of the SM/CU count; the kernel's grid-stride
+  // loop covers all outputs. This both saturates occupancy and avoids the
+  // unreliable dispatch of extremely large 1-D grids on some architectures.
+  const auto* props = at::cuda::getCurrentDeviceProperties();
+  const int64_t blocks_per_sm = 32;  // generous; saturates NVIDIA and AMD alike
+  const int64_t cap = static_cast<int64_t>(props->multiProcessorCount) * blocks_per_sm;
+  const dim3 grid(static_cast<unsigned int>(std::min<int64_t>(total, cap)));
   const dim3 block(kCUDANumThreads);
   int64_t n = self.size(0);
   int64_t m = self.size(1);
@@ -281,7 +286,7 @@ void pdist_forward_kernel_impl(Tensor& result, const Tensor& self, double p) {
     }
     impl_fptr<<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
         result.mutable_data_ptr<scalar_t>(), self.const_data_ptr<scalar_t>(),
-        n, m, p, n2, n2_squared_minus_1, total);   // <-- pass total
+        n, m, p, n2, n2_squared_minus_1, total);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   });
 }
