@@ -5136,11 +5136,11 @@ class TestLinalg(TestCase):
             if x.dtype.is_floating_point or x.dtype.is_complex:
                 k = max(x.shape[-1], 1)  # Scale the atol with the size of the matrix
                 self.assertEqual(answer, expected,
-                                 msg=f"{x.shape} x {y.shape} = {answer.shape}",
+                                 msg=lambda msg: f"{msg}\n{x.shape} x {y.shape} = {answer.shape}",
                                  atol=k * 5e-5,
                                  rtol=1e-4)
             else:
-                self.assertEqual(answer, expected, msg=f"{x.shape} x {y.shape} = {answer.shape}")
+                self.assertEqual(answer, expected, msg=lambda msg: f"{msg}\n{x.shape} x {y.shape} = {answer.shape}")
 
         # test x @ y
         expected = np.matmul(x.cpu(), y.cpu())
@@ -5622,7 +5622,7 @@ class TestLinalg(TestCase):
         for p in [1, 2, 3, 4, inf]:
             res = x.renorm(p, 1, 1)
             expected = x / x.norm(p, 0, keepdim=True).clamp(min=1)
-            self.assertEqual(res, expected, msg=f"renorm failed for {p}-norm")
+            self.assertEqual(res, expected, msg=lambda msg: f"{msg}\nrenorm failed for {p}-norm")
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoCusolver
@@ -8111,15 +8111,15 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
             # Test det
             self.assertEqual(det, target_sdet * target_logabsdet.exp(),
-                             atol=1e-6, rtol=0, msg=f'{desc} (det)')
+                             atol=1e-6, rtol=0, msg=lambda msg: f'{msg}\n{desc} (det)')
 
             # Test slogdet
             # Compare the overall value rather than individual parts because of
             # precision issues when det is near zero.
             self.assertEqual(sdet * logabsdet.exp(), target_sdet * target_logabsdet.exp(),
-                             atol=1e-6, rtol=0, msg=f'{desc} (slogdet)')
+                             atol=1e-6, rtol=0, msg=lambda msg: f'{msg}\n{desc} (slogdet)')
             self.assertEqual(linalg_sdet * linalg_logabsdet.exp(), target_sdet * target_logabsdet.exp(),
-                             atol=1e-6, rtol=0, msg=f'{desc} (linalg_slogdet)')
+                             atol=1e-6, rtol=0, msg=lambda msg: f'{msg}\n{desc} (linalg_slogdet)')
 
             # Test logdet
             # Compare logdet against our own pytorch slogdet because they should
@@ -8130,7 +8130,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                 self.assertTrue(logdet.item() != logdet.item(), f'{desc} (logdet negative case)')
             else:
                 self.assertEqual(logdet.exp(), target_logabsdet.exp(),
-                                 atol=1e-6, rtol=0, msg=f'{desc} (logdet non-negative case)')
+                                 atol=1e-6, rtol=0, msg=lambda msg: f'{msg}\n{desc} (logdet non-negative case)')
 
         eye = torch.eye(5, dtype=dtype, device=device)
         test_single_det(eye, (torch.ones((), dtype=dtype, device=device), torch.zeros((), dtype=dtype, device=device)), 'identity')
@@ -9237,11 +9237,11 @@ class TestLinalgCudaOnly(TestCase):
             if x.dtype.is_floating_point or x.dtype.is_complex:
                 k = max(x.shape[-1], 1)
                 self.assertEqual(answer, expected,
-                                 msg=f"{x.shape} x {y.shape} = {answer.shape}",
+                                 msg=lambda msg: f"{msg}\n{x.shape} x {y.shape} = {answer.shape}",
                                  atol=k * 5e-5,
                                  rtol=1e-4)
             else:
-                self.assertEqual(answer, expected, msg=f"{x.shape} x {y.shape} = {answer.shape}")
+                self.assertEqual(answer, expected, msg=lambda msg: f"{msg}\n{x.shape} x {y.shape} = {answer.shape}")
 
         expected = np.matmul(x.cpu(), y.cpu())
         ans = torch.matmul(x, y)

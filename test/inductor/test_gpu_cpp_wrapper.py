@@ -355,7 +355,7 @@ class TestGpuWrapper(InductorTestCase):
                 self.assertEqual(
                     xblocks,
                     [DEFAULT_COMBO_BLOCK_SIZE_1D],
-                    f"{name} got xblocks={xblocks}, "
+                    lambda msg: f"{msg}\n{name} got xblocks={xblocks}, "
                     f"expected [{DEFAULT_COMBO_BLOCK_SIZE_1D}]",
                 )
 
@@ -579,7 +579,11 @@ class TestLazyCompileKernelCollision(InductorTestCase):
                 text=True,
                 env=env,
             )
-            self.assertEqual(r1.returncode, 0, f"Cold run failed:\n{r1.stderr[-2000:]}")
+            self.assertEqual(
+                r1.returncode,
+                0,
+                lambda msg: f"{msg}\nCold run failed:\n{r1.stderr[-2000:]}",
+            )
             # Second run: warm caches trigger the collision without the fix.
             r2 = subprocess.run(
                 [sys.executable, "-c", _LAZY_COMPILE_COLLISION_SCRIPT],
@@ -588,7 +592,11 @@ class TestLazyCompileKernelCollision(InductorTestCase):
                 text=True,
                 env=env,
             )
-            self.assertEqual(r2.returncode, 0, f"Warm run failed:\n{r2.stderr[-2000:]}")
+            self.assertEqual(
+                r2.returncode,
+                0,
+                lambda msg: f"{msg}\nWarm run failed:\n{r2.stderr[-2000:]}",
+            )
 
 
 # Helper script for test_static_init_dlopen_does_not_deadlock
@@ -649,7 +657,7 @@ class TestCppWrapperStaticInitDeadlock(InductorTestCase):
         self.assertEqual(
             r.returncode,
             0,
-            f"Subprocess failed:\nstderr:\n{r.stderr[-2000:]}\nstdout:\n{r.stdout[-2000:]}",
+            lambda msg: f"{msg}\nSubprocess failed:\nstderr:\n{r.stderr[-2000:]}\nstdout:\n{r.stdout[-2000:]}",
         )
 
 
@@ -789,7 +797,7 @@ class TestLazyTmaGlobalScratch(InductorTestCase):
         self.assertEqual(
             result.returncode,
             0,
-            "lazy TMA scratch regression subprocess failed:\n"
+            lambda msg: f"{msg}\nlazy TMA scratch regression subprocess failed:\n"
             f"returncode: {result.returncode}\n"
             f"stderr tail:\n{stderr_tail}",
         )

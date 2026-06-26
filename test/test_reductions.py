@@ -114,7 +114,7 @@ class TestReductions(TestCase):
         result = op(t, *args, **dim_keepdim, **kwargs)
         empty_dim_as_none = (op.name == "linalg.vector_norm" or op.name == "_refs.linalg.vector_norm")
         expected_shape = _reduced_shape(shape, empty_dim_as_none, **dim_keepdim)
-        self.assertEqual(result.shape, expected_shape, f"""
+        self.assertEqual(result.shape, expected_shape, lambda msg: f"""{msg}\n
         expected output shape to be {expected_shape} but got {list(result.shape)}
         for input shape {shape} and {dim_keepdim}
         """)
@@ -2180,9 +2180,9 @@ class TestReductions(TestCase):
             a[2, 2] = nan
             actual = f(a.to(device)).cpu()
             expected = f(a).cpu()
-            self.assertEqual(torch.isnan(actual), torch.isnan(expected), msg=f'nans for {name}')
+            self.assertEqual(torch.isnan(actual), torch.isnan(expected), msg=lambda msg: f'{msg}\nnans for {name}')
             self.assertEqual(actual[~torch.isnan(actual)],
-                             expected[~torch.isnan(expected)], msg=f'nans for {name}')
+                             expected[~torch.isnan(expected)], msg=lambda msg: f'{msg}\nnans for {name}')
 
     # TODO: make this test generic using OpInfos
     @onlyOn(["cuda", "xpu"])
@@ -2440,16 +2440,16 @@ class TestReductions(TestCase):
             fn_tuple(y, 1, keepdim=False, out=(values[:, 1], indices[:, 1]))
             values_expected, indices_expected = fn_tuple(y, 1, keepdim=False)
             self.assertEqual(values[:, 1], values_expected,
-                             msg=f'{fn_name} values with out= kwarg')
+                             msg=lambda msg: f'{msg}\n{fn_name} values with out= kwarg')
             self.assertEqual(indices[:, 1], indices_expected,
-                             msg=f'{fn_name} indices with out= kwarg')
+                             msg=lambda msg: f'{msg}\n{fn_name} indices with out= kwarg')
             return
 
         x = torch.randn(5, 3, device=device)
         y = torch.randn(5, 3, device=device)
         fn(y, 1, keepdim=False, out=x[:, 1])
         expected = fn(y, 1, keepdim=False)
-        self.assertEqual(x[:, 1], expected, msg=f'{fn_name} with out= kwarg')
+        self.assertEqual(x[:, 1], expected, msg=lambda msg: f'{msg}\n{fn_name} with out= kwarg')
 
     @onlyOn(["cuda", "xpu"])
     @largeTensorTest('10GB')

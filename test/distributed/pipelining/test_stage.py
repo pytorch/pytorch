@@ -322,7 +322,7 @@ class StageTest(MultiProcContinuousTest):
             self.assertEqual(
                 len(stage.output_chunks),
                 0,
-                f"Non-last stage (rank {self.rank}) should not store output chunks",
+                lambda msg: f"{msg}\nNon-last stage (rank {self.rank}) should not store output chunks",
             )
 
         # Clear the schedule and stage caches
