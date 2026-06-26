@@ -212,6 +212,26 @@ if (needs_input_grad[/*${name}*/${idx}]) {  // ${name}
 """
 )
 
+# note(crcrpar): A foreach function whose differentiable input is a single
+# (non-list) Tensor, e.g. `other` of `_foreach_{add,mul,div}.Tensor`, shares
+# that Tensor across every list element. Its gradient is therefore the sum over
+# the list of the per-element contributions, each reduced to the argument's
+# shape to handle broadcasting.
+DERIVATIVE_SINGLE_FOREACH_TENSOR = CodeTemplate(
+    """\
+if (needs_input_grad[/*${name}*/${idx}]) {  // ${name}
+  Tensor grad_result;
+  for (const auto & i : c10::irange(grads.size())) {
+    if (grads[i].defined()) {
+      auto grad_part = at::sum_to(${derivative}, ${name}.sym_sizes());
+      grad_result = grad_result.defined() ? grad_result + grad_part : std::move(grad_part);
+    }
+  }
+  copy_range(grad_inputs, ${name}_ix, grad_result);
+}
+"""
+)
+
 DERIVATIVE_MULTI_COPY_RANGE = CodeTemplate(
     """\
   if (needs_input_grad[/*${name}*/${idx}]) {
@@ -941,20 +961,32 @@ static PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
 
         if len(var_names) == 1:
             checks_any_grad_defined = False
-            if "not_implemented" not in formula:
-                matching_args = [
-                    arg for arg in args_with_derivatives if arg.name == var_names[0]
-                ]
-                if len(matching_args) == 1:
-                    # We can add undefined grad support if the input variable is a Tensor
-                    arg = matching_args[0]
-                    if isinstance(arg.argument, Argument) and str(
-                        arg.argument.type
-                    ) in ("Tensor", "Tensor?"):
-                        formula = "any_grad_defined ? (" + formula + ") : Tensor()"
-                        checks_any_grad_defined = True
-            if info.name.startswith("_foreach_"):
-                derivative_template = DERIVATIVE_SINGLE_FOREACH
+            is_foreach = info.name.startswith("_foreach_")
+            matching_args = [
+                arg for arg in args_with_derivatives if arg.name == var_names[0]
+            ]
+            # A single (non-list) Tensor input, e.g. `other` of
+            # `_foreach_{add,mul,div}.Tensor`, needs its per-element gradients
+            # reduced into one Tensor rather than emitted as a list.
+            is_single_tensor_arg = (
+                len(matching_args) == 1
+                and isinstance(matching_args[0].argument, Argument)
+                and str(matching_args[0].argument.type) in ("Tensor", "Tensor?")
+            )
+            if (
+                "not_implemented" not in formula
+                and is_single_tensor_arg
+                and not is_foreach
+            ):
+                # We can add undefined grad support if the input variable is a Tensor
+                formula = "any_grad_defined ? (" + formula + ") : Tensor()"
+                checks_any_grad_defined = True
+            if is_foreach:
+                derivative_template = (
+                    DERIVATIVE_SINGLE_FOREACH_TENSOR
+                    if is_single_tensor_arg
+                    else DERIVATIVE_SINGLE_FOREACH
+                )
             else:
                 derivative_template = DERIVATIVE_SINGLE
             return (
