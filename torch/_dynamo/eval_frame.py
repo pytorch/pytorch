@@ -1032,8 +1032,10 @@ class _TorchDynamoContext:
         from .variables import TorchInGraphFunctionVariable
 
         rule = trace_rules.lookup(fn)
-        top_level_in_graph = isinstance(rule, type) and issubclass(
-            rule, TorchInGraphFunctionVariable
+        top_level_in_graph = (
+            isinstance(rule, type)
+            and issubclass(rule, TorchInGraphFunctionVariable)
+            and not trace_rules.is_callable_allowed(fn)
         )
         has_polyfill = trace_rules.is_polyfilled_callable(fn)
 

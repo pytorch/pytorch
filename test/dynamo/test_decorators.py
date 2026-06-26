@@ -46,6 +46,13 @@ class DecoratorTests(PytreeRegisteringTestCase):
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(cnts.op_count, 4)
 
+    def test_disallow_in_graph_is_idempotent(self):
+        try:
+            torch._dynamo.disallow_in_graph(torch.sub)
+            torch._dynamo.disallow_in_graph(torch.sub)
+        finally:
+            torch._dynamo.allow_in_graph(torch.sub)
+
     def test_disable_for_custom_op(self):
         import torch.library
 

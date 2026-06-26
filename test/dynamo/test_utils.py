@@ -1,10 +1,12 @@
 # Owner(s): ["module: dynamo"]
 import dataclasses
+import gc
 import json
 import os
 import pprint
 import sys
 import unittest
+import weakref
 from unittest import mock
 from unittest.mock import patch
 
@@ -28,6 +30,34 @@ _IS_WINDOWS = sys.platform == "win32"
 
 
 class TestUtils(TestCase):
+    def test_exact_weak_key_dictionary_uses_identity(self):
+        class EqualObject:
+            def __eq__(self, other):
+                return isinstance(other, EqualObject)
+
+        first = EqualObject()
+        second = EqualObject()
+        first_ref = weakref.ref(first)
+        mapping = utils.ExactWeakKeyDictionary()
+
+        mapping[first] = "first"
+        mapping[second] = "second"
+
+        self.assertIn(first, mapping)
+        self.assertIn(second, mapping)
+        self.assertEqual(mapping[first], "first")
+        self.assertEqual(mapping[second], "second")
+        self.assertEqual(mapping.key_ids(), {id(first), id(second)})
+
+        self.assertEqual(mapping.pop(first), "first")
+        self.assertNotIn(first, mapping)
+        self.assertIn(second, mapping)
+
+        del first
+        gc.collect()
+        self.assertIsNone(first_ref())
+        self.assertEqual(mapping.key_ids(), {id(second)})
+
     def test_nan(self):
         a = torch.Tensor([float("nan")])
         b = torch.Tensor([float("nan")])

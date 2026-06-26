@@ -1076,25 +1076,55 @@ class ExactWeakKeyDictionary:
         self.refs: dict[int, weakref.ReferenceType[Any]] = {}
 
     def __getitem__(self, key: Any) -> Any:
-        return self.values[id(key)]
+        idx = id(key)
+        ref = self.refs.get(idx)
+        if ref is None or ref() is not key:
+            raise KeyError(key)
+        return self.values[idx]
 
     def get(self, key: Any, default: Any = None) -> Any:
-        return self.values.get(id(key), default)
+        try:
+            return self[key]
+        except KeyError:
+            return default
 
     def __contains__(self, key: Any) -> bool:
-        return id(key) in self.values
+        idx = id(key)
+        ref = self.refs.get(idx)
+        if ref is None:
+            return False
+        obj = ref()
+        if obj is None:
+            self._remove_id(idx, ref)
+            return False
+        return obj is key
 
     def __setitem__(self, key: Any, value: Any) -> None:
         idx = id(key)
-        if idx not in self.refs:
-            self.refs[idx] = weakref.ref(key, lambda ref: self._remove_id(idx))
+        ref = self.refs.get(idx)
+        if ref is None or ref() is not key:
+            self.refs[idx] = weakref.ref(key, lambda ref: self._remove_id(idx, ref))
         self.values[idx] = value
 
-    def _remove_id(self, idx: int) -> None:
-        if idx in self.values:
-            del self.values[idx]
-        if idx in self.refs:
-            del self.refs[idx]
+    def _remove_id(
+        self, idx: int, ref: weakref.ReferenceType[Any] | None = None
+    ) -> None:
+        if ref is None or self.refs.get(idx) is ref:
+            self.values.pop(idx, None)
+            self.refs.pop(idx, None)
+
+    def pop(self, key: Any, default: Any = None) -> Any:
+        if key not in self:
+            return default
+        idx = id(key)
+        self.refs.pop(idx, None)
+        return self.values.pop(idx)
+
+    def key_ids(self) -> set[int]:
+        for idx, ref in list(self.refs.items()):
+            if ref() is None:
+                self._remove_id(idx, ref)
+        return set(self.values)
 
     def clear(self) -> None:
         self.refs.clear()
@@ -2494,10 +2524,14 @@ class CleanupManager(ExactWeakKeyDictionary):
     count = 0
     instance: ClassVar[CleanupManager]
 
-    def _remove_id(self, idx: int) -> None:
-        for hook in self.values[idx]:
+    def _remove_id(
+        self, idx: int, ref: weakref.ReferenceType[Any] | None = None
+    ) -> None:
+        if ref is not None and self.refs.get(idx) is not ref:
+            return
+        for hook in self.values.get(idx, ()):
             hook()
-        super()._remove_id(idx)
+        super()._remove_id(idx, ref)
 
 
 CleanupManager.instance = CleanupManager()
