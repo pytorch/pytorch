@@ -10,7 +10,7 @@ import sys
 import threading
 import unittest
 from collections import namedtuple
-from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from enum import Enum
 from functools import partial, wraps
 from typing import Any, ClassVar, TypeVar
@@ -480,9 +480,7 @@ class DeviceTypeTestBase(TestCase):
                 return exclusion_rule.get(test_name) == "*"
             # "TestClassB": ["test_a", "test_b"] — simple form, exclude all
             # generated variants of specific methods.
-            if isinstance(exclusion_rule, Collection) and not isinstance(
-                exclusion_rule, (str, bytes)
-            ):
+            if isinstance(exclusion_rule, list):
                 return test_name in exclusion_rule
             return False
 
@@ -667,13 +665,14 @@ class DeviceTypeTestBase(TestCase):
         # If one of the @dtypes* decorators is present, also parametrize over the dtypes set by it.
         dtypes = cls._get_dtypes(test)
         if dtypes is not None:
-            dtypes = tuple(
-                dtype
-                for dtype in dtypes
-                if not cls._should_exclude(
-                    generic_cls.__name__, test_name=name, dtype_variant=dtype
+            if generic_cls is not None:
+                dtypes = tuple(
+                    dtype
+                    for dtype in dtypes
+                    if not cls._should_exclude(
+                        generic_cls.__name__, test_name=name, dtype_variant=dtype
+                    )
                 )
-            )
 
             if not dtypes:
                 return
