@@ -321,13 +321,18 @@ class MetaTensorDescriber:
         is_legacy_batchedtensor_v = is_legacy_batchedtensor(t)
         is_gradtrackingtensor_v = is_gradtrackingtensor(t)
         is_functional = torch._is_functional_tensor(t)
+        has_storage = torch._C._has_storage(t)
+        is_privateuse1_no_storage = (
+            not has_storage
+            and t.device.type == torch._C._get_privateuse1_backend_name()
+        )
 
         storage = None
         # NB: For compatibility, I default this to zero, as sometimes people
         # still have stuffed zero into storage offset even though the tensor
         # doesn't meaningfully have an offset
         storage_offset = 0
-        if not (
+        if not is_privateuse1_no_storage and not (
             is_sparse
             or is_sparse_compressed_layout(layout)
             or (is_nested and not is_traceable_wrapper_subclass_v)
@@ -2058,7 +2063,7 @@ class MetaConverter(Generic[_TensorT]):
                                 device="meta",
                             )
                         )
-                        if self.copy_data:
+                        if self.copy_data and t.storage is not None:
                             with torch.no_grad(), no_dispatch():
                                 if t.size is None:
                                     raise AssertionError(
@@ -2074,7 +2079,10 @@ class MetaConverter(Generic[_TensorT]):
                                     )
                                 # pyrefly: ignore[bad-assignment]
                                 r.real_tensor = torch.empty_strided(
-                                    t.size, t.stride, dtype=t.dtype, device=t.device
+                                    t.size,
+                                    t.stride,
+                                    dtype=t.dtype,
+                                    device=t.device,
                                 )
                                 _safe_copy(r.real_tensor, t.data)
 
@@ -2100,7 +2108,10 @@ class MetaConverter(Generic[_TensorT]):
                     # Storage aliasing for traceable wrapper subclasses is tracked
                     # through their inner tensors. Memoizing the wrapper placeholder
                     # storage can later force a cross-device set_ on the wrapper.
-                    if not t.is_traceable_wrapper_subclass:
+                    if not t.is_traceable_wrapper_subclass and (
+                        t.storage is not None
+                        or t.device.type != torch._C._get_privateuse1_backend_name()
+                    ):
                         s = t.storage
                         if s is None:
                             raise AssertionError("t.storage must not be None")
