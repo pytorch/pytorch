@@ -4,9 +4,8 @@
 #include <cuda.h> // for CUDA_VERSION
 #include <cub/version.cuh>
 #else
-// Check if we can find HIPCUB_CCCL_VERSION. It is exposed
-// transitively by hipcub/config.hpp.
-#include <hipcub/config.hpp>
+// Check if we can find HIPCUB_CCCL_VERSION.
+#include <hipcub/hipcub_version.hpp>
 // Older versions of hipCUB do not support the CUB V3 API.
 #if defined(HIPCUB_CCCL_VERSION) && HIPCUB_CCCL_VERSION >= 300000
 #define CUB_VERSION HIPCUB_CCCL_VERSION
