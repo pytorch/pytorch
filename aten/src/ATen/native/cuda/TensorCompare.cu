@@ -81,7 +81,8 @@ void inline launch_clamp_scalar(TensorIteratorBase& iter, Scalar lim0, Scalar li
         // The following replaces std::clamp(val, low, high) and is a viable solution for
         // both CUDA and ROCm since std::clamp and this replacement generates the same PTX.
         // The replacement should generate the same PTX as std::clamp. See https://godbolt.org/z/Wde9KW3v4
-        return (val < lim0_val) ? lim0_val : (lim1_val < val) ? lim1_val : val;
+        opmath_t result = (val < lim0_val) ? lim0_val : val;
+        return scalar_t((lim1_val < result) ? lim1_val : result);
       }
     });
   });
