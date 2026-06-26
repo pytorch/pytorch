@@ -208,7 +208,6 @@ void initSingleStream(int p, DeviceIndex device_index, int i) {
   if (C10_UNLIKELY(interp)) {
     (*interp)->trace_gpu_stream_creation(
         c10::kCUDA, reinterpret_cast<uintptr_t>(stream));
-    priority_counters[p][device_index] = 0;
   }
 }
 
