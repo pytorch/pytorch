@@ -155,6 +155,22 @@ class TestProvenanceTracingArtifact(TestCase):
                     self.assertTrue(m)
                     filepath = Path(m.group(1))
                     if device == "cuda" or device == "xpu":
+                        # aot_inductor uses export (no canonicalization),
+                        # so pre-graph names stay as original.
+                        # inductor uses torch.compile (canonicalization runs),
+                        # so pre-graph names become canonical.
+                        if backend == "aot_inductor":
+                            pre_mul, pre_addmm, pre_gelu = (
+                                "mul",
+                                "addmm",
+                                "gelu",
+                            )
+                        else:
+                            pre_mul, pre_addmm, pre_gelu = (
+                                "mul_tensor",
+                                "addmm_default",
+                                "gelu_default",
+                            )
                         expected_mapping = [
                             (
                                 "cppCodeToPost",
@@ -185,22 +201,31 @@ class TestProvenanceTracingArtifact(TestCase):
                             (
                                 "postToPre",
                                 {
-                                    "mul": ["mul"],
-                                    "mm_default": ["addmm"],
-                                    "add_tensor": ["addmm"],
-                                    "mul_1": ["gelu"],
-                                    "mul_2": ["gelu"],
-                                    "erf": ["gelu"],
-                                    "add": ["gelu"],
-                                    "mul_3": ["gelu"],
+                                    "mul": [pre_mul],
+                                    "mm_default": [pre_addmm],
+                                    "add_tensor": [pre_addmm],
+                                    "mul_1": [pre_gelu],
+                                    "mul_2": [pre_gelu],
+                                    "erf": [pre_gelu],
+                                    "add": [pre_gelu],
+                                    "mul_3": [pre_gelu],
                                 },
                             ),
                             (
                                 "preToPost",
                                 {
-                                    "mul": ["mul"],
-                                    "addmm": ["mm_default", "add_tensor"],
-                                    "gelu": ["mul_1", "mul_2", "erf", "add", "mul_3"],
+                                    pre_mul: ["mul"],
+                                    pre_addmm: [
+                                        "mm_default",
+                                        "add_tensor",
+                                    ],
+                                    pre_gelu: [
+                                        "mul_1",
+                                        "mul_2",
+                                        "erf",
+                                        "add",
+                                        "mul_3",
+                                    ],
                                 },
                             ),
                         ]
@@ -580,13 +605,13 @@ class TestProvenanceTracingStackTraces(TestCase):
         )
 
         expected = {
-            "cpp_fused_mul_relu_sigmoid_threshold_backward_0:2": [
+            "cpp_fused_mul_0:2": [
                 "d = a * 3.14",
+            ],
+            "cpp_fused_gelu_relu_sigmoid_threshold_backward_1:4": [
+                "z = torch.nn.functional.gelu(y)",
                 "x = self.relu(x)",
                 "x = self.sigmoid(x)",
-            ],
-            "cpp_fused_gelu_1:4": [
-                "z = torch.nn.functional.gelu(y)",
             ],
             "extern_kernels.addmm:1": [
                 "x = self.fc1(x)",
@@ -626,23 +651,23 @@ class TestProvenanceTracingStackTraces(TestCase):
         example_inputs = (x, a, b, c)
 
         expected = {
-            "triton_poi_fused_addmm_relu_sigmoid_threshold_backward_0:2": [
+            "triton_poi_fused_addmm_relu_sigmoid_threshold_backward_2:5": [
                 "x = self.sigmoid(x)",
                 "x = self.fc1(x)",
                 "x = self.relu(x)",
             ],
-            "triton_poi_fused_mul_1:3": [
+            "triton_poi_fused_mul_0:2": [
                 "d = a * 3.14",
             ],
-            "triton_poi_fused_addmm_gelu_2:5": [
+            "triton_poi_fused_addmm_gelu_1:4": [
                 "z = torch.nn.functional.gelu(y)",
+                "y = torch.addmm(c, d, b)",
+            ],
+            "extern_kernels.mm:3": [
                 "y = torch.addmm(c, d, b)",
             ],
             "extern_kernels.mm:1": [
                 "x = self.fc1(x)",
-            ],
-            "extern_kernels.mm:4": [
-                "y = torch.addmm(c, d, b)",
             ],
         }
 
@@ -688,7 +713,7 @@ class TestProvenanceTracingStackTraces(TestCase):
             self.assertTrue("a = m(inp)" in str(data))
 
             # Check that debug handle is in the output code
-            FileCheck().check("Topologically Sorted Source Nodes: [a]").check(
+            FileCheck().check("Topologically Sorted Source Nodes: [linear]").check(
                 "[Provenance debug handles]"
             ).run(out_code[0])
 
