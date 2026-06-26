@@ -60,9 +60,6 @@ if(USE_KINETO)
     install(TARGETS test_global_state_manager DESTINATION bin)
   endif()
 
-  # Cross-session global RecordFunction callback teardown reproducer: a stale
-  # exit landing after its session was torn down. Deterministic, but the
-  # use-after-free is only observable under a sanitizer (ASAN/UBSAN).
   add_executable(test_profiler_global_callback_stale_session
     ${TORCH_ROOT}/test/cpp/common/main.cpp
     ${PROFILER_TEST_ROOT}/profiler_global_callback_stale_session_test.cpp

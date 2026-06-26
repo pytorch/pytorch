@@ -14,12 +14,15 @@
 // Reproducer for a cross-session use-after-free in the global RecordFunction
 // callback path. The narrow write-section guard keeps a callback's critical
 // section from overlapping teardown, but it intentionally does not span the op
-// body (that would deadlock on the GIL). So an op can enter in session A,
-// have A torn down (freeing its RecordQueue event) while in-flight, then exit
-// while a *later* session B is active -- the gate is open for B, so the exit is
-// not skipped and onFunctionExitGlobal dereferences A's freed event. We
-// tag each ObserverContext with the session generation and drop the exit when
-// it no longer matches.
+// body (that would deadlock on the GIL). So an op can:
+//
+//   1. Enter in session A.
+//   2. Have A torn down (freeing its RecordQueue event) while in-flight.
+//   3. Exit while a LATER session B is active.
+//
+// The gate is open for B, so the exit is not skipped and onFunctionExitGlobal
+// dereferences A's freed event. We tag each ObserverContext with the session
+// generation and drop the exit when it no longer matches.
 //
 // at::RecordFunction's destructor runs the captured exit callback even after
 // A's callback was removed.

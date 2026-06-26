@@ -605,14 +605,17 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
 // Coordinates one global RecordFunction callback session (KINETO_ONDEMAND, or
 // KINETO with profile_all_threads) against teardown. Those callbacks fire on
 // every thread and touch the profiler state while disableProfiler() finalizes
-// and frees it on another thread. While the session is active, each callback
-// invocation brackets only its own short, GIL-free critical section --
-// getGlobal() plus the RecordQueue access -- with enter()/exit(); it does NOT
-// span the op body (enter to exit). Teardown calls drain(), which closes the
-// session to new callbacks and blocks until the in-flight count reaches zero,
-// so finalize never races a live critical section. The enter()/isActive()
-// re-check is a handshake: a callback that joined before teardown is always
-// waited for, while one arriving after bails without touching the state.
+// and frees it on another thread.
+//
+// While the session is active, each callback invocation brackets only its own
+// short critical section - getGlobal() plus the RecordQueue access - with
+// enter()/exit(). Teardown calls drain(), which closes the session to new
+// callbacks and blocks until the in-flight count reaches zero, so finalize
+// never races a live critical section.
+//
+// The enter()/isActive() re-check is a handshake: a callback that joined before
+// teardown is always waited for, while one arriving after bails without
+// touching the state.
 //
 // Bracketing only the critical section (not the op body) is what keeps drain()
 // from deadlocking against the GIL, but it lets an op enter under one session
@@ -657,8 +660,7 @@ class GlobalCallbackSession {
 
   // Session generation, stamped into each callback's ObserverContext at enter
   // and re-checked at exit. A mismatch means the stamping session was torn down
-  // (its RecordQueue and event freed), so the exit drops itself. Reads only
-  // this atomic and the live context, never the freed event.
+  // (its RecordQueue and event freed), so the exit drops itself.
   uint64_t generation() const {
     return generation_.load();
   }
@@ -686,9 +688,9 @@ class GlobalCallbackSession {
 
   // Close the session to new callbacks and block until all in-flight ones have
   // exited; returns true once drained (also returns true if the session was
-  // never opened -- purely thread-local profiling). Closing is fused with the
-  // wait, so the session cannot be closed without waiting out in-flight
-  // callbacks.
+  // never opened; it remained purely thread-local profiling). Closing is fused
+  // with the wait, so the session cannot be closed without waiting out
+  // in-flight callbacks.
   //
   // Returns false if the drain does not complete within kDrainTimeout. A normal
   // drain takes microseconds (the in-flight window is just a callback's
@@ -713,8 +715,6 @@ class GlobalCallbackSession {
 
   std::atomic<bool> active_{false};
   std::atomic<int64_t> in_flight_{0};
-  // Bumped once per true enable (a new session means a new RecordQueue); see
-  // activate(new_session) and generation().
   std::atomic<uint64_t> generation_{0};
   std::mutex mutex_;
   std::condition_variable cv_; // guarded by mutex_
