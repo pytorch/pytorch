@@ -26,8 +26,8 @@ install_ubuntu() {
     apt-get install -y libc++1
     apt-get install -y libc++abi1
 
-    # When ROCM_VERSION=nightly, install ROCm from TheRock nightly wheels
-    if [[ "${ROCM_VERSION}" == "nightly" ]]; then
+    # When ROCM_VERSION=preview, install ROCm from TheRock preview wheels
+    if [[ "${ROCM_VERSION}" == "preview" ]]; then
       if [[ -d /opt/rocm ]]; then
         rm -rf /opt/rocm
       fi
@@ -40,10 +40,10 @@ install_ubuntu() {
       THEROCK_NIGHTLY_VERSION="7.14.0a20260612"
 
       echo "=============================================="
-      echo "ROCm Multi-Arch Wheel Installation (TheRock nightly)"
+      echo "ROCm Multi-Arch Wheel Installation (TheRock preview)"
       echo "=============================================="
       echo "Index URL: ${THEROCK_NIGHTLY_INDEX_URL}"
-      echo "TheRock nightly version: ${THEROCK_NIGHTLY_VERSION}"
+      echo "TheRock preview version: ${THEROCK_NIGHTLY_VERSION}"
       echo "=============================================="
 
       python3 -m pip install \
@@ -78,21 +78,21 @@ export C_INCLUDE_PATH="${ROCM_SYSDEPS_INCLUDE}:\${C_INCLUDE_PATH:-}"
 export PKG_CONFIG_PATH="${ROCM_SYSDEPS_PKGCONFIG}:\${PKG_CONFIG_PATH:-}"
 export LD_LIBRARY_PATH="${ROCM_SYSDEPS_LIB}:\${LD_LIBRARY_PATH}"
 export LIBRARY_PATH="${ROCM_SYSDEPS_LIB}:\${LIBRARY_PATH:-}"
-# Disable MSLK for theRock nightly (not yet supported)
+# Disable MSLK for theRock preview (not yet supported)
 export USE_MSLK=0
 ROCM_ENV
 
       echo "source /etc/rocm_env.sh" >> /etc/bash.bashrc
 
       echo "=============================================="
-      echo "TheRock nightly ROCm wheel install complete"
+      echo "TheRock preview ROCm wheel install complete"
       echo "ROCM_HOME=${ROCM_HOME}"
       echo "=============================================="
 
-      # --- End of theRock nightly wheel installation ---
+      # --- End of theRock preview wheel installation ---
     else
       # =========================================================================
-      # Non-nightly: install ROCm from repo.radeon.com apt packages
+      # Non-preview: install ROCm from repo.radeon.com apt packages
       # =========================================================================
 
     # Make sure rocm packages from repo.radeon.com have highest priority

@@ -187,7 +187,7 @@ case "$tag" in
   pytorch-linux-noble-rocm-preview-py3)
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=13
-    ROCM_VERSION=nightly
+    ROCM_VERSION=preview
     TRITON=yes
     KATEX=yes
     PYTORCH_ROCM_ARCH="gfx942;gfx950"
