@@ -11520,6 +11520,43 @@ class TestHopSchema(TestCase):
             """switch(int index, Any branch0_fn, Any branch1_fn, Tensor operand0) -> ((Tensor))""",
         )
 
+    def test_switch_gen_schema_differing_int_symint_outputs(self):
+        def branch0(x):
+            return x.sin(), 5
+
+        def branch1(x):
+            return x.cos(), 7
+
+        def branch2(x):
+            return x.tan(), 9
+
+        schema = torch.ops.higher_order.switch.gen_schema(
+            torch.tensor(0),
+            (branch0, branch1, branch2),
+            (torch.randn(3, 4),),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """switch(Tensor index, Any branch0_fn, Any branch1_fn, Any branch2_fn, Tensor operand0) -> (Tensor, SymInt)""",
+        )
+
+    def test_switch_gen_schema_matching_int_int_outputs(self):
+        def branch0(x):
+            return x.sin(), 5
+
+        def branch1(x):
+            return x.cos(), 5
+
+        schema = torch.ops.higher_order.switch.gen_schema(
+            torch.tensor(0),
+            (branch0, branch1),
+            (torch.randn(3, 4),),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """switch(Tensor index, Any branch0_fn, Any branch1_fn, Tensor operand0) -> (Tensor, int)""",
+        )
+
     def test_while_loop_gen_schema_tensor_inputs(self):
         def cond_fn(x, y):
             return x.sum() < 10
