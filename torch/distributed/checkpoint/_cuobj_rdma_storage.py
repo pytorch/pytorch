@@ -6,8 +6,14 @@ import os
 import pickle
 import struct
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from urllib.parse import urlparse
+
+
+_DEFAULT_MULTIPART_THRESHOLD = 512 * 1024 * 1024
+_DEFAULT_PART_SIZE = 64 * 1024 * 1024
+_DEFAULT_PART_WORKERS = 8
 
 import torch
 from torch import Tensor
@@ -142,6 +148,9 @@ class BotoCuObjClient(ObjectClient):
         endpoint_url: str | None = None,
         region: str | None = "us-east-1",
         addressing_style: str = "virtual",
+        multipart_threshold: int = _DEFAULT_MULTIPART_THRESHOLD,
+        part_size: int = _DEFAULT_PART_SIZE,
+        part_workers: int = _DEFAULT_PART_WORKERS,
         boto3_session=None,
         client_kwargs: dict | None = None,
     ) -> None:
@@ -149,6 +158,9 @@ class BotoCuObjClient(ObjectClient):
         from botocore.client import Config
 
         self.bucket = bucket
+        self.multipart_threshold = multipart_threshold
+        self.part_size = part_size
+        self.part_workers = part_workers
         session = boto3_session or boto3.session.Session()
         self.s3 = session.client(
             "s3",
@@ -168,6 +180,7 @@ class BotoCuObjClient(ObjectClient):
         self._tls = threading.local()
         self.s3.meta.events.register("before-sign.s3.PutObject", self._inject_token)
         self.s3.meta.events.register("before-sign.s3.GetObject", self._inject_token)
+        self.s3.meta.events.register("before-sign.s3.UploadPart", self._inject_token)
 
     def _inject_token(self, request, **kwargs) -> None:
         token = getattr(self._tls, "rdma_token", None)
@@ -205,8 +218,85 @@ class BotoCuObjClient(ObjectClient):
         finally:
             cuobj.deregister_buffer(storage)
 
+    def _upload_part_rdma(
+        self,
+        key: str,
+        upload_id: str,
+        part_number: int,
+        storage,
+        base_addr: int,
+        offset: int,
+        size: int,
+    ) -> dict:
+        # The whole buffer is already registered by the caller; mint a token for
+        # this part's sub-range. StartAddr is the part's virtual address
+        # (base + offset) per the AWS S3 RDMA descriptor format.
+        descriptor = cuobj.get_rdma_token(storage, size, offset, True)
+        try:
+            self._tls.rdma_token = f"{descriptor}:{base_addr + offset:016x}:{size:016x}"
+            resp = self.s3.upload_part(
+                Bucket=self.bucket,
+                Key=key,
+                UploadId=upload_id,
+                PartNumber=part_number,
+                Body=b"",
+            )
+            self._check_rdma_reply(resp)
+        finally:
+            self._tls.rdma_token = None
+            cuobj.put_rdma_token(descriptor)
+        return {"PartNumber": part_number, "ETag": resp["ETag"]}
+
+    def _multipart_put_rdma(self, key: str, tensor: Tensor) -> None:
+        storage = tensor.untyped_storage()
+        nbytes = tensor.nbytes
+        base_addr = storage.data_ptr()
+        upload_id = self.s3.create_multipart_upload(Bucket=self.bucket, Key=key)[
+            "UploadId"
+        ]
+        cuobj.register_buffer(storage)
+        try:
+            offsets = list(range(0, nbytes, self.part_size))
+            workers = min(self.part_workers, len(offsets))
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                futures = [
+                    pool.submit(
+                        self._upload_part_rdma,
+                        key,
+                        upload_id,
+                        i + 1,
+                        storage,
+                        base_addr,
+                        off,
+                        min(self.part_size, nbytes - off),
+                    )
+                    for i, off in enumerate(offsets)
+                ]
+                parts = sorted(
+                    (f.result() for f in futures), key=lambda p: p["PartNumber"]
+                )
+            self.s3.complete_multipart_upload(
+                Bucket=self.bucket,
+                Key=key,
+                UploadId=upload_id,
+                MultipartUpload={"Parts": parts},
+            )
+        except BaseException:
+            try:
+                self.s3.abort_multipart_upload(
+                    Bucket=self.bucket, Key=key, UploadId=upload_id
+                )
+            except Exception:
+                pass
+            raise
+        finally:
+            cuobj.deregister_buffer(storage)
+
     def put_rdma(self, key: str, tensor: Tensor) -> None:
-        self._rdma(key, tensor, is_put=True)
+        if self.part_size and tensor.nbytes > self.multipart_threshold:
+            self._multipart_put_rdma(key, tensor)
+        else:
+            self._rdma(key, tensor, is_put=True)
 
     def get_rdma(self, key: str, tensor: Tensor) -> None:
         self._rdma(key, tensor, is_put=False)
@@ -277,6 +367,9 @@ class _S3RdmaBase:
         region: str | None,
         client_kwargs: dict | None,
         addressing_style: str = "virtual",
+        multipart_threshold: int = _DEFAULT_MULTIPART_THRESHOLD,
+        part_size: int = _DEFAULT_PART_SIZE,
+        part_workers: int = _DEFAULT_PART_WORKERS,
     ) -> None:
         self.bucket, self.prefix = _parse_s3_url(path)
         self.path = str(path)
@@ -285,6 +378,9 @@ class _S3RdmaBase:
             endpoint_url=endpoint_url,
             region=region,
             addressing_style=addressing_style,
+            multipart_threshold=multipart_threshold,
+            part_size=part_size,
+            part_workers=part_workers,
             client_kwargs=client_kwargs,
         )
 
@@ -344,6 +440,11 @@ class S3RdmaStorageWriter(_S3RdmaBase, StorageWriter):
         client_kwargs: Extra kwargs forwarded to ``boto3.session.Session.client``
             (e.g. credentials).
         overwrite: Whether to allow overwriting an existing checkpoint.
+        thread_count: Number of worker threads used to upload objects
+            concurrently. Default 1.
+        multipart_threshold: Objects larger than this many bytes are uploaded
+            with S3 multipart, whose parts are sent concurrently over RDMA.
+        part_size: Multipart part size in bytes.
     """
 
     def __init__(
@@ -356,11 +457,24 @@ class S3RdmaStorageWriter(_S3RdmaBase, StorageWriter):
         addressing_style: str = "virtual",
         client_kwargs: dict | None = None,
         overwrite: bool = True,
+        thread_count: int = 1,
+        multipart_threshold: int = _DEFAULT_MULTIPART_THRESHOLD,
+        part_size: int = _DEFAULT_PART_SIZE,
+        part_workers: int = _DEFAULT_PART_WORKERS,
     ) -> None:
         super().__init__(
-            path, client, endpoint_url, region, client_kwargs, addressing_style
+            path,
+            client,
+            endpoint_url,
+            region,
+            client_kwargs,
+            addressing_style,
+            multipart_threshold,
+            part_size,
+            part_workers,
         )
         self.overwrite = overwrite
+        self.thread_count = thread_count
         self.save_id = _generate_uuid()
         self.rank: int | None = None
         self.use_collectives = True
@@ -390,44 +504,48 @@ class S3RdmaStorageWriter(_S3RdmaBase, StorageWriter):
             for i, plan in enumerate(plans)
         ]
 
+    def _write_item(self, item, name: str, planner: SavePlanner) -> WriteResult:
+        key = self._key(name)
+        data = planner.resolve_data(item)
+        if item.type == WriteItemType.BYTE_IO:
+            blob = data.getvalue()
+            self.client.put_bytes(key, blob)
+            return WriteResult(
+                index=item.index,
+                size_in_bytes=len(blob),
+                storage_data=_RdmaObjectInfo(name, len(blob)),
+            )
+        staged = _stage_for_put(data)
+        nbytes = staged.nbytes
+        self.client.put_rdma(key, staged)
+        chunk = item.tensor_data.chunk
+        return WriteResult(
+            index=item.index,
+            size_in_bytes=nbytes,
+            storage_data=_RdmaObjectInfo(
+                name, nbytes, tuple(chunk.offsets), tuple(chunk.sizes)
+            ),
+        )
+
     def write_data(
         self, plan: SavePlan, planner: SavePlanner
     ) -> Future[list[WriteResult]]:
         storage_plan: _StoragePrefix = plan.storage_data
-        file_count = 0
-        results: list[WriteResult] = []
+        # Assign object names deterministically up front, then upload (possibly
+        # concurrently). resolve_data is called inside the workers.
+        named = [
+            (item, f"{storage_plan.prefix}{i}{DEFAULT_SUFFIX}")
+            for i, item in enumerate(plan.items)
+        ]
 
-        for item in plan.items:
-            name = f"{storage_plan.prefix}{file_count}{DEFAULT_SUFFIX}"
-            file_count += 1
-            key = self._key(name)
-            data = planner.resolve_data(item)
-
-            if item.type == WriteItemType.BYTE_IO:
-                blob = data.getvalue()
-                self.client.put_bytes(key, blob)
-                results.append(
-                    WriteResult(
-                        index=item.index,
-                        size_in_bytes=len(blob),
-                        storage_data=_RdmaObjectInfo(name, len(blob)),
-                    )
-                )
-            else:
-                staged = _stage_for_put(data)
-                nbytes = staged.nbytes
-                self.client.put_rdma(key, staged)
-                chunk = item.tensor_data.chunk
-                results.append(
-                    WriteResult(
-                        index=item.index,
-                        size_in_bytes=nbytes,
-                        storage_data=_RdmaObjectInfo(
-                            name,
-                            nbytes,
-                            tuple(chunk.offsets),
-                            tuple(chunk.sizes),
-                        ),
+        if self.thread_count <= 1 or len(named) <= 1:
+            results = [self._write_item(item, name, planner) for item, name in named]
+        else:
+            workers = min(self.thread_count, len(named))
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                results = list(
+                    pool.map(
+                        lambda x: self._write_item(x[0], x[1], planner), named
                     )
                 )
 
@@ -584,11 +702,24 @@ class S3RdmaHuggingFaceStorageWriter(_S3RdmaBase, StorageWriter):
         addressing_style: str = "virtual",
         client_kwargs: dict | None = None,
         fqn_to_index_mapping: dict[str, int] | None = None,
+        thread_count: int = 1,
+        multipart_threshold: int = _DEFAULT_MULTIPART_THRESHOLD,
+        part_size: int = _DEFAULT_PART_SIZE,
+        part_workers: int = _DEFAULT_PART_WORKERS,
     ) -> None:
         super().__init__(
-            path, client, endpoint_url, region, client_kwargs, addressing_style
+            path,
+            client,
+            endpoint_url,
+            region,
+            client_kwargs,
+            addressing_style,
+            multipart_threshold,
+            part_size,
+            part_workers,
         )
         self.fqn_to_index_mapping = fqn_to_index_mapping
+        self.thread_count = thread_count
         self.save_id = _generate_uuid()
         self.rank: int | None = None
         self.use_collectives = True
@@ -617,44 +748,56 @@ class S3RdmaHuggingFaceStorageWriter(_S3RdmaBase, StorageWriter):
             buckets.setdefault(idx, []).append(item)
         return buckets
 
+    def _write_file(self, file_name: str, items, planner: SavePlanner):
+        from safetensors.torch import save as safetensors_save
+
+        tensors: dict[str, Tensor] = {}
+        sharding: dict[str, dict] = {}
+        for item in items:
+            fqn = item.index.fqn
+            tensors[fqn] = _stage_for_put(planner.resolve_data(item))
+            sharding[fqn] = {SAVED_OFFSETS_KEY: list(item.tensor_data.chunk.offsets)}
+        blob = safetensors_save(
+            tensors,
+            metadata={
+                CUSTOM_METADATA_KEY: json.dumps(sharding),
+                DCP_VERSION_KEY: str(HF_DCP_VERSION),
+                FORMAT_KEY: FORMAT_VALUE,
+            },
+        )
+        buf = torch.frombuffer(bytearray(blob), dtype=torch.uint8).clone()
+        self.client.put_rdma(self._key(file_name), buf)
+        return [
+            WriteResult(
+                index=item.index,
+                size_in_bytes=tensors[item.index.fqn].nbytes,
+                storage_data=_HFRdmaObjectInfo(file_name, len(blob)),
+            )
+            for item in items
+        ]
+
     def write_data(
         self, plan: SavePlan, planner: SavePlanner
     ) -> Future[list[WriteResult]]:
-        from safetensors.torch import save as safetensors_save
-
         tensor_items = [i for i in plan.items if i.type != WriteItemType.BYTE_IO]
         buckets = self._bucket_items(tensor_items)
         highest = max(buckets) if buckets else 1
-        results: list[WriteResult] = []
+        files = [
+            (f"model-{idx:05d}-of-{highest:05d}{_HF_SUFFIX}", items)
+            for idx, items in buckets.items()
+        ]
 
-        for file_index, items in buckets.items():
-            file_name = f"model-{file_index:05d}-of-{highest:05d}{_HF_SUFFIX}"
-            tensors: dict[str, Tensor] = {}
-            sharding: dict[str, dict] = {}
-            for item in items:
-                fqn = item.index.fqn
-                tensors[fqn] = _stage_for_put(planner.resolve_data(item))
-                sharding[fqn] = {
-                    SAVED_OFFSETS_KEY: list(item.tensor_data.chunk.offsets)
-                }
-            blob = safetensors_save(
-                tensors,
-                metadata={
-                    CUSTOM_METADATA_KEY: json.dumps(sharding),
-                    DCP_VERSION_KEY: str(HF_DCP_VERSION),
-                    FORMAT_KEY: FORMAT_VALUE,
-                },
-            )
-            buf = torch.frombuffer(bytearray(blob), dtype=torch.uint8).clone()
-            self.client.put_rdma(self._key(file_name), buf)
-            for item in items:
-                results.append(
-                    WriteResult(
-                        index=item.index,
-                        size_in_bytes=tensors[item.index.fqn].nbytes,
-                        storage_data=_HFRdmaObjectInfo(file_name, len(blob)),
+        if self.thread_count <= 1 or len(files) <= 1:
+            grouped = [self._write_file(name, items, planner) for name, items in files]
+        else:
+            workers = min(self.thread_count, len(files))
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                grouped = list(
+                    pool.map(
+                        lambda x: self._write_file(x[0], x[1], planner), files
                     )
                 )
+        results = [wr for group in grouped for wr in group]
 
         fut: Future[list[WriteResult]] = Future()
         fut.set_result(results)
