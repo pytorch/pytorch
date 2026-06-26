@@ -3508,6 +3508,20 @@ class TestSparseCSR(TestCase):
         with self.assertRaisesRegex(RuntimeError, "b must be a 1D or 2D tensor"):
             torch.linalg.solve(A, b, out=out)
 
+        b = torch.rand(3, dtype=dtype, device=device)
+        expect = torch.linalg.solve(A.to_dense(), b)
+
+        out = torch.empty(0, dtype=dtype, device=device)
+        solve_out = torch.linalg.solve(A, b, out=out)
+        self.assertIs(solve_out, out)
+        self.assertEqual(expect, out)
+
+        out = torch.empty(6, dtype=dtype, device=device)[::2]
+        self.assertEqual(out.stride(0), 2)
+        solve_out = torch.linalg.solve(A, b, out=out)
+        self.assertIs(solve_out, out)
+        self.assertEqual(expect, out)
+
         samples = sample_inputs_linalg_solve(None, device, dtype)
 
         for sample in samples:
