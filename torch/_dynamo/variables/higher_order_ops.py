@@ -55,6 +55,7 @@ from torch.utils._ordered_set import OrderedSet
 
 from .. import graph_break_hints, variables
 from ..exc import (
+    FakeTensorObservedException,
     ObservedException,
     UncapturedHigherOrderOpError,
     unimplemented,
@@ -2238,35 +2239,8 @@ def add_hop_context(cls: type[HOP_VT_Alias]) -> type[HOP_VT_Alias]:
                 e._hop_name = self._HOP_NAME  # pyrefly: ignore[missing-attribute]
             raise
         except (Unsupported, ObservedException) as e:
-            # Re-raise as TorchRuntimeError to preserve error semantics.
-            if (
-                isinstance(e, ObservedException)
-                and e.args
-                and isinstance(e.args[0], VariableTracker)
-            ):
-                msg = (
-                    e.args[0].as_python_constant()
-                    if hasattr(e.args[0], "as_python_constant")
-                    else ""
-                )
-                if isinstance(msg, str) and msg.startswith(
-                    "Dynamo failed to run FX node"
-                ):
-                    from torch._dynamo import graph_break_hints
-                    from torch._dynamo.exc import (
-                        format_graph_break_message,
-                        TorchRuntimeError,
-                    )
-
-                    formatted = format_graph_break_message(
-                        gb_type="RuntimeError when making fake tensor call",
-                        context="",
-                        explanation=msg,
-                        hints=[*graph_break_hints.USER_ERROR],
-                    )
-                    raise TorchRuntimeError(
-                        formatted, getattr(e, "real_stack", None)
-                    ) from None
+            if isinstance(e, FakeTensorObservedException):
+                raise
             # Only tag if not already tagged (reports deepest HOP only)
             if hasattr(e, "_hop_name"):
                 raise
