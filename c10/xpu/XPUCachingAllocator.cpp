@@ -507,6 +507,69 @@ class RingBuffer {
 
 static char SHAREABLE_HANDLE_VERSION = 1;
 enum ShareableHandleType : char { SHAREABLE_XPU_MALLOC = 'c' };
+// BlockState, SegmentState, and PrivatePoolState contain the information
+// needed to reconstruct a private pool to a previous state.
+struct BlockState {
+  c10::DeviceIndex device = 0;
+  sycl::queue* queue = nullptr;
+  stream_set stream_uses;
+  size_t size = 0;
+  void* ptr = nullptr;
+  bool allocated = false;
+
+  explicit BlockState(Block* block);
+};
+
+struct SegmentState {
+  std::vector<BlockState> blocks;
+  bool is_small = false;
+
+  explicit SegmentState(Block* head);
+};
+
+struct PrivatePoolState : AllocatorState {
+  MempoolId_t owner_id = {0, 0};
+  std::vector<SegmentState> segments;
+
+  PrivatePoolState(
+      MempoolId_t pool_id,
+      const std::vector<Block*>& private_pool_head_blocks);
+};
+
+struct RestoreResult {
+  std::vector<void*> allocations_freed;
+  std::vector<Block*> allocations_created;
+};
+
+BlockState::BlockState(Block* block)
+    : device(block->device),
+      queue(block->queue),
+      stream_uses(block->stream_uses),
+      size(block->size),
+      ptr(block->ptr),
+      allocated(block->allocated) {
+  TORCH_CHECK(
+      block->event_count == 0,
+      "Events should have synchronized when checkpointing block");
+}
+
+SegmentState::SegmentState(Block* head) {
+  TORCH_INTERNAL_ASSERT(head->prev == nullptr && head->pool != nullptr);
+  is_small = head->pool->is_small;
+
+  for (Block* curr = head; curr != nullptr; curr = curr->next) {
+    blocks.emplace_back(curr);
+  }
+}
+
+PrivatePoolState::PrivatePoolState(
+    MempoolId_t pool_id,
+    const std::vector<Block*>& private_pool_head_blocks)
+    : owner_id(std::move(pool_id)) {
+  for (Block* head : private_pool_head_blocks) {
+    segments.emplace_back(head);
+  }
+}
 
 struct BlockState {
   c10::DeviceIndex device = 0;
@@ -1920,7 +1983,6 @@ class DeviceCachingAllocator {
     freeBlocksAllocatedToPool(private_pool, rr);
 
     std::unordered_map<void*, Block*> ptrs_to_blocks;
-
     for (Block* block : private_pool->small_blocks.blocks) {
       ptrs_to_blocks[block->ptr] = block;
     }
@@ -2629,7 +2691,6 @@ class NativeCachingAllocator : public XPUAllocator {
     return device_allocators[device]->checkPoolLiveAllocations(
         mempool_id, expected_live_allocations);
   }
-
   void enablePeerAccess(c10::DeviceIndex dev, c10::DeviceIndex dev_to_access) {
     assertValidDevice(dev);
     assertValidDevice(dev_to_access);
