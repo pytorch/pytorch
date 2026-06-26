@@ -83,11 +83,17 @@ class ObjectClient:
 class BotoCuObjClient(ObjectClient):
     """:class:`ObjectClient` backed by boto3 and NVIDIA cuObject.
 
-    The RDMA descriptor produced by cuObject is injected as the signed
-    ``x-amz-rdma-token`` header via a botocore ``before-sign`` hook (SigV4
-    signs all ``x-amz-*`` headers, so it must be added before signing). The
-    cuObjServer-backed S3 endpoint then transfers the payload directly into or
-    out of the registered buffer over RDMA, bypassing the HTTP body.
+    For each transfer the buffer is registered with cuObject, an RDMA descriptor
+    is minted, and the descriptor is injected as the signed ``x-amz-rdma-token``
+    header (``<descriptor>:<hex buffer addr>:<hex size>``) via a botocore
+    ``before-sign`` hook -- SigV4 signs all ``x-amz-*`` headers, so it must be
+    added before signing. The S3 endpoint transfers the payload directly into or
+    out of the registered buffer over RDMA; the HTTP body is empty.
+
+    The boto3 client is configured to match the S3-over-RDMA wire contract:
+    unsigned payload (the body is empty; data moves over RDMA) and no default
+    content checksum (botocore would otherwise checksum the empty body and the
+    server's checksum of the RDMA-delivered bytes would not match).
     """
 
     def __init__(
@@ -95,11 +101,12 @@ class BotoCuObjClient(ObjectClient):
         bucket: str,
         *,
         endpoint_url: str | None = None,
-        region: str | None = None,
+        region: str | None = "us-east-1",
         boto3_session=None,
         client_kwargs: dict | None = None,
     ) -> None:
         import boto3
+        from botocore.client import Config
 
         self.bucket = bucket
         session = boto3_session or boto3.session.Session()
@@ -107,6 +114,12 @@ class BotoCuObjClient(ObjectClient):
             "s3",
             endpoint_url=endpoint_url,
             region_name=region,
+            config=Config(
+                signature_version="s3v4",
+                request_checksum_calculation="when_required",
+                response_checksum_validation="when_required",
+                s3={"addressing_style": "path", "payload_signing_enabled": False},
+            ),
             **(client_kwargs or {}),
         )
         self._tls = threading.local()
@@ -118,21 +131,34 @@ class BotoCuObjClient(ObjectClient):
         if token is not None:
             request.headers["x-amz-rdma-token"] = token
 
+    @staticmethod
+    def _check_rdma_reply(response) -> None:
+        headers = response["ResponseMetadata"]["HTTPHeaders"]
+        reply = headers.get("x-amz-rdma-reply")
+        if not reply or reply == "501":
+            raise RuntimeError(
+                "S3 endpoint declined RDMA (x-amz-rdma-reply="
+                f"{reply!r}); RDMA is not available for this object store"
+            )
+
     def _rdma(self, key: str, tensor: Tensor, is_put: bool) -> None:
         storage = tensor.untyped_storage()
         nbytes = tensor.nbytes
+        addr = storage.data_ptr()
         cuobj.register_buffer(storage)
         try:
-            token = cuobj.get_rdma_token(storage, nbytes, 0, is_put)
+            descriptor = cuobj.get_rdma_token(storage, nbytes, 0, is_put)
             try:
-                self._tls.rdma_token = token
+                self._tls.rdma_token = f"{descriptor}:{addr:016x}:{nbytes:016x}"
                 if is_put:
-                    self.s3.put_object(Bucket=self.bucket, Key=key, Body=b"")
+                    resp = self.s3.put_object(Bucket=self.bucket, Key=key, Body=b"")
                 else:
-                    self.s3.get_object(Bucket=self.bucket, Key=key)["Body"].read()
+                    resp = self.s3.get_object(Bucket=self.bucket, Key=key)
+                    resp["Body"].read()
+                self._check_rdma_reply(resp)
             finally:
                 self._tls.rdma_token = None
-                cuobj.put_rdma_token(token)
+                cuobj.put_rdma_token(descriptor)
         finally:
             cuobj.deregister_buffer(storage)
 
