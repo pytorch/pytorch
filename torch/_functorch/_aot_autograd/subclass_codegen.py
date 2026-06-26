@@ -9,18 +9,15 @@ subclass types, symint positions) is baked in at compile time.
 
 import functools
 import keyword
-import logging
 from collections.abc import Callable, Iterable
 from typing import cast, TYPE_CHECKING
 
-import torch
 from torch import SymInt
 
+from .codegen_utils import _compile_and_exec_source, PySourceBuilder
 from .schemas import ActInputPaths, OpaqueMeta, PlainTensorMeta, SubclassCreationMeta
 from .utils import import_async_collective_tensor_type
 
-
-log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from torch.distributed._functional_collectives import AsyncCollectiveTensor
@@ -49,27 +46,6 @@ def _safe_attr_access(var: str, attr: str) -> str:
     return f"getattr({var}, {attr!r})"
 
 
-class _CodegenState:
-    """Accumulates lines of generated source and global bindings."""
-
-    def __init__(self) -> None:
-        self.lines: list[str] = []
-        self.globals: dict[str, object] = {}
-        self._name_counter: int = 0
-
-    def emit(self, line: str, indent: int = 1) -> None:
-        self.lines.append("    " * indent + line)
-
-    def fresh_name(self, prefix: str) -> str:
-        name = f"{prefix}_{self._name_counter}"
-        self._name_counter += 1
-        return name
-
-    def add_global(self, name: str, value: object) -> str:
-        self.globals[name] = value
-        return name
-
-
 def _maybe_wait_async_collective_tensor(
     x: object,
     AsyncCollectiveTensor: type["AsyncCollectiveTensor"],
@@ -81,7 +57,7 @@ def _maybe_wait_async_collective_tensor(
 
 
 def _codegen_unwrap_subclass(
-    state: _CodegenState,
+    state: PySourceBuilder,
     meta: SubclassCreationMeta,
     var: str,
     indent: int = 1,
@@ -166,7 +142,7 @@ def _concrete_value(val: None | int | SymInt) -> int:
 
 
 def _codegen_wrap_subclass(
-    state: _CodegenState,
+    state: PySourceBuilder,
     meta: SubclassCreationMeta,
 ) -> str:
     """Emit code to reconstruct one subclass output. Returns the variable name."""
@@ -265,7 +241,7 @@ def _count_output_args(
 
 
 def _emit_output_wrapping(
-    state: _CodegenState,
+    state: PySourceBuilder,
     out_metas: list[PlainTensorMeta | SubclassCreationMeta],
     num_fw_outs_saved_for_bw: int | None,
 ) -> tuple[list[str], int]:
@@ -303,7 +279,7 @@ def _emit_output_wrapping(
 
 
 def _emit_input_unwrapping(
-    state: _CodegenState,
+    state: PySourceBuilder,
     inp_metas: list[PlainTensorMeta | SubclassCreationMeta],
     frozen_inp_indices: frozenset[int] = frozenset(),
     include_symints: bool = True,
@@ -367,7 +343,7 @@ def _codegen_subclass_wrapper_source(
     Returns (source, globals_dict).  The globals_dict will NOT contain
     ``compiled_fn`` — the caller is responsible for adding it before exec.
     """
-    state = _CodegenState()
+    state = PySourceBuilder()
 
     state.emit("def inner_fn(args):", indent=0)
 
@@ -427,7 +403,7 @@ def _codegen_subclass_wrap_source(
     Used for the backward epilogue. Shares output-wrapping logic with
     _codegen_subclass_wrapper_source via _emit_output_wrapping.
     """
-    state = _CodegenState()
+    state = PySourceBuilder()
     state.emit("def wrap_fn(unwrapped_outs):", indent=0)
     result_exprs, _ = _emit_output_wrapping(
         state, out_metas, num_fw_outs_saved_for_bw=None
@@ -436,45 +412,6 @@ def _codegen_subclass_wrap_source(
     state.emit(f"return {result_tuple}")
     source = "\n".join(state.lines)
     return source, state.globals
-
-
-def _compile_and_exec_source(
-    source: str,
-    globals_dict: dict[str, object],
-    fn_name: str,
-    artifact_name: str,
-    wrapped_fn: Callable[..., object] | None = None,
-) -> Callable[..., object]:
-    """Compile generated source, exec it, and return the named function.
-
-    If wrapped_fn is provided, applies functools.update_wrapper so that
-    __wrapped__ and __dict__ (e.g. _fx_graph_cache_key) propagate to the
-    generated function.
-    """
-    if log.isEnabledFor(logging.DEBUG):
-        log.debug("Generated %s:\n%s", artifact_name, source)
-
-    torch._logging.trace_structured(
-        "artifact",
-        metadata_fn=lambda: {
-            "name": artifact_name,
-            "encoding": "string",
-        },
-        payload_fn=lambda: source,
-    )
-
-    # Use a path under torch/_functorch/ so the code object is recognized by
-    # dynamo's MOD_SKIPLIST. The eval frame hook stays active during the entire
-    # torch.compile(fn)(*args) call (to handle graph breaks and resume functions),
-    # so codegen'd functions called during backward get intercepted even though
-    # no tracing is active. A real path makes them skip automatically.
-    code = compile(source, f"{__file__}:codegen({artifact_name})", "exec")
-    local_dict: dict[str, object] = {}
-    exec(code, globals_dict, local_dict)
-    fn = local_dict[fn_name]
-    if wrapped_fn is not None:
-        functools.update_wrapper(fn, wrapped_fn)  # type: ignore[arg-type]
-    return fn  # type: ignore[return-value]
 
 
 def codegen_backward_subclass_fns(
