@@ -11798,6 +11798,15 @@ class TestNNDeviceType(NNTestCase):
                         self.assertEqual(input.grad, ref_input.grad)
 
     @onlyCUDA
+    @dtypes(torch.half)
+    def test_softmax_half_to_float_matches_half(self, device, dtype):
+        input = torch.randn((4, 1025), generator=torch.Generator().manual_seed(10), dtype=torch.float32)
+        input = (input * 4).to(device=device, dtype=dtype)
+        expected = F.softmax(input, dim=-1)
+        actual = F.softmax(input, dim=-1, dtype=torch.float32).to(dtype)
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+
+    @onlyCUDA
     @dtypes(torch.float, torch.half)
     @largeTensorTest("20GB")
     @largeTensorTest("64GB", "cpu")
