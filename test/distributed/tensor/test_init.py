@@ -203,7 +203,7 @@ class DTensorConstructorTest(DTensorTestBase):
                 "linspace only supports 0-dimensional start and end tensors",
             ):
                 linspace(
-                    torch.tensor([1.0, 2.0], device="cuda"),
+                    torch.tensor([1.0, 2.0], device=self.device_type),
                     2.0,
                     steps,
                     device_mesh=mesh,
@@ -265,7 +265,7 @@ class DTensorConstructorTest(DTensorTestBase):
                 "logspace only supports 0-dimensional start and end tensors",
             ):
                 logspace(
-                    torch.tensor([1.0, 2.0], device="cuda"),
+                    torch.tensor([1.0, 2.0], device=self.device_type),
                     2.0,
                     steps,
                     device_mesh=mesh,
