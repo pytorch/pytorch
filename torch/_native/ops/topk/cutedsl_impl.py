@@ -162,14 +162,28 @@ def _run(self: torch.Tensor, k: int) -> tuple[torch.Tensor, torch.Tensor]:
     self_2d = flatten_last_dim(self)
     N = self_2d.shape[-1]
     kernel = _kernel_for(k, N)
-    if kernel == "register":
-        values_2d, indices_2d = topk_register(self_2d, k)
-    else:
+
+    def _launch() -> tuple[torch.Tensor, torch.Tensor]:
+        if kernel == "register":
+            return topk_register(self_2d, k)
         # Pick the deterministic kernel under torch.use_deterministic_algorithms
         # (kept off by default for perf; the non-det kernel still produces
         # correct top-K values but indices may differ on ties).
         deterministic = torch.are_deterministic_algorithms_enabled()
-        values_2d, indices_2d = topk_radix(self_2d, k, deterministic=deterministic)
+        return topk_radix(self_2d, k, deterministic=deterministic)
+
+    # The Python-native dispatch path does not get an automatic CUDA device
+    # guard before launching the kernel (unlike the generated C++ ATen path),
+    # so the CuTeDSL kernel runs on the current device's stream. Guard the
+    # launch when the input is not already on the current device, while leaving
+    # the common already-current path direct to avoid the context-manager
+    # overhead. See #187983 for the same fix on the bmm override.
+    device = self.get_device()
+    if device == torch.cuda.current_device():
+        values_2d, indices_2d = _launch()
+    else:
+        with torch.cuda.device(device):
+            values_2d, indices_2d = _launch()
     return unflatten_last_dim(values_2d, indices_2d, self, k)
 
 
