@@ -9642,7 +9642,7 @@ class TestMPS(TestCaseMPS):
         b = torch.randn(2, device="mps", dtype=torch.complex64)
 
         with self.assertRaisesRegex(
-            RuntimeError,
+            TypeError,
             "igamma.*not implemented",
         ):
             torch.igamma(a, b)
@@ -9652,7 +9652,7 @@ class TestMPS(TestCaseMPS):
         b = torch.randn(2, device="mps", dtype=torch.complex64)
 
         with self.assertRaisesRegex(
-            RuntimeError,
+            TypeError,
             "igammac.*not implemented",
         ):
             torch.igammac(a, b)
