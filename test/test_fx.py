@@ -1455,7 +1455,7 @@ class TestFX(JitTestCase):
             self.assertEqual(
                 line,
                 line.rstrip(),
-                f"Line {i + 1} has trailing whitespace: {repr(line)}",
+                lambda msg: f"{msg}\nLine {i + 1} has trailing whitespace: {repr(line)}",
             )
 
     def test_script_tensor_constant(self):

@@ -963,7 +963,7 @@ class TreeMapCompileTests(TestCase):
             self.assertEqual(
                 len(fallback_messages),
                 0,
-                f"Fallback was triggered unexpectedly: {fallback_messages}",
+                lambda msg: f"{msg}\nFallback was triggered unexpectedly: {fallback_messages}",
             )
         finally:
             logger.removeHandler(handler)

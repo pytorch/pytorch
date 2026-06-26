@@ -160,7 +160,7 @@ class TestFlashAttentionFA4(FlashAttentionTestMixin, TestCase):
                 self.assertEqual(
                     call_kwargs["deterministic"],
                     deterministic,
-                    f"Expected deterministic={deterministic} but got {call_kwargs['deterministic']}",
+                    lambda msg: f"{msg}\nExpected deterministic={deterministic} but got {call_kwargs['deterministic']}",
                 )
         finally:
             torch.use_deterministic_algorithms(False)

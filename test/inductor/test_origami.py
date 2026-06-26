@@ -501,7 +501,7 @@ class TestOrigami(TestCase):
         self.assertEqual(
             result.returncode,
             0,
-            msg=f"subprocess failed:\nstdout: {result.stdout}\nstderr: {result.stderr}",
+            msg=lambda msg: f"{msg}\nsubprocess failed:\nstdout: {result.stdout}\nstderr: {result.stderr}",
         )
         self.assertIn("OK", result.stdout)
 

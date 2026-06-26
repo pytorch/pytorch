@@ -6008,7 +6008,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     output = F.grid_sample(input, grid, mode=mode, padding_mode=padding_mode,
                                            align_corners=align_corners)
                     self.assertEqual(output, groundtruth, atol=1e-5, rtol=0,
-                                     msg=f"groundtruth comparison failed for mode={mode}, "
+                                     msg=lambda msg: f"{msg}\ngroundtruth comparison failed for mode={mode}, "
                                      f"padding_mode={padding_mode}")
 
                     # See NOTE [ grid_sample CPU fallback ]
@@ -6096,7 +6096,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                         F.grid_sample(input, grid, mode=mode, padding_mode=padding_mode,
                                       align_corners=align_corners).sum().backward()
                         self.assertEqual(grid.grad, groundtruth, atol=1e-5, rtol=0,
-                                         msg=f"gradient groundtruth comparison failed for mode={mode}, "
+                                         msg=lambda msg: f"{msg}\ngradient groundtruth comparison failed for mode={mode}, "
                                          f"padding_mode={padding_mode}, input_requires_grad={input_requires_grad}")
                         grid.grad.zero_()
 
@@ -7273,7 +7273,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             adjusted = options._adjust(num_batches, in_features, num_classes, torch.float32)
             self.assertEqual(
                 adjusted.batch_chunk_size, expected,
-                msg=f"N={num_batches}, F={in_features}, C={num_classes}, method={method!r}",
+                msg=lambda msg: f"{msg}\nN={num_batches}, F={in_features}, C={num_classes}, method={method!r}",
             )
 
     def test_linear_cross_entropy_options_chunk_size_disagreement_raises(self):
@@ -7665,9 +7665,9 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     atol = 1e-3
                     rtol = 1e-3
                 if elementwise_affine:
-                    self.assertEqual(ln.weight.grad, ln_cuda.weight.grad, f"weight grad failed: {m=} {n=}", rtol=rtol, atol=atol)
+                    self.assertEqual(ln.weight.grad, ln_cuda.weight.grad, lambda msg: f"{msg}\nweight grad failed: {m=} {n=}", rtol=rtol, atol=atol)
                 if bias and elementwise_affine:
-                    self.assertEqual(ln.bias.grad, ln_cuda.bias.grad, f"bias grad failed: {m=} {n=}", rtol=rtol, atol=atol)
+                    self.assertEqual(ln.bias.grad, ln_cuda.bias.grad, lambda msg: f"{msg}\nbias grad failed: {m=} {n=}", rtol=rtol, atol=atol)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     @largeTensorTest("40GB", device="cuda")
@@ -8601,9 +8601,9 @@ class TestNNDeviceType(NNTestCase):
 
         # verify running stats maintain their original dtype
         self.assertEqual(layer.running_mean.dtype, param_dtype,
-                         f"Running mean should maintain {param_dtype} dtype")
+                         lambda msg: f"{msg}\nRunning mean should maintain {param_dtype} dtype")
         self.assertEqual(layer.running_var.dtype, param_dtype,
-                         f"Running var should maintain {param_dtype} dtype")
+                         lambda msg: f"{msg}\nRunning var should maintain {param_dtype} dtype")
 
         # test eval mode uses tracked stats correctly
         layer.eval()
@@ -9648,11 +9648,11 @@ class TestNNDeviceType(NNTestCase):
 
                 self.assertEqual(
                     dgamma_gpu.float().cpu(), gamma_cpu.grad, atol=atol, rtol=rtol,
-                    msg=f"dgamma mismatch: N={N} C={C} G={G} dtype={dtype}",
+                    msg=lambda msg: f"{msg}\ndgamma mismatch: N={N} C={C} G={G} dtype={dtype}",
                 )
                 self.assertEqual(
                     dbeta_gpu.float().cpu(), beta_cpu.grad, atol=atol, rtol=rtol,
-                    msg=f"dbeta mismatch: N={N} C={C} G={G} dtype={dtype}",
+                    msg=lambda msg: f"{msg}\ndbeta mismatch: N={N} C={C} G={G} dtype={dtype}",
                 )
 
     @expectedFailureMPS  # Double is not supported on MPS
@@ -10607,7 +10607,7 @@ class TestNNDeviceType(NNTestCase):
                 in_t, scale_factor=s, recompute_scale_factor=False, mode="nearest-exact"
             )
             expected_out = in_t
-            self.assertEqual(out_t, expected_out, msg=f"scale: {s}")
+            self.assertEqual(out_t, expected_out, msg=lambda msg: f"{msg}\nscale: {s}")
 
         # checks data duplication if output_size == 2 * input_size
         # for s in [2.00001, 1.99999]:  # 1.99999 case is broken
@@ -11846,7 +11846,7 @@ class TestNNDeviceType(NNTestCase):
                 out_double = F.grid_sample(data.double(), grid.double(), mode=mode, padding_mode='zeros',
                                            align_corners=align_corners)
 
-                self.assertEqual(out_half, out_double.half(), msg=f"grid_sample with mode = {mode} doesn't match")
+                self.assertEqual(out_half, out_double.half(), msg=lambda msg: f"{msg}\ngrid_sample with mode = {mode} doesn't match")
 
         helper((32, 64, 16, 16), (32, 8, 8, 2), True)
         helper((32, 64, 16, 16, 16), (32, 8, 8, 8, 3), True)
@@ -11866,7 +11866,7 @@ class TestNNDeviceType(NNTestCase):
                 out_double = F.grid_sample(data.double(), grid.double(), mode=mode, padding_mode='zeros',
                                            align_corners=align_corners)
 
-                self.assertEqual(out_half, out_double.bfloat16(), msg=f"grid_sample with mode = {mode} doesn't match")
+                self.assertEqual(out_half, out_double.bfloat16(), msg=lambda msg: f"{msg}\ngrid_sample with mode = {mode} doesn't match")
 
         helper((32, 64, 16, 16), (32, 8, 8, 2), True)
         helper((32, 64, 16, 16, 16), (32, 8, 8, 8, 3), True)

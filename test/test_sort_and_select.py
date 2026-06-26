@@ -73,7 +73,7 @@ class TestSortAndSelect(TestCase):
                 self.assertEqual(
                     x[k][ixx[k][j]],
                     mxx[k][j],
-                    msg=f"torch.sort ({order}) indices wrong for {task}",
+                    msg=lambda msg: f"{msg}\ntorch.sort ({order}) indices wrong for {task}",
                 )
                 seen.add(ixx[k][j])
             self.assertEqual(len(seen), size)
@@ -878,7 +878,7 @@ class TestSortAndSelect(TestCase):
                     self.assertEqual(
                         vals,
                         ref,
-                        f"value/index mismatch k={k} slice_size={slice_size} "
+                        lambda msg: f"{msg}\nvalue/index mismatch k={k} slice_size={slice_size} "
                         f"dtype={dtype} largest={largest}",
                     )
 
@@ -1423,7 +1423,9 @@ class TestSortAndSelect(TestCase):
         cpu_indices_copy.copy_(indices.squeeze(0))
         total_unique = torch.unique(cpu_indices_copy).numel()
         self.assertEqual(
-            total_unique, k, f"Duplicates found in topk test: {k - total_unique}"
+            total_unique,
+            k,
+            lambda msg: f"{msg}\nDuplicates found in topk test: {k - total_unique}",
         )
         # for random case, values must match at returned indices (use pre-allocated tensor)
         if test_case == "random":
@@ -1439,7 +1441,9 @@ class TestSortAndSelect(TestCase):
                     data[0], 0, chunk_indices, out=gpu_chunk_values[:chunk_size_actual]
                 )
                 self.assertEqual(
-                    chunk_values, actual_values, msg=f"Value mismatch in chunk {i + 1}"
+                    chunk_values,
+                    actual_values,
+                    msg=lambda msg: f"{msg}\nValue mismatch in chunk {i + 1}",
                 )
 
         # for identical case, all values must equal to constant

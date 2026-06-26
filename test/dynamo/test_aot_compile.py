@@ -1756,7 +1756,7 @@ from user code:
                     self.assertEqual(
                         compiled_grads[name],
                         eager_grads[name],
-                        msg=f"Gradients for {name} should be bitwise equivalent",
+                        msg=lambda msg: f"{msg}\nGradients for {name} should be bitwise equivalent",
                     )
         finally:
             c10d.destroy_process_group()

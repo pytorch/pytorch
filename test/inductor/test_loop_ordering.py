@@ -1654,7 +1654,7 @@ class TestTiling(TestCase):
             self.assertEqual(
                 len(coalesce_analysis.uncoalesced_addrs),
                 1,
-                f"Expected 1 uncoalesced access, got {len(coalesce_analysis.uncoalesced_addrs)}",
+                lambda msg: f"{msg}\nExpected 1 uncoalesced access, got {len(coalesce_analysis.uncoalesced_addrs)}",
             )
 
             # The uncoalesced access should have an INDIRECT symbol

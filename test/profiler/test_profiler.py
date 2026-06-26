@@ -1666,7 +1666,9 @@ class TestProfiler(TestCase):
         )
         expected_threads = prior_threads + 1
         self.assertEqual(
-            len(tid_counts), expected_threads, f"{expected_threads}, {tid_counts}"
+            len(tid_counts),
+            expected_threads,
+            lambda msg: f"{msg}\n{expected_threads}, {tid_counts}",
         )
         self.assertEqual(len(nodes), sum(tid_counts.values()))
 
@@ -2047,7 +2049,7 @@ class TestProfiler(TestCase):
             self.assertEqual(
                 missing,
                 set(),
-                f"{op}: metadata keys missing in trace_only: {missing}",
+                lambda msg: f"{msg}\n{op}: metadata keys missing in trace_only: {missing}",
             )
 
         if use_cuda:
@@ -2066,7 +2068,7 @@ class TestProfiler(TestCase):
                 self.assertEqual(
                     default_counts[cat],
                     trace_only_counts[cat],
-                    f"{cat} event count mismatch",
+                    lambda msg: f"{msg}\n{cat} event count mismatch",
                 )
 
         # events() must raise in trace_only mode
@@ -4011,7 +4013,7 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
                 self.assertEqual(
                     has_grid,
                     has_block,
-                    f"kernel '{name}' should provide grid and block together",
+                    lambda msg: f"{msg}\nkernel '{name}' should provide grid and block together",
                 )
                 has_kernel_launch_metadata |= has_grid
             self.assertTrue(
@@ -5324,7 +5326,7 @@ For a model PR to follow, see: https://github.com/pytorch/pytorch/pull/180100
             self.assertEqual(
                 actual_meta,
                 expected_meta,
-                f"{key}: structured metadata differs between events() and Chrome trace JSON",
+                lambda msg: f"{msg}\n{key}: structured metadata differs between events() and Chrome trace JSON",
             )
 
 
@@ -5377,7 +5379,7 @@ class TestPythonChromeTraceExport(TestCase):
         self.assertEqual(
             len(kineto_acts),
             len(py_acts),
-            f"Activity event count mismatch: kineto={len(kineto_acts)}, python={len(py_acts)}",
+            lambda msg: f"{msg}\nActivity event count mismatch: kineto={len(kineto_acts)}, python={len(py_acts)}",
         )
 
         from collections import Counter
@@ -5409,7 +5411,7 @@ class TestPythonChromeTraceExport(TestCase):
             self.assertEqual(
                 ke,
                 pe,
-                f"Event mismatch for {ke['cat']}::{ke['name']} at ts={ke['ts']}",
+                lambda msg: f"{msg}\nEvent mismatch for {ke['cat']}::{ke['name']} at ts={ke['ts']}",
             )
 
         # Flow event parity (ph, id, cat).

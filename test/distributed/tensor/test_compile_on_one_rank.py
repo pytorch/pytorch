@@ -290,7 +290,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         self.assertEqual(
             baked,
             [],
-            f"no node should bake a concrete indexed cuda device; found: {baked}",
+            lambda msg: f"{msg}\nno node should bake a concrete indexed cuda device; found: {baked}",
         )
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")

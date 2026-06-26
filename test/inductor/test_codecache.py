@@ -5084,7 +5084,7 @@ class TestVecISACheckBuild(TestCase):
         self.assertEqual(
             value.split(os.pathsep)[0],
             torch_lib,
-            msg=f"LD_LIBRARY_PATH should be prepended with {torch_lib!r}, got {value!r}",
+            msg=lambda msg: f"{msg}\nLD_LIBRARY_PATH should be prepended with {torch_lib!r}, got {value!r}",
         )
 
 

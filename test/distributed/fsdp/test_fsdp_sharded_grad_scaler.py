@@ -312,7 +312,7 @@ class TestShardedGradScalerParityWithDDP(FSDPTestContinuous):
                         _grad_scaler.get_scale(),
                         orig_scale * _grad_scaler.get_backoff_factor(),
                         (
-                            f"rank: {self.rank} iter: {iter} expect origin scale {orig_scale} "
+                            lambda msg: f"{msg}\nrank: {self.rank} iter: {iter} expect origin scale {orig_scale} "
                             f"to be backed off by {_grad_scaler.get_backoff_factor()} "
                             f"but got {_grad_scaler.get_scale()}"
                         ),
@@ -322,7 +322,7 @@ class TestShardedGradScalerParityWithDDP(FSDPTestContinuous):
                         _grad_scaler.get_scale(),
                         orig_scale,
                         (
-                            f"rank: {self.rank} iter: {iter} expect same scale {orig_scale} "
+                            lambda msg: f"{msg}\nrank: {self.rank} iter: {iter} expect same scale {orig_scale} "
                             f"but got {_grad_scaler.get_scale()}"
                         ),
                     )
@@ -335,7 +335,7 @@ class TestShardedGradScalerParityWithDDP(FSDPTestContinuous):
                             param,
                             orig_param,
                             (
-                                f"rank: {self.rank} iter: {iter} expect the same params before "
+                                lambda msg: f"{msg}\nrank: {self.rank} iter: {iter} expect the same params before "
                                 f"and after optim.step but got {param} vs {orig_param}"
                             ),
                         )
@@ -344,14 +344,14 @@ class TestShardedGradScalerParityWithDDP(FSDPTestContinuous):
                             param,
                             orig_param,
                             (
-                                f"rank: {self.rank} iter: {iter} expect the updated params after "
+                                lambda msg: f"{msg}\nrank: {self.rank} iter: {iter} expect the updated params after "
                                 f"optim.step but got {param} vs {orig_param}"
                             ),
                         )
             self.assertEqual(
                 scaled_losses[0],
                 scaled_losses[1],
-                f"iter: {iter} {scaled_losses[0]} vs {scaled_losses[1]}",
+                lambda msg: f"{msg}\niter: {iter} {scaled_losses[0]} vs {scaled_losses[1]}",
             )
 
 

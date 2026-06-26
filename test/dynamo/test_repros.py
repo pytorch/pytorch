@@ -9517,7 +9517,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertEqual(
             a_stride,
             cloned_stride,
-            f"Strides should match in eager: {a_stride} against {cloned_stride}",
+            lambda msg: f"{msg}\nStrides should match in eager: {a_stride} against {cloned_stride}",
         )
 
         compiled_a_stride, compiled_cloned_stride = torch.compile(fn, backend="eager")(
@@ -9526,7 +9526,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertEqual(
             compiled_a_stride,
             compiled_cloned_stride,
-            f"Strides should match in eager: {compiled_a_stride} against {compiled_cloned_stride}",
+            lambda msg: f"{msg}\nStrides should match in eager: {compiled_a_stride} against {compiled_cloned_stride}",
         )
 
 

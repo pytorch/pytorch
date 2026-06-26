@@ -8775,7 +8775,7 @@ torch._inductor.aoti_load_package("{model_path}")
             self.assertEqual(
                 result.returncode,
                 0,
-                f"Failed to load package in subprocess: {result.stdout + result.stderr}",
+                lambda msg: f"{msg}\nFailed to load package in subprocess: {result.stdout + result.stderr}",
             )
 
     @unittest.skipIf(

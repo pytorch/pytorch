@@ -719,7 +719,7 @@ class TestFXGraphPasses(JitTestCase):
                     self.assertEqual(
                         getitem_partition,
                         producer_partition,
-                        f"Getitem node '{getitem_node.name}' (nested in chain from producer) "
+                        lambda msg: f"{msg}\nGetitem node '{getitem_node.name}' (nested in chain from producer) "
                         f"should be in same partition as producer. "
                         f"Got partition {getitem_partition}, expected {producer_partition}"
                     )

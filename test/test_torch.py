@@ -3658,7 +3658,7 @@ class TestTorchDeviceType(TestCase):
             if not self.scatter_allow_reduce(device, dtype, operation):
                 continue
             input.scatter_(0, index, src, reduce=operation)
-            self.assertEqual(input, result, msg=f"result: {result} input: {input} method: {str(operation)}")
+            self.assertEqual(input, result, msg=lambda msg: f"{msg}\nresult: {result} input: {input} method: {str(operation)}")
 
     @onlyCUDA
     @dtypes(*complex_types())
@@ -4801,7 +4801,7 @@ class TestTorchDeviceType(TestCase):
                 x_c_clone = x_c.clone() if is_inplace else x_c
                 result_c = fn(x_c_clone, y_c)
                 result = fn(x_clone, y)
-                self.assertEqual(result, result_c, f"Failed for '{inspect.getsource(fn).strip()}'")
+                self.assertEqual(result, result_c, lambda msg: f"{msg}\nFailed for '{inspect.getsource(fn).strip()}'")
                 self.assertTrue(
                     result.is_contiguous(memory_format=memory_format),
                     f"result of the '{inspect.getsource(fn).strip()}' is not in '{memory_format}' format")
@@ -4809,7 +4809,7 @@ class TestTorchDeviceType(TestCase):
             for fn in bias_fns:
                 result_c = fn(x_c, b_c)
                 result = fn(x, bias)
-                self.assertEqual(result, result_c, f"Failed for '{inspect.getsource(fn).strip()}'")
+                self.assertEqual(result, result_c, lambda msg: f"{msg}\nFailed for '{inspect.getsource(fn).strip()}'")
                 self.assertTrue(
                     result.is_contiguous(memory_format=memory_format),
                     f"result of the '{inspect.getsource(fn).strip()}' is not in '{memory_format}' format")
@@ -4817,7 +4817,7 @@ class TestTorchDeviceType(TestCase):
             for fn in return_contig_fns:
                 result_c = fn(x_c, y_c)
                 result = fn(x, y)
-                self.assertEqual(result, result_c, f"Failed for '{inspect.getsource(fn).strip()}'")
+                self.assertEqual(result, result_c, lambda msg: f"{msg}\nFailed for '{inspect.getsource(fn).strip()}'")
                 self.assertTrue(
                     result.is_contiguous(memory_format=torch.contiguous_format),
                     f"result of the '{inspect.getsource(fn).strip()}' is not in '{torch.contiguous_format}' format")
@@ -7057,7 +7057,7 @@ class TestTorch(TestCase):
                 warnings.filterwarnings('always', category=warning_type)
                 fn()
 
-                self.assertEqual(len(w), 1, msg=f'{warning_type} not raised')
+                self.assertEqual(len(w), 1, msg=lambda msg: f'{msg}\n{warning_type} not raised')
                 warning = w[0].message
                 self.assertTrue(isinstance(warning, warning_type), msg=f'{warning_type} not raised')
                 self.assertTrue(re.search(

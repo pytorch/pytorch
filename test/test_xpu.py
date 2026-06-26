@@ -3360,7 +3360,7 @@ class TestXpuOps(TestCase):
                 y_cpu,
                 atol=atol_fwd,
                 rtol=0,
-                msg=f"forward shape={shape}, dtype={dtype}",
+                msg=lambda msg: f"{msg}\nforward shape={shape}, dtype={dtype}",
             )
 
             # Backward
@@ -3371,14 +3371,14 @@ class TestXpuOps(TestCase):
                 x_cpu.grad,
                 atol=atol_bwd,
                 rtol=0,
-                msg=f"x_grad shape={shape}, dtype={dtype}",
+                msg=lambda msg: f"{msg}\nx_grad shape={shape}, dtype={dtype}",
             )
             self.assertEqual(
                 w.grad.cpu(),
                 w_cpu.grad,
                 atol=atol_bwd,
                 rtol=0,
-                msg=f"w_grad shape={shape}, dtype={dtype}",
+                msg=lambda msg: f"{msg}\nw_grad shape={shape}, dtype={dtype}",
             )
 
 

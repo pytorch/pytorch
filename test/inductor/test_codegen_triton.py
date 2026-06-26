@@ -474,7 +474,9 @@ class TestCodegenTriton(InductorTestCase):
         for dtype, expected_sig in expected.items():
             arg = TensorArg(name="x", buffer="buf0", dtype=dtype)
             sig = triton_utils.signature_of(arg, size_dtype=None)
-            self.assertEqual(sig, expected_sig, f"wrong signature for {dtype}")
+            self.assertEqual(
+                sig, expected_sig, lambda msg: f"{msg}\nwrong signature for {dtype}"
+            )
 
     @unittest.skipUnless(has_triton_package(), "requires Triton package")
     def test_fp8_dtype_support_matrix(self):

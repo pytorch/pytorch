@@ -1102,7 +1102,7 @@ class TestViewOps(TestCase):
             self.assertEqual(
                 result_is_view,
                 ref_is_view,
-                f"View status mismatch for shape={shape}, group_size={group_size}, "
+                lambda msg: f"{msg}\nView status mismatch for shape={shape}, group_size={group_size}, "
                 f"gather_dim={gather_dim}: result_is_view={result_is_view}, "
                 f"ref_is_view={ref_is_view}",
             )

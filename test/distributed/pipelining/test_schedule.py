@@ -591,7 +591,11 @@ class TestScheduleCsv(TestCase):
 
         for rank in sch_ref:
             for timestep, (a, b) in enumerate(zip(sch[rank], sch_ref[rank])):
-                self.assertEqual(a, b, f"Mismatch at {timestep=}, {a=}, expected {b}")
+                self.assertEqual(
+                    a,
+                    b,
+                    lambda msg: f"{msg}\nMismatch at {timestep=}, {a=}, expected {b}",
+                )
 
 
 instantiate_parametrized_tests(TestScheduleCsv)
@@ -663,7 +667,7 @@ class TestScheduleLowering(TestCase):
                 expected,
                 actual,
                 (
-                    f"Mismatch: expected action {expected} but found {actual}."
+                    lambda msg: f"{msg}\nMismatch: expected action {expected} but found {actual}."
                     f"\nWhole Schedule: {comms_sch}"
                 ),
             )
@@ -702,7 +706,7 @@ class TestScheduleLowering(TestCase):
                 expected,
                 actual,
                 (
-                    f"Mismatch: expected action {expected} but found {actual}."
+                    lambda msg: f"{msg}\nMismatch: expected action {expected} but found {actual}."
                     f"\nWhole Schedule: {comms_sch}"
                 ),
             )
@@ -737,7 +741,7 @@ class TestScheduleLowering(TestCase):
                 expected,
                 actual,
                 (
-                    f"Mismatch: expected action {expected} but found {actual}."
+                    lambda msg: f"{msg}\nMismatch: expected action {expected} but found {actual}."
                     f"\nWhole Schedule: {merged_sch}"
                 ),
             )
@@ -888,7 +892,7 @@ class TestScheduleLowering(TestCase):
                     expected,
                     actual,
                     (
-                        f"Mismatch on rank {rank} at position {i}."
+                        lambda msg: f"{msg}\nMismatch on rank {rank} at position {i}."
                         f"\nExpected: {expected_comms_sch[rank]}"
                         f"\nActual:   {comms_sch[rank]}"
                     ),
@@ -1242,7 +1246,7 @@ class TestScheduleLowering(TestCase):
                     expected,
                     actual,
                     (
-                        f"Mismatch on rank {rank} at position {i}."
+                        lambda msg: f"{msg}\nMismatch on rank {rank} at position {i}."
                         f"\nExpected: {expected_sch[rank]}"
                         f"\nActual:   {result_sch[rank]}"
                     ),
@@ -1408,7 +1412,11 @@ class TestScheduleLowering(TestCase):
 
         for rank in sch_ref:
             for timestep, (a, b) in enumerate(zip(comms_sch[rank], sch_ref[rank])):
-                self.assertEqual(a, b, f"Mismatch at {timestep=}, {a=}, expected {b}")
+                self.assertEqual(
+                    a,
+                    b,
+                    lambda msg: f"{msg}\nMismatch at {timestep=}, {a=}, expected {b}",
+                )
 
         simulated_schedule = _simulate_comms_compute(
             comms_sch,

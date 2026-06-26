@@ -611,7 +611,7 @@ class TestProvenanceTracingStackTraces(TestCase):
                     self.assertEqual(
                         sorted(actual_lines),
                         sorted(expected_lines),
-                        f"Mismatch for key: {key}",
+                        lambda msg: f"{msg}\nMismatch for key: {key}",
                     )
 
     @torch._inductor.config.patch({"trace.provenance_tracking_level": 2})
@@ -663,7 +663,7 @@ class TestProvenanceTracingStackTraces(TestCase):
                     self.assertEqual(
                         sorted(actual_lines),
                         sorted(expected_lines),
-                        f"Mismatch for key: {key}",
+                        lambda msg: f"{msg}\nMismatch for key: {key}",
                     )
 
     @torch._inductor.config.patch(
@@ -808,13 +808,13 @@ class TestProvenanceTracingStackTraces(TestCase):
                 self.assertEqual(
                     sorted(kernel_info[key]["pre_grad_nodes"]),
                     sorted(data["pre_grad_nodes"]),
-                    f"Mismatch for key: {key}",
+                    lambda msg: f"{msg}\nMismatch for key: {key}",
                 )
 
                 self.assertEqual(
                     sorted(kernel_info[key]["post_grad_nodes"]),
                     sorted(data["post_grad_nodes"]),
-                    f"Mismatch for key: {key}",
+                    lambda msg: f"{msg}\nMismatch for key: {key}",
                 )
 
     @torch._inductor.config.patch("trace.provenance_tracking_level", 0)

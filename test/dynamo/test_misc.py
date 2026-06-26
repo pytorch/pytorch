@@ -3735,8 +3735,14 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
                 continue
             cnts = torch._dynamo.testing.CompileCounter()
             opt_fn = torch.compile(fn, backend=cnts)
-            self.assertEqual(result, opt_fn(op, t1, t2), msg=f"{op=} {t1_np=} {t2_np=}")
-            self.assertEqual(cnts.frame_count, 1, msg=f"{op=} {t1_np=} {t2_np=}")
+            self.assertEqual(
+                result,
+                opt_fn(op, t1, t2),
+                msg=lambda msg: f"{msg}\n{op=} {t1_np=} {t2_np=}",
+            )
+            self.assertEqual(
+                cnts.frame_count, 1, msg=lambda msg: f"{msg}\n{op=} {t1_np=} {t2_np=}"
+            )
             torch._dynamo.reset()
 
     def test_numpy_ndarray_graph_break(self):
@@ -15837,7 +15843,7 @@ assert functorch_config.error_on_custom_op_aliasing is True
         self.assertEqual(
             default_result.returncode,
             0,
-            msg=f"stdout:\n{default_result.stdout}\nstderr:\n{default_result.stderr}",
+            msg=lambda msg: f"{msg}\nstdout:\n{default_result.stdout}\nstderr:\n{default_result.stderr}",
         )
 
         script = """
@@ -15879,7 +15885,7 @@ with torch.library._scoped_library("mylib_ci", "FRAGMENT") as lib:
         self.assertEqual(
             result.returncode,
             0,
-            msg=f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+            msg=lambda msg: f"{msg}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}",
         )
 
     def test_make_contiguous_strides_for_under_compile(self):

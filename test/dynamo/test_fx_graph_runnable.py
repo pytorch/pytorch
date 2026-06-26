@@ -191,7 +191,7 @@ class FxGraphRunnableTest(TestCase):
             self.assertEqual(
                 res.returncode,
                 0,
-                f"Standalone fx_graph_runnable failed:\nSTDERR:\n{res.stderr}",
+                lambda msg: f"{msg}\nStandalone fx_graph_runnable failed:\nSTDERR:\n{res.stderr}",
             )
 
     # basic tests
@@ -643,7 +643,7 @@ class TestFxGraphRunnableMultiProcessGroup(TestCase):
             self.assertEqual(
                 result.returncode,
                 0,
-                f"Generated repro failed to execute:\nSTDERR:\n{result.stderr}",
+                lambda msg: f"{msg}\nGenerated repro failed to execute:\nSTDERR:\n{result.stderr}",
             )
 
         finally:

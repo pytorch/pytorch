@@ -3642,7 +3642,7 @@ class TestGuardsExpressions(TestCase):
         self.assertEqual(
             cnt.frame_count,
             1,
-            f"Expected 1 compilation, got {cnt.frame_count}. "
+            lambda msg: f"{msg}\nExpected 1 compilation, got {cnt.frame_count}. "
             f"Size comparison should not cause recompilation.",
         )
 
@@ -3679,7 +3679,7 @@ class TestGuardsExpressions(TestCase):
         self.assertEqual(
             cnt.frame_count,
             1,
-            f"Expected 1 compilation, got {cnt.frame_count}. "
+            lambda msg: f"{msg}\nExpected 1 compilation, got {cnt.frame_count}. "
             f"PythonMod padding should not cause recompilation.",
         )
 

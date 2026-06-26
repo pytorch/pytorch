@@ -180,7 +180,9 @@ class TestMarkKernels(TestCase):
         inner_ids = set()
         for tid, anns in annotations.items():
             self.assertEqual(
-                len(anns), 1, f"toolsId {hex(tid)} has {len(anns)} annotations"
+                len(anns),
+                1,
+                lambda msg: f"{msg}\ntoolsId {hex(tid)} has {len(anns)} annotations",
             )
             ann = anns[0]
             self.assertIsInstance(ann, dict)
@@ -340,7 +342,7 @@ class TestMarkKernels(TestCase):
             self.assertEqual(
                 graph_id,
                 exec_graph_id,
-                f"toolsId 0x{tools_id:016x} has graph_id {graph_id}, "
+                lambda msg: f"{msg}\ntoolsId 0x{tools_id:016x} has graph_id {graph_id}, "
                 f"expected exec_graph_id {exec_graph_id}",
             )
 

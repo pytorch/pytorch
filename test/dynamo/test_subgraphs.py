@@ -34,7 +34,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(
             cnt.frame_count,
             frame_count,
-            f"actual {cnt.frame_count} != expected {frame_count}",
+            lambda msg: f"{msg}\nactual {cnt.frame_count} != expected {frame_count}",
         )
         self.assertEqual(cnt.op_count, op_count)
 

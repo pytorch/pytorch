@@ -1505,7 +1505,9 @@ class _TestContainerSpecBase(TestCase):
             leaves = pytree.tree_leaves(arg_value)
             out = _walk_spec(spec, arg_value, where="<root>")
             self.assertEqual(
-                len(out), len(leaves), f"leaf-count drift for case {arg_value!r}"
+                len(out),
+                len(leaves),
+                lambda msg: f"{msg}\nleaf-count drift for case {arg_value!r}",
             )
             # Per-slot check: each slot's spec name must match the
             # tensor at that flat position from pytree.tree_flatten.
@@ -1522,7 +1524,7 @@ class _TestContainerSpecBase(TestCase):
                     actual,
                     expected,
                     msg=(
-                        f"alignment drift at slot {i}: spec name "
+                        lambda msg: f"{msg}\nalignment drift at slot {i}: spec name "
                         f"{actual!r} does not match pytree-flatten leaf "
                         f"name {expected!r} for case {arg_value!r}"
                     ),
@@ -1544,7 +1546,9 @@ class _TestContainerSpecBase(TestCase):
             expected = len(pytree.tree_leaves(arg_value))
             out = _walk_spec(None, arg_value, where="<root>")
             self.assertEqual(
-                len(out), expected, f"no-spec leaf-count drift for {arg_value!r}"
+                len(out),
+                expected,
+                lambda msg: f"{msg}\nno-spec leaf-count drift for {arg_value!r}",
             )
 
 

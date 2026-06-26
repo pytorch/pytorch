@@ -1664,7 +1664,7 @@ class DistributeWithDeviceOrderTest(DTensorContinuousTestBase):
         self.assertEqual(
             ascending_all_gather_count,
             1,
-            f"ascending order: expected 1 all_gather (with full flattening), got {ascending_all_gather_count}",
+            lambda msg: f"{msg}\nascending order: expected 1 all_gather (with full flattening), got {ascending_all_gather_count}",
         )
 
         # Test case 2: non-ascending order (1, 0, 2) - should NOT use flattened all_gather
@@ -1689,7 +1689,7 @@ class DistributeWithDeviceOrderTest(DTensorContinuousTestBase):
         self.assertEqual(
             non_ascending_all_gather_count,
             3,
-            f"non-ascending order: expected 3 all_gathers (no flattening), got {non_ascending_all_gather_count}",
+            lambda msg: f"{msg}\nnon-ascending order: expected 3 all_gathers (no flattening), got {non_ascending_all_gather_count}",
         )
 
         # Both should produce the same fully replicated tensor
@@ -2068,7 +2068,7 @@ class TransformInfoTest(TestCase):
             self.assertEqual(
                 info._comm_type_key(),
                 expected_key,
-                f"_StridedShard transform {placements} should map to '{expected_key}'",
+                lambda msg: f"{msg}\n_StridedShard transform {placements} should map to '{expected_key}'",
             )
 
 
@@ -2832,7 +2832,7 @@ class MultiDimRedistributeOptimizationTest(DTensorContinuousTestBase):
                     self.assertEqual(
                         actual_count,
                         expected_count,
-                        f"{desc}: expected {expected_count} {op}, got {actual_count}",
+                        lambda msg: f"{msg}\n{desc}: expected {expected_count} {op}, got {actual_count}",
                     )
 
                 # Verify placements
@@ -3111,7 +3111,7 @@ class UnevenFlattenedReduceScatterTest(DTensorContinuousTestBase):
         self.assertEqual(
             local_result.size(0),
             expected_size,
-            f"Rank {rank}: expected size {expected_size}, got {local_result.size(0)}",
+            lambda msg: f"{msg}\nRank {rank}: expected size {expected_size}, got {local_result.size(0)}",
         )
 
         # Check value for non-empty ranks
@@ -3120,7 +3120,7 @@ class UnevenFlattenedReduceScatterTest(DTensorContinuousTestBase):
             self.assertEqual(
                 local_result[0, 0].item(),
                 expected_val,
-                f"Rank {rank}: expected value {expected_val}, got {local_result[0, 0].item()}",
+                lambda msg: f"{msg}\nRank {rank}: expected value {expected_val}, got {local_result[0, 0].item()}",
             )
 
 

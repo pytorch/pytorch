@@ -145,7 +145,9 @@ class DistTensorRandomInitTest(DTensorTestBase):
             # run a second time, to make sure that `rng`'s offset-state is advancing on the second usage
             torch.nn.init.uniform_(t1, 0.0, 1.0)
             torch.nn.init.uniform_(t2, 0.0, 1.0, rng)
-            self.assertEqual(t1.full_tensor(), t2.full_tensor(), f"Failed at {i=}")
+            self.assertEqual(
+                t1.full_tensor(), t2.full_tensor(), lambda msg: f"{msg}\nFailed at {i=}"
+            )
 
         # ensure that we do not cache the 'seed' from the first time we see it in DTensor
         # this is a behavior change, DTensor used to cache the generator state and not modify the original generator,
@@ -775,7 +777,7 @@ class DistTensorRandomOpCompileTest(DTensorTestBase):
             self.assertEqual(
                 eager_rng_states[i + 1],
                 compiled_rng_states[i + 1],
-                f"RNG state mismatch between eager and compiled after call {i}",
+                lambda msg: f"{msg}\nRNG state mismatch between eager and compiled after call {i}",
             )
 
     def _assert_replicate_cross_rank_equal(self, results, device_mesh):

@@ -108,7 +108,7 @@ class TestUnaryUfuncs(TestCase):
                     result.item(),
                     float("nan"),
                     msg=(
-                        f"input of {lower_tensor.item()} outside lower domain boundary"
+                        lambda msg: f"{msg}\ninput of {lower_tensor.item()} outside lower domain boundary"
                         f" {low} produced {result.item()}, not nan!"
                     ),
                 )
@@ -127,7 +127,7 @@ class TestUnaryUfuncs(TestCase):
                     result.item(),
                     float("nan"),
                     msg=(
-                        f"input of {higher_tensor.item()} outside upper domain boundary"
+                        lambda msg: f"{msg}\ninput of {higher_tensor.item()} outside upper domain boundary"
                         f" {high} produced {result.item()}, not nan!"
                     ),
                 )

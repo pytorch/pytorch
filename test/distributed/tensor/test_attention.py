@@ -984,7 +984,9 @@ class TestSharding(DTensorTestBase):
                 # Verify the output is NOT sharded on sequence dimension (dim 2)
                 # This proves that CP sharding rules were not used
                 self.assertNotEqual(
-                    out.placements[0], Shard(2), f"Placement {out.placements}"
+                    out.placements[0],
+                    Shard(2),
+                    lambda msg: f"{msg}\nPlacement {out.placements}",
                 )
                 # The output should be replicated or sharded on batch head dimensions.
                 self.assertIn(out.placements[0], [Replicate(), Shard(0), Shard(1)])
