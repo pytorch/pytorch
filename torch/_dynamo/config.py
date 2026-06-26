@@ -491,7 +491,15 @@ assume_dunder_attributes_remain_unchanged = True
 
 # Speedup guard execution of nested nn modules by recursively checking for dict
 # tags to avoid full guard execution.
-use_recursive_dict_tags_for_guards = False
+#
+# Enabled by default only on CPython 3.12+ non-free-threaded builds. The fast
+# path relies on PyDict_Watch (3.12+) to invalidate recorded dict tags, and on
+# the GIL to serialize the dict-watcher / weakref callbacks that gate it: the
+# gate flag is read on the hot path without atomics, so free-threading is
+# excluded. Pre-3.12 the fast path does not engage regardless (no watchers).
+use_recursive_dict_tags_for_guards = (
+    sys.version_info >= (3, 12) and sysconfig.get_config_var("Py_GIL_DISABLED") != 1
+)
 
 # Maximum number of objects for which we check dict pointers tags. This is
 # useful for regional compilation.
