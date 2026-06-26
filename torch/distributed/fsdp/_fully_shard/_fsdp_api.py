@@ -102,6 +102,9 @@ class AllGather(Comm):
     Interface for all_gather comm primitive
     """
 
+    supports_param_contiguous_output: bool = False
+    supports_no_copy: bool = False
+
     @abstractmethod
     def __call__(
         self,
@@ -110,6 +113,28 @@ class AllGather(Comm):
         group: dist.ProcessGroup,
         async_op: bool = False,
     ) -> dist.Work | None: ...
+
+    def prepare_param_contiguous_output(
+        self,
+        all_gather_input_split_sizes: list[int],
+        all_gather_input_numel: int,
+        world_size: int,
+        dtype: torch.dtype,
+        device: torch.device,
+    ) -> object | None:
+        """
+        Optionally prepare a backend for param-contiguous all-gather output.
+
+        The default rank-major layout is ``[rank][parameter]`` and FSDP copies
+        from that layout into per-parameter buffers. Backends that set
+        ``supports_param_contiguous_output`` may instead write
+        ``[parameter][rank]`` so FSDP can view the backend output directly.
+        """
+        return None
+
+    def clear_param_contiguous_output(self) -> None:
+        """Clear any backend-side state for param-contiguous output."""
+        pass
 
 
 class ReduceScatter(Comm):

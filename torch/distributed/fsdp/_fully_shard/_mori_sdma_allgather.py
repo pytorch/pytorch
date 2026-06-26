@@ -14,6 +14,11 @@ def is_mori_fsdp_sdma_enabled() -> bool:
     return raw not in ("", "0", "false", "no", "off")
 
 
+def is_mori_fsdp_zero_copy_output_enabled() -> bool:
+    raw = os.environ.get("MORI_FSDP_ZERO_COPY_OUTPUT", "").strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+
 class _MoriSdmaAllGatherWork:
     def __init__(self, collective: Any, stream: torch.Stream) -> None:
         self._collective = collective
@@ -29,6 +34,9 @@ class _MoriSdmaAllGatherWork:
 
 class MoriSdmaAllGather(AllGather):
     def __init__(self) -> None:
+        self._zero_copy_output = is_mori_fsdp_zero_copy_output_enabled()
+        self.supports_no_copy = self._zero_copy_output
+        self.supports_param_contiguous_output = self._zero_copy_output
         self._collective: Any | None = None
         self._rank: int | None = None
         self._world_size: int | None = None
@@ -37,6 +45,8 @@ class MoriSdmaAllGather(AllGather):
         self._output_buffer: torch.Tensor | None = None
         self._output_buffer_nbytes = 0
         self._registered_output_ptr: int | None = None
+        self._param_contiguous_split_sizes: torch.Tensor | None = None
+        self._param_contiguous_split_offsets: torch.Tensor | None = None
 
     def allocate(
         self,
@@ -72,11 +82,103 @@ class MoriSdmaAllGather(AllGather):
         stream = torch.cuda.current_stream(input_tensor.device)
         count = input_tensor.numel()
         self._ensure_output_registered(collective, output_tensor)
+        if self._can_call_param_contiguous(input_tensor):
+            split_sizes = self._param_contiguous_split_sizes
+            split_offsets = self._param_contiguous_split_offsets
+            if split_sizes is None or split_offsets is None:
+                raise RuntimeError(
+                    "MORI param-contiguous allgather metadata is not initialized"
+                )
+            if async_op:
+                collective.start_async_param_contiguous(
+                    input_tensor,
+                    output_tensor,
+                    count,
+                    split_sizes,
+                    split_offsets,
+                    stream=stream,
+                )
+                return _MoriSdmaAllGatherWork(collective, stream)
+            collective.enqueue_param_contiguous(
+                input_tensor,
+                output_tensor,
+                count,
+                split_sizes,
+                split_offsets,
+                stream=stream,
+            )
+            return None
         if async_op:
             collective.start_async(input_tensor, output_tensor, count, stream=stream)
             return _MoriSdmaAllGatherWork(collective, stream)
         collective.enqueue(input_tensor, output_tensor, count, stream=stream)
         return None
+
+    def prepare_param_contiguous_output(
+        self,
+        all_gather_input_split_sizes: list[int],
+        all_gather_input_numel: int,
+        world_size: int,
+        dtype: torch.dtype,
+        device: torch.device,
+    ) -> object | None:
+        self.clear_param_contiguous_output()
+        if not self._zero_copy_output:
+            return None
+        if not all_gather_input_split_sizes:
+            raise RuntimeError("MORI zero-copy allgather requires non-empty splits")
+        if sum(all_gather_input_split_sizes) != all_gather_input_numel:
+            raise RuntimeError(
+                "MORI zero-copy allgather split sizes do not match input numel"
+            )
+        element_size = torch.empty((), dtype=dtype).element_size()
+        split_sizes_u32: list[int] = []
+        split_offsets_u32: list[int] = []
+        offset = 0
+        for split_size in all_gather_input_split_sizes:
+            split_nbytes = int(split_size) * element_size
+            if split_nbytes % 4 != 0:
+                raise RuntimeError(
+                    "MORI zero-copy allgather requires every split to be "
+                    "4-byte aligned"
+                )
+            split_u32 = split_nbytes // 4
+            split_offsets_u32.append(offset)
+            split_sizes_u32.append(split_u32)
+            offset += split_u32
+        if offset * 4 != all_gather_input_numel * element_size:
+            raise RuntimeError("MORI zero-copy allgather byte size mismatch")
+        self._param_contiguous_split_sizes = torch.tensor(
+            split_sizes_u32, dtype=torch.int64, device=device
+        )
+        self._param_contiguous_split_offsets = torch.tensor(
+            split_offsets_u32, dtype=torch.int64, device=device
+        )
+        return self.param_contiguous_metadata()
+
+    def clear_param_contiguous_output(self) -> None:
+        self._param_contiguous_split_sizes = None
+        self._param_contiguous_split_offsets = None
+
+    def param_contiguous_metadata(self) -> tuple[torch.Tensor, torch.Tensor] | None:
+        if (
+            self._param_contiguous_split_sizes is None
+            or self._param_contiguous_split_offsets is None
+        ):
+            return None
+        return self._param_contiguous_split_sizes, self._param_contiguous_split_offsets
+
+    def _can_call_param_contiguous(self, input_tensor: torch.Tensor) -> bool:
+        if (
+            self._param_contiguous_split_sizes is None
+            or self._param_contiguous_split_offsets is None
+        ):
+            return False
+        split_nbytes = int(self._param_contiguous_split_sizes.sum().item()) * 4
+        if split_nbytes != _tensor_nbytes(input_tensor):
+            self.clear_param_contiguous_output()
+            return False
+        return True
 
     def _validate_tensors(
         self,
@@ -134,7 +236,7 @@ class MoriSdmaAllGather(AllGather):
             npes,
             input_buffer_size=4,
             output_buffer_size=4,
-            copy_output_to_user=True,
+            copy_output_to_user=not self._zero_copy_output,
         )
         self._rank = rank
         self._world_size = world_size
@@ -152,6 +254,11 @@ class MoriSdmaAllGather(AllGather):
             self._registered_output_ptr = ptr
             return
         collective.register_output_buffer(output_tensor)
+        if self._zero_copy_output and not collective.is_output_registered(output_tensor):
+            raise RuntimeError(
+                "MORI FSDP SDMA allgather requires registered output buffers "
+                "when zero-copy output is enabled"
+            )
         self._registered_output_ptr = ptr
 
     def _deregister_output_buffer_if_needed(self) -> None:

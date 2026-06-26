@@ -125,6 +125,79 @@ class _RankMajorTestAllGather(AllGather):
         )
 
 
+class _ParamContiguousTestAllGather(_RankMajorTestAllGather):
+    supports_param_contiguous_output = True
+    supports_no_copy = True
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.output: torch.Tensor | None = None
+        self.split_sizes: list[int] = []
+        self.world_size: int = -1
+
+    def allocate(
+        self,
+        size: Sequence[int | torch.SymInt],
+        *,
+        dtype: torch.dtype,
+        device: torch.device,
+    ) -> torch.Tensor:
+        if (
+            self.output is None
+            or self.output.numel() != torch.Size(size).numel()
+            or self.output.dtype != dtype
+            or self.output.device != device
+        ):
+            self.output = torch.empty(size, dtype=dtype, device=device)
+            self.outputs.append(self.output)
+        return self.output
+
+    def prepare_param_contiguous_output(
+        self,
+        all_gather_input_split_sizes: list[int],
+        all_gather_input_numel: int,
+        world_size: int,
+        dtype: torch.dtype,
+        device: torch.device,
+    ) -> object | None:
+        self.split_sizes = all_gather_input_split_sizes
+        self.world_size = world_size
+        return self.split_sizes
+
+    def __call__(
+        self,
+        output_tensor: torch.Tensor,
+        input_tensor: torch.Tensor,
+        group: dist.ProcessGroup,
+        async_op: bool = False,
+    ) -> dist.distributed_c10d.Work | None:
+        self.assert_sync_only(async_op)
+        rank_major_output = torch.empty_like(output_tensor)
+        dist.all_gather_single(
+            rank_major_output,
+            input_tensor,
+            group=group,
+            async_op=False,
+        )
+        rank_major_output = rank_major_output.view(self.world_size, -1)
+        input_offset = 0
+        output_offset = 0
+        for split_size in self.split_sizes:
+            output_numel = split_size * self.world_size
+            output_tensor.narrow(0, output_offset, output_numel).copy_(
+                rank_major_output[:, input_offset : input_offset + split_size].reshape(
+                    -1
+                )
+            )
+            input_offset += split_size
+            output_offset += output_numel
+        return None
+
+    def assert_sync_only(self, async_op: bool) -> None:
+        if async_op:
+            raise AssertionError("test all-gather only supports sync collectives")
+
+
 class TestFullyShardCollectiveOps(FSDPTestMultiThread):
     @property
     def world_size(self) -> int:
@@ -258,6 +331,56 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             else:
                 os.environ["MORI_FSDP_ENABLE_SDMA"] = old_value
         self.assertIsInstance(fsdp_param_group._all_gather_comm, MoriSdmaAllGather)
+
+    @skip_if_lt_x_gpu(1)
+    def test_custom_all_gather_param_contiguous_no_copy(self):
+        param_sizes = [torch.Size([self.world_size, 2]), torch.Size([self.world_size])]
+        orig_params = self._init_params(param_sizes)
+        fsdp_param_group = self._init_fsdp_param_group(orig_params, True)
+        comm = _ParamContiguousTestAllGather()
+        group = fsdp_param_group.mesh_info.shard_process_group
+        default_stream = device_module.current_stream()
+
+        def all_gather() -> list[int]:
+            all_gather_result = foreach_all_gather(
+                fsdp_param_group.fsdp_params,
+                group,
+                async_op=False,
+                all_gather_copy_in_stream=default_stream,
+                all_gather_stream=default_stream,
+                device=self.device,
+                all_gather_comm=comm,
+            )
+            self.assertIsNotNone(all_gather_result)
+            foreach_all_gather_copy_out(
+                all_gather_result, fsdp_param_group.fsdp_params, group
+            )
+            backend_output = comm.output
+            self.assertIsNotNone(backend_output)
+            assert backend_output is not None
+            backend_storage_ptr = backend_output.untyped_storage().data_ptr()
+            output_ptrs = []
+            for fsdp_param in fsdp_param_group.fsdp_params:
+                all_gather_output = fsdp_param.all_gather_outputs[0]
+                self.assertEqual(
+                    all_gather_output.untyped_storage().data_ptr(),
+                    backend_storage_ptr,
+                )
+                output_ptrs.append(all_gather_output.data_ptr())
+                fsdp_param.init_unsharded_param()
+                self.assertEqual(fsdp_param._unsharded_param.data_ptr(), output_ptrs[-1])
+            fsdp_param_group._to_unsharded()
+            for orig_param, param in zip(
+                orig_params, fsdp_param_group.modules[0].parameters()
+            ):
+                self.assertEqual(param, orig_param)
+            return output_ptrs
+
+        output_ptrs = all_gather()
+        fsdp_param_group._to_sharded()
+        for fsdp_param, output_ptr in zip(fsdp_param_group.fsdp_params, output_ptrs):
+            self.assertEqual(fsdp_param.all_gather_outputs[0].data_ptr(), output_ptr)
+        self.assertEqual(all_gather(), output_ptrs)
 
     def _test_all_gather(
         self,
