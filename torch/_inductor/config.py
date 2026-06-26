@@ -1864,6 +1864,15 @@ class triton:
     # Emit objgraph backref dumps for leaked cudagraph pool tensors
     cudagraph_trees_objgraph = False
 
+    # Which live cudagraph tree storages to clone before starting a new
+    # generation. None keeps the existing stale-output error behavior.
+    # "user_visible" clones live user-visible output storages out of
+    # the graph pool. Backward graph outputs are not selected for cloning.
+    # This mode can add overhead because live outputs that cross generations
+    # are explicitly copied and stop using cached TensorImpl outputs. Users
+    # can leave this unset and manually clone/copy those outputs instead.
+    cudagraph_trees_generation_cloning: Literal["user_visible"] | None = None
+
     # Enable cudagraph support for mutated inputs from prior cudagraph pool
     cudagraph_support_input_mutation = not is_fbcode()
 
