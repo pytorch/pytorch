@@ -101,6 +101,7 @@ from .bytecode_transformation import (
     create_rot_n,
     create_swap,
     Instruction,
+    make_compiled_fn_name,
     unique_id,
 )
 from .code_context import code_context
@@ -853,10 +854,10 @@ class OutputGraph(OutputGraphCommon):
 
         # Wire ShapesSpec.assumptions BEFORE any input is processed. Each
         # assumption is appended to `_shape_spec_pending_assumptions`;
-        if config._shapes_spec is not None:
+        if config._dynamic_shapes_spec is not None:
             from torch.fx.experimental.symbolic_shapes import _wire_spec_assumptions
 
-            _wire_spec_assumptions(self.shape_env, config._shapes_spec)
+            _wire_spec_assumptions(self.shape_env, config._dynamic_shapes_spec)
 
         # Map each tensor id to a list of sources. This is necessary because
         # tensor ids cannot be recovered from tracked fakes (in general).
@@ -2043,7 +2044,7 @@ class OutputGraph(OutputGraphCommon):
         # Finalize shapes_spec wiring: errors if any spec assumption/derived
         # check still has unbound IntVar dependencies (i.e. an IntVar
         # appears in an expression but never as a bare-IntVar input slot).
-        if config._shapes_spec is not None:
+        if config._dynamic_shapes_spec is not None:
             from torch.fx.experimental.symbolic_shapes import _finalize_spec_wiring
 
             _finalize_spec_wiring(self.shape_env)
@@ -2824,7 +2825,7 @@ class OutputGraph(OutputGraphCommon):
             if count_calls(self.graph) == 0 and len(rv) == 0:
                 return [], None
 
-            name = unique_id("__compiled_fn", with_uuid=True)
+            name = make_compiled_fn_name()
 
             if not isinstance(rv, list):
                 raise AssertionError(f"rv must be a list, got {type(rv)}")
@@ -2890,6 +2891,8 @@ class OutputGraph(OutputGraphCommon):
             # placeholder layout that must not be reordered.
             if (
                 config.canonicalize_output_graph_node_order
+                and not self.export
+                and not torch.compiler.is_exporting()
                 and not torch._dynamo.compiled_autograd.in_compiled_autograd_region
             ):
                 _canonicalize_graph(self.graph)

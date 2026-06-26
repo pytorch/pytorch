@@ -1474,8 +1474,14 @@ class InstructionTranslatorBase(
         }
         # Only keep the locals that must remain on the stack.
         reads = livevars_analysis(self.instructions, self.current_instruction)
+        # inspect.signature() renames ".N" to "implicitN" for comprehension
+        # iterator variables because dotted names aren't valid identifiers.
+        # Normalize reads to match symbolic_locals keys.
+        normalized_reads = set()
+        for r in reads:
+            normalized_reads.add(r.replace(".", "implicit") if r.startswith(".") else r)
         self.symbolic_locals = {
-            k: v for k, v in self.symbolic_locals.items() if k in reads
+            k: v for k, v in self.symbolic_locals.items() if k in normalized_reads
         }
 
     def call_function(
@@ -3333,12 +3339,23 @@ class InstructionTranslatorBase(
         # the current instruction there should be a CALL.
         if is_leaf:
             reads = livevars_analysis(self.instructions, resume_inst)
+            # inspect.signature() renames ".N" to "implicitN" for comprehension
+            # iterator variables. Build a mapping to emit the bytecode name
+            # (.0) in argnames so the resume function's co_varnames matches
+            # the bytecode instructions.
+            implicit_to_bytecode: dict[str, str] = {}
+            for name in self.f_code.co_varnames:
+                if name.startswith("."):
+                    implicit_to_bytecode[name.replace(".", "implicit")] = name
             all_argnames = tuple(
-                k
+                implicit_to_bytecode.get(k, k)
                 for k in self.symbolic_locals
-                if k in reads and k not in self.cell_and_freevars()
+                if implicit_to_bytecode.get(k, k) in reads
+                and k not in self.cell_and_freevars()
             )
-            argnames_null_set = set(meta.locals_null_keys)
+            argnames_null_set = {
+                implicit_to_bytecode.get(k, k) for k in meta.locals_null_keys
+            }
             argnames = tuple(k for k in all_argnames if k not in argnames_null_set)
             argnames_null = tuple(k for k in all_argnames if k in argnames_null_set)
 
@@ -3352,12 +3369,16 @@ class InstructionTranslatorBase(
                     create_dup_top(),
                 ]
             )
+            bytecode_to_implicit = {v: k for k, v in implicit_to_bytecode.items()}
             for arg in argnames:
                 # current stack state: frames, frames[i], *(prev locals), frames[i]
+                locals_key = bytecode_to_implicit.get(arg, arg)
                 cg.extend_output(
                     [
                         create_dup_top(),
-                        cg.create_load_const(meta.num_stack + meta.locals_names[arg]),
+                        cg.create_load_const(
+                            meta.num_stack + meta.locals_names[locals_key]
+                        ),
                         cg.create_binary_subscr(),
                         *create_swap(2),
                     ],

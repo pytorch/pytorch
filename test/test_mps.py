@@ -11656,6 +11656,30 @@ class TestSDPA(TestCaseMPS):
         out = F.scaled_dot_product_attention(q, k, v, attn_mask=mask, enable_gqa=True)
         self.assertFalse(torch.isnan(out).any())
 
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    @parametrize("shape", [(4, 16, 64), (4, 1024, 64), (16, 16, 64)])
+    @parametrize("nan_in", ["q", "k"])
+    def test_sdpa_nan_propagation(self, dtype, shape, nan_in):
+        qL, kL, hd = shape
+        torch.manual_seed(0)
+        q = torch.randn(1, 2, qL, hd, dtype=dtype)
+        k = torch.randn(1, 2, kL, hd, dtype=dtype)
+        v = torch.randn(1, 2, kL, hd, dtype=dtype)
+        if nan_in == "q":
+            q[0, 0, 0, 0] = float("nan")
+        else:
+            k[0, 0, 1, 0] = float("nan")
+
+        out_cpu = F.scaled_dot_product_attention(q, k, v)
+        out_mps = F.scaled_dot_product_attention(q.to("mps"), k.to("mps"), v.to("mps")).cpu()
+
+        self.assertTrue(torch.isnan(out_mps).any())
+        self.assertEqual(torch.isnan(out_mps), torch.isnan(out_cpu))
+        finite = ~torch.isnan(out_cpu)
+        if finite.any():
+            tol = 0.02 if dtype == torch.bfloat16 else 0.01 if dtype == torch.float16 else 1e-4
+            self._compare_tensors(out_mps[finite], out_cpu[finite], tol=tol)
+
     @parametrize("dtype", [torch.float16, torch.float32])
     def test_sdpa_3d_input(self, dtype):
         head_num, seq_len, embed_dim = 16, 16, 80
@@ -12187,8 +12211,9 @@ class TestSDPA(TestCaseMPS):
             attn_mask[1, :, qL // 2:, :] = False
         elif variant == "causal_with_inf":
             attn_mask = torch.zeros(B, NH, qL, kL, dtype=dtype, device="mps")
+            causal_mask = torch.ones(qL, kL, dtype=torch.bool, device="mps").tril()
+            attn_mask.masked_fill_(causal_mask.logical_not(), float("-inf"))
             attn_mask[..., 0, 0] = float("-inf")
-            is_causal = True
         self._run_prefill_test(q, k, v, attn_mask=attn_mask, is_causal=is_causal)
 
     def test_caching_scale(self):

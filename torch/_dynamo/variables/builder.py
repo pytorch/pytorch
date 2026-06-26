@@ -244,6 +244,7 @@ from .iter import CountIteratorVariable, ItertoolsVariable
 from .lazy import LazyConstantVariable, LazyVariableTracker
 from .lists import (
     BaseListVariable,
+    DequeVariable,
     ListIteratorVariable,
     ListVariable,
     RangeVariable,
@@ -320,6 +321,7 @@ from .user_defined import (
     SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
     UserDefinedConstantVariable,
+    UserDefinedDequeVariable,
     UserDefinedDictVariable,
     UserDefinedExceptionClassVariable,
     UserDefinedListVariable,
@@ -2166,6 +2168,34 @@ class VariableBuilder:
             )
             result = UserDefinedListVariable(value, list_vt=list_vt, source=self.source)
             return self.tx.output.side_effects.track_object_existing(value, result)
+        elif isinstance(value, collections.deque):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
+            # maxlen is baked into the DequeVariable as a constant, so guard on
+            # it to recompile if a same-typed deque with a different maxlen
+            # appears.
+            install_guard(
+                AttrSource(self.source, "maxlen").make_guard(GuardBuilder.EQUALS_MATCH)
+            )
+
+            output = [
+                LazyVariableTracker.create(
+                    collections.deque.__getitem__(value, i),
+                    source=GetItemSource(self.get_source(), i),
+                    tx=self.tx,
+                )
+                for i in range(collections.deque.__len__(value))
+            ]
+            deque_vt = DequeVariable(
+                output,  # type: ignore[arg-type]
+                maxlen=ConstantVariable.create(value.maxlen),
+                source=self.source,
+                mutation_type=ValueMutationExisting(),
+            )
+            result = UserDefinedDequeVariable(
+                value, deque_vt=deque_vt, source=self.source
+            )
+            return self.tx.output.side_effects.track_object_existing(value, result)
         elif isinstance(value, (set, frozenset)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
@@ -2637,9 +2667,9 @@ class VariableBuilder:
         # They are handled later in __call__ and always treated as dynamic.
         if type(value) is int:
             # Check for user-provided spec from shapes_spec.
-            if config._shapes_spec is not None:
+            if config._dynamic_shapes_spec is not None:
                 int_spec = lookup_spec_from_dynamo_source(
-                    self.source, config._shapes_spec
+                    self.source, config._dynamic_shapes_spec
                 )
                 if int_spec is None:
                     # shapes_spec is set but this int has no spec → force static
@@ -2805,7 +2835,7 @@ class VariableBuilder:
         # At tensor builder callsites, shapes_spec for this source can only be TensorSpec or None.
         _tensor_spec = cast(
             TensorSpec | None,
-            lookup_spec_from_dynamo_source(source, config._shapes_spec),
+            lookup_spec_from_dynamo_source(source, config._dynamic_shapes_spec),
         )
         _has_spec = _tensor_spec is not None
 
@@ -4492,7 +4522,11 @@ def _automatic_dynamic(
     # (e.g. nn.Parameter shapes when force_parameter_static_shapes=True).
     # Otherwise PGO would later "learn" those dims as dynamic and bypass the
     # progressive PGO warm-up that consumers (e.g. test_pgo_dynamic_params) rely on.
-    if config._shapes_spec is None and static_shapes and not is_dynamic_source(name):
+    if (
+        config._dynamic_shapes_spec is None
+        and static_shapes
+        and not is_dynamic_source(name)
+    ):
         return StatefulSymbolicContext(
             dynamic_sizes=[DimDynamic.STATIC] * e.dim(),
             dynamic_strides=[DimDynamic.INFER_STRIDE] * e.dim(),
@@ -4542,7 +4576,7 @@ def _automatic_dynamic(
                     constraint.dim, constraint.constraint_range, constraint.name
                 )
 
-    if config._shapes_spec is not None:
+    if config._dynamic_shapes_spec is not None:
         return _symbolic_context_from_shapes_spec(
             e,
             source,

@@ -188,6 +188,24 @@ TORCH_LOGS="+dynamo" python script.py            # full debug logging
 TORCH_LOGS="bytecode" python script.py           # see bytecode transformations
 ```
 
+### Reproducing crashes
+
+When writing a minimal repro for a Dynamo crash:
+
+1. **Capture `TORCH_LOGS="+dynamo"` for the known-failing case.** Look for
+   the frame ID (e.g. `[3/0_1]`), INLINING/FAILED/COMPILING/Restart events,
+   speculation behavior, and graph break reasons.
+2. **Capture the same logs for your repro attempt** and diff against the
+   failing case. The divergence point tells you what condition you're missing.
+3. **Match each condition from the crash traceback:**
+   - Does the code need a speculation checkpoint? Add tensor ops before the
+     failing code so `compile_subgraph` creates one.
+   - Does the function need to be inlined on retry (not skipped)? The graph
+     break type matters — `step_unsupported` keeps inlining on retry while
+     `unimplemented` may skip the function.
+   - Does the crash happen in a resume function? Add a `graph_break()` earlier
+     so PEP 523 compiles the resume as a fresh frame.
+
 ### Structured tracing (for production)
 
 ```bash

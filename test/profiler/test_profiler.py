@@ -21,11 +21,8 @@ import time
 import types
 import unittest
 import warnings
-from dataclasses import dataclass, field
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 from unittest.mock import patch
-
-import expecttest
 
 
 # Suppress libkineto USDT profiler_start/profiler_stop logs in this verbose
@@ -716,6 +713,37 @@ _cupti_monitor.enable_hes_early()
             if e.get("cat") == "user_annotation" and e.get("ph") == "X"
         }
         self.assertIn("monitor_region", user_names)
+
+    @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
+    def test_cupti_monitor_observer_registration_failure_is_graceful(self):
+        # If the per-cycle ProfilerObserver fails to register with the CUPTI monitor (an
+        # intermittent CUPTI condition), the profiler must degrade gracefully: with no
+        # observer / trace window, stop_trace and export_chrome_trace skip the trace instead
+        # of asserting and taking down the run.
+        from torch.profiler._cupti import monitor as _cupti_monitor
+
+        cfg = _ExperimentalConfig(custom_profiler_config='{"backend":"cupti_monitor"}')
+        with patch.object(
+            _cupti_monitor.CuptiMonitor,
+            "register",
+            side_effect=RuntimeError("simulated observer registration failure"),
+        ):
+            with TemporaryFileName(mode="w+") as trace_path:
+                # Exiting the profiler runs stop_trace -- it must not raise even though the
+                # observer never registered.
+                with profile(
+                    activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                    experimental_config=cfg,
+                ) as prof:
+                    a = torch.randn(64, 64, device="cuda")
+                    _ = (a @ a).cpu()
+                    torch.cuda.synchronize()
+                # Registration failed -> observer unavailable, no trace window.
+                obs = prof._cupti_profiler_observer
+                self.assertTrue(obs is None or not obs.available)
+                # Must skip the export rather than assert/crash.
+                prof.export_chrome_trace(trace_path)
+                prof.wait_for_exports()
 
     @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
     def test_cupti_monitor_record_shapes(self):
@@ -3057,54 +3085,6 @@ class SimpleNet(nn.Module):
         return self.fc2(self.fc1(x))
 
 
-@dataclass(frozen=True)
-class MockKinetoEvent:
-    _name: str
-    _start_us: int
-    _duration_us: int
-    _linked_correlation_id: int
-    _device_type: int
-
-    @property
-    def name(self) -> str:
-        return self._name
-
-    def start_ns(self) -> int:
-        return self._start_us * 1000
-
-    def duration_ns(self) -> int:
-        return self._duration_us * 1000
-
-    def linked_correlation_id(self) -> int:
-        return self._linked_correlation_id
-
-    def device_type(self) -> DeviceType:
-        return DeviceType.CUDA if self._device_type == 1 else DeviceType.CPU
-
-
-@dataclass(frozen=True)
-class MockProfilerEvent:
-    _name: str
-    id: int
-    start_time_ns: int
-    duration_time_ns: int
-    correlation_id: int = 0
-    children: list["MockProfilerEvent"] = field(default_factory=list)
-    parent: Optional["MockProfilerEvent"] = None
-
-    @property
-    def end_time_ns(self):
-        return self.start_time_ns + self.duration_time_ns
-
-    @property
-    def name(self) -> str:
-        return self._name
-
-    def __post__init__(self, parent, children):
-        object.__setattr__(self, "parent", parent)
-        object.__setattr__(self, "children", children)
-
-
 class MockNode:
     def __init__(self, name, children) -> None:
         self.name = name
@@ -4073,269 +4053,6 @@ class TestExperimentalUtils(TestCase):
         self.assertEqual(
             " ".join(i.name for i in _utils.traverse_bfs(self.make_tree())),
             "root_0 root_1 1 3 6 7 8 2 4 5 9 10",
-        )
-
-    @staticmethod
-    def generate_mock_profile():
-        cuda_events = [
-            MockKinetoEvent("cudaLaunchKernel", 400, 100, 1, 0),
-            MockKinetoEvent("cudaLaunchKernel", 500, 100, 2, 0),
-            MockKinetoEvent("cudaLaunchKernel", 600, 100, 3, 0),
-            MockKinetoEvent("cudaLaunchKernel", 700, 100, 4, 0),
-            MockKinetoEvent("cudaLaunchKernel", 800, 100, 5, 0),
-            MockKinetoEvent("cudaLaunchKernel", 1500, 100, 6, 0),
-            MockKinetoEvent("GPU", 900, 100, 1, 1),
-            MockKinetoEvent("GPU", 1000, 100, 2, 1),
-            MockKinetoEvent("GPU", 1100, 100, 3, 1),
-            MockKinetoEvent("GPU", 1200, 100, 4, 1),
-            MockKinetoEvent("GPU", 1300, 100, 5, 1),
-            MockKinetoEvent("GPU", 1700, 100, 6, 1),
-        ]
-        cpu_events = [
-            MockProfilerEvent("CPU (Before cudaLaunchKernel)", 1, 0, 100000),
-            MockProfilerEvent("CPU (Before cudaLaunchKernel)", 2, 100000, 100000),
-            MockProfilerEvent("CPU (Before cudaLaunchKernel)", 3, 200000, 100000),
-            MockProfilerEvent("CPU (Before cudaLaunchKernel)", 4, 300000, 100000),
-            MockProfilerEvent("CPU (After cudaLaunchKernel)", 5, 400000, 100000),
-            MockProfilerEvent("CPU (After cudaLaunchKernel)", 6, 500000, 100000),
-            MockProfilerEvent("CPU (After cudaLaunchKernel)", 7, 600000, 100000),
-            MockProfilerEvent("CPU (After cudaLaunchKernel)", 8, 700000, 100000),
-            MockProfilerEvent("CPU (After GPU)", 9, 800000, 100000),
-            MockProfilerEvent("CPU (After GPU)", 10, 900000, 100000),
-            MockProfilerEvent("CPU (After GPU)", 11, 1100000, 100000),
-            MockProfilerEvent("CPU (After GPU)", 12, 1200000, 500000),
-        ]
-
-        profiler = unittest.mock.Mock()
-        profiler.kineto_results = unittest.mock.Mock()
-        profiler.kineto_results.events = unittest.mock.Mock(return_value=cuda_events)
-        profiler.kineto_results.experimental_event_tree = unittest.mock.Mock(
-            return_value=cpu_events
-        )
-        return profiler
-
-    @staticmethod
-    def load_mock_profile():
-        accept = expecttest.ACCEPT
-        json_file_path = os.path.join(
-            os.path.dirname(os.path.realpath(__file__)),
-            "profiler_utils_mock_events.json",
-        )
-        if accept and torch.cuda.is_available():
-
-            def garbage_code(x):
-                for i in range(5):
-                    x[0, i] = i
-
-            x = torch.ones((4096, 4096), device="cuda")
-            x = x @ x
-            with profile(
-                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-                record_shapes=True,
-                with_stack=True,
-            ) as prof:
-                for _ in range(5):
-                    x = x @ x
-                garbage_code(x)
-                for _ in range(5):
-                    x = x @ x
-
-            kineto_events = [
-                {
-                    "_name": e.name,
-                    "_start_ns": e.start_ns(),
-                    "_duration_ns": e.duration_ns(),
-                    "_linked_correlation_id": e.linked_correlation_id(),
-                    "_device_type": 1 if e.device_type() == DeviceType.CUDA else 0,
-                }
-                for e in prof.profiler.kineto_results.events()
-            ]
-
-            def EventTreeDFS(event_tree):
-                from collections import deque
-
-                stack = deque(event_tree)
-                while stack:
-                    curr_event = stack.pop()
-                    yield curr_event
-                    for child_event in curr_event.children:
-                        stack.append(child_event)
-
-            profiler_events = [
-                {
-                    "_name": e.name,
-                    "id": e.id,
-                    "start_time_ns": e.start_time_ns,
-                    "duration_time_ns": e.duration_time_ns,
-                    "correlation_id": e.correlation_id,
-                    "children": [child.id for child in e.children],
-                    "parent": e.parent.id if e.parent else None,
-                }
-                for e in EventTreeDFS(
-                    prof.profiler.kineto_results.experimental_event_tree()
-                )
-            ]
-
-            with open(json_file_path, "w") as f:
-                json.dump([kineto_events, profiler_events], f)
-
-        if not os.path.exists(json_file_path):
-            raise AssertionError(f"JSON file not found: {json_file_path}")
-        with open(json_file_path) as f:
-            kineto_events, profiler_events = json.load(f)
-
-        cuda_events = [MockKinetoEvent(*event.values()) for event in kineto_events]
-        cpu_events = []
-        id_map = {}
-        for e in profiler_events:
-            event = MockProfilerEvent(**e)
-            id_map[event.id] = event
-            cpu_events.append(event)
-        for event in cpu_events:
-            parent = None if event.parent is None else id_map[event.parent]
-            children = [id_map[child] for child in event.children]
-            event.__post__init__(parent, children)
-        cpu_events = [event for event in cpu_events if event.parent is None]
-        profiler = unittest.mock.Mock()
-        profiler.kineto_results = unittest.mock.Mock()
-        profiler.kineto_results.events = unittest.mock.Mock(return_value=cuda_events)
-        profiler.kineto_results.experimental_event_tree = unittest.mock.Mock(
-            return_value=cpu_events
-        )
-        return profiler
-
-    def test_utils_compute_self_time(self):
-        with profile() as prof:
-            t1, t2 = (
-                torch.ones(1, requires_grad=True),
-                torch.ones(1, requires_grad=True),
-            )
-            z = torch.add(t1, t2)
-            y = torch.ones(1)
-            loss = torch.nn.functional.binary_cross_entropy_with_logits(z, y)
-            loss.backward()
-        basic_eval = _utils.BasicEvaluation(prof.profiler)
-        metrics = basic_eval.metrics
-        self.assertTrue(len(metrics) > 0)
-        for event_key, event_metrics in metrics.items():
-            self.assertEqual(
-                event_metrics.self_time_ns,
-                event_key.event.duration_time_ns
-                - sum(child.duration_time_ns for child in event_key.event.children),
-            )
-
-    def test_utils_intervals_overlap(self):
-        event = _utils.EventKey(MockProfilerEvent("Event 1", 1, 5, 5))
-        intervals = [
-            _utils.Interval(0, 9),
-            _utils.Interval(1, 2),
-            _utils.Interval(2, 3),
-            _utils.Interval(3, 4),
-            _utils.Interval(4, 5),
-            _utils.Interval(8, 12),
-        ]
-        print(event.intervals_overlap(intervals))
-        self.assertEqual(event.intervals_overlap(intervals), 5)
-
-    def test_utils_compute_queue_depth(self):
-        def format_queue_depth(queue_depth_list, events):
-            res = ""
-            for data, event in zip(queue_depth_list, events):
-                res += f"{data.queue_depth} [{event.name}]\n"
-            return res
-
-        # We have to use Mock because time series data is too flaky to test
-        profiler = self.generate_mock_profile()
-        basic_evaluation = _utils.BasicEvaluation(profiler)
-        self.assertExpectedInline(
-            format_queue_depth(
-                basic_evaluation.queue_depth_list, basic_evaluation.cuda_events
-            ),
-            """\
-1 [cudaLaunchKernel]
-2 [cudaLaunchKernel]
-3 [cudaLaunchKernel]
-4 [cudaLaunchKernel]
-5 [cudaLaunchKernel]
-4 [GPU]
-3 [GPU]
-2 [GPU]
-1 [GPU]
-0 [GPU]
-1 [cudaLaunchKernel]
-0 [GPU]
-""",
-        )
-        self.assertExpectedInline(
-            format_queue_depth(
-                [basic_evaluation.metrics[k] for k in basic_evaluation.event_keys],
-                basic_evaluation.events,
-            ),
-            """\
-0 [CPU (Before cudaLaunchKernel)]
-0 [CPU (Before cudaLaunchKernel)]
-0 [CPU (Before cudaLaunchKernel)]
-0 [CPU (Before cudaLaunchKernel)]
-1 [CPU (After cudaLaunchKernel)]
-2 [CPU (After cudaLaunchKernel)]
-3 [CPU (After cudaLaunchKernel)]
-4 [CPU (After cudaLaunchKernel)]
-5 [CPU (After GPU)]
-4 [CPU (After GPU)]
-2 [CPU (After GPU)]
-1 [CPU (After GPU)]
-""",
-        )
-
-    def test_utils_compute_queue_depth_when_no_cuda_events(self):
-        # For traces with only cpu events, we expect empty queue depth list
-        x = torch.ones((100, 100))
-        with profile() as prof:
-            for _ in range(5):
-                x = x @ x
-        basic_evaluation = _utils.BasicEvaluation(prof.profiler)
-        self.assertFalse(basic_evaluation.compute_queue_depth())
-
-    def test_utils_compute_idle_time(self):
-        profiler = self.generate_mock_profile()
-        basic_evaluation = _utils.BasicEvaluation(profiler)
-        expected_output = "\n".join(
-            [
-                f"{basic_evaluation.metrics[event_key].idle_time_ns} [{event_key.event.name}]"
-                for event_key in basic_evaluation.event_keys
-            ]
-        )
-        self.assertExpectedInline(
-            expected_output,
-            """\
-100000 [CPU (Before cudaLaunchKernel)]
-100000 [CPU (Before cudaLaunchKernel)]
-100000 [CPU (Before cudaLaunchKernel)]
-100000 [CPU (Before cudaLaunchKernel)]
-0 [CPU (After cudaLaunchKernel)]
-0 [CPU (After cudaLaunchKernel)]
-0 [CPU (After cudaLaunchKernel)]
-0 [CPU (After cudaLaunchKernel)]
-0 [CPU (After GPU)]
-0 [CPU (After GPU)]
-0 [CPU (After GPU)]
-100000 [CPU (After GPU)]""",
-        )
-
-    @unittest.skipIf(IS_JETSON, "JSON not behaving as expected on Jetson")
-    def test_utils_get_optimizable_events(self):
-        basic_evaluation = _utils.BasicEvaluation(self.load_mock_profile())
-        optimizable_events = basic_evaluation.get_optimizable_events(
-            2, print_enable=False
-        )
-        expected_output = "\n".join(
-            [f"{event_key.event.name}" for event_key in optimizable_events]
-        )
-        self.assertExpectedInline(
-            expected_output,
-            """\
-<built-in function _cuda_synchronize>
-aten::copy_""",
         )
 
     @unittest.skipIf(

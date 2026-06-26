@@ -177,7 +177,7 @@ if TYPE_CHECKING:
 class FxCompileMode(enum.Enum):
     NORMAL = 0
     # For testing - use the serde FxCompile scheme to debug serialization and
-    # deserialization of GraphMoule and CompiledFxGraph.
+    # deserialization of GraphModule and CompiledFxGraph.
     SERIALIZE = 1
     # Compile using a subprocess instead of in-process.
     SUBPROCESS = 2

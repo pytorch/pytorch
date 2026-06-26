@@ -76,8 +76,8 @@ elif [[ "$image" == *cuda*linter* ]]; then
 elif [[ "$image" == *linter* ]]; then
   # Use a separate Dockerfile for linter to keep a small image size
   DOCKERFILE="linter/Dockerfile"
-elif [[ "$image" == *riscv* ]]; then
-  # Use RISC-V specific Dockerfile
+elif [[ "$image" == *riscv*cross* ]]; then
+  # Use RISC-V cross-compilation specific Dockerfile
   DOCKERFILE="ubuntu-cross-riscv/Dockerfile"
 fi
 
@@ -237,11 +237,6 @@ case "$tag" in
     GCC_VERSION=11
     HALIDE=yes
     TRITON=yes
-    ;;
-  pytorch-linux-jammy-py3.12-pallas)
-    ANACONDA_PYTHON_VERSION=3.12
-    GCC_VERSION=11
-    PALLAS=yes
     ;;
   pytorch-linux-jammy-cuda12.8-py3.12-pallas)
     CUDA_VERSION=12.8.1
@@ -475,7 +470,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
 fi
 
 if [ -n "$GCC_VERSION" ]; then
-  if [[ "$image" == *riscv* ]]; then
+  if [[ "$image" == *riscv*cross* ]]; then
     # Check RISC-V cross-compilation toolchain version
     if !(drun riscv64-linux-gnu-gcc-${GCC_VERSION} --version 2>&1 | grep -q " $GCC_VERSION\\W"); then
       echo "RISC-V GCC_VERSION=$GCC_VERSION, but:"

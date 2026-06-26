@@ -1105,12 +1105,6 @@ class ExactWeakKeyDictionary:
 def istype(obj: object, allowed_types: type[T]) -> TypeIs[T]: ...
 
 
-@overload
-def istype(
-    obj: object, allowed_types: tuple[type[list[T]], type[tuple[T, ...]]]
-) -> TypeIs[T]: ...
-
-
 # This can be simplified once TypeVarTuple objects can be expanded into TypeIs.
 @overload
 def istype(
@@ -3079,6 +3073,10 @@ tuple_new = tuple.__new__
 tuple_methods = {method for method in tuple.__dict__.values() if callable(method)}
 list_methods = {method for method in list.__dict__.values() if callable(method)}
 list_getitem = list.__getitem__
+
+deque_methods = {
+    method for method in collections.deque.__dict__.values() if callable(method)
+}
 
 str_methods = {method for method in str.__dict__.values() if callable(method)}
 

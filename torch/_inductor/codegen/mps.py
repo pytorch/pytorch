@@ -1209,7 +1209,6 @@ class MetalKernel(SIMDKernel):
 
 class MetalScheduling(SIMDScheduling):
     kernel_type = MetalKernel  # type: ignore[assignment]
-    _kernel_fn_counter: int = 0
 
     def __init__(self, scheduler: Scheduler | None) -> None:
         super().__init__(scheduler)
@@ -1235,8 +1234,7 @@ class MetalScheduling(SIMDScheduling):
 
         # Python path: register kernel with async_compile; wait() will compile all
         # accumulated Metal kernels into a single library and replace each placeholder.
-        fn_name = f"generated_kernel_{self._kernel_fn_counter}"
-        self._kernel_fn_counter += 1
+        fn_name = f"generated_kernel_{wrapper.next_kernel_suffix()}"
         wrapper.src_to_kernel[src_code] = fn_name
 
         # Extract Metal source from compile_mps_shader('''...''') call

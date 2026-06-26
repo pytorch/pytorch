@@ -1077,8 +1077,6 @@ class CUDAGraphNode:
             self.recorded_liveness_before_graph = curr_liveness
             self.expected_dead_indices_before_graph = different_indices
 
-        rng_states = [inp for inp in inputs if isinstance(inp, torch.Generator)]
-
         recording_inputs = self._allocate_and_copy_recording_inputs(inputs)
         # recording inputs will copy over memory, so we can free non recording inputs
 
@@ -1088,12 +1086,6 @@ class CUDAGraphNode:
         self.graph: torch.cuda.CUDAGraph | None = (
             None if wrapped_function.kernel_free_cudagraph else torch.cuda.CUDAGraph()
         )
-
-        # TODO: register_generator_state should potentially take explicit device
-        if self.graph is not None:
-            with torch.cuda.device(self.device):
-                for rng_state in rng_states:
-                    self.graph.register_generator_state(rng_state)
 
         # we allocate non-static inputs within the same memory pool as the CUDAGraph
         # which we will record the model with. For memory efficiency, it is important

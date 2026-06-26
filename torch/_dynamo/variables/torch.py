@@ -190,6 +190,8 @@ constant_fold_functions = [
     torch._C._get_cublas_allow_tf32,
     torch._C._is_any_autocast_enabled,
     torch.accelerator.is_available,
+    torch.backends.mps.is_available.__wrapped__,  # type: ignore[attr-defined]
+    torch.backends.mps.is_built,
     torch.cuda.get_device_properties,
     torch.cuda.is_available,
     torch.distributed.is_available,
@@ -205,6 +207,8 @@ constant_fold_functions = [
     torch.promote_types,
     torch._C._get_privateuse1_backend_name,
     torch.autograd._is_checkpoint_valid,
+    torch.mps.is_available,
+    torch.mtia.is_available,
     torch.xpu.get_device_properties,
     torch.xpu.is_available,
 ] + constant_fold_functions_need_guards
@@ -2535,46 +2539,64 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
 
             message_eager = None
-            message_graph_proxy = None
-            if message_vt is not None:
-                if not isinstance(message_vt, NestedUserFunctionVariable):
+            message_graph_arg = None
+            match message_vt:
+                case None:
+                    pass
+                case ConstantVariable():
+                    message_eager = message_vt.as_python_constant()
+                    if message_eager is not None and not isinstance(message_eager, str):
+                        unimplemented(
+                            gb_type="Can't extract message from torch._check*()",
+                            context=str(message_vt),
+                            explanation=(
+                                "The message argument of torch._check*() must be a string, None, "
+                                "or a function defined within the torch.compile region."
+                            ),
+                            hints=[
+                                *graph_break_hints.SUPPORTABLE,
+                            ],
+                        )
+                    message_graph_arg = message_eager
+                case NestedUserFunctionVariable():
+                    try:
+                        message_eager = message_vt.get_function()
+                    except ClosureConversionError:
+                        unimplemented(
+                            gb_type="Can't convert torch._check*() message closure",
+                            context=str(message_vt),
+                            explanation=(
+                                "The message argument of torch._check*() must be a function "
+                                "whose closure variables are Python constants."
+                            ),
+                            hints=[
+                                "Remove closure variables that reference non-constant values, e.g. "
+                                "remove references to tensor `x` in `lambda: f'{x} failed check'`",
+                                *graph_break_hints.SUPPORTABLE,
+                            ],
+                        )
+
+                    message_graph_arg = tx.output.register_static_attr_and_return_proxy(
+                        "_check_message", message_eager
+                    )
+                case _:
                     unimplemented(
                         gb_type="Can't extract message from torch._check*()",
                         context=str(message_vt),
                         explanation=(
-                            "The message argument of torch._check*() must be a function "
-                            "defined within the torch.compile region."
+                            "The message argument of torch._check*() must be a string, None, "
+                            "or a function defined within the torch.compile region."
                         ),
                         hints=[
                             *graph_break_hints.SUPPORTABLE,
                         ],
                     )
-                try:
-                    message_eager = message_vt.get_function()
-                except ClosureConversionError:
-                    unimplemented(
-                        gb_type="Can't convert torch._check*() message closure",
-                        context=str(message_vt),
-                        explanation=(
-                            "The message argument of torch._check*() must be a function "
-                            "whose closure variables are Python constants."
-                        ),
-                        hints=[
-                            "Remove closure variables that reference non-constant values, e.g. "
-                            "remove references to tensor `x` in `lambda: f'{x} failed check'`",
-                            *graph_break_hints.SUPPORTABLE,
-                        ],
-                    )
-
-                message_graph_proxy = tx.output.register_static_attr_and_return_proxy(
-                    "_check_message", message_eager
-                )
 
             if predicate_vt.is_python_constant():
                 if predicate_vt.as_python_constant():
                     return ConstantVariable.create(None)
                 msg = (
-                    message_eager()
+                    str(message_eager() if callable(message_eager) else message_eager)
                     if message_eager is not None
                     else ("Expected cond to be True, but got False.")
                 )
@@ -2583,10 +2605,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             predicate_proxy = predicate_vt.as_proxy()
 
             proxy_args: tuple[Any, ...]
-            if message_graph_proxy is None:
+            if message_graph_arg is None:
                 proxy_args = (predicate_proxy,)
             else:
-                proxy_args = (predicate_proxy, message_graph_proxy)
+                proxy_args = (predicate_proxy, message_graph_arg)
 
             return wrap_fx_proxy(
                 tx=tx,
