@@ -718,7 +718,24 @@ class TritonBenchmarkRequest(BenchmarkRequest):
             self.module_path,
         )
 
-        run_method = getattr(mod, self.kernel_name).run
+        kernel = getattr(mod, self.kernel_name)
+        run_method = kernel.run
+
+        # Template input deduplication can reduce the kernel's parameter
+        # count below len(input_tensors) when a cached candidate compiled
+        # with aliased inputs is benchmarked for a graph with distinct
+        # inputs.  Read the compiled signature to detect the mismatch.
+        triton_meta = getattr(kernel, "triton_meta", None)
+        if triton_meta is not None:
+            n_kernel_args = len(triton_meta.get("signature", {}))
+            n_expected_inputs = max(n_kernel_args - 1, 0)
+            if len(input_tensors) > n_expected_inputs:
+                autotuning_log.debug(
+                    "Trimming input_tensors from %d to %d for %s",
+                    len(input_tensors), n_expected_inputs, self.kernel_name,
+                )
+                input_tensors = input_tensors[:n_expected_inputs]
+
         extra_args = list(self.extra_args)
 
         # Recreate workspace tensor if needed (for TMA templates)
