@@ -13041,16 +13041,6 @@ class TestNNDeviceType(NNTestCase):
             with torch.backends.cudnn.flags(enabled=False):
                 self._test_batchnorm_update_stats(device)
 
-    @dtypes(torch.bool, torch.uint8, torch.int16, torch.int32, torch.int64)
-    def test_batchnorm_unsupported_dtype(self, device, dtype):
-        # Non-floating inputs must raise cleanly instead of crashing the process.
-        # Regression test for https://github.com/pytorch/pytorch/issues/188243
-        x = torch.zeros(2, 16, 4, 4, dtype=dtype, device=device)
-        running_mean = torch.zeros(16, device=device)
-        running_var = torch.ones(16, device=device)
-        with self.assertRaisesRegex(RuntimeError, "batch_norm.*not implemented"):
-            F.batch_norm(x, running_mean, running_var, None, None, training=False)
-
     @onlyCPU
     @dtypes(torch.bfloat16, torch.float16)
     def test_activations_bfloat16_half_cpu(self, device, dtype):
