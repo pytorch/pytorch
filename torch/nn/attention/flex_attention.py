@@ -1068,6 +1068,13 @@ class BlockMask:
         dq_kv_order_tensor = dq_kv_order if isinstance(dq_kv_order, Tensor) else None
         dq_kv_order_spt = dq_kv_order if isinstance(dq_kv_order, bool) else None
 
+        # NOTE: _blocks_are_contiguous intentionally falls back to its
+        # conservative default (False) here. Reconstruction paths that route
+        # through from_kv_blocks (slicing via __getitem__, _adjust) can change
+        # which blocks are visited, so a previously-contiguous mask may no
+        # longer be; re-detection is deliberately not run here. Dropping the
+        # flag only forfeits a fast path, it never enables an unsafe one. Use
+        # BlockMask.to(), which preserves structure, to retain it across moves.
         return cls(
             seq_lengths=seq_lengths,
             kv_num_blocks=kv_num_blocks,
@@ -1499,6 +1506,10 @@ class BlockMask:
             BLOCK_SIZE=self.BLOCK_SIZE,
             mask_mod=self.mask_mod,
             dq_kv_order_spt=self.dq_kv_order_spt,
+            # A device move copies the index tensors value-for-value, so block
+            # contiguity is invariant under .to(). Propagate the detected flag so
+            # a mask detected on-device doesn't silently lose the fast path.
+            _blocks_are_contiguous=self._blocks_are_contiguous,
         )
 
     @staticmethod
@@ -1960,6 +1971,41 @@ def _detect_blocks_are_contiguous(block_mask: BlockMask) -> bool | None:
         for num_blocks, indices in index_pairs
         if num_blocks is not None and indices is not None
     )
+
+
+def _resolve_rocm_kernel_options(
+    kernel_options: dict[str, Any],
+    *,
+    is_rocm: bool,
+    blocks_are_contiguous: bool,
+    score_mod_is_identity: bool,
+    user_set_blocks_contiguous: bool,
+    user_set_prescale: bool,
+) -> dict[str, Any]:
+    """Apply the ROCm-only auto opt-ins to ``kernel_options`` in place.
+
+    This is intentionally pure / hardware-independent: callers pass ``is_rocm``
+    explicitly so the gating logic can be unit-tested without an AMD GPU. Both
+    opt-ins are gated on ``is_rocm`` so the call-site intent is local and robust
+    even if a ``BlockMask`` carries a flag set on a different device. A value
+    the user pinned in ``kernel_options`` is never overridden.
+
+    - ``BLOCKS_ARE_CONTIGUOUS``: enabled when the mask only visits contiguous
+      blocks (causal / dense / document masks).
+    - ``PRESCALE_QK``: enabled ONLY for the identity ``score_mod``. An additive
+      ``score_mod`` (a bias) must NOT get prescale, since the bias would be
+      exponentiated in the wrong (base-2 vs base-e) space.
+    """
+    if not is_rocm:
+        return kernel_options
+
+    if not user_set_blocks_contiguous and blocks_are_contiguous:
+        kernel_options["BLOCKS_ARE_CONTIGUOUS"] = True
+
+    if not user_set_prescale and score_mod_is_identity:
+        kernel_options["PRESCALE_QK"] = True
+
+    return kernel_options
 
 
 def create_block_mask(
@@ -2580,23 +2626,19 @@ def flex_attention(
 
     _is_rocm = query.device.type == "cuda" and torch.version.hip is not None
 
-    # If the block mask was detected to only visit contiguous KV blocks (e.g.
-    # causal / dense / document masks on ROCm), enable the kernel's contiguous
-    # fast path unless the user explicitly pinned the option themselves.
-    if not user_set_blocks_contiguous and getattr(
-        block_mask, "_blocks_are_contiguous", False
-    ):
-        kernel_options["BLOCKS_ARE_CONTIGUOUS"] = True
-
-    # On ROCm, pre-scaling Q folds the softmax scale + change-of-base into the
-    # matmul feed and improves forward throughput. This is ONLY numerically
-    # valid when no additive score_mod is present: an additive bias would be
-    # exponentiated in the wrong (base-2 vs base-e) space. Masking-only patterns
-    # (causal, sliding window, document masks via mask_mod) keep score_mod as the
-    # identity, so they are safe. We therefore opt in by default only for the
-    # identity score_mod and never override an explicit user choice.
-    if not user_set_prescale and _is_rocm and score_mod is _identity:
-        kernel_options["PRESCALE_QK"] = True
+    # On ROCm, opt into two kernel fast paths by default (never overriding a
+    # user-pinned value): the contiguous-blocks traversal for masks that only
+    # visit adjacent blocks, and Q pre-scaling for the identity score_mod (an
+    # additive bias is unsafe to prescale -- it would be exponentiated in the
+    # wrong base). See _resolve_rocm_kernel_options for the full reasoning.
+    kernel_options = _resolve_rocm_kernel_options(
+        kernel_options,
+        is_rocm=_is_rocm,
+        blocks_are_contiguous=getattr(block_mask, "_blocks_are_contiguous", False),
+        score_mod_is_identity=score_mod is _identity,
+        user_set_blocks_contiguous=user_set_blocks_contiguous,
+        user_set_prescale=user_set_prescale,
+    )
 
     def _finalize_outputs(
         out,
