@@ -4475,6 +4475,16 @@
       ]
     }
   ],
+  "GB2607": [
+    {
+      "Gb_type": "Unsupported custom metaclass __call__",
+      "Context": "type({self.value}) = {type(self.value)}",
+      "Explanation": "Dynamo only knows how to trace custom metaclass __call__ descriptors that are types.FunctionType.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0298": [
     {
       "Gb_type": "attempted to trace torch._numpy.random function with config.use_numpy_random_stream=True",
