@@ -118,7 +118,15 @@ def fx_graph_cse(
         torch.ops.higher_order.auto_functionalized,
         torch.ops.higher_order.auto_functionalized_v2,
     )
-    triton_wrapper_target = torch.ops.higher_order.triton_kernel_wrapper_functional
+    # triton_kernel_wrapper_functional is registered lazily, so reference it
+    # from its defining module rather than torch.ops.higher_order (which may not
+    # have the attribute yet when no triton kernel has been traced).
+    try:
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            triton_kernel_wrapper_functional as triton_wrapper_target,
+        )
+    except ImportError:
+        triton_wrapper_target = None
     nodes_used_as_mutation_base: set[fx.Node] = set()
     for n in fx_g.nodes:
         if n.op != "call_function":
@@ -127,7 +135,7 @@ def fx_graph_cse(
             for base in n.kwargs.get("_all_bases", ()):
                 if isinstance(base, fx.Node):
                     nodes_used_as_mutation_base.add(base)
-        elif n.target is triton_wrapper_target:
+        elif triton_wrapper_target is not None and n.target is triton_wrapper_target:
             inner_kwargs = n.kwargs.get("kwargs", {})
             for name in n.kwargs.get("tensors_to_clone", ()):
                 base = inner_kwargs.get(name)
