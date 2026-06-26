@@ -87,4 +87,5 @@ self-hosted-runner:
     # OSDC ARC (multi-tenant) runners
     - mt-l-x86iavx512-2-4
     - mt-rel-l-x86iavx512-8-64
+    - mt-rel-l-arm64g4-16-62
     - mt-l-x86iamx-22-225-h100

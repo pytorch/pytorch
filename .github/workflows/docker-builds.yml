@@ -82,13 +82,12 @@ jobs:
             buildkit_addr: "tcp://buildkitd-arm64.buildkit:1234"
             timeout-minutes: 600
             runner_label: mt-rel-l-arm64g4-16-62
-    # Use the release runner pool: its nodes carry osdc.io/runner-class=release,
-    # which exempts them from the cache-enforcer DaemonSet's iptables block on
-    # outbound ghcr.io traffic so the "Mirror image to GHCR" step can succeed.
-    # The regular mt-l-* pool blocks ghcr.io egress at the host iptables layer.
-    runs-on:
-      group: release-runners
-      labels: ${{ matrix.runner_label || 'mt-rel-l-x86iavx512-8-64' }}
+    # Use the mt-rel-* release runner labels: their nodes carry
+    # osdc.io/runner-class=release, which exempts them from the cache-enforcer
+    # DaemonSet's iptables block on outbound ghcr.io traffic so the "Mirror image
+    # to GHCR" step can succeed. The regular mt-l-* pool blocks ghcr.io egress at
+    # the host iptables layer.
+    runs-on: ${{ matrix.runner_label || 'mt-rel-l-x86iavx512-8-64' }}
     container:
       image: ghcr.io/actions/actions-runner:latest
     steps:
