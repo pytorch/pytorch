@@ -3930,6 +3930,14 @@
     {
       "Gb_type": "Can't extract message from torch._check*()",
       "Context": "str(message_vt)",
+      "Explanation": "The message argument of torch._check*() must be a string, None, or a function defined within the torch.compile region.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "Can't extract message from torch._check*()",
+      "Context": "str(message_vt)",
       "Explanation": "The message argument of torch._check*() must be a function defined within the torch.compile region.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
