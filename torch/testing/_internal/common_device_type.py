@@ -455,15 +455,15 @@ class DeviceTypeTestBase(TestCase):
         return dist.get_default_backend_for_device(cls.device_type)
 
     @classmethod
-    def get_available_memory(cls) -> int:
+    def has_sufficient_memory(cls, size: int) -> bool:
         """
-        Returns available memory in bytes for this device type.
+        Returns True if there is sufficient memory available for the given size.
 
         Device-specific test bases may override this to support
         memory-aware tests.
         """
         raise NotImplementedError(
-            f"{cls.__name__}.get_available_memory() is not implemented"
+            f"{cls.__name__}.has_sufficient_memory() is not implemented"
         )
 
     @classmethod
@@ -751,10 +751,22 @@ class CPUTestBase(DeviceTypeTestBase):
     device_type = "cpu"
 
     @classmethod
-    def get_available_memory(cls) -> int:
+    def has_sufficient_memory(cls, size: int) -> bool:
         if not HAS_PSUTIL:
             raise unittest.SkipTest("Need psutil to query available system memory")
-        return psutil.virtual_memory().available
+
+        # The sanitizers have significant memory overheads
+        if TEST_WITH_ASAN or TEST_WITH_TSAN or TEST_WITH_UBSAN:
+            size *= 10
+
+        # don't try using all RAM on s390x, leave some for service processes
+        if IS_S390X:
+            size *= 2
+
+        available = psutil.virtual_memory().available
+        if available < size:
+            gc.collect()
+        return psutil.virtual_memory().available >= size
 
     # No critical error should stop CPU test suite
     def _should_stop_test_suite(self):
@@ -792,12 +804,15 @@ class CUDATestBase(DeviceTypeTestBase):
         return [prim_device] + non_primary_devices
 
     @classmethod
-    def get_available_memory(cls) -> int:
+    def has_sufficient_memory(cls, size: int) -> bool:
         device = torch.cuda.current_device()
-        return int(
+        gc.collect()
+        torch.cuda.empty_cache()
+        available = int(
             torch.cuda.memory.mem_get_info(device)[0]
             * torch.cuda.memory.get_per_process_memory_fraction(device)
         )
+        return available >= size
 
     @classmethod
     def setUpClass(cls):
@@ -851,10 +866,17 @@ class MPSTestBase(DeviceTypeTestBase):
         return [prim_device]
 
     @classmethod
-    def get_available_memory(cls) -> int:
+    def has_sufficient_memory(cls, size: int) -> bool:
         if not HAS_PSUTIL:
             raise unittest.SkipTest("Need psutil to query available system memory")
-        return psutil.virtual_memory().available
+        if TEST_WITH_ASAN or TEST_WITH_TSAN or TEST_WITH_UBSAN:
+            size *= 10
+        if IS_S390X:
+            size *= 2
+        available = psutil.virtual_memory().available
+        if available < size:
+            gc.collect()
+        return psutil.virtual_memory().available >= size
 
     @classmethod
     def setUpClass(cls):
@@ -888,9 +910,12 @@ class XPUTestBase(DeviceTypeTestBase):
         return [prim_device] + non_primary_devices
 
     @classmethod
-    def get_available_memory(cls) -> int:
+    def has_sufficient_memory(cls, size: int) -> bool:
         device = torch.xpu.current_device()
-        return torch.xpu.memory.mem_get_info(device)[0]
+        gc.collect()
+        torch.xpu.empty_cache()
+        available = torch.xpu.memory.mem_get_info(device)[0]
+        return available >= size
 
     @classmethod
     def setUpClass(cls):
@@ -1634,46 +1659,7 @@ class skipPRIVATEUSE1If(skipIf):
         super().__init__(dep, reason, device_type=device_type)
 
 
-def _has_sufficient_memory(device, size, test_instance=None):
-    # Some callers use _has_sufficient_memory() directly, while others go
-    # through largeTensorTest. Not all tests run as device-specific test
-    # classes, so some test instances may not expose get_available_memory().
-    # Prefer the device-type hook when available; once all relevant tests use
-    # device-specific test classes, the legacy device-specific logic below can
-    # be removed.
-    device_ = torch.device(device)
-    device_type = device_.type
-
-    instance_device_type = (
-        torch.device(test_instance.device_type).type
-        if test_instance is not None and hasattr(test_instance, "device_type")
-        else None
-    )
-
-    get_available_memory = getattr(test_instance, "get_available_memory", None)
-    if callable(get_available_memory) and instance_device_type == device_type:
-        try:
-            required_size = size
-            if device_type in ["cpu", "mps"]:
-                # The sanitizers have significant memory overheads
-                if TEST_WITH_ASAN or TEST_WITH_TSAN or TEST_WITH_UBSAN:
-                    required_size *= 10
-
-                # don't try using all RAM on s390x, leave some for service processes
-                if IS_S390X:
-                    required_size *= 2
-
-            available = get_available_memory()
-            if available < required_size:
-                gc.collect()
-                acc = torch.accelerator.current_accelerator()
-                if acc is not None and acc.type == device_type:
-                    torch.accelerator.empty_cache()
-                available = get_available_memory()
-            return available >= required_size
-        except NotImplementedError:
-            pass
-
+def _has_sufficient_memory(device, size):
     device_ = torch.device(device)
     device_type = device_.type
     if device_type in ["cuda", "xpu", "mtia"]:
@@ -1777,7 +1763,12 @@ def largeTensorTest(size, device=None, inductor=TEST_WITH_TORCHINDUCTOR):
             # an additional array of the same size as the input.
             if inductor and torch._inductor.config.cpp_wrapper and _device != "cpu":
                 size_bytes *= 2
-            if not _has_sufficient_memory(_device, size_bytes, test_instance=self):
+            # Prefer DeviceTypeTestBase.has_sufficient_memory hook when available.
+            has_sufficient_memory = getattr(self, "has_sufficient_memory", None)
+            if callable(has_sufficient_memory):
+                if not has_sufficient_memory(size_bytes):
+                    raise unittest.SkipTest(f"Insufficient {_device} memory")
+            elif not _has_sufficient_memory(_device, size_bytes):
                 raise unittest.SkipTest(f"Insufficient {_device} memory")
 
             return fn(self, *args, **kwargs)
