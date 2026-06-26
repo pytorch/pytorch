@@ -141,6 +141,7 @@ class BotoCuObjClient(ObjectClient):
         *,
         endpoint_url: str | None = None,
         region: str | None = "us-east-1",
+        addressing_style: str = "virtual",
         boto3_session=None,
         client_kwargs: dict | None = None,
     ) -> None:
@@ -157,7 +158,10 @@ class BotoCuObjClient(ObjectClient):
                 signature_version="s3v4",
                 request_checksum_calculation="when_required",
                 response_checksum_validation="when_required",
-                s3={"addressing_style": "path", "payload_signing_enabled": False},
+                s3={
+                    "addressing_style": addressing_style,
+                    "payload_signing_enabled": False,
+                },
             ),
             **(client_kwargs or {}),
         )
@@ -272,6 +276,7 @@ class _S3RdmaBase:
         endpoint_url: str | None,
         region: str | None,
         client_kwargs: dict | None,
+        addressing_style: str = "virtual",
     ) -> None:
         self.bucket, self.prefix = _parse_s3_url(path)
         self.path = str(path)
@@ -279,6 +284,7 @@ class _S3RdmaBase:
             self.bucket,
             endpoint_url=endpoint_url,
             region=region,
+            addressing_style=addressing_style,
             client_kwargs=client_kwargs,
         )
 
@@ -301,6 +307,43 @@ class S3RdmaStorageWriter(_S3RdmaBase, StorageWriter):
     contiguous bytes, transferred directly from a registered buffer over RDMA.
     A ``.metadata`` object written last by the coordinator commits the
     checkpoint (S3 ``PutObject`` is atomic).
+
+    Requires an RDMA-capable, S3-compatible endpoint and a PyTorch build with
+    cuObject support (``USE_CUOBJ=1``, CUDA Toolkit >= 13.1). Check availability
+    with :func:`torch.cuda.cuobj.is_available`.
+
+    Example::
+
+        >>> # xdoctest: +SKIP("requires RDMA + S3 endpoint")
+        >>> import torch.distributed.checkpoint as dcp
+        >>> from torch.distributed.checkpoint import S3RdmaStorageWriter
+        >>> # AWS S3 (virtual-hosted / bucket-DNS addressing, the default):
+        >>> dcp.save(
+        ...     state_dict,
+        ...     storage_writer=S3RdmaStorageWriter("s3://my-bucket/step-100"),
+        ... )
+        >>> # S3-compatible endpoint that needs path-style addressing:
+        >>> dcp.save(
+        ...     state_dict,
+        ...     storage_writer=S3RdmaStorageWriter(
+        ...         "s3://my-bucket/step-100",
+        ...         endpoint_url="https://s3.example.com:9000",
+        ...         addressing_style="path",
+        ...     ),
+        ... )
+
+    Args:
+        path: ``s3://bucket/prefix`` checkpoint location.
+        client: A custom :class:`ObjectClient`. Defaults to a boto3-backed
+            :class:`BotoCuObjClient`.
+        endpoint_url: S3 endpoint URL. Defaults to AWS S3.
+        region: AWS region.
+        addressing_style: ``"virtual"`` (bucket-DNS, the AWS default),
+            ``"path"``, or ``"auto"``. Use ``"path"`` for S3-compatible
+            endpoints that do not support virtual-hosted buckets.
+        client_kwargs: Extra kwargs forwarded to ``boto3.session.Session.client``
+            (e.g. credentials).
+        overwrite: Whether to allow overwriting an existing checkpoint.
     """
 
     def __init__(
@@ -310,10 +353,13 @@ class S3RdmaStorageWriter(_S3RdmaBase, StorageWriter):
         client: ObjectClient | None = None,
         endpoint_url: str | None = None,
         region: str | None = None,
+        addressing_style: str = "virtual",
         client_kwargs: dict | None = None,
         overwrite: bool = True,
     ) -> None:
-        super().__init__(path, client, endpoint_url, region, client_kwargs)
+        super().__init__(
+            path, client, endpoint_url, region, client_kwargs, addressing_style
+        )
         self.overwrite = overwrite
         self.save_id = _generate_uuid()
         self.rank: int | None = None
@@ -414,9 +460,12 @@ class S3RdmaStorageReader(_S3RdmaBase, StorageReader):
         client: ObjectClient | None = None,
         endpoint_url: str | None = None,
         region: str | None = None,
+        addressing_style: str = "virtual",
         client_kwargs: dict | None = None,
     ) -> None:
-        super().__init__(path, client, endpoint_url, region, client_kwargs)
+        super().__init__(
+            path, client, endpoint_url, region, client_kwargs, addressing_style
+        )
         self.storage_data: dict = {}
         self.load_id = _generate_uuid()
 
@@ -509,6 +558,20 @@ class S3RdmaHuggingFaceStorageWriter(_S3RdmaBase, StorageWriter):
     header, then concatenated tensor bytes) assembled with ``safetensors.torch``
     and transferred as a single S3 object via cuObject RDMA. A
     ``model.safetensors.index.json`` weight map is written last (plain PUT).
+
+    Accepts the same connection options as :class:`S3RdmaStorageWriter`
+    (``endpoint_url``, ``region``, ``addressing_style`` defaulting to
+    virtual-hosted, ``client_kwargs``).
+
+    Example::
+
+        >>> # xdoctest: +SKIP("requires RDMA + S3 endpoint")
+        >>> import torch.distributed.checkpoint as dcp
+        >>> from torch.distributed.checkpoint import S3RdmaHuggingFaceStorageWriter
+        >>> dcp.save(
+        ...     state_dict,
+        ...     storage_writer=S3RdmaHuggingFaceStorageWriter("s3://my-bucket/hf-ckpt"),
+        ... )
     """
 
     def __init__(
@@ -518,10 +581,13 @@ class S3RdmaHuggingFaceStorageWriter(_S3RdmaBase, StorageWriter):
         client: ObjectClient | None = None,
         endpoint_url: str | None = None,
         region: str | None = "us-east-1",
+        addressing_style: str = "virtual",
         client_kwargs: dict | None = None,
         fqn_to_index_mapping: dict[str, int] | None = None,
     ) -> None:
-        super().__init__(path, client, endpoint_url, region, client_kwargs)
+        super().__init__(
+            path, client, endpoint_url, region, client_kwargs, addressing_style
+        )
         self.fqn_to_index_mapping = fqn_to_index_mapping
         self.save_id = _generate_uuid()
         self.rank: int | None = None
@@ -628,9 +694,12 @@ class S3RdmaHuggingFaceStorageReader(_S3RdmaBase, StorageReader):
         client: ObjectClient | None = None,
         endpoint_url: str | None = None,
         region: str | None = "us-east-1",
+        addressing_style: str = "virtual",
         client_kwargs: dict | None = None,
     ) -> None:
-        super().__init__(path, client, endpoint_url, region, client_kwargs)
+        super().__init__(
+            path, client, endpoint_url, region, client_kwargs, addressing_style
+        )
         self.storage_data: dict = {}
         self.load_id = _generate_uuid()
         self._file_cache: dict[str, Tensor] = {}
