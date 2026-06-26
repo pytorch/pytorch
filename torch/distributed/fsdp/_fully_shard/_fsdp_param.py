@@ -205,6 +205,8 @@ class FSDPParam:
         DTensorSpec | None
     )  # set for DTensor params (SPMD or TP/EP)
     all_gather_outputs: list[torch.Tensor]  # 1D
+    # Whether `all_gather_outputs` aliases a backend-owned, parameter-contiguous
+    # all-gather output that FSDP must not free/reallocate on reshard
     _keep_all_gather_output_storage: bool
     # All-gather extension attributes
     _extensions_data: ExtensionsData
@@ -848,10 +850,19 @@ class FSDPParam:
     def init_param_contiguous_all_gather_outputs(
         self, all_gather_output: torch.Tensor
     ) -> None:
+        """Alias this parameter's all-gather output to a backend-owned buffer.
+
+        Used by backends that produce a parameter-contiguous output (see
+        ``AllGather.supports_param_contiguous_output``): the buffer is reused as
+        the unsharded parameter storage, so FSDP must not free it on reshard.
+        """
         if (
             hasattr(self, "_unsharded_param")
             and self._unsharded_param.data_ptr() != all_gather_output.data_ptr()
         ):
+            # The unsharded parameter from a previous all-gather no longer
+            # aliases the backend buffer; drop it so it is rebuilt over the new
+            # storage.
             del self._unsharded_param
         self.all_gather_outputs = [all_gather_output]
         self._keep_all_gather_output_storage = True
@@ -1060,6 +1071,9 @@ class FSDPParam:
             alloc_storage(tensor)
 
     def free_unsharded_param(self) -> None:
+        # A parameter-contiguous all-gather output is owned by the backend, so
+        # its storage is left intact across reshards (see
+        # ``init_param_contiguous_all_gather_outputs``).
         tensors = self._unsharded_inner_tensors
         if not self._keep_all_gather_output_storage:
             tensors = [*self.all_gather_outputs, *tensors]

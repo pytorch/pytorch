@@ -99,11 +99,20 @@ class Comm(ABC):
 
 class AllGather(Comm):
     """
-    Interface for all_gather comm primitive
+    Interface for all_gather comm primitive.
+
+    By default FSDP all-gathers into a rank-major ``[rank][param]`` buffer and
+    then copies each parameter out into its own contiguous storage. A backend
+    that can instead produce a parameter-major ``[param][rank]`` output may set
+    :attr:`supports_param_contiguous_output` to ``True`` and implement
+    :meth:`prepare_param_contiguous_output`. FSDP then views the unsharded
+    parameters directly on top of the backend output, skipping the copy-out and
+    its extra allocation.
     """
 
+    # Whether the backend can write a parameter-contiguous ``[param][rank]``
+    # all-gather output that FSDP can use in place (i.e. without a copy-out).
     supports_param_contiguous_output: bool = False
-    supports_no_copy: bool = False
 
     @abstractmethod
     def __call__(
@@ -123,18 +132,18 @@ class AllGather(Comm):
         device: torch.device,
     ) -> object | None:
         """
-        Optionally prepare a backend for param-contiguous all-gather output.
+        Prepare backend state for a parameter-contiguous all-gather output.
 
-        The default rank-major layout is ``[rank][parameter]`` and FSDP copies
-        from that layout into per-parameter buffers. Backends that set
-        ``supports_param_contiguous_output`` may instead write
-        ``[parameter][rank]`` so FSDP can view the backend output directly.
+        Only called when :attr:`supports_param_contiguous_output` is ``True``.
+        ``all_gather_input_split_sizes`` gives the per-parameter input numels
+        (summing to ``all_gather_input_numel``). The returned value, if any, is
+        opaque backend metadata carried through the all-gather and is otherwise
+        unused by FSDP.
         """
         return None
 
     def clear_param_contiguous_output(self) -> None:
-        """Clear any backend-side state for param-contiguous output."""
-        pass
+        """Release any state created by :meth:`prepare_param_contiguous_output`."""
 
 
 class ReduceScatter(Comm):

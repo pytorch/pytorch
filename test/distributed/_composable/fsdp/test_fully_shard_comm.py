@@ -6,7 +6,7 @@ import itertools
 import os
 import tempfile
 import unittest
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from unittest.mock import MagicMock
 
 import torch
@@ -41,9 +41,13 @@ from torch.distributed.fsdp._fully_shard._fsdp_init import (
     _get_post_forward_mesh_info,
     _init_default_fully_shard_mesh,
 )
-from torch.distributed.fsdp._fully_shard._mori_sdma_allgather import MoriSdmaAllGather
 from torch.distributed.fsdp._fully_shard._fsdp_param import ShardedState
 from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
+from torch.distributed.fsdp._fully_shard._mori_sdma_allgather import (
+    is_mori_fsdp_sdma_enabled,
+    is_mori_fsdp_zero_copy_output_enabled,
+    MoriSdmaAllGather,
+)
 from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import implicit_replication
@@ -72,6 +76,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchInductor,
     TEST_WITH_ROCM,
     TEST_XPU,
+    TestCase,
     xfailIf,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -96,6 +101,8 @@ device_module = torch.get_device_module(device_type)
 
 
 class _RankMajorTestAllGather(AllGather):
+    """Minimal custom backend that all-gathers into the default rank-major layout."""
+
     def __init__(self) -> None:
         self.outputs: list[torch.Tensor] = []
 
@@ -126,8 +133,13 @@ class _RankMajorTestAllGather(AllGather):
 
 
 class _ParamContiguousTestAllGather(_RankMajorTestAllGather):
+    """Custom backend that emulates a no-copy, parameter-contiguous output.
+
+    It reuses a single persistent output buffer and rearranges the rank-major
+    result into the ``[param][rank]`` layout that FSDP can view in place.
+    """
+
     supports_param_contiguous_output = True
-    supports_no_copy = True
 
     def __init__(self) -> None:
         super().__init__()
@@ -171,13 +183,11 @@ class _ParamContiguousTestAllGather(_RankMajorTestAllGather):
         group: dist.ProcessGroup,
         async_op: bool = False,
     ) -> dist.distributed_c10d.Work | None:
-        self.assert_sync_only(async_op)
+        if async_op:
+            raise AssertionError("test all-gather only supports sync collectives")
         rank_major_output = torch.empty_like(output_tensor)
         dist.all_gather_single(
-            rank_major_output,
-            input_tensor,
-            group=group,
-            async_op=False,
+            rank_major_output, input_tensor, group=group, async_op=False
         )
         rank_major_output = rank_major_output.view(self.world_size, -1)
         input_offset = 0
@@ -192,10 +202,6 @@ class _ParamContiguousTestAllGather(_RankMajorTestAllGather):
             input_offset += split_size
             output_offset += output_numel
         return None
-
-    def assert_sync_only(self, async_op: bool) -> None:
-        if async_op:
-            raise AssertionError("test all-gather only supports sync collectives")
 
 
 class TestFullyShardCollectiveOps(FSDPTestMultiThread):
@@ -303,6 +309,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         foreach_all_gather_copy_out(
             all_gather_result, fsdp_param_group.fsdp_params, group
         )
+        # The default path copies each parameter out into its own storage.
         rank_major_storage_ptr = comm.outputs[-1].untyped_storage().data_ptr()
         for fsdp_param in fsdp_param_group.fsdp_params:
             self.assertNotEqual(
@@ -317,20 +324,6 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             orig_params, fsdp_param_group.modules[0].parameters()
         ):
             self.assertEqual(param, orig_param)
-
-    @skip_if_lt_x_gpu(1)
-    def test_mori_sdma_all_gather_env_gate(self):
-        old_value = os.environ.get("MORI_FSDP_ENABLE_SDMA")
-        os.environ["MORI_FSDP_ENABLE_SDMA"] = "1"
-        try:
-            orig_params = self._init_params([torch.Size([self.world_size])])
-            fsdp_param_group = self._init_fsdp_param_group(orig_params, True)
-        finally:
-            if old_value is None:
-                os.environ.pop("MORI_FSDP_ENABLE_SDMA", None)
-            else:
-                os.environ["MORI_FSDP_ENABLE_SDMA"] = old_value
-        self.assertIsInstance(fsdp_param_group._all_gather_comm, MoriSdmaAllGather)
 
     @skip_if_lt_x_gpu(1)
     def test_custom_all_gather_param_contiguous_no_copy(self):
@@ -355,10 +348,9 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             foreach_all_gather_copy_out(
                 all_gather_result, fsdp_param_group.fsdp_params, group
             )
-            backend_output = comm.output
-            self.assertIsNotNone(backend_output)
-            assert backend_output is not None
-            backend_storage_ptr = backend_output.untyped_storage().data_ptr()
+            self.assertIsNotNone(comm.output)
+            # Each parameter must alias the single backend buffer (no copy-out).
+            backend_storage_ptr = comm.outputs[-1].untyped_storage().data_ptr()
             output_ptrs = []
             for fsdp_param in fsdp_param_group.fsdp_params:
                 all_gather_output = fsdp_param.all_gather_outputs[0]
@@ -368,7 +360,9 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
                 )
                 output_ptrs.append(all_gather_output.data_ptr())
                 fsdp_param.init_unsharded_param()
-                self.assertEqual(fsdp_param._unsharded_param.data_ptr(), output_ptrs[-1])
+                self.assertEqual(
+                    fsdp_param._unsharded_param.data_ptr(), output_ptrs[-1]
+                )
             fsdp_param_group._to_unsharded()
             for orig_param, param in zip(
                 orig_params, fsdp_param_group.modules[0].parameters()
@@ -376,6 +370,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
                 self.assertEqual(param, orig_param)
             return output_ptrs
 
+        # The backend buffer must be reused (kept alive) across reshards.
         output_ptrs = all_gather()
         fsdp_param_group._to_sharded()
         for fsdp_param, output_ptr in zip(fsdp_param_group.fsdp_params, output_ptrs):
@@ -2296,6 +2291,28 @@ class TestFullyShardReduceOpWorldSize1(FSDPTest):
             all_reduce_op,
         ) = _get_gradient_divide_factors(group, None, torch.float32)
         self.assertEqual(all_reduce_op, ReduceOp.SUM)
+
+
+class TestMoriSdmaAllGather(TestCase):
+    """Backend-level tests that do not require the ``mori`` runtime or GPUs."""
+
+    def test_zero_copy_output_capability(self):
+        self.assertFalse(
+            MoriSdmaAllGather(zero_copy_output=False).supports_param_contiguous_output
+        )
+        self.assertTrue(
+            MoriSdmaAllGather(zero_copy_output=True).supports_param_contiguous_output
+        )
+
+    def test_env_flag_parsing(self):
+        for value, enabled in (("1", True), ("true", True), ("0", False), ("", False)):
+            with unittest.mock.patch.dict(
+                os.environ, {"MORI_FSDP_ZERO_COPY_OUTPUT": value}
+            ):
+                self.assertEqual(is_mori_fsdp_zero_copy_output_enabled(), enabled)
+        for value, enabled in (("1", True), ("off", False), ("", False)):
+            with unittest.mock.patch.dict(os.environ, {"MORI_FSDP_ENABLE_SDMA": value}):
+                self.assertEqual(is_mori_fsdp_sdma_enabled(), enabled)
 
 
 if __name__ == "__main__":

@@ -24,7 +24,10 @@ class AllGatherResult(NamedTuple):
     all_gather_output: torch.Tensor
     all_gather_event: torch.Event | None
     all_gather_work: dist.distributed_c10d.Work | None
+    # Whether the backend produced a parameter-contiguous output that can be
+    # used in place (see `AllGather.supports_param_contiguous_output`)
     use_param_contiguous_output: bool
+    # Opaque metadata returned by `AllGather.prepare_param_contiguous_output`
     param_contiguous_metadata: object | None
     # For each parameter, the all-gather input dtype for each input
     param_all_gather_input_dtypes: list[list[torch.dtype]]
@@ -352,7 +355,6 @@ def foreach_all_gather(
         all_gather_input_numel = sum(inp_split_sizes)
         use_param_contiguous_output = (
             all_gather_comm.supports_param_contiguous_output
-            and all_gather_comm.supports_no_copy
             and _can_use_param_contiguous_output(
                 fsdp_params,
                 param_all_gather_input_dtypes,
@@ -361,20 +363,19 @@ def foreach_all_gather(
             )
         )
         param_contiguous_metadata = None
-        if use_param_contiguous_output:
-            param_contiguous_metadata = (
-                all_gather_comm.prepare_param_contiguous_output(
-                    inp_split_sizes,
-                    all_gather_input_numel,
-                    world_size,
-                    dtype,
-                    device,
-                )
-            )
         all_gather_output = all_gather_comm.allocate(
             (all_gather_input_numel * world_size,), dtype=dtype, device=device
         )
         if use_param_contiguous_output:
+            param_contiguous_metadata = all_gather_comm.prepare_param_contiguous_output(
+                inp_split_sizes,
+                all_gather_input_numel,
+                world_size,
+                dtype,
+                device,
+            )
+            # The backend writes a [param][rank] output that FSDP views in
+            # place, so only the rank-major copy-in fusion is skipped here.
             all_gather_input = torch.empty(
                 (all_gather_input_numel,), dtype=dtype, device=device
             )
@@ -483,13 +484,15 @@ def foreach_all_gather_copy_out(
     if isinstance(all_gather_work, dist.distributed_c10d.Work):  # async op
         all_gather_work.wait()
     world_size, device = group.size(), all_gather_output.device
-    if use_param_contiguous_output and _try_use_param_contiguous_output(
-        all_gather_output,
-        fsdp_params,
-        param_all_gather_input_dtypes,
-        param_all_gather_input_numels,
-        world_size,
-    ):
+    if use_param_contiguous_output:
+        # The backend already produced a parameter-contiguous output; point each
+        # unsharded parameter at its slice and skip the copy-out entirely.
+        _init_param_contiguous_outputs(
+            all_gather_output,
+            fsdp_params,
+            param_all_gather_input_numels,
+            world_size,
+        )
         return
 
     split_with_sizes_out: list[torch.Tensor] = []
@@ -567,9 +570,14 @@ def _can_use_param_contiguous_output(
     param_all_gather_input_numels: list[list[int]],
     all_gather_output_dtype: torch.dtype,
 ) -> bool:
+    """Whether every parameter is eligible for a parameter-contiguous output.
+
+    The fast path requires a single, dtype-preserving all-gather input per
+    parameter sharded on dim-0, with no all-gather extension or DTensor
+    post-processing that would otherwise need the rank-major copy-out.
+    """
     if len(fsdp_params) != len(param_all_gather_input_numels):
         return False
-
     for fsdp_param, input_dtypes, input_numels in zip(
         fsdp_params, param_all_gather_input_dtypes, param_all_gather_input_numels
     ):
@@ -585,36 +593,28 @@ def _can_use_param_contiguous_output(
     return True
 
 
-def _try_use_param_contiguous_output(
+def _init_param_contiguous_outputs(
     all_gather_output: torch.Tensor,
     fsdp_params: list[FSDPParam],
-    param_all_gather_input_dtypes: list[list[torch.dtype]],
     param_all_gather_input_numels: list[list[int]],
     world_size: int,
-) -> bool:
-    if not _can_use_param_contiguous_output(
-        fsdp_params,
-        param_all_gather_input_dtypes,
-        param_all_gather_input_numels,
-        all_gather_output.dtype,
-    ):
-        return False
+) -> None:
+    """Point each parameter at its slice of a parameter-contiguous output.
 
+    Eligibility was already validated in ``foreach_all_gather``; here we only
+    carve ``all_gather_output`` into the per-parameter ``[param][rank]`` views.
+    """
     output_offset = 0
-    param_all_gather_outputs: list[tuple[FSDPParam, torch.Tensor]] = []
-    for fsdp_param, _input_dtypes, input_numels in zip(
-        fsdp_params, param_all_gather_input_dtypes, param_all_gather_input_numels
-    ):
+    for fsdp_param, input_numels in zip(fsdp_params, param_all_gather_input_numels):
         output_numel = input_numels[0] * world_size
         param_output = all_gather_output.narrow(0, output_offset, output_numel)
-        param_all_gather_outputs.append((fsdp_param, param_output))
+        fsdp_param.init_param_contiguous_all_gather_outputs(param_output)
         output_offset += output_numel
     if output_offset != all_gather_output.numel():
-        return False
-
-    for fsdp_param, param_output in param_all_gather_outputs:
-        fsdp_param.init_param_contiguous_all_gather_outputs(param_output)
-    return True
+        raise AssertionError(
+            "parameter-contiguous all-gather output covered "
+            f"{output_offset} of {all_gather_output.numel()} elements"
+        )
 
 
 @torch.no_grad()
