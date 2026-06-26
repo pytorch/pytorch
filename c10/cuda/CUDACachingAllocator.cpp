@@ -304,7 +304,7 @@ struct SegmentRange {
   SegmentRange(void* p, size_t s) : ptr(static_cast<char*>(p)), size(s) {}
 };
 
-#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED) || \
+#if (!defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)) || \
     defined(USE_ROCM)
 
 /*
@@ -548,12 +548,16 @@ struct ExpandableSegment {
       prop.location.id = static_cast<int>(device_);
 #ifdef USE_ROCM
       auto status = hipMemCreate(&handle, segment_size_, &prop, 0);
+      constexpr auto kMemCreateOk = hipSuccess;
+      constexpr auto kMemCreateOom = hipErrorOutOfMemory;
 #else
       auto status =
           DriverAPI::get()->cuMemCreate_(&handle, segment_size_, &prop, 0);
+      constexpr auto kMemCreateOk = CUDA_SUCCESS;
+      constexpr auto kMemCreateOom = CUDA_ERROR_OUT_OF_MEMORY;
 #endif
-      if (status != CUDA_SUCCESS) {
-        if (status == CUDA_ERROR_OUT_OF_MEMORY) {
+      if (status != kMemCreateOk) {
+        if (status == kMemCreateOom) {
           {
             size_t device_free = 0;
             size_t device_total = 0;
@@ -768,7 +772,7 @@ struct ExpandableSegment {
         void* myfd_handle =
             reinterpret_cast<void*>(static_cast<uintptr_t>(myfd));
 #else
-        void* myfd_handle = (void*)(uintptr_t)&myfd;
+        void* myfd_handle = static_cast<void*>(&myfd);
 #endif
         C10_CUDA_CHECK(hipMemImportFromShareableHandle(
             &handle, myfd_handle, hipMemHandleTypePosixFileDescriptor));
