@@ -267,7 +267,7 @@ inductor_expected_failures_single_sample["cuda"] = {
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
     "normal": {f16, f32, f64},
-    "sparse.sampled_addmm": {f32, f64},
+    "sparse.sampled_addmm": {f32, f64, f16},
     "torch.ops.aten._flash_attention_forward": {f16},
     "torch.ops.aten._efficient_attention_forward": {f16, f32},
     "to_sparse": {
@@ -285,7 +285,7 @@ inductor_expected_failures_single_sample["xpu"] = {
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
     "normal": {f16, f32, f64},
-    "sparse.sampled_addmm": {f32, f64},
+    "sparse.sampled_addmm": {f32, f64, f16},
     "tan": {f16},
     "torch.ops.aten._flash_attention_forward": {f16},
     "torch.ops.aten._efficient_attention_forward": {f16, f32},

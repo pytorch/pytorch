@@ -14667,12 +14667,23 @@ op_db: list[OpInfo] = [
            supports_out=False),
     OpInfo('sparse.sampled_addmm',
            dtypes=floating_and_complex_types(),
+           # CUDA forward supports float16 (native cuSPARSE SDDMM) and bfloat16
+           # (computed in float32; cuSPARSE has no bf16 SDDMM kernel). Backward
+           # routes through cuSPARSE SpMM: float16 needs CC >= 5.3, bfloat16 needs
+           # CC >= 8.0, and ROCm's hipSPARSE SpMM implements neither dtype.
+           dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+           backward_dtypesIfCUDA=floating_and_complex_types_and(
+               *([torch.half] if not TEST_WITH_ROCM else []),
+               *([torch.bfloat16] if SM80OrLater and not TEST_WITH_ROCM else [])),
            supports_autograd=True,
            sample_inputs_func=sample_inputs_sparse_sampled_addmm,
            decorators=[
                skipCPUIfNoMklSparse,
                skipXPU],
            skips=(
+               # Reduced-precision sampled_addmm needs CC >= 5.3 (cuSPARSE SDDMM);
+               # skip the dtype check on older CUDA arches that have no CI runner.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type='cuda', active_if=not SM53OrLater),
                # NotImplementedError: Tensors of type SparseCsrTensorImpl do not have is_contiguous
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_noncontiguous_samples'),
                # RuntimeError: Sparse CSR tensors do not have strides.
