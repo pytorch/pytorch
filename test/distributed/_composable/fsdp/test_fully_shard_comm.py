@@ -7,6 +7,7 @@ import os
 import tempfile
 import unittest
 from collections.abc import Callable, Sequence
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import torch
@@ -28,6 +29,7 @@ from torch.distributed.fsdp import (
 )
 from torch.distributed.fsdp._fully_shard._fsdp_api import AllGather
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
+    _can_use_param_contiguous_output,
     _div_if_needed,
     _get_gradient_divide_factors,
     DefaultAllGather,
@@ -43,11 +45,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_init import (
 )
 from torch.distributed.fsdp._fully_shard._fsdp_param import ShardedState
 from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
-from torch.distributed.fsdp._fully_shard._mori_sdma_allgather import (
-    is_mori_fsdp_sdma_enabled,
-    is_mori_fsdp_zero_copy_output_enabled,
-    MoriSdmaAllGather,
-)
+from torch.distributed.fsdp._fully_shard._mori_sdma_allgather import MoriSdmaAllGather
 from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import implicit_replication
@@ -2304,15 +2302,61 @@ class TestMoriSdmaAllGather(TestCase):
             MoriSdmaAllGather(zero_copy_output=True).supports_param_contiguous_output
         )
 
-    def test_env_flag_parsing(self):
-        for value, enabled in (("1", True), ("true", True), ("0", False), ("", False)):
-            with unittest.mock.patch.dict(
-                os.environ, {"MORI_FSDP_ZERO_COPY_OUTPUT": value}
-            ):
-                self.assertEqual(is_mori_fsdp_zero_copy_output_enabled(), enabled)
-        for value, enabled in (("1", True), ("off", False), ("", False)):
-            with unittest.mock.patch.dict(os.environ, {"MORI_FSDP_ENABLE_SDMA": value}):
-                self.assertEqual(is_mori_fsdp_sdma_enabled(), enabled)
+
+class TestParamContiguousEligibility(TestCase):
+    """Runtime-free tests for the conservative param-contiguous eligibility gate."""
+
+    @staticmethod
+    def _make_param(
+        *,
+        dim: int = 0,
+        is_dtensor: bool = False,
+        pre_all_gather: bool = False,
+        post_all_gather: bool = False,
+        sharded_state: ShardedState = ShardedState.SHARDED,
+    ):
+        sharded_local_tensor = SimpleNamespace()
+        if pre_all_gather:
+            sharded_local_tensor.fsdp_pre_all_gather = lambda *a, **k: None
+        if post_all_gather:
+            sharded_local_tensor.fsdp_post_all_gather = lambda *a, **k: None
+        return SimpleNamespace(
+            fsdp_placement=SimpleNamespace(dim=dim),
+            is_dtensor=is_dtensor,
+            _sharded_local_tensor=sharded_local_tensor,
+            sharded_state=sharded_state,
+        )
+
+    def _can_use(self, param) -> bool:
+        return _can_use_param_contiguous_output(
+            [param], [[torch.float32]], [[8]], torch.float32
+        )
+
+    def test_eligible_base_case(self):
+        self.assertTrue(self._can_use(self._make_param()))
+
+    def test_excludes_ineligible_params(self):
+        # Any parameter that still needs the rank-major copy-out disables the
+        # fast path: non dim-0 sharding, DTensor, an all-gather extension, a
+        # post-forward mesh reshard, or a dtype-changing (mixed precision / fp8)
+        # input.
+        self.assertFalse(self._can_use(self._make_param(dim=1)))
+        self.assertFalse(self._can_use(self._make_param(is_dtensor=True)))
+        self.assertFalse(self._can_use(self._make_param(pre_all_gather=True)))
+        self.assertFalse(self._can_use(self._make_param(post_all_gather=True)))
+        self.assertFalse(
+            self._can_use(
+                self._make_param(sharded_state=ShardedState.SHARDED_POST_FORWARD)
+            )
+        )
+        self.assertFalse(
+            _can_use_param_contiguous_output(
+                [self._make_param()], [[torch.bfloat16]], [[8]], torch.float32
+            )
+        )
+        # torch.compile / compiled autograd cannot trace the in-place aliasing.
+        with unittest.mock.patch("torch.compiler.is_compiling", return_value=True):
+            self.assertFalse(self._can_use(self._make_param()))
 
 
 if __name__ == "__main__":

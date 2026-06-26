@@ -570,27 +570,56 @@ def _can_use_param_contiguous_output(
     param_all_gather_input_numels: list[list[int]],
     all_gather_output_dtype: torch.dtype,
 ) -> bool:
-    """Whether every parameter is eligible for a parameter-contiguous output.
+    """Whether the no-copy parameter-contiguous output fast path is eligible.
 
-    The fast path requires a single, dtype-preserving all-gather input per
-    parameter sharded on dim-0, with no all-gather extension or DTensor
-    post-processing that would otherwise need the rank-major copy-out.
+    This implements the RFC's conservative eligibility gate (pytorch/pytorch#
+    186601): the unsharded parameters become views aliasing the backend's
+    all-gather output, so the path is only taken when that aliasing is known to
+    be both correct and safe. Each excluded case below falls back to the
+    rank-major ``split_with_sizes_copy`` copy-out.
     """
+    # Compiled autograd / Traceable FSDP2: the in-place aliasing and the
+    # Python-level view bookkeeping are not traceable today.
+    if _compile_active():
+        return False
     if len(fsdp_params) != len(param_all_gather_input_numels):
         return False
     for fsdp_param, input_dtypes, input_numels in zip(
         fsdp_params, param_all_gather_input_dtypes, param_all_gather_input_numels
     ):
         if (
+            # A single dtype-preserving input: more than one input, or an
+            # input whose dtype differs from the output (mixed precision / fp8),
+            # means the output is not a plain reinterpretation of the shard.
             len(input_dtypes) != 1
             or len(input_numels) != 1
             or input_dtypes[0] != all_gather_output_dtype
+            # Only dim-0 sharding leaves each parameter contiguous in the
+            # ``[param][rank]`` output; Shard(i>0) still needs the chunk-cat.
             or fsdp_param.fsdp_placement.dim != 0
+            # TP/EP DTensor params and the ``fsdp_pre_all_gather`` /
+            # ``fsdp_post_all_gather`` extensions (fp8, custom layouts, ...)
+            # transform the data around the collective, so the gathered output
+            # is not the parameter itself; the RFC excludes them until each is
+            # explicitly validated.
             or fsdp_param.is_dtensor
+            or hasattr(fsdp_param._sharded_local_tensor, "fsdp_pre_all_gather")
             or hasattr(fsdp_param._sharded_local_tensor, "fsdp_post_all_gather")
+            # Post-forward mesh reshard all-gathers over a different mesh; the
+            # backing-storage lifetime across that reshard is not yet validated.
+            or fsdp_param.sharded_state == ShardedState.SHARDED_POST_FORWARD
         ):
             return False
     return True
+
+
+def _compile_active() -> bool:
+    """Whether FSDP is running under torch.compile or compiled autograd."""
+    if torch.compiler.is_compiling():
+        return True
+    from torch._dynamo.compiled_autograd import compiled_autograd_enabled
+
+    return compiled_autograd_enabled
 
 
 def _init_param_contiguous_outputs(

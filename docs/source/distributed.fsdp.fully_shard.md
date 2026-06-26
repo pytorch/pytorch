@@ -176,9 +176,12 @@ write a parameter-contiguous (`[param][rank]`) output may set
 `AllGather.supports_param_contiguous_output` and implement
 `AllGather.prepare_param_contiguous_output`. FSDP then views each unsharded
 parameter directly on top of the backend buffer, skipping the copy-out and its
-extra allocation. This fast path is used when every parameter has a single
-dtype-preserving all-gather input, is sharded on dim-0, and uses no all-gather
-extension or DTensor post-processing.
+extra allocation. Because the unsharded parameters alias the backend output,
+this fast path follows a conservative eligibility policy and is only used when
+every parameter has a single dtype-preserving all-gather input, is sharded on
+dim-0, and uses no all-gather extension or DTensor post-processing. It also
+falls back to the rank-major copy-out under `torch.compile` / compiled autograd
+(the aliasing is not traceable today) and during a post-forward mesh reshard.
 
 A backend is selected explicitly per module with `set_custom_all_gather`. For
 example, the ROCm MORI SDMA backend (`MoriSdmaAllGather`) — which produces the
