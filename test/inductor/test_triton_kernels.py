@@ -700,6 +700,11 @@ def forward(self, x_1, output_1):
             mul2_kernel[grid](x, output, n_elements, BLOCK_SIZE=16)
             return output.view(4, 4)
 
+        def call_triton_inplace_view(x: torch.Tensor):
+            n_elements = x.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            mul2_inplace_kernel[grid](x, n_elements, BLOCK_SIZE=16)
+
         t = torch.rand(4, 4, device=GPU_TYPE)
         t_view = t.view(16)
 
@@ -714,6 +719,17 @@ def forward(self, x_1, output_1):
         )
         self.assertEqual(2 * t_view, compiled_func(t).view(16))
         self.assertEqual(2 * t, compiled_func(t))
+
+        compiled_func = torch.compile(
+            call_triton_inplace_view, backend=backend, fullgraph=True, dynamic=dynamic
+        )
+        t2 = t.clone()
+        t2_view = t2.view(16)
+        compiled_func(t2)
+        self.assertEqual(2 * t_view, t2_view)
+        t2.copy_(t)
+        compiled_func(t2_view)
+        self.assertEqual(2 * t, t2_view.view(4, 4))
 
     @requires_gpu
     def test_no_nan_kernels(self):
@@ -1087,6 +1103,37 @@ def forward(self, x_1, output_1):
         torch_result = call_triton(t1, t2)
         compiled_result = torch.compile(call_triton)(t1, t2)
         self.assertEqual(torch_result, compiled_result)
+
+    @requires_gpu
+    def test_triton_kernel_with_reinplace_scatter_copy_back(self):
+        def call_triton_inplace_view(x: torch.Tensor):
+            x_slice = x[2:]
+            n_elements = x_slice.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            mul2_inplace_kernel[grid](x_slice, n_elements, BLOCK_SIZE=16)
+
+        t = torch.rand(4, 4, device=GPU_TYPE)
+        t2 = t.clone()
+
+        log_stream, ctx = logs_to_string("torch._inductor.debug", "ir_post_fusion")
+        with ctx():
+            compiled_func = torch.compile(
+                call_triton_inplace_view,
+                fullgraph=True,
+            )
+            compiled_func(t2)
+
+        t[2:] *= 2
+        self.assertEqual(t, t2)
+
+        log = log_stream.getvalue()
+
+        self.assertNotIn("ComputedBuffer", log)
+
+        # Assert that the UserDefinedTritonKernel node directly mutates the argument.
+        FileCheck().check("UserDefinedTritonKernel").check(
+            "buf0: MutationOutput"
+        ).check("buf0.mutations = ['arg0_1']").run(log)
 
     @requires_gpu
     @common_utils.parametrize("grad", [False, True])
