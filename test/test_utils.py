@@ -16,15 +16,15 @@ import warnings
 from typing import Any, cast
 
 import torch
-import torch.cuda
 import torch.nn as nn
 import torch.utils.cpp_extension
 import torch.utils.data
 from torch._utils import try_import
 from torch._utils_internal import deprecated
-from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
+    deviceCountAtLeast,
     instantiate_device_type_tests,
+    onlyAccelerator,
     onlyCPU,
     ops,
 )
@@ -56,11 +56,6 @@ from torch.utils.data import DataLoader
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests  # noqa: PLW0127
-
-device_type = (
-    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
-)
-TEST_GPU = torch.xpu.is_available() or torch.cuda.is_available()
 
 from torch.testing._internal.common_utils import run_tests, TestCase
 
@@ -309,46 +304,6 @@ class TestCheckpoint(TestCase):
 
             self.assertEqual(grad_with_checkpointing, grad_no_checkpointing)
 
-    @unittest.skipIf(not TEST_GPU, "No accelerator")
-    def test_checkpoint_rng_gpu(self):
-        for _ in range(5):
-            inp = torch.randn(20000, device=device_type).requires_grad_()
-            phase1 = torch.nn.Dropout()
-            phase2 = torch.nn.Dropout()
-
-            def run_fn(input):
-                return phase2(input)
-
-            state = torch.get_device_module(device_type).get_rng_state()
-
-            out = phase1(inp)
-            out = checkpoint(run_fn, out, use_reentrant=True)
-            out.sum().backward()
-            grad_with_checkpointing = inp.grad
-
-            torch.get_device_module(device_type).set_rng_state(state)
-
-            inp.grad = None
-
-            out = phase1(inp)
-            out = run_fn(out)
-            out.sum().backward()
-            grad_no_checkpointing = inp.grad
-
-            self.assertEqual(grad_with_checkpointing, grad_no_checkpointing)
-
-    @unittest.skipIf(not TEST_GPU, "No accelerator")
-    def test_checkpoint_not_preserve_rng_state_and_without_reentrant(self):
-        inp = torch.randn(2, device=device_type).requires_grad_()
-        layer = torch.nn.Dropout()
-
-        def run_fn(input):
-            return layer(input)
-
-        out = checkpoint(run_fn, inp, use_reentrant=False, preserve_rng_state=False)
-        out.sum().backward()
-        # This should run without error
-
     def test_checkpoint_non_tensor(self):
         def run_fn(tensor1, tensor2):
             if tensor2 is None:
@@ -442,18 +397,26 @@ class TestCheckpoint(TestCase):
             out = checkpoint(run_fn2, input_var, input_var2, use_reentrant=True)
             out.sum().backward()
 
-    @unittest.skipIf(not TEST_GPU, "No accelerator")
+    @unittest.skipIf(not torch.accelerator.is_available(), "No accelerator")
     def test_checkpointing_without_reentrant_early_free(self):
-        # I don't know how to check if the temporary saved variable buffer
-        # get de-allocated directly. So using GPU memory usage as a proxy
+        _acc = torch.accelerator.current_accelerator()
+        if _acc is None:
+            self.skipTest("current_accelerator() not supported")
+
+        _device_type = _acc.type
+
+        # Functional check: verify memory tracking actually works on this backend
+        test_tensor = torch.zeros(1024, device=_device_type)
+        torch.accelerator.synchronize()
+        if torch.accelerator.memory_allocated() == 0:
+            del test_tensor
+            self.skipTest(f"{_device_type} does not support memory_allocated tracking")
+        del test_tensor
 
         def _do_test(fn, should_free):
             stats: list[int] = []
 
             def track(x, idx):
-                # Track that at each step of the backward, some Tensor were
-                # de-allocated (which correspond to the checkpoint storage being
-                # emptied at each step)
                 def hook(_unused):
                     self.assertEqual(len(stats), idx)
                     torch.accelerator.synchronize()
@@ -467,8 +430,6 @@ class TestCheckpoint(TestCase):
                 x.register_hook(hook)
 
             def test_fn(x):
-                # The main property of this function is that it contains multiple
-                # operations that save gradients in a chain.
                 x = x**2
                 track(x, 2)
                 x = x**2
@@ -482,23 +443,19 @@ class TestCheckpoint(TestCase):
 
             return stats
 
-        x = torch.zeros(10, device=device_type, requires_grad=True)
+        x = torch.zeros(10, device=_device_type, requires_grad=True)
         x.grad = torch.zeros_like(x)
 
-        # In a regular backward, buffers get eagerly freed
         non_retain_stats = _do_test(lambda fn: fn(x).backward(), True)
 
-        # In a retain_grad backward, buffers get preserved
         _unused_retain_stats = _do_test(
             lambda fn: fn(x).backward(retain_graph=True), False
         )
 
-        # In a regular backward with checkpoint, buffers get eagerly freed
         checkpoint_non_retain_stats = _do_test(
             lambda fn: checkpoint(fn, x, use_reentrant=False).backward(), True
         )
 
-        # In a retain_grad backward with checkpoint, buffers get eagerly freed
         checkpoint_retain_stats = _do_test(
             lambda fn: checkpoint(fn, x, use_reentrant=False).backward(
                 retain_graph=True
@@ -509,11 +466,59 @@ class TestCheckpoint(TestCase):
         self.assertEqual(non_retain_stats, checkpoint_non_retain_stats)
         self.assertEqual(non_retain_stats, checkpoint_retain_stats)
 
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    def test_get_device_states_recursive(self):
+    def test_infer_device_state_recursive_meta(self):
+        inp = {"foo": torch.rand(10, device="meta")}
+        device_type = _infer_device_type(inp)
+        self.assertEqual("meta", device_type)
+
+
+class TestCheckpointDeviceType(TestCase):
+    @onlyAccelerator
+    def test_checkpoint_rng_accelerator(self, device):
+        for _ in range(5):
+            inp = torch.randn(20000, device=device).requires_grad_()
+            phase1 = torch.nn.Dropout()
+            phase2 = torch.nn.Dropout()
+
+            def run_fn(input):
+                return phase2(input)
+
+            state = torch.get_device_module(device).get_rng_state()
+
+            out = phase1(inp)
+            out = checkpoint(run_fn, out, use_reentrant=True)
+            out.sum().backward()
+            grad_with_checkpointing = inp.grad
+
+            torch.get_device_module(device).set_rng_state(state)
+
+            inp.grad = None
+
+            out = phase1(inp)
+            out = run_fn(out)
+            out.sum().backward()
+            grad_no_checkpointing = inp.grad
+
+            self.assertEqual(grad_with_checkpointing, grad_no_checkpointing)
+
+    @onlyAccelerator
+    def test_checkpoint_not_preserve_rng_state_and_without_reentrant(self, device):
+        inp = torch.randn(2, device=device).requires_grad_()
+        layer = torch.nn.Dropout()
+
+        def run_fn(input):
+            return layer(input)
+
+        out = checkpoint(run_fn, inp, use_reentrant=False, preserve_rng_state=False)
+        out.sum().backward()
+
+    @onlyAccelerator
+    @deviceCountAtLeast(2)
+    def test_get_device_states_recursive(self, devices):
+        dev_type = torch.device(devices[0]).type
         inp = {
-            "foo": torch.rand(10, device=f"{device_type}:0"),
-            "bar": [torch.rand(10, device=f"{device_type}:1")],
+            "foo": torch.rand(10, device=f"{dev_type}:0"),
+            "bar": [torch.rand(10, device=f"{dev_type}:1")],
         }
         device_ids, device_states = get_device_states(inp)
         self.assertEqual(2, len(device_ids))
@@ -523,76 +528,67 @@ class TestCheckpoint(TestCase):
         self.assertTrue(isinstance(device_states[0], torch.Tensor))
         self.assertTrue(isinstance(device_states[1], torch.Tensor))
 
-    def test_infer_device_state_recursive_meta(self):
-        inp = {"foo": torch.rand(10, device="meta")}
-        device_type = _infer_device_type(inp)
-        self.assertEqual("meta", device_type)
-
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    def test_infer_device_state_recursive_multi_gpu(self):
-        # Check that no warning is issued for either gpu:0, gpu:1 or
-        # gpu:0, gpu:0 cases since they are both the same device type
+    @onlyAccelerator
+    @deviceCountAtLeast(2)
+    def test_infer_device_state_recursive_multi_device(self, devices):
+        dev_type = torch.device(devices[0]).type
         inp = {
-            "foo": torch.rand(10, device=f"{device_type}:0"),
-            "bar": [torch.rand(10, device=f"{device_type}:1")],
+            "foo": torch.rand(10, device=f"{dev_type}:0"),
+            "bar": [torch.rand(10, device=f"{dev_type}:1")],
         }
         with warnings.catch_warnings():
             warnings.simplefilter("error")
             _device_type = _infer_device_type(inp)
-            self.assertEqual(device_type, _device_type)
+            self.assertEqual(dev_type, _device_type)
         inp = {
-            "foo": torch.rand(10, device=f"{device_type}:0"),
-            "bar": [torch.rand(10, device=f"{device_type}:0")],
+            "foo": torch.rand(10, device=f"{dev_type}:0"),
+            "bar": [torch.rand(10, device=f"{dev_type}:0")],
         }
         with warnings.catch_warnings():
             warnings.simplefilter("error")
             _device_type = _infer_device_type(inp)
-            self.assertEqual(device_type, _device_type)
-        # Check that a warning is issued for gpu:0, meta and that it includes
-        # device type information
+            self.assertEqual(dev_type, _device_type)
         inp = {
-            "foo": torch.rand(10, device=f"{device_type}:0"),
+            "foo": torch.rand(10, device=f"{dev_type}:0"),
             "bar": [torch.rand(10, device="meta")],
         }
         with warnings.catch_warnings(record=True) as w:
             _device_type = _infer_device_type(inp)
-            self.assertEqual(device_type, _device_type)
+            self.assertEqual(dev_type, _device_type)
         self.assertEqual(len(w), 1)
         warning_msg = str(w[-1].message)
         self.assertTrue(
             "Tensor arguments, excluding CPU tensors, are detected on at least two types of devices"
             in warning_msg
         )
-        self.assertTrue(f"Device types: ['{device_type}', 'meta']" in warning_msg)
-        self.assertTrue(f"first device type: {device_type}" in warning_msg)
+        self.assertTrue(f"Device types: ['{dev_type}', 'meta']" in warning_msg)
+        self.assertTrue(f"first device type: {dev_type}" in warning_msg)
 
-    @unittest.skipIf(not TEST_GPU, "No accelerator")
-    def test_checkpoint_preserves_device_context(self):
-        """Test that checkpoint preserves torch.device() context during recomputation.
-
-        When a forward function is executed inside a torch.device() context manager,
-        tensors created without explicit device should be placed on the context's device.
-        This should also hold during checkpoint recomputation in backward pass.
-        """
+    @onlyAccelerator
+    def test_checkpoint_preserves_device_context(self, device):
+        """Test that checkpoint preserves torch.device() context during recomputation."""
         recomputed_devices = []
+        dev_type = torch.device(device).type
 
         def fn_creates_tensor(x):
-            # Create tensor without explicit device - should use default from context
             intermediate = torch.empty(4)
             recomputed_devices.append(intermediate.device)
             return x * intermediate.sum()
 
-        x = torch.randn(4, device=device_type, requires_grad=True)
+        x = torch.randn(4, device=device, requires_grad=True)
 
-        with torch.device(device_type):
-            # Forward pass: intermediate should be on device_type
+        with torch.device(dev_type):
             y = checkpoint(fn_creates_tensor, x, use_reentrant=False)
-            self.assertEqual(recomputed_devices[-1].type, device_type)
+            self.assertEqual(recomputed_devices[-1].type, dev_type)
 
-            # Backward pass triggers recomputation: intermediate should still be on device_type
             y.sum().backward()
-            self.assertEqual(len(recomputed_devices), 2)  # forward + recompute
-            self.assertEqual(recomputed_devices[-1].type, device_type)
+            self.assertEqual(len(recomputed_devices), 2)
+            self.assertEqual(recomputed_devices[-1].type, dev_type)
+
+
+instantiate_device_type_tests(
+    TestCheckpointDeviceType, globals(), except_for=["cpu"], allow_xpu=True
+)
 
 
 class TestDataLoaderUtils(TestCase):
@@ -894,40 +890,41 @@ class TestDeviceUtils(TestCase):
         self.assertEqual(torch.get_default_device().type, "meta")
         torch.set_default_device(None)
 
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    def test_get_default_device_more(self):
+    @onlyAccelerator
+    @deviceCountAtLeast(2)
+    def test_get_default_device_more(self, devices):
+        dev_type = torch.device(devices[0]).type
         try:
-            torch.set_default_device(device_type)
+            torch.set_default_device(dev_type)
             self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
             torch.set_default_device(None)
 
-            torch.set_default_device(device_type)
-            torch.get_device_module(device_type).set_device(f"{device_type}:1")
+            torch.set_default_device(dev_type)
+            torch.get_device_module(dev_type).set_device(f"{dev_type}:1")
             self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
             torch.accelerator.set_device_index(1)
             self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
             torch.set_default_device(None)
 
-            torch.set_default_device(f"{device_type}:1")
+            torch.set_default_device(f"{dev_type}:1")
             self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
             torch.set_default_device(None)
 
-            torch.set_default_device(f"{device_type}:1")
-            with torch.device(f"{device_type}:0"):
+            torch.set_default_device(f"{dev_type}:1")
+            with torch.device(f"{dev_type}:0"):
                 self.assertEqual(
-                    torch.get_default_device(), torch.device(f"{device_type}", 0)
+                    torch.get_default_device(), torch.device(f"{dev_type}", 0)
                 )
 
             torch.set_default_device("cpu")
             self.assertEqual(torch.get_default_device(), torch.device("cpu"))
-            with torch.device(f"{device_type}:0"):
+            with torch.device(f"{dev_type}:0"):
                 self.assertEqual(
-                    torch.get_default_device(), torch.device(f"{device_type}", 0)
+                    torch.get_default_device(), torch.device(f"{dev_type}", 0)
                 )
 
             self.assertEqual(torch.get_default_device(), torch.device("cpu"))
         finally:
-            # Reset the device at the end.
             torch.set_default_device(None)
 
     @onlyCPU
