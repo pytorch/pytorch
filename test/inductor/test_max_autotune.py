@@ -3496,6 +3496,40 @@ class TestMaxAutotune(TestCase):
         self.assertNotIn("acc.to(tl.float16)", code[0])
         self.assertNotIn("acc.to(tl.bfloat16)", code[0])
 
+    @unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    def test_bmm_input_dedup_no_stream_overflow(self):
+        """Autotuning bmm after a self-referential bmm must not crash.
+
+        The first compilation produces template kernels where both operands
+        alias the same buffer (input deduplication).  The second compilation's
+        autotuning must handle the reduced parameter count without overflowing
+        positional args into the stream keyword.
+        """
+        dev = GPU_TYPE
+        B, N = 2, 128
+
+        grad = torch.randn(B, N, N, device=dev)
+        m0 = torch.randn(B, N, N, device=dev)
+        m1 = torch.randn(B, N, N, device=dev)
+        q0 = torch.randn(B, N, N, device=dev)
+        q1 = torch.randn(B, N, N, device=dev)
+
+        @torch.compile(fullgraph=True, dynamic=False, mode="max-autotune-no-cudagraphs")
+        def update(grad, m0, m1, beta):
+            outer0 = torch.einsum("...ab,...Ab->...aA", grad, grad)
+            m0.lerp_(outer0, 1 - beta)
+            outer1 = torch.einsum("...ab,...aB->...bB", grad, grad)
+            m1.lerp_(outer1, 1 - beta)
+
+        @torch.compile(fullgraph=True, dynamic=False, mode="max-autotune-no-cudagraphs")
+        def project(grad, q0, q1):
+            return torch.einsum("...ab,...aA,...bB->...AB", grad, q0, q1)
+
+        update(grad, m0, m1, 0.999)
+        result = project(grad.float(), q0.float(), q1.float())
+        expected = torch.einsum("...ab,...aA,...bB->...AB", grad.float(), q0.float(), q1.float())
+        torch.testing.assert_close(result, expected)
+
 
 @instantiate_parametrized_tests
 class TestTemplateConfigPruning(TestCase):
