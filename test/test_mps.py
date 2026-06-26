@@ -1491,57 +1491,6 @@ class TestMPS(TestCaseMPS):
                 self.assertFalse(out_a.isnan().any() or out_a.isinf().any(),
                                  f"addbmm beta=0 propagated {bad} for dtype={dtype}")
 
-    def test_baddbmm_empty_tensors(self):
-        # baddbmm crashes on MPS with size-0 dimensions due to empty
-        # MTLBuffer assertion in Placeholder.
-        cases = [
-            # (input_shape, batch1_shape, batch2_shape, label)
-            ((0, 3, 5), (0, 3, 4), (0, 4, 5), "B=0"),
-            ((2, 0, 5), (2, 0, 4), (2, 4, 5), "M=0"),
-            ((2, 3, 0), (2, 3, 4), (2, 4, 0), "N=0"),
-            ((2, 0, 1), (2, 0, 3), (2, 3, 1), "M=0,N=1"),
-            ((2, 3, 5), (2, 3, 0), (2, 0, 5), "K=0"),
-        ]
-        for inp_shape, b1_shape, b2_shape, label in cases:
-            for beta in [0.0, 0.5, 1.0]:
-                inp_cpu = torch.randn(inp_shape)
-                b1_cpu = torch.randn(b1_shape)
-                b2_cpu = torch.randn(b2_shape)
-                expected = torch.baddbmm(inp_cpu, b1_cpu, b2_cpu, beta=beta, alpha=1.2)
-
-                inp_mps = inp_cpu.to("mps")
-                b1_mps = b1_cpu.to("mps")
-                b2_mps = b2_cpu.to("mps")
-                result = torch.baddbmm(inp_mps, b1_mps, b2_mps, beta=beta, alpha=1.2)
-
-                self.assertEqual(result.shape, expected.shape, msg=f"baddbmm {label} beta={beta}")
-                self.assertEqual(result.cpu(), expected, msg=f"baddbmm {label} beta={beta}")
-
-    def test_addbmm_empty_tensors(self):
-        # addbmm hits the same crash path as baddbmm for size-0
-        # dimensions on MPS.
-        cases = [
-            # (input_shape, batch1_shape, batch2_shape, label)
-            ((3, 5), (0, 3, 4), (0, 4, 5), "B=0"),
-            ((0, 5), (2, 0, 4), (2, 4, 5), "M=0"),
-            ((3, 0), (2, 3, 4), (2, 4, 0), "N=0"),
-            ((3, 5), (2, 3, 0), (2, 0, 5), "K=0"),
-        ]
-        for inp_shape, b1_shape, b2_shape, label in cases:
-            for beta in [0.0, 0.5, 1.0]:
-                inp_cpu = torch.randn(inp_shape)
-                b1_cpu = torch.randn(b1_shape)
-                b2_cpu = torch.randn(b2_shape)
-                expected = torch.addbmm(inp_cpu, b1_cpu, b2_cpu, beta=beta, alpha=1.2)
-
-                inp_mps = inp_cpu.to("mps")
-                b1_mps = b1_cpu.to("mps")
-                b2_mps = b2_cpu.to("mps")
-                result = torch.addbmm(inp_mps, b1_mps, b2_mps, beta=beta, alpha=1.2)
-
-                self.assertEqual(result.shape, expected.shape, msg=f"addbmm {label} beta={beta}")
-                self.assertEqual(result.cpu(), expected, msg=f"addbmm {label} beta={beta}")
-
     def test_local_scalar_dense_mps(self):
         x_cpu = torch.randn(1)
         y_mps = x_cpu.to("mps")

@@ -17,6 +17,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ScalarOps.h>
 #include <ATen/ops/_cholesky_solve_helper_native.h>
 #include <ATen/ops/_linalg_eigh.h>
 #include <ATen/ops/_linalg_solve_ex_native.h>
@@ -43,6 +44,7 @@
 #include <ATen/ops/lu_unpack_native.h>
 #include <ATen/ops/matmul.h>
 #include <ATen/ops/mm_native.h>
+#include <ATen/ops/mul.h>
 #include <ATen/ops/orgqr_native.h>
 #include <ATen/ops/real.h>
 #include <ATen/ops/slice.h>
@@ -793,18 +795,13 @@ static Tensor& addbmm_or_baddbmm_out_mps_impl(const Tensor& input,
 
   if (opType == ADDBMM_OP_TYPE) {
     result.resize_as_(input);
-    // addbmm's result isn't populated by a meta function (unlike baddbmm),
-    // so copy input now so that beta-scaling guards below work correctly.
-    if (beta.toComplexDouble() != 0.0) {
-      result.copy_(input);
-    }
     // addbmm sums across batches into a 2D output, so B=0 doesn't make
     // result.numel()==0 the way it does for baddbmm; needs its own guard.
     if (batch1.size(0) == 0) {
       if (beta.toComplexDouble() == 0.0) {
         result.zero_();
       } else {
-        result.mul_(beta);
+        at::mul_out(result, input, wrapped_scalar_tensor(beta));
       }
       return result;
     }
@@ -821,6 +818,8 @@ static Tensor& addbmm_or_baddbmm_out_mps_impl(const Tensor& input,
   if (batch1.size(2) == 0) {
     if (beta.toComplexDouble() == 0.0) {
       result.zero_();
+    } else if (opType == ADDBMM_OP_TYPE) {
+      at::mul_out(result, input, wrapped_scalar_tensor(beta));
     } else {
       result.mul_(beta);
     }
