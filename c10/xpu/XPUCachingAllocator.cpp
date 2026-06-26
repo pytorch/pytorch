@@ -2032,7 +2032,6 @@ class DeviceCachingAllocator {
     freeBlocksAllocatedToPool(private_pool, rr);
 
     std::unordered_map<void*, Block*> ptrs_to_blocks;
-
     for (Block* block : private_pool->small_blocks.blocks) {
       ptrs_to_blocks[block->ptr] = block;
     }
@@ -2743,7 +2742,6 @@ class NativeCachingAllocator : public XPUAllocator {
     return device_allocators[device]->checkPoolLiveAllocations(
         mempool_id, expected_live_allocations);
   }
-
   void enablePeerAccess(c10::DeviceIndex dev, c10::DeviceIndex dev_to_access) {
     assertValidDevice(dev);
     assertValidDevice(dev_to_access);
