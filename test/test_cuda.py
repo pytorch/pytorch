@@ -8701,6 +8701,29 @@ class TestMemPool(TestCase):
         self.assertIsNotNone(model.weight.grad)
         self.assertEqual(model.weight.grad.shape, (512, 512))
 
+    @skipIfRocm(msg="cudaMallocManaged (UVM) is not supported on ROCm")
+    @unittest.skipIf(
+        not TEST_CUDA_PYTHON_BINDINGS, "requires cuda-python (cuda.bindings)"
+    )
+    def test_use_uvm_tensor_outlives_context(self):
+        # Regression test: a tensor allocated inside _use_uvm() can outlive the
+        # context, leaving its block cached in the PrivatePool until a later global
+        # empty_cache() frees it. Before the fix the alloc/free ctypes closures
+        # were GC'd by then, so the free dangled and segfaulted. Loop twice and
+        # (where available) over a second device to exercise the now-shared
+        # allocator across calls/devices.
+        devices = [None]
+        if torch.cuda.device_count() > 1:
+            devices.append(1)
+        for _ in range(2):
+            for device in devices:
+                with torch.cuda._use_uvm(device=device):
+                    x = torch.randn(256, 256, device=device or "cuda")
+                self.assertTrue(x.is_cuda)
+                del x
+                gc.collect()
+                torch.cuda.empty_cache()
+
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 @torch.testing._internal.common_utils.markDynamoStrictTest

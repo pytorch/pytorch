@@ -62,6 +62,16 @@
       ]
     }
   ],
+  "GB4774": [
+    {
+      "Gb_type": "torch.map: f mutates pos_args",
+      "Context": "pos_args={pos_args_mutated}",
+      "Explanation": "map only supports in-place mutation of xs (each iteration sees a storage-disjoint slice). pos_args are loop-invariant: every iteration sees the same tensor, so a mutation makes iterations depend on each other, breaking map's independence contract and introducing a data race under any parallel lowering. Use scan or while_loop if sequential buffer updates are required.",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
   "GB2861": [
     {
       "Gb_type": "Untraceable C tp_hash",
@@ -2982,6 +2992,16 @@
       ]
     }
   ],
+  "GB6183": [
+    {
+      "Gb_type": "torch.map: f mutates a captured tensor",
+      "Context": "freevars={freevars_mutated}",
+      "Explanation": "map only supports in-place mutation of xs. A tensor captured from the enclosing scope (lifted parameter) is loop-invariant: every iteration sees the same tensor, so a mutation makes iterations depend on each other, breaking map's independence contract and introducing a data race under any parallel lowering. Pass the buffer through xs, or use scan / while_loop if sequential buffer updates are required.",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
   "GB9198": [
     {
       "Gb_type": "Attempted to call repr() method implemented in C/C++",
@@ -3907,6 +3927,14 @@
     }
   ],
   "GB9840": [
+    {
+      "Gb_type": "Can't extract message from torch._check*()",
+      "Context": "str(message_vt)",
+      "Explanation": "The message argument of torch._check*() must be a string, None, or a function defined within the torch.compile region.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
     {
       "Gb_type": "Can't extract message from torch._check*()",
       "Context": "str(message_vt)",

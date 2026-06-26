@@ -3500,6 +3500,8 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        self.supports_input_mutation = not torch.is_grad_enabled()
+
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
 
         if len(kwargs) > 0:
@@ -3577,6 +3579,10 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             supports_aliasing=self.supports_aliasing,
         )
 
+        body_mutated_inputs = set(
+            getattr(body_graph, "_dynamo_mutated_input_indices", ())
+        )
+
         # Check all outputs of map are tensors.
         # For map, outputting None is OK, thus ignore None values in the check
         body_r_vars = unpack_iterable(tx, body_r)
@@ -3584,6 +3590,61 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         _check_all_tensorvariable(
             [br for bm, br in zip(none_mask, body_r_vars) if not bm]
         )
+
+        # Mutation handling: map allows in-place writes only to xs
+        # (each iteration sees a storage-disjoint slice). Mutations of
+        # pos_args or captured freevars are unsafe (see MapImpl.gen_schema
+        # for the contract). Placeholder order is [xs, pos_args, freevars].
+        n_xs = len(unpacked_xs)
+        n_pos = len(unpacked_args)
+
+        pos_args_mutated = sorted(
+            i - n_xs for i in body_mutated_inputs if n_xs <= i < n_xs + n_pos
+        )
+        if pos_args_mutated:
+            unimplemented(
+                gb_type="torch.map: f mutates pos_args",
+                context=f"pos_args={pos_args_mutated}",
+                explanation=(
+                    "map only supports in-place mutation of xs (each "
+                    "iteration sees a storage-disjoint slice). pos_args "
+                    "are loop-invariant: every iteration sees the same "
+                    "tensor, so a mutation makes iterations depend on each "
+                    "other, breaking map's independence contract and "
+                    "introducing a data race under any parallel lowering. "
+                    "Use scan or while_loop if sequential buffer updates "
+                    "are required."
+                ),
+                hints=[
+                    *graph_break_hints.USER_ERROR,
+                ],
+            )
+
+        freevars_mutated = sorted(
+            i - n_xs - n_pos for i in body_mutated_inputs if i >= n_xs + n_pos
+        )
+        if freevars_mutated:
+            unimplemented(
+                gb_type="torch.map: f mutates a captured tensor",
+                context=f"freevars={freevars_mutated}",
+                explanation=(
+                    "map only supports in-place mutation of xs. A tensor "
+                    "captured from the enclosing scope (lifted parameter) is loop-invariant: "
+                    "every iteration sees the same tensor, so a mutation "
+                    "makes iterations depend on each other, breaking map's "
+                    "independence contract and introducing a data race "
+                    "under any parallel lowering. Pass the buffer through "
+                    "xs, or use scan / while_loop if sequential buffer "
+                    "updates are required."
+                ),
+                hints=[
+                    *graph_break_hints.USER_ERROR,
+                ],
+            )
+
+        # No storage round-trip needed: aliasing graph-breaks upstream, so the
+        # mutated subgraph placeholder indices are already the parent xs indices.
+        mutated_arg_indices = ",".join(str(i) for i in sorted(body_mutated_inputs))
 
         body_nn_modules = dict(tx.output.nn_modules)
 
@@ -3600,9 +3661,14 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             [arg.as_proxy() for arg in unpacked_args]
             + list(body_lifted_freevars.keys()),
         )
-
         return _call_function_and_unflatten_output(
-            tx, torch.ops.higher_order.map_impl, p_args, {}, None, body_spec, body_r
+            tx,
+            torch.ops.higher_order.map_impl,
+            p_args,
+            {"mutated_arg_indices": mutated_arg_indices} if mutated_arg_indices else {},
+            None,
+            body_spec,
+            body_r,
         )
 
 

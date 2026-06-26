@@ -1197,7 +1197,7 @@ def _set_backcompat_keepdim_warn(
     arg: _bool,
 ) -> None: ...  # THPModule_setBackcompatKeepdimWarn
 def _get_backcompat_keepdim_warn() -> _bool: ...  # THPModule_getBackcompatKeepdimWarn
-def get_num_thread() -> _int: ...  # THPModule_getNumThreads
+def get_num_threads() -> _int: ...  # THPModule_getNumThreads
 def set_num_threads(nthreads: _int) -> None: ...  # THPModule_setNumThreads
 def get_num_interop_threads() -> _int: ...  # THPModule_getNumInteropThreads
 def set_num_interop_threads(
