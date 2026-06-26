@@ -3563,6 +3563,37 @@ class TestSDPACudaOnly(NNTestCase):
         max_diff = (out - out_contig).abs().mean()
         self.assertTrue(max_diff.item() < 1e-7)
 
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
+    def test_mem_eff_attention_save_on_cpu_unaligned_bias_stride(self, device):
+        dtype = torch.float16
+        make_tensor = partial(torch.rand, device=device, dtype=dtype, requires_grad=True)
+        batch, num_heads, seq_len_q, seq_len_kv, head_dim = 1, 8, 1, 361, 64
+        query = make_tensor(SdpaShape(batch, num_heads, seq_len_q, head_dim))
+        kv_shape = SdpaShape(batch, num_heads, seq_len_kv, head_dim)
+        key, value = make_tensor(kv_shape), make_tensor(kv_shape)
+        attn_mask = torch.randn((batch, 1, seq_len_q, seq_len_kv), device=device, dtype=dtype, requires_grad=True)
+        self.assertEqual(attn_mask.stride(1), 361)
+        ref_query = query.detach().clone().requires_grad_()
+        ref_key = key.detach().clone().requires_grad_()
+        ref_value = value.detach().clone().requires_grad_()
+        ref_attn_mask = attn_mask.detach().clone().requires_grad_()
+
+        with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
+            ref_out = F.scaled_dot_product_attention(ref_query, ref_key, ref_value, ref_attn_mask)
+            ref_out.sum().backward()
+            with torch.autograd.graph.save_on_cpu():
+                out = F.scaled_dot_product_attention(query, key, value, attn_mask)
+        out.sum().backward()
+
+        self.assertEqual(out, ref_out)
+        for actual, expected in (
+            (query.grad, ref_query.grad),
+            (key.grad, ref_key.grad),
+            (value.grad, ref_value.grad),
+            (attn_mask.grad, ref_attn_mask.grad),
+        ):
+            self.assertEqual(actual, expected)
+
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Fused SDPA was not built for this system")
     def test_singelton_head_dim_stride_ne_1(self, device):
         query = torch.tensor([[[[1, 2]]]], dtype=torch.float16, device=device)
