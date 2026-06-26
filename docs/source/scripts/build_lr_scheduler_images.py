@@ -35,11 +35,13 @@ model = torch.nn.Linear(10, 1)
 
 num_epochs = 100
 
+
 def constant_exponential_schedulers(opt):
     return [
         ConstantLR(opt, factor=0.1, total_iters=num_epochs // 5),
         ExponentialLR(opt, gamma=0.9),
     ]
+
 
 schedulers = [
     (lambda opt: LambdaLR(opt, lr_lambda=lambda epoch: epoch // 30)),
@@ -62,6 +64,7 @@ schedulers = [
         )
     ),
 ]
+
 
 def plot_function(scheduler):
     plt.clf()
