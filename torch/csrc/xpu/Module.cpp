@@ -268,6 +268,47 @@ static PyObject* THXPModule_resetAccumulatedMemoryStats(
   Py_RETURN_NONE;
 }
 
+namespace {
+
+void removeStorageDeleterFns(
+    const std::vector<c10::StorageImpl*>& stale_live_storages,
+    std::unordered_set<void*> definitely_stale_pointers) {
+  for (c10::StorageImpl* stale_storage : stale_live_storages) {
+    auto ptr = stale_storage->data_ptr().get();
+    auto allocated_pointer = definitely_stale_pointers.find(ptr);
+    TORCH_CHECK(allocated_pointer != definitely_stale_pointers.end());
+    auto t = c10::xpu::XPUCachingAllocator::get();
+    bool succeeded = stale_storage->mutable_data_ptr().compare_exchange_deleter(
+        t->raw_deleter(), &c10::detail::deleteNothing);
+
+    TORCH_CHECK(
+        succeeded,
+        "Unexpected deleter function on storage, could not swap function");
+  }
+}
+
+void addStorageDeleterFns(
+    std::vector<c10::StorageImpl*>& storages_to_add_deleters_to,
+    c10::xpu::XPUCachingAllocator::CheckpointDelta& delta) {
+  std::unordered_map<void*, c10::StorageImpl*> storages;
+  for (auto& storage : storages_to_add_deleters_to) {
+    storages[storage->data_ptr().get()] = storage;
+  }
+
+  for (auto& data_ptr : delta.dataptrs_allocd) {
+    auto storage_pair = storages.find(data_ptr.get());
+    if (storage_pair != storages.end()) {
+      auto ctx = storage_pair->second->data_ptr().get_context();
+      TORCH_CHECK(ctx == nullptr, " Not expecting deleter function");
+      storage_pair->second->set_data_ptr_noswap(std::move(data_ptr));
+    } else {
+      data_ptr.release_context();
+    }
+  }
+}
+
+} // namespace
+
 // XPU module initialization
 
 static void registerXpuDeviceProperties(PyObject* module) {
@@ -388,6 +429,9 @@ static void registerXpuDeviceProperties(PyObject* module) {
                    << ", is_integrated_gpu=" << prop.is_integrated_gpu << ")";
             return std::move(stream).str();
           });
+  m.def("_xpu_isHistoryEnabled", []() {
+    return c10::xpu::XPUCachingAllocator::isHistoryEnabled();
+  });
 }
 
 static void registerXpuPluggableAllocator(PyObject* module) {
@@ -405,6 +449,11 @@ static void registerXpuPluggableAllocator(PyObject* module) {
       std::shared_ptr<
           torch::xpu::XPUPluggableAllocator::XPUPluggableAllocator>>(
       m, "_XPUPluggableAllocator");
+
+  py::class_<
+      c10::xpu::XPUCachingAllocator::AllocatorState,
+      std::shared_ptr<c10::xpu::XPUCachingAllocator::AllocatorState>>(
+      m, "_xpu_XPUAllocator_AllocatorState");
 
   m.def("_xpu_getAllocator", []() {
     return py::cast(torch::xpu::XPUPluggableAllocator::getCurrentAllocator());
@@ -425,6 +474,79 @@ static void registerXpuPluggableAllocator(PyObject* module) {
     return torch::xpu::XPUPluggableAllocator::createCustomAllocator(
         malloc_fn, free_fn);
   });
+  m.def(
+      "_xpu_getCheckpointState",
+      [](c10::DeviceIndex device, c10::xpu::MempoolId_t id) {
+        return c10::xpu::XPUCachingAllocator::getCheckpointState(device, id);
+      });
+  m.def(
+      "_xpu_checkPoolLiveAllocations",
+      [](c10::DeviceIndex device,
+         at::xpu::MempoolId_t mempool_id,
+         const py::set& expected_live_allocations) {
+        std::unordered_set<void*> allocations;
+        allocations.reserve(expected_live_allocations.size());
+        for (auto& elem : expected_live_allocations) {
+          // NOLINTNEXTLINE(performance-no-int-to-ptr)
+          allocations.insert(reinterpret_cast<void*>(py::cast<size_t>(elem)));
+        }
+        return c10::xpu::XPUCachingAllocator::checkPoolLiveAllocations(
+            device, mempool_id, allocations);
+      });
+
+  m.def(
+      "_xpu_setCheckpointPoolState",
+      [](c10::DeviceIndex device,
+         std::shared_ptr<c10::xpu::XPUCachingAllocator::AllocatorState> pps,
+         const std::vector<size_t>& stale_storages_ptr,
+         const std::vector<size_t>& storages_to_add_deleters_to_ptr = {}) {
+        std::unordered_set<c10::StorageImpl*> ptr_set;
+        // iterate on std::vector for determinism
+        std::vector<c10::StorageImpl*> ptrs;
+        for (size_t ptr_int : stale_storages_ptr) {
+          // NOLINTNEXTLINE(performance-no-int-to-ptr)
+          c10::StorageImpl* ptr = (c10::StorageImpl*)ptr_int;
+          if (!ptr_set.count(ptr)) {
+            ptrs.push_back(ptr);
+            ptr_set.insert(ptr);
+          }
+        }
+        auto delta = c10::xpu::XPUCachingAllocator::setCheckpointPoolState(
+            device, std::move(pps));
+        auto& freed_pointers = delta.ptrs_freed;
+
+        std::unordered_set<void*> allocd_set;
+        for (auto& data_ptr : delta.dataptrs_allocd) {
+          allocd_set.insert(data_ptr.get());
+        }
+        std::unordered_set<void*> freed_pointer_set;
+        size_t definite_freed_count = 0;
+        for (void* ptr : freed_pointers) {
+          if (!allocd_set.count(ptr)) {
+            definite_freed_count += 1;
+          }
+          freed_pointer_set.insert(ptr);
+        }
+        // that block has already been freed,
+        // so even those this will error, so too will the allocator
+        // when the corresponding tensor dies because there is no
+        // live tensor corresponding to it
+        TORCH_CHECK(
+            ptr_set.size() >= definite_freed_count,
+            "Any stale tensors which are being manually freed"
+            " must be passed to set checkpoint");
+
+        removeStorageDeleterFns(ptrs, freed_pointer_set);
+        std::vector<c10::StorageImpl*> storages_to_add_deleters_to;
+        storages_to_add_deleters_to.reserve(
+            storages_to_add_deleters_to_ptr.size());
+        for (size_t ptr_int : storages_to_add_deleters_to_ptr) {
+          // NOLINTNEXTLINE(performance-no-int-to-ptr)
+          storages_to_add_deleters_to.push_back((c10::StorageImpl*)ptr_int);
+        }
+
+        addStorageDeleterFns(storages_to_add_deleters_to, delta);
+      });
 }
 
 static void bindGetDeviceProperties(PyObject* module) {
@@ -697,6 +819,19 @@ static PyObject* THXPModule_isCurrentStreamCapturing_wrap(
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THXPModule_xpuCachingAllocator_raw_delete(
+    PyObject* _unused,
+    PyObject* obj) {
+  HANDLE_TH_ERRORS
+  void* mem_ptr = PyLong_AsVoidPtr(obj);
+  {
+    pybind11::gil_scoped_release no_gil;
+    c10::xpu::XPUCachingAllocator::raw_delete(mem_ptr);
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 // NOLINTNEXTLINE(*-c-arrays*, *-global-variables)
 static struct PyMethodDef _THXPModule_methods[] = {
     {"_xpu_init", THXPModule_initExtension, METH_NOARGS, nullptr},
@@ -738,6 +873,10 @@ static struct PyMethodDef _THXPModule_methods[] = {
      nullptr},
     {"_xpu_resetPeakMemoryStats",
      THXPModule_resetPeakMemoryStats,
+     METH_O,
+     nullptr},
+    {"_xpu_xpuCachingAllocator_raw_delete",
+     THXPModule_xpuCachingAllocator_raw_delete,
      METH_O,
      nullptr},
     {nullptr}};
