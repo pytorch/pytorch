@@ -7032,6 +7032,18 @@ class TestBlockMask(InductorTestCase):
         self.assertTrue(block_mask[0].sparsity() > block_mask[1].sparsity())
 
     @supported_platform
+    def test_adjust_block_mask_ignores_entries_past_num_blocks(self, device):
+        def mask_mod(b, h, q, kv):
+            return (kv < 128) | ((kv >= 384) & (kv < 512))
+
+        block_mask = create_block_mask(mask_mod, 1, 1, 128, 640, device=device)
+        adjusted = block_mask._adjust(128, 384)
+        expected = create_block_mask(mask_mod, 1, 1, 128, 384, device=device)
+
+        self.assertEqual(adjusted.full_kv_num_blocks, expected.full_kv_num_blocks)
+        self.assertEqual(adjusted.to_dense(), expected.to_dense())
+
+    @supported_platform
     @common_utils.parametrize("BLOCK_SIZE", [32, 64, 128, 256, (32, 64), (64, 32)])
     def test_block_size_changes(self, device, BLOCK_SIZE: int | tuple[int, int]):
         B, H, Q_LEN, KV_LEN = 4, 2, 2048, 2048

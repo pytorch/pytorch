@@ -462,10 +462,16 @@ def _adjust_num_blocks_and_indices(
     new_num_rows: int,
     new_num_cols: int,
 ) -> tuple[Tensor, Tensor]:
+    """Crop an ordered block list while ignoring undefined entries past num_blocks."""
     indices = indices[:, :, :new_num_rows, :new_num_cols]
     num_blocks = num_blocks[:, :, :new_num_rows]
-    num_blocks = torch.where(num_blocks < new_num_cols, num_blocks, new_num_cols)
-    num_blocks = torch.sum(indices < num_blocks[:, :, :, None], dim=-1).to(torch.int32)
+    valid_entries = (
+        torch.arange(indices.shape[-1], dtype=num_blocks.dtype, device=indices.device)
+        < num_blocks[..., None]
+    )
+    num_blocks = torch.sum(valid_entries & (indices < new_num_cols), dim=-1).to(
+        torch.int32
+    )
     return num_blocks, indices
 
 
