@@ -7486,9 +7486,10 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         adjusted = options._adjust(128, 4096, 50000, torch.float32)
         self.assertEqual(adjusted.batch_chunk_size, 16)
 
-    @parametrize_test("acc_policy", ["unknown", "Memory", ""])
+    @parametrize_test("acc_policy", ["unknown", "Memory", "balanced", ""])
     def test_linear_cross_entropy_options_invalid_acc_policy_raises(self, acc_policy):
-        """__post_init__ rejects acc_policy outside the documented set."""
+        """__post_init__ rejects acc_policy outside the documented set
+        (``"balanced"`` was removed; ``"compact"`` supersedes it)."""
         with self.assertRaisesRegex(ValueError, "acc_policy"):
             nn.LinearCrossEntropyOptions(acc_policy=acc_policy)
 
@@ -7633,7 +7634,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         for d in (torch.bfloat16, torch.float16):
             self.assertEqual(opts._adjust(128, 4096, 50000, d, cpu).acc_dtype, torch.float32)
         self.assertEqual(opts._adjust(128, 4096, 50000, torch.float32, cpu).acc_dtype, torch.float32)
-        opts_explicit = nn.LinearCrossEntropyOptions(acc_policy="balanced")
+        opts_explicit = nn.LinearCrossEntropyOptions(acc_policy="compact")
         self.assertEqual(
             opts_explicit._adjust(128, 4096, 50000, torch.bfloat16, cpu).acc_dtype,
             torch.bfloat16,
@@ -14863,8 +14864,8 @@ if __name__ == '__main__':
             # every device. Observed maxima (input_grad / weight):
             # fp32 cpu 9229/914 (aarch64; x86_64 4619), cuda 189/131
             # (NVIDIA ig 189 / w 106, ROCm ig 105 / w 131), mps 98/29;
-            # fp16 balanced/compact ig 60-93 / w 17-58 (mps 67/14); bf16
-            # balanced/compact ig 6 / w 3 (mps 0); accurate fp16/bf16 ~0.
+            # fp16 compact ig 60-93 / w 17-58 (mps 67/14); bf16
+            # compact ig 6 / w 3 (mps 0); accurate fp16/bf16 ~0.
             # No bias=True prob samples, so the bias-grad cap stays 0.
             expected_max_ulp_diff = 4
             if dtype == torch.float32:
@@ -14880,10 +14881,10 @@ if __name__ == '__main__':
             elif _resolved_policy == "accurate":
                 expected_input_grad_max_ulp_diff = 4
                 expected_weight_grad_max_ulp_diff = 4
-            elif dtype == torch.bfloat16:  # balanced / compact, bf16
+            elif dtype == torch.bfloat16:  # compact, bf16
                 expected_input_grad_max_ulp_diff = 16
                 expected_weight_grad_max_ulp_diff = 8
-            else:  # balanced / compact, fp16
+            else:  # compact, fp16
                 expected_input_grad_max_ulp_diff = 192
                 expected_weight_grad_max_ulp_diff = 128
             expected_linear_bias_grad_max_ulp_diff = 0
@@ -14897,18 +14898,14 @@ if __name__ == '__main__':
             # device-specific near-zero inflation. bias=True has no none
             # samples (bias coverage is reduction='mean' only), so the
             # bias-grad cap stays at the default 0. Observed maxima:
-            # accurate 0/0; balanced bf16 4/0, fp16 25/27; compact bf16
-            # 4/4, fp16 25/85 (input_grad/weight).
+            # accurate 0/0; compact bf16 4/4, fp16 25/85 (input_grad/weight).
             expected_max_ulp_diff = 8
             if _resolved_policy == "accurate":
                 expected_input_grad_max_ulp_diff = 4
                 expected_weight_grad_max_ulp_diff = 4
-            elif dtype == torch.bfloat16:  # balanced / compact, bf16
+            elif dtype == torch.bfloat16:  # compact, bf16
                 expected_input_grad_max_ulp_diff = 8
                 expected_weight_grad_max_ulp_diff = 8
-            elif _resolved_policy == "balanced":  # fp16
-                expected_input_grad_max_ulp_diff = 48
-                expected_weight_grad_max_ulp_diff = 48
             else:  # compact, fp16
                 expected_input_grad_max_ulp_diff = 48
                 expected_weight_grad_max_ulp_diff = 128
@@ -14965,43 +14962,6 @@ if __name__ == '__main__':
                         expected_input_grad_max_ulp_diff = 0
                         expected_weight_grad_max_ulp_diff = 0
                         expected_linear_bias_grad_max_ulp_diff = 0
-        elif _resolved_policy == "balanced":
-            if "cpu" in device:
-                if dtype == torch.float16:
-                    expected_max_ulp_diff = 1
-                    expected_input_grad_max_ulp_diff = 204   # x86_64 119
-                    expected_weight_grad_max_ulp_diff = 191  # x86_64 150
-                    expected_linear_bias_grad_max_ulp_diff = 1 if bias else 0
-                else:  # dtype == torch.bfloat16
-                    expected_max_ulp_diff = 1
-                    if bias:
-                        expected_input_grad_max_ulp_diff = 10
-                        expected_weight_grad_max_ulp_diff = 12
-                        expected_linear_bias_grad_max_ulp_diff = 1
-                    else:
-                        expected_input_grad_max_ulp_diff = 0
-                        expected_weight_grad_max_ulp_diff = 0
-                        expected_linear_bias_grad_max_ulp_diff = 0
-            else:
-                if dtype == torch.float16:
-                    if "mps" in device:
-                        expected_max_ulp_diff = 2
-                        expected_input_grad_max_ulp_diff = 232
-                        expected_weight_grad_max_ulp_diff = 190
-                        expected_linear_bias_grad_max_ulp_diff = 16 if bias else 0
-                    else:  # CUDA/...
-                        expected_max_ulp_diff = 1
-                        expected_input_grad_max_ulp_diff = 90
-                        expected_weight_grad_max_ulp_diff = 50  # x86_64 41
-                        expected_linear_bias_grad_max_ulp_diff = 16 if bias else 0
-                else:  # dtype == torch.bfloat16
-                    expected_max_ulp_diff = 2
-                    expected_input_grad_max_ulp_diff = 90
-                    if "mps" in device:
-                        expected_weight_grad_max_ulp_diff = 36 if bias else 0
-                    else:  # CUDA
-                        expected_weight_grad_max_ulp_diff = 4 if bias else 0  # A100
-                    expected_linear_bias_grad_max_ulp_diff = 17 if bias else 0  # A100
         elif _resolved_policy == "compact":
             # Loss output is genuinely bounded (O(1), no cancellation); the
             # +1 on MPS is its lower-precision fp16 matmul.
@@ -15227,7 +15187,7 @@ if __name__ == '__main__':
         self._test_linear_cross_entropy_loss(device=device, dtype=dtype, bias=bias)
 
     @parametrize_test("prob_target", [False, True])
-    @parametrize_test("acc_policy", ["accurate", "balanced", "compact", "auto"])
+    @parametrize_test("acc_policy", ["accurate", "compact", "auto"])
     @parametrize_test("bias", [False, True])
     def test_linear_cross_entropy_chunked_gradcheck(
         self, device, acc_policy, bias, prob_target
@@ -15295,7 +15255,7 @@ if __name__ == '__main__':
 
         torch.autograd.gradcheck(f, (inp, weight, linear_bias) if bias else (inp, weight))
 
-    @parametrize_test("acc_policy", ["accurate", "balanced", "compact", "auto"])
+    @parametrize_test("acc_policy", ["accurate", "compact", "auto"])
     def test_linear_cross_entropy_loss_no_grad(self, device, acc_policy):
         """Forward-only path under torch.no_grad(): exercises the
         rank-empty grad-buffer branches (compute_*_grad both False).
@@ -15651,7 +15611,7 @@ if __name__ == '__main__':
 
     @parametrize_test("bias", [False, True])
     @parametrize_test("dtype", [torch.float16, torch.bfloat16])
-    @parametrize_test("acc_policy", ["accurate", "balanced", "compact", "auto"])
+    @parametrize_test("acc_policy", ["accurate", "compact", "auto"])
     def test_linear_cross_entropy_loss_with_acc_dtype(self, device, dtype, acc_policy, bias):
         if dtype == torch.bfloat16 and "cuda" in device and not SM80OrLater:
             self.skipTest("bf16 requires SM80+ on CUDA")
@@ -15662,7 +15622,7 @@ if __name__ == '__main__':
 
     @parametrize_test("bias", [False, True])
     @parametrize_test("dtype", [torch.float16, torch.bfloat16])
-    @parametrize_test("acc_policy", ["accurate", "balanced", "compact", "auto"])
+    @parametrize_test("acc_policy", ["accurate", "compact", "auto"])
     def test_linear_cross_entropy_loss_none_reduction_with_acc_dtype(
         self, device, dtype, acc_policy, bias
     ):
@@ -15679,7 +15639,7 @@ if __name__ == '__main__':
             acc_dtype={torch.float16: torch.float32, torch.bfloat16: torch.float32}[dtype],
             bias=bias, none_reduction=True)
 
-    @parametrize_test("acc_policy", ["accurate", "balanced", "compact", "auto"])
+    @parametrize_test("acc_policy", ["accurate", "compact", "auto"])
     @dtypes(torch.float32)
     def test_linear_cross_entropy_loss_prob_target(self, device, dtype, acc_policy):
         # Probability-target counterpart of the scalar harness legs:
@@ -15691,7 +15651,7 @@ if __name__ == '__main__':
             device=device, dtype=dtype, acc_policy=acc_policy, prob_target=True)
 
     @parametrize_test("dtype", [torch.float16, torch.bfloat16])
-    @parametrize_test("acc_policy", ["accurate", "balanced", "compact", "auto"])
+    @parametrize_test("acc_policy", ["accurate", "compact", "auto"])
     def test_linear_cross_entropy_loss_prob_target_with_acc_dtype(
         self, device, dtype, acc_policy
     ):
@@ -15705,7 +15665,7 @@ if __name__ == '__main__':
             acc_dtype={torch.float16: torch.float32, torch.bfloat16: torch.float32}[dtype],
             prob_target=True)
 
-    @parametrize_test("acc_policy", ["auto", "compact", "balanced", "accurate"])
+    @parametrize_test("acc_policy", ["auto", "compact", "accurate"])
     def test_linear_cross_entropy_prob_large_vocab_fp16_denom(self, device, acc_policy):
         # Regression: the softmax denominator sum_v exp(shifted) sums
         # ~num_classes terms near 1, so for a large vocabulary it overflows
@@ -15732,7 +15692,7 @@ if __name__ == '__main__':
         ref = (torch.logsumexp(z, 1) - (p.cpu().double() * z).sum(1)).mean()
         self.assertEqual(loss.cpu().double(), ref, atol=0.05, rtol=5e-3)
 
-    @parametrize_test("acc_policy", ["compact", "balanced", "auto"])
+    @parametrize_test("acc_policy", ["compact", "auto"])
     def test_linear_cross_entropy_prob_large_magnitude_fp16_loss_term(self, device, acc_policy):
         # Regression: the prob loss target term sum_{n,c} (w*t)*x_shifted was a
         # flat torch.dot whose fp16 result overflows (>65504) mid-accumulation
