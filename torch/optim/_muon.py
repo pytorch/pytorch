@@ -469,7 +469,7 @@ def param_groups_for_muon(
     if isinstance(exclude_name_patterns, str):
         raise TypeError(
             "exclude_name_patterns must be a sequence of strings (e.g. "
-            f'("embed", "lm_head")), not a single string {exclude_name_patterns!r}; '
+            f'("embed", "lm_head"), not a single string {exclude_name_patterns!r}; '
             "a bare str would be iterated character-by-character."
         )
     patterns: tuple[str, ...] = tuple(exclude_name_patterns or ())
