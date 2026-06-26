@@ -8758,6 +8758,31 @@ class SetSourceTensorKernel(ExternKernelAlloc):
         return [self.input_name(0), self.input_name(1)]
 
 
+class ShallowCopyDataKernel(ExternKernelAlloc):
+    def __init__(self, self_tensor: IRNode, storage_tensor: IRNode) -> None:
+        storage_tensor = self.realize_input(storage_tensor)
+        storage_tensor.freeze_layout()
+        super().__init__(
+            storage_tensor.get_layout(),
+            [self_tensor, storage_tensor],
+            python_kernel_name="torch.ops.aten.shallow_copy_data_",
+            op_overload=torch.ops.aten.set_.source_Tensor,
+        )
+        if not isinstance(self_tensor, (BaseView, StorageBox, TensorBox)):
+            raise AssertionError(type(self_tensor))
+        V.graph.never_reuse_buffers.add(self_tensor.data.get_name())
+        V.graph.never_reuse_buffers.add(storage_tensor.get_name())
+        V.graph.never_reuse_buffers.add(self.get_name())
+        device = storage_tensor.get_device()
+        self.mutation_outputs = [
+            MutationOutput(NoneLayout(device=device), self_tensor, self),
+            MutationOutput(NoneLayout(device=device), storage_tensor, self),
+        ]
+
+    def get_inputs_that_alias_output(self) -> Sequence[str]:
+        return [self.input_name(0), self.input_name(1)]
+
+
 class ScatterFallback(ExternKernel):
     """
     This needs to be a custom class to handle mutation properly.
