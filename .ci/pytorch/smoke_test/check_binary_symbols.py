@@ -322,8 +322,11 @@ def check_headeronly_symbols(install_root: Path) -> None:
     # Filter out platform-specific headers that may not compile everywhere
     platform_specific_keywords = [
         "cpu/vec",
-        "win32-headers.h",
     ]
+    # win32-headers.h pulls in <windows.h>; only include it in the check on
+    # Windows so it is exercised there but does not break the Linux/macOS check.
+    if os.name != "nt":
+        platform_specific_keywords.append("win32-headers.h")
 
     filtered_headers = []
     for header in headeronly_headers:
