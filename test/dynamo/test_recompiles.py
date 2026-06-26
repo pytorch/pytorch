@@ -562,6 +562,32 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         apply_patches(f, x, [("c", 3), ("d", 4)])
         self.assertEqual(counter.frame_count, 1)
 
+    def test_composite_out_variant_does_not_overrecompile(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/187953.
+        # CompositeImplicitAutograd out= ops (linalg.norm, linalg.cond, ...) used
+        # to recompile on every new input shape: their out= kernels resized the
+        # output with a non-size-oblivious check, which specialized the symbolic
+        # input dim. They should now recompile no more than the functional variant.
+        def count_recompiles(fn):
+            cnt = torch._dynamo.testing.CompileCounter()
+            opt = torch.compile(fn, backend=cnt, dynamic=None)
+            for n in range(4, 10):
+                opt(torch.randn(n, 6))
+            return cnt.frame_count
+
+        def norm_out(x):
+            out = x.new_empty(x.shape[0])
+            torch.linalg.norm(x, dim=1, out=out)
+            return out
+
+        def norm_functional(x):
+            return torch.linalg.norm(x, dim=1)
+
+        torch._dynamo.reset()
+        baseline = count_recompiles(norm_functional)
+        torch._dynamo.reset()
+        self.assertEqual(count_recompiles(norm_out), baseline)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

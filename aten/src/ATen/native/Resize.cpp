@@ -16,14 +16,40 @@
 #endif
 
 #include <c10/util/overflows.h>
+#include <c10/util/irange.h>
+#include <c10/core/SymBool.h>
 
 namespace at::native {
+
+// Definitely-equal shape comparison. For symbolic shapes this never introduces
+// a guard: it returns true only when each dim is statically known equal, and
+// false when equality cannot be proven without specializing. Falling through to
+// a (runtime no-op) resize is preferable to guarding, which would recompile on
+// symbolic input shapes under torch.compile. statically_known_true (rather than
+// guard_or_false) is required: guard_or_false still installs an equality guard
+// for two distinct backed symbols whose hints happen to match at trace time.
+// See https://github.com/pytorch/pytorch/issues/187953.
+static bool _shapes_definitely_equal(IntArrayRef a, IntArrayRef b) {
+  return a.equals(b);
+}
+
+static bool _shapes_definitely_equal(SymIntArrayRef a, SymIntArrayRef b) {
+  if (a.size() != b.size()) {
+    return false;
+  }
+  for (const auto i : c10::irange(a.size())) {
+    if (!TORCH_STATICALLY_KNOWN_TRUE(a[i].sym_eq(b[i]))) {
+      return false;
+    }
+  }
+  return true;
+}
 
 // Returns true if resize is necessary
 template <typename T>
 static bool _resize_output_check(const Tensor& output, ArrayRef<T> shape) {
   // Tests for resizing of tensors with one or more elements
-  if (at::symint::sizes<T>(output).equals(shape)) {
+  if (_shapes_definitely_equal(at::symint::sizes<T>(output), shape)) {
     return false;
   }
   if (at::symint::numel<T>(output) != 0) {

@@ -1792,7 +1792,7 @@ Tensor& cholesky_solve_out(const Tensor& self, const Tensor& A, bool upper, Tens
   checkSameDevice("cholesky_solve", result, self);
   checkLinalgCompatibleDtype("cholesky_solve", result, self);
   Tensor result_tmp = at::cholesky_solve(self, A, upper);
-  at::native::resize_output(result, result_tmp.sizes());
+  at::native::resize_output_symint(result, result_tmp.sym_sizes());
   result.copy_(result_tmp);
   return result;
 }
@@ -1926,7 +1926,7 @@ Tensor& cholesky_inverse_out(const Tensor &input, bool upper, Tensor &result) {
   if (copy_needed) {
     Tensor result_tmp = at::empty({0}, input.options());
     result_tmp = cholesky_inverse_out_info(result_tmp, infos, input, upper);
-    at::native::resize_output(result, result_tmp.sizes());
+    at::native::resize_output_symint(result, result_tmp.sym_sizes());
     result.copy_(result_tmp);
   } else {
     // use result's memory directly
@@ -2396,9 +2396,9 @@ std::tuple<Tensor&, Tensor&> geqrf_out(const Tensor& input, Tensor& QR, Tensor& 
 
     geqrf_out_helper(input, QR_tmp, tau_tmp);
 
-    at::native::resize_output(QR, QR_tmp.sizes());
+    at::native::resize_output_symint(QR, QR_tmp.sym_sizes());
     QR.copy_(QR_tmp);
-    at::native::resize_output(tau, tau_tmp.sizes());
+    at::native::resize_output_symint(tau, tau_tmp.sym_sizes());
     tau.copy_(tau_tmp);
   } else {
     // use "out" tensors' storage directly
@@ -2633,7 +2633,7 @@ Tensor& linalg_householder_product_out(const Tensor& input, const Tensor& tau, T
   if (copy_needed) {
     Tensor result_tmp = at::empty({0}, input.options());
     result_tmp = householder_product_out_helper(input, tau, result_tmp);
-    at::native::resize_output(result, result_tmp.sizes());
+    at::native::resize_output_symint(result, result_tmp.sym_sizes());
     result.copy_(result_tmp);
   } else {
     // use result's storage directly
@@ -2786,7 +2786,7 @@ Tensor& ormqr_out(const Tensor& input, const Tensor& tau, const Tensor& other, b
   if (copy_needed) {
     Tensor result_tmp = at::empty({0}, input.options());
     ormqr_out_helper(input, tau, other, result_tmp, left, transpose);
-    at::native::resize_output(result, result_tmp.sizes());
+    at::native::resize_output_symint(result, result_tmp.sym_sizes());
     result.copy_(result_tmp);
   } else {
     // use result's storage directly
@@ -3048,21 +3048,21 @@ std::tuple<Tensor&, Tensor&> linalg_eig_out(const Tensor& input, Tensor& values,
     Tensor values_tmp = at::empty({0}, options.dtype(values_type));
     Tensor vectors_tmp = at::empty({0}, options.dtype(vectors_type));
     std::tie(values_tmp, vectors_tmp) = linalg_eig_out_info(input, values_tmp, vectors_tmp, infos, true);
-    at::native::resize_output(values, values_tmp.sizes());
+    at::native::resize_output_symint(values, values_tmp.sym_sizes());
     values.copy_(values_tmp);
-    at::native::resize_output(vectors, vectors_tmp.sizes());
+    at::native::resize_output_symint(vectors, vectors_tmp.sym_sizes());
     vectors.copy_(vectors_tmp);
   } else if (!values_tmp_needed && vectors_tmp_needed) {
     // use 'values' storage directly
     Tensor vectors_tmp = at::empty({0}, options.dtype(vectors_type));
     std::tie(values, vectors_tmp) = linalg_eig_out_info(input, values, vectors_tmp, infos, true);
-    at::native::resize_output(vectors, vectors_tmp.sizes());
+    at::native::resize_output_symint(vectors, vectors_tmp.sym_sizes());
     vectors.copy_(vectors_tmp);
   } else if (values_tmp_needed && !vectors_tmp_needed) {
     // use 'vectors' storage directly
     Tensor values_tmp = at::empty({0}, options.dtype(values_type));
     std::tie(values_tmp, vectors) = linalg_eig_out_info(input, values_tmp, vectors, infos, true);
-    at::native::resize_output(values, values_tmp.sizes());
+    at::native::resize_output_symint(values, values_tmp.sym_sizes());
     values.copy_(values_tmp);
   } else {
     // use 'values' and 'vectors' storage directly
@@ -3124,7 +3124,7 @@ Tensor& linalg_eigvals_out(const Tensor& input, Tensor& values) {
   if (values_tmp_needed) {
     Tensor values_tmp = at::empty({0}, options.dtype(values_type));
     std::tie(values_tmp, std::ignore) = linalg_eig_out_info(input, values_tmp, vectors, infos, /*compute_eigenvectors=*/false);
-    at::native::resize_output(values, values_tmp.sizes());
+    at::native::resize_output_symint(values, values_tmp.sym_sizes());
     values.copy_(values_tmp);
   } else { // use 'values' storage directly
     std::tie(values, std::ignore) = linalg_eig_out_info(input, values, vectors, infos, /*compute_eigenvectors=*/false);
@@ -3687,16 +3687,16 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> linalg_lstsq_out(
 
     linalg_lstsq_out_info(solution_tmp, residuals_tmp, rank_tmp, singular_values_tmp, infos, input, other, rcond_value, driver_name);
 
-    at::native::resize_output(solution, solution_tmp.sizes());
+    at::native::resize_output_symint(solution, solution_tmp.sym_sizes());
     solution.copy_(solution_tmp);
 
-    at::native::resize_output(residuals, residuals_tmp.sizes());
+    at::native::resize_output_symint(residuals, residuals_tmp.sym_sizes());
     residuals.copy_(residuals_tmp);
 
-    at::native::resize_output(rank, rank_tmp.sizes());
+    at::native::resize_output_symint(rank, rank_tmp.sym_sizes());
     rank.copy_(rank_tmp);
 
-    at::native::resize_output(singular_values, singular_values_tmp.sizes());
+    at::native::resize_output_symint(singular_values, singular_values_tmp.sym_sizes());
     singular_values.copy_(singular_values_tmp);
   } else {
     // else use the provided output storage directly
