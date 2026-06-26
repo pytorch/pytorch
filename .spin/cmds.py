@@ -534,14 +534,19 @@ def _pip_install_cmd(editable):
 
 
 @click.command()
-def build():
+def develop():
     """Build PyTorch (editable install).
 
     Runs an editable pip install using uv when available, falling back to
     regular pip.  Build configuration comes from the environment, e.g.
-    `BUILD_CONFIG spin build`.
+    `BUILD_CONFIG spin develop`.
     """
     spin.util.run(_pip_install_cmd(editable=True))
+
+
+# Alias so `spin editable` also works.
+editable = click.command(name="editable")(develop.callback)
+editable.help = develop.help
 
 
 @click.command()
