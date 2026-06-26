@@ -1,77 +1,82 @@
 #!/usr/bin/env python3
-"""Tests for the libtorch extraction pipeline."""
+"""Smoke test for extracted libtorch: verify rpath and that libtorch.so loads."""
 
+import argparse
+import ctypes
+import glob
 import shutil
+import subprocess
+import sys
 import tempfile
-import unittest
 import zipfile
 from pathlib import Path
 
-from extract_libtorch_from_wheel import (
-    compute_zip_prefix,
-    copy_bin,
-    copy_cmake,
-    copy_includes,
-    copy_libraries,
-    create_libtorch_zip,
-    extract_wheel,
-    find_wheel,
-    get_git_hash,
-    parse_version_from_wheel,
-    write_metadata,
-)
+
+def check_rpath(lib_dir: Path) -> None:
+    patchelf = shutil.which("patchelf")
+    if not patchelf:
+        print("patchelf not found, skipping rpath checks")
+        return
+    for so_file in sorted(lib_dir.iterdir()):
+        if not so_file.is_file():
+            continue
+        if not (so_file.name.endswith(".so") or ".so." in so_file.name):
+            continue
+        result = subprocess.run(
+            [patchelf, "--print-rpath", str(so_file)],
+            capture_output=True,
+            text=True,
+        )
+        rpath = result.stdout.strip()
+        if "$ORIGIN" not in rpath:
+            raise RuntimeError(
+                f"{so_file.name}: expected $ORIGIN in rpath, got {rpath!r}"
+            )
+        print(f"  rpath OK: {so_file.name} -> {rpath}")
 
 
-def _make_fake_wheel(wheel_dir: Path) -> Path:
-    wheel_path = wheel_dir / "torch-0.0-cp310-cp310-linux_x86_64.whl"
-    with zipfile.ZipFile(wheel_path, "w") as zf:
-        zf.writestr("torch/lib/libtorch.so", "fake")
-        zf.writestr("torch/include/torch/torch.h", "// header")
-        zf.writestr("torch/share/cmake/Torch/TorchConfig.cmake", "# cmake")
-        zf.writestr("torch/version.py", "git_version = 'abc123'\n")
-    return wheel_path
+def check_import(lib_dir: Path) -> None:
+    libtorch = lib_dir / "libtorch.so"
+    if not libtorch.exists():
+        raise FileNotFoundError(f"libtorch.so not found in {lib_dir}")
+    ctypes.CDLL(str(libtorch))
+    print(f"  import OK: loaded {libtorch.name}")
 
 
-class TestExtraction(unittest.TestCase):
-    def setUp(self):
-        self._tmp = tempfile.mkdtemp()
-        self.wheel_dir = Path(self._tmp) / "wheels"
-        self.wheel_dir.mkdir()
-        self.output_dir = Path(self._tmp) / "output"
-        self.output_dir.mkdir()
-        _make_fake_wheel(self.wheel_dir)
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--output-dir",
+        required=True,
+        type=Path,
+        help="Directory containing the libtorch zip produced by extract_libtorch_from_wheel.py",
+    )
+    args = parser.parse_args()
 
-    def tearDown(self):
-        shutil.rmtree(self._tmp)
+    zips = [
+        p for p in args.output_dir.glob("libtorch-*.zip")
+        if "latest" not in p.name
+    ]
+    if not zips:
+        raise FileNotFoundError(f"No libtorch zip found in {args.output_dir}")
+    if len(zips) > 1:
+        raise RuntimeError(f"Multiple libtorch zips found: {zips}")
+    libtorch_zip = zips[0]
 
-    def test_extraction(self):
-        wheel_path = find_wheel(str(self.wheel_dir))
-        version = parse_version_from_wheel(wheel_path)
-        extract_dir = self.wheel_dir / "_tmp"
-        extract_dir.mkdir()
-        torch_dir = extract_wheel(wheel_path, extract_dir)
-
-        libtorch_dir = extract_dir / "libtorch"
-        libtorch_dir.mkdir()
-        for sub in ["lib", "bin", "include", "share"]:
-            (libtorch_dir / sub).mkdir()
-
-        copy_libraries(torch_dir, libtorch_dir / "lib", "linux")
-        copy_includes(torch_dir, libtorch_dir / "include")
-        copy_cmake(torch_dir, libtorch_dir / "share")
-        copy_bin(torch_dir, libtorch_dir / "bin", "linux")
-        write_metadata(libtorch_dir, version, get_git_hash(torch_dir))
-
-        prefix = compute_zip_prefix("linux", "cu126", "shared-with-deps", "x86_64")
-        zip_path = create_libtorch_zip(libtorch_dir, self.output_dir, prefix, version)
-
-        with zipfile.ZipFile(zip_path) as zf:
-            names = set(zf.namelist())
-
-        self.assertIn("libtorch/lib/libtorch.so", names)
-        self.assertIn("libtorch/include/torch/torch.h", names)
-        self.assertTrue(any("TorchConfig.cmake" in n for n in names))
+    tmp = tempfile.mkdtemp()
+    try:
+        print(f"Extracting {libtorch_zip.name} ...")
+        with zipfile.ZipFile(libtorch_zip) as zf:
+            zf.extractall(tmp)
+        lib_dir = Path(tmp) / "libtorch" / "lib"
+        if not lib_dir.is_dir():
+            raise FileNotFoundError(f"libtorch/lib not found in zip")
+        check_rpath(lib_dir)
+        check_import(lib_dir)
+        print("Smoke test passed.")
+    finally:
+        shutil.rmtree(tmp)
 
 
 if __name__ == "__main__":
-    unittest.main()
+    main()

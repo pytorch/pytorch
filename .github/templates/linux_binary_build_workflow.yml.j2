@@ -580,26 +580,28 @@ jobs:
         name: Download Wheel Artifact
         with:
           name: ${{ matrix.source_wheel_build_name }}
-          path: "${{ runner.temp }}/wheel_artifact/"
-      - name: Test libtorch extraction logic
-        run: python3 -m unittest discover -s .ci/libtorch -p smoke_test_extract_libtorch.py -v
+          path: "${{ github.workspace }}/wheel_artifact/"
       - name: Extract libtorch from wheel
         run: |
           set -eux
-          mkdir -p "${RUNNER_TEMP}/libtorch_output"
+          mkdir -p "${{ github.workspace }}/libtorch_output"
           python3 .ci/libtorch/extract_libtorch_from_wheel.py \
-            --wheel-dir "${RUNNER_TEMP}/wheel_artifact" \
-            --output-dir "${RUNNER_TEMP}/libtorch_output" \
+            --wheel-dir "${{ github.workspace }}/wheel_artifact" \
+            --output-dir "${{ github.workspace }}/libtorch_output" \
             --platform linux \
             --desired-cuda "$DESIRED_CUDA" \
             --libtorch-variant "$LIBTORCH_VARIANT"
+      - name: Smoke test extracted libtorch
+        run: |
+          python3 .ci/libtorch/smoke_test_extract_libtorch.py \
+            --output-dir "${{ github.workspace }}/libtorch_output"
       - uses: !{{ common.upload_artifact_action }}
         if: always()
         with:
           name: ${{ matrix.build_name }}
           retention-days: 14
           if-no-files-found: error
-          path: "${{ runner.temp }}/libtorch_output/"
+          path: "${{ github.workspace }}/libtorch_output/"
 
 {%- if branches == "nightly" %}
 
