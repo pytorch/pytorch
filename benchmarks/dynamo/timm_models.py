@@ -24,15 +24,19 @@ if "TORCHINDUCTOR_FX_GRAPH_CACHE" not in os.environ:
     torch._inductor.config.fx_graph_cache = True
 
 
-def pip_install(package):
-    subprocess.check_call([sys.executable, "-m", "pip", "install", package])
+def pip_install(package, *, no_deps=False):
+    command = [sys.executable, "-m", "pip", "install"]
+    if no_deps:
+        command.append("--no-deps")
+    command.append(package)
+    subprocess.check_call(command)
 
 
 try:
     importlib.import_module("timm")
 except ModuleNotFoundError:
     print("Installing PyTorch Image Models...")
-    pip_install("git+https://github.com/rwightman/pytorch-image-models")
+    pip_install("git+https://github.com/rwightman/pytorch-image-models", no_deps=True)
 finally:
     from timm import __version__ as timmversion
     from timm.data import resolve_data_config
@@ -297,10 +301,10 @@ class TimmRunner(BenchmarkRunner):
             self.compute_loss = self.scaled_compute_loss
 
         # See yaml note for emulate_precision_casts. This preserves the
-        # bf16 downcast-upcast pairs (fp16 untested) that inductor would
-        # otherwise elide when fusing across mixed-precision boundaries
-        # (e.g. bf16 conv-bias-add fused into an fp32 cat-prep store),
-        # which is what eager autocast actually does.
+        # autocast downcast-upcast pairs (bf16 and fp16; mobilenetv2_100 is
+        # the fp16 case) that inductor would otherwise elide when fusing
+        # across mixed-precision boundaries (e.g. bf16 conv-bias-add fused
+        # into an fp32 cat-prep store), which is what eager autocast does.
         #
         # Baseline is captured on the FIRST load_model call so that any
         # --inductor-config emulate_precision_casts=... CLI override (applied

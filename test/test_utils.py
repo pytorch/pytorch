@@ -10,9 +10,10 @@ import sys
 import tempfile
 import textwrap
 import traceback
+import types
 import unittest
 import warnings
-from typing import Any
+from typing import Any, cast
 
 import torch
 import torch.cuda
@@ -1036,6 +1037,57 @@ class TestTryImport(TestCase):
     def test_import_missing(self):
         missing_module = try_import("missing_module")
         self.assertIsNone(missing_module)
+
+
+class TestUtilsInternal(TestCase):
+    def test_max_clock_rate_falls_back_to_pynvml_when_nvidia_smi_missing(self):
+        def nvsmi(_query):
+            raise FileNotFoundError("nvidia-smi")
+
+        triton = types.ModuleType("triton")
+        triton_testing = types.ModuleType("triton.testing")
+        cast(Any, triton_testing).nvsmi = nvsmi
+        cast(Any, triton).testing = triton_testing
+
+        pynvml = types.ModuleType("pynvml")
+        cast(Any, pynvml).NVML_CLOCK_SM = 1
+        calls = []
+
+        def nvmlDeviceGetMaxClockInfo(handle, clock_type):
+            calls.append(("max_clock", handle, clock_type))
+            return 1980
+
+        def nvmlShutdown():
+            calls.append("shutdown")
+
+        cast(Any, pynvml).nvmlDeviceGetMaxClockInfo = nvmlDeviceGetMaxClockInfo
+        cast(Any, pynvml).nvmlShutdown = nvmlShutdown
+
+        torch._utils_internal.max_clock_rate.cache_clear()
+        try:
+            with (
+                unittest.mock.patch.dict(
+                    sys.modules,
+                    {
+                        "triton": triton,
+                        "triton.testing": triton_testing,
+                        "pynvml": pynvml,
+                    },
+                ),
+                unittest.mock.patch.object(torch.version, "hip", None),
+                unittest.mock.patch.object(
+                    torch.cuda, "_get_pynvml_handler", return_value="handle"
+                ) as get_pynvml_handler,
+            ):
+                self.assertEqual(torch._utils_internal.max_clock_rate(), 1980)
+                get_pynvml_handler.assert_called_once_with()
+        finally:
+            torch._utils_internal.max_clock_rate.cache_clear()
+
+        self.assertEqual(
+            calls,
+            [("max_clock", "handle", 1), "shutdown"],
+        )
 
 
 @deprecated()

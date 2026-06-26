@@ -59,7 +59,7 @@ jobs:
             gpu_arch_version: ""
             gpu_arch_type: "cpu"
             build_name: "wheel-py3_10-cpu"
-            pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.23.1.3; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
+            pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.23.1.3; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.10"
             desired_cuda: "cu126"
             gpu_arch_version: "12.6"
@@ -89,7 +89,7 @@ jobs:
             gpu_arch_version: ""
             gpu_arch_type: "cpu"
             build_name: "wheel-py3_11-cpu"
-            pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.23.1.3; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
+            pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.23.1.3; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.11"
             desired_cuda: "cu126"
             gpu_arch_version: "12.6"
@@ -119,7 +119,7 @@ jobs:
             gpu_arch_version: ""
             gpu_arch_type: "cpu"
             build_name: "wheel-py3_12-cpu"
-            pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.23.1.3; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
+            pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.23.1.3; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.12"
             desired_cuda: "cu126"
             gpu_arch_version: "12.6"
@@ -149,7 +149,7 @@ jobs:
             gpu_arch_version: ""
             gpu_arch_type: "cpu"
             build_name: "wheel-py3_13-cpu"
-            pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.23.1.3; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
+            pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.23.1.3; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.13"
             desired_cuda: "cu126"
             gpu_arch_version: "12.6"
@@ -179,7 +179,7 @@ jobs:
             gpu_arch_version: ""
             gpu_arch_type: "cpu"
             build_name: "wheel-py3_14-cpu"
-            pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.23.1.3; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
+            pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.23.1.3; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.14"
             desired_cuda: "cu126"
             gpu_arch_version: "12.6"
@@ -209,7 +209,7 @@ jobs:
             gpu_arch_version: ""
             gpu_arch_type: "cpu"
             build_name: "wheel-py3_14t-cpu"
-            pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.23.1.3; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
+            pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.23.1.3; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.14t"
             desired_cuda: "cu126"
             gpu_arch_version: "12.6"
@@ -831,7 +831,8 @@ jobs:
             --output-dir "${{ runner.temp }}/libtorch_output" \
             --platform windows \
             --desired-cuda "$DESIRED_CUDA" \
-            --libtorch-variant "$LIBTORCH_VARIANT"
+            --libtorch-variant "$LIBTORCH_VARIANT" \
+            --arch x86_64
       - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
@@ -891,7 +892,8 @@ jobs:
             --output-dir "${{ runner.temp }}/libtorch_output" \
             --platform windows \
             --desired-cuda "$DESIRED_CUDA" \
-            --libtorch-variant "$LIBTORCH_VARIANT"
+            --libtorch-variant "$LIBTORCH_VARIANT" \
+            --arch x86_64
       - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
@@ -952,7 +954,8 @@ jobs:
             --output-dir "${{ runner.temp }}/libtorch_output" \
             --platform windows \
             --desired-cuda "$DESIRED_CUDA" \
-            --libtorch-variant "$LIBTORCH_VARIANT"
+            --libtorch-variant "$LIBTORCH_VARIANT" \
+            --arch x86_64
       - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
@@ -1013,7 +1016,8 @@ jobs:
             --output-dir "${{ runner.temp }}/libtorch_output" \
             --platform windows \
             --desired-cuda "$DESIRED_CUDA" \
-            --libtorch-variant "$LIBTORCH_VARIANT"
+            --libtorch-variant "$LIBTORCH_VARIANT" \
+            --arch x86_64
       - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:

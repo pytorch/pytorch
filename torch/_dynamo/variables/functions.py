@@ -1197,6 +1197,15 @@ class LocalGeneratorObjectVariable(VariableTracker):
     def python_type(self) -> type:
         return types.GeneratorType
 
+    def richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
+        # Generators have no tp_richcompare: identity for ==/!=, TypeError for
+        # ordering.
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
+
     def gen_send_ex2(
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
     ) -> VariableTracker:
@@ -1531,6 +1540,14 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if isinstance(self.vt, SkipFunctionVariable):
+            unimplemented(
+                gb_type="generator function over a skipped function",
+                context=str(self.vt),
+                explanation="Cannot trace a generator whose underlying function is skipped by Dynamo "
+                "(e.g. defined in a skip-listed module), since its body cannot be symbolically traced.",
+                hints=[*graph_break_hints.FUNDAMENTAL],
+            )
         if not is_generator(self.vt.get_code()):
             unimplemented(
                 gb_type="non-generator contextlib.contextmanager",
@@ -2848,7 +2865,9 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
 
                 ops.append(op_var)
                 tensors.append(item.var_getattr(tx, "tensor"))
-                peers.append(item.var_getattr(tx, "peer"))
+                # batch_p2p_ops expects a group-local rank, which is what
+                # P2POp.group_peer provides.
+                peers.append(item.var_getattr(tx, "group_peer"))
                 tags.append(item.var_getattr(tx, "tag"))
                 if group_var is None:
                     group_var = item.var_getattr(tx, "group")
@@ -3351,8 +3370,10 @@ class DynamoTritonHOPifier(TritonHOPifier):
         variable: "TritonKernelVariable",
         grids: Any,
         combined_args: dict[str, Any],
+        launch_kwargs: tuple[str, ...],
+        kernel_arg_names: set[str],
         tx: "InstructionTranslatorBase",
-    ) -> "variables.ConstantVariable":
+    ) -> ConstantVariable | None:
         from .dicts import ConstDictVariable
 
         # as we can only pass tensors as non-const args in fx graph,
@@ -3392,6 +3413,24 @@ class DynamoTritonHOPifier(TritonHOPifier):
             for k, v in combined_args_vt.items()
             if not (isinstance(v, VariableTracker) and v.is_python_constant())
         }
+        # launch_kwargs records the names passed as kwargs at the Triton launch
+        # site. A non-kernel launch kwarg can only be a compiler option, so it
+        # must be a Python constant before entering the graph. Kernel launch
+        # kwargs may also be compiler options, but that target-specific check
+        # happens in Inductor after the triton backend is determined and
+        # backend.parse_options() is called.
+        non_const_options: list[str] = []
+        for k in launch_kwargs:
+            if k in kernel_arg_names:
+                continue
+            v = combined_args[k]
+            if not (isinstance(v, VariableTracker) and v.is_python_constant()):
+                non_const_options.append(k)
+        if non_const_options:
+            self.raise_unsupported(
+                "Triton backend options must be Python constants: "
+                f"{sorted(non_const_options)!r}."
+            )
 
         for v in non_constant_args.values():
             v = v.realize()
@@ -3412,6 +3451,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
                 "grid": grids,
                 "tma_descriptor_metadata": tma_descriptor_metadata,
                 "kwargs": meta.as_proxy(),
+                "launch_kwargs": launch_kwargs,
             },
         )
 
@@ -4006,24 +4046,26 @@ class MethodWrapperVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        try:
-            method_wrapper = self.as_python_constant()
-        except NotImplementedError:
-            method_wrapper = None
-        if (
-            method_wrapper is not None
-            and is_tensor_base_attr_getter(method_wrapper)
-            and args
-            and isinstance(args[0], variables.TensorVariable)
-        ):
-            if not (len(args) == 1 and len(kwargs) == 0):
-                raise_type_error(
-                    tx, "tensor attribute getter takes exactly one argument"
-                )
-            # Avoid the generic descriptor path's implicit owner lookup, which
-            # would read __class__ on tensor subclasses during __torch_function__.
-            descriptor = cast(Any, method_wrapper.__self__)
-            return args[0].var_getattr(tx, descriptor.__name__)
+        # Only materialize the wrapper (which forces self.obj's python constant)
+        # for the tensor-getter special case; the generic path below dispatches
+        # via call_method and must not require a constant self.obj (e.g. a set /
+        # frozenset whose as_python_constant() re-hashes its keys).
+        if args and isinstance(args[0], variables.TensorVariable):
+            try:
+                method_wrapper = self.as_python_constant()
+            except NotImplementedError:
+                method_wrapper = None
+            if method_wrapper is not None and is_tensor_base_attr_getter(
+                method_wrapper
+            ):
+                if not (len(args) == 1 and len(kwargs) == 0):
+                    raise_type_error(
+                        tx, "tensor attribute getter takes exactly one argument"
+                    )
+                # Avoid the generic descriptor path's implicit owner lookup, which
+                # would read __class__ on tensor subclasses during __torch_function__.
+                descriptor = cast(Any, method_wrapper.__self__)
+                return args[0].var_getattr(tx, descriptor.__name__)
 
         return self.obj.call_method(tx, self.descriptor.__name__, list(args), kwargs)
 
@@ -4433,7 +4475,7 @@ class MemberDescriptorVariable(VariableTracker):
                 return obj.var_getattr(tx, attr_name)
         try:
             resolved = self.descriptor.__get__(obj_value)
-        except AttributeError:
+        except (AttributeError, TypeError):
             raise_observed_exception(
                 AttributeError,
                 tx,
@@ -4520,7 +4562,7 @@ class GetSetDescriptorVariable(VariableTracker):
                 return obj.var_getattr(tx, attr_name)
         try:
             resolved = self.descriptor.__get__(obj_value)
-        except AttributeError:
+        except (AttributeError, TypeError):
             raise_observed_exception(
                 AttributeError,
                 tx,

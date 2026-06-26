@@ -316,7 +316,7 @@ static void writeJsonNode(
 static std::string timeString(const std::time_t timepoint) {
   std::ostringstream oss;
   oss << std::put_time(std::localtime(&timepoint), "%Y-%m-%d %X"); // NOLINT
-  return std::move(oss).str();
+  return oss.str();
 }
 
 static bool initExecutionTraceStart(ExecutionTraceObserver& ob) {
@@ -806,7 +806,7 @@ static std::string json_str_escape(const std::string& str) {
       ostream << ch;
     }
   }
-  return std::move(ostream).str();
+  return ostream.str();
 }
 
 static void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {

@@ -339,7 +339,7 @@ def _preload_cuda_lib(lib_folder: str, lib_name: str, required: bool = True) -> 
         ctypes.CDLL(lib_path)
 
 
-def _preload_cuda_deps(err: OSError | None = None) -> None:
+def _preload_cuda_deps(err: OSError | None = None, required: bool = True) -> None:
     cuda_libs: list[tuple[str, str]] = [
         # NOTE: Order matters! We must preload libcublasLt BEFORE libcublas to prevent
         # libcublas from loading a mismatched system-wide libcublasLt via its RUNPATH.
@@ -369,9 +369,12 @@ def _preload_cuda_deps(err: OSError | None = None) -> None:
     ]:
         raise err
 
-    # Otherwise, try to preload dependencies from site-packages
+    # Otherwise, try to preload dependencies from site-packages. With
+    # required=False each lib is best-effort: a partial install that only ships
+    # some of these wheels (e.g. just a cupti wheel alongside a system CUDA)
+    # preloads the ones present instead of aborting on the first missing one.
     for lib_folder, lib_name in cuda_libs:
-        _preload_cuda_lib(lib_folder, lib_name)
+        _preload_cuda_lib(lib_folder, lib_name, required=required)
 
     # libnvToolsExt is Optional Dependency
     _preload_cuda_lib("nvtx", "libnvToolsExt.so.*[0-9]", required=False)
@@ -403,8 +406,15 @@ def _load_global_deps() -> None:
             # libtorch_global_deps.so always depends in cudart, check if its installed and loaded
             if "libcudart.so" not in _maps:
                 return
-            # If all above-mentioned conditions are met, preload CUDA dependencies
-            _preload_cuda_deps()
+            # If all above-mentioned conditions are met, preload CUDA dependencies.
+            # Only libtorch_global_deps is loaded so far (it pulls libcudart, not
+            # the rest); libtorch_cpu, which DT_NEEDEDs the other CUDA libs, is
+            # imported below via torch._C. So be best-effort and front-load any
+            # component wheels that ARE present now, before that import, so they
+            # win libtorch_cpu's DT_NEEDED soname lookups (e.g. a newer cupti
+            # wheel over a system copy). A missing wheel must not abort -- rpath
+            # will satisfy libtorch_cpu's DT_NEEDED for whatever isn't preloaded.
+            _preload_cuda_deps(required=False)
         except Exception:
             pass
 
@@ -1592,7 +1602,9 @@ def set_default_device(device: "Device") -> None:
         :func:`torch.from_numpy` and :func:`torch.frombuffer`
 
     Args:
-        device (device or string): the device to set as default
+        device (:class:`torch.device`, str, int, or None): the device to set as
+            default, or ``None`` to clear the override. An integer is
+            interpreted as an index for the current accelerator.
 
     Example::
 
@@ -1758,6 +1770,7 @@ def use_deterministic_algorithms(
         * :func:`torch.Tensor.scatter` when `src` type is Tensor and called on CUDA tensor
         * :func:`torch.Tensor.scatter_reduce` when ``reduce='sum'`` or ``reduce='mean'`` and called on CUDA tensor
         * :class:`torch.nn.MaxPool3d` when attempting to differentiate a CUDA tensor
+        * :class:`torch.nn.Embedding` when attempting to differentiate a CUDA tensor
 
     The following normally-nondeterministic operations will throw a
     :class:`RuntimeError` when ``mode=True``:
@@ -2706,6 +2719,12 @@ from torch._classes import classes as classes  # usort: skip
 sys.modules.setdefault(f"{__name__}.ops", ops)
 sys.modules.setdefault(f"{__name__}.classes", classes)
 
+if hasattr(torch._C, "_c10d_init"):
+    from torch.distributed.distributed_c10d import _register_process_group_opaque_type
+
+    _register_process_group_opaque_type()
+    del _register_process_group_opaque_type
+
 # quantization depends on torch.fx and torch.ops
 # Import quantization
 from torch import quantization as quantization  # usort: skip
@@ -2960,7 +2979,7 @@ def compile(
     | None = None,
     name: str | None = None,
     disable: builtins.bool = False,
-    shapes_spec: _Any = None,
+    dynamic_shapes: _Any = None,
 ) -> _Callable[_InputT, _RetT]: ...
 
 
@@ -2976,7 +2995,7 @@ def compile(
     | None = None,
     name: str | None = None,
     disable: builtins.bool = False,
-    shapes_spec: _Any = None,
+    dynamic_shapes: _Any = None,
 ) -> _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]: ...
 
 
@@ -2993,7 +3012,7 @@ def compile(
     disable: builtins.bool = False,
     recompile_limit: builtins.int | None = None,
     isolate_recompiles: builtins.bool = False,
-    shapes_spec: _Any = None,
+    dynamic_shapes: _Any = None,
 ) -> (
     _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]
     | _Callable[_InputT, _RetT]
@@ -3134,11 +3153,18 @@ def compile(
         backend = get_default_backend()
 
     # Auto-wrap ParamsSpec → ShapesSpec for convenience
-    if shapes_spec is not None:
+    if dynamic_shapes is not None:
         from torch.fx.experimental.dynamic_spec import ParamsSpec, ShapesSpec
 
-        if isinstance(shapes_spec, ParamsSpec):
-            shapes_spec = ShapesSpec(shapes_spec)
+        if isinstance(dynamic_shapes, ParamsSpec):
+            dynamic_shapes = ShapesSpec(dynamic_shapes)
+
+    # If ``model`` carries an ``@dynamic_spec(...)`` decorator, the attached
+    # ``ShapesSpec`` is used as ``dynamic_shapes``. Passing both raises.
+    if model is not None:
+        from torch.fx.experimental.dynamic_spec import _resolve_dynamic_shapes
+
+        dynamic_shapes = _resolve_dynamic_shapes(model, dynamic_shapes)
 
     # Decorator mode
     if model is None:
@@ -3157,7 +3183,7 @@ def compile(
                 disable=disable,
                 recompile_limit=recompile_limit,
                 isolate_recompiles=isolate_recompiles,
-                shapes_spec=shapes_spec,
+                dynamic_shapes=dynamic_shapes,
             )
 
         return fn
@@ -3216,7 +3242,7 @@ def compile(
         guard_filter_fn=guard_filter_fn,
         recompile_limit=recompile_limit,
         isolate_recompiles=isolate_recompiles,
-        shapes_spec=shapes_spec,
+        dynamic_shapes=dynamic_shapes,
     )(model)  # type: ignore[return-value]
 
 

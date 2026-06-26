@@ -782,6 +782,16 @@ def _import_pyzes():
     return pyzes
 
 
+def _get_pyzes_version() -> tuple[int, ...]:
+    """
+    Return the version of the pyzes package as a tuple of integers (major, minor, patch).
+    Always ensure that the pyzes package is installed before calling this function.
+    """
+    from importlib.metadata import version
+
+    return tuple(map(int, version("pyzes").split(".")))
+
+
 def _zes_check(rc: int, msg: str) -> None:
     """Raise RuntimeError if the Level Zero Sysman call failed (rc != ZE_RESULT_SUCCESS)."""
     import pyzes  # type: ignore[import]
@@ -1319,6 +1329,7 @@ from .memory import (
     change_current_allocator,
     empty_cache,
     get_per_process_memory_fraction,
+    list_gpu_processes,
     max_memory_allocated,
     max_memory_reserved,
     mem_get_info,
@@ -1383,6 +1394,7 @@ __all__ = [
     "is_current_stream_capturing",
     "is_initialized",
     "is_tf32_supported",
+    "list_gpu_processes",
     "make_graphed_callables",
     "manual_seed",
     "manual_seed_all",

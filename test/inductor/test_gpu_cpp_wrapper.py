@@ -98,6 +98,27 @@ def _register_fbcode_cpp_wrapper_arg_helper_op(m, device):
 class TestGpuWrapper(InductorTestCase):
     device = GPU_TYPE
 
+    def test_cpp_wrapper_compile_timing_recorded(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+
+        from torch._dynamo.utils import compilation_time_metrics
+        from torch._inductor.utils import fresh_cache
+
+        def fn(x, y):
+            return (x @ y).relu()
+
+        x = torch.randn(64, 64, device=self.device)
+        y = torch.randn(64, 64, device=self.device)
+        compilation_time_metrics.pop("cpp_wrapper_compile", None)
+        with fresh_cache():
+            compiled = torch.compile(options={"cpp_wrapper": True})(fn)
+            result = compiled(x, y)
+        self.assertEqual(result, fn(x, y))
+        self.assertIn("cpp_wrapper_compile", compilation_time_metrics)
+        durations = compilation_time_metrics["cpp_wrapper_compile"]
+        self.assertTrue(any(t > 0 for t in durations))
+
     def test_aoti_debug_printer_works_on_constants(self):
         batch_size = 32
         seq_length = 50

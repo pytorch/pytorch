@@ -40,8 +40,9 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.node import _get_qualified_name
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.functions import Max, Min
+from torch.utils._sympy.functions import FloorDiv, Max, Min
 from torch.utils._sympy.singleton_int import SingletonInt
+from torch.utils._sympy.solve import try_solve
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import async_compile, config, debug as inductor_debug, ir
@@ -101,6 +102,32 @@ ReuseKey = tuple[torch.device, torch.dtype, str, bool, int]
 CommBufferReuseKey = tuple[torch.device, torch.dtype, str, "ir.CommBufferType", str]
 BufferLike = ir.Buffer | WorkspaceArg
 FxConversionFunc = Callable[["WrapperLine"], None]
+
+
+def _replace_floor_div(expr: sympy.Expr) -> sympy.Expr:
+    """
+    Replace sympy.floor with FloorDiv.
+    """
+
+    def replace(expr: sympy.Expr) -> sympy.Expr:
+        expr = sympy.together(expr)
+
+        # Division is represented as a Mul with a Rational factor or a Pow with
+        # negative exponent. Convert floor(Mul(...)) to FloorDiv(numerator,
+        # denominator) by partitioning factors into the numerator and denominator.
+        numerator, denominator = (sympy.S.One,) * 2
+        for arg in sympy.Mul.make_args(expr):
+            if isinstance(arg, sympy.Rational):
+                numerator *= arg.numerator
+                denominator *= arg.denominator
+            elif isinstance(arg, sympy.Pow) and arg.exp.is_negative:
+                denominator *= arg.base**-arg.exp
+            else:
+                numerator *= arg
+
+        return FloorDiv(numerator, denominator)
+
+    return expr.replace(sympy.floor, replace)
 
 
 @dataclasses.dataclass
@@ -2454,9 +2481,10 @@ class PythonWrapperCodegen(CodeGen):
     def codegen_input_symbol_assignment(
         self,
         name: str,
-        value: ir.TensorBox,
+        value: ir.TensorBox | sympy.Expr,
         bound_vars: OrderedSet[sympy.Symbol],
     ):
+        """Assign wrapper locals for symbolic input sizes and strides."""
         code = self.prefix
 
         @functools.cache
@@ -2470,33 +2498,67 @@ class PythonWrapperCodegen(CodeGen):
             return f"{name}_stride"
 
         def maybe_emit_replacement_aliases(sym: sympy.Symbol) -> None:
-            # Deferred runtime asserts and graph input metadata can reference
-            # either side of a backed-symbol replacement. Emit aliases so both
-            # the pre-replacement and canonical names are defined.
-            from torch.utils._sympy.symbol import symbol_is_type, SymT
-
-            def is_backed_symbol(s: sympy.Symbol) -> bool:
-                return not symbol_is_type(s, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT))
-
+            # Deferred runtime asserts reference pre-replacement backed
+            # symbols (e.g. s77) that were replaced to this canonical
+            # symbol (s31) during constraint solving. Emit aliases so
+            # the asserts compile. Skip unbacked symbols — they are
+            # defined separately by the unbacked symbol codegen path.
             for src, tgt in V.graph.sizevars.shape_env.replacements.items():
                 if (
                     tgt == sym
                     and isinstance(src, sympy.Symbol)
                     and src not in bound_vars
-                    and is_backed_symbol(src)
-                    and is_backed_symbol(sym)
+                    and not symbol_is_type(
+                        src, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT)
+                    )
                 ):
                     code.writeline(f"{src} = {sym}")
                     bound_vars.add(src)
-                elif (
-                    src == sym
-                    and isinstance(tgt, sympy.Symbol)
-                    and tgt not in bound_vars
-                    and is_backed_symbol(sym)
-                    and is_backed_symbol(tgt)
-                ):
-                    code.writeline(f"{tgt} = {sym}")
-                    bound_vars.add(tgt)
+
+        def codegen_symbol(
+            sym_or_exp: object,
+            name: str,
+            accessor: Callable[[str], str],
+            dim: int,
+            bound_vars: OrderedSet[sympy.Symbol],
+        ) -> None:
+            if isinstance(sym_or_exp, sympy.Symbol):
+                if sym_or_exp in bound_vars:
+                    return
+                code.writeline(f"{sym_or_exp} = {accessor(name)}[{dim}]")
+                bound_vars.add(sym_or_exp)
+                maybe_emit_replacement_aliases(sym_or_exp)
+                return
+
+            if not isinstance(sym_or_exp, sympy.Expr):
+                return
+
+            undefined_symbols = [
+                sym for sym in sym_or_exp.free_symbols if sym not in bound_vars
+            ]
+            if not undefined_symbols:
+                return
+            if len(undefined_symbols) > 1:
+                return
+
+            runtime_symbol = sympy.Symbol(
+                f"{accessor(name)}_{dim}", integer=True, nonnegative=True
+            )
+
+            undefined_symbol = undefined_symbols[0]
+            solution = try_solve(sympy.Eq(sym_or_exp, runtime_symbol), undefined_symbol)
+            if solution is None:
+                return
+
+            code.writeline(f"{runtime_symbol} = {accessor(name)}[{dim}]")
+            undefined_symbol_expr = solution[1]
+            if undefined_symbol.is_integer:
+                undefined_symbol_expr = _replace_floor_div(
+                    sympy.floor(undefined_symbol_expr)
+                )
+            code.writeline(f"{undefined_symbol} = {pexpr(undefined_symbol_expr)}")
+            bound_vars.add(undefined_symbol)
+            maybe_emit_replacement_aliases(undefined_symbol)
 
         if isinstance(value, sympy.Expr):
             if not isinstance(value, sympy.Symbol) or value in bound_vars:
@@ -2506,14 +2568,9 @@ class PythonWrapperCodegen(CodeGen):
             maybe_emit_replacement_aliases(value)
         elif isinstance(value, ir.TensorBox):
             for dim, size in enumerate(value.get_size()):
-                if isinstance(size, sympy.Symbol) and size not in bound_vars:
-                    code.writeline(f"{size} = {sizeof(name)}[{dim}]")
-                    bound_vars.add(size)
-                    maybe_emit_replacement_aliases(size)
+                codegen_symbol(size, name, sizeof, dim, bound_vars)
             for dim, stride in enumerate(value.get_stride()):
-                if isinstance(stride, sympy.Symbol) and stride not in bound_vars:
-                    code.writeline(f"{stride} = {strideof(name)}[{dim}]")
-                    bound_vars.add(stride)
+                codegen_symbol(stride, name, strideof, dim, bound_vars)
         elif isinstance(
             value, (ir.TorchBindObject, ir.GeneratorState, ir.OpaqueObjectState)
         ):
@@ -3005,6 +3062,7 @@ class PythonWrapperCodegen(CodeGen):
         reset_to_zero_args,
         grids: list[list[int | sympy.Expr]],
         epilogue_fusion: tuple[ir.ComputedBuffer, str] | None,
+        launch_kwargs: tuple[str, ...],
     ):
         """Codegen a user-defined Triton kernel and return its cache entry.
 
@@ -3015,6 +3073,10 @@ class PythonWrapperCodegen(CodeGen):
         inductor_meta, extra_launcher_call_args)``; subsequent calls with the
         same ``cache_key`` reuse the previously assigned name.
         """
+        from torch._dynamo.device_interface import get_interface_for_device
+
+        from ..runtime.triton_compat import GPUTarget
+        from ..runtime.triton_helpers import try_filter_backend_options_for_target
         from ..runtime.triton_heuristics import (
             config_to_dict,
             FixedGrid,
@@ -3142,9 +3204,11 @@ class PythonWrapperCodegen(CodeGen):
             indices=arg_indices,
             argdefs=[ArgName(x) for x in kernel.arg_names],
         )
+        device = V.graph.get_current_device_or_throw()
+        device_props = DeviceProperties.create(device)
         triton_meta: dict[str, Any] = {
             "signature": triton_signature,
-            "device": DeviceProperties.create(V.graph.get_current_device_or_throw()),
+            "device": device_props,
             # Triton compiler includes equal_to_1 args into constants even
             # when they are not constexpr. otherwise there may be a segfault
             # during launching the Inductor-compiled Triton kernel.
@@ -3170,6 +3234,29 @@ class PythonWrapperCodegen(CodeGen):
 
         if reset_to_zero_args:
             triton_meta["reset_to_zero"] = tuple(reset_to_zero_args)
+
+        backend_option_candidates = {
+            name: kwargs[name] for name in launch_kwargs if name in kwargs
+        }
+        if backend_option_candidates:
+            get_interface_for_device(device).raise_if_triton_unavailable(device)
+            assert GPUTarget is not None  # noqa: S101
+            target = GPUTarget(
+                device_props.type,
+                device_props.cc,
+                device_props.warp_size_or_default,
+            )
+            # HOP capture deliberately keeps an over-approximation of launch kwargs so
+            # a concrete kwarg can still have Triton's direct-call dual meaning:
+            # kernel parameter plus backend option. Once the target backend is known,
+            # only names accepted by parse_options() should be serialized into
+            # triton_meta["backend_options"]. Names that are neither kernel parameters
+            # nor backend options are invalid launch kwargs, matching eager Triton.
+            filtered_backend_options = try_filter_backend_options_for_target(
+                target, backend_option_candidates, kernel.arg_names
+            )
+            if filtered_backend_options:
+                triton_meta["backend_options"] = filtered_backend_options
 
         if len(grids) == 1:
             # compute the grid in the wrapper and pass it in as an arg

@@ -189,16 +189,16 @@ class TestSortAndSelect(TestCase):
         # tests direct cub path
         x = torch.randn(4, 1024000, device=device)
         res1val, res1ind = torch.sort(x, stable=True)
-        torch.cuda.synchronize()
+        torch.get_device_module().synchronize()
         # assertIsOrdered is too slow, so just compare to cpu
         res1val_cpu, res1ind_cpu = torch.sort(x.cpu(), stable=True)
-        self.assertEqual(res1val, res1val_cpu.cuda())
-        self.assertEqual(res1ind, res1ind_cpu.cuda())
+        self.assertEqual(res1val, res1val_cpu.to(device))
+        self.assertEqual(res1ind, res1ind_cpu.to(device))
         res1val, res1ind = torch.sort(x, descending=True, stable=True)
-        torch.cuda.synchronize()
+        torch.get_device_module().synchronize()
         res1val_cpu, res1ind_cpu = torch.sort(x.cpu(), descending=True, stable=True)
-        self.assertEqual(res1val, res1val_cpu.cuda())
-        self.assertEqual(res1ind, res1ind_cpu.cuda())
+        self.assertEqual(res1val, res1val_cpu.to(device))
+        self.assertEqual(res1ind, res1ind_cpu.to(device))
 
     @dtypes(*all_types_and(torch.bool, torch.half, torch.bfloat16))
     def test_stable_sort(self, device, dtype):

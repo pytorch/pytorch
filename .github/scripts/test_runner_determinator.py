@@ -917,7 +917,7 @@ class TestRunnerDeterminatorArcExperiment(TestCase):
         self.assertEqual("mt-", result.prefix)
         self.assertTrue(result.use_arc)
 
-    def test_arc_takes_precedence_over_lf(self) -> None:
+    def test_arc_combined_with_lf_returns_lf_prefix(self) -> None:
         settings_text = """
         experiments:
             lf:
@@ -931,7 +931,7 @@ class TestRunnerDeterminatorArcExperiment(TestCase):
 
         """
         result = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
-        self.assertEqual("mt-", result.prefix)
+        self.assertEqual("lf-", result.prefix)
         self.assertTrue(result.use_arc)
 
     @patch("random.uniform", return_value=10)

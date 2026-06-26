@@ -33,7 +33,7 @@ from torch import Tensor
 from torch._decomp import decomposition_table, get_decompositions
 from torch._dynamo._trace_wrapped_higher_order_op import mod_index
 from torch._dynamo.test_case import TestCase
-from torch._dynamo.testing import CompileCounter, normalize_gm
+from torch._dynamo.testing import normalize_gm
 from torch._export import config
 from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
 from torch._export.utils import (
@@ -539,12 +539,7 @@ graph():
 
         inputs = (torch.arange(10), torch.tensor(2))
 
-        # See https://github.com/pytorch/pytorch/issues/154574
-        # # Without transforming the unbacked int expression, we can't export.
-        # with self.assertRaisesRegex(
-        #     RuntimeError, escape("Could not guard on data-dependent expression")
-        # ):
-        #     export(Module(identity), inputs, strict=True)
+        export(Module(identity), inputs, strict=True)
 
         # It works if we transform the whole unbacked int expression into
         # an unbacked int.
@@ -1336,7 +1331,8 @@ def forward(self, x):
     _remove_batch_dim_1 = torch._functorch.predispatch._remove_batch_dim(_remove_batch_dim, 3, 128, 0);  _remove_batch_dim = None
     _vmap_decrement_nesting_1 = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting_1 = None
     _remove_batch_dim_2 = torch._functorch.predispatch._remove_batch_dim(_remove_batch_dim_1, 2, 1, 0)
-    expand = torch.ops.aten.expand.default(_remove_batch_dim_1, [1, 128, 128]);  _remove_batch_dim_1 = expand = None
+    unsqueeze = torch.ops.aten.unsqueeze.default(_remove_batch_dim_1, 0);  _remove_batch_dim_1 = None
+    expand = torch.ops.aten.expand.default(unsqueeze, [1, 128, 128]);  unsqueeze = expand = None
     _vmap_decrement_nesting_2 = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting_2 = None
     _remove_batch_dim_3 = torch._functorch.predispatch._remove_batch_dim(_remove_batch_dim_2, 1, 2, 0);  _remove_batch_dim_2 = None
     _vmap_decrement_nesting_3 = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting_3 = None
@@ -1378,13 +1374,13 @@ def forward(self, x):
     _add_batch_dim_7 = torch._functorch.predispatch._add_batch_dim(_add_batch_dim_5, 0, 2);  _add_batch_dim_5 = None
     new_zeros = torch.ops.aten.new_zeros.default(_add_batch_dim_7, [1, 2], dtype = torch.int32, pin_memory = False)
     arange_4 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='cpu'), pin_memory = False)
-    unsqueeze = torch.ops.aten.unsqueeze.default(arange_4, -1);  arange_4 = None
+    unsqueeze_1 = torch.ops.aten.unsqueeze.default(arange_4, -1);  arange_4 = None
     arange_5 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='cpu'), pin_memory = False)
-    unsqueeze_1 = torch.ops.aten.unsqueeze.default(_add_batch_dim_6, -1);  _add_batch_dim_6 = None
-    lt_1 = torch.ops.aten.lt.Tensor(arange_5, unsqueeze_1);  arange_5 = unsqueeze_1 = None
+    unsqueeze_2 = torch.ops.aten.unsqueeze.default(_add_batch_dim_6, -1);  _add_batch_dim_6 = None
+    lt_1 = torch.ops.aten.lt.Tensor(arange_5, unsqueeze_2);  arange_5 = unsqueeze_2 = None
     where = torch.ops.aten.where.ScalarOther(lt_1, _add_batch_dim_7, 1);  lt_1 = _add_batch_dim_7 = None
     new_ones = torch.ops.aten.new_ones.default(new_zeros, [], pin_memory = False)
-    index_put_ = torch.ops.aten.index_put_.default(new_zeros, [unsqueeze, where], new_ones);  new_zeros = unsqueeze = where = new_ones = None
+    index_put_ = torch.ops.aten.index_put_.default(new_zeros, [unsqueeze_1, where], new_ones);  new_zeros = unsqueeze_1 = where = new_ones = None
     slice_1 = torch.ops.aten.slice.Tensor(index_put_, 1, 0, 1);  index_put_ = None
     _remove_batch_dim_4 = torch._functorch.predispatch._remove_batch_dim(slice_1, 2, 1, 0);  slice_1 = None
     _vmap_decrement_nesting_4 = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting_4 = None
@@ -1409,13 +1405,13 @@ def forward(self, x):
     _add_batch_dim_11 = torch._functorch.predispatch._add_batch_dim(_add_batch_dim_9, 0, 2);  _add_batch_dim_9 = None
     new_zeros_1 = torch.ops.aten.new_zeros.default(_add_batch_dim_11, [1, 2], dtype = torch.int32, pin_memory = False)
     arange_6 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='cpu'), pin_memory = False)
-    unsqueeze_2 = torch.ops.aten.unsqueeze.default(arange_6, -1);  arange_6 = None
+    unsqueeze_3 = torch.ops.aten.unsqueeze.default(arange_6, -1);  arange_6 = None
     arange_7 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='cpu'), pin_memory = False)
-    unsqueeze_3 = torch.ops.aten.unsqueeze.default(_add_batch_dim_10, -1);  _add_batch_dim_10 = None
-    lt_2 = torch.ops.aten.lt.Tensor(arange_7, unsqueeze_3);  arange_7 = unsqueeze_3 = None
+    unsqueeze_4 = torch.ops.aten.unsqueeze.default(_add_batch_dim_10, -1);  _add_batch_dim_10 = None
+    lt_2 = torch.ops.aten.lt.Tensor(arange_7, unsqueeze_4);  arange_7 = unsqueeze_4 = None
     where_1 = torch.ops.aten.where.ScalarOther(lt_2, _add_batch_dim_11, 1);  lt_2 = _add_batch_dim_11 = None
     new_ones_1 = torch.ops.aten.new_ones.default(new_zeros_1, [], pin_memory = False)
-    index_put__1 = torch.ops.aten.index_put_.default(new_zeros_1, [unsqueeze_2, where_1], new_ones_1);  new_zeros_1 = unsqueeze_2 = where_1 = new_ones_1 = None
+    index_put__1 = torch.ops.aten.index_put_.default(new_zeros_1, [unsqueeze_3, where_1], new_ones_1);  new_zeros_1 = unsqueeze_3 = where_1 = new_ones_1 = None
     slice_2 = torch.ops.aten.slice.Tensor(index_put__1, 1, 0, 1);  index_put__1 = None
     _remove_batch_dim_6 = torch._functorch.predispatch._remove_batch_dim(slice_2, 2, 1, 0);  slice_2 = None
     _vmap_decrement_nesting_6 = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting_6 = None
@@ -9833,170 +9829,6 @@ def forward(self, x):
         ):
             test_inp = (torch.randint(1, 2, (2, 2)), torch.randint(3, 5, (2, 3)))
             _ = ep.module()(*test_inp)
-
-    def test_linspace_logspace_unbacked_steps(self):
-        class Linspace(torch.nn.Module):
-            def forward(self, x):
-                steps = x.item()
-                torch._check(steps >= 2)
-                torch._check(steps <= 8)
-                return torch.linspace(0, 3, steps=x, device=x.device)
-
-        class Logspace(torch.nn.Module):
-            def forward(self, x):
-                steps = x.item()
-                torch._check(steps >= 2)
-                torch._check(steps <= 8)
-                return torch.logspace(0, 2, steps=x, device=x.device)
-
-        class LinspaceVmap(torch.nn.Module):
-            def forward(self, start, end, x):
-                steps = x.item()
-                torch._check(steps >= 2)
-                torch._check(steps <= 8)
-                return torch.vmap(
-                    lambda s, e: torch.linspace(s, e, steps=x, device=x.device)
-                )(start, end)
-
-        class LogspaceVmap(torch.nn.Module):
-            def forward(self, start, end, x):
-                steps = x.item()
-                torch._check(steps >= 2)
-                torch._check(steps <= 8)
-                return torch.vmap(
-                    lambda s, e: torch.logspace(s, e, steps=x, device=x.device)
-                )(start, end)
-
-        for module in (Linspace(), Logspace()):
-            for strict in (False, True):
-                with self.subTest(module=type(module).__name__, strict=strict):
-                    ep = export(module, (torch.tensor(4),), strict=strict)
-                    exported_module = ep.module()
-                    self.assertEqual(
-                        exported_module(torch.tensor(5)), module(torch.tensor(5))
-                    )
-
-                    torchdynamo.reset()
-                    counter = CompileCounter()
-                    compiled_module = torch.compile(
-                        exported_module,
-                        backend=counter,
-                        dynamic=True,
-                        fullgraph=True,
-                    )
-                    self.assertEqual(
-                        compiled_module(torch.tensor(4)), module(torch.tensor(4))
-                    )
-                    self.assertEqual(
-                        compiled_module(torch.tensor(6)), module(torch.tensor(6))
-                    )
-                    self.assertEqual(counter.frame_count, 1)
-
-                    with self.assertRaisesRegex(
-                        (RuntimeError, AssertionError),
-                        "Runtime assertion failed|Guard failed",
-                    ):
-                        exported_module(torch.tensor(1))
-
-        start = torch.tensor([0.0, 1.0])
-        end = torch.tensor([2.0, 3.0])
-        for op in (torch.linspace, torch.logspace):
-            for step_count in (0, 1, 4):
-                steps = torch.tensor(step_count)
-                with self.subTest(op=op.__name__, steps=step_count):
-                    self.assertEqual(
-                        torch.vmap(lambda s, e: op(s, e, steps=steps, device=s.device))(
-                            start, end
-                        ),
-                        torch.stack(
-                            [
-                                op(s, e, steps=steps, device=s.device)
-                                for s, e in zip(start, end)
-                            ]
-                        ),
-                    )
-            vmap_inputs = [
-                (start, end, 0, torch.complex64),
-                (start, end, 1, torch.complex64),
-                (start, end, 4, torch.complex64),
-                (start.double(), end.double(), 4, None),
-                (start.to(torch.complex64) + 1j, end.to(torch.complex64), 0, None),
-                (start.to(torch.complex64) + 1j, end.to(torch.complex64), 1, None),
-                (start.to(torch.complex64) + 1j, end.to(torch.complex64), 4, None),
-                (
-                    start.to(torch.complex128) + 1j,
-                    end.to(torch.complex128),
-                    4,
-                    None,
-                ),
-            ]
-            if op is torch.linspace:
-                vmap_inputs.append(
-                    (
-                        torch.tensor([2**54 + 1, 2**54 + 3], dtype=torch.int64),
-                        torch.tensor([2**54 + 5, 2**54 + 7], dtype=torch.int64),
-                        1,
-                        torch.int64,
-                    )
-                )
-            if op is torch.logspace:
-                vmap_inputs.extend(
-                    [
-                        (
-                            torch.tensor([0.5, 1.5]),
-                            torch.tensor([2.5, 3.5]),
-                            1,
-                            torch.int64,
-                        ),
-                        (
-                            torch.tensor([0.5, 1.5], dtype=torch.float64),
-                            torch.tensor([2.5, 3.5], dtype=torch.float64),
-                            1,
-                            None,
-                        ),
-                        (
-                            torch.tensor([0.5, 1.5], dtype=torch.complex128),
-                            torch.tensor([2.5, 3.5], dtype=torch.complex128),
-                            1,
-                            None,
-                        ),
-                    ]
-                )
-            for case_start, case_end, step_count, dtype in vmap_inputs:
-                with self.subTest(op=op.__name__, steps=step_count, dtype=dtype):
-
-                    def call_op(s, e):
-                        kwargs = {"device": s.device}
-                        if dtype is not None:
-                            kwargs["dtype"] = dtype
-                        return op(s, e, steps=step_count, **kwargs)
-
-                    self.assertEqual(
-                        torch.vmap(call_op)(case_start, case_end),
-                        torch.stack(
-                            [call_op(s, e) for s, e in zip(case_start, case_end)]
-                        ),
-                    )
-
-        for module in (LinspaceVmap(), LogspaceVmap()):
-            with self.subTest(module=type(module).__name__):
-                torchdynamo.reset()
-                counter = CompileCounter()
-                compiled_module = torch.compile(
-                    module,
-                    backend=counter,
-                    dynamic=True,
-                    fullgraph=True,
-                )
-                self.assertEqual(
-                    compiled_module(start, end, torch.tensor(4)),
-                    module(start, end, torch.tensor(4)),
-                )
-                self.assertEqual(
-                    compiled_module(start, end, torch.tensor(6)),
-                    module(start, end, torch.tensor(6)),
-                )
-                self.assertEqual(counter.frame_count, 1)
 
     def test_while_loop_simple(self):
         class Simple(torch.nn.Module):

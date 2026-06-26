@@ -13,11 +13,9 @@ import os.path
 import re
 import warnings
 from collections import defaultdict, deque
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from dataclasses import dataclass, replace
-from typing import Any, TYPE_CHECKING
-
-import sympy
+from typing import Any, cast, TYPE_CHECKING
 
 import torch
 import torch._inductor.inductor_prims
@@ -35,20 +33,17 @@ from torch._inductor.custom_graph_pass import (
     CustomRuntimeEstimator,
 )
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_value
 from torch._library.utils import is_builtin
 from torch._logging import LazyString, trace_structured
 from torch._logging._internal import trace_log
 from torch._subclasses.fake_tensor import extract_tensor_metadata
-from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
-from torch.fx.experimental.sym_node import magic_methods, method_to_operator, SymNode
+from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.fx.experimental.symbolic_shapes import (
-    _get_placeholder_expr,
     find_symbol_binding_fx_nodes,
+    free_symbols,
     is_symbol_binding_fx_node,
-    is_symbolic,
     optimization_hint,
     statically_known_false,
     statically_known_true,
@@ -89,6 +84,7 @@ from .compile_utils import fx_graph_cse, get_aten_target, raise_getitems
 
 if TYPE_CHECKING:
     import networkx as nx
+    import sympy
 
 
 AOT_PARTITIONER_DEBUG: bool = config.debug_partitioner
@@ -174,6 +170,53 @@ def must_recompute(node: fx.Node) -> bool:
     ]
 
 
+def get_schema_arg_idx(target: object, arg_name: str) -> int | None:
+    """Return the positional schema index for an operator argument name."""
+    if not isinstance(target, torch._ops.OpOverload):
+        return None
+    for idx, arg in enumerate(target._schema.arguments):
+        if arg.name == arg_name:
+            return idx
+    return None
+
+
+def is_nonzero_dropout_sdpa(node: fx.Node) -> bool:
+    """Return True unless SDPA-family dropout is statically known to be disabled."""
+    target = node.target
+    if not isinstance(target, torch._ops.OpOverload):
+        return True
+
+    dropout_arg_idx = get_schema_arg_idx(target, "dropout_p")
+    if dropout_arg_idx is None:
+        return True
+
+    dropout_arg = target._schema.arguments[dropout_arg_idx]
+    if len(node.args) > dropout_arg_idx:
+        dropout_p = node.args[dropout_arg_idx]
+    elif "dropout_p" in node.kwargs:
+        dropout_p = node.kwargs["dropout_p"]
+    elif dropout_arg.default_value is not None:
+        dropout_p = dropout_arg.default_value
+    else:
+        return True
+
+    return not statically_known_true(cast(bool | torch.SymBool, dropout_p == 0.0))
+
+
+def is_rng_op(node: fx.Node) -> bool:
+    """Return True when a node's seeded nondeterminism cannot be statically ruled out."""
+    if not (
+        hasattr(node.target, "tags")
+        and torch.Tag.nondeterministic_seeded in node.target.tags
+    ):
+        return False
+
+    if get_schema_arg_idx(node.target, "dropout_p") is not None:
+        return is_nonzero_dropout_sdpa(node)
+
+    return True
+
+
 def _is_assert_only_symbool(node: fx.Node) -> bool:
     return (
         isinstance(node.meta.get("val"), torch.SymBool)
@@ -193,11 +236,7 @@ def has_recomputable_ops(fx_g: fx.GraphModule) -> bool:
 
 def has_recomputable_rng_ops(fx_g: fx.GraphModule) -> bool:
     for node in fx_g.graph.nodes:
-        if (
-            must_recompute(node)
-            and hasattr(node.target, "tags")
-            and torch.Tag.nondeterministic_seeded in node.target.tags
-        ):
+        if must_recompute(node) and is_rng_op(node):
             return True
     return False
 
@@ -462,46 +501,6 @@ def _must_be_in_backward(node: fx.Node) -> bool:
         and node.target._schema.is_mutable
     )
     return _has_tag_is_backward(node) and is_mutable
-
-
-def _iter_input_exprs_without_replacements(val: Any) -> Iterator[sympy.Basic]:
-    # Keep this traversal in sync with symbolic_shapes._iterate_exprs.
-    if isinstance(val, py_sym_types):
-        if is_symbolic(val):
-            yield _get_placeholder_expr(val.node)
-    elif isinstance(val, SymNode):
-        yield _get_placeholder_expr(val)
-    elif isinstance(val, sympy.Basic):
-        yield val
-    elif isinstance(val, (int, float, bool, str)):
-        pass
-    elif isinstance(val, (tuple, list)):
-        for s in val:
-            yield from _iter_input_exprs_without_replacements(s)
-    elif isinstance(val, dict):
-        for s in itertools.chain(val.keys(), val.values()):
-            yield from _iter_input_exprs_without_replacements(s)
-    elif is_sparse_any(val):
-        yield from _iter_input_exprs_without_replacements(val.size())
-    elif isinstance(val, torch.Tensor):
-        yield from _iter_input_exprs_without_replacements(val.size())
-        yield from _iter_input_exprs_without_replacements(val.stride())
-        yield from _iter_input_exprs_without_replacements(val.storage_offset())
-    elif val is None:
-        pass
-    elif isinstance(val, torch.Generator) or is_opaque_value(val):
-        pass
-    elif isinstance(val, FakeScriptObject):
-        pass
-    else:
-        raise AssertionError(f"cannot extract sympy expressions from {val} {type(val)}")
-
-
-def _free_symbols_without_replacements(val: Any) -> OrderedSet[sympy.Symbol]:
-    symbols: OrderedSet[sympy.Symbol] = OrderedSet()
-    for expr in _iter_input_exprs_without_replacements(val):
-        symbols.update(expr.free_symbols)
-    return symbols
 
 
 def _extract_fwd_bwd_outputs(
@@ -1150,9 +1149,7 @@ def _extract_fwd_bwd_modules(
     for node in itertools.chain(saved_sym_nodes_derived, saved_values, tangent_inputs):
         if "val" not in node.meta:
             continue
-        new_symbols = (
-            _free_symbols_without_replacements(node.meta["val"]) - saved_symbols
-        )
+        new_symbols = free_symbols(node.meta["val"]) - saved_symbols
         # NB: Deterministic order please!
         for s in sorted(new_symbols, key=lambda s: s.name):
             # NB: For well formed graphs, the symbol should always be present,
@@ -1724,9 +1721,6 @@ def apply_graphsafe_rng_functionalization(
     - We save the forward RNG state
     - We update the backward Generator's state before executing backward
 
-    Before each CUDA Graph replay, replay_prologue updates captured RNG pointers with current states, ensuring backward Generator
-    changes are reflected during replay.
-
     This function modifies both forward and backward computation graphs by:
 
     Creating RNG state placeholders for both passes
@@ -1818,11 +1812,7 @@ def functionalize_rng_ops(
     def get_rng_ops(gmod: fx.GraphModule) -> dict[str, fx.Node]:
         random_nodes: dict[str, fx.Node] = {}
         for node in gmod.graph.nodes:
-            if (
-                node.op == "call_function"
-                and hasattr(node.target, "tags")
-                and torch.Tag.nondeterministic_seeded in node.target.tags
-            ):
+            if node.op == "call_function" and is_rng_op(node):
                 random_nodes[node.name] = node
         return random_nodes
 
@@ -1861,11 +1851,7 @@ def functionalize_rng_ops(
     bw_graph_rng_ops = get_rng_ops(bw_module)
     recomputable_rng_ops_map = {}
     for node in joint_module.graph.nodes:
-        if (
-            must_recompute(node)
-            and hasattr(node.target, "tags")
-            and torch.Tag.nondeterministic_seeded in node.target.tags
-        ):
+        if must_recompute(node) and is_rng_op(node):
             # Skip if the node doesn't exist in both forward and backward graphs.
             # This can happen when the RNG op's output is not needed for gradient
             # computation and gets eliminated by dead code elimination.
@@ -3272,7 +3258,9 @@ def choose_saved_values_set(
         recomputable_banned_nodes, key=_size_of, reverse=True
     )
     if len(all_recomputable_banned_nodes) == 0:
-        return node_info.inputs + must_save_nodes
+        # Nothing left for the knapsack to trade off, so this is the same cut the
+        # knapsack would return with an empty dont_ban.
+        return aggressive_recomputation_saved_values
     memories_banned_nodes = [
         get_normalized_size(_size_of(i)) for i in all_recomputable_banned_nodes
     ]

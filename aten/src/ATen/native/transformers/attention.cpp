@@ -531,6 +531,9 @@ inline void validate_sdpa_input(
       "Expected query, key, and value to all be  at least 2 dimensional, but got query.dim: ",
       query_.dim(), " key.dim: ", key.dim(), " and value.dim: ", value.dim(), " instead.");
   if (attn_mask_.has_value()){
+    TORCH_CHECK(
+      !is_causal,
+      "_scaled_dot_product_attention: Explicit attn_mask should not be set when is_causal=True");
     auto mask_dtype = attn_mask_->dtype();
     TORCH_CHECK(mask_dtype == at::kBool || mask_dtype == at::kFloat || mask_dtype == query_.dtype(),
       "Expected attn_mask dtype to be bool or float or to match query dtype, but got attn_mask.dtype: ",
@@ -763,7 +766,7 @@ Tensor scaled_dot_product_attention(
       if(query_device_type == DeviceType::CUDA ||
          query_device_type == DeviceType::XPU) {
         c10::SymInt og_size = query_.sym_size(-1);
-        int alignment_size = (query_device_type == DeviceType::XPU) ? 64 : 8;
+        int alignment_size = (query_device_type == DeviceType::XPU) ? 1 : 8;
         Tensor query_padded = pad_last_dim(query_, alignment_size);
         Tensor key_padded = pad_last_dim(key, alignment_size);
         Tensor value_padded = pad_last_dim(value, alignment_size);

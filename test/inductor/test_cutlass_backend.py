@@ -633,6 +633,7 @@ class TestCutlassBackend(TestCase):
 
     @unittest.skipIf(torch.version.hip is not None, "ROCm not supported")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @skipXPUIf(not Xe2_Or_Later, "")
     @parametrize("dtype", (torch.float16, torch.bfloat16))
     @parametrize("num_gemms", (1, 2))
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})

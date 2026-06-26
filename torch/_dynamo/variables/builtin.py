@@ -70,9 +70,7 @@ from ..utils import (
     dict_methods,
     extract_fake_example_value,
     get_fake_value,
-    guard_if_dyn,
     is_tensor_getset_descriptor,
-    is_wrapper_or_member_descriptor,
     istype,
     numpy_operator_wrapper,
     proxy_args_kwargs,
@@ -97,13 +95,7 @@ from .dicts import (
     DictViewVariable,
 )
 from .hashable import is_hashable
-from .lists import (
-    BaseListVariable,
-    ListIteratorVariable,
-    ListVariable,
-    TupleIteratorVariable,
-    TupleVariable,
-)
+from .lists import BaseListVariable, ListVariable, TupleIteratorVariable, TupleVariable
 from .misc import NullVariable, StringFormatVariable
 from .object_protocol import (
     binary_iop,
@@ -112,6 +104,7 @@ from .object_protocol import (
     generic_bool,
     generic_float,
     generic_getiter,
+    generic_hash,
     generic_inplace_multiply,
     generic_int,
     generic_invert,
@@ -122,6 +115,7 @@ from .object_protocol import (
     generic_repr,
     generic_str,
     maybe_get_python_type,
+    pycallable_check,
     pysequence_check,
     ternary_iop,
     ternary_op,
@@ -602,7 +596,6 @@ class BuiltinVariable(BaseBuiltinVariable):
         from .nn_module import NNModuleVariable
         from .tensor import supported_const_comparison_ops
         from .torch import BaseTorchVariable
-        from .user_defined import UserDefinedVariable
 
         # Override table contains: op_fn -> [list of handlers]
         op_handlers: dict[Any, list[Any]] = {}
@@ -1747,6 +1740,14 @@ class BuiltinVariable(BaseBuiltinVariable):
             # e.g., int.__invert__(4) → ~4
             return generic_invert(tx, args[0])
 
+        if name == "__hash__" and len(args) == 1 and not kwargs:
+            arg = args[0]
+            if (
+                isinstance(arg, variables.UserDefinedConstantVariable)
+                and arg._base_vt is not None
+            ):
+                return generic_hash(tx, arg._base_vt)
+
         return super().call_method(tx, name, args, kwargs)
 
     def call_int(
@@ -1796,50 +1797,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         if isinstance(arg, (variables.UserFunctionVariable)):
             return VariableTracker.build(tx, str(arg.fn))
         elif isinstance(arg, (variables.UserDefinedObjectVariable)):
-            # Check if object has __str__ method
-            if hasattr(arg.value, "__str__"):
-                str_method = arg.value.__str__
-            elif hasattr(arg.value, "__repr__"):
-                # account for __repr__ functions when __str__ is absent
-                str_method = arg.value.__repr__
-            else:
-                unimplemented(
-                    gb_type="failed to call str() on user defined object",
-                    context=str(arg),
-                    explanation="User defined object has no __str__ or __repr__ method",
-                    hints=[*graph_break_hints.USER_ERROR],
-                )
-
-            if type(arg.value).__str__ is object.__str__:
-                # Rely on the object str method
-                try:
-                    # pyrefly: ignore [unbound-name]
-                    return VariableTracker.build(tx, str_method())
-                except AttributeError:
-                    # Graph break
-                    return None
-            elif is_wrapper_or_member_descriptor(str_method):
-                unimplemented(
-                    gb_type="Attempted to a str() method implemented in C/C++",
-                    context="",
-                    explanation=f"{type(arg.value)} has a C/C++ based str method. This is not supported.",
-                    hints=["Write the str method in Python"],
-                )
-            else:
-                # Overrides for custom str method
-                # Pass method as function to call tx.inline_user_function_return
-                bound_method = str_method.__func__  # type: ignore[attr-defined]
-
-                try:
-                    # Only supports certain function types
-                    user_func_variable = VariableTracker.build(tx, bound_method)
-                except AssertionError:
-                    # Won't be able to do inline the str method, return to avoid graph break
-                    log.warning("Failed to create UserFunctionVariable", exc_info=True)
-                    return None
-
-                # Inline the user function
-                return user_func_variable.call_function(tx, [arg], {})
+            return generic_str(tx, arg)
         return None
 
     def call___build_class__(self, tx, *args, **kwargs):
@@ -2045,20 +2003,15 @@ class BuiltinVariable(BaseBuiltinVariable):
         tx: "InstructionTranslatorBase",
         *args: VariableTracker,
         **kwargs: VariableTracker,
-    ) -> VariableTracker | None:
+    ) -> VariableTracker:
         if kwargs:
             raise_type_error(tx, "range() takes no keyword arguments")
         if len(args) == 0:
             raise_type_error(tx, "range expected at least 1 argument, got 0")
         if len(args) > 3:
             raise_type_error(tx, f"range expected at most 3 arguments, got {len(args)}")
-        if check_unspec_or_constant_args(args, {}):
-            return variables.RangeVariable(list(args))
-        elif self._dynamic_args(*args):
-            args = tuple(VariableTracker.build(tx, guard_if_dyn(arg)) for arg in args)
-            return variables.RangeVariable(list(args))
-        # None no-ops this handler and lets the driving function proceed
-        return None
+        args = tuple(VariableTracker.build(tx, arg.nb_index_impl(tx)) for arg in args)
+        return variables.RangeVariable(list(args))
 
     def _dynamic_args(self, *args: VariableTracker, **kwargs: VariableTracker) -> bool:
         return any(isinstance(x, SymNodeVariable) for x in args) or any(
@@ -2113,37 +2066,15 @@ class BuiltinVariable(BaseBuiltinVariable):
 
     def call_callable(
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
-    ) -> VariableTracker | None:
-        from .functions import BaseUserFunctionVariable, FunctoolsPartialVariable
-        from .nn_module import NNModuleVariable
-
-        if isinstance(
-            arg,
-            (
-                variables.UserDefinedClassVariable,
-                BaseUserFunctionVariable,
-                FunctoolsPartialVariable,
-                NNModuleVariable,
-            ),
-        ):
-            return variables.ConstantVariable.create(True)
-        elif isinstance(arg, UserDefinedVariable):
-            return VariableTracker.build(tx, callable(arg.value))
-        elif isinstance(
-            arg,
-            (
-                ConstantVariable,
-                SymNodeVariable,
-                StringFormatVariable,
-                TensorVariable,
-                ListVariable,
-                TupleVariable,
-                ListIteratorVariable,
-            ),
-        ):
-            return variables.ConstantVariable.create(False)
-        else:
-            return None
+    ) -> VariableTracker:
+        # PyCallable_Check: callable(x) is type(x)->tp_call != NULL. Dispatch on
+        # the arg's Python type slot rather than enumerating callable VTs.
+        # callable() is the only handler for this builtin, so always return a
+        # result (or graph break via maybe_get_python_type) -- never None, which
+        # would signal "try another handler" that does not exist.
+        return variables.ConstantVariable.create(
+            pycallable_check(maybe_get_python_type(arg))
+        )
 
     def call_cast(
         self, _: Any, *args: VariableTracker, **kwargs: VariableTracker
@@ -2217,7 +2148,13 @@ class BuiltinVariable(BaseBuiltinVariable):
             # CPython: frozenset(existing_frozenset) returns the same object.
             return args[0]
 
-        items = unpack_iterable(tx, args[0])
+        # Reuse existing HashableTracker keys from a set/frozenset/dict operand
+        # instead of re-hashing, mirroring CPython's set_update_internal fast
+        # path (do-not-rehash-dict-keys).
+        if isinstance(args[0], (variables.SetVariable, variables.ConstDictVariable)):
+            items = list(args[0].items.keys())
+        else:
+            items = unpack_iterable(tx, args[0])
         fs = FrozensetVariable(items, mutation_type=ValueMutationNew())
         return fs
 
@@ -3060,6 +2997,13 @@ class DictBuiltinVariable(BaseBuiltinVariable):
             else:
                 return ConstDictVariable(items, mutation_type=ValueMutationNew())
 
+        # Reuse the operand's existing HashableTracker keys instead of
+        # re-wrapping (and thus re-hashing) the underlying VTs, mirroring
+        # CPython's do-not-rehash-dict-keys behavior when building a dict from
+        # an existing set/frozenset/dict.
+        if isinstance(arg, (variables.SetVariable, ConstDictVariable)):
+            # HashableTracker keys are accepted by ConstDictVariable.__init__.
+            return _make_result(dict.fromkeys(arg.items.keys(), value))  # type: ignore[arg-type]
         if isinstance(arg, dict):
             arg_list = [VariableTracker.build(tx, k) for k in arg]
             return _make_result(dict.fromkeys(arg_list, value))
