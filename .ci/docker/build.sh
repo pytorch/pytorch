@@ -184,7 +184,7 @@ case "$tag" in
       INDUCTOR_BENCHMARKS=yes
     fi
     ;;
-  pytorch-linux-noble-rocm-nightly-py3)
+  pytorch-linux-noble-rocm-preview-py3)
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=13
     ROCM_VERSION=nightly

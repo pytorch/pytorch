@@ -66,7 +66,7 @@ ADD ./common/install_rocm_drm.sh install_rocm_drm.sh
 RUN if [ "${ROCM_VERSION}" != "nightly" ]; then bash ./install_rocm_drm.sh /usr ; fi && rm install_rocm_drm.sh
 
 # ROCm environment is written by install_rocm.sh to /etc/rocm_env.sh and sourced
-# by CI scripts. Do not set /opt/rocm defaults here: rocm-nightly installs ROCm
+# by CI scripts. Do not set /opt/rocm defaults here: rocm-preview installs ROCm
 # from TheRock wheels under the Python environment instead.
 
 ENV LANG C.UTF-8
