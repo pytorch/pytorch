@@ -729,19 +729,23 @@ std::unique_ptr<at::ObserverContext> onFunctionEnterGlobal(
   if (!global_callback_session.isActive()) {
     return nullptr;
   }
+
   global_callback_session.enter();
+
   // Release the ref when this function returns (success or early bail), so the
   // in-flight window is just this enter's getGlobal() + begin_op() critical
-  // section, not the op body. The matching onFunctionExitGlobal takes its own.
+  // section.
   auto in_flight_guard =
       c10::make_scope_exit([] { global_callback_session.exit(); });
+
   // Re-check after the increment. This is the handshake that makes teardown
   // safe: if disableProfiler() cleared active concurrently, its drain is
-  // guaranteed to observe our increment and wait iff we still observe active
-  // true here.
+  // guaranteed to observe our increment and wait if and only if we still
+  // observe active true here.
   if (!global_callback_session.isActive()) {
     return nullptr;
   }
+
   std::shared_ptr<KinetoThreadLocalState> state_ptr =
       KinetoThreadLocalState::getGlobal();
   if (!state_ptr) {
@@ -823,6 +827,7 @@ void onFunctionExitGlobal(
     // there is nothing to finalize.
     return;
   }
+
   // Take this exit's own in-flight ref, paired here because
   // onFunctionEnterGlobal no longer hands one off. It covers only this exit's
   // getGlobal() + RecordQueue write, never the op body, so the drain cannot
@@ -830,26 +835,29 @@ void onFunctionExitGlobal(
   global_callback_session.enter();
   auto in_flight_guard =
       c10::make_scope_exit([] { global_callback_session.exit(); });
+
   // Re-check after the increment, mirroring onFunctionEnterGlobal: if teardown
   // began concurrently the queue may already be finalized/freed, so skip the
   // write (the event keeps its start and gets no end).
   if (!global_callback_session.isActive()) {
     return;
   }
+
   std::shared_ptr<KinetoThreadLocalState> state_ptr =
       KinetoThreadLocalState::getGlobal();
   if (!state_ptr) {
     return;
   }
-  // begin_op ran in an earlier session (generation differs): that session was
-  // torn down and event_ is freed, so drop the exit before touching event_.
-  // session_generation_ lives in the context (alive while RecordFunction holds
-  // it), never in the freed event_, so this check is always safe.
+
+  // If the session generations don't match, that means this op entered under an
+  // earlier session that has since been torn down, freeing its RecordQueue and
+  // event_. In that case, we don't need to do any exit cleanup.
   auto* kineto_ctx =
       static_cast<torch::profiler::impl::KinetoObserverContext*>(ctx_ptr);
   if (kineto_ctx->session_generation_ != global_callback_session.generation()) {
     return;
   }
+
   onFunctionExitImpl(*state_ptr, fn, ctx_ptr);
 }
 
@@ -873,14 +881,12 @@ void pushGlobalProfilingCallbacks(
       at::RecordFunctionCallback(onFunctionEnterGlobal, onFunctionExitGlobal)
           .needsInputs(state_ptr->config().report_input_shapes)
           .scopes(scopes);
-  // Arm the drain gate -- and, on a true enable, bump the session generation --
-  // before the global callback can fire on any thread. disableProfiler() relies
-  // on this to know it must drain in-flight callbacks. Do not reset in_flight
-  // here: it is already zero once the previous disableProfiler() drained it,
-  // and this function is also called by the dynamic collection toggle
-  // mid-session, where a concurrent in-flight callback may still hold a
-  // reference that must not be discarded.
+
+  // Arm the drain gate before the global callback and fire on any thread. If
+  // this a new profiling session, also bump the session generation.
+  // disableProfiler() relies on this to know it must drain in-flight callbacks.
   global_callback_session.activate(new_session);
+
   state_ptr->setCallbackHandle(at::addGlobalCallback(recordFunctionCallback));
 }
 

@@ -470,8 +470,12 @@ struct KinetoObserverContext : public at::ObserverContext {
 
   Event* event_;
   FallbackPair* fallback_{nullptr};
-  // Global-callback path: session generation captured at begin_op;
-  // onFunctionExitGlobal drops the exit if it no longer matches (session gone).
+
+  // Generation of the global session this op entered under, snapshotted from
+  // global_callback_session at enter time. That counter bumps per new global
+  // session (not on the mid-session toggle). At exit, a match means event_ is
+  // still live so the exit finalizes it; a mismatch means the session was torn
+  // down and event_ freed, so the exit drops without touching event_.
   uint64_t session_generation_{0};
 };
 
