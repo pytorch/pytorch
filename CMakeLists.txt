@@ -285,6 +285,7 @@ cmake_dependent_option(USE_CUSPARSELT "Use cuSPARSELt" ON "USE_CUDA" OFF)
 cmake_dependent_option(USE_CUDSS "Use cuDSS" ON "USE_CUDA" OFF)
 # USE_ROCM is guarded against in Dependencies.cmake because USE_ROCM is not properly defined here
 cmake_dependent_option(USE_CUFILE "Use cuFile" ON "USE_CUDA AND NOT WIN32" OFF)
+cmake_dependent_option(USE_CUOBJ "Use NVIDIA cuObject (S3-over-RDMA)" ON "USE_CUDA AND NOT WIN32" OFF)
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
 option(USE_KINETO "Use Kineto profiling library" ON)
 option(USE_CUPTI_SO "Use CUPTI as a shared library" ON)

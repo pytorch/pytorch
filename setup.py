@@ -55,6 +55,9 @@
 #   USE_CUFILE=0
 #     disables the cuFile build
 #
+#   USE_CUOBJ=0
+#     disables the NVIDIA cuObject (S3-over-RDMA) build
+#
 #   USE_FBGEMM=0
 #     disables the FBGEMM build
 #

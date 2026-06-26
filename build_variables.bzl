@@ -889,6 +889,7 @@ libtorch_python_cuda_core_sources = [
     "torch/csrc/cuda/shared/nvtx.cpp",
     "torch/csrc/cuda/utils.cpp",
     "torch/csrc/cuda/GdsFile.cpp",
+    "torch/csrc/cuda/CuObjClient.cpp",
 ]
 
 libtorch_python_cuda_sources = libtorch_python_cuda_core_sources + [

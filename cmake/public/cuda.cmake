@@ -268,6 +268,29 @@ else()
   message(STATUS "USE_CUFILE is set to 0. Compiling without cuFile support")
 endif()
 
+# cuobject (NVIDIA cuObject / libcuobjclient, S3-over-RDMA)
+if(CAFFE2_USE_CUOBJ)
+  find_path(CUDA_cuObjClient_INCLUDE_DIR cuobjclient.h
+      HINTS ${CUDAToolkit_INCLUDE_DIRS} ${CUDA_TOOLKIT_ROOT_DIR}/include)
+  find_library(CUDA_cuObjClient_LIBRARY cuobjclient
+      HINTS ${CUDAToolkit_LIBRARY_DIR} ${CUDA_TOOLKIT_ROOT_DIR}/lib64
+            ${CUDA_TOOLKIT_ROOT_DIR}/lib)
+  if(CUDA_cuObjClient_INCLUDE_DIR AND CUDA_cuObjClient_LIBRARY)
+    add_library(torch::cuobj INTERFACE IMPORTED)
+    target_include_directories(torch::cuobj INTERFACE ${CUDA_cuObjClient_INCLUDE_DIR})
+    set_property(
+        TARGET torch::cuobj PROPERTY INTERFACE_LINK_LIBRARIES
+        ${CUDA_cuObjClient_LIBRARY})
+  else()
+    message(WARNING
+        "USE_CUOBJ is set but libcuobjclient/cuobjclient.h was not found. "
+        "Turning the option off. Install NVIDIA cuObject (CUDA Toolkit >= 13.1.1) to enable it.")
+    set(CAFFE2_USE_CUOBJ OFF)
+  endif()
+else()
+  message(STATUS "USE_CUOBJ is set to 0. Compiling without cuObject support")
+endif()
+
 # curand
 add_library(caffe2::curand INTERFACE IMPORTED)
 if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
