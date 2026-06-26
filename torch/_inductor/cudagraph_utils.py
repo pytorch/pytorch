@@ -39,6 +39,7 @@ INPUT_STORAGE_MUTATION_TARGETS = (
     torch.ops.aten.set_.source_Storage_storage_offset,
     torch.ops.aten.set_.source_Tensor,
     torch.ops.aten.set_.source_Tensor_storage_offset,
+    torch.ops.aten.shallow_copy_data_.default,
 )
 
 
