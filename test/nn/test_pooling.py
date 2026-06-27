@@ -1097,14 +1097,15 @@ torch.cuda.synchronize()
             grad = torch.randn(
                 n,
                 c,
-                (h - kernel_size) // stride + 1,
-                (w - kernel_size) // stride + 1,
+                (h + 2 * padding - kernel_size) // stride + 1,
+                (w + 2 * padding - kernel_size) // stride + 1,
                 dtype=dtype,
                 device=device,
             )
             pool = torch.nn.AvgPool2d(
                 kernel_size,
                 stride=stride,
+                padding=padding,
                 count_include_pad=count_include_pad,
                 divisor_override=divisor_override,
             ).to(device)
@@ -1114,6 +1115,7 @@ torch.cuda.synchronize()
             ref_pool = torch.nn.AvgPool2d(
                 kernel_size,
                 stride=stride,
+                padding=padding,
                 count_include_pad=count_include_pad,
                 divisor_override=divisor_override,
             ).to(device)
@@ -1130,7 +1132,8 @@ torch.cuda.synchronize()
 
         helper(4, 8, 8, 8, 3)
         helper(4, 8, 8, 8, 3, count_include_pad=False, padding=1)
-        helper(4, 8, 8, 8, 3, count_include_pad=False, padding=2, stride=2)
+        helper(4, 8, 8, 8, 5, count_include_pad=False, padding=2, stride=2)
+        helper(4, 8, 8, 8, 3, padding=1)
         helper(4, 8, 8, 8, 3, divisor_override=42)
         helper(4, 8, 8, 8, 7)
         # ROCm 16GB MI25 hits OOM error. Clear caching allocator prior to running large subtest.
