@@ -1447,9 +1447,7 @@ def materialize_bw_fn_filter_non_tensor_grads(
     grads_tensor_masks: list[bool] = []
 
     @functools.wraps(bw_fn)
-    def wrapped(
-        *inner_args: _P.args, **inner_kwargs: _P.kwargs
-    ) -> list[torch.Tensor | None]:
+    def wrapped(*inner_args, **inner_kwargs):
         nonlocal grads_tensor_masks
         grads = bw_fn(*inner_args, **inner_kwargs)
         grads_tensor_masks = [isinstance(g, torch.Tensor) for g in grads]

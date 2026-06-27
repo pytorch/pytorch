@@ -224,7 +224,7 @@ def _branch_tensor_outputs_only(
     """Wrap a branch so it only returns its Tensor leaves."""
 
     @functools.wraps(branch)
-    def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> tuple[torch.Tensor, ...]:
+    def wrapped(*args, **kwargs):
         branch_outs = branch(*args, **kwargs)
         return tuple(
             o for o in pytree.tree_leaves(branch_outs) if isinstance(o, torch.Tensor)
