@@ -161,6 +161,26 @@ class ContextWrappingVariable(VariableTracker):
     def exit_on_graph_break(self) -> bool:
         return True
 
+    def reconstructs_as_value_in_resume(self) -> bool:
+        # A context manager that is live across a graph break but not entered is
+        # normally rebuilt in the resume function by *re-running its
+        # constructor*: reconstruct_type() pushes the class and the resume
+        # prologue calls it with target_values (see
+        # OutputGraph._get_stack_values_to_restore and resume_execution). This
+        # indirection exists because Dynamo recognizes context managers at their
+        # construction call, not as opaque pre-built objects, so
+        # reconstructing-by-construction is what keeps the resume body's `with`
+        # re-traceable.
+        #
+        # A few VTs (e.g. StreamVariable) instead represent a concrete object
+        # that round-trips exactly -- it is re-recognized from its live instance
+        # by VariableBuilder and reconstructed via the user-object registry.
+        # Such VTs return True so they are reconstructed as the object itself
+        # rather than rebuilt from their class, which would otherwise change the
+        # type (e.g. Stream -> StreamContext) and lose the concrete
+        # subtype/identity.
+        return False
+
     def cleanup(self) -> None:
         if self.cleanup_fn is not None:
             self.cleanup_fn()

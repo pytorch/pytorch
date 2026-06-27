@@ -1,4 +1,6 @@
 import collections
+import contextlib
+import functools
 from collections.abc import Callable
 from typing import Any, Optional
 
@@ -319,7 +321,60 @@ class SymbolicStreamState:
         return id(stream.value)
 
 
-class StreamContextVariable(FxTracebackAnnotateVariable):
+class StreamContextWrappingVariable(FxTracebackAnnotateVariable):
+    """Shared implementation for VTs that select a stream when used as a `with`
+    context.
+
+    Both torch.Stream (via its own __enter__/__exit__) and torch.cuda.StreamContext
+    are context managers that make a stream current, and neither subclasses the
+    other in torch -- so StreamVariable and StreamContextVariable are siblings
+    that share only this behavior, expressed here in terms of get_stream().
+    """
+
+    def enter(
+        self, tx: "InstructionTranslatorBase", *args: VariableTracker
+    ) -> VariableTracker:
+        strm: StreamVariable = self.get_stream()
+        # Entering makes `strm` the current stream; exiting restores the prior one.
+        tx.symbolic_stream_state.enter_stream(strm)
+        # annotate + preserve_node_meta: this ensures the captured nodes have
+        # appropriate node.meta["custom"]["stream"] annotations.
+        if strm.user_object_index is None:
+            raise AssertionError("stream not registered")
+        annotation: dict[str, Any] = {"stream": strm.user_object_index}
+        stack = contextlib.ExitStack()
+        stack.enter_context(torch.fx.traceback.annotate(annotation))
+        stack.enter_context(torch.fx.traceback.preserve_node_meta())
+        self.set_cleanup_hook(tx, lambda: stack.close())
+        return ConstantVariable.create(None)
+
+    def exit(
+        self, tx: "InstructionTranslatorBase", *args: VariableTracker
+    ) -> VariableTracker:
+        tx.symbolic_stream_state.exit_stream()
+        return super().exit(tx, *args)
+
+    def reconstruct_type(self, codegen: "PyCodegen") -> None:
+        # The base ContextWrappingVariable.reconstruct_type reconstructs
+        # `torch._C.<fn_name>` and calls it, but there is no direct constructor to
+        # reference for a stream context. Instead push a 0-arg callable that
+        # builds a fresh StreamContext re-selecting this stream when entered:
+        # functools.partial over torch.cuda.stream, installed as a global so the
+        # resume prologue can LOAD_GLOBAL it (partial is a builtin Dynamo
+        # retraces natively; a closure defined in torch/_dynamo would be
+        # skiplisted during the prologue retrace).
+        thunk = functools.partial(torch.cuda.stream, self.get_stream().value)
+        name = codegen.tx.output.install_global_by_id("_stream_ctx_thunk", thunk)
+        codegen.append_output(codegen.create_load_global(name, add=True))
+
+    def supports_graph_breaks(self) -> bool:
+        return True
+
+    def get_stream(self) -> "StreamVariable":
+        raise NotImplementedError
+
+
+class StreamContextVariable(StreamContextWrappingVariable):
     """This represents torch.cuda.StreamContext"""
 
     @staticmethod
@@ -336,32 +391,13 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
     def __init__(self, stream: Optional["StreamVariable"], **kwargs: Any) -> None:
         self.stream = stream
         super().__init__(
-            target_values={"stream": self.get_stream().user_object_index},
+            target_values=(),
             initial_values=None,
             **kwargs,
         )
 
-    def enter(
-        self, tx: "InstructionTranslatorBase", *args: VariableTracker
-    ) -> VariableTracker:
-        # to stream, from stream is the order of the arguments
-        # we are entering the target, and leaving the initial stream
-        tx.symbolic_stream_state.enter_stream(self.get_stream())
-        return super().enter(tx)
-
-    def exit(
-        self, tx: "InstructionTranslatorBase", *args: VariableTracker
-    ) -> VariableTracker:
-        # to stream, from stream is the order of the arguments
-        # we are leaving the target, and entering the initial stream
-        tx.symbolic_stream_state.exit_stream()
-        return super().exit(tx, *args)
-
     def python_type(self) -> type:
         return torch.cuda.StreamContext
-
-    def supports_graph_breaks(self) -> bool:
-        return True
 
     def get_stream(self) -> "StreamVariable":
         if not self.stream:
@@ -369,10 +405,17 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
         return self.stream
 
 
-class StreamVariable(StreamContextVariable):
-    """Represents the device-agnostic torch.Stream class"""
+class StreamVariable(StreamContextWrappingVariable):
+    """Represents the device-agnostic torch.Stream class.
 
-    _cpython_type: type = torch.Stream  # pyrefly: ignore [bad-override]
+    A Stream is a concrete value that can *also* be used directly as a context
+    manager (`with stream:`). It shares StreamContextWrappingVariable with
+    StreamContextVariable but is not a subclass of it -- a Stream is not a
+    *kind of* StreamContext (in torch, torch.Stream and torch.cuda.StreamContext
+    are unrelated classes).
+    """
+
+    _cpython_type: type = torch.Stream  # pyre-ignore[bad-override]
     # Subclasses set this to the device-specific handle attribute name
     # (e.g. "cuda_stream", "sycl_queue").  None means no special handling.
     _device_handle_attr: str | None = None
@@ -397,7 +440,7 @@ class StreamVariable(StreamContextVariable):
         self.device = value.device
 
         self.user_object_index = user_object_index
-        super().__init__(None, **kwargs)
+        super().__init__(target_values=(), initial_values=None, **kwargs)
 
     def python_type(self) -> type:
         return self._cpython_type
@@ -558,6 +601,20 @@ class StreamVariable(StreamContextVariable):
 
     def get_stream(self) -> "StreamVariable":
         return self
+
+    # reconstruct_type (the torch.cuda.stream rebuild, used when a bare stream is
+    # the *active* `with stream:` context being re-entered in a resume function)
+    # is inherited from StreamContextWrappingVariable. A live stream *value* does
+    # not go through it -- see reconstructs_as_value_in_resume below.
+
+    def reconstructs_as_value_in_resume(self) -> bool:
+        # A live torch.Stream value round-trips exactly: it is registered in the
+        # user-object table and reconstructed via get_external_object_by_index
+        # (see reconstruct), and re-recognized from its instance by
+        # VariableBuilder. So across a graph break it is reconstructed as the
+        # object itself rather than rebuilt from its class -- the latter would
+        # yield a StreamContext and drop the concrete torch.cuda.Stream subtype.
+        return True
 
     @staticmethod
     def make_construct_in_graph_stream_fn(

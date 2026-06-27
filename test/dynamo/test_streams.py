@@ -2404,6 +2404,38 @@ class <lambda>(torch.nn.Module):
         self.assertEqual(actual_s2, expected_s2)
         self.assertEqual(actual_default, default_s.cuda_stream)
 
+    @requires_cuda
+    def test_stream_value_live_across_graph_break_in_stream_context(self):
+        # Regression test: a plain torch.Stream value that is live across a
+        # graph break occurring inside `with torch.cuda.stream(side):` must be
+        # reconstructed as a Stream, not rebuilt as a StreamContext.
+        #
+        # StreamVariable subclasses StreamContextVariable for code reuse, so
+        # OutputGraph._get_stack_values_to_restore used to misclassify the live
+        # stream `s` as an inactive context manager and rebuild it in the resume
+        # function via torch.cuda.stream(s) -> a StreamContext.  The eager
+        # record_stream() call below then died with "unknown parameter type".
+
+        @torch._dynamo.disable
+        def eager_record_stream(t, stream):
+            assert isinstance(stream, torch.Stream), type(stream)
+            t.record_stream(stream)
+
+        def fn(x):
+            s = torch.cuda.current_stream()
+            side = torch.cuda.Stream()
+            with torch.cuda.stream(side):
+                y = x + 1
+                torch._dynamo.graph_break()
+                out = y + 1
+            del y
+            eager_record_stream(out, s)
+            return out
+
+        x = torch.ones(3, device="cuda")
+        out = torch.compile(fn, backend="eager")(x)
+        self.assertEqual(out, torch.full((3,), 3.0, device="cuda"))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
