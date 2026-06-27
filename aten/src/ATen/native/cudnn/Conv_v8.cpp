@@ -683,10 +683,9 @@ bool plan_errata_exception(
                 ]
             })");
   if (cudnn_frontend::check_errata(
-          hardcoded_errata_json_handle_188288,
-          executionPlanTag,
-          handle,
-          []() { return true; })) {
+          hardcoded_errata_json_handle_188288, executionPlanTag, handle, []() {
+            return true;
+          })) {
     return true;
   }
   if (!has_json && x.dim() > 4) {
