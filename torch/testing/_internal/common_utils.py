@@ -124,12 +124,13 @@ class HardwareClassification(Enum):
 
     Currently there are three hardware classification categories:
 
-    * ``GENERIC`` – tests for shared logic that do not require device
-    execution.
-    * ``DEVICE_GENERIC`` – tests that require device execution but are
-    expected to run on any supported device type.
+    * ``GENERIC`` – tests that validate shared CPU-only logic and do not
+    require any accelerator (CUDA, MPS, XPU, etc.) to run.
+    * ``DEVICE_GENERIC`` – tests that require an accelerator to run and
+    should run for all accelerators.
     * ``CPU``, ``CUDA``, ``MPS``, ``XPU`` – tests that require a specific
-    device type.
+    device type. These should be use very rarely and only to test some
+    specific hw behavior.
 
     Usage::
 
@@ -198,8 +199,8 @@ def _get_hw_classification(
     return requirement
 
 
-def _filter_suite_by_hw_classification(tests: unittest.TestSuite) -> unittest.TestSuite:
-    if HW_CLASSIFICATION is None:
+def _filter_suite_by_hw_classification(tests: unittest.TestSuite, hw_classification: set[HardwareClassification]) -> unittest.TestSuite:
+    if hw_classification is None:
         return tests
 
     filtered_suite = unittest.TestSuite()
@@ -207,7 +208,7 @@ def _filter_suite_by_hw_classification(tests: unittest.TestSuite) -> unittest.Te
     for test_case in _iter_test_cases_recursively(tests):
         requirement = _get_hw_classification(test_case.__class__)
 
-        if requirement is not None and requirement in HW_CLASSIFICATION:
+        if requirement is not None and requirement in hw_classification:
             filtered_suite.addTest(test_case)
 
     return filtered_suite
@@ -1356,12 +1357,16 @@ def get_pytest_test_cases(argv: list[str]) -> list[str]:
 
 
 class HardwareClassificationTestLoader(unittest.TestLoader):
+    def __init__(self, hw_classification):
+        super().__init__()
+        self.hw_classification = hw_classification
+
     """Unittest TestLoader that filters loaded tests by hw_classification."""
     def loadTestsFromModule(self, module, *args, pattern=None, **kwargs):
         suite = super().loadTestsFromModule(
             module, *args, pattern=pattern, **kwargs
         )
-        return _filter_suite_by_hw_classification(suite)
+        return _filter_suite_by_hw_classification(suite,self.hw_classification)
 
 
 def run_tests(argv=None):
@@ -1394,7 +1399,7 @@ def run_tests(argv=None):
 
     testLoader = unittest.loader.defaultTestLoader
     if HW_CLASSIFICATION is not None:
-        testLoader = HardwareClassificationTestLoader()
+        testLoader = HardwareClassificationTestLoader(HW_CLASSIFICATION)
 
     # Before running the tests, lint to check that every test class extends from TestCase
     suite = testLoader.loadTestsFromModule(__main__)
