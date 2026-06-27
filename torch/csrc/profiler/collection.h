@@ -477,6 +477,13 @@ struct KinetoObserverContext : public at::ObserverContext {
   // still live so the exit finalizes it; a mismatch means the session was torn
   // down and event_ freed, so the exit drops without touching event_.
   uint64_t session_generation_{0};
+
+  // True if begin_op pushed an external correlation id for this op. The
+  // matching pop must run on every exit path (including teardown /
+  // stale-session early exits), or the id leaks onto the device profiling
+  // backend's per-thread correlation stack, which is not reset across profiler
+  // sessions.
+  bool pushed_correlation_id_{false};
 };
 
 constexpr int IO_ENCODER_DEFAULT_BLOCK_SIZE = 1024;

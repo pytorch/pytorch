@@ -809,13 +809,26 @@ void onFunctionExitImpl(
     torch::profiler::impl::privateuse1Stubs()->record(
         nullptr, &fallback->device_event_end_, nullptr);
   }
+}
 
-  if (!config.experimental_config.disable_external_correlation) {
-    if (fn.scope() == at::RecordScope::USER_SCOPE) {
-      torch::profiler::impl::kineto::popUserCorrelationId();
-    } else {
-      torch::profiler::impl::kineto::popCorrelationId();
-    }
+// Pop the external correlation id that begin_op pushed for this op, if any.
+// Must run on every onFunctionExit path, including the teardown and
+// stale-session early exits that skip event finalization: the correlation stack
+// lives in the device profiling backend (per thread) and is not reset across
+// profiler sessions, so a skipped pop leaks. Safe on those paths because it
+// touches only that stack, never the possibly-freed event_.
+void maybePopCorrelationId(
+    const at::RecordFunction& fn,
+    at::ObserverContext* ctx_ptr) {
+  auto* kineto_ctx =
+      static_cast<torch::profiler::impl::KinetoObserverContext*>(ctx_ptr);
+  if (kineto_ctx == nullptr || !kineto_ctx->pushed_correlation_id_) {
+    return;
+  }
+  if (fn.scope() == at::RecordScope::USER_SCOPE) {
+    torch::profiler::impl::kineto::popUserCorrelationId();
+  } else {
+    torch::profiler::impl::kineto::popCorrelationId();
   }
 }
 
@@ -827,6 +840,12 @@ void onFunctionExitGlobal(
     // there is nothing to finalize.
     return;
   }
+
+  // Balance the correlation id pushed at begin_op on every path below,
+  // including the teardown and stale-session early exits that skip event
+  // finalization.
+  auto correlation_guard =
+      c10::make_scope_exit([&] { maybePopCorrelationId(fn, ctx_ptr); });
 
   // Take this exit's own in-flight ref, paired here because
   // onFunctionEnterGlobal no longer hands one off. It covers only this exit's
@@ -864,6 +883,11 @@ void onFunctionExitGlobal(
 void onFunctionExitTLS(
     const at::RecordFunction& fn,
     at::ObserverContext* ctx_ptr) {
+  // Balance the correlation id pushed at begin_op even when the TLS state is
+  // gone by exit (early return below), for the same reason as
+  // onFunctionExitGlobal.
+  auto correlation_guard =
+      c10::make_scope_exit([&] { maybePopCorrelationId(fn, ctx_ptr); });
   KinetoThreadLocalState* state_ptr = KinetoThreadLocalState::getTLS();
   if (!state_ptr) {
     return;
