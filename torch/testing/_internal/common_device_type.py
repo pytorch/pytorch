@@ -806,12 +806,17 @@ class CUDATestBase(DeviceTypeTestBase):
     @classmethod
     def has_sufficient_memory(cls, size: int) -> bool:
         device = torch.cuda.current_device()
-        gc.collect()
-        torch.cuda.empty_cache()
         available = int(
             torch.cuda.memory.mem_get_info(device)[0]
             * torch.cuda.memory.get_per_process_memory_fraction(device)
         )
+        if available < size:
+            gc.collect()
+            torch.cuda.empty_cache()
+            available = int(
+                torch.cuda.memory.mem_get_info(device)[0]
+                * torch.cuda.memory.get_per_process_memory_fraction(device)
+            )
         return available >= size
 
     @classmethod
@@ -912,9 +917,11 @@ class XPUTestBase(DeviceTypeTestBase):
     @classmethod
     def has_sufficient_memory(cls, size: int) -> bool:
         device = torch.xpu.current_device()
-        gc.collect()
-        torch.xpu.empty_cache()
         available = torch.xpu.memory.mem_get_info(device)[0]
+        if available < size:
+            gc.collect()
+            torch.xpu.empty_cache()
+            available = torch.xpu.memory.mem_get_info(device)[0]
         return available >= size
 
     @classmethod
