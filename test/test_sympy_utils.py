@@ -33,7 +33,7 @@ from torch.utils._sympy.functions import (
 )
 from torch.utils._sympy.interp import sympy_interp
 from torch.utils._sympy.numbers import int_oo, IntInfinity, NegativeIntInfinity
-from torch.utils._sympy.printers import CppPrinter
+from torch.utils._sympy.printers import CppPrinter, ExprPrinter
 from torch.utils._sympy.reference import (
     PythonReferenceAnalysis,
     ReferenceAnalysis,
@@ -257,6 +257,18 @@ class TestCppPrinter(TestCase):
         printed = CppPrinter().doprint(TorchSymMax(sympy.Integer(4), s0))
         self.assertIn("std::max", printed)
         self.assertIn("static_cast<int64_t>", printed)
+
+
+class TestExprPrinter(TestCase):
+    def test_negative_integer_pow(self):
+        x = sympy.Symbol("x", integer=True)
+        printer = ExprPrinter()
+
+        self.assertEqual(printer.doprint(x**-1), "1/x")
+        self.assertEqual(printer.doprint(x**-2), "1/(x*x)")
+        self.assertEqual(printer.doprint(x**-3), "1/(x*x*x)")
+        self.assertEqual(printer.doprint(x**0), "1")
+        self.assertEqual(printer.doprint(x**2), "x*x")
 
 
 class TestValueRanges(TestCase):
@@ -504,6 +516,17 @@ class TestValueRanges(TestCase):
 
 
 class TestSympyInterp(TestCase):
+    def test_negative_integer_pow_uses_float_pow(self):
+        x = sympy.Symbol("x")
+
+        result = sympy_interp(
+            ValueRangeAnalysis,
+            {x: ValueRanges.wrap(2)},
+            x**-1,
+        )
+
+        self.assertEqual(result, ValueRanges.unknown())
+
     @parametrize(
         "fn", UNARY_OPS + BINARY_OPS + UNARY_BOOL_OPS + BINARY_BOOL_OPS + COMPARE_OPS
     )

@@ -128,6 +128,19 @@ def _run_sympy_handler(analysis, args, expr, index_dtype=torch.int64):
         expr.args[1], sympy.core.numbers.Half
     ):
         return analysis.sqrt(args[0])
+    # sympy.Pow is mapped to pow_by_natural (which only handles non-negative
+    # integer exponents), but SymPy can produce Pow(x, -n) for negative
+    # integer n — e.g. 1/x is represented as Pow(x, -1) — when simplifying
+    # expressions like stride-divisibility checks.  Route negative-integer
+    # exponents to pow() instead; for ValueRangeAnalysis that conservatively
+    # returns ValueRanges.unknown(), which is correct: the range of 1/x is
+    # not representable as an integer range.
+    if (
+        isinstance(expr, sympy.Pow)
+        and isinstance(expr.args[1], sympy.Integer)
+        and expr.args[1] < 0
+    ):
+        return analysis.pow(args[0], args[1])
     if isinstance(expr, ToFloat):
         return analysis.to_dtype(args[0], torch.float64)
 

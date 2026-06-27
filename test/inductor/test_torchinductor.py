@@ -17967,6 +17967,77 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         compiled = torch.compile(fn, backend="inductor", dynamic=True)(a, b)
         self.assertEqual(eager, compiled)
 
+    def test_dynamic_negative_exponent_convolution_regression(self):
+        # Regression test for #188323.
+        # This pattern triggers SymPy generation of Pow(..., -1) during
+        # dynamic shape analysis in convolution lowering.
+        def fn(output, target, act, skip, w_first, w_g2, w1, w2, w3):
+            batch_size = output.size(0)
+
+            _, predicted = torch.topk(output, 1, dim=1)
+            correct = torch.eq(
+                predicted.t(),
+                target.view(1, -1).expand_as(predicted.t()),
+            )
+            scalar = (
+                correct[:1]
+                .contiguous()
+                .view(-1)
+                .float()
+                .sum(dim=0, keepdim=True)
+                .mul(100.0 / batch_size)
+            )
+
+            feature = torch.cat([act, skip], dim=1)
+            feature = F.conv2d(feature, w_first, padding=1)
+            feature = F.leaky_relu(feature, 0.1)
+
+            pointwise = F.relu(scalar - feature) + feature
+
+            hidden = F.leaky_relu(F.conv2d(pointwise, w_g2), 0.2)
+
+            out = F.conv2d(hidden, w1)
+            out = F.conv2d(out, w2, padding=1)
+            out = F.conv2d(out, w3)
+            out = out + hidden
+
+            return out
+
+        output = torch.randn(8, 10)
+        target = torch.zeros(8, dtype=torch.int64)
+
+        act = torch.randn(2, 3, 8, 8)
+        skip = torch.randn(2, 3, 8, 8)
+
+        w_first = torch.randn(3, 6, 3, 3)
+        w_g2 = torch.randn(16, 3, 1, 1)
+
+        w1 = torch.randn(4, 16, 1, 1)
+        w2 = torch.randn(4, 4, 3, 3)
+        w3 = torch.randn(16, 4, 1, 1)
+
+        eager = fn(output, target, act, skip, w_first, w_g2, w1, w2, w3)
+
+        compiled = torch.compile(
+            fn,
+            backend="inductor",
+            dynamic=True,
+        )
+
+        result = compiled(
+            output,
+            target,
+            act,
+            skip,
+            w_first,
+            w_g2,
+            w1,
+            w2,
+            w3,
+        )
+
+        self.assertEqual(eager, result)
+
     def test_cpu_scalar_with_cpu_tensor(self):
         def fn(a, b):
             return a + b[0]
