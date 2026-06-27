@@ -3500,6 +3500,26 @@ class TestSDPACudaOnly(NNTestCase):
         out.sum().backward()
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
+    def test_mem_eff_attention_mask_only_requires_grad(self, device):
+        torch.manual_seed(0)
+        query, key, value = (torch.randn((1, 1, 64, 16), device=device) for _ in range(3))
+        mask = torch.randn((1, 1, 64, 64), device=device)
+
+        actual_mask = mask.detach().clone().requires_grad_()
+        with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
+            actual = F.scaled_dot_product_attention(query, key, value, actual_mask)
+        actual.sum().backward()
+        torch.cuda.synchronize()
+
+        expected_mask = mask.detach().clone().requires_grad_()
+        with sdpa_kernel(backends=[SDPBackend.MATH]):
+            expected = F.scaled_dot_product_attention(query, key, value, expected_mask)
+        expected.sum().backward()
+
+        self.assertEqual(actual, expected, atol=1e-5, rtol=1e-5)
+        self.assertEqual(actual_mask.grad, expected_mask.grad, atol=1e-5, rtol=1e-5)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("dtype", [torch.float, torch.float16])
     def test_mem_eff_attention_non_contiguous_mask(self, device, dtype):
         make_tensor = partial(torch.rand, device=device, dtype=dtype, requires_grad=True)
