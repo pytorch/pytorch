@@ -1056,6 +1056,29 @@ if "optree" in sys.modules:
         self.assertIsInstance(serialized_spec, str)
         self.assertEqual(spec, python_pytree.treespec_loads(serialized_spec))
 
+    def test_pytree_serialize_mapping_tuple_key(self):
+        for tree in (
+            {(1, 2): 3},
+            OrderedDict({(1, 2): 3}),
+            defaultdict(list, {(1, 2): 3}),
+            {(1, (2, 3)): 4},
+        ):
+            leaves, spec = python_pytree.tree_flatten(tree)
+            roundtrip = python_pytree.treespec_loads(python_pytree.treespec_dumps(spec))
+            self.assertEqual(roundtrip, spec)
+            self.assertEqual(python_pytree.tree_unflatten(leaves, roundtrip), tree)
+
+    def test_pytree_serialize_dict_legacy_string_context(self):
+        # A dict spec serialized before tuple-key escaping stored its context as
+        # a JSON string; loading it must still work.
+        legacy = (
+            '[1, {"type": "builtins.dict", "context": "[\\"a\\"]", '
+            '"children_spec": [{"type": null, "context": null, '
+            '"children_spec": []}]}]'
+        )
+        spec = python_pytree.treespec_loads(legacy)
+        self.assertEqual(python_pytree.tree_unflatten([1], spec), {"a": 1})
+
     def test_pytree_serialize_defaultdict_enum(self):
         spec = python_pytree.TreeSpec(
             defaultdict,
