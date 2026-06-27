@@ -2701,6 +2701,36 @@ torch.cuda.synchronize()
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
+    def test_graph_masked_fill_scalar_assignment(self):
+        x = torch.zeros(2, 2, device="cuda")
+        mask = torch.tensor([[True, False], [False, True]], device="cuda")
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            x[mask] = 5.0
+
+        x.zero_()  # Reset the side-effect of capture execution
+        g.replay()
+        expected = torch.tensor([[5.0, 0.0], [0.0, 5.0]], device="cuda")
+        self.assertEqual(x, expected)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_graph_advanced_index_scalar_assignment(self):
+        x = torch.zeros(2, 2, device="cuda")
+        indices = torch.tensor([0, 1], device="cuda")
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            x[indices, indices] = 5.0
+
+        x.zero_()  # Reset the side-effect of capture execution
+        g.replay()
+        expected = torch.tensor([[5.0, 0.0], [0.0, 5.0]], device="cuda")
+        self.assertEqual(x, expected)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
     def test_graph_capture_stale_default_stream_error(self):
         """Default-stream warmup + side-stream capture raises a clear error
         (not an opaque CUDA crash) when override is not enabled."""

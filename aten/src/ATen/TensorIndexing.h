@@ -338,6 +338,48 @@ inline c10::List<::std::optional<Tensor>> typeConvertIndices(
   return converted_inds;
 }
 
+inline std::tuple<bool, Tensor> canDispatchToMaskedFill(
+    const Tensor& self,
+    const torch::List<std::optional<at::Tensor>>& indices) {
+  int64_t num_ind = 0;
+  Tensor mask;
+  auto self_device = self.device();
+  for (const std::optional<Tensor>& i : indices) {
+    if (!i.has_value() || !(*i).defined()) {
+      if (!mask.defined()) {
+        num_ind++;
+      }
+    } else {
+      const Tensor& index = *i;
+      if ((index.scalar_type() != kByte && index.scalar_type() != kBool) ||
+          index.device() != self_device || mask.defined()) {
+        return std::make_tuple(false, Tensor());
+      } else {
+        mask = index;
+        for (const auto j : c10::irange(index.dim())) {
+          int64_t srcIdx = num_ind + j;
+          TORCH_CHECK_INDEX(
+              index.size(j) == self.size(srcIdx),
+              "The shape of the mask ",
+              index.sizes(),
+              " at index ",
+              j,
+              " does not match the shape of the indexed tensor ",
+              self.sizes(),
+              " at index ",
+              srcIdx);
+        }
+        num_ind += mask.ndimension();
+      }
+    }
+  }
+  for ([[maybe_unused]] const auto i :
+       c10::irange(num_ind, self.ndimension())) {
+    mask = mask.unsqueeze(-1);
+  }
+  return std::make_tuple(true, std::move(mask));
+}
+
 // NOTE: Why do we mirror instead of replace the `count_specified_dimensions`
 // function in torch/csrc/autograd/python_variable_indexing.cpp? It's because
 // `count_specified_dimensions` is on the hot path of Python tensor multi-dim
@@ -402,14 +444,11 @@ inline Tensor asTensor(const Tensor& value, const Tensor& target) {
 }
 inline Tensor asTensor(const Scalar& value, const Tensor& target) {
   at::AutoDispatchBelowADInplaceOrView guard;
-  at::Device target_device = target.device();
   // TODO: This qint special case looks very suspicious...
   if (isQIntType(target.scalar_type())) {
     return scalarToTensor(value, device(kCPU).dtype(kFloat), at::Device(kCPU));
-  } else if (target_device.is_cuda()) {
-    return scalarToTensor(value, target.options(), at::Device(kCPU));
   } else {
-    return scalarToTensor(value, target.options(), target_device);
+    return scalarToTensor(value, target.options(), target.device());
   }
 }
 
@@ -629,6 +668,23 @@ inline Tensor dispatch_index_put_(
       impl::typeConvertIndices(self, std::move(indices)), value);
 }
 
+inline bool try_dispatch_masked_fill_(
+    Tensor& self,
+    std::vector<Tensor> indices,
+    const Scalar& value) {
+  // Remove trailing null elements from indices
+  while (!indices.empty() && !indices.back().defined()) {
+    indices.pop_back();
+  }
+  auto list_indices = impl::typeConvertIndices(self, std::move(indices));
+  auto [can_dispatch, mask] = impl::canDispatchToMaskedFill(self, list_indices);
+  if (can_dispatch) {
+    self.masked_fill_(mask, value);
+    return true;
+  }
+  return false;
+}
+
 // NOTE [ Setting `disable_slice_optimization` when calling C++ tensor indexing
 // functions from Python ]
 //
@@ -787,6 +843,12 @@ inline void set_item(
   if (tensorIndices.empty()) {
     copy_to(sliced, value);
     return;
+  }
+
+  if constexpr (std::is_same_v<T, Scalar>) {
+    if (try_dispatch_masked_fill_(sliced, tensorIndices, value)) {
+      return;
+    }
   }
 
   Tensor valueTensor = asTensor(value, self);
