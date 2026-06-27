@@ -426,6 +426,7 @@ static void linalg_lu_factor_ex_out_mps_impl(const Tensor& A,
 
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
+      mpsStream->endKernelCoalescing();
       id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
       auto filter = [[[MPSMatrixDecompositionLU alloc] initWithDevice:device rows:aRows columns:aCols] autorelease];
 
@@ -571,6 +572,7 @@ static void linalg_solve_out_mps_impl(const Tensor& A,
 
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
+      mpsStream->endKernelCoalescing();
       id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
 
       auto lu_decomp = [[[MPSMatrixDecompositionLU alloc] initWithDevice:device rows:aRows columns:aCols] autorelease];
@@ -1000,11 +1002,11 @@ static Tensor& tiled_bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2
 
     MPSStream* mpsStream = getCurrentMPSStream();
     id<MTLDevice> device = MPSDevice::getInstance()->device();
-    id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
 
     dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
       @autoreleasepool {
         mpsStream->endKernelCoalescing();
+        id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
 
         uint64_t originalBatchSize = batch1.sizes().size() > 2 ? batch1.size(0) : 1;
         uint64_t aRows = batch1.size(-2);
