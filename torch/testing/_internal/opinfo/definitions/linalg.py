@@ -893,6 +893,18 @@ def sample_inputs_linalg_cholesky(
         yield SampleInput(a, upper=upper)
 
 
+def sample_inputs_linalg_matrix_sqrth(
+    op_info, device, dtype, requires_grad=False, **kwargs
+):
+    """Generates symmetric/Hermitian positive-definite inputs for torch.linalg.matrix_sqrth."""
+    from torch.testing._internal.common_utils import random_hermitian_pd_matrix
+
+    for batch, n in product([(), (0,), (2,), (1, 1)], [5, 0]):
+        a = random_hermitian_pd_matrix(n, *batch, dtype=dtype, device=device)
+        a.requires_grad = requires_grad
+        yield SampleInput(a)
+
+
 def sample_inputs_linalg_eig(op_info, device, dtype, requires_grad=False, **kwargs):
     """
     This function generates input for torch.linalg.eig
@@ -1227,6 +1239,23 @@ op_db: list[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_diagonal_diag_embed,
         error_inputs_func=error_inputs_diagonal_diag_embed,
+    ),
+    OpInfo(
+        "linalg.matrix_sqrth",
+        aten_name="linalg_matrix_sqrth",
+        dtypes=floating_and_complex_types(),
+        sample_inputs_func=sample_inputs_linalg_matrix_sqrth,
+        gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
+        check_batched_forward_grad=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        # autogen .out exists but is not exercised here (mirrors linalg.matrix_exp).
+        supports_out=False,
+        decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack, with_tf32_off],
+        skips=(
+            # The operator 'aten::linalg_matrix_sqrth' is not implemented for MPS.
+            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
+        ),
     ),
     OpInfo(
         "linalg.cholesky",

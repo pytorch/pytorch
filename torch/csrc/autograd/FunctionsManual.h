@@ -725,6 +725,7 @@ Tensor linalg_matrix_exp_differential(
     const Tensor& self,
     const Tensor& grad,
     bool adjoint);
+Tensor linalg_matrix_sqrth_differential(const Tensor& self, const Tensor& grad);
 std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
     const Tensor& input,
     const std::optional<Tensor>& gamma,
