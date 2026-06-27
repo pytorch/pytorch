@@ -185,8 +185,9 @@ REGISTER_NORM(half2, half);
 
 #include <c10/metal/reduction_utils.h>
 
-// Load modes for sum_reduction: identity (sum), nan-to-zero (nansum),
-// nonzero-as-one (count_nonzero), abs (L1 norm), or square (L2 norm).
+// Load modes for the specialized strided/outer/inner sum kernels and norm
+// kernels: identity (sum), nan-to-zero (nansum), nonzero-as-one
+// (count_nonzero), abs (L1 norm), or square (L2 norm).
 enum LoadMode : uint {
   LOAD_IDENTITY = 0,
   LOAD_NAN_TO_ZERO = 1,
@@ -279,10 +280,9 @@ inline T finalize_val(T v) {
 }
 
 // Load functors decide how an input element is converted into the accumulator
-// type. IdentityLoad casts; PredicateLoad maps nonzero (and NaN) -> 1, zero ->
-// 0 (any/all, count_nonzero); NanToZeroLoad replaces NaN with 0 (nansum).
-// Shared by sum_reduction and value_reduction (both route sum/prod/min/max
-// through the same Op + Load abstraction).
+// type for value_reduction instantiations. IdentityLoad casts; PredicateLoad
+// maps nonzero (and NaN) -> 1, zero -> 0 (any/all, count_nonzero);
+// NanToZeroLoad replaces NaN with 0 (nansum).
 struct IdentityLoad {
   template <typename TA, typename TI>
   static inline TA load(TI v) {
@@ -305,6 +305,30 @@ struct NanToZeroLoad {
       r = TA(0);
     }
     return r;
+  }
+};
+
+template <template <typename> class OpFn, typename Load, typename TA>
+struct ValueAccumulator {
+  template <typename TI>
+  static inline void accumulate(thread TA& acc, TI v) {
+    acc = OpFn<TA>::combine(acc, Load::template load<TA>(v));
+  }
+
+  static inline TA combine(TA a, TA b) {
+    return OpFn<TA>::combine(a, b);
+  }
+};
+
+template <typename Load, typename TA>
+struct ValueAccumulator<c10::metal::SumOp, Load, TA> {
+  template <typename TI>
+  static inline void accumulate(thread TA& acc, TI v) {
+    acc += Load::template load<TA>(v);
+  }
+
+  static inline TA combine(TA a, TA b) {
+    return a + b;
   }
 };
 
@@ -680,6 +704,7 @@ kernel void value_reduction(
   }
 
   using Op = OpFn<TA>;
+  using Acc = ValueAccumulator<OpFn, Load, TA>;
   const TA identity_val = Op::identity();
   metal::array<TA, NCHAINS> acc;
   for (uint j = 0; j < NCHAINS; j++) {
@@ -693,36 +718,30 @@ kernel void value_reduction(
   if (num_reduced_dims <= 1) {
     for (; base + NCHAINS <= rsize; base += stride) {
       for (uint j = 0; j < NCHAINS; j++) {
-        acc[j] = Op::combine(
-            acc[j],
-            Load::template load<TA>(
-                input[input_base + (base + j) * reduction_stride]));
+        Acc::accumulate(
+            acc[j], input[input_base + (base + j) * reduction_stride]);
       }
     }
     for (uint32_t idx = base; idx < rsize; idx++) {
-      acc[idx % NCHAINS] = Op::combine(
-          acc[idx % NCHAINS],
-          Load::template load<TA>(input[input_base + idx * reduction_stride]));
+      Acc::accumulate(
+          acc[idx % NCHAINS], input[input_base + idx * reduction_stride]);
     }
   } else {
     for (; base + NCHAINS <= rsize; base += stride) {
       for (uint j = 0; j < NCHAINS; j++) {
-        acc[j] = Op::combine(
-            acc[j],
-            Load::template load<TA>(
-                input[get_input_offset(base + j, tgid, params)]));
+        Acc::accumulate(
+            acc[j], input[get_input_offset(base + j, tgid, params)]);
       }
     }
     for (uint32_t idx = base; idx < rsize; idx++) {
-      acc[idx % NCHAINS] = Op::combine(
-          acc[idx % NCHAINS],
-          Load::template load<TA>(input[get_input_offset(idx, tgid, params)]));
+      Acc::accumulate(
+          acc[idx % NCHAINS], input[get_input_offset(idx, tgid, params)]);
     }
   }
 
   TA output_val = acc[0];
   for (uint j = 1; j < NCHAINS; j++) {
-    output_val = Op::combine(output_val, acc[j]);
+    output_val = Acc::combine(output_val, acc[j]);
   }
 
   threadgroup TA shared_outputs[MAX_THREADGROUP_SIZE / simdgroup_size];

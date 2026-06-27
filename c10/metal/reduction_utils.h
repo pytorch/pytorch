@@ -501,12 +501,12 @@ struct MinOp {
   }
 };
 
-// Sum / product reduction op functors, sharing the identity / combine /
-// simd_reduce / threadgroup_reduce concept with MaxOp / MinOp so sum_reduction
-// can route through the same two-pass value_reduction kernel. T is the
-// accumulator type (opmath_t<TO> for sum, keeping the fp32 accumulation from
-// being lost when TO is fp16/bf16). No `replace`
-// member: that is arg-reduction-only (argmax/argmin reuse MaxOp/MinOp).
+// Sum reduction op functor, sharing the identity / combine / simd_reduce /
+// threadgroup_reduce concept with MaxOp / MinOp so sum and mean can route
+// through the same value_reduction kernels. T is the accumulator type
+// (opmath_t<TO> for sum, keeping fp32 accumulation from being lost when TO is
+// fp16/bf16). No `replace` member: that is arg-reduction-only (argmax/argmin
+// reuse MaxOp/MinOp).
 template <typename T>
 struct SumOp {
   static inline constexpr T identity() {

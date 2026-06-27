@@ -5498,6 +5498,25 @@ class TestMPS(TestCaseMPS):
             for cpu, mps in ((x.cpu(), x), (x.t().cpu(), x.t())):
                 self.assertEqual(mps.sum(**kw).cpu(), cpu.sum(**kw))
 
+    def test_sum_family_generic_reduction(self):
+        cpu = (torch.arange(2 * 4 * 3 * 5, dtype=torch.float32).reshape(2, 4, 3, 5) - 37) / 10
+        cpu = cpu[:, ::2, :, :]
+        self.assertFalse(cpu.is_contiguous())
+        mps = cpu.to("mps")
+        dims = (1, 3)
+
+        for keepdim in (False, True):
+            kw = {"dim": dims, "keepdim": keepdim}
+            self.assertEqual(mps.sum(**kw).cpu(), cpu.sum(**kw))
+            self.assertEqual(mps.mean(**kw).cpu(), cpu.mean(**kw))
+
+            nans_cpu = cpu.clone()
+            nans_cpu[nans_cpu > 2] = torch.nan
+            nans_mps = nans_cpu.to("mps")
+            self.assertEqual(torch.nansum(nans_mps, **kw).cpu(), torch.nansum(nans_cpu, **kw))
+
+        self.assertEqual(torch.count_nonzero(mps, dim=dims).cpu(), torch.count_nonzero(cpu, dim=dims))
+
     def test_trace_repeated(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/178497
         torch.manual_seed(42)
