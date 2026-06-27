@@ -459,10 +459,11 @@ class DeviceTypeTestBase(TestCase):
         """
         Returns True if there is sufficient memory available for the given size.
 
-        Device-specific test bases may override this to support
-        memory-aware tests.
+        Device-specific test bases should override this to support
+        memory-aware tests. The default implementation skips the test
+        for device types that do not implement this hook.
         """
-        raise NotImplementedError(
+        raise unittest.SkipTest(
             f"{cls.__name__}.has_sufficient_memory() is not implemented"
         )
 
