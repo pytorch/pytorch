@@ -3903,6 +3903,11 @@ class TestComposability(TestCase):
         with self.assertRaisesRegex(RuntimeError, "must override the setup_context"):
             transform(MySin.apply)(x)
 
+    _SAVED_TENSOR_HOOKS_EAGER_ONLY = (
+        "saved-tensor hooks (save_on_cpu) with torch.func are eager only; "
+        "under torch.compile they are handled by AOTAutograd"
+    )
+
     @parametrize(
         "transform",
         [
@@ -3912,6 +3917,7 @@ class TestComposability(TestCase):
             "vjp",
         ],
     )
+    @skipIfTorchDynamo(_SAVED_TENSOR_HOOKS_EAGER_ONLY)
     def test_first_order_transforms_support_saved_tensor_hooks(self, device, transform):
         # A single first-order reverse-mode transform supports saved-tensor
         # hooks (e.g. save_on_cpu). Results must match the same transform with
@@ -3937,6 +3943,7 @@ class TestComposability(TestCase):
         with torch.autograd.graph.save_on_cpu():
             self.assertEqual(apply(f), expected)
 
+    @skipIfTorchDynamo(_SAVED_TENSOR_HOOKS_EAGER_ONLY)
     def test_higher_order_transforms_dont_support_saved_tensor_hooks(self, device):
         # Nested / higher-order differentiation over a saved-tensor-hooks region
         # must raise rather than silently miscompute: the offload device
@@ -3973,6 +3980,7 @@ class TestComposability(TestCase):
         "pin_memory",
         [subtest(False, name="nopin"), subtest(True, name="pin")],
     )
+    @skipIfTorchDynamo(_SAVED_TENSOR_HOOKS_EAGER_ONLY)
     def test_grad_save_on_cpu_matches_no_offload(self, device, pin_memory):
         if pin_memory and self.device_type != "cuda":
             self.skipTest("pin_memory offloading requires CUDA")
@@ -3998,6 +4006,7 @@ class TestComposability(TestCase):
         "pin_memory",
         [subtest(False, name="nopin"), subtest(True, name="pin")],
     )
+    @skipIfTorchDynamo(_SAVED_TENSOR_HOOKS_EAGER_ONLY)
     def test_vmap_grad_save_on_cpu_matches_no_offload(self, device, pin_memory):
         if pin_memory and self.device_type != "cuda":
             self.skipTest("pin_memory offloading requires CUDA")
@@ -4019,6 +4028,7 @@ class TestComposability(TestCase):
             vmap(grad(partial(f, offload=False)))(x),
         )
 
+    @skipIfTorchDynamo(_SAVED_TENSOR_HOOKS_EAGER_ONLY)
     def test_jvp_supports_saved_tensor_hooks(self, device):
         def f(x):
             return torch.sin(x).sum()
