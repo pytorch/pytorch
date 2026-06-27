@@ -284,6 +284,45 @@ class TestLoadStateDict(NNTestCase):
         self.assertEqual(mm[0].param[0].item(), 10)
         self.assertEqual(mm[0].sub.weight[0, 0].item(), 555)
 
+    def test_load_state_dict_assign_preserves_tied_buffers(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                buffer = torch.ones(1)
+                self.register_buffer("buffer1", buffer)
+                self.register_buffer("buffer2", buffer)
+
+        source = MyModule()
+        target = MyModule()
+        self.assertIs(target.buffer1, target.buffer2)
+
+        target.load_state_dict(source.state_dict(), assign=True)
+        self.assertIs(target.buffer1, target.buffer2)
+        self.assertEqual([name for name, _ in target.named_buffers()], ["buffer1"])
+
+    def test_load_state_dict_assign_preserves_tied_parameters_across_submodules(self):
+        class Sub(torch.nn.Module):
+            def __init__(self, weight) -> None:
+                super().__init__()
+                self.weight = weight
+
+        class MyModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                weight = nn.Parameter(torch.ones(2, 2))
+                self.embed = Sub(weight)
+                self.proj = Sub(weight)
+
+        source = MyModule()
+        target = MyModule()
+        self.assertIs(target.embed.weight, target.proj.weight)
+
+        target.load_state_dict(source.state_dict(), assign=True)
+        self.assertIs(target.embed.weight, target.proj.weight)
+        self.assertEqual(
+            [name for name, _ in target.named_parameters()], ["embed.weight"]
+        )
+
     @swap([True, False])
     @parametrize("keep_vars", [True, False])
     def test_load_state_dict_assign_meta(self, keep_vars):
