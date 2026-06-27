@@ -3896,6 +3896,7 @@ class TestComposability(TestCase):
             lambda: jacrev(jacrev(f))(x),
             lambda: hessian(f)(x),
             lambda: jvp(grad(f), (x,), (t,)),
+            lambda: grad(lambda z: vmap(grad(f))(z).sum())(x),
             lambda: enclosed(lambda: grad(lambda z: grad(g)(z).sum())(x)),
             lambda: enclosed(lambda: hessian(g)(x)),
         ]
