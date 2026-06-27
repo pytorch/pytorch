@@ -89,6 +89,7 @@ def scan(
     *,
     dim: int = 0,
     reverse: bool = False,
+    length: int | None = None,
 ) -> tuple[pytree.PyTree, pytree.PyTree]:
     r"""
     Performs an inclusive scan with a combine function.
@@ -111,11 +112,17 @@ def scan(
         init (torch.Tensor or pytree with tensor leaves): The initial scan carry, a tensor, or nested pytree of tensors.
             The ``init`` is expected to have the same pytree structure as the first output element (i.e. carry)
             of ``combine_fn``.
-        xs (torch.Tensor or pytree with tensor leaves): The input tensor, or nested pytree of tensors.
+        xs (torch.Tensor or pytree with tensor leaves or None): The input tensor, or nested pytree of tensors.
+            May be ``None`` when ``length`` is provided, in which case ``combine_fn`` receives ``None`` as ``x``
+            each step (counter-loop mode).
 
     Kwargs:
         dim (int): the dimension to scan over, default 0.
         reverse (bool): A boolean stating if the scan should be reversed with respect to ``dim``, default ``False``.
+        length (int or None): Number of scan iterations. When ``xs`` has leaves, ``length`` must equal
+            ``xs.shape[dim]`` and is used only as a consistency check. When ``xs`` has no leaves (``None``
+            or empty pytree), ``length`` drives the number of iterations and ``combine_fn`` receives
+            ``x=None`` each step. Default ``None``.
 
     Returns:
         final_carry (torch.Tensor or pytree with tensor leaves),
@@ -153,8 +160,61 @@ def scan(
     leaves_init, spec_init = pytree.tree_flatten(init)
     leaves_xs_orig, spec_xs = pytree.tree_flatten(xs)
 
-    # Shortcut if no xs is provided
-    if len(leaves_xs_orig) == 0:
+    # Determine whether xs carries any tensor data. xs=None flattens to [None]
+    # (a single non-tensor leaf), so we check for tensor leaves rather than length.
+    xs_has_tensors = any(isinstance(l, torch.Tensor) for l in leaves_xs_orig)
+
+    if length is not None:
+        if not isinstance(length, int) or length < 0:
+            raise RuntimeError(
+                f"scan() length must be a non-negative integer, got {length!r}"
+            )
+
+    if length is not None and xs_has_tensors:
+        actual = leaves_xs_orig[0].shape[dim]
+        if length != actual:
+            raise RuntimeError(
+                f"scan() length={length} does not match xs size along dim={dim}: {actual}"
+            )
+
+    if length is not None and not xs_has_tensors:
+        # Probe combine_fn(init, None) once: validates it accepts x=None and
+        # infers the output pytree shape (needed for both length==0 and length>0).
+        try:
+            _, sample_y = combine_fn(init, None)
+        except Exception as e:
+            raise RuntimeError(
+                "scan() with xs=None requires combine_fn to accept x=None. "
+                f"Got error when calling combine_fn(init, None): {e}"
+            ) from e
+
+        if length == 0:
+            # Return init unchanged and empty tensors of shape (0, *y_element_shape),
+            # matching jax.lax.scan semantics for xs=None, length=0.
+            sample_y_leaves, sample_y_spec = pytree.tree_flatten(sample_y)
+            empty_outs = pytree.tree_unflatten(
+                [
+                    torch.empty([0] + list(t.shape), dtype=t.dtype, device=t.device)
+                    if isinstance(t, torch.Tensor)
+                    else None
+                    for t in sample_y_leaves
+                ],
+                sample_y_spec,
+            )
+            return init, empty_outs
+        else:
+            dummy = torch.zeros(length, dtype=torch.int64)
+            leaves_xs_orig = [dummy]
+            spec_xs = pytree.tree_flatten([None])[1]
+            _user_combine_fn = combine_fn
+
+            def combine_fn(carry, _ignored):  # noqa: E306
+                return _user_combine_fn(carry, None)
+
+            xs_has_tensors = True
+
+    # Shortcut if no xs is provided and length is not set
+    if not xs_has_tensors:
         return init, []
 
     def _validate_input(cfn, lxs, linit, d, r):
@@ -1118,10 +1178,36 @@ def scan_batch_rule(
 
 
 # dense implementation for scan. Used for testing only.
-def _fake_scan(combine_fn, init, xs=None, dim=0, reverse=False):
+def _fake_scan(combine_fn, init, xs=None, dim=0, reverse=False, length=None):
     carry_leaves, carry_spec = pytree.tree_flatten(init)
     inp_leaves, inp_spec = pytree.tree_flatten(xs)
-    if xs is None or len(inp_leaves) == 0:
+    xs_has_tensors = any(isinstance(l, torch.Tensor) for l in inp_leaves)
+
+    if length is not None and not xs_has_tensors:
+        if length == 0:
+            sample_carry, sample_y = combine_fn(init, None)
+            sample_y_leaves, sample_y_spec = pytree.tree_flatten(sample_y)
+            empty_outs = pytree.tree_unflatten(
+                [
+                    torch.empty([0] + list(t.shape), dtype=t.dtype, device=t.device)
+                    if isinstance(t, torch.Tensor)
+                    else None
+                    for t in sample_y_leaves
+                ],
+                sample_y_spec,
+            )
+            return init, empty_outs
+        else:
+            _user_combine_fn = combine_fn
+
+            def combine_fn(carry, _ignored):
+                return _user_combine_fn(carry, None)
+
+            inp_leaves = [torch.zeros(length, dtype=torch.int64)]
+            inp_spec = pytree.tree_flatten([None])[1]
+            xs_has_tensors = True
+
+    if not xs_has_tensors:
         return init, []
     result_flat = []
     carry = carry_leaves

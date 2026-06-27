@@ -4268,6 +4268,124 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
         ):
             scan(fct_carry_output_alias, init, inp, dim=0)
 
+    def test_scan_length_validation_pass(self):
+        def add(c, x):
+            return c + x, (c + x).clone()
+
+        init = torch.tensor(0.0)
+        xs = torch.arange(4, dtype=torch.float32)
+        result = scan(add, init, xs, length=4)
+        expected = _fake_scan(add, init, xs)
+        self.assertEqual(result, expected)
+
+    def test_scan_length_validation_mismatch(self):
+        def add(c, x):
+            return c + x, (c + x).clone()
+
+        init = torch.tensor(0.0)
+        xs = torch.arange(4, dtype=torch.float32)
+        with self.assertRaisesRegex(
+            RuntimeError, r"length=3.*does not match xs size.*4"
+        ):
+            scan(add, init, xs, length=3)
+
+    def test_scan_xs_none_length_eager(self):
+        def body(c, x):
+            return c + 1.0, (c + 1.0).clone()
+
+        init = torch.tensor(0.0)
+        carry, ys = scan(body, init, None, length=4)
+        self.assertEqual(carry, torch.tensor(4.0))
+        self.assertEqual(ys, torch.tensor([1.0, 2.0, 3.0, 4.0]))
+        expected = _fake_scan(body, init, None, length=4)
+        self.assertEqual((carry, ys), expected)
+
+    def test_scan_xs_empty_tuple_length_eager(self):
+        def body(c, x):
+            return c + 1.0, (c + 1.0).clone()
+
+        init = torch.tensor(0.0)
+        carry, ys = scan(body, init, (), length=4)
+        self.assertEqual(carry, torch.tensor(4.0))
+        self.assertEqual(ys, torch.tensor([1.0, 2.0, 3.0, 4.0]))
+
+    @skipIfNoDynamoSupport
+    def test_scan_xs_none_length_compile(self):
+        def body(c, x):
+            return c + 1.0, (c + 1.0).clone()
+
+        init = torch.tensor(0.0)
+        result_eager = scan(body, init, None, length=4)
+
+        @torch.compile(fullgraph=True)
+        def f(i):
+            return scan(body, i, None, length=4)
+
+        result_compiled = f(init)
+        self.assertEqual(result_compiled, result_eager)
+
+    def test_scan_xs_none_length_grad(self):
+        def body(c, x):
+            return torch.sin(c), torch.sin(c).clone()
+
+        init = torch.tensor(0.5, requires_grad=True)
+        carry, ys = scan(body, init, None, length=3)
+        (carry.sum() + ys.sum()).backward()
+        self.assertIsNotNone(init.grad)
+        self.assertTrue(torch.isfinite(init.grad).all())
+
+        # Reference: compare against manual unrolled forward
+        init_ref = torch.tensor(0.5, requires_grad=True)
+        c = init_ref
+        ys_ref = []
+        for _ in range(3):
+            c = torch.sin(c)
+            ys_ref.append(c.clone())
+        (c.sum() + torch.stack(ys_ref).sum()).backward()
+        self.assertEqual(init.grad, init_ref.grad)
+
+    def test_scan_xs_none_length_vmap(self):
+        def body(c, x):
+            return c + 1.0, (c + 1.0).clone()
+
+        batch_init = torch.arange(3, dtype=torch.float32)
+        batched_carry, batched_ys = torch.vmap(lambda i: scan(body, i, None, length=4))(
+            batch_init
+        )
+        self.assertEqual(batched_carry, batch_init + 4.0)
+        expected_ys = torch.stack([batch_init + k for k in range(1, 5)], dim=1)
+        self.assertEqual(batched_ys, expected_ys)
+
+    def test_scan_length_negative_raises(self):
+        def body(c, x):
+            return c + 1.0, (c + 1.0).clone()
+
+        init = torch.tensor(0.0)
+        with self.assertRaisesRegex(
+            RuntimeError, r"length must be a non-negative integer"
+        ):
+            scan(body, init, None, length=-1)
+
+    def test_scan_xs_none_length_body_uses_x_raises(self):
+        def bad_body(c, x):
+            return c + x, (c + x).clone()
+
+        init = torch.tensor(0.0)
+        with self.assertRaisesRegex(RuntimeError, r"combine_fn to accept x=None"):
+            scan(bad_body, init, None, length=4)
+
+    def test_scan_xs_none_length_zero(self):
+        def body(c, x):
+            return c, (c * 2).clone()
+
+        init = torch.tensor([1.0, 2.0, 3.0])
+        carry, ys = scan(body, init, None, length=0)
+        self.assertEqual(carry, init)
+        self.assertEqual(ys.shape, torch.Size([0, 3]))
+        self.assertEqual(ys.dtype, init.dtype)
+        expected = _fake_scan(body, init, None, length=0)
+        self.assertEqual((carry, ys), expected)
+
 
 class AssociativeScanModels:
     @staticmethod
