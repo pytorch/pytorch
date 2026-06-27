@@ -24,12 +24,12 @@ from torch._higher_order_ops.utils import (
     check_meta_consistency,
     fill_none_with_masks,
     filter_with_masks,
+    first_slice_copy,
     get_graph_output_example_values,
     get_tensor_mask,
     HopInstance,
     mask_list,
     materialize_as_graph,
-    proto_slice,
     reenter_make_fx,
     split_into_chunks,
     unique_graph_id,
@@ -348,7 +348,7 @@ def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
             # prototype slice (values discarded) only to learn the output
             # metadata, then return init as the carry and zero-length stacked
             # tensors as the output.
-            proto_xs = [proto_slice(x, dim) for x in xs]
+            proto_xs = [first_slice_copy(x, dim) for x in xs]
             with torch.no_grad():
                 _, out_proto = _extract_carry_and_out(
                     call_operator(operator, *carry, *proto_xs, *additional_inputs),
@@ -448,7 +448,7 @@ def trace_scan(
 
     with disable_proxy_modes_tracing():
         sample_inits = [clone_input(x_init) for x_init in init]
-        sample_inputs = [proto_slice(x) for x in xs]
+        sample_inputs = [first_slice_copy(x) for x in xs]
         sample_additional_inputs = [
             clone_input(x) if isinstance(x, torch.Tensor) else x
             for x in additional_inputs
@@ -905,7 +905,7 @@ class ScanAutogradImpl:
             )
             return flat_grads
 
-        single_step_bw_xs = pytree.tree_map(proto_slice, bw_xs)
+        single_step_bw_xs = pytree.tree_map(first_slice_copy, bw_xs)
         bw_single_step_gm = materialize_as_graph(
             bw_single_step_wrapper,
             tuple(
@@ -956,7 +956,7 @@ def scan_autograd(combine_fn, init, xs, additional_inputs, mutated_arg_indices="
             hop_partitioned_graph: HopPartitionedGraph = (
                 HopGraphMinCutPartitioner.create_partitioned_graph(
                     combine_fn,
-                    (*init, *[proto_slice(x) for x in xs], *additional_inputs),
+                    (*init, *[first_slice_copy(x) for x in xs], *additional_inputs),
                     always_recompute_complex_exprs=True,
                 )
             )
@@ -999,7 +999,7 @@ def scan_fake_tensor_mode(
         carry, outputs = _extract_carry_and_out(
             combine_fn(
                 *init,
-                *[proto_slice(inp) for inp in xs],
+                *[first_slice_copy(inp) for inp in xs],
                 *additional_inputs,
             ),
             len(init),
@@ -1047,7 +1047,7 @@ def scan_functionalize(
         functional_combine_fn = ctx.functionalize(
             _maybe_run_with_interpreter(combine_fn)
         )
-        sample_unwrapped_xs_sliced = [proto_slice(inp) for inp in unwrapped_xs]
+        sample_unwrapped_xs_sliced = [first_slice_copy(inp) for inp in unwrapped_xs]
         sample_inputs = list(
             itertools.chain(
                 unwrapped_init,
@@ -1148,7 +1148,7 @@ def _fake_scan(combine_fn, init, xs=None, dim=0, reverse=False):
     dummy_carry, dummy_out = combine_fn(
         pytree.tree_unflatten(carry, carry_spec),
         pytree.tree_unflatten(
-            [proto_slice(elem, dim) for elem in inp_leaves],
+            [first_slice_copy(elem, dim) for elem in inp_leaves],
             inp_spec,
         ),
     )

@@ -4834,6 +4834,46 @@ class AssociativeScanTests(TestCase):
     @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
+    @parametrize("dim", [0, 1])
+    # pointwise only supports CUDA and does not support compile_dynamic_shape
+    # (lifted arguments), so skip those combinations as in test_associative_scan_compile.
+    @decorateIf(
+        unittest.skip,
+        lambda params: (
+            params["combine_mode"] == "pointwise"
+            and (
+                params["device"] == torch.device("cpu")
+                or params["compile_mode"] == "compile_dynamic_shape"
+            )
+        ),
+    )
+    def test_associative_scan_zero_length(
+        self, combine_mode, reverse, compile_mode, device, autograd, dim
+    ):
+        shape = [2, 4, 3]
+        shape[dim] = 0
+        x = torch.randn(*shape, device=device, requires_grad=autograd)
+        kwargs = {
+            "dim": dim,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_mode": combine_mode,
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=AssociativeScanModels.Simple(**kwargs),
+            model_fake=AssociativeScanModels.Simple(**kwargs_fake),
+            inputs=x,
+            autograd_param=None if not autograd else (x,),
+        )
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("reverse", [False, True])
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    @parametrize("autograd", [False, True])
     # Skipping the combination of combine_mode=pointwise and device=cpu
     # as the current implementation of pointwise does only support CUDA device
     # Skipping the combination of combine_mode=pointwise and compile_mode=compile_dynamic_shape
@@ -4848,18 +4888,6 @@ class AssociativeScanTests(TestCase):
             )
         ),
     )
-    # # Skipping this combination as there is a CPP compilation failure that
-    # # may be unrelated to associative_scan itself. There is a dedicated tests for
-    # # this case below.
-    # @decorateIf(
-    #     unittest.skip,
-    #     lambda params: (
-    #         params["compile_mode"] == "compile_dynamic_shape"
-    #         and params["combine_mode"] == "generic"
-    #         and params["device"] == torch.device("cpu")
-    #         and params["autograd"]
-    #     ),
-    # )
     def test_associative_scan_compile(
         self, combine_mode, reverse, compile_mode, device, autograd
     ):
@@ -5847,7 +5875,7 @@ class GraphModule(torch.nn.Module):
 
         with self.assertRaisesRegex(
             ValueError,
-            "All xs leaves must at least have.*",
+            "All xs leaves must have at least 'dim \\+ 1' dimensions",
         ):
             associative_scan(
                 get_scan_combine_fn("different_input_size_operator", True),

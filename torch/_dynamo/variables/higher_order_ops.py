@@ -3010,17 +3010,6 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         additional_inputs_vars = unpack_iterable(tx, additional_inputs)
         _check_all_tensorvariable(additional_inputs_vars)
 
-        scan_length = get_fake_value(xs_vars[0].as_proxy().node, tx).size()[0]
-        if scan_length == 0:
-            unimplemented(
-                gb_type="torch.associative_scan: zero-sized tensor",
-                context=str(xs_vars[0]),
-                explanation="associative_scan() operator doesn't support zero-sized tensors during tracing.",
-                hints=[
-                    *graph_break_hints.USER_ERROR,
-                ],
-            )
-
         # Trace the subgraph
         # The sub_args is a slice of original input, e.g. if input.size is (3, 4), and scan dim=0
         # the sub_args shape will be (4, ).
@@ -3185,7 +3174,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         from torch._higher_order_ops.scan import _extract_carry_and_out
-        from torch._higher_order_ops.utils import proto_slice
+        from torch._higher_order_ops.utils import first_slice_copy
 
         self.supports_input_mutation = not torch.is_grad_enabled()
 
@@ -3298,7 +3287,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             ]
             # The sub_args_inp is a slice of original input, e.g. if input.size is (3, 4), and scan dim=0
             # the sub_args_inp shape will be (4, ).
-            sub_args_inp = [_make_inlined(tx, proto_slice)(inp) for inp in xs_vars]
+            sub_args_inp = [_make_inlined(tx, first_slice_copy)(inp) for inp in xs_vars]
             sub_args_additional_inputs = [
                 t.call_method(tx, "clone", args=[], kwargs={})
                 for t in additional_inputs_vars

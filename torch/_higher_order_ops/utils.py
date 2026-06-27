@@ -948,23 +948,16 @@ def get_dummy_aot_autograd_config():
     )
 
 
-# Slices off the first element of a given dimension
+# Slices off the first element of a given dimension. Used to build a
+# representative single slice for subgraph tracing of control-flow ops.
+# When `dim` has size 0 (e.g. a zero-length scan) there is no real slice to
+# take, so return an uninitialized tensor with `dim` removed.
 def first_slice_copy(t: torch.Tensor, dim: int = 0) -> torch.Tensor:
-    return torch.select_copy(t, dim, 0)
-
-
-def proto_slice(t: torch.Tensor, dim: int = 0) -> torch.Tensor:
-    """Return a representative single slice of `t` along `dim` for subgraph tracing.
-
-    Same as first_slice_copy for non-empty `dim`, but when `dim` has size 0 (e.g.
-    a zero-length scan) there is no real slice to take, so return an uninitialized
-    tensor with `dim` removed. Only the metadata (shape/dtype/device) is meaningful.
-    """
     if t.shape[dim] == 0:
         shape = list(t.shape)
         del shape[dim]
         return t.new_empty(shape)
-    return first_slice_copy(t, dim)
+    return torch.select_copy(t, dim, 0)
 
 
 # Returns a mask whether a list element is a tensor or not

@@ -251,8 +251,11 @@ def _extract_subgraphs_and_args(
     if node.target is torch.ops.higher_order.associative_scan:
         # Associative scan operates on slices of xs (see: scan), but multiple slices.
         # Use the same slice twice to account for cases where only a single slice is
-        # input.
-        yield args[0], (*(a[0] for a in args[1]), *(a[0] for a in args[1]), *args[2])
+        # input. first_slice_copy tolerates a zero-length scan dim.
+        from torch._higher_order_ops.utils import first_slice_copy
+
+        sliced = [first_slice_copy(a) for a in args[1]]
+        yield args[0], (*sliced, *sliced, *args[2])
     elif node.target is torch.ops.higher_order.cond:
         subgraph_args = tuple(args[3])
         yield args[1], subgraph_args
@@ -341,11 +344,11 @@ def _extract_subgraphs_and_args(
         yield args[0], (*(a[0] for a in args[1]), *args[2])
     elif node.target is torch.ops.higher_order.scan:
         # Scans accept a dim keyword, but the dimensions will be reordered so that at
-        # this point we always scan over dim 0. proto_slice tolerates a zero-length
-        # scan dim, where a[0] would raise IndexError.
-        from torch._higher_order_ops.utils import proto_slice
+        # this point we always scan over dim 0. 
+        # first_slice_copy tolerates a zero-length scan dim.
+        from torch._higher_order_ops.utils import first_slice_copy
 
-        yield args[0], (*args[1], *(proto_slice(a) for a in args[2]), *args[3])
+        yield args[0], (*args[1], *(first_slice_copy(a) for a in args[2]), *args[3])
     elif node.target in (
         torch.ops.higher_order.while_loop,
         torch.ops.higher_order.while_loop_stack_output,

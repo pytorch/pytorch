@@ -226,13 +226,7 @@ def associative_scan(
                 "xs leaves must dense Tensors, consider using `to_dense()`"
             )
         if any(x.ndim <= d for x in lxs):
-            raise ValueError(
-                "All xs leaves must at least have 'dim' number of dimensions and scan dimension > 0"
-            )
-        if any(x.shape[d] == 0 for x in lxs):
-            raise ValueError(
-                "All xs leaves must at least have 'dim' number of dimensions and scan dimension > 0"
-            )
+            raise ValueError("All xs leaves must have at least 'dim + 1' dimensions")
 
     ndim = leaves_xs_orig[0].ndim
     dim = utils.canonicalize_dim(ndim, dim)
@@ -711,6 +705,17 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
         xs, additional_inputs, outs = split_into_chunks(
             flat_args, [num_xs, num_additional_inputs, num_xs]
         )
+
+        if scan_length == 0:
+            # Zero-length scan: no elements contribute, so the gradient w.r.t.
+            # each xs leaf is an empty tensor matching that leaf. The triangular
+            # transition matrices below are not defined for scan_length == 0.
+            return (
+                *[None] * 3,
+                *[torch.zeros_like(x) for x in xs],
+                *[None] * num_additional_inputs,
+            )
+
         ndim = outs[0].ndim
 
         # First_slice_copy does not keep the original requires_grad flag,
@@ -914,8 +919,12 @@ def _fake_associative_scan(combine_fn, xs, dim, reverse=False):
         r_flat, _ = pytree.tree_flatten(r)
         result_flat.append(r_flat)
 
-    results = [
-        torch.stack([e[leave_ind] for e in op(result_flat)], dim)
-        for leave_ind in range(num_leaves)
-    ]
+    if len(result_flat) == 0:
+        # Zero-length scan: the output mirrors the (empty) input.
+        results = list(inp_leaves)
+    else:
+        results = [
+            torch.stack([e[leave_ind] for e in op(result_flat)], dim)
+            for leave_ind in range(num_leaves)
+        ]
     return pytree.tree_unflatten(results, spec)
