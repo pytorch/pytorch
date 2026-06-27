@@ -3286,25 +3286,63 @@ def forward(self, pred_1, x_1):
         self.assertEqual(counter[0], 1)
 
     @skipIfTorchDynamo("don't test compile on compile")
-    def test_scan_init_scanned_0(self):
-        # Only init and no input
-        x = torch.randn(3, 1, 2, device=torch.device("cpu"))
-        init = torch.randn(3, 2, device=torch.device("cpu"))
-        dim = 1
+    @parametrize("reverse", [False, True])
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    def test_scan_zero_length(self, reverse, compile_mode):
+        def body_same(c, x):
+            y = c + x
+            return y, y.clone()
 
-        # Scan dimension is 0
-        init = torch._ops.ops.aten.slice(x, dim, 0, 1, 1)
-        inp = torch._ops.ops.aten.slice(x, dim, 1, None, 1)
+        def body_reduce(c, x):
+            # y shape and dtype both differ from the xs slice.
+            y = c + x
+            return y, y.sum(dim=-1).to(torch.float64).clone()
+
+        def body_struct(c, x):
+            # xs is a 2-tuple, but the body emits a single ys leaf.
+            x0, x1 = x
+            y = c + x0 + x1
+            return y, y.clone()
+
+        cases = [
+            (body_same, torch.tensor([0.0, 1.0]), torch.zeros(0, 2), 0),
+            (body_reduce, torch.arange(6.0).reshape(2, 3), torch.ones(0, 2, 3), 0),
+            (body_reduce, torch.arange(6.0).reshape(2, 3), torch.ones(2, 0, 3), 1),
+            (body_struct, torch.zeros(2), (torch.ones(0, 2), torch.ones(0, 2)), 0),
+        ]
+        scan_fct = compile_mode_helper(scan, compile_mode)
+        for body, init, xs, dim in cases:
+            result = scan_fct(body, init, xs, dim=dim, reverse=reverse)
+            expected = _fake_scan(body, init, xs, dim=dim, reverse=reverse)
+            self.assertEqual(result, expected)
+
+    @skipIfTorchDynamo("don't test compile on compile")
+    @parametrize("reverse", [False, True])
+    def test_scan_zero_length_autograd(self, reverse):
+        init = torch.randn(2, 3, requires_grad=True)
+        xs = torch.randn(0, 2, 3, requires_grad=True)
+
+        def body(c, x):
+            y = torch.sin(c + x)
+            return y, y.clone()
+
+        carry, ys = scan(body, init, xs, reverse=reverse)
+        (carry.sum() + ys.sum()).backward()
+        # No steps run, so the carry passes through to init (grad of ones) and xs
+        # receives a correctly-shaped zero-length gradient.
+        self.assertEqual(init.grad, torch.ones_like(init))
+        self.assertEqual(xs.grad.shape, xs.shape)
+
+    def test_scan_unequal_scan_dim_size(self):
+        def body(c, x):
+            x0, x1 = x
+            y = c + x0 + x1
+            return y, y.clone()
+
         with self.assertRaisesRegex(
-            RuntimeError,
-            "All xs leaves must at least have.*",
+            RuntimeError, "All xs leaves must have the same scan dimension size"
         ):
-            scan(
-                get_scan_combine_fn("add", False),
-                init,
-                inp,
-                dim=dim,
-            )
+            scan(body, torch.zeros(2), (torch.ones(0, 2), torch.ones(5, 2)))
 
     @skipIfTorchDynamo("don't test compile on compile")
     def test_scan_init_non_tensor(self):
@@ -4469,12 +4507,12 @@ class GraphModule(torch.nn.Module):
             """\
 def forward(self, fct_1, init_1, xs_1):
     flip = torch.ops.aten.flip.default(xs_1, [0])
-    sym_size_int_1 = torch.ops.aten.sym_size.int(init_1, 1)
-    sym_size_int_2 = torch.ops.aten.sym_size.int(init_1, 2)
-    sym_size_int_3 = torch.ops.aten.sym_size.int(xs_1, 1)
-    sym_size_int_4 = torch.ops.aten.sym_size.int(xs_1, 2);  xs_1 = None
+    sym_size_int = torch.ops.aten.sym_size.int(init_1, 1)
+    sym_size_int_1 = torch.ops.aten.sym_size.int(init_1, 2)
+    sym_size_int_2 = torch.ops.aten.sym_size.int(xs_1, 1)
+    sym_size_int_3 = torch.ops.aten.sym_size.int(xs_1, 2);  xs_1 = None
     scan_combine_graph_0 = self.scan_combine_graph_0
-    scan = torch.ops.higher_order.scan(scan_combine_graph_0, [init_1], [flip], (sym_size_int_1, sym_size_int_2, sym_size_int_3, sym_size_int_4));  scan_combine_graph_0 = init_1 = flip = sym_size_int_1 = sym_size_int_2 = sym_size_int_3 = sym_size_int_4 = None
+    scan = torch.ops.higher_order.scan(scan_combine_graph_0, [init_1], [flip], (sym_size_int, sym_size_int_1, sym_size_int_2, sym_size_int_3));  scan_combine_graph_0 = init_1 = flip = sym_size_int = sym_size_int_1 = sym_size_int_2 = sym_size_int_3 = None
     getitem = scan[0]
     getitem_1 = scan[1];  scan = None
     flip_1 = torch.ops.aten.flip.default(getitem_1, [0]);  getitem_1 = None

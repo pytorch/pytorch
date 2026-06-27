@@ -739,6 +739,17 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
                 additional_inputs,
             ) = pytree.tree_unflatten(args, tree_spec)
             scan_length = xs[0].size(0)
+            if scan_length == 0:
+                empty_ys = [
+                    torch.empty(
+                        [0] + list(ys_out.shape[1:]),
+                        dtype=ys_out.dtype,
+                        device=ys_out.device,
+                    )
+                    for ys_out in ys_outputs
+                ]
+                return list(init) + empty_ys
+
             loop_idx = torch.zeros([], dtype=torch.int64, device=torch.device("cpu"))
 
             # NOTE [Pre-allocate scan's output buffer]

@@ -24,12 +24,12 @@ from torch._higher_order_ops.utils import (
     check_meta_consistency,
     fill_none_with_masks,
     filter_with_masks,
-    first_slice_copy,
     get_graph_output_example_values,
     get_tensor_mask,
     HopInstance,
     mask_list,
     materialize_as_graph,
+    proto_slice,
     reenter_make_fx,
     split_into_chunks,
     unique_graph_id,
@@ -178,13 +178,9 @@ def scan(
             if not isinstance(x, torch.Tensor):
                 raise RuntimeError(f"All xs leaves must be a Tensor but got {x}")
         if any(x.ndim <= d for x in lxs):
-            raise RuntimeError(
-                "All xs leaves must at least have 'dim' number of dimensions and scan dimension > 0"
-            )
-        if any(x.shape[d] == 0 for x in lxs):
-            raise RuntimeError(
-                "All xs leaves must at least have 'dim' number of dimensions and scan dimension > 0"
-            )
+            raise RuntimeError("All xs leaves must have at least 'dim + 1' dimensions")
+        if any(x.shape[d] != lxs[0].shape[d] for x in lxs[1:]):
+            raise RuntimeError("All xs leaves must have the same scan dimension size")
 
     ndim = leaves_xs_orig[0].ndim
     dim = utils.canonicalize_dim(ndim, dim)
@@ -347,6 +343,28 @@ def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
         num_elems = xs[0].shape[dim]
         num_init_leaves = len(init)
 
+        if num_elems == 0:
+            # Zero-length scan: the body never executes.  Run it once on a
+            # prototype slice (values discarded) only to learn the output
+            # metadata, then return init as the carry and zero-length stacked
+            # tensors as the output.
+            proto_xs = [proto_slice(x, dim) for x in xs]
+            with torch.no_grad():
+                _, out_proto = _extract_carry_and_out(
+                    call_operator(operator, *carry, *proto_xs, *additional_inputs),
+                    num_init_leaves,
+                )
+            out_tensor_mask = get_tensor_mask(out_proto)
+            out_proto_masked = mask_list(out_tensor_mask, out_proto)
+            outs = [
+                torch.empty([0] + list(e.size()), dtype=e.dtype, device=e.device)
+                for e in out_proto_masked
+            ]
+            outs_expanded = [
+                outs.pop(0) if out_m else None for out_m in out_tensor_mask
+            ]
+            return (*carry, *outs_expanded)
+
         # Process element 0 to infer output shapes for pre-allocation
         # AND produce the first real result in a single call.  The previous
         # approach used first_slice_copy() for shape inference and then
@@ -430,7 +448,7 @@ def trace_scan(
 
     with disable_proxy_modes_tracing():
         sample_inits = [clone_input(x_init) for x_init in init]
-        sample_inputs = [first_slice_copy(x) for x in xs]
+        sample_inputs = [proto_slice(x) for x in xs]
         sample_additional_inputs = [
             clone_input(x) if isinstance(x, torch.Tensor) else x
             for x in additional_inputs
@@ -887,7 +905,7 @@ class ScanAutogradImpl:
             )
             return flat_grads
 
-        single_step_bw_xs = pytree.tree_map(lambda t: t[0], bw_xs)
+        single_step_bw_xs = pytree.tree_map(proto_slice, bw_xs)
         bw_single_step_gm = materialize_as_graph(
             bw_single_step_wrapper,
             tuple(
@@ -938,7 +956,7 @@ def scan_autograd(combine_fn, init, xs, additional_inputs, mutated_arg_indices="
             hop_partitioned_graph: HopPartitionedGraph = (
                 HopGraphMinCutPartitioner.create_partitioned_graph(
                     combine_fn,
-                    (*init, *[x[0] for x in xs], *additional_inputs),
+                    (*init, *[proto_slice(x) for x in xs], *additional_inputs),
                     always_recompute_complex_exprs=True,
                 )
             )
@@ -981,7 +999,7 @@ def scan_fake_tensor_mode(
         carry, outputs = _extract_carry_and_out(
             combine_fn(
                 *init,
-                *[first_slice_copy(inp) for inp in xs],
+                *[proto_slice(inp) for inp in xs],
                 *additional_inputs,
             ),
             len(init),
@@ -1029,7 +1047,7 @@ def scan_functionalize(
         functional_combine_fn = ctx.functionalize(
             _maybe_run_with_interpreter(combine_fn)
         )
-        sample_unwrapped_xs_sliced = [first_slice_copy(inp) for inp in unwrapped_xs]
+        sample_unwrapped_xs_sliced = [proto_slice(inp) for inp in unwrapped_xs]
         sample_inputs = list(
             itertools.chain(
                 unwrapped_init,
@@ -1130,7 +1148,7 @@ def _fake_scan(combine_fn, init, xs=None, dim=0, reverse=False):
     dummy_carry, dummy_out = combine_fn(
         pytree.tree_unflatten(carry, carry_spec),
         pytree.tree_unflatten(
-            [first_slice_copy(elem, dim) for elem in inp_leaves],
+            [proto_slice(elem, dim) for elem in inp_leaves],
             inp_spec,
         ),
     )
@@ -1148,10 +1166,18 @@ def _fake_scan(combine_fn, init, xs=None, dim=0, reverse=False):
         y, _ = pytree.tree_flatten(y)
         result_flat.append(y)
 
-    results = [
-        torch.stack([e[leave_ind] for e in op(result_flat)])
-        for leave_ind in range(num_leaves)
-    ]
+    if len(result_flat) == 0:
+        # Zero-length scan: no iterations ran, so stack empty outputs shaped from
+        # the prototype output leaves obtained above.
+        results = [
+            torch.empty([0] + list(e.shape), dtype=e.dtype, device=e.device)
+            for e in dummy_out_leaves
+        ]
+    else:
+        results = [
+            torch.stack([e[leave_ind] for e in op(result_flat)])
+            for leave_ind in range(num_leaves)
+        ]
     # Match scan semantics: move the scan dim from 0 to the user-specified dim
     # when the output has enough dimensions.
     results = [torch.movedim(r, 0, dim) if dim < r.ndim else r for r in results]

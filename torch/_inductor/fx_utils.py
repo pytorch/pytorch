@@ -341,8 +341,11 @@ def _extract_subgraphs_and_args(
         yield args[0], (*(a[0] for a in args[1]), *args[2])
     elif node.target is torch.ops.higher_order.scan:
         # Scans accept a dim keyword, but the dimensions will be reordered so that at
-        # this point we always scan over dim 0.
-        yield args[0], (*args[1], *(a[0] for a in args[2]), *args[3])
+        # this point we always scan over dim 0. proto_slice tolerates a zero-length
+        # scan dim, where a[0] would raise IndexError.
+        from torch._higher_order_ops.utils import proto_slice
+
+        yield args[0], (*args[1], *(proto_slice(a) for a in args[2]), *args[3])
     elif node.target in (
         torch.ops.higher_order.while_loop,
         torch.ops.higher_order.while_loop_stack_output,
