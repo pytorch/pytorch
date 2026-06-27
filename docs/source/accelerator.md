@@ -54,6 +54,7 @@ per-backend modules, the following APIs are delegated to each backend:
     current_stream
     synchronize
     device_index
+    device_of
 ```
 
 ## Graphs

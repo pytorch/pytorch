@@ -94,6 +94,40 @@ class TestAccelerator(TestCase):
             self.assertEqual(torch.accelerator.current_device_index(), 0)
         self.assertEqual(torch.accelerator.current_device_index(), prev_device)
 
+    def test_device_of_context_manager(self):
+        prev_device = torch.accelerator.current_device_index()
+        # CPU tensor is a no-op
+        cpu_x = torch.randn(10, device="cpu")
+        with torch.accelerator.device_of(cpu_x):
+            self.assertEqual(torch.accelerator.current_device_index(), prev_device)
+        self.assertEqual(torch.accelerator.current_device_index(), prev_device)
+        # Accelerator tensor switches to its index
+        acc = torch.accelerator.current_accelerator()
+        x = torch.randn(10, device=acc)
+        with torch.accelerator.device_of(x):
+            self.assertEqual(
+                torch.accelerator.current_device_index(), x.get_device()
+            )
+        self.assertEqual(torch.accelerator.current_device_index(), prev_device)
+        # Storage is also accepted
+        s = x.untyped_storage()
+        with torch.accelerator.device_of(s):
+            self.assertEqual(
+                torch.accelerator.current_device_index(), s.get_device()
+            )
+        self.assertEqual(torch.accelerator.current_device_index(), prev_device)
+
+    @unittest.skipIf(not TEST_MULTIACCELERATOR, "only one accelerator detected")
+    def test_device_of_multi_device(self):
+        src_device = 0
+        dst_device = 1
+        torch.accelerator.set_device_index(src_device)
+        acc = torch.accelerator.current_accelerator()
+        x = torch.randn(10, device=torch.device(acc.type, dst_device))
+        with torch.accelerator.device_of(x):
+            self.assertEqual(torch.accelerator.current_device_index(), dst_device)
+        self.assertEqual(torch.accelerator.current_device_index(), src_device)
+
     def test_device_index_fullgraph(self):
         def fn(x):
             with torch.accelerator.device_index(x.device.index):

@@ -34,6 +34,7 @@ __all__ = [
     "current_stream",
     "device_count",
     "device_index",
+    "device_of",
     "empty_cache",
     "empty_host_cache",
     "get_memory_info",
@@ -306,3 +307,31 @@ class device_index:
     def __exit__(self, *exc_info: object) -> None:
         if self.idx is not None:
             torch._C._accelerator_maybeExchangeDevice(self.prev_idx)
+
+
+class device_of(device_index):
+    r"""Context-manager that changes the current device to that of given object.
+
+    You can use both tensors and storages as arguments. If a given object is
+    not allocated on the current :ref:`accelerator<accelerators>`, this is a no-op.
+
+    Args:
+        obj (Tensor or Storage): object allocated on the selected device.
+
+    Examples:
+
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+        >>> x = torch.randn(10, device="cuda:1")
+        >>> with torch.accelerator.device_of(x):
+        ...     # Code here runs with device 1 as the current accelerator device
+        ...     y = torch.randn(10, device="cuda")
+    """
+
+    def __init__(self, obj) -> None:
+        acc = current_accelerator()
+        idx = (
+            obj.get_device()
+            if (acc is not None and obj.device.type == acc.type)
+            else -1
+        )
+        super().__init__(idx if idx >= 0 else None)
