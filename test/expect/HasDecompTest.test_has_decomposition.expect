@@ -923,6 +923,8 @@ aten::linalg_lu_solve
 aten::linalg_lu_solve.out
 aten::linalg_matrix_exp
 aten::linalg_matrix_exp.out
+aten::linalg_matrix_sqrth
+aten::linalg_matrix_sqrth.out
 aten::linalg_pinv.atol_rtol_tensor
 aten::linalg_pinv.atol_rtol_tensor_out
 aten::linalg_polar

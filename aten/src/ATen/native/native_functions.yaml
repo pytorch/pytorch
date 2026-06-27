@@ -14393,6 +14393,13 @@
     CPU, CUDA: linalg_matrix_exp
   autogen: linalg_matrix_exp.out
 
+- func: linalg_matrix_sqrth(Tensor self) -> Tensor
+  python_module: linalg
+  variants: function
+  dispatch:
+    CPU, CUDA: linalg_matrix_sqrth
+  autogen: linalg_matrix_sqrth.out
+
 - func: _linalg_slogdet(Tensor A) -> (Tensor sign, Tensor logabsdet, Tensor LU, Tensor pivots)
   structured_delegate: _linalg_slogdet.sign
 

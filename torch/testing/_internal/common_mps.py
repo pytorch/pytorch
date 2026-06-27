@@ -369,6 +369,7 @@ if torch.backends.mps.is_available():
             "linalg.ldl_factor": None,
             "linalg.ldl_factor_ex": None,
             "linalg.ldl_solve": None,
+            "linalg.matrix_sqrth": None,
             "linalg.polar": None,
             "matrix_exp": None,
             "max_pool2d_with_indices_backward": [
