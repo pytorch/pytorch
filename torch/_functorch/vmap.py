@@ -54,9 +54,21 @@ def disable_saved_tensors_hooks_for_higher_order(
         "round-trip severs the higher-order graph and would silently produce "
         "incorrect gradients. First-order use is supported."
     )
+    compile_message = (
+        "torch.func transforms (grad, vjp, jacrev, hessian) don't support saved "
+        "tensor hooks (e.g. torch.autograd.graph.save_on_cpu) under torch.compile, "
+        "where saved-tensor hooks are managed by AOTAutograd. Use eager execution "
+        "for saved-tensor hooks with torch.func."
+    )
 
     @functools.wraps(f)
     def fn(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        # Under torch.compile the interpreter stack below is not traceable;
+        # disable hooks unconditionally, matching the pre-existing compiled
+        # behavior. Saved-tensor hook support with torch.func is eager only.
+        if torch.compiler.is_compiling():
+            with torch.autograd.graph.disable_saved_tensors_hooks(compile_message):
+                return f(*args, **kwargs)
         # An enclosing Grad/Jvp layer (checked before this transform pushes its
         # own) means higher-order differentiation, where saved-tensor hooks
         # miscompute. vmap layers don't differentiate and are ignored.
