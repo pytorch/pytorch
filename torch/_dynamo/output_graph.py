@@ -589,10 +589,6 @@ def _is_safe_to_reorder(node: fx.Node) -> bool:
             return False
         if isinstance(node.kwargs.get("out"), fx.Node):
             return False
-        # triton_kernel_wrapper_mutation mutates tensors via kwargs but
-        # is not detected by is_impure() or trailing-underscore checks.
-        if name == "triton_kernel_wrapper_mutation":
-            return False
         # Non-OpOverload targets with no FX Node arguments are likely
         # state-changing (e.g., _vmap_increment_nesting,
         # _set_fwd_grad_enabled). This is intentionally conservative:
