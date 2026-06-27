@@ -4,6 +4,7 @@ import logging
 import warnings
 from collections.abc import Callable
 from typing import Any
+from typing_extensions import ParamSpec
 
 import torch
 import torch.utils._pytree as pytree
@@ -28,6 +29,9 @@ from torch.utils._python_dispatch import _get_current_dispatch_mode
 
 
 log = logging.getLogger(__name__)
+
+
+_P = ParamSpec("_P")
 
 
 class SwitchOp(HigherOrderOperator):
@@ -214,12 +218,14 @@ def switch_op_dense(index, branches, operands):
     return branches[clamped_idx](*operands)
 
 
-def _branch_tensor_outputs_only(branch):
+def _branch_tensor_outputs_only(
+    branch: Callable[_P, Any],
+) -> Callable[_P, tuple[torch.Tensor, ...]]:
     """Wrap a branch so it only returns its Tensor leaves."""
 
     @functools.wraps(branch)
-    def wrapped(*args):
-        branch_outs = branch(*args)
+    def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> tuple[torch.Tensor, ...]:
+        branch_outs = branch(*args, **kwargs)
         return tuple(
             o for o in pytree.tree_leaves(branch_outs) if isinstance(o, torch.Tensor)
         )

@@ -5,6 +5,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
 from typing import Any, overload, TypeVar
+from typing_extensions import ParamSpec
 
 import torch
 import torch.fx.traceback as fx_traceback
@@ -1139,6 +1140,7 @@ hops_that_skip_faketensor_cache: set[torch._ops.OpOverload] = set()
 
 
 F = TypeVar("F", bound=Callable)
+_P = ParamSpec("_P")
 
 
 @overload
@@ -1427,7 +1429,7 @@ def fill_none_with_masks(data: list[torch.Tensor | None], masks: list[bool]):
 
 
 def materialize_bw_fn_filter_non_tensor_grads(
-    bw_fn: Callable,
+    bw_fn: Callable[_P, list[torch.Tensor | None]],
     args: tuple[Any, ...],
     include_key_set: torch._C.DispatchKeySet,
     exclude_key_set: torch._C.DispatchKeySet,
@@ -1445,9 +1447,11 @@ def materialize_bw_fn_filter_non_tensor_grads(
     grads_tensor_masks: list[bool] = []
 
     @functools.wraps(bw_fn)
-    def wrapped(*inner_args):
+    def wrapped(
+        *inner_args: _P.args, **inner_kwargs: _P.kwargs
+    ) -> list[torch.Tensor | None]:
         nonlocal grads_tensor_masks
-        grads = bw_fn(*inner_args)
+        grads = bw_fn(*inner_args, **inner_kwargs)
         grads_tensor_masks = [isinstance(g, torch.Tensor) for g in grads]
         return filter_with_masks(grads, grads_tensor_masks)
 
