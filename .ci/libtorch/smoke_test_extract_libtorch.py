@@ -3,10 +3,8 @@
 
 import argparse
 import ctypes
-import glob
 import shutil
 import subprocess
-import sys
 import tempfile
 import zipfile
 from pathlib import Path
@@ -70,7 +68,7 @@ def main() -> None:
             zf.extractall(tmp)
         lib_dir = Path(tmp) / "libtorch" / "lib"
         if not lib_dir.is_dir():
-            raise FileNotFoundError(f"libtorch/lib not found in zip")
+            raise FileNotFoundError("libtorch/lib not found in zip")
         check_rpath(lib_dir)
         check_import(lib_dir)
         print("Smoke test passed.")
