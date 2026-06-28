@@ -371,4 +371,3 @@ class WorkspaceContext:
         with self._lock:
             self._compiled_fn = None
             self.state = WorkspaceState.CREATED
-
