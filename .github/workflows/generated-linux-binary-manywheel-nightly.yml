@@ -96,42 +96,42 @@ jobs:
           bash .ci/manywheel/build_all.sh
       # One artifact per built Python -- names must match what the test/upload
       # matrix below downloads.
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.4.0
         with:
           name: manywheel-py3_10-cpu
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_10-cpu/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.4.0
         with:
           name: manywheel-py3_11-cpu
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_11-cpu/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.4.0
         with:
           name: manywheel-py3_12-cpu
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_12-cpu/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.4.0
         with:
           name: manywheel-py3_13-cpu
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_13-cpu/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.4.0
         with:
           name: manywheel-py3_14-cpu
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_14-cpu/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.4.0
         with:
           name: manywheel-py3_14t-cpu
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_14t-cpu/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.4.0
         with:
           name: manywheel-py3_15-cpu
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_15-cpu/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.4.0
         with:
           name: manywheel-py3_15t-cpu
           if-no-files-found: error
@@ -185,42 +185,42 @@ jobs:
           bash .ci/manywheel/build_all.sh
       # One artifact per built Python -- names must match what the test/upload
       # matrix below downloads.
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.4.0
         with:
           name: manywheel-py3_10-cuda12_6
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_10-cuda12_6/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.4.0
         with:
           name: manywheel-py3_11-cuda12_6
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_11-cuda12_6/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.4.0
         with:
           name: manywheel-py3_12-cuda12_6
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_12-cuda12_6/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.4.0
         with:
           name: manywheel-py3_13-cuda12_6
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_13-cuda12_6/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.4.0
         with:
           name: manywheel-py3_14-cuda12_6
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_14-cuda12_6/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.4.0
         with:
           name: manywheel-py3_14t-cuda12_6
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_14t-cuda12_6/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.4.0
         with:
           name: manywheel-py3_15-cuda12_6
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_15-cuda12_6/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.4.0
         with:
           name: manywheel-py3_15t-cuda12_6
           if-no-files-found: error
@@ -274,42 +274,42 @@ jobs:
           bash .ci/manywheel/build_all.sh
       # One artifact per built Python -- names must match what the test/upload
       # matrix below downloads.
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.4.0
         with:
           name: manywheel-py3_10-cuda13_0
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_10-cuda13_0/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.4.0
         with:
           name: manywheel-py3_11-cuda13_0
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_11-cuda13_0/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.4.0
         with:
           name: manywheel-py3_12-cuda13_0
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_12-cuda13_0/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.4.0
         with:
           name: manywheel-py3_13-cuda13_0
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_13-cuda13_0/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.4.0
         with:
           name: manywheel-py3_14-cuda13_0
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_14-cuda13_0/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.4.0
         with:
           name: manywheel-py3_14t-cuda13_0
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_14t-cuda13_0/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.4.0
         with:
           name: manywheel-py3_15-cuda13_0
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_15-cuda13_0/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.4.0
         with:
           name: manywheel-py3_15t-cuda13_0
           if-no-files-found: error
@@ -363,42 +363,42 @@ jobs:
           bash .ci/manywheel/build_all.sh
       # One artifact per built Python -- names must match what the test/upload
       # matrix below downloads.
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.4.0
         with:
           name: manywheel-py3_10-cuda13_2
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_10-cuda13_2/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.4.0
         with:
           name: manywheel-py3_11-cuda13_2
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_11-cuda13_2/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.4.0
         with:
           name: manywheel-py3_12-cuda13_2
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_12-cuda13_2/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.4.0
         with:
           name: manywheel-py3_13-cuda13_2
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_13-cuda13_2/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.4.0
         with:
           name: manywheel-py3_14-cuda13_2
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_14-cuda13_2/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.4.0
         with:
           name: manywheel-py3_14t-cuda13_2
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_14t-cuda13_2/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.4.0
         with:
           name: manywheel-py3_15-cuda13_2
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_15-cuda13_2/*
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.4.0
         with:
           name: manywheel-py3_15t-cuda13_2
           if-no-files-found: error
@@ -1613,7 +1613,7 @@ jobs:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           sparse-checkout: .ci/libtorch/
           show-progress: false
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.1.7
         name: Download Wheel Artifact
         with:
           name: ${{ matrix.source_wheel_build_name }}
@@ -1628,7 +1628,7 @@ jobs:
             --platform linux \
             --desired-cuda "$DESIRED_CUDA" \
             --libtorch-variant "$LIBTORCH_VARIANT"
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.4.0
         if: always()
         with:
           name: ${{ matrix.build_name }}

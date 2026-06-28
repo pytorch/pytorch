@@ -368,7 +368,7 @@ jobs:
 
       - name: Upload docs preview artifact (PR)
         if: ${{ github.event_name == 'pull_request' && steps.build-docs.outcome == 'success' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: docs-preview-osdc-${{ matrix.docs_type }}
           path: docs-preview-staging
@@ -420,8 +420,8 @@ jobs:
     # tag shangdiy for any issue with this test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '20'
       - name: Run MemoryViz JS tests (nonretryable)
