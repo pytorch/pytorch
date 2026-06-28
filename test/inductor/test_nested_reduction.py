@@ -886,7 +886,6 @@ def _run_and_capture_source_bundle(
     def capture():
         with (
             inductor_config.patch("triton.nested_reduction", True),
-            inductor_config.patch("triton.two_pass_variance_l2_fraction", 0.0),
             _choices_context(force_persistent_outer_reduction),
         ):
             compiled = torch.compile(f, dynamic=dynamic)
