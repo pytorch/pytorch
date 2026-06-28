@@ -222,7 +222,9 @@ class IndexPropagation(DefaultHandler):
         self.shape_env = V.graph.sizevars.shape_env
 
         var_to_range = {
-            k: ValueRanges(0, upper_bound(v) - 1) for k, v in iter_ranges.items()
+            k: ValueRanges(0, ub)
+            for k, v in iter_ranges.items()
+            if (ub := upper_bound(v) - 1) >= 0
         }
         self.var_to_range = tuple(
             itertools.chain(self.shape_env.var_to_range.items(), var_to_range.items())
