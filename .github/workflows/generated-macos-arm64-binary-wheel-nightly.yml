@@ -59,7 +59,7 @@ jobs:
         run: |
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           # Full fetch on tag pushes so the release tag is visible to
@@ -95,7 +95,7 @@ jobs:
           "${PYTORCH_ROOT}/.ci/wheel/delocate_wheels.sh"
       # Upload phase: each wheel becomes its own artifact (one call per name).
       - name: Upload wheel-py3_10-cpu
-        uses: actions/upload-artifact@v4.4.0
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.4.0
         if: always()
         with:
           name: wheel-py3_10-cpu
@@ -103,7 +103,7 @@ jobs:
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/wheel-py3_10-cpu
       - name: Upload wheel-py3_11-cpu
-        uses: actions/upload-artifact@v4.4.0
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.4.0
         if: always()
         with:
           name: wheel-py3_11-cpu
@@ -111,7 +111,7 @@ jobs:
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/wheel-py3_11-cpu
       - name: Upload wheel-py3_12-cpu
-        uses: actions/upload-artifact@v4.4.0
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.4.0
         if: always()
         with:
           name: wheel-py3_12-cpu
@@ -119,7 +119,7 @@ jobs:
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/wheel-py3_12-cpu
       - name: Upload wheel-py3_13-cpu
-        uses: actions/upload-artifact@v4.4.0
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.4.0
         if: always()
         with:
           name: wheel-py3_13-cpu
@@ -127,7 +127,7 @@ jobs:
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/wheel-py3_13-cpu
       - name: Upload wheel-py3_14-cpu
-        uses: actions/upload-artifact@v4.4.0
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.4.0
         if: always()
         with:
           name: wheel-py3_14-cpu
@@ -135,7 +135,7 @@ jobs:
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/wheel-py3_14-cpu
       - name: Upload wheel-py3_14t-cpu
-        uses: actions/upload-artifact@v4.4.0
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.4.0
         if: always()
         with:
           name: wheel-py3_14t-cpu
@@ -208,17 +208,17 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
     steps:
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           sparse-checkout: .ci/libtorch/
           show-progress: false
       - name: Setup Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.10.4"
           freethreaded: false
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.1.7
         name: Download Wheel Artifact
         with:
           name: wheel-py3_10-cpu
@@ -233,7 +233,7 @@ jobs:
             --platform macos \
             --desired-cuda "$DESIRED_CUDA" \
             --libtorch-variant "$LIBTORCH_VARIANT"
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.4.0
         if: always()
         with:
           name: libtorch-cpu-shared-with-deps-release

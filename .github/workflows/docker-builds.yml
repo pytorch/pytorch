@@ -105,7 +105,7 @@ jobs:
 
       - name: Login to GHCR
         if: github.event_name == 'push' && github.ref_type == 'branch'
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: pytorch
@@ -169,7 +169,7 @@ jobs:
           echo "${docker_image_name}=${docker_image_tag}" >> "docker-builds-output-${docker_image_name}.txt"
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4.4.0
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.4.0
         if: contains(matrix.docker-image-name, 'rocm')
         with:
           name: docker-builds-artifacts-${{ matrix.docker-image-name }}

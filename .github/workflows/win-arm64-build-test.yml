@@ -45,7 +45,7 @@ jobs:
           git config --system core.longpaths true
 
       - name: Git checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           path: pytorch
           submodules: recursive
@@ -114,7 +114,7 @@ jobs:
           powershell -ExecutionPolicy Bypass -File ".ci/pytorch/win-arm64-build.ps1"
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4.4.0
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.4.0
         if: always()
         with:
           name: torch-wheel-win-arm64-py3-12
@@ -136,7 +136,7 @@ jobs:
           git config --system core.longpaths true
 
       - name: Git checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           path: pytorch
           submodules: recursive
@@ -161,7 +161,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download Build Artifacts
-        uses: actions/download-artifact@v4.1.7
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.1.7
         with:
           name: torch-wheel-win-arm64-py3-12
           path: C:\${{ github.run_id }}\build-results
