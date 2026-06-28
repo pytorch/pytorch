@@ -332,9 +332,7 @@ class FSDPParamGroup:
         self._init_flat_param_buffer()
         self._register_state_dict_hooks()
 
-    def _invalidate_flat_param_buffer(
-        self, reset_support_check: bool = True
-    ) -> None:
+    def _invalidate_flat_param_buffer(self, reset_support_check: bool = True) -> None:
         self._flat_param_buffer = None
         self._flat_param_numels = None
         self._flat_cast_buffer = None
@@ -425,13 +423,13 @@ class FSDPParamGroup:
             fsdp_param._sharded_param_data = flat_param_slice
 
             shard_dim = fsdp_param.fsdp_placement.dim
-            local_shard_length = (
-                fsdp_param.sharded_size[shard_dim] if numel > 0 else 0
-            )
+            local_shard_length = fsdp_param.sharded_size[shard_dim] if numel > 0 else 0
             padded_local_tensor = flat_param_slice.view(
                 fsdp_param.padded_sharded_param_size
             )
-            sharded_param = cast(DTensor, fsdp_param.sharded_param)
+            sharded_param = fsdp_param.sharded_param
+            if not isinstance(sharded_param, DTensor):
+                raise AssertionError(f"Expected DTensor, got {type(sharded_param)}")
             sharded_param._local_tensor = padded_local_tensor.narrow(
                 dim=shard_dim,
                 start=0,
