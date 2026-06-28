@@ -363,6 +363,62 @@ def populate_fw_metadata_with_stream_indices(
     fw_metadata.mutated_inp_stream_indices = stream_indices
 
 
+def _expand_dict_returning_deps(
+    deps: list[Node],
+    visited: set[Node],
+    graph: torch.fx.Graph,
+    sync_node: Node,
+) -> list[Node]:
+    """Expand triton_kernel_wrapper_functional dict deps into per-key getitems.
+
+    ``triton_kernel_wrapper_functional`` returns a flat ``dict[str, Tensor]``.
+    If such a node is threaded through ``control_deps`` as a pass-through
+    value, ``decompose_triton_kernel_wrapper_functional`` later replaces it
+    with a raw Python dict, corrupting every user that expected an FX Node.
+
+    To avoid this, we insert ``operator.getitem`` nodes *before* the sync for
+    each after-sync getitem user, so that only tensor-valued nodes are passed
+    through ``control_deps``.  The dict node may still appear in
+    ``additional_deps`` (ordering-only) which is safe since that tuple is
+    never decomposed.
+    """
+    expanded: list[Node] = []
+    for dep in deps:
+        if not (
+            dep.op == "call_function"
+            and dep.target is torch.ops.higher_order.triton_kernel_wrapper_functional
+        ):
+            expanded.append(dep)
+            continue
+
+        after_sync_getitems = [
+            user
+            for user in dep.users
+            if user not in visited
+            and user.op == "call_function"
+            and user.target is operator.getitem
+        ]
+        if not after_sync_getitems:
+            expanded.append(dep)
+            continue
+
+        with graph.inserting_before(sync_node):
+            for old_gi in after_sync_getitems:
+                key = old_gi.args[1]
+                new_gi = graph.call_function(operator.getitem, args=(dep, key))
+                new_gi.meta.update(old_gi.meta)
+                if isinstance(new_gi.meta.get("val"), dict):
+                    raise AssertionError(
+                        f"nested dict in triton kernel output for key {key}"
+                    )
+                visited.add(new_gi)
+                expanded.append(new_gi)
+                old_gi.replace_all_uses_with(new_gi)
+                graph.erase_node(old_gi)
+
+    return expanded
+
+
 def _wrap_sync_node(
     gm: torch.fx.GraphModule,
     sync_node: Node,
@@ -391,6 +447,15 @@ def _wrap_sync_node(
         for dep in deps_before_sync
         if any(user not in visited for user in dep.users)
     ]
+
+    # Expand dict-returning nodes (triton_kernel_wrapper_functional) into
+    # individual getitem outputs.  Passing a dict-valued node through
+    # control_deps breaks post-grad passes: reinplace + decomposition replace
+    # the dict node with a Python dict, corrupting any user that expected an
+    # FX Node.  Unwrapping here ensures only tensor-valued nodes flow through.
+    deps_with_uses_after_sync = _expand_dict_returning_deps(
+        deps_with_uses_after_sync, visited, graph, sync_node
+    )
 
     # Create subgraph that executes sync and passes through only used dependencies
     subgraph_module = _create_subgraph_for_node(
@@ -552,6 +617,10 @@ def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
                         found_sync = True
                         _wrap_sync_node(gm, node, all_stream_deps, visited)
                     stream_to_nodes.clear()
+                    while (
+                        getattr(next_node, "_erased", False) and next_node.op != "root"
+                    ):
+                        next_node = next_node.next
                     node = next_node
                     continue
 
@@ -578,6 +647,10 @@ def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
                     stream_to_nodes[waited_on_stream] = []
                     if None in stream_to_nodes:
                         stream_to_nodes[None] = []
+                    while (
+                        getattr(next_node, "_erased", False) and next_node.op != "root"
+                    ):
+                        next_node = next_node.next
                     node = next_node
                     continue
 
@@ -665,6 +738,11 @@ def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
                 stream = get_stream(node)
                 stream_to_nodes.setdefault(stream, []).append(node)
 
+        # _wrap_sync_node may erase nodes after the sync (e.g.
+        # _expand_dict_returning_deps erases getitems).  Skip erased nodes
+        # so we don't re-process a dead node into stream_to_nodes.
+        while getattr(next_node, "_erased", False) and next_node.op != "root":
+            next_node = next_node.next
         node = next_node
 
     if found_sync:

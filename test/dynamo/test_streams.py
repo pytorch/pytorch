@@ -2404,6 +2404,87 @@ class <lambda>(torch.nn.Module):
         self.assertEqual(actual_s2, expected_s2)
         self.assertEqual(actual_default, default_s.cuda_stream)
 
+    def test_expand_dict_returning_deps_triton_kernel(self) -> None:
+        """Triton kernel dicts must not be passed through control_deps.
+
+        triton_kernel_wrapper_functional returns a dict.  If the dict node is
+        threaded through control_deps as a pass-through value,
+        decompose_triton_kernel_wrapper_functional later replaces it with a
+        raw Python dict (via replace_with_graph -> replace_all_uses_with),
+        corrupting the graph and causing KeyError during lowering.
+
+        _expand_dict_returning_deps should insert per-key getitem nodes
+        *before* the sync so that only tensor-valued nodes are passed through.
+        """
+        import operator
+
+        from torch._functorch._aot_autograd.streams import _expand_dict_returning_deps
+
+        graph = torch.fx.Graph()
+        # Placeholder input
+        x = graph.placeholder("x")
+        x.meta["val"] = torch.empty(4, 4)
+
+        # Simulate a triton_kernel_wrapper_functional call returning a dict
+        triton_func = graph.call_function(
+            torch.ops.higher_order.triton_kernel_wrapper_functional,
+            kwargs={
+                "kernel_idx": 0,
+                "constant_args_idx": 0,
+                "grid": [(1, 1, 1)],
+                "tma_descriptor_metadata": {},
+                "kwargs": {"Out": x},
+                "tensors_to_clone": ["Out"],
+            },
+        )
+        triton_func.meta["val"] = {"Out": torch.empty(4, 4)}
+
+        # Simulate a sync node (record_event) between triton_func and getitem
+        sync_node = graph.call_function(
+            torch.ops.streams.record_event.default,
+            args=(0, 0),
+        )
+
+        # getitem user AFTER the sync -- this is the problematic pattern
+        getitem_out = graph.call_function(
+            operator.getitem,
+            args=(triton_func, "Out"),
+        )
+        getitem_out.meta["val"] = torch.empty(4, 4)
+
+        # Use getitem_out so it's live
+        add_node = graph.call_function(torch.ops.aten.add.Tensor, args=(getitem_out, x))
+        graph.output(add_node)
+
+        # Build visited set: everything at or before sync_node
+        visited: set[torch.fx.Node] = set()
+        for n in graph.nodes:
+            visited.add(n)
+            if n is sync_node:
+                break
+
+        # deps_with_uses_after_sync: triton_func has getitem_out as after-sync user
+        deps = [triton_func]
+
+        expanded = _expand_dict_returning_deps(deps, visited, graph, sync_node)
+
+        # The triton_func dict should NOT be in the expanded list
+        self.assertNotIn(triton_func, expanded)
+
+        # Instead, we should have a new getitem node for key "Out"
+        self.assertEqual(len(expanded), 1)
+        new_gi = expanded[0]
+        self.assertEqual(new_gi.target, operator.getitem)
+        self.assertEqual(new_gi.args, (triton_func, "Out"))
+
+        # The new getitem should be BEFORE the sync in graph order
+        node_order = list(graph.nodes)
+        self.assertLess(node_order.index(new_gi), node_order.index(sync_node))
+
+        # The old getitem_out should have been erased; add_node now uses new_gi
+        self.assertNotIn(getitem_out, set(graph.nodes))
+        self.assertIn(new_gi, add_node.all_input_nodes)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
