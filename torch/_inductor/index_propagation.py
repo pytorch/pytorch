@@ -339,8 +339,9 @@ class IndexPropagation(DefaultHandler):
         var_to_range = (
             *self.var_to_range,
             *(
-                (k, ValueRanges(0, upper_bound(v) - 1))
+                (k, ValueRanges(0, ub))
                 for k, v in self.indirect_var_ranges.items()
+                if (ub := upper_bound(v) - 1) >= 0
             ),
         )
         # pyrefly: ignore [bad-argument-type]

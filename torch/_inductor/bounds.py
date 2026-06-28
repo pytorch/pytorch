@@ -41,8 +41,9 @@ class BoundVars:
 
         self.loop_body = loop_body
         self.replacement_vals = {
-            k: ValueRanges[Expr](0, upper_bound(v) - 1)
+            k: ValueRanges[Expr](0, ub)
             for k, v in loop_body.var_ranges.items()
+            if (ub := upper_bound(v) - 1) >= 0
         }
         # avoid computing these values, pessimistically assume that they are unbounded
         self.unbounded_vars = dominated_nodes(
