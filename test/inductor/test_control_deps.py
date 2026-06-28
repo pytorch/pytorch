@@ -1,5 +1,7 @@
 # Owner(s): ["module: inductor"]
 
+import unittest
+
 import torch
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
@@ -8,9 +10,13 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
+    HAS_CUDA_AND_TRITON,
     HAS_GPU_AND_TRITON,
     requires_gpu,
 )
+
+
+requires_cuda_triton = unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires CUDA")
 
 
 class TestControlDeps(InductorTestCase):
@@ -442,6 +448,121 @@ class TestControlDeps(InductorTestCase):
         # non-control_deps node -> not ordering only
         add = g.call_function(torch.ops.aten.add.Tensor, args=(view, other))
         self.assertFalse(_is_control_deps_ordering_only_use(add, view))
+
+    @requires_gpu()
+    def test_control_deps_passthrough_creates_ordering_barrier(self):
+        """Pass-through values in control_deps create OrderingBarrier nodes.
+
+        Verifies that OrderingBarrier:
+        - is created for pass-through buffers
+        - has ordering_only=True (so scheduler uses WeakDep, not StarDep)
+        - does not add pass-through buffers to mutated_buffers
+        """
+        from torch._inductor import ir
+        from torch._inductor.virtualized import V
+
+        captured: list[dict] = []
+
+        def capture(nodes):
+            barriers = [
+                op for op in V.graph.operations if isinstance(op, ir.OrderingBarrier)
+            ]
+            captured.append(
+                {
+                    "barriers": barriers,
+                    "barrier_source_names": [b.mutation_names[0] for b in barriers],
+                    "ordering_only_flags": [b.ordering_only for b in barriers],
+                    "mutated_buffers": set(V.graph.mutated_buffers),
+                }
+            )
+            return nodes
+
+        def fn(x):
+            s = torch.Stream(device=GPU_TYPE)
+            e = torch.Event()
+            with s:
+                y = x + 1
+                e.record()
+            e.wait()
+            return y * 2
+
+        torch._dynamo.reset()
+        with config.patch(_pre_fusion_custom_pass=capture):
+            x = torch.ones(4, device=GPU_TYPE)
+            result = torch.compile(fn)(x)
+
+        expected = fn(torch.ones(4, device=GPU_TYPE))
+        torch.testing.assert_close(result, expected)
+
+        self.assertTrue(captured, "expected at least one Inductor compile")
+        for c in captured:
+            self.assertGreater(len(c["barriers"]), 0, "expected OrderingBarrier nodes")
+            self.assertTrue(
+                all(c["ordering_only_flags"]),
+                "all OrderingBarrier nodes must have ordering_only=True",
+            )
+            for source_name in c["barrier_source_names"]:
+                self.assertNotIn(
+                    source_name,
+                    c["mutated_buffers"],
+                    f"barrier source {source_name} should not be in mutated_buffers",
+                )
+
+    @requires_gpu()
+    def test_ordering_barrier_is_nop(self):
+        """OrderingBarrier must not allocate or generate code.
+
+        Verifies should_allocate() and is_no_op() on the actual IR node.
+        """
+        from torch._inductor import ir
+        from torch._inductor.virtualized import V
+
+        captured: list[dict] = []
+
+        def capture(nodes):
+            barriers = [
+                op for op in V.graph.operations if isinstance(op, ir.OrderingBarrier)
+            ]
+            captured.append(
+                {
+                    "barriers_allocate": [b.should_allocate() for b in barriers],
+                    "barriers_nop": [b.is_no_op() for b in barriers],
+                }
+            )
+            return nodes
+
+        def fn(x):
+            s = torch.Stream(device=GPU_TYPE)
+            e = torch.Event()
+            with s:
+                y = x + 1
+                e.record()
+            e.wait()
+            return y * 2
+
+        torch._dynamo.reset()
+        with config.patch(_pre_fusion_custom_pass=capture):
+            x = torch.ones(4, device=GPU_TYPE)
+            result = torch.compile(fn)(x)
+
+        expected = fn(torch.ones(4, device=GPU_TYPE))
+        torch.testing.assert_close(result, expected)
+
+        self.assertTrue(captured, "expected at least one compile")
+        for c in captured:
+            self.assertGreater(
+                len(c["barriers_allocate"]),
+                0,
+                "expected OrderingBarrier nodes (precondition)",
+            )
+            self.assertTrue(
+                all(not a for a in c["barriers_allocate"]),
+                "OrderingBarrier should_allocate() must be False",
+            )
+            self.assertTrue(
+                all(c["barriers_nop"]),
+                "OrderingBarrier is_no_op() must be True",
+            )
 
 
 if __name__ == "__main__":
