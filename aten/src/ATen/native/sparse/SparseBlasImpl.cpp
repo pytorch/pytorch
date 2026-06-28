@@ -410,7 +410,21 @@ void triangular_solve_out_sparse_csr_reference(
   const auto values = A.values().contiguous();
   const auto* values_ptr = values.const_data_ptr<scalar_t>();
 
+  std::vector<int64_t> row_counts(n);
+  for (const auto row : c10::irange(n)) {
+    for (const auto idx : c10::irange(crow_index[row], crow_index[row + 1])) {
+      const auto col = static_cast<int64_t>(col_index[idx]);
+      if ((upper && col < row) || (!upper && col > row)) {
+        continue;
+      }
+      ++row_counts[transpose ? col : row];
+    }
+  }
+
   std::vector<std::vector<std::pair<int64_t, scalar_t>>> rows(n);
+  for (const auto row : c10::irange(n)) {
+    rows[row].reserve(row_counts[row]);
+  }
   for (const auto row : c10::irange(n)) {
     for (const auto idx : c10::irange(crow_index[row], crow_index[row + 1])) {
       const auto col = static_cast<int64_t>(col_index[idx]);
