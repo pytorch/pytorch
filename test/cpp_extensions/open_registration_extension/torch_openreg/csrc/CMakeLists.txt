@@ -40,6 +40,11 @@ if(USE_TEST)
         ${PROJECT_SOURCE_DIR}/tests/cpp/test_openreg_backend_meta.cpp)
     target_link_libraries(${BACKEND_META_TEST_TARGET}
         PRIVATE torch_openreg torch_cpu_library openreg gtest gtest_main)
+    # This standalone binary links libtorch_cpu, which lives in the torch
+    # install dir rather than next to the executable. Derive its rpath from the
+    # linked library locations instead of hardcoding the torch lib path.
+    set_target_properties(${BACKEND_META_TEST_TARGET} PROPERTIES
+        INSTALL_RPATH_USE_LINK_PATH TRUE)
     add_test(NAME ${BACKEND_META_TEST_TARGET} COMMAND ${BACKEND_META_TEST_TARGET})
 endif()
 
