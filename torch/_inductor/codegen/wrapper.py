@@ -832,11 +832,12 @@ class EnterDeviceContextManagerWithStreamInfoLine(EnterDeviceContextManagerLine)
     Attributes:
         num_streams: Number of streams (determined by user annotations on nodes).
         stream_idx_to_user_obj_idx: Maps stream_idx → user_object_index for
-            retrieving user stream objects via get_external_object_by_index.
+            retrieving user stream objects via _get_stream_by_index.
     """
 
     num_streams: int = 1
     stream_idx_to_user_obj_idx: dict[int, int] = dataclasses.field(default_factory=dict)
+    setup_stream_cache: bool = True
 
     def codegen(self, code: IndentedBuffer) -> None:
         """Generate context switching and stream retrieval code."""
@@ -844,14 +845,18 @@ class EnterDeviceContextManagerWithStreamInfoLine(EnterDeviceContextManagerLine)
             super().codegen(code)
         else:
             super().codegen(code)
-            code.writeline(f"{DEFAULT_STREAM} = {V.graph.device_ops.current_stream()}")
+
+            if self.setup_stream_cache:
+                code.writeline(
+                    f"{DEFAULT_STREAM} = {V.graph.device_ops.current_stream()}"
+                )
 
             if self.num_streams > 1:
                 for i in range(1, self.num_streams):
                     user_obj_idx = self.stream_idx_to_user_obj_idx[i]
                     code.writeline(
                         f"{STREAM_NAME_TEMPLATE.format(stream_idx=i)} "
-                        f"= get_external_object_by_index({user_obj_idx})",
+                        f"= _get_stream_by_index({user_obj_idx})",
                     )
 
 
@@ -1339,6 +1344,7 @@ class PythonWrapperCodegen(CodeGen):
 
     def __init__(self):
         super().__init__()
+        self._last_default_stream_device: int | None = None
         self._pending_input_asserts: dict[str, tuple[str, str]] = {}
         self._pending_alignment_copies: OrderedSet[str] = OrderedSet()
         self._names_iter: Iterator[int] = count()
@@ -1917,17 +1923,19 @@ class PythonWrapperCodegen(CodeGen):
             if stream_idx_to_user_obj_idx is None:
                 raise AssertionError("expected stream_idx_to_user_obj_idx to be set")
             import_line = (
-                "from torch._dynamo.graph_bytecode_inputs import "
-                "get_external_object_by_index"
+                "from torch._dynamo.variables.streams import _get_stream_by_index"
             )
             if not self.imports.contains(import_line):
                 self.imports.writeline(import_line)
+            setup_stream_cache = self._last_default_stream_device != device_idx
+            self._last_default_stream_device = device_idx
             self.writeline(
                 EnterDeviceContextManagerWithStreamInfoLine(
                     device_idx,
                     self.last_seen_device_guard_index,
                     num_streams,
                     stream_idx_to_user_obj_idx,
+                    setup_stream_cache=setup_stream_cache,
                 ),
             )
         else:
