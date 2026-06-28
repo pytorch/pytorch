@@ -344,7 +344,7 @@ def _extract_subgraphs_and_args(
         yield args[0], (*(a[0] for a in args[1]), *args[2])
     elif node.target is torch.ops.higher_order.scan:
         # Scans accept a dim keyword, but the dimensions will be reordered so that at
-        # this point we always scan over dim 0. 
+        # this point we always scan over dim 0.
         # first_slice_copy tolerates a zero-length scan dim.
         from torch._higher_order_ops.utils import first_slice_copy
 
