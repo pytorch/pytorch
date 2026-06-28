@@ -1458,8 +1458,15 @@ def slice_forward(
 
 @register_op_impl(torch.ops.aten.masked_select.default)
 def masked_select(
-    fake_mode: FakeTensorMode, func: OpOverload, self: FakeTensor, mask: FakeTensor
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    self: FakeTensor,
+    mask: FakeTensor,
+    output_size: IntLikeType | None = None,
 ) -> FakeTensor:
+    if output_size is not None:
+        return self.new_empty((output_size,))  # type: ignore[return]
+
     if (
         fake_mode.shape_env is None
         or not fake_mode.shape_env.allow_dynamic_output_shape_ops

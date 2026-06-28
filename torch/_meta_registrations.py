@@ -3701,6 +3701,13 @@ def meta_repeat_interleave_Tensor(repeats, output_size=None):
     return repeats.new_empty(output_size)
 
 
+@register_meta(aten.masked_select.default)
+def meta_masked_select(self, mask, *, output_size=None):
+    if output_size is None:
+        raise RuntimeError("cannot masked_select a meta tensor without output_size")
+    return self.new_empty(output_size)
+
+
 @register_meta([aten.complex.default, aten.complex.out])
 @out_wrapper()
 def meta_complex(real, imag):

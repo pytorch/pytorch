@@ -9284,7 +9284,7 @@
   dispatch:
     CompositeImplicitAutograd: index_select_backward_symint
 
-- func: masked_select.out(Tensor self, Tensor mask, *, Tensor(a!) out) -> Tensor(a!)
+- func: masked_select.out(Tensor self, Tensor mask, *, SymInt? output_size=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: masked_select_out_cpu
     CUDA: masked_select_out_cuda
@@ -9292,7 +9292,7 @@
     XPU: masked_select_out_xpu
   tags: dynamic_output_shape
 
-- func: masked_select(Tensor self, Tensor mask) -> Tensor
+- func: masked_select(Tensor self, Tensor mask, *, SymInt? output_size=None) -> Tensor
   variants: method, function
   dispatch:
     CPU: masked_select_cpu

@@ -1110,7 +1110,7 @@
   mask: non_differentiable
   result: masked_scatter_backward(grad_output_t, mask, grad_output_t.sizes())
 
-- name: masked_select(Tensor self, Tensor mask) -> Tensor
+- name: masked_select(Tensor self, Tensor mask, *, SymInt? output_size=None) -> Tensor
   self: masked_select_backward(grad, self, mask)
   mask: non_differentiable
   result: auto_linear

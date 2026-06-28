@@ -774,7 +774,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.margin_ranking_loss: lambda input1, input2, target, margin=0, size_average=None, reduce=None, reduction="mean": -1,  # type: ignore[attr-defined]
         torch.masked_fill: lambda input, mask, value: -1,
         torch.masked_scatter: lambda input, mask, source: -1,
-        torch.masked_select: lambda input, mask, out=None: -1,
+        torch.masked_select: lambda input, mask, *, output_size=None, out=None: -1,
         torch.matmul: lambda input, other, out=None: -1,
         torch.linalg.lu: lambda input, pivot=True, out=None: -1,
         torch.linalg.lu_factor: lambda input, pivot=True, out=None: -1,

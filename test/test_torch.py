@@ -3824,6 +3824,21 @@ class TestTorchDeviceType(TestCase):
         a_masked = a.masked_select(mask_copy_3_times)
         self.assertEqual(a_masked, a.unsqueeze(0).expand(3, 100).flatten())
 
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    def test_masked_select_output_size(self, device, dtype):
+        # output_size lets meta/data-dependent backends pre-size the result.
+        src = torch.tensor([1, 2, 3, 4], dtype=dtype, device=device)
+        mask = torch.tensor([True, False, True, False], device=device)
+        dst = torch.masked_select(src, mask, output_size=2)
+        self.assertEqual(dst, torch.tensor([1, 3], dtype=dtype, device=device))
+
+        # When omitted, behavior is unchanged on a real device.
+        self.assertEqual(torch.masked_select(src, mask), torch.tensor([1, 3], dtype=dtype, device=device))
+
+        # A wrong output_size is rejected on a real device.
+        with self.assertRaisesRegex(RuntimeError, "does not match the number of selected elements"):
+            torch.masked_select(src, mask, output_size=999)
+
     # FIXME: find a test suite for the masked select operator
     def test_masked_select_discontiguous(self, device):
         for size in (10, 200):
@@ -6708,6 +6723,19 @@ class TestTorch(TestCase):
 
     def test_dir(self):
         dir(torch)
+
+    def test_masked_select_meta(self):
+        data_meta = torch.empty(4, 4, device="meta")
+        mask_meta = torch.empty(4, 4, dtype=torch.bool, device="meta")
+
+        # With output_size, the meta kernel can produce output metadata.
+        result = data_meta.masked_select(mask_meta, output_size=8)
+        self.assertEqual(result.shape, torch.Size([8]))
+        self.assertEqual(result.device.type, "meta")
+
+        # Without output_size the output shape is data-dependent and unknowable.
+        with self.assertRaisesRegex(RuntimeError, "cannot masked_select a meta tensor without output_size"):
+            data_meta.masked_select(mask_meta)
 
     def test_wildcard_import(self):
         exec('from torch import *')

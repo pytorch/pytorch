@@ -6506,7 +6506,7 @@ Example::
 add_docstr(
     torch.masked_select,
     r"""
-masked_select(input, mask, *, out=None) -> Tensor
+masked_select(input, mask, *, output_size=None, out=None) -> Tensor
 
 Returns a new 1-D tensor which indexes the :attr:`input` tensor according to
 the boolean mask :attr:`mask` which is a `BoolTensor`.

@@ -2602,13 +2602,37 @@ static Tensor& masked_select_out_impl_cpu(
 Tensor& masked_select_out_cpu(
     const Tensor& self,
     const Tensor& mask,
+    std::optional<c10::SymInt> output_size,
     Tensor& result) {
-  return masked_select_out_impl_cpu(result, self, mask);
+  masked_select_out_impl_cpu(result, self, mask);
+  if (output_size.has_value()) {
+    TORCH_CHECK(
+        output_size.value().expect_int() == result.numel(),
+        "masked_select: output_size=",
+        output_size.value(),
+        " does not match the number of selected elements (",
+        result.numel(),
+        ")");
+  }
+  return result;
 }
 
-Tensor masked_select_cpu(const Tensor& self, const Tensor& mask) {
+Tensor masked_select_cpu(
+    const Tensor& self,
+    const Tensor& mask,
+    std::optional<c10::SymInt> output_size) {
   Tensor result = at::empty({0}, self.options());
-  return at::native::masked_select_out_cpu(self, mask, result);
+  at::native::masked_select_out_cpu(self, mask, result);
+  if (output_size.has_value()) {
+    TORCH_CHECK(
+        output_size.value().expect_int() == result.numel(),
+        "masked_select: output_size=",
+        output_size.value(),
+        " does not match the number of selected elements (",
+        result.numel(),
+        ")");
+  }
+  return result;
 }
 
 Tensor masked_select_backward(

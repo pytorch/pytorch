@@ -474,13 +474,33 @@ Tensor nonzero_static_mps(const Tensor& self, int64_t size, int64_t fill_value) 
   return result;
 }
 
-Tensor masked_select_mps(const Tensor& self, const Tensor& mask) {
+Tensor masked_select_mps(const Tensor& self, const Tensor& mask, std::optional<c10::SymInt> output_size) {
   Tensor result = at::empty({0}, self.options());
-  return mps::masked_select_out_mps_impl(result, self, mask);
+  mps::masked_select_out_mps_impl(result, self, mask);
+  if (output_size.has_value()) {
+    TORCH_CHECK(
+        output_size.value().expect_int() == result.numel(),
+        "masked_select: output_size=",
+        output_size.value(),
+        " does not match the number of selected elements (",
+        result.numel(),
+        ")");
+  }
+  return result;
 }
 
-Tensor& masked_select_out_mps(const Tensor& self, const Tensor& mask, Tensor& result) {
-  return mps::masked_select_out_mps_impl(result, self, mask);
+Tensor& masked_select_out_mps(const Tensor& self, const Tensor& mask, std::optional<c10::SymInt> output_size, Tensor& result) {
+  mps::masked_select_out_mps_impl(result, self, mask);
+  if (output_size.has_value()) {
+    TORCH_CHECK(
+        output_size.value().expect_int() == result.numel(),
+        "masked_select: output_size=",
+        output_size.value(),
+        " does not match the number of selected elements (",
+        result.numel(),
+        ")");
+  }
+  return result;
 }
 
 Tensor flip_mps(const Tensor& self, IntArrayRef dims) {
