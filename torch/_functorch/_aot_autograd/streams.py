@@ -681,34 +681,25 @@ def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
                     if None in stream_to_nodes and sync_stream is not None:
                         deps_before_sync.extend(stream_to_nodes[None])
 
-                # For wait_event and synchronize_event, add a cross-event
-                # dependency on the matching record_event's control_deps node
-                # so they cannot be reordered before the record.
-                if (
-                    node.target
-                    in (
-                        torch.ops.streams.wait_event.default,
-                        torch.ops.streams.synchronize_event.default,
-                    )
-                    and event_index in event_to_ctrl
+                # For wait_event and synchronize_event, depend on the matching
+                # record_event's control_deps node (ordering) and thread its
+                # passthrough getitems through (data edge), so consumers of
+                # recorded values are rewired through the wait/synchronize
+                # and the scheduler sees the dependency.
+                if node.target in (
+                    torch.ops.streams.wait_event.default,
+                    torch.ops.streams.synchronize_event.default,
                 ):
-                    deps_before_sync = [
-                        event_to_ctrl[event_index],
-                        *deps_before_sync,
-                    ]
-
-                # For synchronize_event, also include the getitem nodes
-                # threaded through record_event's control_deps. This ensures
-                # subsequent ops that depend on recorded values get rewired
-                # through synchronize_event.
-                if (
-                    node.target is torch.ops.streams.synchronize_event.default
-                    and event_index in event_to_passthrough
-                ):
-                    deps_before_sync = [
-                        *deps_before_sync,
-                        *event_to_passthrough[event_index],
-                    ]
+                    if event_index in event_to_ctrl:
+                        deps_before_sync = [
+                            event_to_ctrl[event_index],
+                            *deps_before_sync,
+                        ]
+                    if event_index in event_to_passthrough:
+                        deps_before_sync = [
+                            *deps_before_sync,
+                            *event_to_passthrough[event_index],
+                        ]
 
                 if deps_before_sync:
                     found_sync = True
