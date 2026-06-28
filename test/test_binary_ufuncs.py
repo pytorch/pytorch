@@ -255,6 +255,31 @@ class TestBinaryUfuncs(TestCase):
                 result_nc = op(x_nc, n_nc)
                 self.assertTrue(result_nc.isnan().all())
 
+    def test_laguerre_legendre_polynomial_nan_propagation(self):
+        # Same uninitialized-memory bug as test_chebyshev_polynomial_nan_propagation
+        # above (#187761/#187762), in the two remaining recurrences that guard the
+        # loop with !isnan(q): laguerre_polynomial_l and legendre_polynomial_p. With
+        # a NaN x, q is NaN up front so the loop never runs and `T r` was returned
+        # uninitialized. hermite_polynomial_he has no isnan guard (its loop always
+        # runs once for n >= 2), so it is not affected.
+        nan = float("nan")
+        ops = [
+            torch.special.laguerre_polynomial_l,
+            torch.special.legendre_polynomial_p,
+        ]
+        for op in ops:
+            with self.subTest(op=op.__name__):
+                x = torch.tensor([nan, nan], dtype=torch.float64)
+                n = torch.tensor([5, 5], dtype=torch.float64)
+                # Contiguous input
+                result = op(x, n)
+                self.assertTrue(result.isnan().all())
+                # Non-contiguous input (non-contiguous inputs were the primary repro)
+                x_nc = x[::1].clone().as_strided((1,), (2,))
+                n_nc = n[::1].clone().as_strided((1,), (2,))
+                result_nc = op(x_nc, n_nc)
+                self.assertTrue(result_nc.isnan().all())
+
 
 class TestBinaryUfuncsDevice(TestCase):
     # Generic tests for elementwise binary (AKA binary universal (u) functions (funcs))
