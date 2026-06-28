@@ -968,6 +968,13 @@ class FractionalMaxPool2d(Module):
         _random_samples=None,
     ) -> None:
         super().__init__()
+        if (isinstance(kernel_size, int) and kernel_size <= 0) or (
+            isinstance(kernel_size, (tuple, list))
+            and not all(k > 0 for k in kernel_size)
+        ):
+            raise ValueError(
+                f"kernel_size must be greater than 0, but got {kernel_size}"
+            )
         self.kernel_size = _pair(kernel_size)
         self.return_indices = return_indices
         self.register_buffer("_random_samples", _random_samples)
