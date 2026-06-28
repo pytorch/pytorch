@@ -8071,6 +8071,38 @@ class MutationOutput(Buffer):
         ]
 
 
+class OrderingBarrier(NopKernel):
+    """A no-op that creates a rename chain for scheduling order.
+
+    Takes a source buffer and produces a new buffer name. The scheduler
+    sees this as a node with a rename (source -> self), so future readers
+    of the source are redirected through this barrier.
+
+    Uses WeakDep(is_fake=True) instead of StarDep via the ``ordering_only``
+    flag, avoiding lifetime extension and mark_buffer_mutated side effects.
+    No kernel is generated and no allocation occurs.
+    """
+
+    ordering_only = True
+
+    def __init__(self, source_node: IRNode) -> None:
+        source_node.realize()
+        super().__init__(
+            name=None,
+            layout=NoneLayout(device=source_node.get_device()),
+            inputs=[source_node],
+        )
+        self.mutation_names = [source_node.get_name()]
+        self.name = V.graph.register_buffer(self)
+        V.graph.register_operation(self)
+
+    def get_mutation_names(self) -> Sequence[str]:
+        return self.mutation_names
+
+    def should_allocate(self) -> bool:
+        return False
+
+
 class TMADescriptor(ExternKernel):
     """
     An IR node representing a generic host-side TMA descriptor in the Triton API

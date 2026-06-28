@@ -4714,6 +4714,13 @@ class Scheduler:
                     )
                 for alt_name in buf.get_mutations():
                     alt_name = rename(alt_name)
+                    is_ordering_only = getattr(buf, "ordering_only", False)
+                    if is_ordering_only:
+                        add_user(alt_name, node, is_weak=True)
+                        node.add_fake_dep(
+                            WeakDep(alt_name, mutating_buf=buf.get_name(), is_fake=True)
+                        )
+                        continue
                     # this node must run after the prior writer
                     add_user(alt_name, node)
                     node.add_fake_dep(StarDep(alt_name, mode=node_mode))
