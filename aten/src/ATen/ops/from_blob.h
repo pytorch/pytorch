@@ -120,12 +120,14 @@ inline Tensor from_blob(
     IntArrayRef strides,
     const std::function<void(void*)>& deleter,
     const TensorOptions& options = {},
-    const std::optional<Device> target_device = std::nullopt) {
+    const std::optional<Device> target_device = std::nullopt,
+    c10::intrusive_ptr<c10::BackendMeta> backend_meta = {}) {
   return for_blob(data, sizes)
       .strides(strides)
       .deleter(deleter)
       .options(options)
       .target_device(target_device)
+      .backend_meta(std::move(backend_meta))
       .make_tensor();
 }
 
@@ -136,13 +138,15 @@ inline Tensor from_blob(
     int64_t storage_offset,
     const std::function<void(void*)>& deleter,
     const TensorOptions& options = {},
-    const std::optional<Device> target_device = std::nullopt) {
+    const std::optional<Device> target_device = std::nullopt,
+    c10::intrusive_ptr<c10::BackendMeta> backend_meta = {}) {
   return for_blob(data, sizes)
       .strides(strides)
       .storage_offset(storage_offset)
       .deleter(deleter)
       .options(options)
       .target_device(target_device)
+      .backend_meta(std::move(backend_meta))
       .make_tensor();
 }
 
@@ -151,11 +155,13 @@ inline Tensor from_blob(
     IntArrayRef sizes,
     std::function<void(void*)> deleter,
     const TensorOptions& options = {},
-    const std::optional<Device> target_device = std::nullopt) {
+    const std::optional<Device> target_device = std::nullopt,
+    c10::intrusive_ptr<c10::BackendMeta> backend_meta = {}) {
   return for_blob(data, sizes)
       .deleter(std::move(deleter))
       .options(options)
       .target_device(target_device)
+      .backend_meta(std::move(backend_meta))
       .make_tensor();
 }
 
@@ -163,15 +169,24 @@ inline Tensor from_blob(
     void* data,
     IntArrayRef sizes,
     IntArrayRef strides,
-    const TensorOptions& options = {}) {
-  return for_blob(data, sizes).strides(strides).options(options).make_tensor();
+    const TensorOptions& options = {},
+    c10::intrusive_ptr<c10::BackendMeta> backend_meta = {}) {
+  return for_blob(data, sizes)
+      .strides(strides)
+      .options(options)
+      .backend_meta(std::move(backend_meta))
+      .make_tensor();
 }
 
 inline Tensor from_blob(
     void* data,
     IntArrayRef sizes,
-    const TensorOptions& options = {}) {
-  return for_blob(data, sizes).options(options).make_tensor();
+    const TensorOptions& options = {},
+    c10::intrusive_ptr<c10::BackendMeta> backend_meta = {}) {
+  return for_blob(data, sizes)
+      .options(options)
+      .backend_meta(std::move(backend_meta))
+      .make_tensor();
 }
 
 } // namespace at
