@@ -34,6 +34,15 @@ if(USE_TEST AND kineto_LIBRARY)
     add_test(NAME ${PROFILER_TEST_TARGET} COMMAND ${PROFILER_TEST_TARGET})
 endif()
 
+if(USE_TEST)
+    set(BACKEND_META_TEST_TARGET openreg_backend_meta_tests)
+    add_executable(${BACKEND_META_TEST_TARGET}
+        ${PROJECT_SOURCE_DIR}/tests/cpp/test_openreg_backend_meta.cpp)
+    target_link_libraries(${BACKEND_META_TEST_TARGET}
+        PRIVATE torch_openreg torch_cpu_library openreg gtest gtest_main)
+    add_test(NAME ${BACKEND_META_TEST_TARGET} COMMAND ${BACKEND_META_TEST_TARGET})
+endif()
+
 install(TARGETS ${LIBRARY_NAME}
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}

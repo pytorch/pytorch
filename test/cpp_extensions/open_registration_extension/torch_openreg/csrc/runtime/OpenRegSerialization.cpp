@@ -1,14 +1,6 @@
 #include "OpenRegSerialization.h"
 
 namespace c10::openreg {
-struct OpenRegBackendMeta : public c10::BackendMeta {
-  OpenRegBackendMeta(int version_number, int format_number)
-      : version_number_(version_number), format_number_(format_number) {}
-
-  int version_number_{-1};
-  int format_number_{-1};
-};
-
 void for_serialization(
     const at::Tensor& t,
     std::unordered_map<std::string, bool>& m) {

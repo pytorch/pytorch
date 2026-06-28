@@ -1001,6 +1001,14 @@ def test_openreg(test_module, test_directory, options):
         if return_code != 0:
             return return_code
 
+    backend_meta_tests_bin = os.path.join(
+        openreg_dir, "build", "csrc", "openreg_backend_meta_tests"
+    )
+    if os.path.isfile(backend_meta_tests_bin):
+        return_code = shell([backend_meta_tests_bin], cwd=openreg_dir)
+        if return_code != 0:
+            return return_code
+
     with extend_python_path([install_dir]):
         cmd = [
             sys.executable,

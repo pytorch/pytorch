@@ -1,5 +1,7 @@
 #pragma once
 #include <ATen/core/Tensor.h>
+#include <c10/core/TensorImpl.h>
+#include <c10/util/intrusive_ptr.h>
 
 namespace at {
 
@@ -74,6 +76,13 @@ class TORCH_API TensorMaker {
     return *this;
   }
 
+  TensorMaker& backend_meta(
+      c10::intrusive_ptr<c10::BackendMeta> value) noexcept {
+    backend_meta_ = std::move(value);
+
+    return *this;
+  }
+
   Tensor make_tensor();
 
  private:
@@ -98,6 +107,7 @@ class TORCH_API TensorMaker {
   TensorOptions opts_;
   bool resizeable_{};
   c10::Allocator* allocator_{};
+  c10::intrusive_ptr<c10::BackendMeta> backend_meta_{};
 };
 
 inline TensorMaker for_blob(void* data, IntArrayRef sizes) noexcept {
