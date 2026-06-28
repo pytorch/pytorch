@@ -105,7 +105,7 @@ jobs:
           git config --system --get core.longpaths || echo "core.longpaths is not set, setting it now"
           git config --system core.longpaths true
       - name: Git checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           submodules: recursive
       - name: Bootstrap Python
@@ -136,7 +136,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.ci/pytorch/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.4.0
         if: always()
         with:
           name: ${{ matrix.build_name }}
@@ -193,7 +193,7 @@ jobs:
           git config --system --get core.longpaths || echo "core.longpaths is not set, setting it now"
           git config --system core.longpaths true
       - name: Git checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           submodules: recursive
       - name: Bootstrap APL
@@ -208,7 +208,7 @@ jobs:
         shell: cmd
         run: |
           ".ci/pytorch/windows/arm64/bootstrap_rust.bat"
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.1.7
         name: Download Build Artifacts
         with:
           name: ${{ matrix.build_name }}
@@ -276,12 +276,12 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
     steps:
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           sparse-checkout: .ci/libtorch/
           show-progress: false
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.1.7
         name: Download Wheel Artifact
         with:
           name: wheel-py3_11-cpu
@@ -298,7 +298,7 @@ jobs:
             --desired-cuda "$DESIRED_CUDA" \
             --libtorch-variant "$LIBTORCH_VARIANT" \
             --arch arm64
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.4.0
         if: always()
         with:
           name: libtorch-arm64-cpu-shared-with-deps-release

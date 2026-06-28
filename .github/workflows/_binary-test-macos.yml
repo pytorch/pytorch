@@ -57,17 +57,17 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout smoke-test script
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           sparse-checkout: .ci/pytorch/smoke_test/
           show-progress: false
       - name: Setup Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: ${{ inputs.setup_python_version }}
           freethreaded: ${{ inputs.freethreaded }}
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.1.7
         with:
           name: ${{ inputs.build_name }}
           path: ${{ runner.temp }}/artifacts

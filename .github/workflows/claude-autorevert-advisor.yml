@@ -29,7 +29,7 @@ jobs:
 
     steps:
       - name: Checkout pytorch/pytorch trunk
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           ref: main
           fetch-depth: 128
@@ -118,7 +118,7 @@ jobs:
 
       - name: Upload verdict artifact
         if: always() && steps.claude.outputs.structured_output != ''
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: autorevert-verdict
           path: /tmp/verdict/verdict.json
