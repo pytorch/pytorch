@@ -26,9 +26,7 @@ from torch._higher_order_ops.utils import (
     filter_with_masks,
     first_slice_copy,
     get_graph_output_example_values,
-    get_tensor_mask,
     HopInstance,
-    mask_list,
     materialize_as_graph,
     reenter_make_fx,
     split_into_chunks,
@@ -160,8 +158,7 @@ def scan(
     leaves_init, spec_init = pytree.tree_flatten(init)
     leaves_xs_orig, spec_xs = pytree.tree_flatten(xs)
 
-    # Determine whether xs carries any tensor data. xs=None flattens to [None]
-    # (a single non-tensor leaf), so we check for tensor leaves rather than length.
+    # Determine whether xs carries any tensor data.
     xs_has_tensors = any(isinstance(l, torch.Tensor) for l in leaves_xs_orig)
 
     if length is not None:
@@ -170,42 +167,44 @@ def scan(
                 f"scan() length must be a non-negative integer, got {length!r}"
             )
 
-    if length is not None and xs_has_tensors:
-        actual = leaves_xs_orig[0].shape[dim]
-        if length != actual:
-            raise RuntimeError(
-                f"scan() length={length} does not match xs size along dim={dim}: {actual}"
-            )
+        if xs_has_tensors:
+            actual = leaves_xs_orig[0].shape[dim]
+            if length != actual:
+                raise RuntimeError(
+                    f"scan() length={length} does not match xs size along dim={dim}: {actual}"
+                )
 
-    if length is not None and not xs_has_tensors:
-        # Probe combine_fn(init, None) once: validates it accepts x=None and
-        # infers the output pytree shape (needed for both length==0 and length>0).
-        try:
-            _, sample_y = combine_fn(init, None)
-        except Exception as e:
-            raise RuntimeError(
-                "scan() with xs=None requires combine_fn to accept x=None. "
-                f"Got error when calling combine_fn(init, None): {e}"
-            ) from e
-
-        if length == 0:
-            # Return init unchanged and empty tensors of shape (0, *y_element_shape),
-            # matching jax.lax.scan semantics for xs=None, length=0.
-            sample_y_leaves, sample_y_spec = pytree.tree_flatten(sample_y)
-            empty_outs = pytree.tree_unflatten(
-                [
-                    torch.empty([0] + list(t.shape), dtype=t.dtype, device=t.device)
-                    if isinstance(t, torch.Tensor)
-                    else None
-                    for t in sample_y_leaves
-                ],
-                sample_y_spec,
-            )
-            return init, empty_outs
         else:
-            dummy = torch.zeros(length, dtype=torch.int64)
-            leaves_xs_orig = [dummy]
-            spec_xs = pytree.tree_flatten([None])[1]
+
+            def _validate_none_length_combine_fn(cfn):
+                try:
+                    _, sample_y = cfn(init, None)
+                except Exception as e:
+                    raise RuntimeError(
+                        "scan() with xs=None requires combine_fn to accept x=None. "
+                        f"Got error when calling combine_fn(init, None): {e}"
+                    ) from e
+                return sample_y
+
+            sample_y = _validate_none_length_combine_fn(combine_fn)
+
+            if length == 0:
+                sample_y_leaves, sample_y_spec = pytree.tree_flatten(sample_y)
+                empty_outs = pytree.tree_unflatten(
+                    [
+                        torch.empty(
+                            [0] + list(leaf.shape), dtype=leaf.dtype, device=leaf.device
+                        )
+                        if isinstance(leaf, torch.Tensor)
+                        else leaf
+                        for leaf in sample_y_leaves
+                    ],
+                    sample_y_spec,
+                )
+                return init, empty_outs
+
+            leaves_xs_orig = [torch.zeros(length, dtype=torch.int64)]
+            spec_xs = pytree.tree_structure(None)
             _user_combine_fn = combine_fn
 
             def combine_fn(carry, _ignored):  # noqa: E306
@@ -213,12 +212,10 @@ def scan(
 
             xs_has_tensors = True
 
-    # Shortcut if no xs is provided and length is not set
     if not xs_has_tensors:
         return init, []
 
     def _validate_input(cfn, lxs, linit, d, r):
-        # Basic arguments check
         if not callable(cfn):
             raise RuntimeError(f"Combine_fn must be a callable, but got {cfn}")
         if not isinstance(d, int):
@@ -226,14 +223,12 @@ def scan(
         if not isinstance(r, bool):
             raise RuntimeError("Reverse must be a bool, but got " + str(type(r)))
 
-        # Checks for init
         if len(linit) == 0:
             raise RuntimeError("scan() operator requires init leaves.")
         for x in linit:
             if not isinstance(x, torch.Tensor):
                 raise RuntimeError(f"All init leaves must be a Tensor but got {x}")
 
-        # Checks for xs
         for x in lxs:
             if not isinstance(x, torch.Tensor):
                 raise RuntimeError(f"All xs leaves must be a Tensor but got {x}")
@@ -406,57 +401,11 @@ def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
 
         num_elems = xs[0].shape[dim]
         num_init_leaves = len(init)
+        carry = init
+        ys = []
 
-        # Process element 0 to infer output shapes for pre-allocation
-        # AND produce the first real result in a single call.  The previous
-        # approach used first_slice_copy() for shape inference and then
-        # re-processed element 0 in the main loop, calling the operator
-        # num_elems+1 times.  That extra invocation is incorrect for
-        # operators with side effects.
-        carry, out_0 = _extract_carry_and_out(
-            call_operator(
-                operator,
-                *carry,
-                *[elem.select(dim, 0) for elem in xs],
-                *additional_inputs,
-            ),
-            num_init_leaves,
-        )
-
-        out_tensor_mask = get_tensor_mask(out_0)
-        out_0_masked = mask_list(out_tensor_mask, out_0)
-
-        # Pre-allocate
-        # outs -> Output matrix
-        # idxs -> Index matrix for scatter_
-        # out: (num_elems, M, N, ...)
-        # idx: (1, M, N)
-        outs = [
-            torch.empty(
-                [num_elems] + list(e.size()),
-                dtype=e.dtype,
-                device=e.device,
-            )
-            for e in out_0_masked
-        ]
-        idxs = [
-            torch.ones_like(e, dtype=torch.int64).unsqueeze(0) for e in out_0_masked
-        ]
-
-        def store_out_in_outs(out, ind):
-            # Store the intermediate out in the outs matrix
-            for o, x, idx in zip(outs, out, idxs):
-                # o: (num_elems, M, N ...)
-                # x: (M, N, ...) -> (1, M, N)
-                # ind * idx: (1, M, N,) with values to be ind
-                # essentially: o[ind][n][k] = x[0][n][k]
-                o.scatter_(0, ind * idx, x.unsqueeze(0))
-
-        # Store element 0's result, then continue from element 1.
-        store_out_in_outs(out_0_masked, 0)
-
-        for i in range(1, num_elems):
-            carry, out = _extract_carry_and_out(
+        for i in range(num_elems):
+            carry, y = _extract_carry_and_out(
                 call_operator(
                     operator,
                     *carry,
@@ -465,13 +414,27 @@ def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
                 ),
                 num_init_leaves,
             )
+            ys.append(y)
 
-            store_out_in_outs(mask_list(out_tensor_mask, out), i)
+        if len(ys) == 0:
+            return (*carry,)
 
-        # Expand outs with None depending on the tensor mask of the output
-        outs_expanded = [outs.pop(0) if out_m else None for out_m in out_tensor_mask]
+        y_leaves, y_spec = pytree.tree_flatten(ys[0])
+        if len(y_leaves) == 0:
+            return (*carry, *y_leaves)
 
-        return (*carry, *outs_expanded)
+        flat_ys = [pytree.tree_flatten(y)[0] for y in ys]
+        results = []
+        for leaf_idx, leaf in enumerate(y_leaves):
+            if isinstance(leaf, torch.Tensor):
+                stacked = torch.stack([flat_y[leaf_idx] for flat_y in flat_ys])
+                results.append(
+                    torch.movedim(stacked, 0, dim) if dim < stacked.ndim else stacked
+                )
+            else:
+                results.append(leaf)
+
+        return (*carry, *pytree.tree_unflatten(results, y_spec))
 
     scans = _scan(init, xs)
     return scans
@@ -541,11 +504,14 @@ def trace_scan(
     with disable_proxy_modes_tracing():
         scan_length = xs[0].shape[0]
         fake_carry, fake_outputs = _extract_carry_and_out(
-            [o.meta["val"] for o in outputs], len(init)
+            [o.meta["val"] if o is not None else None for o in outputs], len(init)
         )
         out = (
             *fake_carry,
-            *(stack_y(t, scan_length) for t in fake_outputs),
+            *(
+                stack_y(t, scan_length) if isinstance(t, torch.Tensor) else t
+                for t in fake_outputs
+            ),
         )
 
     return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
@@ -1048,7 +1014,10 @@ def scan_fake_tensor_mode(
         )
         out = (
             *carry,
-            *(stack_y(t, scan_length) for t in outputs),
+            *(
+                stack_y(t, scan_length) if isinstance(t, torch.Tensor) else t
+                for t in outputs
+            ),
         )
         return out
 
@@ -1089,7 +1058,11 @@ def scan_functionalize(
         functional_combine_fn = ctx.functionalize(
             _maybe_run_with_interpreter(combine_fn)
         )
-        sample_unwrapped_xs_sliced = [first_slice_copy(inp) for inp in unwrapped_xs]
+        sample_unwrapped_xs_sliced = (
+            [first_slice_copy(inp) for inp in unwrapped_xs]
+            if len(unwrapped_xs) > 0
+            else [None]
+        )
         sample_inputs = list(
             itertools.chain(
                 unwrapped_init,
@@ -1189,10 +1162,12 @@ def _fake_scan(combine_fn, init, xs=None, dim=0, reverse=False, length=None):
             sample_y_leaves, sample_y_spec = pytree.tree_flatten(sample_y)
             empty_outs = pytree.tree_unflatten(
                 [
-                    torch.empty([0] + list(t.shape), dtype=t.dtype, device=t.device)
-                    if isinstance(t, torch.Tensor)
-                    else None
-                    for t in sample_y_leaves
+                    torch.empty(
+                        [0] + list(leaf.shape), dtype=leaf.dtype, device=leaf.device
+                    )
+                    if isinstance(leaf, torch.Tensor)
+                    else leaf
+                    for leaf in sample_y_leaves
                 ],
                 sample_y_spec,
             )
@@ -1204,7 +1179,7 @@ def _fake_scan(combine_fn, init, xs=None, dim=0, reverse=False, length=None):
                 return _user_combine_fn(carry, None)
 
             inp_leaves = [torch.zeros(length, dtype=torch.int64)]
-            inp_spec = pytree.tree_flatten([None])[1]
+            inp_spec = pytree.tree_structure(None)
             xs_has_tensors = True
 
     if not xs_has_tensors:
@@ -1213,7 +1188,7 @@ def _fake_scan(combine_fn, init, xs=None, dim=0, reverse=False, length=None):
     carry = carry_leaves
     op = reversed if reverse else lambda x: x
 
-    dummy_carry, dummy_out = combine_fn(
+    _, dummy_out = combine_fn(
         pytree.tree_unflatten(carry, carry_spec),
         pytree.tree_unflatten(
             [first_slice_copy(elem, dim) for elem in inp_leaves],
@@ -1234,13 +1209,18 @@ def _fake_scan(combine_fn, init, xs=None, dim=0, reverse=False, length=None):
         y, _ = pytree.tree_flatten(y)
         result_flat.append(y)
 
-    results = [
-        torch.stack([e[leave_ind] for e in op(result_flat)])
-        for leave_ind in range(num_leaves)
-    ]
-    # Match scan semantics: move the scan dim from 0 to the user-specified dim
-    # when the output has enough dimensions.
-    results = [torch.movedim(r, 0, dim) if dim < r.ndim else r for r in results]
+    if num_leaves == 0:
+        results = []
+    else:
+        results = []
+        for leaf_idx, leaf in enumerate(dummy_out_leaves):
+            if isinstance(leaf, torch.Tensor):
+                stacked = torch.stack([e[leaf_idx] for e in op(result_flat)])
+                results.append(
+                    torch.movedim(stacked, 0, dim) if dim < stacked.ndim else stacked
+                )
+            else:
+                results.append(leaf)
     return (
         pytree.tree_unflatten(carry, carry_spec),
         pytree.tree_unflatten(results, dummy_out_spec),

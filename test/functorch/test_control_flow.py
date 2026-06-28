@@ -4371,7 +4371,10 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
             return c + x, (c + x).clone()
 
         init = torch.tensor(0.0)
-        with self.assertRaisesRegex(RuntimeError, r"combine_fn to accept x=None"):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"combine_fn to accept x=None|unsupported operand type\(s\) for \+: 'FakeTensor' and 'NoneType'",
+        ):
             scan(bad_body, init, None, length=4)
 
     def test_scan_xs_none_length_zero(self):
@@ -4385,6 +4388,43 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
         self.assertEqual(ys.dtype, init.dtype)
         expected = _fake_scan(body, init, None, length=0)
         self.assertEqual((carry, ys), expected)
+
+    def test_scan_xs_none_length_zero_none_output(self):
+        def body(c, x):
+            return c + 1.0, None
+
+        init = torch.tensor(0.0)
+        carry, ys = scan(body, init, None, length=0)
+        self.assertEqual(carry, init)
+        self.assertIsNone(ys)
+        expected = _fake_scan(body, init, None, length=0)
+        self.assertEqual((carry, ys), expected)
+
+    def test_scan_xs_none_length_none_output(self):
+        def body(c, x):
+            return c + 1.0, None
+
+        init = torch.tensor(0.0)
+        carry, ys = scan(body, init, None, length=4)
+        self.assertEqual(carry, torch.tensor(4.0))
+        self.assertIsNone(ys)
+        expected = _fake_scan(body, init, None, length=4)
+        self.assertEqual((carry, ys), expected)
+
+    @skipIfNoDynamoSupport
+    def test_scan_xs_none_length_none_output_compile(self):
+        def body(c, x):
+            return c + 1.0, None
+
+        init = torch.tensor(0.0)
+        result_eager = scan(body, init, None, length=4)
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def f(i):
+            return scan(body, i, None, length=4)
+
+        result_compiled = f(init)
+        self.assertEqual(result_compiled, result_eager)
 
 
 class AssociativeScanModels:
