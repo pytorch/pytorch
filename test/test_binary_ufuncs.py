@@ -4651,6 +4651,39 @@ class TestBinaryUfuncsDevice(TestCase):
         self.assertEqual(x * 2.5, x * torch.tensor(2.5, device=device, dtype=dtype))
 
 
+class TestChebyshevNanPropagation(TestCase):
+    def test_chebyshev_nan_noncontiguous(self, device):
+        if self.device_type not in ("cpu", "cuda"):
+            self.skipTest("NaN uninitialized return is only fixed for CPU and CUDA")
+
+        nan = float("nan")
+        ops = [
+            (torch.special.chebyshev_polynomial_t, 3),
+            (torch.special.chebyshev_polynomial_u, 3),
+            (torch.special.chebyshev_polynomial_v, 3),
+            (torch.special.chebyshev_polynomial_w, 3),
+            (torch.special.shifted_chebyshev_polynomial_t, 7),
+            (torch.special.shifted_chebyshev_polynomial_u, 3),
+            (torch.special.shifted_chebyshev_polynomial_v, 3),
+            (torch.special.shifted_chebyshev_polynomial_w, 3),
+        ]
+        vals = torch.tensor(
+            [[float("-inf"), nan, float("inf")], [-0.0, 0.0, 1.0]],
+            device=device,
+            dtype=torch.float32,
+        )
+        x = torch.empty((3, 2), device=device, dtype=torch.float32).t()
+        x.copy_(vals)
+
+        for op, n in ops:
+            with self.subTest(op=op.__name__, n=n):
+                expected = op(x.contiguous(), n)
+                actual = op(x, n)
+                self.assertEqual(actual, expected, equal_nan=True)
+                self.assertTrue(expected[0, 1].isnan().item())
+                self.assertTrue(actual[0, 1].isnan().item())
+
+
 class TestBinaryUfuncsCUDA(TestCase):
     @dtypes(torch.float16, torch.bfloat16)
     def test_copysign_nan_sign(self, device, dtype):
@@ -4770,6 +4803,9 @@ def generate_not_implemented_tests(cls):
 
 
 generate_not_implemented_tests(TestBinaryUfuncsDevice)
+instantiate_device_type_tests(
+    TestChebyshevNanPropagation, globals(), only_for=("cpu", "cuda")
+)
 instantiate_device_type_tests(
     TestBinaryUfuncsDevice, globals(), allow_xpu=True, except_for="cpu"
 )
