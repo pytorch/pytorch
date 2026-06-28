@@ -82,6 +82,9 @@ class CompileId:
     # torch.compiling a compiled autograd graph
     compiled_autograd_id: int | None = None
 
+    # Async workspace compilation: tracks which workspace owns the guard
+    workspace_id: int | None = None
+
     # TODO: consider also tracking the recompilation count
     # See Note: Updating CompileId
 

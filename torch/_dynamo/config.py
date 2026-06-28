@@ -928,6 +928,13 @@ invalidate_compile_context_weakrefs: bool | None = None
 # dict iteration orders across distributed ranks) produce identical FX graphs.
 canonicalize_output_graph_node_order: bool = False
 
+# Experimental: enable async workspace compilation. When True, a custom
+# backend can partition FX graphs into isolated workspaces that communicate
+# shape/guard deltas via a shared whiteboard, allowing incremental kernel
+# patching instead of full recompilation on guard failures.
+# [@compile_ignored: runtime_behaviour]
+enable_async_workspaces: bool = False
+
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F403
 
