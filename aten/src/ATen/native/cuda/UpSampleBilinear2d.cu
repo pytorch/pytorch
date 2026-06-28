@@ -390,6 +390,11 @@ static void upsample_bilinear2d_out_cuda_template(
 
       // const int num_kernels = output_height * output_width;
       const int64_t num_kernels = output.numel();
+
+      if (num_kernels == 0) {
+        return;
+      }
+      
       const int64_t num_threads = std::min(
           at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
       cudaStream_t stream = at::cuda::getCurrentCUDAStream();
