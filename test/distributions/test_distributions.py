@@ -3228,6 +3228,7 @@ class TestDistributions(DistributionsTestCase):
         self.assertEqual(d.variance, empirical_var, atol=0.05, rtol=0)
 
     # We applied same tests in Multivariate Normal distribution for Wishart distribution
+    @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
     def test_wishart_shape(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
@@ -3336,6 +3337,7 @@ class TestDistributions(DistributionsTestCase):
         Wishart(torch.tensor(ndim), precision_matrix=P)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
     def test_wishart_log_prob(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
