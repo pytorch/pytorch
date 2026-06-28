@@ -2655,6 +2655,26 @@ instantiate_parametrized_tests(TestPDLWithMultiStream)
 instantiate_parametrized_tests(TestStreamCudagraphInteraction)
 
 
+@unittest.skipIf(not TEST_CUDA, "requires CUDA")
+class TestStreamExternalObjectRestore(InductorTestCase):
+    def test_restore_external_objects_before_backward(self):
+        """Forward snapshots external object registry, backward restores it."""
+        from torch._dynamo.graph_bytecode_inputs import store_user_object_weakrefs
+
+        def fn(x):
+            s = torch.Stream(device="cuda")
+            with s:
+                return x * 2 + 1
+
+        compiled_fn = torch.compile(fn)
+        x = torch.randn(4, 4, device="cuda", requires_grad=True)
+        out = compiled_fn(x)
+        store_user_object_weakrefs(torch.cuda.Stream())
+        out.sum().backward()
+        self.assertIsNotNone(x.grad)
+        torch.testing.assert_close(x.grad, torch.full_like(x, 2.0))
+
+
 if __name__ == "__main__":
     from torch.testing._internal.common_utils import run_tests
 
