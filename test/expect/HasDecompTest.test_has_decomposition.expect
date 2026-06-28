@@ -594,6 +594,7 @@ aten::_sparse_sum_backward.out
 aten::_spdiags
 aten::_spdiags.out
 aten::_spsolve
+aten::_spsolve.out
 aten::_stack
 aten::_stack.out
 aten::_standard_gamma
