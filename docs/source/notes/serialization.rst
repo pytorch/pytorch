@@ -251,7 +251,7 @@ the checkpoint, enabling direct checkpoint manipulation.
       # offset of the storage in the checkpoint
       print(f"key={k}, checkpoint_offset={v.untyped_storage()._checkpoint_offset}")
 
-For more information, `this tutorial <https://docs.pytorch.org/tutorials/prototype/gpu_direct_storage.html>`_
+For more information, `this tutorial <https://docs.pytorch.org/tutorials/unstable/gpu_direct_storage.html>`_
 offers a comprehensive example of using these features to manipulate a checkpoint.
 
 
