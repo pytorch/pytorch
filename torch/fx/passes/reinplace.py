@@ -248,7 +248,7 @@ def _get_view_inverse_node_usages(
 ) -> set[Node]:
     def matching_view_metadata(a: FakeTensor, b: FakeTensor) -> bool:
         return (
-            a.size() == b.size()
+            a.size() == b.size()  # type: ignore[bad-return]
             and a.stride() == b.stride()
             and a.storage_offset() == b.storage_offset()
         )

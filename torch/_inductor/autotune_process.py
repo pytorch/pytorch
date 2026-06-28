@@ -1224,8 +1224,9 @@ class CuteDSLBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
     ) -> None:
         super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)
 
-        finalized_code = source_code.finalize_all()
-        self.module_cache_key, self.module_path = PyCodeCache.write(finalized_code)
+        # Template-specific precompile hooks reuse the finalized module source in subprocesses.
+        self.source_code = source_code.finalize_all()
+        self.module_cache_key, self.module_path = PyCodeCache.write(self.source_code)
 
     def make_run_fn(
         self, *input_tensors: torch.Tensor, out: torch.Tensor
@@ -1256,7 +1257,7 @@ class CuteDSLBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         def run_kernel():
             device_interface = get_interface_for_device("cuda")
             stream = device_interface.get_raw_stream(out.device.index)
-            return kernel_func(*input_tensors, out, stream=stream)
+            return kernel_func(*input_tensors, out, *self.extra_args, stream=stream)
 
         return run_kernel
 

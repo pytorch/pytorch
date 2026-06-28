@@ -205,6 +205,121 @@ class TimeoutTest(TestCase):
             threads = []
 
 
+class BackendEntryPointTest(TestCase):
+    def setUp(self):
+        super().setUp()
+        self._plugins = dist.Backend._plugins.copy()
+        self._backend_list = dist.Backend.backend_list.copy()
+        self._backend_capability = copy.deepcopy(dist.Backend.backend_capability)
+        self._backend_type_map = dist.Backend.backend_type_map.copy()
+        self._default_device_backend_map = (
+            dist.Backend.default_device_backend_map.copy()
+        )
+        self._custom_backend_attrs = {
+            "ENTRYPOINT_TEST": hasattr(dist.Backend, "ENTRYPOINT_TEST"),
+        }
+
+    def tearDown(self):
+        dist.Backend._plugins = self._plugins
+        dist.Backend.backend_list = self._backend_list
+        dist.Backend.backend_capability = self._backend_capability
+        dist.Backend.backend_type_map = self._backend_type_map
+        dist.Backend.default_device_backend_map = self._default_device_backend_map
+        for attr, existed in self._custom_backend_attrs.items():
+            if not existed and hasattr(dist.Backend, attr):
+                delattr(dist.Backend, attr)
+        super().tearDown()
+
+    def test_backend_entrypoint_loads_on_availability_check(self):
+        load_count = 0
+
+        def create_backend(store, rank, world_size, timeout):
+            raise AssertionError("backend factory should not run in this test")
+
+        class EntryPoint:
+            name = "entrypoint_test"
+
+            def load(self):
+                nonlocal load_count
+                load_count += 1
+
+                def register():
+                    dist.Backend.register_backend(
+                        "entrypoint_test",
+                        create_backend,
+                        devices=["cpu"],
+                    )
+
+                return register
+
+        with unittest.mock.patch(
+            "importlib.metadata.entry_points", return_value=[EntryPoint()]
+        ):
+            self.assertTrue(dist.is_backend_available("entrypoint_test"))
+
+        self.assertEqual(load_count, 1)
+        self.assertIn("ENTRYPOINT_TEST", dist.Backend._plugins)
+        backend_config = dist.BackendConfig("entrypoint_test")
+        self.assertEqual(str(backend_config), "cpu:entrypoint_test")
+        self.assertIs(
+            dist.Backend._plugins["ENTRYPOINT_TEST"].creator_fn, create_backend
+        )
+
+    def test_backend_entrypoint_loads_for_backend_config(self):
+        load_count = 0
+
+        def create_backend(store, rank, world_size, timeout):
+            raise AssertionError("backend factory should not run in this test")
+
+        class EntryPoint:
+            name = "entrypoint_test"
+
+            def load(self):
+                nonlocal load_count
+                load_count += 1
+
+                def register():
+                    dist.Backend.register_backend(
+                        "entrypoint_test",
+                        create_backend,
+                        devices=["cpu"],
+                    )
+
+                return register
+
+        with unittest.mock.patch(
+            "importlib.metadata.entry_points", return_value=[EntryPoint()]
+        ):
+            backend_config = dist.BackendConfig("entrypoint_test")
+
+        self.assertEqual(load_count, 1)
+        self.assertEqual(str(backend_config), "cpu:entrypoint_test")
+        self.assertIs(
+            dist.Backend._plugins["ENTRYPOINT_TEST"].creator_fn, create_backend
+        )
+
+    def test_backend_config_device_form_registers_per_pair(self):
+        # The "device:backend" form must look up each backend individually, not
+        # the whole comma-separated string (which can never match a backend and
+        # would waste an entry-point scan on every BackendConfig construction).
+        looked_up = []
+        original = dist.Backend._ensure_backend_registered.__func__
+
+        def spy(cls, name):
+            looked_up.append(name)
+            return original(cls, name)
+
+        with unittest.mock.patch.object(
+            dist.Backend, "_ensure_backend_registered", classmethod(spy)
+        ):
+            backend_config = dist.BackendConfig("cpu:gloo,cuda:nccl")
+
+        self.assertNotIn("cpu:gloo,cuda:nccl", looked_up)
+        self.assertIn("gloo", looked_up)
+        self.assertIn("nccl", looked_up)
+        self.assertEqual(str(backend_config), "cpu:gloo,cuda:nccl")
+
+
 class Net(nn.Module):
     def __init__(self) -> None:
         super().__init__()
@@ -1788,6 +1903,28 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
         # with self.assertRaises(RuntimeError):
         # _canonicalize_group_rank(dpg, group_rank=123, return_global=True)
 
+    def test_get_backend_impl(self):
+        dist.Backend.register_backend(
+            "dummy", PythonProcessGroupExtensionTest.create_dummy
+        )
+
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = "6789"
+        dist.init_process_group("dummy", rank=self.rank, world_size=self.world_size)
+
+        backend = dist.get_backend_impl()
+        self.assertIsInstance(backend, DummyProcessGroup)
+        pg = c10d._get_default_group()
+        self.assertIs(pg.get_backend(torch.device("cpu")), backend)
+        self.assertIs(dist.get_backend_impl(device=torch.device("cpu")), backend)
+
+        group_name = c10d._get_process_group_name(pg)
+        self.assertEqual(
+            dist.get_backend_impl(str(group_name)).getBackendName(), "Dummy"
+        )
+
+        dist.destroy_process_group()
+
     def test_canonicalize_helper(self):
         dist.Backend.register_backend(
             "dummy", PythonProcessGroupExtensionTest.create_dummy
@@ -1840,6 +1977,9 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
         dist.Backend.register_backend(
             "dummy", PythonProcessGroupExtensionTest.create_dummy
         )
+        dummy_backend_config = (
+            f"cpu:dummy,{device_type}:dummy" if device_type != "cpu" else "cpu:dummy"
+        )
 
         # Ensure backend config can be created with the following arguments
         backend_config_strings_and_expected_values = [
@@ -1847,9 +1987,9 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
             (dist.Backend.NCCL, "cuda:nccl"),
             (dist.Backend.MPI, "cpu:mpi,cuda:mpi"),
             (dist.Backend.UCC, "cpu:ucc,cuda:ucc"),
-            (dist.Backend.DUMMY, "cpu:dummy,cuda:dummy"),
-            ("DUMMY", "cpu:dummy,cuda:dummy"),
-            ("dummy", "cpu:dummy,cuda:dummy"),
+            (dist.Backend.DUMMY, dummy_backend_config),
+            ("DUMMY", dummy_backend_config),
+            ("dummy", dummy_backend_config),
             ("cpu:dummy,cuda:dummy", "cpu:dummy,cuda:dummy"),
             ("cpu:dummy,cuda:nccl", "cpu:dummy,cuda:nccl"),
             ("cpu:gloo,cuda:dummy", "cpu:gloo,cuda:dummy"),
@@ -1859,9 +1999,9 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
         if TEST_XPU:
             # Override backend_config_strings_and_expected_values for Intel GPU.
             backend_config_strings_and_expected_values[4:10] = [
-                (dist.Backend.DUMMY, "cpu:dummy,cuda:dummy,xpu:dummy"),
-                ("DUMMY", "cpu:dummy,cuda:dummy,xpu:dummy"),
-                ("dummy", "cpu:dummy,cuda:dummy,xpu:dummy"),
+                (dist.Backend.DUMMY, dummy_backend_config),
+                ("DUMMY", dummy_backend_config),
+                ("dummy", dummy_backend_config),
                 ("cpu:dummy,xpu:dummy", "cpu:dummy,xpu:dummy"),
                 ("cpu:dummy,xpu:xccl", "cpu:dummy,xpu:xccl"),
                 ("cpu:gloo,xpu:dummy", "cpu:gloo,xpu:dummy"),
@@ -1889,33 +2029,51 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
     def test_parse_backend_string(self):
         from torch.distributed.distributed_c10d import _parse_backend_string
 
-        # Simple form maps to device(s) where the backend is the registered default.
-        self.assertEqual(_parse_backend_string("nccl"), {"cuda": "nccl"})
-        self.assertEqual(_parse_backend_string("NCCL"), {"cuda": "nccl"})
-        # gloo is the default for both cpu and mps in default_device_backend_map.
-        self.assertEqual(_parse_backend_string("gloo"), {"cpu": "gloo", "mps": "gloo"})
+        all_devices = {"cpu", "cuda", "xpu", "mps"}
 
-        # Merged form returns exactly what was named, no synthesized defaults.
+        # Simple form maps to device(s) where the backend is the registered default.
         self.assertEqual(
-            _parse_backend_string("cpu:gloo,cuda:nccl"),
+            _parse_backend_string("nccl", available_devices=all_devices),
+            {"cuda": "nccl"},
+        )
+        self.assertEqual(
+            _parse_backend_string("NCCL", available_devices=all_devices),
+            {"cuda": "nccl"},
+        )
+        # gloo is the default for both cpu and mps in default_device_backend_map.
+        self.assertEqual(
+            _parse_backend_string("gloo", available_devices=all_devices),
+            {"cpu": "gloo", "mps": "gloo"},
+        )
+
+        # Merged form returns exactly what was named, filtered by available_devices.
+        self.assertEqual(
+            _parse_backend_string("cpu:gloo,cuda:nccl", available_devices=all_devices),
             {"cpu": "gloo", "cuda": "nccl"},
         )
         self.assertEqual(
-            _parse_backend_string("CPU:GLOO , CUDA:NCCL"),
+            _parse_backend_string(
+                "CPU:GLOO , CUDA:NCCL", available_devices=all_devices
+            ),
             {"cpu": "gloo", "cuda": "nccl"},
         )
         # Unknown device types in merged form are accepted (no validation here).
-        self.assertEqual(_parse_backend_string("xpu:nccl"), {"xpu": "nccl"})
+        self.assertEqual(
+            _parse_backend_string("xpu:nccl", available_devices=all_devices),
+            {"xpu": "nccl"},
+        )
 
         # Errors.
         with self.assertRaisesRegex(ValueError, "Unknown backend"):
-            _parse_backend_string("definitely_not_a_backend")
+            _parse_backend_string(
+                "definitely_not_a_backend", available_devices=all_devices
+            )
         with self.assertRaisesRegex(ValueError, "Invalid device:backend pairing"):
-            _parse_backend_string("cpu:gloo:extra")
+            _parse_backend_string("cpu:gloo:extra", available_devices=all_devices)
         with self.assertRaisesRegex(ValueError, "Invalid device:backend pairing"):
-            _parse_backend_string("cpu:gloo,bare")
+            _parse_backend_string("cpu:gloo,bare", available_devices=all_devices)
         with self.assertRaisesRegex(ValueError, "Duplicate device type"):
-            _parse_backend_string("cpu:gloo,cpu:dummy")
+            _parse_backend_string("cpu:gloo,cpu:dummy", available_devices=all_devices)
 
     def test_init_process_group_with_multiple_backends(self):
         dist.Backend.register_backend(

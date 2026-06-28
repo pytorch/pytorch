@@ -161,6 +161,42 @@ def _create_gemm_cache_key(
     return cache_key
 
 
+def _unwrap_efc_compiled_obj(compiled_obj):
+    """Extract the inner JIT function from an EFC closure for disk serialization."""
+    if hasattr(compiled_obj, "__closure__") and compiled_obj.__closure__:
+        inner = compiled_obj.__closure__[0].cell_contents
+        if hasattr(inner, "export_to_c"):
+            return inner
+    return compiled_obj
+
+
+def _rewrap_efc_compiled_obj(compiled_fn, kernel):
+    """Reconstruct the EFC wrapped_launch closure from a loaded JIT function."""
+    if not hasattr(kernel, "impl") or not hasattr(kernel.impl, "efc"):
+        return compiled_fn
+
+    from cutlass_api.providers.cutedsl.gemm.sm100_static_persistent_efc import (
+        KernelOperand,
+        TensorWrapper,
+    )
+
+    def wrapped_launch(a_tensor, b_tensor, stream, *supplemental_args):
+        runtime_args = [
+            e.runtime_tensor
+            if isinstance(e, TensorWrapper)
+            else (e.tensor.runtime_tensor if isinstance(e, KernelOperand) else e)
+            for e in supplemental_args
+        ]
+        return compiled_fn(
+            a_tensor,
+            b_tensor,
+            stream,
+            kernel.impl.efc.jit.pack_arguments(*runtime_args),
+        )
+
+    return wrapped_launch
+
+
 def _nvgemm_run(
     variant_name: str,
     kernel_name: str,
@@ -212,6 +248,7 @@ def _nvgemm_run(
             disk_fn_cache, module_path, disk_config_key, cache_key, dev_idx
         )
         if compiled_fn is not None:
+            compiled_fn = _rewrap_efc_compiled_obj(compiled_fn, kernel)
             artifact = CompiledArtifact(compiled_fn, kernel)
         else:
             artifact = kernel.compile(args)
@@ -220,7 +257,7 @@ def _nvgemm_run(
                 module_path,
                 disk_config_key,
                 cache_key,
-                artifact.compiled_obj,
+                _unwrap_efc_compiled_obj(artifact.compiled_obj),
                 dev_idx,
             )
         compiled_cache[mem_key] = artifact
@@ -273,6 +310,11 @@ def _nvgemm_precompile(
     if max_active_clusters is None:
         return
 
+    # cutlass_api queries device occupancy while compiling. In async-compile
+    # workers forked from a CUDA-initialized parent, skip precompile.
+    if torch.cuda._is_in_bad_fork():
+        return
+
     device = f"cuda:{device_index}"
     with FakeTensorMode():
         tensors = {}
@@ -313,7 +355,8 @@ def _nvgemm_precompile(
         cache_key = _create_gemm_cache_key(input_tensors, out)
         mem_key = (cache_key, device_index)
         if mem_key not in compiled_cache:
-            artifact = kernel.compile(args)
+            with torch.cuda.device(device_index):
+                artifact = kernel.compile(args)
             disk_cache_set(
                 disk_fn_cache,
                 module_path,

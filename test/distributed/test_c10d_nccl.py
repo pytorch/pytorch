@@ -986,8 +986,12 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         )
         self._check_nccl_timeout(timedelta(seconds=23))
         pg.allreduce(torch.rand(10).cuda(self.rank))
-        c10d.distributed_c10d._set_pg_timeout(timedelta(seconds=252), pg)
+        c10d.set_timeout(timedelta(seconds=252), pg)
         self._check_nccl_timeout(timedelta(seconds=252))
+        # the deprecated `_set_pg_timeout` alias still works
+        with self.assertWarnsRegex(FutureWarning, "_set_pg_timeout"):
+            c10d.distributed_c10d._set_pg_timeout(timedelta(seconds=99), pg)
+        self._check_nccl_timeout(timedelta(seconds=99))
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
@@ -1267,7 +1271,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
         # Device type not present in parent.
         with self.assertRaisesRegex(ValueError, "is not present in the parent"):
-            c10d.split_group(pg, [[0, 1]], backend="xpu:nccl")
+            c10d.split_group(pg, [[0, 1]], backend="xpu:xccl")
 
         # Filtering out the parent's default backend (cuda) must raise from C++.
         with self.assertRaises(RuntimeError):

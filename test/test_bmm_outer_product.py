@@ -93,6 +93,29 @@ class TestBmmOuterProduct(TestCase):
         with self.assertRaises(RuntimeError):
             torch.bmm(a, b)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    def test_non_current_device_outer_product(self):
+        if torch.cuda.device_count() < 2:
+            self.skipTest("requires at least 2 visible CUDA devices")
+
+        old_device = torch.cuda.current_device()
+        try:
+            torch.cuda.set_device(0)
+            a = torch.randn(4, 8, 1, device="cuda:1")
+            b = torch.randn(4, 1, 16, device="cuda:1")
+
+            out = torch.bmm(a, b)
+
+            self.assertEqual(torch.cuda.current_device(), 0)
+            self.assertEqual(out.device, torch.device("cuda:1"))
+            self.assertEqual(out, a * b)
+
+            mismatched_a = torch.randn(4, 8, 1, device="cuda:0")
+            with self.assertRaisesRegex(RuntimeError, "same device|different"):
+                torch.bmm(mismatched_a, b)
+        finally:
+            torch.cuda.set_device(old_device)
+
 
 class TestOuterProductDetection(TestCase):
     def test_is_outer_product(self):

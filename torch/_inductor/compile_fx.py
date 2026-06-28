@@ -65,6 +65,7 @@ from torch._functorch.aot_autograd import (
 from torch._inductor.codecache import code_hash, FxGraphCache, output_code_log
 from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
+    cudagraph_trees_clone_live_user_visible_outputs,
     cudagraphs_log,
     format_default_skip_message,
     log_cudagraph_skip_and_bump_counter,
@@ -177,7 +178,7 @@ if TYPE_CHECKING:
 class FxCompileMode(enum.Enum):
     NORMAL = 0
     # For testing - use the serde FxCompile scheme to debug serialization and
-    # deserialization of GraphMoule and CompiledFxGraph.
+    # deserialization of GraphModule and CompiledFxGraph.
     SERIALIZE = 1
     # Compile using a subprocess instead of in-process.
     SUBPROCESS = 2
@@ -306,6 +307,10 @@ def _recursive_record_user_visible_output_idxs(gm: GraphModule) -> None:
                 if isinstance(node.args[0][idx], torch.fx.Node)
             ]
         _recursive_record_user_visible_output_idxs(subgraph)
+
+
+def _cudagraph_trees_clone_live_user_outputs() -> bool:
+    return cudagraph_trees_clone_live_user_visible_outputs()
 
 
 @functools.lru_cache(None)
@@ -1796,6 +1801,14 @@ class _InProcessFxCompile(FxCompile):
                             )
                         )
 
+                    if (
+                        cudagraphs
+                        and not V.graph.disable_cudagraphs_reason
+                        and graph.scheduler.count_kernel_nodes(graph.scheduler.nodes)
+                        == 0
+                    ):
+                        V.graph.kernel_free_cudagraph = True
+
                     self._compile_stats[type(self)].codegen_and_compile += 1
 
                     if (
@@ -1949,6 +1962,8 @@ def cudagraphify(
     constants: tuple[torch.Tensor, ...] = (),
     placeholders: Sequence[PlaceholderInfo] = (),
     mutated_input_idxs: tuple[int, ...] = (),
+    kernel_free_cudagraph: bool = False,
+    user_visible_output_idxs: tuple[int, ...] = (),
 ) -> Callable[..., Any]:
     from torch._inductor.cudagraph_trees import (
         cudagraphify_impl as new_cudagraphify_impl,
@@ -1965,10 +1980,15 @@ def cudagraphify(
             constants=constants,
             placeholders=placeholders,
             mutated_input_idxs=mutated_input_idxs,
+            kernel_free_cudagraph=kernel_free_cudagraph,
+            user_visible_output_idxs=user_visible_output_idxs,
             compile_id=torch._guards.CompileContext.current_compile_id(),
         )
     else:
-        cudagraphify_fn = cudagraphify_impl
+        cudagraphify_fn = functools.partial(
+            cudagraphify_impl,
+            kernel_free_cudagraph=kernel_free_cudagraph,
+        )
 
     thread_local = threading.local()
 
@@ -2011,10 +2031,15 @@ def cudagraphify_impl(
     model: Callable[..., Any],
     inputs: list[torch.Tensor],
     static_input_idxs: Sequence[int] = (),
+    *,
+    kernel_free_cudagraph: bool = False,
 ) -> Callable[[list[InputType]], Any]:
     """
     Assumes inputs[static_input_idxs[i]] are always the same memory address
     """
+    if kernel_free_cudagraph:
+        return model
+
     check_input_idxs = get_input_idxs_to_check(inputs, static_input_idxs)  # type: ignore[arg-type]
     # pyrefly: ignore [annotation-mismatch, redefinition]
     static_input_idxs: OrderedSet[int] = OrderedSet(
@@ -2574,7 +2599,10 @@ def compile_fx_forward(
     )
 
     model_outputs_node = output_node(gm)
-    if config.keep_output_stride:
+    clone_live_user_outputs = _cudagraph_trees_clone_live_user_outputs()
+    model_outputs = None
+    user_visible_output_idxs: list[int] = []
+    if config.keep_output_stride or clone_live_user_outputs:
         model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
         num_model_outputs = len(model_outputs)
 
@@ -2615,11 +2643,14 @@ def compile_fx_forward(
                 f"<= num_model_outputs ({num_model_outputs})"
             )
 
-        model_outputs_node.meta["user_visible_output_idxs"] = [
+        user_visible_output_idxs = [
             idx
             for idx in range(original_output_start_index, orig_output_end_idx)
             if isinstance(model_outputs[idx], torch.fx.Node)
         ]
+
+    if config.keep_output_stride or clone_live_user_outputs:
+        model_outputs_node.meta["user_visible_output_idxs"] = user_visible_output_idxs
     else:
         model_outputs_node.meta["user_visible_output_idxs"] = []
 

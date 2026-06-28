@@ -198,8 +198,16 @@ BENCHMARK_USE_SGD = {
     "XGLMForCausalLM",
     # TIMM
     "adv_inception_v3",
-    "tf_efficientnet_b0",
     "ghostnet_100",
+    "tf_efficientnet_b0",
+}
+
+# These CUDA Inductor TIMM models fail fp16 training accuracy with the default
+# eager Adam reference, but this has not been validated for non-accuracy runs,
+# non-Inductor, or ROCm periodic baselines.
+CUDA_INDUCTOR_ACCURACY_USE_SGD = {
+    "convnextv2_nano.fcmae_ft_in22k_in1k",
+    "vit_base_patch14_dinov2.lvd142m",
 }
 
 # These models OOM in CI
@@ -1855,7 +1863,17 @@ class BenchmarkRunner:
 
     def init_optimizer(self, name, device, params):
         if device == "cuda" and self.args.training and name not in CI_SKIP_OPTIMIZER:
-            if (name in CI_USE_SGD and self.args.ci) or name in BENCHMARK_USE_SGD:
+            use_sgd = (
+                (name in CI_USE_SGD and self.args.ci)
+                or name in BENCHMARK_USE_SGD
+                or (
+                    torch.version.hip is None
+                    and self.args.backend == "inductor"
+                    and self.args.accuracy
+                    and name in CUDA_INDUCTOR_ACCURACY_USE_SGD
+                )
+            )
+            if use_sgd:
                 self.optimizer = torch.optim.SGD(params, lr=0.01, foreach=True)
                 # Disable multi_tensor_sgd for benchmarking, there isn't a large performance benefit (~1%) to compiling
                 # this optimizer because it is a single foreach add, and increases compile time.

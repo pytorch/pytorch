@@ -1101,6 +1101,13 @@ def configure_extension_build() -> tuple[
         entry_points["console_scripts"].append(
             "torchfrtrace = torch.distributed.flight_recorder.fr_trace:main",
         )
+        entry_points["torch.distributed.backends"] = [
+            "mpi = torch.distributed.distributed_c10d:_register_builtin_mpi_backend",
+            "gloo = torch.distributed.distributed_c10d:_register_builtin_gloo_backend",
+            "nccl = torch.distributed.distributed_c10d:_register_builtin_nccl_backend",
+            "ucc = torch.distributed.distributed_c10d:_register_builtin_ucc_backend",
+            "xccl = torch.distributed.distributed_c10d:_register_builtin_xccl_backend",
+        ]
     return ext_modules, cmdclass, packages, entry_points, extra_install_requires
 
 
@@ -1137,7 +1144,7 @@ def main() -> None:
     install_requires = [
         "filelock",
         "typing-extensions>=4.10.0",
-        "setuptools<82",
+        "setuptools>=77.0.3",
         "sympy>=1.13.3",
         "networkx>=2.5.1",
         "jinja2",

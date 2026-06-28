@@ -10,6 +10,7 @@
 #include <c10/core/Allocator.h>
 #include <c10/macros/Macros.h>
 
+#include <torch/csrc/distributed/c10d/Hooks.hpp>
 #include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/Window.hpp>
@@ -26,6 +27,11 @@
 // one-sided window APIs (supportsWindow / new_window) and the c10d::Window
 // interface. Downstream backends can guard their overrides with #ifdef.
 #define C10D_BACKEND_HAS_WINDOW 1
+
+// Feature macro: when defined, c10d::Backend exposes abort-hook registration
+// and c10d::ProcessGroup additionally exposes pre/post collective hooks (see
+// Hooks.hpp). Downstream backends can guard their overrides with #ifdef.
+#define C10D_BACKEND_HAS_HOOKS 1
 
 constexpr auto kBackendDefaultTimeout =
     std::chrono::milliseconds(30 * 60 * 1000);
@@ -164,11 +170,11 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         c10::str("Backend ", getBackendName(), " does not support shrink"));
   }
 
-  virtual void setTimeout(std::chrono::milliseconds timeout) {
-    TORCH_CHECK(
-        false,
-        c10::str(
-            "Backend ", getBackendName(), " does not support setting timeout"));
+  virtual void setTimeout(std::chrono::milliseconds /*timeout*/) {
+    TORCH_WARN(
+        "Backend ",
+        getBackendName(),
+        " does not support setting timeout; the new value is ignored");
   }
 
   // Fault Tolerance / Reconfigure API
@@ -212,6 +218,29 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     TORCH_CHECK(
         false,
         c10::str("Backend ", getBackendName(), " does not support new_window"));
+  }
+
+  // Abort Hook API
+  //
+  // Abort hooks are invoked before the backend aborts on a timeout or error,
+  // letting users capture debug information. Hooks are keyed by an opaque
+  // hook_id so they can be individually unregistered.
+  virtual void registerAbortHook(int64_t /* hook_id */, AbortHook /* hook */) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ",
+            getBackendName(),
+            " does not support registerAbortHook"));
+  }
+
+  virtual void unregisterAbortHook(int64_t /* hook_id */) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ",
+            getBackendName(),
+            " does not support unregisterAbortHook"));
   }
 
   virtual void startCoalescing() {
@@ -684,10 +713,8 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   // appropriate logging etc.
   void init();
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
-  const int rank_;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
-  const int size_;
+  int rank_;
+  int size_;
   // Debug level setting. It is parsed once when ProcessGroup is constructed and
   // remains the same across use of this process group.
   DebugLevel dist_debug_level_;

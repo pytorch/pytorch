@@ -579,7 +579,6 @@ if(USE_CUDA)
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryOps.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.cu
-        ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/nccl_ep.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/nccl_extension.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/ops/nccl_reduce_scatter_offset.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/cuda_mem_pool.cpp
@@ -595,12 +594,6 @@ if(USE_CUDA)
     if(CUDA_NVCC_FLAGS MATCHES ".*compute_90.*")
       set_source_files_properties(${ASYNC_MM_FILE} PROPERTIES COMPILE_FLAGS "-gencode arch=compute_90a,code=sm_90a")
     endif()
-  endif()
-  if(NOT WIN32)
-    set_source_files_properties(
-      ${TORCH_ROOT}/aten/src/ATen/cuda/CUDAGreenContext.cpp
-      PROPERTIES COMPILE_FLAGS "-DPYTORCH_C10_DRIVER_API_SUPPORTED=1"
-    )
   endif()
   set_source_files_properties(
     ${TORCH_ROOT}/aten/src/ATen/cuda/detail/LazyNVRTC.cpp
@@ -832,8 +825,8 @@ if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND NOT USE_IOS AND NOT USE_COREML
   endforeach()
 endif()
 if(USE_MPS)
+  add_dependencies(torch_cpu metallibs)
   if(CAN_COMPILE_METAL)
-    add_dependencies(torch_cpu metallibs)
     target_link_options(torch_cpu PRIVATE -Wl,-sectcreate,__TEXT,metal_basic,${CMAKE_CURRENT_BINARY_DIR}/aten/src/ATen/kernels_basic.metallib)
     if(CAN_COMPILE_METAL_40)
       target_link_options(torch_cpu PRIVATE -Wl,-sectcreate,__TEXT,metal_40,${CMAKE_CURRENT_BINARY_DIR}/aten/src/ATen/kernels_40.metallib)

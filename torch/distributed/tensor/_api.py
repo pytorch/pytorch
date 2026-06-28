@@ -14,6 +14,7 @@ import torch.distributed.tensor._dispatch as op_dispatch
 import torch.distributed.tensor._random as random
 import torch.nn as nn
 from torch._export.wrappers import mark_subclass_constructor_exportable_experimental
+from torch.distributed._local_tensor import maybe_run_for_local_tensor
 from torch.distributed.device_mesh import (
     _mesh_resources,
     _register_distributed_opaque_types,
@@ -47,6 +48,7 @@ __all__ = [
     "ones",
     "empty",
     "full",
+    "logspace",
     "rand",
     "randn",
     "zeros",
@@ -1278,6 +1280,21 @@ def distribute_module(
 # and placements to create a proper DTensor.
 
 
+@maybe_run_for_local_tensor
+def _logspace_local_tensor(
+    init_op, start, end, base, total_steps, local_steps, offset, **kwargs
+):
+    local_start = start
+    local_end = end
+    if local_steps > 0 and total_steps > 1:
+        step = (end - start) / (total_steps - 1)
+        local_start = start + offset * step
+        local_end = local_start + step * (local_steps - 1)
+    elif local_steps > 0:
+        local_end = start
+    return init_op(local_start, local_end, steps=local_steps, base=base, **kwargs)
+
+
 def _dtensor_init_helper(  # type: ignore[no-untyped-def]
     init_op,
     size: torch.Size,
@@ -1301,14 +1318,28 @@ def _dtensor_init_helper(  # type: ignore[no-untyped-def]
     torch_stride = torch._prims_common.make_contiguous_strides_for(size)
 
     # get local tensor shape
-    local_shape, _ = compute_local_shape_and_global_offset(
-        size, device_mesh, placements, skip_offset=True
+    local_shape, global_offset = compute_local_shape_and_global_offset(
+        size, device_mesh, placements, skip_offset=init_op is not torch.logspace
     )
 
     # initialize the local tensor
     if init_op is torch.full:
-        fill_value = kwargs.pop("fill_value", 0)
+        fill_value = kwargs.pop("fill_value")
         local_tensor = init_op(local_shape, fill_value, **kwargs)
+    elif init_op is torch.logspace:
+        start = kwargs.pop("start")
+        end = kwargs.pop("end")
+        base = kwargs.pop("base")
+        local_tensor = _logspace_local_tensor(
+            init_op,
+            start,
+            end,
+            base,
+            size[0],
+            local_shape[0],
+            global_offset[0],
+            **kwargs,
+        )
     elif init_op is torch.rand or init_op is torch.randn:
         # this tensor meta is not used except `shape`
         dtype = kwargs.get("dtype", torch.get_default_dtype())
@@ -1471,6 +1502,65 @@ def full(  # type: ignore[no-untyped-def]
         torch.full,
         torch_size,
         fill_value=fill_value,
+        dtype=dtype,
+        layout=layout,
+        requires_grad=requires_grad,
+        device_mesh=device_mesh,
+        placements=placements,
+    )
+
+
+def logspace(
+    start,
+    end,
+    steps,
+    base=10.0,
+    *,
+    dtype: torch.dtype | None = None,
+    layout: torch.layout = torch.strided,
+    requires_grad: bool = False,
+    device_mesh: DeviceMesh | None = None,
+    placements: Sequence[Placement] | None = None,
+) -> DTensor:
+    """
+    Returns a :class:`DTensor` of size ``steps`` whose values are evenly spaced from
+    ``base`` :sup:`start` to ``base`` :sup:`end`, inclusive, on a logarithmic scale
+    with base ``base``.
+
+    Args:
+        start (float or :class:`DTensor`): the starting value for the set of points. If
+           :class:`DTensor`, it must be 0-dimensional
+        end (float or :class:`DTensor`): the ending value for the set of points. If
+           :class:`DTensor`, it must be 0-dimensional
+        steps (int): size of the constructed :class:`DTensor`
+
+    Keyword args:
+        base (float, optional): base of the logarithm function. Default: ``10.0``.
+        dtype (:class:`torch.dtype`, optional): the data type to perform the computation
+            in. Default: if ``None``, uses the global default dtype
+            (see :func:`torch.set_default_dtype`) when both `start` and `end` are real,
+            and corresponding complex dtype when either is complex.
+        layout (:class:`torch.layout`, optional): the desired layout of returned
+            :class:`DTensor`. Default: ``torch.strided``.
+        requires_grad (bool, optional): If autograd should record operations on the
+            returned :class:`DTensor`. Default: ``False``.
+        device_mesh: :class:`DeviceMesh` type, contains the mesh info of ranks
+        placements: a sequence of :class:`Placement` type: ``Shard``, ``Replicate``
+
+    Returns:
+        A :class:`DTensor` object on each rank
+    """
+    if placements is not None and any(isinstance(p, _StridedShard) for p in placements):
+        raise AssertionError("logspace does not support _StridedShard placements")
+
+    torch_size = normalize_to_torch_size((steps,))
+
+    return _dtensor_init_helper(
+        torch.logspace,
+        torch_size,
+        start=start,
+        end=end,
+        base=base,
         dtype=dtype,
         layout=layout,
         requires_grad=requires_grad,

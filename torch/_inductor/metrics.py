@@ -390,7 +390,7 @@ def log_kernel_metadata(
     kernel_name: str, kernel_path: str, kernel_module_code: str
 ) -> None:
     """
-    An utility to log kernel metadata. We may parse metadata from kernel source code here.
+    A utility to log kernel metadata. We may parse metadata from kernel source code here.
 
     It's fine to parse the generated kernel code here since the logging is
     disabled by default. It would hurt compilation time.

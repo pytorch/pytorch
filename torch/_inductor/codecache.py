@@ -249,6 +249,51 @@ def get_kernel_bin_format(device: str) -> str:
         return ""
 
 
+def _cuda_fatbin_command(
+    asm_file: str,
+    cubin_file: str,
+    raw_cubin_file: str | None,
+    nvcc: str | None,
+    fatbinary: str | None,
+    current_arch: str | None = None,
+) -> list[str]:
+    if not current_arch:
+        current_arch = cuda_compile_utils._nvcc_arch_as_compile_option_or_raise()
+    gencode_options = cuda_compile_utils._cuda_multi_arch_gencode_options(current_arch)
+    if (
+        fatbinary is not None
+        and raw_cubin_file is not None
+        and os.path.exists(raw_cubin_file)
+        and not cuda_compile_utils._cuda_gencode_options_have_non_current_sass(
+            gencode_options, current_arch
+        )
+    ):
+        # Avoid re-running ptxas; the CUDA toolkit can lag the PTX version
+        # emitted by Triton. This path is only valid when no extra SASS images
+        # beyond the current GPU generation were requested.
+        return [
+            fatbinary,
+            f"--create={cubin_file}",
+            "-64",
+            f"--image3=kind=elf,sm={current_arch},file={raw_cubin_file}",
+            f"--image3=kind=ptx,sm={current_arch},file={asm_file}",
+        ]
+
+    if nvcc is None:
+        raise RuntimeError("nvcc is required to build fatbin")
+
+    cmd = [
+        *shlex.split(nvcc),
+        "-fatbin",
+        asm_file,
+        "-o",
+        cubin_file,
+    ]
+    for gencode_option in gencode_options:
+        cmd.extend(["-gencode", gencode_option])
+    return cmd
+
+
 def get_device_information(device_type: str) -> dict[str, str]:
     """
     Gets all the current device information used to compile the .so.
@@ -2120,29 +2165,8 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
 
         # Now re-evaluate with the symints to add any guards to the current env.
         if graph.guards_expr:
-            # Older cache entries were serialized before guard source locations
-            # were stored, so keep accepting entries with only guards_expr.
-            guards_expr_with_source = getattr(graph, "guards_expr_with_source", None)
-            guards_expr_with_source_arg_count = getattr(
-                graph, "guards_expr_with_source_arg_count", None
-            )
-            # AOTAutograd can load an FX graph using a custom guard checker and
-            # an argument list that differs from the one Inductor used to save
-            # these per-guard expressions. In that case, preserve the custom
-            # evaluate_guards fallback below.
-            can_replay_guards_with_source = (
-                guards_expr_with_source is not None
-                and guards_expr_with_source_arg_count == len(symints)
-                and not config.unsafe_skip_cache_dynamic_shape_guards
-            )
-            if can_replay_guards_with_source:
-                check = shape_env.evaluate_guards_expression_with_source_info(
-                    guards_expr_with_source, symints
-                )
-            else:
-                check = bool(evaluate_guards(graph.guards_expr, symints))
-            if check is not True:
-                raise AssertionError(f"Post-load guard evaluation failed for key {key}")
+            check = bool(evaluate_guards(graph.guards_expr, symints))
+            assert check is True  # noqa: S101
             log.debug(
                 "fx graph cache key %s post-load guards: %s", key, shape_env.guards
             )
@@ -2196,14 +2220,8 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
             raise AssertionError("ShapeEnv is not set for cache serialization")
         symints = FxGraphCache._filter_backed_symints(example_inputs)
         guards = shape_env.get_pruned_guards(symints)
-        (
-            compiled_graph.guards_expr,
-            compiled_graph.guards_expr_with_source,
-        ) = shape_env.produce_guards_expression_with_source_info(
+        compiled_graph.guards_expr = shape_env.produce_guards_expression(
             placeholders=symints, guards=guards
-        )
-        compiled_graph.guards_expr_with_source_arg_count = (
-            len(symints) if compiled_graph.guards_expr_with_source is not None else None
         )
         try:
             backend = torch.utils._triton.triton_backend()
@@ -3226,7 +3244,7 @@ end
 
             cubins_o = []
             asm_files = []
-            fatbin_cmds: list[tuple[str, str, str | None]] = []
+            fatbin_cmds: list[tuple[str, str, str | None, str | None]] = []
             if not _IS_WINDOWS:
                 cubins_to_embed: list[tuple[str, str]] = []
                 ld, objcopy = get_ld_and_objcopy(use_relative_path)
@@ -3247,7 +3265,12 @@ end
                     ):
                         if torch.version.hip is None:
                             fatbin_cmds.append(
-                                (asm_file, cubin_file, value.get("runtime_bin_path"))
+                                (
+                                    asm_file,
+                                    cubin_file,
+                                    value.get("runtime_bin_path"),
+                                    value.get("cuda_arch"),
+                                )
                             )
 
                         else:
@@ -3288,7 +3311,6 @@ end
                 if fatbin_cmds:
                     from concurrent.futures import ThreadPoolExecutor
 
-                    current_arch = cuda_compile_utils._nvcc_arch_as_compile_option()
                     nvcc = cuda_compile_utils._cuda_compiler()
                     fatbinary = shutil.which("fatbinary")
                     if nvcc is not None and (nvcc_dir := os.path.dirname(nvcc)):
@@ -3297,37 +3319,12 @@ end
                             fatbinary = candidate
 
                     def _compile_fatbin(
-                        asm_cubin_and_raw: tuple[str, str, str | None],
+                        asm_cubin_and_raw: tuple[str, str, str | None, str | None],
                     ) -> None:
-                        asm_f, cubin_f, raw_cubin_f = asm_cubin_and_raw
-                        if (
-                            fatbinary is not None
-                            and raw_cubin_f is not None
-                            and os.path.exists(raw_cubin_f)
-                        ):
-                            # Avoid re-running ptxas; the CUDA toolkit can lag
-                            # the PTX version emitted by Triton.
-                            cmd = [
-                                fatbinary,
-                                f"--create={cubin_f}",
-                                "-64",
-                                f"--image3=kind=elf,sm={current_arch},file={raw_cubin_f}",
-                                f"--image3=kind=ptx,sm={current_arch},file={asm_f}",
-                            ]
-                        else:
-                            if nvcc is None:
-                                raise RuntimeError("nvcc is required to build fatbin")
-                            cmd = [
-                                *shlex.split(nvcc),
-                                "-fatbin",
-                                asm_f,
-                                "-o",
-                                cubin_f,
-                                "-gencode",
-                                f"arch=compute_{current_arch},code=compute_{current_arch}",
-                                "-gencode",
-                                f"arch=compute_{current_arch},code=sm_{current_arch}",
-                            ]
+                        asm_f, cubin_f, raw_cubin_f, cuda_arch = asm_cubin_and_raw
+                        cmd = _cuda_fatbin_command(
+                            asm_f, cubin_f, raw_cubin_f, nvcc, fatbinary, cuda_arch
+                        )
                         try:
                             subprocess.run(
                                 cmd, capture_output=True, text=True, check=True
@@ -4168,6 +4165,17 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
     def cache_clear() -> None:
         CppWrapperCodeCache.cache.clear()
 
+    @classmethod
+    def load_pybinding(cls, *args: Any, **kwargs: Any) -> Any:
+        # The cpp_wrapper host glue is compiled synchronously here (in the JIT
+        # torch.compile path this runs while importing the generated wrapper
+        # module, and in AOTI it runs during the autotune pass). Time it under a
+        # dedicated key so the host C++ cold-compile cost is attributed to
+        # cpp_wrapper instead of being hidden inside the generic
+        # PyCodeCache.load_by_key_path timer.
+        with dynamo_timed("cpp_wrapper_compile", log_pt2_compile_event=True):
+            return super().load_pybinding(*args, **kwargs)
+
     cpp_compile_command_flags = {
         "include_pytorch": True,
         "shared": True,
@@ -4183,8 +4191,19 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
             size_t result_len = PyList_GET_SIZE(pyvec);
             result.reserve(result_len);
             for (size_t i = 0; i < result_len; i++) {{
+                PyObject* item = PyList_GET_ITEM(pyvec, i);
+                if (item == Py_None) {{
+                    result.push_back(nullptr);
+                    continue;
+                }}
                 // AtenTensorHandle is essentially a pointer
-                void* elem = PyCapsule_GetPointer(PyList_GET_ITEM(pyvec, i), NULL);
+                void* elem = PyCapsule_GetPointer(item, NULL);
+                if (elem == nullptr && PyErr_Occurred()) {{
+                    PyErr_Clear();
+                    throw std::runtime_error(
+                        "expected input handle to be a PyCapsule or None"
+                    );
+                }}
                 result.push_back(reinterpret_cast<AtenTensorHandle>(elem));
             }}
             return result;

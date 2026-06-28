@@ -771,7 +771,9 @@ class ComboKernel(Kernel):
         for arg_num in equal_1_arg_indices(signature):
             triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
 
-        triton_meta["configs"] = [config_of(signature)]
+        triton_meta["configs"] = [
+            config_of(signature, skip_cpp_wrapper_input_tensor_alignment=True)
+        ]
 
         mutated_args = self.get_mutated_args_sub_kernels()
         dispatch = self.dispatch_class

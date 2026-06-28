@@ -693,6 +693,14 @@ class TensorVariable(VariableTracker):
                 return variables.misc.DelayGraphBreakVariable(
                     source=AttrSource(self.source, name),
                     msg="Getting an inplace view on a graph input is not supported",
+                    hints=[
+                        "Avoid mutating a graph input's tensor metadata with in-place view ops. "
+                        "If the mutation is only needed inside the compiled region, replace the in-place call "
+                        "with an out-of-place view, for example `x = x.transpose(1, 2)` instead of "
+                        "`x.transpose_(1, 2)`.",
+                        "If you need to mutate the input tensor's metadata, move the in-place view call outside "
+                        "`torch.compile`.",
+                    ],
                 )
 
         # For attributes (not methods) that were not caught in the special handling above,
@@ -1721,6 +1729,25 @@ class TensorVariable(VariableTracker):
     def method___abs__(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return self.nb_absolute_impl(tx)
 
+    def nb_invert_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+    ) -> VariableTracker:
+        from .builder import wrap_fx_proxy
+
+        return wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_function",
+                operator.invert,
+                (self.as_proxy(),),
+                {},
+            ),
+        )
+
+    def method___invert__(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return self.nb_invert_impl(tx)
+
     def method___getitem__(
         self,
         tx: "InstructionTranslatorBase",
@@ -2512,13 +2539,6 @@ class TensorVariable(VariableTracker):
             ),
         )
 
-    def is_python_equal(self, other: object) -> bool:
-        if not isinstance(other, VariableTracker):
-            return False
-        a = self.as_proxy().node.meta["example_value"]
-        b = other.as_proxy().node.meta["example_value"]
-        return a is b
-
 
 class SymNodeVariable(VariableTracker):
     """
@@ -2976,15 +2996,6 @@ class SymNodeVariable(VariableTracker):
         # Essentially convert the SymNode to a constant variable whenever its
         # searched for a dict key.
         return hash(self.evaluate_expr())
-
-    def is_python_equal(self, other: object) -> bool:
-        if isinstance(other, SymNodeVariable):
-            return self.evaluate_expr() == other.evaluate_expr()
-        # could be constant variable as well
-        return (
-            isinstance(other, VariableTracker)
-            and self.evaluate_expr() == other.as_python_constant()
-        )
 
 
 class NumpyNdarrayVariable(TensorVariable):

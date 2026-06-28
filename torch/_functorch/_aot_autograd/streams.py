@@ -413,6 +413,11 @@ def _wrap_sync_node(
             kwargs={},
         )
 
+    # Propagate partitioner_tag so the partitioner can distinguish
+    # forward vs backward sync control_deps during graph extraction.
+    if "partitioner_tag" in sync_node.meta:
+        control_deps_node.meta["partitioner_tag"] = sync_node.meta["partitioner_tag"]
+
     # Mark newly created nodes as visited so subsequent syncs don't
     # misclassify them as "after the sync" during replacement.
     visited.add(get_subgraph)

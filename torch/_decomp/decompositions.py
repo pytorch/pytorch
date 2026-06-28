@@ -1272,7 +1272,7 @@ def dropout(input: Tensor, p: float, train: bool | None):
     if train and p != 0:
         return aten.native_dropout(input, p, train)[0]
     else:
-        return input.clone()
+        return input
 
 
 @register_decomposition(aten.native_dropout)
@@ -3358,32 +3358,12 @@ def _index_add(
         index.ndim <= 1,
         lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
     )
-    torch._check(
-        dim == 0 or dim < tensor.ndim,
-        lambda: (
-            f"index_add_(): Indexing dim {dim} is out of bounds of the source tensor "
-            f"with dim {tensor.ndim}"
-        ),
-    )
     index_size = index.size(0) if index.ndim == 1 else 1
     tensor_size = tensor.size(dim) if tensor.ndim > 0 else 1
     torch._check(
         tensor_size == index_size,
         lambda: f"Number of indices ({index_size}) should be equal to tensor.size(dim) ({tensor_size}), for {dim=}",
     )
-
-    def source_shape_error() -> str:
-        return (
-            "source tensor shape must match self tensor shape, excluding the specified "
-            f"dimension. Got self.shape = {list(x.shape)} source.shape = {list(tensor.shape)}"
-        )
-
-    torch._check(x.ndim == tensor.ndim, source_shape_error)
-    if x.ndim != 0:
-        for i in range(x.ndim):
-            if i != dim:
-                torch._check(x.size(i) == tensor.size(i), source_shape_error)
-
     if alpha != 1:
         python_type = utils.dtype_to_type(x.dtype)
         torch._check(
@@ -3415,7 +3395,9 @@ def pad_sequence(sequences, batch_first=False, padding_value=0.0, padding_side="
     sequences_size = len(sequences)
     max_size = sequences[0].size()
     trailing_dims = max_size[1:]
-    max_len = max(x.size(0) for x in sequences)
+    # Fold with sym_max (not Python max, which does pairwise `>` comparisons)
+    # so symbolic/unbacked sequence lengths don't trigger a data-dependent guard.
+    max_len = reduce(torch.sym_max, (x.size(0) for x in sequences))
     if batch_first:
         out_dims = (sequences_size, max_len)
     else:
@@ -5629,7 +5611,7 @@ def _reflection_pad_backward(grad_output, x, padding):
 
 
 @register_decomposition(aten.aminmax)
-@out_wrapper("min", "max")
+@out_wrapper("min", "max", exact_dtype=True)
 def aminmax(self, *, dim=None, keepdim=False):
     # pyrefly: ignore [bad-argument-type]
     amin = torch.amin(self, dim=dim, keepdim=keepdim)

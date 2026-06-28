@@ -261,6 +261,16 @@ def linalg_matrix_exp(self):
     return torch.empty_like(self, memory_format=torch.contiguous_format)
 
 
+@register_meta(aten.linalg_matrix_sqrth)
+@out_wrapper()
+def linalg_matrix_sqrth(self):
+    squareCheckInputs(self, "linalg.matrix_sqrth")
+    checkFloatingOrComplex(
+        self, "linalg.matrix_sqrth", allow_low_precision_dtypes=False
+    )
+    return torch.empty_like(self, memory_format=torch.contiguous_format)
+
+
 @register_meta(
     [aten.cummax.default, aten.cummax.out, aten.cummin.default, aten.cummin.out]
 )
@@ -1463,10 +1473,10 @@ def linalg_lu_meta(A: Tensor, *, pivot: bool = True) -> tuple[Tensor, Tensor, Te
     else:
         P = A.new_empty([0])
 
-    sizes[-1] = k
+    sizes[-1] = k  # type: ignore[call-overload]
     L = A.new_empty(sizes)
 
-    sizes[-2] = k
+    sizes[-2] = k  # type: ignore[call-overload]
     sizes[-1] = n
     U = A.new_empty(sizes)
     return P, L, U
@@ -1499,7 +1509,7 @@ def linalg_lu_factor_ex_meta(
     # Sets sizes to the size of pivots
     sizes.pop()
     # Use sym_min to handle unbacked symbolic dimensions
-    sizes[-1] = sym_min(m, n)
+    sizes[-1] = sym_min(m, n)  # type: ignore[call-overload]
     pivots = A.new_empty(sizes, dtype=torch.int)
 
     # Sets sizes to the size of info
@@ -1596,9 +1606,9 @@ def lu_unpack_meta(
     else:
         P = LU.new_empty([0])
     if unpack_data:
-        sizes[-1] = k
+        sizes[-1] = k  # type: ignore[call-overload]
         L = LU.new_empty(sizes)
-        sizes[-2] = k
+        sizes[-2] = k  # type: ignore[call-overload]
         sizes[-1] = n
         U = LU.new_empty(sizes)
     else:
@@ -1643,7 +1653,7 @@ def linalg_qr_meta(A: Tensor, mode: str = "reduced") -> tuple[Tensor, Tensor]:
 
     if compute_q:
         Q_shape = list(A.shape)
-        Q_shape[-1] = k if reduced_mode else m
+        Q_shape[-1] = k if reduced_mode else m  # type: ignore[call-overload]
         Q = A.new_empty(Q_shape)
         Q.as_strided_(Q_shape, make_contiguous_strides_for(Q_shape, row_major=False))
     else:
@@ -1651,10 +1661,38 @@ def linalg_qr_meta(A: Tensor, mode: str = "reduced") -> tuple[Tensor, Tensor]:
 
     # For readability
     R_shape = list(A.shape)
-    R_shape[-2] = k if reduced_mode or not compute_q else m
+    R_shape[-2] = k if reduced_mode or not compute_q else m  # type: ignore[call-overload]
     R = A.new_empty(R_shape)
     R.as_strided_(R_shape, make_contiguous_strides_for(R_shape, row_major=False))
     return Q, R
+
+
+@register_meta([aten.linalg_polar.default, aten.linalg_polar.out])
+@out_wrapper("U", "H")
+def linalg_polar_meta(A: Tensor) -> tuple[Tensor, Tensor]:
+    checkIsMatrix(A, "linalg.polar")
+    checkFloatingOrComplex(A, "linalg.polar")
+
+    m = A.shape[-2]
+    n = A.shape[-1]
+    # Symbolic-safe comparison so a dynamic row dimension is not specialized.
+    torch._check(
+        m >= n,
+        lambda: f"linalg.polar: input must have at least as many rows as "
+        f"columns, but got {m} by {n} matrices",
+    )
+
+    # U matches A's shape; H is (n, n). Both row-major contiguous, matching the
+    # SVD-based C++ kernel and the CUDA override.
+    U_shape = list(A.shape)
+    U = A.new_empty(U_shape)
+    U.as_strided_(U_shape, make_contiguous_strides_for(U_shape))
+
+    H_shape = list(A.shape)
+    H_shape[-2] = n
+    H = A.new_empty(H_shape)
+    H.as_strided_(H_shape, make_contiguous_strides_for(H_shape))
+    return U, H
 
 
 @register_meta([aten._linalg_slogdet.default, aten._linalg_slogdet.sign])
@@ -1695,7 +1733,7 @@ def _linalg_svd_meta(
     if compute_uv:
         U_shape = batch_dims + [m, m if full_matrices else k]
         U = A.new_empty(U_shape)
-        U.as_strided_(U_shape, make_contiguous_strides_for(U_shape, row_major=False))
+        U.as_strided_(U_shape, make_contiguous_strides_for(U_shape, row_major=False))  # type: ignore[arg-type]
 
         V_shape = batch_dims + [n if full_matrices else k, n]
         V = A.new_empty(V_shape)
@@ -1704,7 +1742,7 @@ def _linalg_svd_meta(
         # available as device_hint just defaults to CUDA in that case. See
         # _linalg_svd meta in core.
         is_cuda = device_hint(A) == "cuda"
-        V.as_strided_(V_shape, make_contiguous_strides_for(V_shape, row_major=is_cuda))
+        V.as_strided_(V_shape, make_contiguous_strides_for(V_shape, row_major=is_cuda))  # type: ignore[arg-type]
     else:
         # doesn't matter
         U = A.new_empty([0])
@@ -2679,12 +2717,10 @@ def calc_conv_nd_return_shape(
                 _formula(dims[i], padding[i], dilation[i], kernel_size[i], stride[i])
             )
     # NOTE: Backend behavior for zero-sized spatial dimensions is inconsistent.
-    # CUDA (cuDNN) handles zero-sized outputs gracefully by short-circuiting,
-    # but other backends fail: CPU rejects it, ROCm/miopen returns
-    # miopenStatusBadParm, and MPS asserts "Placeholder tensor is empty".
-    # We only allow zero-sized outputs on CUDA with cuDNN (not ROCm/HIP).
+    # CUDA (cuDNN) and HIP handle zero-sized conv_transpose outputs by short-circuiting,
+    # but other backends fail: CPU rejects it and MPS asserts "Placeholder tensor is empty".
     from torch._subclasses.fake_tensor import FakeTensor
-    from torch.fx.experimental.symbolic_shapes import sym_or
+    from torch.fx.experimental.symbolic_shapes import sym_and, sym_or
 
     device = (
         input_tensor.fake_device
@@ -2692,9 +2728,18 @@ def calc_conv_nd_return_shape(
         else input_tensor.device
     )
 
-    # ROCm also reports device.type as "cuda", but miopen doesn't support zero-sized outputs
+    # ROCm reports device.type as "cuda"; keep the existing NVIDIA CUDA behavior
+    # unchanged and only apply the new check to HIP.
     is_cudnn = device.type == "cuda" and torch.version.hip is None
-    if not is_cudnn:
+    is_hip = device.type == "cuda" and torch.version.hip is not None
+    if is_hip:
+        torch._check(
+            sym_and(*[x >= 0 for x in ret_shape[2:]]),
+            lambda: f"Given input size per channel: {list(dims)}. "
+            f"Calculated output size per channel: {ret_shape[2:]}. "
+            f"Output size is too small",
+        )
+    elif not is_cudnn:
         torch._check(
             sym_or(*[x > 0 for x in ret_shape[2:]]),
             lambda: f"Given input size per channel: {list(dims)}. "
@@ -8702,7 +8747,11 @@ def native_multi_head_attention_fake(
             "_native_multi_head_attention fake implementation does not support nested tensors"
         )
 
-    if query.numel() == 0:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    # Unbacked-safe: known-empty takes the empty path; if the size is symbolic
+    # and can't be decided, assume non-empty (the common case) instead of DDE-ing.
+    if guard_or_false(query.numel() == 0):
         return (query.new_empty(query.shape), query.new_empty(0))
 
     B = query.size(0)  # B: batch size

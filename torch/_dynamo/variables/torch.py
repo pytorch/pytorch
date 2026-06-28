@@ -190,6 +190,8 @@ constant_fold_functions = [
     torch._C._get_cublas_allow_tf32,
     torch._C._is_any_autocast_enabled,
     torch.accelerator.is_available,
+    torch.backends.mps.is_available.__wrapped__,  # type: ignore[attr-defined]
+    torch.backends.mps.is_built,
     torch.cuda.get_device_properties,
     torch.cuda.is_available,
     torch.distributed.is_available,
@@ -205,6 +207,8 @@ constant_fold_functions = [
     torch.promote_types,
     torch._C._get_privateuse1_backend_name,
     torch.autograd._is_checkpoint_valid,
+    torch.mps.is_available,
+    torch.mtia.is_available,
     torch.xpu.get_device_properties,
     torch.xpu.is_available,
 ] + constant_fold_functions_need_guards
@@ -1720,10 +1724,17 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             *args: VariableTracker,
             **kwargs: VariableTracker,
         ) -> VariableTracker | None:
-            # Decompose via addcmul_ so tensor weights (e.g. 0-dim tensor
-            # from tensor betas in Adam) stay in tensor arguments instead of
-            # hitting float() in the native lerp_scalar lowering.
-            if len(args) == 3 and not isinstance(args[2], ListVariable) and not kwargs:
+            # Decompose via addcmul_ only when the weight is a tensor, so
+            # tensor weights (e.g. 0-dim tensor from tensor betas in Adam) stay
+            # in tensor arguments instead of hitting float() in the native
+            # lerp_scalar lowering.  Python scalar weights can use the native
+            # foreach op directly, avoiding extra full-size weight tensors.
+            if (
+                config.enable_dynamo_decompositions
+                and len(args) == 3
+                and args[2].is_tensor()
+                and not kwargs
+            ):
                 return tx.inline_user_function_return(
                     VariableTracker.build(tx, polyfills.foreach_lerp_inplace),
                     list(args),
@@ -2528,46 +2539,64 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
 
             message_eager = None
-            message_graph_proxy = None
-            if message_vt is not None:
-                if not isinstance(message_vt, NestedUserFunctionVariable):
+            message_graph_arg = None
+            match message_vt:
+                case None:
+                    pass
+                case ConstantVariable():
+                    message_eager = message_vt.as_python_constant()
+                    if message_eager is not None and not isinstance(message_eager, str):
+                        unimplemented(
+                            gb_type="Can't extract message from torch._check*()",
+                            context=str(message_vt),
+                            explanation=(
+                                "The message argument of torch._check*() must be a string, None, "
+                                "or a function defined within the torch.compile region."
+                            ),
+                            hints=[
+                                *graph_break_hints.SUPPORTABLE,
+                            ],
+                        )
+                    message_graph_arg = message_eager
+                case NestedUserFunctionVariable():
+                    try:
+                        message_eager = message_vt.get_function()
+                    except ClosureConversionError:
+                        unimplemented(
+                            gb_type="Can't convert torch._check*() message closure",
+                            context=str(message_vt),
+                            explanation=(
+                                "The message argument of torch._check*() must be a function "
+                                "whose closure variables are Python constants."
+                            ),
+                            hints=[
+                                "Remove closure variables that reference non-constant values, e.g. "
+                                "remove references to tensor `x` in `lambda: f'{x} failed check'`",
+                                *graph_break_hints.SUPPORTABLE,
+                            ],
+                        )
+
+                    message_graph_arg = tx.output.register_static_attr_and_return_proxy(
+                        "_check_message", message_eager
+                    )
+                case _:
                     unimplemented(
                         gb_type="Can't extract message from torch._check*()",
                         context=str(message_vt),
                         explanation=(
-                            "The message argument of torch._check*() must be a function "
-                            "defined within the torch.compile region."
+                            "The message argument of torch._check*() must be a string, None, "
+                            "or a function defined within the torch.compile region."
                         ),
                         hints=[
                             *graph_break_hints.SUPPORTABLE,
                         ],
                     )
-                try:
-                    message_eager = message_vt.get_function()
-                except ClosureConversionError:
-                    unimplemented(
-                        gb_type="Can't convert torch._check*() message closure",
-                        context=str(message_vt),
-                        explanation=(
-                            "The message argument of torch._check*() must be a function "
-                            "whose closure variables are Python constants."
-                        ),
-                        hints=[
-                            "Remove closure variables that reference non-constant values, e.g. "
-                            "remove references to tensor `x` in `lambda: f'{x} failed check'`",
-                            *graph_break_hints.SUPPORTABLE,
-                        ],
-                    )
-
-                message_graph_proxy = tx.output.register_static_attr_and_return_proxy(
-                    "_check_message", message_eager
-                )
 
             if predicate_vt.is_python_constant():
                 if predicate_vt.as_python_constant():
                     return ConstantVariable.create(None)
                 msg = (
-                    message_eager()
+                    str(message_eager() if callable(message_eager) else message_eager)
                     if message_eager is not None
                     else ("Expected cond to be True, but got False.")
                 )
@@ -2576,10 +2605,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             predicate_proxy = predicate_vt.as_proxy()
 
             proxy_args: tuple[Any, ...]
-            if message_graph_proxy is None:
+            if message_graph_arg is None:
                 proxy_args = (predicate_proxy,)
             else:
-                proxy_args = (predicate_proxy, message_graph_proxy)
+                proxy_args = (predicate_proxy, message_graph_arg)
 
             return wrap_fx_proxy(
                 tx=tx,
@@ -4037,11 +4066,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 (torch._ops.OpOverload, torch._ops.OpOverloadPacket),
             )
         ) and can_dispatch_torch_function(tx, args, kwargs)
-
-    def is_python_equal(self, other: object) -> bool:
-        if not isinstance(other, VariableTracker):
-            return False
-        return self.as_python_constant() == other.as_python_constant()
 
 
 class DispatchKeySetVariable(BaseTorchVariable):

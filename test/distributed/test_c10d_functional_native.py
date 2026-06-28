@@ -902,6 +902,28 @@ class ProcessGroupArgTest(TestCase):
         torch.ops._c10d_functional.wait_tensor(out)
 
 
+class ProcessGroupOpaqueTypeRegistrationTest(TestCase):
+    def test_process_group_is_registered_on_distributed_import(self) -> None:
+        from torch._library.opaque_object import (
+            get_member_type,
+            is_opaque_type,
+            MemberType,
+        )
+
+        self.assertTrue(is_opaque_type(dist.ProcessGroup))
+        self.assertEqual(
+            get_member_type(dist.ProcessGroup, "size"), MemberType.USE_REAL
+        )
+
+        def f(x: torch.Tensor, pg: dist.ProcessGroup) -> torch.Tensor:
+            return x
+
+        self.assertEqual(
+            torch.library.infer_schema(f, mutates_args=()),
+            "(Tensor x, torch.distributed.distributed_c10d.ProcessGroup pg) -> Tensor",
+        )
+
+
 def find_buffer_assignments(code):
     pattern = r"buf(\d+) = empty_strided_"
     matches = re.finditer(pattern, code)
@@ -987,6 +1009,9 @@ class CompileTest(TestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
+    @torch._inductor.config.patch(
+        {"aten_distributed_optimizations.enable_simple_overlap": False}
+    )
     def test_inductor_all_reduce_single(self):
         def func(arg: torch.Tensor) -> torch.Tensor:
             buf0 = arg + 42
@@ -1396,6 +1421,9 @@ class CompileTest(TestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
+    @torch._inductor.config.patch(
+        {"aten_distributed_optimizations.enable_simple_overlap": False}
+    )
     def test_inductor_broadcast(self):
         def func(arg: torch.Tensor) -> torch.Tensor:
             buf0 = arg + 42
