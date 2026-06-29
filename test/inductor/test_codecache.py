@@ -3265,7 +3265,7 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
 
-class TestCustomPartitionerFn(CustomPartitionerFn):
+class _TestCustomPartitionerFn(CustomPartitionerFn):
     def __init__(self):
         self._uuid = None
 
@@ -4115,7 +4115,7 @@ class TestFxGraphCacheHashing(TestCase):
         """
         Test that the custom partitioner function's UUID is properly used in the FX graph cache hashing.
         """
-        custom_partitioner_fn = TestCustomPartitionerFn()
+        custom_partitioner_fn = _TestCustomPartitionerFn()
         with config.patch({"custom_partitioner_fn": custom_partitioner_fn}):
             custom_partitioner_fn._uuid = "1"
             details1 = FxGraphHashDetails(None, [], {}, [])
