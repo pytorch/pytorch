@@ -135,7 +135,23 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
                     uint32_t numWarps,
                     uint32_t sharedMemBytes,
                     void* args[],
-                    cudaStream_t stream) {
+                    cudaStream_t stream,
+                    bool launch_pdl = false) {
+                if (launch_pdl) {
+                    #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12000
+                    CUlaunchAttribute launch_attribute[1];
+                    launch_attribute[0].id = CU_LAUNCH_ATTRIBUTE_PROGRAMMATIC_STREAM_SERIALIZATION;
+                    launch_attribute[0].value.programmaticStreamSerializationAllowed = 1;
+                    CUlaunchConfig launch_config = {
+                        gridX, gridY, gridZ, __WARP_SIZE__*numWarps, 1, 1,
+                        sharedMemBytes, stream, launch_attribute, 1
+                    };
+                    CUDA_DRIVER_CHECK(cuLaunchKernelEx(&launch_config, func, args, nullptr));
+                    #else
+                    throw std::runtime_error("PDL launch requires CUDA 12.0 or newer");
+                    #endif
+                    return;
+                }
                 CUDA_DRIVER_CHECK(cuLaunchKernel(
                     func, gridX, gridY, gridZ, __WARP_SIZE__*numWarps, 1, 1, sharedMemBytes, stream, args, nullptr
                 ));
