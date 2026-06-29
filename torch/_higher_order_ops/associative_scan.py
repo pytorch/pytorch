@@ -8,7 +8,10 @@ import torch
 import torch._prims_common as utils
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
+from torch._dynamo.utils import clone_input
+from torch._higher_order_ops.schema import HopSchemaGenerator
 from torch._higher_order_ops.utils import (
+    _check_alias_and_mutation,
     _maybe_compile_and_run_fn,
     _maybe_run_with_interpreter,
     check_input_alias_and_mutation_return_outputs,
@@ -102,9 +105,6 @@ class AssociativeScanOp(HigherOrderOperator):
 
     # pyrefly: ignore [bad-override]
     def gen_schema(self, combine_fn, xs, additional_inputs):
-        from torch._higher_order_ops.schema import HopSchemaGenerator
-        from torch._higher_order_ops.utils import materialize_as_graph
-
         # For associative scan, we need two copies of xs for the combine function
         # The combine function takes two elements and returns one element
         xs_slice1 = [first_slice_copy(x) for x in xs]
@@ -227,6 +227,19 @@ def associative_scan(
             )
         if any(x.ndim <= d for x in lxs):
             raise ValueError("All xs leaves must have at least 'dim + 1' dimensions")
+        if any(x.shape[d] != lxs[0].shape[d] for x in lxs[1:]):
+            raise ValueError("All xs leaves must have the same scan dimension size")
+        if any(x.shape != lxs[0].shape for x in lxs[1:]):
+            raise ValueError("All xs leaves must have the same shape")
+
+        privateuse1_backend = torch._C._get_privateuse1_backend_name()
+        if cm == "pointwise" and not all(
+            l.device.type in ("cuda", "xpu", privateuse1_backend) for l in lxs
+        ):
+            raise ValueError(
+                "For combine_mode='pointwise', all input tensors need to be on "
+                "CUDA, XPU, or a PrivateUse1 backend"
+            )
 
     ndim = leaves_xs_orig[0].ndim
     dim = utils.canonicalize_dim(ndim, dim)
@@ -404,8 +417,6 @@ def trace_associative_scan(
     xs: list[torch.Tensor],
     additional_inputs: tuple[torch.Tensor],
 ):
-    from torch._dynamo.utils import clone_input
-
     with disable_proxy_modes_tracing():
         sample_xs = [first_slice_copy(x) for x in itertools.chain(xs, xs)]
         sample_additional_inputs = [
@@ -785,7 +796,7 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
             zeros_mask = compute_helper_tril_mask(-1)
 
             # 5.1) Repeat the elements of bwys to form the square matrix
-            y_mat = bwys.unsqueeze(dim).repeat_interleave(scan_length, dim)
+            y_mat = bwys.unsqueeze(dim).repeat_interleave(scan_length, dim).clone()
 
             # 5.2) Fill the lower triangular part, including the diagonal,
             # of the h_mat with 1s. I.e., use the ones_mask to fill with 1s.
@@ -869,8 +880,6 @@ def assoiciative_scan_fake_tensor_mode(combine_fn, xs, additional_inputs):
 
 @associative_scan_op.py_functionalize_impl
 def associative_scan_functionalize(ctx, combine_fn, xs, additional_inputs):
-    from torch._higher_order_ops.utils import _check_alias_and_mutation
-
     unwrapped_xs = ctx.unwrap_tensors(xs)
     unwrapped_additional_inputs = ctx.unwrap_tensors(additional_inputs)
     with ctx.redispatch_to_next():

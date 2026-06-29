@@ -4828,7 +4828,6 @@ class AssociativeScanTests(TestCase):
         return kwargs_fake
 
     @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("combine_mode", ["pointwise", "generic"])

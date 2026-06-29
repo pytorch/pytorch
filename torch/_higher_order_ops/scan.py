@@ -10,6 +10,8 @@ import torch
 import torch._prims_common as utils
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
+from torch._dynamo.utils import clone_input
+from torch._functorch.vmap import restore_vmap, unwrap_batched, wrap_batched
 from torch._higher_order_ops.auto_functionalize import (
     can_auto_functionalize,
     do_auto_functionalize_v2,
@@ -19,8 +21,11 @@ from torch._higher_order_ops.partitioner import (
     HopGraphMinCutPartitioner,
     HopPartitionedGraph,
 )
+from torch._higher_order_ops.schema import HopSchemaGenerator
 from torch._higher_order_ops.utils import (
+    _check_alias_and_mutation,
     _maybe_compile_and_run_fn,
+    _maybe_run_with_interpreter,
     check_meta_consistency,
     fill_none_with_masks,
     filter_with_masks,
@@ -267,8 +272,6 @@ class ScanOp(HigherOrderOperator):
     def gen_schema(
         self, combine_fn, init, xs, additional_inputs, mutated_arg_indices=""
     ):
-        from torch._higher_order_ops.schema import HopSchemaGenerator
-
         all_inputs = tuple(
             list(init)
             + [
@@ -444,8 +447,6 @@ def trace_scan(
     additional_inputs: tuple[torch.Tensor],
     mutated_arg_indices: str = "",
 ):
-    from torch._dynamo.utils import clone_input
-
     with disable_proxy_modes_tracing():
         sample_inits = [clone_input(x_init) for x_init in init]
         sample_inputs = [first_slice_copy(x) for x in xs]
@@ -1015,11 +1016,6 @@ def scan_fake_tensor_mode(
 def scan_functionalize(
     ctx, combine_fn, init, xs, additional_inputs, mutated_arg_indices=""
 ):
-    from torch._higher_order_ops.utils import (
-        _check_alias_and_mutation,
-        _maybe_run_with_interpreter,
-    )
-
     if hasattr(ctx, "mode"):
         hop_instance = HopInstance.create(
             scan_op,
@@ -1071,8 +1067,6 @@ def scan_functionalize(
 def scan_batch_rule(
     interpreter, combine_fn, init, xs, additional_inputs, mutated_arg_indices=""
 ):
-    from torch._functorch.vmap import restore_vmap, unwrap_batched, wrap_batched
-
     unbatched_args, in_dims = unwrap_batched(
         (init, xs, additional_inputs), interpreter.level()
     )
