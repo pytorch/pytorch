@@ -309,7 +309,7 @@ struct MPSKernelCache {
 
     MPSCacheKey hash = std::hash<std::string>{}(key);
     dispatch_sync_with_rethrow(serialQueue_, ^() {
-      if (cache_.count(hash) != 0) {
+      if (cache_.contains(hash)) {
         auto& entry = cache_.at(hash);
         TORCH_INTERNAL_ASSERT_DEBUG_ONLY(key == entry.key_, "Key collision in the MPS cached kernel!\n");
         cachedKernel = entry.cachedKernel_;
@@ -385,7 +385,7 @@ struct MPSGraphCache {
 
     dispatch_sync_with_rethrow(serialQueue_, ^() {
       // verify the cached entry doesn't already exist
-      if (cache_.count(hash) != 0) {
+      if (cache_.contains(hash)) {
         auto& entry = cache_.at(hash);
         TORCH_INTERNAL_ASSERT_DEBUG_ONLY(key == entry.key_, "Key collision in the MPS cached graph!\n");
         cachedGraph = entry.cachedGraph_;
@@ -410,7 +410,7 @@ struct MPSGraphCache {
     MPSCacheKey hash = std::hash<std::string>{}(key);
 
     dispatch_sync(serialQueue_, ^() {
-      if (cache_.count(hash) != 0) {
+      if (cache_.contains(hash)) {
         auto& entry = cache_.at(hash);
         TORCH_INTERNAL_ASSERT_DEBUG_ONLY(key == entry.key_, "Key collision in the MPS cached graph!\n");
         cachedGraph = entry.cachedGraph_;
