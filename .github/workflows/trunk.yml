@@ -409,14 +409,14 @@ jobs:
       compiler: gcc11
     secrets: inherit
 
-  linux-jammy-aarch64-py3_10-gcc15-build:
+  linux-jammy-aarch64-py3_10-gcc13-build:
     name: linux-jammy-aarch64-py3.10
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
       build-environment: linux-jammy-aarch64-py3.10
-      docker-image-name: ci-image:pytorch-linux-jammy-aarch64-py3.10-gcc15
+      docker-image-name: ci-image:pytorch-linux-jammy-aarch64-py3.10-gcc13
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       runner: linux.arm64.m7g.4xlarge
       # Periodic AArch64 tests for SVE256 coverage
@@ -430,20 +430,20 @@ jobs:
         ]}
       use-arc: true
       python-version: "3.10"
-      compiler: gcc15
+      compiler: gcc13
     secrets: inherit
 
-  linux-jammy-aarch64-py3_10-gcc15-test:
+  linux-jammy-aarch64-py3_10-gcc13-test:
     name: linux-jammy-aarch64-py3.10
     uses: ./.github/workflows/_linux-test.yml
     needs:
-      - linux-jammy-aarch64-py3_10-gcc15-build
+      - linux-jammy-aarch64-py3_10-gcc13-build
       - get-label-type
     with:
-      build-environment: ${{ needs.linux-jammy-aarch64-py3_10-gcc15-build.outputs.build-environment }}
-      docker-image: ${{ needs.linux-jammy-aarch64-py3_10-gcc15-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-aarch64-py3_10-gcc15-build.outputs.test-matrix }}
+      build-environment: ${{ needs.linux-jammy-aarch64-py3_10-gcc13-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-jammy-aarch64-py3_10-gcc13-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-aarch64-py3_10-gcc13-build.outputs.test-matrix }}
       use-arc: true
       python-version: "3.10"
-      compiler: gcc15
+      compiler: gcc13
     secrets: inherit
