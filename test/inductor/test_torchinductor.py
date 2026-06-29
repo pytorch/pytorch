@@ -12547,7 +12547,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         if self.device != "mps" and self.device != "xpu":
             self.assertGreater(torch._inductor.metrics.generated_kernel_count, 0)
 
-    def test_max_pool2d_with_indices_backward_xpu_fallback(self):
+    def test_max_pool2d_with_indices_backward_fallback(self):
         def fn(a, b, c):
             return aten.max_pool2d_with_indices_backward(
                 a, b, [2, 2], [2, 2], [0, 0], [1, 1], False, c
