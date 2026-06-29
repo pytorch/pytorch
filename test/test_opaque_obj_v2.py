@@ -44,7 +44,7 @@ from torch._library.opaque_object import (
     OpaqueBase,
     register_opaque_type,
 )
-from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensorMode, unset_fake_temporarily
 from torch.fx._graph_pickler import GraphPickler, Options
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -166,6 +166,7 @@ class OpaqueMultiplier(OpaqueBase):
 
 
 class Counter(OpaqueBase):
+    # Test ops only create Counter from literals or traced scalar args.
     _allow_opaque_reference_mid_trace_creation = True
 
     def __init__(self, start, end):
@@ -363,6 +364,13 @@ class CacheMeta(OpaqueBase):
 
 
 register_opaque_type(CacheMeta, typ="reference")
+
+
+class AllowedCacheMeta(OpaqueBase):
+    _allow_opaque_reference_mid_trace_creation = True
+
+
+register_opaque_type(AllowedCacheMeta, typ="reference")
 
 
 @torch.library.custom_op("_cache_meta_base::apply", mutates_args=[])
@@ -3222,9 +3230,38 @@ def forward(self, x_1, hoisted_str_1):
         x = WrappedTensor(torch.randn(4, requires_grad=True))
         self.assertRaisesRegex(
             RuntimeError,
-            "was created during tracing",
+            "was created during tracing.*unset_fake_temporarily",
             lambda: torch.compile(fn, fullgraph=True)(x),
         )
+
+    def test_reference_opaque_mid_trace_creation_opt_out(self):
+        def disallowed(x):
+            CacheMeta()
+            return x + 1
+
+        def allowed(x):
+            AllowedCacheMeta()
+            return x + 1
+
+        x = torch.randn(4)
+        self.assertRaisesRegex(
+            RuntimeError,
+            "was created during tracing",
+            lambda: make_fx(disallowed, tracing_mode="fake")(x),
+        )
+
+        gm = make_fx(allowed, tracing_mode="fake")(x)
+        self.assertEqual(gm(x), x + 1)
+
+    def test_reference_opaque_mid_trace_creation_unset_fake_temporarily(self):
+        def fn(x):
+            with unset_fake_temporarily():
+                CacheMeta()
+            return x + 1
+
+        x = torch.randn(4)
+        gm = make_fx(fn, tracing_mode="fake")(x)
+        self.assertEqual(gm(x), x + 1)
 
     def test_opaque_class_literal_attribute_inlined(self):
         """Test that literal attributes on opaque classes are inlined without source tracking.
