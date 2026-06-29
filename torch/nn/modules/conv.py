@@ -864,7 +864,7 @@ class ConvTranspose1d(_ConvTransposeNd):
         The :attr:`padding` argument effectively adds ``dilation * (kernel_size - 1) - padding``
         amount of zero padding to both sides of the input. This is set so that
         when a :class:`~torch.nn.Conv1d` and a :class:`~torch.nn.ConvTranspose1d`
-        are initialized with same parameters, they are inverses of each other in
+        are initialized with the same parameters, they are inverses of each other in
         regard to the input and output shapes. However, when ``stride > 1``,
         :class:`~torch.nn.Conv1d` maps multiple input shapes to the same output
         shape. :attr:`output_padding` is provided to resolve this ambiguity by
@@ -1054,7 +1054,7 @@ class ConvTranspose2d(_ConvTransposeNd):
         The :attr:`padding` argument effectively adds ``dilation * (kernel_size - 1) - padding``
         amount of zero padding to both sides of the input. This is set so that
         when a :class:`~torch.nn.Conv2d` and a :class:`~torch.nn.ConvTranspose2d`
-        are initialized with same parameters, they are inverses of each other in
+        are initialized with the same parameters, they are inverses of each other in
         regard to the input and output shapes. However, when ``stride > 1``,
         :class:`~torch.nn.Conv2d` maps multiple input shapes to the same output
         shape. :attr:`output_padding` is provided to resolve this ambiguity by
@@ -1251,7 +1251,7 @@ class ConvTranspose3d(_ConvTransposeNd):
         The :attr:`padding` argument effectively adds ``dilation * (kernel_size - 1) - padding``
         amount of zero padding to both sides of the input. This is set so that
         when a :class:`~torch.nn.Conv3d` and a :class:`~torch.nn.ConvTranspose3d`
-        are initialized with same parameters, they are inverses of each other in
+        are initialized with the same parameters, they are inverses of each other in
         regard to the input and output shapes. However, when ``stride > 1``,
         :class:`~torch.nn.Conv3d` maps multiple input shapes to the same output
         shape. :attr:`output_padding` is provided to resolve this ambiguity by
