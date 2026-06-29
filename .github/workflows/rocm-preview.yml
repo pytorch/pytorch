@@ -4,6 +4,7 @@ name: rocm-preview
 on:
   push:
     tags:
+      - ciflow/rocm-nightly/*
       - ciflow/rocm-preview/*
   workflow_dispatch:
   schedule:
