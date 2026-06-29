@@ -343,6 +343,7 @@ class TestGpuWrapper(InductorTestCase):
         )
         self.assertIn("programmaticStreamSerializationAllowed = 1", kernel_driver)
         self.assertIn("cuLaunchKernelEx(&launch_config", kernel_driver)
+        self.assertNotIn("cuLaunchKernel(", kernel_driver)
 
     def test_triton_wrapper_passes_pdl_launch_flag(self):
         if GPU_TYPE != "cuda" or torch.version.hip:
