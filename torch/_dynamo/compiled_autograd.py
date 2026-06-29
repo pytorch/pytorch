@@ -21,7 +21,7 @@ import operator
 import time
 from collections import Counter, defaultdict
 from collections.abc import Callable, Generator, Sequence
-from typing import Any, TYPE_CHECKING
+from typing import Any, Literal, TYPE_CHECKING
 
 import torch
 import torch.utils._pytree as pytree
@@ -78,6 +78,17 @@ TURN_OFF_MSG = """You can turn off compiled autograd by either:
 
 compiled_autograd_log = getArtifactLogger(__name__, "compiled_autograd")
 verbose_log = getArtifactLogger(__name__, "compiled_autograd_verbose")
+
+# The kind of autograd hook being proxied. Threaded through proxy_call_hook into
+# the fx node's kwargs, where the graph post-processing passes read it back to
+# match nodes (e.g. node.kwargs["hook_type"] == "post_hook").
+HookType = Literal[
+    "unpack_hook",
+    "tensor_pre_hook",
+    "pre_hook",
+    "post_hook",
+    "post_acc_grad_hook",
+]
 
 
 def snapshot_verbose_logging_enabled() -> bool:
@@ -884,7 +895,7 @@ class AutogradCompilerInstance:
         return result
 
     def proxy_call_hook(
-        self, hook: Callable[..., Any], *args: Any, **kwargs: Any
+        self, hook: Callable[..., Any], *args: Any, hook_type: HookType
     ) -> torch.fx.Proxy:
         return self.fx_tracer.create_proxy(
             "call_function",
@@ -893,7 +904,7 @@ class AutogradCompilerInstance:
                 hook,
                 *[self.to_proxy(x) for x in args],
             ),
-            kwargs,
+            {"hook_type": hook_type},
         )
 
     def unpack_hook(self, hook_id: int, data_id: int) -> torch.Tensor:

@@ -29,7 +29,7 @@ import warnings
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, cast, Literal, Optional, TYPE_CHECKING, Union
+from typing import Any, cast, get_args, Literal, Optional, TYPE_CHECKING, Union
 
 import torch._C
 import torch.fx
@@ -85,6 +85,13 @@ HOP_VT_Alias = TypeVar("HOP_VT_Alias", bound="TorchHigherOrderOperatorVariable")
 
 log = logging.getLogger(__name__)
 hc_log = torch._logging.getArtifactLogger(__name__, "hierarchical_compile")
+
+# How speculate_subgraph constructs subgraph placeholders from sub_args. See
+# NOTE [argument `set_subgraph_inputs`] below for the meaning of each value. This
+# is the single source of truth for the runtime asserts that validate the value.
+SetSubgraphInputs = Literal[
+    "automatic", "automatic_with_forced_inputs", "flatten_manual", "manual"
+]
 
 
 @dataclass
@@ -1131,7 +1138,7 @@ def validate_args_and_maybe_create_graph_inputs(
     sub_args: list[VariableTracker],
     tracer: "SubgraphTracer",
     tx: "InstructionTranslatorBase",
-    set_subgraph_inputs: str,
+    set_subgraph_inputs: SetSubgraphInputs,
     description: str,
     sub_args_names: Sequence[str] | None = None,
 ) -> list[Any]:
@@ -1598,7 +1605,7 @@ def get_hop_args(
     subtracer: "SubgraphTracer",
     sub_args: list[VariableTracker],
     sub_kwargs: dict[str, VariableTracker],
-    set_subgraph_inputs: str,
+    set_subgraph_inputs: SetSubgraphInputs,
     description: str,
 ) -> list[VariableTracker]:
     sub_args_names = maybe_positional_arg_names(f)
@@ -1650,9 +1657,7 @@ def speculate_subgraph_with_auto_output_flattening(
     # order they are see while tracing). This is useful for autograd.Function
     # backward where we do need to account for all the inputs of the backwards
     # to be lifted as inputs for making the fwd-bwd graph consistent.
-    set_subgraph_inputs: Literal[
-        "automatic", "automatic_with_forced_inputs", "flatten_manual", "manual"
-    ] = "automatic",
+    set_subgraph_inputs: SetSubgraphInputs = "automatic",
     # If True, exposes intermediates to subgraph outputs to allow later tensor ops to
     # access intermediates from the subgraph, this is useful for mutation
     allow_side_effects: bool = False,
@@ -1781,12 +1786,7 @@ def speculate_subgraph_with_auto_output_flattening(
     if sub_kwargs is None:
         sub_kwargs = {}
 
-    if set_subgraph_inputs not in {
-        "automatic",
-        "automatic_with_forced_inputs",
-        "flatten_manual",
-        "manual",
-    }:
+    if set_subgraph_inputs not in get_args(SetSubgraphInputs):
         raise AssertionError(
             "Please use one of the supported set_subgraph_inputs options."
         )
@@ -2022,9 +2022,7 @@ def speculate_subgraph(
     # 3. if your HOP must preserve inputs that are not tensor or symnode as placeholders e.g. AutogradFunctionContextVariable
     # use set_subgraph_inputs="manual" (not recommended). We do not recommend it in general because it has the
     # restriction that user need to manually control how to create placeholders and VariableTrackers for the args.
-    set_subgraph_inputs: Literal[
-        "automatic", "semi_automatic", "flatten_manual", "manual"
-    ] = "automatic",
+    set_subgraph_inputs: SetSubgraphInputs = "automatic",
     restore_side_effects: bool = True,
     should_flatten_outputs: bool = False,
     # if should_flatten_outputs is True, `remove_consts_from_outputs` remove the
@@ -2042,12 +2040,7 @@ def speculate_subgraph(
 
     from .builder import SourcelessBuilder
 
-    if set_subgraph_inputs not in {
-        "automatic",
-        "automatic_with_forced_inputs",
-        "flatten_manual",
-        "manual",
-    }:
+    if set_subgraph_inputs not in get_args(SetSubgraphInputs):
         raise AssertionError(
             "Please use one of the supported set_subgraph_inputs options."
         )

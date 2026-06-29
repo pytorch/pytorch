@@ -30,6 +30,7 @@ from .eval_frame import (
     innermost_fn,
     RunOnlyContext,
     skip_code,
+    StanceStr,
 )
 from .external_utils import (
     get_nonrecursive_disable_wrapper,
@@ -152,7 +153,7 @@ class set_stance(_DecoratorContextManager):
 
     def __init__(
         self,
-        stance: str = "default",
+        stance: StanceStr = "default",
         *,
         skip_guard_eval_unsafe: bool = False,
         force_backend: str | Callable[..., Any] | None = None,

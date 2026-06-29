@@ -2,7 +2,7 @@
 import contextlib
 import io
 from collections.abc import Callable
-from typing import Any, TypeVar
+from typing import Any, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -10,6 +10,10 @@ from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
 
 from . import config
 from ._cache import CacheInfo
+
+
+if TYPE_CHECKING:
+    from torch._dynamo.eval_frame import StanceStr
 
 
 __all__ = [
@@ -368,7 +372,7 @@ def get_default_backend() -> str | Callable[..., Any]:
 
 
 def set_stance(
-    stance: str = "default",
+    stance: "StanceStr" = "default",
     *,
     skip_guard_eval_unsafe: bool = False,
     force_backend: str | Callable[..., Any] | None = None,
