@@ -156,6 +156,64 @@ PROFILE_TEMPLATE = """
 {% endblock %}
     """
 
+MEMORY_TEMPLATE = """
+{% extends "base.html" %}
+{% block header %}
+    <h1>{% block title %}GPU Memory{% endblock %}</h1>
+{% endblock %}
+
+{% block content %}
+    <script>
+    function stringToArrayBuffer(str) {
+        const encoder = new TextEncoder();
+        return encoder.encode(str).buffer;
+    }
+    async function openPerfetto(data) {
+        const ui = window.open('https://ui.perfetto.dev/#!/');
+        if (!ui) { alert('Popup blocked. Allow popups for this page and click again.'); return; }
+
+        await new Promise((resolve, reject) => {
+        const onMsg = (e) => {
+            if (e.source === ui && e.data === 'PONG') {
+            window.removeEventListener('message', onMsg);
+            clearInterval(pinger);
+            resolve();
+            }
+        };
+        window.addEventListener('message', onMsg);
+        const pinger = setInterval(() => { try { ui.postMessage('PING', '*'); } catch (_e) {} }, 250);
+        setTimeout(() => { clearInterval(pinger); window.removeEventListener('message', onMsg); reject(); }, 20000);
+        }).catch(() => { alert('Perfetto UI did not respond. Try again.'); return; });
+
+        ui.postMessage({
+        perfetto: {
+            buffer: stringToArrayBuffer(JSON.stringify(data)),
+            title: "GPU Memory",
+            fileName: "memory_trace.json",
+        }
+        }, '*');
+    }
+    </script>
+
+    {% for i, (addr, resp) in enumerate(zip(addrs, resps)) %}
+        <h2>Rank {{ i }}: {{ addr }}</h2>
+        {% if resp.status_code != 200 %}
+            <p>Failed to fetch: status={{ resp.status_code }}</p>
+            <pre>{{ resp.text }}</pre>
+        {% else %}
+            <script>
+            function run{{ i }}() {
+                var data = {{ resp.text | safe }};
+                openPerfetto(data);
+            }
+            </script>
+
+            <button onclick="run{{ i }}()">View {{ i }}</button>
+        {% endif %}
+    {% endfor %}
+{% endblock %}
+    """
+
 TCPSTORE_TEMPLATE = """
 {% extends "base.html" %}
 {% block header %}
@@ -438,6 +496,21 @@ class ProfilerHandler(DebugHandler):
         return req.frontend.render_template("profile.html", addrs=addrs, resps=resps)
 
 
+class MemoryHandler(DebugHandler):
+    def routes(self) -> list[Route]:
+        return [Route("/memory", self._handle)]
+
+    def nav_links(self) -> list[NavLink]:
+        return [NavLink("/memory", "GPU Memory")]
+
+    def templates(self) -> dict[str, str]:
+        return {"memory.html": MEMORY_TEMPLATE}
+
+    def _handle(self, req: HTTPRequestHandler) -> bytes:
+        addrs, resps = fetch_all("memory_snapshot", timeout=self.fetch_timeout)
+        return req.frontend.render_template("memory.html", addrs=addrs, resps=resps)
+
+
 class WaitCountersHandler(DebugHandler):
     def routes(self) -> list[Route]:
         return [Route("/wait_counters", self._handle)]
@@ -709,6 +782,7 @@ def default_handlers() -> list[DebugHandler]:
         TorchCommsFlightRecorderHandler(),
         TorchCommsHealthCheckHandler(),
         ProfilerHandler(),
+        MemoryHandler(),
         WaitCountersHandler(),
         TCPStoreHandler(),
     ]
