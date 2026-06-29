@@ -1208,25 +1208,29 @@ class ListVariable(CommonListMethodsVariable):
                     ValueError, tx, args=["list modified during sort"]
                 )
             return ConstantVariable.create(None)
-
-        if name == "__init__" and self.is_mutable():
-            # list___init___impl: clear the list, then extend with the optional
-            # iterable arg.
-            # https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L2966-L2986
-            if kwargs or len(args) > 1:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "at most 1 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-            tx.output.side_effects.mutation(self)
-            self.items.clear()
-            if len(args) == 1:
-                self.call_method(tx, "extend", args, {})
-            return ConstantVariable.create(None)
-
         return super().call_method(tx, name, args, kwargs)
+
+    def tp_init_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # list___init___impl: clear the list, then extend with the optional
+        # iterable arg.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L2966-L2986
+        if kwargs or len(args) > 1:
+            raise_args_mismatch(
+                tx,
+                "__init__",
+                "at most 1 args and 0 kwargs",
+                f"{len(args)} args and {len(kwargs)} kwargs",
+            )
+        tx.output.side_effects.mutation(self)
+        self.items.clear()
+        if len(args) == 1:
+            self.call_method(tx, "extend", args, {})
+        return ConstantVariable.create(None)
 
     def var_getattr(
         self, tx: "InstructionTranslatorBase", name: str
@@ -1557,31 +1561,16 @@ class DequeVariable(CommonListMethodsVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        # __init__ resets maxlen, so it must bypass the trailing maxlen clamp
+        # below (which uses the pre-call maxlen captured here).
+        if name == "__init__":
+            return self.tp_init_impl(tx, args, kwargs)
+
         maxlen = self.maxlen.as_python_constant()
         if maxlen is not None:
             slice_within_maxlen = slice(-maxlen, None)
         else:
             slice_within_maxlen = None
-
-        if name == "__init__" and self.is_mutable():
-            # deque_init: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L1810
-            # Re-init resets maxlen (to None unless given), clears the deque,
-            # then extends with the iterable.
-            iterable = args[0] if len(args) >= 1 else kwargs.pop("iterable", None)
-            new_maxlen = (
-                args[1]
-                if len(args) >= 2
-                else kwargs.pop("maxlen", ConstantVariable.create(None))
-            )
-            if len(args) > 2 or kwargs:
-                raise_args_mismatch(tx, name)
-            self.validate_maxlen(tx, new_maxlen)
-            tx.output.side_effects.mutation(self)
-            self.maxlen = new_maxlen
-            self.items.clear()
-            if iterable is not None:
-                self.call_method(tx, "extend", [iterable], {})
-            return ConstantVariable.create(None)
 
         if name == "extendleft" and self.is_mutable() and len(args) > 0:
             if kwargs or len(args) != 1:
@@ -1650,6 +1639,33 @@ class DequeVariable(CommonListMethodsVariable):
         if self.python_type() is collections.deque:
             return VariableTracker.build(tx, name in collections.deque.__dict__)
         return super().call_obj_hasattr(tx, name)
+
+    def tp_init_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # deque_init: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L1810
+        # Re-init resets maxlen (to None unless given), clears the deque,
+        # then extends with the iterable.
+        if not self.is_mutable():
+            return super().tp_init_impl(tx, args, kwargs)
+        iterable = args[0] if len(args) >= 1 else kwargs.pop("iterable", None)
+        new_maxlen = (
+            args[1]
+            if len(args) >= 2
+            else kwargs.pop("maxlen", ConstantVariable.create(None))
+        )
+        if len(args) > 2 or kwargs:
+            raise_args_mismatch(tx, "__init__")
+        self.validate_maxlen(tx, new_maxlen)
+        tx.output.side_effects.mutation(self)
+        self.maxlen = new_maxlen
+        self.items.clear()
+        if iterable is not None:
+            self.call_method(tx, "extend", [iterable], {})
+        return ConstantVariable.create(None)
 
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Modules/_collectionsmodule.c#L1886-L1904
