@@ -50,10 +50,14 @@ jobs:
     with:
       runner_prefix: "mt-"
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+<<<<<<< HEAD
 <<<<<<< HEAD:.github/workflows/rocm-nightly.yml
       build-environment: linux-noble-rocm-nightly-py3.12-mi350
       docker-image-name: ci-image:pytorch-linux-noble-rocm-nightly-py3
 =======
+=======
+      use-arc: true
+>>>>>>> [ROCm][CI] Normalize rocm-preview workflow newlines
       build-environment: linux-noble-rocm-preview-py3.12-gfx942
       docker-image-name: ci-image:pytorch-linux-noble-rocm-preview-py3
 >>>>>>> [ROCm][CI] Rename nightly tag to preview:.github/workflows/rocm-preview.yml
