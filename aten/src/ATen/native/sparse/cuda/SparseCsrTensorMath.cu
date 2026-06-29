@@ -818,13 +818,20 @@ static Tensor _sparse_csr_linear_solve_impl(const Tensor& A, const Tensor& b, co
     out = at::empty(b.sizes(), b.options());
   }
   if (b.dim() == 2) {
-    // cuDSS expects column-major dense matrices. Convert the row-major contiguous
-    // RHS to a column-major strided view backed by a contiguous transpose.
-    Tensor b_col_major = b.transpose(-2, -1).contiguous().transpose(-2, -1);
+    // cuDSS expects column-major dense matrices.
+    const bool b_is_col_major_matrix = b.stride(0) == 1 && b.stride(1) >= b.size(0);
+    Tensor b_col_major;
+    if (b_is_col_major_matrix) {
+      b_col_major = b;
+    } else {
+      b_col_major = at::empty({b.size(1), b.size(0)}, b.options()).transpose(-2, -1);
+      b_col_major.copy_(b);
+    }
     const bool out_is_strided = out.layout() == kStrided;
     const bool out_has_expected_options =
         out_is_strided && out.device() == b.device() && out.scalar_type() == b.scalar_type();
-    const bool out_is_col_major_matrix = out.dim() == 2 && out.stride(0) == 1;
+    const bool out_is_col_major_matrix =
+        out.dim() == 2 && out.stride(0) == 1 && out.stride(1) >= out.size(0);
     if (out_has_expected_options && out_is_col_major_matrix) {
       _apply_sparse_csr_linear_solve(A, b_col_major, left, out);
     } else {
