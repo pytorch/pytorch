@@ -3,6 +3,7 @@
 #include <c10/cuda/CUDAException.h>
 #include <c10/util/Exception.h>
 #include <cuda_runtime.h>
+#include <algorithm>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -174,7 +175,7 @@ cublasGroupedArgs::cublasGroupedArgs(
 
   const int64_t cublas_m = m;
   const int64_t cublas_n = n;
-  const int64_t cublas_k = k;
+  int64_t cublas_k = k;
   const int64_t lda_val = lda;
   const int64_t ldb_val = ldb;
   const int64_t ldd_val = result_ld;
@@ -188,13 +189,15 @@ cublasGroupedArgs::cublasGroupedArgs(
 
   if (a_is_2d && b_is_2d) {
     // 2D x 2D: jagged K
+    const int64_t jagged_k_bound = std::min(mat1.size(-1), mat2.size(-2));
     k_is_delta = true;
     a_offs_stride = mata->stride(-2) * element_size;
     b_offs_stride = matb->stride(-1) * element_size;
     d_idx_stride = result->stride(0) * out_element_size;
     m = cublas_m;
     n = cublas_n;
-    k = cublas_k / batchCount;
+    k = jagged_k_bound / batchCount;
+    cublas_k = jagged_k_bound;
   } else if (a_is_2d && !b_is_2d) {
     // 2D x 3D: jagged M (user M varies, cublas n varies)
     n_is_delta = true;
