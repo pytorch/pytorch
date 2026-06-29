@@ -20,7 +20,7 @@ name: !{{ build_environment }}
     invalidation handles the per-Python ABI bits). Everything else still runs
     on the per-Python matrix below. Add more arch types here as their inline
     build job is wired up. -#}
-{%- set unified_arch_types = ['cpu', 'cpu-aarch64', 'cuda', 'cuda-aarch64'] %}
+{%- set unified_arch_types = ['cpu', 'cpu-aarch64', 'cuda', 'cuda-aarch64', 'xpu'] %}
 {%- set unified_build_configs = build_configs | selectattr('gpu_arch_type', 'in', unified_arch_types) | list %}
 {%- set matrix_build_configs = build_configs | rejectattr('gpu_arch_type', 'in', unified_arch_types) | list %}
 
@@ -126,14 +126,19 @@ jobs:
     libtorch_python + _C are recompiled per interpreter via the cmake.py cache
     invalidation. -#}
 {%- set unified_job_names = [] %}
+{#- unified_standard_job_names excludes XPU so manywheel-test (which only tests
+    CPU/CUDA) is not blocked by an XPU build failure. -#}
+{%- set unified_standard_job_names = [] %}
+{%- set unified_xpu_job_names = [] %}
 {%- for g in ns.groups %}
   {%- set group = g['configs'] %}
   {%- set arch_type = g['arch_type'] %}
   {%- set desired_cuda = g['desired_cuda'] %}
   {%- set first = group[0] %}
-  {#- Job name: keep cpu/cpu-aarch64 names stable; for cuda, include the
-      desired_cuda variant so cu126/cu130/cu132 each get a distinct job. -#}
-  {%- if desired_cuda == 'cpu' %}
+  {#- Job name: arch types with a single variant (cpu, xpu) use
+      "manywheel-<arch>-build"; multi-variant types (cuda cu126/cu130/cu132)
+      include the desired_cuda suffix for a distinct job per variant. -#}
+  {%- if desired_cuda in ('cpu', 'xpu') %}
     {%- set job_name = "manywheel-" ~ arch_type ~ "-build" %}
   {%- else %}
     {%- set job_name = "manywheel-" ~ arch_type ~ "-" ~ desired_cuda ~ "-build" %}
@@ -143,13 +148,24 @@ jobs:
   {%- set py_dotless = first['python_version'] | replace('.', '_') %}
   {%- set build_name_suffix = first['build_name'] | replace('manywheel-py' ~ py_dotless, '') %}
   {%- set _ = unified_job_names.append(job_name) %}
+  {%- if arch_type == 'xpu' %}
+  {%- set _ = unified_xpu_job_names.append(job_name) %}
+  {%- else %}
+  {%- set _ = unified_standard_job_names.append(job_name) %}
+  {%- endif %}
 
   !{{ job_name }}:
     name: !{{ job_name }}
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "!{{ runner_prefix }}!{{ build_runs_on }}"
+    {#- XPU full builds are heavier than CPU/CUDA, so give the unified job
+        more headroom when all Python versions run sequentially. -#}
+    {%- if arch_type == 'xpu' %}
+    timeout-minutes: 420
+    {%- else %}
     timeout-minutes: !{{ timeout_minutes }}
+    {%- endif %}
     container:
       image: pytorch/!{{ first['container_image'] }}:!{{ first['container_image_tag_prefix'] }}
     env:
@@ -263,7 +279,7 @@ jobs:
   manywheel-test:
     name: ${{ matrix.build_name }}-test
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: [get-label-type{%- if matrix_standard_configs %}, manywheel-build{%- endif %}{%- for n in unified_job_names %}, !{{ n }}{%- endfor %}]
+    needs: [get-label-type{%- if matrix_standard_configs %}, manywheel-build{%- endif %}{%- for n in unified_standard_job_names %}, !{{ n }}{%- endfor %}]
     uses: ./.github/workflows/_binary-test-linux.yml
     strategy:
       fail-fast: false
@@ -344,7 +360,7 @@ jobs:
   manywheel-test-xpu:
     name: ${{ matrix.build_name }}-test
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: [get-label-type, manywheel-build]
+    needs: [get-label-type{%- for n in unified_xpu_job_names %}, !{{ n }}{%- endfor %}]
     uses: ./.github/workflows/_binary-test-xpu-linux.yml
     strategy:
       fail-fast: false
