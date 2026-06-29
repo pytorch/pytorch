@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 import torch
 from torch._inductor import config
@@ -509,6 +509,29 @@ class TestGpuWrapper(InductorTestCase):
         expected = fn(xs)
         opt_fn = torch.compile(fn, fullgraph=True, options={"cpp_wrapper": True})
         self.assertEqual(opt_fn(xs), expected)
+
+    def test_any_fallback_cpp_wrapper(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+
+        with torch.library._scoped_library("mylib_fallback", "FRAGMENT") as m:
+            m.define("any_fallback(Tensor x, Any y) -> Tensor")
+
+            def any_fallback(x: torch.Tensor, y: Any) -> torch.Tensor:
+                torch._check(y is not None)
+                return x.clone()
+
+            m.impl("any_fallback", any_fallback, GPU_TYPE.upper())
+            m.impl("any_fallback", any_fallback, "Meta")
+
+            @torch.compile(fullgraph=True, options={"cpp_wrapper": True})
+            def test_fn(x: torch.Tensor, y: Any) -> torch.Tensor:
+                return torch.ops.mylib_fallback.any_fallback(x, y)
+
+            test_fn(
+                torch.randn(4, device=self.device), torch.randn(4, device=self.device)
+            )
+            test_fn(torch.randn(4, device=self.device), "string")
 
 
 instantiate_parametrized_tests(TestGpuWrapper)
