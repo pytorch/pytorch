@@ -652,6 +652,18 @@ bool plan_errata_exception(
       cudnn_frontend::load_from_config(errata_json_handle, "");
   // rule_id is an arbitrary string, here we use the issue number if there is
   // one
+  static auto hardcoded_errata_json_handle_188288 = nlohmann::json::parse(R"(
+            { "version" : 1,
+              "rules"   :
+                [
+                    { "rule_id"             : "188288",
+                      "operation"           : "ConvFwd",
+                      "engine"              : 5,
+                      "cudnn_version_start" : 92301,
+                      "cudnn_version_end"   : -1
+                    }
+                ]
+            })");
   static auto hardcoded_errata_json_handle_3d = nlohmann::json::parse(R"(
             { "version" : 1,
               "rules"   :
@@ -670,6 +682,12 @@ bool plan_errata_exception(
                     }
                 ]
             })");
+  if (cudnn_frontend::check_errata(
+          hardcoded_errata_json_handle_188288, executionPlanTag, handle, []() {
+            return true;
+          })) {
+    return true;
+  }
   if (!has_json && x.dim() > 4) {
     return cudnn_frontend::check_errata(
         hardcoded_errata_json_handle_3d, executionPlanTag, handle, []() {
