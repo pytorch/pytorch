@@ -32,6 +32,7 @@ from torch.distributed.tensor._ops._einsum_strategy import (
 )
 from torch.distributed.tensor._ops._math_ops import common_reduction_strategy
 from torch.distributed.tensor._ops.utils import replicate_op_strategy
+from torch.distributed.tensor._utils import ExplicitRedistributionContext
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing._internal.common_utils import run_tests, TestCase
@@ -1871,6 +1872,84 @@ class TestUnsupportedDTensorOp(TestCase):
             r"Operator.*testlib\.unsupported_cat.*does not have a sharding strategy registered",
         ):
             _ = torch.ops.testlib.unsupported_cat([x_dt, y_dt], dim=0)
+
+
+class TestSearchsortedStrategy(DTensorTestBase):
+    @property
+    def world_size(self):
+        return 4
+
+    def _check(
+        self,
+        mesh,
+        ss,
+        vals,
+        ss_p,
+        vals_p,
+        expected_out,
+        sorter=None,
+        sorter_p=None,
+        **kw,
+    ):
+        ref = torch.searchsorted(ss, vals, sorter=sorter, **kw)
+        ss_dt = distribute_tensor(ss, mesh, [ss_p])
+        vals_dt = distribute_tensor(vals, mesh, [vals_p])
+        if sorter is not None:
+            kw["sorter"] = distribute_tensor(sorter, mesh, [sorter_p])
+        # Inputs are pre-placed to match a rule, so no implicit redistribution.
+        with ExplicitRedistributionContext():
+            out = torch.searchsorted(ss_dt, vals_dt, **kw)
+        self.assertEqual(out.placements, (expected_out,))
+        self.assertEqual(out.full_tensor(), ref)
+
+    @with_comms
+    def test_broadcast_shard_values(self):
+        mesh = self.build_device_mesh()
+        ss = torch.sort(torch.randn(16, device=self.device_type))[0]
+        vals = torch.randn(8, device=self.device_type)
+        self._check(mesh, ss, vals, Replicate(), Shard(0), Shard(0))
+
+    @with_comms
+    def test_broadcast_partial_sum(self):
+        # Sharding the (globally sorted) searched dim sums local index counts.
+        mesh = self.build_device_mesh()
+        ss = torch.sort(torch.randn(16, device=self.device_type))[0]
+        vals = torch.randn(8, device=self.device_type)
+        self._check(mesh, ss, vals, Shard(0), Replicate(), Partial("sum"), right=True)
+
+    @with_comms
+    def test_batched_shard_batch(self):
+        mesh = self.build_device_mesh()
+        ss = torch.sort(torch.randn(8, 10, device=self.device_type), dim=-1)[0]
+        vals = torch.randn(8, 5, device=self.device_type)
+        self._check(mesh, ss, vals, Shard(0), Shard(0), Shard(0))
+
+    @with_comms
+    def test_batched_shard_value_dim(self):
+        mesh = self.build_device_mesh()
+        ss = torch.sort(torch.randn(8, 10, device=self.device_type), dim=-1)[0]
+        vals = torch.randn(8, 8, device=self.device_type)
+        self._check(mesh, ss, vals, Replicate(), Shard(1), Shard(1))
+
+    @with_comms
+    def test_batched_sorter_consistent(self):
+        # sorter is keyword-only and is never redistributed by the dispatcher, so
+        # it must arrive with a placement matching sorted_sequence (here both shard
+        # the batch dim).
+        mesh = self.build_device_mesh()
+        ss = torch.randn(8, 10, device=self.device_type)
+        sorter = torch.argsort(ss, dim=-1)
+        vals = torch.randn(8, 5, device=self.device_type)
+        self._check(
+            mesh,
+            ss,
+            vals,
+            Shard(0),
+            Shard(0),
+            Shard(0),
+            sorter=sorter,
+            sorter_p=Shard(0),
+        )
 
 
 if __name__ == "__main__":

@@ -280,6 +280,85 @@ def bucketize_single_dim_strategy(
     return strategies
 
 
+@register_single_dim_strategy(aten.searchsorted.Tensor)
+def searchsorted_tensor_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    """searchsorted(sorted_sequence, self) returns insertion indices of self
+    into sorted_sequence, which is sorted along its last dim. The output has
+    self's shape. sorted_sequence is either 1-D (broadcast over all of self) or
+    N-D with the same batch dims (all but the last) as self.
+
+    Placement order: [output, sorted_sequence, self, sorter?]. sorter (optional,
+    same shape as sorted_sequence) mirrors sorted_sequence's placement.
+
+    Families of strategies:
+    1. Batch-dim sharding (N-D sorted_sequence only): shard a leading dim shared
+       by sorted_sequence, self, and output. Each batch row is independent.
+    2. Self value-dim sharding: shard a dim of self that is not searched over
+       (every dim in the broadcast case, only the last dim in the N-D case),
+       keeping sorted_sequence replicated. Output follows self.
+    3. Partial("sum") output: shard sorted_sequence on its last (searched) dim,
+       replicate self. The shards are contiguous and globally ordered, so each
+       rank's local index count sums to the global index. Disabled when sorter
+       is present, since sorter holds global indices that are invalid per shard.
+    4. Partial(max/min) self and output: searchsorted is monotonically
+       non-decreasing in self's values, so reducing local indices with max (or
+       min) matches searching the reduced value.
+    """
+    ss_meta, self_meta = args_schema[0], args_schema[1]
+    if not isinstance(ss_meta, TensorMeta) or not isinstance(self_meta, TensorMeta):
+        raise AssertionError(f"Expected TensorMeta, got {ss_meta}, {self_meta}")
+    has_sorter = isinstance(kwargs_schema.get("sorter"), TensorMeta)
+    ss_ndim = len(ss_meta.shape)
+    out_ndim = len(self_meta.shape)
+    search_dim = ss_ndim - 1
+    is_broadcast = ss_ndim == 1
+    SP = _ShardingPlaceholder
+
+    # sorter (same shape/role as sorted_sequence) always shares its placement.
+    # It is keyword-only, and the dispatcher never reshards kwargs, so sorter
+    # must already arrive matching sorted_sequence's placement.
+    def rule(out_p, ss_p, self_p):
+        placements: list[Placement | _ShardingPlaceholder] = [out_p, ss_p, self_p]
+        if has_sorter:
+            placements.append(ss_p)
+        return placements
+
+    strategies: list[list[Placement | _ShardingPlaceholder]] = []
+    # Family 1: batch dims (shared leading dims) of N-D sorted_sequence.
+    if not is_broadcast:
+        for dim in range(ss_ndim - 1):
+            strategies.append(rule(SP(dim), SP(dim), SP(dim)))
+    # Family 2: self value dims (all dims if broadcast, else only the last).
+    self_value_dims = range(out_ndim) if is_broadcast else (out_ndim - 1,)
+    for dim in self_value_dims:
+        strategies.append(rule(SP(dim), Replicate(), SP(dim)))
+    # Family 3: shard the searched dim, sum partial over it.
+    if not has_sorter:
+        strategies.append([Partial("sum"), SP(search_dim), Replicate()])
+    # Family 4: monotonicity of searchsorted in self's values.
+    for reduce_op in ("max", "min"):
+        strategies.append(rule(Partial(reduce_op), Replicate(), Partial(reduce_op)))
+    return strategies
+
+
+@register_single_dim_strategy(aten.searchsorted.Scalar)
+def searchsorted_scalar_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    """searchsorted with a scalar query value: sorted_sequence is 1-D and the
+    output is a scalar. The only non-trivial sharding shards sorted_sequence on
+    its searched dim and sums the local index counts (see Family 3 above).
+    Disabled when sorter is present.
+
+    Placement order: [output, sorted_sequence].
+    """
+    if isinstance(kwargs_schema.get("sorter"), TensorMeta):
+        return []
+    return [[Partial("sum"), _ShardingPlaceholder(0)]]
+
+
 @register_single_dim_strategy(
     aten.select.int,
     schema_info=RuntimeSchemaInfo(1),
