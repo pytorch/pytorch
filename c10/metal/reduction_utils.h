@@ -376,13 +376,30 @@ float3 threadgroup_welford_reduce(threadgroup T* data, unsigned size) {
 // Each vec3type is tuple of mean, m2 and weight
 template <typename T>
 float3 welford_combine(T a, T b) {
+  // A zero-weight operand (e.g. a simd padding lane filled with 0) is a no-op.
+  // Skipping it before computing delta keeps a valid +/-inf mean from being
+  // corrupted to nan via (inf - 0) * 0 = nan.
+  if (b.z == 0) {
+    return float3(a.x, a.y, a.z);
+  }
+  if (a.z == 0) {
+    return float3(b.x, b.y, b.z);
+  }
   float delta = b.x - a.x;
   float new_weight = a.z + b.z;
   auto w2_over_w = new_weight != 0 ? b.z / new_weight : 0.0;
-  return float3(
-      a.x + delta * w2_over_w,
-      a.y + b.y + delta * delta * a.z * w2_over_w,
-      new_weight);
+  // The delta form is precise for finite means but yields inf - inf = nan when
+  // combining an infinite mean; fall back to the weighted average there so a
+  // valid +/-inf mean is preserved (variance is still nan). NOTE: for inputs
+  // containing infinities, the fused mean here is the mathematically-sensible
+  // value (any same-signed inf -> +/-inf, mixed -> nan) but does NOT match CPU
+  // bit-for-bit, because CPU's serial Welford mean is order-dependent
+  // (var_mean([0,0,inf]) -> inf but var_mean([inf,0,0]) -> nan). A parallel
+  // reduction cannot reproduce that ordering; this matches other parallel
+  // backends rather than the serial reference for this degenerate case.
+  float mean = ::metal::isfinite(delta) ? a.x + delta * w2_over_w
+                                        : (a.x * a.z + b.x * b.z) / new_weight;
+  return float3(mean, a.y + b.y + delta * delta * a.z * w2_over_w, new_weight);
 }
 
 template <typename T>

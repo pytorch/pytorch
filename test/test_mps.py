@@ -16269,6 +16269,251 @@ class TestMetalLibrary(TestCaseMPS):
 # This requires mps to be properly registered in the device generic test framework which is not the
 # case right now. We can probably use `allow_mps` introduced in https://github.com/pytorch/pytorch/pull/87342
 # to achieve this.
+
+class TestReduceOpsMetal(TestCaseMPS):
+    """Tests for Metal kernel reduce ops: var / std / var_mean / std_mean."""
+
+    # =========================================================================
+    # Variance and standard deviation
+    # =========================================================================
+    def test_var_metal_basic(self):
+        for shape in [(8,), (4, 8), (2, 4, 8), (2, 3, 4, 5)]:
+            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float32)
+            mps_x = cpu_x.to('mps')
+            # Scalar var
+            self.assertEqual(torch.var(mps_x), torch.var(cpu_x), atol=1e-4, rtol=1e-4)
+            self.assertEqual(torch.var(mps_x, correction=0), torch.var(cpu_x, correction=0), atol=1e-4, rtol=1e-4)
+            # Per-dim
+            for dim in range(len(shape)):
+                self.assertEqual(
+                    torch.var(mps_x, dim=dim), torch.var(cpu_x, dim=dim), atol=1e-4, rtol=1e-4)
+                self.assertEqual(
+                    torch.var(mps_x, dim=dim, keepdim=True),
+                    torch.var(cpu_x, dim=dim, keepdim=True), atol=1e-4, rtol=1e-4)
+
+    def test_std_metal_basic(self):
+        for shape in [(8,), (4, 8), (2, 4, 8)]:
+            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float32)
+            mps_x = cpu_x.to('mps')
+            self.assertEqual(torch.std(mps_x), torch.std(cpu_x), atol=1e-4, rtol=1e-4)
+            for dim in range(len(shape)):
+                self.assertEqual(
+                    torch.std(mps_x, dim=dim), torch.std(cpu_x, dim=dim), atol=1e-4, rtol=1e-4)
+
+    def test_var_metal_correction(self):
+        cpu_x = torch.randn(10, 20, device='cpu')
+        mps_x = cpu_x.to('mps')
+        for corr in [0, 1, 2]:
+            self.assertEqual(
+                torch.var(mps_x, dim=1, correction=corr),
+                torch.var(cpu_x, dim=1, correction=corr), atol=1e-4, rtol=1e-4)
+
+    def test_var_metal_multidim(self):
+        cpu_x = torch.randn(3, 4, 5, device='cpu')
+        mps_x = cpu_x.to('mps')
+        self.assertEqual(
+            torch.var(mps_x, dim=[0, 2]),
+            torch.var(cpu_x, dim=[0, 2]), atol=1e-4, rtol=1e-4)
+        self.assertEqual(
+            torch.var(mps_x, dim=[0, 2], keepdim=True),
+            torch.var(cpu_x, dim=[0, 2], keepdim=True), atol=1e-4, rtol=1e-4)
+
+    def test_var_metal_half(self):
+        cpu_x = torch.randn(16, 32, device='cpu', dtype=torch.float32)
+        for dtype in [torch.float16, torch.bfloat16]:
+            cx = cpu_x.to(dtype)
+            mx = cx.to('mps')
+            self.assertEqual(
+                torch.var(mx, dim=1),
+                torch.var(cx, dim=1), atol=1e-1, rtol=1e-1)
+
+    def test_var_metal_integral_dtype_error(self):
+        for dtype in (torch.int32, torch.int64):
+            x = torch.arange(6, dtype=dtype, device='mps').reshape(2, 3)
+            for fn in (torch.var, torch.std, torch.var_mean, torch.std_mean):
+                with self.assertRaisesRegex(RuntimeError, "only support floating point and complex dtypes"):
+                    fn(x, dim=1)
+
+    def test_var_metal_empty(self):
+        cpu_x = torch.randn(0, 5, device='cpu')
+        mps_x = cpu_x.to('mps')
+        self.assertEqual(torch.var(mps_x, dim=0).shape, torch.var(cpu_x, dim=0).shape)
+
+    def test_var_metal_scalar(self):
+        cpu_x = torch.tensor(3.14, device='cpu')
+        mps_x = cpu_x.to('mps')
+        # var of scalar with correction=1 is NaN (dof=0); test correction=0
+        self.assertTrue(torch.isnan(torch.var(mps_x)))
+        self.assertEqual(
+            torch.var(mps_x, correction=0), torch.var(cpu_x, correction=0))
+
+    def test_var_metal_allreduce_large_and_outer(self):
+        # The 2-pass all-reduce Welford indexes partials as device float3*
+        # (16B/group); allocating 3 floats/group overruns the buffer for inputs
+        # past ~4096. The dim=0 outer path binds a uint3 sizes constant. Both
+        # are validated under MTL_DEBUG_LAYER/MTL_SHADER_VALIDATION in CI; here
+        # we check correctness across both paths.
+        for fn in (torch.var, torch.std):
+            for n in (8192, 100003):
+                cpu_x = torch.randn(n, device='cpu')
+                self.assertEqual(fn(cpu_x.to('mps')).cpu(), fn(cpu_x), atol=2e-4, rtol=2e-4)
+        cpu_x = torch.randn(64, 130, device='cpu')  # dim=0 outer welford, uint3 sizes
+        self.assertEqual(torch.var(cpu_x.to('mps'), dim=0).cpu(),
+                         torch.var(cpu_x, dim=0), atol=2e-4, rtol=2e-4)
+
+    def test_var_mean_metal_inf_mean(self):
+        # Welford combine must skip zero-weight padding lanes before delta, else
+        # a valid +/-inf mean is corrupted to nan via (inf - 0) * 0.
+        for fn in (torch.var_mean, torch.std_mean):
+            cpu_x = torch.tensor([0., 0., float('inf')])
+            self.assertEqual(fn(cpu_x.to('mps'))[1].cpu(), fn(cpu_x)[1], equal_nan=True)
+            cpu_x2 = torch.tensor([[0., float('inf')], [1., 2.]])
+            self.assertEqual(fn(cpu_x2.to('mps'), dim=1)[1].cpu(),
+                             fn(cpu_x2, dim=1)[1], equal_nan=True)
+            for inf_value in (float('inf'), float('-inf')):
+                cpu_x3 = torch.zeros(8192)
+                cpu_x3[-1] = inf_value
+                mps_stat, mps_mean = fn(cpu_x3.to('mps'), correction=0)
+                cpu_stat, cpu_mean = fn(cpu_x3, correction=0)
+                self.assertEqual(mps_mean.cpu(), cpu_mean, equal_nan=True)
+                self.assertEqual(mps_stat.cpu(), cpu_stat, equal_nan=True)
+
+    def test_var_metal_inf_propagates_nan(self):
+        # A tensor containing inf has NaN variance (inf-inf); the M2 clamp must
+        # preserve NaN, not clamp it to 0. var/std must match CPU (nan), through
+        # the all-reduce, outer, inner, and generic paths.
+        for shape, dim in (((3,), None), ((2, 4), 1), ((4, 2), 0)):
+            cpu_x = torch.zeros(shape)
+            cpu_x.view(-1)[0] = float('inf')
+            for fn in (torch.var, torch.std):
+                self.assertEqual(fn(cpu_x.to('mps'), dim=dim, correction=0).cpu(),
+                                 fn(cpu_x, dim=dim, correction=0), equal_nan=True)
+
+    def test_var_metal_thin_inner_small_n(self):
+        # Tall-thin (small N, large M) routes to the thread-per-row thin kernel
+        # (N<=32); must match CPU across dtypes and across the N=32/33 boundary.
+        torch.manual_seed(0)
+        for M, N in [(100000, 8), (50000, 16), (20000, 32), (20000, 33)]:
+            for dt in (torch.float32, torch.float16, torch.bfloat16):
+                x = torch.randn(M, N, dtype=dt)
+                for fn in (torch.var, torch.std):
+                    self.assertEqual(fn(x.to("mps"), dim=1).cpu(), fn(x, dim=1),
+                                     rtol=2e-2, atol=2e-2)
+
+    def test_var_metal_large_n_correction_near_n(self):
+        # For N > 2^24 a float element count loses integer precision; the divisor
+        # (N - correction) is computed exactly on the host, so var/std with
+        # correction close to N matches CPU instead of returning inf.
+        N = (1 << 24) + 1
+        x = torch.zeros(N, dtype=torch.float32)
+        x[-1] = 1.0
+        for fn in (torch.var, torch.std):
+            self.assertEqual(fn(x.to("mps"), correction=N - 1).cpu(),
+                             fn(x, correction=N - 1))
+
+    def test_var_metal_partial_simdgroup_allreduce(self):
+        # A 2-pass all-reduce whose pass1/pass2 threadgroup is not a multiple of
+        # 32 must round up to a full simdgroup, else simd_welford_combine reads
+        # undefined data from inactive lanes (0 on M1/M2 -> corrupt). Passes on
+        # M4 (benign fill) regardless; guards the M1/M2 path on CI. The sizes
+        # span the 2-pass threshold so num_groups lands non-multiple-of-32.
+        for N in [4099, 6151, 99991, 1 << 20]:
+            x = torch.randn(N)
+            for fn in (torch.var, torch.std):
+                self.assertEqual(fn(x.to("mps")).cpu(), fn(x), rtol=1e-3, atol=1e-4)
+
+    def test_var_metal_max_rank(self):
+        # 16 is MPS's maximum tensor rank and the exact size of the NormParams
+        # buffers; the generic Welford path must accept it (a tighter bound
+        # would wrongly reject a valid 16-D reduction).
+        cpu_x = torch.randn([2] + [1] * 15, device='cpu')  # 16 dims
+        self.assertEqual(torch.var(cpu_x.to('mps')).cpu(), torch.var(cpu_x),
+                         atol=1e-4, rtol=1e-4)
+
+    def test_var_metal_outer_large_offset(self):
+        # Large mean + small variance catastrophically cancels in a
+        # sum-of-squares formula (negative variance, nan std); the streaming
+        # Welford outer path must stay stable. These shapes hit the M<=8 / M<=16
+        # outer kernels with N>=256.
+        torch.manual_seed(0)
+        for M, N in ((8, 512), (16, 1024)):
+            cpu_x = 1.0e6 + torch.randn(M, N)
+            for fn in (torch.var, torch.std):
+                mv = fn(cpu_x.to('mps'), dim=0).cpu()
+                self.assertFalse(torch.isnan(mv).any())
+                self.assertEqual(mv, fn(cpu_x, dim=0), atol=5e-2, rtol=5e-2)
+            self.assertTrue((torch.var(cpu_x.to('mps'), dim=0).cpu() >= 0).all())
+
+    def test_var_metal_duplicate_dim_raises(self):
+        # Duplicate reduction dims are invalid; MPS must raise like CPU.
+        x = torch.randn(3, 4, 5, device='mps')
+        for fn in (torch.var, torch.std, torch.var_mean, torch.std_mean):
+            with self.assertRaisesRegex(RuntimeError, "appears multiple times"):
+                fn(x, dim=(0, 0))
+
+    def test_var_metal_inner_wide_tail(self):
+        # welford_inner_wide vectorizes NCHAINS elements/thread; a tail-boundary
+        # bug double-counted the last vector block for non-stride-aligned N.
+        torch.manual_seed(0)
+        for N in (4095, 4097, 6000, 8191):
+            cpu_x = torch.randn(2, N)
+            for fn in (torch.var, torch.std):
+                self.assertEqual(fn(cpu_x.to('mps'), dim=1).cpu(),
+                                 fn(cpu_x, dim=1), atol=1e-3, rtol=1e-3)
+
+    def test_var_metal_scalar_invalid_dim_raises(self):
+        # An invalid dim on a 0-d input must raise like CPU, not silently return.
+        x = torch.tensor(3.14, device='mps')
+        for fn in (torch.var, torch.std, torch.var_mean, torch.std_mean):
+            with self.assertRaisesRegex(IndexError, r"Dimension out of range \(expected to be in range of \[-1, 0\], but got 1\)"):
+                fn(x, dim=1)
+
+    def test_var_metal_scalar_duplicate_dim_raises(self):
+        # A duplicate dim on a 0-d input must raise like CPU (dim appears
+        # multiple times), not silently return nan.
+        x = torch.tensor(3.14, device='mps')
+        for fn in (torch.var, torch.std, torch.var_mean, torch.std_mean):
+            with self.assertRaisesRegex(RuntimeError, "dim 0 appears multiple times in the list of dims"):
+                fn(x, dim=(0, 0))
+
+    # =========================================================================
+    # var_mean / std_mean (fused)
+    # =========================================================================
+    def test_var_mean_metal(self):
+        for shape in [(8,), (4, 8), (2, 4, 8)]:
+            cpu_x = torch.randn(shape, device='cpu')
+            mps_x = cpu_x.to('mps')
+            # Scalar
+            mv, mm = torch.var_mean(mps_x)
+            cv, cm = torch.var_mean(cpu_x)
+            self.assertEqual(mv, cv, atol=1e-4, rtol=1e-4)
+            self.assertEqual(mm, cm, atol=1e-4, rtol=1e-4)
+            # Per-dim
+            for dim in range(len(shape)):
+                mv, mm = torch.var_mean(mps_x, dim=dim)
+                cv, cm = torch.var_mean(cpu_x, dim=dim)
+                self.assertEqual(mv, cv, atol=1e-4, rtol=1e-4)
+                self.assertEqual(mm, cm, atol=1e-4, rtol=1e-4)
+
+    def test_std_mean_metal(self):
+        cpu_x = torch.randn(4, 8, device='cpu')
+        mps_x = cpu_x.to('mps')
+        ms, mm = torch.std_mean(mps_x, dim=1)
+        cs, cm = torch.std_mean(cpu_x, dim=1)
+        self.assertEqual(ms, cs, atol=1e-4, rtol=1e-4)
+        self.assertEqual(mm, cm, atol=1e-4, rtol=1e-4)
+
+    def test_var_mean_metal_keepdim(self):
+        cpu_x = torch.randn(3, 4, 5, device='cpu')
+        mps_x = cpu_x.to('mps')
+        mv, mm = torch.var_mean(mps_x, dim=1, keepdim=True)
+        cv, cm = torch.var_mean(cpu_x, dim=1, keepdim=True)
+        self.assertEqual(mv, cv, atol=1e-4, rtol=1e-4)
+        self.assertEqual(mm, cm, atol=1e-4, rtol=1e-4)
+
+
+instantiate_parametrized_tests(TestReduceOpsMetal)
+
 instantiate_device_type_tests(TestConsistency, globals(), allow_mps=True, only_for="mps")
 instantiate_device_type_tests(TestErrorInputs, globals(), allow_mps=True, only_for="mps")
 instantiate_device_type_tests(TestCommon, globals(), allow_mps=True, only_for="mps")
