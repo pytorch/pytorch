@@ -800,11 +800,13 @@ class MetalKernel(SIMDKernel):
             )
         if reduction_type == "welford_reduce":
             if not self.multistage_reduction_entry:
-                acc_buf = self._new_idxvar(src_dtype, acc_buf_alloc_size)
-                self.compute.splice(f"{acc_buf}[{reduction_idx}] = {value};")
+                acc_buf = self._new_idxvar("float3", acc_buf_alloc_size)
+                self.compute.splice(
+                    f"{acc_buf}[{reduction_idx}] = float3({value}, 0.0, 1.0);"
+                )
                 wf_res = self.cse.generate(
                     self.compute,
-                    f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {acc_buf_size_str})",
+                    f"c10::metal::threadgroup_welford_combine({acc_buf}, {reduction_idx}, {acc_buf_size_str})",
                     dtype=torch.float32,
                 )
                 return _unwrap_helper(wf_res)
@@ -816,7 +818,7 @@ class MetalKernel(SIMDKernel):
             )
             wf_res = self.cse.generate(
                 self.stores,
-                f"c10::metal::threadgroup_welford_combine({acc_buf}, {acc_buf_size_str})",
+                f"c10::metal::threadgroup_welford_combine({acc_buf}, {reduction_idx}, {acc_buf_size_str})",
                 dtype=torch.float32,
             )
             return _unwrap_helper(wf_res)
@@ -836,7 +838,7 @@ class MetalKernel(SIMDKernel):
                 self.compute.writeline(f"{acc_thread_var} = {inp_value};")
             wf_res = self.cse.generate(
                 self.stores if self.multistage_reduction_entry else self.compute,
-                f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {acc_buf_size_str})",
+                f"c10::metal::threadgroup_welford_combine({acc_buf}, {reduction_idx}, {acc_buf_size_str})",
                 dtype=torch.float32,
             )
             return _unwrap_helper(wf_res)
