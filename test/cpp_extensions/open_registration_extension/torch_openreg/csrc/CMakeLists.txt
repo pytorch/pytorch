@@ -38,11 +38,14 @@ if(USE_TEST)
     set(BACKEND_META_TEST_TARGET openreg_backend_meta_tests)
     add_executable(${BACKEND_META_TEST_TARGET}
         ${PROJECT_SOURCE_DIR}/tests/cpp/test_openreg_backend_meta.cpp)
+    # OpenRegBackendMeta is header-only: link only ATen + gtest (an unused
+    # libopenreg.so link breaks clang's standalone run) and add the header dir.
+    target_include_directories(${BACKEND_META_TEST_TARGET}
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_link_libraries(${BACKEND_META_TEST_TARGET}
-        PRIVATE torch_openreg torch_cpu_library openreg gtest gtest_main)
-    # This standalone binary links libtorch_cpu, which lives in the torch
-    # install dir rather than next to the executable. Derive its rpath from the
-    # linked library locations instead of hardcoding the torch lib path.
+        PRIVATE torch_cpu_library gtest gtest_main)
+    # libtorch_cpu lives in the torch install dir, not by the exe: derive its
+    # rpath from the linked library locations.
     set_target_properties(${BACKEND_META_TEST_TARGET} PROPERTIES
         INSTALL_RPATH_USE_LINK_PATH TRUE)
     add_test(NAME ${BACKEND_META_TEST_TARGET} COMMAND ${BACKEND_META_TEST_TARGET})
