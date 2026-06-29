@@ -480,22 +480,8 @@ std::optional<c10::ScalarType> out_dtype) {
       "cublasLt grouped GEMM requires BFloat16 or Float16 input, got ", mat_a.scalar_type());
   TORCH_CHECK(mat_b.dtype() == mat_a.dtype(),
       "mat_a and mat_b must have the same dtype");
-  TORCH_CHECK(mat_a.dim() == 2 || mat_a.dim() == 3, "mat_a has to be 2 or 3d");
-  TORCH_CHECK(mat_b.dim() == 2 || mat_b.dim() == 3, "mat_b has to be 2 or 3d");
   const bool a_is_2d = mat_a.dim() == 2;
   const bool b_is_2d = mat_b.dim() == 2;
-  if (!a_is_2d || !b_is_2d) {
-    TORCH_CHECK(mat_a.size(-1) == mat_b.size(-2),
-        "contraction dimension of mat_a and mat_b must match");
-  }
-  TORCH_CHECK(offs.has_value() == (a_is_2d || b_is_2d),
-      "Must provide offsets iff at least one input is 2D");
-  if (offs.has_value()) {
-    TORCH_CHECK(offs->dim() == 1, "offs must be 1D");
-    TORCH_CHECK(offs->dtype() == at::kInt, "offs must be int32");
-  }
-  TORCH_CHECK(!bias.has_value(), "Bias not supported yet");
-
   const int64_t batchCount64 = (a_is_2d || b_is_2d)
       ? offs->size(0) : mat_a.size(0);
   TORCH_CHECK(batchCount64 > 0 && batchCount64 <= 1024,
