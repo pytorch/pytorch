@@ -20,10 +20,15 @@ import sys
 
 import torch
 
-from .reductions import init_reductions
+from .reductions import init_reductions, xpu_ipc_lock
 
 
-__all__ = ["set_sharing_strategy", "get_sharing_strategy", "get_all_sharing_strategies"]
+__all__ = [
+    "set_sharing_strategy",
+    "get_sharing_strategy",
+    "get_all_sharing_strategies",
+    "xpu_ipc_lock",
+]
 
 
 from multiprocessing import *  # noqa: F403

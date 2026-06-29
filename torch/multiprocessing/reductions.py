@@ -1,9 +1,16 @@
 # mypy: allow-untyped-defs
+import contextlib
 import multiprocessing
 import os
 import threading
 from multiprocessing import reduction
 from multiprocessing.util import register_after_fork
+
+
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
 
 import torch
 from torch._namedtensor_internals import check_serializing_named_tensor
@@ -95,6 +102,121 @@ class SharedCache(dict):
 
 # mapping from handles to StorageWeakRef objects
 shared_cache = SharedCache()
+
+
+def _xpu_storage_cdata(storage) -> int:
+    untyped_storage = (
+        storage
+        if isinstance(storage, torch.UntypedStorage)
+        else storage._untyped_storage
+    )
+    return int(untyped_storage._cdata)
+
+
+def _create_xpu_ipc_lock_fd() -> int:
+    if hasattr(os, "memfd_create"):
+        fd = os.memfd_create("torch_xpu_ipc_lock", os.MFD_CLOEXEC)
+    else:
+        import tempfile
+
+        tmp = tempfile.NamedTemporaryFile(prefix="torch_xpu_ipc_lock_", delete=False)
+        try:
+            fd = os.open(tmp.name, os.O_RDWR)
+        finally:
+            tmp.close()
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+    os.ftruncate(fd, 1)
+    return fd
+
+
+class XpuIpcLockRegistry:
+    def __init__(self) -> None:
+        self._after_fork()
+        register_after_fork(self, XpuIpcLockRegistry._after_fork)
+
+    def _after_fork(self) -> None:
+        self._entries = {}
+        self._lock = threading.Lock()
+
+    def _prune_dead_locked(self) -> None:
+        for cdata, (lock_fd, storage_ref) in list(self._entries.items()):
+            if storage_ref.expired():
+                del self._entries[cdata]
+                os.close(lock_fd)
+
+    def _make_entry(self, storage, lock_fd: int) -> "tuple[int, StorageWeakRef]":
+        untyped_storage = (
+            storage
+            if isinstance(storage, torch.UntypedStorage)
+            else storage._untyped_storage
+        )
+        return (lock_fd, StorageWeakRef(untyped_storage))
+
+    def register_fd(self, storage, lock_fd) -> None:
+        if lock_fd is None:
+            return
+        cdata = _xpu_storage_cdata(storage)
+        fd_to_close = None
+        with self._lock:
+            self._prune_dead_locked()
+            existing = self._entries.get(cdata)
+            if existing is None:
+                self._entries[cdata] = self._make_entry(storage, lock_fd)
+                return
+            existing_fd, _ = existing
+            if existing_fd != lock_fd:
+                fd_to_close = lock_fd
+        if fd_to_close is not None:
+            os.close(fd_to_close)
+
+    def get_or_create_fd(self, storage) -> int:
+        cdata = _xpu_storage_cdata(storage)
+        with self._lock:
+            self._prune_dead_locked()
+            entry = self._entries.get(cdata)
+            if entry is None:
+                lock_fd = _create_xpu_ipc_lock_fd()
+                self._entries[cdata] = self._make_entry(storage, lock_fd)
+                return lock_fd
+            lock_fd, _ = entry
+            return lock_fd
+
+
+_xpu_ipc_lock_registry = XpuIpcLockRegistry()
+
+
+@contextlib.contextmanager
+def xpu_ipc_lock(tensor: torch.Tensor):
+    if tensor.device.type != "xpu":
+        yield
+        return
+
+    if fcntl is None:
+        raise RuntimeError("xpu_ipc_lock is only supported on platforms with fcntl")
+
+    untyped_storage = tensor.untyped_storage()
+    lock_fd = _xpu_ipc_lock_registry.get_or_create_fd(untyped_storage)
+    fcntl.lockf(lock_fd, fcntl.LOCK_EX)
+    try:
+        yield
+    finally:
+        fcntl.lockf(lock_fd, fcntl.LOCK_UN)
+
+
+def _detach_dupfd(handle: object) -> object:
+    detach = getattr(handle, "detach", None)
+    if callable(detach):
+        return detach()
+    return handle
+
+
+def _detach_lock_fd(lock_fd_handle: object) -> "int | None":
+    if lock_fd_handle is None:
+        return None
+    return int(_detach_dupfd(lock_fd_handle))
 
 
 def rebuild_event(device, handle):
@@ -231,18 +353,15 @@ def rebuild_xpu_tensor(
     storage_size_bytes,
     storage_offset_bytes,
     requires_grad,
+    lock_fd_handle,
 ):
     if isinstance(storage_handle, tuple):
-        storage_handle_list = list(storage_handle)
-        if storage_handle_list:
-            detach = getattr(storage_handle_list[0], "detach", None)
-            if callable(detach):
-                storage_handle_list[0] = detach()
-        storage_handle = tuple(storage_handle_list)
+        storage_handle = tuple(
+            _detach_dupfd(elem) if i == 0 else elem
+            for i, elem in enumerate(storage_handle)
+        )
     else:
-        detach = getattr(storage_handle, "detach", None)
-        if callable(detach):
-            storage_handle = detach()
+        storage_handle = _detach_dupfd(storage_handle)
 
     if storage_handle is None or storage_size_bytes == 0:
         storage = storage_cls(0, dtype=dtype, device=storage_device, _internal=True)
@@ -257,6 +376,7 @@ def rebuild_xpu_tensor(
                 storage_size_bytes,
                 storage_offset_bytes,
             )
+            torch.xpu.synchronize(storage_device)
             shared_cache[cache_key] = StorageWeakRef(storage)
 
     _storage = (
@@ -264,6 +384,8 @@ def rebuild_xpu_tensor(
         if isinstance(storage, torch.UntypedStorage)
         else storage._untyped_storage
     )
+    lock_fd = _detach_lock_fd(lock_fd_handle)
+    _xpu_ipc_lock_registry.register_fd(_storage, lock_fd)
 
     t = torch._utils._rebuild_tensor(
         torch.storage.TypedStorage(wrap_storage=_storage, dtype=dtype, _internal=True),
@@ -450,6 +572,9 @@ def reduce_tensor(tensor):
             ),
         )
     elif storage._untyped_storage.device.type == "xpu":
+        # Unlike CUDA, the sender does not populate shared_cache here. DMA-BUF
+        # handles are imported fresh on the receiver side, which caches via
+        # rebuild_xpu_tensor.
         (
             device,
             handle,
@@ -457,6 +582,8 @@ def reduce_tensor(tensor):
             storage_offset_bytes,
         ) = storage._share_xpu_()
         tensor_offset = tensor.storage_offset()
+        lock_fd = _xpu_ipc_lock_registry.get_or_create_fd(storage._untyped_storage)
+        lock_fd_handle = multiprocessing.reduction.DupFd(os.dup(lock_fd))
 
         if (
             isinstance(handle, tuple)
@@ -484,6 +611,7 @@ def reduce_tensor(tensor):
                 storage_size_bytes,
                 storage_offset_bytes,
                 tensor.requires_grad,
+                lock_fd_handle,
             ),
         )
 
