@@ -112,7 +112,11 @@ from .base import (
 )
 from .dicts import ConstDictVariable, pydict_check
 from .hashable import HashableTracker
-from .object_protocol import is_nb_not_implemented, type_implements_nb_slot
+from .object_protocol import (
+    generic_repr,
+    is_nb_not_implemented,
+    type_implements_nb_slot,
+)
 from .sets import SetVariable
 
 
@@ -485,13 +489,23 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L2379-L2408
         metaclass = type(self.value)
-        if metaclass is type or type(self.value).__repr__ is type.__repr__:
+        if metaclass is type or metaclass.__repr__ is type.__repr__:
             return VariableTracker.build(tx, repr(self.value))
 
         type_attr = self.lookup_metaclass_attr("__repr__")
         if type_attr is None:
             raise_type_error(tx, "'NoneType' object is not callable")
         return self.call_method(tx, "__repr__", [], {})
+
+    def str_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        metaclass = type(self.value)
+        if metaclass is type or metaclass.__str__ is type.__str__:
+            return generic_repr(tx, self)
+
+        type_attr = self.lookup_metaclass_attr("__str__")
+        if type_attr is None:
+            raise_type_error(tx, "'NoneType' object is not callable")
+        return self.call_method(tx, "__str__", [], {})
 
     def nb_or_impl(
         self,
@@ -1897,8 +1911,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         self,
         tx: "InstructionTranslatorBase",
     ) -> VariableTracker:
-        from .object_protocol import generic_repr
-
         type_attr = self.lookup_class_mro_attr("__str__")
         if type_attr is NO_SUCH_SUBOBJ:
             return super().str_impl(tx)
@@ -4329,6 +4341,12 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
         if type(self.value).__repr__ is not BaseException.__repr__:
             return super().repr_impl(tx)
         return self.exc_vt.repr_impl(tx)
+
+    def str_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
+        # ref: BaseException_str in https://github.com/python/cpython/blob/3.13/Objects/exceptions.c#L118-L129
+        if type(self.value).__str__ is not BaseException.__str__:
+            return super().str_impl(tx)
+        return self.exc_vt.str_impl(tx)
 
     @python_stack.setter
     def python_stack(self, value: traceback.StackSummary) -> None:

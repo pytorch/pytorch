@@ -75,6 +75,7 @@ from ..utils import (
 from .base import AsPythonConstantNotImplementedError, NO_SUCH_SUBOBJ, VariableTracker
 from .constant import ConstantVariable
 from .functions import NestedUserFunctionVariable, UserFunctionVariable
+from .object_protocol import generic_str
 from .user_defined import call_random_fn, is_standard_setattr, UserDefinedObjectVariable
 
 
@@ -728,6 +729,18 @@ class ExceptionVariable(VariableTracker):
                 source=self.source and AttrSource(self.source, "args"),
             )
         return super().var_getattr(tx, name)
+
+    def str_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/exceptions.c#L118-L129
+        if len(self.args) == 0:
+            return VariableTracker.build(tx, "")
+        elif len(self.args) == 1:
+            return generic_str(tx, self.args[0])
+        else:
+            from . import TupleVariable
+
+            tuple_var = TupleVariable(list(self.args))
+            return generic_str(tx, tuple_var)
 
     def __str__(self) -> str:
         return f"{self.__class__.__name__}({self.exc_type})"

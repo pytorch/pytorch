@@ -455,17 +455,24 @@ def generic_str(
 
     Resolution order: str identity check -> tp_str (str_impl) -> tp_repr fallback.
     """
+    from ..exc import TorchDynamoException
+
     if maybe_get_python_type(obj) is str:
         return obj
 
     obj_type = maybe_get_python_type(obj)
-    if (
-        type_implements_tp_str(obj_type)
-        and type(obj).str_impl is not VariableTracker.str_impl
-    ):
-        result = obj.str_impl(tx)
-    else:
-        result = generic_repr(tx, obj)
+    try:
+        if (
+            type_implements_tp_str(obj_type)
+            and type(obj).str_impl is not VariableTracker.str_impl
+        ):
+            result = obj.str_impl(tx)
+        else:
+            result = generic_repr(tx, obj)
+    except TorchDynamoException:
+        raise
+    except Exception as exc:
+        raise_observed_exception(type(exc), tx, args=list(exc.args))
 
     result_type = maybe_get_python_type(result)
     if not issubclass(result_type, str):
