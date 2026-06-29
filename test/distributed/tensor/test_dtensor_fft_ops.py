@@ -3,14 +3,14 @@
 import sys
 
 import torch
-
-from torch.distributed.tensor import Shard, distribute_tensor
-from torch.testing._internal.common_utils import TEST_WITH_DEV_DBG_ASAN, run_tests
+from torch.distributed.tensor import distribute_tensor, Shard
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
     create_local_tensor_test_class,
+    DTensorTestBase,
     with_comms,
 )
+
 
 if TEST_WITH_DEV_DBG_ASAN:
     print("Skip dev-asan", file=sys.stderr)
