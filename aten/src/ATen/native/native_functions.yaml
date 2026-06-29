@@ -2040,11 +2040,12 @@
     CPU: ctc_loss_backward_cpu
     CUDA: ctc_loss_backward_gpu
     XPU: ctc_loss_backward_xpu
+    MPS: ctc_loss_backward_mps
   autogen: _ctc_loss_backward.out
 
 - func: _ctc_loss_backward.Tensor(Tensor grad, Tensor log_probs, Tensor targets, Tensor input_lengths, Tensor target_lengths, Tensor neg_log_likelihood, Tensor log_alpha, int blank, bool zero_infinity=False) -> Tensor
   dispatch:
-    CPU, CUDA, XPU: ctc_loss_backward_tensor
+    CPU, CUDA, XPU, MPS: ctc_loss_backward_tensor
 
 - func: diag_embed(Tensor self, int offset=0, int dim1=-2, int dim2=-1) -> Tensor
   variants: function, method
@@ -14392,6 +14393,13 @@
   dispatch:
     CPU, CUDA: linalg_matrix_exp
   autogen: linalg_matrix_exp.out
+
+- func: linalg_matrix_sqrth(Tensor self) -> Tensor
+  python_module: linalg
+  variants: function
+  dispatch:
+    CPU, CUDA: linalg_matrix_sqrth
+  autogen: linalg_matrix_sqrth.out
 
 - func: _linalg_slogdet(Tensor A) -> (Tensor sign, Tensor logabsdet, Tensor LU, Tensor pivots)
   structured_delegate: _linalg_slogdet.sign

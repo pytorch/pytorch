@@ -4239,7 +4239,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             self.assertEqual(
                 out_stride_order,
                 query_stride_order,
-                f"Stride order mismatch: out {out_stride_order}, query {query_stride_order}",
+                lambda msg: f"{msg}\nStride order mismatch: out {out_stride_order}, query {query_stride_order}",
             )
 
     @supported_platform
@@ -4301,7 +4301,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 self.assertEqual(
                     input_stride_order,
                     orig_stride_order,
-                    f"Mode: {mode}, Stride order mismatch for {name}: grad {input_stride_order}, input {orig_stride_order}.",
+                    lambda msg: f"{msg}\nMode: {mode}, Stride order mismatch for {name}: grad {input_stride_order}, input {orig_stride_order}.",
                 )
 
     @supported_platform
@@ -7758,7 +7758,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         self.assertEqual(
             result.shape,
             expected_shape,
-            f"Expected output shape {expected_shape}, but got {result.shape}",
+            lambda msg: f"{msg}\nExpected output shape {expected_shape}, but got {result.shape}",
         )
 
     @supported_platform
@@ -8287,7 +8287,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             self.assertEqual(
                 original_value,
                 reconstructed_value,
-                f"Context attribute {attr_name} not equal after reconstruction",
+                lambda msg: f"{msg}\nContext attribute {attr_name} not equal after reconstruction",
             )
 
     @supported_platform
@@ -8372,7 +8372,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
                 self.assertEqual(
                     original_value,
                     reconstructed_value,
-                    f"Attribute {attr_name} not equal after reconstruction",
+                    lambda msg: f"{msg}\nAttribute {attr_name} not equal after reconstruction",
                 )
 
 
@@ -9613,7 +9613,9 @@ class TestLearnableBiases(InductorTestCase):
         out.sum().backward()
 
         self.assertEqual(
-            out.shape, query.shape, f"Expected shape {query.shape}, got {out.shape}"
+            out.shape,
+            query.shape,
+            lambda msg: f"{msg}\nExpected shape {query.shape}, got {out.shape}",
         )
 
     @skip_on_cpu

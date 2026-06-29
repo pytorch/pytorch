@@ -451,7 +451,7 @@ class TestCommon(TestCase):
                 self.assertEqual(
                     result.numel(),
                     expected_numel,
-                    f"{op.name} with dim={dim_val} should reduce numel by factor of {reduction_factor} "
+                    lambda msg: f"{msg}\n{op.name} with dim={dim_val} should reduce numel by factor of {reduction_factor} "
                     f"(input: {sample.input.numel()}, expected: {expected_numel}, got: {result.numel()})",
                 )
 
@@ -914,7 +914,7 @@ class TestCommon(TestCase):
 
             msg = "Got different gradients for contiguous / non-contiguous inputs wrt input {}."
             for i, (t, n) in enumerate(zip(t_grads, n_grads)):
-                self.assertEqual(t, n, msg=msg.format(i))
+                self.assertEqual(t, n, msg=lambda _m: f"{_m}\n" + (msg.format(i)))
 
     # Separates one case from the following test_out because many ops don't properly implement the
     #   incorrectly sized out parameter warning properly yet
@@ -3045,14 +3045,18 @@ class TestForwardADWithScalars(TestCase):
                 result = op(dual0d, 2.0)
                 p, t = torch.autograd.forward_ad.unpack_dual(result)
                 self.assertEqual(
-                    p.dtype, t.dtype, f"{op.name} and scalar on RHS - dtype mismatch"
+                    p.dtype,
+                    t.dtype,
+                    lambda msg: f"{msg}\n{op.name} and scalar on RHS - dtype mismatch",
                 )
             # Test with scalar on LHS
             if op.supports_one_python_scalar:
                 result = op(2.0, dual0d)
                 p, t = torch.autograd.forward_ad.unpack_dual(result)
                 self.assertEqual(
-                    p.dtype, t.dtype, f"{op.name} and scalar on LHS - dtype mismatch"
+                    p.dtype,
+                    t.dtype,
+                    lambda msg: f"{msg}\n{op.name} and scalar on LHS - dtype mismatch",
                 )
 
 

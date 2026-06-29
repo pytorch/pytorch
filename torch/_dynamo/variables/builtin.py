@@ -395,6 +395,20 @@ class BaseBuiltinVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if name == "__str__" and len(args) == 1 and not kwargs:
+            arg = args[0]
+            if self.as_python_constant() is object:
+                return generic_repr(tx, arg)
+            if self.as_python_constant() is type:
+                if isinstance(arg, variables.UserDefinedClassVariable):
+                    return VariableTracker.build(tx, type.__str__(arg.value))
+                if arg.is_python_constant() and isinstance(
+                    arg.as_python_constant(), type
+                ):
+                    return VariableTracker.build(
+                        tx, type.__str__(arg.as_python_constant())
+                    )
+            return generic_str(tx, arg)
         if name == "__repr__" and len(args) == 1 and not kwargs:
             arg = args[0]
             if self.as_python_constant() is object and isinstance(
@@ -1708,8 +1722,7 @@ class BuiltinVariable(BaseBuiltinVariable):
             return generic_len(tx, args[0])
 
         if name == "__str__" and len(args) == 1 and not kwargs:
-            # type.__str__(instance) → str(instance)
-            return generic_str(tx, args[0])
+            return super().call_method(tx, name, args, kwargs)
 
         if name == "__repr__" and len(args) == 1 and not kwargs:
             return super().call_method(tx, name, args, kwargs)
@@ -1781,24 +1794,7 @@ class BuiltinVariable(BaseBuiltinVariable):
     def call_str(
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
     ) -> VariableTracker | None:
-        if isinstance(
-            arg,
-            (variables.ExceptionVariable, variables.UserDefinedExceptionObjectVariable),
-        ):
-            if len(arg.args) == 0:
-                return VariableTracker.build(tx, "")
-            elif len(arg.args) == 1:
-                return BuiltinVariable(str).call_function(tx, [arg.args[0]], {})
-            else:
-                tuple_var = variables.TupleVariable(list(arg.args))
-                return BuiltinVariable(str).call_function(tx, [tuple_var], {})
-
-        # Handle `str` on a user defined function or object
-        if isinstance(arg, (variables.UserFunctionVariable)):
-            return VariableTracker.build(tx, str(arg.fn))
-        elif isinstance(arg, (variables.UserDefinedObjectVariable)):
-            return generic_str(tx, arg)
-        return None
+        return generic_str(tx, arg)
 
     def call___build_class__(self, tx, *args, **kwargs):
         def fail(args, kwargs) -> NoReturn:

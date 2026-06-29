@@ -23517,10 +23517,6 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.skip("Fails with ASAN"),
                          'TestProxyTensorOpInfo',
                          'test_make_fx_fake_exhaustive', active_if=TEST_WITH_ASAN),
-            # NotImplementedError: The operator 'aten::_ctc_loss_backward' is not currently implemented for the MPS device
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager', device_type='mps'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
         ),
     ),
     OpInfo(

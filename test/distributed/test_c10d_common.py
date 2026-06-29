@@ -1587,7 +1587,7 @@ class AbstractLargeCommTest:
         self.assertEqual(
             ranks_in,
             dist.get_process_group_ranks(new_pg),
-            f"expecting {ranks_in} but got {dist.get_process_group_ranks(new_pg)}",
+            lambda msg: f"{msg}\nexpecting {ranks_in} but got {dist.get_process_group_ranks(new_pg)}",
         )
 
     def _test_new_group_local_sync_sanity_check(self, backend):
@@ -1742,7 +1742,7 @@ class CommTest(AbstractCommTest, MultiProcessTestCase):
             self.assertEqual(
                 set_debug_mode,
                 mapping[mode],
-                f"Expected {mode} to map to {mapping[mode]} but got {set_debug_mode}",
+                lambda msg: f"{msg}\nExpected {mode} to map to {mapping[mode]} but got {set_debug_mode}",
             )
 
         for mode in invalid_debug_modes:
