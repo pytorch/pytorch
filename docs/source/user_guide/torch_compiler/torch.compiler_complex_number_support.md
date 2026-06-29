@@ -35,7 +35,7 @@ for converting the tensor into the two-component format or back.
 
 Not all operations are supported for
 compilation. If there are some operations you'd like supported, check the list of known issues in
-[this list](https://github.com/pytorch/pytorch/issues?q=sort%3Aupdated-desc%20state%3Aopen%20label%3A%22module%3A%20complex%22%20label%3Adynamo-functorch).
+[this list](https://github.com/pytorch/pytorch/issues?q=sort%3Aupdated-desc%20state%3Aopen%20label%3A%22module%3A%20complex%22%20label%3Adynamo-functorch%20label%3A%22module%3A%20dynamo%22).
 If there's no existing issue open for your proposed operation, open an issue.
 
 ## Limitations
