@@ -2287,7 +2287,9 @@ torch.cuda.synchronize()
 
 
 instantiate_device_type_tests(TestAvgPoolDeviceType, globals())
-instantiate_device_type_tests(TestPoolingNNDeviceType, globals(), allow_mps=True)
+instantiate_device_type_tests(
+    TestPoolingNNDeviceType, globals(), allow_mps=True, allow_xpu=True
+)
 instantiate_parametrized_tests(TestPoolingNN)
 
 if __name__ == "__main__":

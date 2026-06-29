@@ -993,7 +993,9 @@ class TestMultiheadAttentionNNDeviceType(NNTestCase):
         mha(query, key, key)
 
 
-instantiate_device_type_tests(TestMultiheadAttentionNNDeviceType, globals())
+instantiate_device_type_tests(
+    TestMultiheadAttentionNNDeviceType, globals(), allow_xpu=True
+)
 instantiate_parametrized_tests(TestMultiheadAttentionNN)
 
 if __name__ == "__main__":

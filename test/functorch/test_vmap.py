@@ -6710,16 +6710,22 @@ class TestVmapNestedTensor(Namespace.TestVmapBase):
             vmap(vmap(vmap(f)))(x)
 
 
-only_for = ("cpu", "cuda")
-instantiate_device_type_tests(TestVmapOperatorsOpInfo, globals(), only_for=only_for)
+only_for = ("cpu", "cuda", "xpu")
+instantiate_device_type_tests(
+    TestVmapOperatorsOpInfo, globals(), only_for=only_for, allow_xpu=True
+)
 
 instantiate_device_type_tests(
     TestVmapBatchedGradient,
     globals(),
     only_for=only_for,
 )
-instantiate_device_type_tests(TestTransformFailure, globals(), only_for=only_for)
-instantiate_device_type_tests(TestRandomness, globals(), only_for=only_for)
+instantiate_device_type_tests(
+    TestTransformFailure, globals(), only_for=only_for, allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestRandomness, globals(), only_for=only_for, allow_xpu=True
+)
 instantiate_device_type_tests(TestVmapDeviceType, globals(), only_for=only_for)
 instantiate_device_type_tests(TestVmapNestedTensor, globals(), only_for=only_for)
 

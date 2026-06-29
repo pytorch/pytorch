@@ -745,7 +745,9 @@ class TestNNInitDeviceType(TestCase):
         self._run_init_test(device, zero_element=True)
 
 
-instantiate_device_type_tests(TestNNInitDeviceType, globals())
+instantiate_device_type_tests(
+    TestNNInitDeviceType, globals(), allow_xpu=True
+)
 
 
 if __name__ == "__main__":

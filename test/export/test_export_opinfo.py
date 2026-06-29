@@ -11,9 +11,8 @@ import torch
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    onlyCUDA,
+    onlyOn,
     ops,
-    skip,
     skipOps,
     xfail,
 )
@@ -22,7 +21,6 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     IS_WINDOWS,
     run_tests,
-    skipIfRocm,
     TestCase,
 )
 from torch.utils import _pytree as pytree
@@ -77,11 +75,11 @@ fake_decomposition_failures = {
 }
 
 
-def _test_export_helper(self, dtype, op):
+def _test_export_helper(self, device, dtype, op):
     sample_inputs_itr = op.sample_inputs("cpu", dtype, requires_grad=False)
 
     mode = FakeTensorMode(allow_non_fake_inputs=True)
-    target_device = "cuda:0"
+    target_device = f"{device}:0"
 
     def to_fake_device(x):
         return x.to(target_device)
@@ -125,7 +123,7 @@ class TestExportOpInfo(TestCase):
     @skipOps(export_failures | fake_export_failures)
     @unittest.skipIf(IS_FBCODE, "tests broken with unexpected successes internally")
     def test_fake_export(self, device, dtype, op):
-        _test_export_helper(self, dtype, op)
+        _test_export_helper(self, device, dtype, op)
 
 
 instantiate_device_type_tests(TestExportOpInfo, globals(), only_for="cpu")
@@ -144,17 +142,22 @@ selected_op_db = [op for op in op_db if op.name in selected_ops]
 
 
 class TestExportOnFakeCuda(TestCase):
-    # In CI, this test runs on a CUDA machine with cuda build
-    # We set CUDA_VISIBLE_DEVICES="" to simulate a CPU machine with cuda build
+    # In CI, this test runs on a CUDA/XPU machine with corresponding build
+    # We set CUDA_VISIBLE_DEVICES="" or ZE_AFFINITY_MASK="" to simulate a CPU machine
     # Running this on all ops in op_db is too slow, so we only run on a selected subset
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @unittest.skipIf(
         IS_WINDOWS,
-        'Subprocess with CUDA_VISIBLE_DEVICES="" imports op_db which triggers '
+        'Subprocess with env vars set imports op_db which triggers '
         "get_device_capability(); 0 devices raises Invalid device id on Windows.",
     )
     @ops(selected_op_db, allowed_dtypes=(torch.float,))
     def test_fake_export(self, device, dtype, op):
+        device_type = torch.accelerator.current_accelerator().type
+        env_var_name = {
+            "cuda": "CUDA_VISIBLE_DEVICES",
+            "xpu": "ZE_AFFINITY_MASK",
+        }[device_type]
         test_script = f"""\
 import torch
 import itertools
@@ -170,7 +173,7 @@ for op in ops:
 
     mode = FakeTensorMode(allow_non_fake_inputs=True)
 
-    target_device = "cuda:0"
+    target_device = "{device_type}:0"
 
     def to_fake_device(x):
         return x.to(target_device)
@@ -210,7 +213,7 @@ for op in ops:
             (
                 subprocess.check_output(
                     [sys.executable, "-c", test_script],
-                    env={"CUDA_VISIBLE_DEVICES": ""},
+                    env={f"{env_var_name}": ""},
                 )
             )
             .decode("ascii")
@@ -218,12 +221,17 @@ for op in ops:
         )
         self.assertEqual(r, "")
 
-    @unittest.skipIf(not torch.backends.cuda.is_built(), "requires CUDA build")
+    @onlyOn(["cuda", "xpu"])
     @unittest.skipIf(
         IS_WINDOWS,
         "Failing on Windows, device_count() changes from 0 to 1 ",
     )
     def test_preserve_original_behavior(self):
+        device_type = torch.accelerator.current_accelerator().type
+        env_var_name = {
+            "cuda": "CUDA_VISIBLE_DEVICES",
+            "xpu": "ZE_AFFINITY_MASK",
+        }[device_type]
         test_script = f"""\
 import torch
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
@@ -233,32 +241,32 @@ def cuda_calls_behavior_unchanged():
 
     try:
         cpu_x = torch.randn(2)
-        cuda_x = cpu_x.to("cuda")
+        cuda_x = cpu_x.to("{device_type}")
     except Exception as e:
         exception_count += 1
 
     try:
-        torch.randn(2, device="cuda")
+        torch.randn(2, device="{device_type}")
     except Exception as e:
         exception_count += 1
 
     try:
-        torch.cuda.get_device_capability()
+        torch.accelerator.get_device_capability()
     except Exception as e:
         exception_count += 1
 
     try:
-        torch.cuda.set_device(1)
+        torch.accelerator.set_device_index(1)
     except Exception as e:
         exception_count += 1
 
     try:
-        torch.cuda.current_device()
+        torch.accelerator.current_device_index()
     except Exception as e:
         exception_count += 1
 
-    assert torch.cuda.is_available() == False
-    assert torch.cuda.device_count() == 0
+    assert torch.accelerator.is_available() == False
+    assert torch.accelerator.device_count() == 0
     assert exception_count == 5
 
 cuda_calls_behavior_unchanged()
@@ -266,9 +274,9 @@ cuda_calls_behavior_unchanged()
 cpu_x = torch.randn(2)
 with FakeTensorMode(allow_non_fake_inputs=True) as mode:
     cuda_x = mode.from_tensor(cpu_x)
-    cuda_x.fake_device = torch.device("cuda")
+    cuda_x.fake_device = torch.device("{device_type}")
     cuda_y = cuda_x + cuda_x
-    assert cuda_y.device.type == "cuda"
+    assert cuda_y.device.type == "{device_type}"
 
 # should fail again after exiting the fake mode, with the identical error message
 cuda_calls_behavior_unchanged()
@@ -277,7 +285,7 @@ cuda_calls_behavior_unchanged()
             (
                 subprocess.check_output(
                     [sys.executable, "-c", test_script],
-                    env={"CUDA_VISIBLE_DEVICES": ""},
+                    env={f"{env_var_name}": ""},
                 )
             )
             .decode("ascii")
@@ -286,7 +294,9 @@ cuda_calls_behavior_unchanged()
         self.assertEqual(r, "")
 
 
-instantiate_device_type_tests(TestExportOnFakeCuda, globals(), only_for="cuda")
+instantiate_device_type_tests(
+    TestExportOnFakeCuda, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+)
 
 
 if __name__ == "__main__":

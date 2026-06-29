@@ -1675,7 +1675,7 @@ for doc_test in FFTDocTestFinder().find(torch.fft, globs=dict(torch=torch)):
     generate_doc_test(doc_test)
 
 
-instantiate_device_type_tests(TestFFT, globals())
+instantiate_device_type_tests(TestFFT, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestFFTDocExamples, globals(), only_for='cpu')
 
 if __name__ == '__main__':
