@@ -80,122 +80,6 @@ def _deref_cstr(ptr: int) -> str:
     return value.decode(errors="replace") if value is not None else ""
 
 
-class CuptiMonitorBuffer:
-    """A completed CUPTI buffer (the item from ``_cupti_monitor.get_completed()``)
-    plus the record layout CUPTI captured for it. Owns the buffer for its lifetime:
-    it returns the buffer to the native pool on destruction (RAII), so the worker
-    loop never has to. ``decode()`` demuxes its records columnar against the captured
-    layout."""
-
-    def __init__(self, item: tuple) -> None:
-        # Bind _returned first so __del__ is safe even if unpacking fails.
-        self._returned = False
-        self.buffer_ptr, self.valid_size, self.ctx, self.stream, self.layouts = item
-
-    def __del__(self) -> None:
-        if not self._returned:
-            self._returned = True
-            _cupti_monitor_native.return_buffer(self.buffer_ptr)
-
-    def decode(self) -> dict[int, dict[int, Any]]:
-        """Demux this buffer into ``{kind: {field_id: column}}`` against the record
-        layout CUPTI captured for it (``self.layouts``: ``[(kind, record_size,
-        [(field_id, offset, size), ...]), ...]``). Every field in the layout is
-        decoded -- the layout holds exactly the enabled selection (the observers'
-        field union), so there is nothing extra to filter (the per-observer slice
-        happens in dispatch).
-
-        Records begin with *_FIELD_KIND (id 0, a 4-byte kind) at offset 0 and are
-        sized by their kind's record_size. Three strategies, fastest first: one kind
-        -> homogeneous stride; uniform size -> stride + dispatch by the KIND column;
-        variable size -> per-record walk (CUPTI records aren't self-synchronizing).
-        A bounds guard drops any trailing record that would run past valid_size."""
-        buffer_ptr, valid_size, record_layouts = (
-            self.buffer_ptr,
-            self.valid_size,
-            self.layouts,
-        )
-        # kind -> (record_size, {field_id: (offset, size)}).
-        layouts: dict[int, tuple[int, dict[int, tuple[int, int]]]] = {}
-        for kind, rsz, fields in record_layouts:
-            if rsz > 0:
-                layouts[kind] = (rsz, {fid: (off, sz) for fid, off, sz in fields})
-        if not layouts or valid_size == 0:
-            return {}
-
-        raw = np.ctypeslib.as_array(
-            (ctypes.c_uint8 * valid_size).from_address(buffer_ptr)
-        )
-
-        rszs = {rsz for rsz, _ in layouts.values()}
-        positions: dict[int, Any] = {}
-        if len(layouts) == 1:
-            ((kind, (rsz, _)),) = layouts.items()
-            n = valid_size // rsz
-            if n:
-                positions[kind] = np.arange(n, dtype=np.int64) * rsz
-        elif len(rszs) == 1:
-            rsz = next(iter(rszs))
-            n = valid_size // rsz
-            if n:
-                starts = np.arange(n, dtype=np.int64) * rsz
-                kinds_col = (
-                    raw[starts[:, None] + np.arange(4)].copy().view("<u4").ravel()
-                )
-                for kind in layouts:
-                    sel = starts[kinds_col == kind]
-                    if sel.size:
-                        positions[kind] = sel
-        else:
-            pos_lists: dict[int, list[int]] = {k: [] for k in layouts}
-            pos = 0
-            while pos + 4 <= valid_size:
-                kind = int(raw[pos : pos + 4].view("<u4")[0])
-                ent = layouts.get(kind)
-                if ent is None:
-                    break  # unknown kind: can't size it, stop
-                pos_lists[kind].append(pos)
-                pos += ent[0]
-            positions = {
-                k: np.array(v, dtype=np.int64) for k, v in pos_lists.items() if v
-            }
-
-        # Bounds guard: only decode records that fully fit in the valid region.
-        for kind in list(positions):
-            rsz = layouts[kind][0]
-            fitted = positions[kind][positions[kind] + rsz <= valid_size]
-            if len(fitted):
-                positions[kind] = fitted
-            else:
-                del positions[kind]
-
-        out: dict[int, dict[int, Any]] = {}
-        for kind, pos_arr in positions.items():
-            fields = layouts[kind][1]
-            str_fields = STRING_FIELDS.get(kind, frozenset())
-            cols: dict[int, Any] = {}
-            for fid, (off, size) in fields.items():
-                if fid in str_fields and size == 8:
-                    # const char* field: deref each pointer to a str now.
-                    ptrs = (
-                        raw[pos_arr[:, None] + np.arange(off, off + 8)]
-                        .copy()
-                        .view("<u8")
-                        .ravel()
-                    )
-                    cols[fid] = np.array(
-                        [_deref_cstr(int(p)) for p in ptrs], dtype=object
-                    )
-                    continue
-                if size not in (1, 2, 4, 8):
-                    continue
-                idx = pos_arr[:, None] + np.arange(off, off + size)
-                cols[fid] = raw[idx].copy().view(f"<u{size}").ravel()
-            if cols:
-                out[kind] = cols
-        return out
-
-
 class _Observer:
     """A registered consumer of the monitor's records: the activity kinds it
     requested, its per-kind field selection (``{kind: frozenset(field_ids)}``), and
@@ -965,8 +849,7 @@ class CuptiMonitor:
     ) -> dict[int, Any]:
         """Turn one native group's ``{field_id: (field_size, bytes)}`` into
         ``{field_id: column}``: numeric fields are viewed as ``<u{size}``; const
-        char* (string) fields are dereferenced to str. Mirrors the strategy in
-        ``CuptiMonitorBuffer.decode`` (the Python reference decoder)."""
+        char* (string) fields are dereferenced to str."""
         str_fields = STRING_FIELDS.get(kind, frozenset())
         cols: dict[int, Any] = {}
         for fid, (size, raw) in fields.items():
@@ -975,8 +858,7 @@ class CuptiMonitor:
                 cols[fid] = np.array([_deref_cstr(int(p)) for p in ptrs], dtype=object)
             elif size in (1, 2, 4, 8):
                 # .copy() so the column is writable and owns its memory (the
-                # frombuffer view is read-only over the transient bytes), matching
-                # CuptiMonitorBuffer.decode's contract.
+                # frombuffer view is read-only over the transient bytes).
                 cols[fid] = np.frombuffer(raw, dtype=f"<u{size}").copy()
         return cols
 
