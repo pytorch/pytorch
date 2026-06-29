@@ -1499,7 +1499,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 ind = register_graph_created_object(
                     stream,
                     StreamVariable.make_construct_in_graph_stream_fn(
-                        var_args, var_kwargs
+                        var_args, var_kwargs, self.value
                     ),
                 )
                 tensor_variable = wrap_fx_proxy(
@@ -1526,7 +1526,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 ind = register_graph_created_object(
                     event,
                     EventVariable.make_construct_in_graph_event_fn(
-                        var_args, var_kwargs
+                        var_args, var_kwargs, self.value
                     ),
                 )
                 tensor_variable = wrap_fx_proxy(
