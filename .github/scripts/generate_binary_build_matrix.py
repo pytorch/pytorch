@@ -317,7 +317,7 @@ WHEEL_CONTAINER_IMAGES = {
 # inside these containers, so only those images are pinned. s390x is excluded:
 # its builder images are built locally on self-hosted runners and never published
 # to docker.io under the pinned tag, so pinning it breaks the image pull.
-DOCKER_IMAGE_PIN = "f38ba0b10220982e39441d29d203d803a2b56c92"
+DOCKER_IMAGE_PIN = "78e737ad29420ffc4800e677c51e2a852caf8359"
 MANYWHEEL_OSES = ("linux", "linux-aarch64")
 
 
