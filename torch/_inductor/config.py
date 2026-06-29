@@ -1829,11 +1829,6 @@ class triton:
     Config specific to codegen/triton.py
     """
 
-    # Select the two-pass variance algorithm for CUDA inputs whose total input
-    # working set is no larger than this fraction of the device L2 cache.
-    # Set to 0 to disable the L2-aware heuristic.
-    two_pass_variance_l2_fraction = 0.5
-
     # Use cudagraphs on output code
     cudagraphs = os.environ.get("TORCHINDUCTOR_CUDAGRAPHS") == "1"
 
@@ -1863,6 +1858,15 @@ class triton:
 
     # Emit objgraph backref dumps for leaked cudagraph pool tensors
     cudagraph_trees_objgraph = False
+
+    # Which live cudagraph tree storages to clone before starting a new
+    # generation. None keeps the existing stale-output error behavior.
+    # "user_visible" clones live user-visible output storages out of
+    # the graph pool. Backward graph outputs are not selected for cloning.
+    # This mode can add overhead because live outputs that cross generations
+    # are explicitly copied and stop using cached TensorImpl outputs. Users
+    # can leave this unset and manually clone/copy those outputs instead.
+    cudagraph_trees_generation_cloning: Literal["user_visible"] | None = None
 
     # Enable cudagraph support for mutated inputs from prior cudagraph pool
     cudagraph_support_input_mutation = not is_fbcode()

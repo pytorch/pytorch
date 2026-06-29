@@ -802,14 +802,16 @@ id<MTLLibrary> MetalShaderLibrary::getLibrary() {
 
 id<MTLLibrary> MetalShaderLibrary::getLibrary(const std::initializer_list<std::string>& params) {
   TORCH_INTERNAL_ASSERT(nparams == params.size());
-  std::string key = "";
-  for (auto p : params) {
-    key += ":" + p;
+  std::string key;
+  for (const auto& p : params) {
+    key += ':';
+    key += p;
   }
-  auto lib = libMap[key];
-  if (lib) {
-    return lib;
+  auto found_lib = libMap.find(key);
+  if (found_lib != libMap.end()) {
+    return found_lib->second;
   }
+  id<MTLLibrary> lib = nil;
   auto it = params.begin();
   switch (nparams) {
     case 1:
@@ -831,7 +833,7 @@ id<MTLLibrary> MetalShaderLibrary::getLibrary(const std::initializer_list<std::s
     default:
       TORCH_INTERNAL_ASSERT(false, "Unsupported number of parameters ", nparams);
   }
-  return libMap[key] = lib;
+  return libMap.try_emplace(std::move(key), lib).first->second;
 }
 
 id<MTLLibrary> MetalShaderLibrary::compileLibrary(const std::string& src) {
@@ -878,7 +880,7 @@ id<MTLLibrary> MetalShaderLibrary::compileLibrary(const std::string& src) {
 std::pair<id<MTLComputePipelineState>, id<MTLFunction>> MetalShaderLibrary::getLibraryPipelineState(
     id<MTLLibrary> lib,
     const std::string& fname) {
-  const auto key = fmt::format("{}:{}", reinterpret_cast<void*>(lib), fname);
+  auto key = fmt::format("{}:{}", reinterpret_cast<void*>(lib), fname);
   auto found_cpl = cplMap.find(key);
   if (found_cpl != cplMap.end()) {
     return found_cpl->second;
@@ -890,8 +892,7 @@ std::pair<id<MTLComputePipelineState>, id<MTLFunction>> MetalShaderLibrary::getL
   auto cpl = [[lib device] newComputePipelineStateWithFunction:func error:&error];
   TORCH_CHECK(cpl, "Failed to created pipeline state object, error: ", [[error description] UTF8String]);
 
-  cplMap[key] = std::make_pair(cpl, func);
-  return cplMap[key];
+  return cplMap.try_emplace(std::move(key), cpl, func).first->second;
 }
 
 bool MetalShaderLibrary::hasFunction(const std::string& fname) {
@@ -936,10 +937,7 @@ MetalKernelFunction* MetalShaderLibrary::getCachedKernelFunctionPtr(const std::s
   // Create new kernel function and cache it
   auto [cpl, func] = getLibraryPipelineState(getLibrary(), name);
   auto kernel = std::make_unique<MetalKernelFunction>(cpl, func);
-  MetalKernelFunction* raw_ptr = kernel.get();
-  kernelCache[name] = std::move(kernel);
-
-  return raw_ptr;
+  return kernelCache.try_emplace(name, std::move(kernel)).first->second.get();
 }
 
 class BundledShaderLibrary : public MetalShaderLibrary {

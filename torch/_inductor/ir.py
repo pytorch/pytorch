@@ -8071,6 +8071,38 @@ class MutationOutput(Buffer):
         ]
 
 
+class OrderingBarrier(NopKernel):
+    """A no-op that creates a rename chain for scheduling order.
+
+    Takes a source buffer and produces a new buffer name. The scheduler
+    sees this as a node with a rename (source -> self), so future readers
+    of the source are redirected through this barrier.
+
+    Uses WeakDep(is_fake=True) instead of StarDep via the ``ordering_only``
+    flag, avoiding lifetime extension and mark_buffer_mutated side effects.
+    No kernel is generated and no allocation occurs.
+    """
+
+    ordering_only = True
+
+    def __init__(self, source_node: IRNode) -> None:
+        source_node.realize()
+        super().__init__(
+            name=None,
+            layout=NoneLayout(device=source_node.get_device()),
+            inputs=[source_node],
+        )
+        self.mutation_names = [source_node.get_name()]
+        self.name = V.graph.register_buffer(self)
+        V.graph.register_operation(self)
+
+    def get_mutation_names(self) -> Sequence[str]:
+        return self.mutation_names
+
+    def should_allocate(self) -> bool:
+        return False
+
+
 class TMADescriptor(ExternKernel):
     """
     An IR node representing a generic host-side TMA descriptor in the Triton API
@@ -8741,6 +8773,31 @@ class SetSourceTensorKernel(ExternKernelAlloc):
             storage_tensor.get_layout(),
             [self_tensor, storage_tensor],
             python_kernel_name="torch.ops.aten.set_.source_Tensor",
+            op_overload=torch.ops.aten.set_.source_Tensor,
+        )
+        if not isinstance(self_tensor, (BaseView, StorageBox, TensorBox)):
+            raise AssertionError(type(self_tensor))
+        V.graph.never_reuse_buffers.add(self_tensor.data.get_name())
+        V.graph.never_reuse_buffers.add(storage_tensor.get_name())
+        V.graph.never_reuse_buffers.add(self.get_name())
+        device = storage_tensor.get_device()
+        self.mutation_outputs = [
+            MutationOutput(NoneLayout(device=device), self_tensor, self),
+            MutationOutput(NoneLayout(device=device), storage_tensor, self),
+        ]
+
+    def get_inputs_that_alias_output(self) -> Sequence[str]:
+        return [self.input_name(0), self.input_name(1)]
+
+
+class ShallowCopyDataKernel(ExternKernelAlloc):
+    def __init__(self, self_tensor: IRNode, storage_tensor: IRNode) -> None:
+        storage_tensor = self.realize_input(storage_tensor)
+        storage_tensor.freeze_layout()
+        super().__init__(
+            storage_tensor.get_layout(),
+            [self_tensor, storage_tensor],
+            python_kernel_name="torch.ops.aten.shallow_copy_data_",
             op_overload=torch.ops.aten.set_.source_Tensor,
         )
         if not isinstance(self_tensor, (BaseView, StorageBox, TensorBox)):

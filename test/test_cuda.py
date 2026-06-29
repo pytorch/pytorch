@@ -189,6 +189,14 @@ def get_wait_for_cpu_kernel():
     return _wait_for_cpu_kernel
 
 
+def _check_allocator_settings_on_tear_down(test_case):
+    # Regression check: no test in `test_case` should leave the runtime
+    # expandable_segments knob mismatched against the suite's env-derived
+    # baseline. This should be called in the class's `tearDown` method.
+    md = torch.cuda.memory._snapshot()["allocator_settings"]
+    test_case.assertEqual(md["expandable_segments"], EXPANDABLE_SEGMENTS)
+
+
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCuda(TestCase):
@@ -5250,11 +5258,7 @@ class TestResizeStorageWithAddr(TestCase):
 class TestCudaAllocator(TestCase):
     def tearDown(self):
         super().tearDown()
-        # Regression check: no test in this class should leave the runtime
-        # expandable_segments knob mismatched against the suite's env-derived
-        # baseline. This is the only class that toggles it.
-        md = torch.cuda.memory._snapshot()["allocator_settings"]
-        self.assertEqual(md["expandable_segments"], EXPANDABLE_SEGMENTS)
+        _check_allocator_settings_on_tear_down(self)
 
     @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
@@ -7174,6 +7178,10 @@ class TestCachingHostAllocatorCudaGraph(TestCase):
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 class TestMemPool(TestCase):
+    def tearDown(self):
+        super().tearDown()
+        _check_allocator_settings_on_tear_down(self)
+
     def _setup_mempool_limited_memory_test(self, additional_allowed_memory_in_mb):
         device = torch.device("cuda:0")
 
@@ -8662,7 +8670,11 @@ class TestMemPool(TestCase):
             self._check_reserved_bytes_by_private_pools()
         finally:
             torch.cuda.empty_cache()
-            torch.cuda.memory._set_allocator_settings("")
+            # Test toggles expandable_segments internally; restore the
+            # suite's baseline so subsequent tests see consistent state.
+            torch.cuda.memory._set_allocator_settings(
+                f"expandable_segments:{EXPANDABLE_SEGMENTS}"
+            )
 
     @skipIfRocm(msg="cudaMallocManaged (UVM) is not supported on ROCm")
     @unittest.skipIf(

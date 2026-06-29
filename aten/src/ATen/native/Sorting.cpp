@@ -285,17 +285,35 @@ Tensor quantile_compute(
   in_shape[in_shape.size() - 1] = sorted.sym_size(-1);
   sorted = sorted.view_symint(in_shape);
 
-  // Ensure converting from int64_t to double won't overflow
+  // quantile maps q to ranks via q * (size - 1), rounded to gather indices, so
+  // size must be exactly representable in the rank dtype. float32 reaches only
+  // 2^24, so ranks use double (exact to 2^53) where it exists; MPS has no
+  // double, so float32 there keeps float32 ranks and the 2^24 cap.
+  TORCH_INTERNAL_ASSERT(
+      self.scalar_type() == kFloat || self.scalar_type() == kDouble,
+      "quantile() rank computation assumes a float or double input");
+  const bool double_ranks =
+      self.scalar_type() == kDouble || self.device().type() != kMPS;
+  const auto rank_dtype = double_ranks ? kDouble : self.scalar_type();
+  const int64_t max_size = double_ranks
+      ? (1LL << std::numeric_limits<double>::digits)
+      : (1LL << std::numeric_limits<float>::digits);
   TORCH_SYM_CHECK(
-      sorted.sym_size(-1).sym_le(1 << 24),
-      "quantile() input tensor is too large");
+      sorted.sym_size(-1).sym_le(max_size),
+      "quantile() input tensor is too large for ",
+      self.scalar_type(),
+      " dtype: the dimension being reduced has ",
+      sorted.sym_size(-1),
+      " elements but at most ",
+      max_size,
+      " are supported");
 
   // Convert q in [0, 1] to ranks in [0, reduction_size)
   Tensor ranks;
   if (ignore_nan) {
     // For nanquantile, compute ranks based on number of non-nan values.
     // If all values are nan, set rank to 0 so the quantile computed is nan.
-    ranks = q * (sorted.isnan().logical_not_().sum(-1, true) - 1);
+    ranks = q.to(rank_dtype) * (sorted.isnan().logical_not_().sum(-1, true) - 1);
     // For Composite Compliance,
     // if `ranks` is `CCT` but it's tangent is a regular Tensor,
     // then while computing jvp, we end calling `masked_fill_`
@@ -310,8 +328,8 @@ Tensor quantile_compute(
     // For quantile, compute ranks based on reduction size. If there is nan
     // set rank to last index so the quantile computed will be nan.
     auto last_index = sorted.sym_size(-1) - 1;
-    std::vector<Tensor> tl =
-        at::broadcast_tensors({q * last_index, sorted.isnan().any(-1, true)});
+    std::vector<Tensor> tl = at::broadcast_tensors(
+        {q.to(rank_dtype) * last_index, sorted.isnan().any(-1, true)});
     ranks = at::masked_fill(tl[0], tl[1], last_index);
   }
 
@@ -331,9 +349,11 @@ Tensor quantile_compute(
   if (interpolation == QUANTILE_INTERPOLATION_MODE::LINEAR ||
       interpolation == QUANTILE_INTERPOLATION_MODE::MIDPOINT) {
     // calculate weights for linear and midpoint
+    // ranks may be double while values stay float32; the lerp weight must match
+    // the value dtype or the interpolation upcasts the output.
     Tensor weights = interpolation == QUANTILE_INTERPOLATION_MODE::MIDPOINT
-        ? at::full_like(ranks, 0.5)
-        : ranks - ranks_below;
+        ? at::full_like(ranks, 0.5, self.options())
+        : (ranks - ranks_below).to(self.scalar_type());
 
     // Interpolate to compute quantiles and store in values_below
     Tensor ranks_above = ranks.ceil_().toType(kLong);

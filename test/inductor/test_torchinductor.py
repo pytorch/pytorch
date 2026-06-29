@@ -82,7 +82,6 @@ from torch.testing._internal.common_cuda import (
     TEST_CUDNN,
     tf32_on_and_off,
     with_tf32_off,
-    xfailIfSM100OrLater,
 )
 from torch.testing._internal.common_device_type import (
     expectedFailureXPU,
@@ -18608,6 +18607,25 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 check_lowp=False,
             )
 
+    @requires_gpu()
+    @skip_if_cpp_wrapper("cross-device shallow_copy_data_ not in AOTI shim")
+    def test_tensor_set_data_cross_device(self):
+        def func(x):
+            x.data = x.data.to(self.device)
+            return x + 1
+
+        x_eager = torch.randn(4, device="cpu")
+        x_compiled = x_eager.clone()
+
+        out_eager = func(x_eager)
+        torch._dynamo.reset()
+        out_compiled = torch.compile(func, backend="inductor", fullgraph=True)(
+            x_compiled
+        )
+
+        self.assertEqual(out_eager, out_compiled)
+        self.assertEqual(x_eager.device, x_compiled.device)
+
     # end of class CommonTemplate - add new tests here
 
 
@@ -18799,10 +18817,6 @@ if RUN_GPU:
 
             return kernels
 
-        # On Blackwell+, #179729 raised the split-reduction no-split threshold to 524288,
-        # so the 256*256=65536-element reduction below no longer splits and produces 1 kernel
-        # instead of the expected 2.
-        @xfailIfSM100OrLater
         def test_divisible_by_16_covers_numel_args(self):
             torch._dynamo.reset()
 

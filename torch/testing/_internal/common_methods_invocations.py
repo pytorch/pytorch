@@ -14667,12 +14667,23 @@ op_db: list[OpInfo] = [
            supports_out=False),
     OpInfo('sparse.sampled_addmm',
            dtypes=floating_and_complex_types(),
+           # CUDA forward supports float16 (native cuSPARSE SDDMM) and bfloat16
+           # (computed in float32; cuSPARSE has no bf16 SDDMM kernel). Backward
+           # routes through cuSPARSE SpMM: float16 needs CC >= 5.3, bfloat16 needs
+           # CC >= 8.0, and ROCm's hipSPARSE SpMM implements neither dtype.
+           dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+           backward_dtypesIfCUDA=floating_and_complex_types_and(
+               *([torch.half] if not TEST_WITH_ROCM else []),
+               *([torch.bfloat16] if SM80OrLater and not TEST_WITH_ROCM else [])),
            supports_autograd=True,
            sample_inputs_func=sample_inputs_sparse_sampled_addmm,
            decorators=[
                skipCPUIfNoMklSparse,
                skipXPU],
            skips=(
+               # Reduced-precision sampled_addmm needs CC >= 5.3 (cuSPARSE SDDMM);
+               # skip the dtype check on older CUDA arches that have no CI runner.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type='cuda', active_if=not SM53OrLater),
                # NotImplementedError: Tensors of type SparseCsrTensorImpl do not have is_contiguous
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_noncontiguous_samples'),
                # RuntimeError: Sparse CSR tensors do not have strides.
@@ -16312,9 +16323,6 @@ op_db: list[OpInfo] = [
            aten_name='native_batch_norm',
            dtypes=floating_types_and(torch.float16, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
-           dtypesIfMPS=floating_types_and(
-               torch.float16, torch.bfloat16, torch.uint8, torch.bool, torch.int8, torch.int16, torch.int32
-           ),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
@@ -16367,10 +16375,6 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu'),
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-5)}),
                             "TestCompositeCompliance", "test_forward_ad"),
-               # The following dtypes worked in forward but are not listed by
-               # the OpInfo: {torch.uint8, torch.bool, torch.int8, torch.int16,
-               # torch.int32}.
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
                # FIXME: AssertionError: The values for attribute 'shape' do not match
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
@@ -16408,10 +16412,6 @@ op_db: list[OpInfo] = [
                # aten out variants do not accept out= kwarg, only python out variants
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
-               # The following dtypes worked in forward but are not listed by
-               # the OpInfo: {torch.uint8, torch.bool, torch.int8, torch.int16,
-               # torch.int32}.
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
            )
            ),
     OpInfo('nn.functional.cosine_similarity',
@@ -18516,9 +18516,6 @@ op_db: list[OpInfo] = [
     OpInfo('nn.functional.batch_norm',
            aten_name='batch_norm',
            dtypes=floating_types_and(torch.float16, torch.bfloat16),
-           dtypesIfMPS=floating_types_and(
-               torch.float16, torch.bfloat16, torch.uint8, torch.bool, torch.int8, torch.int16, torch.int32
-           ),
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -23520,8 +23517,6 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.skip("Fails with ASAN"),
                          'TestProxyTensorOpInfo',
                          'test_make_fx_fake_exhaustive', active_if=TEST_WITH_ASAN),
-            # NotImplementedError: The operator 'aten::_ctc_loss' is not currently implemented for the MPS device
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps'),
         ),
     ),
     OpInfo(
