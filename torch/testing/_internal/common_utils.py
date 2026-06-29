@@ -1366,7 +1366,7 @@ class HardwareClassificationTestLoader(unittest.TestLoader):
         suite = super().loadTestsFromModule(
             module, *args, pattern=pattern, **kwargs
         )
-        return _filter_suite_by_hw_classification(suite,self.hw_classification)
+        return _filter_suite_by_hw_classification(suite, self.hw_classification)
 
 
 def run_tests(argv=None):

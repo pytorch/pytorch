@@ -2690,12 +2690,10 @@ class TestHardwareClassifications(TestCase):
             ]
         )
 
-        with unittest.mock.patch.object(
-            self._cu,
-            "HW_CLASSIFICATION",
+        filtered_suite = self._cu._filter_suite_by_hw_classification(
+            suite,
             {self._cu.HardwareClassification.GENERIC},
-        ):
-            filtered_suite = self._cu._filter_suite_by_hw_classification(suite)
+        )
 
         self.assertEqual(
             self._suite_test_names(filtered_suite),
@@ -2713,12 +2711,10 @@ class TestHardwareClassifications(TestCase):
                 pass
 
         suite = unittest.defaultTestLoader.loadTestsFromTestCase(DeviceGenericChild)
-        with unittest.mock.patch.object(
-            self._cu,
-            "HW_CLASSIFICATION",
+        filtered_suite = self._cu._filter_suite_by_hw_classification(
+            suite,
             {self._cu.HardwareClassification.DEVICE_GENERIC},
-        ):
-            filtered_suite = self._cu._filter_suite_by_hw_classification(suite)
+        )
 
         self.assertEqual(
             self._suite_test_names(filtered_suite),
@@ -2756,13 +2752,8 @@ class TestHardwareClassifications(TestCase):
         mod.GenericB = GenericB
         mod.Cuda = Cuda
 
-        loader = self._cu.HardwareClassificationTestLoader()
-        with unittest.mock.patch.object(
-            self._cu,
-            "HW_CLASSIFICATION",
-            {requirement.GENERIC},
-        ):
-            suite = loader.loadTestsFromModule(mod)
+        loader = self._cu.HardwareClassificationTestLoader({requirement.GENERIC})
+        suite = loader.loadTestsFromModule(mod)
 
         self.assertEqual(
             self._suite_test_names(suite),
@@ -2788,9 +2779,8 @@ class TestHardwareClassifications(TestCase):
         mod.GenericA = GenericA
         mod.Cuda = Cuda
 
-        loader = self._cu.HardwareClassificationTestLoader()
-        with unittest.mock.patch.object(self._cu, "HW_CLASSIFICATION", None):
-            suite = loader.loadTestsFromModule(mod)
+        loader = self._cu.HardwareClassificationTestLoader(None)
+        suite = loader.loadTestsFromModule(mod)
 
         self.assertEqual(self._suite_test_names(suite), {"test_a", "test_b"})
 
