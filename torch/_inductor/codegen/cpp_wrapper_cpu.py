@@ -3180,8 +3180,21 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 return type_supported(t.getElementType())
             return isinstance(t, supported_types)
 
+        def uses_symint(t: torch.JitType) -> bool:
+            # SymInt/SymBool/SymFloat are reported as Int/Bool/Float by
+            # JitType.type, so they pass type_supported above.  But the
+            # StableIValue codegen below emits no symbolic-int-aware conversion,
+            # so route such ops to the boxed dispatch path, which handles
+            # c10::SymInt correctly.  real_type preserves the symbolic types.
+            if isinstance(t, (torch.OptionalType, torch.ListType)):
+                return uses_symint(t.getElementType())
+            return (
+                isinstance(t, (torch.SymIntType, torch.SymBoolType))
+                or repr(t) == "SymFloat"
+            )
+
         return all(
-            type_supported(a.type)
+            type_supported(a.type) and not uses_symint(a.real_type)
             for a in chain(op._schema.arguments, op._schema.returns)
         )
 
