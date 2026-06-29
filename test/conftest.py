@@ -113,14 +113,13 @@ class HardwareClassificationPytestPlugin:
         filtered = []
         for item in items:
             # hw_classification is a class-level attribute. Function-based tests
-            # do not have item.cls and are therefore not filtered.
+            # do not have item.cls and are therefore filtered.
             cls = getattr(item, "cls", None)
             if cls is not None:
                 req = _cu._get_hw_classification(cls)
                 if req is not None and req in self.requirement:
                     filtered.append(item)
-            else:
-                filtered.append(item)
+
         items[:] = filtered
 
 
