@@ -18,9 +18,8 @@ from ...select_algorithm import (
     SymbolicGridFn,
     TritonTemplate,
 )
-from ...utils import can_use_tma, use_triton_tdm_template
+from ...utils import can_use_tma
 from .common import (
-    apply_tdm_num_stages,
     create_indices_fake,
     create_num_blocks_fake_generator,
     freeze_irnodes,
@@ -354,15 +353,6 @@ def create_flex_decoding_kernel(*args, **kwargs):
 
         if cur_kernel_options["USE_TMA"] and not can_use_tma(query, key, value):
             cur_kernel_options["USE_TMA"] = False
-
-        # For gfx1250 TDM, ensure the non-TMA path uses enough pipeline stages
-        # to trigger TDM async copies in Triton's AMD backend (TTGIR pipelining pass).
-        # Standard attention block sizes (64, 128, 256) with FP16/BF16
-        # produce 128B aligned tiles and are compatible.
-        if not cur_kernel_options["USE_TMA"] and use_triton_tdm_template(
-            query, key, value
-        ):
-            apply_tdm_num_stages(cur_kernel_options)
 
         # Add ROCm-specific parameters if they exist in the config
         for attrib in ["kpack", "matrix_instr_nonkdim", "waves_per_eu"]:

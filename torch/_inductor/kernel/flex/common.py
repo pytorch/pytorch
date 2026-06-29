@@ -43,15 +43,10 @@ from ...lowering import (
     to_dtype,
 )
 from ...select_algorithm import realize_inputs
-from ...utils import config, load_template
+from ...utils import load_template
 
 
 SubgraphResults = Union[list[Optional[ComputedBuffer]], Optional[ComputedBuffer]]
-
-
-def apply_tdm_num_stages(kernel_options: dict[str, Any]) -> None:
-    kernel_options["num_stages"] = config.tdm.max_outstanding_per_wave
-    kernel_options.pop("NUM_STAGES", None)
 
 
 def zeros_and_scatter_lowering(shape: list[int], indices, values):

@@ -446,20 +446,6 @@ def batch_reserve(paged_attention: PagedAttention, target_seq_len: Tensor):
         )
 
 
-class TestFlexAttentionTDMOptions(InductorTestCase):
-    def test_apply_tdm_num_stages_uses_triton_launch_option(self):
-        from torch._inductor.kernel.flex.common import apply_tdm_num_stages
-
-        kernel_options = {"num_stages": 1, "NUM_STAGES": 4}
-
-        apply_tdm_num_stages(kernel_options)
-
-        self.assertEqual(
-            kernel_options["num_stages"], config.tdm.max_outstanding_per_wave
-        )
-        self.assertNotIn("NUM_STAGES", kernel_options)
-
-
 @large_tensor_test_class("2GB", device=test_device[0])
 class TestFlexAttention(InductorTestCase):
     def setUp(self):

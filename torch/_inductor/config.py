@@ -734,19 +734,6 @@ layout_optimization = (
 
 force_layout_optimization = os.environ.get("TORCHINDUCTOR_FORCE_LAYOUT_OPT", "0") == "1"
 
-# AMD TDM config flag for TDM support for gfx1250, is a configuration gate
-# rather than something that causes TDM instructions to be emitted directly.
-# It's set to control if gfx1250-specific autotuning configs
-# (with larger tile sizes, more pipeline stages) are included
-# in the candidate set during `max_autotune`.
-# When enabled and running on a gfx1250 device, Inductor may emit Triton kernels
-# that leverage TDM for asynchronous global->LDS tensor tile copies.
-# Requires Triton >= 3.6.0 with AMD TDM backend support.
-# Disabled by default on ROCm; TDM is further gated by device arch (gfx1250)
-# in `use_triton_tdm_template()` at codegen time.
-# Set to "0" to disable TDM even on gfx1250 hardware.
-enable_tdm_configs = os.environ.get("TORCHINDUCTOR_ENABLE_TDM_CONFIGS", "0") == "1"
-
 # Whether to keep the output strides the same as eager after layout optimization.
 keep_output_stride = os.environ.get("TORCHINDUCTOR_KEEP_OUTPUT_STRIDE", "1") == "1"
 
@@ -2279,17 +2266,6 @@ class rocm:
 
     # The threshold at which we trigger a contiguous subgraph transformation
     contiguous_threshold: int = 16
-
-
-class tdm:
-    # Maximum outstanding TDM address translations per wave is 4.
-    # For small tiles (e.g., 128x64 FP16), this is the binding constraint.
-    # For larger tiles with 2 waves/SIMD, the SIMD limit of 6 applies.
-    max_outstanding_per_wave: int = 4
-    max_outstanding_per_simd: int = 6
-    # TDM requires 128B/256B aligned contiguous regions
-    # in both global memory and LDS.
-    alignment_bytes: int = 128
 
 
 # Backend to use for CPU codegen either "cpp" or "triton" (experimental) or "halide" (experimental) or "pallas" (experimental)

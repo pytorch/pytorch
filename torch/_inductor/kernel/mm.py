@@ -54,7 +54,6 @@ from ..utils import (
     use_triton_scaling_template,
     use_triton_template,
     use_triton_tma_template,
-    use_triton_tdm_template,
 )
 from .mm_common import (
     _is_static_problem,
@@ -141,39 +140,6 @@ def _append_persistent_mm_template(
     ):
         templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
         return "blackwell_tma"
-    if use_triton_tdm_template(mat1, mat2, output_layout=layout, add_guards=True):
-        # GFX1250 TDM: use the non-TMA persistent template. Triton's AMD backend
-        # automatically inserts TDM instructions when compiling with num_stages > 1.
-        #
-        # TDM hardware constraints (gfx1250):
-        # Documentation-only for now because Triton's pipeliner handles the
-        # wave assignment internally. If Triton exposes wave-specialization
-        # knobs in the future, these comments identify where to hook them.
-        # - 1 TDM unit per SIMD pair (2 SIMDs share 1 TDM unit)
-        # - Max 4 outstanding TDM address translations per wave
-        # - Max 6 outstanding TDM address translations per SIMD
-        # - Recommended: waves specialized to load A or B
-        # - 8 waves/WG (num_warps=8): 4 waves for A, 4 for B
-        # - 4 waves/WG (num_warps=4): 2 waves for A, 2 for B
-        # - All waves can load both A & B. This is preferable for uniform
-        #   unrolling across CUs and helps multicast load latency.
-        # - Do not interleave different TDMs within a wave. Complete one TDM
-        #   instruction's unrolling before switching.
-        #
-        # The persistent template heuristic supplies gfx1250 TDM configs.
-        # Key constraints:
-        # - TDM requests target 128B or 256B aligned contiguous regions in both
-        #   global memory and LDS.
-        # - For FP16: BLOCK_K must be a multiple of 64 (64 * 2B = 128B).
-        # - For FP8/FP4: BLOCK_K must be a multiple of 128 (128 * 1B = 128B).
-        # - For FP32: BLOCK_K must be a multiple of 32 (32 * 4B = 128B).
-        # - BLOCK_M and BLOCK_N should also produce 128B-aligned LDS rows.
-        # TDM is most beneficial for small tiles such as 128x64/64x128 FP16
-        # and 128x128/128x256 FP8 with num_stages=4 (matching the
-        # 4-outstanding-per-wave TDM address translation limit) and
-        # num_warps=4 or 8 (for wave-specialized A/B loading).
-        templates_to_use.append(persistent_mm_template)
-        return "tdm"
     if use_triton_tma_template(mat1, mat2, output_layout=layout, add_guards=True):
         if torch.version.hip is None:
             templates_to_use.append(persistent_tma_mm_template)
