@@ -1,0 +1,81 @@
+# Owner(s): ["module: rocm"]
+# Opt-in validation workflow for the DigitalOcean MI350X (gfx950) ARC runner
+# scale sets added in ROCm/rocOps#626. Those scale sets register the canonical
+# `linux.rocm.gpu.gfx950.*` labels (runner group linux.rocm.gpu.group) on the DO
+# cluster, so a job that requests `linux.rocm.gpu.gfx950.N` directly (no amd-do
+# experiment prefix) can land on the new DO fleet and exercise it end to end.
+#
+# This workflow is intentionally NON-required and OPT-IN: it only runs on the
+# ciflow/rocm-mi350-do-validation push tag or manual workflow_dispatch, never on
+# every push/PR, so it can never become a blocking/required check and the PR that
+# adds it does not need a force-merge.
+#
+# NOTE: the canonical gfx950 label is also served by the existing ROCm MI350
+# fleet, so a green run confirms the label works but does not by itself guarantee
+# the job ran on the DO cluster. To pin to the DO experiment fleet specifically,
+# use the amd-do- prefixed label (see rocm-mi350.yml).
+name: rocm-mi350-do-validation
+
+on:
+  push:
+    tags:
+      - ciflow/rocm-mi350-do-validation/*
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+permissions:
+  id-token: write
+  contents: read
+  actions: read
+
+jobs:
+  target-determination:
+    if: github.repository_owner == 'pytorch'
+    name: before-test
+    uses: ./.github/workflows/target_determination.yml
+
+  get-label-type:
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    if: ${{ github.repository_owner == 'pytorch' }}
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
+  linux-noble-rocm-py3_12-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    name: linux-noble-rocm-py3.12-mi350-do-validation
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "mt-"
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+      use-arc: true
+      build-environment: linux-noble-rocm-py3.12-mi350
+      docker-image-name: ci-image:pytorch-linux-noble-rocm-n-py3
+      # Keep this minimal: a single shard on the 1-GPU canonical gfx950 label so
+      # we exercise the new DO scale set without consuming much GPU time.
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx950.1" },
+        ]}
+    secrets: inherit
+
+  linux-noble-rocm-py3_12-test:
+    name: linux-noble-rocm-py3.12-mi350-do-validation
+    uses: ./.github/workflows/_rocm-test.yml
+    needs:
+      - linux-noble-rocm-py3_12-build
+      - target-determination
+    with:
+      build-environment: ${{ needs.linux-noble-rocm-py3_12-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-noble-rocm-py3_12-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-noble-rocm-py3_12-build.outputs.test-matrix }}
+      # Run a small but real suite so the runner is genuinely exercised.
+      tests-to-include: "test_autograd"
+    secrets: inherit
