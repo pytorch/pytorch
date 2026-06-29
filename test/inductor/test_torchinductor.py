@@ -23123,9 +23123,7 @@ if RUN_GPU:
             ref = torch.clamp(a, min=-0.5, max=0.5)
 
             with _scoped_library("aten", "IMPL") as lib:
-                register_ops_with_aoti_compile(
-                    "aten", ["clamp"], "CUDA", lib
-                )
+                register_ops_with_aoti_compile("aten", ["clamp"], "CUDA", lib)
                 torch.clamp(a, min=-0.5, max=0.5, out=out)
 
             self.assertEqual(ref, out)
