@@ -150,9 +150,11 @@ namespace {
 
 OpenRegDeviceAllocator g_allocator;
 
+// LITERALINCLUDE START: OPENREG DELETER
 void deleteOpenRegMemory(void* ptr) {
   g_allocator.freeMemory(ptr);
 }
+// LITERALINCLUDE END: OPENREG DELETER
 
 }
 
@@ -166,6 +168,7 @@ OpenRegDeviceAllocator::OpenRegDeviceAllocator() {
 }
 
 
+// LITERALINCLUDE START: OPENREG ALLOCATE
 at::DataPtr OpenRegDeviceAllocator::allocate(size_t nbytes) {
   int current_device_index = -1;
   auto ret = orGetDevice(&current_device_index);
@@ -186,10 +189,13 @@ at::DataPtr OpenRegDeviceAllocator::allocate(size_t nbytes) {
 
   return {data, data, &deleteOpenRegMemory, curr_device};
 }
+// LITERALINCLUDE END: OPENREG ALLOCATE
 
+// LITERALINCLUDE START: OPENREG RAW DELETER
 at::DeleterFnPtr OpenRegDeviceAllocator::raw_deleter() const {
   return &deleteOpenRegMemory;
 }
+// LITERALINCLUDE END: OPENREG RAW DELETER
 
 void OpenRegDeviceAllocator::copy_data(
     void* dest,
@@ -268,8 +274,8 @@ void OpenRegDeviceAllocator::recordStream(
   // OpenReg doesn't track stream usage yet
   // TODO: When stream support is added, track which streams are using this pointer
 }
-// ============ Global Registration ============
-
+// LITERALINCLUDE START: OPENREG REGISTER ALLOCATOR
 REGISTER_ALLOCATOR(c10::DeviceType::PrivateUse1, &g_allocator);
+// LITERALINCLUDE END: OPENREG REGISTER ALLOCATOR
 
 } // namespace c10::openreg
