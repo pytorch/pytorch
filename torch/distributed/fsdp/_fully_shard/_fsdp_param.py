@@ -291,8 +291,11 @@ class FSDPParam:
         # this remains true even if spmd typechecking is disabled at runtime.
         self.is_spmd_types = (
             dist._is_spmd_types_available()
-            and bool(spmd_local_type := spmd.get_local_type(param))
             and not isinstance(param, DTensor)
+            and (
+                bool(spmd_local_type := spmd.get_local_type(param))
+                or spmd.current_mesh() is not None
+            )
         )
         if self.is_spmd_types:
             param = self._resolve_spmd_types_for_storage(

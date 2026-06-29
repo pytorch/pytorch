@@ -232,6 +232,47 @@ class TestFullyShardSpmdTypes(TestCase):
                     2,
                 )
 
+    def test_active_spmd_mesh_infers_unannotated_fsdp_axes(self):
+        class DpCpLinear(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = nn.Parameter(torch.randn(16, 16))
+                self.compute_param_type = None
+
+            def forward(self, x):
+                self.compute_param_type = dict(spmd.get_local_type(self.weight))
+                return (x @ self.weight).sum()
+
+        model = DpCpLinear()
+        dp_cp_mesh = self.dense_type_mesh["dp", "cp"]
+
+        with spmd.set_current_mesh(dp_cp_mesh):
+            fully_shard(
+                model,
+                mesh=dp_cp_mesh,
+                dp_mesh_dims=DataParallelMeshDims(shard=("dp", "cp")),
+            )
+
+        inp = torch.randn(4, 8, 16, requires_grad=True)
+        with (
+            spmd.set_current_mesh(dp_cp_mesh),
+            typecheck(strict_mode="strict", local=False),
+        ):
+            spmd.assert_type(
+                inp,
+                {"dp": spmd.V, "cp": spmd.V},
+                partition_spec=spmd.PartitionSpec("dp", "cp", None),
+            )
+            loss = model(inp)
+            self.assertEqual(
+                dict(spmd.get_local_type(loss)),
+                {self.dp_axis: spmd.P, self.cp_axis: spmd.P},
+            )
+        self.assertEqual(
+            model.compute_param_type,
+            {self.dp_axis: spmd.R, self.cp_axis: spmd.R},
+        )
+
     def test_full_param_annotations_do_not_require_init_compute_mesh(self):
         """Full per-axis annotations are enough without an init compute mesh."""
         model = SpmdLinear(self.dense_type_mesh, seq_parallel=False)

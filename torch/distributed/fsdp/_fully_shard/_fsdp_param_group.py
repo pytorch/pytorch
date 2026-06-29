@@ -1143,6 +1143,20 @@ class RegisterPostBackwardFunction(torch.autograd.Function):
         return inputs
 
     @staticmethod
+    def typecheck_forward(param_group: FSDPParamGroup, *inputs: torch.Tensor):
+        import spmd_types
+        from spmd_types.runtime import get_partition_spec
+
+        outputs = RegisterPostBackwardFunction.apply(param_group, *inputs)
+        for output, input in zip(outputs, inputs):
+            spmd_types.assert_type(
+                output,
+                dict(spmd_types.get_local_type(input)),
+                partition_spec=get_partition_spec(input),
+            )
+        return outputs
+
+    @staticmethod
     def setup_context(ctx, inputs: tuple[Any, ...], output: Any) -> None:
         param_group, *_ = inputs
         ctx.param_group = param_group
@@ -1167,4 +1181,4 @@ class RegisterPostBackwardFunction(torch.autograd.Function):
 if dist._is_spmd_types_available():
     import spmd_types
 
-    spmd_types.register_local_autograd_function(RegisterPostBackwardFunction)
+    spmd_types.register_autograd_function(RegisterPostBackwardFunction)
