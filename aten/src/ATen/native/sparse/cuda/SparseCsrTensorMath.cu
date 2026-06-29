@@ -843,7 +843,7 @@ static Tensor _sparse_csr_linear_solve_impl(const Tensor& A, const Tensor& b, co
   }
   Tensor b_copy = b.contiguous();
   if (out.layout() == kStrided && out.device() == b.device() && out.scalar_type() == b.scalar_type() &&
-      out.dim() == 1 && out.stride(0) == 1) {
+      out.stride(0) == 1) {
     _apply_sparse_csr_linear_solve(A, b_copy, left, out);
   } else {
     Tensor x = at::empty(b.sizes(), b.options());
