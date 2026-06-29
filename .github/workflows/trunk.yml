@@ -332,6 +332,29 @@ jobs:
       tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
     secrets: inherit
 
+  # TEMPORARY: validate rocOps#626 DO MI350X gfx950 runners - revert before merge
+  # Exercises the canonical (non-amd-do) linux.rocm.gpu.gfx950.1 label that the
+  # new DigitalOcean MI350X scale sets serve. Reuses the existing MI350 build
+  # (linux-jammy-rocm-py3_10-build) to avoid a redundant build, and runs a single
+  # quick shard (test_autograd) to keep GPU usage minimal. This added job does not
+  # alter any existing trunk job.
+  linux-jammy-rocm-py3_10-gfx950-do-validation-test:
+    name: linux-jammy-rocm-py3.10-mi350-gfx950-do-validation
+    uses: ./.github/workflows/_rocm-test.yml
+    needs:
+      - linux-jammy-rocm-py3_10-build
+      - target-determination
+      - job-filter
+    with:
+      build-environment: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.docker-image }}
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx950.1" },
+        ]}
+      tests-to-include: "test_autograd"
+    secrets: inherit
+
   inductor-build:
     if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' inductor-build ') }}
     name: inductor-build
