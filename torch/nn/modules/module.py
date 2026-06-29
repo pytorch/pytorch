@@ -2675,6 +2675,12 @@ class Module:
         Yields:
             Parameter: module parameter
 
+        Note:
+            Parameters are yielded in a consistent order. With
+            ``recurse=True``, this module's own parameters come first
+            (in registration order), then each submodule's parameters in
+            the order the submodules were registered (depth-first).
+
         Example::
 
             >>> # xdoctest: +SKIP("undefined vars")
@@ -2703,6 +2709,12 @@ class Module:
         Yields:
             (str, Parameter): Tuple containing the name and parameter
 
+        Note:
+            Parameters are yielded in a consistent order. With
+            ``recurse=True``, this module's own parameters come first
+            (in registration order), then each submodule's parameters in
+            the order the submodules were registered (depth-first).
+
         Example::
 
             >>> # xdoctest: +SKIP("undefined vars")
@@ -2730,6 +2742,12 @@ class Module:
         Yields:
             torch.Tensor: module buffer
 
+        Note:
+            Buffers are yielded in a consistent order. With
+            ``recurse=True``, this module's own buffers come first
+            (in registration order), then each submodule's buffers in
+            the order the submodules were registered (depth-first).
+
         Example::
 
             >>> # xdoctest: +SKIP("undefined vars")
@@ -2756,6 +2774,12 @@ class Module:
 
         Yields:
             (str, torch.Tensor): Tuple containing the name and buffer
+
+        Note:
+            Buffers are yielded in a consistent order. With
+            ``recurse=True``, this module's own buffers come first
+            (in registration order), then each submodule's buffers in
+            the order the submodules were registered (depth-first).
 
         Example::
 
