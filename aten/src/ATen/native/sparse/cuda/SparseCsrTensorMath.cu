@@ -858,7 +858,7 @@ Tensor _sparse_csr_linear_solve(const Tensor& A, const Tensor& b, const bool lef
 }
 
 Tensor& _sparse_csr_linear_solve(const Tensor& A, const Tensor& b, const bool left, Tensor& out) {
-  at::native::_sparse_csr_linear_solve_impl(A, b, left, &out);
+  _sparse_csr_linear_solve_impl(A, b, left, &out);
   return out;
 }
 
