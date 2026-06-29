@@ -731,7 +731,7 @@ void _apply_sparse_csr_linear_solve(
   TORCH_CHECK(x.size(0) == A.size(1), "linear system size mismatch.");
 
   if (b.dim() == 2) {
-    TORCH_CHECK(b.size(1) == x.size(1), "x columns count must be the same as b");
+    TORCH_CHECK(b.size(1) == x.size(1), "x and b must have the same number of columns");
   }
   TORCH_CHECK(A.dtype() == b.dtype() && A.dtype() == x.dtype(), "A, x, and b must have the same dtype");
   TORCH_CHECK(left == true, "only left == true is supported by the Sparse CSR backend");
