@@ -34,6 +34,9 @@ CAPTURE_DTYPE_MAP = {
     torch.bool: "bool",
 }
 
+# log2(e) for converting flex attention stats back
+RCP_LN2 = "1.44269504088896340736f"
+
 # A captured buffer bound as a Metal kernel argument, with its static shape.
 _CapturedBuf = namedtuple("_CapturedBuf", ["name", "sizes", "strides", "dtype"])
 
@@ -645,7 +648,7 @@ def _generate_metal_shader(
             "        lse[(long)b_idx * (Hq * N_Q)"
             " + (long)h_idx * N_Q + (long)m_idx]"
             " = (row_sum > 0.0f)"
-            " ? (row_max + metal::precise::log(row_sum)) * 1.44269504088896340736f"
+            f" ? (row_max + metal::precise::log(row_sum)) * {RCP_LN2}"
             " : -INFINITY;\n"
         )
 
@@ -657,7 +660,7 @@ def _generate_metal_shader(
         max_write_code = (
             "        max_scores[(long)b_idx * (Hq * N_Q)"
             " + (long)h_idx * N_Q + (long)m_idx]"
-            " = row_max * 1.44269504088896340736f;\n"
+            f" = row_max * {RCP_LN2};\n"
         )
 
     scalar_params_str = f"    constant long* _params [[buffer({buf_idx})]]"
