@@ -53,6 +53,11 @@ class LocalResponseNorm(Module):
         self, size: int, alpha: float = 1e-4, beta: float = 0.75, k: float = 1.0
     ) -> None:
         super().__init__()
+        if k == 0 and alpha == 0:
+            raise ValueError(
+                "k and alpha cannot both be zero, as this would make the "
+                "LRN denominator zero and produce +/-inf outputs"
+            )
         self.size = size
         self.alpha = alpha
         self.beta = beta
