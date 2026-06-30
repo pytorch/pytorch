@@ -6923,9 +6923,16 @@ def meta__efficient_attention_forward(
             )
         actual_max_seqlen_q = max_seqlen_q
     actual_max_seqlen_k = max_seqlen_k if max_seqlen_k is not None else N
-    logsumexp_dim = (
-        math.ceil(actual_max_seqlen_q / 32) * 32 if compute_log_sumexp else 0
-    )
+    
+    # Check if PyTorch is built with ROCm/HIP support
+    if getattr(torch.version, 'hip', None) is not None:
+        # ROCm backend (AOTriton/CK) requires compact logsumexp tensor without 32-alignment
+        logsumexp_dim = actual_max_seqlen_q if compute_log_sumexp else 0
+    else:
+        logsumexp_dim = (
+            math.ceil(actual_max_seqlen_q / 32) * 32 if compute_log_sumexp else 0
+        )
+        
     logsum_exp = torch.empty(
         (logsumexp_batch_dim, num_heads, logsumexp_dim),
         dtype=torch.float,
