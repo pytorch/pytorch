@@ -10,7 +10,6 @@ import torch
 import torch._prims_common as utils
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
-from torch._dynamo.utils import clone_input
 from torch._functorch.vmap import restore_vmap, unwrap_batched, wrap_batched
 from torch._higher_order_ops.auto_functionalize import (
     can_auto_functionalize,
@@ -447,6 +446,8 @@ def trace_scan(
     additional_inputs: tuple[torch.Tensor],
     mutated_arg_indices: str = "",
 ):
+    from torch._dynamo.utils import clone_input
+
     with disable_proxy_modes_tracing():
         sample_inits = [clone_input(x_init) for x_init in init]
         sample_inputs = [first_slice_copy(x) for x in xs]

@@ -8,7 +8,6 @@ import torch
 import torch._prims_common as utils
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
-from torch._dynamo.utils import clone_input
 from torch._higher_order_ops.schema import HopSchemaGenerator
 from torch._higher_order_ops.utils import (
     _check_alias_and_mutation,
@@ -417,6 +416,8 @@ def trace_associative_scan(
     xs: list[torch.Tensor],
     additional_inputs: tuple[torch.Tensor],
 ):
+    from torch._dynamo.utils import clone_input
+
     with disable_proxy_modes_tracing():
         sample_xs = [first_slice_copy(x) for x in itertools.chain(xs, xs)]
         sample_additional_inputs = [
