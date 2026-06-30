@@ -83,9 +83,12 @@ def CDNA2OrLater():
 
 def evaluate_platform_supports_flash_attention():
     if TEST_WITH_ROCM:
-        # NOTE: gfx1250 is omitted until flash-attention artifacts ship for it:
-        # AOTriton has no published gfx1250 image (see cmake/External/aotriton.cmake)
-        # and the CK FAv3/AITER codegen is not yet wired for gfx1250
+        # NOTE: gfx1250 is omitted until flash-attention artifacts ship for it.
+        # The AOTriton path needs the gfx1250 GPU image from AOTriton 0.12.1b,
+        # which is wired up by PR #188242 (which also adds gfx1250 to this list);
+        # this gate-only PR leaves it out so the two changes do not conflict
+        # (see cmake/External/aotriton.cmake). The CK FAv3/AITER codegen is
+        # separately not yet wired for gfx1250
         # (see aten/src/ATen/native/transformers/hip/flash_attn/ck/fav_v3/CMakeLists.txt).
         arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950"]
         if os.environ.get("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "0") != "0":
@@ -106,7 +109,10 @@ def evaluate_platform_supports_ck_sdpa():
 def evaluate_platform_supports_efficient_attention():
     if TEST_WITH_ROCM:
         # NOTE: gfx1250 is omitted until mem-efficient-attention artifacts ship
-        # for it (no AOTriton gfx1250 image, CK FAv3/AITER codegen not yet wired).
+        # for it. The AOTriton gfx1250 image (from AOTriton 0.12.1b) is wired up
+        # by PR #188242, which also adds gfx1250 here; this gate-only PR leaves
+        # it out to avoid conflicting with that change. The CK FAv3/AITER codegen
+        # is separately not yet wired for gfx1250.
         arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950"]
         if os.environ.get("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "0") != "0":
             arch_list += ["gfx1101", "gfx1102", "gfx1150", "gfx1151", "gfx1200"]

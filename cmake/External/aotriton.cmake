@@ -33,6 +33,12 @@ if(NOT __AOTRITON_INCLUDED)
       "a1d731745929b61598d088eeaad31d8a82a27032aa51e3a7c831e45a99e095c2"  # rocm7.1
       "5b97e8d041b160c84085961f3d3bd7b9890642b146bacb04c991aa9ad6a8dca8"  # rocm7.2
       )
+  # AOTriton GPU image entries are version-locked to __AOTRITON_VER: the image
+  # tarball filename embeds the release version (see aotriton_download_image),
+  # and __AOTRITON_IMAGE_LIST is positionally paired with
+  # __AOTRITON_IMAGE_SHA256_LIST. Adding a new arch's pre-compiled image
+  # therefore requires bumping to an AOTriton release that publishes it and
+  # adding the image name and its SHA256 together.
   set(__AOTRITON_IMAGE_LIST
       "amd-gfx90a"
       "amd-gfx942"
@@ -40,8 +46,6 @@ if(NOT __AOTRITON_INCLUDED)
       "amd-gfx110x"
       "amd-gfx115x"
       "amd-gfx120x"
-      # TODO: Update on AOTriton integration
-      #"amd-gfx1250"
      )
   set(__AOTRITON_IMAGE_SHA256_LIST
      "bb8bf2237b77fc503bc2967ea0d99d6ca419126c479e951ea42b712737128086" # amd-gfx90a
@@ -50,9 +54,6 @@ if(NOT __AOTRITON_INCLUDED)
      "c9cac7cf6f277168e1659ac2f04706f8823580b7c7e3e895f5a5503ed6bdd55f" # amd-gfx110x
      "3177387a15c678b30057f4584d1fc1b8f8db56163890cb5c98f27450209f5a7b" # amd-gfx115x
      "68572511ce6487a83f9014bd255bd69c8943f87d0c93bd57b2daac5fbc6c79c1" # amd-gfx120x
-     # TODO: Update when AOTriton publishes gfx1250 images.
-     # Until then, may need to set AOTRITON_INSTALL_FROM_SOURCE=1 to build from source.
-     #"0000000000000000000000000000000000000000000000000000000000000000" # amd-gfx1250
      )
   set(__AOTRITON_BASE_URL "$ENV{PYTORCH_AOTRITON_BASE_URL}")
   if(NOT __AOTRITON_BASE_URL)
