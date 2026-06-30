@@ -7487,7 +7487,7 @@ torch.cuda.synchronize()
 
     # Internally-defined NT use cases are lifted to here for maximum test realism.
     # TODO: Remove these when ViewNestedFromBuffer, etc. are deprecated.
-    @skipCUDAIfRocm  # not needed
+
     @skipIfTorchDynamo("compiles internally")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @parametrize("use_legacy_api", [True, False])
