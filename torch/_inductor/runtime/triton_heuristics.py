@@ -2739,6 +2739,7 @@ class StaticTritonCompileResult(CompileResult[_T]):
         triton_meta: dict[str, Any],
         heuristic_type: HeuristicType,
     ) -> _KernelType | None:
+        """Return a static launcher when the compiled Triton kernel supports it."""
         if not torch._inductor.config.use_static_triton_launcher:
             return None
 
@@ -2768,11 +2769,16 @@ class StaticTritonCompileResult(CompileResult[_T]):
                 # Requires storing the entire binary
                 raise CannotStaticallyLaunchKernel("store_cubin is enabled")
 
-            if getattr(kernel.metadata, "launch_pdl", False) or getattr(
-                kernel.metadata, "launch_cooperative_grid", False
-            ):
+            if getattr(kernel.metadata, "launch_cooperative_grid", False):
                 raise CannotStaticallyLaunchKernel(
-                    "static launch does not support launch attributes"
+                    "static launch does not support cooperative grid launch"
+                )
+
+            if getattr(kernel.metadata, "launch_pdl", False) and triton_meta.get(
+                "device_type"
+            ) != "cuda":
+                raise CannotStaticallyLaunchKernel(
+                    "static launch only supports PDL on CUDA"
                 )
 
             binary_ext = GPU_KERNEL_BIN_EXTS.get(

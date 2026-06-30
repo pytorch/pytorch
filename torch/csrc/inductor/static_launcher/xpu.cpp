@@ -441,10 +441,11 @@ PyObject* launch_kernel(PyObject* self, PyObject* args) {
   uint64_t stream = 0;
   const char* argTypes = nullptr;
   PyObject* varArgs = nullptr;
+  int launchPdl = 0;
   // Parse the fixed arguments and the format string
   if (!PyArg_ParseTuple(
           args,
-          "OiiiiisOK",
+          "OiiiiisOK|p",
           &kernel_py,
           &gridX,
           &gridY,
@@ -453,9 +454,11 @@ PyObject* launch_kernel(PyObject* self, PyObject* args) {
           &sharedMemBytes,
           &argTypes,
           &varArgs,
-          &stream)) {
+          &stream,
+          &launchPdl)) {
     return nullptr;
   }
+  TORCH_CHECK(!launchPdl, "PDL launch is not supported on XPU static launcher");
   if (gridX * gridY * gridZ <= 0) {
     // No need to do any work if we're outside of grid bounds
     Py_RETURN_NONE;

@@ -5,6 +5,7 @@
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/inductor/static_launcher/cuda.h>
+#include <array>
 #include <cstdint>
 
 #include <torch/csrc/utils/python_numbers.h>
@@ -231,10 +232,12 @@ inline void launchKernel(
     uint32_t numWarps,
     uint32_t sharedMemBytes,
     void** args,
-    cudaStream_t stream) {
+    cudaStream_t stream,
+    bool launchPdl = false) {
   // cta_args is always 1 for inductor generated triton kernels,
   // so we don't need to figure out grid dimension here
 #if defined(USE_ROCM)
+  TORCH_CHECK(!launchPdl, "PDL launch is not supported on ROCm static launcher");
   int device = 0;
   AT_CUDA_DRIVER_CHECK(hipGetDevice(&device));
   int warp_size = 0;
@@ -255,18 +258,36 @@ inline void launchKernel(
       nullptr));
 
 #else
-  AT_CUDA_DRIVER_CHECK(nvrtc().cuLaunchKernel(
-      func,
-      gridX,
-      gridY,
-      gridZ,
-      32 * numWarps, // blockDim.x
-      1, // blockDim.y
-      1, // blockDim.z
-      sharedMemBytes,
-      stream,
-      args,
-      nullptr));
+  if (launchPdl) {
+    std::array<CUlaunchAttribute, 1> launchAttribute{};
+    launchAttribute[0].id = CU_LAUNCH_ATTRIBUTE_PROGRAMMATIC_STREAM_SERIALIZATION;
+    launchAttribute[0].value.programmaticStreamSerializationAllowed = 1;
+    CUlaunchConfig launchConfig = {
+        gridX,
+        gridY,
+        gridZ,
+        32 * numWarps, // blockDim.x
+        1, // blockDim.y
+        1, // blockDim.z
+        sharedMemBytes,
+        stream,
+        launchAttribute.data(),
+        static_cast<unsigned int>(launchAttribute.size())};
+    AT_CUDA_DRIVER_CHECK(nvrtc().cuLaunchKernelEx(&launchConfig, func, args, nullptr));
+  } else {
+    AT_CUDA_DRIVER_CHECK(nvrtc().cuLaunchKernel(
+        func,
+        gridX,
+        gridY,
+        gridZ,
+        32 * numWarps, // blockDim.x
+        1, // blockDim.y
+        1, // blockDim.z
+        sharedMemBytes,
+        stream,
+        args,
+        nullptr));
+  }
 #endif
 }
 
@@ -426,7 +447,8 @@ PyObject* launch_kernel_inner(
     int sharedMemBytes,
     const char* argTypes,
     PyObject* varArgs,
-    cudaStream_t cudaStream) {
+    cudaStream_t cudaStream,
+    bool launchPdl) {
   // Launch the kernel
   // Prepare the arguments for the kernel
   // We allocate 8 bytes per argument on the stack. We then allocate 8 more
@@ -443,7 +465,8 @@ PyObject* launch_kernel_inner(
       numWarps,
       sharedMemBytes,
       kernelArgs.data(),
-      cudaStream);
+      cudaStream,
+      launchPdl);
   Py_RETURN_NONE;
 }
 
@@ -456,7 +479,8 @@ PyObject* launch_kernel_slow(
     int sharedMemBytes,
     const char* argTypes,
     PyObject* varArgs,
-    cudaStream_t cudaStream) {
+    cudaStream_t cudaStream,
+    bool launchPdl) {
   /* For the slow case, allocate memory on the stack instead of the heap */
   size_t numArgs = std::strlen(argTypes);
   std::vector<uint64_t> argStorage(numArgs);
@@ -472,7 +496,8 @@ PyObject* launch_kernel_slow(
       numWarps,
       sharedMemBytes,
       kernelArgs.data(),
-      cudaStream);
+      cudaStream,
+      launchPdl);
   Py_RETURN_NONE;
 }
 
@@ -501,10 +526,11 @@ PyObject* launch_kernel(PyObject* self, PyObject* args) {
   uint64_t stream = 0;
   const char* argTypes = nullptr;
   PyObject* varArgs = nullptr;
+  int launchPdl = 0;
   // Parse the fixed arguments and the format string
   if (!PyArg_ParseTuple(
           args,
-          "KiiiiisOK",
+          "KiiiiisOKp",
           &func_ptr,
           &gridX,
           &gridY,
@@ -513,7 +539,8 @@ PyObject* launch_kernel(PyObject* self, PyObject* args) {
           &sharedMemBytes,
           &argTypes,
           &varArgs,
-          &stream)) {
+          &stream,
+          &launchPdl)) {
     return nullptr;
   }
   if (gridX * gridY * gridZ <= 0) {
@@ -554,7 +581,8 @@ PyObject* launch_kernel(PyObject* self, PyObject* args) {
         numWarps,
         sharedMemBytes,
         nullptr,
-        cudaStream);
+        cudaStream,
+        launchPdl);
     Py_RETURN_NONE;
   } else if (num_args <= MAX_ARGS) {
     return launch_kernel_inner(
@@ -566,7 +594,8 @@ PyObject* launch_kernel(PyObject* self, PyObject* args) {
         sharedMemBytes,
         argTypes,
         varArgs,
-        cudaStream);
+        cudaStream,
+        launchPdl);
   } else {
     return launch_kernel_slow(
         func,
@@ -577,7 +606,8 @@ PyObject* launch_kernel(PyObject* self, PyObject* args) {
         sharedMemBytes,
         argTypes,
         varArgs,
-        cudaStream);
+        cudaStream,
+        launchPdl);
   }
   END_HANDLE_TH_ERRORS
 }
@@ -588,6 +618,7 @@ PyObject* unload_kernel(PyObject* self, PyObject* args) {
   if (!PyArg_ParseTuple(args, "K", &mod_ptr)) {
     return nullptr;
   }
+  // NOLINTNEXTLINE(performance-no-int-to-ptr)
   CUmodule mod = reinterpret_cast<CUmodule>(mod_ptr);
   if (mod) {
 #if defined(USE_ROCM)
@@ -713,6 +744,7 @@ inline CUdeviceptr getPointerFast(PyObject* obj) {
 // Skips:     cuCtxGetCurrent, cuPointerGetAttribute, PyArg_ParseTuple for
 //            kernel metadata.
 // ---------------------------------------------------------------------------
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct FastCudaLauncherObject {
   PyObject_HEAD
   vectorcallfunc vectorcall;
@@ -721,7 +753,7 @@ struct FastCudaLauncherObject {
   uint32_t sharedMemBytes;
   int numKernelArgs; // args passed from Python
   int numTotalArgs; // numKernelArgs + nScratch
-  char argTypes[MAX_ARGS + 1]; // null-terminated
+  std::array<char, MAX_ARGS + 1> argTypes; // null-terminated
   // Thread safety: argStorage/kernelArgs are shared across calls but safe
   // because the GIL is held throughout fast_launcher_vectorcall (no
   // Py_BEGIN_ALLOW_THREADS).  cuLaunchKernel copies arg values from the
@@ -730,8 +762,8 @@ struct FastCudaLauncherObject {
   // TODO(T000000): Not safe under free-threaded Python (PEP 703, nogil).
   // If two threads call the same instance concurrently without the GIL,
   // they will corrupt argStorage/kernelArgs.  Revisit when nogil is stable.
-  uint64_t argStorage[MAX_ARGS];
-  void* kernelArgs[MAX_ARGS];
+  std::array<uint64_t, MAX_ARGS> argStorage;
+  std::array<void*, MAX_ARGS> kernelArgs;
 };
 
 static PyObject* fast_launcher_vectorcall(
@@ -777,7 +809,7 @@ static PyObject* FastCudaLauncher_new(
 
   self->numKernelArgs = nKernel;
   self->numTotalArgs = nTotal;
-  std::memcpy(self->argTypes, argTypes, nKernel);
+  std::memcpy(self->argTypes.data(), argTypes, nKernel);
   // Scratch slots are pointer type ('O')
   for (int i = nKernel; i < nTotal; ++i) {
     self->argTypes[i] = 'O';
@@ -785,7 +817,7 @@ static PyObject* FastCudaLauncher_new(
   self->argTypes[nTotal] = '\0';
 
   // Pre-compute kernelArgs pointers and zero all storage.
-  std::memset(self->argStorage, 0, sizeof(self->argStorage));
+  self->argStorage.fill(0);
   for (int i = 0; i < nTotal; ++i) {
     self->kernelArgs[i] = &self->argStorage[i];
   }
@@ -899,7 +931,7 @@ static PyObject* fast_launcher_vectorcall(
       static_cast<uint32_t>(gridZ),
       self->numWarps,
       self->sharedMemBytes,
-      self->kernelArgs,
+      self->kernelArgs.data(),
       reinterpret_cast<cudaStream_t>(stream)); // NOLINT
 
   Py_RETURN_NONE;

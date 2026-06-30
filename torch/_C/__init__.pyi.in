@@ -3037,6 +3037,7 @@ class _StaticCudaLauncher:
         arg_types: str,
         args: tuple[Any, ...],
         stream: _int,
+        launch_pdl: bool = False,
     ) -> None: ...
 
 # Defined in torch/csrc/inductor/static_launcher/xpu.cpp

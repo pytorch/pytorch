@@ -107,6 +107,8 @@ class StaticallyLaunchedTritonKernel:
         self.has_global_scratch = needs_scratch_arg("Global", "global_scratch_size")
         # same situation for profile scratch - triton-lang/triton#7258
         self.has_profile_scratch = needs_scratch_arg("Profile", "profile_scratch_size")
+        # pyrefly: ignore [missing-attribute]
+        self.launch_pdl = bool(getattr(kernel.metadata, "launch_pdl", False))
 
         # pyrefly: ignore [missing-attribute]
         self.arg_tys = self.arg_ty_from_signature(kernel.src)
@@ -321,7 +323,11 @@ class StaticallyLaunchedTritonKernel:
             arg_tys,
             args,
             stream,
+            *self.extra_launch_args(),
         )
+
+    def extra_launch_args(self) -> tuple[object, ...]:
+        return ()
 
 
 class StaticallyLaunchedCudaKernel(StaticallyLaunchedTritonKernel):
@@ -330,6 +336,9 @@ class StaticallyLaunchedCudaKernel(StaticallyLaunchedTritonKernel):
         from torch._C import _StaticCudaLauncher
 
         return _StaticCudaLauncher
+
+    def extra_launch_args(self) -> tuple[object, ...]:
+        return (self.launch_pdl,)
 
     def __init__(self, kernel: CompiledKernel) -> None:
         # pyrefly: ignore [missing-attribute]

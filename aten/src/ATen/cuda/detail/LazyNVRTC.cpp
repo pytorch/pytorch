@@ -232,6 +232,19 @@ CUresult CUDAAPI cuLaunchKernel(CUfunction f,
             sharedMemBytes, hStream, kernelParams, extra);
 }
 
+#if !defined(USE_ROCM)
+CUresult CUDAAPI cuLaunchKernelEx(const CUlaunchConfig* config,
+                                  CUfunction f,
+                                  void** kernelParams,
+                                  void** extra) {
+  auto fn = reinterpret_cast<decltype(&cuLaunchKernelEx)>(getCUDALibrary().sym(__func__));
+  if (!fn)
+    throw std::runtime_error("Can't get cuLaunchKernelEx");
+  lazyNVRTC.cuLaunchKernelEx = fn;
+  return fn(config, f, kernelParams, extra);
+}
+#endif
+
 // Irregularly shaped functions
 CUresult CUDAAPI cuLaunchCooperativeKernel(
     CUfunction f,

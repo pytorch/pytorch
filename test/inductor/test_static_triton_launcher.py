@@ -134,6 +134,51 @@ class TestStaticTritonLauncherUnit(TestCase):
         gc.collect()
         self.assertIsNone(owner_ref())
 
+    def test_static_cuda_launcher_passes_pdl_to_c_impl(self):
+        launch_calls = []
+
+        class FakeImpl:
+            @staticmethod
+            def _launch_kernel(*args):
+                launch_calls.append(args)
+
+        launcher = object.__new__(StaticallyLaunchedCudaKernel)
+        launcher.function = 123
+        launcher.num_warps = 4
+        launcher.shared = 0
+        launcher.arg_tys = ""
+        launcher.has_global_scratch = False
+        launcher.has_profile_scratch = False
+        launcher.launch_pdl = True
+        launcher.C_impl = FakeImpl
+
+        launcher.run(1, 2, 3, 456)
+
+        self.assertEqual(launch_calls, [(123, 1, 2, 3, 4, 0, "", (), 456, True)])
+
+    def test_static_xpu_launcher_keeps_old_launch_arity(self):
+        launch_calls = []
+
+        class FakeImpl:
+            @staticmethod
+            def _launch_kernel(*args):
+                launch_calls.append(args)
+
+        launcher = object.__new__(StaticallyLaunchedXpuKernel)
+        launcher.function = object()
+        launcher.num_warps = 4
+        launcher.shared = 0
+        launcher.arg_tys = ""
+        launcher.has_global_scratch = False
+        launcher.has_profile_scratch = False
+        launcher.launch_pdl = False
+        launcher.C_impl = FakeImpl
+
+        launcher.run(1, 2, 3, 456)
+
+        self.assertEqual(len(launch_calls[0]), 9)
+
+
     @staticmethod
     def _autotuner_with_static_cubin(cubin_raw):
         autotuner = object.__new__(CachingAutotuner)
