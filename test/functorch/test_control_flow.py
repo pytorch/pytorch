@@ -4302,6 +4302,8 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
 
     def test_scan_xs_empty_tuple_length_eager(self):
         def body(c, x):
+            if x is not None:
+                raise RuntimeError(f"expected x to be None, got {x}")
             return c + 1.0, (c + 1.0).clone()
 
         init = torch.tensor(0.0)
@@ -4376,6 +4378,17 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
             r"combine_fn to accept x=None|unsupported operand type\(s\) for \+: 'FakeTensor' and 'NoneType'",
         ):
             scan(bad_body, init, None, length=4)
+
+    def test_scan_xs_none_length_zero_body_uses_x_raises(self):
+        def bad_body(c, x):
+            return c + x, (c + x).clone()
+
+        init = torch.tensor(0.0)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"scan\(\) with xs=None requires combine_fn to accept x=None",
+        ):
+            scan(bad_body, init, None, length=0)
 
     def test_scan_xs_none_length_zero(self):
         def body(c, x):

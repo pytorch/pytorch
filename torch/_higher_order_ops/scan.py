@@ -78,6 +78,30 @@ def call_operator(operator, *args):
     return pytree.tree_leaves(operator(*args))
 
 
+def _build_empty_output_for_length_zero(
+    combine_fn: Callable, init: pytree.PyTree
+) -> pytree.PyTree:
+    """Probe combine_fn(init, None) to learn the output structure for length==0."""
+    try:
+        _, sample_y = combine_fn(init, None)
+    except Exception as e:
+        raise RuntimeError(
+            "scan() with xs=None requires combine_fn to accept x=None. "
+            f"Got error when calling combine_fn(init, None): {e}"
+        ) from e
+    sample_y_leaves, sample_y_spec = pytree.tree_flatten(sample_y)
+    empty_outs = pytree.tree_unflatten(
+        [
+            torch.empty([0] + list(leaf.shape), dtype=leaf.dtype, device=leaf.device)
+            if isinstance(leaf, torch.Tensor)
+            else leaf
+            for leaf in sample_y_leaves
+        ],
+        sample_y_spec,
+    )
+    return empty_outs
+
+
 def scan(
     combine_fn: Callable[
         [pytree.PyTree, pytree.PyTree], tuple[pytree.PyTree, pytree.PyTree]
@@ -162,46 +186,14 @@ def scan(
     xs_has_tensors = any(isinstance(l, torch.Tensor) for l in leaves_xs_orig)
 
     if length is not None:
-        if not isinstance(length, int) or length < 0:
+        if isinstance(length, bool) or not isinstance(length, int) or length < 0:
             raise RuntimeError(
                 f"scan() length must be a non-negative integer, got {length!r}"
             )
 
-        if xs_has_tensors:
-            actual = leaves_xs_orig[0].shape[dim]
-            if length != actual:
-                raise RuntimeError(
-                    f"scan() length={length} does not match xs size along dim={dim}: {actual}"
-                )
-
-        else:
-
-            def _validate_none_length_combine_fn(cfn):
-                try:
-                    _, sample_y = cfn(init, None)
-                except Exception as e:
-                    raise RuntimeError(
-                        "scan() with xs=None requires combine_fn to accept x=None. "
-                        f"Got error when calling combine_fn(init, None): {e}"
-                    ) from e
-                return sample_y
-
-            sample_y = _validate_none_length_combine_fn(combine_fn)
-
+        if not xs_has_tensors:
             if length == 0:
-                sample_y_leaves, sample_y_spec = pytree.tree_flatten(sample_y)
-                empty_outs = pytree.tree_unflatten(
-                    [
-                        torch.empty(
-                            [0] + list(leaf.shape), dtype=leaf.dtype, device=leaf.device
-                        )
-                        if isinstance(leaf, torch.Tensor)
-                        else leaf
-                        for leaf in sample_y_leaves
-                    ],
-                    sample_y_spec,
-                )
-                return init, empty_outs
+                return init, _build_empty_output_for_length_zero(combine_fn, init)
 
             leaves_xs_orig = [torch.zeros(length, dtype=torch.int64)]
             spec_xs = pytree.tree_structure(None)
@@ -209,10 +201,7 @@ def scan(
 
             def combine_fn(carry, _ignored):  # noqa: E306
                 return _user_combine_fn(carry, None)
-
-            xs_has_tensors = True
-
-    if not xs_has_tensors:
+    elif not xs_has_tensors:
         return init, []
 
     def _validate_input(cfn, lxs, linit, d, r):
@@ -243,6 +232,12 @@ def scan(
 
     ndim = leaves_xs_orig[0].ndim
     dim = utils.canonicalize_dim(ndim, dim)
+
+    if length is not None and xs_has_tensors and leaves_xs_orig[0].shape[dim] != length:
+        raise RuntimeError(
+            f"scan() length={length} does not match xs size along dim={dim}: "
+            f"{leaves_xs_orig[0].shape[dim]}"
+        )
 
     _validate_input(combine_fn, leaves_xs_orig, leaves_init, dim, reverse)
 
@@ -1158,29 +1153,16 @@ def _fake_scan(combine_fn, init, xs=None, dim=0, reverse=False, length=None):
 
     if length is not None and not xs_has_tensors:
         if length == 0:
-            sample_carry, sample_y = combine_fn(init, None)
-            sample_y_leaves, sample_y_spec = pytree.tree_flatten(sample_y)
-            empty_outs = pytree.tree_unflatten(
-                [
-                    torch.empty(
-                        [0] + list(leaf.shape), dtype=leaf.dtype, device=leaf.device
-                    )
-                    if isinstance(leaf, torch.Tensor)
-                    else leaf
-                    for leaf in sample_y_leaves
-                ],
-                sample_y_spec,
-            )
-            return init, empty_outs
-        else:
-            _user_combine_fn = combine_fn
+            return init, _build_empty_output_for_length_zero(combine_fn, init)
 
-            def combine_fn(carry, _ignored):
-                return _user_combine_fn(carry, None)
+        _user_combine_fn = combine_fn
 
-            inp_leaves = [torch.zeros(length, dtype=torch.int64)]
-            inp_spec = pytree.tree_structure(None)
-            xs_has_tensors = True
+        def combine_fn(carry, _ignored):
+            return _user_combine_fn(carry, None)
+
+        inp_leaves = [torch.zeros(length, dtype=torch.int64)]
+        inp_spec = pytree.tree_structure(None)
+        xs_has_tensors = True
 
     if not xs_has_tensors:
         return init, []
