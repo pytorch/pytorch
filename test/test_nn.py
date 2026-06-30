@@ -11779,6 +11779,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(out_none_bias, out_zero_bias)
 
     @dtypes(torch.float32, torch.float64)
+    @dtypesIfMPS(torch.float32)  # MPS doesn't support float64
     def test_layer_norm_affine_null_cases(self, device, dtype):
         # The CPU LayerNormSecondPass has dedicated vectorized paths for every
         # weight/bias == None combination. Each must match passing explicit
