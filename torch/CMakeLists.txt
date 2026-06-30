@@ -322,6 +322,10 @@ if(USE_CUFILE AND NOT USE_ROCM)
   target_compile_definitions(torch_python PRIVATE USE_CUFILE)
 endif()
 
+if(BUILD_LAZY_TS_BACKEND)
+  target_compile_definitions(torch_python PRIVATE BUILD_LAZY_TS_BACKEND)
+endif()
+
 if(HAVE_SOVERSION)
   set_target_properties(torch_python PROPERTIES
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
