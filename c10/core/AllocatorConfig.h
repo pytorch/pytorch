@@ -19,6 +19,10 @@ constexpr size_t kMinBlockSize = 512;
 // largest "small" allocation is 1 MiB
 constexpr size_t kSmallSize = 1048576;
 // allocations between 1 and 10 MiB may use kLargeBuffer
+// NOTE: Do not raise this for gfx1250 via `#if defined(__gfx1250__)`. This is
+// host-side code; __gfx1250__ is only defined during HIP device compilation, so
+// such a gate never fires. A device-specific threshold must be a runtime arch
+// check at allocator init (also messy under mixed-GPU configs).
 constexpr size_t kMinLargeAlloc = 10485760;
 // round up large allocations to 2 MiB
 constexpr size_t kRoundLarge = 2097152;

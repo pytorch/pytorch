@@ -709,6 +709,9 @@ std::optional<c10::ScalarType> out_dtype) {
 #if defined(USE_ROCM_CK_GEMM)
   // ifdef USE_ROCM_CK_GEMM is required since ROCm systems w/o CK should not call ck path.
   // To enable CK path, use env variable ROCM_ALLOW_GROUP_GEMM_CK=1.
+  // NOTE: gfx1250 is intentionally excluded. The CK grouped GEMM path dispatches
+  // Wave64/MFMA-style XDL templates; gfx1250 is Wave32 and needs a WMMA/SWMMAC
+  // path, so it must stay on the fallback until a gfx1250-safe CK path exists.
   if (at::globalContext().rocmAllowGroupGemmCk() && at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950", "gfx90a"})) {
     at::hip::detail::group_gemm_ck(mat_a, mat_b, offs, bias, out);
   } else {

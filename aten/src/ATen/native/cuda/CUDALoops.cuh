@@ -260,6 +260,10 @@ template <int vec_size, typename func_t, typename array_t>
 C10_LAUNCH_BOUNDS_1(num_threads())
 __global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
   constexpr auto io_size = calc_io_size<func_t>();
+  // tws_942 (16) is tuned for gfx942 (CDNA3, Wave64) and is NOT portable
+  // to Wave32 archs. gfx1250 (GFX12.5, Wave32) uses the default `tws`
+  // path below; re-enabling the gfx942 fast path for gfx1250 requires
+  // retuning this constant against the 2x wave-width ratio.
   constexpr auto tws_942 = 16;
   constexpr auto tws = elems_per_thread<io_size>();
   if (__builtin_amdgcn_processor_is("gfx942"))
