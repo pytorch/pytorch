@@ -3202,9 +3202,20 @@ def _max_unpoolnd(
     ).reshape(-1)
 
     output = self.new_zeros(output_shape)
-    return aten._unsafe_index_put(
+    result = aten._unsafe_index_put(
         output.reshape(-1), [indices_flat], self.reshape(-1), accumulate=False
     ).view(output.shape)
+
+    # Match the CPU max_unpool2d layout behavior: the native 4D path resizes
+    # the output with self.suggest_memory_format(), preserving channels-last.
+    # The 3D path uses the default contiguous layout.
+    # For compile, FakeTensor preserves the real device here.
+    # The only edge-case we see is direct meta calls, which follow meta strides
+    # and may differ from CPU eager layout.
+    if dim == 2 and self.ndim == 4 and self.device.type == "cpu":
+        result = result.contiguous(memory_format=utils.suggest_memory_format(self))
+
+    return result
 
 
 @register_decomposition(aten.max_unpool2d)
