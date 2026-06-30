@@ -11569,6 +11569,316 @@ class TestCudaGreenContexts(TestCase):
 
         self.assertGreater(limited_time, baseline_time)
 
+    @serialTest()
+    def test_greencontext_stream_registry_is_weak(self):
+        from torch.cuda import green_contexts
+
+        ctx = green_contexts.GreenContext(num_sms=1)
+        stream = ctx.Stream()
+        stream_id = stream.cuda_stream
+        ctx_ref = weakref.ref(ctx)
+        with green_contexts._STREAM_TO_GREEN_CTX_LOCK:
+            self.assertIs(green_contexts._STREAM_TO_GREEN_CTX.get(stream_id), ctx)
+
+        del ctx
+        gc.collect()
+        try:
+            self.assertIsNone(ctx_ref())
+            with green_contexts._STREAM_TO_GREEN_CTX_LOCK:
+                self.assertNotIn(stream_id, green_contexts._STREAM_TO_GREEN_CTX)
+        finally:
+            with green_contexts._STREAM_TO_GREEN_CTX_LOCK:
+                green_contexts._STREAM_TO_GREEN_CTX.pop(stream_id, None)
+        del stream
+
+    @serialTest()
+    def test_greencontext_nonowning_wrapper_destroys_created_streams(self):
+        from torch.cuda import green_contexts
+
+        next_stream = [20_000_000]
+        destroyed_streams = []
+        destroyed_contexts = []
+
+        class FakeDriver:
+            class CUstream_flags:
+                CU_STREAM_NON_BLOCKING = 0
+
+            @staticmethod
+            def cuGreenCtxStreamCreate(*args):
+                next_stream[0] += 1
+                return next_stream[0]
+
+            @staticmethod
+            def cuStreamDestroy(stream):
+                destroyed_streams.append(int(stream))
+
+            @staticmethod
+            def cuGreenCtxDestroy(green_ctx):
+                destroyed_contexts.append(int(green_ctx))
+
+        ctx = object.__new__(green_contexts.GreenContext)
+        ctx._is_owning = False
+        ctx._init_from_cuda_objects(0, 1, 1, None, 0)
+        with (
+            patch.object(green_contexts, "_drv", FakeDriver),
+            patch.object(
+                green_contexts, "_check_cuda_bindings", new=lambda result: result
+            ),
+            patch.object(green_contexts.GreenContext, "_drv_", FakeDriver),
+            patch.object(
+                green_contexts.GreenContext,
+                "_check_cuda_bindings_",
+                new=lambda result: result,
+            ),
+            patch.object(
+                torch.cuda,
+                "ExternalStream",
+                new=lambda stream, device_id: stream,
+            ),
+        ):
+            streams = [ctx.Stream(), ctx.Stream()]
+            ctx_ref = weakref.ref(ctx)
+            del ctx
+            gc.collect()
+
+        self.assertIsNone(ctx_ref())
+        self.assertEqual(destroyed_streams, list(reversed(streams)))
+        self.assertEqual(destroyed_contexts, [])
+
+    @serialTest()
+    def test_greencontext_concurrent_stream_creation_uses_distinct_slots(self):
+        from torch.cuda import green_contexts
+
+        barrier = threading.Barrier(2)
+        counter_lock = threading.Lock()
+        next_stream = [10_000_000]
+        destroyed_streams = []
+        destroyed_contexts = []
+
+        class FakeDriver:
+            class CUstream_flags:
+                CU_STREAM_NON_BLOCKING = 0
+
+            @staticmethod
+            def cuGreenCtxStreamCreate(*args):
+                barrier.wait(timeout=5)
+                with counter_lock:
+                    next_stream[0] += 1
+                    return next_stream[0]
+
+            @staticmethod
+            def cuStreamDestroy(stream):
+                destroyed_streams.append(int(stream))
+
+            @staticmethod
+            def cuGreenCtxDestroy(green_ctx):
+                destroyed_contexts.append(int(green_ctx))
+
+        ctx = object.__new__(green_contexts.GreenContext)
+        ctx._is_owning = False
+        ctx._init_from_cuda_objects(0, 1, 1, None, 0)
+        ctx_holder = [ctx]
+        streams = []
+        errors = []
+
+        def create_stream():
+            try:
+                streams.append(ctx_holder[0].Stream())
+            except Exception as e:
+                errors.append(e)
+
+        with (
+            patch.object(green_contexts, "_drv", FakeDriver),
+            patch.object(
+                green_contexts, "_check_cuda_bindings", new=lambda result: result
+            ),
+            patch.object(
+                torch.cuda,
+                "ExternalStream",
+                new=lambda stream, device_id: stream,
+            ),
+        ):
+            threads = [threading.Thread(target=create_stream) for _ in range(2)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=10)
+
+        for thread in threads:
+            self.assertFalse(thread.is_alive())
+        if errors:
+            raise errors[0]
+        self.assertEqual(ctx._curr_stream_idx, 1)
+        self.assertEqual(len(set(streams)), 2)
+        self.assertEqual(
+            sum(stream is not None for stream in ctx._green_ctx_streams), 2
+        )
+        expected_destroyed_streams = [
+            int(stream) for stream in reversed(ctx._green_ctx_streams[:2])
+        ]
+        with (
+            patch.object(green_contexts.GreenContext, "_drv_", FakeDriver),
+            patch.object(
+                green_contexts.GreenContext,
+                "_check_cuda_bindings_",
+                new=lambda result: result,
+            ),
+        ):
+            ctx_ref = weakref.ref(ctx)
+            del ctx
+            ctx_holder.clear()
+            gc.collect()
+        self.assertIsNone(ctx_ref())
+        self.assertEqual(destroyed_streams, expected_destroyed_streams)
+        self.assertEqual(destroyed_contexts, [])
+
+    @serialTest()
+    def test_execute_in_green_contexts(self):
+        from torch.cuda import green_contexts
+
+        contexts = [green_contexts.GreenContext(num_sms=1) for _ in range(2)]
+        streams = [context.Stream() for context in contexts]
+        outputs = [torch.empty((), device="cuda") for _ in streams]
+        callback_streams = []
+        caller_stream = torch.cuda.current_stream()
+
+        def work(index, context):
+            self.assertIsNotNone(context)
+            callback_streams.append(torch.cuda.current_stream().cuda_stream)
+            outputs[index].fill_(index + 1)
+
+        green_contexts.execute_in_green_contexts(streams, work)
+
+        self.assertEqual(torch.cuda.current_stream(), caller_stream)
+        self.assertEqual(callback_streams, [stream.cuda_stream for stream in streams])
+        torch.cuda.synchronize()
+        self.assertEqual(outputs[0], torch.tensor(1.0, device="cuda"))
+        self.assertEqual(outputs[1], torch.tensor(2.0, device="cuda"))
+
+    @serialTest()
+    def test_execute_in_green_contexts_restores_stream_on_error(self):
+        from torch.cuda import green_contexts
+
+        contexts = [green_contexts.GreenContext(num_sms=1) for _ in range(2)]
+        streams = [context.Stream() for context in contexts]
+        caller_stream = torch.cuda.current_stream()
+
+        def fail(index, context):
+            raise RuntimeError("callback failure")
+
+        with self.assertRaisesRegex(RuntimeError, "callback failure"):
+            green_contexts.execute_in_green_contexts(streams, fail)
+
+        self.assertEqual(torch.cuda.current_stream(), caller_stream)
+
+    @serialTest()
+    def test_greencontext_locality_backfill(self):
+        from torch.cuda import green_contexts
+
+        if not green_contexts.is_localization_supported():
+            self.skipTest("Green context localization is not supported")
+
+        device_id = torch.cuda.current_device()
+        num_domains = green_contexts.get_num_locality_domains(device_id)
+        drv_device = green_contexts._check_cuda_bindings(
+            green_contexts._drv.cuDeviceGet(device_id)
+        )
+        sm_resource = green_contexts._check_cuda_bindings(
+            green_contexts._drv.cuDeviceGetDevResource(
+                drv_device,
+                green_contexts._drv.CUdevResourceType.CU_DEV_RESOURCE_TYPE_SM,
+            )
+        )
+        expected_sms = sm_resource.sm.smCount // num_domains
+
+        resources = green_contexts._get_localized_sm_resources(
+            device_id, locality_domain_backfill=True
+        )
+        self.assertEqual(len(resources), num_domains)
+        self.assertTrue(
+            all(resource.sm.smCount == expected_sms for resource in resources)
+        )
+
+        contexts = [
+            green_contexts.GreenContext(
+                locality_domain_id=domain_id,
+                locality_domain_backfill=True,
+                device_id=device_id,
+            )
+            for domain_id in range(num_domains)
+        ]
+        for context in contexts:
+            resource = green_contexts._check_cuda_bindings(
+                green_contexts._drv.cuGreenCtxGetDevResource(
+                    context._green_ctx,
+                    green_contexts._drv.CUdevResourceType.CU_DEV_RESOURCE_TYPE_SM,
+                )
+            )
+            self.assertEqual(resource.sm.smCount, expected_sms)
+
+        for locality_domain_backfill in (False, True):
+            for other_args in ({}, {"num_sms": 1}):
+                with self.subTest(
+                    locality_domain_backfill=locality_domain_backfill,
+                    other_args=other_args,
+                ):
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        "locality_domain_backfill requires locality_domain_id",
+                    ):
+                        green_contexts.GreenContext(
+                            locality_domain_backfill=locality_domain_backfill,
+                            **other_args,
+                        )
+
+    @serialTest()
+    def test_greencontext_coscheduled_sm_count(self):
+        from torch.cuda import green_contexts
+
+        if not green_contexts.is_localization_supported():
+            self.skipTest("Green context localization is not supported")
+
+        device_id = torch.cuda.current_device()
+        coscheduled_sm_count = 2
+        context = green_contexts.GreenContext.create(
+            locality_domain_id=0,
+            coscheduled_sm_count=coscheduled_sm_count,
+            device_id=device_id,
+        )
+        resource = green_contexts._check_cuda_bindings(
+            green_contexts._drv.cuGreenCtxGetDevResource(
+                context._green_ctx,
+                green_contexts._drv.CUdevResourceType.CU_DEV_RESOURCE_TYPE_SM,
+            )
+        )
+        self.assertEqual(resource.sm.smCoscheduledAlignment, coscheduled_sm_count)
+
+    @parametrize("coscheduled_sm_count", [-1, 1, 34])
+    def test_greencontext_invalid_coscheduled_sm_count(self, coscheduled_sm_count):
+        from torch.cuda import green_contexts
+
+        if not green_contexts.is_localization_supported():
+            self.skipTest("Green context localization is not supported")
+
+        device_id = torch.cuda.current_device()
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "coscheduled_sm_count must be 0 or a multiple of 2 between 2 and",
+        ):
+            green_contexts.GreenContext(
+                locality_domain_id=0,
+                coscheduled_sm_count=coscheduled_sm_count,
+                device_id=device_id,
+            )
+
+    def test_greencontext_coscheduled_sm_count_requires_locality_domain(self):
+        from torch.cuda import green_contexts
+
+        with self.assertRaisesRegex(
+            RuntimeError, "coscheduled_sm_count requires locality_domain_id"
+        ):
+            green_contexts.GreenContext(num_sms=1, coscheduled_sm_count=0)
+
 
 class TestCudaArchList(TestCase):
     def test_get_arch_list_empty_when_cuda_not_compiled(self):
