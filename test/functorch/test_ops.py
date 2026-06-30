@@ -404,7 +404,6 @@ skip_noncontig = {
     "_batch_norm_with_update",
     "as_strided_copy",
     "native_group_norm",
-    "torch.ops.aten._scaled_dot_product_flash_attention_for_cpu",
 }
 
 bool_unsupported_ordered_ops = {
@@ -1120,7 +1119,6 @@ class TestOperators(TestCase):
             skip("nn.functional.alpha_dropout"),  # randomness
             skip("nn.functional.scaled_dot_product_attention"),  # randomness
             xfail("torch.ops.aten._efficient_attention_forward"),  # outputs ints
-            xfail("torch.ops.aten._scaled_dot_product_flash_attention_for_cpu"),
             skip("nn.functional.multi_head_attention_forward"),  # randomness
             xfail(
                 "index_put", ""
@@ -1521,6 +1519,9 @@ class TestOperators(TestCase):
                     "index_fill"
                 ),  # aten::_unique hit the vmap fallback which is currently disabled
                 xfail("native_group_norm"),
+                xfail(
+                    "torch.ops.aten._scaled_dot_product_flash_attention_for_cpu"
+                ),  # aten::_scaled_dot_product_flash_attention_for_cpu hit the vmap fallback which is currently disabled
             }
         ),
     )
