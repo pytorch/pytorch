@@ -3530,6 +3530,80 @@ class TestMaxAutotune(TestCase):
         expected = torch.einsum("...ab,...aA,...bB->...AB", grad.float(), q0.float(), q1.float())
         torch.testing.assert_close(result, expected)
 
+    @unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    def test_nontail_input_dedup_trimming(self):
+        """Non-tail deduplication must keep trailing tensors, not truncate.
+
+        Simulates a 4-input template (A, B, C, D) where B (index 1) was
+        deduplicated to A. The kernel signature has 3 input pointers:
+        arg_A, arg_C, arg_D. A naive tail-truncation would drop D (index 3)
+        instead of B (index 1). The name_to_idx logic must keep [0, 2, 3].
+        """
+        dev = GPU_TYPE
+        t_A = torch.randn(4, 4, device=dev)
+        t_B = torch.randn(4, 4, device=dev)
+        t_C = torch.randn(4, 4, device=dev)
+        t_D = torch.randn(4, 4, device=dev)
+        out = torch.empty(4, 4, device=dev)
+
+        class FakeKernelSelf:
+            with_bandwidth_info = False
+
+        def fake_run(*args, **kwargs):
+            pass
+
+        fake_run.__self__ = FakeKernelSelf()
+
+        class FakeKernel:
+            run = fake_run
+            triton_meta = {
+                "signature": {
+                    "arg_A": "*fp32",
+                    "arg_C": "*fp32",
+                    "arg_D": "*fp32",
+                    "out_ptr0": "*fp32",
+                    "ks0": "i32",
+                    "ks1": "i32",
+                },
+            }
+
+        class FakeModule:
+            triton_mm_plus_mm = FakeKernel()
+
+        input_meta = [
+            TensorMeta(device=t.device, dtype=t.dtype, sizes=t.shape,
+                       strides=t.stride(), offset=0)
+            for t in [t_A, t_B, t_C, t_D]
+        ]
+        output_meta = TensorMeta(
+            device=out.device, dtype=out.dtype, sizes=out.shape,
+            strides=out.stride(), offset=0,
+        )
+
+        req = TritonBenchmarkRequest(
+            kernel_name="triton_mm_plus_mm",
+            input_tensor_meta=input_meta,
+            output_tensor_meta=output_meta,
+            extra_args=[1, 1, 1],
+            module_path="/dev/null",
+            module_cache_key="fake_key",
+            num_stages=1,
+            num_warps=4,
+            input_param_names=("arg_A", "arg_B", "arg_C", "arg_D"),
+        )
+
+        with patch(
+            "torch._inductor.autotune_process.PyCodeCache.load_by_key_path",
+            return_value=FakeModule(),
+        ):
+            fn = req.make_run_fn(t_A, t_B, t_C, t_D, out=out)
+
+        kept = fn.args[:3]
+        self.assertEqual(len(kept), 3)
+        self.assertIs(kept[0], t_A)
+        self.assertIs(kept[1], t_C)
+        self.assertIs(kept[2], t_D)
+
 
 @instantiate_parametrized_tests
 class TestTemplateConfigPruning(TestCase):
@@ -3804,41 +3878,6 @@ class TestTemplateConfigPruning(TestCase):
                     captured_smem <= smem_estimation,
                     lambda msg: f"{msg}\nEstimated maximum smem should exceed actual smem used for config {c}",
                 )
-
-
-    @unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
-    def test_bmm_input_dedup_no_stream_overflow(self):
-        """Autotuning bmm after a self-referential bmm must not crash.
-
-        The first compilation produces template kernels where both operands
-        alias the same buffer (input deduplication).  The second compilation's
-        autotuning must handle the reduced parameter count without overflowing
-        positional args into the stream keyword.
-        """
-        dev = GPU_TYPE
-        B, N = 2, 128
-
-        grad = torch.randn(B, N, N, device=dev)
-        m0 = torch.randn(B, N, N, device=dev)
-        m1 = torch.randn(B, N, N, device=dev)
-        q0 = torch.randn(B, N, N, device=dev)
-        q1 = torch.randn(B, N, N, device=dev)
-
-        @torch.compile(fullgraph=True, dynamic=False, mode="max-autotune-no-cudagraphs")
-        def update(grad, m0, m1, beta):
-            outer0 = torch.einsum("...ab,...Ab->...aA", grad, grad)
-            m0.lerp_(outer0, 1 - beta)
-            outer1 = torch.einsum("...ab,...aB->...bB", grad, grad)
-            m1.lerp_(outer1, 1 - beta)
-
-        @torch.compile(fullgraph=True, dynamic=False, mode="max-autotune-no-cudagraphs")
-        def project(grad, q0, q1):
-            return torch.einsum("...ab,...aA,...bB->...AB", grad, q0, q1)
-
-        update(grad, m0, m1, 0.999)
-        result = project(grad.float(), q0.float(), q1.float())
-        expected = torch.einsum("...ab,...aA,...bB->...AB", grad.float(), q0.float(), q1.float())
-        torch.testing.assert_close(result, expected)
 
 
 class TestMaxAutotunePrecompile(TestCase):

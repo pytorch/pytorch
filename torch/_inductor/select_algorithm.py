@@ -2720,6 +2720,7 @@ class GenerateAndLoadResult(NamedTuple):
     prologue_supported_inputs: OrderedSet[str]
     kernel_args_sizevars_keys: tuple[sympy.Expr, ...]
     kernel_options: dict[str, Any]
+    input_param_names: tuple[str, ...]
 
 
 class GeneratedCodeCacheEntry(NamedTuple):
@@ -3160,6 +3161,7 @@ class TritonTemplate(KernelTemplate):
         mod = PyCodeCache.load(code, extra, set_sys_modules=False)
 
         input_call_args = tuple(kernel.args.input_buffers.keys())
+        input_param_names = tuple(kernel.args.input_buffers.values())
         prologue_supported_inputs = kernel.prologue_supported_inputs.copy()
         kernel_args_sizevars_keys = tuple(kernel.args.sizevars.keys())
 
@@ -3173,6 +3175,7 @@ class TritonTemplate(KernelTemplate):
             prologue_supported_inputs,
             kernel_args_sizevars_keys,
             kernel_options,
+            input_param_names,
         )
 
     def generate(  # type: ignore[override]
@@ -3367,6 +3370,7 @@ class TritonTemplate(KernelTemplate):
             workspace_zero_fill=workspace_zero_fill,
             input_tensor_meta=TensorMeta.from_irnodes(kernel_input_nodes),  # type: ignore[arg-type]
             output_tensor_meta=TensorMeta.from_irnodes(layout),
+            input_param_names=result.input_param_names,
         )
 
         # Convolution-specific parameters to include in logging
