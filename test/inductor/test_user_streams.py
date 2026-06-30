@@ -2203,18 +2203,25 @@ class TestPDLWithMultiStream(InductorTestCase):
     user-annotated multi-stream code under torch.compile.
 
     PDL's GDC intrinsics are stream-local: gdc_wait/gdc_launch_dependents
-    only govern the overlap between consecutive kernels on the *same* CUDA
-    stream.  Cross-stream ordering is handled entirely by CUDA events at the
-    wrapper level.  These tests verify that enabling PDL in the presence of
-    multi-stream code doesn't break correctness, doesn't interfere with
-    stream-level invariants (no cross-stream fusion, event ops preserved),
-    and still applies within each stream's own kernel sequence.
+    only govern overlap between kernels on one CUDA stream. Cross-stream
+    ordering is handled by CUDA events at the wrapper level. These tests verify
+    that enabling PDL in the presence of multi-stream code does not break
+    correctness, does not interfere with stream invariants, and keeps user
+    stream graphs on plain launches until per-stream PDL chains are modeled.
     """
+
+    def _assert_no_pdl(self, code: str):
+        (
+            FileCheck()
+            .check_not("'launch_pdl': True")
+            .check_not("gdc_wait")
+            .check_not("gdc_launch")
+        ).run(code)
 
     @unittest.skipIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
     @inductor_config.patch({"triton.enable_pdl": True})
     def test_pdl_single_side_stream(self):
-        """PDL metadata is emitted for a kernel on a side stream."""
+        """PDL metadata is not emitted for a user side-stream graph."""
         from torch._inductor.utils import run_and_get_code, run_and_get_triton_code
 
         def fn(x):
@@ -2236,12 +2243,7 @@ class TestPDLWithMultiStream(InductorTestCase):
         self.assertIn("synchronize_stream", wrapper_code)
 
         triton_code = run_and_get_triton_code(torch.compile(fn), x)
-        (
-            FileCheck()
-            .check("'launch_pdl': True")
-            .check("gdc_wait")
-            .check("gdc_launch")
-        ).run(triton_code)
+        self._assert_no_pdl(triton_code)
 
     @unittest.skipIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
     @inductor_config.patch({"triton.enable_pdl": True})
@@ -2273,22 +2275,8 @@ class TestPDLWithMultiStream(InductorTestCase):
         self.assertEqual(compiled_fn(x), expected)
 
         triton_code = run_and_get_triton_code(torch.compile(fn), x)
-        # s1 kernel, s2 kernel, and default-stream add kernel
-        (
-            FileCheck()
-            # s1 kernel
-            .check("'launch_pdl': True")
-            .check("gdc_wait")
-            .check("gdc_launch")
-            # s2 kernel
-            .check("'launch_pdl': True")
-            .check("gdc_wait")
-            .check("gdc_launch")
-            # default stream add
-            .check("'launch_pdl': True")
-            .check("gdc_wait")
-            .check("gdc_launch")
-        ).run(triton_code)
+        # Multi-stream graphs stay on plain launches for now.
+        self._assert_no_pdl(triton_code)
 
     @unittest.skipIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
     @inductor_config.patch({"triton.enable_pdl": True})
@@ -2323,33 +2311,23 @@ class TestPDLWithMultiStream(InductorTestCase):
         self.assertIn("record_event", code)
         self.assertIn("wait_event", code)
 
-        # Both kernels (default + side stream) get PDL intrinsics
+        # Cross-stream event graphs stay on plain launches for now.
         triton_code = run_and_get_triton_code(torch.compile(fn), x)
-        (
-            FileCheck()
-            # default stream kernel
-            .check("'launch_pdl': True")
-            .check("gdc_wait")
-            .check("gdc_launch")
-            # side stream kernel
-            .check("'launch_pdl': True")
-            .check("gdc_wait")
-            .check("gdc_launch")
-        ).run(triton_code)
+        self._assert_no_pdl(triton_code)
 
     @unittest.skipIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
     @inductor_config.patch({"triton.enable_pdl": True})
     def test_pdl_same_stream_consecutive_kernels(self):
-        """Two consecutive kernels on the same side stream should both get PDL.
+        """A side-stream sequence stays on plain launches for now.
 
-        This is the case where PDL is actually useful: the second kernel can
-        overlap with the first via GDC intrinsics because they share a stream."""
+        This avoids partially enabling a PDL chain before per-stream launch
+        dependency modeling is available for user-stream graphs."""
         from torch._inductor.utils import run_and_get_triton_code
 
         def fn(x, y):
             s = torch.cuda.Stream()
             with torch.cuda.stream(s):
-                # Two separate fused groups on the same stream
+                # A side-stream producer followed by an in-place consumer
                 a = x**2 + x
                 y.copy_(a)
             s.synchronize()
@@ -2362,12 +2340,7 @@ class TestPDLWithMultiStream(InductorTestCase):
         self.assertEqual(compiled_fn(x, y.clone()), expected)
 
         triton_code = run_and_get_triton_code(torch.compile(fn), x, y.clone())
-        (
-            FileCheck()
-            .check("'launch_pdl': True")
-            .check("gdc_wait")
-            .check("gdc_launch")
-        ).run(triton_code)
+        self._assert_no_pdl(triton_code)
 
     @unittest.skipIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
     @inductor_config.patch({"triton.enable_pdl": True})
@@ -2406,23 +2379,9 @@ class TestPDLWithMultiStream(InductorTestCase):
         # 3 kernels: s1 pointwise, s2 pointwise, default stream add
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 3)
 
-        # All 3 kernels should have PDL with GDC intrinsics
+        # Multi-stream graphs stay on plain launches for now.
         triton_code = run_and_get_triton_code(torch.compile(fn), x)
-        (
-            FileCheck()
-            # s1 kernel
-            .check("'launch_pdl': True")
-            .check("gdc_wait")
-            .check("gdc_launch")
-            # s2 kernel
-            .check("'launch_pdl': True")
-            .check("gdc_wait")
-            .check("gdc_launch")
-            # default stream add
-            .check("'launch_pdl': True")
-            .check("gdc_wait")
-            .check("gdc_launch")
-        ).run(triton_code)
+        self._assert_no_pdl(triton_code)
 
     @unittest.skipIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
     @inductor_config.patch({"triton.enable_pdl": True})
@@ -2463,13 +2422,8 @@ class TestPDLWithMultiStream(InductorTestCase):
         # Wrapper must have stream context and event sync
         self.assertGreaterEqual(_count_generated_stream_contexts(code), 1)
         self.assertIn("wait_event", code)
-        # The relu+add pointwise kernel should have PDL
-        (
-            FileCheck()
-            .check("'launch_pdl': True")
-            .check("gdc_wait")
-            .check("gdc_launch")
-        ).run(code)
+        # Multi-stream graphs stay on plain launches for now.
+        self._assert_no_pdl(code)
 
         for _ in range(ITERS):
             expected = fn(x, w)
@@ -2512,19 +2466,9 @@ class TestPDLWithMultiStream(InductorTestCase):
         self.assertIn("record_event", code)
         self.assertIn("wait_event", code)
 
-        # Both kernels (default + side stream) get PDL intrinsics
+        # Cross-stream event graphs stay on plain launches for now.
         triton_code = run_and_get_triton_code(torch.compile(fn), x)
-        (
-            FileCheck()
-            # default stream kernel
-            .check("'launch_pdl': True")
-            .check("gdc_wait")
-            .check("gdc_launch")
-            # side stream kernel
-            .check("'launch_pdl': True")
-            .check("gdc_wait")
-            .check("gdc_launch")
-        ).run(triton_code)
+        self._assert_no_pdl(triton_code)
 
 
 @unittest.skipIf(not TEST_CUDA, "requires CUDA")
