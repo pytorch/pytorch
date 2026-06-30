@@ -50,7 +50,7 @@ class PyProcessGroup : public ProcessGroup {
         pybind11::get_override(static_cast<const cname*>(this), #name); \
     if (override) {                                                     \
       auto o = override(__VA_ARGS__);                                   \
-      return c10::make_intrusive<PyWorkHolder>(o);                      \
+      return c10::make_intrusive<PyWorkHolder>(std::move(o));           \
     }                                                                   \
     return cname::name(__VA_ARGS__);                                    \
   } while (false)
@@ -195,6 +195,18 @@ class PyProcessGroup : public ProcessGroup {
         opts);
   }
 
+  c10::intrusive_ptr<Work> all_gather_single(
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
+      const AllgatherOptions& opts = AllgatherOptions()) override {
+    WORK_OVERRIDE(
+        ProcessGroup, /* Parent class */
+        all_gather_single, /* Name of function in C++ */
+        outputBuffer,
+        inputBuffer,
+        opts);
+  }
+
   c10::intrusive_ptr<Work> all_gather_single_coalesced(
       std::vector<at::Tensor>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
@@ -291,6 +303,18 @@ class PyProcessGroup : public ProcessGroup {
         reduce_scatter, /* Name of function in C++ */
         outputTensors,
         inputTensors,
+        opts);
+  }
+
+  c10::intrusive_ptr<Work> reduce_scatter_single(
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) override {
+    WORK_OVERRIDE(
+        ProcessGroup, /* Parent class */
+        reduce_scatter_single, /* Name of function in C++ */
+        outputBuffer,
+        inputBuffer,
         opts);
   }
 
