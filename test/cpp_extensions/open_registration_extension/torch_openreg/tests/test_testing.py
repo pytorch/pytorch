@@ -131,7 +131,7 @@ class TestDeviceTypeOpenReg(TestCase):
                 self.precision,
                 1e-2,
                 msg=(
-                    f"Expected op_overrides precisionOverride (1e-2) to win over "
+                    lambda msg: f"{msg}\nExpected op_overrides precisionOverride (1e-2) to win over "
                     f"OpInfo precisionOverride (1e-5), but got {self.precision}"
                 ),
             )

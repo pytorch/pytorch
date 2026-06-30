@@ -82,7 +82,6 @@ from torch.testing._internal.common_cuda import (
     TEST_CUDNN,
     tf32_on_and_off,
     with_tf32_off,
-    xfailIfSM100OrLater,
 )
 from torch.testing._internal.common_device_type import (
     expectedFailureXPU,
@@ -4079,7 +4078,7 @@ for dtype in (torch.int32, torch.int64):
         self.assertEqual(
             result.returncode,
             0,
-            msg=f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+            msg=lambda msg: f"{msg}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}",
         )
 
     @skip_if_cpu
@@ -7606,7 +7605,7 @@ for dtype in (torch.int32, torch.int64):
             self.assertEqual(
                 mul_node in folder.node_replacements,
                 should_fold,
-                msg=f"unexpected fold decision for dtype={dtype}",
+                msg=lambda msg: f"{msg}\nunexpected fold decision for dtype={dtype}",
             )
 
     def test_mul_by_zero_extremal(self):
@@ -18818,10 +18817,6 @@ if RUN_GPU:
 
             return kernels
 
-        # On Blackwell+, #179729 raised the split-reduction no-split threshold to 524288,
-        # so the 256*256=65536-element reduction below no longer splits and produces 1 kernel
-        # instead of the expected 2.
-        @xfailIfSM100OrLater
         def test_divisible_by_16_covers_numel_args(self):
             torch._dynamo.reset()
 
@@ -19180,7 +19175,7 @@ if RUN_GPU:
 
                 x = torch.randn(8, device=GPU_TYPE)
                 code = run_and_get_triton_code(fn_opt, x)
-                self.assertEqual(fn_opt(x), fn(x), msg=f"{dynamic=}")
+                self.assertEqual(fn_opt(x), fn(x), msg=lambda msg: f"{msg}\n{dynamic=}")
 
                 # Check that there's indirect indexing...
                 has_indirect(code, tl_fn="tl.load")
@@ -19210,7 +19205,7 @@ if RUN_GPU:
                 # Correctness
                 out_opt = fn_opt(a.clone(), z, b, idx0, idx1)
                 out = fn(a.clone(), z, b, idx0, idx1)
-                self.assertEqual(out_opt, out, msg=f"{dynamic=}")
+                self.assertEqual(out_opt, out, msg=lambda msg: f"{msg}\n{dynamic=}")
 
                 # We have an indirect store via atomic_add
                 has_indirect(code, tl_fn="tl.atomic_add")
@@ -20551,7 +20546,7 @@ if RUN_GPU:
             self.assertEqual(
                 explanation.graph_break_count,
                 0,
-                f"Expected 0 graph breaks for multinomial, got: {explanation.graph_break_count}",
+                lambda msg: f"{msg}\nExpected 0 graph breaks for multinomial, got: {explanation.graph_break_count}",
             )
 
             result = torch.compile(fn)(inp)
@@ -20572,7 +20567,7 @@ if RUN_GPU:
             self.assertEqual(
                 explanation.graph_break_count,
                 0,
-                f"Expected 0 graph breaks for bincount, got: {explanation.graph_break_count}",
+                lambda msg: f"{msg}\nExpected 0 graph breaks for bincount, got: {explanation.graph_break_count}",
             )
 
             result = torch.compile(fn)(inp)
@@ -20595,7 +20590,7 @@ if RUN_GPU:
             self.assertEqual(
                 explanation.graph_break_count,
                 0,
-                f"Expected 0 graph breaks for unique, got: {explanation.graph_break_count}",
+                lambda msg: f"{msg}\nExpected 0 graph breaks for unique, got: {explanation.graph_break_count}",
             )
 
             result = torch.compile(fn)(inp)
@@ -20620,7 +20615,7 @@ if RUN_GPU:
             self.assertEqual(
                 explanation.graph_break_count,
                 0,
-                f"Expected 0 graph breaks for unique_consecutive, got: {explanation.graph_break_count}",
+                lambda msg: f"{msg}\nExpected 0 graph breaks for unique_consecutive, got: {explanation.graph_break_count}",
             )
 
             result = torch.compile(fn)(inp)
@@ -20645,7 +20640,7 @@ if RUN_GPU:
             self.assertEqual(
                 explanation.graph_break_count,
                 0,
-                f"Expected 0 graph breaks for unique(dim=0), got: {explanation.graph_break_count}",
+                lambda msg: f"{msg}\nExpected 0 graph breaks for unique(dim=0), got: {explanation.graph_break_count}",
             )
 
             result = torch.compile(fn)(inp)
@@ -20670,7 +20665,7 @@ if RUN_GPU:
             self.assertEqual(
                 explanation.graph_break_count,
                 0,
-                f"Expected 0 graph breaks for unique_consecutive(dim=0), got: {explanation.graph_break_count}",
+                lambda msg: f"{msg}\nExpected 0 graph breaks for unique_consecutive(dim=0), got: {explanation.graph_break_count}",
             )
 
             result = torch.compile(fn)(inp)
@@ -20704,7 +20699,7 @@ if RUN_GPU:
             self.assertEqual(
                 explanation.graph_break_count,
                 0,
-                f"Expected 0 graph breaks for _amp_update_scale_, got: {explanation.graph_break_count}",
+                lambda msg: f"{msg}\nExpected 0 graph breaks for _amp_update_scale_, got: {explanation.graph_break_count}",
             )
 
             result = torch.compile(fn)(
@@ -20736,6 +20731,53 @@ if RUN_GPU:
             expected = fn(inp)
             torch.testing.assert_close(result[0], expected[0])
             torch.testing.assert_close(result[1], expected[1])
+
+        @config.patch(
+            {
+                "triton.use_tensor_descriptor": True,
+                "assume_aligned_inputs": True,
+            }
+        )
+        def test_tma_descriptor_no_x_dim_split_scan(self):
+            # Regression test: split_scan kernels have no_x_dim=True (XBLOCK
+            # hardcoded to 1). TMA descriptors require >= 16 bytes in the
+            # innermost dimension, so TMA must be rejected when the innermost
+            # block is XBLOCK and XBLOCK is fixed at 1.
+            def fn(x, b):
+                return torch.cumsum(x + b, dim=1)
+
+            x = torch.randn(1, 129, 64, device=GPU_TYPE)
+            b = torch.randn(64, device=GPU_TYPE)
+            actual = torch.compile(fn)(x, b)
+            expected = fn(x, b)
+            torch.testing.assert_close(actual, expected)
+
+        @config.patch(
+            {
+                "triton.use_tensor_descriptor": True,
+                "assume_aligned_inputs": True,
+                "combo_kernels": True,
+            }
+        )
+        def test_tma_descriptor_combo_kernel_shared_xblock(self):
+            # Regression test: in combo kernels without per_subkernel_blocks,
+            # XBLOCK is shared across sub-kernels. If one sub-kernel has
+            # xnumel=1 (forcing XBLOCK=1), tensor descriptors in sibling
+            # sub-kernels with block_shape containing XBLOCK will violate
+            # the TMA 16-byte minimum. TMA must be rejected for such cases.
+            def fn(x):
+                return (
+                    x.mean(),
+                    x.mean(-1),
+                    torch.mean(x, -2, keepdim=True),
+                    x.mean([0, 1]),
+                )
+
+            x = torch.randn(1, 2, 4, 8, device=GPU_TYPE)
+            actual = torch.compile(fn)(x)
+            expected = fn(x)
+            for a, e in zip(actual, expected):
+                torch.testing.assert_close(a, e)
 
     class RNNTest(TestCase):
         device_type = GPU_TYPE

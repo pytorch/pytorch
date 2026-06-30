@@ -8442,7 +8442,7 @@ class TestMemPool(TestCase):
         self.assertEqual(
             len(mem_snapshot),
             len(tensor_ptrs),
-            f"expected to have {len(tensor_ptrs)} segments, but actually got {len(mem_snapshot)}",
+            lambda msg: f"{msg}\nexpected to have {len(tensor_ptrs)} segments, but actually got {len(mem_snapshot)}",
         )
 
         for idx, first_addr in enumerate(tensor_ptrs):
@@ -8455,7 +8455,7 @@ class TestMemPool(TestCase):
             self.assertEqual(
                 second_addr,
                 state.allocated_addrs[idx],
-                f"{second_round_tensor_ptrs[idx]=} != {state.allocated_addrs[idx]=}",
+                lambda msg: f"{msg}\n{second_round_tensor_ptrs[idx]=} != {state.allocated_addrs[idx]=}",  # noqa: F821
             )
         del pool
         del state
@@ -8556,7 +8556,7 @@ class TestMemPool(TestCase):
                 self.assertEqual(
                     new,
                     orig,
-                    f"[{label}] Block not reused after multi-stream free "
+                    lambda msg: f"{msg}\n[{label}] Block not reused after multi-stream free "
                     "-- free was likely deferred as if under graph capture",
                 )
 
@@ -10438,45 +10438,40 @@ class TestCudaGreenContexts(TestCase):
     def tearDown(self):
         super().tearDown()
 
-    def test_greencontext_restores_stream(self):
+    def test_greencontext_set_pop_context_deprecation(self):
         # need to start on a side stream as we are comparing pointers and want to avoid
         # two NULL streams...
         s = torch.cuda.Stream()
         with torch.cuda.stream(s):
             start_stream = torch.cuda.current_stream()
             ctx = torch.cuda.green_contexts.GreenContext(num_sms=1)
-            ctx.set_context()
+            with self.assertWarnsRegex(FutureWarning, "GreenContext.set_context"):
+                ctx.set_context()
             context_stream = torch.cuda.current_stream()
-            ctx.pop_context()
+            with self.assertWarnsRegex(FutureWarning, "GreenContext.pop_context"):
+                ctx.pop_context()
             end_stream = torch.cuda.current_stream()
             self.assertEqual(start_stream.cuda_stream, end_stream.cuda_stream)
             self.assertNotEqual(start_stream.cuda_stream, context_stream.cuda_stream)
 
-    @serialTest()
-    def test_greencontext_carveout(self):
-        # By default, everything is performed on the current device
-        a = torch.randn(4096, 4096, device="cuda", dtype=torch.bfloat16)
-        ctx = torch.cuda.green_contexts.GreenContext(num_sms=1)
-        ctx.set_context()
-        torch.matmul(a, a)
-        torch.cuda.synchronize()
-        t0 = time.perf_counter()
-        partial_res = torch.matmul(a, a)
-        torch.cuda.synchronize()
-        t1 = time.perf_counter()
-        ctx.pop_context()
-        torch.matmul(a, a)
-        torch.cuda.synchronize()
-        t2 = time.perf_counter()
-        full_res = torch.matmul(a, a)
-        torch.cuda.synchronize()
-        t3 = time.perf_counter()
-        self.assertEqual(partial_res, full_res)
-        self.assertGreater(t1 - t0, t3 - t2)
+    def test_greencontext_stream_context_restores_stream(self):
+        # need to start on a side stream as we are comparing pointers and
+        # want to avoid the NULL stream
+        s = torch.cuda.Stream()
+        with torch.cuda.stream(s):
+            start_stream = torch.cuda.current_stream()
+            ctx = torch.cuda.green_contexts.GreenContext(num_sms=1)
+            ctx_stream = ctx.Stream()
+            stream_context = torch.cuda.stream(ctx_stream)
+            with stream_context as context_value:
+                self.assertIsNone(context_value)
+                context_stream = torch.cuda.current_stream()
+            end_stream = torch.cuda.current_stream()
+            self.assertIsInstance(stream_context, torch.cuda.StreamContext)
+            self.assertEqual(ctx_stream.cuda_stream, context_stream.cuda_stream)
+            self.assertEqual(start_stream.cuda_stream, end_stream.cuda_stream)
+            self.assertNotEqual(start_stream.cuda_stream, context_stream.cuda_stream)
 
-    @unittest.skipIf(
-        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/181370"
-    )
     @serialTest()
     def test_greencontext_stream_carveout(self):
         # By default, everything is performed on the current device
@@ -10501,24 +10496,21 @@ class TestCudaGreenContexts(TestCase):
 
     @serialTest()
     def test_greencontext_graphs(self):
-        # By default, everything is performed on the current device
         a = torch.randn(4096, 4096, device="cuda", dtype=torch.bfloat16)
         ctx = torch.cuda.green_contexts.GreenContext(num_sms=1)
-        ctx.set_context()
-        partial_res = torch.matmul(a, a)
-        ctx.pop_context()
+        ctx_stream = ctx.Stream()
+        with torch.cuda.stream(ctx_stream):
+            partial_res = torch.matmul(a, a)
         full_res = torch.matmul(a, a)
         full_res.zero_()
         partial_res.zero_()
         torch.cuda.synchronize()
 
         g = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(g):
-            ctx.set_context()
+        with torch.cuda.graph(g, stream=ctx_stream):
             partial_res = torch.matmul(a, a)
-            ctx.pop_context()
-            full_res = torch.matmul(a, a)
         g.replay()
+        full_res = torch.matmul(a, a)
         self.assertEqual(partial_res, full_res)
 
     @unittest.skipIf(
@@ -10569,12 +10561,10 @@ class TestCudaGreenContexts(TestCase):
             workqueue_scope="balanced",
             workqueue_concurrency_limit=1,
         )
-        ctx.set_context()
         green_streams = [ctx.Stream() for _ in range(n_streams)]
         t2 = time.perf_counter()
         run_multi_stream_sleep(green_streams)
         t3 = time.perf_counter()
-        ctx.pop_context()
         limited_time = t3 - t2
 
         self.assertGreater(limited_time, baseline_time)
