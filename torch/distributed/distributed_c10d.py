@@ -6394,6 +6394,7 @@ def _new_group_with_tag(
         pg_or_none = default_pg.new_group(
             ranks,
             timeout=timeout,
+            backend=backend,
             pg_options=backend_options,
             group_name=group_name,
             group_desc=group_desc,
