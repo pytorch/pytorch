@@ -1853,6 +1853,14 @@ void scaled_gemm(
                            "Got m=", m, ", n=", n, ", k=", k);
             }
   #endif
+  #if ROCM_VERSION >= 70200
+            if (at::detail::getCUDAHooks().isGPUArch({"gfx1250"})) {
+                // TODO: add constraints based on hipblaslt internals
+                TORCH_CHECK((m % 16 == 0) && (n % 16 == 0) && (k % 128 == 0),
+                           "M, N must be multiples of 16 and K should be multiple of 128 for MX format. "
+                           "Got m=", m, ", n=", n, ", k=", k);
+            }
+  #endif
   }
 #elif (CUDA_VERSION < 12090) && !defined(USE_ROCM)
   // hipblaslt supported row-wise before cublas, and did so their own way (via
