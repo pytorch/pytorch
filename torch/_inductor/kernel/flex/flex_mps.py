@@ -6,7 +6,7 @@ import sympy
 import torch
 from torch._inductor.virtualized import V
 
-from ...ir import FixedLayout, TensorBox
+from ...ir import FixedLayout, ShapeAsConstantBuffer, TensorBox
 from ...lowering import empty_strided
 from ...select_algorithm import realize_inputs
 from .common import infer_dense_strides, maybe_realize
@@ -125,29 +125,33 @@ def lower_mps(
 
     scale_val = float(scale)
 
-    # Captured tensors become extra Metal buffers; their sizes/strides are baked
-    # into the index offset math. maybe_realize passes SymInts through untouched;
-    # SymInt captures (from dynamic-shape closures) are not supported yet.
+    # Tensor captures become extra Metal buffers; their sizes/strides are baked
+    # into the index offset math. SymInt captures (from dynamic-shape closures)
+    # become extra packed scalars, evaluated at the call site. maybe_realize
+    # passes SymInts through untouched. `metas` keeps the placeholder order so
+    # the subgraph codegen can bind each capture (tensor or scalar) by position.
     def _capture_meta(items):
-        metas, tensors = [], []
+        metas, tensors, scalars = [], [], []
         for cap in maybe_realize(list(items)):
-            if isinstance(cap, sympy.Expr):
-                raise NotImplementedError(
-                    "flex_attention on MPS does not yet support SymInt captures "
-                    "in score_mod/mask_mod (dynamic-shape closures)"
-                )
+            if isinstance(cap, ShapeAsConstantBuffer):
+                cap = cap.expr
+            if isinstance(cap, (int, sympy.Expr)):
+                metas.append(("scalar",))
+                scalars.append(cap)
+                continue
             metas.append(
                 (
+                    "tensor",
                     [sizevars.guard_int(s) for s in cap.get_size()],
                     [sizevars.guard_int(s) for s in cap.get_stride()],
                     cap.get_dtype(),
                 )
             )
             tensors.append(cap)
-        return metas, tensors
+        return metas, tensors, scalars
 
-    score_meta, score_tensors = _capture_meta(score_mod_other_buffers)
-    mask_meta, mask_tensors = _capture_meta(mask_mod_other_buffers)
+    score_meta, score_tensors, score_scalars = _capture_meta(score_mod_other_buffers)
+    mask_meta, mask_tensors, mask_scalars = _capture_meta(mask_mod_other_buffers)
 
     shader_source = _generate_metal_shader(
         dtype=dtype,
@@ -220,6 +224,10 @@ def lower_mps(
             *_pad_strides(full_kv_nb_strides, 3),
             *_pad_strides(full_kv_idx_strides, 4),
         ]
+
+    # SymInt captures trail the fixed scalars; order (score then mask) matches
+    # the scalar_capture_names appended in _generate_metal_shader.
+    scalar_args += [*score_scalars, *mask_scalars]
 
     # (num_q_blocks, Hq, B); each threadgroup owns BLOCK_M query rows.
     grid = (
