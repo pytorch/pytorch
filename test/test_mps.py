@@ -10028,6 +10028,53 @@ class TestBinaryDispatchRouting(TestCaseMPS):
             "probe_dense_bool_float")
 
 
+# Sliced/narrowed views route through the inner_contiguous kernels once
+# shape()[0] >= 16. Locks in the two paths op tests miss: castout (out dtype !=
+# compute dtype) and the byte-erased same-dtype copy (tail + alignment ladder).
+class TestInnerContiguous(TestCaseMPS):
+    _SHAPES = [(48, 64), (8, 6, 40), (3, 4, 5, 24)]
+
+    @parametrize("in_dtype,out_dtype", [
+        (torch.float32, torch.float16),
+        (torch.float32, torch.bfloat16),
+        (torch.float32, torch.int32),
+        (torch.int32, torch.float32),
+        (torch.int8, torch.float32),
+    ])
+    def test_castout(self, device, in_dtype, out_dtype):
+        torch.manual_seed(0)
+        for shape in self._SHAPES:
+            inner = shape[-1] - 8  # drop the tail so the view is strided
+            full = _conformance_make_tensor(shape, in_dtype)
+            src_cpu = full[..., :inner]
+            src_dev = full.to(device)[..., :inner]
+            self.assertFalse(src_dev.is_contiguous())
+            # input-sliced: cast-copy reads the strided view, writes contiguous out
+            self.assertEqual(src_dev.to(out_dtype).cpu(), src_cpu.to(out_dtype))
+            # output-sliced: cast-copy writes into the strided view
+            dst_cpu = torch.zeros(shape, dtype=out_dtype)
+            dst_dev = torch.zeros(shape, dtype=out_dtype, device=device)
+            dst_cpu[..., :inner].copy_(src_cpu)
+            dst_dev[..., :inner].copy_(src_dev)
+            self.assertEqual(dst_dev.cpu(), dst_cpu)
+
+    @parametrize("dtype", [torch.int8, torch.int16, torch.float32])
+    @parametrize("offset", [0, 1, 2, 4, 8])
+    @parametrize("inner", [17, 31, 48])
+    def test_byte_copy(self, device, dtype, offset, inner):
+        # offset varies the per-row base alignment to exercise the ladder, and
+        # odd inner extents make inner_bytes % 16 != 0 for narrow dtypes.
+        torch.manual_seed(0)
+        R, full_w = 24, offset + inner + 8
+        src = _conformance_make_tensor((R, inner), dtype)
+        buf = _conformance_make_tensor((R, full_w), dtype)
+        dst_cpu, dst_dev = buf.clone(), buf.to(device)
+        dst_cpu[:, offset:offset + inner].copy_(src)
+        dst_dev[:, offset:offset + inner].copy_(src.to(device))
+        # whole-buffer compare also proves the copy leaves neighbors untouched
+        self.assertEqual(dst_dev.cpu(), dst_cpu)
+
+
 class TestLargeTensors(TestCaseMPS):
     @serialTest()
     def test_64bit_binops(self):
@@ -16178,6 +16225,7 @@ instantiate_device_type_tests(TestConsistency, globals(), allow_mps=True, only_f
 instantiate_device_type_tests(TestErrorInputs, globals(), allow_mps=True, only_for="mps")
 instantiate_device_type_tests(TestCommon, globals(), allow_mps=True, only_for="mps")
 instantiate_device_type_tests(TestLinalgMPS, globals(), allow_mps=True, only_for="mps")
+instantiate_device_type_tests(TestInnerContiguous, globals(), allow_mps=True, only_for="mps")
 instantiate_parametrized_tests(TestAdvancedIndexing)
 instantiate_parametrized_tests(TestAutocastMPS)
 instantiate_parametrized_tests(TestBinaryIteratorConformance)
