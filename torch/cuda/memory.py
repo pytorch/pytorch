@@ -119,6 +119,11 @@ def caching_allocator_alloc(size, device: "Device" = None, stream=None):
         See :ref:`cuda-memory-management` for more details about GPU memory
         management.
     """
+    if size < 0:
+        raise ValueError(
+            f"Invalid memory size: {size}. "
+            "caching_allocator_alloc requires a non-negative size."
+        )
     if device is None:
         device = torch.cuda.current_device()
     device = _get_device_index(device)
