@@ -5805,7 +5805,16 @@ def monitored_barrier(
         _warn_not_in_group("monitored_barrier")
         return
 
-    if get_backend(group) != Backend.GLOO:
+    # Under TorchComms a gloo group is recorded with a device-qualified backend
+    # string (e.g. "cpu:gloo") and wrapped by BackendWrapper, so the exact
+    # "gloo" match would reject it even though BackendWrapper implements
+    # monitoredBarrier. Accept it when torchcomms is enabled and the group's
+    # backend is gloo.
+    backend = get_backend(group)
+    is_gloo_backend = backend == Backend.GLOO or (
+        _use_torchcomms_enabled() and "gloo" in str(backend)
+    )
+    if not is_gloo_backend:
         raise ValueError("monitored_barrier is only implemented for GLOO backend.")
 
     if timeout is None:
