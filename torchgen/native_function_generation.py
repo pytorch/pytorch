@@ -360,6 +360,7 @@ def generate_function(
             structured_delegate=None,
             structured_inherits=None,
             precomputed=None,
+            structured_no_meta=False,
             autogen=[],
             ufunc_inner_loop={},
             manual_kernel_registration=False,

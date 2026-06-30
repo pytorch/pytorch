@@ -592,6 +592,15 @@ class NativeFunction:
     # in this member, if applicable.
     precomputed: Precompute | None
 
+    # When True for a structured op, suppress auto-generation of the Meta
+    # dispatch-key kernel so that an explicit Meta: entry in the dispatch table
+    # is used instead. The structured meta class is still generated for the
+    # device backends; this only redirects the Meta key. Used when the
+    # structured (int-only) set_output path cannot express a kernel's behavior,
+    # e.g. SymInt output sizes, so a hand-written symint-aware Meta kernel is
+    # needed.
+    structured_no_meta: bool
+
     # Argument names whose default  should be excluded from the C++ interface.
     # Intended for resolving overload ambiguities between signatures.
     cpp_no_default_args: set[str]
@@ -745,6 +754,14 @@ class NativeFunction:
                 f"precomputed requires structured=True, got structured={structured}"
             )
         precomputed = Precompute.parse(precomputed_dict) if precomputed_dict else None
+
+        structured_no_meta = e.pop("structured_no_meta", False)
+        if not isinstance(structured_no_meta, bool):
+            raise AssertionError(f"not a bool: {structured_no_meta}")
+        if structured_no_meta and not structured:
+            raise AssertionError(
+                f"structured_no_meta requires structured=True, got structured={structured}"
+            )
 
         tags_inp = e.pop("tags", [])
         if isinstance(tags_inp, str):
@@ -1010,6 +1027,7 @@ class NativeFunction:
                 structured_delegate=structured_delegate,
                 structured_inherits=structured_inherits,
                 precomputed=precomputed,
+                structured_no_meta=structured_no_meta,
                 autogen=autogen,
                 ufunc_inner_loop=ufunc_inner_loop,
                 manual_kernel_registration=manual_kernel_registration,
