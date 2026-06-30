@@ -1406,15 +1406,15 @@ class TestConvolutionNNDeviceType(NNTestCase):
     def test_conv3d_backward_nondense_strides(self, device, dtype):
         def _make_inputs(seed=0):
             torch.manual_seed(seed)
-            input   = torch.randn(1, 1, 4, 4, 4, device=device, dtype=dtype)
-            weight  = torch.randn(1, 1, 4, 4, 4, device=device, dtype=dtype)
-            bias    = torch.randn(1, device=device, dtype=dtype)
+            input = torch.randn(1, 1, 4, 4, 4, device=device, dtype=dtype)
+            weight = torch.randn(1, 1, 4, 4, 4, device=device, dtype=dtype)
+            bias = torch.randn(1, device=device, dtype=dtype)
             cotangent = torch.randn(1, 1, 1, 1, 1, device=device, dtype=dtype)
             return input, weight, bias, cotangent
 
         def _batch_last(tensor, batch_size):
             return tensor.unsqueeze(-1).expand(*tensor.shape, batch_size).contiguous()
-    
+
         batch_size = 2
         input, weight, bias, cotangent = _make_inputs()
 
@@ -1426,10 +1426,12 @@ class TestConvolutionNNDeviceType(NNTestCase):
             return back(cotangent)
 
         # Batch all four args at the last dimension
-        batched_input     = _batch_last(input,     batch_size)   # [1, 1, 4, 4, 4, batch_size]
-        batched_weight    = _batch_last(weight,    batch_size)   # [1, 1, 4, 4, 4, batch_size]
-        batched_bias      = _batch_last(bias,      batch_size)   # [1, batch_size]
-        batched_cotangent = _batch_last(cotangent, batch_size)   # [1, 1, 1, 1, 1, batch_size]
+        batched_input = _batch_last(input, batch_size)  # [1, 1, 4, 4, 4, batch_size]
+        batched_weight = _batch_last(weight, batch_size)  # [1, 1, 4, 4, 4, batch_size]
+        batched_bias = _batch_last(bias, batch_size)  # [1, batch_size]
+        batched_cotangent = _batch_last(
+            cotangent, batch_size
+        )  # [1, 1, 1, 1, 1, batch_size]
 
         # Reference: slice out each sample manually so every tensor passed to
         # conv3d has dense, contiguous strides.
@@ -1442,9 +1444,9 @@ class TestConvolutionNNDeviceType(NNTestCase):
             )
             for i in range(batch_size)
         ]
-        loop_grad_input  = torch.stack([g[0] for g in loop_out])
+        loop_grad_input = torch.stack([g[0] for g in loop_out])
         loop_grad_weight = torch.stack([g[1] for g in loop_out])
-        loop_grad_bias   = torch.stack([g[2] for g in loop_out])
+        loop_grad_bias = torch.stack([g[2] for g in loop_out])
 
         # vmap applies the conv3d batch rule, which internally calls
         # reshape_dim_into(src=-1, dst=1, tensor). This can ultimately
@@ -1453,9 +1455,9 @@ class TestConvolutionNNDeviceType(NNTestCase):
             vjp_fn, in_dims=(-1, -1, -1, -1)
         )(batched_input, batched_weight, batched_bias, batched_cotangent)
 
-        torch.testing.assert_close(vmap_grad_input,  loop_grad_input)
+        torch.testing.assert_close(vmap_grad_input, loop_grad_input)
         torch.testing.assert_close(vmap_grad_weight, loop_grad_weight)
-        torch.testing.assert_close(vmap_grad_bias,   loop_grad_bias)
+        torch.testing.assert_close(vmap_grad_bias, loop_grad_bias)
 
 
 instantiate_device_type_tests(
