@@ -3,6 +3,7 @@
 import functools
 import gc
 import json
+import math
 import os
 import random
 import string
@@ -4620,6 +4621,113 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                     "fwd_BLOCK_N": 64,
                 },
             )
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps
+    @skip_on_xpu
+    def test_flex_flash_honors_sparse_metadata_with_trivial_mask(self, device):
+        """FLASH should honor BlockMask metadata without relying on mask_mod."""
+        from torch._inductor.kernel.flex.flex_flash_attention import (
+            ensure_flash_available,
+        )
+
+        if not ensure_flash_available():
+            self.skipTest("flash-attn-4 is not available")
+        if torch.cuda.get_device_capability(device)[0] not in (10, 11):
+            self.skipTest("FA4 sparse block path in this test targets SM100+")
+
+        torch.manual_seed(0)
+        batch = 1
+        heads = 1
+        q_blocks = 2
+        kv_blocks = 2
+        q_block_size = 256
+        kv_block_size = 128
+        head_dim = 128
+        top_k = 1
+        q = torch.randn(
+            batch,
+            heads,
+            q_blocks * q_block_size,
+            head_dim,
+            device=device,
+            dtype=torch.bfloat16,
+        )
+        k = torch.randn(
+            batch,
+            heads,
+            kv_blocks * kv_block_size,
+            head_dim,
+            device=device,
+            dtype=torch.bfloat16,
+        )
+        v = torch.randn(
+            batch,
+            heads,
+            kv_blocks * kv_block_size,
+            head_dim,
+            device=device,
+            dtype=torch.bfloat16,
+        )
+
+        selected = torch.tensor(
+            [[[[0], [1]]]],
+            device=device,
+            dtype=torch.int32,
+        )
+        num_blocks = torch.full(
+            selected.shape[:-1], top_k, device=device, dtype=torch.int32
+        )
+        zero_num_blocks = torch.zeros_like(num_blocks)
+        zero_indices = torch.zeros(
+            *selected.shape[:-1], kv_blocks, device=device, dtype=torch.int32
+        )
+        sparse_indices = torch.zeros_like(zero_indices)
+        sparse_indices[..., :top_k] = selected
+
+        block_map = torch.zeros(
+            batch, heads, q_blocks, kv_blocks, device=device, dtype=torch.bool
+        )
+        block_map.scatter_(-1, selected.long(), True)
+        dense_mask = block_map.repeat_interleave(q_block_size, -2).repeat_interleave(
+            kv_block_size, -1
+        )
+        ref = (
+            torch.softmax(
+                (q @ k.transpose(-2, -1) / math.sqrt(head_dim)).masked_fill(
+                    ~dense_mask, -float("inf")
+                ),
+                dim=-1,
+            )
+            @ v
+        )
+
+        block_masks = {
+            "full": BlockMask.from_kv_blocks(
+                kv_num_blocks=zero_num_blocks,
+                kv_indices=zero_indices,
+                full_kv_num_blocks=num_blocks,
+                full_kv_indices=sparse_indices,
+                BLOCK_SIZE=(q_block_size, kv_block_size),
+                seq_lengths=(q_blocks * q_block_size, kv_blocks * kv_block_size),
+            ),
+            "partial": BlockMask.from_kv_blocks(
+                kv_num_blocks=num_blocks,
+                kv_indices=sparse_indices,
+                BLOCK_SIZE=(q_block_size, kv_block_size),
+                seq_lengths=(q_blocks * q_block_size, kv_blocks * kv_block_size),
+            ),
+        }
+        flash = torch.compile(
+            functools.partial(flex_attention, kernel_options={"BACKEND": "FLASH"}),
+            dynamic=False,
+        )
+        for name, block_mask in block_masks.items():
+            with self.subTest(name=name):
+                out = flash(q, k, v, block_mask=block_mask)
+                torch.cuda.synchronize()
+                self.assertEqual(out, ref, atol=5e-2, rtol=5e-2)
 
     @supported_platform
     @skip_on_cpu
