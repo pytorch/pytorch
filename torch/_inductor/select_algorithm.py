@@ -695,6 +695,7 @@ class TritonTemplateKernel(TritonKernel):
 
         # Tracking for intermediate variables
         self.tmp_var_ctr = itertools.count()
+        self._has_fused_epilogue_nodes = False
 
     @property
     def index_dtype(self) -> str:
@@ -856,6 +857,27 @@ class TritonTemplateKernel(TritonKernel):
 
     def need_numel_args(self):
         return False
+
+    def _enable_pdl_codegen(self):
+        if type(self) is not TritonTemplateKernel:
+            return False
+        if not torch._inductor.config.triton.enable_pdl:
+            return False
+        if torch.version.hip:
+            return False
+        if (
+            V.graph.get_current_device_or_throw().type != "cuda"
+            or torch.cuda.get_device_capability()[0] < 9
+        ):
+            return False
+        if self._has_fused_epilogue_nodes:
+            return False
+        prev_node = (
+            V.graph.scheduler.previous_node if V.graph.scheduler is not None else None
+        )
+        if prev_node is not None and self.current_node is None:
+            return False
+        return True
 
     def estimate_kernel_num_bytes(self):
         """
@@ -1936,6 +1958,7 @@ class TritonTemplateKernel(TritonKernel):
         self._epilogue_nodes_by_subgraph: defaultdict[int, list[Any]] = defaultdict(
             lambda: epilogue_nodes
         )
+        self._has_fused_epilogue_nodes = bool(epilogue_nodes)
         self._unfused_epilogues: list[Any] = []
         self._prologue_sources: dict[str, frozenset[str]] = {}
 

@@ -3197,6 +3197,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.cse = TritonCSE(self.newvar_prefix, self.suffix)
         # Cache of values that can be reused for the prologue.
         self.prologue_cache: dict[str, str] = {}
+        self._pdl_enabled: bool | None = None
         self.prologue: IndentedBuffer = IndentedBuffer()
         self.post_loop_combine: IndentedBuffer = IndentedBuffer()
         self.post_loop_store: IndentedBuffer = IndentedBuffer()
@@ -4150,10 +4151,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     GDC_LAUNCH = "tl.extra.cuda.gdc_launch_dependents()"
 
     @staticmethod
-    def _enable_pdl_codegen():
+    def _pdl_supported_target():
         if not torch._inductor.config.triton.enable_pdl:
-            return False
-        if isinstance(V.kernel, torch._inductor.select_algorithm.TritonTemplateKernel):
             return False
         # PDL uses CUDA-specific intrinsics (gdc_wait/gdc_launch), not available on ROCm
         if torch.version.hip:
@@ -4162,6 +4161,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             V.graph.get_current_device_or_throw().type == "cuda"
             and torch.cuda.get_device_capability()[0] >= 9
         )
+
+    def _enable_pdl_codegen(self):
+        if self._pdl_enabled is not None:
+            return self._pdl_enabled
+        if isinstance(V.kernel, torch._inductor.select_algorithm.TritonTemplateKernel):
+            self._pdl_enabled = V.kernel._enable_pdl_codegen()
+        else:
+            self._pdl_enabled = self._pdl_supported_target()
+        return self._pdl_enabled
 
     def _handle_pdl_before_access(
         self, wait_buffer, *dependencies, consider_reads=False
@@ -6325,11 +6333,17 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         return imports.getvalue()
 
-    @classmethod
-    def triton_meta_common(cls):
+    @staticmethod
+    def triton_meta_common():
+        kernel = V.kernel
+        launch_pdl = (
+            kernel._enable_pdl_codegen()
+            if isinstance(kernel, TritonKernel)
+            else TritonKernel._pdl_supported_target()
+        )
         return {
             "enable_fp_fusion": not config.emulate_precision_casts,
-            "launch_pdl": cls._enable_pdl_codegen(),
+            "launch_pdl": launch_pdl,
             "disable_ftz": config.eager_numerics.disable_ftz,
         }
 
