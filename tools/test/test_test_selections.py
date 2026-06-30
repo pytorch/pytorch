@@ -13,7 +13,11 @@ try:
     # using tools/ to optimize test run.
     sys.path.append(str(REPO_ROOT))
     from tools.testing.test_run import ShardedTest, TestRun
-    from tools.testing.test_selections import calculate_shards, THRESHOLD
+    from tools.testing.test_selections import (
+        calculate_shards,
+        get_job_base_name,
+        THRESHOLD,
+    )
 except ModuleNotFoundError:
     print("Can't import required modules, exiting")
     sys.exit(1)
@@ -547,6 +551,52 @@ class TestCalculateShards(unittest.TestCase):
                 )
                 # All the tests should be represented by some shard
                 self.assertEqual(sorted_tests, [x.name for x in sorted_shard_tests])
+
+
+class TestGetJobBaseName(unittest.TestCase):
+    def test_strips_test_target(self) -> None:
+        self.assertEqual(
+            get_job_base_name(
+                "linux-jammy-py3.10-clang18 / test (dynamo_wrapped, 1, 3, lf-l-x86)"
+            ),
+            "linux-jammy-py3.10-clang18",
+        )
+
+    def test_strips_test_osdc_target(self) -> None:
+        self.assertEqual(
+            get_job_base_name(
+                "linux-jammy-py3.14t-clang18 / test-osdc (dynamo_wrapped, 1, 3, mt-l-x86)"
+            ),
+            "linux-jammy-py3.14t-clang18",
+        )
+
+    def test_build_env_with_test_substring_is_preserved(self) -> None:
+        # The build env itself contains "-test-"; only the target suffix is stripped.
+        self.assertEqual(
+            get_job_base_name(
+                "cross-compile-linux-test-cuda13 / test-osdc (aoti, 1, 1, r, win)"
+            ),
+            "cross-compile-linux-test-cuda13",
+        )
+
+    def test_multi_segment_name_keeps_full_prefix(self) -> None:
+        # Only the final target is split; the rest is the key.
+        self.assertEqual(
+            get_job_base_name(
+                "unit-test / inductor-test / test-osdc (inductor, 2, 2, mt-l-x86)"
+            ),
+            "unit-test / inductor-test",
+        )
+
+    def test_unrelated_targets_are_not_matched(self) -> None:
+        # Non-test/test-osdc targets are left intact so they miss the lookup.
+        for name in (
+            "env / test-foo (default, 1, 1, r)",
+            "env / testbar (default, 1, 1, r)",
+            "env / inductor-cpu-core-test (3.11)",
+            "env / build",
+        ):
+            self.assertEqual(get_job_base_name(name), name)
 
 
 if __name__ == "__main__":
