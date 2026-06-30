@@ -373,15 +373,10 @@ post_grad_fusion_options: dict[str, dict[str, Any]] = {}
 # enable reordering pass for improving memory locality
 reorder_for_locality = True
 
-# Also run reorder_for_locality on training (non-inference) graphs.
-# reorder_for_locality is a semantics-preserving reorder: it walks the graph in
-# reverse and pulls each producer next to its sole consumer. The reorder is only
-# conditionally safe, so the pass guards the order-sensitive cases (RNG-state
-# consumers, collective wait nodes, nodes across a mutation-region boundary, the
-# copy_ mutation epilogue) and skips them. Default off to keep upstream training
-# behaviour unchanged.
-# This depends on reorder_for_locality above being on: setting this True while
-# reorder_for_locality is False does nothing (the master flag gates the pass).
+# Also run reorder_for_locality (a semantics-preserving pass; see
+# reorder_for_locality in fx_passes/post_grad.py for the cases it guards) on
+# training graphs, not just inference. Default off. Gated by reorder_for_locality
+# above: enabling this while that is False does nothing.
 reorder_for_locality_in_training = (
     os.environ.get("TORCHINDUCTOR_REORDER_LOCALITY_TRAINING", "0") == "1"
 )

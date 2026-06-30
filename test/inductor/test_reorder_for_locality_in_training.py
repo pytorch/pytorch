@@ -12,6 +12,7 @@ import torch
 import torch._dynamo
 import torch._inductor.config as inductor_config
 from torch._inductor.fx_passes import post_grad
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -69,15 +70,16 @@ class _TwoBranch(torch.nn.Module):
         return (a * b + torch.sin(a) * torch.cos(b)).sum(dim=1)
 
 
-def _train_once(flag_on):
+def _train_once(device, flag_on, reorder_on=True):
     rec = _Recorder()
     torch._dynamo.reset()
     torch.manual_seed(1234)
-    model = _TwoBranch()
-    x = torch.randn(8, 16)
+    model = _TwoBranch().to(device)
+    x = torch.randn(8, 16, device=device)
     opt = torch.optim.SGD(model.parameters(), lr=0.1)
     with inductor_config.patch(
         {
+            "reorder_for_locality": reorder_on,
             "reorder_for_locality_in_training": flag_on,
             "fx_graph_cache": False,
             "force_disable_caches": True,
@@ -102,18 +104,34 @@ class TestReorderForLocalityInTrainingEnv(TestCase):
     def test_env_zero_keeps_off(self):
         self.assertEqual(_flag_in_subprocess("0"), "0")
 
+    def test_inference_gate_unchanged(self):
+        # Gate-only check (invocation, not a feature exercise): inference graphs
+        # must still run the pass regardless of the training flag. Pure FX, no
+        # device execution, so it stays out of the device-generic class below.
+        rec = _Recorder()
+        with inductor_config.patch({"reorder_for_locality_in_training": False}):
+            with mock_patch.object(post_grad, "reorder_for_locality", rec):
+                g = torch.fx.Graph()
+                xn = g.placeholder("x")
+                g.output(g.call_function(torch.relu, args=(xn,)))
+                gm = torch.fx.GraphModule(torch.nn.Module(), g)
+                post_grad.post_grad_passes(gm, is_inference=True)
+        self.assertGreater(rec.calls, 0)
+
 
 class TestReorderForLocalityInTraining(TestCase):
-    def test_training_flag_reorders_and_preserves_semantics(self):
-        p_off, g_off, rec_off = _train_once(flag_on=False)
-        p_on, g_on, rec_on = _train_once(flag_on=True)
+    def test_training_flag_reorders_and_preserves_semantics(self, device):
+        p_off, g_off, rec_off = _train_once(device, flag_on=False)
+        p_on, g_on, rec_on = _train_once(device, flag_on=True)
 
-        # (a) semantics preserved: same seed/init/input, so grads and the
-        # post-step params must match exactly between flag-off and flag-on.
+        # (a) semantics preserved: same seed/init/input, so grads and post-step
+        # params match between flag-off and flag-on. reorder_for_locality is a
+        # mathematical (not bitwise) equivalence -- it can change fusion grouping
+        # and thus low-bit FP accumulation -- so use default tolerances.
         self.assertEqual(set(g_off), set(g_on))
         for k in g_off:
-            self.assertEqual(g_on[k], g_off[k], atol=0, rtol=0)
-            self.assertEqual(p_on[k], p_off[k], atol=0, rtol=0)
+            self.assertEqual(g_on[k], g_off[k])
+            self.assertEqual(p_on[k], p_off[k])
 
         # (b) the flag actually exercised the pass: with it on the reorder ran
         # and moved at least one node on a training graph; with it off the pass
@@ -126,18 +144,14 @@ class TestReorderForLocalityInTraining(TestCase):
             "flag on must reorder at least one node on the training graph",
         )
 
-    def test_inference_gate_unchanged(self):
-        # Gate-only check (invocation, not a feature exercise): inference graphs
-        # must still run the pass regardless of the training flag.
-        rec = _Recorder()
-        with inductor_config.patch({"reorder_for_locality_in_training": False}):
-            with mock_patch.object(post_grad, "reorder_for_locality", rec):
-                g = torch.fx.Graph()
-                xn = g.placeholder("x")
-                g.output(g.call_function(torch.relu, args=(xn,)))
-                gm = torch.fx.GraphModule(torch.nn.Module(), g)
-                post_grad.post_grad_passes(gm, is_inference=True)
-        self.assertGreater(rec.calls, 0)
+    def test_training_flag_noop_when_reorder_off(self, device):
+        # The training flag is gated by reorder_for_locality: enabling it while
+        # reorder_for_locality is off must not run the pass on a training graph.
+        _, _, rec = _train_once(device, flag_on=True, reorder_on=False)
+        self.assertEqual(rec.calls, 0)
+
+
+instantiate_device_type_tests(TestReorderForLocalityInTraining, globals())
 
 
 if __name__ == "__main__":
