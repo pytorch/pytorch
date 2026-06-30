@@ -7,12 +7,14 @@ import torch
 
 try:
     from cuda.bindings import (  # pyrefly: ignore[missing-import]
+        __version__ as _cuda_bindings_version,
         driver as _cuda_bindings_driver,
         runtime as _cuda_bindings_runtime,
     )
 
     _HAS_CUDA_BINDINGS = True
 except ImportError:
+    _cuda_bindings_version = None  # type: ignore[assignment]
     _cuda_bindings_driver = None  # type: ignore[assignment]
     _cuda_bindings_runtime = None  # type: ignore[assignment]
     _HAS_CUDA_BINDINGS = False
