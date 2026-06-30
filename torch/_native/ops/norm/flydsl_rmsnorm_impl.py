@@ -72,7 +72,7 @@ def _rms_norm_impl(
     weight: torch.Tensor | None = None,
     eps: float | None = None,
 ) -> torch.Tensor:
-    from flydsl.torch import rmsnorm
+    from .flydsl_kernels import rmsnorm
 
     return rmsnorm(input, normalized_shape, weight, eps)
 
