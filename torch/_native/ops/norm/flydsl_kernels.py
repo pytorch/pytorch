@@ -5,9 +5,6 @@
 from __future__ import annotations
 
 import math
-from collections import namedtuple
-from dataclasses import dataclass
-from threading import Lock
 
 import torch
 
@@ -17,6 +14,8 @@ from flydsl.expr import arith, const_expr, gpu, range_constexpr
 from flydsl.expr import math as fmath
 from flydsl.expr.vector import ReductionOp, full
 from flydsl.runtime.device import get_rocm_arch, is_rdna_arch
+
+from torch._native.flydsl_cache import jit_cache
 
 
 EPS = 1e-5
@@ -28,24 +27,6 @@ _SUPPORTED_DTYPES: dict[torch.dtype, str] = {
     torch.float16: "f16",
     torch.bfloat16: "bf16",
 }
-
-RmsNormCacheInfo = namedtuple("RmsNormCacheInfo", ["hits", "misses", "currsize"])
-
-
-@dataclass(frozen=True)
-class _RmsNormKey:
-    n: int
-    dtype: str
-    arch: str
-    backend: str
-    variant: str = "forward"
-
-
-_compiled_rmsnorm_cache: dict[_RmsNormKey, flyc.CompiledFunction] = {}
-_cache_lock = Lock()
-_cache_hits = 0
-_cache_misses = 0
-
 
 def _dtype_str(dtype: torch.dtype) -> str:
     try:
@@ -395,39 +376,25 @@ def _make_compile_arg(tensor: torch.Tensor):
     return flyc.from_torch_tensor(tensor).mark_shape_dynamic(0)
 
 
-def _get_compiled(
-    key: _RmsNormKey,
-    input_2d: torch.Tensor,
-    weight: torch.Tensor,
-    output_2d: torch.Tensor,
-    rows_m: int,
-    stream,
+@jit_cache
+def _compile_rmsnorm(
+    n: int,
+    dtype: str,
+    arch: str,
+    backend: str,
+    *,
+    compile_args,
 ) -> flyc.CompiledFunction:
-    global _cache_hits, _cache_misses
-
-    compiled = _compiled_rmsnorm_cache.get(key)
-    if compiled is not None:
-        _cache_hits += 1
-        return compiled
-
-    with _cache_lock:
-        compiled = _compiled_rmsnorm_cache.get(key)
-        if compiled is not None:
-            _cache_hits += 1
-            return compiled
-
-        _cache_misses += 1
-        launch = _build_rmsnorm_module(key.n, key.dtype)
-        compiled = flyc.compile(
-            launch,
-            _make_compile_arg(input_2d),
-            flyc.from_torch_tensor(weight),
-            _make_compile_arg(output_2d),
-            rows_m,
-            stream,
-        )
-        _compiled_rmsnorm_cache[key] = compiled
-        return compiled
+    input_2d, weight, output_2d, rows_m, stream = compile_args
+    launch = _build_rmsnorm_module(n, dtype)
+    return flyc.compile(
+        launch,
+        _make_compile_arg(input_2d),
+        flyc.from_torch_tensor(weight),
+        _make_compile_arg(output_2d),
+        rows_m,
+        stream,
+    )
 
 
 def rmsnorm(
@@ -445,26 +412,21 @@ def rmsnorm(
         input_2d = input.reshape(rows_m, n)
         output_2d = output.reshape(rows_m, n)
         stream = torch.cuda.current_stream(input.device)
-        key = _RmsNormKey(
-            n=n,
-            dtype=_dtype_str(input.dtype),
-            arch=str(get_rocm_arch()),
-            backend=flyc.compile_backend_name(),
+        compiled = _compile_rmsnorm(
+            n,
+            _dtype_str(input.dtype),
+            str(get_rocm_arch()),
+            flyc.compile_backend_name(),
+            compile_args=(input_2d, weight, output_2d, rows_m, stream),
         )
-        compiled = _get_compiled(key, input_2d, weight, output_2d, rows_m, stream)
         compiled(input_2d, weight, output_2d, rows_m, stream)
 
     return output
 
 
 def clear_rmsnorm_cache() -> None:
-    global _cache_hits, _cache_misses
-    with _cache_lock:
-        _compiled_rmsnorm_cache.clear()
-        _cache_hits = 0
-        _cache_misses = 0
+    _compile_rmsnorm.cache_clear()
 
 
-def rmsnorm_cache_info() -> RmsNormCacheInfo:
-    with _cache_lock:
-        return RmsNormCacheInfo(_cache_hits, _cache_misses, len(_compiled_rmsnorm_cache))
+def rmsnorm_cache_info():
+    return _compile_rmsnorm.cache_info()
