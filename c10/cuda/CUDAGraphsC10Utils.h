@@ -43,7 +43,14 @@ static_assert(
     int(cudaStreamCaptureStatus::cudaStreamCaptureStatusInvalidated) == 2,
     "unexpected int(cudaStreamCaptureStatusInvalidated) value");
 
+// New cudafe++ emits `using CaptureStatus = enum c10::cuda::CaptureStatus;`,
+// which MSVC rejects with C3431 ("scoped enumeration cannot be redeclared as
+// unscoped") for a scoped enum. Using an unscoped enum.
+#if defined(_WIN32)
+enum CaptureStatus : int {
+#else
 enum class CaptureStatus : int {
+#endif
   None = int(cudaStreamCaptureStatus::cudaStreamCaptureStatusNone),
   Active = int(cudaStreamCaptureStatus::cudaStreamCaptureStatusActive),
   Invalidated = int(cudaStreamCaptureStatus::cudaStreamCaptureStatusInvalidated)
