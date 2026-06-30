@@ -62,11 +62,7 @@ def lower_mps(
         )
 
     write_lse = bool(kernel_options.get("OUTPUT_LOGSUMEXP", False))
-    if kernel_options.get("OUTPUT_MAX", False):
-        raise NotImplementedError(
-            "flex_attention on MPS does not yet support returning max scores "
-            "(return_aux=AuxRequest(max_scores=True))."
-        )
+    write_max = bool(kernel_options.get("OUTPUT_MAX", False))
 
     dtype = query.get_dtype()
 
@@ -165,6 +161,7 @@ def lower_mps(
         score_captured=score_meta,
         mask_captured=mask_meta,
         write_lse=write_lse,
+        write_max=write_max,
     )
 
     out_size = [B, Hq, seq_len_q, v_head_dim]
@@ -238,10 +235,13 @@ def lower_mps(
     max_scores = empty_strided(
         lse_shape, None, dtype=torch.float32, device=query.get_device()
     )
-    node_inputs = realized_inputs
+    node_inputs = [*realized_inputs]
     if write_lse:
         logsumexp.realize()
-        node_inputs = [*realized_inputs, logsumexp]
+        node_inputs.append(logsumexp)
+    if write_max:
+        max_scores.realize()
+        node_inputs.append(max_scores)
 
     node = MetalFlexAttentionNode(
         layout=layout,
@@ -250,7 +250,7 @@ def lower_mps(
         scalar_args=scalar_args,
         grid=grid,
         block_m=BLOCK_M,
-        mutates_lse=write_lse,
+        num_mutated_outputs=int(write_lse) + int(write_max),
     )
 
     return (TensorBox.create(node), logsumexp, max_scores)
