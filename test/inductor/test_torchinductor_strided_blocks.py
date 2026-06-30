@@ -58,8 +58,10 @@ max_block: int = TRITON_MAX_BLOCK["X"]
 def _get_no_split_threshold() -> int:
     if torch.cuda.is_available():
         props = torch.cuda.get_device_properties(torch.cuda.current_device())
-        if props.major is not None and props.major >= 10:
-            return 524288
+        # These tests reduce the whole view to one output, so xnumel is 1.
+        return InductorChoices._inner_reduction_no_split_threshold(
+            props, xnumel=1, num_sm=props.multi_processor_count
+        )
     return 8192
 
 
