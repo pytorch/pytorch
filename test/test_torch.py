@@ -2817,6 +2817,14 @@ class TestTorchDeviceType(TestCase):
                     'Expected reduction dim -1 or 0 for scalar but got 100'):
                 op(x, dim)
 
+            # Check that zero-size tensors with invalid dims raise IndexError
+            # consistently, matching non-zero tensor behavior
+            x = torch.tensor([], device=device)
+            with self.assertRaisesRegex(
+                    IndexError,
+                    'Dimension out of range'):
+                op(x, -46)
+
             # Check that op over a zero length dimension doesn't crash on backprop.
             # Also check that op over other dimensions in a tensor with a zero-length
             # dimension also works
