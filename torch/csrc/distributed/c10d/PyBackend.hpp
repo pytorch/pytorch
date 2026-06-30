@@ -14,6 +14,9 @@ class PyBackend : public Backend {
   PyBackend(py::object backend, int rank, int size)
       : Backend(rank, size), pyBackend_(std::move(backend)) {}
 
+  PyBackend(const PyBackend&) = delete;
+  PyBackend& operator=(const PyBackend&) = delete;
+
   ~PyBackend() override {
     pybind11::gil_scoped_acquire gil;
     if (pyBackend_) {

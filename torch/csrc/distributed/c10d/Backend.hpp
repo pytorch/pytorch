@@ -118,6 +118,8 @@ class TORCH_API Backend : public torch::CustomClassHolder {
 
   explicit Backend(int rank, int size);
   ~Backend() override = 0;
+  Backend(const Backend&) = delete;
+  Backend& operator=(const Backend&) = delete;
 
   int getRank() const {
     return rank_;
