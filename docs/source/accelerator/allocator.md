@@ -131,7 +131,7 @@ Register the allocator for `PrivateUse1` using `REGISTER_ALLOCATOR`:
 ```
 
 ```{seealso}
-- [CUDA custom allocator documentation](../notes/cuda.md#cuda-memory-custom-allocator) for the CUDA-specific pluggable allocator API
+- {ref}`CUDA custom allocator documentation <cuda-memory-custom-allocator>` for the CUDA-specific pluggable allocator API
 - [Accelerator hooks](hooks.md) for the full hooks interface including `getPinnedMemoryAllocator()`
 ```
 
