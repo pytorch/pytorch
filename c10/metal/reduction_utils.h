@@ -274,11 +274,47 @@ opmath_t<T> threadgroup_prod(
   }
   if (size > simdgroup_size) {
     ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
-    if (idx < ((size + simdgroup_size - 1) / simdgroup_size)) {
-      auto rc1 = simd_prod(data[idx]);
-      if (idx == 0) {
-        data[0] = rc1;
+    // simd_prod is a manual shuffle (no hardware simd product); run over a
+    // partial final simdgroup it folds in inactive lanes that read as 0,
+    // zeroing the result -- this hits the emulated simd_prod<long> that all
+    // integer prod (int64 default output) routes through. Reduce the
+    // per-simdgroup partials serially on lane 0 instead (as the float2 overload
+    // below does for complex).
+    if (idx == 0) {
+      unsigned nsg = (size + simdgroup_size - 1) / simdgroup_size;
+      opmath_t<T> acc = data[0];
+      for (unsigned j = 1; j < nsg; ++j) {
+        acc *= data[j];
       }
+      data[0] = acc;
+    }
+  }
+  ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
+  return data[0];
+}
+
+// Complex product: simd_prod uses a manual shuffle (complex multiply is not a
+// hardware simd reduction), which folds in inactive lanes that read as (0, 0)
+// when the second level has fewer than a full simdgroup of partials. Reduce the
+// per-simdgroup partials serially on lane 0 instead.
+inline float2 threadgroup_prod(
+    threadgroup float2* data,
+    float2 val,
+    unsigned idx,
+    unsigned size) {
+  auto rc = simd_prod(val);
+  if (idx % simdgroup_size == 0) {
+    data[idx / simdgroup_size] = rc;
+  }
+  if (size > simdgroup_size) {
+    ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
+    if (idx == 0) {
+      unsigned nsg = (size + simdgroup_size - 1) / simdgroup_size;
+      float2 acc = data[0];
+      for (unsigned j = 1; j < nsg; ++j) {
+        acc = c10::metal::mul(acc, data[j]);
+      }
+      data[0] = acc;
     }
   }
   ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
@@ -502,8 +538,8 @@ struct MinOp {
 };
 
 // Sum reduction op functor, sharing the identity / combine / simd_reduce /
-// threadgroup_reduce concept with MaxOp / MinOp so sum and mean can route
-// through the same value_reduction kernels. T is the accumulator type
+// threadgroup_reduce concept with MaxOp / MinOp so mean and sum route through
+// the same value_reduction kernels. T is the accumulator type
 // (opmath_t<TO> for sum, keeping fp32 accumulation from being lost when TO is
 // fp16/bf16). No `replace` member: that is arg-reduction-only (argmax/argmin
 // reuse MaxOp/MinOp).
@@ -524,6 +560,48 @@ struct SumOp {
       uint tid,
       uint tptg) {
     return c10::metal::threadgroup_sum(shared, val, tid, tptg);
+  }
+};
+
+template <typename T>
+struct ProdOp {
+  static inline constexpr T identity() {
+    return T(1);
+  }
+  static inline T combine(T a, T b) {
+    return a * b;
+  }
+  static inline T simd_reduce(T val) {
+    return c10::metal::simd_prod(val);
+  }
+  static inline T threadgroup_reduce(
+      threadgroup T* shared,
+      T val,
+      uint tid,
+      uint tptg) {
+    return c10::metal::threadgroup_prod(shared, val, tid, tptg);
+  }
+};
+
+// Complex prod: identity is (1, 0) and combine is a complex multiply. The
+// simd/threadgroup reduce already delegate to the complex-correct simd_prod.
+template <>
+struct ProdOp<float2> {
+  static inline constexpr float2 identity() {
+    return float2(1, 0);
+  }
+  static inline float2 combine(float2 a, float2 b) {
+    return c10::metal::mul(a, b);
+  }
+  static inline float2 simd_reduce(float2 val) {
+    return c10::metal::simd_prod(val);
+  }
+  static inline float2 threadgroup_reduce(
+      threadgroup float2* shared,
+      float2 val,
+      uint tid,
+      uint tptg) {
+    return c10::metal::threadgroup_prod(shared, val, tid, tptg);
   }
 };
 
