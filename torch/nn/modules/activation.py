@@ -85,7 +85,11 @@ class Threshold(Module):
         self.threshold = threshold
         self.value = value
         self.inplace = inplace
-        # TODO: check in THNN (if inplace == True, then assert value <= threshold)
+        if self.inplace and self.value > self.threshold:
+            raise ValueError(
+                f"value ({self.value}) must be <= threshold ({self.threshold})"
+                " when inplace=True"
+            )
 
     def forward(self, input: Tensor) -> Tensor:
         """
