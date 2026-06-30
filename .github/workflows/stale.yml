@@ -22,7 +22,7 @@ on:
 jobs:
   stale:
     if: ${{ github.repository == 'pytorch/pytorch' }}
-    runs-on: linux.large
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: write
