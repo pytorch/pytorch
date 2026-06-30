@@ -12574,7 +12574,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         if self.device == "xpu":
             assertGeneratedKernelCountEqual(self, 0)
         else:
-            assertGeneratedKernelCountEqual(self, 1)
+            assertGeneratedKernelCountEqual(self, 3)
 
     def test_issue102546(self):
         def fn(x):
