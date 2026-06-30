@@ -375,6 +375,7 @@ jobs:
         with:
           build-targets: ${{ inputs.build-external-packages }}
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
+          cuda-version: ${{ inputs.cuda-version || '12.8.1' }}
           cuda-arch-list: ${{ inputs.cuda-arch-list }}
           output-dir: external
 
@@ -577,6 +578,7 @@ jobs:
         with:
           build-targets: ${{ inputs.build-external-packages }}
           docker-image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${{ inputs.docker-image-name }}${{ inputs.ci-docker-hash && format('-{0}', inputs.ci-docker-hash) || '' }}
+          cuda-version: ${{ inputs.cuda-version || '12.8.1' }}
           cuda-arch-list: ${{ inputs.cuda-arch-list }}
           output-dir: external
 
