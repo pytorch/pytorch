@@ -15,6 +15,8 @@ from torch._C._distributed_c10d import _create_work_from_future
 from torch.distributed.distributed_c10d import (
     _coalescing_manager,
     _get_default_group,
+    _register_process_group,
+    _unregister_process_group,
     ReconfigureOptions,
 )
 from torch.futures import Future
@@ -320,6 +322,37 @@ class TestPyProcessGroup(TestCase):
         self.assertEqual(pg.name(), "store-pg")
         self.assertEqual(pg.rank(), 0)
         self.assertEqual(pg.size(), 1)
+
+    def test_all_gather_single(self):
+        # all_gather_into_tensor_out calls group->all_gather_single(...) in C++,
+        # which dispatches through the PyProcessGroup trampoline into the Python
+        # DummyProcessGroup.all_gather_single override (it copies the input into
+        # each chunk). Without the override the base impl needs a backend and
+        # raises, so a correct output proves the override the PR adds was hit.
+        pg = test_c10d_common.DummyProcessGroup(0, 1)
+        _register_process_group("test_all_gather_single", pg)
+        try:
+            input = torch.ones(2)
+            output = torch.empty(2)
+            torch.ops._c10d_functional.all_gather_into_tensor_out(
+                input, 1, "test_all_gather_single", out=output
+            )
+            torch.ops._c10d_functional.wait_tensor(output)
+            self.assertIn("all_gather_single", pg.collectives_called)
+            self.assertEqual(output, torch.ones(2))
+        finally:
+            _unregister_process_group("test_all_gather_single")
+
+    def test_reduce_scatter_single(self):
+        # No functional collective dispatches to reduce_scatter_single (they use
+        # the coalesced variant), so this is a direct sanity check that the
+        # override runs and forwards its buffers.
+        pg = test_c10d_common.DummyProcessGroup(0, 1)
+        input = torch.ones(2)
+        output = torch.zeros(2)
+        pg.reduce_scatter_single(output, input).wait()
+        self.assertIn("reduce_scatter_single", pg.collectives_called)
+        self.assertEqual(output, torch.ones(2))
 
     def test_coalescing_manager(self):
         # The coalescing manager calls _start_coalescing / _end_coalescing, which
