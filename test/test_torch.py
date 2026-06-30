@@ -2126,6 +2126,16 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(a_with_output.dtype, y.dtype)
             self.assertEqual(a_with_output.size(), torch.Size([3, 2]))
 
+    @onlyCPU
+    def test_repeat_interleave_cpu_small_integer_repeats(self, device):
+        y = torch.tensor([[1, 2], [3, 4]], device=device)
+        expected = torch.tensor([[1, 2], [3, 4], [3, 4]], device=device)
+
+        for dtype in (torch.int8, torch.uint8, torch.int16):
+            lengths = torch.tensor([1, 2], dtype=dtype, device=device)
+            self.assertEqual(
+                torch.repeat_interleave(y, lengths, dim=0), expected)
+
     @dtypes(*floating_types())
     @dtypesIfCPU(*floating_types_and(torch.bfloat16, torch.half))
     @dtypesIfCUDA(*floating_types_and(torch.half))

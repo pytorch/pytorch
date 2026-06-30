@@ -43,10 +43,11 @@ Tensor repeat_interleave_cpu(
     const Tensor& repeat,
     std::optional<int64_t> output_size) {
   Tensor output;
-  AT_DISPATCH_INDEX_TYPES(repeat.scalar_type(), "repeat_interleave_cpu", [&]() {
-    output = repeat_interleave_common<index_t, compute_cpu<index_t>>(
-        repeat, output_size);
-  });
+  AT_DISPATCH_INTEGRAL_TYPES(
+      repeat.scalar_type(), "repeat_interleave_cpu", [&]() {
+        output = repeat_interleave_common<scalar_t, compute_cpu<scalar_t>>(
+            repeat, output_size);
+      });
 
   return output;
 }
