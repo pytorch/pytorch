@@ -580,6 +580,9 @@ def requires_multicast_support():
 def evaluate_platform_supports_symm_mem():
     if TEST_CUDA:
         if TEST_WITH_ROCM:
+            # NOTE: gfx1250 (Wave32) is intentionally excluded: the rocSHMEM
+            # AllToAllv collective paths are Wave64-only and reject Wave32
+            # devices at launch. Re-add once those kernels are wave-size aware.
             arch_list = ["gfx942", "gfx950"]
             for arch in arch_list:
                 if arch in torch.cuda.get_device_properties(0).gcnArchName:

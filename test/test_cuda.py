@@ -828,7 +828,7 @@ print(t.is_pinned())
                 gcn_arch = str(
                     torch.cuda.get_device_properties(0).gcnArchName.split(":", 1)[0]
                 )
-                if gcn_arch in ["gfx90a", "gfx942", "gfx950", "gfx1200", "gfx1201"]:
+                if gcn_arch in ["gfx90a", "gfx942", "gfx950", "gfx1200", "gfx1201", "gfx1250"]:
                     self.assertTrue(default == torch._C._BlasBackend.Cublaslt)
                 else:
                     self.assertTrue(default == torch._C._BlasBackend.Cublas)
@@ -915,7 +915,7 @@ print(t.is_pinned())
             gcn_arch = str(
                 torch.cuda.get_device_properties(0).gcnArchName.split(":", 1)[0]
             )
-            if "gfx94" in gcn_arch or "gfx95" in gcn_arch:
+            if "gfx94" in gcn_arch or "gfx95" in gcn_arch or "gfx1250" in gcn_arch:
                 default_workspace_size = 1024 * 128 * 1024  # :1024:128
         else:
             default_workspace_size = (
@@ -9846,8 +9846,13 @@ class TestCompileKernel(TestCase):
 
         # Test error handling with more than supported shared memory size
         if torch.version.hip:
+            # Strip feature suffixes (e.g. "gfx1250:sramecc+:xnack-") before
+            # matching so this mirrors set_shared_memory_config in torch/cuda/_utils.py.
+            gcn_arch = get_device_properties().gcnArchName.split(":", 1)[0]
             max_smem = (
-                65536 if get_device_properties().gcnArchName != "gfx950" else 160 * 1024
+                65536
+                if gcn_arch not in ["gfx950", "gfx1250"]
+                else (320 * 1024 if gcn_arch == "gfx1250" else 160 * 1024)
             )
         else:
             max_smem = get_device_properties().shared_memory_per_block_optin
