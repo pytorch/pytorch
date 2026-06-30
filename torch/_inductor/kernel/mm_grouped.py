@@ -142,6 +142,7 @@ cutedsl_grouped_mm_template = CuteDSLTemplate(
     source=load_kernel_template("cutedsl_mm_grouped"),
 )
 
+
 def has_grouped_mm_triton_support() -> bool:
     if not torch.cuda.is_available():
         return False
