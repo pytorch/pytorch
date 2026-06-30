@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import copy
+import operator
 import re
 import unittest
 from textwrap import dedent
@@ -18,12 +19,19 @@ from torch._dynamo.testing import (
     rand_strided,
 )
 from torch._functorch.aot_autograd import _aot_export_function, create_functional_call
+from torch._functorch.partitioners import _extract_fwd_bwd_modules
 from torch._guards import CompileContext, StorageOverlap, TracingContext
+from torch._inductor.graph import GraphLowering
+from torch._inductor.virtualized import V
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.fx.experimental import _config as fx_config
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.profiler import profile
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import compare_equal_outs_and_grads
+from torch.utils._sympy.symbol import make_symbol, SymT
+from torch.utils._sympy.value_ranges import ValueRanges
 
 
 def maybe_dupe_op(x):
@@ -1381,8 +1389,14 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         #   %le : [num_users=1] = call_function[target=torch.ops.aten.le.Scalar](args = (%relu, 0), kwargs = {})
         #   return [add, primals_1, le]
         #
+        if is_dynamic_shape_test(self._testMethodName):
+            # an extra symint exists before the saved tensors
+            expected_msg = "bw_donated_idxs=[2]"
+        else:
+            expected_msg = "bw_donated_idxs=[1]"
+
         # `le` is a donated buffer but primals_1 is not.
-        FileCheck().check("bw_donated_idxs=[1]").run("\n".join(captured.output))
+        FileCheck().check(expected_msg).run("\n".join(captured.output))
 
     @torch._functorch.config.patch("donated_buffer", True)
     @torch._dynamo.config.patch("graph_break_on_nn_param_ctor", False)
@@ -1902,6 +1916,62 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
                 and isinstance(node.meta.get("val"), torch.SymBool)
                 for node in outputs
             )
+        )
+
+    @fx_config.patch(translation_validation=False)
+    def test_partitioner_saves_unreplaced_input_symbols_for_bw(self):
+        shape_env = ShapeEnv(should_record_events=False)
+        s0 = make_symbol(SymT.SIZE, 0, integer=True)
+        shape_env.var_to_range[s0] = ValueRanges(2, 10)
+        shape_env.add_backed_var_to_val(s0, 3)
+        s0_sym = shape_env.create_symintnode(s0, hint=3)
+
+        u0_sym = shape_env.create_unbacked_symint()
+        u0 = u0_sym.node._expr
+        shape_env._set_replacement(u0, s0, "test")
+        u1_sym = shape_env.create_unbacked_symint()
+        u1 = u1_sym.node._expr
+        shape_env._rename_unbacked_to(u0, u1)
+        derived_sym = shape_env.create_symintnode(u0 + 1, hint=None)
+
+        graph = torch.fx.Graph()
+        s0_node = graph.placeholder("primals_1")
+        s0_node.meta["val"] = s0_sym
+        u0_node = graph.call_function(operator.add, (s0_node, 0))
+        u0_node.meta["val"] = u0_sym
+        u0_node.meta["unbacked_bindings"] = {u0: ()}
+        derived_node = graph.call_function(operator.add, (u0_node, 1))
+        derived_node.meta["val"] = derived_sym
+        output = graph.output((s0_node, derived_node))
+        output.meta["desc"] = [None, None]
+        joint = torch.fx.GraphModule({}, graph)
+
+        _, bw_graph = _extract_fwd_bwd_modules(
+            joint, [], [derived_node], num_fwd_outputs=1
+        )
+        bw_placeholders = list(bw_graph.graph.find_nodes(op="placeholder"))
+        self.assertEqual(
+            [node.meta["val"].node._expr for node in bw_placeholders],
+            [u0, u0 + 1],
+        )
+
+        graph_inputs = [node.meta["val"] for node in bw_placeholders]
+        lowering = GraphLowering(
+            bw_graph, graph_inputs, shape_env=shape_env, is_backward=True
+        )
+        with V.set_graph_handler(lowering):
+            lowering.run(*graph_inputs)
+
+        self.assertEqual(
+            [lowering.graph_inputs[name] for name in lowering.graph_input_names],
+            [u1, u1 + 1],
+        )
+        self.assertEqual(
+            [
+                lowering.graph_inputs[name].xreplace({u1: s0})
+                for name in lowering.graph_input_names
+            ],
+            [s0, s0 + 1],
         )
 
     def test_batched_matmul_inference_mode(self):
