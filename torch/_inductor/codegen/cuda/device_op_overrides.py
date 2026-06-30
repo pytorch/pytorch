@@ -58,6 +58,101 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
         embedded in AOTI-generated wrapper code."""
         # NVIDIA devices have a warp size of 32, while AMD devices can have a
         # warp size of 32 or 64 depending on the architecture.
+        if torch.version.hip is not None:
+            if torch.cuda.is_available():
+                device = torch.device("cuda", torch.cuda.current_device())
+                warp_size = get_warp_size(device)
+            else:
+                warp_size = 32
+            source_codes = """
+            #define CUDA_DRIVER_CHECK(EXPR)                    \
+            do {                                               \
+                hipError_t code = EXPR;                        \
+                const char *msg;                               \
+                hipError_t code_get_error = hipDrvGetErrorString(code, &msg); \
+                if (code_get_error != hipSuccess) {            \
+                    throw std::runtime_error(                  \
+                        std::string("CUDA driver error: ") +   \
+                        std::string("invalid error code!"));   \
+                }                                              \
+                if (code != hipSuccess) {                      \
+                    throw std::runtime_error(                  \
+                        std::string("CUDA driver error: ") +   \
+                        std::string(msg));                     \
+                }                                              \
+            } while (0);
+
+            static inline hipFunction_t loadKernel(
+                    std::string filePath,
+                    const std::string &funcName,
+                    uint32_t sharedMemBytes,
+                    const std::optional<std::string> &cubinDir = std::nullopt,
+                    std::vector<hipModule_t>* loaded_modules = nullptr) {
+                if (cubinDir) {
+                    std::filesystem::path p1{*cubinDir};
+                    std::filesystem::path p2{filePath};
+                    filePath = (p1 / p2.filename()).string();
+                }
+
+                hipModule_t mod;
+                hipFunction_t func;
+                CUDA_DRIVER_CHECK(hipModuleLoad(&mod, filePath.c_str()));
+                if (loaded_modules) {
+                    loaded_modules->push_back(mod);
+                }
+                CUDA_DRIVER_CHECK(hipModuleGetFunction(&func, mod, funcName.c_str()));
+                if (sharedMemBytes > 0) {
+                    CUDA_DRIVER_CHECK(hipFuncSetAttribute(
+                        func,
+                        hipFuncAttributeMaxDynamicSharedMemorySize,
+                        sharedMemBytes
+                    ))
+                }
+                return func;
+            }
+
+            static inline hipFunction_t loadKernel(
+                    const void* start,
+                    const std::string &funcName,
+                    uint32_t sharedMemBytes,
+                    std::vector<hipModule_t>* loaded_modules = nullptr) {
+                hipModule_t mod;
+                hipFunction_t func;
+                CUDA_DRIVER_CHECK(hipModuleLoadData(&mod, start));
+                if (loaded_modules) {
+                    loaded_modules->push_back(mod);
+                }
+                CUDA_DRIVER_CHECK(hipModuleGetFunction(&func, mod, funcName.c_str()));
+                if (sharedMemBytes > 0) {
+                    CUDA_DRIVER_CHECK(hipFuncSetAttribute(
+                        func,
+                        hipFuncAttributeMaxDynamicSharedMemorySize,
+                        sharedMemBytes
+                    ))
+                }
+                return func;
+            }
+
+            static inline void launchKernel(
+                    hipFunction_t func,
+                    uint32_t gridX,
+                    uint32_t gridY,
+                    uint32_t gridZ,
+                    uint32_t numWarps,
+                    uint32_t sharedMemBytes,
+                    void* args[],
+                    hipStream_t stream,
+                    bool launch_pdl = false) {
+                if (launch_pdl) {
+                    throw std::runtime_error("PDL launch is not supported on HIP");
+                }
+                CUDA_DRIVER_CHECK(hipModuleLaunchKernel(
+                    func, gridX, gridY, gridZ, __WARP_SIZE__*numWarps, 1, 1, sharedMemBytes, stream, args, nullptr
+                ));
+            }
+        """
+            return source_codes.replace("__WARP_SIZE__", str(warp_size))
+
         source_codes = """
             #define CUDA_DRIVER_CHECK(EXPR)                    \\
             do {                                               \\
@@ -151,12 +246,7 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
                 CUDA_DRIVER_CHECK(cuLaunchKernelEx(&launch_config, func, args, nullptr));
             }
         """
-        if torch.version.hip is not None and torch.cuda.is_available():
-            device = torch.device("cuda", torch.cuda.current_device())
-            warp_size = get_warp_size(device)
-        else:
-            warp_size = 32
-        return source_codes.replace("__WARP_SIZE__", str(warp_size))
+        return source_codes.replace("__WARP_SIZE__", "32")
 
     def tma_descriptor_helpers(self) -> str:
         """
