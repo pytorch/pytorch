@@ -3,8 +3,8 @@
 During CUDA graph capture, ``mark_kernels`` records the current capture
 frontier and the direct dependents already attached to that frontier.
 On scope exit it walks only the newly added dependent edges to find the
-nodes created within the scope. Each kernel or memcpy node found is
-annotated by its ``toolsId`` so it can later be matched to profiler
+nodes created within the scope. Each kernel, memcpy, or memset node found
+is annotated by its ``toolsId`` so it can later be matched to profiler
 trace events.
 
 ``mark_kernels`` now snapshots capture state from whatever stream is
@@ -233,9 +233,9 @@ def _collect_descendants(
 # toolsId -> list of annotation objects.
 _kernel_annotations: defaultdict[int, list[Any]] = defaultdict(list)
 
-# Node types we annotate (kernels, memcpys, and batch mem ops), as driver
-# node-type enums. Initialized lazily to avoid touching cuda.bindings at import
-# time.
+# Node types we annotate (kernels, memcpys, memsets, and batch mem ops), as
+# driver node-type enums. Initialized lazily to avoid touching cuda.bindings at
+# import time.
 _ANNOTATABLE_TYPES: set[Any] | None = None
 
 
@@ -246,6 +246,7 @@ def _get_annotatable_types() -> set[Any]:
         _ANNOTATABLE_TYPES = {
             node_types.CU_GRAPH_NODE_TYPE_KERNEL,
             node_types.CU_GRAPH_NODE_TYPE_MEMCPY,
+            node_types.CU_GRAPH_NODE_TYPE_MEMSET,
             node_types.CU_GRAPH_NODE_TYPE_BATCH_MEM_OP,
         }
     return _ANNOTATABLE_TYPES
@@ -276,7 +277,7 @@ def mark_kernels(annotation: str | dict[str, Any]):
 
     Args:
         annotation: Arbitrary object appended to the annotation list for
-            every kernel/memcpy node captured within this scope.
+            every kernel/memcpy/memset node captured within this scope.
     """
     if not _annotations_enabled or _is_tools_id_unavailable():
         yield
