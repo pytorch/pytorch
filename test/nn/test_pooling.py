@@ -1141,7 +1141,7 @@ torch.cuda.synchronize()
             torch.cuda.empty_cache()
         helper(200, 512, 28, 28, 2)
         helper(4, 8, 7, 7, 3, stride=1)
-        helper(4, 8, 7, 7, 3, padding=2, stride=1)
+        helper(4, 8, 7, 7, 5, padding=2, stride=1)
         helper(10, 512, 31, 31, 3, stride=2)
         helper(1, 129, 8, 8, 3, stride=2)
 
