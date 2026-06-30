@@ -245,6 +245,37 @@ We also provide other storage layers, including ones to interact with HuggingFac
 .. autoclass:: torch.distributed.checkpoint.QuantizedHuggingFaceStorageReader
   :members:
 
+We also provide storage layers that transfer checkpoints to an RDMA-capable,
+S3-compatible object store over RDMA via NVIDIA cuObject, bypassing the TCP/HTTP
+data path. These require a PyTorch build with cuObject support (`USE_CUOBJ=1`,
+CUDA Toolkit >= 13.1) and an RDMA NIC; check availability with
+{func}`torch.cuda.cuobj.is_available`. By default they target AWS S3 with
+virtual-hosted (bucket-DNS) addressing; pass `addressing_style="path"` and an
+`endpoint_url` for S3-compatible endpoints that require path-style access. The
+native-format pair writes one object per tensor; the HuggingFace pair writes
+standard `safetensors` files. See
+{class}`~torch.distributed.checkpoint.S3RdmaStorageWriter` for a usage example.
+
+```{eval-rst}
+.. autoclass:: torch.distributed.checkpoint.S3RdmaStorageWriter
+  :members:
+```
+
+```{eval-rst}
+.. autoclass:: torch.distributed.checkpoint.S3RdmaStorageReader
+  :members:
+```
+
+```{eval-rst}
+.. autoclass:: torch.distributed.checkpoint.S3RdmaHuggingFaceStorageWriter
+  :members:
+```
+
+```{eval-rst}
+.. autoclass:: torch.distributed.checkpoint.S3RdmaHuggingFaceStorageReader
+  :members:
+```
+
 We provide default implementations of `LoadPlanner` and `SavePlanner` that
 can handle all of torch.distributed constructs such as FSDP, DDP, ShardedTensor and DistributedTensor.
 

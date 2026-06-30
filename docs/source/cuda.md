@@ -288,6 +288,36 @@ See the docs for {class}`~torch.cuda.gds.GdsFile` for an example of how to use t
 
 ```
 
+## S3-over-RDMA object storage (prototype)
+
+The APIs in `torch.cuda.cuobj` are thin wrappers around NVIDIA cuObject
+(`libcuobjclient`) that register a buffer for RDMA and mint an RDMA descriptor,
+enabling direct RDMA transfers between client memory and an S3-compatible object
+store. They are the building block for the S3-over-RDMA distributed-checkpoint
+backends ({class}`~torch.distributed.checkpoint.S3RdmaStorageWriter` and friends).
+
+These require a PyTorch build with cuObject support (`USE_CUOBJ=1`), the CUDA
+Toolkit >= 13.1 (which ships `libcuobjclient`), and an RDMA-capable NIC. Use
+{func}`torch.cuda.cuobj.is_available` to check at runtime; on builds/hosts without
+cuObject the wrappers raise `RuntimeError`.
+
+```{eval-rst}
+.. currentmodule:: torch.cuda.cuobj
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    is_available
+    register_buffer
+    deregister_buffer
+    get_rdma_token
+    put_rdma_token
+
+```
+
 ## Green Contexts (experimental)
 
 `torch.cuda.green_contexts` provides thin wrappers around the CUDA Green Context APIs
@@ -341,6 +371,10 @@ deprecated compatibility APIs.
 
 ```{eval-rst}
 .. py:module:: torch.cuda.gds
+```
+
+```{eval-rst}
+.. py:module:: torch.cuda.cuobj
 ```
 
 ```{eval-rst}

@@ -155,6 +155,10 @@ if(USE_CUDA)
         list(APPEND TORCH_PYTHON_LINK_LIBRARIES torch::cufile)
         list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_CUFILE)
     endif()
+    if(USE_CUOBJ AND TARGET torch::cuobj)
+        list(APPEND TORCH_PYTHON_LINK_LIBRARIES torch::cuobj)
+        list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_CUOBJ)
+    endif()
 
     if(TARGET torch::nvtx3)
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES torch::nvtx3)
@@ -320,6 +324,10 @@ endif()
 
 if(USE_CUFILE AND NOT USE_ROCM)
   target_compile_definitions(torch_python PRIVATE USE_CUFILE)
+endif()
+
+if(USE_CUOBJ AND NOT USE_ROCM AND TARGET torch::cuobj)
+  target_compile_definitions(torch_python PRIVATE USE_CUOBJ)
 endif()
 
 if(HAVE_SOVERSION)

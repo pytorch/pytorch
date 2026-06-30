@@ -35,6 +35,7 @@
 #include <torch/csrc/CudaIPCTypes.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
+#include <torch/csrc/cuda/CuObjClient.h>
 #include <torch/csrc/cuda/GdsFile.h>
 #include <torch/csrc/cuda/THCP.h>
 #include <torch/csrc/cuda/memory_snapshot.h>
@@ -2443,6 +2444,7 @@ void initModule(PyObject* module) {
   shared::initCusparseltBindings(module);
 #endif
   shared::initGdsBindings(module);
+  shared::initCuObjBindings(module);
   registerCudaDeviceProperties(module);
   registerCudaPluggableAllocator(module);
   initCudaMethodBindings(module);
