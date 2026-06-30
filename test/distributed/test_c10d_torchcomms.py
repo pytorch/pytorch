@@ -2,9 +2,11 @@
 
 import os
 import unittest
+from unittest import mock
 
 import torch
 import torch.distributed as dist
+import torch.distributed.distributed_c10d as c10d
 from torch.distributed.distributed_c10d import _TORCHCOMM_AVAILABLE
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import C10dTorchCommsTestBase
@@ -13,6 +15,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     subtest,
+    TestCase,
 )
 
 
@@ -477,6 +480,73 @@ class TestC10dTorchCommsSplitMixedBackends(C10dTorchCommsTestBase):
 instantiate_device_type_tests(
     TestC10dTorchCommsSplitMixedBackends, globals(), only_for=["cuda"]
 )
+
+
+class TestTorchCommsHandlesBackend(TestCase):
+    """Unit-test the pure routing logic of ``_torchcomms_handles_backend``.
+
+    This decides whether a backend is one TorchComms can construct (so it goes
+    through ``new_comm`` / ``split_group``) versus a custom c10d plugin such as
+    ``mooncake`` that must fall through to the normal ProcessGroup path. The
+    function depends only on ``_TORCHCOMM_AVAILABLE`` and the two
+    ``is_backend_*`` callables, all of which we patch -- so these tests run even
+    when torchcomms is not installed.
+    """
+
+    def _patch(self, available=True, built=(), registered=()):
+        built, registered = set(built), set(registered)
+        return mock.patch.multiple(
+            c10d,
+            _TORCHCOMM_AVAILABLE=available,
+            _torchcomms_is_backend_built=lambda name: name in built,
+            _torchcomms_is_backend_registered=lambda name: name in registered,
+            create=True,
+        )
+
+    def test_unavailable_returns_false(self):
+        with self._patch(available=False, built=["nccl"]):
+            self.assertFalse(c10d._torchcomms_handles_backend("nccl"))
+            self.assertFalse(c10d._torchcomms_handles_backend(None))
+
+    def test_none_backend_inherits_parent(self):
+        with self._patch(built=[]):
+            self.assertTrue(c10d._torchcomms_handles_backend(None))
+
+    def test_builtin_backend(self):
+        with self._patch(built=["nccl"]):
+            self.assertTrue(c10d._torchcomms_handles_backend("nccl"))
+
+    def test_registered_backend(self):
+        with self._patch(registered=["myadapter"]):
+            self.assertTrue(c10d._torchcomms_handles_backend("myadapter"))
+
+    def test_custom_backend_falls_through(self):
+        with self._patch(built=["nccl"]):
+            self.assertFalse(c10d._torchcomms_handles_backend("mooncake"))
+            self.assertFalse(c10d._torchcomms_handles_backend("ucc"))
+
+    def test_case_insensitive(self):
+        with self._patch(built=["nccl"]):
+            self.assertTrue(c10d._torchcomms_handles_backend("NCCL"))
+
+    def test_nccl_lazy_maps_to_nccl(self):
+        with self._patch(built=["nccl"]):
+            self.assertTrue(c10d._torchcomms_handles_backend("nccl-lazy"))
+        with self._patch(built=[]):
+            self.assertFalse(c10d._torchcomms_handles_backend("nccl-lazy"))
+
+    def test_qualified_all_handled(self):
+        with self._patch(built=["gloo", "nccl"]):
+            self.assertTrue(c10d._torchcomms_handles_backend("cpu:gloo,cuda:nccl"))
+
+    def test_qualified_one_unhandled_falls_through(self):
+        with self._patch(built=["gloo"]):
+            self.assertFalse(c10d._torchcomms_handles_backend("cpu:gloo,cuda:mooncake"))
+
+    def test_empty_parts_are_skipped(self):
+        with self._patch(built=["nccl"]):
+            self.assertTrue(c10d._torchcomms_handles_backend("nccl,"))
+            self.assertTrue(c10d._torchcomms_handles_backend(" nccl , "))
 
 
 if __name__ == "__main__":
