@@ -59,6 +59,8 @@ COPY ./common/install_nccl.sh install_nccl.sh
 COPY ./ci_commit_pins/nccl* /ci_commit_pins/
 COPY ./common/install_cusparselt.sh install_cusparselt.sh
 RUN bash ./install_cuda.sh ${CUDA_VERSION} && rm install_cuda.sh install_nccl.sh /ci_commit_pins/nccl* install_cusparselt.sh
+COPY ./common/install_cudss.sh install_cudss.sh
+RUN bash ./install_cudss.sh && rm install_cudss.sh
 ENV DESIRED_CUDA=${CUDA_VERSION}
 ENV PATH=/usr/local/nvidia/bin:/usr/local/cuda/bin:$PATH
 
