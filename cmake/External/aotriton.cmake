@@ -43,6 +43,7 @@ if(NOT __AOTRITON_INCLUDED)
       "amd-gfx110x"
       "amd-gfx115x"
       "amd-gfx120x"
+      "amd-gfx1250"
      )
   set(__AOTRITON_IMAGE_SHA256_LIST
      "bb8bf2237b77fc503bc2967ea0d99d6ca419126c479e951ea42b712737128086" # amd-gfx90a
@@ -51,6 +52,7 @@ if(NOT __AOTRITON_INCLUDED)
      "c9cac7cf6f277168e1659ac2f04706f8823580b7c7e3e895f5a5503ed6bdd55f" # amd-gfx110x
      "3177387a15c678b30057f4584d1fc1b8f8db56163890cb5c98f27450209f5a7b" # amd-gfx115x
      "68572511ce6487a83f9014bd255bd69c8943f87d0c93bd57b2daac5fbc6c79c1" # amd-gfx120x
+     "f15547af1cf95292701dffb9f1f593e8a83b34f4ae7cfc40c821e913c12c961a" # amd-gfx1250
      )
   set(__AOTRITON_BASE_URL "$ENV{PYTORCH_AOTRITON_BASE_URL}")
   if(NOT __AOTRITON_BASE_URL)
