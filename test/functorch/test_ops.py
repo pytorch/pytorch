@@ -404,6 +404,7 @@ skip_noncontig = {
     "_batch_norm_with_update",
     "as_strided_copy",
     "native_group_norm",
+    "torch.ops.aten._scaled_dot_product_flash_attention_for_cpu",
 }
 
 bool_unsupported_ordered_ops = {
@@ -593,6 +594,7 @@ class TestOperators(TestCase):
                 xfail("nn.functional.scaled_dot_product_attention"),
                 xfail("torch.ops.aten._flash_attention_forward"),
                 xfail("torch.ops.aten._efficient_attention_forward"),
+                xfail("torch.ops.aten._scaled_dot_product_flash_attention_for_cpu"),
                 xfail(
                     "nn.functional.rrelu"
                 ),  # in-place test errors out with no formula implemented
@@ -1118,6 +1120,7 @@ class TestOperators(TestCase):
             skip("nn.functional.alpha_dropout"),  # randomness
             skip("nn.functional.scaled_dot_product_attention"),  # randomness
             xfail("torch.ops.aten._efficient_attention_forward"),  # outputs ints
+            xfail("torch.ops.aten._scaled_dot_product_flash_attention_for_cpu"),
             skip("nn.functional.multi_head_attention_forward"),  # randomness
             xfail(
                 "index_put", ""
@@ -1740,6 +1743,9 @@ class TestOperators(TestCase):
                 skip("nn.functional.scaled_dot_product_attention"),
                 xfail("torch.ops.aten._efficient_attention_forward"),  # outputs ints
                 xfail(
+                    "torch.ops.aten._scaled_dot_product_flash_attention_for_cpu"
+                ),  # forward-AD not implemented
+                xfail(
                     "nn.functional.multi_margin_loss", ""
                 ),  # NYI: forward AD with multi_margin_loss
                 skip(
@@ -1924,6 +1930,7 @@ class TestOperators(TestCase):
                 xfail("nn.functional.dropout"),  # calls random op
                 xfail("nn.functional.scaled_dot_product_attention"),  # randomness
                 xfail("torch.ops.aten._efficient_attention_forward"),  # outputs ints
+                xfail("torch.ops.aten._scaled_dot_product_flash_attention_for_cpu"),
                 xfail("nn.functional.multi_head_attention_forward"),  # randomness
                 xfail(
                     "nn.functional.embedding_bag"
