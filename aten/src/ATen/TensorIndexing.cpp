@@ -40,28 +40,6 @@ std::ostream& operator<<(std::ostream& stream, const std::vector<TensorIndex>& t
   return stream;
 }
 
-// This mirrors `THPVariable_setitem` in torch/csrc/autograd/python_variable_indexing.cpp
-// for "the assigned value is a Scalar" case
-static inline void set_item(const Tensor& self, ArrayRef<TensorIndex> indices, const Scalar& v) {
-  Tensor value;
-
-  {
-    at::AutoDispatchBelowADInplaceOrView guard;
-    at::Device self_device = self.device();
-
-    // TODO: This qint special case looks very suspicious...
-    if (isQIntType(self.scalar_type())) {
-      value = at::indexing::scalarToTensor(v, device(kCPU).dtype(kFloat), at::Device(kCPU));
-    } else if (self_device.is_cuda()) {
-      value = at::indexing::scalarToTensor(v, self.options(), at::Device(kCPU));
-    } else {
-      value = at::indexing::scalarToTensor(v, self.options(), self_device);
-    }
-  }
-
-  set_item(self, indices, value);
-}
-
 } // namespace indexing
 
 Tensor Tensor::index(ArrayRef<at::indexing::TensorIndex> indices) const {
