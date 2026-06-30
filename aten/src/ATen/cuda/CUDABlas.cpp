@@ -1853,7 +1853,7 @@ void scaled_gemm(
                            "Got m=", m, ", n=", n, ", k=", k);
             }
   #endif
-  #if ROCM_VERSION >= 70200
+  #if ROCM_VERSION >= 71400
             if (at::detail::getCUDAHooks().isGPUArch({"gfx1250"})) {
                 // TODO: add constraints based on hipblaslt internals
                 TORCH_CHECK((m % 16 == 0) && (n % 16 == 0) && (k % 128 == 0),

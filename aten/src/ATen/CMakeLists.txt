@@ -475,7 +475,6 @@ IF(USE_MSLK)
         list(PREPEND MSLK_EXTRA_HIP_FLAGS -mllvm=-amdgpu-coerce-illegal-types=1)
       endif()
 
-
     add_library(mslk STATIC ${mslk_native_rocm_hip})
     set_target_properties(mslk PROPERTIES
       POSITION_INDEPENDENT_CODE ON

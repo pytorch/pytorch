@@ -224,7 +224,7 @@ def evaluate_platform_supports_mx_gemm():
         if torch.version.hip:
             if ROCM_VERSION >= (7, 0):
                 gcn_name = torch.cuda.get_device_properties(0).gcnArchName
-                return 'gfx950' in gcn_name or ('gfx1250' in gcn_name and ROCM_VERSION >= (7, 2))
+                return 'gfx950' in gcn_name or ('gfx1250' in gcn_name and ROCM_VERSION >= (7, 14))
         else:
             return SM100OrLater
     return False
