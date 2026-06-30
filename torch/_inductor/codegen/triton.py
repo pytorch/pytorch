@@ -14,7 +14,7 @@ import operator
 import os
 import textwrap
 from abc import abstractmethod
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from functools import lru_cache
 from typing import Any, cast, TYPE_CHECKING, TypeVar
 
@@ -905,6 +905,43 @@ def triton_reshape(
 # inconsistent with Python semantics (and consistent with C semantics).  We
 # must override all of these, or it is potential silent correctness problem
 class TritonPrinter(PythonPrinter):  # noqa: docstring_linter
+    def _print_Symbol(self, expr: sympy.Symbol) -> str:
+        symbol = str(expr)
+        if cast_dtype := self._value_expr_symbol_cast_dtype(expr):
+            return f"({symbol}).to({cast_dtype})"
+        return symbol
+
+    @staticmethod
+    def _value_expr_symbol_cast_dtype(expr: sympy.Symbol) -> str | None:
+        emitted_index_dtype = getattr(V.kernel, "_value_expr_symbol_source_dtype", None)
+        if emitted_index_dtype is None:
+            return None
+
+        index_dtype = V.kernel.get_index_dtype_as_torch_dtype()
+        if index_dtype not in (torch.int32, torch.int64):
+            return None
+
+        cast_dtype = V.kernel.dtype_to_str(index_dtype)
+
+        if emitted_index_dtype not in ("tl.int32", "tl.int64"):
+            raise AssertionError(f"unexpected index dtype: {emitted_index_dtype}")
+
+        # Value expressions should perform integer arithmetic in the requested
+        # dtype, even when that widens or narrows from the selected index dtype.
+        if expr in V.kernel.range_tree_nodes:
+            return None if emitted_index_dtype == cast_dtype else cast_dtype
+
+        for tree in V.kernel.range_trees:
+            if expr in (tree.index_sym(), tree.block_offset()):
+                return None if emitted_index_dtype == cast_dtype else cast_dtype
+
+        if symbol_is_type(expr, SymT.TMP):
+            var = V.kernel.cse.varname_map[expr.name]
+            if var.dtype in (torch.int32, torch.int64) and var.dtype != index_dtype:
+                return cast_dtype
+
+        return None
+
     def _print_TruncToInt(self, expr: sympy.Expr) -> str:
         if len(expr.args) != 1:
             raise AssertionError(f"expected 1 arg, got {len(expr.args)}")
@@ -2428,10 +2465,13 @@ class TritonKernelOverrides(TritonOverrides):
         return cls._shaped_constant(value, dtype, shape=shape)
 
     @classmethod
-    def index_expr(cls, expr, dtype):
+    def index_expr(cls, expr, dtype, *, value_expr_symbol_source_dtype=None):
         expr = _materialize_trunc_to_float_expr(expr, dtype)
         indexing = V.kernel.indexing(
-            expr, block_ptr=False, tma_compatibility_checker=None
+            expr,
+            block_ptr=False,
+            tma_compatibility_checker=None,
+            value_expr_symbol_source_dtype=value_expr_symbol_source_dtype,
         )
         if not isinstance(indexing, IndexingOptions):
             raise AssertionError(f"expected IndexingOptions, got {type(indexing)}")
@@ -2471,17 +2511,19 @@ class TritonKernelOverrides(TritonOverrides):
     def value_expr(cls, expr, dtype):
         """
         Like :meth:`index_expr`, but honors ``dtype`` by setting the kernel
-        index dtype before emitting, and casting the result if needed.
+        index dtype before emitting, casting range symbols before integer
+        arithmetic, and casting the result if needed.
         """
-        real_index_dtype = V.kernel._index_dtype
-        V.kernel._index_dtype = (
-            dtype if dtype in (torch.int32, torch.int64) else torch.int64
+        value_expr_symbol_source_dtype = (
+            V.kernel.index_dtype if dtype in (torch.int32, torch.int64) else None
         )
-        try:
-            var = cls.index_expr(expr, dtype)
-        finally:
-            V.kernel._index_dtype = real_index_dtype
-        if real_index_dtype != dtype or var.dtype != dtype:
+        with V.kernel.value_expr_index_dtype(dtype):
+            var = cls.index_expr(
+                expr,
+                dtype,
+                value_expr_symbol_source_dtype=value_expr_symbol_source_dtype,
+            )
+        if var.dtype != dtype:
             var = V.kernel.cse.generate(
                 V.kernel.compute,
                 f"({var}).to({triton_type(dtype)})",
@@ -3192,6 +3234,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.is_combo_kernel: bool = is_combo_kernel
         self.per_subkernel_blocks: bool = per_subkernel_blocks
         super().__init__(tiling, **kwargs)
+        self._value_expr_symbol_source_dtype: str | None = None
         self.cse = TritonCSE(self.newvar_prefix, self.suffix)
         # Cache of values that can be reused for the prologue.
         self.prologue_cache: dict[str, str] = {}
@@ -3298,6 +3341,30 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
     def dtype_to_str(self, dtype: torch.dtype) -> str:
         return triton_type(dtype)
+
+    @contextlib.contextmanager
+    def value_expr_index_dtype(self, dtype: torch.dtype) -> Iterator[None]:
+        """
+        Temporarily emit a value-producing index expression with the requested
+        integer dtype.
+        """
+        prior_index_dtype = self._index_dtype
+        self._index_dtype = (
+            dtype if dtype in (torch.int32, torch.int64) else torch.int64
+        )
+        try:
+            yield
+        finally:
+            self._index_dtype = prior_index_dtype
+
+    @contextlib.contextmanager
+    def _value_expr_symbol_casts(self, source_dtype: str | None) -> Iterator[None]:
+        prior_symbol_source_dtype = self._value_expr_symbol_source_dtype
+        self._value_expr_symbol_source_dtype = source_dtype
+        try:
+            yield
+        finally:
+            self._value_expr_symbol_source_dtype = prior_symbol_source_dtype
 
     def should_use_cooperative_reduction(self) -> bool:
         return self.inside_reduction and V.choices.should_use_cooperative_reduction(
@@ -3427,6 +3494,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         block_ptr=False,
         tma_compatibility_checker: TMACompatibilityChecker | None = None,
         mask_constant_index=False,
+        value_expr_symbol_source_dtype: str | None = None,
     ):
         """
         Compute the index and mask to pass to tl.load() or tl.store()
@@ -3768,7 +3836,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 return options
         expand_str = None
         expand_shape: BlockShapeType = None
-        index_str = self.index_to_str(index)
+        with self._value_expr_symbol_casts(value_expr_symbol_source_dtype):
+            index_str = self.index_to_str(index)
 
         def _get_expand_str():
             if copy_shape:

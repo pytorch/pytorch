@@ -1792,6 +1792,7 @@ class TritonTemplateKernel(TritonKernel):
         block_ptr=False,
         tma_compatibility_checker: TMACompatibilityChecker | None = None,
         mask_constant_index=False,
+        value_expr_symbol_source_dtype: str | None = None,
     ):
         """
         Override the default indexing to use our custom mask and force
@@ -1807,6 +1808,7 @@ class TritonTemplateKernel(TritonKernel):
             block_ptr=block_ptr,
             tma_compatibility_checker=tma_compatibility_checker,
             mask_constant_index=mask_constant_index,
+            value_expr_symbol_source_dtype=value_expr_symbol_source_dtype,
         )
 
     def codegen_range_tree(self):

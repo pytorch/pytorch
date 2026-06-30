@@ -18817,6 +18817,13 @@ if RUN_GPU:
 
             return kernels
 
+        @staticmethod
+        def get_triton_kernel_code(code: str) -> str:
+            kernels = re.findall(
+                r"async_compile\.triton\([^,]+,\s*'''(.*?)'''", code, re.DOTALL
+            )
+            return "\n".join(kernels) if kernels else code
+
         def test_divisible_by_16_covers_numel_args(self):
             torch._dynamo.reset()
 
@@ -18902,8 +18909,9 @@ if RUN_GPU:
             fn_opt = torch.compile(fn, backend="inductor")
             inps = [torch.randn(2, 4, 16, 16, device=GPU_TYPE)]
             code = run_and_get_triton_code(fn_opt, *inps)
-            self.assertTrue("to(tl.int32)" in code)
-            self.assertFalse("to(tl.int64)" in code)
+            triton_code = self.get_triton_kernel_code(code)
+            self.assertTrue("to(tl.int32)" in triton_code)
+            self.assertFalse("to(tl.int64)" in triton_code)
 
             self.assertEqual(fn_opt(*inps), fn(*inps))
 
@@ -18915,8 +18923,22 @@ if RUN_GPU:
             fn_opt = torch.compile(fn, backend="inductor")
             inps = [torch.randn(128, device=GPU_TYPE)]
             code = run_and_get_triton_code(fn_opt, *inps)
-            self.assertFalse("to(tl.int64)" in code)
+            triton_code = self.get_triton_kernel_code(code)
+            self.assertFalse("to(tl.int64)" in triton_code)
 
+            self.assertEqual(fn_opt(*inps), fn(*inps))
+
+        def test_value_expr_int64_mul_preserves_intermediates(self):
+            def fn(x: torch.Tensor) -> torch.Tensor:
+                return torch.arange(
+                    0, 9, device=x.device, dtype=torch.int64
+                ) * torch.tensor([1500000000], dtype=torch.int64, device=x.device)
+
+            fn_opt = torch.compile(fn, backend="inductor")
+            inps = [torch.empty(1, device=GPU_TYPE)]
+            code = run_and_get_triton_code(fn_opt, *inps)
+            self.assertTrue("1500000000*(x0).to(tl.int64)" in code)
+            self.assertFalse("(1500000000*x0).to(tl.int64)" in code)
             self.assertEqual(fn_opt(*inps), fn(*inps))
 
         def test_value_expr_float_preserves_integer_intermediates(self):
@@ -18948,7 +18970,8 @@ if RUN_GPU:
                 torch.tensor([[0.1, 0.5], [1.5, 2.5]], device=GPU_TYPE),
             ]
             code = run_and_get_triton_code(fn_opt, *inps)
-            self.assertFalse("to(tl.int64)" in code)
+            triton_code = self.get_triton_kernel_code(code)
+            self.assertFalse("to(tl.int64)" in triton_code)
 
             self.assertEqual(fn_opt(*inps), fn(*inps))
 
@@ -18981,9 +19004,11 @@ if RUN_GPU:
 
             # The function with the constrained tensor should be optimized, but
             # the other should not:
-            self.assertTrue("to(tl.int64)" in code1)
-            self.assertTrue("to(tl.int32)" in code2)
-            self.assertFalse("to(tl.int64)" in code2)
+            triton_code1 = self.get_triton_kernel_code(code1)
+            triton_code2 = self.get_triton_kernel_code(code2)
+            self.assertTrue("to(tl.int64)" in triton_code1)
+            self.assertTrue("to(tl.int32)" in triton_code2)
+            self.assertFalse("to(tl.int64)" in triton_code2)
 
             self.assertEqual(fn1_opt(*inps1), fn1(*inps1))
             self.assertEqual(fn2_opt(*inps2), fn1(*inps2))
