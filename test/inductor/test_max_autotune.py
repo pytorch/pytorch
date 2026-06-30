@@ -32,6 +32,7 @@ from torch._inductor.autotune_process import (
     AutotuneProcessPool,
     ExternKernelBenchmarkRequest,
     get_visible_devices_env_var,
+    TensorMeta,
     TritonBenchmarkRequest,
     TuningProcess,
     TuningProcessPool,
