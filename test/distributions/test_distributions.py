@@ -118,6 +118,7 @@ from torch.testing._internal.common_device_type import (
     skipMPS,
 )
 from torch.testing._internal.common_utils import (
+    device_rng_seed,
     gradcheck,
     load_tests,
     run_tests,
@@ -3328,8 +3329,8 @@ class TestDistributions(DistributionsTestCase):
         wishart_log_prob_gradcheck(df_no_batch, None, None, scale_tril_batched)
 
     @skipMPS  # flaky failure
+    @device_rng_seed(default=0, xpu=3) # see Note [Randomized statistical tests]
     def test_wishart_stable_with_precision_matrix(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
         ndim = 10
         x = torch.randn(ndim)
         P = torch.exp(-((x - x.unsqueeze(-1)) ** 2))  # RBF kernel
