@@ -271,37 +271,36 @@ def _fx_graph_to_metal(
             ctype = "long" if both_int else "float"
             code_lines.append(f"{ctype} {t} = {_val(args[0])} {op} {_val(args[1])};")
             if both_int:
-                int_vars.add(t)
+                int_vars.add(node.name)
         elif target in _CMP_OPS:
             code_lines.append(
                 f"bool {t} = {_val(args[0])} {_CMP_OPS[target]} {_val(args[1])};"
             )
         elif target in (operator.floordiv, operator.mod):
+            fn = "floor_divide" if target is operator.floordiv else "remainder"
             both_int = _is_int(args[0]) and _is_int(args[1])
-            fa = f"static_cast<float>({_val(args[0])})"
-            fb = f"static_cast<float>({_val(args[1])})"
-            if target is operator.floordiv:
-                expr = f"metal::floor({fa} / {fb})"
-            else:
-                expr = f"c10::metal::remainder({fa}, {fb})"
-            ctype = "long" if both_int else "float"
-            rhs = f"(long){expr}" if both_int else expr
-            code_lines.append(f"{ctype} {t} = {rhs};")
             if both_int:
-                int_vars.add(t)
+                a, b, ctype = _val(args[0]), _val(args[1]), "long"
+            else:
+                a = f"static_cast<float>({_val(args[0])})"
+                b = f"static_cast<float>({_val(args[1])})"
+                ctype = "float"
+            code_lines.append(f"{ctype} {t} = c10::metal::{fn}({a}, {b});")
+            if both_int:
+                int_vars.add(node.name)
         elif target is operator.neg:
             is_int = _is_int(args[0])
             code_lines.append(
                 f"{'long' if is_int else 'float'} {t} = -{_val(args[0])};"
             )
             if is_int:
-                int_vars.add(t)
+                int_vars.add(node.name)
         elif target in (operator.and_, operator.or_):
             a, b = _val(args[0]), _val(args[1])
             if _is_int(args[0]) and _is_int(args[1]):
                 op = "&" if target is operator.and_ else "|"
                 code_lines.append(f"long {t} = {a} {op} {b};")
-                int_vars.add(t)
+                int_vars.add(node.name)
             else:
                 op = "&&" if target is operator.and_ else "||"
                 code_lines.append(f"bool {t} = ({a}) {op} ({b});")
