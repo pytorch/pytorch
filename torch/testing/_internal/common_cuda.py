@@ -7,7 +7,6 @@ import torch
 import torch.cuda
 from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS, IS_MACOS, TEST_XPU
 from torch.utils._import_utils import _check_module_exists
-import inspect
 import contextlib
 import os
 import unittest
@@ -318,7 +317,7 @@ def initialize_cuda_context_rng():
 # TF32 helpers (CUDA + XPU) are defined in common.py and re-exported here so
 # that existing ``from torch.testing._internal.common_cuda import tf32_*``
 # call sites continue to work without modification.
-from torch.testing._internal.common import (  # noqa: E402, F401
+from torch.testing._internal.common import (  # noqa: F401
     tf32_off,
     tf32_on,
     tf32_enabled,
