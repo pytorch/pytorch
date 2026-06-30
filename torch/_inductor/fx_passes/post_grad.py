@@ -178,7 +178,9 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         # has some issues with mutation in inference mode
         gm.graph.eliminate_dead_code()
 
-    if is_inference and config.reorder_for_locality:
+    if config.reorder_for_locality and (
+        is_inference or config.reorder_for_locality_in_training
+    ):
         GraphTransformObserver(gm, "reorder_for_locality").apply_graph_pass(
             reorder_for_locality
         )
