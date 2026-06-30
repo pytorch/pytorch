@@ -2248,7 +2248,8 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
                     cfg,
                     grid,
                 )
-                # One MFMA per warp, capped at 2 * parallel_mi_cu.
+                # One matrix-instruction tile per warp, capped at
+                # 2 * parallel_mi_cu.
                 tile_area = cfg.mt.m * cfg.mt.n
                 try:
                     warp_size = DeviceProperties.create(device).warp_size or 64
@@ -2259,7 +2260,8 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
                     )
                     warp_size = 64
                 max_warps = 2 * _origami_hardware(selector).parallel_mi_cu
-                # mfma_dim from origami hardware object; fall back to 16.
+                # mfma_m is the dimension field exposed by the origami hardware
+                # object; fall back to 16 if it is unavailable.
                 mfma_dim = getattr(_origami_hardware(selector), "mfma_m", 16)
                 num_warps = min(
                     max_warps,

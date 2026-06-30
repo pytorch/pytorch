@@ -34,6 +34,7 @@
 
 #include <ATen/hip/cub.cuh>
 
+#include <ATen/cuda/CUDAContext.h>
 #include <c10/hip/HIPException.h>
 #include <rocshmem/rocshmem.hpp>
 
@@ -41,9 +42,27 @@ using namespace rocshmem;
 namespace c10d::nvshmem_extension {
 
 #define THREADS_PER_BLOCK 512
+// The AllToAllV WarpScan paths below are written for a 64-lane ROCm wave
+// (WarpScan over WARP_SIZE lanes, tile sizing derived from it). They are only
+// correct on Wave64 hardware; Wave32-only targets (e.g. gfx1250) would require
+// target-aware WARP_SIZE and tile/limit retuning before they can be enabled.
+// `checkWave64Device` rejects non-Wave64 devices at launch so we fail loudly
+// instead of silently corrupting results on lanes that do not exist.
 #define WARP_SIZE 64
 
 namespace {
+
+void checkWave64Device(const at::Device& device) {
+  const auto warp_size = at::cuda::getDeviceProperties(device.index())->warpSize;
+  TORCH_CHECK(
+      warp_size == WARP_SIZE,
+      "rocSHMEM AllToAllv collectives require a 64-lane (Wave64) device, but "
+      "device ",
+      device.index(),
+      " has warp size ",
+      warp_size,
+      ". This path is not yet supported on Wave32 architectures.");
+}
 
 bool parse_rocshmem_version_ge(
     const char* version,
@@ -361,6 +380,7 @@ void all_to_all_vdev(
   TORCH_CHECK_EQ(input.device(), out.device());
   auto device = input.device();
   c10::cuda::CUDAGuard guard(device);
+  checkWave64Device(device);
   auto& team_manager = TeamManager::get(device);
   auto team = team_manager.get_team(group_name, input_hdl->get_rank_to_global_rank());
   auto stream = at::cuda::getCurrentCUDAStream(device.index());
@@ -395,10 +415,10 @@ void all_to_all_vdev(
 
 // Start of `all_to_all_vdev_2d`
 
-// This is an warp-scope, exclusive prefix sum. When called by a block of
-// threads, each warp will perform an independent prefix sum, concurrently.
-// Returns the sum of all elements in the warp.
-// `NUM_WARPS` is the number of warps participating the concurrent prefix sum.
+// This is a warp/wave-scope, exclusive prefix sum. When called by a block of
+// threads, each warp/wave will perform an independent prefix sum, concurrently.
+// Returns the sum of all elements in the warp/wave.
+// `NUM_WARPS` is the number of warps/waves participating the concurrent prefix sum.
 template <int NUM_WARPS>
 __device__ int64_t prefixSum_warp(int64_t *odata, int64_t *idata, int n) {
   CUDA_KERNEL_ASSERT(n <= WARP_SIZE);
@@ -601,10 +621,8 @@ __global__ void allToAllV_2d(void *send_data, void *recv_data, int64_t* in_split
 
   // Starting offset of each tile
   __shared__ int64_t start_offset_per_tile[NUM_TILES];
-  // Prefix sum again to get the tiles' start offsets.
-  // `NUM_TILES` is typically not greater than 32, because 32 tiles * 32 threads
-  // = 1024 threads, and this kernel is launched within 1024 threads. Thus, we
-  // can use warp-scope prefix sum.
+  // Prefix sum again to get the tiles' start offsets. `NUM_TILES` is
+  // THREADS_PER_BLOCK / WARP_SIZE, so a single warp/wave can cover it.
   static_assert(NUM_TILES <= WARP_SIZE);
   // Only 1 warp is needed
   prefixSum_warp<1>(start_offset_per_tile, len_per_tile, NUM_TILES);
@@ -729,6 +747,7 @@ void all_to_all_vdev_2d(
       out_splits_offsets.device() == device,
       "all tensor arguments must be on the same CUDA device");
   c10::cuda::CUDAGuard guard(device);
+  checkWave64Device(device);
   auto stream = at::cuda::getCurrentCUDAStream();
   auto& team_manager = TeamManager::get(device);
   auto team = team_manager.get_team(group_name, input_hdl->get_rank_to_global_rank());
@@ -847,6 +866,7 @@ void all_to_all_vdev_2d_offset(
       out_splits_offsets.device() == device,
       "all tensor arguments must be on the same CUDA device");
   c10::cuda::CUDAGuard guard(device);
+  checkWave64Device(device);
   auto stream = at::cuda::getCurrentCUDAStream();
   auto& team_manager = TeamManager::get(device);
   auto team = team_manager.get_team(group_name, input_hdl->get_rank_to_global_rank());

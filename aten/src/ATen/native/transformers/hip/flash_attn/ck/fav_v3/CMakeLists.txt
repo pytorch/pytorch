@@ -6,6 +6,8 @@ include(CMakePrintHelpers)
 # 3.15 fails. codegen_compat.py reproduces codegen.py's output using only the
 # standard library, so this step runs under plain python3 like every other CK
 # generator here -- no venv or pandas/numpy install required.
+# TODO: More gfx1250 support once AITER codegen and embedded HSA artifacts
+# are ready for gfx1250.
 execute_process(
     COMMAND ${CMAKE_COMMAND} -E env "AITER_GPU_ARCHS=gfx942;gfx950"
             python3 ${CMAKE_CURRENT_LIST_DIR}/codegen_compat.py
@@ -29,6 +31,7 @@ set(AITER_EMBEDDED_HSA_HEADER "${AITER_EMBEDDED_HSA_HEADER_DIR}/aiter_embedded_h
 set(GENERATE_SCRIPT "${CMAKE_CURRENT_LIST_DIR}/generate_aiter_embedded_hsa.py")
 
 # Generate the embedded HSA header using Python script (much faster than CMake loops)
+# TODO: gfx1250/fmha_v3_bwd
 execute_process(
     COMMAND python3 ${GENERATE_SCRIPT}
             --hsa-dir ${AITER_HSA_DIR}

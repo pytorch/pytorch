@@ -1040,7 +1040,15 @@ if(USE_ROCM)
       list(APPEND HIP_CXX_FLAGS -DHIPBLASLT_VEC_EXT)
     endif()
     if(USE_ROCM_CK_GEMM)
-      list(APPEND HIP_CXX_FLAGS -DUSE_ROCM_CK_GEMM)
+      # Current CK GEMM sources are XDL/Wave64 paths. Mixed-arch builds are
+      # handled by target-local HIP_ARCHITECTURES filtering in ATen/CMakeLists,
+      # but a gfx1250-only build has no supported CK GEMM arch left.
+      set(_ck_gemm_global_supported_archs ${PYTORCH_ROCM_ARCH})
+      list(REMOVE_ITEM _ck_gemm_global_supported_archs gfx1250)
+      if("gfx1250" IN_LIST PYTORCH_ROCM_ARCH AND "${_ck_gemm_global_supported_archs}" STREQUAL "")
+        message(STATUS "USE_ROCM_CK_GEMM disabled: PYTORCH_ROCM_ARCH (${PYTORCH_ROCM_ARCH}) has no supported CK GEMM arch (gfx90a/gfx942/gfx950)")
+        caffe2_update_option(USE_ROCM_CK_GEMM OFF)
+      endif()
     endif()
     # add_definitions(-DAT_DISABLE_JITERATOR) above doesn't reliably
     # propagate to HIP TUs; mirror the pattern used for USE_ROCM and
