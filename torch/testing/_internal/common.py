@@ -18,22 +18,21 @@ import torch
 # TF32 context managers
 # ---------------------------------------------------------------------------
 
+
 @contextlib.contextmanager
 def tf32_off():
     """Context manager that disables TF32 for both CUDA (cuBLAS/cuDNN) and
     XPU (oneDNN/mkldnn) for the duration of the ``with`` block."""
     old_cuda_matmul = torch.backends.cuda.matmul.allow_tf32
-    old_onednn = torch.backends.mkldnn.allow_tf32
     try:
         torch.backends.cuda.matmul.allow_tf32 = False
-        torch.backends.mkldnn.allow_tf32 = False
         with torch.backends.cudnn.flags(
             enabled=None, benchmark=None, deterministic=None, allow_tf32=False
         ):
-            yield
+            with torch.backends.mkldnn.flags(allow_tf32=False):
+                yield
     finally:
         torch.backends.cuda.matmul.allow_tf32 = old_cuda_matmul
-        torch.backends.mkldnn.allow_tf32 = old_onednn
 
 
 @contextlib.contextmanager
@@ -41,8 +40,8 @@ def tf32_on(self, tf32_precision=1e-5):
     """Context manager that enables TF32 for both CUDA and XPU, and
     temporarily lowers the test's precision threshold to *tf32_precision*."""
     import os
+
     old_cuda_matmul = torch.backends.cuda.matmul.allow_tf32
-    old_onednn = torch.backends.mkldnn.allow_tf32
     old_precision = self.precision
     # ROCm uses an environment variable to enable TF32 in hipBLASLt
     hip_allow_tf32 = None
@@ -51,12 +50,12 @@ def tf32_on(self, tf32_precision=1e-5):
         os.environ["HIPBLASLT_ALLOW_TF32"] = "1"
     try:
         torch.backends.cuda.matmul.allow_tf32 = True
-        torch.backends.mkldnn.allow_tf32 = True
         self.precision = tf32_precision
         with torch.backends.cudnn.flags(
             enabled=None, benchmark=None, deterministic=None, allow_tf32=True
         ):
-            yield
+            with torch.backends.mkldnn.flags(allow_tf32=True):
+                yield
     finally:
         if torch.version.hip:
             if hip_allow_tf32 is not None:
@@ -64,7 +63,6 @@ def tf32_on(self, tf32_precision=1e-5):
             else:
                 del os.environ["HIPBLASLT_ALLOW_TF32"]
         torch.backends.cuda.matmul.allow_tf32 = old_cuda_matmul
-        torch.backends.mkldnn.allow_tf32 = old_onednn
         self.precision = old_precision
 
 
@@ -73,22 +71,21 @@ def tf32_enabled():
     """Context manager to temporarily enable TF32 for both CUDA and XPU
     operations.  Restores the previous TF32 state after exiting the context."""
     old_cuda_matmul = torch.backends.cuda.matmul.allow_tf32
-    old_onednn = torch.backends.mkldnn.allow_tf32
     try:
         torch.backends.cuda.matmul.allow_tf32 = True
-        torch.backends.mkldnn.allow_tf32 = True
         with torch.backends.cudnn.flags(
             enabled=None, benchmark=None, deterministic=None, allow_tf32=True
         ):
-            yield
+            with torch.backends.mkldnn.flags(allow_tf32=True):
+                yield
     finally:
         torch.backends.cuda.matmul.allow_tf32 = old_cuda_matmul
-        torch.backends.mkldnn.allow_tf32 = old_onednn
 
 
 # ---------------------------------------------------------------------------
 # TF32 test decorator
 # ---------------------------------------------------------------------------
+
 
 # This is a wrapper that wraps a test to run this test twice, one with
 # allow_tf32=True, another with allow_tf32=False. When running with
@@ -138,20 +135,25 @@ def tf32_on_and_off(tf32_precision=1e-5, *, only_if=True):
             kwargs.update(zip(arg_names, args, strict=False))
             # Condition: either CUDA or XPU must support TF32
             cuda_tf32 = torch.cuda.is_tf32_supported()
-            xpu_tf32 = torch.xpu.is_tf32_supported() if hasattr(torch.xpu, 'is_tf32_supported') else False
+            xpu_tf32 = (
+                torch.xpu.is_tf32_supported()
+                if hasattr(torch.xpu, "is_tf32_supported")
+                else False
+            )
             cond = (cuda_tf32 or xpu_tf32) and only_if
-            if 'device' in kwargs:
-                dev_type = torch.device(kwargs['device']).type
-                cond = cond and (dev_type in {'cuda', 'xpu'})
-            if 'dtype' in kwargs:
-                cond = cond and (kwargs['dtype'] in {torch.float32, torch.complex64})
+            if "device" in kwargs:
+                dev_type = torch.device(kwargs["device"]).type
+                cond = cond and (dev_type in {"cuda", "xpu"})
+            if "dtype" in kwargs:
+                cond = cond and (kwargs["dtype"] in {torch.float32, torch.complex64})
             if cond:
-                with_tf32_disabled(kwargs['self'], lambda: f(**kwargs))
-                with_tf32_enabled(kwargs['self'], lambda: f(**kwargs))
+                with_tf32_disabled(kwargs["self"], lambda: f(**kwargs))
+                with_tf32_enabled(kwargs["self"], lambda: f(**kwargs))
             else:
                 f(**kwargs)
 
         return wrapped
+
     return wrapper
 
 
@@ -159,6 +161,7 @@ def with_tf32_off(f):
     """Decorator that runs the wrapped test with TF32 disabled for both CUDA
     and XPU.  Use this when a test exercises matmul/convolutions as a side
     effect but its correctness should not depend on TF32 precision."""
+
     @functools.wraps(f)
     def wrapped(*args, **kwargs):
         with tf32_off():
