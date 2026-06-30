@@ -363,6 +363,11 @@ class Backend(str):  # noqa: SLOT000
     MPI = "mpi"
     XCCL = "xccl"
     FAKE = "fake"
+    # TorchComms-only per-peer variant of NCCL. Lazily creates a dedicated
+    # 2-rank communicator per send/recv peer (matching ProcessGroupNCCL), so
+    # P2P to different peers can overlap. Only meaningful when TorchComms is
+    # enabled; routed through the TorchComms branch of _new_process_group_helper.
+    NCCL_LAZY = "nccl-lazy"
 
     class _BackendPlugin(NamedTuple):
         creator_fn: Callable[..., C10DBackend | ProcessGroup | None]
@@ -370,7 +375,7 @@ class Backend(str):  # noqa: SLOT000
 
     _plugins: dict[str, _BackendPlugin] = {}
 
-    backend_list = [UNDEFINED, GLOO, NCCL, XCCL, UCC, MPI, FAKE]
+    backend_list = [UNDEFINED, GLOO, NCCL, NCCL_LAZY, XCCL, UCC, MPI, FAKE]
 
     # 3rd-party devices can register the default backend support here
     default_device_backend_map: dict[str, str] = {
@@ -383,6 +388,7 @@ class Backend(str):  # noqa: SLOT000
     backend_capability: dict[str, list[str]] = {
         GLOO: ["cpu", "cuda"],
         NCCL: ["cuda"],
+        NCCL_LAZY: ["cuda"],
         XCCL: ["xpu"],
         UCC: ["cpu", "cuda"],
         MPI: ["cpu", "cuda"],
@@ -393,6 +399,7 @@ class Backend(str):  # noqa: SLOT000
         UNDEFINED: ProcessGroup.BackendType.UNDEFINED,
         GLOO: ProcessGroup.BackendType.GLOO,
         NCCL: ProcessGroup.BackendType.NCCL,
+        NCCL_LAZY: ProcessGroup.BackendType.CUSTOM,
         XCCL: ProcessGroup.BackendType.XCCL,
         UCC: ProcessGroup.BackendType.UCC,
         MPI: ProcessGroup.BackendType.MPI,
@@ -2515,13 +2522,31 @@ def _new_process_group_helper(
                 extra = _pg_options_to_hints(backend_options)
                 if extra:
                     hints.update(extra)
-            comm = new_comm(
-                backend_str,
-                torch_device,
-                name=group_name,
-                store=backend_prefix_store,
-                hints=hints,
+            # new_comm has no rank/size params -- the TorchComms bootstrap reads
+            # them from TORCHCOMM_RANK/SIZE. Seed from this group's rank/size so
+            # non-Torchrun launchers (which TorchComms cannot auto-detect, e.g.
+            # process-spawning inference servers) work without each caller having
+            # to set these. Save/restore around the call (single-threaded here).
+            _tc_saved = (
+                os.environ.get("TORCHCOMM_RANK"),
+                os.environ.get("TORCHCOMM_SIZE"),
             )
+            os.environ["TORCHCOMM_RANK"] = str(group_rank)
+            os.environ["TORCHCOMM_SIZE"] = str(group_size)
+            try:
+                comm = new_comm(
+                    backend_str,
+                    torch_device,
+                    name=group_name,
+                    store=backend_prefix_store,
+                    hints=hints,
+                )
+            finally:
+                for _k, _v in zip(("TORCHCOMM_RANK", "TORCHCOMM_SIZE"), _tc_saved):
+                    if _v is None:
+                        os.environ.pop(_k, None)
+                    else:
+                        os.environ[_k] = _v
             buffer_size = os.environ.get(
                 "TORCH_FR_BUFFER_SIZE",
                 os.environ.get("TORCH_NCCL_TRACE_BUFFER_SIZE", "0"),
@@ -6170,6 +6195,38 @@ def new_group(
             and str(backend).lower() == "fake"
             and str(backend).lower() != str(parent_backend).lower()
         )
+        # Members-only + lazy init (use_local_synchronization=True, no device_id)
+        # cannot be expressed through split_group, which always produces an eager
+        # child over the full parent group. Instead, route through the normal
+        # new_group machinery with the "nccl-lazy" backend: that builds a
+        # per-peer group directly via new_comm (the lazy semantics map to
+        # torchcomms' "nccl-lazy" backend, the members-only semantics to
+        # use_local_synchronization's rank-subset bootstrap). Excludes the
+        # fake-subgroup case above, which DeviceMesh also creates with
+        # use_local_synchronization=True but must stay a FakeProcessGroup.
+        if use_local_synchronization and device_id is None and not is_fake_subgroup:
+            if _get_default_group().bound_device_id is None:
+                raise ValueError(
+                    "new_group with use_local_synchronization=True and no "
+                    "device_id requires the default process group to be "
+                    "device-bound; pass device_id=... to init_process_group so "
+                    "a lazy per-peer group can select its device."
+                )
+            group_ranks = (
+                list(range(get_world_size())) if ranks is None else list(ranks)
+            )
+            if get_rank() not in group_ranks:
+                return GroupMember.NON_GROUP_MEMBER
+            return _new_group_with_tag(
+                group_ranks,
+                timeout,
+                Backend.NCCL_LAZY,
+                pg_options,
+                None,
+                use_local_synchronization=True,
+                group_desc=group_desc,
+                sort_ranks=sort_ranks,
+            )
         if not is_fake_subgroup:
             return _new_group_via_split_group(
                 ranks=ranks,

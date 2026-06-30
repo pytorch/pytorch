@@ -236,10 +236,10 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
     def test_new_group_via_split_group_raises_on_unsupported_args(self):
         # `split_group` has a narrower surface than `new_group`; under
         # torchcomms the delegation must surface that mismatch instead of
-        # silently falling back to the legacy path.
+        # silently falling back to the legacy path. (``use_local_synchronization``
+        # is now a supported path -- it builds a lazy per-peer group -- so only
+        # ``sort_ranks=False`` remains unsupported here.)
         ranks = list(range(self.world_size))
-        with self.assertRaisesRegex(NotImplementedError, "use_local_synchronization"):
-            dist.new_group(ranks=ranks, use_local_synchronization=True)
         with self.assertRaisesRegex(NotImplementedError, "sort_ranks"):
             dist.new_group(ranks=ranks, sort_ranks=False)
 
@@ -362,6 +362,51 @@ class TestC10dTorchCommsInitAutoQualify(C10dTorchCommsTestBase):
         default_pg = dist.distributed_c10d._get_default_group()
         self.assertIsNotNone(default_pg.bound_device_id)
         self.assertEqual(default_pg.bound_device_id.type, "cuda")
+
+    def test_new_group_use_local_synchronization_builds_lazy_group(self):
+        # use_local_synchronization=True with no device_id builds a members-only,
+        # lazily-initialized per-peer ("nccl-lazy") group usable for P2P. The
+        # parent must be device-bound (it is, in this class).
+        ranks = list(range(self.world_size))
+        g = dist.new_group(ranks=ranks, use_local_synchronization=True)
+        self.assertEqual(dist.get_process_group_ranks(g), ranks)
+        # P2P round-trip over the lazy group: 0 -> 1 -> ... -> 0
+        dev = torch.device(f"cuda:{self.rank}")
+        send_to = (self.rank + 1) % self.world_size
+        recv_from = (self.rank - 1) % self.world_size
+        if self.rank % 2 == 0:
+            dist.send(
+                torch.full((4,), float(self.rank), device=dev), dst=send_to, group=g
+            )
+            r = torch.empty(4, device=dev)
+            dist.recv(r, src=recv_from, group=g)
+        else:
+            r = torch.empty(4, device=dev)
+            dist.recv(r, src=recv_from, group=g)
+            dist.send(
+                torch.full((4,), float(self.rank), device=dev), dst=send_to, group=g
+            )
+        self.assertEqual(r[0].item(), float(recv_from))
+
+    def test_non_torchcomms_backend_falls_through_to_c10d(self):
+        # Under torchcomms, a backend TorchComms does not own (registered the way
+        # mooncake registers a custom c10d backend) must route through the normal
+        # ProcessGroup path, not new_comm. Use a gloo-backed stand-in.
+        def _creator(store, grank, gsize, timeout):
+            return dist.ProcessGroupGloo(store, grank, gsize, timeout)
+
+        name = "tc_gate_stub"
+        if name not in dist.Backend.backend_list:
+            dist.Backend.register_backend(name, _creator, devices=["cpu", "cuda"])
+
+        ranks = list(range(self.world_size))
+        g = dist.new_group(ranks=ranks, backend=name)
+        be = g._get_backend(torch.device("cpu"))
+        # The c10d creator ran (real ProcessGroupGloo), not a TorchComms wrapper.
+        self.assertNotIn("BackendWrapper", type(be).__name__)
+        t = torch.tensor([self._rank_value], dtype=torch.float32)
+        dist.all_reduce(t, group=g)
+        self.assertEqual(t.item(), sum(range(1, self.world_size + 1)))
 
 
 instantiate_device_type_tests(
