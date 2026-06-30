@@ -2,7 +2,7 @@
 
 #ifdef USE_C10D_UCC
 
-#include <torch/csrc/distributed/c10d/UCCUtils.hpp>
+#include <torch/csrc/distributed/c10d/ucc/UCCUtils.hpp>
 
 #include <exception>
 #include <memory>
@@ -209,7 +209,7 @@ class TORCH_API ProcessGroupUCC : public Backend {
       std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
-  c10::intrusive_ptr<Work> _allgather_base(
+  c10::intrusive_ptr<Work> all_gather_single(
       at::Tensor& outputBuffer,
       at::Tensor& inputBuffer,
       const AllgatherOptions& opts = AllgatherOptions()) override;
@@ -232,12 +232,12 @@ class TORCH_API ProcessGroupUCC : public Backend {
       std::vector<std::vector<at::Tensor>>& inputTensors,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
 
-  c10::intrusive_ptr<Work> _reduce_scatter_base(
+  c10::intrusive_ptr<Work> reduce_scatter_single(
       at::Tensor& outputTensor,
       at::Tensor& inputTensor,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
 
-  c10::intrusive_ptr<Work> alltoall_base(
+  c10::intrusive_ptr<Work> all_to_all_single(
       at::Tensor& outputTensor,
       at::Tensor& inputTensor,
       std::vector<int64_t>& outputSplitSizes,

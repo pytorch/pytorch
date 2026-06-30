@@ -10,7 +10,7 @@ beit_base_patch16_224,pass,7
 
 
 
-convnextv2_nano.fcmae_ft_in22k_in1k,pass,7
+convnextv2_nano.fcmae_ft_in22k_in1k,pass,6
 
 
 
@@ -34,7 +34,7 @@ inception_v3,pass,6
 
 
 
-mobilenetv2_100,pass,7
+mobilenetv2_100,pass,0
 
 
 
@@ -58,7 +58,7 @@ swin_base_patch4_window7_224,pass,7
 
 
 
-tf_efficientnet_b0,pass,6
+tf_efficientnet_b0,pass,0
 
 
 
@@ -66,7 +66,7 @@ visformer_small,pass,7
 
 
 
-vit_base_patch14_dinov2.lvd142m,fail_accuracy,7
+vit_base_patch14_dinov2.lvd142m,pass,6
 
 
 

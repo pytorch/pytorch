@@ -1,7 +1,8 @@
 """CuTeDSL override registrations for ``aten::scatter_add``.
 
-Two kernels for the ``index.unsqueeze(-1).expand(-1, ...)`` expanded-1D
-pattern (dim=0, same shape for self/src/index, contiguous), tried in order:
+Two kernels for the fast-path layout (self/src 2D-shaped after
+coalescing, with self contiguous on the slice axis and src either
+contiguous or row-strided), tried in order:
 
 1. **TMA** (``tma_kernel.py``, sm_90+): uses ``cp.reduce.async.bulk`` to
    offload the whole reduction to the TMA unit, 3-7x faster than aten on
@@ -11,9 +12,18 @@ pattern (dim=0, same shape for self/src/index, contiguous), tried in order:
    pre-sm_90, and sm_90+ shapes where the TMA alignment constraint isn't
    met.
 
-Anything else (non-expanded index, dim != 0, non-contiguous inputs,
-deterministic mode) falls through to aten. Aten is competitive or better
-on those shapes, so we intentionally don't override them.
+Eligibility mirrors aten's ``fast_scatter_add_kernel_eligible``
+(IndexKernelUtils.h): we restride ``self`` so its scatter-axis stride
+is 0 and shape matches ``index``, then build a ``TensorIterator`` on
+``(self_restrided, src_restrided, index)``. TensorIterator's coalescing
+and stride-magnitude reordering produces a 2D iterator iff the layout
+is kernel-friendly; we then pattern-match the resulting iter strides
+to confirm slice/index-axis assignment. This delegates the layout
+analysis to ``TensorIterator`` rather than reimplementing it.
+
+Anything else (non-2D-coalescing layout, dtype mismatch, deterministic
+mode) falls through to aten. Aten is competitive or better on those
+shapes, so we intentionally don't override them.
 
 In-place (``scatter_add_``) is registered explicitly; PyTorch's
 structured-delegate from ``scatter_add_`` to ``scatter_add.out`` happens
@@ -22,10 +32,9 @@ intercept the in-place method.
 """
 
 import functools
-import importlib.util
-import math
 
 import torch
+from torch._tensor_iterator import TensorIterator
 
 from ... import cutedsl_utils as cu
 from ...registry import _OpCondFn, _OpImplFn
@@ -33,16 +42,26 @@ from ...registry import _OpCondFn, _OpImplFn
 
 _SUPPORTED_DTYPES = {torch.float16, torch.bfloat16, torch.float32}
 
+# 16B alignment for `src.data_ptr()` and `src.stride(0) * elem`: required
+# for the LDG.128 / tile-mode TMA load of `src` and the row-start 16B
+# boundary that LDG.128 reads from. Applies to both paths.
+_SRC_ALIGN_BYTES = 16
+# Path-specific destination alignment. TMA: cp.reduce.async.bulk gmem
+# operand needs 16B base + stride. vec-scatter: scalar fp32 atomicAdd /
+# f16x2 / bf16x2 paired atomics need natural alignment of the 4B atomic
+# operand on both base and per-row stride.
+_TMA_DST_ALIGN_BYTES = 16
+_VEC_DST_ALIGN_BYTES = 4
+
 
 @functools.cache
-def _has_cutedsl() -> bool:
-    try:
-        return (
-            importlib.util.find_spec("cutlass") is not None
-            and importlib.util.find_spec("tvm_ffi") is not None
-        )
-    except ModuleNotFoundError:
-        return False
+def _is_rocm() -> bool:
+    # These kernels are built on the CUTLASS Python DSL (CuteDSL), which is
+    # NVIDIA-only and performs a hard CUDA-driver dependency check at compile
+    # time. On a ROCm/HIP build ``tensor.is_cuda`` is still True, so without
+    # this guard the cond approves and ``cute.compile`` fails with
+    # CudaDriverDependencyError. Decline so scatter_add falls back to aten.
+    return torch.version.hip is not None
 
 
 @functools.cache
@@ -70,7 +89,9 @@ def _any_cow(*tensors: torch.Tensor) -> bool:
 
 def _base_cond_ok(*tensors: torch.Tensor) -> bool:
     """Pre-checks shared by every path: env sanity, all CUDA, non-COW."""
-    if not _has_cutedsl() or _deterministic():
+    if _is_rocm():
+        return False
+    if _deterministic():
         return False
     if not all(t.is_cuda for t in tensors):
         return False
@@ -80,108 +101,109 @@ def _base_cond_ok(*tensors: torch.Tensor) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Expanded-1D helpers, shared by TMA and vec-scatter paths.
+# TI-driven layout analysis.
+#
+# Mirrors aten's pattern in ScatterGatherKernel.cu / IndexKernelUtils.h:
+# restride ``self`` so its scatter-axis stride is 0 and its shape matches
+# ``index``, then build a TensorIterator on the three. TensorIterator does
+# the broadcast / coalesce / dim reorder; we then pattern-match the post-
+# build iter strides to recognize the kernel's expected layout.
 # ---------------------------------------------------------------------------
 
 
-def _inner_contiguous(t: torch.Tensor) -> bool:
-    """True iff ``t.shape[1:]`` is packed contiguously (so flattening to
-    ``(t.shape[0], prod(t.shape[1:]))`` is a valid view), regardless of
-    the outer stride. Covers slices like ``X[:, :K]`` of a wider buffer.
-
-    Empty outer axis returns ``False``: the kernel has no work to do,
-    and letting it through means ``select(0, 0)`` below would raise.
-    """
-    if t.ndim == 0:
-        return False
-    if t.ndim == 1:
-        return t.stride(0) == 1
-    if t.shape[0] == 0:
-        return False
-    return t.select(0, 0).is_contiguous()
+def _normalize_dim(dim: int, ndim: int) -> int:
+    return dim + ndim if dim < 0 else dim
 
 
-def _expanded_1d_inner_size(
-    self: torch.Tensor, dim: int, index: torch.Tensor, src: torch.Tensor
-) -> int | None:
-    """Return ``prod(src.shape[1:])`` when the ``index.unsqueeze(-1)
-    .expand(-1, ...)`` fast-path pattern applies, else ``None``.
+def _scatter_add_eligibility(
+    self: torch.Tensor, d: int, index: torch.Tensor, src: torch.Tensor
+) -> TensorIterator | None:
+    """Return the analysis TensorIterator if (self, d, index, src) fits the
+    kernel's expected layout, else ``None``. ``d`` is the already-normalized
+    scatter axis.
 
-    Requirements:
-      - dim == 0
-      - self, src, index have the same rank (>= 2) and shape
-      - self, src have inner-dim stride 1 (outer row stride can differ
-        from prod(shape[1:]) -- e.g. a slice like ``X[:, :K]`` of a
-        wider buffer works)
-      - index.stride(i) == 0 for every axis i > 0 (the broadcast)
-      - dtype in ``_SUPPORTED_DTYPES`` and self.dtype == src.dtype
-      - index.dtype in {int32, int64} (int32 is cast to int64 on the
-        host before the kernel launches)
+    Mirrors aten's ``fast_scatter_add_kernel_eligible`` (IndexKernelUtils.h):
+    restride ``self`` so its scatter-axis stride is 0 (shape = ``index.shape``),
+    let TensorIterator coalesce + reorder, then check that the result is
+    a 2D iter where dim 0 is the contiguous slice axis and dim 1 is the
+    scatter (index) axis.
     """
     if self.dtype not in _SUPPORTED_DTYPES or self.dtype != src.dtype:
         return None
     if index.dtype not in (torch.int32, torch.int64):
         return None
-    if dim != 0:
+    if self.ndim != src.ndim or self.ndim != index.ndim or self.ndim == 0:
         return None
-    if self.ndim != src.ndim or self.ndim != index.ndim or self.ndim < 2:
+    if not 0 <= d < self.ndim:
         return None
-    # Inner-dim stride 1, plus ensure inner dims pack contiguously so we
-    # can flatten shape[1:] into a single N. A simple sufficient check:
-    # stride of each inner axis == product of strides below it.
-    if not _inner_contiguous(self) or not _inner_contiguous(src):
+
+    self_strides = list(self.stride())
+    self_strides[d] = 0  # aten's restride_dim trick
+    try:
+        self_r = self.as_strided(index.shape, self_strides)
+        src_r = src.as_strided(index.shape, src.stride())
+        it = TensorIterator(
+            outputs=[self_r],
+            const_inputs=[src_r, index],
+            check_mem_overlap=False,
+            check_all_same_dtype=False,
+            resize_outputs=False,
+        )
+    except RuntimeError:
         return None
-    if index.shape != src.shape or self.shape[1:] != src.shape[1:]:
+
+    if it.ndim != 2:
         return None
-    for i in range(1, index.ndim):
-        if index.stride(i) != 0:
-            return None
-    # shape[0] == 0 on self or src is already rejected by
-    # ``_inner_contiguous`` above.
-    N = math.prod(src.shape[1:])
-    if N == 0:
-        return None
-    return N
+    elem = self.element_size()
+    idx_elem = index.element_size()
+    s_self, s_src, s_idx = it.strides(0), it.strides(1), it.strides(2)
+    if (
+        s_idx[0] == 0
+        and s_idx[1] == idx_elem
+        and s_self[0] == elem
+        and s_src[0] == elem
+        and s_self[1] == 0
+    ):
+        return it
+    return None
 
 
-def _flatten_2d_view(t: torch.Tensor) -> torch.Tensor:
-    """Flatten ``t.shape[1:]`` into a single N. Preserves the outer row
-    stride (so a slice like ``X[:, :K]`` stays a view of the wider
-    buffer). Caller must have verified ``_inner_contiguous(t)``.
+def _alignment_contract_ok(
+    dst: torch.Tensor, src: torch.Tensor, dim: int, *, dst_ptr_align: int
+) -> bool:
+    """Alignment of effective ptrs and outer row strides.
+
+    The src side is always read via 16B-wide vector ops (LDG.128 /
+    tile-mode TMA load), so its data_ptr and per-row stride must be
+    16B-aligned. The dst side's requirement is path-specific:
+
+      - TMA: ``cp.reduce.async.bulk`` writes the gmem operand via a TMA
+        descriptor that requires 16B alignment of both base and stride.
+      - vec-scatter: writes via scalar fp32 atomicAdd / f16x2 / bf16x2
+        paired atomics, which need natural alignment of the 4B atomic
+        operand on both base address and per-row stride.
+
+    The "row stride" is the stride along ``dim`` -- the kernel uses it to
+    step between rows of the (M, N) views ``_prepare_kernel_inputs`` builds.
+    When this returns False the cond rejects and the call falls through
+    to aten, which has its own predicate and safe fallback to
+    ``vectorized_scatter_add_kernel_launch`` / ``indexFunc{Small,Large}Index``.
     """
-    if t.ndim == 2:
-        return t
-    N = math.prod(t.shape[1:])
-    # Outer stride carries through unchanged; inner dims collapse to
-    # stride 1 because they were packed (cond-enforced).
-    return t.as_strided((t.shape[0], N), (t.stride(0), 1))
-
-
-def _flatten_for_expanded_1d(
-    self: torch.Tensor, index: torch.Tensor, src: torch.Tensor
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Reshape eligible nD inputs to (self_2d, index_1d, src_2d).
-
-    Caller must have verified eligibility via ``_expanded_1d_inner_size``.
-    All reshapes are views; the 1D index view is taken by selecting
-    element 0 of every broadcast axis.
-    """
-    self_2d = _flatten_2d_view(self)
-    src_2d = _flatten_2d_view(src)
-    index_1d = index
-    for _ in range(index.ndim - 1):
-        index_1d = index_1d.select(-1, 0)
-    if index_1d.dtype != torch.int64:
-        # Kernel expects int64. aten accepts both int32 and int64; we
-        # widen on the host so the kernel stays dtype-specialized.
-        index_1d = index_1d.to(torch.int64)
-    if not index_1d.is_contiguous():
-        index_1d = index_1d.contiguous()
-    return self_2d, index_1d, src_2d
+    if src.data_ptr() % _SRC_ALIGN_BYTES:
+        return False
+    if dst.data_ptr() % dst_ptr_align:
+        return False
+    elem = dst.element_size()
+    if (src.stride(dim) * elem) % _SRC_ALIGN_BYTES:
+        return False
+    if (dst.stride(dim) * elem) % dst_ptr_align:
+        return False
+    return True
 
 
 # ---------------------------------------------------------------------------
-# Path-specific eligibility checks.
+# Per-kernel eligibility. ``it.shape[0]`` is the slice extent (N elements)
+# after coalescing; that's what the alignment / divisibility checks key on.
 # ---------------------------------------------------------------------------
 
 
@@ -190,29 +212,75 @@ def _is_tma_supported(
 ) -> bool:
     if not _has_sm90_plus():
         return False
-    N = _expanded_1d_inner_size(self, dim, index, src)
-    if N is None:
+    d = _normalize_dim(dim, self.ndim)
+    it = _scatter_add_eligibility(self, d, index, src)
+    if it is None:
         return False
-    # TMA transfer size is baked in at compile time (chunk_bytes =
-    # min(row_bytes, 512)); row_bytes must evenly divide by chunk_bytes
-    # and chunk_bytes must be 16-byte aligned.
+    if not _alignment_contract_ok(self, src, d, dst_ptr_align=_TMA_DST_ALIGN_BYTES):
+        return False
+    # TMA chunk_bytes = min(row_bytes, 512); row_bytes must evenly divide
+    # by chunk_bytes and chunk_bytes must be 16-byte aligned.
     from .tma_kernel import row_shape_supported
 
-    return row_shape_supported(self.dtype, N)
+    return row_shape_supported(self.dtype, it.shape[0])
 
 
 def _is_vec_scatter_supported(
     self: torch.Tensor, dim: int, index: torch.Tensor, src: torch.Tensor
 ) -> bool:
-    N = _expanded_1d_inner_size(self, dim, index, src)
-    if N is None:
+    # ``red.global.add.noftz.bf16x2`` requires sm_90+. fp16x2 (sm_70+) and
+    # scalar fp32 atomicAdd (sm_60+) work everywhere we care about.
+    if self.dtype is torch.bfloat16 and not _has_sm90_plus():
         return False
-    # Each lane owns vec_elems consecutive elements; the loop is either
+    d = _normalize_dim(dim, self.ndim)
+    it = _scatter_add_eligibility(self, d, index, src)
+    if it is None:
+        return False
+    if not _alignment_contract_ok(self, src, d, dst_ptr_align=_VEC_DST_ALIGN_BYTES):
+        return False
+    # Each lane owns vec_elems consecutive elements; loop is either
     # fully in-bounds or fully skipped per lane. Only requirement is
-    # D % vec_elems == 0 (fp32: %4, halves: %8).
+    # N % vec_elems == 0 (fp32: %4, halves: %8).
     from .vec_scatter_kernel import vec_elems_for
 
-    return N % vec_elems_for(self.dtype) == 0
+    return it.shape[0] % vec_elems_for(self.dtype) == 0
+
+
+# ---------------------------------------------------------------------------
+# Kernel-input prep. After eligibility the kernel host functions take 2D
+# (M, N) tensors and a 1D index. We synthesize those views from the user's
+# original operands using the TI-approved geometry.
+# ---------------------------------------------------------------------------
+
+
+def _prepare_kernel_inputs(
+    self: torch.Tensor,
+    d: int,
+    index: torch.Tensor,
+    src: torch.Tensor,
+    it: TensorIterator,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Build (self_2d, index_1d, src_2d) for the kernel host functions.
+
+    Caller has verified eligibility via ``_scatter_add_eligibility``.
+    ``d`` is the already-normalized scatter axis. ``it.shape[0]`` is the
+    coalesced slice extent (product of every non-scatter dim of ``self``).
+    The 2D views preserve the user's original stride along ``d`` (used by
+    the kernel for the row stride).
+    """
+    N, M_src = it.shape[0], it.shape[1]
+    M_self = self.shape[d]
+    self_2d = self.as_strided((M_self, N), (self.stride(d), 1))
+    src_2d = src.as_strided((M_src, N), (src.stride(d), 1))
+    # Eligibility verified the iter has post-coalesce strides
+    # ``s_idx = (0, idx_elem)`` on ``index``; that means ``index`` carries
+    # M_src consecutive elements at offset 0 with element stride 1, padded
+    # by stride-0 broadcast axes. A single ``as_strided`` collapses that
+    # to the 1D view the kernels expect.
+    index_1d = index.as_strided((M_src,), (1,))
+    if index_1d.dtype != torch.int64:
+        index_1d = index_1d.to(torch.int64)
+    return self_2d, index_1d, src_2d
 
 
 # ---------------------------------------------------------------------------
@@ -225,12 +293,22 @@ def _is_vec_scatter_supported(
 def _make_cond(
     support_check,
     *,
-    requires_out: bool = False,
+    out_dst_ptr_align: int | None = None,
 ) -> _OpCondFn:
     """Build a cond function that runs ``support_check`` behind the shared
-    boilerplate (cutedsl availability, non-deterministic mode, CUDA tensors,
-    non-COW, dtype/shape match on ``out`` when present)."""
-    if requires_out:
+    boilerplate (cutedsl availability, non-deterministic mode, CUDA
+    tensors, non-COW, dtype/shape match on ``out`` when present).
+
+    ``out_dst_ptr_align`` is None for the functional / inplace variants.
+    For the ``.out`` variant it is the path-specific destination
+    alignment (TMA: 16, vec-scatter: 4) used to alignment-check ``out``,
+    which the ``.out`` impl runs the kernel on instead of ``self``.
+
+    ``support_check`` is ``_is_tma_supported`` or ``_is_vec_scatter_supported``
+    -- both take ``(self, dim, index, src)`` and rebuild the analysis iter
+    internally.
+    """
+    if out_dst_ptr_align is not None:
 
         def _cond(self, dim, index, src, *, out):
             if not _base_cond_ok(self, index, src, out):
@@ -239,12 +317,17 @@ def _make_cond(
                 return False
             if out.ndim == 0:
                 return False
-            # Kernels read/write ``out`` with inner-dim stride 1; outer
-            # stride can differ from prod(shape[1:]) (same relaxation as
-            # self/src). Inner dims must be packed for the 2D view.
-            if not _inner_contiguous(out):
+            # ``out`` is the destination of a functional .out call; it
+            # plays the role of self in the iter analysis.
+            if not support_check(out, dim, index, src):
                 return False
-            return support_check(self, dim, index, src)
+            # The .out impl runs the kernel on ``out``, not ``self`` (see
+            # _make_impls.out_impl). support_check above validates ``out``'s
+            # layout via TI strides, but we still need to alignment-check it
+            # explicitly here in case ``out`` is a distinct buffer with
+            # different alignment from ``self``.
+            d = _normalize_dim(dim, out.ndim)
+            return _alignment_contract_ok(out, src, d, dst_ptr_align=out_dst_ptr_align)
 
         return _cond
 
@@ -264,28 +347,40 @@ def _copy_if_distinct(out: torch.Tensor, self: torch.Tensor) -> None:
 
 
 def _make_impls(kernel_getter):
-    """Build (functional, out, in-place) impl callables for an
-    expanded-1D-pattern kernel. ``kernel_getter`` is a zero-arg callable
-    that lazily imports and returns the ``*_scatter_add_into`` kernel; we
-    defer the import so the DSL runtime isn't pulled in at registration
-    time.
+    """Build (functional, out, in-place) impl callables.
+
+    ``kernel_getter`` lazily imports the ``*_scatter_add_into`` kernel
+    host function (we defer to keep the DSL runtime out of registration).
+    Cond has already verified eligibility; we rebuild the iter inside the
+    impl to recover the post-coalesce geometry that ``_prepare_kernel_inputs``
+    needs. The build is pure C++ and cheap.
     """
 
-    def _run(dst: torch.Tensor, index, src) -> torch.Tensor:
-        # Caller guarantees dst/src/index pass _expanded_1d_inner_size.
-        dst_2d, index_1d, src_2d = _flatten_for_expanded_1d(dst, index, src)
+    def _run(dst: torch.Tensor, dim: int, index, src) -> torch.Tensor:
+        d = _normalize_dim(dim, dst.ndim)
+        it = _scatter_add_eligibility(dst, d, index, src)
+        if it is None:
+            raise RuntimeError(
+                "scatter_add cutedsl: cond approved but iter rebuild failed"
+            )
+        # Mirrors aten's `if (iter.numel() == 0) return;` in
+        # ScatterGatherKernel.cu -- the eligibility check is purely
+        # layout-shaped, so empty inputs satisfy it but have no work.
+        if it.numel == 0:
+            return dst
+        dst_2d, index_1d, src_2d = _prepare_kernel_inputs(dst, d, index, src, it)
         kernel_getter()(dst_2d, index_1d, src_2d)
         return dst
 
     def impl(self, dim, index, src, *args, **kwargs):
-        return _run(self.clone(), index, src)
+        return _run(self.clone(), dim, index, src)
 
     def out_impl(self, dim, index, src, *, out):
         _copy_if_distinct(out, self)
-        return _run(out, index, src)
+        return _run(out, dim, index, src)
 
     def inplace_impl(self, dim, index, src, *args, **kwargs):
-        return _run(self, index, src)
+        return _run(self, dim, index, src)
 
     return impl, out_impl, inplace_impl
 
@@ -306,9 +401,11 @@ _tma_impl, _tma_out_impl, _tma_inplace_impl = _make_impls(_tma_kernel)
 _vs_impl, _vs_out_impl, _vs_inplace_impl = _make_impls(_vs_kernel)
 
 _tma_cond = _make_cond(_is_tma_supported)
-_tma_out_cond = _make_cond(_is_tma_supported, requires_out=True)
+_tma_out_cond = _make_cond(_is_tma_supported, out_dst_ptr_align=_TMA_DST_ALIGN_BYTES)
 _vs_cond = _make_cond(_is_vec_scatter_supported)
-_vs_out_cond = _make_cond(_is_vec_scatter_supported, requires_out=True)
+_vs_out_cond = _make_cond(
+    _is_vec_scatter_supported, out_dst_ptr_align=_VEC_DST_ALIGN_BYTES
+)
 
 
 # ---------------------------------------------------------------------------
@@ -353,7 +450,5 @@ def _register_path(
 
 
 def register_to_dispatch() -> None:
-    if not _has_cutedsl():
-        return
     for path in _PATHS:
         _register_path("CUDA", *path)

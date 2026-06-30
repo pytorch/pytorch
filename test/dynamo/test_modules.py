@@ -10,7 +10,7 @@ import traceback
 import types
 import unittest
 from copy import deepcopy
-from functools import partial
+from functools import partial, update_wrapper
 from typing import NamedTuple
 from unittest.mock import patch
 
@@ -2306,6 +2306,85 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             )
         )
 
+    def test_celu_matches_eager(self):
+        for alpha, inplace in itertools.product((0.5, 1.0, 2.0), (False, True)):
+            with self.subTest(alpha=alpha, inplace=inplace):
+
+                def fn(x):
+                    if inplace:
+                        return torch.celu_(x, alpha=alpha)
+                    return torch.celu(x, alpha=alpha)
+
+                eager_inp = torch.linspace(-2, 2, 17)
+                compiled_inp = eager_inp.clone()
+                opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+                self.assertEqual(fn(eager_inp), opt_fn(compiled_inp))
+                self.assertEqual(eager_inp, compiled_inp)
+
+    def test_celu_zero_alpha_raises(self):
+        for inplace in (False, True):
+            with self.subTest(inplace=inplace):
+
+                def fn(x):
+                    if inplace:
+                        return torch.celu_(x, alpha=0.0)
+                    return torch.celu(x, alpha=0.0)
+
+                with self.assertRaisesRegex(
+                    RuntimeError, "ZeroDivisionError: alpha cannot be 0 for CELU"
+                ):
+                    fn(torch.randn(8))
+
+                with self.assertRaisesRegex(
+                    RuntimeError, "ZeroDivisionError: alpha cannot be 0 for CELU"
+                ):
+                    torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(8))
+
+    def test_partial_monkeypatched_forward_no_recompile(self):
+        class Hook:
+            def pre_forward(self, module, *args, **kwargs):
+                return args, kwargs
+
+            def post_forward(self, module, output):
+                return output
+
+        def add_hook_to_module(module):
+            old_forward = module.forward
+            module._old_forward = old_forward
+            module._hf_hook = Hook()
+
+            def new_forward(module, *args, **kwargs):
+                args, kwargs = module._hf_hook.pre_forward(module, *args, **kwargs)
+                output = module._old_forward(*args, **kwargs)
+                return module._hf_hook.post_forward(module, output)
+
+            module.forward = update_wrapper(partial(new_forward, module), old_forward)
+
+        class Layer(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.q_proj = torch.nn.Linear(4, 4)
+                add_hook_to_module(self.q_proj)
+
+            def forward(self, x):
+                return self.q_proj(x)
+
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("eager")
+
+        @torch.compile(backend=cnt)
+        def run(layer, x):
+            return layer(x)
+
+        x = torch.randn(2, 4)
+        layers = [Layer() for _ in range(4)]
+
+        self.assertTrue(same(layers[0](x), run(layers[0], x)))
+        with patch.object(torch._dynamo.config, "error_on_recompile", True):
+            for layer in layers[1:]:
+                self.assertTrue(same(layer(x), run(layer, x)))
+        self.assertEqual(cnt.frame_count, 1)
+
     @patch.object(torch._dynamo.config, "skip_nnmodule_hook_guards", False)
     def test_hooks_outer(self):
         class TestModule(torch.nn.Module):
@@ -2418,6 +2497,33 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         m._forward_hooks[handle.id] = new_forward_hook
         self.assertEqual(compiled_func(inp), outer_func(inp))
         self.assertEqual(compiled_func(inp).item(), 16)
+
+    def test_forward_hook_handle_attr_in_hasattr(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.encoder = torch.nn.Linear(8, 4)
+                self.decoder = torch.nn.Linear(4, 8)
+
+            def forward(self, x):
+                if not hasattr(self, "_forward_hook"):
+                    self._forward_hook = self.register_forward_hook(
+                        lambda module, inputs, output: output + 1
+                    )
+                return self.decoder(self.encoder(x))
+
+        model = TestModule().eval()
+        x = torch.randn(2, 8)
+
+        with torch.no_grad():
+            model(x)
+            expected = model(x)
+
+        compiled_model = torch.compile(model, backend="eager", fullgraph=True)
+        with torch.no_grad():
+            actual = compiled_model(x)
+
+        self.assertEqual(actual, expected)
 
     def _forward_hook_test_helper(self, model):
         forward_handles = {}

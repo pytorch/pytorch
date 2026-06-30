@@ -23,6 +23,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_MACOS,
     parametrize,
+    skipIfRocm,
     skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import (
@@ -76,7 +77,9 @@ class TestCustomOpAutoTune(TestCase):
             compiled_result = test_model(*inputs)
 
         self.assertEqual(
-            compiled_result.shape, expected.shape, f"{test_name} shape mismatch"
+            compiled_result.shape,
+            expected.shape,
+            lambda msg: f"{msg}\n{test_name} shape mismatch",
         )
         torch.testing.assert_close(
             compiled_result,
@@ -259,6 +262,7 @@ class TestCustomOpAutoTune(TestCase):
         )
         return a, b, bias
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/171519")
     def test_decompose_k_custom_op_autotune_dynamic_config_for_input_shape(self):
         """Test decompose_k autotuning with epilogue fusion(matmul+bias+relu+scale) and
         dynamic config generation based on matmul input shapes.
@@ -580,6 +584,7 @@ class TestCustomOpAutoTune(TestCase):
             print("[Dynamic] No dispatch logic found (unexpected for dynamic shapes)")
         self.assertTrue(dispatch_dynamic, "Dynamic shapes should have dispatch logic")
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179943")
     @skipIfXpu
     def test_benchmark_with_cudagraphs_uses_cuda_graph_benchmarking(self):
         """Test that benchmark_with_cudagraphs flag causes CUDA graph benchmarking to be used."""
@@ -829,7 +834,7 @@ class TestCustomOpAutoTune(TestCase):
         self.assertEqual(
             len(code_with_coord),
             len(code),
-            f"Expected all {len(code)} code modules to have coordinate_descent_tuning, "
+            lambda msg: f"{msg}\nExpected all {len(code)} code modules to have coordinate_descent_tuning, "
             f"but only {len(code_with_coord)} have it",
         )
 
@@ -905,7 +910,7 @@ class TestCustomOpAutoTune(TestCase):
         self.assertEqual(
             len(ranges_hit),
             3,
-            f"Expected 3 ranges hit during benchmarking, got {ranges_hit}",
+            lambda msg: f"{msg}\nExpected 3 ranges hit during benchmarking, got {ranges_hit}",
         )
 
         # Verify tracing uses SYMBOLIC shapes in generated code
@@ -1438,7 +1443,7 @@ class TestCustomOpAutoTune(TestCase):
 
         # Clear everything first
         torch.cuda.synchronize()
-        torch._C._cuda_clearCublasWorkspaces()
+        torch.cuda._clear_cublas_workspaces()
 
         # Create test tensors and establish baseline with some mm activity
         a = torch.randn(256, 256, device=self.device, dtype=self.dtype)
@@ -1472,7 +1477,7 @@ class TestCustomOpAutoTune(TestCase):
         self.assertEqual(
             memory_after_cleanup,
             baseline_memory,
-            f"Memory leak detected: baseline={baseline_memory}, after_cleanup={memory_after_cleanup}",
+            lambda msg: f"{msg}\nMemory leak detected: baseline={baseline_memory}, after_cleanup={memory_after_cleanup}",
         )
 
     @skipIfXpu
@@ -1483,7 +1488,7 @@ class TestCustomOpAutoTune(TestCase):
 
         # Clear everything first
         torch.cuda.synchronize()
-        torch._C._cuda_clearCublasWorkspaces()
+        torch.cuda._clear_cublas_workspaces()
 
         # Create test tensors
         a = torch.randn(256, 256, device=self.device, dtype=self.dtype)
@@ -1511,7 +1516,7 @@ class TestCustomOpAutoTune(TestCase):
         self.assertEqual(
             memory_after_many,
             memory_after_first,
-            f"Memory leak detected: after_first={memory_after_first}, after_many={memory_after_many}",
+            lambda msg: f"{msg}\nMemory leak detected: after_first={memory_after_first}, after_many={memory_after_many}",
         )
 
 

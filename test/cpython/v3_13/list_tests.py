@@ -12,7 +12,7 @@ import torch
 import torch._dynamo.test_case
 import unittest
 from torch._dynamo.test_case import CPythonTestCase
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_TORCHDYNAMO
 
 __TestCase = CPythonTestCase
 
@@ -418,6 +418,10 @@ class CommonTest(seq_tests.CommonTest):
             # verify that original order and values are retained.
             self.assertIs(x, y)
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "__build_class__ with closed over objects not supported",
+    )
     def test_index(self):
         super().test_index()
         a = self.type2test([-2, -1, 0, 0, 1, 2])

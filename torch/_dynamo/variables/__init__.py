@@ -59,6 +59,7 @@ from .ctx_manager import (
 from .dicts import (
     ConstDictVariable,
     DictItemsVariable,
+    DictViewVariable,
     DunderDictVariable,
     MappingProxyVariable,
     NNModuleHooksDictVariable,
@@ -106,17 +107,20 @@ from .higher_order_ops import (
     TorchHigherOrderOperatorVariable,
 )
 from .iter import (
+    ChainVariable,
     CountIteratorVariable,
     FilterVariable,
     IteratorVariable,
     ItertoolsVariable,
     MapVariable,
     RepeatIteratorVariable,
+    ZipLongestVariable,
     ZipVariable,
 )
 from .lazy import LazyConstantVariable, LazyVariableTracker
 from .lists import (
     BaseListVariable,
+    DequeVariable,
     ListIteratorVariable,
     ListVariable,
     RangeVariable,
@@ -140,7 +144,6 @@ from .misc import (
     RandomVariable,
     StringFormatVariable,
     SuperVariable,
-    TorchVersionVariable,
     TracebackVariable,
     TypingVariable,
     UnknownVariable,
@@ -188,6 +191,7 @@ from .user_defined import (
     StructSequenceVariable,
     UserDefinedClassVariable,
     UserDefinedConstantVariable,
+    UserDefinedDequeVariable,
     UserDefinedDictVariable,
     UserDefinedExceptionClassVariable,
     UserDefinedExceptionObjectVariable,
@@ -212,6 +216,7 @@ __all__ = [
     "ConstantVariable",
     "ConstDictVariable",
     "ContextWrappingVariable",
+    "ChainVariable",
     "CountIteratorVariable",
     "CreateTMADescriptorExperimentalVariable",
     "CreateTMADescriptorStableVariable",
@@ -269,7 +274,6 @@ __all__ = [
     "TMADescriptorStableVariable",
     "TorchCtxManagerClassVariable",
     "TorchInGraphFunctionVariable",
-    "TorchVersionVariable",
     "TupleVariable",
     "UnknownVariable",
     "UnspecializedNNModuleVariable",
@@ -284,4 +288,5 @@ __all__ = [
     "WithEnterFunctionVariable",
     "WithExitFunctionVariable",
     "XPUDeviceVariable",
+    "ZipLongestVariable",
 ]

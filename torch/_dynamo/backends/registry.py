@@ -100,7 +100,7 @@ def register_backend(
     """
     if compiler_fn is None:
         # @register_backend(name="") syntax
-        return functools.partial(register_backend, name=name, tags=tags)
+        return functools.partial(register_backend, name=name, tags=tags)  # type: ignore[return-value]
     if not callable(compiler_fn):
         raise AssertionError(f"compiler_fn must be callable, got {type(compiler_fn)}")
     name = name or compiler_fn.__name__

@@ -845,7 +845,7 @@ class SymPyValueRangeAnalysis:
         # If you want to implement it, compute the partial derivatives of a ** b
         # and check the ranges where the function is increasing / decreasing
         # Another non-tight way of doing this is defaulting to doing noting that for a > 0,  a ** b == exp(b * log(a))
-        # If this second option is implemented, by carefult about the types and possible infinities here and there.
+        # If this second option is implemented, be careful about the types and possible infinities here and there.
         if not b.is_singleton():
             return ValueRanges.unknown()
 

@@ -193,14 +193,6 @@ CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(asinh_out_mps, asinh)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(acosh_out_mps, acosh)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(atanh_out_mps, atanh)
 
-Tensor& logical_not_out_mps(const Tensor& self, Tensor& output) {
-  auto bool_self = self.to(ScalarType::Bool);
-  mps::unary_op(bool_self, output, "logical_not_out_mps", [](MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
-    return [mpsGraph notWithTensor:inputTensor name:nil];
-  });
-  return output;
-}
-
 TORCH_IMPL_FUNC(frac_out_mps)(const Tensor& self, const Tensor& output) {
   TORCH_CHECK(isFloatingType(self.scalar_type()), "frac_out_mps is only implemented for floating types");
   mps::unary_op(self, output, "frac_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
@@ -224,10 +216,22 @@ static void logit_mps_impl(const Tensor& self, std::optional<double> eps, Tensor
     if (eps.has_value()) {
       MPSGraphTensor* lowTensor = [mpsGraph constantWithScalar:eps.value() shape:@[ @1 ] dataType:inputTensor.dataType];
       MPSGraphTensor* highTensor = [mpsGraph subtractionWithPrimaryTensor:oneTensor secondaryTensor:lowTensor name:nil];
-      logitInputTensor = [mpsGraph clampWithTensor:inputTensor
-                                    minValueTensor:lowTensor
-                                    maxValueTensor:highTensor
-                                              name:nil];
+      // Apply lo last so it wins when eps > 1 - eps, matching the
+      // scalar `x < lo ? lo : (x > hi ? hi : x)` priority.
+      MPSGraphTensor* inputGreaterThanHighTensor = [mpsGraph greaterThanWithPrimaryTensor:inputTensor
+                                                                          secondaryTensor:highTensor
+                                                                                     name:nil];
+      MPSGraphTensor* clampedHighTensor = [mpsGraph selectWithPredicateTensor:inputGreaterThanHighTensor
+                                                          truePredicateTensor:highTensor
+                                                         falsePredicateTensor:inputTensor
+                                                                         name:nil];
+      MPSGraphTensor* inputLessThanLowTensor = [mpsGraph lessThanWithPrimaryTensor:inputTensor
+                                                                   secondaryTensor:lowTensor
+                                                                              name:nil];
+      logitInputTensor = [mpsGraph selectWithPredicateTensor:inputLessThanLowTensor
+                                         truePredicateTensor:lowTensor
+                                        falsePredicateTensor:clampedHighTensor
+                                                        name:nil];
     } else {
       logitInputTensor = inputTensor;
     }
@@ -321,8 +325,7 @@ static void cumulative_op_impl(const Tensor& self,
                                int64_t dim,
                                std::optional<ScalarType> dtype,
                                const Tensor& result,
-                               MPSCumulativeOpType cumulativeOpType,
-                               const std::string& op_name) {
+                               MPSCumulativeOpType cumulativeOpType) {
   auto nDims = self.dim();
   auto wrapped_dim = maybe_wrap_dim(dim, nDims);
   TORCH_CHECK(wrapped_dim >= 0 && wrapped_dim < std::max(1LL, self.ndimension()),
@@ -334,52 +337,58 @@ static void cumulative_op_impl(const Tensor& self,
               dim,
               ")");
   auto input = dtype.has_value() ? self.to(dtype.value()) : self;
+  const std::string scan_op_name = cumulativeOpType == MPSCumulativeOpType::CUMSUM ? "cumsum" : "cumprod";
+
   if (input.is_complex()) {
     if (cumulativeOpType == MPSCumulativeOpType::CUMSUM) {
       auto input_real = at::view_as_real(input.dim() == 0 ? input.view({1}) : input);
       auto result_real = at::view_as_real(result.dim() == 0 ? result.view({1}) : result);
-      return cumulative_op_impl(
-          input_real, wrapped_dim, std::nullopt, result_real, MPSCumulativeOpType::CUMSUM, "cumsum_out_mps");
-    } else if (cumulativeOpType == MPSCumulativeOpType::CUMPROD) {
-      auto input_view = input.dim() == 0 ? input.view({1}) : input;
-      auto result_view = result.dim() == 0 ? result.view({1}) : result;
-      return mps::scan_simple_mps_impl(input_view, result_view, wrapped_dim, "cumprod");
-    } else {
-      TORCH_INTERNAL_ASSERT(false);
+      return cumulative_op_impl(input_real, wrapped_dim, std::nullopt, result_real, MPSCumulativeOpType::CUMSUM);
     }
+    auto input_view = input.dim() == 0 ? input.view({1}) : input;
+    auto result_view = result.dim() == 0 ? result.view({1}) : result;
+    return mps::scan_simple_mps_impl(input_view, result_view, wrapped_dim, scan_op_name);
   }
 
-  // issue #103810551: cumsum / cumprod are broken for int8, int16 and as chances for overflow are pretty high, cast to
-  // int32 fixed in macOS 13.3
-  bool castInputData = (isIntegralType(input.scalar_type(), true) && input.scalar_type() != ScalarType::Int &&
-                        input.scalar_type() != ScalarType::Long);
+  // cumsum/cumprod of a 0-dim tensor is the identity.
+  if (input.dim() == 0) {
+    result.copy_(input);
+    return;
+  }
 
-  mps::unary_op(
-      input, result, op_name + std::to_string(dim), ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
-        if (castInputData) {
-          inputTensor = mps::castMPSTensor(mpsGraph, inputTensor, ScalarType::Int);
-        }
-        MPSGraphTensor* rc;
-        if (cumulativeOpType == MPSCumulativeOpType::CUMSUM) {
-          rc = [mpsGraph cumulativeSumWithTensor:inputTensor axis:dim name:nil];
-        } else if (cumulativeOpType == MPSCumulativeOpType::CUMPROD) {
-          rc = [mpsGraph cumulativeProductWithTensor:inputTensor axis:dim name:nil];
-        }
-        if ((mps::getMPSDataType(result) != [rc dataType]) || castInputData) {
-          return mps::castMPSTensor(mpsGraph, rc, result.scalar_type());
-        }
-        return rc;
-      });
+  const bool castInputData = isIntegralType(input.scalar_type(), /*includeBool=*/true) &&
+      input.scalar_type() != ScalarType::Int && input.scalar_type() != ScalarType::Long;
+  if (castInputData) {
+    auto input_i32 = input.to(ScalarType::Int);
+    if (result.scalar_type() == ScalarType::Long) {
+      mps::scan_simple_mps_impl(input_i32, result, wrapped_dim, scan_op_name);
+    } else {
+      auto result_i32 = at::empty(result.sizes(), result.options().dtype(ScalarType::Int));
+      mps::scan_simple_mps_impl(input_i32, result_i32, wrapped_dim, scan_op_name);
+      result.copy_(result_i32);
+    }
+    return;
+  }
+  // int32 -> int64 result: scan int32 directly; the kernel widens (no upcast).
+  if (input.scalar_type() == ScalarType::Int && result.scalar_type() == ScalarType::Long) {
+    mps::scan_simple_mps_impl(input, result, wrapped_dim, scan_op_name);
+    return;
+  }
+
+  // int64 input, or a dtype= override: match the scan input dtype to the result.
+  auto scan_input = input.scalar_type() == result.scalar_type() ? input : input.to(result.scalar_type());
+
+  mps::scan_simple_mps_impl(scan_input, result, wrapped_dim, scan_op_name);
 }
 
 TORCH_IMPL_FUNC(cumsum_out_mps)
 (const Tensor& self, int64_t dim, std::optional<ScalarType> dtype, const Tensor& result) {
-  return cumulative_op_impl(self, dim, dtype, result, MPSCumulativeOpType::CUMSUM, "cumsum_out_mps");
+  return cumulative_op_impl(self, dim, dtype, result, MPSCumulativeOpType::CUMSUM);
 }
 
 TORCH_IMPL_FUNC(cumprod_out_mps)
 (const Tensor& self, int64_t dim, std::optional<ScalarType> dtype, const Tensor& result) {
-  return cumulative_op_impl(self, dim, dtype, result, MPSCumulativeOpType::CUMPROD, "cumprod_out_mps");
+  return cumulative_op_impl(self, dim, dtype, result, MPSCumulativeOpType::CUMPROD);
 }
 
 TORCH_IMPL_FUNC(sgn_out_mps)(const Tensor& self, const Tensor& output) {

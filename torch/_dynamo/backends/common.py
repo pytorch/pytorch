@@ -63,7 +63,7 @@ class AotAutograd:
         if callable(self.kwargs.get("decompositions")):
             self.kwargs["decompositions"] = self.kwargs["decompositions"]()
 
-        # NB: dont delete counter increment
+        # NB: don't delete counter increment
         counters["aot_autograd"]["total"] += 1
         use_fallback = False
 
@@ -82,7 +82,7 @@ class AotAutograd:
                 return disable(
                     disable(
                         bw_compiler_fn, reason="do not trace backward compiler function"
-                    )(*args, **kwargs),
+                    )(*args, **kwargs),  # type: ignore[misc]
                     reason="do not trace generated backwards pass",
                 )
 

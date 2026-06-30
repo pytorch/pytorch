@@ -298,6 +298,8 @@ cudaStream_t CUDAStream::stream() const {
   StreamId stream_id = stream_.id();
   StreamIdType st = streamIdType(stream_id);
   size_t si = streamIdIndex(stream_id);
+  initCUDAStreamsOnce();
+  check_gpu(device_index);
   if (st.isDefault()) {
     TORCH_CHECK(
         si == 0,
@@ -393,7 +395,9 @@ CUDAStream getCurrentCUDAStream(DeviceIndex device_index) {
 
 void setCurrentCUDAStream(CUDAStream stream) {
   initCUDAStreamsOnce();
-  current_streams[stream.device_index()] = stream.id();
+  auto device_index = stream.device_index();
+  check_gpu(device_index);
+  current_streams[device_index] = stream.id();
 }
 
 std::ostream& operator<<(std::ostream& stream, const CUDAStream& s) {

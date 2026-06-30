@@ -4151,6 +4151,15 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         self.assertEqual(nt.dim(), 3)
         self.assertEqual(nt.numel(), 27)
 
+        values = torch.randn(2, 8, 3, device=device)
+        offsets = torch.tensor([1, 4, 7], device=device)
+        lengths = torch.tensor([2, 3], device=device)
+        nt_holes = torch.nested.nested_tensor_from_jagged(
+            values, offsets, lengths=lengths, jagged_dim=2
+        )
+        self.assertEqual(nt_holes.numel(), 30)
+        self.assertEqual(torch.ops.aten.sym_numel.default(nt_holes), 30)
+
     @parametrize("nt_dim", [3, 4, 5])
     def test_linear(self, device, nt_dim):
         if nt_dim == 3:
@@ -4191,7 +4200,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         # for higher dim input sizes.
         # See https://github.com/pytorch/pytorch/issues/141112
         B, D, max_seq_len = 64, 512, 100
-        torch._C._cuda_clearCublasWorkspaces()
+        torch.cuda._clear_cublas_workspaces()
         m = torch.nn.Linear(D, D, device=device)
         nt = torch.nested.as_nested_tensor(
             [
@@ -6707,6 +6716,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         ):
             a.copy_(b)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/175482")
     def test_index_put_error(self, device):
         import subprocess
 
@@ -7126,7 +7136,8 @@ torch.cuda.synchronize()
             with torch.nn.attention.sdpa_kernel(
                 torch.nn.attention.SDPBackend.CUDNN_ATTENTION
             ):
-                check_forward_backward()
+                with self.assertRaisesRegex(RuntimeError, "No viable backend"):
+                    check_forward_backward(skip_backward=True)
 
     @skipIfTorchDynamo("SDPA test compiles internally")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
@@ -8156,6 +8167,92 @@ torch.cuda.synchronize()
                 self.assertFalse(any(d == 3 for d in buffer_dims))
 
     @dtypes(torch.float32)
+    @skipIfTorchDynamo("Test manually invokes __torch_function__")
+    def test_torch_function_metadata_fast_path_exact_callables(self, device, dtype):
+        nt = torch.nested.nested_tensor(
+            [
+                torch.randn(2, 3, device=device, dtype=dtype),
+                torch.randn(4, 3, device=device, dtype=dtype),
+            ],
+            layout=torch.jagged,
+        )
+
+        self.assertEqual(nt.size(), torch.Size(nt._size))
+        self.assertEqual(nt.size(0), nt._size[0])
+        self.assertEqual(nt.size(dim=2), nt._size[2])
+        self.assertEqual(nt.stride(), nt._strides)
+        self.assertEqual(nt.stride(2), nt._strides[2])
+        self.assertEqual(nt.dim(), len(nt._size))
+        self.assertEqual(nt.shape, torch.Size(nt._size))
+        self.assertEqual(nt.ndim, len(nt._size))
+
+        def size(t):
+            raise RuntimeError("fake size called")
+
+        def stride(t):
+            raise RuntimeError("fake stride called")
+
+        def dim(t):
+            raise RuntimeError("fake dim called")
+
+        class FakeDescriptor:
+            def __init__(self, name):
+                self.__name__ = name
+
+        class FakeDescriptorGet:
+            __name__ = "__get__"
+
+            def __init__(self, name):
+                self.__self__ = FakeDescriptor(name)
+
+            def __call__(self, t):
+                raise RuntimeError("fake descriptor called")
+
+        for func in (
+            size,
+            stride,
+            dim,
+            FakeDescriptorGet("shape"),
+            FakeDescriptorGet("ndim"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "fake .* called"):
+                type(nt).__torch_function__(func, (type(nt),), (nt,), {})
+
+    @dtypes(torch.float32)
+    @skipIfTorchDynamo("Test inspects Dynamo guards")
+    def test_compile_jagged_mean_omits_outer_size_stride_guards(self, device, dtype):
+        nt = torch.nested.nested_tensor(
+            [
+                torch.randn(2, 3, device=device, dtype=dtype),
+                torch.randn(4, 3, device=device, dtype=dtype),
+            ],
+            layout=torch.jagged,
+        )
+
+        def f(nt):
+            padded = torch.ops.aten._jagged_to_padded_dense_forward(
+                nt.values(),
+                [nt.offsets()],
+                max_lengths=[4],
+            )
+            return torch.sum(padded, dim=1) / nt.offsets().diff().unsqueeze(1)
+
+        explanation = torch._dynamo.explain(f)(nt)
+        guard_code = [
+            code for guard in explanation.out_guards for code in (guard.code_list or [])
+        ]
+
+        self.assertTrue(any("L['nt']._values.size()" in code for code in guard_code))
+        self.assertFalse(
+            any("L['nt'].size()" in code for code in guard_code),
+            "\n".join(guard_code),
+        )
+        self.assertFalse(
+            any("L['nt'].stride()" in code for code in guard_code),
+            "\n".join(guard_code),
+        )
+
+    @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     def test_compile_padded_dense_conversion_preserves_metadata_cache(
@@ -8278,6 +8375,39 @@ torch.cuda.synchronize()
         self.assertEqual(nt.shape[:-1], output.shape[:-1])
         for nt_component, output_component in zip(nt.unbind(), output.unbind()):
             self.assertEqual(nt_component.shape, output_component.shape)
+
+    @skipIfTorchDynamo("compiles internally")
+    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    @dtypes(torch.float32)
+    @parametrize("scalar_input", ["self", "other"])
+    def test_where_scalar_broadcast_on_in_graph_constructed_njt(
+        self, device, dtype, scalar_input
+    ):
+        nt = torch.nested.nested_tensor(
+            [
+                torch.randn(2, 5),
+                torch.randn(3, 5),
+                torch.randn(2, 5),
+                torch.randn(3, 5),
+            ],
+            layout=torch.jagged,
+            device=device,
+            dtype=dtype,
+        )
+
+        values = nt._values.detach().clone()
+        offsets = nt._offsets.detach().clone()
+
+        def f(values, offsets):
+            nt = torch.nested.nested_tensor_from_jagged(values, offsets)
+            condition = nt > 0.0
+            if scalar_input == "self":
+                return torch.where(condition, 1, torch.zeros_like(nt))
+            return torch.where(condition, torch.ones_like(nt), 0)
+
+        expected = f(values, offsets)
+        output = torch.compile(f, fullgraph=True)(values, offsets)
+        self.assertEqual(output, expected)
 
 
 # The following lists specify skips and xfails for particular SampleInputs. Note that

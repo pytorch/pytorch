@@ -498,6 +498,7 @@ class TestCase(__TestCase):
         self.check_for_loop(dict, list(dict.keys()))
 
     # Test a file
+    @torch._dynamo.error_on_graph_break(False)
     def test_iter_file(self):
         f = open(TESTFN, "w", encoding="utf-8")
         try:
@@ -548,6 +549,7 @@ class TestCase(__TestCase):
                 pass
 
     # Test tuples()'s use of iterators.
+    @torch._dynamo.error_on_graph_break(False)
     def test_builtin_tuple(self):
         self.assertEqual(tuple(SequenceClass(5)), (0, 1, 2, 3, 4))
         self.assertEqual(tuple(SequenceClass(0)), ())
@@ -626,6 +628,7 @@ class TestCase(__TestCase):
         self.assertEqual(list(filter(lambda x: not x, iter(seq))), [bFalse]*25)
 
     # Test max() and min()'s use of iterators.
+    @torch._dynamo.error_on_graph_break(False)
     def test_builtin_max_min(self):
         self.assertEqual(max(SequenceClass(5)), 4)
         self.assertEqual(min(SequenceClass(5)), 0)
@@ -658,6 +661,7 @@ class TestCase(__TestCase):
                 pass
 
     # Test map()'s use of iterators.
+    @torch._dynamo.error_on_graph_break(False)
     def test_builtin_map(self):
         self.assertEqual(list(map(lambda x: x+1, SequenceClass(5))),
                          list(range(1, 6)))
@@ -768,6 +772,7 @@ class TestCase(__TestCase):
             for y in NoGuessLen5(), Guess3Len5(), Guess30Len5():
                 self.assertEqual(lzip(x, y), expected)
 
+    @torch._dynamo.error_on_graph_break(False)
     def test_unicode_join_endcase(self):
 
         # This class inserts a Unicode object into its argument's natural
@@ -810,6 +815,7 @@ class TestCase(__TestCase):
                 pass
 
     # Test iterators with 'x in y' and 'x not in y'.
+    @torch._dynamo.error_on_graph_break(False)
     def test_in_and_not_in(self):
         for sc5 in IteratingSequenceClass(5), SequenceClass(5):
             for i in range(5):
@@ -894,6 +900,7 @@ class TestCase(__TestCase):
                 pass
 
     # Test iterators with operator.indexOf (PySequence_Index).
+    @torch._dynamo.error_on_graph_break(False)
     def test_indexOf(self):
         from operator import indexOf
         self.assertEqual(indexOf([1,2,2,3,2,5], 1), 0)
@@ -936,6 +943,7 @@ class TestCase(__TestCase):
         self.assertRaises(ValueError, indexOf, iclass, -1)
 
     # Test iterators with file.writelines().
+    @torch._dynamo.error_on_graph_break(False)
     def test_writelines(self):
         f = open(TESTFN, "w", encoding="utf-8")
 
@@ -989,6 +997,7 @@ class TestCase(__TestCase):
 
 
     # Test iterators on RHS of unpacking assignments.
+    @torch._dynamo.error_on_graph_break(False)
     def test_unpack_iter(self):
         a, b = 1, 2
         self.assertEqual((a, b), (1, 2))

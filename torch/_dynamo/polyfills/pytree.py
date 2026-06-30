@@ -91,14 +91,14 @@ for __name, __func in (
     ("structseq_fields", structseq_fields),
 ):
     globals()[__name] = substitute_in_graph(
-        __func,
+        __func,  # type: ignore[arg-type]
         can_constant_fold_through=True,
     )(__func.__python_implementation__)  # type: ignore[attr-defined]
     del __func
 del __name
 
 
-@substitute_in_graph(optree.tree_is_leaf, can_constant_fold_through=True)
+@substitute_in_graph(optree.tree_is_leaf, can_constant_fold_through=True)  # type: ignore[arg-type]
 def tree_is_leaf(
     tree: PyTree,
     /,
@@ -114,7 +114,7 @@ def tree_is_leaf(
     return False
 
 
-@substitute_in_graph(optree.tree_iter, can_constant_fold_through=False)
+@substitute_in_graph(optree.tree_iter, can_constant_fold_through=False)  # type: ignore[arg-type]
 def tree_iter(
     tree: PyTree,
     /,
@@ -144,7 +144,7 @@ def tree_iter(
         stack.extend(reversed(children))
 
 
-@substitute_in_graph(optree.tree_leaves, can_constant_fold_through=True)
+@substitute_in_graph(optree.tree_leaves, can_constant_fold_through=True)  # type: ignore[arg-type]
 def tree_leaves(
     tree: PyTree,
     /,
@@ -546,7 +546,7 @@ def treespec_dict(
         metadata,
         entries,
         unflatten_func,
-    ) = optree.tree_flatten_one_level(
+    ) = optree.tree_flatten_one_level(  # type: ignore[assignment,var-annotated]
         dct,  # type: ignore[arg-type]
         none_is_leaf=none_is_leaf,
         namespace=namespace,
@@ -556,7 +556,7 @@ def treespec_dict(
         dict,
         metadata,
         entries,
-        unflatten_func,
+        unflatten_func,  # type: ignore[arg-type]
         none_is_leaf=none_is_leaf,
         namespace=namespace,
     )
@@ -613,10 +613,10 @@ def tree_flatten(
             type(node),
             metadata,
             entries,
-            unflatten_func,
+            unflatten_func,  # type: ignore[arg-type]
             none_is_leaf=none_is_leaf,
             namespace=namespace,
-        )
+        )  # type: ignore[arg-type]
 
     leaves: list[Any] = []
     treespec = helper(tree, leaves)

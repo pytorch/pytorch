@@ -207,7 +207,7 @@ class TestTPFSDPIntegration(FSDPTestContinuous):
         all_grads_as_flattened = torch.cat(
             [torch.empty_like(local_grads_as_flattened) for _ in range(fsdp_pg.size())]
         ).contiguous()
-        dist.all_gather_into_tensor(
+        dist.all_gather_single(
             all_grads_as_flattened, local_grads_as_flattened, group=fsdp_pg
         )
         if not uses_tp:

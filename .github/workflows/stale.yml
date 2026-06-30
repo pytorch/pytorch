@@ -1,3 +1,4 @@
+# Owner(s): ["module: ci"]
 # A workflow that implements similar logic to actions/stale.
 #
 # Compared to actions/stale, it is implemented to make API requests proportional

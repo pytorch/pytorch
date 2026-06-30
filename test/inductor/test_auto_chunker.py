@@ -122,7 +122,7 @@ class AutoChunkerTest(TestCase):
         self.common_matmul_test(has_softmax=True, use_bias=True)
 
     @config.patch("auto_chunker.num_chunk", config.auto_chunker.num_chunk or 16)
-    @largeTensorTest("6GB", device=GPU_TYPE, inductor=True)
+    @largeTensorTest("10GB", device=GPU_TYPE, inductor=True)
     def test_fused_linear_cel(self):
         B = 32
         T = 1024
