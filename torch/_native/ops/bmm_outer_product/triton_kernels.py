@@ -3,6 +3,8 @@ import triton.language as tl
 
 import torch
 
+from ...triton import ConstTensorWrapper
+
 
 @triton.jit
 def _bmm_outer_product_kernel(
@@ -73,9 +75,11 @@ def bmm_outer_product(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
 
     BLOCK_M, BLOCK_N = _pick_block_sizes(M, N)
 
+    # a and b are read-only inputs; wrap them so a copy-on-write tensor is read
+    # through const_data_ptr() and not materialized. out is written directly.
     _bmm_outer_product_kernel[(B * triton.cdiv(M, BLOCK_M) * triton.cdiv(N, BLOCK_N),)](
-        a,
-        b,
+        ConstTensorWrapper(a),
+        ConstTensorWrapper(b),
         out,
         B,
         M,
