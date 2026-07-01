@@ -155,7 +155,7 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
   constexpr auto kChannelsLast = MemoryFormat::ChannelsLast;
   constexpr auto kChannelsLast3d = MemoryFormat::ChannelsLast3d;
   constexpr auto kContiguous = MemoryFormat::Contiguous;
-  const bool is_macos_15_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
+  const bool is_macos_15_plus = is_macos_at_least(MacOSVersion::MACOS_15_0);
 
   const bool is3DConv = input_t.dim() == 5;
   const auto memory_format = input_t.suggest_memory_format(/*channels_last_strides_exact_match=*/true);
@@ -194,7 +194,7 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
     output_c = at::empty_like(output_t, output_t.options().memory_format(kContiguous));
   }
 
-  if (!is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_1_PLUS)) {
+  if (!is_macos_at_least(MacOSVersion::MACOS_15_1)) {
     // On macOS < 15.1, MPS convolution kernel does not support output channels > 2^16
     for (auto elem : output_t.sizes()) {
       TORCH_CHECK_NOT_IMPLEMENTED(elem <= (1 << 16), "Output channels > 65536 not supported at the MPS device. ");
@@ -371,7 +371,7 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
   using namespace at::native::mps;
   using namespace mps;
   bool is3DConv = grad_output_t.dim() == 5;
-  if (!is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_1_PLUS)) {
+  if (!is_macos_at_least(MacOSVersion::MACOS_15_1)) {
     // On macOS < 15.1, MPS convolution kernel does not support output channels > 2^16
     for (auto elem : grad_output_t.sizes()) {
       TORCH_CHECK_NOT_IMPLEMENTED(elem <= (1 << 16), "Output channels > 65536 not supported at the MPS device. ");
@@ -386,7 +386,7 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
   constexpr auto kChannelsLast = at::MemoryFormat::ChannelsLast;
   constexpr auto kChannelsLast3d = at::MemoryFormat::ChannelsLast3d;
   constexpr auto kContiguous = at::MemoryFormat::Contiguous;
-  const bool is_macos_15_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
+  const bool is_macos_15_plus = is_macos_at_least(MacOSVersion::MACOS_15_0);
   // Backward uses NDHWC+DHWIO only when the full fast path is beneficial; for
   // factorized kernels / small Cin / depthwise the NCDHW+OIDHW fallback wins.
   const bool use_dhwio = is3DConv && is_macos_15_plus && is_packed_channels_last_3d(grad_output_t) &&
@@ -539,7 +539,7 @@ static Tensor mps_convolution_backward_weights(IntArrayRef weight_size,
   constexpr auto kChannelsLast = at::MemoryFormat::ChannelsLast;
   constexpr auto kChannelsLast3d = at::MemoryFormat::ChannelsLast3d;
   constexpr auto kContiguous = at::MemoryFormat::Contiguous;
-  const bool is_macos_15_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
+  const bool is_macos_15_plus = is_macos_at_least(MacOSVersion::MACOS_15_0);
   // Half-precision WG regresses on NDHWC+DHWIO; force NCDHW+OIDHW.
   const bool half_precision_wg =
       grad_output_t.scalar_type() == at::kBFloat16 || grad_output_t.scalar_type() == at::kHalf;
@@ -576,7 +576,7 @@ static Tensor mps_convolution_backward_weights(IntArrayRef weight_size,
 
   // TODO: Remove me when MacOS-14 is no longer supported
   std::optional<Tensor> grad_weight_c;
-  if (!is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS) && allocate_grad_weight_cl) {
+  if (!is_macos_at_least(MacOSVersion::MACOS_15_0) && allocate_grad_weight_cl) {
     grad_weight_c = at::empty_like(grad_weight_t, grad_weight_t.options().memory_format(MemoryFormat::Contiguous));
   }
 
