@@ -1,6 +1,6 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
 
-#include <torch/csrc/distributed/c10d/nccltc/TracingGuard.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/TracingGuard.hpp>
 
 #include <string>
 #include <string_view>
@@ -9,7 +9,7 @@
 #include <ATen/record_function.h>
 #include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
 
-namespace c10d::nccltc {
+namespace c10d::nccl2 {
 
 // Creates a ParamCommsDebugInfo object containing metadata about a collective
 // operation for integration with PyTorch's debugging and profiling
@@ -192,4 +192,4 @@ TracingGuard::TracingGuard(
       {output_tensor});
 }
 
-} // namespace c10d::nccltc
+} // namespace c10d::nccl2
