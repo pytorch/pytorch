@@ -262,8 +262,8 @@ def _format_target(base: str, target: str) -> str:
     elems = target.split(".")
     r = base
     for e in elems:
-        if not e.isidentifier():
-            r = f'getattr({r}, "{e}")'
+        if not e.isidentifier() or keyword.iskeyword(e):
+            r = f"getattr({r}, {e!r})"
         else:
             r = f"{r}.{e}"
     return r

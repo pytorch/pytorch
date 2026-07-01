@@ -1783,6 +1783,36 @@ class TestFX(JitTestCase):
         ref = torch.sin(mod.linear(input) + mod.bias)
         self.assertEqual(r, ref)
 
+    def test_format_target_special_names(self):
+        # Python keywords as submodule names must use getattr(), not dot notation
+        class ModWithKeyword(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.seq = torch.nn.Sequential(collections.OrderedDict([("class", torch.nn.Identity())]))
+
+            def forward(self, x):
+                return getattr(self.seq, "class")(x)
+
+        m = ModWithKeyword()
+        traced = symbolic_trace(m)
+        x = torch.rand(3)
+        self.assertEqual(traced(x), m(x))
+        self.assertIn("getattr(self.seq, 'class')", traced.code)
+
+        # Names with embedded quotes must be properly escaped in getattr()
+        class ModWithQuote(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.add_module('key"name', torch.nn.Identity())
+
+            def forward(self, x):
+                return getattr(self, 'key"name')(x)
+
+        m = ModWithQuote()
+        traced = symbolic_trace(m)
+        self.assertEqual(traced(x), m(x))
+        self.assertIn("getattr(self, 'key\"name')", traced.code)
+
     def test_remove_uses(self):
         g: torch.fx.Graph = Graph()
         x: torch.fx.Node = g.placeholder("x")
