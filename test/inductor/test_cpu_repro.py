@@ -915,9 +915,7 @@ class CPUReproTests(TestCase):
         inp = v.clone()
         result, code = run_and_get_cpp_code(fn_opt, inp)
         self.assertIn(
-            "aoti_torch_cpu_set__source_Tensor"
-            if config.cpp_wrapper
-            else "aten.set_.source_Tensor",
+            "shallow_copy_data_",
             code,
         )
         expected = model(inp)
@@ -5440,7 +5438,7 @@ class CPUReproTests(TestCase):
         self.assertEqual(
             x.to(torch.uint8),
             fn(x),
-            msg=f"Expected {x.to(torch.uint8)} but got {fn(x)}",
+            msg=lambda msg: f"{msg}\nExpected {x.to(torch.uint8)} but got {fn(x)}",
         )
 
     def test_non_contiguous_reduction_store(self):
