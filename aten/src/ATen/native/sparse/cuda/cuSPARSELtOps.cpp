@@ -56,7 +56,7 @@ static void initHipSparseLtSupport() {
             // hipSparseLt gfx1250 support requires ROCm 7.2+. Older ROCm builds
             // should not treat gfx1250 as supported here to avoid failing deeper
             // in hipSparseLt after we pass this gate.
-#if ROCM_VERSION >= 70200
+#if ROCM_VERSION >= 71400
             g_hipSparseLtSupported = at::detail::getCUDAHooks().isGPUArch(
                 {"gfx950", "gfx942", "gfx1250"}, 0);
 #else
@@ -81,10 +81,10 @@ static bool isHipSparseLtSupported() {
         TORCH_CHECK(
             false,
             "hipSparseLt not supported on this device. Supported architectures: "
-#if ROCM_VERSION >= 70200
+#if ROCM_VERSION >= 71400
             "gfx1250, gfx950, gfx942. "
 #else
-            "gfx950, gfx942 (gfx1250 requires a PyTorch build against ROCm 7.2 or newer). "
+            "gfx950, gfx942 (gfx1250 requires a PyTorch build against ROCm 7.14 or newer). "
 #endif
             "hipSparseLt on ROCm requires ROCm 7.12 or newer.");
     }

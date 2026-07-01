@@ -79,7 +79,7 @@ bool _scaled_mm_allowed_device(bool sm90_only=false, bool sm100_only=false) {
 #if ROCM_VERSION >= 60500
         "gfx950"
 #endif
-#if ROCM_VERSION >= 70200
+#if ROCM_VERSION >= 71400
         , "gfx1250"
 #endif
     };
@@ -627,7 +627,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   else if (scaling_choice_a == ScalingType::BlockWise1x32 && scaling_choice_b == ScalingType::BlockWise1x32) {
 #ifdef USE_ROCM
 #if ROCM_VERSION >= 70000
-#if ROCM_VERSION >= 70200
+#if ROCM_VERSION >= 71400
     TORCH_CHECK_NOT_IMPLEMENTED(at::detail::getCUDAHooks().isGPUArch({"gfx950", "gfx1250"}),
                 "Block-wise scaling for Float8_e8m0fnu is only supported on gfx950/gfx1250");
 #else
@@ -1077,7 +1077,7 @@ _scaled_mxfp8_mxfp8(
 
 #ifdef USE_ROCM
 #if ROCM_VERSION >= 70000
-#if ROCM_VERSION >= 70200
+#if ROCM_VERSION >= 71400
   TORCH_CHECK_NOT_IMPLEMENTED(at::detail::getCUDAHooks().isGPUArch({"gfx950", "gfx1250"}),
               "Block-wise scaling for Float8_e8m0fnu is only supported on gfx950/gfx1250");
 #else
@@ -1169,7 +1169,7 @@ _scaled_mxfp4_mxfp4(
   auto scaling_choice_b = ScalingType::BlockWise1x32;
 
 #if ROCM_VERSION >= 70000
-#if ROCM_VERSION >= 70200
+#if ROCM_VERSION >= 71400
   TORCH_CHECK_NOT_IMPLEMENTED(at::detail::getCUDAHooks().isGPUArch({"gfx950", "gfx1250"}),
               "Block-wise scaling for Float8_e8m0fnu is only supported on gfx950/gfx1250");
 #else

@@ -193,7 +193,7 @@ def evaluate_platform_supports_fp8():
                 archs.extend(['gfx120'])
             if ROCM_VERSION >= (6, 5):
                 archs.append('gfx95')
-            if ROCM_VERSION >= (7, 2):
+            if ROCM_VERSION >= (7, 14):
                 archs.append('gfx1250')
             for arch in archs:
                 if arch in torch.cuda.get_device_properties(0).gcnArchName:
