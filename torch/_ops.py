@@ -1178,6 +1178,7 @@ class OpOverloadPacket(Generic[_P, _T]):
         # defined below but are immutable
         self._qualified_op_name = qualified_op_name
         self.__name__ = op_name
+        self.__qualname__ = qualified_op_name
         self._op = op
         self._overload_names = overload_names
         self._dir: list[str] = []
