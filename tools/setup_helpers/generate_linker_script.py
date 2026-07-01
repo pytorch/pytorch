@@ -41,7 +41,8 @@ def gen_linker_script(
         for lineid, line in enumerate(linker_script_lines):
             if lineid == text_line_start + 2:
                 f.write("    *(\n")
-                f.writelines(f"      .text.{plines}\n" for plines in prioritized_text)
+                for plines in prioritized_text:
+                    f.write(f"      .text.{plines}\n")
                 f.write("    )\n")
             f.write(f"{line}\n")
 
