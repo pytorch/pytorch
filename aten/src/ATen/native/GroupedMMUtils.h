@@ -116,6 +116,7 @@ std::optional<c10::ScalarType> out_dtype) {
   if (offs.has_value()) {
     TORCH_CHECK(offs->dim() == 1, "offs has to be 1D");
     TORCH_CHECK(offs->dtype() == at::kInt, "Offsets have to be int32");
+    TORCH_CHECK(offs->stride(0) == 1, "Offsets must have stride (1,)");
   }
   TORCH_CHECK(!bias.has_value(), "Bias not supported yet");
 }

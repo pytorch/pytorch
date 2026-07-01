@@ -8533,6 +8533,10 @@ def _meta_grouped_mm_common(
                 offs.dtype == torch.int32,
                 lambda: f"Offsets tensor must be integer (int32) tensor, but got {offs.dtype}.",
             )
+            torch._check(
+                offs.stride() == (1,),
+                lambda: f"Offsets tensor must have stride (1,), but got {offs.stride()}.",
+            )
     else:
         torch._check(
             offs is None,
