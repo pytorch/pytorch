@@ -430,6 +430,11 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
     filtered_ops_cache: dict[str, list[Any]] = {}
     cache_clear = staticmethod(filtered_ops_cache.clear)
 
+    @property
+    def _device_cutlass_config(self):
+        """Get device-specific CUTLASS config (xpu/cuda overrides general cutlass config)."""
+        return cutlass_utils.get_device_cutlass_config(self.device_type)
+
     def __init__(
         self,
         input_nodes: list[Buffer],
@@ -594,10 +599,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         )
 
         with dynamo_timed("CUTLASSGemmTemplate.maybe_append_choice"):
+            device_config = self._device_cutlass_config
             for name, op in ops:
-                for (
-                    swizzle
-                ) in inductor_cutlass_config.cutlass_max_profiling_swizzle_options:
+                for swizzle in device_config.cutlass_max_profiling_swizzle_options:
                     description = f"{name} swizzle={swizzle}"
                     self.maybe_append_choice(
                         choices,
@@ -1078,7 +1082,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             time.time() - start_time,
         )
         sorted_res = sorted(res.items())
-        ret_res = sorted_res[: inductor_cutlass_config.cutlass_max_profiling_configs]
+        device_config = self._device_cutlass_config
+        ret_res = sorted_res[: device_config.cutlass_max_profiling_configs]
         if len(self.filtered_ops_cache) < 50:
             self.filtered_ops_cache[self.cache_key] = ret_res
         else:
@@ -1713,8 +1718,17 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             raise RuntimeError("Invalid Gemm config: \n" + op_def)
         op_type = match.groups()[0]
         if op.gemm_kind == cutlass_lib.GemmKind.Universal3x:
-            op_def += f"\n  using {op_type}_device_type = cutlass::gemm::device::GemmUniversalAdapter<{op_type}>;\n"
-            op_type = f"{op_type}_device_type"
+            # Append KERNEL_NAME to the struct name to ensure uniqueness across
+            # compiled .so files. When multiple kernels share the same GEMM core
+            # but have different epilogues (e.g., LinearCombination vs EVT), they
+            # produce identical struct names. On SYCL/XPU this causes the runtime
+            # to dispatch the wrong binary; on CUDA it avoids potential symbol
+            # collisions. KERNEL_NAME gets replaced with a unique per-.so hash
+            # in scheduling.py.
+            unique_op_type = f"{op_type}_{Placeholder.KERNEL_NAME}"
+            op_def = op_def.replace(f"struct {op_type} :", f"struct {unique_op_type} :")
+            op_def += f"\n  using {unique_op_type}_device_type = cutlass::gemm::device::GemmUniversalAdapter<{unique_op_type}>;\n"
+            op_type = f"{unique_op_type}_device_type"
 
         return op_def, op_type
 
