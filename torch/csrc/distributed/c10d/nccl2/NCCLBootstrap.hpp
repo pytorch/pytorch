@@ -11,19 +11,19 @@
 #include <torch/csrc/distributed/c10d/Store.hpp>
 
 #include <nccl.h>
-#include <torch/csrc/distributed/c10d/nccltc/CudaApi.hpp>
-#include <torch/csrc/distributed/c10d/nccltc/NcclApi.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/CudaApi.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/NcclApi.hpp>
 
-namespace c10d::nccltc {
+namespace c10d::nccl2 {
 
 // Default port for TCPStore-based unique ID exchange. This port is chosen
 // to match PyTorch's default TCPStore port (29500) for compatibility.
 // Users can override this via environment variables or configuration.
 constexpr uint16_t kTCPStorePort = 29500;
 
-class TorchCommNCCLBootstrap {
+class NCCLBootstrap {
  public:
-  TorchCommNCCLBootstrap(
+  NCCLBootstrap(
       c10::intrusive_ptr<c10d::Store> store,
       c10::Device device,
       int rank,
@@ -31,13 +31,13 @@ class TorchCommNCCLBootstrap {
       std::shared_ptr<NcclApi> nccl_api,
       std::shared_ptr<CudaApi> cuda_api,
       std::chrono::milliseconds timeout);
-  ~TorchCommNCCLBootstrap() noexcept;
+  ~NCCLBootstrap() noexcept;
 
   // Delete copy and move operations
-  TorchCommNCCLBootstrap(const TorchCommNCCLBootstrap&) = delete;
-  TorchCommNCCLBootstrap& operator=(const TorchCommNCCLBootstrap&) = delete;
-  TorchCommNCCLBootstrap(TorchCommNCCLBootstrap&&) = delete;
-  TorchCommNCCLBootstrap& operator=(TorchCommNCCLBootstrap&&) = delete;
+  NCCLBootstrap(const NCCLBootstrap&) = delete;
+  NCCLBootstrap& operator=(const NCCLBootstrap&) = delete;
+  NCCLBootstrap(NCCLBootstrap&&) = delete;
+  NCCLBootstrap& operator=(NCCLBootstrap&&) = delete;
 
   ncclComm_t createNcclComm(
       const std::string& name,
@@ -85,4 +85,4 @@ void populateNcclConfigFromHints(
     const std::unordered_map<std::string, std::string>& hints,
     const std::string& name);
 
-} // namespace c10d::nccltc
+} // namespace c10d::nccl2

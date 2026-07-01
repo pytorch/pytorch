@@ -9,7 +9,7 @@
 #include <ATen/ATen.h>
 #include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
 
-namespace c10d::nccltc {
+namespace c10d::nccl2 {
 
 // Snapshot of communicator metadata captured at construction time.
 // Stored by work handles to avoid calling checked comm accessors that
@@ -78,4 +78,4 @@ class TracingGuard {
   inline static int sequence_number_ = 0;
 };
 
-} // namespace c10d::nccltc
+} // namespace c10d::nccl2

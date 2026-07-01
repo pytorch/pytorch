@@ -1,13 +1,13 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
 //
-// ProcessGroupNCCLTC: an in-tree c10d::Backend backed by the torchcomms NCCL
+// ProcessGroupNCCL: an in-tree c10d::Backend backed by the torchcomms NCCL
 // engine. This is a port of torchcomms' TorchCommNCCL collapsed directly onto
 // c10d::Backend -- the upstream TorchComm/TorchCommBackend/BackendWrapper
 // layers are removed, and the collective methods use the c10d option objects
 // (c10d::BroadcastOptions, c10d::ReduceOp, ...) directly rather than the
 // torchcomms-specific option/ReduceOp types.
 //
-// Namespace: the class lives in c10d::nccltc.
+// Namespace: the class lives in c10d::nccl2.
 
 #pragma once
 
@@ -34,12 +34,12 @@
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/Work.hpp>
 
-#include <torch/csrc/distributed/c10d/nccltc/CudaApi.hpp>
-#include <torch/csrc/distributed/c10d/nccltc/NcclApi.hpp>
-#include <torch/csrc/distributed/c10d/nccltc/TorchCommBatch.hpp>
-#include <torch/csrc/distributed/c10d/nccltc/TorchWorkNCCL.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/Batch.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/CudaApi.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/NcclApi.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/WorkNCCL.hpp>
 
-namespace c10d::nccltc {
+namespace c10d::nccl2 {
 
 // Hint key names for NCCL backend configuration
 constexpr std::string_view kHintMaxEventPoolSize = "max_event_pool_size";
@@ -81,9 +81,9 @@ class NCCLException : public std::exception {
     }                                                                      \
   } while (0)
 
-class TORCH_API ProcessGroupNCCLTC : public ::c10d::Backend {
+class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
  public:
-  static constexpr std::string_view kBackendName = "nccltc";
+  static constexpr std::string_view kBackendName = "nccl2";
 
   // c10d Backend options for this backend (a c10d::Backend::Options subclass,
   // like ProcessGroupNCCL::Options); surfaced to Python via the Options pybind.
@@ -106,17 +106,17 @@ class TORCH_API ProcessGroupNCCLTC : public ::c10d::Backend {
   // the first collective (or via eagerConnectSingleDevice / bound_device_id),
   // matching c10d's device-binding model -- unlike torchcomms which took an
   // eager init(device).
-  ProcessGroupNCCLTC(
+  ProcessGroupNCCL(
       c10::intrusive_ptr<::c10d::Store> store,
       int rank,
       int size,
       c10::intrusive_ptr<Options> options = Options::create());
-  ~ProcessGroupNCCLTC() override;
+  ~ProcessGroupNCCL() override;
 
-  ProcessGroupNCCLTC(const ProcessGroupNCCLTC&) = delete;
-  ProcessGroupNCCLTC(ProcessGroupNCCLTC&&) = delete;
-  ProcessGroupNCCLTC& operator=(const ProcessGroupNCCLTC&) = delete;
-  ProcessGroupNCCLTC& operator=(ProcessGroupNCCLTC&&) = delete;
+  ProcessGroupNCCL(const ProcessGroupNCCL&) = delete;
+  ProcessGroupNCCL(ProcessGroupNCCL&&) = delete;
+  ProcessGroupNCCL& operator=(const ProcessGroupNCCL&) = delete;
+  ProcessGroupNCCL& operator=(ProcessGroupNCCL&&) = delete;
 
   // ---- c10d::Backend overrides ----
   const std::string getBackendName() const override {
@@ -240,7 +240,7 @@ class TORCH_API ProcessGroupNCCLTC : public ::c10d::Backend {
   // Underlying host ncclComm_t as an opaque integer pointer.
   int64_t getCommPtr() const;
 
-  friend class TorchWorkNCCL;
+  friend class WorkNCCL;
 
  protected:
   [[nodiscard]] cudaEvent_t getEvent();
@@ -258,11 +258,11 @@ class TORCH_API ProcessGroupNCCLTC : public ::c10d::Backend {
   std::atomic<bool> revoked_{false};
 
   ncclDataType_t getNcclDataType(const at::Tensor& tensor);
-  c10::intrusive_ptr<TorchWorkNCCL> createWork(
+  c10::intrusive_ptr<WorkNCCL> createWork(
       cudaStream_t stream,
       std::chrono::milliseconds timeout,
       const std::vector<at::Tensor>& inputTensors = {});
-  c10::intrusive_ptr<TorchWorkNCCL> createWork(
+  c10::intrusive_ptr<WorkNCCL> createWork(
       cudaStream_t stream,
       std::chrono::milliseconds timeout,
       const at::Tensor& inputTensor);
@@ -324,85 +324,85 @@ class TORCH_API ProcessGroupNCCLTC : public ::c10d::Backend {
   // Internal NCCL engine helpers (port of TorchCommNCCL). These take c10d
   // option fields directly (c10d::ReduceOp + resolved timeout/root/async),
   // not torchcomms-specific option objects.
-  c10::intrusive_ptr<TorchWorkNCCL> sendImpl(
+  c10::intrusive_ptr<WorkNCCL> sendImpl(
       const at::Tensor& tensor,
       int dst,
       bool async_op,
       std::chrono::milliseconds timeout);
-  c10::intrusive_ptr<TorchWorkNCCL> recvImpl(
+  c10::intrusive_ptr<WorkNCCL> recvImpl(
       at::Tensor& tensor,
       int src,
       bool async_op,
       std::chrono::milliseconds timeout);
-  c10::intrusive_ptr<TorchWorkNCCL> batch_op_issue(
+  c10::intrusive_ptr<WorkNCCL> batch_op_issue(
       const std::vector<BatchSendRecv::P2POp>& ops,
       bool async_op,
       std::chrono::milliseconds timeout);
-  c10::intrusive_ptr<TorchWorkNCCL> broadcastImpl(
+  c10::intrusive_ptr<WorkNCCL> broadcastImpl(
       at::Tensor& tensor,
       int root,
       bool async_op,
       std::chrono::milliseconds timeout);
-  c10::intrusive_ptr<TorchWorkNCCL> all_reduce(
+  c10::intrusive_ptr<WorkNCCL> all_reduce(
       at::Tensor& tensor,
       const ::c10d::ReduceOp& op,
       bool async_op,
       std::chrono::milliseconds timeout);
-  c10::intrusive_ptr<TorchWorkNCCL> reduceImpl(
+  c10::intrusive_ptr<WorkNCCL> reduceImpl(
       const at::Tensor& tensor,
       int root,
       const ::c10d::ReduceOp& op,
       bool async_op,
       std::chrono::milliseconds timeout);
-  c10::intrusive_ptr<TorchWorkNCCL> all_gather(
+  c10::intrusive_ptr<WorkNCCL> all_gather(
       const std::vector<at::Tensor>& tensor_list,
       const at::Tensor& tensor,
       bool async_op,
       std::chrono::milliseconds timeout);
-  c10::intrusive_ptr<TorchWorkNCCL> allGatherSingleImpl(
+  c10::intrusive_ptr<WorkNCCL> allGatherSingleImpl(
       at::Tensor& output,
       const at::Tensor& input,
       bool async_op,
       std::chrono::milliseconds timeout);
-  c10::intrusive_ptr<TorchWorkNCCL> reduce_scatter(
+  c10::intrusive_ptr<WorkNCCL> reduce_scatter(
       at::Tensor& output,
       const std::vector<at::Tensor>& input_list,
       const ::c10d::ReduceOp& op,
       bool async_op,
       std::chrono::milliseconds timeout);
-  c10::intrusive_ptr<TorchWorkNCCL> reduceScatterSingleImpl(
+  c10::intrusive_ptr<WorkNCCL> reduceScatterSingleImpl(
       at::Tensor& output,
       const at::Tensor& input,
       const ::c10d::ReduceOp& op,
       bool async_op,
       std::chrono::milliseconds timeout);
-  c10::intrusive_ptr<TorchWorkNCCL> allToAllSingleImpl(
+  c10::intrusive_ptr<WorkNCCL> allToAllSingleImpl(
       at::Tensor& output,
       const at::Tensor& input,
       bool async_op,
       std::chrono::milliseconds timeout);
-  c10::intrusive_ptr<TorchWorkNCCL> all_to_all_v_single(
+  c10::intrusive_ptr<WorkNCCL> all_to_all_v_single(
       at::Tensor& output,
       const at::Tensor& input,
       const std::vector<uint64_t>& output_split_sizes,
       const std::vector<uint64_t>& input_split_sizes,
       bool async_op,
       std::chrono::milliseconds timeout);
-  c10::intrusive_ptr<TorchWorkNCCL> all_to_all(
+  c10::intrusive_ptr<WorkNCCL> all_to_all(
       const std::vector<at::Tensor>& output_tensor_list,
       const std::vector<at::Tensor>& input_tensor_list,
       bool async_op,
       std::chrono::milliseconds timeout);
-  c10::intrusive_ptr<TorchWorkNCCL> barrierImpl(
+  c10::intrusive_ptr<WorkNCCL> barrierImpl(
       bool async_op,
       std::chrono::milliseconds timeout);
-  c10::intrusive_ptr<TorchWorkNCCL> scatterImpl(
+  c10::intrusive_ptr<WorkNCCL> scatterImpl(
       at::Tensor& output_tensor,
       const std::vector<at::Tensor>& input_tensor_list,
       int root,
       bool async_op,
       std::chrono::milliseconds timeout);
-  c10::intrusive_ptr<TorchWorkNCCL> gatherImpl(
+  c10::intrusive_ptr<WorkNCCL> gatherImpl(
       const std::vector<at::Tensor>& output_tensor_list,
       const at::Tensor& input_tensor,
       int root,
@@ -422,7 +422,7 @@ class TORCH_API ProcessGroupNCCLTC : public ::c10d::Backend {
   void checkInitialized() const;
   void checkAndAbortIfTimedOutOrError();
   void checkWorkQueue();
-  void enqueueWork(c10::intrusive_ptr<TorchWorkNCCL> work, cudaStream_t stream);
+  void enqueueWork(c10::intrusive_ptr<WorkNCCL> work, cudaStream_t stream);
   bool getGraphCaptureMode();
   cudaStream_t getOperationStream(bool async_op);
   void ensureTensorContiguous(const at::Tensor& tensor);
@@ -458,7 +458,7 @@ class TORCH_API ProcessGroupNCCLTC : public ::c10d::Backend {
   std::queue<cudaEvent_t> event_pool_;
   std::mutex event_pool_mutex_;
 
-  TorchWorkNCCLQueue workq_;
+  WorkNCCLQueue workq_;
 
   std::thread timeout_thread_;
   std::atomic<bool> shutdown_{false};
@@ -480,14 +480,14 @@ class TORCH_API ProcessGroupNCCLTC : public ::c10d::Backend {
 
   std::unordered_map<
       unsigned long long,
-      std::vector<c10::intrusive_ptr<TorchWorkNCCL>>>
+      std::vector<c10::intrusive_ptr<WorkNCCL>>>
       graph_capture_work_refs_;
   std::mutex graph_capture_work_mutex_;
 
   struct GraphCleanupData {
-    ProcessGroupNCCLTC* comm;
+    ProcessGroupNCCL* comm;
     unsigned long long graph_id;
-    GraphCleanupData(ProcessGroupNCCLTC* comm_, unsigned long long id)
+    GraphCleanupData(ProcessGroupNCCL* comm_, unsigned long long id)
         : comm(comm_), graph_id(id) {}
   };
   // NOTE: no CUDART_CB here -- it is empty on Linux CUDA and undefined under
@@ -495,6 +495,6 @@ class TORCH_API ProcessGroupNCCLTC : public ::c10d::Backend {
   static void graphCleanupCallback(void* userData);
 };
 
-} // namespace c10d::nccltc
+} // namespace c10d::nccl2
 
 #endif // USE_C10D_NCCL
