@@ -402,7 +402,7 @@ class StreamVariable(StreamContextVariable):
     def python_type(self) -> type:
         return self._cpython_type
 
-    def var_getattr(
+    def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> "VariableTracker":
         if self._device_handle_attr is not None and name == self._device_handle_attr:
@@ -417,7 +417,7 @@ class StreamVariable(StreamContextVariable):
             if hasattr(self.value, "native_handle"):
                 return ConstantVariable.create(self.value.native_handle)
 
-        return super().var_getattr(tx, name)
+        return super().getattro_impl(tx, name)
 
     def get_real_python_backed_value(self) -> object:
         return self.value

@@ -59,6 +59,7 @@ from .iter import IteratorVariable
 from .object_protocol import (
     generic_richcompare_bool,
     maybe_get_python_type,
+    object_generic_getattr,
     pyindex_check,
     pylong_as_ssize_t,
     pynumber_as_ssize_t,
@@ -891,13 +892,14 @@ class RangeVariable(BaseListVariable):
             )
         return super().call_method(tx, name, args, kwargs)
 
-    def var_getattr(
+    def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         fields = ["start", "stop", "step"]
         if name in fields:
             return self.items[fields.index(name)]
-        return super().var_getattr(tx, name)
+
+        return object_generic_getattr(tx, self, name)
 
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # CPython range_hash: https://github.com/python/cpython/blob/e76aa128fe/Objects/rangeobject.c#L572
@@ -1232,7 +1234,7 @@ class ListVariable(CommonListMethodsVariable):
             self.call_method(tx, "extend", args, {})
         return ConstantVariable.create(None)
 
-    def var_getattr(
+    def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         if name == "__class__":
@@ -1242,7 +1244,7 @@ class ListVariable(CommonListMethodsVariable):
                 return VariableTracker.build(tx, class_type, source=source)
             else:
                 return VariableTracker.build(tx, class_type, source)
-        return super().var_getattr(tx, name)
+        return super().getattro_impl(tx, name)
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
@@ -1547,12 +1549,12 @@ class DequeVariable(CommonListMethodsVariable):
             ]
         )
 
-    def var_getattr(
+    def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         if name == "maxlen":
             return self.maxlen
-        return super().var_getattr(tx, name)
+        return super().getattro_impl(tx, name)
 
     def call_method(
         self,
@@ -1718,14 +1720,14 @@ class TupleVariable(BaseListVariable):
         else:
             return f"({', '.join([item.reconstruct_pycode(codegen) for item in self.items])},)"
 
-    def var_getattr(
+    def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         if name == "__class__":
             source = AttrSource(self.source, name) if self.source else None
             class_type = self.python_type()
             return VariableTracker.build(tx, class_type, source=source)
-        return super().var_getattr(tx, name)
+        return super().getattro_impl(tx, name)
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
@@ -2143,7 +2145,7 @@ class SliceVariable(VariableTracker):
         codegen.foreach(self.items)
         codegen.append_output(create_instruction("BUILD_SLICE", arg=len(self.items)))
 
-    def var_getattr(
+    def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         if name in cmp_name_to_op_mapping or name in ("__hash__", "indices"):
@@ -2154,7 +2156,7 @@ class SliceVariable(VariableTracker):
         if name not in fields:
             unimplemented(
                 gb_type="Unsupported attribute for slice() object",
-                context=f"var_getattr {self} {name}",
+                context=f"getattro_impl {self} {name}",
                 explanation=f"Expected attribute to be one of {','.join(fields)} "
                 f"but got {name}",
                 hints=[*graph_break_hints.USER_ERROR],

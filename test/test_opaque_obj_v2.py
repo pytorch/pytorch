@@ -3014,7 +3014,7 @@ def forward(self, primals_2, tangents_1):
 
         This tests the code path where:
         1. An opaque class (like Color) is accessed via OpaqueObjectClassVariable
-        2. Attribute access (Color.RED) goes through var_getattr with static getattr
+        2. Attribute access (Color.RED) goes through getattro_impl with static getattr
         3. The opaque object is correctly lifted as a graph input
         """
         from torch._library.opaque_object import is_opaque_reference_type
@@ -3203,7 +3203,7 @@ def forward(self, L_x_ : torch.Tensor):
     def test_opaque_class_staticmethod(self):
         """Test that accessing a staticmethod on an opaque class works correctly.
 
-        This verifies that OpaqueObjectClassVariable.var_getattr properly handles
+        This verifies that OpaqueObjectClassVariable.getattro_impl properly handles
         staticmethod descriptors (instead of raising 'Unsupported descriptor').
         """
         captured = {"graph": None}
@@ -3226,7 +3226,7 @@ def forward(self, L_x_ : torch.Tensor):
     def test_opaque_class_property(self):
         """Test that accessing a property descriptor on an opaque class works correctly.
 
-        This verifies that OpaqueObjectClassVariable.var_getattr properly handles
+        This verifies that OpaqueObjectClassVariable.getattro_impl properly handles
         property descriptors. When accessing a property on the class (not instance),
         you get the property object back.
         """

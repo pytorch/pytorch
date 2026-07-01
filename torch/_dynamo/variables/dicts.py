@@ -891,10 +891,10 @@ class ConstDictVariable(VariableTracker):
             return VariableTracker.build(tx, not eq_result.as_python_constant())
         return eq_result
 
-    def var_getattr(self, tx: "InstructionTranslatorBase", name: str):
+    def getattro_impl(self, tx: "InstructionTranslatorBase", name: str):
         if name == "__class__":
             return VariableTracker.build(tx, self.python_type())
-        return super().var_getattr(tx, name)
+        return super().getattro_impl(tx, name)
 
 
 class MappingProxyVariable(VariableTracker):
@@ -1090,7 +1090,7 @@ class DictViewVariable(VariableTracker):
             return ConstantVariable.create(True)
         return ConstantVariable.create(False)
 
-    def var_getattr(
+    def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         # dictview_mapping getset returns a read-only mappingproxy of the
@@ -1098,7 +1098,7 @@ class DictViewVariable(VariableTracker):
         # https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L5032-L5040
         if name == "mapping":
             return MappingProxyVariable(self.dv_dict)
-        return super().var_getattr(tx, name)
+        return super().getattro_impl(tx, name)
 
     def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         if self.kv == "keys":
