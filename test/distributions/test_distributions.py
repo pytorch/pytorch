@@ -3897,7 +3897,7 @@ class TestDistributions(DistributionsTestCase):
         self._check_log_prob(Chi2(df), ref_log_prob)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    @device_rng_seed(default=0)  # see Note [Randomized statistical tests]
+    @device_rng_seed(default=0, xpu=1)  # see Note [Randomized statistical tests]
     def test_chi2_sample(self):
         for df in [0.1, 1.0, 5.0]:
             self._check_sampler_sampler(
