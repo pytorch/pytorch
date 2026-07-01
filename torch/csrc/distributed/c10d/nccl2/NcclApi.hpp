@@ -29,7 +29,7 @@ typedef struct ncclWindow_vidmem* ncclWindow_t;
 #define NCCL_WIN_COLL_SYMMETRIC 0x01
 #endif
 
-namespace c10d::nccltc {
+namespace c10d::nccl2 {
 /**
  * Abstract interface for NCCL API operations.
  * This allows for dependency injection and testing by providing
@@ -473,4 +473,4 @@ class DefaultNcclApi : public NcclApi {
   mutable std::mutex api_mutex_;
 };
 
-} // namespace c10d::nccltc
+} // namespace c10d::nccl2
