@@ -1543,6 +1543,10 @@ test_xpu_bin(){
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
 
+  # Build binaries carry absolute RPATHs that don't exist on the test runner;
+  # point LD_LIBRARY_PATH at the installed torch libs so the linker finds them.
+  export LD_LIBRARY_PATH="${TORCH_LIB_DIR}:${LD_LIBRARY_PATH}"
+
   for xpu_case in "${BUILD_BIN_DIR}"/*{xpu,sycl}*; do
     if [[ "$xpu_case" != *"*"* && "$xpu_case" != *.so && "$xpu_case" != *.a ]]; then
       case_name=$(basename "$xpu_case")
