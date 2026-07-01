@@ -141,9 +141,7 @@ static Variable sequenceToVariable(c10::TensorOptions options, PyObject* seq) {
       options, kLong, std::nullopt, seq);
 }
 
-static inline Scalar valueToScalar(
-    c10::TensorOptions options,
-    PyObject* value) {
+inline Scalar valueToScalar(c10::TensorOptions options, PyObject* value) {
   Scalar scalar;
   if (THPUtils_checkLong(value) || PyBool_Check(value)) {
     scalar = Scalar(THPUtils_unpackLong(value));
@@ -168,31 +166,13 @@ static inline Scalar valueToScalar(
   return scalar;
 }
 
-Variable valueToTensor(
-    c10::TensorOptions options,
-    PyObject* value,
-    const at::Device& device) {
-  if (THPVariable_Check(value)) {
-    return THPVariable_Unpack(value);
-  }
-  auto scalar = valueToScalar(options, value);
-  // lift_fresh is supposed to be used in situations where you are guaranteed to
-  // get a plain Tensor which is not true for cpu device but not for non cpu
-  // device
-  at::AutoDispatchBelowADInplaceOrView guard; // TODO: remove
-  at::tracer::impl::NoTracerDispatchMode tracer_guard;
-  if (device == at::kCPU && !scalar.isSymbolic()) {
-    return at::lift_fresh(
-        at::indexing::scalarToTensor(scalar, options, device));
-  } else {
-    return at::indexing::scalarToTensor(scalar, options, device);
-  }
-}
-
 static inline Tensor asTensor(const Tensor& value, const Tensor& target) {
   return value;
 }
 static inline Tensor asTensor(const Scalar& value, const Tensor& self) {
+  // lift_fresh is supposed to be used in situations where you are guaranteed to
+  // get a plain Tensor which is not true for cpu device but not for non cpu
+  // device
   at::AutoDispatchBelowADInplaceOrView guard;
   at::tracer::impl::NoTracerDispatchMode tracer_guard;
   Tensor tensor = at::indexing::asTensor(value, self);

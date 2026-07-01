@@ -3347,29 +3347,35 @@ static PyObject* THPVariable_get_itemsize(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
+static inline int copy_value_(const Tensor& self, PyObject* value) {
+  if (THPVariable_Check(value)) {
+    auto value_ = THPVariable_Unpack(value);
+    {
+      pybind11::gil_scoped_release no_gil;
+      self.copy_(value_);
+      return 0;
+    }
+  } else {
+    auto scalar = valueToScalar(self.options(), value);
+    {
+      pybind11::gil_scoped_release no_gil;
+      self.fill_(scalar);
+      return 0;
+    }
+  }
+}
+
 static int THPVariable_set_real(PyObject* self, PyObject* real, void* unused) {
   HANDLE_TH_ERRORS
   auto& self_ = THPVariable_Unpack(self);
-  auto self_real = at::real(self_);
-  auto real_ = valueToTensor(self_real.options(), real, self_real.device());
-  {
-    pybind11::gil_scoped_release no_gil;
-    self_real.copy_(real_);
-    return 0;
-  }
+  return copy_value_(at::real(self_), real);
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
 static int THPVariable_set_imag(PyObject* self, PyObject* imag, void* unused) {
   HANDLE_TH_ERRORS
   auto& self_ = THPVariable_Unpack(self);
-  auto self_imag = at::imag(self_);
-  auto imag_ = valueToTensor(self_imag.options(), imag, self_imag.device());
-  {
-    pybind11::gil_scoped_release no_gil;
-    self_imag.copy_(imag_);
-    return 0;
-  }
+  return copy_value_(at::imag(self_), imag);
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
