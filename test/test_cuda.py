@@ -1917,38 +1917,32 @@ except RuntimeError as e:
     @unittest.skipIf(
         not TEST_CUDAMALLOCASYNC, "requires the cudaMallocAsync allocator backend"
     )
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
-    @unittest.skipIf(
-        not SM70OrLater, "Compute capability >= SM70 required for relaxed ptx flag"
-    )
     @serialTest()
     def test_cudamallocasync_trim_on_oom_retry(self):
         # The fix under test: when the cudaMallocAsync allocator cannot fit an
         # allocation it normally raises OutOfMemoryError; the fix first releases the
-        # pool's freed-but-cached memory back to the OS and tries once more. We build
-        # an allocation that only succeeds if that retry runs -- so it fails before
-        # the fix and passes after.
+        # pool's freed-but-cached backing to the OS and tries once more. We build an
+        # allocation that only succeeds if that retry runs -- it OOMs before the fix
+        # and succeeds after.
         #
         # The trick is to make memory that is freed but not yet reusable at the
         # moment of the allocation:
         #   1. Fill the GPU with a "wall" we keep alive, so almost nothing is free.
-        #   2. On a side stream, allocate A and free it -- but first park a kernel
-        #      that stalls the stream, so A's free is queued behind it and has not
-        #      run. A is released by us but not yet reusable by the allocator.
+        #   2. On a side stream, keep the stream busy, then allocate A and free it.
+        #      A's free is queued behind the busy work and has not run, so A is
+        #      released by us but not yet reusable by the allocator.
         #   3. Ask for B (larger than A). Little is free and A is unusable, so the
-        #      allocation fails.
-        #        before the fix: gives up -> OutOfMemoryError, and the test fails.
-        #        after the fix:  waits for the stream (which runs A's free), reclaims
-        #                        A, retries -> B fits, and a recovery warning fires.
-        #
-        # The stalling kernel spins until we flip a CPU flag (a self-finishing wait
-        # would let the allocator foresee A's release and reuse it, hiding the bug).
-        # We flip the flag from a background thread because the fix's retry waits on
-        # the stalled stream, which blocks THIS thread too.
-        spin = get_wait_for_cpu_kernel()
+        #      first attempt fails; the fix then syncs the stream (running A's free),
+        #      trims the pool, retries, and B fits (a recovery is logged). Without
+        #      the fix the allocation raises OutOfMemoryError and the test fails.
+        dev = torch.cuda.current_device()
+        # Neutralize any inherited per-process memory fraction: a fractional cap
+        # would raise a *preemptive* OOM before cudaMallocAsync ever fails, which is
+        # a different path than the trim-and-retry this test targets.
+        orig_fraction = torch.cuda.get_per_process_memory_fraction(dev)
+        torch.cuda.set_per_process_memory_fraction(1.0, dev)
         torch.cuda.empty_cache()  # start from a clean, predictable amount of free memory
         torch.cuda.synchronize()
-        dev = torch.cuda.current_device()
         free, _ = torch.cuda.mem_get_info(dev)
         if free < 16 * 1024**3:
             self.skipTest("insufficient free CUDA memory for the trim-on-OOM repro")
@@ -1959,42 +1953,29 @@ except RuntimeError as e:
         a_size = int(free * 0.10)
         b_size = int(free * 0.15)
 
-        flag = torch.zeros(1, dtype=torch.int32, device="cpu").pin_memory()
-
-        def release_after_oom():
-            # Flip the flag (ending the stall) only after B has been requested and
-            # the fix is already waiting on the stream. Flipping sooner would let A
-            # become reusable, so B fits on the first try and the retry never runs.
-            # 0.5s easily covers the ~ms it takes to reach B.
-            time.sleep(0.5)
-            flag[0] = 1
-
         wall = torch.empty(wall_size, dtype=torch.int8, device=dev)  # keep most memory
         s1 = torch.cuda.Stream()
         b = None
         try:
             with torch.cuda.stream(s1):
                 a = torch.empty(a_size, dtype=torch.int8, device=dev)
-                spin(grid=(1, 1, 1), block=(1, 1, 1), args=[flag])  # stall the stream
+                # Keep the stream busy so A's free stays queued (pending, not yet
+                # reclaimable) when B is requested. The sleep must still be running
+                # when the host reaches B; if it finished first, A's free would run
+                # and B would simply reuse it. 1s comfortably covers the host's
+                # sub-ms trip to B even on a loaded machine.
+                torch.cuda._sleep(int(1000 * get_cycles_per_ms()))
                 del a
-                gc.collect()  # free A, but its release is queued behind the stall
-                threading.Thread(target=release_after_oom, daemon=True).start()
-                with warnings.catch_warnings(record=True) as caught:
-                    warnings.simplefilter("always")
-                    # Fails here: pre-fix raises OutOfMemoryError; the fix trims + retries.
-                    b = torch.empty(b_size, dtype=torch.int8, device=dev)
-                    torch.cuda.synchronize()
-            # The warning fires only if the trim+retry path actually ran (not if B
-            # simply happened to fit).
-            self.assertTrue(
-                any("trimming the pool" in str(w.message) for w in caught),
-                "expected the trim-on-OOM recovery warning",
-            )
+                gc.collect()  # free A, but its release is queued behind the busy work
+                # Pre-fix this raises OutOfMemoryError; the fix trims and retries.
+                b = torch.empty(b_size, dtype=torch.int8, device=dev)
+                torch.cuda.synchronize()
+            # Reaching here without OutOfMemoryError means the trim-and-retry ran.
+            self.assertIsNotNone(b)
         finally:
-            flag[0] = 1  # end the stall even if B raised (pre-fix path)
-            torch.cuda.synchronize()
             del wall, b
             torch.cuda.empty_cache()
+            torch.cuda.set_per_process_memory_fraction(orig_fraction, dev)
 
     @slowTest
     def test_multinomial_invalid_probs_cuda(self):

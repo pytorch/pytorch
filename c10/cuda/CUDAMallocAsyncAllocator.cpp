@@ -2,6 +2,7 @@
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/Logging.h>
 #include <c10/util/UniqueVoidPtr.h>
 #include <c10/util/flat_hash_map.h>
 
@@ -373,9 +374,9 @@ void mallocAsync(
           (void)cudaMemPoolTrimTo(mempool, 0);
           err = cudaMallocAsync(devPtr, size, stream);
           if (err == cudaSuccess) {
-            TORCH_WARN_ONCE(
-                "[cudaMallocAsync] recovered from an allocation failure by "
-                "trimming the pool and retrying.");
+            LOG(WARNING)
+                << "[cudaMallocAsync] recovered from an allocation failure by "
+                   "trimming the pool and retrying.";
           }
         } else {
           err = sync_err;
