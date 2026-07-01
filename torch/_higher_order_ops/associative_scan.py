@@ -8,9 +8,7 @@ import torch
 import torch._prims_common as utils
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
-from torch._higher_order_ops.schema import HopSchemaGenerator
 from torch._higher_order_ops.utils import (
-    _check_alias_and_mutation,
     _maybe_compile_and_run_fn,
     _maybe_run_with_interpreter,
     check_input_alias_and_mutation_return_outputs,
@@ -104,6 +102,8 @@ class AssociativeScanOp(HigherOrderOperator):
 
     # pyrefly: ignore [bad-override]
     def gen_schema(self, combine_fn, xs, additional_inputs):
+        from torch._higher_order_ops.schema import HopSchemaGenerator
+        
         # For associative scan, we need two copies of xs for the combine function
         # The combine function takes two elements and returns one element
         xs_slice1 = [first_slice_copy(x) for x in xs]
@@ -797,7 +797,7 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
             zeros_mask = compute_helper_tril_mask(-1)
 
             # 5.1) Repeat the elements of bwys to form the square matrix
-            y_mat = bwys.unsqueeze(dim).repeat_interleave(scan_length, dim).clone()
+            y_mat = bwys.unsqueeze(dim).repeat_interleave(scan_length, dim)
 
             # 5.2) Fill the lower triangular part, including the diagonal,
             # of the h_mat with 1s. I.e., use the ones_mask to fill with 1s.
@@ -881,6 +881,8 @@ def assoiciative_scan_fake_tensor_mode(combine_fn, xs, additional_inputs):
 
 @associative_scan_op.py_functionalize_impl
 def associative_scan_functionalize(ctx, combine_fn, xs, additional_inputs):
+    from torch._higher_order_ops.utils import _check_alias_and_mutation
+    
     unwrapped_xs = ctx.unwrap_tensors(xs)
     unwrapped_additional_inputs = ctx.unwrap_tensors(additional_inputs)
     with ctx.redispatch_to_next():
