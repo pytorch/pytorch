@@ -1455,7 +1455,7 @@ NCCLException::NCCLException(
     ncclResult_t result,
     ncclComm_t comm)
     : message_(
-          message + ": " + nccl_api.getErrorString(result) +
+          message + ": " + std::string(nccl_api.getErrorString(result)) +
           " \nNCCL Last Error: " + nccl_api.getLastError(comm)),
       result_(result) {}
 
