@@ -59,7 +59,6 @@ from .iter import IteratorVariable
 from .object_protocol import (
     generic_richcompare_bool,
     maybe_get_python_type,
-    object_generic_getattr,
     pyindex_check,
     pylong_as_ssize_t,
     pynumber_as_ssize_t,
@@ -899,7 +898,7 @@ class RangeVariable(BaseListVariable):
         if name in fields:
             return self.items[fields.index(name)]
 
-        return object_generic_getattr(tx, self, name)
+        return super().getattro_impl(tx, name)
 
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # CPython range_hash: https://github.com/python/cpython/blob/e76aa128fe/Objects/rangeobject.c#L572

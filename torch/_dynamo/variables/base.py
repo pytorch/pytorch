@@ -613,13 +613,28 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def getattro_impl(
         self, tx: InstructionTranslatorBase, name: str
     ) -> VariableTracker:
-        """Default attribute access via const_getattr.
+        """Default attribute access via object_generic_getattr.
 
-        VTs with custom tp_getattro override this method.  The shared
-        GenericGetAttr algorithm is available as object_generic_getattr()
-        in object_protocol.py for VTs that want to opt into MRO-based
-        descriptor dispatch.
+        Tries the MRO-based descriptor protocol first (PyObject_GenericGetAttr),
+        falls back to const_getattr for VTs without a known python_type or
+        when the descriptor protocol hits an unhandled type.
         """
+        try:
+            py_type = self.python_type()
+        except NotImplementedError:
+            py_type = None
+
+        if py_type is not None:
+            from .object_protocol import (
+                _UnhandledDescriptorError,
+                object_generic_getattr,
+            )
+
+            try:
+                return object_generic_getattr(tx, self, name)
+            except _UnhandledDescriptorError:
+                pass
+
         value = self.const_getattr(tx, name)
         if not variables.ConstantVariable.is_literal(value):
             raise NotImplementedError
