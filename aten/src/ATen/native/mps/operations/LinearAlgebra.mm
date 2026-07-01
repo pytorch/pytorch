@@ -310,13 +310,13 @@ bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output)
   static bool always_use_metal = c10::utils::has_env("PYTORCH_MPS_PREFER_METAL");
   constexpr auto max_stride_size = 32768;
   constexpr auto max_complex_inner_size = 2048;
-  static bool is_macos_14_4_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_4_PLUS);
+  static bool is_macos_14_4_or_newer = is_macos_at_least(MacOSVersion::MACOS_14_4);
   if (always_use_metal || c10::isIntegralType(self.scalar_type(), true)) {
     return true;
   }
   // MPSGraph mis-writes a non-contiguous output before macOS 26; the metal
   // kernels honor the output strides.
-  static const bool is_macos_26_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_26_0_PLUS);
+  static const bool is_macos_26_0_or_newer = is_macos_at_least(MacOSVersion::MACOS_26_0);
   if (!output.is_contiguous() && !is_macos_26_0_or_newer) {
     return true;
   }
@@ -691,7 +691,7 @@ static void linalg_inv_ex_out_mps_impl(const Tensor& A, bool check_errors, const
 
 static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& output) {
   using namespace mps;
-  static const bool is_macOS_15_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
+  static const bool is_macOS_15_0_or_newer = is_macos_at_least(MacOSVersion::MACOS_15_0);
 
   using CachedGraph = MPSBinaryCachedGraph;
   TORCH_CHECK(self.dim() == 2 && other.dim() == 2, "tensors must be 2-D");
@@ -733,7 +733,7 @@ static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& 
     // inputs on macOS < 26.4 (only every 16th row is computed). Contiguify such tensors
     // by disabling the strided API so they go through the gather/clone path first.
     // See https://github.com/pytorch/pytorch/issues/180201
-    static const bool is_macOS_26_4_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_26_4_PLUS);
+    static const bool is_macOS_26_4_or_newer = is_macos_at_least(MacOSVersion::MACOS_26_4);
     auto hasZeroStride = [](const Tensor& t) {
       return std::ranges::any_of(t.strides(), [](auto s) { return s == 0; });
     };
@@ -993,7 +993,7 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
 }
 
 static Tensor& tiled_bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tensor& result) {
-  if (is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS)) {
+  if (is_macos_at_least(MacOSVersion::MACOS_15_0)) {
     using namespace mps;
 
     id<MTLBuffer> aBuffer = getMTLBufferStorage(batch1);
@@ -1148,12 +1148,12 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
 
   // MPSGraph mis-writes a non-contiguous output before macOS 26; the metal
   // kernel honors the output strides.
-  static const bool is_macos_26_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_26_0_PLUS);
+  static const bool is_macos_26_0_or_newer = is_macos_at_least(MacOSVersion::MACOS_26_0);
   if (!result.is_contiguous() && !is_macos_26_0_or_newer) {
     return do_metal_bmm(batch1, batch2, result);
   }
 
-  static const bool is_macOS_15_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
+  static const bool is_macOS_15_0_or_newer = is_macos_at_least(MacOSVersion::MACOS_15_0);
   MPSShape* shape = nil;
   bool doTranspose = false;
 
@@ -1409,7 +1409,7 @@ static void cholesky_stub_impl(const Tensor& out, const Tensor& info, bool upper
   auto device = MPSDevice::getInstance()->device();
   auto info_ = info.dim() >= 2 ? info.view({B}) : info;
   auto info_sizes = info.sizes();
-  if (is_macos_13_or_newer(MacOSVersion::MACOS_VER_26_2_PLUS)) {
+  if (is_macos_at_least(MacOSVersion::MACOS_26_2)) {
     return cholesky_panel_impl(out, info_, N, B, upper);
   }
   info_.fill_(0);
