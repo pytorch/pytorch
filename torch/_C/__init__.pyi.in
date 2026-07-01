@@ -1341,17 +1341,20 @@ def _to_dlpack(
     data: Tensor,
     dl_device: tuple[IntEnum, _int] | None = None,
     copy: _bool | None = None,
+    read_only: _bool = False,
 ) -> Any: ...  # THPModule_toDLPack
 def _to_dlpack_versioned(
     data: Tensor,
     dl_device: tuple[IntEnum, _int] | None = None,
     copy: _bool | None = None,
+    read_only: _bool = False,
 ) -> Any: ...  # THPModule_toDLPackVersioned
 def _from_dlpack(data: Any) -> Tensor: ...  # THPModule_fromDLPack
 def _torchDeviceToDLDevice(
     device: torch.device,
 ) -> tuple[_int, _int]: ...  # THPModule_torchDeviceToDLDevice
 def _dlpack_exchange_api() -> object: ...  # THPModule_DLPackExchangeAPI
+def _const_dlpack_exchange_api() -> object: ...  # THPModule_ConstDLPackExchangeAPI
 def _get_cpp_backtrace(
     frames_to_skip: _int,
     maximum_number_of_frames: _int,

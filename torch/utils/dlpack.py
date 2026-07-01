@@ -9,6 +9,7 @@ from torch.types import Device as _Device
 __all__ = [
     "DLDeviceType",
     "from_dlpack",
+    "ReadOnlyTensorWrapper",
 ]
 
 class DLDeviceType(enum.IntEnum):
@@ -28,6 +29,71 @@ class DLDeviceType(enum.IntEnum):
     kDLWebGPU = 15,
     kDLHexagon = 16,
     kDLMAIA = 17,
+
+
+class ReadOnlyTensorWrapper(torch.Tensor):
+    r"""A zero-copy, read-only view of a tensor for DLPack interop only.
+
+    Wrapping a tensor with ``ReadOnlyTensorWrapper`` declares the intent that
+    consumers must not mutate its data. It changes only the DLPack export
+    behavior; the wrapper shares storage with the source tensor and does not
+    copy.
+
+    Both DLPack export paths are routed to read-only variants:
+
+    * the fast ``__dlpack_c_exchange_api__`` C exchange protocol (used by
+      tvm-ffi / CuteDSL) points at the const exchange API, which exports
+      through ``const_data_ptr()`` and sets
+      ``DLPACK_FLAG_BITMASK_READ_ONLY``;
+    * the ``__dlpack__()`` capsule protocol forces ``read_only=True``.
+
+    Because the export uses ``const_data_ptr()``, exporting a copy-on-write
+    tensor does not materialize it.
+
+    The wrapper is export-only: every torch operation other than the DLPack
+    protocol methods raises ``RuntimeError``. Unwrap it (e.g. via the original
+    tensor) to operate on the data.
+
+    Example::
+
+        x = torch.randn(8)
+        ro = ReadOnlyTensorWrapper(x)
+        cute.runtime.from_dlpack(ro, enable_tvm_ffi=True)  # read-only export
+    """
+
+    # Consumers discover the C exchange API on the type. Pointing it at the
+    # const variant makes the fast path export read-only.
+    # pyrefly: ignore [missing-attribute]
+    __dlpack_c_exchange_api__: object = torch._C._const_dlpack_exchange_api()
+
+    # The only torch functions the wrapper participates in. Everything else is
+    # rejected so the wrapper cannot be used as a normal tensor.
+    _DLPACK_ALLOWED = frozenset(
+        {torch.Tensor.__dlpack__, torch.Tensor.__dlpack_device__}
+    )
+
+    @staticmethod
+    def __new__(cls, tensor: torch.Tensor) -> "ReadOnlyTensorWrapper":
+        return tensor.as_subclass(cls)
+
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
+        if func in cls._DLPACK_ALLOWED:
+            # Run as a plain tensor so the export internals (property accesses,
+            # is_conj(), etc.) are not re-intercepted and re-blocked.
+            with torch._C.DisableTorchFunctionSubclass():
+                return func(*args, **(kwargs or {}))
+        raise RuntimeError(
+            f"{cls.__name__} only supports DLPack export; "
+            f"'{getattr(func, '__name__', func)}' is not allowed. "
+            "Unwrap the tensor to operate on its data."
+        )
+
+    def __dlpack__(self, *, max_version=None, **kwargs):  # type: ignore[override]
+        # The capsule path can only carry read-only on the versioned protocol.
+        if max_version is None:
+            max_version = (1, 0)
+        return super().__dlpack__(max_version=max_version, read_only=True, **kwargs)
 
 
 torch._C._add_docstr(to_dlpack, r"""to_dlpack(tensor) -> PyCapsule
