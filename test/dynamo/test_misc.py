@@ -15100,7 +15100,7 @@ fn
         self.assertEqual(cnts.frame_count, 1)
 
     def test_getattrvariable_as_python_constant(self):
-        from torch._dynamo.variables.misc import GetAttrVariable
+        from torch._dynamo.variables.misc import CallMethodVariable as CMV
 
         @torch.compile(backend="eager")
         def fn(x, rand1):
@@ -15116,7 +15116,7 @@ fn
         x = torch.randn(3, 3)
         expected = fn.__wrapped__(x, get_rng())
 
-        with patch.object(GetAttrVariable, "as_python_constant", autospec=True) as po:
+        with patch.object(CMV, "as_python_constant", autospec=True) as po:
             actual = fn(x, get_rng())
 
         self.assertEqual(expected, actual)
