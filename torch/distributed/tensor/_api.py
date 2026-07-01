@@ -48,6 +48,7 @@ __all__ = [
     "ones",
     "empty",
     "full",
+    "linspace",
     "logspace",
     "rand",
     "randn",
@@ -1281,6 +1282,21 @@ def distribute_module(
 
 
 @maybe_run_for_local_tensor
+def _linspace_local_tensor(
+    init_op, start, end, total_steps, local_steps, offset, **kwargs
+):
+    local_start = start
+    local_end = end
+    if local_steps > 0 and total_steps > 1:
+        step = (end - start) / (total_steps - 1)
+        local_start = start + offset * step
+        local_end = local_start + step * (local_steps - 1)
+    elif local_steps > 0:
+        local_end = start
+    return init_op(local_start, local_end, steps=local_steps, **kwargs)
+
+
+@maybe_run_for_local_tensor
 def _logspace_local_tensor(
     init_op, start, end, base, total_steps, local_steps, offset, **kwargs
 ):
@@ -1319,13 +1335,28 @@ def _dtensor_init_helper(  # type: ignore[no-untyped-def]
 
     # get local tensor shape
     local_shape, global_offset = compute_local_shape_and_global_offset(
-        size, device_mesh, placements, skip_offset=init_op is not torch.logspace
+        size,
+        device_mesh,
+        placements,
+        skip_offset=init_op not in (torch.linspace, torch.logspace),
     )
 
     # initialize the local tensor
     if init_op is torch.full:
         fill_value = kwargs.pop("fill_value")
         local_tensor = init_op(local_shape, fill_value, **kwargs)
+    elif init_op is torch.linspace:
+        start = kwargs.pop("start")
+        end = kwargs.pop("end")
+        local_tensor = _linspace_local_tensor(
+            init_op,
+            start,
+            end,
+            size[0],
+            local_shape[0],
+            global_offset[0],
+            **kwargs,
+        )
     elif init_op is torch.logspace:
         start = kwargs.pop("start")
         end = kwargs.pop("end")
@@ -1510,6 +1541,75 @@ def full(  # type: ignore[no-untyped-def]
     )
 
 
+def linspace(
+    start,
+    end,
+    steps,
+    *,
+    dtype: torch.dtype | None = None,
+    layout: torch.layout = torch.strided,
+    requires_grad: bool = False,
+    device_mesh: DeviceMesh | None = None,
+    placements: Sequence[Placement] | None = None,
+) -> DTensor:
+    """
+    Returns a :class:`DTensor` of size ``steps`` whose values are evenly spaced from
+    `start` to `end`.
+
+    Args:
+        start (float or :class:`DTensor`): the starting value for the set of points. If
+           :class:`DTensor`, it must be 0-dimensional
+        end (float or :class:`DTensor`): the ending value for the set of points. If
+           :class:`DTensor`, it must be 0-dimensional
+        steps (int): size of the constructed :class:`DTensor`
+
+    Keyword args:
+        dtype (:class:`torch.dtype`, optional): the data type to perform the computation
+            in. Default: if ``None``, uses the global default dtype
+            (see :func:`torch.set_default_dtype`) when both `start` and `end` are real,
+            and corresponding complex dtype when either is complex.
+        layout (:class:`torch.layout`, optional): the desired layout of returned
+            :class:`DTensor`. Default: ``torch.strided``.
+        requires_grad (bool, optional): If autograd should record operations on the
+            returned :class:`DTensor`. Default: ``False``.
+        device_mesh: :class:`DeviceMesh` type, contains the mesh info of ranks
+        placements: a sequence of :class:`Placement` type: ``Shard``, ``Replicate``
+
+    Returns:
+        A :class:`DTensor` object on each rank
+    """
+    if placements is not None and any(isinstance(p, _StridedShard) for p in placements):
+        raise AssertionError("linspace does not support _StridedShard placements")
+
+    if isinstance(start, torch.Tensor):
+        torch._check(
+            start.dim() == 0,
+            lambda: "linspace only supports 0-dimensional start and end tensors",
+        )
+        start = start.item()
+
+    if isinstance(end, torch.Tensor):
+        torch._check(
+            end.dim() == 0,
+            lambda: "linspace only supports 0-dimensional start and end tensors",
+        )
+        end = end.item()
+
+    torch_size = normalize_to_torch_size((steps,))
+
+    return _dtensor_init_helper(
+        torch.linspace,
+        torch_size,
+        start=start,
+        end=end,
+        dtype=dtype,
+        layout=layout,
+        requires_grad=requires_grad,
+        device_mesh=device_mesh,
+        placements=placements,
+    )
+
+
 def logspace(
     start,
     end,
@@ -1552,6 +1652,20 @@ def logspace(
     """
     if placements is not None and any(isinstance(p, _StridedShard) for p in placements):
         raise AssertionError("logspace does not support _StridedShard placements")
+
+    if isinstance(start, torch.Tensor):
+        torch._check(
+            start.dim() == 0,
+            lambda: "logspace only supports 0-dimensional start and end tensors",
+        )
+        start = start.item()
+
+    if isinstance(end, torch.Tensor):
+        torch._check(
+            end.dim() == 0,
+            lambda: "logspace only supports 0-dimensional start and end tensors",
+        )
+        end = end.item()
 
     torch_size = normalize_to_torch_size((steps,))
 
