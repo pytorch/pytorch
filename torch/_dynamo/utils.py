@@ -3200,9 +3200,21 @@ def dict_keys_getitem(d: dict[Any, Any], n: int) -> Any:
     return next(itertools.islice(dict.keys(d), n, n + 1))
 
 
+def set_base_iter(s: Iterable[T]) -> Iterator[T]:
+    if isinstance(s, set):
+        return set.__iter__(s)
+    if isinstance(s, frozenset):
+        return frozenset.__iter__(s)
+    return iter(s)
+
+
 def set_getitem(s: set[T], n: int) -> T:
-    # Set ordering might not be stable
-    return list(s)[n]
+    # Set ordering might not be stable. For set/frozenset subclasses, use the
+    # base iterator so guard reconstruction observes the internal set contents.
+    try:
+        return next(itertools.islice(set_base_iter(s), n, n + 1))
+    except StopIteration:
+        raise IndexError("set index out of range") from None
 
 
 def enum_repr(value: Any, local: bool) -> str:
@@ -5191,7 +5203,12 @@ def get_instruction_source_311(code: types.CodeType, inst: Instruction) -> str:
     )
 
 
-def get_static_address_type(t: Any) -> Any:
+# The two flavors of mark_static_address: "guarded" recompiles when the data_ptr
+# changes, "unguarded" re-records cudagraphs instead. Set in decorators.py.
+StaticInputType = Literal["guarded", "unguarded"]
+
+
+def get_static_address_type(t: Any) -> StaticInputType | None:
     if isinstance(t, torch.Tensor):
         return getattr(t, "_dynamo_static_input_type", None)
 
@@ -5641,7 +5658,14 @@ def set_feature_use(feature: str, usage: bool) -> None:
         get_metrics_context().set_key_value("feature_usage", feature, usage)
 
 
-_ddp_optimization_mode: tuple[str, ...] = (
+OptimizeDDPMode = Literal[
+    "ddp_optimizer",
+    "python_reducer",
+    "python_reducer_without_compiled_forward",
+    "no_optimization",
+]
+
+_ddp_optimization_mode: tuple[OptimizeDDPMode, ...] = (
     "ddp_optimizer",
     "python_reducer",  # experimental mode
     "python_reducer_without_compiled_forward",
@@ -5649,7 +5673,7 @@ _ddp_optimization_mode: tuple[str, ...] = (
 )
 
 
-def get_optimize_ddp_mode() -> str:
+def get_optimize_ddp_mode() -> OptimizeDDPMode:
     optimize_ddp = config.optimize_ddp
     if isinstance(optimize_ddp, bool):
         mode = "ddp_optimizer" if optimize_ddp else "no_optimization"
@@ -5662,7 +5686,7 @@ def get_optimize_ddp_mode() -> str:
 
     if mode not in _ddp_optimization_mode:
         raise AssertionError(f"Invalid dynamo config optimize_ddp value {mode=}")
-    return mode
+    return cast("OptimizeDDPMode", mode)
 
 
 @contextmanager
