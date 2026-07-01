@@ -31,7 +31,7 @@ from torch.testing._internal.common_utils import \
      runOnRocmArch, MI200_ARCH, MI300_ARCH, MI350_ARCH, NAVI_ARCH, TEST_CUDA,
      skipIfNoNvmath)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, dtypes, has_cusolver, onlyCPU, skipIf, skipCPUIfNoLapack, precisionOverride,
+    (instantiate_device_type_tests, dtypes, has_cusolver, onlyCPU, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIf,
      skipCUDAIfNoCusolver, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoMagmaAndNoLinalgsolver, onlyNativeDeviceTypes, dtypesIfCUDA,
      onlyCUDA, onlyAccelerator, skipMeta, skipCUDAIfNotRocm, dtypesIfMPS, largeTensorTest,
@@ -2002,62 +2002,16 @@ class TestLinalg(TestCase):
                     run_test_case(input, ord, dim, keepdim)
 
     # Test degenerate shape results match numpy for linalg.norm matrix norms
-    @skipIf(np.lib.NumpyVersion(np.__version__) < '2.3.0', 'Numpy changed handling of degenerate inputs in 2.3.0')
     @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_norm_matrix_degenerate_shapes(self, device, dtype):
+        new_numpy = tuple(int(x) for x in np.__version__.split('.')[:2]) >= (2, 3)
+
         def run_test_case(input, ord, dim, keepdim, should_error):
             msg = f'input.size()={input.size()}, ord={ord}, dim={dim}, keepdim={keepdim}, dtype={dtype}'
             input_numpy = input.cpu().numpy()
             ops = [torch.linalg.norm]
-
-            if ord is not None and dim is not None:
-                ops.append(torch.linalg.matrix_norm)
-
-            if should_error:
-                with self.assertRaises(ValueError):
-                    np.linalg.norm(input_numpy, ord, dim, keepdim)
-                for op in ops:
-                    with self.assertRaises(IndexError):
-                        op(input, ord, dim, keepdim)
-            else:
-                result_numpy = np.linalg.norm(input_numpy, ord, dim, keepdim)
-                for op in ops:
-                    result = op(input, ord, dim, keepdim)
-                    self.assertEqual(result, result_numpy, msg=msg)
-
-        ord_matrix = ['fro', 'nuc', 1, 2, inf, -1, -2, -inf, None]
-        S = 10
-        test_cases = [
-            # input size, p settings that cause error, dim
-            ((0, 0), [-1, -2, -inf], None),
-            ((0, S), [-2, -inf], None),
-            ((S, 0), [-1, -2], None),
-            ((S, S, 0), [], (0, 1)),
-            ((1, S, 0), [], (0, 1)),
-            ((0, 0, S), [-1, -2, -inf], (0, 1)),
-            ((0, 0, S), [-1, -2, -inf], (1, 0)),
-        ]
-
-        for keepdim in [True, False]:
-            for input_size, error_ords, dim in test_cases:
-                input = torch.randn(*input_size, dtype=dtype, device=device)
-                for ord in ord_matrix:
-                    run_test_case(input, ord, dim, keepdim, ord in error_ords)
-
-    # TODO this is redundant with test_norm_matrix_degenerate_shapes above,
-    # remove when old numpy versions are dropped
-    @skipIf(np.lib.NumpyVersion(np.__version__) >= '2.3.0', 'Numpy changed handling of degenerate inputs in 2.3.0')
-    @skipCUDAIfNoMagmaAndNoLinalgsolver
-    @skipCPUIfNoLapack
-    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
-    def test_norm_matrix_degenerate_shapes_old_numpy(self, device, dtype):
-        def run_test_case(input, ord, dim, keepdim, should_error):
-            msg = f'input.size()={input.size()}, ord={ord}, dim={dim}, keepdim={keepdim}, dtype={dtype}'
-            input_numpy = input.cpu().numpy()
-            ops = [torch.linalg.norm]
-
             if ord is not None and dim is not None:
                 ops.append(torch.linalg.matrix_norm)
 
@@ -2068,22 +2022,29 @@ class TestLinalg(TestCase):
                     with self.assertRaises(IndexError):
                         op(input, ord, dim, keepdim)
             elif should_error == 'np_only':
-                with self.assertRaises(ValueError):
-                    np.linalg.norm(input_numpy, ord, dim, keepdim)
-                for op in ops:
-                    result = op(input, ord, dim, keepdim)
-                    dim_ = dim
-                    if dim_ is None:
-                        dim_ = (0, 1)
-                    expected_shape = list(input.shape)
-                    if keepdim:
-                        expected_shape[dim_[0]] = 1
-                        expected_shape[dim_[1]] = 1
-                    else:
-                        del expected_shape[max(dim_)]
-                        del expected_shape[min(dim_)]
-                    expected = torch.zeros(expected_shape, dtype=dtype.to_real())
-                    self.assertEqual(expected, result, msg=msg)
+                if new_numpy:
+                    # numpy 2.3.0 fixed this — both now return a result
+                    result_numpy = np.linalg.norm(input_numpy, ord, dim, keepdim)
+                    for op in ops:
+                        result = op(input, ord, dim, keepdim)
+                        self.assertEqual(result, result_numpy, msg=msg)
+                else:
+                    with self.assertRaises(ValueError):
+                        np.linalg.norm(input_numpy, ord, dim, keepdim)
+                    for op in ops:
+                        result = op(input, ord, dim, keepdim)
+                        dim_ = dim
+                        if dim_ is None:
+                            dim_ = (0, 1)
+                        expected_shape = list(input.shape)
+                        if keepdim:
+                            expected_shape[dim_[0]] = 1
+                            expected_shape[dim_[1]] = 1
+                        else:
+                            del expected_shape[max(dim_)]
+                            del expected_shape[min(dim_)]
+                        expected = torch.zeros(expected_shape, dtype=dtype.to_real())
+                        self.assertEqual(expected, result, msg=msg)
             else:
                 result_numpy = np.linalg.norm(input_numpy, ord, dim, keepdim)
                 for op in ops:
@@ -2093,8 +2054,7 @@ class TestLinalg(TestCase):
         ord_matrix = ['fro', 'nuc', 1, 2, inf, -1, -2, -inf, None]
         S = 10
         test_cases = [
-            # input size, p settings that cause error,
-            # p settings that error numpy but not torch, dim
+            # shape, error_ords, np_only_ords, dim
             ((0, 0), [-1, -2, -inf], [inf, 1, 2], None),
             ((0, S), [-2, -inf], [inf, 2], None),
             ((S, 0), [-1, -2], [1, 2], None),
@@ -2113,7 +2073,7 @@ class TestLinalg(TestCase):
                     elif ord in np_error_ords:
                         should_error = 'np_only'
                     else:
-                        should_error = 'no'
+                        should_error = None
                     run_test_case(input, ord, dim, keepdim, should_error)
 
     def test_norm_fastpaths(self, device):
