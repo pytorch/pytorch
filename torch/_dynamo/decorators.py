@@ -8,7 +8,7 @@ import weakref
 from collections.abc import Callable
 from dataclasses import dataclass
 from types import TracebackType
-from typing import Any, overload, TYPE_CHECKING, TypeVar
+from typing import Any, overload, Protocol, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -1483,10 +1483,25 @@ def _allow_in_graph_einops() -> None:
 trace_rules.add_module_init_func("einops", _allow_in_graph_einops)
 
 
+class _ConfigPatchProtocol(Protocol):
+    """The config.patch() context manager object wrapped by DynamoConfigPatchProxy."""
+
+    changes: dict[str, Any]
+
+    def __enter__(self) -> None: ...
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None: ...
+
+
 # Proxy class for torch._dynamo.config patching - so dynamo can identify context managers/decorators
 # created by patch_dynamo_config, compared to ones created by a raw torch._dynamo.config.patch.
 class DynamoConfigPatchProxy:
-    def __init__(self, config_patch: Any) -> None:
+    def __init__(self, config_patch: _ConfigPatchProtocol) -> None:
         self.config_patch = config_patch
 
     @property
