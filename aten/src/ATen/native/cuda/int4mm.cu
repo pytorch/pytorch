@@ -144,8 +144,6 @@ static bool isCDNA2orLater(int index) {
     return at::detail::getCUDAHooks().isGPUArch({"gfx90a", "gfx942", "gfx950"}, index);
 }
 
-// Conceptual for now and subject to change
-// gfx1250 (CDNA5 / CDNA-next / UDNA)
 static bool isCDNA5orLater(int index) {
   return at::detail::getCUDAHooks().isGPUArch({"gfx1250"}, index);
 }

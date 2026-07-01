@@ -3,6 +3,8 @@
 #include <mutex>
 #include <string_view>
 #include <unordered_map>
+#include <vector>
+#include <c10/util/StringUtil.h>
 #if AT_CUSPARSELT_ENABLED()
 
 namespace at::native {
@@ -45,6 +47,17 @@ cusparseLtHandle_t& get_cusparselt_handle_for_current_device() {
 c10::once_flag g_hipSparseLtSupportInitFlag;
 static bool g_hipSparseLtSupported = false;
 
+static const std::vector<std::string>& hipSparseLtSupportedArchs() {
+#if ROCM_VERSION >= 71400
+  static const std::vector<std::string> archs = {"gfx950", "gfx942", "gfx1250"};
+#elif ROCM_VERSION >= 71200
+  static const std::vector<std::string> archs = {"gfx950", "gfx942"};
+#else
+  static const std::vector<std::string> archs = {};
+#endif
+  return archs;
+}
+
 // Initialize the hipSparseLt support status once for the platform
 static void initHipSparseLtSupport() {
   // Default to not supported
@@ -53,16 +66,8 @@ static void initHipSparseLtSupport() {
     // Check only the first available device
     try {
         if (at::cuda::device_count() > 0) {
-            // hipSparseLt gfx1250 support requires ROCm 7.2+. Older ROCm builds
-            // should not treat gfx1250 as supported here to avoid failing deeper
-            // in hipSparseLt after we pass this gate.
-#if ROCM_VERSION >= 71400
             g_hipSparseLtSupported = at::detail::getCUDAHooks().isGPUArch(
-                {"gfx950", "gfx942", "gfx1250"}, 0);
-#else
-            g_hipSparseLtSupported = at::detail::getCUDAHooks().isGPUArch(
-                {"gfx950", "gfx942"}, 0);
-#endif
+                hipSparseLtSupportedArchs(), 0);
         }
     } catch (const std::exception&) {
         // If an exception occurs during device property check, we assume hipSparseLt is not supported
@@ -80,13 +85,9 @@ static bool isHipSparseLtSupported() {
     if (!g_hipSparseLtSupported) {
         TORCH_CHECK(
             false,
-            "hipSparseLt not supported on this device. Supported architectures: "
-#if ROCM_VERSION >= 71400
-            "gfx1250, gfx950, gfx942. "
-#else
-            "gfx950, gfx942 (gfx1250 requires a PyTorch build against ROCm 7.14 or newer). "
-#endif
-            "hipSparseLt on ROCm requires ROCm 7.12 or newer.");
+            "hipSparseLt not supported on this device. Supported architectures: ",
+            c10::Join(", ", hipSparseLtSupportedArchs()),
+            ". hipSparseLt on ROCm requires ROCm 7.12 or newer.");
     }
     return g_hipSparseLtSupported;
 }
