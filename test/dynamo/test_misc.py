@@ -86,6 +86,7 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA,
+    PYTORCH_CUDA_MEMCHECK,
 )
 from torch.testing._internal.common_methods_invocations import (
     sample_inputs_take_along_dim,
@@ -6403,6 +6404,88 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
                 sparse_copy = torch._dynamo.utils.clone_input(sparse_input)
                 # Make sure sparse clone is successful.
                 self.assertEqual(sparse_input, sparse_copy)
+
+    @unittest.skipIf(not TEST_CUDA, "pinned CPU memory requires CUDA")
+    @unittest.skipIf(
+        PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property"
+    )
+    def test_clone_input_preserves_pinned_cpu_tensor_metadata(self):
+        base = torch.randn(4, 6, pin_memory=True)
+        x = base[:, ::2].requires_grad_()
+        x.grad = torch.ones_like(x).pin_memory()
+        x._dynamo_dynamic_indices = {1}
+
+        cloned = torch._dynamo.utils.clone_input(x)
+
+        self.assertTrue(cloned.is_pinned())
+        self.assertEqual(cloned.stride(), x.stride())
+        self.assertEqual(cloned, x)
+        self.assertNotEqual(cloned.data_ptr(), x.data_ptr())
+        self.assertTrue(cloned.requires_grad)
+        self.assertIsNotNone(cloned.grad)
+        self.assertTrue(cloned.grad.is_pinned())
+        self.assertEqual(cloned.grad, x.grad)
+        self.assertEqual(cloned._dynamo_dynamic_indices, x._dynamo_dynamic_indices)
+        self.assertIsNot(cloned._dynamo_dynamic_indices, x._dynamo_dynamic_indices)
+
+        expanded = torch.arange(3, dtype=torch.float32, pin_memory=True).expand(2, 3)
+        expanded_cloned = torch._dynamo.utils.clone_input(expanded)
+        self.assertTrue(expanded_cloned.is_pinned())
+        self.assertEqual(expanded_cloned, expanded)
+
+    def test_clone_input_does_not_check_pinned_memory_for_wrapper_subclass(self):
+        class WrapperSubclass(torch.Tensor):
+            @staticmethod
+            def __new__(cls, elem):
+                return torch.Tensor._make_wrapper_subclass(
+                    cls,
+                    elem.size(),
+                    strides=elem.stride(),
+                    storage_offset=elem.storage_offset(),
+                    dtype=elem.dtype,
+                    layout=elem.layout,
+                    requires_grad=elem.requires_grad,
+                    device=elem.device,
+                )
+
+            def __init__(self, elem):
+                self.elem = elem
+
+            def __tensor_flatten__(self):
+                return ["elem"], None
+
+            @staticmethod
+            def __tensor_unflatten__(inner_tensors, metadata, outer_size, outer_stride):
+                if metadata is not None:
+                    raise AssertionError("Expected metadata to be None")
+                return WrapperSubclass(
+                    inner_tensors["elem"].as_strided(outer_size, outer_stride)
+                )
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                if func is torch.ops.aten.is_pinned.default:
+                    raise AssertionError(
+                        "clone_input should not check pinning on wrapper subclasses"
+                    )
+                if kwargs is None:
+                    kwargs = {}
+                args = python_pytree.tree_map_only(
+                    WrapperSubclass, lambda x: x.elem, args
+                )
+                kwargs = python_pytree.tree_map_only(
+                    WrapperSubclass, lambda x: x.elem, kwargs
+                )
+                out = func(*args, **kwargs)
+                return python_pytree.tree_map_only(torch.Tensor, WrapperSubclass, out)
+
+        x = WrapperSubclass(torch.randn(4, 6))
+
+        cloned = torch._dynamo.utils.clone_input(x)
+
+        self.assertIsInstance(cloned, WrapperSubclass)
+        self.assertEqual(cloned.elem, x.elem)
+        self.assertNotEqual(cloned.elem.data_ptr(), x.elem.data_ptr())
 
     def test_tensor_is_contiguous(self):
         def fn(x):
