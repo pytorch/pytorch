@@ -2495,7 +2495,12 @@ def _new_process_group_helper(
             # parent group, even those not in the new group.  This is
             # a requirement of the NCCL API as otherwise we would get
             # out of sync.
-            if split_from:
+            #
+            # Under TorchComms, subgroups are built with `new_comm` (a
+            # members-only store rendezvous), not by splitting the parent, so
+            # non-members must NOT issue a no-color split -- doing so would
+            # desync against members that never split.
+            if split_from and not _use_torchcomms_enabled():
                 split_from.perform_nocolor_split(_get_default_group().bound_device_id)
             return GroupMember.NON_GROUP_MEMBER, None
 
@@ -2550,6 +2555,20 @@ def _new_process_group_helper(
             and _torchcomms_handles_backend(backend_str)
         ):
             torch_device = torch.device(device)
+            # Pass this rank's actual device WITH its index. A device-type-only
+            # torch.device(device) makes the TorchComms bootstrap default the
+            # device to (group-local rank % device_count) -- correct only for the
+            # world group (group-local == global rank). For a subgroup the
+            # group-local rank differs from the rank's physical device, so the
+            # comm (and its lazy P2P pair comms) would be created on the wrong
+            # device, causing illegal memory access. The default PG's
+            # bound_device_id is this rank's device for every group it joins.
+            if (
+                device_id is not None
+                and device_id.index is not None
+                and device_id.type == torch_device.type
+            ):
+                torch_device = device_id
             logger.warning(
                 "Using TorchComms backend (enabled via %s) for device %s with backend %s",
                 "TORCH_DISTRIBUTED_USE_TORCHCOMMS env var"
@@ -2813,10 +2832,19 @@ def destroy_process_group(group: ProcessGroup | None = None):
         _world.group_count = 0
     else:
         if _TORCHCOMM_AVAILABLE:
+            # A single comm may be shared across multiple device types (e.g. a
+            # gloo group reports both 'cuda' and 'cpu' device types backed by the
+            # same _BackendWrapper). Deduplicate by comm identity so we finalize
+            # each comm exactly once — finalize() is not idempotent and raises
+            # "already finalized" on a second call.
+            finalized_comm_ids: set[int] = set()
             for device_type in pg._device_types:
                 backend = pg._get_backend(device_type)
                 if isinstance(backend, _BackendWrapper):
-                    backend.get_comm().finalize()
+                    comm = backend.get_comm()
+                    if id(comm) not in finalized_comm_ids:
+                        comm.finalize()
+                        finalized_comm_ids.add(id(comm))
             _world.comms.clear()
         pg.shutdown()
         del _world.pg_map[pg]
@@ -5861,8 +5889,16 @@ def _create_process_group_wrapper(
 # helper function for hashing a list of ranks to a unique string
 def _hash_ranks_to_str(ranks: list[int]) -> str:
     rank_join: str = "_".join(map(str, ranks))
-    # In case there is already a PG with the same rank composition
-    unique_str = "_".join([rank_join, str(len(_world.pg_names))])
+    # Disambiguate multiple PGs with the same rank composition. The salt MUST be
+    # identical across all ranks that create this group, otherwise ranks compute
+    # different group names for the same group. Backends that use the group name
+    # as a rendezvous store prefix (e.g. Gloo split's connectFullMesh) then key
+    # off different prefixes and deadlock. len(_world.pg_names) is NOT safe here:
+    # it diverges across ranks after an earlier asymmetric-membership new_group()
+    # (non-member ranks register fewer PGs). _world.group_count is incremented by
+    # _process_group_name() on every rank that reaches it (before the member
+    # check), so it stays consistent and monotonic across ranks.
+    unique_str = "_".join([rank_join, str(_world.group_count)])
     return hashlib.sha1(bytes(unique_str, "utf-8"), usedforsecurity=False).hexdigest()
 
 
@@ -5888,8 +5924,12 @@ def _process_group_name(ranks, use_hashed_name) -> GroupName:
         pg_name = GroupName(_hash_ranks_to_str(ranks))
     else:
         pg_name = GroupName(str(_world.group_count))
-        _world.group_count += 1
-    # TODO: why is group count incremented only in the else path?
+    # Increment on BOTH paths so group_count advances once per group-creation
+    # call on every rank that reaches here. This keeps it a collective-consistent,
+    # monotonic counter usable as the uniqueness salt in _hash_ranks_to_str
+    # (see the comment there). Names need only be unique, not contiguous, so the
+    # hashed path consuming counter values is harmless for the non-hashed names.
+    _world.group_count += 1
     return pg_name
 
 
@@ -6228,72 +6268,13 @@ def new_group(
     same global creation order.
 
     N.B. When TorchComms is enabled (``torch.distributed.config.use_torchcomms``
-    / ``TORCH_DISTRIBUTED_USE_TORCHCOMMS=1``), this function delegates to
-    :func:`split_group` so subgroup creation goes through the TorchComms path.
-    The delegation raises ``NotImplementedError`` for arguments that
-    :func:`split_group` cannot honor (e.g. ``use_local_synchronization=True``,
-    ``sort_ranks=False``, or an explicit ``device_id`` that diverges from the
-    default group's bound device).
+    / ``TORCH_DISTRIBUTED_USE_TORCHCOMMS=1``), subgroups are created directly via
+    TorchComms' ``new_comm`` (the normal ``_new_group_with_tag`` path), not by
+    splitting the parent communicator. Pass ``backend="nccl-lazy"`` to build a
+    per-peer, lazily-initialized group (a dedicated comm + stream per send/recv
+    peer, like ``ProcessGroupNCCL``) so concurrent P2P to different peers can
+    overlap; pass the default / ``"nccl"`` backend for an eager group.
     """
-    if _use_torchcomms_enabled() and _torchcomms_handles_backend(backend):
-        # split_group can only split the parent's existing communicator, so it
-        # cannot produce a child whose backend differs from the parent's. A
-        # "fake" subgroup of a real parent -- how DeviceMesh creates disabled /
-        # unflattened dims, with use_local_synchronization for hashed names -- is
-        # exactly that case: route it through the normal path, which builds the
-        # FakeProcessGroup directly (see ``_new_group_with_tag``). When the
-        # requested backend matches the parent (including a fake parent), split
-        # delegation is fine.
-        parent_backend, _ = _world.pg_map[_get_default_group()]
-        is_fake_subgroup = (
-            backend is not None
-            and str(backend).lower() == "fake"
-            and str(backend).lower() != str(parent_backend).lower()
-        )
-        # Members-only + lazy init (use_local_synchronization=True, no device_id)
-        # cannot be expressed through split_group, which always produces an eager
-        # child over the full parent group. Instead, route through the normal
-        # new_group machinery with the "nccl-lazy" backend: that builds a
-        # per-peer group directly via new_comm (the lazy semantics map to
-        # torchcomms' "nccl-lazy" backend, the members-only semantics to
-        # use_local_synchronization's rank-subset bootstrap). Excludes the
-        # fake-subgroup case above, which DeviceMesh also creates with
-        # use_local_synchronization=True but must stay a FakeProcessGroup.
-        if use_local_synchronization and device_id is None and not is_fake_subgroup:
-            if _get_default_group().bound_device_id is None:
-                raise ValueError(
-                    "new_group with use_local_synchronization=True and no "
-                    "device_id requires the default process group to be "
-                    "device-bound; pass device_id=... to init_process_group so "
-                    "a lazy per-peer group can select its device."
-                )
-            group_ranks = (
-                list(range(get_world_size())) if ranks is None else list(ranks)
-            )
-            if get_rank() not in group_ranks:
-                return GroupMember.NON_GROUP_MEMBER
-            return _new_group_with_tag(
-                group_ranks,
-                timeout,
-                Backend.NCCL_LAZY,
-                pg_options,
-                None,
-                use_local_synchronization=True,
-                group_desc=group_desc,
-                sort_ranks=sort_ranks,
-            )
-        if not is_fake_subgroup:
-            return _new_group_via_split_group(
-                ranks=ranks,
-                timeout=timeout,
-                backend=backend,
-                pg_options=pg_options,
-                use_local_synchronization=use_local_synchronization,
-                group_desc=group_desc,
-                device_id=device_id,
-                sort_ranks=sort_ranks,
-            )
-
     return _new_group_with_tag(
         ranks,
         timeout,
@@ -6304,117 +6285,6 @@ def new_group(
         group_desc=group_desc,
         device_id=device_id,
         sort_ranks=sort_ranks,
-    )
-
-
-def _new_group_via_split_group(
-    ranks,
-    timeout,
-    backend,
-    pg_options,
-    use_local_synchronization,
-    group_desc,
-    device_id,
-    sort_ranks,
-):
-    """Implement `new_group` semantics on top of `split_group`.
-
-    Used on the TorchComms path so subgroup creation goes through
-    :func:`split_group`. Raises ``NotImplementedError`` (or ``ValueError``
-    for inconsistent args) when the requested ``new_group`` configuration
-    cannot be expressed through ``split_group``.
-    """
-    if use_local_synchronization:
-        raise NotImplementedError(
-            "new_group cannot delegate to split_group with "
-            "use_local_synchronization=True; split_group requires all ranks "
-            "in the parent group to participate."
-        )
-    if not sort_ranks:
-        raise NotImplementedError(
-            "new_group cannot delegate to split_group with sort_ranks=False; "
-            "split_group always sorts the ranks of each subgroup."
-        )
-
-    default_pg = _get_default_group()
-    if device_id is not None:
-        bound = default_pg.bound_device_id
-        if bound is not None and device_id != bound:
-            raise ValueError(
-                f"device_id={device_id} does not match the default process "
-                f"group's bound_device_id={bound}; split_group inherits the "
-                "default group's device binding."
-            )
-
-    global_world_size = default_pg.size()
-    if ranks is None:
-        group_ranks = list(range(global_world_size))
-    else:
-        group_ranks = sorted(ranks)
-
-    # Auto-qualify the requested backend so it always names just the parent's
-    # default device backend (the one matching ``bound_device_id``) plus any
-    # explicitly-requested extra device entry.
-    #
-    # split_group's filter has two requirements:
-    #   (1) it must contain the parent's default device backend, and
-    #   (2) device entries it omits are not included in the new subgroup.
-    #
-    # The naive default (``backend=None``) inherits the parent's full set,
-    # which creates an extra gloo comm per subgroup on every nccl-with-gloo
-    # parent — expensive and racy. Explicitly narrowing to the default
-    # device backend gives every torchcomms caller the same single-backend
-    # subgroup they almost always want, while still letting an explicit
-    # device-qualified string (``"cpu:gloo,cuda:nccl"``) opt back into the
-    # multi-backend behavior
-    bound = default_pg.bound_device_id
-    if bound is not None and (backend is None or ":" not in str(backend)):
-        parent_backend_str, _ = _world.pg_map[default_pg]
-        parent_devices = {d.type for d in default_pg._device_types}
-        parent_device_backends = _parse_backend_string(
-            parent_backend_str, available_devices=parent_devices
-        )
-        default_dev = bound.type
-        default_be = parent_device_backends.get(default_dev)
-        if default_be is not None:
-            if backend is None:
-                # Inherit just the default-device backend, not all parent
-                # device backends.
-                backend = f"{default_dev}:{default_be}"
-            else:
-                bare = str(backend)
-                matched_device = next(
-                    (d for d, be in parent_device_backends.items() if be == bare),
-                    None,
-                )
-                if matched_device is not None:
-                    qualified: dict[str, str] = {matched_device: bare}
-                    backend = ",".join(f"{d}:{b}" for d, b in qualified.items())
-
-    # Non-members participate in the split collective by passing [] to
-    # each backend (NOCOLOR for nccl, no-op for gloo).
-    # ProcessGroup::splitGroup can't be used here because it passes the
-    # member ranks list to TorchComm::split, which rejects non-empty
-    # ranks lists that don't include the calling rank.
-    if default_pg.rank() not in group_ranks:
-        group_name = _process_group_name(group_ranks, use_hashed_name=True)
-        for device in default_pg._device_types:
-            be = default_pg._get_backend(device)
-            if not be.supports_splitting:
-                continue
-            store = PrefixStore(f"{group_name}/", default_pg.get_group_store())
-            opts = be.options
-            opts.group_name = group_name
-            be.split(store, [], opts)
-        return GroupMember.NON_GROUP_MEMBER
-
-    return split_group(
-        parent_pg=default_pg,
-        split_ranks=[group_ranks],
-        timeout=timeout,
-        pg_options=pg_options,
-        group_desc=group_desc,
-        backend=backend,
     )
 
 

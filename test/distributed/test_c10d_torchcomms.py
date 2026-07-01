@@ -221,10 +221,11 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
         # If we reach this point, the barrier succeeded without deadlock
         self.assertTrue(True)
 
-    def test_new_group_delegates_to_split_group(self):
-        # Under torchcomms, `new_group` routes through `split_group`. The
-        # resulting subgroup must contain the requested ranks and be usable
-        # for collectives.
+    def test_new_group_creates_subgroup(self):
+        # Under torchcomms, `new_group` builds the subgroup directly via
+        # `new_comm` (a members-only store rendezvous), not by splitting the
+        # parent. The resulting subgroup must contain the requested ranks and be
+        # usable for collectives; non-members get NON_GROUP_MEMBER.
         subg_ranks = list(range(self.world_size // 2))
         ng = dist.new_group(ranks=subg_ranks)
 
@@ -235,16 +236,6 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
             self.assertEqual(tensor.item(), sum(r + 1 for r in subg_ranks))
         else:
             self.assertIs(ng, dist.GroupMember.NON_GROUP_MEMBER)
-
-    def test_new_group_via_split_group_raises_on_unsupported_args(self):
-        # `split_group` has a narrower surface than `new_group`; under
-        # torchcomms the delegation must surface that mismatch instead of
-        # silently falling back to the legacy path. (``use_local_synchronization``
-        # is now a supported path -- it builds a lazy per-peer group -- so only
-        # ``sort_ranks=False`` remains unsupported here.)
-        ranks = list(range(self.world_size))
-        with self.assertRaisesRegex(NotImplementedError, "sort_ranks"):
-            dist.new_group(ranks=ranks, sort_ranks=False)
 
     def test_new_group_backend_none_narrows_to_default_device(self):
         ranks = list(range(self.world_size))
@@ -366,12 +357,15 @@ class TestC10dTorchCommsInitAutoQualify(C10dTorchCommsTestBase):
         self.assertIsNotNone(default_pg.bound_device_id)
         self.assertEqual(default_pg.bound_device_id.type, "cuda")
 
-    def test_new_group_use_local_synchronization_builds_lazy_group(self):
-        # use_local_synchronization=True with no device_id builds a members-only,
-        # lazily-initialized per-peer ("nccl-lazy") group usable for P2P. The
-        # parent must be device-bound (it is, in this class).
+    def test_new_group_nccl_lazy_builds_per_peer_group(self):
+        # Passing backend="nccl-lazy" builds a per-peer, lazily-initialized
+        # group (a dedicated comm + stream per send/recv peer) usable for P2P.
+        # use_local_synchronization makes it members-only. The parent must be
+        # device-bound (it is, in this class).
         ranks = list(range(self.world_size))
-        g = dist.new_group(ranks=ranks, use_local_synchronization=True)
+        g = dist.new_group(
+            ranks=ranks, backend="nccl-lazy", use_local_synchronization=True
+        )
         self.assertEqual(dist.get_process_group_ranks(g), ranks)
         # P2P round-trip over the lazy group: 0 -> 1 -> ... -> 0
         dev = torch.device(f"cuda:{self.rank}")
@@ -418,15 +412,14 @@ instantiate_device_type_tests(
 
 
 @unittest.skipIf(not _TORCHCOMM_AVAILABLE, "TorchComms is not installed")
-class TestC10dTorchCommsSplitMixedBackends(C10dTorchCommsTestBase):
-    """Verify split skips parent backends that don't support splitting.
+class TestC10dTorchCommsMixedBackends(C10dTorchCommsTestBase):
+    """Verify subgroup creation from a mixed-backend parent under torchcomms.
 
-    The parent PG mixes ``cuda:nccl`` (a torchcomms ``BackendWrapper`` that
-    supports splitting) with ``cpu:fake`` (a plain ``FakeProcessGroup`` that
-    does not).  When a rank is *not* a member of a new subgroup,
-    ``_new_group_via_split_group`` calls ``Backend.split(store, [], opts)``
-    on each parent device backend, skipping those where
-    ``supports_splitting`` is False.
+    The parent PG mixes ``cuda:nccl`` with ``cpu:fake``. Under torchcomms,
+    ``new_group`` builds each subgroup directly via ``new_comm`` (a members-only
+    store rendezvous), so a non-splittable device backend in the parent (here
+    ``cpu:fake``) is no obstacle: members construct the subgroup and non-members
+    return ``NON_GROUP_MEMBER`` without any parent split.
     """
 
     @classmethod
@@ -457,14 +450,7 @@ class TestC10dTorchCommsSplitMixedBackends(C10dTorchCommsTestBase):
     def _rank_value(self):
         return self.rank + 1
 
-    def test_parent_has_backend_without_split_support(self):
-        default_pg = dist.distributed_c10d._get_default_group()
-        cpu_be = default_pg._get_backend(torch.device("cpu"))
-        cuda_be = default_pg._get_backend(torch.device("cuda"))
-        self.assertFalse(cpu_be.supports_splitting)
-        self.assertTrue(cuda_be.supports_splitting)
-
-    def test_split_skips_backend_without_split_support(self):
+    def test_mixed_backend_subgroup(self):
         subg_ranks = list(range(self.world_size // 2))
         ng = dist.new_group(ranks=subg_ranks)
 
@@ -478,7 +464,7 @@ class TestC10dTorchCommsSplitMixedBackends(C10dTorchCommsTestBase):
 
 
 instantiate_device_type_tests(
-    TestC10dTorchCommsSplitMixedBackends, globals(), only_for=["cuda"]
+    TestC10dTorchCommsMixedBackends, globals(), only_for=["cuda"]
 )
 
 
