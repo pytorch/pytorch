@@ -99,7 +99,7 @@ from torch.utils.weak import TensorWeakRef
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Generator, Iterator, Sequence
+    from collections.abc import Callable, Generator, Iterable, Iterator, Sequence
 
     from torch._guards import CompileId
     from torch._inductor.utils import InputType
@@ -507,6 +507,7 @@ def cudagraphify(
     placeholders: tuple[PlaceholderInfo, ...] = (),
     mutated_input_idxs: tuple[int, ...] = (),
     kernel_free_cudagraph: bool = False,
+    user_visible_output_idxs: tuple[int, ...] = (),
     compile_id: CompileId | None = None,
 ) -> tuple[ModelType, OutputType]:
     if is_backward and is_inference:
@@ -530,6 +531,7 @@ def cudagraphify(
         placeholders,
         mutated_input_idxs,
         kernel_free_cudagraph,
+        user_visible_output_idxs,
         compile_id,
     )
 
@@ -681,6 +683,14 @@ def map_to_ref(t: Tensor | None) -> StorageWeakRefWrapper | None:
 # A path index of (depth, offset) indices into a graph that is `depth`` number of nodes from the root
 # at graph output offset
 PathOutputIndex = tuple[int, int]
+# Cached per-node lists and output index to check for user-visible output cloning.
+PathUserVisibleOutputEntry = tuple[
+    list[StorageWeakRefWrapper | None],
+    list[TensorWeakRef | None],
+    list[Tensor | None] | None,
+    int,
+]
+PathUserVisibleStorageGroup = tuple[PathUserVisibleOutputEntry, ...]
 
 # For each node in the path, for each output, is the output alive
 PathLiveness = list[list[bool]]
@@ -720,6 +730,7 @@ class CUDAWarmupNode:
         id: GraphID,
     ) -> None:
         self.wrapped_function = wrapped_function
+        self.user_visible_output_idxs = wrapped_function.user_visible_output_idxs
         self.parent: CUDAGraphNode | CUDAWarmupNode | None = parent
         self.cuda_graphs_pool = cuda_graphs_pool
         self.outputs_weakrefs: list[StorageWeakRefWrapper | None] = []
@@ -731,6 +742,12 @@ class CUDAWarmupNode:
         self.stream = stream
         self.already_warm = already_warm
         self.id = id
+
+    @functools.cached_property
+    def path_user_visible_storage_groups(
+        self,
+    ) -> tuple[PathUserVisibleStorageGroup, ...]:
+        return collect_path_user_visible_storage_groups(tuple(self._path_from_root))
 
     def run(self, new_inputs: Any) -> OutputType:
         if self.has_run:
@@ -922,6 +939,7 @@ class CUDAGraphNode:
             )
 
         self.wrapped_function = wrapped_function
+        self.user_visible_output_idxs = wrapped_function.user_visible_output_idxs
         self.id = id
         self.device = device_index
         self.stack_traces = stack_traces
@@ -1122,8 +1140,6 @@ class CUDAGraphNode:
         self.output_storage_alias: OutputList[OutputAliasInfo | None] = []
 
         # is the output Storage unaliased in subsequent outputs, of all subsequent paths
-        # if it is, we cached the output tensor and adjust storage liveness tracking to also
-        # check if the output tensor does not have an additional python reference.
         # If a descendant node discovers it has an alias of a prior output, then the output
         # will no longer be cached in the ancestor.
         # The large majority of tensors are unaliased, and preserving aliased output tensors would add
@@ -1162,6 +1178,12 @@ class CUDAGraphNode:
 
         if self.graph is not None:
             self.graph.replay()
+
+    @functools.cached_property
+    def path_user_visible_storage_groups(
+        self,
+    ) -> tuple[PathUserVisibleStorageGroup, ...]:
+        return collect_path_user_visible_storage_groups(tuple(self._path_from_root))
 
     def _copy_inputs_and_remove_from_src(
         self, dsts: list[InputType], srcs: list[InputType]
@@ -1252,6 +1274,7 @@ class CUDAGraphNode:
             self._initialize_cached_tensors()
 
         outputs: OutputType = []
+        user_visible_output_idxs = self.user_visible_output_idxs
 
         for i, (storage_info, metadata) in enumerate(
             zip(self.output_storage_alias, self.outputs_metadata)
@@ -1303,6 +1326,8 @@ class CUDAGraphNode:
             if w is None:
                 raise AssertionError("expected w to not be None")
             w.swap_weakref(out.untyped_storage()._weak_ref())
+            if user_visible_output_idxs and i in user_visible_output_idxs:
+                self.tensor_weakrefs[i] = TensorWeakRef(out)
 
         return outputs
 
@@ -1573,7 +1598,6 @@ class CUDAGraphNode:
             raise AssertionError(
                 "expected len(outputs_weakrefs) == len(outputs_metadata)"
             )
-
         for i, (storage_info, metadata, make_cached) in enumerate(
             zip(
                 self.output_storage_alias,
@@ -1988,6 +2012,85 @@ class CUDAGraphNode:
         return num_desc
 
 
+def canonical_path_output_index(
+    node: CUDAGraphNode | CUDAWarmupNode, depth: int, idx: int
+) -> PathOutputIndex:
+    if isinstance(node, CUDAGraphNode):
+        alias_info = node.output_storage_alias[idx]
+        if isinstance(alias_info, AliasesPriorGraphOutput):
+            return alias_info.index
+        if isinstance(alias_info, AliasesNewOutput):
+            return (depth, alias_info.index)
+    return (depth, idx)
+
+
+def collect_path_user_visible_storage_groups(
+    path: tuple[CUDAGraphNode | CUDAWarmupNode, ...],
+) -> tuple[PathUserVisibleStorageGroup, ...]:
+    """Return path storage-alias groups for user-visible output cloning.
+
+    Starts from user-visible outputs, then includes outputs on the same path
+    that may alias those outputs by recorded storage pointer or alias metadata.
+    This is cached per node path so aliases discovered on a different tree path
+    do not affect the current generation transition.
+    """
+    selected_outputs: OrderedSet[PathOutputIndex] = OrderedSet()
+    selected_alias_outputs: OrderedSet[PathOutputIndex] = OrderedSet()
+    selected_data_ptrs: OrderedSet[int] = OrderedSet()
+
+    # First, collect storage pointers and canonical outputs referenced by
+    # user-visible outputs.
+    for depth, node in enumerate(path):
+        for idx in node.user_visible_output_idxs:
+            if idx >= len(node.outputs_weakrefs):
+                raise AssertionError(
+                    "expected user_visible_output_idxs to index outputs_weakrefs"
+                )
+            selected_outputs.add((depth, idx))
+            selected_alias_outputs.add(canonical_path_output_index(node, depth, idx))
+
+            storage_ref = node.outputs_weakrefs[idx]
+            if storage_ref is not None:
+                selected_data_ptrs.add(storage_ref.data_ptr())
+
+    # Then, collect outputs that may alias a user-visible output.
+    for depth, node in enumerate(path):
+        for idx, storage_ref in enumerate(node.outputs_weakrefs):
+            output_index = (depth, idx)
+
+            alias_index = canonical_path_output_index(node, depth, idx)
+            if (
+                output_index in selected_outputs
+                or alias_index in selected_alias_outputs
+                or storage_ref is not None
+                and storage_ref.data_ptr() in selected_data_ptrs
+            ):
+                selected_outputs.add(output_index)
+
+    entries_by_data_ptr: dict[int, list[PathUserVisibleOutputEntry]] = {}
+    for depth, idx in selected_outputs:
+        node = path[depth]
+        output_weakrefs = node.outputs_weakrefs
+        storage_ref = output_weakrefs[idx]
+        if storage_ref is None:
+            continue
+
+        cached_tensor_outputs = (
+            node.cached_tensor_outputs if isinstance(node, CUDAGraphNode) else None
+        )
+        data_ptr = storage_ref.data_ptr()
+        entries_by_data_ptr.setdefault(data_ptr, []).append(
+            (
+                output_weakrefs,
+                node.tensor_weakrefs,
+                cached_tensor_outputs,
+                idx,
+            )
+        )
+
+    return tuple(tuple(entries) for entries in entries_by_data_ptr.values())
+
+
 def get_cudagraph_segments(pool_id: tuple[int, int]) -> Any:
     segments = torch.cuda.memory_snapshot()
     return [segment for segment in segments if segment["segment_pool_id"] == pool_id]
@@ -2249,6 +2352,7 @@ class CUDAGraphTreeManager:
 
         self.id_to_mode: dict[FunctionID, CompilationMode] = {}
         self.id_to_compile_id: dict[FunctionID, CompileId | None] = {}
+        self.has_live_user_visible_output_cloning = False
 
         # Note: [Backward Generation Handling]
         # We generally perform a sequence of forward executions followed by backward executions.
@@ -2348,6 +2452,20 @@ class CUDAGraphTreeManager:
 
         if self.in_warmup:
             self.try_end_curr_warmup(function_id)
+
+        if (
+            self.has_live_user_visible_output_cloning
+            and self.path_state == ExecutionState.EXECUTION
+        ):
+            curr_generation = self.get_curr_generation()
+            # current_node is cleared lazily, so the first invocation in a new
+            # generation may still see children from the previous generation.
+            # Enforce the existing generation boundary before matching children.
+            if self.in_new_torch_compile_invocation(curr_generation):
+                self.try_end_curr_execution(
+                    curr_generation,
+                    skip_dead_output_cleanup=True,
+                )
 
         node_id = self._get_node_id()
         if function_id not in self.non_cudagraph_managed_mutation_hint[node_id]:
@@ -2606,12 +2724,18 @@ class CUDAGraphTreeManager:
         placeholders: tuple[PlaceholderInfo, ...],
         mutated_input_idxs: tuple[int, ...],
         kernel_free_cudagraph: bool,
+        user_visible_output_idxs: tuple[int, ...],
         compile_id: CompileId | None,
     ) -> tuple[
         ModelType,
         OutputType,
     ]:
         id = self.new_func_id()
+        if mode == CompilationMode.BACKWARD:
+            user_visible_output_idxs = ()
+        user_visible_output_idxs_set = frozenset(user_visible_output_idxs)
+        if user_visible_output_idxs_set:
+            self.has_live_user_visible_output_cloning = True
         self.ids_to_stack_traces[id] = stack_traces
         self.ids_to_funcs[id] = WrappedFunction(
             model,
@@ -2621,6 +2745,7 @@ class CUDAGraphTreeManager:
             placeholders,
             mutated_input_idxs,
             kernel_free_cudagraph,
+            user_visible_output_idxs_set,
         )
         self.id_to_mode[id] = mode
         self.id_to_compile_id[id] = compile_id
@@ -2666,8 +2791,8 @@ class CUDAGraphTreeManager:
     def user_invoked_mark_step() -> bool:
         return MarkStepBox.mark_step_counter != 0
 
-    def can_start_new_generation(self) -> bool:
-        if not self.in_new_torch_compile_invocation():
+    def can_start_new_generation(self, curr_generation: int | None = None) -> bool:
+        if not self.in_new_torch_compile_invocation(curr_generation):
             return False
 
         if self.user_invoked_mark_step():
@@ -2675,8 +2800,116 @@ class CUDAGraphTreeManager:
 
         return not self.running_forwards_with_pending_backwards
 
-    def in_new_torch_compile_invocation(self) -> bool:
-        return self.current_gen != self.get_curr_generation()
+    def in_new_torch_compile_invocation(
+        self, curr_generation: int | None = None
+    ) -> bool:
+        if curr_generation is None:
+            curr_generation = self.get_curr_generation()
+        return self.current_gen != curr_generation
+
+    def _clone_current_path_live_user_visible_outputs(self) -> None:
+        if self.current_node is None:
+            raise AssertionError("expected current_node to not be None")
+        path_user_visible_storage_groups = (
+            self.current_node.path_user_visible_storage_groups
+        )
+        if not path_user_visible_storage_groups:
+            return
+
+        storages_to_clone: list[
+            tuple[StorageWeakRefPointer, PathUserVisibleStorageGroup]
+        ] = []
+
+        for output_entries in path_user_visible_storage_groups:
+            for (
+                output_weakrefs,
+                _tensor_weakrefs,
+                _cached_tensor_outputs,
+                idx,
+            ) in output_entries:
+                storage_and_ptr = maybe_deref(output_weakrefs[idx])
+                if storage_and_ptr is not None:
+                    storage_ptr, _data_ptr = storage_and_ptr
+                    storages_to_clone.append((storage_ptr, output_entries))
+                    break
+
+        if storages_to_clone:
+            self._clone_live_user_visible_storages(storages_to_clone)
+
+    def _clone_live_user_visible_storages(
+        self,
+        storages_to_clone: Iterable[
+            tuple[
+                StorageWeakRefPointer,
+                PathUserVisibleStorageGroup,
+            ]
+        ],
+    ) -> None:
+        replacements: list[
+            tuple[
+                UntypedStorage,
+                UntypedStorage,
+                PathUserVisibleStorageGroup,
+            ]
+        ] = []
+
+        with torch.cuda.device(self.device_index):
+            source_tensors = []
+            replacement_tensors = []
+
+            for storage_ptr, entries in storages_to_clone:
+                source_storage = torch.UntypedStorage._new_with_weak_ptr(storage_ptr)
+                replacement = torch.empty(
+                    (source_storage.nbytes(),),
+                    dtype=torch.uint8,
+                    device=source_storage.device,
+                )
+                replacement_storage = replacement.untyped_storage()
+                source_tensors.append(
+                    torch.empty(
+                        (), dtype=torch.uint8, device=source_storage.device
+                    ).set_(source_storage, 0, (source_storage.nbytes(),), (1,))
+                )
+                replacement_tensors.append(replacement)
+                replacements.append((source_storage, replacement_storage, entries))
+
+            torch._foreach_copy_(replacement_tensors, source_tensors)
+
+            for source_storage, replacement_storage, entries in replacements:
+                # pyrefly: ignore[missing-attribute]
+                source_storage._swap_data_ptr_(replacement_storage)
+                placeholder_weakrefs = [
+                    replacement_storage._weak_ref() for _ in entries
+                ]
+
+                # Warmup/recording storages own the graph-pool block after
+                # the swap. Reconstructed replay storages are non-owning.
+                if torch._C._has_Standard_Deleter(replacement_storage._cdata):
+                    torch._C._free_And_Remove_DeleterFn(replacement_storage._cdata)
+                torch._C._set_storage_data_ptr_access_error_msg(
+                    replacement_storage._cdata,
+                    "CUDAGraph output storage was cloned before a new generation.",
+                )
+
+                for (
+                    output_weakrefs,
+                    tensor_weakrefs,
+                    cached_tensor_outputs,
+                    idx,
+                ), placeholder_weakref in zip(
+                    entries, placeholder_weakrefs, strict=True
+                ):
+                    cached_t = (
+                        cached_tensor_outputs[idx] if cached_tensor_outputs else None
+                    )
+                    output_ref = cast(StorageWeakRefWrapper, output_weakrefs[idx])
+                    tensor_weakrefs[idx] = None
+                    output_ref.remove_extra_reference()
+                    output_ref.swap_weakref(placeholder_weakref)
+
+                    if cached_tensor_outputs is not None and cached_t is not None:
+                        torch._C._remove_cached_tensor(cached_t)
+                        cached_tensor_outputs[idx] = None
 
     def try_end_curr_recording(self, function_id: FunctionID) -> None:
         """
@@ -2691,8 +2924,10 @@ class CUDAGraphTreeManager:
 
         # multiple invocations, allow overwriting the previous generation
         if self.can_start_new_generation():
-            self.dealloc_current_path_weakrefs()
-            self.clear_current_path_state_and_set_to_none()
+            self.clear_current_path_state_and_set_to_none(
+                clone_live_user_visible_outputs=True,
+                dealloc_current_path_weakrefs=True,
+            )
             return
 
         if self.current_node.all_outputs_are_dead():
@@ -2701,7 +2936,12 @@ class CUDAGraphTreeManager:
 
         self.check_warn_on_unable_to_start_executing(function_id)
 
-    def try_end_curr_execution(self) -> None:
+    def try_end_curr_execution(
+        self,
+        curr_generation: int | None = None,
+        *,
+        skip_dead_output_cleanup: bool = False,
+    ) -> None:
         """
         Check if the current executing node can be terminated, either because all outputs of the
         previously executed node are dead or because it was executed in a different generation.
@@ -2713,21 +2953,27 @@ class CUDAGraphTreeManager:
         if self.current_node is None:
             return
 
-        if self.can_start_new_generation():
-            self.clear_current_path_state_and_set_to_none()
+        if self.can_start_new_generation(curr_generation):
+            self.clear_current_path_state_and_set_to_none(
+                clone_live_user_visible_outputs=True
+            )
+            return
+
+        if skip_dead_output_cleanup:
             return
 
         if self.current_node.all_outputs_are_dead():
             self.clear_current_path_state_and_set_to_none()
 
     def try_end_curr_warmup(self, function_id: FunctionID) -> None:
+        if self.current_node is None:
+            raise AssertionError("expected current_node to not be None")
         if self.can_start_new_generation():
+            self._clone_current_path_live_user_visible_outputs()
             self.dealloc_current_path_weakrefs()
             self.current_node = None
             return
 
-        if self.current_node is None:
-            raise AssertionError("expected current_node to not be None")
         if self.current_node.all_outputs_are_dead():
             self.current_node = None
             return
@@ -2792,8 +3038,12 @@ class CUDAGraphTreeManager:
         return (
             "Error: accessing tensor output of CUDAGraphs that has been overwritten by a subsequent run. "
             f"Stack trace: {stack_trace}. "
-            "To prevent overwriting, clone the tensor outside of torch.compile() "
-            "or call torch.compiler.cudagraph_mark_step_begin() before each model invocation."
+            "To prevent overwriting, call torch.compiler.cudagraph_mark_step_begin() "
+            "before each model invocation. If a tensor is a user-visible output "
+            "that must remain live across generations, manually clone the tensor "
+            "outside torch.compile(), or set torch._inductor.config.triton."
+            "cudagraph_trees_generation_cloning = 'user_visible' to clone all "
+            "user-visible tensors that persist across generations."
         )
 
     def dealloc_current_path_weakrefs(self) -> None:
@@ -2865,11 +3115,20 @@ class CUDAGraphTreeManager:
 
                 torch._C._set_storage_data_ptr_access_error_msg(_storage_deref, msg)
 
-    def clear_current_path_state_and_set_to_none(self) -> None:
+    def clear_current_path_state_and_set_to_none(
+        self,
+        *,
+        clone_live_user_visible_outputs: bool = False,
+        dealloc_current_path_weakrefs: bool = False,
+    ) -> None:
         if not isinstance(self.current_node, CUDAGraphNode):
             raise AssertionError(
                 f"expected current_node to be a CUDAGraphNode, got {type(self.current_node)}"
             )
+        if clone_live_user_visible_outputs:
+            self._clone_current_path_live_user_visible_outputs()
+        if dealloc_current_path_weakrefs:
+            self.dealloc_current_path_weakrefs()
         self.current_node.clear_path_state()
         self.current_node = None
 

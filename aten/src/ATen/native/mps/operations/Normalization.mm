@@ -114,9 +114,8 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out(const Tensor& self,
                               save_var);
   }
 
-  TORCH_CHECK_NOT_IMPLEMENTED(self.scalar_type() != kLong, "Long batch norm is not supported with MPS");
-  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(self.scalar_type()),
-                              "Batch norm for complex is not supported for MPS");
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      isFloatingType(self.scalar_type()), "batch_norm is not implemented for ", self.scalar_type(), " on MPS");
   using namespace at::native::mps;
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
@@ -873,7 +872,11 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
       newCachedGraph->gradBiasTensor_ = gradBiasTensor;
     });
 
-    auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input, input_shape);
+    // For channels_last, input_shape is the NHWC-packed shape; feed the raw buffer directly instead of
+    // viewing the NCHW tensor to NHWC (which view() rejects). Mirrors the forward pass.
+    const auto needs_gather = memory_format != MemoryFormat::ChannelsLast;
+    auto inputPlaceholder =
+        Placeholder(cachedGraph->inputTensor_, input, input_shape, needs_gather, MPSDataTypeInvalid, needs_gather);
     auto gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, grad_out, input_shape_readonly);
     auto weightPlaceholder = Placeholder();
     if (has_weight)
@@ -893,7 +896,8 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
 
     auto gradInputPlaceholder = Placeholder();
     if (grad_input_mask[0])
-      gradInputPlaceholder = Placeholder(cachedGraph->gradInputTensor_, grad_input, input_shape);
+      gradInputPlaceholder =
+          Placeholder(cachedGraph->gradInputTensor_, grad_input, input_shape, false, MPSDataTypeInvalid, needs_gather);
     auto gradWeightPlaceholder = Placeholder();
     if (grad_input_mask[1])
       gradWeightPlaceholder = Placeholder(cachedGraph->gradWeightTensor_, grad_weight);
