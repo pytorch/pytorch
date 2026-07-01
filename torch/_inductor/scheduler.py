@@ -401,19 +401,28 @@ class MixOrderReduction:
             ):
                 return False
 
-            # We require more more row than columns since
-            # 1, we prefer doing persistent reduction for each row
-            # 2, we will split the reduction across the rows
-            if not V.graph.sizevars.evaluate_expr(
+            # Fuse when either:
+            # 1, ncol is wide enough that the per-row persistent reduction is
+            #    efficient on its own, or
+            # 2, there are at least twice as many rows as columns, so the other
+            #    reduction can be split efficiently across the rows.
+            # Until now, `nrow >= ncol * 2` rejected profitable wide reductions
+            wide_enough = V.graph.sizevars.evaluate_expr(
+                sympy.Ge(ncol, 4096),
+                size_oblivious=True,
+                fallback_value=False,
+            )
+            tall_enough = V.graph.sizevars.evaluate_expr(
                 sympy.Ge(nrow, ncol * 2),
                 size_oblivious=True,
                 fallback_value=False,
-            ):
+            )
+            if not (wide_enough or tall_enough):
                 return False
 
-            # When nrow is small, ncol should also be small (due to the check
-            # above). Thus the entire tensor should be well cached in L2.
-            # Mix order reduction is less beneficial.
+            # Require a minimum number of rows. With few rows there is not
+            # enough parallelism to split the other reduction across, and the
+            # tensor tends to be small enough to stay cached.
             if not V.graph.sizevars.evaluate_expr(
                 sympy.Ge(nrow, 4096),
                 size_oblivious=True,

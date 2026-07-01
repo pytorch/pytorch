@@ -120,6 +120,56 @@ class MixOrderReductionTest(TestBase):
             metrics.codegen_mix_order_reduction,
         )
 
+    @parametrize("shape", ((4096, 8192), (4096, 16384), (8192, 16384)))
+    def test_wide_reduction_fuses_in_strict_mode(self, shape):
+        """A wide reduction (large ncol, nrow < ncol*2) should use mix-order
+        fusion in the default (strict) mode. Fusion now triggers when ncol is
+        wide enough for an efficient per-row persistent reduction.
+        """
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        M, N = shape
+
+        def f(x):
+            return x.sum(dim=1), x.sum(dim=0)
+
+        x = torch.randn(M, N, device=GPU_TYPE, dtype=torch.bfloat16)
+        ref = f(x)
+        act = torch.compile(f)(x)
+
+        self.assertTrue(same(ref, act, tol=1e-2), f"ref:\n{ref}\nact:\n{act}")
+        self.assertEqual(
+            1,
+            metrics.codegen_mix_order_reduction,
+            f"wide reduction {shape} should use mix-order fusion in strict mode",
+        )
+
+    def test_wide_reduction_respects_row_floor(self):
+        """The relaxed wide-reduction path still requires a minimum row count.
+        A wide reduction with too few rows (nrow < 4096) lacks parallelism to
+        split the other reduction across rows and tends to stay L2-resident, so
+        it is left unfused in strict mode. This guards the wide path against
+        over-fusing short tensors (2048x8192).
+        """
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        def f(x):
+            return x.sum(dim=1), x.sum(dim=0)
+
+        # ncol=8192 is wide, but nrow=2048 < 4096 -> conservatively not fused.
+        x = torch.randn(2048, 8192, device=GPU_TYPE, dtype=torch.bfloat16)
+        ref = f(x)
+        act = torch.compile(f)(x)
+
+        self.assertTrue(same(ref, act, tol=1e-2), f"ref:\n{ref}\nact:\n{act}")
+        self.assertEqual(
+            0,
+            metrics.codegen_mix_order_reduction,
+            "wide reduction with too few rows should not fuse in strict mode",
+        )
+
     def test_xmask(self):
         """
         Make sure xmask is setup properly
