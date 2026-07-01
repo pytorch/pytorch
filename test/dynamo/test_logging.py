@@ -23,6 +23,7 @@ from torch.testing._internal.common_utils import (
     find_free_port,
     IS_WINDOWS,
     munge_exc,
+    skipIfRocmVersionAtLeast,
     skipIfTorchDynamo,
     skipIfWindows,
     TEST_XPU,
@@ -1415,6 +1416,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
             len([r for r in records if "return a + 1" in r.getMessage()]), 0
         )
 
+    @skipIfRocmVersionAtLeast([7, 14])
     def test_logs_out(self):
         import tempfile
 

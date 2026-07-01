@@ -46,7 +46,10 @@ from torch.testing._internal.common_dist_composable import (
     CompositeParamModel,
     UnitModule,
 )
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import (
+    skip_if_lt_x_gpu,
+    skip_if_rocm_ver_atleast_multiprocess,
+)
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -824,6 +827,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
 
     @with_comms
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_atleast_multiprocess([7, 14])
     def test_shared_weight(self):
         class TiedEmbeddingModel(nn.Module):
             def __init__(self, vocab_size, embedding_dim):

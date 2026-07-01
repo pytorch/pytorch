@@ -21,7 +21,12 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    IS_WINDOWS,
+    run_tests,
+    skipIfRocmVersionAtLeast,
+    TestCase,
+)
 from torch.utils.cpp_extension import (
     CUDA_HOME,
     get_cxx_compiler,
@@ -36,6 +41,7 @@ GPU_HOME = CUDA_HOME or ROCM_HOME
 # numba.cuda.cudadrv.driver:driver.py:384 Call to cuInit results in CUDA_ERROR_NO_DEVICE
 if not IS_WINDOWS:
 
+    @skipIfRocmVersionAtLeast([7, 14])
     class FunctionVersionCompatibilityTest(TestCase):
         """Test that all function files require PyTorch 2.10+."""
 

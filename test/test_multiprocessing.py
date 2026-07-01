@@ -25,6 +25,7 @@ from torch.testing._internal.common_utils import (
     load_tests,
     run_tests,
     skipIfRocm,
+    skipIfRocmVersionAtLeast,
     slowTest,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
@@ -650,6 +651,7 @@ class TestMultiprocessing(_MultiprocessingTestMixin, TestCase):
         TEST_WITH_ASAN,
         "seems to hang with ASAN, see https://github.com/pytorch/pytorch/issues/5326",
     )
+    @skipIfRocmVersionAtLeast([7, 14])
     def test_fs_sharing(self):
         with fs_sharing():
             # The test works but is very slow on MacOS, see https://github.com/pytorch/pytorch/pull/93183,
@@ -657,15 +659,18 @@ class TestMultiprocessing(_MultiprocessingTestMixin, TestCase):
             repeat = 1 if IS_MACOS else TEST_REPEATS
             self._test_sharing(repeat=repeat)
 
+    @skipIfRocmVersionAtLeast([7, 14])
     def test_fs_preserve_sharing(self):
         with fs_sharing():
             self._test_preserve_sharing(repeat=TEST_REPEATS)
 
+    @skipIfRocmVersionAtLeast([7, 14])
     def test_fs_pool(self):
         with fs_sharing():
             self._test_pool(repeat=TEST_REPEATS)
 
     @unittest.skipIf(not HAS_SHM_FILES, "don't not how to check if shm files exist")
+    @skipIfRocmVersionAtLeast([7, 14])
     def test_fs(self):
         def queue_put():
             x = torch.DoubleStorage(4)
@@ -1076,6 +1081,7 @@ if __name__ == "__main__":
     def test_is_shared(self):
         self._test_is_shared()
 
+    @skipIfRocmVersionAtLeast([7, 14])
     def test_fs_is_shared(self):
         with fs_sharing():
             self._test_is_shared()

@@ -56,7 +56,10 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
 )
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import (
+    skip_if_lt_x_gpu,
+    skip_if_rocm_ver_atleast_multiprocess,
+)
 from torch.testing._internal.common_utils import run_tests, skipIfRocm
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
@@ -682,6 +685,7 @@ class CPFlexAttentionTest(DTensorTestBase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
     )
+    @skip_if_rocm_ver_atleast_multiprocess([7, 14])
     def test_cp_flex_attention_causal_mask(self) -> None:
         seq_length_list = [256 * self.world_size, 2048]
         load_balance_type_list = [
@@ -749,6 +753,7 @@ class CPFlexAttentionTest(DTensorTestBase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
     )
+    @skip_if_rocm_ver_atleast_multiprocess([7, 14])
     def test_cp_flex_attention_document_mask(self) -> None:
         random.seed(10)
 

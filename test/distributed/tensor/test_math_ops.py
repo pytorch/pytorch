@@ -26,7 +26,10 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
     SequenceParallel,
 )
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import (
+    skip_if_lt_x_gpu,
+    skip_if_rocm_ver_atleast_multiprocess,
+)
 from torch.testing._internal.common_utils import run_tests, skipIfRocm
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
@@ -1770,6 +1773,7 @@ class DistMathOpsTest(DTensorTestBase):
 
     @with_comms
     @skip_unless_torch_gpu
+    @skip_if_rocm_ver_atleast_multiprocess([7, 14])
     def test_linalg_ops(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
 

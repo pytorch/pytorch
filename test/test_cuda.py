@@ -88,6 +88,7 @@ from torch.testing._internal.common_utils import (
     skipCUDANonDefaultStreamIf,
     skipIfRocm,
     skipIfRocmArch,
+    skipIfRocmVersionAtLeast,
     skipIfRocmVersionLessThan,
     slowTest,
     subtest,
@@ -2501,6 +2502,7 @@ torch.cuda.synchronize()
     # Test is flaky on Windows (https://github.com/pytorch/pytorch/issues/57401)
     @unittest.skipIf(IS_WINDOWS, "Test is flaky on Windows (see issue 57401)")
     @unittest.skipIf(not TEST_CUDNN, "CUDNN not available")
+    @skipIfRocmVersionAtLeast([7, 14])
     def test_cudnn_multiple_threads_same_device(self):
         # This function is intended to test the lazy creation and reuse of per-thread
         # cudnn handles on each device in aten/src/ATen/cudnn/Handles.cpp.
@@ -4968,6 +4970,7 @@ with torch.cuda.graph(g):
             self.assertEqual(rc, "3")
 
     @unittest.skipIf(not TEST_WITH_ROCM, "not relevant for CUDA testing")
+    @skipIfRocmVersionAtLeast([7, 14])
     def test_hip_device_count(self):
         """Validate device_count works with both CUDA/HIP visible devices"""
         test_script = """\

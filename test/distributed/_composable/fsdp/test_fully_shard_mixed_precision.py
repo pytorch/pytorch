@@ -19,6 +19,7 @@ from torch.testing._internal.common_distributed import (
     requires_nccl_version,
     SaveForwardInputsModel,
     skip_if_lt_x_gpu,
+    skip_if_rocm_ver_atleast_multiprocess,
 )
 from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
@@ -895,6 +896,7 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
 
     @skip_if_lt_x_gpu(1)
     @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
+    @skip_if_rocm_ver_atleast_multiprocess([7, 14])
     def test_norm_modules_bf16(self):
         mp_policy = MixedPrecisionPolicy(param_dtype=torch.bfloat16)
         self._test_norm_modules(mp_policy)

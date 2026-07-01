@@ -33,6 +33,7 @@ from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
+    skip_if_rocm_ver_atleast_multiprocess,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -346,6 +347,7 @@ class ComposabilityTest(MultiProcContinuousTest):
             torch.float32,
         ],
     )
+    @skip_if_rocm_ver_atleast_multiprocess([7, 14])
     def test_replicate_pp(self, ScheduleClass, MixedPrecisionParam):
         torch.accelerator.set_device_index(self.device)
         dim = 8

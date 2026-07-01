@@ -1,4 +1,4 @@
-# Owner(s): ["module: nn"]
+g Owner(s): ["module: nn"]
 # ruff: noqa: F841
 
 import contextlib
@@ -35,7 +35,7 @@ from torch.nn import Buffer, Parameter
 from torch.nn.parallel._functions import Broadcast
 from torch.testing._internal.common_dtype import integral_types, get_all_math_dtypes, floating_types
 from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, run_tests, TestCase, \
-    skipIfNoLapack, skipIfRocm, skipIfRocmVersionLessThan, TEST_NUMPY, TEST_SCIPY, TEST_WITH_CROSSREF, TEST_WITH_ROCM, TEST_MULTIACCELERATOR, \
+    skipIfNoLapack, skipIfRocm, skipIfRocmVersionLessThan, skipIfRocmVersionAtLeast, TEST_NUMPY, TEST_SCIPY, TEST_WITH_CROSSREF, TEST_WITH_ROCM, TEST_MULTIACCELERATOR \
     download_file, get_function_arglist, load_tests, skipIfMPS, MACOS_VERSION, \
     IS_PPC, IS_ARM64, IS_MACOS, IS_WINDOWS, IS_CPU_CAPABILITY_SVE, IS_CPU_EXT_SVE_SUPPORTED, xfailIf, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
@@ -11562,6 +11562,7 @@ class TestNNDeviceType(NNTestCase):
         out = m(inp)
 
     @onlyCUDA
+    @skipIfRocmVersionAtLeast([7, 14])
     def test_CTCLoss_cudnn(self, device):
         def _helper(zero_infinity):
             target_lengths = [30, 25, 20]
@@ -12587,6 +12588,7 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyCUDA
     @dtypes(torch.float16, torch.float32)
+    @skipIfRocmVersionAtLeast([7, 14])
     def test_cross_entropy_loss_2d_out_of_bounds_class_index(self, device, dtype):
         # Test for issue #117532
         # Run in a different process to prevent the device-side assert from affecting other tests

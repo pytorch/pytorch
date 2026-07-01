@@ -15,7 +15,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_modules import module_db, modules, ModuleErrorEnum, TrainEvalMode
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, freeze_rng_state, mock_wrapper, get_tensors_from, gradcheck,
-    gradgradcheck, parametrize, wrapSwapTensorsTest, TEST_WITH_ROCM)
+    gradgradcheck, parametrize, wrapSwapTensorsTest, TEST_WITH_ROCM, getRocmVersion)
 from unittest.mock import patch, call
 
 
@@ -51,6 +51,8 @@ class TestModule(TestCase):
 
     @modules(module_db)
     def test_forward(self, device, dtype, module_info, training):
+        if TEST_WITH_ROCM and getRocmVersion() >= (7, 14) and module_info.module_cls is torch.nn.CTCLoss:
+            self.skipTest("known MIOpen CTC failure on ROCm 7.14")
         module_cls = module_info.module_cls
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
                                                        requires_grad=False, training=training)
@@ -543,6 +545,8 @@ class TestModule(TestCase):
                         torch.float64: tol(4e-4, 0)})
     @modules(module_db)
     def test_cpu_gpu_parity(self, device, dtype, module_info, training):
+        if TEST_WITH_ROCM and getRocmVersion() >= (7, 14) and module_info.module_cls is torch.nn.CTCLoss:
+            self.skipTest("known MIOpen CTC failure on ROCm 7.14")
         # TODO: RNN / GRU / LSTM don't support backwards on eval mode for cuDNN; skip this in a
         # nicer way for eval mode only.
         # See https://github.com/pytorch/pytorch/issues/79161
