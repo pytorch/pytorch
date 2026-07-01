@@ -46,8 +46,8 @@ from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, Criteri
     module_tests, criterion_tests, loss_reference_fns, _create_basic_net, \
     ctcloss_reference, get_new_module_tests, single_batch_reference_fn, _test_bfloat16_ops, _test_module_empty_input
 from torch.testing._internal.common_device_type import dtypesIfMPS, instantiate_device_type_tests, dtypes, \
-    dtypesIfCUDA, precisionOverride, onlyCUDA, onlyCPU, \
-    skipCUDAIf, skipMPSIf, \
+    dtypesIfCUDA, precisionOverride, onlyCUDA, onlyCPU, onlyAccelerator, \
+    skipCUDAIf, skipMPSIf, skipMPS, \
     onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, expectedFailureMPS, \
     skipMeta, get_all_device_types
 from torch.testing._internal.common_modules import module_inputs_torch_nn_LinearCrossEntropyLoss
@@ -5439,133 +5439,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         input2 = torch.randn(4, 4, requires_grad=True, dtype=torch.double)
         self.assertTrue(gradcheck(lambda x, y: F.pairwise_distance(x, y), (input1, input2)))
 
-    # TODO: Create an OpInfo for pdist
-    def test_pdist(self):
-        for device, trans in itertools.product(device_(), [False, True]):
-            inp = torch.randn(4, 5, dtype=torch.double, device=device, requires_grad=True)
-            if trans:
-                inp = inp.transpose(0, 1)
-            for p in [0, 1, 2, 0.5, 1.5, 2.5, float('inf')]:
-                self.assertTrue(gradcheck(lambda x: F.pdist(x, p), (inp,)))
-
-    def test_pdist_zeros(self):
-        """Test that grad is still valid when dist is 0"""
-        for device in device_():
-            inp = torch.randn(1, 3, dtype=torch.double, device=device, requires_grad=True).repeat([2, 1])
-            for p in [0, 1, 2, 0.5, 1.5, 2.5, float('inf')]:
-                self.assertTrue(gradcheck(lambda x: F.pdist(x, p), (inp,)))
-
-    def test_pdist_empty_row(self):
-        for device in device_():
-            inp = torch.randn(1, 3, dtype=torch.double, device=device, requires_grad=True)
-            self.assertTrue(gradcheck(F.pdist, (inp,)))
-
-    def test_pdist_empty_col(self):
-        for device in device_():
-            inp = torch.randn(4, 0, dtype=torch.double, device=device, requires_grad=True)
-            self.assertTrue(gradcheck(F.pdist, (inp,)))
-
-    @unittest.expectedFailure
-    def test_pdist_cpu_gradgrad_unimplemented(self):
-        inp = torch.randn(4, 5, requires_grad=True)
-        gradgradcheck(F.pdist, (inp,))
-
-    @unittest.expectedFailure
-    def test_pdist_cuda_gradgrad_unimplemented(self):
-        inp = torch.randn(4, 5, device='cuda', requires_grad=True)
-        gradgradcheck(F.pdist, (inp,))
-
-    # Merge into OpInfo?
-    # test for backward in https://github.com/pytorch/pytorch/issues/15511
-    def test_pdist_large(self):
-        for device in device_():
-            def func(x):
-                return torch.pdist(x, p=2)
-
-            # shape[0] should be able to be (roughly) arbitrarily large, but the kernel
-            # is currently limited to smaller sizes (see issue above); this is just testing
-            # a floor.
-            shape = (1000, 1)
-            x = torch.randn(shape, device=device).requires_grad_()
-            output = torch.pdist(x, p=2)
-            # just run a single backward, as gradcheck/gradgradcheck is expensive here
-            output.sum().backward()
-
-    # test for issue reported in https://github.com/pytorch/pytorch/issues/173799
-    def test_pdist_inf_nan_propagation(self):
-        x = torch.empty((2, 2), dtype=torch.float64).fill_(float("inf"))
-        for device in device_():
-            result = F.pdist(x.to(device), p=0.0)
-            self.assertTrue(torch.isnan(result).item(), "Expected NaN in pdist output")
-
-    def test_cosine_embedding_loss_with_diff_type(self):
-        for device in device_():
-            input1 = torch.tensor([[2, 3, 4], [6, 2, 4]], dtype=torch.double, device=device)
-            input2 = torch.tensor([[2, 3, 5], [3, 2, 1]], dtype=torch.double, device=device)
-            target = torch.tensor([1, -1], dtype=torch.int, device=device)
-            expected = torch.nn.functional.cosine_embedding_loss(input1, input2, target)
-            for dt1 in get_all_math_dtypes(device):
-                for dt2 in get_all_math_dtypes(device):
-                    for dt3 in get_all_math_dtypes(device):
-                        # dt3 is used as dtype for target = [1, -1], so let's skip unsigned type
-                        if dt3 == torch.uint8:
-                            continue
-                        if dt1.is_complex or dt2.is_complex or dt3.is_complex:
-                            continue
-                        input1 = input1.to(dt1)
-                        input2 = input2.to(dt2)
-                        target = target.to(dt3)
-                        result = torch.nn.functional.cosine_embedding_loss(input1, input2, target)
-                        self.assertEqual(result.item(), expected.item(), atol=0.001, rtol=0)
-
-    def test_cosine_embedding_loss_error_on_diff_shapes(self):
-        for device in device_():
-            input1 = torch.empty((0, 0), dtype=torch.double, device=device)
-            input2 = torch.empty((0,), dtype=torch.double, device=device)
-            target = torch.empty((0,), dtype=torch.int, device=device)
-            with self.assertRaisesRegex(RuntimeError, ".*expects 2D.*"):
-                torch.nn.functional.cosine_embedding_loss(input1, input2, target)
-
-    def test_cosine_embedding_loss_error_on_nonexpandable_shapes(self):
-        for device in device_():
-            input1 = torch.empty((1, 5), dtype=torch.double, device=device)
-            input2 = torch.empty((1, 6), dtype=torch.double, device=device)
-            target = torch.ones((1,), dtype=torch.int, device=device)
-            with self.assertRaisesRegex(RuntimeError, ".*must match the size.*"):
-                torch.nn.functional.cosine_embedding_loss(input1, input2, target)
-
-    def test_kl_div_with_diff_type(self):
-        for device in device_():
-            input = torch.tensor([[2, 3, 5], [3, 2, 1]], dtype=torch.double, device=device)
-            target = torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=torch.double, device=device)
-            expected = torch.nn.functional.kl_div(input, target)
-            real_dtypes = (torch.float32, torch.float64, torch.float16)
-            for input_dtype, target_dtype in product(real_dtypes, repeat=2):
-                input = input.to(input_dtype)
-                target = target.to(target_dtype)
-                result = torch.nn.functional.kl_div(input, target)
-                self.assertEqual(result.item(), expected.item(), atol=0.001, rtol=0)
-
-    def test_kl_div_with_diff_type_log_target(self):
-        for device in device_():
-            input = torch.tensor([[2, 3, 5], [3, 2, 1]], dtype=torch.double, device=device)
-            target = torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=torch.double, device=device).log()
-            expected = torch.nn.functional.kl_div(input, target, log_target=True)
-            real_dtypes = (torch.float32, torch.float64, torch.float16)
-            for input_dtype, target_dtype in product(real_dtypes, repeat=2):
-                input = input.to(input_dtype)
-                target = target.to(target_dtype)
-                result = torch.nn.functional.kl_div(input, target, log_target=True)
-                self.assertEqual(result.item(), expected.item(), atol=0.001, rtol=0)
-
-    def test_kl_div_log_softmax_target(self):
-        for device in device_():
-            a = torch.tensor([[1.0, 2, 3], [5.0, 5, 5]], device=device)
-            b = torch.tensor([[1.0, 2, 3], [5.0, 5, 5]], device=device)
-            self.assertEqual(
-                F.kl_div(F.log_softmax(a, 1), F.log_softmax(b, 1), reduction='none', log_target=True),
-                torch.zeros_like(a)
-            )
 
     def test_cosine_embedding_loss_no_reduce(self):
         input1 = torch.randn(15, 10, requires_grad=True, dtype=torch.double)
@@ -5689,25 +5562,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     torch.nn.L1Loss()(input, torch.zeros_like(input)),
                     input.abs().mean())
 
-    def test_smoothl1loss_intergral_target(self):
-        def _input_grad(input, target, reduction):
-            output = F.smooth_l1_loss(input, target, reduction=reduction, beta=0.5)
-            output.sum().backward()
-            return input.grad
-
-        for device, dtype, reduction in product(device_(),
-                                                integral_types(),
-                                                ('none', 'sum', 'mean')):
-            input = torch.randn(2, 2, device=device, requires_grad=True)
-            target = torch.randint(0, 9, (2, 2), device=device, dtype=dtype)
-
-            input_grad_with_float_target = _input_grad(input, target.float(), reduction)
-
-            input_grad = _input_grad(input.detach().clone().requires_grad_(True),
-                                     target,
-                                     reduction)
-            self.assertEqual(input_grad, input_grad_with_float_target)
-
     def test_smoothl1loss_negative_beta_not_supported(self):
         with self.assertRaises(RuntimeError):
             F.smooth_l1_loss(torch.randn(2, 2), torch.randn(2, 2), beta=-1.0)
@@ -5775,54 +5629,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         out = F.cosine_similarity(a, b)
         self.assertEqual(out, torch.ones(2, dtype=torch.float))
 
-    def test_cosine_similarity_mixed_precision(self):
-        # test that CPU and CUDA behave consistently with various eps values
-
-        # test: Negative eps should raise error on both CPU and CUDA
-        x1 = torch.tensor(-1.6437e+10, dtype=torch.float64)
-        x2 = torch.full((3, 8, 2, 6), float('nan'), dtype=torch.float16)
-        eps_negative = -9.74982e+23
-
-        with self.assertRaisesRegex(RuntimeError, "eps must be non-negative"):
-            F.cosine_similarity(x1, x2, dim=0, eps=eps_negative)
-
-        if torch.cuda.is_available():
-            x1_cuda = x1.cuda()
-            x2_cuda = x2.cuda()
-            with self.assertRaisesRegex(RuntimeError, "eps must be non-negative"):
-                F.cosine_similarity(x1_cuda, x2_cuda, dim=0, eps=eps_negative)
-
-        # test: Large positive eps that overflows dtype - should produce consistent results
-        # CPU and CUDA should both handle overflow consistently (producing inf/nan)
-        eps_large_positive = 9.74982e+23  # Overflows float16
-        result_cpu = F.cosine_similarity(x1, x2, dim=0, eps=eps_large_positive)
-        self.assertTrue(torch.all(torch.isnan(result_cpu)) or torch.all(torch.isinf(result_cpu)))
-
-        if torch.cuda.is_available():
-            result_cuda = F.cosine_similarity(x1_cuda, x2_cuda, dim=0, eps=eps_large_positive)
-            # both should produce NaN or inf consistently
-            self.assertTrue(torch.all(torch.isnan(result_cuda)) or torch.all(torch.isinf(result_cuda)))
-
-        # test: Normal positive eps - should work correctly on both CPU and CUDA
-        x3 = torch.randn(10, 128, dtype=torch.float32)
-        x4 = torch.randn(10, 128, dtype=torch.float32)
-        result_cpu = F.cosine_similarity(x3, x4, dim=1, eps=1e-8)
-        self.assertEqual(result_cpu.shape, torch.Size([10]))
-        self.assertTrue(torch.all(result_cpu >= -1.0) and torch.all(result_cpu <= 1.0))
-
-        if torch.cuda.is_available():
-            x3_cuda = x3.cuda()
-            x4_cuda = x4.cuda()
-            result_cuda = F.cosine_similarity(x3_cuda, x4_cuda, dim=1, eps=1e-8)
-            self.assertTrue(torch.allclose(result_cpu, result_cuda.cpu(), rtol=1e-5, atol=1e-5))
-
-        # test: Float16 inputs with appropriate eps
-        x5 = torch.ones(2, 3, dtype=torch.float16)
-        x6 = torch.ones(2, 3, dtype=torch.float16)
-        result = F.cosine_similarity(x5, x6, dim=1, eps=1e-8)
-        self.assertEqual(result.dtype, torch.float16)
-        self.assertEqual(result.shape, torch.Size([2]))
-        self.assertTrue(torch.all(torch.isclose(result, torch.ones(2, dtype=torch.float16), rtol=1e-3)))
 
     def test_grid_sample_error_checking(self):
         input = torch.empty(1, 1, 2, 2)
@@ -6202,7 +6008,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     output = F.grid_sample(input, grid, mode=mode, padding_mode=padding_mode,
                                            align_corners=align_corners)
                     self.assertEqual(output, groundtruth, atol=1e-5, rtol=0,
-                                     msg=f"groundtruth comparison failed for mode={mode}, "
+                                     msg=lambda msg: f"{msg}\ngroundtruth comparison failed for mode={mode}, "
                                      f"padding_mode={padding_mode}")
 
                     # See NOTE [ grid_sample CPU fallback ]
@@ -6290,7 +6096,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                         F.grid_sample(input, grid, mode=mode, padding_mode=padding_mode,
                                       align_corners=align_corners).sum().backward()
                         self.assertEqual(grid.grad, groundtruth, atol=1e-5, rtol=0,
-                                         msg=f"gradient groundtruth comparison failed for mode={mode}, "
+                                         msg=lambda msg: f"{msg}\ngradient groundtruth comparison failed for mode={mode}, "
                                          f"padding_mode={padding_mode}, input_requires_grad={input_requires_grad}")
                         grid.grad.zero_()
 
@@ -7455,19 +7261,19 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         ]
         # ``_adjust`` is called without a ``device`` argument here.
         # That makes ``acc_policy="auto"`` (the dataclass default)
-        # resolve to ``_AUTO_FALLBACK`` instead of a per-device pick,
-        # but this test only asserts on ``batch_chunk_size`` and each
-        # case sets ``chunking_method`` to an explicit
-        # ``aspect_ratio[:N]`` literal, so the auto-resolution of
-        # ``acc_policy`` is intentionally irrelevant to the
-        # assertion.
+        # resolve to the ``"compact"`` fallback instead of a per-device
+        # pick, but this test only asserts on ``batch_chunk_size`` and
+        # each case sets ``chunking_method`` to an explicit
+        # ``aspect_ratio[:N]`` literal (so the cap, which applies only to
+        # auto chunking, never engages), making the auto-resolution of
+        # ``acc_policy`` intentionally irrelevant to the assertion.
         for num_batches, in_features, num_classes, factor, expected in cases:
             method = "aspect_ratio" if factor == 1 else f"aspect_ratio:{factor}"
             options = nn.LinearCrossEntropyOptions(chunking_method=method)
             adjusted = options._adjust(num_batches, in_features, num_classes, torch.float32)
             self.assertEqual(
                 adjusted.batch_chunk_size, expected,
-                msg=f"N={num_batches}, F={in_features}, C={num_classes}, method={method!r}",
+                msg=lambda msg: f"{msg}\nN={num_batches}, F={in_features}, C={num_classes}, method={method!r}",
             )
 
     def test_linear_cross_entropy_options_chunk_size_disagreement_raises(self):
@@ -7486,9 +7292,10 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         adjusted = options._adjust(128, 4096, 50000, torch.float32)
         self.assertEqual(adjusted.batch_chunk_size, 16)
 
-    @parametrize_test("acc_policy", ["unknown", "Memory", ""])
+    @parametrize_test("acc_policy", ["unknown", "Memory", "balanced", ""])
     def test_linear_cross_entropy_options_invalid_acc_policy_raises(self, acc_policy):
-        """__post_init__ rejects acc_policy outside the documented set."""
+        """__post_init__ rejects acc_policy outside the documented set
+        (``"balanced"`` was removed; ``"compact"`` supersedes it)."""
         with self.assertRaisesRegex(ValueError, "acc_policy"):
             nn.LinearCrossEntropyOptions(acc_policy=acc_policy)
 
@@ -7560,21 +7367,23 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(opts.acc_policy, "auto")
         self.assertEqual(opts.chunking_method, "auto")
 
-        # Known pair: CUDA + bf16 -> ("compact", "aspect_ratio:2").
+        # Known pair: CUDA + bf16 -> ("compact", "aspect_ratio"). These
+        # vocab shapes (num_classes >> in_features) leave the N*V/4D cap
+        # inert; the budget regime is covered in the memory-cap test.
         adjusted = opts._adjust(
             128, 4096, 50000, torch.bfloat16, torch.device("cuda"),
         )
         self.assertEqual(adjusted.acc_policy, "compact")
-        self.assertEqual(adjusted.chunking_method, "aspect_ratio:2")
+        self.assertEqual(adjusted.chunking_method, "aspect_ratio")
 
-        # Known pair: CUDA + fp16 -> ("compact", "aspect_ratio:2").
+        # Known pair: CUDA + fp16 -> ("compact", "aspect_ratio").
         # Same pick as bf16 -- a single CUDA policy across dtypes
         # post-``weight_chunk_dtype=acc_dtype`` fix.
         adjusted = opts._adjust(
             128, 4096, 50000, torch.float16, torch.device("cuda"),
         )
         self.assertEqual(adjusted.acc_policy, "compact")
-        self.assertEqual(adjusted.chunking_method, "aspect_ratio:2")
+        self.assertEqual(adjusted.chunking_method, "aspect_ratio")
 
         # Known pair: CPU + bf16 -> ("accurate", "aspect_ratio").
         # CPU has no hardware low-precision matmul, so the only
@@ -7593,18 +7402,20 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(adjusted.acc_policy, "accurate")
         self.assertEqual(adjusted.chunking_method, "aspect_ratio")
 
-        # Unknown pair (cpu + fp32) -> _AUTO_FALLBACK.
+        # CPU + fp32: "accurate" is only for CPU low-precision input (its
+        # emulated low-precision GEMM); fp32/fp64 GEMM is native at any policy,
+        # so auto picks the memory-frugal "compact".
         adjusted = opts._adjust(
             128, 4096, 50000, torch.float32, torch.device("cpu"),
         )
         self.assertEqual(adjusted.acc_policy, "compact")
-        self.assertEqual(adjusted.chunking_method, "aspect_ratio:2")
+        self.assertEqual(adjusted.chunking_method, "aspect_ratio")
 
-        # No device given -> _AUTO_FALLBACK (back-compat with callers
+        # No device given -> "compact" fallback (back-compat with callers
         # / tests that don't pass device).
         adjusted = opts._adjust(128, 4096, 50000, torch.float32)
         self.assertEqual(adjusted.acc_policy, "compact")
-        self.assertEqual(adjusted.chunking_method, "aspect_ratio:2")
+        self.assertEqual(adjusted.chunking_method, "aspect_ratio")
 
         # Partial override: acc_policy explicit, chunking_method auto.
         opts = nn.LinearCrossEntropyOptions(acc_policy="accurate")
@@ -7612,7 +7423,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             128, 4096, 50000, torch.bfloat16, torch.device("cuda"),
         )
         self.assertEqual(adjusted.acc_policy, "accurate")
-        self.assertEqual(adjusted.chunking_method, "aspect_ratio:2")
+        self.assertEqual(adjusted.chunking_method, "aspect_ratio")
 
         # Partial override: chunking_method explicit, acc_policy auto.
         opts = nn.LinearCrossEntropyOptions(chunking_method="aspect_ratio")
@@ -7629,7 +7440,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         for d in (torch.bfloat16, torch.float16):
             self.assertEqual(opts._adjust(128, 4096, 50000, d, cpu).acc_dtype, torch.float32)
         self.assertEqual(opts._adjust(128, 4096, 50000, torch.float32, cpu).acc_dtype, torch.float32)
-        opts_explicit = nn.LinearCrossEntropyOptions(acc_policy="balanced")
+        opts_explicit = nn.LinearCrossEntropyOptions(acc_policy="compact")
         self.assertEqual(
             opts_explicit._adjust(128, 4096, 50000, torch.bfloat16, cpu).acc_dtype,
             torch.bfloat16,
@@ -7645,6 +7456,44 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 opts._adjust(128, 4096, 50000, torch.float16, cuda).acc_dtype,
                 torch.float32 if major >= 7 else torch.float16,
             )
+
+    def test_linear_cross_entropy_options_auto_memory_cap(self):
+        """``auto`` + ``compact`` caps the chunk at a per-target ``B_ref`` so
+        the chunked peak never exceeds the unchunked reference in the budget
+        regime (``in_features >= num_classes``, where aspect_ratio degenerates
+        to a single chunk): ``floor_pow2(N*V/4D)`` for index targets,
+        ``floor_pow2(N/2)`` for prob (whose fatter reference clears the
+        single-chunk excess with two chunks). The cap is inert in the vocab
+        regime, and skipped for non-``compact`` policies (e.g. CPU's
+        ``accurate``) and explicit (non-auto) ``chunking_method``. Pure
+        resolution arithmetic -- no GPU.
+        """
+        opts = nn.LinearCrossEntropyOptions()
+        cuda = torch.device("cuda")
+
+        def b(N, D, V, prob_target=False, device=cuda):
+            return opts._adjust(
+                N, D, V, torch.bfloat16, device, prob_target=prob_target
+            ).batch_chunk_size
+
+        # Vocab regime (V >> D): cap inert; equals the factor-1 aspect_ratio chunk.
+        self.assertEqual(b(4096, 4096, 32000), 512)
+        # Budget regime (D >= V): cap binds at floor_pow2(N*V/4D).
+        self.assertEqual(b(4096, 16384, 4096), 256)
+        self.assertEqual(b(4096, 8192, 8192), 1024)  # crossing D == V
+        # Prob target: capped at N/2 (its fatter reference clears the
+        # single-chunk excess with two chunks); vocab regime stays inert.
+        self.assertEqual(b(4096, 16384, 4096, prob_target=True), 2048)
+        self.assertEqual(b(4096, 8192, 8192, prob_target=True), 2048)  # crossing: N/2
+        self.assertEqual(b(4096, 4096, 32000, prob_target=True), 512)  # vocab inert
+        # CPU auto resolves to "accurate" (non-compact): uncapped.
+        self.assertEqual(b(4096, 16384, 4096, device=torch.device("cpu")), 4096)
+        # Explicit (non-auto) chunking_method is never capped.
+        explicit = nn.LinearCrossEntropyOptions(chunking_method="aspect_ratio")
+        self.assertEqual(
+            explicit._adjust(4096, 16384, 4096, torch.bfloat16, cuda).batch_chunk_size,
+            4096,
+        )
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_convert_sync_batchnorm(self):
@@ -7816,9 +7665,9 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     atol = 1e-3
                     rtol = 1e-3
                 if elementwise_affine:
-                    self.assertEqual(ln.weight.grad, ln_cuda.weight.grad, f"weight grad failed: {m=} {n=}", rtol=rtol, atol=atol)
+                    self.assertEqual(ln.weight.grad, ln_cuda.weight.grad, lambda msg: f"{msg}\nweight grad failed: {m=} {n=}", rtol=rtol, atol=atol)
                 if bias and elementwise_affine:
-                    self.assertEqual(ln.bias.grad, ln_cuda.bias.grad, f"bias grad failed: {m=} {n=}", rtol=rtol, atol=atol)
+                    self.assertEqual(ln.bias.grad, ln_cuda.bias.grad, lambda msg: f"{msg}\nbias grad failed: {m=} {n=}", rtol=rtol, atol=atol)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     @largeTensorTest("40GB", device="cuda")
@@ -8349,15 +8198,6 @@ add_test(NewModuleTest(
     default_dtype=torch.double))
 
 
-# The following are helpers for TestNN.test_affine_*
-if torch.cuda.is_available():
-    def device_():
-        return ['cpu', 'cuda']
-else:
-    def device_():
-        return ['cpu']
-
-
 def angle_rad_():
     return [r * math.pi * 2 for r in [0.0, 0.5, 0.25, 0.125, random.random()]]
 
@@ -8761,9 +8601,9 @@ class TestNNDeviceType(NNTestCase):
 
         # verify running stats maintain their original dtype
         self.assertEqual(layer.running_mean.dtype, param_dtype,
-                         f"Running mean should maintain {param_dtype} dtype")
+                         lambda msg: f"{msg}\nRunning mean should maintain {param_dtype} dtype")
         self.assertEqual(layer.running_var.dtype, param_dtype,
-                         f"Running var should maintain {param_dtype} dtype")
+                         lambda msg: f"{msg}\nRunning var should maintain {param_dtype} dtype")
 
         # test eval mode uses tracked stats correctly
         layer.eval()
@@ -9808,11 +9648,11 @@ class TestNNDeviceType(NNTestCase):
 
                 self.assertEqual(
                     dgamma_gpu.float().cpu(), gamma_cpu.grad, atol=atol, rtol=rtol,
-                    msg=f"dgamma mismatch: N={N} C={C} G={G} dtype={dtype}",
+                    msg=lambda msg: f"{msg}\ndgamma mismatch: N={N} C={C} G={G} dtype={dtype}",
                 )
                 self.assertEqual(
                     dbeta_gpu.float().cpu(), beta_cpu.grad, atol=atol, rtol=rtol,
-                    msg=f"dbeta mismatch: N={N} C={C} G={G} dtype={dtype}",
+                    msg=lambda msg: f"{msg}\ndbeta mismatch: N={N} C={C} G={G} dtype={dtype}",
                 )
 
     @expectedFailureMPS  # Double is not supported on MPS
@@ -10532,7 +10372,6 @@ class TestNNDeviceType(NNTestCase):
                     verify_reduction_scalars(input, reduction, output)
 
     # verify that bogus reduction strings are errors
-    @expectedFailureMPS  # CTCLoss unimplemented
     @onlyNativeDeviceTypes
     def test_invalid_reduction_strings(self, device):
         input = torch.randn(3, 5, requires_grad=True, device=device)
@@ -10768,7 +10607,7 @@ class TestNNDeviceType(NNTestCase):
                 in_t, scale_factor=s, recompute_scale_factor=False, mode="nearest-exact"
             )
             expected_out = in_t
-            self.assertEqual(out_t, expected_out, msg=f"scale: {s}")
+            self.assertEqual(out_t, expected_out, msg=lambda msg: f"{msg}\nscale: {s}")
 
         # checks data duplication if output_size == 2 * input_size
         # for s in [2.00001, 1.99999]:  # 1.99999 case is broken
@@ -11757,6 +11596,15 @@ class TestNNDeviceType(NNTestCase):
                         self.assertEqual(input.grad, ref_input.grad)
 
     @onlyCUDA
+    @dtypes(torch.half)
+    def test_softmax_half_to_float_matches_half(self, device, dtype):
+        input = torch.randn((4, 1025), generator=torch.Generator().manual_seed(10), dtype=torch.float32)
+        input = (input * 4).to(device=device, dtype=dtype)
+        expected = F.softmax(input, dim=-1)
+        actual = F.softmax(input, dim=-1, dtype=torch.float32).to(dtype)
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+
+    @onlyCUDA
     @dtypes(torch.float, torch.half)
     @largeTensorTest("20GB")
     @largeTensorTest("64GB", "cpu")
@@ -11998,7 +11846,7 @@ class TestNNDeviceType(NNTestCase):
                 out_double = F.grid_sample(data.double(), grid.double(), mode=mode, padding_mode='zeros',
                                            align_corners=align_corners)
 
-                self.assertEqual(out_half, out_double.half(), msg=f"grid_sample with mode = {mode} doesn't match")
+                self.assertEqual(out_half, out_double.half(), msg=lambda msg: f"{msg}\ngrid_sample with mode = {mode} doesn't match")
 
         helper((32, 64, 16, 16), (32, 8, 8, 2), True)
         helper((32, 64, 16, 16, 16), (32, 8, 8, 8, 3), True)
@@ -12018,7 +11866,7 @@ class TestNNDeviceType(NNTestCase):
                 out_double = F.grid_sample(data.double(), grid.double(), mode=mode, padding_mode='zeros',
                                            align_corners=align_corners)
 
-                self.assertEqual(out_half, out_double.bfloat16(), msg=f"grid_sample with mode = {mode} doesn't match")
+                self.assertEqual(out_half, out_double.bfloat16(), msg=lambda msg: f"{msg}\ngrid_sample with mode = {mode} doesn't match")
 
         helper((32, 64, 16, 16), (32, 8, 8, 2), True)
         helper((32, 64, 16, 16, 16), (32, 8, 8, 8, 3), True)
@@ -12359,7 +12207,6 @@ class TestNNDeviceType(NNTestCase):
         for ele in list_to_compare:
             self.assertEqual(expected, ele, atol=atol, rtol=rtol)
 
-    @expectedFailureMPS  # NotImplementedError: aten::_ctc_loss https://github.com/pytorch/pytorch/issues/77764
     @parametrize_test("reduction", ['none', 'mean', 'sum'])
     @parametrize_test("use_module_form", [True, False])
     def test_CTCLoss_no_batch_dim(self, device, reduction, use_module_form):
@@ -12754,12 +12601,13 @@ class TestNNDeviceType(NNTestCase):
                                                      padding_mode=padding_mode, align_corners=False)
             self.assertEqual(sample, torch.zeros([1, 1, 1, 2], device=device, dtype=dtype))
 
-    @expectedFailureMPS  # NotImplementedError aten::_ctc_loss https://github.com/pytorch/pytorch/issues/77764
     def test_CTCLoss_empty_target(self, device):
+        dtype = torch.float if torch.device(device).type == 'mps' else torch.double
+
         target_lengths = [0, 0, 0]
         input_lengths = [50, 50, 50]
         targets = torch.randint(1, 15, (0,), dtype=torch.long, device=device)
-        log_probs = torch.randn(50, 3, 15, dtype=torch.double, device=device).log_softmax(2)
+        log_probs = torch.randn(50, 3, 15, dtype=dtype, device=device).log_softmax(2)
         loss = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths, reduction='none')
         self.assertTrue((loss >= 0).all().item())
         self.assertEqual(-log_probs.sum(0)[:, 0], loss)
@@ -12767,7 +12615,7 @@ class TestNNDeviceType(NNTestCase):
         target_lengths = [0, 9, 0]
         input_lengths = [50, 50, 50]
         targets = torch.randint(1, 15, (9,), dtype=torch.long, device=device)
-        log_probs = torch.randn(50, 3, 15, dtype=torch.double, device=device).log_softmax(2)
+        log_probs = torch.randn(50, 3, 15, dtype=dtype, device=device).log_softmax(2)
         loss = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths, reduction='none')
         self.assertTrue((loss >= 0).all().item())
         self.assertEqual(-log_probs.sum(0)[[0, 2], 0], loss[[0, 2]])
@@ -12775,7 +12623,9 @@ class TestNNDeviceType(NNTestCase):
     # Merge into OpInfo?
     @skipCUDAIf(True, """Test is flaky on Linux and Windows, typical error message:
                           https://github.com/pytorch/pytorch/issues/34870""")
-    @expectedFailureMPS  # NotImplementedError aten::_ctc_loss https://github.com/pytorch/pytorch/issues/77764
+    # TODO: Find out if this failure is just because we can't run MPS with
+    # double or if there's a real problem with the backward pass
+    @expectedFailureMPS  # torch.autograd.gradcheck.GradcheckError: Jacobian mismatch
     def test_ctc_loss(self, device):
         batch_size = 64
         num_labels = 101
@@ -12785,6 +12635,8 @@ class TestNNDeviceType(NNTestCase):
         ZERO_NONE = 0
         ZERO_SOME = 1
         ZERO_ALL = 2
+
+        dtype = torch.float if torch.device(device).type == 'mps' else torch.double
 
         # input_length, vary_lengths, zero_lengths
         tests = [(150, False, ZERO_NONE),
@@ -12801,7 +12653,7 @@ class TestNNDeviceType(NNTestCase):
         for input_length, vary_lengths, zero_mode in tests:
             targets = torch.randint(1, num_labels, (batch_size, target_length),
                                     device=device, dtype=torch.long)
-            x = torch.randn(gradcheck_input_size, dtype=torch.double, device=device, requires_grad=True)
+            x = torch.randn(gradcheck_input_size, dtype=dtype, device=device, requires_grad=True)
             tile_factors = torch.randn(input_length * batch_size * num_labels // gradcheck_input_size + 1,
                                        device=device)
             input_lengths = [(torch.randint(input_length // 2, input_length + 1, ()).item()
@@ -12909,7 +12761,6 @@ class TestNNDeviceType(NNTestCase):
             reduction="sum",
         )
 
-    @expectedFailureMPS
     def test_ctc_loss_error(self, device):
         log_probs = torch.rand(0, 0, 4, device=device)
         targets = torch.tensor([], device=device, dtype=torch.long)
@@ -14734,7 +14585,7 @@ if __name__ == '__main__':
 
     def _test_linear_cross_entropy_loss(self, device='cpu', dtype=torch.float32,
                                         acc_policy=None, acc_dtype=None, bias=False,
-                                        none_reduction=False):
+                                        none_reduction=False, prob_target=False):
         """Test the chunked LCE forward + backward against an fp64 reference.
 
         Two metrics per gradient:
@@ -14784,14 +14635,10 @@ if __name__ == '__main__':
         # receive "auto" (so _adjust performs the real resolution), but
         # the test's ULP bounds need to track whichever policy was
         # resolved. Read the dispatch table directly so the test stays
-        # in lock-step with future _AUTO_DEFAULTS edits.
+        # in lock-step with future _auto_acc_policy edits.
         if acc_policy == "auto":
-            from torch.nn.modules.linear_cross_entropy_options import (
-                _AUTO_DEFAULTS, _AUTO_FALLBACK,
-            )
-            _resolved_policy, _ = _AUTO_DEFAULTS.get(
-                (torch.device(device).type, dtype), _AUTO_FALLBACK,
-            )
+            from torch.nn.modules.linear_cross_entropy_options import _auto_acc_policy
+            _resolved_policy = _auto_acc_policy(torch.device(device).type, dtype)
         else:
             _resolved_policy = acc_policy
 
@@ -14805,7 +14652,41 @@ if __name__ == '__main__':
         # input/weight matmuls), so the cap is generally tighter than
         # the input/weight caps for the same combo.
         expected_linear_bias_grad_max_ulp_diff = 0
-        if none_reduction:
+        if prob_target:
+            # Probability-target caps with the near-zero ULP floor (see
+            # ``grad_max_ulp``). fp32 takes the all-input-dtype path, so
+            # its caps are policy-independent and the ULP counts run larger
+            # (smaller eps; the floor threshold feps*max barely bites), in
+            # line with the index-target fp32 caps below -- and they spread
+            # by host, so fp32 is split by device; the fp16/bf16 caps cover
+            # every device. Observed maxima (input_grad / weight):
+            # fp32 cpu 9229/914 (aarch64; x86_64 4619), cuda 189/131
+            # (NVIDIA ig 189 / w 106, ROCm ig 105 / w 131), mps 98/29;
+            # fp16 compact ig 60-93 / w 17-58 (mps 67/14); bf16
+            # compact ig 6 / w 3 (mps 0); accurate fp16/bf16 ~0.
+            # No bias=True prob samples, so the bias-grad cap stays 0.
+            expected_max_ulp_diff = 4
+            if dtype == torch.float32:
+                if "cpu" in device:
+                    expected_input_grad_max_ulp_diff = 16384  # aarch64 9229
+                    expected_weight_grad_max_ulp_diff = 2048
+                elif "mps" in device:
+                    expected_input_grad_max_ulp_diff = 256  # observed 98
+                    expected_weight_grad_max_ulp_diff = 64  # observed 29
+                else:  # cuda / rocm
+                    expected_input_grad_max_ulp_diff = 512  # NVIDIA 189
+                    expected_weight_grad_max_ulp_diff = 256  # ROCm 131
+            elif _resolved_policy == "accurate":
+                expected_input_grad_max_ulp_diff = 4
+                expected_weight_grad_max_ulp_diff = 4
+            elif dtype == torch.bfloat16:  # compact, bf16
+                expected_input_grad_max_ulp_diff = 16
+                expected_weight_grad_max_ulp_diff = 8
+            else:  # compact, fp16
+                expected_input_grad_max_ulp_diff = 192
+                expected_weight_grad_max_ulp_diff = 128
+            expected_linear_bias_grad_max_ulp_diff = 0
+        elif none_reduction:
             # reduction='none' caps. The per-element ULP uses a near-zero
             # floor (see ``grad_max_ulp``) so these track drift in the
             # well-scaled grad elements, not the intrinsic softmax-onehot
@@ -14815,18 +14696,14 @@ if __name__ == '__main__':
             # device-specific near-zero inflation. bias=True has no none
             # samples (bias coverage is reduction='mean' only), so the
             # bias-grad cap stays at the default 0. Observed maxima:
-            # accurate 0/0; balanced bf16 4/0, fp16 25/27; compact bf16
-            # 4/4, fp16 25/85 (input_grad/weight).
+            # accurate 0/0; compact bf16 4/4, fp16 25/85 (input_grad/weight).
             expected_max_ulp_diff = 8
             if _resolved_policy == "accurate":
                 expected_input_grad_max_ulp_diff = 4
                 expected_weight_grad_max_ulp_diff = 4
-            elif dtype == torch.bfloat16:  # balanced / compact, bf16
+            elif dtype == torch.bfloat16:  # compact, bf16
                 expected_input_grad_max_ulp_diff = 8
                 expected_weight_grad_max_ulp_diff = 8
-            elif _resolved_policy == "balanced":  # fp16
-                expected_input_grad_max_ulp_diff = 48
-                expected_weight_grad_max_ulp_diff = 48
             else:  # compact, fp16
                 expected_input_grad_max_ulp_diff = 48
                 expected_weight_grad_max_ulp_diff = 128
@@ -14835,7 +14712,7 @@ if __name__ == '__main__':
                 if dtype == torch.float16:
                     expected_max_ulp_diff = 1
                     if bias:
-                        expected_input_grad_max_ulp_diff = 107
+                        expected_input_grad_max_ulp_diff = 200  # x86_64/aarch64 160 (fp32 denom)
                         expected_weight_grad_max_ulp_diff = 25
                         expected_linear_bias_grad_max_ulp_diff = 1
                     else:
@@ -14883,43 +14760,6 @@ if __name__ == '__main__':
                         expected_input_grad_max_ulp_diff = 0
                         expected_weight_grad_max_ulp_diff = 0
                         expected_linear_bias_grad_max_ulp_diff = 0
-        elif _resolved_policy == "balanced":
-            if "cpu" in device:
-                if dtype == torch.float16:
-                    expected_max_ulp_diff = 1
-                    expected_input_grad_max_ulp_diff = 204   # x86_64 119
-                    expected_weight_grad_max_ulp_diff = 191  # x86_64 150
-                    expected_linear_bias_grad_max_ulp_diff = 1 if bias else 0
-                else:  # dtype == torch.bfloat16
-                    expected_max_ulp_diff = 1
-                    if bias:
-                        expected_input_grad_max_ulp_diff = 10
-                        expected_weight_grad_max_ulp_diff = 12
-                        expected_linear_bias_grad_max_ulp_diff = 1
-                    else:
-                        expected_input_grad_max_ulp_diff = 0
-                        expected_weight_grad_max_ulp_diff = 0
-                        expected_linear_bias_grad_max_ulp_diff = 0
-            else:
-                if dtype == torch.float16:
-                    if "mps" in device:
-                        expected_max_ulp_diff = 2
-                        expected_input_grad_max_ulp_diff = 232
-                        expected_weight_grad_max_ulp_diff = 190
-                        expected_linear_bias_grad_max_ulp_diff = 16 if bias else 0
-                    else:  # CUDA/...
-                        expected_max_ulp_diff = 1
-                        expected_input_grad_max_ulp_diff = 90
-                        expected_weight_grad_max_ulp_diff = 50  # x86_64 41
-                        expected_linear_bias_grad_max_ulp_diff = 16 if bias else 0
-                else:  # dtype == torch.bfloat16
-                    expected_max_ulp_diff = 2
-                    expected_input_grad_max_ulp_diff = 90
-                    if "mps" in device:
-                        expected_weight_grad_max_ulp_diff = 36 if bias else 0
-                    else:  # CUDA
-                        expected_weight_grad_max_ulp_diff = 4 if bias else 0  # A100
-                    expected_linear_bias_grad_max_ulp_diff = 17 if bias else 0  # A100
         elif _resolved_policy == "compact":
             # Loss output is genuinely bounded (O(1), no cancellation); the
             # +1 on MPS is its lower-precision fp16 matmul.
@@ -14983,11 +14823,13 @@ if __name__ == '__main__':
             # which is ~0 up to rounding on near-cancelling rows; the sign
             # of such an element is numerically meaningless (``grad_error``
             # is the correctness guard) but a sign flip inflates the ULP
-            # toward the uint ceiling. Drop elements below feps of the peak
-            # |grad| so the cap tracks drift in the well-scaled elements,
-            # not rounding noise. Scalar reductions keep every element.
+            # toward the uint ceiling. Probability targets cancel the same
+            # way wherever ``softmax(x) ~ weight*target``. Drop elements
+            # below feps of the peak |grad| so the cap tracks drift in the
+            # well-scaled elements, not rounding noise. The scalar
+            # index-target legs keep every element.
             ulp = diff_ulp(grad, expected)
-            if none_reduction:
+            if none_reduction or prob_target:
                 ulp = torch.where(expected.abs() >= feps * expected.abs().max(), ulp, 0)
             return ulp.max().item()
 
@@ -15016,16 +14858,17 @@ if __name__ == '__main__':
             options = module_kwargs.get('options')
             if (
                     options is None
-                    or target.dtype.is_floating_point
+                    or target.dtype.is_floating_point != prob_target
                     or module_kwargs.get('out_features')
                     or (module_kwargs.get('reduction') == 'none') != none_reduction
                     or module_kwargs.get('label_smoothing') > 0
             ):
                 # skip samples that are not be processed via chunking
-                # algorithms. ``none_reduction`` selects the matching
-                # subset: reduction='none' samples when True, the
-                # scalar (mean/sum) samples when False -- the two have
-                # separate cap tables (different numerics).
+                # algorithms. ``none_reduction`` / ``prob_target`` select
+                # the matching subset: reduction='none' samples,
+                # probability-target samples, or the scalar index-target
+                # samples -- each has its own cap table (different
+                # numerics).
                 continue
             if module_kwargs.get('bias', False) != bias:
                 # bias=True and bias=False samples have separate cap
@@ -15061,6 +14904,10 @@ if __name__ == '__main__':
 
             out = loss(input, target)
             ref_target = target.to(ref_device)
+            if prob_target:
+                # fp64 reference target (lossless upcast); the chunked
+                # call keeps the input-dtype target.
+                ref_target = ref_target.to(ref_dtype)
             ref_out = ref_loss(ref_input, ref_target)
 
             max_ulp_diff = diff_ulp(out.to(ref_device), ref_out.to(dtype)).max().item()
@@ -15137,9 +14984,12 @@ if __name__ == '__main__':
     def test_linear_cross_entropy_loss_default(self, device, dtype, bias):
         self._test_linear_cross_entropy_loss(device=device, dtype=dtype, bias=bias)
 
-    @parametrize_test("acc_policy", ["accurate", "balanced", "compact", "auto"])
+    @parametrize_test("prob_target", [False, True])
+    @parametrize_test("acc_policy", ["accurate", "compact", "auto"])
     @parametrize_test("bias", [False, True])
-    def test_linear_cross_entropy_chunked_gradcheck(self, device, acc_policy, bias):
+    def test_linear_cross_entropy_chunked_gradcheck(
+        self, device, acc_policy, bias, prob_target
+    ):
         """``torch.autograd.gradcheck`` against the chunked op.
 
         The chunked path is an unusual autograd hookup: forward
@@ -15156,6 +15006,9 @@ if __name__ == '__main__':
 
         The ``bias`` parametrization covers both the no-bias path and
         the new chunked ``linear_bias`` path (``compute_linear_bias_grad=True``).
+        ``prob_target`` swaps the class-index target for a probability
+        target (with a class weight, exercising ``prob_wt``), routing
+        through the dense prob loop instead of the gather/index one.
         fp64 inputs keep the chunked op's mixed-precision paths off
         (``use_acc_dtype=False``) and stay within gradcheck's default
         tolerance. Small (N, F, V) keeps gradcheck's O(num_inputs)
@@ -15178,7 +15031,14 @@ if __name__ == '__main__':
             torch.randn(V, device=device, dtype=torch.float64, requires_grad=True)
             if bias else None
         )
-        target = torch.randint(0, V, (N,), device=device)
+        if prob_target:
+            target = torch.softmax(
+                torch.randn(N, V, device=device, dtype=torch.float64), dim=1
+            )
+            cw = torch.rand(V, device=device, dtype=torch.float64) + 0.5
+        else:
+            target = torch.randint(0, V, (N,), device=device)
+            cw = None
         options = nn.LinearCrossEntropyOptions(
             batch_chunk_size=2,
             acc_policy=acc_policy,
@@ -15187,12 +15047,13 @@ if __name__ == '__main__':
 
         def f(i, w, b=None):
             return nn.functional.linear_cross_entropy(
-                i, w, target, linear_bias=b, reduction="mean", options=options,
+                i, w, target, linear_bias=b, weight=cw,
+                reduction="mean", options=options,
             )
 
         torch.autograd.gradcheck(f, (inp, weight, linear_bias) if bias else (inp, weight))
 
-    @parametrize_test("acc_policy", ["accurate", "balanced", "compact", "auto"])
+    @parametrize_test("acc_policy", ["accurate", "compact", "auto"])
     def test_linear_cross_entropy_loss_no_grad(self, device, acc_policy):
         """Forward-only path under torch.no_grad(): exercises the
         rank-empty grad-buffer branches (compute_*_grad both False).
@@ -15548,7 +15409,7 @@ if __name__ == '__main__':
 
     @parametrize_test("bias", [False, True])
     @parametrize_test("dtype", [torch.float16, torch.bfloat16])
-    @parametrize_test("acc_policy", ["accurate", "balanced", "compact", "auto"])
+    @parametrize_test("acc_policy", ["accurate", "compact", "auto"])
     def test_linear_cross_entropy_loss_with_acc_dtype(self, device, dtype, acc_policy, bias):
         if dtype == torch.bfloat16 and "cuda" in device and not SM80OrLater:
             self.skipTest("bf16 requires SM80+ on CUDA")
@@ -15559,7 +15420,7 @@ if __name__ == '__main__':
 
     @parametrize_test("bias", [False, True])
     @parametrize_test("dtype", [torch.float16, torch.bfloat16])
-    @parametrize_test("acc_policy", ["accurate", "balanced", "compact", "auto"])
+    @parametrize_test("acc_policy", ["accurate", "compact", "auto"])
     def test_linear_cross_entropy_loss_none_reduction_with_acc_dtype(
         self, device, dtype, acc_policy, bias
     ):
@@ -15575,6 +15436,166 @@ if __name__ == '__main__':
             device=device, dtype=dtype, acc_policy=acc_policy,
             acc_dtype={torch.float16: torch.float32, torch.bfloat16: torch.float32}[dtype],
             bias=bias, none_reduction=True)
+
+    @parametrize_test("acc_policy", ["accurate", "compact", "auto"])
+    @dtypes(torch.float32)
+    def test_linear_cross_entropy_loss_prob_target(self, device, dtype, acc_policy):
+        # Probability-target counterpart of the scalar harness legs:
+        # exercises the dense prob loop against the fp64 reference. The
+        # generator has no bias=True probability-target samples, so only
+        # the bias=False subset runs. See the ``prob_target`` cap block
+        # in _test_linear_cross_entropy_loss.
+        self._test_linear_cross_entropy_loss(
+            device=device, dtype=dtype, acc_policy=acc_policy, prob_target=True)
+
+    @parametrize_test("dtype", [torch.float16, torch.bfloat16])
+    @parametrize_test("acc_policy", ["accurate", "compact", "auto"])
+    def test_linear_cross_entropy_loss_prob_target_with_acc_dtype(
+        self, device, dtype, acc_policy
+    ):
+        # Mixed-precision probability-target leg (exercises the
+        # prob_target_buf scratch: weight*target staged at the logits
+        # dtype).
+        if dtype == torch.bfloat16 and "cuda" in device and not SM80OrLater:
+            self.skipTest("bf16 requires SM80+ on CUDA")
+        self._test_linear_cross_entropy_loss(
+            device=device, dtype=dtype, acc_policy=acc_policy,
+            acc_dtype={torch.float16: torch.float32, torch.bfloat16: torch.float32}[dtype],
+            prob_target=True)
+
+    @parametrize_test("acc_policy", ["auto", "compact", "accurate"])
+    def test_linear_cross_entropy_prob_large_vocab_fp16_denom(self, device, acc_policy):
+        # Regression: the softmax denominator sum_v exp(shifted) sums
+        # ~num_classes terms near 1, so for a large vocabulary it overflows
+        # fp16's 65504. sumexp_ reduces in acc_dtype, which is fp16 on the
+        # non-auto policies (and on MPS even for auto), so the loss went
+        # +inf; sumexp_ now floors that reduction to fp32 for fp16 input.
+        torch.manual_seed(0)
+        dtype = torch.float16
+        N, D, V = 4, 8, 1 << 17  # 131072 > fp16 max (65504)
+        x = torch.randn(N, D, device=device, dtype=dtype) * 0.05
+        w = torch.randn(V, D, device=device, dtype=dtype) * 0.05
+        # Normalize in fp32 then cast: an fp16 row-sum over this V would
+        # itself overflow and yield a degenerate (non-normalized) target;
+        # fp32 is exact enough and MPS-safe (no fp64 on device).
+        p = torch.rand(N, V, device=device, dtype=torch.float32)
+        p = (p / p.sum(1, keepdim=True)).to(dtype)
+        options = nn.LinearCrossEntropyOptions(acc_policy=acc_policy)
+        loss = nn.functional.linear_cross_entropy(
+            x, w, p, reduction="mean", options=options)
+        self.assertTrue(torch.isfinite(loss).item(),
+                        f"prob loss not finite for acc_policy={acc_policy}: {loss}")
+        # fp64 reference on CPU (MPS has no float64).
+        z = x.cpu().double() @ w.cpu().double().t()
+        ref = (torch.logsumexp(z, 1) - (p.cpu().double() * z).sum(1)).mean()
+        self.assertEqual(loss.cpu().double(), ref, atol=0.05, rtol=5e-3)
+
+    @parametrize_test("acc_policy", ["compact", "auto"])
+    def test_linear_cross_entropy_prob_large_magnitude_fp16_loss_term(self, device, acc_policy):
+        # Regression: the prob loss target term sum_{n,c} (w*t)*x_shifted was a
+        # flat torch.dot whose fp16 result overflows (>65504) mid-accumulation
+        # for a large batch of widely-spread (early-training) max-shifted
+        # logits on the fp16 memory-like path -> -inf, poisoning the mean loss
+        # even though the mean itself fits fp16. The per-row einsum reduction
+        # summed across rows in fp32 keeps it finite. reduction='mean' (so the
+        # final value fits fp16, isolating the per-chunk overflow); one big
+        # chunk so that chunk's dot sees the whole batch.
+        torch.manual_seed(0)
+        dtype = torch.float16
+        N, D, V = 4096, 16, 2048
+        x = torch.randn(N, D, device=device, dtype=dtype) * 8.0
+        w = torch.randn(V, D, device=device, dtype=dtype) * 8.0
+        p = torch.rand(N, V, device=device, dtype=torch.float32)
+        p = (p / p.sum(1, keepdim=True)).to(dtype)
+        options = nn.LinearCrossEntropyOptions(acc_policy=acc_policy, batch_chunk_size=N)
+        loss = nn.functional.linear_cross_entropy(
+            x, w, p, reduction="mean", options=options)
+        self.assertTrue(torch.isfinite(loss).item(),
+                        f"prob loss not finite for acc_policy={acc_policy}: {loss}")
+        # fp64 reference on CPU (MPS has no float64).
+        z = x.cpu().double() @ w.cpu().double().t()
+        ref = (torch.logsumexp(z, 1) - (p.cpu().double() * z).sum(1)).mean()
+        self.assertEqual(loss.cpu().double(), ref, rtol=5e-3, atol=0.5)
+
+    def test_linear_cross_entropy_prob_target_dispatch(self, device):
+        """Probability-target dispatch edges. The harness covers the
+        supported configurations; this covers the gate itself: supported
+        prob targets must chunk silently, and the unsupported
+        configurations (target requiring grad -- the chunked op has no
+        grad-target slot -- reduction='none', and a target dtype
+        differing from the input) must warn and fall back to the
+        reference, staying correct. Plus the empty-batch edge.
+        """
+        torch.manual_seed(0)
+        N, F_, C = 8, 5, 4
+        inp = torch.randn(N, F_, device=device, requires_grad=True)
+        lw = torch.randn(C, F_, device=device, requires_grad=True)
+        target = torch.softmax(torch.randn(N, C, device=device), dim=1)
+        options = nn.LinearCrossEntropyOptions(batch_chunk_size=2)
+
+        # Positive control: a supported prob target takes the chunked
+        # path with no fallback warning.
+        out = self.assertNotWarn(
+            lambda: nn.functional.linear_cross_entropy(
+                inp, lw, target, reduction="mean", options=options,
+            )
+        )
+
+        # target.requires_grad: falls back; the target gradient flows.
+        target_g = target.clone().requires_grad_(True)
+        with self.assertWarnsRegex(UserWarning, "options.*ignored"):
+            out = nn.functional.linear_cross_entropy(
+                inp, lw, target_g, reduction="mean", options=options,
+            )
+        ref = nn.functional.cross_entropy(
+            nn.functional.linear(inp, lw), target_g, reduction="mean",
+        )
+        self.assertEqual(out, ref)
+        (grad_target,) = torch.autograd.grad(out, [target_g])
+        self.assertGreater(grad_target.norm().item(), 0.0)
+
+        # reduction='none' with a probability target: falls back.
+        with self.assertWarnsRegex(UserWarning, "options.*ignored"):
+            out = nn.functional.linear_cross_entropy(
+                inp, lw, target, reduction="none", options=options,
+            )
+        self.assertEqual(out.shape, (N,))
+
+        # dtype mismatch: falls back (the reference type-promotes, so
+        # the loss carries the promoted dtype).
+        with self.assertWarnsRegex(UserWarning, "options.*ignored"):
+            out = nn.functional.linear_cross_entropy(
+                inp.half(), lw.half(), target, reduction="mean",
+                options=options,
+            )
+        self.assertEqual(out.dtype, torch.float32)
+
+        # auto heuristic resolves chunking_method to aspect_ratio (factor 1)
+        # for both probability and index targets; below the crossing region
+        # (num_classes >> in_features) the N*V/4D cap is inert, so the
+        # resolved batch_chunk_size is the plain aspect_ratio chunk.
+        if "cuda" in device:
+            for prob in (True, False):
+                adjusted = nn.LinearCrossEntropyOptions()._adjust(
+                    num_batches=4096, in_features=2048, num_classes=32000,
+                    dtype=torch.float16, device=inp.device, prob_target=prob,
+                )
+                self.assertEqual(adjusted.chunking_method, "aspect_ratio")
+
+        # Empty batch on the chunked path: mean is NaN, sum is 0
+        # (matches the reference).
+        i0 = torch.randn(0, F_, device=device)
+        t0 = torch.zeros(0, C, device=device)
+        self.assertTrue(
+            nn.functional.linear_cross_entropy(
+                i0, lw.detach(), t0, reduction="mean", options=options,
+            ).isnan().item()
+        )
+        self.assertEqual(
+            nn.functional.linear_cross_entropy(
+                i0, lw.detach(), t0, reduction="sum", options=options,
+            ).abs().item(), 0.0,
+        )
 
     @parametrize_test("reduction", ["sum", "mean"])
     def test_linear_cross_entropy_chunk_size_invariance(self, device, reduction):
@@ -15661,6 +15682,194 @@ if __name__ == '__main__':
             for i in range(N)
         )
         self.assertEqual(batched, per_item)
+
+    # TODO: Create an OpInfo for pdist
+    @skipMPS
+    def test_pdist(self, device):
+        for trans in [False, True]:
+            inp = torch.randn(4, 5, dtype=torch.double, device=device, requires_grad=True)
+            if trans:
+                inp = inp.transpose(0, 1)
+            for p in [0, 1, 2, 0.5, 1.5, 2.5, float('inf')]:
+                self.assertTrue(gradcheck(lambda x: F.pdist(x, p), (inp,)))
+
+    @skipMPS
+    def test_pdist_zeros(self, device):
+        """Test that grad is still valid when dist is 0"""
+        inp = torch.randn(1, 3, dtype=torch.double, device=device, requires_grad=True).repeat([2, 1])
+        for p in [0, 1, 2, 0.5, 1.5, 2.5, float('inf')]:
+            self.assertTrue(gradcheck(lambda x: F.pdist(x, p), (inp,)))
+
+    @skipMPS
+    def test_pdist_empty_row(self, device):
+        inp = torch.randn(1, 3, dtype=torch.double, device=device, requires_grad=True)
+        self.assertTrue(gradcheck(F.pdist, (inp,)))
+
+    @skipMPS
+    def test_pdist_empty_col(self, device):
+        inp = torch.randn(4, 0, dtype=torch.double, device=device, requires_grad=True)
+        self.assertTrue(gradcheck(F.pdist, (inp,)))
+
+    # Merge into OpInfo?
+    # test for backward in https://github.com/pytorch/pytorch/issues/15511
+    @skipMPS
+    def test_pdist_large(self, device):
+        # shape[0] should be able to be (roughly) arbitrarily large, but the kernel
+        # is currently limited to smaller sizes (see issue above); this is just testing
+        # a floor.
+        shape = (1000, 1)
+        x = torch.randn(shape, device=device).requires_grad_()
+        output = torch.pdist(x, p=2)
+        # just run a single backward, as gradcheck/gradgradcheck is expensive here
+        output.sum().backward()
+
+    @skipMPS
+    @unittest.expectedFailure
+    def test_pdist_gradgrad_unimplemented(self, device):
+        inp = torch.randn(4, 5, device=device, requires_grad=True)
+        gradgradcheck(F.pdist, (inp,))
+
+    # test for issue reported in https://github.com/pytorch/pytorch/issues/173799
+    @skipMPS
+    def test_pdist_inf_nan_propagation(self, device):
+        x = torch.empty((2, 2), dtype=torch.float64, device=device).fill_(float("inf"))
+        result = F.pdist(x, p=0.0)
+        self.assertTrue(torch.isnan(result).item(), "Expected NaN in pdist output")
+
+    @skipMPS
+    def test_cosine_embedding_loss_with_diff_type(self, device):
+        input1 = torch.tensor([[2, 3, 4], [6, 2, 4]], dtype=torch.double, device=device)
+        input2 = torch.tensor([[2, 3, 5], [3, 2, 1]], dtype=torch.double, device=device)
+        target = torch.tensor([1, -1], dtype=torch.int, device=device)
+        expected = torch.nn.functional.cosine_embedding_loss(input1, input2, target)
+        for dt1 in get_all_math_dtypes(device):
+            for dt2 in get_all_math_dtypes(device):
+                for dt3 in get_all_math_dtypes(device):
+                    # dt3 is used as dtype for target = [1, -1], so let's skip unsigned type
+                    if dt3 == torch.uint8:
+                        continue
+                    if dt1.is_complex or dt2.is_complex or dt3.is_complex:
+                        continue
+                    input1 = input1.to(dt1)
+                    input2 = input2.to(dt2)
+                    target = target.to(dt3)
+                    result = torch.nn.functional.cosine_embedding_loss(input1, input2, target)
+                    self.assertEqual(result.item(), expected.item(), atol=0.001, rtol=0)
+
+    @skipMPS
+    def test_cosine_embedding_loss_error_on_diff_shapes(self, device):
+        input1 = torch.empty((0, 0), dtype=torch.double, device=device)
+        input2 = torch.empty((0,), dtype=torch.double, device=device)
+        target = torch.empty((0,), dtype=torch.int, device=device)
+        with self.assertRaisesRegex(RuntimeError, ".*expects 2D.*"):
+            torch.nn.functional.cosine_embedding_loss(input1, input2, target)
+
+    @skipMPS
+    def test_cosine_embedding_loss_error_on_nonexpandable_shapes(self, device):
+        input1 = torch.empty((1, 5), dtype=torch.double, device=device)
+        input2 = torch.empty((1, 6), dtype=torch.double, device=device)
+        target = torch.ones((1,), dtype=torch.int, device=device)
+        with self.assertRaisesRegex(RuntimeError, ".*must match the size.*"):
+            torch.nn.functional.cosine_embedding_loss(input1, input2, target)
+
+    @skipMPS
+    def test_kl_div_with_diff_type(self, device):
+        input = torch.tensor([[2, 3, 5], [3, 2, 1]], dtype=torch.double, device=device)
+        target = torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=torch.double, device=device)
+        expected = torch.nn.functional.kl_div(input, target)
+        real_dtypes = (torch.float32, torch.float64, torch.float16)
+        for input_dtype, target_dtype in product(real_dtypes, repeat=2):
+            input = input.to(input_dtype)
+            target = target.to(target_dtype)
+            result = torch.nn.functional.kl_div(input, target)
+            self.assertEqual(result.item(), expected.item(), atol=0.001, rtol=0)
+
+    @skipMPS
+    def test_kl_div_with_diff_type_log_target(self, device):
+        input = torch.tensor([[2, 3, 5], [3, 2, 1]], dtype=torch.double, device=device)
+        target = torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=torch.double, device=device).log()
+        expected = torch.nn.functional.kl_div(input, target, log_target=True)
+        real_dtypes = (torch.float32, torch.float64, torch.float16)
+        for input_dtype, target_dtype in product(real_dtypes, repeat=2):
+            input = input.to(input_dtype)
+            target = target.to(target_dtype)
+            result = torch.nn.functional.kl_div(input, target, log_target=True)
+            self.assertEqual(result.item(), expected.item(), atol=0.001, rtol=0)
+
+    @skipMPS
+    def test_kl_div_log_softmax_target(self, device):
+        a = torch.tensor([[1.0, 2, 3], [5.0, 5, 5]], device=device)
+        b = torch.tensor([[1.0, 2, 3], [5.0, 5, 5]], device=device)
+        self.assertEqual(
+            F.kl_div(F.log_softmax(a, 1), F.log_softmax(b, 1), reduction='none', log_target=True),
+            torch.zeros_like(a)
+        )
+
+    @skipMPS
+    def test_smoothl1loss_intergral_target(self, device):
+        def _input_grad(input, target, reduction):
+            output = F.smooth_l1_loss(input, target, reduction=reduction, beta=0.5)
+            output.sum().backward()
+            return input.grad
+
+        for dtype, reduction in product(integral_types(), ('none', 'sum', 'mean')):
+            input = torch.randn(2, 2, device=device, requires_grad=True)
+            target = torch.randint(0, 9, (2, 2), device=device, dtype=dtype)
+
+            input_grad_with_float_target = _input_grad(input, target.float(), reduction)
+
+            input_grad = _input_grad(input.detach().clone().requires_grad_(True),
+                                     target,
+                                     reduction)
+            self.assertEqual(input_grad, input_grad_with_float_target)
+
+    @skipMPS  # MPS does not support float64
+    @onlyAccelerator
+    def test_cosine_similarity_mixed_precision(self, device):
+        # test that CPU and accelerator behave consistently with various eps values
+
+        # test: Negative eps should raise error on both CPU and accelerator
+        x1 = torch.tensor(-1.6437e+10, dtype=torch.float64)
+        x2 = torch.full((3, 8, 2, 6), float('nan'), dtype=torch.float16)
+        eps_negative = -9.74982e+23
+
+        with self.assertRaisesRegex(RuntimeError, "eps must be non-negative"):
+            F.cosine_similarity(x1, x2, dim=0, eps=eps_negative)
+
+        x1_accelerator = x1.to(device)
+        x2_accelerator = x2.to(device)
+        with self.assertRaisesRegex(RuntimeError, "eps must be non-negative"):
+            F.cosine_similarity(x1_accelerator, x2_accelerator, dim=0, eps=eps_negative)
+
+        # test: Large positive eps that overflows dtype - should produce consistent results
+        # CPU and accelerator should both handle overflow consistently (producing inf/nan)
+        eps_large_positive = 9.74982e+23  # Overflows float16
+        result_cpu = F.cosine_similarity(x1, x2, dim=0, eps=eps_large_positive)
+        self.assertTrue(torch.all(torch.isnan(result_cpu)) or torch.all(torch.isinf(result_cpu)))
+
+        result_accelerator = F.cosine_similarity(x1_accelerator, x2_accelerator, dim=0, eps=eps_large_positive)
+        # both should produce NaN or inf consistently
+        self.assertTrue(torch.all(torch.isnan(result_accelerator)) or torch.all(torch.isinf(result_accelerator)))
+
+        # test: Normal positive eps - should work correctly on both CPU and accelerator
+        x3 = torch.randn(10, 128, dtype=torch.float32)
+        x4 = torch.randn(10, 128, dtype=torch.float32)
+        result_cpu = F.cosine_similarity(x3, x4, dim=1, eps=1e-8)
+        self.assertEqual(result_cpu.shape, torch.Size([10]))
+        self.assertTrue(torch.all(result_cpu >= -1.0) and torch.all(result_cpu <= 1.0))
+
+        x3_accelerator = x3.to(device)
+        x4_accelerator = x4.to(device)
+        result_accelerator = F.cosine_similarity(x3_accelerator, x4_accelerator, dim=1, eps=1e-8)
+        self.assertTrue(torch.allclose(result_cpu, result_accelerator.cpu(), rtol=1e-5, atol=1e-5))
+
+        # test: Float16 inputs with appropriate eps
+        x5 = torch.ones(2, 3, dtype=torch.float16)
+        x6 = torch.ones(2, 3, dtype=torch.float16)
+        result = F.cosine_similarity(x5, x6, dim=1, eps=1e-8)
+        self.assertEqual(result.dtype, torch.float16)
+        self.assertEqual(result.shape, torch.Size([2]))
+        self.assertTrue(torch.all(torch.isclose(result, torch.ones(2, dtype=torch.float16), rtol=1e-3)))
 
 
 class TestFunctionalPickle(TestCase):

@@ -126,7 +126,7 @@ numba==0.64.0 ; python_version == "3.12" and platform_machine != "s390x"
 
 #numpy
 #Description: Provides N-dimensional arrays and linear algebra
-#Pinned versions: 1.26.2
+#Pinned versions: 1.26.4
 #test that import: test_view_ops.py, test_unary_ufuncs.py, test_type_promotion.py,
 #test_type_info.py, test_torch.py, test_tensorexpr_pybind.py, test_tensorexpr.py,
 #test_tensorboard.py, test_tensor_creation_ops.py, test_static_runtime.py,
@@ -137,7 +137,7 @@ numba==0.64.0 ; python_version == "3.12" and platform_machine != "s390x"
 #test_jit.py, test_indexing.py, test_datapipe.py, test_dataloader.py,
 #test_binary_ufuncs.py
 numpy==1.23.2; python_version == "3.10"
-numpy==1.26.2; python_version == "3.11" or python_version == "3.12"
+numpy==1.26.4; python_version == "3.11" or python_version == "3.12"
 numpy==2.1.2; python_version >= "3.13" and python_version < "3.14"
 numpy==2.3.4; python_version >= "3.14"
 
