@@ -482,6 +482,8 @@ std::string NCCLSymmetricMemory::get_group_name() {
 
 class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
  public:
+  using SymmetricMemoryAllocator::rendezvous;
+
   void* alloc(
       size_t size,
       int device_idx,

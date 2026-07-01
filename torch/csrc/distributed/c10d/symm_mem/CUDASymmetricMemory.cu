@@ -843,9 +843,36 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
 
 } // namespace
 
+
+bool cache_entry_matches_storage(const c10::StorageImpl* storage_impl, const Block::RendezvousCacheEntry& entry) {
+  if (storage_impl == nullptr) {
+    return true;
+  }
+  if (!entry.storage.has_value()) {
+    return false;
+  }
+  auto cached_storage = entry.storage->lock();
+  return cached_storage != nullptr && cached_storage.get() == storage_impl;
+}
 c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
     void* ptr,
     const std::optional<std::string>& group_name) {
+  return rendezvous_impl(ptr, group_name, std::nullopt);
+}
+
+c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
+    const at::Tensor& tensor,
+    const std::optional<std::string>& group_name) {
+  auto storage = tensor.storage();
+  return rendezvous_impl(
+      storage.data_ptr().get(), group_name, storage.getWeakStorageImpl());
+}
+
+c10::intrusive_ptr<SymmetricMemory>
+CUDASymmetricMemoryAllocator::rendezvous_impl(
+    void* ptr,
+    const std::optional<std::string>& group_name,
+    std::optional<c10::weak_intrusive_ptr<c10::StorageImpl>> storage) {
   // In case of MemPool, the `ptr` passed in (i.e. tensor storage ptr) may not
   // be the same as the allocation base pointer, so we need to find the block
   // that covers the `ptr`
@@ -874,23 +901,64 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
     group_name_ = *block->default_group_name;
   }
 
-  // If found, this block has been rendezvous by the given group
+  c10::intrusive_ptr<c10::StorageImpl> storage_ref;
+  c10::StorageImpl* storage_impl = nullptr;
+  if (storage.has_value()) {
+    storage_ref = storage->lock();
+    storage_impl = storage_ref.get();
+    TORCH_INTERNAL_ASSERT(storage_impl != nullptr);
+    for (auto iter = block->symm_mems.begin();
+         iter != block->symm_mems.end();) {
+      if (iter->second.storage.has_value() &&
+          iter->second.storage->expired()) {
+        iter = block->symm_mems.erase(iter);
+      } else {
+        ++iter;
+      }
+    }
+  }
+
+  c10::intrusive_ptr<CUDAPeerAllocInfo> pai;
+  // If found, this block has been rendezvous by the given group.
   auto it = block->symm_mems.find(group_name_);
-  if (it == block->symm_mems.end()) {
+  if (it != block->symm_mems.end()) {
+    if (cache_entry_matches_storage(storage_impl, it->second)) {
+      pai = it->second.symm_mem;
+    }
+  }
+  if (pai == nullptr) {
+    if (storage_impl != nullptr) {
+      auto has_cache_for_storage = std::any_of(
+          block->symm_mems.begin(),
+          block->symm_mems.end(),
+          [&](const auto& entry) {
+            return cache_entry_matches_storage(storage_impl, entry.second);
+          });
+      if (!has_cache_for_storage) {
+        c10::cuda::CUDAGuard guard(block->device_idx);
+        AT_CUDA_CHECK(cudaMemset(
+            static_cast<char*>(block->alloc_ref->ptr) + block->signal_pad_offset,
+            0,
+            block->block_size - block->signal_pad_offset));
+      }
+    }
     // Create PeerAllocInfo for this block (this is the costly part)
     TORCH_INTERNAL_ASSERT(
         handle_type_ != Expandable_Segments_Handle_Type::UNSPECIFIED)
     bool use_fabric =
         handle_type_ == Expandable_Segments_Handle_Type::FABRIC_HANDLE;
     // PeerAllocInfo captures this block's rendezvous info
-    auto pai = use_fabric ? make_peer_alloc_info<true>(ptr, block, group_name_)
-                          : make_peer_alloc_info<false>(ptr, block, group_name_);
+    pai = use_fabric ? make_peer_alloc_info<true>(ptr, block, group_name_)
+                     : make_peer_alloc_info<false>(ptr, block, group_name_);
     // Cache it with the group name
-    it = block->symm_mems.emplace(group_name_, pai).first;
+    block->symm_mems.insert_or_assign(
+        group_name_,
+        Block::RendezvousCacheEntry{
+            std::move(storage),
+            pai});
   }
 
   // Create symm mem handle for this tensor, specified by its offset
-  auto pai = it->second;
   return c10::make_intrusive<CUDASymmetricMemory>(pai, offset);
 }
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <c10/core/StorageImpl.h>
 #include <c10/cuda/CUDAAllocatorConfig.h>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryTypes.hpp>
@@ -115,7 +116,11 @@ struct Block : public c10::intrusive_ptr_target {
   size_t buffer_size;
   size_t signal_pad_offset;
   std::optional<std::string> default_group_name;
-  std::map<std::string, c10::intrusive_ptr<CUDAPeerAllocInfo>> symm_mems;
+  struct RendezvousCacheEntry {
+    std::optional<c10::weak_intrusive_ptr<c10::StorageImpl>> storage;
+    c10::intrusive_ptr<CUDAPeerAllocInfo> symm_mem;
+  };
+  std::map<std::string, RendezvousCacheEntry> symm_mems;
 
   Block(
       c10::intrusive_ptr<AllocationRef> alloc_ref,
@@ -138,6 +143,9 @@ class CUDASymmetricMemoryAllocator : public SymmetricMemoryAllocator {
   c10::intrusive_ptr<SymmetricMemory> rendezvous(
       void* ptr,
       const std::optional<std::string>& group_name) override;
+  c10::intrusive_ptr<SymmetricMemory> rendezvous(
+      const at::Tensor& tensor,
+      const std::optional<std::string>& group_name) override;
   bool has_multicast_support(int device_idx) override;
   bool has_allocation(void* ptr) override;
   c10::DeviceType supported_device_type() override;
@@ -146,6 +154,10 @@ class CUDASymmetricMemoryAllocator : public SymmetricMemoryAllocator {
  private:
   c10::intrusive_ptr<Block> find_block(void* ptr);
   c10::intrusive_ptr<Block> find_block_covering(void* ptr, size_t& offset);
+  c10::intrusive_ptr<SymmetricMemory> rendezvous_impl(
+      void* ptr,
+      const std::optional<std::string>& group_name,
+      std::optional<c10::weak_intrusive_ptr<c10::StorageImpl>> storage);
 
   std::shared_mutex mutex_;
   std::unordered_map<void*, c10::intrusive_ptr<Block>> ptr_to_block_;

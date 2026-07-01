@@ -362,6 +362,8 @@ static void initialize_nvshmem_with_store(
 
 class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
  public:
+  using SymmetricMemoryAllocator::rendezvous;
+
   void* alloc(
       size_t size,
       int device_idx,
