@@ -150,7 +150,7 @@ def _enum_zes_device_infos(visible_mask: list[int]) -> int:
     """
     try:
         import pyzes  # type: ignore[import]
-    except ImportError:
+    except Exception:
         return -1
 
     global _cached_zes_device_infos
@@ -767,6 +767,31 @@ def _get_rng_state_offset(device: int | str | torch.device = "xpu") -> int:
     return default_generator.get_offset()
 
 
+def _import_pyzes():
+    """Return the imported pyzes module; raise ImportError if missing, RuntimeError if the GPU driver is unavailable."""
+    try:
+        import pyzes  # type: ignore[import]
+    except ImportError:
+        raise ImportError(
+            "pyzes is required; install it with 'pip install pyzes'."
+        ) from None
+    except Exception as err:
+        raise RuntimeError(
+            "Failed to import pyzes. Ensure the GPU driver is installed with Level Zero Sysman support."
+        ) from err
+    return pyzes
+
+
+def _get_pyzes_version() -> tuple[int, ...]:
+    """
+    Return the version of the pyzes package as a tuple of integers (major, minor, patch).
+    Always ensure that the pyzes package is installed before calling this function.
+    """
+    from importlib.metadata import version
+
+    return tuple(map(int, version("pyzes").split(".")))
+
+
 def _zes_check(rc: int, msg: str) -> None:
     """Raise RuntimeError if the Level Zero Sysman call failed (rc != ZE_RESULT_SUCCESS)."""
     import pyzes  # type: ignore[import]
@@ -800,12 +825,7 @@ def _get_zes_temperature_handle(device: Device = None) -> c_void_p:
             current device, given by :func:`~torch.xpu.current_device`,
             if ``None`` (default).
     """
-    try:
-        import pyzes  # type: ignore[import]
-    except ImportError:
-        raise ImportError(
-            "pyzes is required; install it with 'pip install pyzes'"
-        ) from None
+    pyzes = _import_pyzes()
 
     device = _get_device_index(device, optional=True)
     _zes_ensure_device_infos(device)
@@ -897,12 +917,7 @@ def _get_zes_frequency_handle(device: Device = None) -> c_void_p:
             current device, given by :func:`~torch.xpu.current_device`,
             if ``None`` (default).
     """
-    try:
-        import pyzes  # type: ignore[import]
-    except ImportError:
-        raise ImportError(
-            "pyzes is required; install it with 'pip install pyzes'"
-        ) from None
+    pyzes = _import_pyzes()
 
     device = _get_device_index(device, optional=True)
     _zes_ensure_device_infos(device)
@@ -968,12 +983,7 @@ def _get_zes_power_handle(device: Device = None) -> c_void_p:
             current device, given by :func:`~torch.xpu.current_device`,
             if ``None`` (default).
     """
-    try:
-        import pyzes  # type: ignore[import]
-    except ImportError:
-        raise ImportError(
-            "pyzes is required; install it with 'pip install pyzes'"
-        ) from None
+    pyzes = _import_pyzes()
 
     device = _get_device_index(device, optional=True)
     _zes_ensure_device_infos(device)
@@ -1064,12 +1074,7 @@ def _get_zes_engine_handle(device: Device = None) -> c_void_p:
             current device, given by :func:`~torch.xpu.current_device`,
             if ``None`` (default).
     """
-    try:
-        import pyzes  # type: ignore[import]
-    except ImportError:
-        raise ImportError(
-            "pyzes is required; install it with 'pip install pyzes'"
-        ) from None
+    pyzes = _import_pyzes()
 
     device = _get_device_index(device, optional=True)
     _zes_ensure_device_infos(device)
@@ -1183,12 +1188,7 @@ def _zes_get_memory_handle(device: Device = None) -> c_void_p:
             current device, given by :func:`~torch.xpu.current_device`,
             if ``None`` (default).
     """
-    try:
-        import pyzes  # type: ignore[import]
-    except ImportError:
-        raise ImportError(
-            "pyzes is required; install it with 'pip install pyzes'"
-        ) from None
+    pyzes = _import_pyzes()
 
     device = _get_device_index(device, optional=True)
     _zes_ensure_device_infos(device)
@@ -1329,6 +1329,7 @@ from .memory import (
     change_current_allocator,
     empty_cache,
     get_per_process_memory_fraction,
+    list_gpu_processes,
     max_memory_allocated,
     max_memory_reserved,
     mem_get_info,
@@ -1393,6 +1394,7 @@ __all__ = [
     "is_current_stream_capturing",
     "is_initialized",
     "is_tf32_supported",
+    "list_gpu_processes",
     "make_graphed_callables",
     "manual_seed",
     "manual_seed_all",

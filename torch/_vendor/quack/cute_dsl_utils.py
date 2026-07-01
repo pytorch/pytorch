@@ -16,7 +16,7 @@ except ImportError:
 
 import cutlass
 import cutlass.cute as cute
-from cutlass import Int32, Int64, Float16, BFloat16, Float32
+from cutlass import Uint8, Int32, Int64, Float16, BFloat16, Float32
 from cutlass.base_dsl.tvm_ffi_builder import spec
 from cutlass.cutlass_dsl import NumericMeta
 
@@ -54,12 +54,11 @@ _converter_module._convert_single_arg = _patched_convert_single_arg
 
 
 torch2cute_dtype_map = {
+    torch.bool: Uint8,
+    torch.uint8: Uint8,
     torch.float16: Float16,
     torch.bfloat16: BFloat16,
     torch.float32: Float32,
-    torch.float8_e4m3fn: cutlass.Float8E4M3FN,
-    torch.float8_e5m2: cutlass.Float8E5M2,
-    torch.float8_e8m0fnu: cutlass.Float8E8M0FNU,
     torch.int32: Int32,
     torch.int64: Int64,
 }
@@ -122,12 +121,6 @@ def get_device_capacity(
     if isinstance(device, torch.Tensor):
         device = device.device
     return _get_device_capacity_cached(device)
-
-
-def ensure_varlen_n_supported(device: torch.device | torch.Tensor | None = None) -> None:
-    """Raise a clear error when varlen-N is requested on unsupported architectures."""
-    if get_device_capacity(device)[0] not in (10, 11):
-        raise NotImplementedError("varlen-N grouped GEMM is implemented only for SM100/SM110")
 
 
 def _partition_fields(obj):

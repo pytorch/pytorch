@@ -183,6 +183,50 @@ def _getDefaultRtolAndAtol(dtype0, dtype1):
     return rtol, atol
 
 
+op_assert_ref_tol_table = {
+    (torch.bfloat16, torch.ops.aten.native_layer_norm.default): 1e-5,
+    (torch.float16, torch.ops.aten.native_layer_norm.default): 1e-5,
+    (torch.float16, torch.ops.aten.native_layer_norm_backward.default): 1e-3,
+    (torch.bfloat16, torch.ops.aten.native_layer_norm_backward.default): 2e-2,
+    (torch.bfloat16, torch.ops.aten.native_batch_norm.default): 1e-5,
+    (torch.float16, torch.ops.aten.native_batch_norm.default): 1e-5,
+    (torch.bfloat16, torch.ops.aten._native_batch_norm_legit.default): 1e-5,
+    (torch.bfloat16, torch.ops.aten._native_batch_norm_legit.no_stats): 1e-5,
+    (torch.float16, torch.ops.aten._native_batch_norm_legit.default): 1e-5,
+    (torch.float16, torch.ops.aten._native_batch_norm_legit.no_stats): 1e-5,
+    (torch.bfloat16, torch.ops.aten.linalg_vector_norm.default): 1e-4,
+    (torch.float16, torch.ops.aten.linalg_vector_norm.default): 1e-4,
+    (torch.bfloat16, torch.ops.aten.var_mean.correction): 5e-7,
+    (torch.float16, torch.ops.aten.var_mean.correction): 5e-7,
+    (torch.bfloat16, torch.ops.aten.var_mean.dim): 5e-7,
+    (torch.float16, torch.ops.aten.var_mean.dim): 5e-7,
+    (torch.float16, torch.ops.aten.nll_loss_forward.default): 1e-2,
+    (torch.bfloat16, torch.ops.aten.nll_loss_forward.default): 1e-1,
+    (torch.float16, torch.ops.aten.nll_loss2d_forward.default): 1e-2,
+    (torch.bfloat16, torch.ops.aten.nll_loss2d_forward.default): 2e-1,
+    (torch.float16, torch.ops.aten.hardswish.default): 2e-7,
+    (torch.bfloat16, torch.ops.aten.hardswish.default): 2e-7,
+    (torch.float16, torch.ops.aten.multi_margin_loss.default): 3e-2,
+    (torch.bfloat16, torch.ops.aten.multi_margin_loss.default): 5e-2,
+    (torch.float16, torch.ops.aten.multilabel_margin_loss_forward.default): 3e-2,
+    (torch.bfloat16, torch.ops.aten.multilabel_margin_loss_forward.default): 3e-2,
+    (torch.float16, torch.ops.aten.reflection_pad1d_backward.default): 5e-3,
+    (torch.bfloat16, torch.ops.aten.reflection_pad1d_backward.default): 5e-3,
+    (torch.float16, torch.ops.aten.reflection_pad2d_backward.default): 5e-3,
+    (torch.bfloat16, torch.ops.aten.reflection_pad2d_backward.default): 5e-3,
+    (torch.float16, torch.ops.aten.reflection_pad3d_backward.default): 5e-3,
+    (torch.bfloat16, torch.ops.aten.reflection_pad3d_backward.default): 5e-2,
+    (torch.float16, torch.ops.aten._batch_norm_with_update.default): 2e-7,
+    (torch.bfloat16, torch.ops.aten._batch_norm_with_update.default): 5e-7,
+    # see https://github.com/pytorch/pytorch/pull/96264
+    (torch.float16, torch.ops.aten.mv.default): 2e-5,
+    (torch.bfloat16, torch.ops.aten.mv.default): 1e-5,
+    (torch.float16, torch.ops.aten.dot.default): 2e-6,
+    (torch.float16, torch.ops.aten._softmax_backward_data.default): 3e-7,
+    (torch.bfloat16, torch.ops.aten._softmax_backward_data.default): 2e-7,
+}
+
+
 def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs):
     if orig.dtype != decomp.dtype:
         raise AssertionError(
@@ -196,52 +240,10 @@ def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs)
         raise AssertionError(
             f"{i} Operation: {op} shape mismatch: {orig.shape} != {decomp.shape}"
         )
-    tol_table = {
-        (torch.bfloat16, torch.ops.aten.native_layer_norm.default): 1e-5,
-        (torch.float16, torch.ops.aten.native_layer_norm.default): 1e-5,
-        (torch.float16, torch.ops.aten.native_layer_norm_backward.default): 1e-3,
-        (torch.bfloat16, torch.ops.aten.native_layer_norm_backward.default): 2e-2,
-        (torch.bfloat16, torch.ops.aten.native_batch_norm.default): 1e-5,
-        (torch.float16, torch.ops.aten.native_batch_norm.default): 1e-5,
-        (torch.bfloat16, torch.ops.aten._native_batch_norm_legit.default): 1e-5,
-        (torch.bfloat16, torch.ops.aten._native_batch_norm_legit.no_stats): 1e-5,
-        (torch.float16, torch.ops.aten._native_batch_norm_legit.default): 1e-5,
-        (torch.float16, torch.ops.aten._native_batch_norm_legit.no_stats): 1e-5,
-        (torch.bfloat16, torch.ops.aten.linalg_vector_norm.default): 1e-4,
-        (torch.float16, torch.ops.aten.linalg_vector_norm.default): 1e-4,
-        (torch.bfloat16, torch.ops.aten.var_mean.correction): 5e-7,
-        (torch.float16, torch.ops.aten.var_mean.correction): 5e-7,
-        (torch.bfloat16, torch.ops.aten.var_mean.dim): 5e-7,
-        (torch.float16, torch.ops.aten.var_mean.dim): 5e-7,
-        (torch.float16, torch.ops.aten.nll_loss_forward.default): 1e-2,
-        (torch.bfloat16, torch.ops.aten.nll_loss_forward.default): 1e-1,
-        (torch.float16, torch.ops.aten.nll_loss2d_forward.default): 1e-2,
-        (torch.bfloat16, torch.ops.aten.nll_loss2d_forward.default): 2e-1,
-        (torch.float16, torch.ops.aten.hardswish.default): 2e-7,
-        (torch.bfloat16, torch.ops.aten.hardswish.default): 2e-7,
-        (torch.float16, torch.ops.aten.multi_margin_loss.default): 3e-2,
-        (torch.bfloat16, torch.ops.aten.multi_margin_loss.default): 5e-2,
-        (torch.float16, torch.ops.aten.multilabel_margin_loss_forward.default): 3e-2,
-        (torch.bfloat16, torch.ops.aten.multilabel_margin_loss_forward.default): 3e-2,
-        (torch.float16, torch.ops.aten.reflection_pad1d_backward.default): 5e-3,
-        (torch.bfloat16, torch.ops.aten.reflection_pad1d_backward.default): 5e-3,
-        (torch.float16, torch.ops.aten.reflection_pad2d_backward.default): 5e-3,
-        (torch.bfloat16, torch.ops.aten.reflection_pad2d_backward.default): 5e-3,
-        (torch.float16, torch.ops.aten.reflection_pad3d_backward.default): 5e-3,
-        (torch.bfloat16, torch.ops.aten.reflection_pad3d_backward.default): 5e-2,
-        (torch.float16, torch.ops.aten._batch_norm_with_update.default): 2e-7,
-        (torch.bfloat16, torch.ops.aten._batch_norm_with_update.default): 5e-7,
-        # see https://github.com/pytorch/pytorch/pull/96264
-        (torch.float16, torch.ops.aten.mv.default): 2e-5,
-        (torch.bfloat16, torch.ops.aten.mv.default): 1e-5,
-        (torch.float16, torch.ops.aten.dot.default): 2e-6,
-        (torch.float16, torch.ops.aten._softmax_backward_data.default): 3e-7,
-        (torch.bfloat16, torch.ops.aten._softmax_backward_data.default): 2e-7,
-    }
     if ref.is_floating_point():
         orig_diff = (orig - ref).abs().max()
         decomp_diff = (decomp - ref).abs().max()
-        atol = tol_table.get((test_dtype, op), 1e-7)
+        atol = op_assert_ref_tol_table.get((test_dtype, op), 1e-7)
         if decomp_diff > orig_diff + atol:
             raise RuntimeError(
                 f"Difference from float64 is larger with decomposition {op.__name__}"
@@ -252,61 +254,63 @@ def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs)
             )
     else:
         test_case.assertEqual(
-            orig, decomp, msg=f"{op.__name__}\nargs = {args}\nkwargs = {kwargs}"
+            orig,
+            decomp,
+            msg=lambda msg: f"{msg}\n{op.__name__}\nargs = {args}\nkwargs = {kwargs}",
         )
+
+
+# Before adding an entry to this table, make sure your decomposition is right :)
+op_assert_equal_tol_table = {
+    # Due to strange epsilon behaviors, see https://github.com/pytorch/pytorch/issues/73161
+    (torch.float32, torch.ops.aten.native_layer_norm.default): (1e-3, 1e-3),
+    (torch.float32, torch.ops.aten.native_layer_norm_backward.default): (1e-3, 1e-3),
+    (torch.float64, torch.ops.aten.native_layer_norm.default): (1e-6, 1e-6),
+    # Due to strange epsilon behaviors, see https://github.com/pytorch/pytorch/issues/73161
+    (torch.float32, torch.ops.aten.native_group_norm.default): (1e-4, 5e-6),
+    # This exceeds default tolerances only on CPU, on CUDA it's fine
+    (torch.float32, torch.ops.aten.grid_sampler_2d.default): (7e-6, 3e-5),
+    # Exceeds tolerances on CUDA, likely due to fma
+    (torch.float32, torch.ops.aten.mv.default): (1e-5, 3e-5),
+    (torch.complex64, torch.ops.aten.mv.default): (5e-5, 5e-5),
+    (torch.float64, torch.ops.aten.upsample_bicubic2d.vec): (1e-5, 5e-4),
+    (torch.float64, torch.ops.aten.upsample_bicubic2d.default): (1e-5, 5e-4),
+    # The decomposition is TOO correct. It computes everything in int64, so sometimes
+    # there's an off-by-one error. See
+    # https://github.com/pytorch/pytorch/issues/81996
+    # https://github.com/pytorch/pytorch/issues/82230
+    (torch.int8, torch.ops.aten.linspace.default): (0, 1),
+    (torch.uint8, torch.ops.aten.linspace.default): (0, 1),
+    (torch.int16, torch.ops.aten.linspace.default): (0, 1),
+    (torch.int32, torch.ops.aten.linspace.default): (0, 1),
+    (torch.int64, torch.ops.aten.linspace.default): (0, 1),
+    (torch.int8, torch.ops.aten.linspace.Tensor_Tensor): (0, 1),
+    (torch.uint8, torch.ops.aten.linspace.Tensor_Tensor): (0, 1),
+    (torch.int16, torch.ops.aten.linspace.Tensor_Tensor): (0, 1),
+    (torch.int32, torch.ops.aten.linspace.Tensor_Tensor): (0, 1),
+    (torch.int64, torch.ops.aten.linspace.Tensor_Tensor): (0, 1),
+    (torch.int8, torch.ops.aten.linspace.Tensor_Scalar): (0, 1),
+    (torch.uint8, torch.ops.aten.linspace.Tensor_Scalar): (0, 1),
+    (torch.int16, torch.ops.aten.linspace.Tensor_Scalar): (0, 1),
+    (torch.int32, torch.ops.aten.linspace.Tensor_Scalar): (0, 1),
+    (torch.int64, torch.ops.aten.linspace.Tensor_Scalar): (0, 1),
+    (torch.int8, torch.ops.aten.linspace.Scalar_Tensor): (0, 1),
+    (torch.uint8, torch.ops.aten.linspace.Scalar_Tensor): (0, 1),
+    (torch.int16, torch.ops.aten.linspace.Scalar_Tensor): (0, 1),
+    (torch.int32, torch.ops.aten.linspace.Scalar_Tensor): (0, 1),
+    (torch.int64, torch.ops.aten.linspace.Scalar_Tensor): (0, 1),
+}
 
 
 def op_assert_equal(test_case, op, test_dtype, orig, decomp, args, kwargs):
     test_case.assertEqual(
         orig.dtype,
         decomp.dtype,
-        f"Operation: {op}, orig.dtype: {orig.dtype}, decomp.dtype: {decomp.dtype}, {args}, {kwargs}",
+        lambda msg: f"{msg}\nOperation: {op}, orig.dtype: {orig.dtype}, "
+        f"decomp.dtype: {decomp.dtype}, {args}, {kwargs}",
     )
-    # Before adding an entry to this table, make sure your decomposition is right :)
-    tol_table = {
-        # Due to strange epsilon behaviors, see https://github.com/pytorch/pytorch/issues/73161
-        (torch.float32, torch.ops.aten.native_layer_norm.default): (1e-3, 1e-3),
-        (torch.float32, torch.ops.aten.native_layer_norm_backward.default): (
-            1e-3,
-            1e-3,
-        ),
-        (torch.float64, torch.ops.aten.native_layer_norm.default): (1e-6, 1e-6),
-        # Due to strange epsilon behaviors, see https://github.com/pytorch/pytorch/issues/73161
-        (torch.float32, torch.ops.aten.native_group_norm.default): (1e-4, 5e-6),
-        # This exceeds default tolerances only on CPU, on CUDA it's fine
-        (torch.float32, torch.ops.aten.grid_sampler_2d.default): (7e-6, 3e-5),
-        # Exceeds tolerances on CUDA, likely due to fma
-        (torch.float32, torch.ops.aten.mv.default): (1e-5, 3e-5),
-        (torch.complex64, torch.ops.aten.mv.default): (5e-5, 5e-5),
-        (torch.float64, torch.ops.aten.upsample_bicubic2d.vec): (1e-5, 5e-4),
-        (torch.float64, torch.ops.aten.upsample_bicubic2d.default): (1e-5, 5e-4),
-        # The decomposition is TOO correct. It computes everything in int64, so sometimes
-        # there's an off-by-one error. See
-        # https://github.com/pytorch/pytorch/issues/81996
-        # https://github.com/pytorch/pytorch/issues/82230
-        (torch.int8, torch.ops.aten.linspace.default): (0, 1),
-        (torch.uint8, torch.ops.aten.linspace.default): (0, 1),
-        (torch.int16, torch.ops.aten.linspace.default): (0, 1),
-        (torch.int32, torch.ops.aten.linspace.default): (0, 1),
-        (torch.int64, torch.ops.aten.linspace.default): (0, 1),
-        (torch.int8, torch.ops.aten.linspace.Tensor_Tensor): (0, 1),
-        (torch.uint8, torch.ops.aten.linspace.Tensor_Tensor): (0, 1),
-        (torch.int16, torch.ops.aten.linspace.Tensor_Tensor): (0, 1),
-        (torch.int32, torch.ops.aten.linspace.Tensor_Tensor): (0, 1),
-        (torch.int64, torch.ops.aten.linspace.Tensor_Tensor): (0, 1),
-        (torch.int8, torch.ops.aten.linspace.Tensor_Scalar): (0, 1),
-        (torch.uint8, torch.ops.aten.linspace.Tensor_Scalar): (0, 1),
-        (torch.int16, torch.ops.aten.linspace.Tensor_Scalar): (0, 1),
-        (torch.int32, torch.ops.aten.linspace.Tensor_Scalar): (0, 1),
-        (torch.int64, torch.ops.aten.linspace.Tensor_Scalar): (0, 1),
-        (torch.int8, torch.ops.aten.linspace.Scalar_Tensor): (0, 1),
-        (torch.uint8, torch.ops.aten.linspace.Scalar_Tensor): (0, 1),
-        (torch.int16, torch.ops.aten.linspace.Scalar_Tensor): (0, 1),
-        (torch.int32, torch.ops.aten.linspace.Scalar_Tensor): (0, 1),
-        (torch.int64, torch.ops.aten.linspace.Scalar_Tensor): (0, 1),
-    }
-    if (decomp.dtype, op) in tol_table:
-        rtol, atol = tol_table[(decomp.dtype, op)]
+    if (decomp.dtype, op) in op_assert_equal_tol_table:
+        rtol, atol = op_assert_equal_tol_table[(decomp.dtype, op)]
     else:
         rtol, atol = _getDefaultRtolAndAtol(orig.dtype, decomp.dtype)
 
@@ -315,7 +319,7 @@ def op_assert_equal(test_case, op, test_dtype, orig, decomp, args, kwargs):
         decomp,
         rtol=rtol,
         atol=atol,
-        msg=f"{op.__name__}\nargs = {args}\nkwargs = {kwargs}",
+        msg=lambda msg: f"{msg}\n{op.__name__}\nargs = {args}\nkwargs = {kwargs}",
     )
 
 
@@ -1018,9 +1022,6 @@ def forward(self, scores_1, mask_1, value_1):
         for sample_input in samples:
             if requires_grad:
                 fn, primals = normalize_op_input_output(func, sample_input)
-                primals = tree_map(
-                    lambda x: x if isinstance(x, torch.Tensor) else x, primals
-                )
 
                 # Once https://github.com/pytorch/pytorch/pull/75965/ I can
                 # store the called list on the mode object instance and no

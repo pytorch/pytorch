@@ -129,7 +129,8 @@ class StaticallyLaunchedTritonKernel:
         reload it from the raw cubin file.
         """
         if self.cubin_path is None:
-            assert self.cubin_raw is not None
+            if self.cubin_raw is None:
+                raise AssertionError("cubin_raw must be set when cubin_path is None")
             os.makedirs(os.path.dirname(filepath), exist_ok=True)
             with open(filepath, "wb") as f:
                 f.write(self.cubin_raw)
@@ -140,8 +141,10 @@ class StaticallyLaunchedTritonKernel:
         if self.function is not None:
             return
 
-        assert hasattr(self, "cubin_path")
-        assert self.cubin_path is not None
+        if not hasattr(self, "cubin_path"):
+            raise AssertionError("cubin_path attribute not set before load_kernel")
+        if self.cubin_path is None:
+            raise AssertionError("cubin_path must not be None before load_kernel")
         (self.module, self.function, self.n_regs, self.n_spills) = (
             self.C_impl._load_kernel(self.cubin_path, self.name, self.shared, device)
         )
@@ -258,7 +261,8 @@ class StaticallyLaunchedTritonKernel:
         """Actually run the kernel at runtime. This function is the hot codepath."""
 
         # Assert load_kernel() has been called and args match
-        assert self.function is not None
+        if self.function is None:
+            raise AssertionError("load_kernel() must be called before run()")
 
         # TODO: actually, if the args *don't* match, we probably should
         # throw an exception. But if inductor is the only one calling this
@@ -302,7 +306,8 @@ class StaticallyLaunchedTritonKernel:
                     arg_tys = arg_tys + "O"
                     args = (*args, None)
         # pyrefly: ignore [bad-argument-type]
-        assert len(args) == len(arg_tys)
+        if len(args) != len(arg_tys):
+            raise AssertionError(f"Expected {len(arg_tys)} args, got {len(args)}")
 
         # TODO: can handle grid functions here or in C++, so
         # that we don't need the grid handler above.
@@ -359,8 +364,10 @@ class StaticallyLaunchedXpuKernel(StaticallyLaunchedTritonKernel):
         if self.function is not None:
             return
 
-        assert hasattr(self, "cubin_path")
-        assert self.cubin_path is not None
+        if not hasattr(self, "cubin_path"):
+            raise AssertionError("expected cubin_path attribute to be set")
+        if self.cubin_path is None:
+            raise AssertionError("expected cubin_path to not be None")
         # The XPU static launcher returns a PyCapsule for the loaded SYCL kernel,
         # not a separate module/function pair like the CUDA/HIP launcher.
         (self.function, self.n_regs, self.n_spills) = self.C_impl._load_kernel(

@@ -86,9 +86,12 @@ class ATenBiasAddMMConfigHeuristics(
         nodes = kernel_inputs.nodes()
         # for addmm, bias is the first input
         bias = nodes[0]
-        assert (
+        if not (
             len(bias.get_size()) == 2
             and bias.get_stride()[0] == 0
             and inductor_config.triton.autotune_cublasLt
-        )
+        ):
+            raise AssertionError(
+                "Expected 2D bias with stride[0]==0 and autotune_cublasLt enabled"
+            )
         yield from super()._get_template_configs_impl(kernel_inputs, op_name)

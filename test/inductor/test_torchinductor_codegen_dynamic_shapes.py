@@ -51,6 +51,7 @@ def check_codegen(
     *,
     device: torch.types.Device,
     is_cpp_code: bool,
+    copy_to_gpu: bool = True,
 ):
     kwargs = kwargs or {}
 
@@ -66,7 +67,8 @@ def check_codegen(
                 x.size(), x.stride(), device=device, dtype=x.dtype
             ).copy_(x)
 
-        example_inputs = tuple(copy_fn(x) for x in example_inputs)
+        if copy_to_gpu:
+            example_inputs = tuple(copy_fn(x) for x in example_inputs)
 
     torch._dynamo.reset()
     torch._inductor.codecache.FxGraphCache.clear()
@@ -528,7 +530,14 @@ if HAS_GPU and not TEST_WITH_ASAN:
         maxDiff = None
         device = GPU_TYPE
 
-        def common(self: TestCase, model, example_inputs, kwargs=None, **_rest):
+        def common(
+            self: TestCase,
+            model,
+            example_inputs,
+            kwargs=None,
+            copy_to_gpu=True,
+            **_rest,
+        ):
             return check_codegen(
                 self=self,
                 model=model,
@@ -536,6 +545,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 device=self.device,
                 kwargs=kwargs,
                 is_cpp_code=False,
+                copy_to_gpu=copy_to_gpu,
             )
 
     copy_tests(

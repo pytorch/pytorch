@@ -82,11 +82,11 @@ detectron2_maskrcnn_r_101_c4,fail_accuracy,57
 
 
 
-detectron2_maskrcnn_r_101_fpn,fail_accuracy,63
+detectron2_maskrcnn_r_101_fpn,pass,63
 
 
 
-detectron2_maskrcnn_r_50_c4,fail_accuracy,57
+detectron2_maskrcnn_r_50_c4,pass,57
 
 
 

@@ -650,6 +650,9 @@ class TestFxGraphCache(TestCase):
         with config.patch(
             bundle_triton_into_fx_graph_cache=bundle_triton,
             use_static_triton_launcher=use_static_triton_launcher,
+            # Avoid non-deterministic pad_mm benchmarking changing numerics or
+            # the number of bundled Triton static autotuners across runs.
+            shape_padding=False,
         ):
             compiled_fn = torch.compile(fn, dynamic=dynamic)
 
@@ -1516,49 +1519,6 @@ class TestFxGraphCache(TestCase):
             self.assertGreater(counters["inductor"]["fxgraph_cache_hit"], 0)
 
             self.assertEqual(res1, res2)
-
-    @config.patch({"fx_graph_cache": True})
-    @config.patch({"fx_graph_remote_cache": False})
-    @requires_cuda_and_triton
-    def test_cache_hit_inductor_guard_preserves_source(self):
-        from torch.nn.attention.flex_attention import create_block_mask
-
-        def mask_fn(b, h, q_idx, kv_idx):
-            return (q_idx - kv_idx <= 512) & (kv_idx - q_idx <= 512)
-
-        def run(compiled_fn, seq_len):
-            x = torch.empty((1, 1, seq_len, 1), dtype=torch.float16, device="cuda")
-            torch._dynamo.mark_dynamic(x, 2)
-            result = compiled_fn(
-                mask_fn,
-                B=None,
-                H=None,
-                Q_LEN=x.size(-2),
-                KV_LEN=x.size(-2),
-                device="cuda",
-            )
-            torch.cuda.synchronize()
-            return result
-
-        compiled_fn = torch.compile(create_block_mask, fullgraph=True, dynamic=True)
-        run(compiled_fn, 10_000)
-
-        self.reset()
-        counters.clear()
-
-        compiled_fn = torch.compile(create_block_mask, fullgraph=True, dynamic=True)
-        run(compiled_fn, 10_000)
-        self.assertGreater(counters["inductor"]["fxgraph_cache_hit"], 0)
-
-        with torch._dynamo.config.patch(error_on_recompile=True):
-            with self.assertRaises(torch._dynamo.exc.RecompileError) as cm:
-                run(compiled_fn, 50_000)
-
-        msg = str(cm.exception)
-        self.assertIn("can_use_32bit_indexing", msg)
-        self.assertNotIn("_lookup_graph", msg)
-        self.assertNotIn("autograd_cache.py", msg)
-        self.assertNotIn("<string>:1", msg)
 
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
@@ -3305,7 +3265,7 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
 
-class TestCustomPartitionerFn(CustomPartitionerFn):
+class _TestCustomPartitionerFn(CustomPartitionerFn):
     def __init__(self):
         self._uuid = None
 
@@ -3855,6 +3815,51 @@ class TestFxGraphCacheHashing(TestCase):
             pickler.dumps(details3),
         )
 
+    def test_hash_provenance_tracking_to_timeline(self):
+        """
+        Test that provenance_tracking_to_timeline affects hashes.
+        """
+        with config.patch(
+            {
+                "trace.provenance_tracking_level": 1,
+                "trace.provenance_tracking_to_timeline": False,
+            }
+        ):
+            details1 = FxGraphHashDetails(None, [], {}, [])
+            details2 = FxGraphHashDetails(None, [], {}, [])
+
+        with config.patch(
+            {
+                "trace.provenance_tracking_level": 1,
+                "trace.provenance_tracking_to_timeline": True,
+            }
+        ):
+            details3 = FxGraphHashDetails(None, [], {}, [])
+
+        with config.patch(
+            {
+                "trace.provenance_tracking_level": 0,
+                "trace.provenance_tracking_to_timeline": True,
+            }
+        ):
+            details4 = FxGraphHashDetails(None, [], {}, [])
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        pickler = FxGraphCachePickler(gm)
+
+        self.assertEqual(
+            pickler.dumps(details1),
+            pickler.dumps(details2),
+        )
+        self.assertNotEqual(
+            pickler.dumps(details1),
+            pickler.dumps(details3),
+        )
+        self.assertNotEqual(
+            pickler.dumps(details1),
+            pickler.dumps(details4),
+        )
+
     def test_provenance_tracking_level_causes_cache_miss(self):
         """
         Test that changing provenance_tracking_level causes a cache miss.
@@ -4110,7 +4115,7 @@ class TestFxGraphCacheHashing(TestCase):
         """
         Test that the custom partitioner function's UUID is properly used in the FX graph cache hashing.
         """
-        custom_partitioner_fn = TestCustomPartitionerFn()
+        custom_partitioner_fn = _TestCustomPartitionerFn()
         with config.patch({"custom_partitioner_fn": custom_partitioner_fn}):
             custom_partitioner_fn._uuid = "1"
             details1 = FxGraphHashDetails(None, [], {}, [])
@@ -5079,7 +5084,7 @@ class TestVecISACheckBuild(TestCase):
         self.assertEqual(
             value.split(os.pathsep)[0],
             torch_lib,
-            msg=f"LD_LIBRARY_PATH should be prepended with {torch_lib!r}, got {value!r}",
+            msg=lambda msg: f"{msg}\nLD_LIBRARY_PATH should be prepended with {torch_lib!r}, got {value!r}",
         )
 
 

@@ -128,9 +128,14 @@ def signature_of(arg: KernelArgType, *, size_dtype: str | None) -> str:
             return "nvTmaDesc"
         else:
             # https://github.com/triton-lang/triton/blob/9695baed9b46cf957e08b157bb4133f4a4b331c5/python/triton/runtime/jit.py#L360-L363
-            assert arg.api_type == "stable"
-            assert arg.block_shape is not None
-            assert arg.dtype is not None
+            if arg.api_type != "stable":
+                raise AssertionError(
+                    f"expected api_type == 'stable', got {arg.api_type}"
+                )
+            if arg.block_shape is None:
+                raise AssertionError("expected block_shape to not be None")
+            if arg.dtype is None:
+                raise AssertionError("expected dtype to not be None")
             inner = _type_of(arg.dtype)[1:]  # strip the `*`: *fp32 -> fp32
             return f"tensordesc<{inner}{list(arg.block_shape)}>"
     if isinstance(arg, ConstexprArg):
@@ -208,7 +213,10 @@ def _get_buffer_layout(buf_name: str) -> "torch._inductor.ir.Layout":
         buffer = V.graph.try_get_buffer(buf_name)
         # output arg
         if not buffer:
-            assert buf_name == V.kernel.output_node.name
+            if buf_name != V.kernel.output_node.name:
+                raise AssertionError(
+                    f"expected buf_name == output_node.name, got {buf_name}"
+                )
             layout = V.kernel.output_node.layout
         else:
             layout = buffer.get_layout()
@@ -291,6 +299,7 @@ def config_of(
     *,
     indices: list[int] | None = None,
     pointer_range_override: tuple[int, ...] | None = None,
+    skip_cpp_wrapper_input_tensor_alignment: bool = False,
 ) -> Any:
     if indices is None:
         indices = list(range(len(args)))
@@ -326,11 +335,31 @@ def config_of(
             return False
         raise NotImplementedError(f"unhandled {type(x)}: {x}")
 
+    def include_tensor_alignment(arg: KernelArgType) -> bool:
+        if (
+            not skip_cpp_wrapper_input_tensor_alignment
+            or not V.graph.cpp_wrapper
+            or V.graph.aot_mode
+            or not isinstance(arg, TensorArg)
+            or arg.buffer not in V.graph.graph_inputs
+        ):
+            return True
+
+        try:
+            input_idx = V.graph.graph_input_names.index(arg.buffer)
+        except ValueError:
+            return True
+        return input_idx not in (V.graph.inputs_to_check or ())
+
     if config.triton.divisible_by_16:
         divisible_by_16 = tuple(
             i
             for i, arg in zip(indices, args)
-            if is_aligned(arg, alignment=16, include_tensor=True)
+            if is_aligned(
+                arg,
+                alignment=16,
+                include_tensor=include_tensor_alignment(arg),
+            )
         )
     else:
         divisible_by_16 = ()

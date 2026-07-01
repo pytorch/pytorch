@@ -514,20 +514,23 @@ def _single_tensor_adam(
             else:
                 denom = exp_avg_sq.sqrt()
 
-            is_low_precision = denom.dtype in (torch.float16, torch.bfloat16)
+            is_float16 = denom.dtype is torch.float16
             if differentiable:
                 exp_avg_for_update = exp_avg.clone()
-                if is_low_precision:
+                if is_float16:
                     denom = denom.float()
                     exp_avg_for_update = exp_avg_for_update.float()
                 denom = denom / bias_correction2_sqrt
                 denom = denom + eps
                 param.addcdiv_(exp_avg_for_update * step_size_neg, denom)
-            elif is_low_precision:
+            elif is_float16:
+                # float16 cannot represent the default eps before it is scaled
+                # by the step size, so keep the denominator math in fp32.
                 denom = denom.float()
                 denom.div_(bias_correction2_sqrt)
                 denom.add_(eps)
-                param.addcdiv_(exp_avg.float() * step_size_neg, denom)
+                denom.div_(step_size_neg)
+                param.addcdiv_(exp_avg, denom)
             else:
                 # Build the folded denominator's numerator before dividing by
                 # the step size. This keeps the numerator nonzero for untouched
@@ -773,6 +776,10 @@ def _multi_tensor_adam(
             else:
                 exp_avg_sq_sqrt = torch._foreach_sqrt(device_exp_avg_sqs)
 
+            if device_params[0].dtype is torch.float16:
+                # Match the single-tensor path: preserve eps in fp32 for
+                # float16 before folding in the capturable step size.
+                exp_avg_sq_sqrt = [t.float() for t in exp_avg_sq_sqrt]
             torch._foreach_div_(exp_avg_sq_sqrt, bias_correction2_sqrt)
             torch._foreach_add_(exp_avg_sq_sqrt, eps)
             torch._foreach_div_(exp_avg_sq_sqrt, step_size)

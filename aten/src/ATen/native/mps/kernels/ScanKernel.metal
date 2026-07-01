@@ -956,10 +956,12 @@ kernel void scan_contig_decoupled(
     uint simd_lane_id [[thread_index_in_simdgroup]],
     uint simd_group_id [[simdgroup_index_in_threadgroup]]) {
   Op op;
-  threadgroup uint tg_tile_id;
+  // Initializing thread-group vars is a no-op, but squashes false-positive
+  // compiler warning
+  threadgroup uint tg_tile_id{};
   threadgroup acc_t simdgroup_sums[simd_size];
-  threadgroup acc_t tg_total;
-  threadgroup acc_t tg_carry;
+  threadgroup acc_t tg_total{};
+  threadgroup acc_t tg_carry{};
 
   // 1) Dynamically claim a tile id (the forward-progress guarantee).
   if (lid == 0) {
@@ -1169,7 +1171,9 @@ kernel void scan_strided_decoupled(
     uint simd_lane_id [[thread_index_in_simdgroup]],
     uint simd_group_id [[simdgroup_index_in_threadgroup]]) {
   Op op;
-  threadgroup uint tg_tile_id;
+  // See scan_contig_decoupled: static init silences a barrier-unaware
+  // -Wsometimes-uninitialized false positive at zero runtime cost.
+  threadgroup uint tg_tile_id{};
   threadgroup acc_t simdgroup_sums[simd_size * VEC];
   threadgroup acc_t tg_total[VEC];
   threadgroup acc_t tg_carry[VEC];

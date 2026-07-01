@@ -63,8 +63,6 @@ test_failures = {
     # PDL tests are CUDA SM90+ only, skip on CPU
     "test_pdl_mutation_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     "test_pdl_template_and_delay_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
-    # Bool argmax/argmin fix is Triton-only (see #174069), skip on CPU
-    "test_max_min_bool_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     # With tensorify enabled, SymInt div no longer graph-breaks; the full
     # model compiles but Inductor hangs on the complex dynamic-shape graph.
     "test_AllenaiLongformerBase_repro_dynamic_shapes": TestFailure(
@@ -74,9 +72,6 @@ test_failures = {
     "test_index_propagation_abs_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_floordiv_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_remainder_dynamic_shapes": TestFailure(("mps",)),
-    "test_reduction2_dynamic_shapes": TestFailure(("mps",)),
-    "test_reduction3_dynamic_shapes": TestFailure(("mps",)),
-    "test_reduction5_dynamic_shapes": TestFailure(("mps",)),
     "test_roll_dynamic_shapes": TestFailure(("mps",)),
     "test_reflection_pad2d_backward_dynamic_shapes": TestFailure(
         ("mps",), is_skip=True
@@ -729,7 +724,11 @@ class TestInductorDynamic(DynamicShapesTestCase):
         else:
             # CUDA limits number of blocks only — 600M/64 ≈ 9.4M blocks,
             # well within 2^31-1, so no scaling should occur
-            self.assertEqual(result_x, 64, f"XBLOCK should remain 64 (got {result_x})")
+            self.assertEqual(
+                result_x,
+                64,
+                lambda msg: f"{msg}\nXBLOCK should remain 64 (got {result_x})",
+            )
             self.assertLessEqual(result_num_blocks, max_grid_x)
 
     @torch._dynamo.config.patch(

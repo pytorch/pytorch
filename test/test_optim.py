@@ -1392,8 +1392,6 @@ class TestOptimRenewed(TestCase):
         all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
             device, dtype, optim_info
         )
-        param = torch.randn((5, 1), device=device, dtype=dtype, requires_grad=True)
-        old_param = param.detach().clone()
 
         def closure():
             return torch.tensor([1], device=device, dtype=dtype)
@@ -1406,13 +1404,13 @@ class TestOptimRenewed(TestCase):
             if kwargs.get("weight_decay", 0) != 0:
                 continue
 
-            # AdamW/Muon params will be updated regardless of grads due to lr, so make lr smaller
-            if optim_cls.__name__ == "AdamW" or optim_cls.__name__ == "Muon":
-                kwargs["lr"] = (
-                    torch.tensor(1e-5)
-                    if isinstance(kwargs.get("lr", 1e-5), torch.Tensor)
-                    else 1e-5
-                )
+            # AdamW and Muon have a nonzero default weight_decay, which decays
+            # params even with zero grads; override it so the step is a true no-op.
+            if optim_cls.__name__ in ("AdamW", "Muon"):
+                kwargs["weight_decay"] = 0
+
+            param = torch.randn((5, 1), device=device, dtype=dtype, requires_grad=True)
+            old_param = param.detach().clone()
 
             if kwargs.get("differentiable", False):
                 params = [param.detach()]
@@ -2348,11 +2346,12 @@ class TestOptimRenewed(TestCase):
                 self.assertGreater(len(state), 0)
 
     @onlyCUDA
+    @parametrize("foreach", [False, True])
     @optims(
         [o for o in optim_db if o.optim_cls.__name__ in ["Adam", "AdamW"]],
-        dtypes=[torch.float16, torch.float32],
+        dtypes=[torch.float16, torch.bfloat16, torch.float32],
     )
-    def test_adam_capturable_forloop_no_nan(self, device, dtype, optim_info):
+    def test_adam_capturable_no_nan(self, device, dtype, optim_info, foreach):
         optim_cls = optim_info.optim_cls
         capturable_inputs = [
             optim_input
@@ -2372,7 +2371,7 @@ class TestOptimRenewed(TestCase):
             embedding = torch.nn.Embedding(16, 4, device=device, dtype=dtype)
             initial_weight = embedding.weight.detach().clone()
             kwargs = {k: move_tensor_kwargs(v) for k, v in optim_input.kwargs.items()}
-            kwargs["foreach"] = False
+            kwargs["foreach"] = foreach
             kwargs["lr"] = (
                 torch.zeros_like(kwargs["lr"], device=device)
                 if isinstance(kwargs.get("lr"), torch.Tensor)
