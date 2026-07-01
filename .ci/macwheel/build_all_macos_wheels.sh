@@ -3,11 +3,11 @@
 # a single runner. After the first full build, subsequent iterations only
 # recompile libtorch_python + _C for the new Python ABI (libtorch_cpu is
 # ABI-free and reused) via the cross-Python cache invalidation in
-# tools/setup_helpers/cmake.py.
+# tools/setup_helpers/cmake.py -- driven by SKIP_SETUP_CLEAN below.
 #
-# Delocation and smoke-testing are handled in separate workflow steps/jobs
-# — this script only produces raw wheels under
-# "${RUNNER_TEMP}/artifacts/<build_name>".
+# Per-Python orchestration (env setup, deps, build, delocate) lives in
+# .ci/macwheel/build.sh; this script only selects the interpreter, resolves the
+# package version, and loops. Mirrors .ci/manywheel/build_all.sh.
 #
 # Inputs (env):
 #   PYTORCH_ROOT     Path to the PyTorch checkout.
@@ -23,6 +23,9 @@ set -eux -o pipefail
 : "${RUNNER_TEMP:=/tmp}"
 export BINARY_ENV_FILE="${BINARY_ENV_FILE:-${RUNNER_TEMP}/env}"
 
+SCRIPTPATH="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+
+iter=0
 for desired in ${DESIRED_PYTHONS}; do
     # Wrap each iteration in a GHA log group so long logs collapse nicely
     # in the run UI (one click per Python version).
@@ -36,20 +39,25 @@ for desired in ${DESIRED_PYTHONS}; do
     build_name="wheel-py${desired//./_}-cpu"
     export DESIRED_PYTHON="${desired}"
     export PYTORCH_FINAL_PACKAGE_DIR="${RUNNER_TEMP}/artifacts/${build_name}"
-    export MAC_PACKAGE_WORK_DIR="${RUNNER_TEMP}/work/${build_name}"
-    mkdir -p "${PYTORCH_FINAL_PACKAGE_DIR}" "${MAC_PACKAGE_WORK_DIR}"
+    mkdir -p "${PYTORCH_FINAL_PACKAGE_DIR}"
 
+    # Resolve PYTORCH_BUILD_VERSION / OVERRIDE_PACKAGE_VERSION (consumed by
+    # `python -m build`); rewritten per Python into BINARY_ENV_FILE.
     "${PYTORCH_ROOT}/.ci/pytorch/binary_populate_env.sh"
     # shellcheck disable=SC1090
     source "${BINARY_ENV_FILE}"
 
-    USE_PYTORCH_METAL_EXPORT=1
-    USE_COREML_DELEGATE=1
-    TORCH_PACKAGE_NAME="${TORCH_PACKAGE_NAME//-/_}"
-    export USE_PYTORCH_METAL_EXPORT USE_COREML_DELEGATE TORCH_PACKAGE_NAME
-    "${PYTORCH_ROOT}/.ci/wheel/build_wheel.sh"
+    # Preserve build/ across iterations after the first so libtorch_cpu and
+    # third-party libs are reused; the Python-specific bits (libtorch_python,
+    # _C.so) are invalidated by cmake.py.
+    if [[ "${iter}" -gt 0 ]]; then
+        export SKIP_SETUP_CLEAN=1
+    fi
+
+    bash "${SCRIPTPATH}/build.sh"
 
     iter_elapsed=$(( $(date +%s) - iter_start ))
+    iter=$((iter + 1))
     echo "::endgroup::"
 
     if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then

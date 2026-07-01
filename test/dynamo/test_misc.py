@@ -134,6 +134,12 @@ TPFLAGS_MAPPING = 1 << 6
 GLOBAL_INT = 1
 
 
+# Module-level function used as a torch._check message (UserFunctionVariable,
+# as opposed to a nested closure defined inside the compiled region).
+def global_check_message():
+    return "global check message"
+
+
 # Specializes a test to run only if translation validation is set.
 def onlyIfTranslationValidation(fn: typing.Callable) -> typing.Callable:
     @functools.wraps(fn)
@@ -2098,6 +2104,92 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             RuntimeError, f"{GLOBAL_INT} is not greater than 3"
         ):
             f(x)
+
+    def test_check_compiles_when_predicate_true_and_message_module_level_fn(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            torch._check(x.shape[0] > 3, global_check_message)
+            return x + 1
+
+        x = torch.randn(4)
+        torch._dynamo.maybe_mark_dynamic(x, 0)
+
+        y = f(x)
+        self.assertEqual(y.shape, x.shape)
+
+    def test_check_raises_at_runtime_when_predicate_false_and_message_module_level_fn(
+        self,
+    ):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            torch._check(x.shape[0] > 3, global_check_message)
+            return x + 1
+
+        x = torch.randn(3)
+        torch._dynamo.maybe_mark_dynamic(x, 0)
+
+        with self.assertRaisesRegex(RuntimeError, "global check message"):
+            f(x)
+
+    def test_check_compiles_when_predicate_true_and_message_non_str_constant(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            torch._check(x.shape[0] > 3, 12345)
+            return x + 1
+
+        x = torch.randn(4)
+        torch._dynamo.maybe_mark_dynamic(x, 0)
+
+        y = f(x)
+        self.assertEqual(y.shape, x.shape)
+
+    def test_check_raises_at_runtime_when_predicate_false_and_message_non_str_constant(
+        self,
+    ):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            torch._check(x.shape[0] > 3, 12345)
+            return x + 1
+
+        x = torch.randn(3)
+        torch._dynamo.maybe_mark_dynamic(x, 0)
+
+        with self.assertRaisesRegex(RuntimeError, "12345"):
+            f(x)
+
+    def test_check_graph_breaks_when_message_is_unsupported_type(self):
+        # A tensor message is neither a constant nor a function.
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            torch._check(x.shape[0] > 3, x)
+            return x + 1
+
+        x = torch.randn(4)
+        torch._dynamo.maybe_mark_dynamic(x, 0)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Can't extract message from torch._check"
+        ):
+            f(x)
+
+    def test_check_graph_breaks_when_message_is_bound_method(self):
+        # A bound method is a function-VT subclass whose reconstructed function
+        # drops the receiver, so it is rejected rather than mis-evaluated.
+        class M:
+            def msg(self):
+                return "bound method message"
+
+            def forward(self, x):
+                torch._check(x.shape[0] > 3, self.msg)
+                return x + 1
+
+        x = torch.randn(4)
+        torch._dynamo.maybe_mark_dynamic(x, 0)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Can't extract message from torch._check"
+        ):
+            torch.compile(M().forward, backend="eager", fullgraph=True)(x)
 
     def test_check_raises_at_runtime_when_predicate_false_and_message_None(self):
         @torch.compile(backend="eager", fullgraph=True)
@@ -8359,6 +8451,154 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x, obj)
         self.assertTrue(same(ref, res))
+
+    def test_tensor_isinstance_custom_instancecheck_graph_break(self):
+        shape_context = threading.local()
+
+        class TensorWithShapeBaseMeta(type):
+            def __instancecheck__(cls, instance):
+                try:
+                    expected_shape = shape_context.value
+                except AttributeError:
+                    expected_shape = cls.expected_shape
+                return (
+                    isinstance(instance, torch.Tensor)
+                    and tuple(instance.shape) == expected_shape
+                )
+
+        class TensorWithShapeMeta(TensorWithShapeBaseMeta):
+            pass
+
+        class TensorWithShape(metaclass=TensorWithShapeMeta):
+            expected_shape = (2, 3)
+
+        def fn(x):
+            if isinstance(x, TensorWithShape):
+                return x + 1
+            return x - 1
+
+        cnt = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt)
+        x = torch.randn(2, 3)
+        for expected_shape in [(2, 3), (2, 4)]:
+            shape_context.value = expected_shape
+            ref = fn(x)
+            res = opt_fn(x)
+            self.assertTrue(same(ref, res))
+
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(Unsupported, "custom type check"):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+
+        def fn_union(x):
+            if isinstance(x, typing.Union[TensorWithShape, int]):
+                return x + 1
+            return x - 1
+
+        torch._dynamo.reset()
+        opt_fn_union = torch.compile(fn_union, backend="eager")
+        for expected_shape in [(2, 3), (2, 4)]:
+            shape_context.value = expected_shape
+            self.assertTrue(same(fn_union(x), opt_fn_union(x)))
+
+        torch._dynamo.reset()
+        if sys.version_info >= (3, 12):
+            with self.assertRaisesRegex(Unsupported, "custom type check"):
+                torch.compile(fn_union, backend="eager", fullgraph=True)(x)
+        else:
+            self.assertTrue(
+                same(
+                    fn_union(x),
+                    torch.compile(fn_union, backend="eager", fullgraph=True)(x),
+                )
+            )
+
+        def fn_union_type(x):
+            if isinstance(x, TensorWithShape | int):
+                return x + 1
+            return x - 1
+
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(Unsupported, "custom type check"):
+            torch.compile(fn_union_type, backend="eager", fullgraph=True)(x)
+
+        class TensorSubclassCheckMeta(type):
+            def __subclasscheck__(cls, subclass):
+                return getattr(shape_context, "allow_subclass", False)
+
+        class TensorSubclassCheck(metaclass=TensorSubclassCheckMeta):
+            pass
+
+        def fn_subclasscheck(x):
+            if isinstance(x, TensorSubclassCheck):
+                return x + 1
+            return x - 1
+
+        shape_context.allow_subclass = True
+        self.assertTrue(issubclass(torch.Tensor, TensorSubclassCheck))
+        self.assertFalse(isinstance(x, TensorSubclassCheck))
+        torch._dynamo.reset()
+        self.assertTrue(
+            same(
+                fn_subclasscheck(x),
+                torch.compile(fn_subclasscheck, backend="eager")(x),
+            )
+        )
+
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(Unsupported, "custom type check"):
+            torch.compile(fn_subclasscheck, backend="eager", fullgraph=True)(x)
+
+        def fn_union_subclasscheck(x):
+            if isinstance(x, typing.Union[TensorSubclassCheck, int]):
+                return x + 1
+            return x - 1
+
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(Unsupported, "custom type check"):
+            torch.compile(fn_union_subclasscheck, backend="eager", fullgraph=True)(x)
+
+        class TensorSubclassMeta(type(torch.Tensor)):
+            def __instancecheck__(cls, instance):
+                return getattr(shape_context, "is_tensor_subclass", False)
+
+        class TensorSubclassWithInstanceCheck(
+            torch.Tensor, metaclass=TensorSubclassMeta
+        ):
+            pass
+
+        def fn_tensor_subclass(x):
+            if isinstance(x, TensorSubclassWithInstanceCheck):
+                return x + 1
+            return x - 1
+
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(Unsupported, "custom type check"):
+            torch.compile(fn_tensor_subclass, backend="eager", fullgraph=True)(x)
+
+    def test_tensor_isinstance_supported_tensor_types_no_graph_break(self):
+        class ParameterSubclass(torch.nn.Parameter):
+            pass
+
+        class BufferSubclass(torch.nn.Buffer):
+            pass
+
+        def fn(x, p, b):
+            return (
+                isinstance(x, torch.FloatTensor),
+                isinstance(p, torch.nn.Parameter),
+                isinstance(p, ParameterSubclass),
+                isinstance(b, torch.nn.Buffer),
+                isinstance(b, BufferSubclass),
+                isinstance(x, collections.abc.Sequence),
+                isinstance(x, abc.ABC),
+            )
+
+        x = torch.randn(2, 3)
+        p = ParameterSubclass(torch.randn(2, 3))
+        b = BufferSubclass(torch.randn(2, 3))
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x, p, b), fn(x, p, b))
 
     def test_custom_instancecheck_does_not_cause_extra_init(self):
         # When __new__ returns an object whose type is not a subclass of cls,
@@ -16370,6 +16610,21 @@ def forward(self, L_x_ : torch.Tensor):
         x = torch.ones(3)
         result = opt(x)
         self.assertTrue(torch.all(result > x))
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_module_hooks_dict_reconstructed_as_ordered_dict(self):
+        """Empty hooks dicts on nn.Module must be reconstructed as OrderedDict,
+        not plain dict, so that weakref.ref() works in RemovableHandle.
+        """
+
+        def fn():
+            m = torch.nn.Linear(5, 7)
+            torch.nn.utils.spectral_norm(m)
+            return m(torch.randn(3, 5))
+
+        opt = torch.compile(fn, backend="eager")
+        result = opt()
+        self.assertEqual(result.shape, (3, 7))
 
 
 instantiate_parametrized_tests(MiscTests)
