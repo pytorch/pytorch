@@ -532,8 +532,6 @@ class ComboKernelTests(TestCase):
         # 3D poi (x, y, z) are separated from combo kernels
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180024")
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180018")
     @skipIfXpu(msg="Profiler JSON traceEvents is not supported on XPU")
     @requires_gpu_and_triton
     def test_combo_kernel_per_config_subkernel_block_size(self):
@@ -613,8 +611,6 @@ class ComboKernelTests(TestCase):
         else:
             FileCheck().check("pid_offset = pid").run(code[0])
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180023")
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180017")
     @skipIfXpu(msg="Profiler JSON traceEvents is not supported on XPU")
     @requires_gpu_and_triton
     @torch._dynamo.config.patch("assume_static_by_default", False)
@@ -757,8 +753,6 @@ class ComboKernelTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180026")
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180019")
     @skipIfXpu(msg="Profiler JSON traceEvents is not supported on XPU")
     @requires_gpu_and_triton
     @unittest.skipIf(not SM90OrLater, "Avoid oom on CI")
@@ -1519,6 +1513,31 @@ class ComboKernelDynamicShapesTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(code.count("def _triton_helper_fn_add0(arg0_0, arg1_0):"), 1)
 
+    @requires_gpu_and_triton
+    def test_dynamic_shapes_persistent_reduction_dynamic_rdim(self):
+        def fn(a, b):
+            torch._check(a.shape[0] <= 32)
+            torch._check(b.shape[0] <= 32)
+            return a.sum(), b.sum()
+
+        for benchmark in (False, True):
+            torch._dynamo.reset()
+            torch._inductor.metrics.reset()
+            a = torch.randn(16, device=GPU_TYPE)
+            b = torch.randn(16, device=GPU_TYPE)
+            with torch._inductor.config.patch("benchmark_combo_kernel", benchmark):
+                fn_c = torch.compile(fn, dynamic=True)
+                result, code = run_and_get_code(fn_c, a, b)
+                self.assertEqual(result[0], a.sum())
+                self.assertEqual(result[1], b.sum())
+                self.assertEqual(
+                    torch._inductor.metrics.generated_kernel_count,
+                    4 if benchmark else 1,
+                )
+                FileCheck().check("R0_BLOCK_0: tl.constexpr = 32").check(
+                    "R0_BLOCK_1: tl.constexpr = 32"
+                ).run(code[0])
+
 
 class ComboKernelTestsPerSubkernelBlocks(ComboKernelTests):
     combo_kernel_per_subkernel_blocks = True
@@ -1844,7 +1863,7 @@ class ComboKernelTestsMaxAutotune(TestCase):
         self.assertEqual(
             len(group_indices),
             2,
-            f"Expected 2 autotune groups, got {group_lines}",
+            lambda msg: f"{msg}\nExpected 2 autotune groups, got {group_lines}",
         )
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
@@ -1941,7 +1960,7 @@ class ComboKernelTestsMaxAutotune(TestCase):
                 self.assertEqual(
                     len(groups),
                     expected_groups,
-                    f"{desc}: expected {expected_groups} group(s), got {len(groups)}",
+                    lambda msg: f"{msg}\n{desc}: expected {expected_groups} group(s), got {len(groups)}",
                 )
 
     @requires_gpu_and_triton
@@ -2029,7 +2048,7 @@ class ComboKernelTestsMaxAutotune(TestCase):
         self.assertEqual(
             changed_fields,
             {"XBLOCK_1"},
-            f"Expected the first combo coordesc step to tune the largest subkernel first, got {changed_fields}",
+            lambda msg: f"{msg}\nExpected the first combo coordesc step to tune the largest subkernel first, got {changed_fields}",
         )
 
 

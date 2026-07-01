@@ -1110,6 +1110,8 @@ class _LPPoolNd(Module):
         ceil_mode: bool = False,
     ) -> None:
         super().__init__()
+        if norm_type == 0:
+            raise ValueError(f"norm_type must be a non-zero value, but got {norm_type}")
         self.norm_type = norm_type
         self.kernel_size = kernel_size
         self.stride = stride

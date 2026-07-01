@@ -1071,6 +1071,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._linalg.linalg_matrix_norm",
         "torch._C._linalg.linalg_matrix_power",
         "torch._C._linalg.linalg_matrix_rank",
+        "torch._C._linalg.linalg_matrix_sqrth",
         "torch._C._linalg.linalg_multi_dot",
         "torch._C._linalg.linalg_norm",
         "torch._C._linalg.linalg_pinv",

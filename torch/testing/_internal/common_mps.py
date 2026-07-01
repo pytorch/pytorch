@@ -369,6 +369,7 @@ if torch.backends.mps.is_available():
             "linalg.ldl_factor": None,
             "linalg.ldl_factor_ex": None,
             "linalg.ldl_solve": None,
+            "linalg.matrix_sqrth": None,
             "linalg.polar": None,
             "matrix_exp": None,
             "max_pool2d_with_indices_backward": [
@@ -451,7 +452,6 @@ if torch.backends.mps.is_available():
             "nn.functional.adaptive_max_pool3d": None,
             "nn.functional.interpolatearea": None,
             "nn.functional.interpolatebicubic": [torch.uint8],
-            "nn.functional.ctc_loss": None,
             "nn.functional.local_response_norm": [
                 torch.int8,
                 torch.int16,

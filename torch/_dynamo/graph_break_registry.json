@@ -62,6 +62,16 @@
       ]
     }
   ],
+  "GB4774": [
+    {
+      "Gb_type": "torch.map: f mutates pos_args",
+      "Context": "pos_args={pos_args_mutated}",
+      "Explanation": "map only supports in-place mutation of xs (each iteration sees a storage-disjoint slice). pos_args are loop-invariant: every iteration sees the same tensor, so a mutation makes iterations depend on each other, breaking map's independence contract and introducing a data race under any parallel lowering. Use scan or while_loop if sequential buffer updates are required.",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
   "GB2861": [
     {
       "Gb_type": "Untraceable C tp_hash",
@@ -938,6 +948,16 @@
       "Context": "str(e.reason)",
       "Explanation": "msg",
       "Hints": []
+    }
+  ],
+  "GB2736": [
+    {
+      "Gb_type": "builtin isinstance() with custom type check on tensor",
+      "Context": "isinstance({arg}, {isinstance_type})",
+      "Explanation": "Dynamo cannot soundly trace arbitrary custom __instancecheck__ or __subclasscheck__ hooks on tensor values because the hook may read external mutable state.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
     }
   ],
   "GB4636": [
@@ -2735,6 +2755,17 @@
       ]
     }
   ],
+  "GB5491": [
+    {
+      "Gb_type": "Failed to mutate tensor data attribute across devices with different shape/strides",
+      "Context": "setattr({obj}, {name}, {val})",
+      "Explanation": "Dynamo only supports cross-device `.data` mutation when shape and strides match",
+      "Hints": [
+        "Don't mutate `.data` on this tensor, or move ",
+        "the mutation out of `torch.compile` region"
+      ]
+    }
+  ],
   "GB0188": [
     {
       "Gb_type": "getattr with no source",
@@ -2979,6 +3010,16 @@
       "Explanation": "Dynamo requires the autograd.Function context to be initialized with a proxy.",
       "Hints": [
         "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB6183": [
+    {
+      "Gb_type": "torch.map: f mutates a captured tensor",
+      "Context": "freevars={freevars_mutated}",
+      "Explanation": "map only supports in-place mutation of xs. A tensor captured from the enclosing scope (lifted parameter) is loop-invariant: every iteration sees the same tensor, so a mutation makes iterations depend on each other, breaking map's independence contract and introducing a data race under any parallel lowering. Pass the buffer through xs, or use scan / while_loop if sequential buffer updates are required.",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -3910,6 +3951,22 @@
     {
       "Gb_type": "Can't extract message from torch._check*()",
       "Context": "str(message_vt)",
+      "Explanation": "The message argument of torch._check*() must be a string, None, or a function.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "Can't extract message from torch._check*()",
+      "Context": "str(message_vt)",
+      "Explanation": "The message argument of torch._check*() must be a string, None, or a function defined within the torch.compile region.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "Can't extract message from torch._check*()",
+      "Context": "str(message_vt)",
       "Explanation": "The message argument of torch._check*() must be a function defined within the torch.compile region.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
@@ -4154,6 +4211,16 @@
       "Explanation": "Cannot determine list/tuple ordering at compile time when element comparison is symbolic.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB5017": [
+    {
+      "Gb_type": "missing tp_init",
+      "Context": "tp_init_impl not implemented for {self.python_type_name()}",
+      "Explanation": "Dynamo does not know how to trace __init__ on `{self.debug_repr()}`.",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
       ]
     }
   ],

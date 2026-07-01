@@ -650,6 +650,9 @@ class TestFxGraphCache(TestCase):
         with config.patch(
             bundle_triton_into_fx_graph_cache=bundle_triton,
             use_static_triton_launcher=use_static_triton_launcher,
+            # Avoid non-deterministic pad_mm benchmarking changing numerics or
+            # the number of bundled Triton static autotuners across runs.
+            shape_padding=False,
         ):
             compiled_fn = torch.compile(fn, dynamic=dynamic)
 
@@ -3262,7 +3265,7 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
 
-class TestCustomPartitionerFn(CustomPartitionerFn):
+class _TestCustomPartitionerFn(CustomPartitionerFn):
     def __init__(self):
         self._uuid = None
 
@@ -4112,7 +4115,7 @@ class TestFxGraphCacheHashing(TestCase):
         """
         Test that the custom partitioner function's UUID is properly used in the FX graph cache hashing.
         """
-        custom_partitioner_fn = TestCustomPartitionerFn()
+        custom_partitioner_fn = _TestCustomPartitionerFn()
         with config.patch({"custom_partitioner_fn": custom_partitioner_fn}):
             custom_partitioner_fn._uuid = "1"
             details1 = FxGraphHashDetails(None, [], {}, [])
@@ -5081,7 +5084,7 @@ class TestVecISACheckBuild(TestCase):
         self.assertEqual(
             value.split(os.pathsep)[0],
             torch_lib,
-            msg=f"LD_LIBRARY_PATH should be prepended with {torch_lib!r}, got {value!r}",
+            msg=lambda msg: f"{msg}\nLD_LIBRARY_PATH should be prepended with {torch_lib!r}, got {value!r}",
         )
 
 
