@@ -104,13 +104,10 @@ class PyBackend : public Backend {
   }
 
   py::object getMethodOverride(const char* name) const {
-    if (pyBackend_) {
-      if (auto override = getAttrOverride(name)) {
-        return *override;
-      }
-      return py::object();
+    if (auto override = getAttrOverride(name)) {
+      return *override;
     }
-    return pybind11::get_override(static_cast<const Backend*>(this), name);
+    return py::object();
   }
 
   template <typename Return>
@@ -125,9 +122,6 @@ class PyBackend : public Backend {
   template <typename Return, typename... Args>
   std::optional<Return> callWrappedOverride(const char* name, Args&&... args)
       const {
-    if (!pyBackend_) {
-      return std::nullopt;
-    }
     pybind11::gil_scoped_acquire gil;
     if (auto override = getAttrOverride(name)) {
       return (*override)(std::forward<Args>(args)...).template cast<Return>();
@@ -137,9 +131,6 @@ class PyBackend : public Backend {
 
   template <typename... Args>
   bool callWrappedVoidOverride(const char* name, Args&&... args) const {
-    if (!pyBackend_) {
-      return false;
-    }
     pybind11::gil_scoped_acquire gil;
     if (auto override = getAttrOverride(name)) {
       (*override)(std::forward<Args>(args)...);
@@ -221,7 +212,7 @@ class PyBackend : public Backend {
     if (callWrappedVoidOverride("set_timeout", timeout)) {
       return;
     }
-    PYBIND11_OVERRIDE_NAME(void, Backend, "set_timeout", setTimeout, timeout);
+    Backend::setTimeout(timeout);
   }
 
   bool supportsReconfigure() const override {
@@ -236,7 +227,7 @@ class PyBackend : public Backend {
             callWrappedOverride<ReconfigureHandle>("get_reconfigure_handle")) {
       return *override;
     }
-    PYBIND11_OVERRIDE(ReconfigureHandle, Backend, get_reconfigure_handle);
+    return Backend::get_reconfigure_handle();
   }
 
   c10::intrusive_ptr<Work> reconfigure(
@@ -259,14 +250,14 @@ class PyBackend : public Backend {
     if (auto override = callWrappedOverride<WindowPtr>("new_window", tensor)) {
       return *override;
     }
-    PYBIND11_OVERRIDE(c10::intrusive_ptr<Window>, Backend, new_window, tensor);
+    return Backend::new_window(tensor);
   }
 
   void startCoalescing() override {
     if (callWrappedVoidOverride("start_coalescing")) {
       return;
     }
-    PYBIND11_OVERRIDE_NAME(void, Backend, "start_coalescing", startCoalescing);
+    Backend::startCoalescing();
   }
 
   c10::intrusive_ptr<Work> endCoalescing() override {
@@ -280,7 +271,7 @@ class PyBackend : public Backend {
     if (auto override = callWrappedOverride<std::string>("getBackendName")) {
       return *override;
     }
-    PYBIND11_OVERRIDE(std::string, Backend, getBackendName);
+    return Backend::getBackendName();
   }
 
   c10::intrusive_ptr<Options> getBackendOptions() override {
@@ -470,24 +461,14 @@ class PyBackend : public Backend {
     if (callWrappedVoidOverride("monitored_barrier", opts, waitAllRanks)) {
       return;
     }
-    PYBIND11_OVERRIDE_NAME(
-        void,
-        Backend,
-        "monitored_barrier",
-        monitoredBarrier,
-        opts,
-        waitAllRanks);
+    Backend::monitoredBarrier(opts, waitAllRanks);
   }
 
   void setSequenceNumberForGroup() override {
     if (callWrappedVoidOverride("_set_sequence_number_for_group")) {
       return;
     }
-    PYBIND11_OVERRIDE_NAME(
-        void,
-        Backend,
-        "_set_sequence_number_for_group",
-        setSequenceNumberForGroup);
+    Backend::setSequenceNumberForGroup();
   }
 
   uint64_t getSequenceNumberForGroup() override {
@@ -495,11 +476,7 @@ class PyBackend : public Backend {
             callWrappedOverride<uint64_t>("_get_sequence_number_for_group")) {
       return *override;
     }
-    PYBIND11_OVERRIDE_NAME(
-        uint64_t,
-        Backend,
-        "_get_sequence_number_for_group",
-        getSequenceNumberForGroup);
+    return Backend::getSequenceNumberForGroup();
   }
 
   c10::intrusive_ptr<Work> send(
@@ -554,16 +531,14 @@ class PyBackend : public Backend {
     if (callWrappedVoidOverride("_wait_for_pending_works")) {
       return;
     }
-    PYBIND11_OVERRIDE_NAME(
-        void, Backend, "_wait_for_pending_works", waitForPendingWorks);
+    Backend::waitForPendingWorks();
   }
 
   void enableCollectivesTiming() override {
     if (callWrappedVoidOverride("_enable_collectives_timing")) {
       return;
     }
-    PYBIND11_OVERRIDE_NAME(
-        void, Backend, "_enable_collectives_timing", enableCollectivesTiming);
+    Backend::enableCollectivesTiming();
   }
 
   c10::intrusive_ptr<Backend> split(
@@ -591,27 +566,21 @@ class PyBackend : public Backend {
     if (callWrappedVoidOverride("_set_group_name", pg_uid)) {
       return;
     }
-    PYBIND11_OVERRIDE_NAME(
-        void, Backend, "_set_group_name", setGroupUid, pg_uid);
+    Backend::setGroupUid(pg_uid);
   }
 
   void eagerConnectSingleDevice(at::Device device) override {
     if (callWrappedVoidOverride("eager_connect_single_device", device)) {
       return;
     }
-    PYBIND11_OVERRIDE_NAME(
-        void,
-        Backend,
-        "eager_connect_single_device",
-        eagerConnectSingleDevice,
-        device);
+    Backend::eagerConnectSingleDevice(device);
   }
 
   ErrorType getError() override {
     if (auto override = callWrappedOverride<ErrorType>("get_error")) {
       return *override;
     }
-    PYBIND11_OVERRIDE_NAME(ErrorType, Backend, "get_error", getError);
+    return Backend::getError();
   }
 
   std::shared_ptr<c10::Allocator> getMemAllocator() override {
@@ -640,44 +609,42 @@ class PyBackend : public Backend {
             callWrappedOverride<bool>("supports_tensor_alloc", deviceIdx)) {
       return *override;
     }
-    PYBIND11_OVERRIDE_NAME(
-        bool, Backend, "supports_tensor_alloc", supportsTensorAlloc, deviceIdx);
+    return Backend::supportsTensorAlloc(deviceIdx);
   }
 
   void abort() override {
     if (callWrappedVoidOverride("abort")) {
       return;
     }
-    PYBIND11_OVERRIDE(void, Backend, abort);
+    Backend::abort();
   }
 
   void shutdown() override {
     if (callWrappedVoidOverride("shutdown")) {
       return;
     }
-    PYBIND11_OVERRIDE(void, Backend, shutdown);
+    Backend::shutdown();
   }
 
   void suspend() override {
     if (callWrappedVoidOverride("suspend")) {
       return;
     }
-    PYBIND11_OVERRIDE(void, Backend, suspend);
+    Backend::suspend();
   }
 
   void resume() override {
     if (callWrappedVoidOverride("resume")) {
       return;
     }
-    PYBIND11_OVERRIDE(void, Backend, resume);
+    Backend::resume();
   }
 
   std::unordered_map<std::string, uint64_t> getMemoryStats() override {
     if (auto override = callWrappedOverride<MemoryStats>("memory_stats")) {
       return *override;
     }
-    PYBIND11_OVERRIDE_NAME(
-        MemoryStats, Backend, "memory_stats", getMemoryStats);
+    return Backend::getMemoryStats();
   }
 };
 
