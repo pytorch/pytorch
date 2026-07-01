@@ -103,7 +103,7 @@ class AssociativeScanOp(HigherOrderOperator):
     # pyrefly: ignore [bad-override]
     def gen_schema(self, combine_fn, xs, additional_inputs):
         from torch._higher_order_ops.schema import HopSchemaGenerator
-        
+
         # For associative scan, we need two copies of xs for the combine function
         # The combine function takes two elements and returns one element
         xs_slice1 = [first_slice_copy(x) for x in xs]
@@ -226,10 +226,6 @@ def associative_scan(
             )
         if any(x.ndim <= d for x in lxs):
             raise ValueError("All xs leaves must have at least 'dim + 1' dimensions")
-        if any(x.shape[d] != lxs[0].shape[d] for x in lxs[1:]):
-            raise ValueError("All xs leaves must have the same scan dimension size")
-        if any(x.shape != lxs[0].shape for x in lxs[1:]):
-            raise ValueError("All xs leaves must have the same shape")
 
         privateuse1_backend = torch._C._get_privateuse1_backend_name()
         if cm == "pointwise" and not all(
@@ -882,7 +878,7 @@ def assoiciative_scan_fake_tensor_mode(combine_fn, xs, additional_inputs):
 @associative_scan_op.py_functionalize_impl
 def associative_scan_functionalize(ctx, combine_fn, xs, additional_inputs):
     from torch._higher_order_ops.utils import _check_alias_and_mutation
-    
+
     unwrapped_xs = ctx.unwrap_tensors(xs)
     unwrapped_additional_inputs = ctx.unwrap_tensors(additional_inputs)
     with ctx.redispatch_to_next():

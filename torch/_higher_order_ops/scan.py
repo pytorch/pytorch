@@ -4,7 +4,6 @@ import functools
 import itertools
 import logging
 from collections.abc import Callable
-from torch._tensor import Tensor
 from typing import Any
 
 import torch
@@ -270,7 +269,7 @@ class ScanOp(HigherOrderOperator):
         self, combine_fn, init, xs, additional_inputs, mutated_arg_indices=""
     ):
         from torch._higher_order_ops.schema import HopSchemaGenerator
-        
+
         all_inputs = tuple(
             list(init)
             + [
@@ -346,7 +345,7 @@ def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
         num_init_leaves = len(init)
 
         proto_xs = [first_slice_copy(x, dim) for x in xs]
-        
+
         # Process element 0 to infer output shapes for pre-allocation
         # AND produce the first real result in a single call.  The previous
         # approach used first_slice_copy() for shape inference and then
@@ -362,10 +361,10 @@ def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
             ),
             num_init_leaves,
         )
-        
+
         out_tensor_mask = get_tensor_mask(out_0)
         out_0_masked = mask_list(out_tensor_mask, out_0)
-        
+
         # Pre-allocate
         # outs -> Output matrix
         # idxs -> Index matrix for scatter_
@@ -382,7 +381,7 @@ def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
         idxs = [
             torch.ones_like(e, dtype=torch.int64).unsqueeze(0) for e in out_0_masked
         ]
-        
+
         if num_elems == 0:
             # outs: list[Tensor] = [
             #     torch.empty([0] + list(e.size()), dtype=e.dtype, device=e.device)
@@ -392,7 +391,6 @@ def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
                 outs.pop(0) if out_m else None for out_m in out_tensor_mask
             ]
             return (*carry_orig, *outs_expanded)
-        
 
         def store_out_in_outs(out, ind):
             # Store the intermediate out in the outs matrix
@@ -1012,7 +1010,7 @@ def scan_functionalize(
         _check_alias_and_mutation,
         _maybe_run_with_interpreter,
     )
-    
+
     if hasattr(ctx, "mode"):
         hop_instance = HopInstance.create(
             scan_op,
@@ -1064,8 +1062,6 @@ def scan_functionalize(
 def scan_batch_rule(
     interpreter, combine_fn, init, xs, additional_inputs, mutated_arg_indices=""
 ):
-    from torch._functorch.vmap import restore_vmap, unwrap_batched, wrap_batched
-    
     unbatched_args, in_dims = unwrap_batched(
         (init, xs, additional_inputs), interpreter.level()
     )
