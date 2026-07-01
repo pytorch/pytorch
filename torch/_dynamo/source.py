@@ -1204,6 +1204,30 @@ class CallMethodItemSource(ChainedSource):
         return "{0}.item()"
 
 
+@dataclass_with_cached_hash(frozen=True)
+class ContextVarGetSource(ChainedSource):
+    has_default: bool = False
+    default_value: Any = None
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        def load_get_method():
+            codegen(self.base)
+            codegen.extend_output(codegen.create_load_attrs("get"))
+
+        codegen.add_push_null(load_get_method)
+        if self.has_default:
+            codegen.append_output(codegen.create_load_const(self.default_value))
+            codegen.extend_output(create_call_function(1, False))
+        else:
+            codegen.extend_output(create_call_function(0, False))
+
+    @functools.cached_property
+    def _name_template(self) -> str:
+        if self.has_default:
+            return f"{{0}}.get({_esc_str(self.default_value, apply_repr=True)})"
+        return "{0}.get()"
+
+
 # This is a synthetic source that is associated with the singleton
 # shape env guard we always register for all frames.  We get the actual
 # guard contents from the ambient ShapeEnv
