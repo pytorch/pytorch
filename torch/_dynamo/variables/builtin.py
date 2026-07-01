@@ -19,6 +19,7 @@ handled during symbolic execution, either by executing them directly when safe
 or by creating appropriate graph nodes when needed.
 """
 
+import abc
 import ast
 import builtins
 import contextlib
@@ -426,6 +427,63 @@ class BaseBuiltinVariable(VariableTracker):
                     )
             return generic_repr(tx, arg)
         return super().call_method(tx, name, args, kwargs)
+
+
+def _uses_custom_classinfo_check(
+    type_info: Any,
+    *,
+    use_instancecheck: bool = True,
+    use_subclasscheck: bool = True,
+) -> bool:
+    if isinstance(type_info, tuple):
+        return any(_uses_custom_classinfo_check(item) for item in type_info)
+    if isinstance(type_info, types.UnionType):
+        return any(
+            _uses_custom_classinfo_check(item) for item in typing.get_args(type_info)
+        )
+    if typing.get_origin(type_info) is typing.Union:
+        typing_union_uses_instancecheck = sys.version_info >= (3, 12)
+        return any(
+            _uses_custom_classinfo_check(
+                item,
+                use_instancecheck=typing_union_uses_instancecheck,
+                use_subclasscheck=True,
+            )
+            for item in typing.get_args(type_info)
+        )
+    if isinstance(type_info, type):
+        if type_info in tensortype_to_dtype:
+            return False
+
+        type_info_meta = type(type_info)
+        instancecheck = getattr(type_info_meta, "__instancecheck__", None)
+        subclasscheck = getattr(type_info_meta, "__subclasscheck__", None)
+        if (
+            instancecheck is type.__instancecheck__
+            and subclasscheck is type.__subclasscheck__
+        ):
+            return False
+
+        if issubclass(type_info, torch.Tensor) and (
+            type_info_meta.__module__,
+            type_info_meta.__qualname__,
+        ) in {
+            ("torch.nn.parameter", "_ParameterMeta"),
+            ("torch.nn.parameter", "_BufferMeta"),
+            ("torch.distributed.fsdp._flat_param", "_FlatParameterMeta"),
+        }:
+            return False
+
+        return (
+            use_instancecheck
+            and instancecheck is not type.__instancecheck__
+            and instancecheck is not abc.ABCMeta.__instancecheck__
+        ) or (
+            use_subclasscheck
+            and subclasscheck is not type.__subclasscheck__
+            and subclasscheck is not abc.ABCMeta.__subclasscheck__
+        )
+    return False
 
 
 class BuiltinVariable(BaseBuiltinVariable):
@@ -2223,6 +2281,15 @@ class BuiltinVariable(BaseBuiltinVariable):
             )
         isinstance_type = isinstance_type_var.as_python_constant()
         if isinstance(arg, variables.TensorVariable) and arg.dtype is not None:
+            if _uses_custom_classinfo_check(isinstance_type):
+                unimplemented(
+                    gb_type="builtin isinstance() with custom type check on tensor",
+                    context=f"isinstance({arg}, {isinstance_type})",
+                    explanation="Dynamo cannot soundly trace arbitrary custom "
+                    "__instancecheck__ or __subclasscheck__ hooks on tensor "
+                    "values because the hook may read external mutable state.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
 
             def _tensor_isinstance(
                 tensor_var: VariableTracker, tensor_type: Any

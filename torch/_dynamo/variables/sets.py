@@ -358,15 +358,7 @@ class SetVariable(VariableTracker):
         # Lazy imports to avoid circular dependencies
         from .dicts import DictItemsVariable, DictKeysVariable
 
-        if name == "__init__":
-            temp_set_vt = SourcelessBuilder.create(tx, set).call_set(
-                tx, *args, **kwargs
-            )
-            tx.output.side_effects.mutation(self)
-            self.items.clear()
-            self.items.update(temp_set_vt.items)  # type: ignore[attr-defined]
-            return ConstantVariable.create(None)
-        elif name == "add":
+        if name == "add":
             if kwargs or len(args) != 1:
                 raise_args_mismatch(
                     tx,
@@ -661,6 +653,20 @@ class SetVariable(VariableTracker):
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
     ) -> VariableTracker:
         raise RuntimeError("Illegal to getitem on a set")
+
+    def tp_init_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        from .builder import SourcelessBuilder
+
+        temp_set_vt = SourcelessBuilder.create(tx, set).call_set(tx, *args, **kwargs)
+        tx.output.side_effects.mutation(self)
+        self.items.clear()
+        self.items.update(temp_set_vt.items)  # type: ignore[attr-defined]
+        return ConstantVariable.create(None)
 
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         from .iter import SetIterator
@@ -1029,9 +1035,6 @@ class FrozensetVariable(SetVariable):
     ) -> VariableTracker:
         if name in ["add", "pop", "update", "remove", "discard", "clear"]:
             raise RuntimeError(f"Illegal call_method {name} on a frozenset")
-        elif name == "__init__":
-            # frozenset is immutable. Calling __init__ again shouldn't have any effect
-            return ConstantVariable.create(None)
         elif name == "copy":
             if args or kwargs:
                 raise_args_mismatch(
@@ -1051,6 +1054,15 @@ class FrozensetVariable(SetVariable):
             r = super().call_method(tx, name, args, kwargs)
             return FrozensetVariable(r.items)  # type: ignore[attr-defined]
         return super().call_method(tx, name, args, kwargs)
+
+    def tp_init_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # frozenset is immutable. Calling __init__ again shouldn't have any effect.
+        return ConstantVariable.create(None)
 
     def is_hashable(self) -> bool:
         return True
