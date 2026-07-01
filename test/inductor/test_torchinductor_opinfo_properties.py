@@ -53,7 +53,6 @@ from torch.testing._internal.common_methods_invocations import (
     op_db,
     unary_ufuncs,
 )
-from torch.testing._internal.opinfo.core import _filter_unary_elementwise_tensor
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,
@@ -61,6 +60,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
 )
 from torch.testing._internal.inductor_utils import HAS_GPU
+from torch.testing._internal.opinfo.core import _filter_unary_elementwise_tensor
 
 
 # LLM-useful op names to filter from unary_ufuncs
@@ -482,7 +482,6 @@ ROCM_BATCH_INVARIANCE_XFAILS = {
 
 ROCM_UNARY_NUMERICAL_XFAILS = {
     "inductor_default": {
-        "log1p": {fp32},
         "rsqrt": {bf16, fp32},
         "sigmoid": {fp32},
         "sin": {fp32},
@@ -535,28 +534,16 @@ def is_expected_failure(device_type, op_name, backend, test_type, dtype=None):
 
 
 def is_relaxed_property_case(device_type, op_name, backend, test_type, dtype=None):
-    """Check if a ROCm property test should use numeric tolerances instead of zero tolerance.
-
-    These cases were disabled because zero-tolerance equality is too strict for a few
-    transcendental ROCm paths even when eager and compiled execution are still
-    numerically equivalent. We keep the scope narrow to the known failing
-    backend/op/dtype combinations instead of relaxing the entire suite.
-    """
-
+    """Return True for the narrow ROCm op/dtype cases that use numeric tolerance."""
     if device_type != "cuda" or torch.version.hip is None:
         return False
 
-    allowed = ROCM_RELAXED_PROPERTY_CASES.get(test_type, {}).get(backend, {}).get(
-        op_name, set()
+    allowed = (
+        ROCM_RELAXED_PROPERTY_CASES.get(test_type, {})
+        .get(backend, {})
+        .get(op_name, set())
     )
     return dtype in allowed or ALL in allowed
-
-
-def assert_property_equal(test_case, eager_out, compiled_out, *, exact):
-    if exact:
-        test_case.assertEqual(eager_out, compiled_out, rtol=0, atol=0)
-    else:
-        test_case.assertEqual(eager_out, compiled_out)
 
 
 def compile_fn(fn, backend):
@@ -829,8 +816,8 @@ class TestOpInfoProperties(TestCase):
                         out3 = compiled_fn3(*args, **kwargs)
 
                 # Zero-tolerance equality across recompilations.
-                assert_property_equal(self, out1, out2, exact=True)
-                assert_property_equal(self, out2, out3, exact=True)
+                self.assertEqual(out1, out2, rtol=0, atol=0)
+                self.assertEqual(out2, out3, rtol=0, atol=0)
 
         try:
             self._run_with_expected_failure(
@@ -871,18 +858,12 @@ class TestOpInfoProperties(TestCase):
                 compiled_out = compiled_fn(*args, **kwargs)
 
                 # Zero-tolerance equality unless this ROCm case needs numeric tolerance.
-                assert_property_equal(
-                    self,
-                    eager_out,
-                    compiled_out,
-                    exact=not is_relaxed_property_case(
-                        device_type,
-                        op.name,
-                        backend,
-                        "eager_equivalence",
-                        dtype,
-                    ),
-                )
+                if is_relaxed_property_case(
+                    device_type, op.name, backend, "eager_equivalence", dtype
+                ):
+                    self.assertEqual(eager_out, compiled_out)
+                else:
+                    self.assertEqual(eager_out, compiled_out, rtol=0, atol=0)
 
         self._run_with_expected_failure(
             device_type, op.name, backend, "eager_equivalence", dtype, run_test
@@ -917,7 +898,10 @@ class TestOpInfoProperties(TestCase):
             # Sampled: 64k random bit patterns
             test_values = generate_sampled_fp32(NUM_SAMPLES, device)
 
-        test_values = _filter_unary_elementwise_tensor(test_values.clone(), op=op)
+        # On ROCm, restrict inputs to the op domain: out-of-domain values (NaN/Inf)
+        # diverge bitwise between eager and compiled. CUDA keeps full bit-pattern coverage.
+        if device_type == "cuda" and torch.version.hip is not None:
+            test_values = _filter_unary_elementwise_tensor(test_values.clone(), op=op)
 
         # Eager reference
         eager_out = fn(test_values)
@@ -928,18 +912,12 @@ class TestOpInfoProperties(TestCase):
 
         def run_test():
             # Zero-tolerance equality unless this ROCm case needs numeric tolerance.
-            assert_property_equal(
-                self,
-                eager_out,
-                compiled_out,
-                exact=not is_relaxed_property_case(
-                    device_type,
-                    op.name,
-                    backend,
-                    "unary_numerical",
-                    dtype,
-                ),
-            )
+            if is_relaxed_property_case(
+                device_type, op.name, backend, "unary_numerical", dtype
+            ):
+                self.assertEqual(eager_out, compiled_out)
+            else:
+                self.assertEqual(eager_out, compiled_out, rtol=0, atol=0)
 
         self._run_with_expected_failure(
             device_type, op.name, backend, "unary_numerical", dtype, run_test
@@ -978,7 +956,7 @@ class TestOpInfoProperties(TestCase):
 
         def run_test():
             # Zero-tolerance equality.
-            assert_property_equal(self, eager_out, compiled_out, exact=True)
+            self.assertEqual(eager_out, compiled_out, rtol=0, atol=0)
 
         self._run_with_expected_failure(
             device_type, op.name, backend, "binary_numerical", dtype, run_test
