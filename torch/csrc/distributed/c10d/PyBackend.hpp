@@ -71,11 +71,7 @@ class PyBackend : public Backend {
   }
 
   py::object pySelf() const {
-    if (pyBackend_) {
-      return pyBackend_;
-    }
-    return py::cast(
-        const_cast<PyBackend*>(this), py::return_value_policy::reference);
+    return pyBackend_;
   }
 
   std::optional<py::object> getAttrOverride(const char* name) const {
