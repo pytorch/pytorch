@@ -10,7 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace c10d::nccltc {
+namespace c10d::nccl2 {
 
 // =============================================================================
 // RegisteredBuffer -- Handle for Local Registered Source Buffers
@@ -51,4 +51,4 @@ struct RegisteredBuffer {
   LkeyPerDevice lkey_per_device{};
 };
 
-} // namespace c10d::nccltc
+} // namespace c10d::nccl2

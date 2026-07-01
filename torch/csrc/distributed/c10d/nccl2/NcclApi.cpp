@@ -1,10 +1,10 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
 
 #include <fmt/core.h>
-#include <torch/csrc/distributed/c10d/nccltc/Logging.hpp>
-#include <torch/csrc/distributed/c10d/nccltc/NcclApi.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/NcclApi.hpp>
 
-namespace c10d::nccltc {
+namespace c10d::nccl2 {
 
 #if defined(IS_NCCLX)
 #error "NCCLX should not be used"
@@ -490,4 +490,4 @@ ncclResult_t DefaultNcclApi::waitSignal(
 #endif
 }
 
-} // namespace c10d::nccltc
+} // namespace c10d::nccl2
