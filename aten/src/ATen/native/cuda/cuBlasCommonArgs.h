@@ -25,12 +25,10 @@ c10::MaybeOwned<Tensor> inline prepare_matrix_for_cublas(const Tensor& tensor, b
   }
   IntArrayRef tensor_strides = tensor.strides();
   IntArrayRef tensor_sizes = tensor.sizes();
-  const auto leading_dim = tensor.dim() - 2;
-  const auto trailing_dim = tensor.dim() - 1;
-  if ((tensor_strides[leading_dim] == 1) && (tensor_strides[trailing_dim] >= std::max<int64_t>(1, tensor_sizes[leading_dim]))) {
+  if ((tensor_strides[0] == 1) && (tensor_strides[1] >= std::max<int64_t>(1, tensor_sizes[0]))) {
     transpose_tensor = false;
     return resolve_conj_if_indicated(tensor, !transpose_result);
-  } else if ((tensor_strides[trailing_dim] == 1) && (tensor_strides[leading_dim] >= std::max<int64_t>(1, tensor_sizes[trailing_dim]))) {
+  } else if ((tensor_strides[1] == 1) && (tensor_strides[0] >= std::max<int64_t>(1, tensor_sizes[1]))) {
     transpose_tensor = true;
     return resolve_conj_if_indicated(tensor, transpose_result);
   } else {
@@ -47,12 +45,10 @@ c10::MaybeOwned<Tensor> inline prepare_matrix_for_cublas(const Tensor& tensor, b
 
   IntArrayRef tensor_strides = tensor.strides();
   IntArrayRef tensor_sizes = tensor.sizes();
-  const auto leading_dim = tensor.dim() - 2;
-  const auto trailing_dim = tensor.dim() - 1;
-  if ((tensor_strides[leading_dim] == 1) && (tensor_strides[trailing_dim] >= std::max<int64_t>(1, tensor_sizes[leading_dim]))) {
+  if ((tensor_strides[0] == 1) && (tensor_strides[1] >= std::max<int64_t>(1, tensor_sizes[0]))) {
     transpose_tensor = false;
     return resolve_conj_if_indicated(tensor, true);
-  } else if ((tensor_strides[trailing_dim] == 1) && (tensor_strides[leading_dim] >= std::max<int64_t>(1, tensor_sizes[trailing_dim]))) {
+  } else if ((tensor_strides[1] == 1) && (tensor_strides[0] >= std::max<int64_t>(1, tensor_sizes[1]))) {
     transpose_tensor = true;
     return resolve_conj_if_indicated(tensor, true);
   } else {
@@ -136,19 +132,13 @@ struct cublasCommonArgs {
 
     auto sizes_a = mata->sizes();
     auto sizes_b = matb->sizes();
-    const auto a_dim0 = mata->dim() - 2;
-    const auto a_dim1 = mata->dim() - 1;
-    const auto b_dim0 = matb->dim() - 2;
-    const auto b_dim1 = matb->dim() - 1;
-    const auto result_dim0 = result->dim() - 2;
-    const auto result_dim1 = result->dim() - 1;
 
-    m = sizes_a[transpose_result ? a_dim1 : a_dim0];
-    k = sizes_a[transpose_result ? a_dim0 : a_dim1];
-    n = sizes_b[transpose_result ? b_dim0 : b_dim1];
-    lda = mata->stride((transpose_a == transpose_result) ? a_dim1 : a_dim0);
-    ldb = matb->stride((transpose_b == transpose_result) ? b_dim1 : b_dim0);
-    result_ld = result->stride(transpose_result ? result_dim0 : result_dim1);
+    m = sizes_a[transpose_result ? 1 : 0];
+    k = sizes_a[transpose_result ? 0 : 1];
+    n = sizes_b[transpose_result ? 0 : 1];
+    lda = mata->stride((transpose_a == transpose_result) ? 1 : 0);
+    ldb = matb->stride((transpose_b == transpose_result) ? 1 : 0);
+    result_ld = result->stride(transpose_result ? 0 : 1);
     transa = transpose_a ? mata->is_conj() ? 'c' : 't' : 'n';
     transb = transpose_b ? matb->is_conj() ? 'c' : 't' : 'n';
 

@@ -512,10 +512,10 @@ std::optional<c10::ScalarType> out_dtype) {
                                args.mArray, args.m,
                                args.nArray, args.n,
                                args.kArray, args.k,
-                               args.alphaPtrArray, args.alphaScalar, args.mata->scalar_type(),
+                               args.alphaPtrArray, args.alphaScalar, mat_a.scalar_type(),
                                args.APtrArray, args.ldaArray,
                                args.BPtrArray, args.ldbArray,
-                               args.betaPtrArray, args.betaScalar, args.result->scalar_type(),
+                               args.betaPtrArray, args.betaScalar, out.scalar_type(),
                                args.DPtrArray, args.lddArray,
                                args.DPtrArray, args.lddArray,
                                args.batchCount, args.use_int64);

@@ -992,6 +992,17 @@ class TestMatmulCuda(InductorTestCase):
             return torch.cat(outputs, dim=1)
         return torch.stack([torch.mm(a, b) for a, b in zip(A, B)])
 
+    def grouped_gemm_cublaslt_alignment_error(self, op):
+        if op == "2d/2d":
+            return "cublasLt grouped GEMM with jagged K not aligned to 16 bytes"
+        if op == "2d/3d":
+            return "cublasLt grouped GEMM with jagged M not aligned to 16 bytes"
+        if op == "3d/2d":
+            return "cublasLt grouped GEMM with jagged N not aligned to 16 bytes"
+        if op == "3d/3d":
+            return "cublasLt grouped GEMM with K not aligned to 16 bytes"
+        raise AssertionError(f"Invalid op: {op}")
+
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support cuBLASLt grouped GEMM")
     @unittest.skipIf(TEST_CUDA and _get_torch_cuda_version() < (13, 2), "cublaslt grouped gemm requires CUDA Toolkit >= 13.2")
     @unittest.skipIf(not SM90OrLater or SM120OrLater, "cublaslt grouped gemm requires SM 9.0-11.0")
@@ -1011,9 +1022,11 @@ class TestMatmulCuda(InductorTestCase):
         # For 3d/2d, A needs to be column major or B needs to be row major
 
         A, B, offs, aligned = self.grouped_gemm_cublaslt_common(op, jagged_size, a_row_major, b_row_major, dtype)
-        # Skip for unaligned cases because passing them to cuBLASLt will cause a CUDA error
         if not aligned:
-            self.skipTest("Arguments don't meet alignment requirements")
+            with self.assertRaisesRegex(RuntimeError, self.grouped_gemm_cublaslt_alignment_error(op)):
+                with prefer_cublaslt_grouped_gemm():
+                    torch._grouped_mm(A, B, offs=offs)
+            return
 
         C_ref = self.grouped_gemm_reference(A, B, offs)
         with prefer_cublaslt_grouped_gemm():
@@ -1037,7 +1050,10 @@ class TestMatmulCuda(InductorTestCase):
 
         A, B, offs, aligned = self.grouped_gemm_cublaslt_common(op, jagged_size, a_row_major, b_row_major, dtype)
         if not aligned:
-            self.skipTest("Arguments don't meet alignment requirements")
+            with self.assertRaisesRegex(RuntimeError, self.grouped_gemm_cublaslt_alignment_error(op)):
+                with prefer_cublaslt_grouped_gemm():
+                    f_ref(A, B, offs)
+            return
 
         with prefer_cublaslt_grouped_gemm():
             f = torch.compile(f_ref, fullgraph=True, mode=mode)

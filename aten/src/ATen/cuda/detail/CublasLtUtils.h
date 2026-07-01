@@ -103,6 +103,7 @@ class CuBlasLtGroupedMatrixLayout : public CuBlasLtDescriptor<
         t ? rows_array : cols_array,
         ld_array));
     descriptor_.reset(raw_descriptor);
+    setAttribute(CUBLASLT_MATRIX_LAYOUT_ORDER, CUBLASLT_ORDER_ROW);
     if (use_int64) {
       setAttribute(
           CUBLASLT_GROUPED_MATRIX_LAYOUT_ROWS_COLS_ARRAY_INTEGER_WIDTH,
