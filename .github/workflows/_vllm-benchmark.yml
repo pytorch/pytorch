@@ -306,7 +306,7 @@ jobs:
           AWS=aws
           if ! command -v aws >/dev/null 2>&1; then
             python3 -m venv /tmp/awscli-venv
-            /tmp/awscli-venv/bin/pip install --quiet awscli
+            /tmp/awscli-venv/bin/pip install --quiet awscli==1.45.39
             AWS=/tmp/awscli-venv/bin/aws
           fi
           for sub in hub flashinfer; do
