@@ -4040,7 +4040,10 @@ class MethodWrapperVariable(VariableTracker):
 
     def as_python_constant(self) -> types.MethodWrapperType:
         obj_value = self.obj.as_python_constant()
-        return self.descriptor.__get__(obj_value, type(obj_value))
+        try:
+            return self.descriptor.__get__(obj_value, type(obj_value))
+        except TypeError:
+            raise AsPythonConstantNotImplementedError(self) from None
 
     def call_function(
         self,
@@ -4480,10 +4483,15 @@ class MemberDescriptorVariable(VariableTracker):
         # Mirrors member_get which calls PyMember_GetOne to read the
         # C struct field.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L162-L180
+        from .object_protocol import _UnhandledDescriptorError
+
         attr_name = self.descriptor.__name__
         obj_value = obj.get_real_python_backed_value()
         if obj_value is NO_SUCH_SUBOBJ:
-            return obj.getattro_impl(tx, attr_name)
+            raise _UnhandledDescriptorError(
+                f"Cannot resolve member_descriptor '{attr_name}' "
+                f"on {type(obj).__name__}"
+            )
         try:
             resolved = self.descriptor.__get__(obj_value, type(obj_value))
         except (AttributeError, TypeError):
@@ -4567,7 +4575,12 @@ class GetSetDescriptorVariable(VariableTracker):
         # proxy-based VTs like TensorVariable.
         obj_value = obj.get_real_python_backed_value()
         if obj_value is NO_SUCH_SUBOBJ:
-            return obj.getattro_impl(tx, attr_name)
+            from .object_protocol import _UnhandledDescriptorError
+
+            raise _UnhandledDescriptorError(
+                f"Cannot resolve getset_descriptor '{attr_name}' "
+                f"on {type(obj).__name__}"
+            )
         try:
             resolved = self.descriptor.__get__(obj_value, type(obj_value))
         except (AttributeError, TypeError):
