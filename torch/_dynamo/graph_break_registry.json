@@ -950,6 +950,16 @@
       "Hints": []
     }
   ],
+  "GB2736": [
+    {
+      "Gb_type": "builtin isinstance() with custom type check on tensor",
+      "Context": "isinstance({arg}, {isinstance_type})",
+      "Explanation": "Dynamo cannot soundly trace arbitrary custom __instancecheck__ or __subclasscheck__ hooks on tensor values because the hook may read external mutable state.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB4636": [
     {
       "Gb_type": "Call to `torch._dynamo.step_unsupported()`",
@@ -3938,6 +3948,14 @@
     }
   ],
   "GB9840": [
+    {
+      "Gb_type": "Can't extract message from torch._check*()",
+      "Context": "str(message_vt)",
+      "Explanation": "The message argument of torch._check*() must be a string, None, or a function.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
     {
       "Gb_type": "Can't extract message from torch._check*()",
       "Context": "str(message_vt)",
