@@ -2969,13 +2969,14 @@ class CUDAGraphTreeManager:
         if self.current_node is None:
             raise AssertionError("expected current_node to not be None")
         if self.can_start_new_generation():
-            self._clone_current_path_live_user_visible_outputs()
-            self.dealloc_current_path_weakrefs()
-            self.current_node = None
+            self.clear_current_path_state_and_set_to_none(
+                clone_live_user_visible_outputs=True,
+                dealloc_current_path_weakrefs=True,
+            )
             return
 
         if self.current_node.all_outputs_are_dead():
-            self.current_node = None
+            self.clear_current_path_state_and_set_to_none()
             return
 
         self.check_warn_on_unable_to_start_executing(function_id)
@@ -3121,15 +3122,17 @@ class CUDAGraphTreeManager:
         clone_live_user_visible_outputs: bool = False,
         dealloc_current_path_weakrefs: bool = False,
     ) -> None:
-        if not isinstance(self.current_node, CUDAGraphNode):
-            raise AssertionError(
-                f"expected current_node to be a CUDAGraphNode, got {type(self.current_node)}"
-            )
+        if self.current_node is None:
+            raise AssertionError("expected current_node to not be None")
         if clone_live_user_visible_outputs:
             self._clone_current_path_live_user_visible_outputs()
         if dealloc_current_path_weakrefs:
             self.dealloc_current_path_weakrefs()
-        self.current_node.clear_path_state()
+        if isinstance(self.current_node, CUDAGraphNode):
+            self.current_node.clear_path_state()
+        # If the current path is dead or has been explicitly invalidated, it
+        # cannot have a pending backward that CUDAGraph Trees should preserve.
+        self.running_forwards_with_pending_backwards = False
         self.current_node = None
 
     def apply_checkpoint_execution_state_in_allocator(self) -> None:
