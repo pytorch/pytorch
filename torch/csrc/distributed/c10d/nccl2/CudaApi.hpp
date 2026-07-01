@@ -5,7 +5,7 @@
 #include <c10/util/Logging.h>
 #include <cuda_runtime.h>
 
-namespace c10d::nccltc {
+namespace c10d::nccl2 {
 
 #define CUDA_CHECK(cuda_api, call, err_str)                               \
   do {                                                                    \
@@ -246,4 +246,4 @@ class DefaultCudaApi : public CudaApi {
   const char* getErrorString(cudaError_t error) override;
 };
 
-} // namespace c10d::nccltc
+} // namespace c10d::nccl2
