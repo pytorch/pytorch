@@ -38,7 +38,7 @@ def ReturnList(x):
 
 def Mutation(x):
     y = x + 2
-    y.add_(1)
+    y = y + 1
     return x + y
 
 
@@ -50,13 +50,13 @@ def MutationInput(x):
 
 def MutationFactory(x, device):
     y = torch.full(x.shape, 3, device=device)
-    y.add_(1)
+    y = y + 1
     return x + y
 
 
 def MutationTorchTensorCall(x):
     y = torch.tensor(3)
-    y.add_(1)
+    y = y + 1
     return x + y
 
 
