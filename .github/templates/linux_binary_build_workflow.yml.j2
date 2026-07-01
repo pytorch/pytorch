@@ -584,17 +584,20 @@ jobs:
       - name: Extract libtorch from wheel
         run: |
           set -eux
-          mkdir -p "${{ github.workspace }}/libtorch_output"
+          # In container jobs the github.workspace context is the host path; the
+          # mount is at $GITHUB_WORKSPACE. Use the env var so run steps and the
+          # translated download/upload action paths resolve to the same dir.
+          mkdir -p "${GITHUB_WORKSPACE}/libtorch_output"
           python3 .ci/libtorch/extract_libtorch_from_wheel.py \
-            --wheel-dir "${{ github.workspace }}/wheel_artifact" \
-            --output-dir "${{ github.workspace }}/libtorch_output" \
+            --wheel-dir "${GITHUB_WORKSPACE}/wheel_artifact" \
+            --output-dir "${GITHUB_WORKSPACE}/libtorch_output" \
             --platform linux \
             --desired-cuda "$DESIRED_CUDA" \
             --libtorch-variant "$LIBTORCH_VARIANT"
       - name: Smoke test extracted libtorch
         run: |
           python3 .ci/libtorch/smoke_test_extract_libtorch.py \
-            --output-dir "${{ github.workspace }}/libtorch_output"
+            --output-dir "${GITHUB_WORKSPACE}/libtorch_output"
       - uses: !{{ common.upload_artifact_action }}
         if: always()
         with:
