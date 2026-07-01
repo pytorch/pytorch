@@ -49,7 +49,7 @@ from .. import async_compile, config, debug as inductor_debug, ir
 from ..codecache import output_code_log
 from ..ir import IRNode, ReinterpretView
 from ..runtime import triton_heuristics
-from ..runtime.hints import DeviceProperties
+from ..runtime.hints import DeviceProperties, TritonMeta
 from ..stream_constants import DEFAULT_STREAM, DEFAULT_STREAM_IDX, STREAM_NAME_TEMPLATE
 from ..stream_utils import get_raw_stream_name, get_stream_name
 from ..utils import (
@@ -732,7 +732,7 @@ class KernelCallLine(WrapperLine):
     raw_args: tuple[Any, ...]
     arg_types: list[str]
     triton: bool
-    triton_meta: dict[str, Any]
+    triton_meta: TritonMeta
     inductor_meta: dict[str, Any] | None
     device: torch.device
     graph_name: str
@@ -3229,7 +3229,7 @@ class PythonWrapperCodegen(CodeGen):
         )
         device = V.graph.get_current_device_or_throw()
         device_props = DeviceProperties.create(device)
-        triton_meta: dict[str, Any] = {
+        triton_meta: TritonMeta = {
             "signature": triton_signature,
             "device": device_props,
             # Triton compiler includes equal_to_1 args into constants even
@@ -3658,7 +3658,7 @@ class PythonWrapperCodegen(CodeGen):
         arg_types=None,
         raw_keys=None,
         raw_args=None,
-        triton_meta=None,
+        triton_meta: TritonMeta | None = None,
         inductor_meta=None,
         original_fxnode_name=None,
     ):
@@ -3714,7 +3714,7 @@ class PythonWrapperCodegen(CodeGen):
         arg_types=None,
         raw_keys=None,
         raw_args=None,
-        triton_meta=None,
+        triton_meta: TritonMeta | None = None,
         inductor_meta=None,
         graph_name="",
         original_fxnode_name=None,
