@@ -2870,6 +2870,15 @@ class TestTorchDeviceType(TestCase):
                     'Dimension out of range'):
                 op(x, -46)
 
+            # The fake/meta path must reject the same invalid dims. Previously it
+            # silently accepted them for empty non-scalar tensors, diverging from
+            # eager under torch.compile / export tracing.
+            from torch._subclasses.fake_tensor import FakeTensorMode
+            with FakeTensorMode():
+                fake_x = torch.empty([1, 0], device=device)
+                with self.assertRaisesRegex(IndexError, 'Dimension out of range'):
+                    op(fake_x, 100)
+
             # Check that op over a zero length dimension doesn't crash on backprop.
             # Also check that op over other dimensions in a tensor with a zero-length
             # dimension also works
