@@ -134,8 +134,7 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::opt
     // The fused 3-source kernel drops the bias for vector-shaped (M==1) inputs on the M1
     // (Apple7) family on macOS 26; add it separately there. Fixed in macOS 27.
     static const bool decompose_bias = is_apple_family_or_newer(AppleGPUFamily::APPLE_7_PLUS) &&
-        !is_apple_family_or_newer(AppleGPUFamily::APPLE_8_PLUS) &&
-        is_macos_at_least(MacOSVersion::MACOS_26_0) &&
+        !is_apple_family_or_newer(AppleGPUFamily::APPLE_8_PLUS) && is_macos_at_least(MacOSVersion::MACOS_26_0) &&
         !is_macos_at_least(MacOSVersion::MACOS_27_0);
     const bool add_bias_after = is_bias_defined && decompose_bias;
     const Tensor kernel_bias = add_bias_after ? Tensor() : bias;
