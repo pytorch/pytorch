@@ -1116,18 +1116,18 @@ def configure_extension_build() -> tuple[
         ],
     }
 
-    if cmake_cache_vars["USE_DISTRIBUTED"]:
-        # Only enable fr_trace command if distributed is enabled
-        entry_points["console_scripts"].append(
-            "torchfrtrace = torch.distributed.flight_recorder.fr_trace:main",
-        )
-        entry_points["torch.distributed.backends"] = [
-            "mpi = torch.distributed.distributed_c10d:_register_builtin_mpi_backend",
-            "gloo = torch.distributed.distributed_c10d:_register_builtin_gloo_backend",
-            "nccl = torch.distributed.distributed_c10d:_register_builtin_nccl_backend",
-            "ucc = torch.distributed.distributed_c10d:_register_builtin_ucc_backend",
-            "xccl = torch.distributed.distributed_c10d:_register_builtin_xccl_backend",
-        ]
+    # Not gated on USE_DISTRIBUTED: the CMake cache is empty during the pip
+    # metadata phase, so gating would drop these from the wheel metadata.
+    entry_points["console_scripts"].append(
+        "torchfrtrace = torch.distributed.flight_recorder.fr_trace:main",
+    )
+    entry_points["torch.distributed.backends"] = [
+        "mpi = torch.distributed.distributed_c10d:_register_builtin_mpi_backend",
+        "gloo = torch.distributed.distributed_c10d:_register_builtin_gloo_backend",
+        "nccl = torch.distributed.distributed_c10d:_register_builtin_nccl_backend",
+        "ucc = torch.distributed.distributed_c10d:_register_builtin_ucc_backend",
+        "xccl = torch.distributed.distributed_c10d:_register_builtin_xccl_backend",
+    ]
     return ext_modules, cmdclass, packages, entry_points, extra_install_requires
 
 
