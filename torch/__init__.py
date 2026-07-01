@@ -2879,6 +2879,74 @@ class _TorchCompileInductorWrapper:
             compile_region_name=self.name,
         )
 
+    def backend_ctx_ctor(self) -> typing.ContextManager[_Any]:
+        from contextlib import nullcontext
+
+        import torch._dynamo.compiled_autograd as compiled_autograd
+        import torch._dynamo.config as dynamo_config
+        import torch._functorch.config as functorch_config
+        import torch._inductor.config as inductor_config
+        from torch._inductor.compile_fx import fx_compile_mode, FxCompileMode
+
+        if not is_grad_enabled():
+            return nullcontext()
+        if self.config.get("cpp_wrapper", inductor_config.cpp_wrapper):
+            return nullcontext()
+        if self.dynamic is True:
+            return nullcontext()
+        if self.config.get("fallback_by_default", inductor_config.fallback_by_default):
+            return nullcontext()
+        if self.config.get("triton.cudagraphs", inductor_config.triton.cudagraphs):
+            return nullcontext()
+        if functorch_config.enable_complex_wrapper:
+            return nullcontext()
+        if self.config.get(
+            "post_grad_custom_pre_pass", inductor_config.post_grad_custom_pre_pass
+        ):
+            return nullcontext()
+        if self.config.get(
+            "post_grad_custom_post_pass", inductor_config.post_grad_custom_post_pass
+        ):
+            return nullcontext()
+        if self.config.get(
+            "joint_custom_pre_pass", inductor_config.joint_custom_pre_pass
+        ):
+            return nullcontext()
+        if self.config.get(
+            "joint_custom_post_pass", inductor_config.joint_custom_post_pass
+        ):
+            return nullcontext()
+        if self.config.get(
+            "pre_grad_custom_pass", inductor_config.pre_grad_custom_pass
+        ):
+            return nullcontext()
+        if self.config.get(
+            "reorder_for_compute_comm_overlap",
+            inductor_config.reorder_for_compute_comm_overlap,
+        ):
+            return nullcontext()
+        if self.config.get(
+            "aten_distributed_optimizations.enable_overlap_scheduling",
+            inductor_config.aten_distributed_optimizations.enable_overlap_scheduling,
+        ):
+            return nullcontext()
+        if self.config.get(
+            "aten_distributed_optimizations.collective_bucketing",
+            inductor_config.aten_distributed_optimizations.collective_bucketing,
+        ):
+            return nullcontext()
+        if dynamo_config.enable_invoke_subgraph_regional_compile:
+            return nullcontext()
+        if dynamo_config.trace_autograd_ops:
+            return nullcontext()
+        if compiled_autograd.in_compiled_autograd_region:
+            return nullcontext()
+        if fx_compile_mode == FxCompileMode.SUBPROCESS:
+            return nullcontext()
+        if self.config.get("graph_deduplication", inductor_config.graph_deduplication):
+            return dynamo_config.patch(use_graph_deduplication=True)
+        return nullcontext()
+
     def get_compiler_config(self) -> dict[str, _Any]:
         from torch._inductor.compile_fx import get_patched_config_dict
 

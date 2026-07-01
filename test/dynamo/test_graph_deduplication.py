@@ -1198,6 +1198,48 @@ graph():
     return (add_10,)""",
             )
 
+    def test_skip_unsupported_invoke_subgraph_operand(self):
+        from torch.fx.experimental._backward_state import BackwardState
+
+        with (
+            torch._dynamo.config.patch("use_graph_deduplication", False),
+            torch._dynamo.config.patch("track_nodes_for_deduplication", True),
+        ):
+
+            def inner(x, y):
+                return (x + y).relu()
+
+            def fn(x, y):
+                return inner(x, y) + inner(x, y) + inner(x, y)
+
+            graph, tracker = extract_graph_and_tracker(
+                fn, torch.rand(2, 4), torch.rand(2, 4)
+            )
+
+            for node in graph.nodes:
+                if node.op == "placeholder" and node.target == "L_y_":
+                    node.meta["example_value"] = BackwardState()
+
+            class MockOutputGraph:
+                def __init__(self):
+                    self.graph = graph
+                    self.region_tracker = tracker
+                    self.nn_modules = FakeRootModule({})
+
+                def install_subgraph(self, name, subgraph):
+                    raise AssertionError(
+                        "unsupported operands should skip the whole region group"
+                    )
+
+            apply_graph_deduplication(MockOutputGraph())
+            self.assertFalse(
+                any(
+                    node.op == "call_function"
+                    and node.target is torch.ops.higher_order.invoke_subgraph
+                    for node in graph.nodes
+                )
+            )
+
     def test_param_transfer_to_submodule(self):
         def inner_fn(x, y):
             return x + y + y + x

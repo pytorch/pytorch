@@ -93,6 +93,8 @@ class WrapBackendDebug:
             self.__name__ = unconfigured_compiler_fn.compiler_name  # type: ignore[attr-defined]
         if hasattr(unconfigured_compiler_fn, "get_compiler_config"):
             self.get_compiler_config = unconfigured_compiler_fn.get_compiler_config  # type: ignore[attr-defined]
+        if hasattr(unconfigured_compiler_fn, "backend_ctx_ctor"):
+            self.backend_ctx_ctor = unconfigured_compiler_fn.backend_ctx_ctor  # type: ignore[attr-defined]
 
     def __call__(
         self, gm: torch.fx.GraphModule, example_inputs: list[Any], **kwargs: Any
