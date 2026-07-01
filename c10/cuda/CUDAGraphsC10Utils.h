@@ -46,7 +46,7 @@ static_assert(
 // New cudafe++ emits `using CaptureStatus = enum c10::cuda::CaptureStatus;`,
 // which MSVC rejects with C3431 ("scoped enumeration cannot be redeclared as
 // unscoped") for a scoped enum. Using an unscoped enum.
-#if defined(_WIN32)
+#if defined(_WIN32) && defined(_M_ARM64)
 enum CaptureStatus : int {
 #else
 enum class CaptureStatus : int {
