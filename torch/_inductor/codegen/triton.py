@@ -59,6 +59,7 @@ from ..runtime.hints import (
     ReductionHint,
     TRITON_MAX_BLOCK,
     TRITON_MAX_RSPLIT,
+    TritonMeta,
 )
 from ..runtime.runtime_utils import get_max_y_grid, next_power_of_2
 from ..scheduler import (
@@ -3226,7 +3227,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         # A set of autotuning hints to pass as part of triton_meta
         self.autotune_hints = OrderedSet[AutotuneHint]()
-        self.triton_meta: dict[str, Any] | None = None
+        self.triton_meta: TritonMeta | None = None
 
         if self.inside_reduction:
             self.codegen_reduction_numels(self.body)
@@ -6336,7 +6337,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return imports.getvalue()
 
     @classmethod
-    def triton_meta_common(cls):
+    def triton_meta_common(cls) -> TritonMeta:
         return {
             "enable_fp_fusion": not config.emulate_precision_casts,
             "launch_pdl": cls._enable_pdl_codegen(),
@@ -6610,16 +6611,21 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         triton_meta_signature = signature_to_meta(
             signature, size_dtype=self.index_dtype, argdefs=argdefs
         )
-        triton_meta: dict[str, Any] = {
-            "signature": triton_meta_signature,
-            "device": DeviceProperties.create(V.graph.get_current_device_or_throw()),
-            "constants": {},
-            "native_matmul": (
-                torch._inductor.config.triton.native_matmul
-                and ("tl.dot" in str(self.body) or "tl.dot" in str(self.compute))
-            ),
-            **self.triton_meta_common(),
-        }
+        triton_meta: TritonMeta = cast(
+            TritonMeta,
+            {
+                "signature": triton_meta_signature,
+                "device": DeviceProperties.create(
+                    V.graph.get_current_device_or_throw()
+                ),
+                "constants": {},
+                "native_matmul": (
+                    torch._inductor.config.triton.native_matmul
+                    and ("tl.dot" in str(self.body) or "tl.dot" in str(self.compute))
+                ),
+                **self.triton_meta_common(),
+            },
+        )
 
         if self.cooperative_reduction:
             # Cooperative reductions rely on multi-block synchronization that

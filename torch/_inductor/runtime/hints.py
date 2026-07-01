@@ -234,6 +234,36 @@ def get_warp_size(device) -> int:
     return DeviceProperties.create(device).warp_size_or_default
 
 
+class TritonMeta(typing.TypedDict, total=False):
+    """Metadata bag threaded from Triton codegen into the runtime launcher.
+
+    total=False because the key set is populated incrementally across codegen
+    (signature/device/constants/configs first, then backend/ROCm/tlx extras)
+    and the whole bag is forwarded verbatim to external Triton APIs, which
+    tolerate and ignore keys they do not recognize. `device` is typed as the
+    codegen-time DeviceProperties; CachingAutotuner rewrites it to the integer
+    device index before reaching Triton, and the runtime read sites that expect
+    that int narrow it with an explicit cast.
+    """
+
+    signature: dict[str, typing.Any]
+    device: DeviceProperties
+    device_type: str
+    constants: dict[str, typing.Any]
+    configs: list[typing.Any]
+    native_matmul: bool
+    launch_cooperative_grid: bool
+    enable_fp_fusion: bool
+    launch_pdl: bool
+    disable_ftz: bool
+    matrix_instr_nonkdim: int
+    waves_per_eu: int
+    kpack: int
+    restore_value: tuple[str, ...]
+    reset_to_zero: tuple[str, ...]
+    backend_options: dict[str, typing.Any]
+
+
 class HalideInputSpec(typing.NamedTuple):
     ctype: str
     name: str

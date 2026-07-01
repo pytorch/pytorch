@@ -61,6 +61,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from ..graph import GraphLowering
+    from ..runtime.hints import TritonMeta
 
     # At most, the list nesting can go one layer deep.
     _OUTPUT_ARGS_TYPE = list[str | None | list[str | None]]
@@ -95,7 +96,7 @@ class DeferredCpuTritonCallWrapper:
     wrapper_name: str
     kernel_name: str
     arg_types: list[Any]
-    triton_meta: dict[str, Any] | None = None
+    triton_meta: TritonMeta | None = None
     inductor_meta: dict[str, Any] | None = None
 
     def _get_cpp_param_type(self, name: str, arg_type: Any) -> str:
@@ -421,7 +422,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         arg_types=None,
         raw_keys=None,
         raw_args=None,
-        triton_meta=None,
+        triton_meta: TritonMeta | None = None,
         inductor_meta=None,
         graph_name="",
         original_fxnode_name=None,
