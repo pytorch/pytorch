@@ -734,6 +734,8 @@ TORCH_IMPL_FUNC(cat_out_cpu)
 // structured behaviour is too risky
 namespace {
 
+// DDE-safe channels-last stride check, copied from
+// torch._prims_common.are_strides_like_channels_last_or_false
 bool are_strides_like_channels_last_or_false(
     c10::SymIntArrayRef sizes,
     c10::SymIntArrayRef strides) {
@@ -784,21 +786,38 @@ MemoryFormat cat_compute_output_memory_format(
     }
     format = f;
   }
-  TORCH_INTERNAL_ASSERT(format.has_value());
+  TORCH_INTERNAL_ASSERT(
+      format.has_value(), "format should not be None if len(inputs) > 0");
   return *format;
 }
 
 struct CatMetaShape {
   c10::SymDimVector sizes;
   MemoryFormat memory_format;
+  bool has_valid_tensor;
+  // for device/layout: the first valid (non-skipped)
+  // tensor, or materialized[0] when every tensor is skipped (matching
+  // torch._refs.cat's filtered[0] and eager's materialized[valid]).
+  const Tensor* first_valid;
 };
 
 CatMetaShape compute_cat_meta_shape(
     const MaterializedITensorListRef& materialized,
     int64_t dim) {
-  TORCH_CHECK(
+  TORCH_CHECK_VALUE(
       !materialized.empty(),
       "cat expects at least one tensor, but received zero!");
+  const Device& device = materialized[0].get().device();
+  for (const auto i : c10::irange(1, materialized.size())) {
+    TORCH_CHECK(
+        materialized[i].get().device() == device,
+        "Expected all tensors to be on the same device, but found at least two devices, ",
+        device,
+        " and ",
+        materialized[i].get().device(),
+        "!");
+  }
+  check_cat_no_zero_dim(materialized);
 
   const Tensor* example = nullptr;
   for (const auto i : c10::irange(materialized.size())) {
@@ -846,11 +865,15 @@ CatMetaShape compute_cat_meta_shape(
 
   if (filtered.empty()) {
     result.sizes = c10::SymDimVector{c10::SymInt(0)};
+    result.has_valid_tensor = false;
+    result.first_valid = &materialized[0].get();
     return result;
   }
 
   const int64_t wrapped_dim = maybe_wrap_dim(dim, ndim);
   const Tensor& first = *filtered[0];
+  result.has_valid_tensor = true;
+  result.first_valid = filtered[0];
   result.sizes =
       c10::SymDimVector(first.sym_sizes().begin(), first.sym_sizes().end());
 
@@ -865,9 +888,9 @@ CatMetaShape compute_cat_meta_shape(
           t.sym_size(d).sym_eq(first.sym_size(d)),
           "Sizes of tensors must match except in dimension ",
           wrapped_dim,
-          ". Expected ",
+          ". Expected size ",
           first.sym_size(d),
-          " but got ",
+          " but got size ",
           t.sym_size(d),
           " for tensor number ",
           i,
@@ -884,24 +907,35 @@ CatMetaShape compute_cat_meta_shape(
 Tensor cat_meta(const ITensorListRef& tensors, int64_t dim) {
   auto materialized = tensors.materialize();
   auto shape = compute_cat_meta_shape(materialized, dim);
-  auto options = materialized[0]
-                     .get()
-                     .options()
+  auto options = shape.first_valid->options()
                      .dtype(result_type(tensors))
                      .memory_format(shape.memory_format);
   return at::empty_symint(shape.sizes, options, std::nullopt);
 }
 
 Tensor& cat_out_meta(const ITensorListRef& tensors, int64_t dim, Tensor& out) {
+  auto materialized = tensors.materialize();
+  auto shape = compute_cat_meta_shape(materialized, dim);
   auto out_dtype = result_type(tensors);
   TORCH_CHECK_TYPE(
       canCast(out_dtype, out.scalar_type()),
       "torch.cat(): input types can't be cast to the desired output type ",
       out.scalar_type());
-  auto materialized = tensors.materialize();
-  auto shape = compute_cat_meta_shape(materialized, dim);
+  TORCH_CHECK(
+      out.device() == shape.first_valid->device(),
+      "Expected out tensor to have device ",
+      shape.first_valid->device(),
+      ", but got ",
+      out.device(),
+      " instead");
   if (resize_output_symint(out, shape.sizes)) {
     out.unsafeGetTensorImpl()->empty_tensor_restride(shape.memory_format);
+  }
+  if (shape.has_valid_tensor) {
+    at::assert_no_internal_overlap(out);
+    for (const Tensor& t : materialized) {
+      at::assert_no_overlap(out, t);
+    }
   }
   return out;
 }

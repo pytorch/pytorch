@@ -2289,6 +2289,46 @@ class TestMetaKernelConv(TestCase):
 
 @instantiate_parametrized_tests
 class TestMetaKernelRegistrations(TestCase):
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_cat_meta_device_checks(self):
+        meta = torch.empty(2, 3, device="meta")
+        cpu = torch.empty(2, 3)
+
+        with self.assertRaisesRegex(RuntimeError, "same device"):
+            torch.ops.aten.cat.default([meta, cpu])
+        with self.assertRaisesRegex(RuntimeError, "Expected out tensor to have device"):
+            torch.ops.aten.cat.out([meta], out=torch.empty(0))
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_cat_out_meta_overlap_checks(self):
+        inp = torch.empty(2, 3, device="meta")
+        with self.assertRaisesRegex(RuntimeError, "single memory location"):
+            torch.ops.aten.cat.out([inp], out=inp)
+
+        out = torch.empty(1, 3, device="meta").expand(2, 3)
+        with self.assertRaisesRegex(RuntimeError, "more than one element"):
+            torch.ops.aten.cat.out([inp], out=out)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_cat_out_meta_validates_inputs_before_dtype(self):
+        out = torch.empty(0, dtype=torch.bool, device="meta")
+        with self.assertRaisesRegex(ValueError, "at least one tensor"):
+            torch.ops.aten.cat.out([], out=out)
+
+    def test_cat_out_symbolic_fake_tensor(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        with FakeTensorMode(shape_env=shape_env):
+            size = shape_env.create_unbacked_symint()
+            inputs = [torch.empty(size, 3), torch.empty(size + 1, 3)]
+            out = torch.empty(0)
+            result = torch.ops.aten.cat.out(inputs, dim=0, out=out)
+
+        self.assertIs(result, out)
+        self.assertEqual(result.shape, (2 * size + 1, 3))
+
     @parametrize("shift", ["lshift", "rshift"])
     @parametrize("other_kind", ["Scalar", "Tensor"])
     def test_shift_out_symbolic_fake_tensor(self, shift, other_kind):

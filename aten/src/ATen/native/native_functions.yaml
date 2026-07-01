@@ -1411,7 +1411,7 @@
 
 - func: cat.out(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
-  structured_no_meta: True
+  structured_generate_meta: False
   precomputed:
   - dim -> int dim, int valid, bool all_contiguous, bool all_same_dtype, bool all_same_sizes_and_stride, MemoryFormat memory_format
   dispatch:
