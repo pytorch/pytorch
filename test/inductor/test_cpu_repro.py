@@ -22,7 +22,7 @@ from torch._inductor.codegen.cpp import CppOverrides, CppVecOverrides
 from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 from torch._inductor.exc import InductorError
 from torch._inductor.graph import GraphLowering
-from torch._inductor.utils import timed
+from torch._inductor.utils import fresh_cache, timed
 from torch._prims_common import is_float_dtype
 from torch.autograd.functional import vjp
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -1520,6 +1520,42 @@ class CPUReproTests(TestCase):
             fn(y, index0, index1)
             torch.compile(fn)(y_clone, index0_clone, index1_clone)
             self.assertEqual(y, y_clone, atol=1e-3, rtol=1e-3)
+
+    def test_index_put_bool_accumulate_codegen(self):
+        # https://github.com/pytorch/pytorch/issues/113692
+        def fn(x, index, values):
+            x = x.clone()
+            x.index_put_((index,), values, accumulate=True)
+            return x
+
+        def fn_computed_values(x, index):
+            x = x.clone()
+            x.index_put_((index,), index > 0, accumulate=True)
+            return x
+
+        x = torch.tensor([False, False, True, False], dtype=torch.bool)
+        index = torch.tensor([0, 1, 1, 3], dtype=torch.int64)
+        values = torch.tensor([True, True, False, True], dtype=torch.bool)
+
+        def forbid_index_put_fallback():
+            return patch(
+                "torch._inductor.lowering.index_put_fallback",
+                side_effect=AssertionError("unexpected CPU index_put fallback"),
+            )
+
+        with fresh_cache(), forbid_index_put_fallback():
+            expected = fn(x, index, values)
+            actual = torch.compile(fn, fullgraph=True)(x, index, values)
+        self.assertEqual(actual, expected)
+
+        with (
+            fresh_cache(),
+            config.patch({"cpp.dynamic_threads": True}),
+            forbid_index_put_fallback(),
+        ):
+            expected = fn_computed_values(x, index)
+            actual = torch.compile(fn_computed_values, fullgraph=True)(x, index)
+        self.assertEqual(actual, expected)
 
     def test_index_add(self):
         # https://github.com/pytorch/pytorch/issues/138908
