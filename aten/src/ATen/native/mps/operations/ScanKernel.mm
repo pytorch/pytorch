@@ -798,11 +798,16 @@ static void scan_with_indices_mps_impl(const Tensor& self,
 
 } // namespace mps
 
+// Complex maps to "float2" in scalarToMetalTypeString, producing a non-existent kernel name.
 void cummax_helper_mps(const Tensor& self, Tensor& values, Tensor& indices, int64_t dim) {
+  TORCH_CHECK(
+      !c10::isComplexType(self.scalar_type()), "\"cummax\" not implemented for '", toString(self.scalar_type()), "'");
   mps::scan_with_indices_mps_impl(self, values, indices, dim, "cummax");
 }
 
 void cummin_helper_mps(const Tensor& self, Tensor& values, Tensor& indices, int64_t dim) {
+  TORCH_CHECK(
+      !c10::isComplexType(self.scalar_type()), "\"cummin\" not implemented for '", toString(self.scalar_type()), "'");
   mps::scan_with_indices_mps_impl(self, values, indices, dim, "cummin");
 }
 
