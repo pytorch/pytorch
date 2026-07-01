@@ -2472,6 +2472,85 @@ class TestPDLWithMultiStream(InductorTestCase):
 
 
 @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+@unittest.skipIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
+@torch._inductor.config.patch({"triton.cudagraphs": True, "triton.enable_pdl": True})
+@xfailIfNoAcceleratorTriton
+class TestPDLCudagraphInteraction(InductorTestCase):
+    """Tests for PDL codegen under CUDA graph capture."""
+
+    def _assert_pdl(self, code: str):
+        (
+            FileCheck()
+            .check("'launch_pdl': True")
+            .check("gdc_wait")
+            .check("gdc_launch")
+        ).run(code)
+
+    def _assert_no_pdl(self, code: str):
+        (
+            FileCheck()
+            .check_not("'launch_pdl': True")
+            .check_not("gdc_wait")
+            .check_not("gdc_launch")
+        ).run(code)
+
+    def _check_single_stream_pdl_with_cudagraphs(self, *, mode=None):
+        from torch._inductor.utils import run_and_get_triton_code
+
+        def fn(x):
+            y = (x * 2).sum(dim=1)
+            return x + y[:, None]
+
+        x = torch.randn(128, 128, device="cuda")
+        expected = fn(x)
+        compile_kwargs = {"mode": mode} if mode is not None else {}
+        compiled_fn = torch.compile(fn, **compile_kwargs)
+        for _ in range(3):
+            self.assertEqual(compiled_fn(x), expected)
+
+        compiled_for_code = torch.compile(fn, **compile_kwargs)
+        self._assert_pdl(run_and_get_triton_code(compiled_for_code, x))
+
+    def test_single_stream_pdl_with_cudagraphs(self):
+        self._check_single_stream_pdl_with_cudagraphs()
+
+    def test_single_stream_pdl_with_reduce_overhead(self):
+        self._check_single_stream_pdl_with_cudagraphs(mode="reduce-overhead")
+
+    @torch._inductor.config.patch("triton.cudagraph_or_error", True)
+    def test_user_stream_cudagraphs_stay_non_pdl(self):
+        from torch._dynamo.utils import counters
+        from torch._inductor.utils import run_and_get_triton_code
+
+        side = torch.cuda.Stream()
+        ev = torch.cuda.Event()
+        ev2 = torch.cuda.Event()
+
+        def fn(x):
+            a = (x * 2).sum(dim=1)
+            ev.record()
+            with torch.cuda.stream(side):
+                ev.wait()
+                b = x + a[:, None]
+                ev2.record()
+            ev2.wait()
+            return b
+
+        x = torch.randn(128, 128, device="cuda")
+        expected = fn(x)
+        counters.clear()
+        compiled_fn = torch.compile(fn, mode="reduce-overhead")
+        for _ in range(3):
+            self.assertEqual(compiled_fn(x), expected)
+        self.assertEqual(counters["inductor"].get("cudagraph_skips", 0), 0)
+
+        triton_code = run_and_get_triton_code(
+            torch.compile(fn, mode="reduce-overhead"), x
+        )
+        self._assert_no_pdl(triton_code)
+
+
+@unittest.skipIf(not TEST_CUDA, "requires CUDA")
 @torch._inductor.config.patch({"triton.cudagraphs": True})
 @xfailIfNoAcceleratorTriton
 class TestStreamCudagraphInteraction(InductorTestCase):
@@ -2596,6 +2675,7 @@ instantiate_parametrized_tests(TestStreamOrderingStress)
 instantiate_parametrized_tests(TestGenericStreamCompile)
 instantiate_parametrized_tests(TestStreamIdentity)
 instantiate_parametrized_tests(TestPDLWithMultiStream)
+instantiate_parametrized_tests(TestPDLCudagraphInteraction)
 instantiate_parametrized_tests(TestStreamCudagraphInteraction)
 
 
