@@ -891,7 +891,8 @@ async def runner(args):
         f"/workspace/result_{args.gpu[0]}_{args.pytorch_version}_{args.cuda_version}.jsonl",
         "a+",
     ) as result:
-        result.writelines(results)
+        for r in results:
+            result.write(r)
 
 
 def main():
