@@ -1,8 +1,8 @@
 # Owner(s): ["oncall: distributed"]
 #
 # Basic sanity checks for the in-tree torchcomms NCCL backend
-# (c10d::nccltc::ProcessGroupNCCLTC), selected via init_process_group(
-# backend="nccltc"). Modeled on the torchcomms c10d tests; exercises the core
+# (c10d::nccl2::ProcessGroupNCCL), selected via init_process_group(
+# backend="nccl2"). Modeled on the torchcomms c10d tests; exercises the core
 # collectives / point-to-point over real NCCL on multiple GPUs.
 
 import torch
@@ -15,22 +15,22 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import run_tests, TEST_CUDA
 
 
-# The "nccltc" backend is normally discovered via the torch.distributed.backends
+# The "nccl2" backend is normally discovered via the torch.distributed.backends
 # entry point. Register it explicitly here too so the test is self-contained
 # under editable installs, where a stale repo egg-info can shadow the dist-info
 # entry points. _ensure_backend_registered short-circuits if already present.
 try:
-    from torch.distributed.distributed_c10d import _register_builtin_nccltc_backend
+    from torch.distributed.distributed_c10d import _register_builtin_nccl2_backend
 
-    _register_builtin_nccltc_backend()
+    _register_builtin_nccl2_backend()
 except Exception:
     pass
 
 
-class ProcessGroupNCCLTCTest(MultiProcContinuousTest):
+class ProcessGroupNCCL2Test(MultiProcContinuousTest):
     @classmethod
     def backend_str(cls) -> str:
-        return "nccltc"
+        return "nccl2"
 
     @classmethod
     def device_type(cls) -> str:

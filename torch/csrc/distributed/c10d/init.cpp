@@ -34,7 +34,7 @@
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/nccl/NCCLXStub.hpp>
-#include <torch/csrc/distributed/c10d/nccltc/ProcessGroupNCCLTC.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/intra_node_comm.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
 #endif
@@ -4144,52 +4144,51 @@ Returns:
 #endif
 
 #ifdef USE_C10D_NCCL
-  auto processGroupNCCLTC =
-      intrusive_ptr_no_gil_destructor_class_<
-          ::c10d::nccltc::ProcessGroupNCCLTC>(
-          module, "ProcessGroupNCCLTC", backend)
+  auto processGroupNCCL2 =
+      intrusive_ptr_no_gil_destructor_class_<::c10d::nccl2::ProcessGroupNCCL>(
+          module, "ProcessGroupNCCL2", backend)
           .def(
-              py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
-                          int rank,
-                          int size,
-                          c10::intrusive_ptr<
-                              ::c10d::nccltc::ProcessGroupNCCLTC::Options>
-                              options) {
-                // gil_scoped_release is not safe as a call_guard in init.
-                // https://github.com/pybind/pybind11/issues/5473
-                py::gil_scoped_release nogil{};
-                return c10::make_intrusive<::c10d::nccltc::ProcessGroupNCCLTC>(
-                    store, rank, size, std::move(options));
-              }),
+              py::init(
+                  [](const c10::intrusive_ptr<::c10d::Store>& store,
+                     int rank,
+                     int size,
+                     c10::intrusive_ptr<
+                         ::c10d::nccl2::ProcessGroupNCCL::Options> options) {
+                    // gil_scoped_release is not safe as a call_guard in init.
+                    // https://github.com/pybind/pybind11/issues/5473
+                    py::gil_scoped_release nogil{};
+                    return c10::make_intrusive<::c10d::nccl2::ProcessGroupNCCL>(
+                        store, rank, size, std::move(options));
+                  }),
               py::arg("store"),
               py::arg("rank"),
               py::arg("size"),
               py::arg("options"),
-              R"(Create a new ProcessGroupNCCLTC instance.)")
+              R"(Create a new ProcessGroupNCCL2 instance.)")
           .def(
               py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
                           int rank,
                           int size) {
                 py::gil_scoped_release nogil{};
                 auto options =
-                    ::c10d::nccltc::ProcessGroupNCCLTC::Options::create();
-                return c10::make_intrusive<::c10d::nccltc::ProcessGroupNCCLTC>(
+                    ::c10d::nccl2::ProcessGroupNCCL::Options::create();
+                return c10::make_intrusive<::c10d::nccl2::ProcessGroupNCCL>(
                     store, rank, size, options);
               }),
               py::arg("store"),
               py::arg("rank"),
               py::arg("size"),
-              R"(Create a new ProcessGroupNCCLTC instance.)");
+              R"(Create a new ProcessGroupNCCL2 instance.)");
 
-  intrusive_ptr_class_<::c10d::nccltc::ProcessGroupNCCLTC::Options>(
-      processGroupNCCLTC, "Options", backendOptions)
+  intrusive_ptr_class_<::c10d::nccl2::ProcessGroupNCCL::Options>(
+      processGroupNCCL2, "Options", backendOptions)
       .def(py::init<bool>(), py::arg("is_high_priority_stream") = false)
       .def_readwrite(
           "is_high_priority_stream",
-          &::c10d::nccltc::ProcessGroupNCCLTC::Options::is_high_priority_stream)
+          &::c10d::nccl2::ProcessGroupNCCL::Options::is_high_priority_stream)
       .def_readwrite(
           "abort_process_on_timeout_or_error",
-          &::c10d::nccltc::ProcessGroupNCCLTC::Options::
+          &::c10d::nccl2::ProcessGroupNCCL::Options::
               abort_process_on_timeout_or_error);
 #endif
 

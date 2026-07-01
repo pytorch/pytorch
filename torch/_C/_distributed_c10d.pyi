@@ -1113,7 +1113,7 @@ class ProcessGroupXCCL(Backend):
     @property
     def options(self) -> Options: ...  # type: ignore[override]
 
-class ProcessGroupNCCLTC(Backend):
+class ProcessGroupNCCL2(Backend):
     class Options(Backend.Options):
         is_high_priority_stream: bool
         abort_process_on_timeout_or_error: bool

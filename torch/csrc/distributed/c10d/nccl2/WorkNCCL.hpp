@@ -19,19 +19,19 @@
 
 #include <torch/csrc/distributed/c10d/Work.hpp>
 
-namespace c10d::nccltc {
+namespace c10d::nccl2 {
 
-class ProcessGroupNCCLTC;
+class ProcessGroupNCCL;
 
 // Work object for the NCCL TorchComms backend. Ported from torchcomms'
-// TorchWorkNCCL, but rebased onto c10d::Work (upstream subclassed
+// WorkNCCL, but rebased onto c10d::Work (upstream subclassed
 // torchcomms::TorchWork). Completion is tracked with a pair of CUDA events;
 // the Future/result handling that BackendWrapper::WorkWrapper used to provide
 // is folded in here (see setOutputs/getFuture). The back-pointer to the owning
 // backend is non-owning: the backend drains its work queue in finalize()/dtor,
 // so a work never outlives its backend (upstream held a shared_ptr, which is
 // incompatible with c10d's intrusive_ptr ownership of the backend).
-class TorchWorkNCCL : public c10d::Work {
+class WorkNCCL : public c10d::Work {
  public:
   enum class WorkStatus {
     NOT_STARTED,
@@ -41,22 +41,22 @@ class TorchWorkNCCL : public c10d::Work {
     ERROR,
   };
 
-  TorchWorkNCCL(
-      ProcessGroupNCCLTC* comm,
+  WorkNCCL(
+      ProcessGroupNCCL* comm,
       cudaStream_t stream,
       std::chrono::milliseconds timeout_ms,
       const std::vector<at::Tensor>& inputTensors);
-  TorchWorkNCCL(
-      ProcessGroupNCCLTC* comm,
+  WorkNCCL(
+      ProcessGroupNCCL* comm,
       cudaStream_t stream,
       std::chrono::milliseconds timeout_ms,
       const at::Tensor& inputTensor);
-  ~TorchWorkNCCL() override;
+  ~WorkNCCL() override;
 
-  TorchWorkNCCL(const TorchWorkNCCL&) = delete;
-  TorchWorkNCCL(TorchWorkNCCL&&) = delete;
-  TorchWorkNCCL& operator=(const TorchWorkNCCL&) = delete;
-  TorchWorkNCCL& operator=(TorchWorkNCCL&&) = delete;
+  WorkNCCL(const WorkNCCL&) = delete;
+  WorkNCCL(WorkNCCL&&) = delete;
+  WorkNCCL& operator=(const WorkNCCL&) = delete;
+  WorkNCCL& operator=(WorkNCCL&&) = delete;
 
   // c10d::Work overrides.
   bool isCompleted() override;
@@ -83,8 +83,8 @@ class TorchWorkNCCL : public c10d::Work {
   void recordStart(std::string_view coll_name);
   void recordEnd();
 
-  friend class ProcessGroupNCCLTC;
-  friend class TorchWorkNCCLQueue;
+  friend class ProcessGroupNCCL;
+  friend class WorkNCCLQueue;
 
  private:
   void setStatus(WorkStatus status) {
@@ -101,7 +101,7 @@ class TorchWorkNCCL : public c10d::Work {
   at::Tensor inputTensor_;
   std::vector<at::Tensor> outputs_;
 
-  ProcessGroupNCCLTC* comm_; // non-owning; see class comment
+  ProcessGroupNCCL* comm_; // non-owning; see class comment
   cudaEvent_t start_event_;
   cudaEvent_t end_event_;
   cudaStream_t stream_; // not owned by this class
@@ -114,24 +114,23 @@ class TorchWorkNCCL : public c10d::Work {
   c10::intrusive_ptr<c10::ivalue::Future> future_;
 };
 
-class TorchWorkNCCLQueue {
+class WorkNCCLQueue {
  public:
-  TorchWorkNCCLQueue() = default;
-  ~TorchWorkNCCLQueue() = default;
+  WorkNCCLQueue() = default;
+  ~WorkNCCLQueue() = default;
 
-  TorchWorkNCCL::WorkStatus garbageCollect();
+  WorkNCCL::WorkStatus garbageCollect();
   // Finalize function can only be called from the main thread
-  TorchWorkNCCL::WorkStatus finalize();
-  void enqueueWork(c10::intrusive_ptr<TorchWorkNCCL> work, cudaStream_t stream);
+  WorkNCCL::WorkStatus finalize();
+  void enqueueWork(c10::intrusive_ptr<WorkNCCL> work, cudaStream_t stream);
 
  private:
-  TorchWorkNCCL::WorkStatus garbageCollectLocked();
-  std::
-      unordered_map<cudaStream_t, std::queue<c10::intrusive_ptr<TorchWorkNCCL>>>
-          stream_work_queues_;
+  WorkNCCL::WorkStatus garbageCollectLocked();
+  std::unordered_map<cudaStream_t, std::queue<c10::intrusive_ptr<WorkNCCL>>>
+      stream_work_queues_;
   std::mutex work_queues_mutex_;
 };
 
-} // namespace c10d::nccltc
+} // namespace c10d::nccl2
 
 #endif // USE_C10D_NCCL

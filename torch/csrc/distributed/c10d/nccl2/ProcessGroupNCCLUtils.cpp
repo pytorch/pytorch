@@ -1,14 +1,14 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
 
-#include <torch/csrc/distributed/c10d/nccltc/ProcessGroupNCCLTC.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
 
 #include <nccl.h>
-#include <torch/csrc/distributed/c10d/nccltc/Logging.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <stdexcept>
 #include <string>
 #include <variant>
 
-namespace c10d::nccltc {
+namespace c10d::nccl2 {
 
 namespace {
 
@@ -84,10 +84,10 @@ void createPreMulSum(
 
 } // namespace
 
-ProcessGroupNCCLTC::RedOpRAII::RedOpRAII(ncclRedOp_t op)
+ProcessGroupNCCL::RedOpRAII::RedOpRAII(ncclRedOp_t op)
     : ncclRedOp_(op), comm_(nullptr) {}
 
-ProcessGroupNCCLTC::RedOpRAII::RedOpRAII(
+ProcessGroupNCCL::RedOpRAII::RedOpRAII(
     const ::c10d::ReduceOp& op,
     const ncclComm_t comm,
     const ncclDataType_t dataType,
@@ -121,7 +121,7 @@ ProcessGroupNCCLTC::RedOpRAII::RedOpRAII(
   }
 }
 
-ProcessGroupNCCLTC::RedOpRAII::~RedOpRAII() {
+ProcessGroupNCCL::RedOpRAII::~RedOpRAII() {
   if (comm_) {
     NCCL_CHECK_IGNORE(
         nccl_api_,
@@ -130,7 +130,7 @@ ProcessGroupNCCLTC::RedOpRAII::~RedOpRAII() {
   }
 }
 
-size_t ProcessGroupNCCLTC::wordSize(ncclDataType_t type) const {
+size_t ProcessGroupNCCL::wordSize(ncclDataType_t type) const {
   switch (type) {
     case ncclChar:
 #if NCCL_MAJOR >= 2
@@ -165,11 +165,11 @@ size_t ProcessGroupNCCLTC::wordSize(ncclDataType_t type) const {
   }
 }
 
-ncclDataType_t ProcessGroupNCCLTC::getNcclDataType(const at::Tensor& tensor) {
+ncclDataType_t ProcessGroupNCCL::getNcclDataType(const at::Tensor& tensor) {
   return getNcclDataTypeInternal(tensor);
 }
 
-ProcessGroupNCCLTC::RedOpRAII ProcessGroupNCCLTC::getNcclReduceOp(
+ProcessGroupNCCL::RedOpRAII ProcessGroupNCCL::getNcclReduceOp(
     const ::c10d::ReduceOp& op,
     const ncclComm_t comm,
     const ncclDataType_t dataType) {
@@ -197,14 +197,14 @@ ProcessGroupNCCLTC::RedOpRAII ProcessGroupNCCLTC::getNcclReduceOp(
   }
 }
 
-void ProcessGroupNCCLTC::checkWorkQueue() {
-  TorchWorkNCCL::WorkStatus status = workq_.garbageCollect();
+void ProcessGroupNCCL::checkWorkQueue() {
+  WorkNCCL::WorkStatus status = workq_.garbageCollect();
 
   switch (status) {
-    case TorchWorkNCCL::WorkStatus::TIMEDOUT:
+    case WorkNCCL::WorkStatus::TIMEDOUT:
       comm_state_ = CommState::TIMEOUT;
       break;
-    case TorchWorkNCCL::WorkStatus::ERROR:
+    case WorkNCCL::WorkStatus::ERROR:
       comm_state_ = CommState::ERROR;
       break;
     default:
@@ -215,7 +215,7 @@ void ProcessGroupNCCLTC::checkWorkQueue() {
 
 // The timeout thread cannot make NCCL calls.  The only CUDA call it can make
 // it cudaEventQuery.
-void ProcessGroupNCCLTC::timeoutWatchdog() noexcept {
+void ProcessGroupNCCL::timeoutWatchdog() noexcept {
   TC_LOG(INFO, this) << "Timeout thread starting for rank: " << rank_;
 
   cudaStreamCaptureMode mode = cudaStreamCaptureModeThreadLocal;
@@ -330,13 +330,13 @@ void ProcessGroupNCCLTC::timeoutWatchdog() noexcept {
   TC_LOG(INFO, this) << "Timeout thread exiting for rank: " << rank_;
 }
 
-void ProcessGroupNCCLTC::checkInitialized() const {
+void ProcessGroupNCCL::checkInitialized() const {
   if (init_state_ != InitializationState::INITIALIZED) {
-    throw std::runtime_error("ProcessGroupNCCLTC not initialized");
+    throw std::runtime_error("ProcessGroupNCCL not initialized");
   }
 }
 
-void ProcessGroupNCCLTC::checkAndAbortIfTimedOutOrError() {
+void ProcessGroupNCCL::checkAndAbortIfTimedOutOrError() {
   // Nothing to check in graph capture mode
   if (getGraphCaptureMode()) {
     return;
@@ -386,7 +386,7 @@ void ProcessGroupNCCLTC::checkAndAbortIfTimedOutOrError() {
   }
 }
 
-bool ProcessGroupNCCLTC::getGraphCaptureMode() {
+bool ProcessGroupNCCL::getGraphCaptureMode() {
   cudaStream_t current_stream =
       cuda_api_->getCurrentCUDAStream(device_.index());
   cudaStreamCaptureStatus capture_status;
@@ -402,28 +402,27 @@ bool ProcessGroupNCCLTC::getGraphCaptureMode() {
       std::string(cuda_api_->getErrorString(err)));
 }
 
-c10::intrusive_ptr<TorchWorkNCCL> ProcessGroupNCCLTC::createWork(
+c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::createWork(
     cudaStream_t stream,
     std::chrono::milliseconds timeout,
     const std::vector<at::Tensor>& inputTensors) {
   // Only create the work object without enqueuing it
   auto work =
-      c10::make_intrusive<TorchWorkNCCL>(this, stream, timeout, inputTensors);
+      c10::make_intrusive<WorkNCCL>(this, stream, timeout, inputTensors);
   return work;
 }
 
-c10::intrusive_ptr<TorchWorkNCCL> ProcessGroupNCCLTC::createWork(
+c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::createWork(
     cudaStream_t stream,
     std::chrono::milliseconds timeout,
     const at::Tensor& inputTensor) {
   // Single-tensor overload to avoid vector allocation
-  auto work =
-      c10::make_intrusive<TorchWorkNCCL>(this, stream, timeout, inputTensor);
+  auto work = c10::make_intrusive<WorkNCCL>(this, stream, timeout, inputTensor);
   return work;
 }
 
-void ProcessGroupNCCLTC::enqueueWork(
-    c10::intrusive_ptr<TorchWorkNCCL> work,
+void ProcessGroupNCCL::enqueueWork(
+    c10::intrusive_ptr<WorkNCCL> work,
     cudaStream_t stream) {
   // In graph capture mode, keep a reference to the work object to prevent
   // premature destruction until the graph gets destroyed, organized per graph
@@ -492,7 +491,7 @@ void ProcessGroupNCCLTC::enqueueWork(
 }
 
 // Static callback function for CUDA user object cleanup
-void ProcessGroupNCCLTC::graphCleanupCallback(void* userData) {
+void ProcessGroupNCCL::graphCleanupCallback(void* userData) {
   auto* cleanup_data = static_cast<GraphCleanupData*>(userData);
   if (cleanup_data == nullptr || cleanup_data->comm == nullptr) {
     throw std::runtime_error("Invalid cleanup data");
@@ -507,7 +506,7 @@ void ProcessGroupNCCLTC::graphCleanupCallback(void* userData) {
   delete cleanup_data;
 }
 
-cudaStream_t ProcessGroupNCCLTC::getOperationStream(bool async_op) {
+cudaStream_t ProcessGroupNCCL::getOperationStream(bool async_op) {
   // c10d does not guarantee the ambient CUDA device matches this comm's device
   // (unlike upstream torchcomms, which ran with the device already set). Pin it
   // here -- the first call in every collective -- so subsequent event/record
@@ -539,13 +538,13 @@ cudaStream_t ProcessGroupNCCLTC::getOperationStream(bool async_op) {
   }
 }
 
-void ProcessGroupNCCLTC::ensureTensorContiguous(const at::Tensor& tensor) {
+void ProcessGroupNCCL::ensureTensorContiguous(const at::Tensor& tensor) {
   if (!tensor.is_contiguous()) {
     throw std::runtime_error("Tensor must be contiguous for NCCL operations");
   }
 }
 
-void ProcessGroupNCCLTC::checkTensorDevice(const at::Tensor& tensor) const {
+void ProcessGroupNCCL::checkTensorDevice(const at::Tensor& tensor) const {
   TORCH_CHECK(
       tensor.device().type() == device_.type(),
       "Expected tensor on ",
@@ -554,7 +553,7 @@ void ProcessGroupNCCLTC::checkTensorDevice(const at::Tensor& tensor) const {
       tensor.device());
 }
 
-void ProcessGroupNCCLTC::checkTensorsDevice(
+void ProcessGroupNCCL::checkTensorsDevice(
     const std::vector<at::Tensor>& tensors) const {
   for (const auto& t : tensors) {
     checkTensorDevice(t);
@@ -562,7 +561,7 @@ void ProcessGroupNCCLTC::checkTensorsDevice(
 }
 
 // Protected methods (not in the private section of the header)
-cudaEvent_t ProcessGroupNCCLTC::getEvent() {
+cudaEvent_t ProcessGroupNCCL::getEvent() {
   std::lock_guard<std::mutex> lock(event_pool_mutex_);
 
   if (!event_pool_.empty()) {
@@ -580,7 +579,7 @@ cudaEvent_t ProcessGroupNCCLTC::getEvent() {
   return event;
 }
 
-void ProcessGroupNCCLTC::returnEvent(cudaEvent_t event) {
+void ProcessGroupNCCL::returnEvent(cudaEvent_t event) {
   std::lock_guard<std::mutex> lock(event_pool_mutex_);
 
   if (event_pool_.size() < max_event_pool_size_) {
@@ -595,8 +594,8 @@ void ProcessGroupNCCLTC::returnEvent(cudaEvent_t event) {
 // CCA (CUDA caching allocator) memory-hook registration is deferred: it
 // auto-registers allocator segments with NCCL for symmetric-memory / window
 // support, which is not part of this initial port. Collectives work without it.
-void ProcessGroupNCCLTC::attachMemoryHook() {}
+void ProcessGroupNCCL::attachMemoryHook() {}
 
-void ProcessGroupNCCLTC::detachMemoryHook() {}
+void ProcessGroupNCCL::detachMemoryHook() {}
 
-} // namespace c10d::nccltc
+} // namespace c10d::nccl2

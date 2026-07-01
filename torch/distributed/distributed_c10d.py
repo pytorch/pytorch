@@ -278,11 +278,11 @@ except ImportError:
 
 try:
     # In-tree NCCL backend built on the torchcomms engine (selected via the
-    # "nccltc" backend / entry point). Available whenever NCCL is built.
-    from torch._C._distributed_c10d import ProcessGroupNCCLTC
+    # "nccl2" backend / entry point). Available whenever NCCL is built.
+    from torch._C._distributed_c10d import ProcessGroupNCCL2
 
-    ProcessGroupNCCLTC.__module__ = "torch.distributed.distributed_c10d"
-    __all__ += ["ProcessGroupNCCLTC"]
+    ProcessGroupNCCL2.__module__ = "torch.distributed.distributed_c10d"
+    __all__ += ["ProcessGroupNCCL2"]
 except ImportError:
     pass
 
@@ -317,7 +317,7 @@ if TYPE_CHECKING:
         ProcessGroupGloo,
         ProcessGroupMPI,
         ProcessGroupNCCL,
-        ProcessGroupNCCLTC,
+        ProcessGroupNCCL2,
         ProcessGroupUCC,
         ProcessGroupXCCL,
     )
@@ -597,26 +597,26 @@ def _create_nccl_process_group(
     return backend_class
 
 
-def _create_nccltc_process_group(
+def _create_nccl2_process_group(
     opts: _DistributedBackendOptions, backend_options: Any | None
 ) -> C10DBackend:
     if not is_nccl_available():
         raise RuntimeError("Distributed package doesn't have NCCL built in")
-    # Accept a ProcessGroupNCCLTC.Options if given; otherwise (None, or a
+    # Accept a ProcessGroupNCCL2.Options if given; otherwise (None, or a
     # ProcessGroupNCCL.Options passed through the generic path) build a fresh one.
     if backend_options is not None and isinstance(
-        backend_options, ProcessGroupNCCLTC.Options
+        backend_options, ProcessGroupNCCL2.Options
     ):
         pg_options = backend_options
     else:
-        pg_options = ProcessGroupNCCLTC.Options()
+        pg_options = ProcessGroupNCCL2.Options()
     # pyrefly: ignore [bad-argument-type]
     pg_options._timeout = opts.timeout
     pg_options.global_ranks_in_group = opts.global_ranks_in_group
     pg_options.group_name = opts.group_id
     if opts.enable_reconfigure:
         pg_options.enable_reconfigure = True
-    return ProcessGroupNCCLTC(opts.store, opts.group_rank, opts.group_size, pg_options)
+    return ProcessGroupNCCL2(opts.store, opts.group_rank, opts.group_size, pg_options)
 
 
 def _create_ucc_process_group(
@@ -682,13 +682,13 @@ def _register_builtin_nccl_backend() -> None:
     )
 
 
-def _register_builtin_nccltc_backend() -> None:
+def _register_builtin_nccl2_backend() -> None:
     # In-tree torchcomms NCCL backend. CUSTOM backend type; registering with
     # devices=["cuda"] sets capability without claiming the cuda default (which
     # stays "nccl"), so this only takes effect when explicitly requested.
     Backend.register_backend(
-        "nccltc",
-        _create_nccltc_process_group,
+        "nccl2",
+        _create_nccl2_process_group,
         extended_api=True,
         devices=["cuda"],
         _backend_type=ProcessGroup.BackendType.CUSTOM,
