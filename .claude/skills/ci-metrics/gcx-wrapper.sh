@@ -4,16 +4,42 @@ set -euo pipefail
 
 export GCX_SERVER="${GCX_SERVER:-https://pytorchci.grafana.net}"
 export GCX_CONTEXT="${GCX_CONTEXT:-pytorchci}"
-export GCX_NO_UPDATE_NOTIFIER="${GCX_NO_UPDATE_NOTIFIER:-1}"
-GCX_CMD=(go run "${GCX_MODULE:-github.com/grafana/gcx/cmd/gcx@latest}")
 
-if ! command -v go >/dev/null 2>&1; then
-  echo "error: go is needed to run gcx." >&2
+# Cache a pinned, prebuilt gcx binary in a private directory and invoke it by
+# absolute path, so nothing lands on the user's PATH. gcx's installer verifies
+# the download's SHA-256 checksum.
+GCX_VERSION="${GCX_VERSION:-0.4.3}"
+GCX_CACHE="${GCX_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/pytorch-ci-metrics}"
+GCX_BIN="${GCX_CACHE}/gcx-${GCX_VERSION}"
+
+if ! command -v curl >/dev/null 2>&1; then
+  echo "error: curl is needed to download gcx and fetch its token." >&2
   exit 1
 fi
 
+_ensure_gcx() {
+  [[ -x "${GCX_BIN}" ]] && return 0
+
+  echo "Fetching gcx ${GCX_VERSION} to ${GCX_BIN}..." >&2
+  mkdir -p "${GCX_CACHE}"
+  local tmp
+  tmp="$(mktemp -d "${GCX_CACHE}/install.XXXXXX")"
+  local installer="https://raw.githubusercontent.com/grafana/gcx/v${GCX_VERSION}/scripts/install.sh"
+  if ! curl -fsSL "${installer}" | INSTALL_DIR="${tmp}" VERSION="${GCX_VERSION}" sh >/dev/null; then
+    rm -rf "${tmp}"
+    echo "error: failed to install gcx ${GCX_VERSION}" >&2
+    return 1
+  fi
+  if ! mv "${tmp}/gcx" "${GCX_BIN}"; then
+    rm -rf "${tmp}"
+    echo "error: gcx installer did not produce a binary" >&2
+    return 1
+  fi
+  rm -rf "${tmp}"
+}
+
 _run_gcx() {
-  "${GCX_CMD[@]}" "$@"
+  "${GCX_BIN}" "$@"
 }
 
 _login_gcx() {
@@ -21,11 +47,6 @@ _login_gcx() {
 
   if ! command -v gh >/dev/null 2>&1; then
     echo "error: gh CLI is needed to fetch the gcx token"
-    return 1
-  fi
-
-  if ! command -v curl >/dev/null 2>&1; then
-    echo "error: curl is needed to fetch the gcx token"
     return 1
   fi
 
@@ -55,6 +76,10 @@ _login_gcx() {
   fi
 }
 
+if ! _ensure_gcx; then
+  exit 1
+fi
+
 if ! _run_gcx --no-color api --context "${GCX_CONTEXT}" /api/health >/dev/null 2>&1; then
   if ! login_error="$(_login_gcx)"; then
     echo "${login_error}" >&2
@@ -64,4 +89,4 @@ fi
 
 _run_gcx config use-context "${GCX_CONTEXT}" >/dev/null 2>&1 || true
 
-exec "${GCX_CMD[@]}" "$@"
+exec "${GCX_BIN}" "$@"

@@ -10,11 +10,10 @@ PyTorch CI and infrastructure metrics are exposed through Grafana. Use [.claude/
 ## Requirements
 
 The wrapper needs these tools on PATH:
-  * `go` - runs the `gcx` CLI.
   * `gh` - fetches the Grafana token and must be authenticated; if not, run `gh auth login --hostname github.com --git-protocol ssh --web`.
-  * `curl` - fetches the token from HUD.
+  * `curl` - downloads `gcx` and fetches the token from HUD.
 
-On first use the wrapper authenticates automatically. If a tool is missing or `gh` is not authenticated, it exits with an error describing what to fix.
+On first use the wrapper downloads a pinned, checksum-verified `gcx` binary into a private cache (`~/.cache/pytorch-ci-metrics/`) and authenticates automatically. Nothing is installed on your PATH. If a tool is missing or `gh` is not authenticated, it exits with an error describing what to fix.
 
 ## Datasources
 
