@@ -301,9 +301,17 @@ jobs:
             echo "HF_CACHE_S3_BUCKET unset (not an hf-cache runner) - skipping sync"
             exit 0
           fi
+          # The benchmark image may not ship the AWS CLI, so fall back to a
+          # throwaway venv when it's absent.
+          AWS=aws
+          if ! command -v aws >/dev/null 2>&1; then
+            python3 -m venv /tmp/awscli-venv
+            /tmp/awscli-venv/bin/pip install --quiet awscli
+            AWS=/tmp/awscli-venv/bin/aws
+          fi
           for sub in hub flashinfer; do
             if [[ -d "${HF_CACHE}/${sub}" ]]; then
-              aws s3 sync "${HF_CACHE}/${sub}" "s3://${HF_CACHE_S3_BUCKET}/${sub}" \
+              "${AWS}" s3 sync "${HF_CACHE}/${sub}" "s3://${HF_CACHE_S3_BUCKET}/${sub}" \
                 --region "${HF_CACHE_S3_REGION}" --no-progress
             else
               echo "No ${HF_CACHE}/${sub} to sync - skipping"
