@@ -344,23 +344,25 @@ def skip_if_lt_x_devices(x, *, allow_cpu=False):
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+            acc = torch.accelerator.current_accelerator()
+            if acc is not None:
+                device_type = acc.type
+                device_module = torch.get_device_module(device_type)
+                if device_module.is_available() and device_module.device_count() >= x:
+                    return func(*args, **kwargs)
 
             # CPU path: allow running a degenerate version if explicitly requested
-            if device_type == "cpu":
-                if allow_cpu:
-                    return func(*args, **kwargs)
-                raise unittest.SkipTest("requires accelerator")
-
-            # Accelerator path
-            device_module = torch.get_device_module(device_type)
-            if device_module.is_available() and device_module.device_count() >= x:
+            if allow_cpu and acc is None:
                 return func(*args, **kwargs)
 
-            raise unittest.SkipTest(
-                f"requires at least {x} {device_type} devices, found {device_module.device_count()}"
-            )
-
+            # NOTE: TEST_SKIPS uses "multi-gpu-{x}" naming for historical/
+            # backward-compatibility reasons only. The skip logic itself is
+            # hardware-agnostic and does not assume CUDA/GPU.
+            test_skip = TEST_SKIPS[f"multi-gpu-{x}"]
+            # NOTE: _maybe_handle_skip_if_lt_x_gpu retains "gpu" in its name
+            # for backward compatibility; it is hardware-agnostic.
+            if not _maybe_handle_skip_if_lt_x_gpu(args, test_skip.message):
+                sys.exit(test_skip.exit_code)
         return wrapper
 
     return decorator
