@@ -29,7 +29,7 @@ __all__ = [
 ]
 
 
-class FileSystem(FileSystemBase):
+class _FileSystem(FileSystemBase):
     def __init__(self) -> None:
         self.fs: AbstractFileSystem | None = None
 
@@ -92,7 +92,6 @@ class FileSystem(FileSystemBase):
         return self.fs.ls(path, detail=False)
 
 
-# TODO: add the dcp.async_save mixin
 class FsspecWriter(FileSystemWriter):
     """
     Basic implementation of StorageWriter using fsspec.
@@ -114,6 +113,7 @@ class FsspecWriter(FileSystemWriter):
         sync_files: bool = True,
         thread_count: int = 1,
         per_thread_copy_ahead: int = 10_000_000,
+        cache_staged_state_dict: bool = False,
         overwrite: bool = True,
         _extensions: Sequence[StreamTransformExtension] | None = None,
         serialization_format: SerializationFormat = SerializationFormat.TORCH_SAVE,
@@ -128,35 +128,39 @@ class FsspecWriter(FileSystemWriter):
             sync_files : force files to be synced to permanent storage. Default to True.
             thread_count: Number of IO threads to use to write. Default to 1.
             per_thread_copy_ahead: How many bytes to copy from the GPU ahead of saving them. Default 10Mb.
+            cache_staged_state_dict: Whether to cache the staged state_dict. This option decreases staging latency
+                at the cost of increased memory usage. Additionally, if this parameter is set to True, it's the expectation
+                that the stager is maintained and reused for multiple dcp.async_save calls. Default to False.
             overwrite: Whether to allow overwriting existing checkpoints. Defaults to True.
             _extensions: Extensions to apply to output streams (EXPERIMENTAL)
 
         N. B. If sync_files is disabled, there's no guarantee that the checkpoint will be consistent in the case of a failure.
         """
         super().__init__(
-            path,
-            single_file_per_rank,
-            sync_files,
-            thread_count,
-            per_thread_copy_ahead,
+            path=path,
+            single_file_per_rank=single_file_per_rank,
+            sync_files=sync_files,
+            thread_count=thread_count,
+            per_thread_copy_ahead=per_thread_copy_ahead,
+            cache_staged_state_dict=cache_staged_state_dict,
             overwrite=overwrite,
             _extensions=_extensions,
             serialization_format=serialization_format,
         )
-        self.fs = FileSystem()
+        self.fs = _FileSystem()
         self.path = self.fs.init_path(path, **kwargs)
 
     @classmethod
     def validate_checkpoint_id(cls, checkpoint_id: str | os.PathLike) -> bool:
-        return FileSystem.validate_checkpoint_id(checkpoint_id)
+        return _FileSystem.validate_checkpoint_id(checkpoint_id)
 
 
 class FsspecReader(FileSystemReader):
     def __init__(self, path: str | os.PathLike, **kwargs) -> None:
         super().__init__(path)
-        self.fs = FileSystem()
+        self.fs = _FileSystem()
         self.path = self.fs.init_path(path, **kwargs)
 
     @classmethod
     def validate_checkpoint_id(cls, checkpoint_id: str | os.PathLike) -> bool:
-        return FileSystem.validate_checkpoint_id(checkpoint_id)
+        return _FileSystem.validate_checkpoint_id(checkpoint_id)
