@@ -1115,7 +1115,7 @@ class TransferEvents {
                   /*start=*/activity->flowStart()};
             },
             [](auto&) {}));
-        if (config_.experimental_config.expose_kineto_event_metadata) {
+        if (config_.get().experimental_config.expose_kineto_event_metadata) {
           e->visit(c10::overloaded(
               [&](ExtraFields<EventType::TorchOp>& i) {
                 i.metadata_json_ = activity->metadataJson();
@@ -1250,8 +1250,7 @@ class TransferEvents {
   static constexpr long long unmatchedIndex = -1;
   static constexpr auto noTID = std::numeric_limits<uint64_t>::max();
   std::reference_wrapper<std::vector<std::shared_ptr<Result>>> results_;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
-  const ProfilerConfig& config_;
+  std::reference_wrapper<const ProfilerConfig> config_;
   std::vector<const itrace_t*> trace_activities_;
   ska::flat_hash_map<const itrace_t*, std::shared_ptr<Result>> kineto_events_;
 };
