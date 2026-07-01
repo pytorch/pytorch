@@ -12,6 +12,7 @@ from torch._functorch.utils import exposed_in
 from torch._higher_order_ops.utils import (
     _maybe_compile_and_run_fn,
     _maybe_run_with_interpreter,
+    check_input_alias_and_mutation_return_outputs,
     reenter_make_fx,
     unique_graph_id,
     validate_subgraph_args_types,
@@ -33,6 +34,57 @@ class SwitchOp(HigherOrderOperator):
         validate_subgraph_args_types(operands)
         # pyrefly: ignore [missing-attribute]
         return super().__call__(index, branches, operands)
+
+    # pyrefly: ignore [bad-override]
+    def gen_schema(self, index, branches, operands):
+        from torch._guards import detect_fake_mode
+        from torch._higher_order_ops.schema import HopSchemaGenerator
+        from torch._higher_order_ops.utils import materialize_as_graph
+
+        branch_gms: list[torch.fx.GraphModule] = []
+        all_branch_outputs: list[tuple[Any, ...] | list[Any]] = []
+        mutated_inputs: set[int] = set()
+        for branch in branches:
+            gm = (
+                branch
+                if isinstance(branch, torch.fx.GraphModule)
+                else materialize_as_graph(branch, operands)
+            )
+            (
+                _,
+                _,
+                _,
+                branch_mutated_inputs,
+                branch_outputs,
+            ) = check_input_alias_and_mutation_return_outputs(gm)
+            branch_gms.append(gm)
+            all_branch_outputs.append(branch_outputs)
+            mutated_inputs |= set(branch_mutated_inputs)
+
+        # Merge outputs to detect int -> SymInt change
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        fake_mode = detect_fake_mode(operands)
+        if fake_mode is None or fake_mode.shape_env is None:
+            fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        # pyrefly: ignore [missing-attribute]
+        with fake_mode, fake_mode.shape_env.ignore_fresh_unbacked_symbols():
+            merged_outputs = [
+                _merge_output(branch_outs, fake_mode)
+                for branch_outs in zip(*all_branch_outputs)
+            ]
+
+        schema_gen = HopSchemaGenerator(self)
+        schema_gen.add_arg("index", index)
+        for i, gm in enumerate(branch_gms):
+            schema_gen.add_arg(f"branch{i}_fn", gm)
+        for idx, arg in enumerate(operands):
+            schema_gen.add_arg(f"operand{idx}", arg, is_mutated=idx in mutated_inputs)
+
+        for out in merged_outputs:
+            schema_gen.add_output(out)
+        schema_gen.add_schema_tree_spec(index, branches, operands)
+        return schema_gen.gen_schema()
 
 
 switch_op = SwitchOp()
