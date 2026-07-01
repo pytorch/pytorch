@@ -231,32 +231,20 @@ class MiscTests(torch._inductor.test_case.TestCase):
         entries = _debug_get_cache_entry_list(torch._dynamo.graph_break)
         self.assertEqual(len(entries), 0)
 
-    def test_pybind11_enum_conversion(self):
-        import importlib.util
-        import os
-        import subprocess
-        import sysconfig
-        import tempfile
+    @torch.testing._internal.common_utils.scoped_load_inline
+    def test_pybind11_enum_conversion(self, load_inline):
+        cpp_source = """
+        #include <torch/extension.h>
 
-        try:
-            d = tempfile.mkdtemp()
-            s = os.path.join(d, "e.cpp")
-            with open(s, "w") as f:
-                f.write(
-                    '#include <pybind11/pybind11.h>\nnamespace py = pybind11;\nenum class E { A = 0, B = 1 };\nPYBIND11_MODULE(e, m) { py::enum_<E>(m, "E").value("A", E::A).value("B", E::B); }'
-                )
-            o = os.path.join(d, f"e{sysconfig.get_config_var('EXT_SUFFIX')}")
-            subprocess.check_call(
-                f"g++ -O2 -shared -fPIC -std=c++17 {subprocess.check_output(['python', '-m', 'pybind11', '--includes'], text=True).strip()} {s} -o {o}",
-                shell=True,
-                stderr=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-            )
-            spec = importlib.util.spec_from_file_location("e", o)
-            mod = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(mod)
-        except Exception:
-            self.skipTest("pybind11 unavailable")
+        enum class E { A = 0, B = 1 };
+
+        PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+            py::enum_<E>(m, "E")
+                .value("A", E::A)
+                .value("B", E::B);
+        }
+        """
+        mod = load_inline(name="pybind11_enum_test", cpp_sources=cpp_source)
         e = mod.E.A
         self.assertEqual(torch.compile(lambda x: int(x), backend="eager")(e), 0)
         self.assertEqual(torch.compile(lambda x: float(x), backend="eager")(e), 0.0)
