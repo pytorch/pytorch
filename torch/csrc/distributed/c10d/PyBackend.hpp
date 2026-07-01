@@ -99,13 +99,6 @@ class PyBackend : public Backend {
     return c10::make_intrusive<PyProcessGroup::PyWorkHolder>(std::move(work));
   }
 
-  py::object getMethodOverride(const char* name) const {
-    if (auto override = getAttrOverride(name)) {
-      return *override;
-    }
-    return py::object();
-  }
-
   template <typename Return>
   std::optional<Return> getAttrOverrideAs(const char* name) const {
     pybind11::gil_scoped_acquire gil;
@@ -139,9 +132,8 @@ class PyBackend : public Backend {
   c10::intrusive_ptr<Work> callWorkOverride(const char* name, Args&&... args)
       const {
     pybind11::gil_scoped_acquire gil;
-    py::object override = getMethodOverride(name);
-    if (override) {
-      return wrapWork(override(std::forward<Args>(args)...));
+    if (auto override = getAttrOverride(name)) {
+      return wrapWork((*override)(std::forward<Args>(args)...));
     }
     return nullptr;
   }
@@ -151,9 +143,8 @@ class PyBackend : public Backend {
       const char* name,
       Args&&... args) const {
     pybind11::gil_scoped_acquire gil;
-    py::object override = getMethodOverride(name);
-    if (override) {
-      return wrap(override(std::forward<Args>(args)...));
+    if (auto override = getAttrOverride(name)) {
+      return wrap((*override)(std::forward<Args>(args)...));
     }
     return nullptr;
   }
@@ -517,9 +508,8 @@ class PyBackend : public Backend {
     pybind11::gil_scoped_acquire gil;
     auto hookCopy = hook;
     onCompletionHook_ = std::move(hook);
-    py::object override = getMethodOverride("_register_on_completion_hook");
-    if (override) {
-      override(std::move(hookCopy));
+    if (auto override = getAttrOverride("_register_on_completion_hook")) {
+      (*override)(std::move(hookCopy));
     }
   }
 
@@ -589,13 +579,12 @@ class PyBackend : public Backend {
   at::Tensor allocateTensor(long size, at::TensorOptions options = {})
       override {
     pybind11::gil_scoped_acquire gil;
-    py::object override = getMethodOverride("allocate_tensor");
-    if (override) {
+    if (auto override = getAttrOverride("allocate_tensor")) {
       c10::ScalarType dtype = c10::optTypeMetaToScalarType(options.dtype_opt())
                                   .value_or(at::kFloat);
       c10::Device device =
           options.device_opt().value_or(c10::Device(c10::DeviceType::CPU));
-      return override(size, dtype, device).cast<at::Tensor>();
+      return (*override)(size, dtype, device).cast<at::Tensor>();
     }
     return Backend::allocateTensor(size, options);
   }
