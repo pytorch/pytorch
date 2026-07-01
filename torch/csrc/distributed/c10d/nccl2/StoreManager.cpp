@@ -1,12 +1,12 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
-#include <torch/csrc/distributed/c10d/nccltc/StoreManager.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/StoreManager.hpp>
 
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
-#include <torch/csrc/distributed/c10d/nccltc/Logging.hpp>
-#include <torch/csrc/distributed/c10d/nccltc/Utils.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/Utils.hpp>
 
-namespace c10d::nccltc {
+namespace c10d::nccl2 {
 
 c10::intrusive_ptr<c10d::Store> createPrefixStore(
     const std::string& prefix,
@@ -79,4 +79,4 @@ c10::intrusive_ptr<c10d::Store> dupPrefixStore(
   return c10::make_intrusive<c10d::PrefixStore>(prefix, tcpStore);
 }
 
-} // namespace c10d::nccltc
+} // namespace c10d::nccl2

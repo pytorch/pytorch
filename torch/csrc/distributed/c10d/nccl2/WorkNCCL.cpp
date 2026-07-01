@@ -2,21 +2,21 @@
 
 #ifdef USE_C10D_NCCL
 
-#include <torch/csrc/distributed/c10d/nccltc/TorchWorkNCCL.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/WorkNCCL.hpp>
 
 #include <ATen/core/ivalue.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/core/DeviceGuard.h>
 
-#include <torch/csrc/distributed/c10d/nccltc/CudaApi.hpp>
-#include <torch/csrc/distributed/c10d/nccltc/Logging.hpp>
-#include <torch/csrc/distributed/c10d/nccltc/ProcessGroupNCCLTC.hpp>
-#include <torch/csrc/distributed/c10d/nccltc/TracingGuard.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/CudaApi.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/TracingGuard.hpp>
 
-namespace c10d::nccltc {
+namespace c10d::nccl2 {
 
-TorchWorkNCCL::TorchWorkNCCL(
-    ProcessGroupNCCLTC* comm,
+WorkNCCL::WorkNCCL(
+    ProcessGroupNCCL* comm,
     cudaStream_t stream,
     std::chrono::milliseconds timeout_ms,
     const std::vector<at::Tensor>& inputTensors)
@@ -28,8 +28,8 @@ TorchWorkNCCL::TorchWorkNCCL(
   end_event_ = comm_->getEvent();
 }
 
-TorchWorkNCCL::TorchWorkNCCL(
-    ProcessGroupNCCLTC* comm,
+WorkNCCL::WorkNCCL(
+    ProcessGroupNCCL* comm,
     cudaStream_t stream,
     std::chrono::milliseconds timeout_ms,
     const at::Tensor& inputTensor)
@@ -41,7 +41,7 @@ TorchWorkNCCL::TorchWorkNCCL(
   end_event_ = comm_->getEvent();
 }
 
-TorchWorkNCCL::~TorchWorkNCCL() {
+WorkNCCL::~WorkNCCL() {
   if (!comm_) {
     return;
   }
@@ -49,7 +49,7 @@ TorchWorkNCCL::~TorchWorkNCCL() {
   comm_->returnEvent(end_event_);
 }
 
-void TorchWorkNCCL::recordFunctionStart(std::string_view coll_name) {
+void WorkNCCL::recordFunctionStart(std::string_view coll_name) {
   recordFunction_.emplace(at::RecordScope::USER_SCOPE);
   if (!recordFunction_->isActive()) {
     return;
@@ -72,7 +72,7 @@ void TorchWorkNCCL::recordFunctionStart(std::string_view coll_name) {
   }
 }
 
-void TorchWorkNCCL::recordStart(std::string_view coll_name) {
+void WorkNCCL::recordStart(std::string_view coll_name) {
   recordFunctionStart(coll_name);
 
   CUDA_CHECK(
@@ -81,7 +81,7 @@ void TorchWorkNCCL::recordStart(std::string_view coll_name) {
       "Failed to record start event");
 }
 
-void TorchWorkNCCL::recordEnd() {
+void WorkNCCL::recordEnd() {
   CUDA_CHECK(
       comm_->getCudaApi(),
       comm_->getCudaApi()->eventRecord(end_event_, stream_),
@@ -92,7 +92,7 @@ void TorchWorkNCCL::recordEnd() {
   }
 }
 
-TorchWorkNCCL::WorkStatus TorchWorkNCCL::checkStatus() {
+WorkNCCL::WorkStatus WorkNCCL::checkStatus() {
   if (status() == WorkStatus::COMPLETED || status() == WorkStatus::ERROR ||
       status() == WorkStatus::TIMEDOUT) {
     return status();
@@ -141,16 +141,16 @@ TorchWorkNCCL::WorkStatus TorchWorkNCCL::checkStatus() {
   return status();
 }
 
-bool TorchWorkNCCL::isCompleted() {
+bool WorkNCCL::isCompleted() {
   return checkStatus() == WorkStatus::COMPLETED;
 }
 
-bool TorchWorkNCCL::isSuccess() const {
+bool WorkNCCL::isSuccess() const {
   WorkStatus s = status();
   return s != WorkStatus::ERROR && s != WorkStatus::TIMEDOUT;
 }
 
-void TorchWorkNCCL::synchronizeInternal() {
+void WorkNCCL::synchronizeInternal() {
   WorkStatus local_state = status();
   if (local_state == WorkStatus::COMPLETED ||
       local_state == WorkStatus::ERROR || local_state == WorkStatus::TIMEDOUT) {
@@ -178,7 +178,7 @@ void TorchWorkNCCL::synchronizeInternal() {
   inputTensor_.reset();
 }
 
-bool TorchWorkNCCL::wait(std::chrono::milliseconds /*timeout*/) {
+bool WorkNCCL::wait(std::chrono::milliseconds /*timeout*/) {
   // Unlike c10d's default wait(), this does not block the CPU: for CUDA work it
   // is sufficient (and matches upstream torchcomms) to order the current stream
   // after the collective. The timeout arg is honored by the watchdog, not here.
@@ -186,15 +186,15 @@ bool TorchWorkNCCL::wait(std::chrono::milliseconds /*timeout*/) {
   return true;
 }
 
-void TorchWorkNCCL::synchronize() {
+void WorkNCCL::synchronize() {
   synchronizeInternal();
 }
 
-std::vector<at::Tensor> TorchWorkNCCL::result() {
+std::vector<at::Tensor> WorkNCCL::result() {
   return outputs_;
 }
 
-c10::intrusive_ptr<c10::ivalue::Future> TorchWorkNCCL::getFuture() {
+c10::intrusive_ptr<c10::ivalue::Future> WorkNCCL::getFuture() {
   if (future_) {
     return future_;
   }
@@ -222,6 +222,6 @@ c10::intrusive_ptr<c10::ivalue::Future> TorchWorkNCCL::getFuture() {
   return future_;
 }
 
-} // namespace c10d::nccltc
+} // namespace c10d::nccl2
 
 #endif // USE_C10D_NCCL

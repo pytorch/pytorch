@@ -1,11 +1,11 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
 
-#include <torch/csrc/distributed/c10d/nccltc/TorchWorkNCCL.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/WorkNCCL.hpp>
 
-namespace c10d::nccltc {
+namespace c10d::nccl2 {
 
-TorchWorkNCCL::WorkStatus TorchWorkNCCLQueue::garbageCollectLocked() {
-  TorchWorkNCCL::WorkStatus last_status = TorchWorkNCCL::WorkStatus::COMPLETED;
+WorkNCCL::WorkStatus WorkNCCLQueue::garbageCollectLocked() {
+  WorkNCCL::WorkStatus last_status = WorkNCCL::WorkStatus::COMPLETED;
 
   // Keep popping completed elements until we hit an in-progress element
   // or the queue is empty
@@ -19,15 +19,15 @@ TorchWorkNCCL::WorkStatus TorchWorkNCCLQueue::garbageCollectLocked() {
       auto work = work_queue.front();
 
       // Use the checkStatus function to determine the work status
-      TorchWorkNCCL::WorkStatus status = work->checkStatus();
+      WorkNCCL::WorkStatus status = work->checkStatus();
 
-      if (status == TorchWorkNCCL::WorkStatus::COMPLETED) {
+      if (status == WorkNCCL::WorkStatus::COMPLETED) {
         // Work is completed, remove it from the work queue
         work_queue.pop();
         // Continue to the next element in the queue
       } else if (
-          status == TorchWorkNCCL::WorkStatus::TIMEDOUT ||
-          status == TorchWorkNCCL::WorkStatus::ERROR) {
+          status == WorkNCCL::WorkStatus::TIMEDOUT ||
+          status == WorkNCCL::WorkStatus::ERROR) {
         // Return the error status immediately
         return status;
       } else {
@@ -52,12 +52,12 @@ TorchWorkNCCL::WorkStatus TorchWorkNCCLQueue::garbageCollectLocked() {
 // the main thread may be enqueuing work via enqueueWork(). The
 // work_queues_mutex_ ensures proper synchronization - both garbageCollect() and
 // enqueueWork() acquire the mutex before accessing stream_work_queues_.
-TorchWorkNCCL::WorkStatus TorchWorkNCCLQueue::garbageCollect() {
+WorkNCCL::WorkStatus WorkNCCLQueue::garbageCollect() {
   std::lock_guard<std::mutex> lock(work_queues_mutex_);
   return garbageCollectLocked();
 }
 
-TorchWorkNCCL::WorkStatus TorchWorkNCCLQueue::finalize() {
+WorkNCCL::WorkStatus WorkNCCLQueue::finalize() {
   // Because this function is typically called after the timeout thread has
   // already joined, we might not need to lock here.  But doing the lock anyway,
   // as defensive programming, just in case someone moves the thread join order
@@ -67,12 +67,12 @@ TorchWorkNCCL::WorkStatus TorchWorkNCCLQueue::finalize() {
 
   // Initialize the status to COMPLETED to cover the case where the queue is
   // empty
-  TorchWorkNCCL::WorkStatus status = TorchWorkNCCL::WorkStatus::COMPLETED;
+  WorkNCCL::WorkStatus status = WorkNCCL::WorkStatus::COMPLETED;
   while (!stream_work_queues_.empty()) {
     status = garbageCollectLocked();
-    if (status == TorchWorkNCCL::WorkStatus::ERROR ||
-        status == TorchWorkNCCL::WorkStatus::TIMEDOUT ||
-        status == TorchWorkNCCL::WorkStatus::COMPLETED) {
+    if (status == WorkNCCL::WorkStatus::ERROR ||
+        status == WorkNCCL::WorkStatus::TIMEDOUT ||
+        status == WorkNCCL::WorkStatus::COMPLETED) {
       break;
     }
   }
@@ -86,12 +86,12 @@ TorchWorkNCCL::WorkStatus TorchWorkNCCLQueue::finalize() {
   return status;
 }
 
-void TorchWorkNCCLQueue::enqueueWork(
-    c10::intrusive_ptr<TorchWorkNCCL> work,
+void WorkNCCLQueue::enqueueWork(
+    c10::intrusive_ptr<WorkNCCL> work,
     cudaStream_t stream) {
   // Add work to stream's queue after events have been recorded
   std::lock_guard<std::mutex> lock(work_queues_mutex_);
   stream_work_queues_[stream].push(std::move(work));
 }
 
-} // namespace c10d::nccltc
+} // namespace c10d::nccl2
