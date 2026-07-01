@@ -978,6 +978,57 @@ print(t.is_pinned())
 
         torch.cuda._clear_cublas_workspaces()
 
+    @serialTest()
+    def test_clear_cublas_workspaces_uses_zero_size_cuda_dummy(self):
+        expected_device = torch.device("cuda", torch.cuda.current_device())
+        dummy_metadata = []
+
+        def metadata(tensor):
+            return (
+                tensor.device,
+                tensor.numel(),
+                tensor.untyped_storage().nbytes(),
+                tensor.data_ptr(),
+                torch.autograd.is_multithreading_enabled(),
+            )
+
+        class RecordDevice(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, dummy):
+                dummy_metadata.append(metadata(dummy))
+                return dummy
+
+            @staticmethod
+            def backward(ctx, grad):
+                dummy_metadata.append(metadata(grad))
+                return None
+
+        torch.cuda._clear_cublas_workspaces()
+        stats = torch.cuda.memory_stats()
+        allocator_stats = {
+            key: stats[key]
+            for key in (
+                "allocation.all.allocated",
+                "allocated_bytes.all.allocated",
+                "segment.all.allocated",
+            )
+        }
+        with (
+            torch.device("cpu"),
+            torch.autograd.set_multithreading_enabled(False),
+            patch.object(torch.cuda, "_ClearCublasWorkspaces", RecordDevice),
+            patch.object(torch.cuda, "device_count", side_effect=AssertionError),
+            patch.object(torch.cuda, "device", side_effect=AssertionError),
+        ):
+            torch.cuda._clear_cublas_workspaces()
+
+        self.assertEqual(
+            dummy_metadata,
+            [(expected_device, 0, 0, 0, True), (expected_device, 0, 0, 0, True)],
+        )
+        stats = torch.cuda.memory_stats()
+        self.assertEqual({key: stats[key] for key in allocator_stats}, allocator_stats)
+
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled for async")
     @unittest.skipIf(IS_FBCODE, "not enabled by default on fbcode")
     @unittest.skipIf(TEST_WITH_ROCM, "not enabled by default on rocm")

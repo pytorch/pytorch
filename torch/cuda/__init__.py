@@ -1367,25 +1367,14 @@ def current_solver_handle():
 _ClearCublasWorkspaces = None
 
 
-def _clear_cublas_workspaces(device: Device = None) -> None:
-    r"""Clear cuBLAS workspaces on this thread and CUDA autograd worker threads.
-    Note that this enables multithreaded autograd during cleanup to reach
-    worker threads.
-    """
+def _clear_cublas_workspaces() -> None:
+    r"""Clear cuBLAS workspaces on this thread and current CUDA device's autograd worker."""
     if not hasattr(torch._C, "_cuda_clearCublasWorkspaces"):
         return
 
     torch._C._cuda_clearCublasWorkspaces()
     if not is_initialized():
         return
-
-    if device is None:
-        device_indices = range(device_count())
-    else:
-        device_index = _get_device_index(device)
-        if device_index < 0:
-            return
-        device_indices = (device_index,)
 
     global _ClearCublasWorkspaces
     if _ClearCublasWorkspaces is None:
@@ -1404,7 +1393,7 @@ def _clear_cublas_workspaces(device: Device = None) -> None:
         _ClearCublasWorkspaces = ClearCublasWorkspaces
 
     # This synthetic backward is internal cleanup; keep it out of compiled
-    # autograd to avoid tracing it while still routing through autograd worker threads.
+    # autograd to avoid tracing it while still routing through the CUDA worker.
     compiled_autograd = getattr(
         getattr(torch._C, "_dynamo", None), "compiled_autograd", None
     )
@@ -1418,17 +1407,14 @@ def _clear_cublas_workspaces(device: Device = None) -> None:
         prior_compiler, prior_dynamic = set_autograd_compiler(None, False)
 
     try:
-        for device_index in device_indices:
-            with (
-                torch.cuda.device(device_index),
-                torch.autograd.set_multithreading_enabled(True),
-                torch.inference_mode(False),
-                torch.enable_grad(),
-            ):  # Just so we have something to call backward on
-                dummy = torch.empty(
-                    (), device=f"cuda:{device_index}", requires_grad=True
-                )
-                _ClearCublasWorkspaces.apply(dummy).backward()
+        with (
+            torch.autograd.set_multithreading_enabled(True),
+            torch.inference_mode(False),
+            torch.enable_grad(),
+        ):
+            dummy = torch.empty(0, device="cuda", requires_grad=True)
+            output = _ClearCublasWorkspaces.apply(dummy)
+            output.backward(output.detach())
     finally:
         if set_autograd_compiler is not None:
             set_autograd_compiler(prior_compiler, prior_dynamic)
