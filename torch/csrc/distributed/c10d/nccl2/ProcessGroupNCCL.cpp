@@ -1,6 +1,6 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
 
-#include <torch/csrc/distributed/c10d/nccltc/ProcessGroupNCCLTC.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
 
 #include <cstdlib>
 #include <cstring>
@@ -12,21 +12,21 @@
 #include <fmt/core.h>
 #include <nccl.h>
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
-#include <torch/csrc/distributed/c10d/nccltc/Logging.hpp>
-#include <torch/csrc/distributed/c10d/nccltc/TorchCommNCCLBootstrap.hpp>
-#include <torch/csrc/distributed/c10d/nccltc/TracingGuard.hpp>
-#include <torch/csrc/distributed/c10d/nccltc/Utils.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/NCCLBootstrap.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/TracingGuard.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/Utils.hpp>
 
-namespace c10d::nccltc {
+namespace c10d::nccl2 {
 
 ncclResult_t NCCLException::getResult() const noexcept {
   return result_;
 }
 
-ProcessGroupNCCLTC::~ProcessGroupNCCLTC() {
+ProcessGroupNCCL::~ProcessGroupNCCL() {
   if (init_state_ == InitializationState::INITIALIZED) {
     TC_LOG(WARNING, this)
-        << "ProcessGroupNCCLTC " << name_
+        << "ProcessGroupNCCL " << name_
         << " was not finalized before destruction. "
         << "This may indicate a resource leak. Please call finalize() explicitly.";
 
@@ -70,15 +70,14 @@ ProcessGroupNCCLTC::~ProcessGroupNCCLTC() {
   detachMemoryHook();
 }
 
-void ProcessGroupNCCLTC::init(at::Device device) {
-  TC_LOG(INFO, this) << "Initializing ProcessGroupNCCLTC for device: "
-                     << device;
+void ProcessGroupNCCL::init(at::Device device) {
+  TC_LOG(INFO, this) << "Initializing ProcessGroupNCCL for device: " << device;
   device_ = device;
 
   if (init_state_ == InitializationState::INITIALIZED) {
-    throw std::runtime_error("ProcessGroupNCCLTC already initialized");
+    throw std::runtime_error("ProcessGroupNCCL already initialized");
   } else if (init_state_ == InitializationState::FINALIZED) {
-    throw std::runtime_error("ProcessGroupNCCLTC already finalized");
+    throw std::runtime_error("ProcessGroupNCCL already finalized");
   }
 
   if (!nccl_api_) {
@@ -90,7 +89,7 @@ void ProcessGroupNCCLTC::init(at::Device device) {
   }
 
   if (device_.index() == -1 || nccl_comm_ == nullptr) {
-    auto bootstrap = std::make_unique<TorchCommNCCLBootstrap>(
+    auto bootstrap = std::make_unique<NCCLBootstrap>(
         store_,
         device_,
         getRank(),
@@ -110,10 +109,10 @@ void ProcessGroupNCCLTC::init(at::Device device) {
   init_state_ = InitializationState::INITIALIZED;
   TracingGuard tracingGuard(name_, comm_size_, "init", rank_);
 
-  TC_LOG(INFO, this) << "ProcessGroupNCCLTC initialized for rank: " << rank_;
+  TC_LOG(INFO, this) << "ProcessGroupNCCL initialized for rank: " << rank_;
 }
 
-void ProcessGroupNCCLTC::initNcclResources() {
+void ProcessGroupNCCL::initNcclResources() {
   CUDA_CHECK(
       cuda_api_,
       cuda_api_->setDevice(device_.index()),
@@ -190,13 +189,13 @@ void ProcessGroupNCCLTC::initNcclResources() {
       "NCCL Count failed");
 
   if (!shutdown_) {
-    timeout_thread_ = std::thread(&ProcessGroupNCCLTC::timeoutWatchdog, this);
+    timeout_thread_ = std::thread(&ProcessGroupNCCL::timeoutWatchdog, this);
   }
 
   attachMemoryHook();
 }
 
-void ProcessGroupNCCLTC::abort() {
+void ProcessGroupNCCL::abort() {
   if (options_c10d_->enable_reconfigure) {
     revokeNcclComm();
   } else {
@@ -205,11 +204,11 @@ void ProcessGroupNCCLTC::abort() {
   comm_state_ = CommState::ERROR;
 }
 
-void ProcessGroupNCCLTC::finalize() {
+void ProcessGroupNCCL::finalize() {
   if (init_state_ == InitializationState::UNINITIALIZED) {
-    throw std::runtime_error("ProcessGroupNCCLTC not initialized");
+    throw std::runtime_error("ProcessGroupNCCL not initialized");
   } else if (init_state_ == InitializationState::FINALIZED) {
-    throw std::runtime_error("ProcessGroupNCCLTC already finalized");
+    throw std::runtime_error("ProcessGroupNCCL already finalized");
   }
   init_state_ = InitializationState::FINALIZED;
 
@@ -230,18 +229,18 @@ void ProcessGroupNCCLTC::finalize() {
   // Wait for all pending work objects to complete and get final status
   auto work_status = workq_.finalize();
 
-  if (work_status == TorchWorkNCCL::WorkStatus::NOT_STARTED ||
-      work_status == TorchWorkNCCL::WorkStatus::INPROGRESS) {
+  if (work_status == WorkNCCL::WorkStatus::NOT_STARTED ||
+      work_status == WorkNCCL::WorkStatus::INPROGRESS) {
     throw std::runtime_error(
         "WorkQ finalize returned in progress or not started state");
   }
 
   // Update comm_state_ based on the work status
-  if (work_status == TorchWorkNCCL::WorkStatus::TIMEDOUT) {
+  if (work_status == WorkNCCL::WorkStatus::TIMEDOUT) {
     comm_state_ = CommState::TIMEOUT;
     abortNcclComm();
     throw std::runtime_error("Work timed out during finalize");
-  } else if (work_status == TorchWorkNCCL::WorkStatus::ERROR) {
+  } else if (work_status == WorkNCCL::WorkStatus::ERROR) {
     comm_state_ = CommState::ERROR;
     ncclResult_t asyncErr;
     NCCL_CHECK(
@@ -308,7 +307,7 @@ void ProcessGroupNCCLTC::finalize() {
   }
 }
 
-void ProcessGroupNCCLTC::abortNcclComm() {
+void ProcessGroupNCCL::abortNcclComm() {
   detachMemoryHook();
   if (nccl_comm_) {
     NCCL_CHECK(
@@ -328,7 +327,7 @@ void ProcessGroupNCCLTC::abortNcclComm() {
   }
 }
 
-void ProcessGroupNCCLTC::revokeNcclComm() {
+void ProcessGroupNCCL::revokeNcclComm() {
   // Idempotent: the timeout watchdog and a synchronous collective may both
   // observe the same timeout and attempt a revoke. Run the teardown (abort
   // hooks, memory hook detach, commRevoke) at most once per communicator
@@ -347,12 +346,12 @@ void ProcessGroupNCCLTC::revokeNcclComm() {
   }
 }
 
-int64_t ProcessGroupNCCLTC::getCommPtr() const {
+int64_t ProcessGroupNCCL::getCommPtr() const {
   return reinterpret_cast<int64_t>(nccl_comm_);
 }
 
 // Point-to-Point Operations
-c10::intrusive_ptr<TorchWorkNCCL> ProcessGroupNCCLTC::sendImpl(
+c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::sendImpl(
     const at::Tensor& tensor,
     int dst,
     bool async_op,
@@ -392,7 +391,7 @@ c10::intrusive_ptr<TorchWorkNCCL> ProcessGroupNCCLTC::sendImpl(
   return work;
 }
 
-c10::intrusive_ptr<TorchWorkNCCL> ProcessGroupNCCLTC::recvImpl(
+c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::recvImpl(
     at::Tensor& tensor,
     int src,
     bool async_op,
@@ -432,7 +431,7 @@ c10::intrusive_ptr<TorchWorkNCCL> ProcessGroupNCCLTC::recvImpl(
 }
 
 // Batch P2P Operations
-c10::intrusive_ptr<TorchWorkNCCL> ProcessGroupNCCLTC::batch_op_issue(
+c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::batch_op_issue(
     const std::vector<BatchSendRecv::P2POp>& ops,
     bool async_op,
     std::chrono::milliseconds timeout) {
@@ -530,7 +529,7 @@ c10::intrusive_ptr<TorchWorkNCCL> ProcessGroupNCCLTC::batch_op_issue(
 }
 
 // Collective Operations
-c10::intrusive_ptr<TorchWorkNCCL> ProcessGroupNCCLTC::broadcastImpl(
+c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::broadcastImpl(
     at::Tensor& tensor,
     int root,
     bool async_op,
@@ -572,7 +571,7 @@ c10::intrusive_ptr<TorchWorkNCCL> ProcessGroupNCCLTC::broadcastImpl(
   return work;
 }
 
-c10::intrusive_ptr<TorchWorkNCCL> ProcessGroupNCCLTC::all_reduce(
+c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_reduce(
     at::Tensor& tensor,
     const ::c10d::ReduceOp& op,
     bool async_op,
@@ -615,7 +614,7 @@ c10::intrusive_ptr<TorchWorkNCCL> ProcessGroupNCCLTC::all_reduce(
   return work;
 }
 
-c10::intrusive_ptr<TorchWorkNCCL> ProcessGroupNCCLTC::reduceImpl(
+c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduceImpl(
     const at::Tensor& tensor,
     int root,
     const ::c10d::ReduceOp& op,
@@ -659,7 +658,7 @@ c10::intrusive_ptr<TorchWorkNCCL> ProcessGroupNCCLTC::reduceImpl(
   return work;
 }
 
-c10::intrusive_ptr<TorchWorkNCCL> ProcessGroupNCCLTC::all_gather(
+c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_gather(
     const std::vector<at::Tensor>& tensor_list,
     const at::Tensor& tensor,
     bool async_op,
@@ -728,7 +727,7 @@ c10::intrusive_ptr<TorchWorkNCCL> ProcessGroupNCCLTC::all_gather(
   return work;
 }
 
-c10::intrusive_ptr<TorchWorkNCCL> ProcessGroupNCCLTC::allGatherSingleImpl(
+c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::allGatherSingleImpl(
     at::Tensor& output,
     const at::Tensor& input,
     bool async_op,
@@ -774,7 +773,7 @@ c10::intrusive_ptr<TorchWorkNCCL> ProcessGroupNCCLTC::allGatherSingleImpl(
   return work;
 }
 
-c10::intrusive_ptr<TorchWorkNCCL> ProcessGroupNCCLTC::reduce_scatter(
+c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduce_scatter(
     at::Tensor& output,
     const std::vector<at::Tensor>& input_list,
     const ::c10d::ReduceOp& op,
@@ -860,7 +859,7 @@ c10::intrusive_ptr<TorchWorkNCCL> ProcessGroupNCCLTC::reduce_scatter(
   return work;
 }
 
-c10::intrusive_ptr<TorchWorkNCCL> ProcessGroupNCCLTC::reduceScatterSingleImpl(
+c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduceScatterSingleImpl(
     at::Tensor& output,
     const at::Tensor& input,
     const ::c10d::ReduceOp& op,
@@ -911,7 +910,7 @@ c10::intrusive_ptr<TorchWorkNCCL> ProcessGroupNCCLTC::reduceScatterSingleImpl(
   return work;
 }
 
-c10::intrusive_ptr<TorchWorkNCCL> ProcessGroupNCCLTC::allToAllSingleImpl(
+c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::allToAllSingleImpl(
     at::Tensor& output,
     const at::Tensor& input,
     bool async_op,
@@ -1002,7 +1001,7 @@ c10::intrusive_ptr<TorchWorkNCCL> ProcessGroupNCCLTC::allToAllSingleImpl(
   return work;
 }
 
-c10::intrusive_ptr<TorchWorkNCCL> ProcessGroupNCCLTC::all_to_all_v_single(
+c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_to_all_v_single(
     at::Tensor& output,
     const at::Tensor& input,
     const std::vector<uint64_t>& output_split_sizes,
@@ -1132,7 +1131,7 @@ c10::intrusive_ptr<TorchWorkNCCL> ProcessGroupNCCLTC::all_to_all_v_single(
   return work;
 }
 
-c10::intrusive_ptr<TorchWorkNCCL> ProcessGroupNCCLTC::all_to_all(
+c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_to_all(
     const std::vector<at::Tensor>& output_tensor_list,
     const std::vector<at::Tensor>& input_tensor_list,
     bool async_op,
@@ -1211,7 +1210,7 @@ c10::intrusive_ptr<TorchWorkNCCL> ProcessGroupNCCLTC::all_to_all(
   return work;
 }
 
-c10::intrusive_ptr<TorchWorkNCCL> ProcessGroupNCCLTC::barrierImpl(
+c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::barrierImpl(
     bool async_op,
     std::chrono::milliseconds timeout) {
   checkInitialized();
@@ -1247,7 +1246,7 @@ c10::intrusive_ptr<TorchWorkNCCL> ProcessGroupNCCLTC::barrierImpl(
   return work;
 }
 
-c10::intrusive_ptr<TorchWorkNCCL> ProcessGroupNCCLTC::scatterImpl(
+c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::scatterImpl(
     at::Tensor& output_tensor,
     const std::vector<at::Tensor>& input_tensor_list,
     int root,
@@ -1349,7 +1348,7 @@ c10::intrusive_ptr<TorchWorkNCCL> ProcessGroupNCCLTC::scatterImpl(
   return work;
 }
 
-c10::intrusive_ptr<TorchWorkNCCL> ProcessGroupNCCLTC::gatherImpl(
+c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::gatherImpl(
     const std::vector<at::Tensor>& output_tensor_list,
     const at::Tensor& input_tensor,
     int root,
@@ -1464,4 +1463,4 @@ const char* NCCLException::what() const noexcept {
   return message_.c_str();
 }
 
-} // namespace c10d::nccltc
+} // namespace c10d::nccl2

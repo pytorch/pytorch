@@ -1,6 +1,6 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
 
-#include <torch/csrc/distributed/c10d/nccltc/Utils.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/Utils.hpp>
 #include <algorithm>
 #include <sstream>
 #include <stdexcept>
@@ -8,7 +8,7 @@
 #include <string_view>
 #include <type_traits>
 
-namespace c10d::nccltc {
+namespace c10d::nccl2 {
 
 namespace {
 // Helper function to trim leading and trailing whitespace from a string
@@ -215,4 +215,4 @@ std::pair<int, int> query_ranksize() {
   return std::make_pair(rank, comm_size);
 }
 
-} // namespace c10d::nccltc
+} // namespace c10d::nccl2
