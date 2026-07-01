@@ -85,8 +85,9 @@ def _zeropower_via_newtonschulz(
         repeat(ns_coefficients[-1], ns_steps - len(ns_coefficients))
     )
     # Ensure spectral norm is at most 1
+    # frobenius normalization is performed also to avoid numerical instability in the gram matrix 
+    ortho_grad.div_(ortho_grad.norm().clamp(min=eps))
     if normalization == "fro":
-        ortho_grad.div_(ortho_grad.norm().clamp(min=eps))
         gram_matrix = ortho_grad @ ortho_grad.T
     elif normalization == "schatten":
         gram_matrix = ortho_grad @ ortho_grad.T
