@@ -2087,7 +2087,7 @@ class TensorVariable(VariableTracker):
                         "register_hook",
                         source_target=None,
                         enable_grad=None,
-                        set_subgraph_inputs="automatic_with_forced_inputs",  # pyrefly: ignore[bad-argument-type]
+                        set_subgraph_inputs="automatic_with_forced_inputs",
                         restore_side_effects=True,
                     )
             except torch._dynamo.exc.UnknownPropertiesDuringBackwardTrace:

@@ -1101,7 +1101,7 @@ class CompiledOptimizerBitwiseTests(TestCase):
                         p_compiled,
                         atol=0,
                         rtol=0,
-                        msg=f"Step {step + 1}, param {i}: params differ",
+                        msg=lambda msg: f"{msg}\nStep {step + 1}, param {i}: params differ",
                     )
 
         # Also check optimizer state
@@ -1117,7 +1117,7 @@ class CompiledOptimizerBitwiseTests(TestCase):
                         compiled_val,
                         atol=0,
                         rtol=0,
-                        msg=f"State '{key}' differs",
+                        msg=lambda msg: f"{msg}\nState '{key}' differs",
                     )
 
         if kernel_count is not None and test_case.check_kernel_count:
