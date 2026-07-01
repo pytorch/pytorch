@@ -1,9 +1,9 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
 
 #include <ATen/cuda/CUDAContext.h>
-#include <torch/csrc/distributed/c10d/nccltc/CudaApi.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/CudaApi.hpp>
 
-namespace c10d::nccltc {
+namespace c10d::nccl2 {
 
 // DefaultCudaApi implementation
 
@@ -207,4 +207,4 @@ const char* DefaultCudaApi::getErrorString(cudaError_t error) {
   return cudaGetErrorString(error);
 }
 
-} // namespace c10d::nccltc
+} // namespace c10d::nccl2

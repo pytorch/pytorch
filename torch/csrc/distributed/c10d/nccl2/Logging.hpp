@@ -14,7 +14,7 @@
 // non-glog LOG() implementation) and drops the glog-init dance and the
 // getDefaultCommunicator() fallback entirely.
 
-namespace c10d::nccltc {
+namespace c10d::nccl2 {
 
 // Prefix helpers are templated on the comm type so this header carries no
 // dependency on the backend class (which itself includes this header).
@@ -32,11 +32,11 @@ inline std::string getRankPrefix(Comm* comm) {
   }
 }
 
-} // namespace c10d::nccltc
+} // namespace c10d::nccl2
 
-#define TC_LOG_METADATA(comm)                   \
-  "[TC]" << ::c10d::nccltc::getRankPrefix(comm) \
-         << ::c10d::nccltc::getCommNamePrefix(comm) << " "
+#define TC_LOG_METADATA(comm)                  \
+  "[TC]" << ::c10d::nccl2::getRankPrefix(comm) \
+         << ::c10d::nccl2::getCommNamePrefix(comm) << " "
 
 // level is one of: INFO, WARNING, ERROR, FATAL
 #define TC_LOG_WITH_PREFIX_BUILDER(level, comm) \
