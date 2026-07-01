@@ -37,15 +37,10 @@ def _bmm_outer_product_cond(
     *args,
     **kwargs,
 ) -> bool:
-    a_is_cow = torch._C._is_cow_tensor(a)  # pyrefly: ignore[missing-attribute]
-    b_is_cow = torch._C._is_cow_tensor(b)  # pyrefly: ignore[missing-attribute]
-    if (
-        a.is_cuda
-        and b.is_cuda
-        and a.device == b.device
-        and _is_outer_product(a, b)
-        and not (a_is_cow or b_is_cow)
-    ):
+    # a and b are read-only here: the kernel wraps them in ConstTensorWrapper and
+    # reads through const_data_ptr(), so copy-on-write inputs are not
+    # materialized and need not be excluded.
+    if a.is_cuda and b.is_cuda and a.device == b.device and _is_outer_product(a, b):
         return True
     return False
 
