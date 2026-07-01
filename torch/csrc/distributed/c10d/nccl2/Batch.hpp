@@ -5,7 +5,7 @@
 #include <ATen/ATen.h>
 #include <vector>
 
-namespace c10d::nccltc {
+namespace c10d::nccl2 {
 
 /**
  * BatchSendRecv accumulates point-to-point operations (sends and receives) so
@@ -13,7 +13,7 @@ namespace c10d::nccltc {
  *
  * In upstream torchcomms this held a shared_ptr<TorchComm> and issued through
  * it. With the c10d collapse there is no TorchComm: this is a plain op
- * container, and ProcessGroupNCCLTC owns issuing via batch_op_issue(ops, ...).
+ * container, and ProcessGroupNCCL owns issuing via batch_op_issue(ops, ...).
  */
 class BatchSendRecv {
  public:
@@ -38,4 +38,4 @@ class BatchSendRecv {
   std::vector<P2POp> ops;
 };
 
-} // namespace c10d::nccltc
+} // namespace c10d::nccl2
