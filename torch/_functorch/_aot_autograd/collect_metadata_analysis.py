@@ -49,6 +49,7 @@ from .functional_utils import (
     to_fun,
     ViewMetaSequence,
     was_inductor_storage_resized,
+    was_shallow_copy_data,
 )
 from .schemas import (
     InputAliasInfo,
@@ -279,6 +280,7 @@ def run_functionalized_fw_and_collect_metadata(
                     mutates_metadata=mutates_metadata,
                     mutations_hidden_from_autograd=mutations_hidden_from_autograd,
                     mutates_storage_metadata=mutates_storage_metadata,
+                    mutation_is_shallow_copy_data=was_shallow_copy_data(f_arg),
                     mutations_under_no_grad_or_inference_mode=mutations_under_no_grad_or_inference_mode,
                     mutation_inductor_storage_resize=mutation_inductor_storage_resize,
                     requires_grad=requires_grad,
