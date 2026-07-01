@@ -53,22 +53,25 @@ def _set_triton_ptxas_path() -> None:
 
 def _set_triton_libdevice_path() -> None:
     """
-    Use the CUDA toolkit's libdevice instead of Triton's bundled version.
-    This ensures Triton's libdevice calls match CUDA eager numerics for bitwise
-    precision.  Gated by config.eager_numerics.use_pytorch_libdevice and by
-    config.emulate_precision_casts, which also requests eager-like numerics.
+    Prefer the CUDA toolkit's libdevice instead of Triton's bundled version.
+    Triton's bundled libdevice can lag the installed CUDA toolkit.  Missing
+    toolkit libdevice only warns when eager-like numerics explicitly require it.
     """
     from torch._inductor import config
 
-    if not (
+    require_toolkit_libdevice = (
         config.eager_numerics.use_pytorch_libdevice or config.emulate_precision_casts
-    ):
-        return
+    )
 
-    _set_triton_libdevice_path_impl()
+    _set_triton_libdevice_path_impl(
+        require_toolkit_libdevice=require_toolkit_libdevice,
+    )
 
 
-def _set_triton_libdevice_path_impl() -> None:
+def _set_triton_libdevice_path_impl(
+    *,
+    require_toolkit_libdevice: bool,
+) -> None:
     import torch
 
     if torch.version.cuda is None:
@@ -91,35 +94,45 @@ def _set_triton_libdevice_path_impl() -> None:
         from torch.utils.cpp_extension import CUDA_HOME
 
         if CUDA_HOME is None:
-            warnings.warn(
-                "CUDA_HOME not set; using Triton's bundled libdevice which may "
-                "cause minor precision differences in pow operations. "
-                "To fix: set TRITON_LIBDEVICE_PATH to your CUDA toolkit's libdevice, "
-                "e.g., export TRITON_LIBDEVICE_PATH=/usr/local/cuda/nvvm/libdevice/libdevice.10.bc",
-                stacklevel=3,
-            )
+            if require_toolkit_libdevice:
+                warnings.warn(
+                    "CUDA_HOME not set; using Triton's bundled libdevice which may "
+                    "cause minor precision differences in pow operations. "
+                    "To fix: set TRITON_LIBDEVICE_PATH to your CUDA "
+                    "toolkit's libdevice, "
+                    "e.g., export TRITON_LIBDEVICE_PATH=/usr/local/cuda/nvvm/"
+                    "libdevice/libdevice.10.bc",
+                    stacklevel=3,
+                )
             return
         libdevice = Path(CUDA_HOME) / "nvvm" / "libdevice" / "libdevice.10.bc"
         if libdevice.is_file():
             knobs.nvidia.libdevice_path = str(libdevice)
             # Also set env var so subprocess compile workers inherit it
             os.environ["TRITON_LIBDEVICE_PATH"] = str(libdevice)
-        else:
+        elif require_toolkit_libdevice:
             warnings.warn(
                 f"CUDA libdevice not found at {libdevice}; using Triton's bundled "
-                "libdevice which may cause minor precision differences in pow operations. "
-                "To fix: set TRITON_LIBDEVICE_PATH to your CUDA toolkit's libdevice, "
-                "e.g., export TRITON_LIBDEVICE_PATH=/usr/local/cuda/nvvm/libdevice/libdevice.10.bc",
+                "libdevice which may cause minor precision "
+                "differences in pow operations. "
+                "To fix: set TRITON_LIBDEVICE_PATH to your CUDA "
+                "toolkit's libdevice, "
+                "e.g., export TRITON_LIBDEVICE_PATH=/usr/local/cuda/nvvm/"
+                "libdevice/libdevice.10.bc",
                 stacklevel=3,
             )
     except ImportError:
-        warnings.warn(
-            "torch.utils.cpp_extension not available; using Triton's bundled "
-            "libdevice which may cause minor precision differences in pow operations. "
-            "To fix: set TRITON_LIBDEVICE_PATH to your CUDA toolkit's libdevice, "
-            "e.g., export TRITON_LIBDEVICE_PATH=/usr/local/cuda/nvvm/libdevice/libdevice.10.bc",
-            stacklevel=3,
-        )
+        if require_toolkit_libdevice:
+            warnings.warn(
+                "torch.utils.cpp_extension not available; using Triton's bundled "
+                "libdevice which may cause minor precision "
+                "differences in pow operations. "
+                "To fix: set TRITON_LIBDEVICE_PATH to your CUDA "
+                "toolkit's libdevice, "
+                "e.g., export TRITON_LIBDEVICE_PATH=/usr/local/cuda/nvvm/"
+                "libdevice/libdevice.10.bc",
+                stacklevel=3,
+            )
 
 
 def _worker_compile_pycodecache_kernel(
