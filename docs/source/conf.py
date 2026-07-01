@@ -2373,8 +2373,7 @@ def coverage_post_process(app, exception):
 
     if output:
         with open(output_file, "a") as f:
-            for o in output:
-                f.write(o)
+            f.writelines(output)
 
 
 def process_docstring(app, what_, name, obj, options, lines):
