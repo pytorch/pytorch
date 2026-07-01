@@ -883,5 +883,13 @@ jobs:
             echo "No ${HF_CACHE}/hub to sync - skipping"
             exit 0
           fi
-          aws s3 sync "${HF_CACHE}/hub" "s3://${HF_CACHE_S3_BUCKET}/hub" \
+          # The test image doesn't ship the AWS CLI (awscli is excluded from
+          # requirements-ci.txt), so fall back to a throwaway venv when it's absent.
+          AWS=aws
+          if ! command -v aws >/dev/null 2>&1; then
+            python3 -m venv /tmp/awscli-venv
+            /tmp/awscli-venv/bin/pip install --quiet awscli
+            AWS=/tmp/awscli-venv/bin/aws
+          fi
+          "${AWS}" s3 sync "${HF_CACHE}/hub" "s3://${HF_CACHE_S3_BUCKET}/hub" \
             --region "${HF_CACHE_S3_REGION}" --no-progress
