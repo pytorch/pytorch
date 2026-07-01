@@ -61,7 +61,11 @@ import torch.utils._pytree as pytree
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import counters
 from torch._prims_common import is_integer_dtype
-from torch._subclasses.fake_tensor import unset_fake_temporarily
+from torch._subclasses.fake_tensor import (
+    is_fake_tensor,
+    maybe_get_fake_constant,
+    unset_fake_temporarily,
+)
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import guard_or_false, statically_known_true
 from torch.fx.graph_module import _get_attr
@@ -73,7 +77,7 @@ from torch.utils._ordered_set import OrderedSet
 from .._functorch import config as functorch_config
 from .._functorch.aot_autograd import aot_function, make_boxed_func
 from .._functorch.partitioners import default_partition
-from .._subclasses import FakeTensor, FakeTensorMode
+from .._subclasses import FakeTensorMode
 from ..fx import Transformer
 from . import config
 from .decomposition import select_decomp_table
@@ -372,7 +376,7 @@ class Match:
                 if fake_mode is not None:
 
                     def _convert_to_fake_mode(it):
-                        if isinstance(it, FakeTensor) and fake_mode is not None:
+                        if is_fake_tensor(it) and fake_mode is not None:
                             return fake_mode.from_tensor(it)
                         return it
 
@@ -2016,7 +2020,7 @@ def gen_register_replacement(
         pat = getattr(m, unique_name)
 
     for arg in pytree.tree_iter(example_inputs):
-        if isinstance(arg, FakeTensor) and arg.constant is not None:
+        if is_fake_tensor(arg) and maybe_get_fake_constant(arg) is not None:
             # This can be a problem - small fake tensors (e.g. `tensor(2)`) will
             # hold onto their original constant value - and by stashing it here
             # will cause a memory leak if the constant value is on GPU.
