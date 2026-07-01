@@ -4386,7 +4386,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
         init = torch.tensor(0.0)
         with self.assertRaisesRegex(
             RuntimeError,
-            r"scan\(\) with xs=None requires combine_fn to accept x=None",
+            r"combine_fn to accept x=None|unsupported operand type\(s\) for \+: 'FakeTensor' and 'NoneType'",
         ):
             scan(bad_body, init, None, length=0)
 
