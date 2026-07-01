@@ -47,11 +47,11 @@ jobs:
       contents: read
     container:
       image: ${{ inputs.docker_image }}
-      options: --gpus all --ipc=host --tty
-      # OSDC runners get /mnt/hf_cache injected by the runner hook (declaring it here
-      # would break the hook's bind-mount check). DGX B200 (non-OSDC) has no injection,
-      # so bind-mount its writable host cache dir instead.
-      volumes: ${{ contains(inputs.runner, 'b200') && fromJSON('["/mnt/hf_cache:/mnt/hf_cache"]') || fromJSON('[]') }}
+      # OSDC runners get /mnt/hf_cache injected by the runner hook (a bind mount here
+      # would break the hook's mount check). DGX B200 (non-OSDC) has no injection, so
+      # bind-mount its writable host cache dir via -v. Set on options (a scalar) rather
+      # than volumes (a sequence) so the conditional expression stays valid YAML.
+      options: ${{ contains(inputs.runner, 'b200') && '--gpus all --ipc=host --tty -v /mnt/hf_cache:/mnt/hf_cache' || '--gpus all --ipc=host --tty' }}
     steps:
       - name: Install system dependencies
         run: |
