@@ -197,9 +197,11 @@ struct Vectorized {
       typename... Args,
       typename = std::enable_if_t<(sizeof...(Args) == size())>>
   Vectorized(Args... vals) : values{vals...} {}
+  // These next two constructors could be unified with std::span in C++20.
   Vectorized(const T (&arr)[kSize]) { // NOLINT(*-avoid-c-arrays)
     std::copy(std::begin(arr), std::end(arr), values.begin());
   }
+  Vectorized(const std::array<T, kSize>& arr) : values{arr} {}
   // This also implies const T& operator[](int idx) const
   inline operator const T*() const {
     return values.data();
