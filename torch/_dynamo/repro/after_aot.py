@@ -34,7 +34,7 @@ import typing
 import uuid
 from importlib import import_module
 from tempfile import TemporaryFile
-from typing import Any, IO, TYPE_CHECKING
+from typing import Any, IO, TYPE_CHECKING, TypedDict
 from typing_extensions import Unpack
 
 import sympy
@@ -146,9 +146,14 @@ log = logging.getLogger(__name__)
 inductor_config = import_module("torch._inductor.config")
 
 
+class GroupInfo(TypedDict):
+    size: int
+    rank: int
+
+
 def _extract_distributed_info(
     gm: torch.fx.GraphModule,
-) -> dict[str, dict[str, int]]:
+) -> dict[str, GroupInfo]:
     """
     Extract process group information from distributed ops in the graph.
 
@@ -158,7 +163,7 @@ def _extract_distributed_info(
     from torch.distributed import GroupName
     from torch.fx.operator_schemas import normalize_function
 
-    group_info: dict[str, dict[str, int]] = {}
+    group_info: dict[str, GroupInfo] = {}
 
     for node in gm.graph.nodes:
         if node.op != "call_function":
@@ -200,7 +205,7 @@ def _extract_distributed_info(
 
 
 def setup_fake_process_groups(
-    group_info: dict[str, dict[str, int]],
+    group_info: dict[str, GroupInfo],
 ) -> None:
     """
     Set up fake process groups for repro execution.
