@@ -418,7 +418,7 @@ class BaseUserFunctionVariable(VariableTracker):
             self.dict_vt = variables.DunderDictVariable.create(tx, self)
         return self.dict_vt
 
-    def repr_impl(self, tx: Any) -> "VariableTracker":
+    def repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/funcobject.c
         return VariableTracker.build(tx, repr(self.as_python_constant()))
 
@@ -1910,7 +1910,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
     def as_python_constant(self) -> types.FunctionType:
         return self.get_function()
 
-    def repr_impl(self, tx: Any) -> "VariableTracker":
+    def repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         try:
             return super().repr_impl(tx)
         except ClosureConversionError as e:
