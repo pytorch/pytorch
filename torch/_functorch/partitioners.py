@@ -1568,22 +1568,6 @@ def default_partition(
     Returns:
         Returns the generated forward and backward Fx graph modules.
     """
-    # Respect the original placement of ops rather than rely on dataflow.
-    forward_nodes = []
-    last_node = None
-    for node in joint_module.graph.nodes:
-        if _has_tag_is_forward(node) or _is_primal(node) or _is_fwd_seed_offset(node):
-            last_node = node
-    if last_node is None:
-        raise AssertionError("last_node must not be None")
-    for node in joint_module.graph.nodes:
-        if not _is_tangent(node):
-            forward_nodes.append(node)
-        if node is last_node:
-            break
-    forward_node_names = OrderedSet(
-        node.name for node in forward_nodes if node.op != "output"
-    )
     graph_has_recomputable_ops = has_recomputable_ops(joint_module)
     graph_has_recomputable_rng_ops = has_recomputable_rng_ops(joint_module)
     if graph_has_recomputable_ops:
@@ -1613,6 +1597,26 @@ def default_partition(
         static_lifetime_input_indices = []
     node_info = classify_nodes(
         joint_module, static_lifetime_input_indices, num_fwd_outputs
+    )
+    materialize_cpu_floating_aminmax_eq_input(joint_module.graph, node_info)
+
+    # Respect the original placement of ops rather than rely on dataflow. This
+    # must run after graph rewrites above, so inserted forward nodes are visible
+    # to the default partitioner's save loop.
+    forward_nodes = []
+    last_node = None
+    for node in joint_module.graph.nodes:
+        if _has_tag_is_forward(node) or _is_primal(node) or _is_fwd_seed_offset(node):
+            last_node = node
+    if last_node is None:
+        raise AssertionError("last_node must not be None")
+    for node in joint_module.graph.nodes:
+        if not _is_tangent(node):
+            forward_nodes.append(node)
+        if node is last_node:
+            break
+    forward_node_names = OrderedSet(
+        node.name for node in forward_nodes if node.op != "output"
     )
 
     saved_values = []
@@ -2317,6 +2321,149 @@ def force_save_bw_mutation_src(joint_module: fx.GraphModule) -> None:
             # We do not want to iterate through all the joint graph,
             # so break at the first non-output, non-copy_ node.
             break
+
+
+def materialize_cpu_floating_aminmax_eq_input(
+    joint_graph: fx.Graph,
+    node_info: NodeInfo,
+) -> None:
+    def is_cpu_floating_tensor(node: fx.Node) -> bool:
+        val = node.meta.get("val")
+        return (
+            isinstance(val, torch.Tensor)
+            and val.device.type == "cpu"
+            and val.dtype.is_floating_point
+        )
+
+    view_ops = OrderedSet(
+        [
+            aten.squeeze,
+            aten.unsqueeze,
+            aten.alias,
+            aten.view,
+            aten.slice,
+            aten.t,
+            aten.transpose,
+            prims.broadcast_in_dim,
+            aten.expand,
+            aten.as_strided,
+            aten.permute,
+            aten.select,
+        ]
+    )
+
+    def is_view_node(node: fx.Node) -> bool:
+        return get_aten_target(node) in view_ops
+
+    def has_materialized_forward_source(node: fx.Node) -> bool:
+        seen: OrderedSet[fx.Node] = OrderedSet()
+        cur = node
+        while is_view_node(cur):
+            if cur in seen:
+                return False
+            seen.add(cur)
+            view_inputs = [
+                arg
+                for arg in pytree.tree_leaves((cur.args, cur.kwargs))
+                if isinstance(arg, fx.Node)
+                and node_info.is_required_fw(arg)
+                and is_cpu_floating_tensor(arg)
+            ]
+            if len(view_inputs) != 1:
+                return False
+            cur = view_inputs[0]
+        return cur.op == "call_function"
+
+    def is_view_of_reduction(node: fx.Node, reduction: fx.Node) -> bool:
+        seen: OrderedSet[fx.Node] = OrderedSet()
+        cur = node
+        while is_view_node(cur):
+            if cur in seen:
+                return False
+            seen.add(cur)
+            view_inputs = [
+                arg
+                for arg in pytree.tree_leaves((cur.args, cur.kwargs))
+                if isinstance(arg, fx.Node)
+            ]
+            if len(view_inputs) != 1:
+                return False
+            cur = view_inputs[0]
+        return cur is reduction
+
+    def backward_exact_eq_users(node: fx.Node, reduction: fx.Node) -> list[fx.Node]:
+        return [
+            user
+            for user in node.users
+            if not node_info.is_required_fw(user) and get_aten_target(user) == aten.eq
+            if any(
+                isinstance(arg, fx.Node)
+                and arg is not node
+                and is_view_of_reduction(arg, reduction)
+                for arg in pytree.tree_leaves((user.args, user.kwargs))
+            )
+        ]
+
+    def replace_node_arg(container: Any, old: fx.Node, new: fx.Node) -> Any:
+        return pytree.tree_map(lambda arg: new if arg is old else arg, container)
+
+    def update_fw_order() -> None:
+        if "required_fw_nodes" in node_info.__dict__:
+            del node_info.__dict__["required_fw_nodes"]
+        node_info.fw_order = {
+            node: idx
+            for idx, node in enumerate(joint_graph.nodes)
+            if node_info.is_required_fw(node)
+        }
+
+    def clone_reduction_input(reduction: fx.Node, reduction_input: fx.Node) -> fx.Node:
+        with joint_graph.inserting_before(reduction):
+            clone = joint_graph.call_function(aten.clone.default, (reduction_input,))
+        clone.meta = copy.copy(reduction_input.meta)
+        clone.meta["val"] = aten.clone.default(reduction_input.meta["val"])
+        clone.meta["tensor_meta"] = extract_tensor_metadata(clone.meta["val"])
+        # Correctness requires saving this clone even when it crosses an
+        # activation-checkpoint boundary that would otherwise recompute it.
+        clone.meta["recompute"] = CheckpointPolicy.MUST_SAVE
+        node_info._required_fw_nodes.add(clone)
+        return clone
+
+    for reduction in list(joint_graph.nodes):
+        if (
+            reduction.op != "call_function"
+            or not node_info.is_required_fw(reduction)
+            or get_aten_target(reduction) not in (aten.amin, aten.amax)
+        ):
+            continue
+        reduction_input = reduction.args[0]
+        if not isinstance(reduction_input, fx.Node):
+            continue
+        if not is_cpu_floating_tensor(reduction_input):
+            continue
+        eq_users = backward_exact_eq_users(reduction_input, reduction)
+        if not eq_users:
+            continue
+        if not has_materialized_forward_source(reduction_input):
+            continue
+        # amin/amax backward routes gradients by exact value equality with the
+        # reduced input. CPU codegen can otherwise fuse the reduction and the
+        # equality mask through different scalar/vector math paths, so the
+        # reduced value is not bitwise equal to any recomputed input element.
+        # Materializing here makes both the forward reduction and equality mask
+        # consume the same buffer, matching eager's semantics.
+        clone = clone_reduction_input(reduction, reduction_input)
+        reduction.args = replace_node_arg(reduction.args, reduction_input, clone)
+        reduction.kwargs = replace_node_arg(reduction.kwargs, reduction_input, clone)
+        for eq in eq_users:
+            eq.args = replace_node_arg(eq.args, reduction_input, clone)
+            eq.kwargs = replace_node_arg(eq.kwargs, reduction_input, clone)
+            # Compute the mask from the saved clone in backward. Saving the
+            # mask itself would let Inductor fuse through the original producer
+            # again and optimize away the forward materialization.
+            # This tag matters for min-cut/Inductor; default_partition only
+            # saves forward nodes.
+            eq.meta["recompute"] = CheckpointPolicy.MUST_RECOMPUTE
+    update_fw_order()
 
 
 def is_getitem_of_multi_output(node: fx.Node) -> bool:
@@ -4109,6 +4256,7 @@ def min_cut_rematerialization_partition(
     node_info = classify_nodes(
         joint_module, static_lifetime_input_indices, num_fwd_outputs
     )
+    materialize_cpu_floating_aminmax_eq_input(joint_graph, node_info)
 
     # networkx blows up on graphs with no required backward nodes
     # Since there's nothing to partition anyway, and the default partitioner can "handle"
