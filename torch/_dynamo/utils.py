@@ -1105,12 +1105,6 @@ class ExactWeakKeyDictionary:
 def istype(obj: object, allowed_types: type[T]) -> TypeIs[T]: ...
 
 
-@overload
-def istype(
-    obj: object, allowed_types: tuple[type[list[T]], type[tuple[T, ...]]]
-) -> TypeIs[T]: ...
-
-
 # This can be simplified once TypeVarTuple objects can be expanded into TypeIs.
 @overload
 def istype(
@@ -1295,28 +1289,22 @@ def is_numpy_float_type(value: Any) -> bool:
     )
 
 
-def unpack_iterable(
-    tx: InstructionTranslatorBase, iterable: VariableTracker
-) -> list[VariableTracker]:
-    items: list[VariableTracker] = []
-    unpack_and_apply_fn(tx, iterable, items.append)
-    return items
+_unpack_fast_types_cache: tuple[type, ...] | None = None
 
 
-def unpack_and_apply_fn(
-    tx: InstructionTranslatorBase,
-    iterable: VariableTracker,
-    apply_fn,
-) -> None:
-    from . import variables
-    from .exc import handle_observed_exception, ObservedUserStopIteration
-    from .variables.object_protocol import generic_getiter, generic_iternext
+def _unpack_fast_types() -> tuple[type, ...]:
+    # Builtin iterables whose elements we can get directly via
+    # unpack_var_sequence, skipping the generic iter/getiter/iternext protocol
+    # (a bottleneck for large iterables). Built lazily since `variables` is a
+    # circular import at module load.
+    global _unpack_fast_types_cache
+    if _unpack_fast_types_cache is None:
+        from . import variables
 
-    if isinstance(
-        iterable,
-        (
+        _unpack_fast_types_cache = (
             variables.ConstDictVariable,
             variables.DictViewVariable,
+            variables.MappingProxyVariable,
             variables.DequeVariable,
             variables.ListVariable,
             variables.ListIteratorVariable,
@@ -1324,19 +1312,44 @@ def unpack_and_apply_fn(
             variables.SetVariable,
             variables.TensorVariable,
             variables.TupleVariable,
-        ),
-    ):
-        # avoid going through the generic iter/getiter/iternext protocol for
-        # common builtin iterables, since it can be a bottleneck for large
-        # iterables (e.g. unpacking a list of 1000 items)
-        [apply_fn(item) for item in iterable.unpack_var_sequence(tx)]  # type: ignore[bad-argument-type]
+        )
+    return _unpack_fast_types_cache
+
+
+def unpack_iterable(
+    tx: InstructionTranslatorBase, iterable: VariableTracker
+) -> list[VariableTracker]:
+    if isinstance(iterable, _unpack_fast_types()):
+        # unpack_var_sequence returns a fresh list, so hand it back directly:
+        # no generator, no per-element callback, single allocation.
+        return iterable.unpack_var_sequence(tx)
+    return list(lazily_unpack(tx, iterable))
+
+
+def unpack_and_apply_fn(
+    tx: InstructionTranslatorBase,
+    iterable: VariableTracker,
+    apply_fn,
+) -> None:
+    for item in lazily_unpack(tx, iterable):
+        apply_fn(item)
+
+
+def lazily_unpack(
+    tx: InstructionTranslatorBase,
+    iterable: VariableTracker,
+):
+    from .exc import handle_observed_exception, ObservedUserStopIteration
+    from .variables.object_protocol import generic_getiter, generic_iternext
+
+    if isinstance(iterable, _unpack_fast_types()):
+        yield from iterable.unpack_var_sequence(tx)
         return
 
     iterator = generic_getiter(tx, iterable)  # type: ignore[bad-argument-type]
     while True:
         try:
-            item = generic_iternext(tx, iterator)  # type: ignore[bad-argument-type]
-            apply_fn(item)
+            yield generic_iternext(tx, iterator)  # type: ignore[bad-argument-type]
         except ObservedUserStopIteration:
             handle_observed_exception(tx)
             break
@@ -3061,6 +3074,10 @@ tuple_methods = {method for method in tuple.__dict__.values() if callable(method
 list_methods = {method for method in list.__dict__.values() if callable(method)}
 list_getitem = list.__getitem__
 
+deque_methods = {
+    method for method in collections.deque.__dict__.values() if callable(method)
+}
+
 str_methods = {method for method in str.__dict__.values() if callable(method)}
 
 # EnumType is the metaclass for Enum classes
@@ -3183,9 +3200,21 @@ def dict_keys_getitem(d: dict[Any, Any], n: int) -> Any:
     return next(itertools.islice(dict.keys(d), n, n + 1))
 
 
+def set_base_iter(s: Iterable[T]) -> Iterator[T]:
+    if isinstance(s, set):
+        return set.__iter__(s)
+    if isinstance(s, frozenset):
+        return frozenset.__iter__(s)
+    return iter(s)
+
+
 def set_getitem(s: set[T], n: int) -> T:
-    # Set ordering might not be stable
-    return list(s)[n]
+    # Set ordering might not be stable. For set/frozenset subclasses, use the
+    # base iterator so guard reconstruction observes the internal set contents.
+    try:
+        return next(itertools.islice(set_base_iter(s), n, n + 1))
+    except StopIteration:
+        raise IndexError("set index out of range") from None
 
 
 def enum_repr(value: Any, local: bool) -> str:
@@ -3261,52 +3290,41 @@ def raise_args_mismatch(
 
 
 def iter_contains(
-    items: Iterable[Any],
-    search: Any,
+    items: Iterable[VariableTracker],
+    search: VariableTracker,
     tx: InstructionTranslatorBase,
-    check_tensor_identity: bool = False,
-) -> Any:
+) -> VariableTracker:
     from .variables import ConstantVariable
+    from .variables.object_protocol import generic_richcompare_bool
 
-    if search.is_python_constant():
+    items = list(items)
+    # CPython's list_contains/set_contains use PyObject_RichCompareBool(item,
+    # search, Py_EQ) with an identity shortcut. The constant fast path is only
+    # valid when every element is a constant too; a non-constant element earlier
+    # in the sequence has an __eq__ that must be honored in order (it may match,
+    # or raise), so fall through to the per-element richcompare loop otherwise.
+    if search.is_python_constant() and all(x.is_python_constant() for x in items):
         search_val = search.as_python_constant()
-        # CPython's list_contains/set_contains use PyObject_RichCompareBool
-        # which has an identity shortcut: if v is w, return True for eq.
-        # Check identity first (matters for NaN).
         found_const = any(
-            x.is_python_constant()
-            and (
-                x.as_python_constant() is search_val
-                or x.as_python_constant() == search_val
-            )
+            x.as_python_constant() is search_val or x.as_python_constant() == search_val
             for x in items
         )
         return ConstantVariable.create(found_const)
-
-    must_check_tensor_id = False
-    if check_tensor_identity and search.is_tensor():
-        must_check_tensor_id = True
-        # Match of Tensor means match of FakeTensor
-        search = _get_fake_tensor(search)
-
     found: VariableTracker | None = None
     for x in items:
-        if must_check_tensor_id:
-            if x.is_tensor():
-                if search is _get_fake_tensor(x):  # Object equivalence
-                    return ConstantVariable.create(True)
+        check = generic_richcompare_bool(tx, x, search, "__eq__")
+        if check.is_constant_match(True):
+            return check
+        if check.is_constant_match(False):
+            continue
+        if found is None:
+            found = check
         else:
             from torch._dynamo.variables.builder import SourcelessBuilder
 
-            check = SourcelessBuilder.create(tx, operator.eq).call_function(
-                tx, [x, search], {}
+            found = SourcelessBuilder.create(tx, operator.or_).call_function(
+                tx, [check, found], {}
             )
-            if found is None:
-                found = check
-            else:
-                found = SourcelessBuilder.create(tx, operator.or_).call_function(
-                    tx, [check, found], {}
-                )
     if found is None:
         found = ConstantVariable.create(False)
     return found
@@ -3750,6 +3768,9 @@ def same(
             ignore_non_fp=ignore_non_fp,
             log_error=log_error,
             use_larger_multiplier_for_smaller_tensor=use_larger_multiplier_for_smaller_tensor,
+            force_max_multiplier=force_max_multiplier,
+            use_iou_for_bool=use_iou_for_bool,
+            iou_threshold=iou_threshold,
         )
     elif type(ref).__name__ in (
         "MaskedLMOutput",
@@ -3779,6 +3800,9 @@ def same(
                 ignore_non_fp=ignore_non_fp,
                 log_error=log_error,
                 use_larger_multiplier_for_smaller_tensor=use_larger_multiplier_for_smaller_tensor,
+                force_max_multiplier=force_max_multiplier,
+                use_iou_for_bool=use_iou_for_bool,
+                iou_threshold=iou_threshold,
             )
             for key in ref.__dict__
         )
@@ -5179,7 +5203,12 @@ def get_instruction_source_311(code: types.CodeType, inst: Instruction) -> str:
     )
 
 
-def get_static_address_type(t: Any) -> Any:
+# The two flavors of mark_static_address: "guarded" recompiles when the data_ptr
+# changes, "unguarded" re-records cudagraphs instead. Set in decorators.py.
+StaticInputType = Literal["guarded", "unguarded"]
+
+
+def get_static_address_type(t: Any) -> StaticInputType | None:
     if isinstance(t, torch.Tensor):
         return getattr(t, "_dynamo_static_input_type", None)
 
@@ -5629,7 +5658,14 @@ def set_feature_use(feature: str, usage: bool) -> None:
         get_metrics_context().set_key_value("feature_usage", feature, usage)
 
 
-_ddp_optimization_mode: tuple[str, ...] = (
+OptimizeDDPMode = Literal[
+    "ddp_optimizer",
+    "python_reducer",
+    "python_reducer_without_compiled_forward",
+    "no_optimization",
+]
+
+_ddp_optimization_mode: tuple[OptimizeDDPMode, ...] = (
     "ddp_optimizer",
     "python_reducer",  # experimental mode
     "python_reducer_without_compiled_forward",
@@ -5637,7 +5673,7 @@ _ddp_optimization_mode: tuple[str, ...] = (
 )
 
 
-def get_optimize_ddp_mode() -> str:
+def get_optimize_ddp_mode() -> OptimizeDDPMode:
     optimize_ddp = config.optimize_ddp
     if isinstance(optimize_ddp, bool):
         mode = "ddp_optimizer" if optimize_ddp else "no_optimization"
@@ -5650,7 +5686,7 @@ def get_optimize_ddp_mode() -> str:
 
     if mode not in _ddp_optimization_mode:
         raise AssertionError(f"Invalid dynamo config optimize_ddp value {mode=}")
-    return mode
+    return cast("OptimizeDDPMode", mode)
 
 
 @contextmanager

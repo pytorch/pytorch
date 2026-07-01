@@ -2,6 +2,7 @@
 """Metal shader template for flex attention on MPS"""
 
 import itertools
+import operator
 from collections import namedtuple
 from collections.abc import Sequence
 from typing import Any
@@ -34,8 +35,32 @@ CAPTURE_DTYPE_MAP = {
     torch.bool: "bool",
 }
 
+# log2(e) for converting flex attention stats back
+RCP_LN2 = "1.44269504088896340736f"
+
 # A captured buffer bound as a Metal kernel argument, with its static shape.
 _CapturedBuf = namedtuple("_CapturedBuf", ["name", "sizes", "strides", "dtype"])
+# A captured SymInt (dynamic-shape closure) packed into the scalar _params
+# buffer; `name` is the unpacked Metal variable holding its runtime value.
+_CapturedScalar = namedtuple("_CapturedScalar", ["name"])
+
+# Python operator builtins appear in score_mod/mask_mod when a closure does
+# arithmetic/comparison on captured SymInts (e.g. q_idx < (s0 // 32) * 32).
+# Arithmetic preserves integer typing when both operands are integral, so a
+# downstream floordiv/index stays exact; otherwise it falls back to float.
+_INT_PRESERVING_OPS = {operator.add: "+", operator.sub: "-", operator.mul: "*"}
+_CMP_OPS = {
+    operator.lt: "<",
+    operator.le: "<=",
+    operator.gt: ">",
+    operator.ge: ">=",
+    operator.eq: "==",
+    operator.ne: "!=",
+}
+
+# Fixed score/mask placeholders bound to integer index variables in the kernel;
+# the score placeholder (score_val) is the only float-typed fixed input.
+_INT_INDEX_VARS = OrderedSet(["b_idx", "h_idx", "m_idx", "n_idx"])
 
 
 # FX aten target -> (output C type, Metal format string with positional {} placeholders).
@@ -103,22 +128,34 @@ del aten, prims
 def _fx_graph_to_metal(
     graph_module: torch.fx.GraphModule,
     fixed_inputs: dict[str, str],
-    captured_views: dict[str, _CapturedBuf],
+    captured: dict[str, Any],
     output_var: str,
     var_prefix: str,
 ) -> str:
     """Compile an FX GraphModule to inline Metal code.
 
     `fixed_inputs` maps scalar placeholder names (score/b/h/q/kv) to Metal
-    variables. `captured_views` maps captured-buffer placeholder names to a
-    `_CapturedBuf`; these are indexed by `aten.index.Tensor` down to a scalar
-    element load. The output is assigned to `output_var`; `var_prefix`
-    namespaces fresh temps.
+    variables. `captured` maps captured placeholder names to a `_CapturedBuf`
+    (a tensor, indexed by `aten.index.Tensor` down to a scalar load) or a
+    `_CapturedScalar` (a SymInt bound directly to a Metal variable). The output
+    is assigned to `output_var`; `var_prefix` namespaces fresh temps.
     """
     var_map: dict[str, str] = {}
     views: dict[str, tuple] = {}
+    # Names of temps/placeholders known to hold an integer value, so operator
+    # arithmetic on captured SymInts stays in integer math (exact, proper floor).
+    int_vars: OrderedSet[str] = OrderedSet(
+        ph for ph, mv in fixed_inputs.items() if mv in _INT_INDEX_VARS
+    )
     code_lines: list[str] = []
     tmp_counter = itertools.count()
+
+    def _is_int(node) -> bool:
+        if isinstance(node, bool):
+            return False
+        if isinstance(node, int):
+            return True
+        return isinstance(node, torch.fx.Node) and node.name in int_vars
 
     # Only emit nodes the output depends on; this drops dead constant captures
     output_node = next(n for n in graph_module.graph.nodes if n.op == "output")
@@ -159,9 +196,12 @@ def _fx_graph_to_metal(
         if node.op == "placeholder":
             if node.name in fixed_inputs:
                 var_map[node.name] = fixed_inputs[node.name]
-            elif node.name in captured_views:
-                cap = captured_views[node.name]
-                if len(cap.sizes) == 0:
+            elif node.name in captured:
+                cap = captured[node.name]
+                if isinstance(cap, _CapturedScalar):
+                    var_map[node.name] = cap.name
+                    int_vars.add(node.name)
+                elif len(cap.sizes) == 0:
                     var_map[node.name] = f"(float){cap.name}[0]"
                 else:
                     views[node.name] = (
@@ -224,7 +264,47 @@ def _fx_graph_to_metal(
             continue
 
         t = _tmp()
-        if target in _OP_TABLE:
+        # Python operator builtins on captured SymInts (dynamic-shape closures).
+        if target in _INT_PRESERVING_OPS:
+            both_int = _is_int(args[0]) and _is_int(args[1])
+            op = _INT_PRESERVING_OPS[target]
+            ctype = "long" if both_int else "float"
+            code_lines.append(f"{ctype} {t} = {_val(args[0])} {op} {_val(args[1])};")
+            if both_int:
+                int_vars.add(node.name)
+        elif target in _CMP_OPS:
+            code_lines.append(
+                f"bool {t} = {_val(args[0])} {_CMP_OPS[target]} {_val(args[1])};"
+            )
+        elif target in (operator.floordiv, operator.mod):
+            fn = "floor_divide" if target is operator.floordiv else "remainder"
+            both_int = _is_int(args[0]) and _is_int(args[1])
+            if both_int:
+                a, b, ctype = _val(args[0]), _val(args[1]), "long"
+            else:
+                a = f"static_cast<float>({_val(args[0])})"
+                b = f"static_cast<float>({_val(args[1])})"
+                ctype = "float"
+            code_lines.append(f"{ctype} {t} = c10::metal::{fn}({a}, {b});")
+            if both_int:
+                int_vars.add(node.name)
+        elif target is operator.neg:
+            is_int = _is_int(args[0])
+            code_lines.append(
+                f"{'long' if is_int else 'float'} {t} = -{_val(args[0])};"
+            )
+            if is_int:
+                int_vars.add(node.name)
+        elif target in (operator.and_, operator.or_):
+            a, b = _val(args[0]), _val(args[1])
+            if _is_int(args[0]) and _is_int(args[1]):
+                op = "&" if target is operator.and_ else "|"
+                code_lines.append(f"long {t} = {a} {op} {b};")
+                int_vars.add(node.name)
+            else:
+                op = "&&" if target is operator.and_ else "||"
+                code_lines.append(f"bool {t} = ({a}) {op} ({b});")
+        elif target in _OP_TABLE:
             out_type, fmt = _OP_TABLE[target]
             code_lines.append(
                 f"{out_type} {t} = {fmt.format(*(_val(a) for a in args))};"
@@ -241,6 +321,19 @@ def _fx_graph_to_metal(
                 code_lines.append(f"float {t} = metal::min({v}, {hi});")
             else:
                 code_lines.append(f"float {t} = {v};")
+        elif target in (
+            torch.ops.aten.div.Tensor_mode,
+            torch.ops.aten.div.Scalar_mode,
+        ):
+            # Floor/trunc division (e.g. paged attention's kv_idx // page_size).
+            mode = args[2] if len(args) > 2 else node.kwargs.get("rounding_mode")
+            quot = f"static_cast<float>({_val(args[0])}) / static_cast<float>({_val(args[1])})"
+            if mode == "floor":
+                code_lines.append(f"float {t} = metal::floor({quot});")
+            elif mode == "trunc":
+                code_lines.append(f"float {t} = metal::trunc({quot});")
+            else:
+                code_lines.append(f"float {t} = {quot};")
         elif target in (
             torch.ops.aten.full_like.default,
             torch.ops.aten.full.default,
@@ -261,7 +354,7 @@ def _fx_graph_to_metal(
 def _compile_subgraph_to_metal(
     graph_module: torch.fx.GraphModule,
     placeholder_metal_names: list[str],
-    captured_meta: list[_CapturedBuf],
+    captured_meta: list[Any],
     output_var: str,
     var_prefix: str,
 ) -> str:
@@ -270,10 +363,11 @@ def _compile_subgraph_to_metal(
 
     score_mod placeholders are [score, b, h, q_idx, kv_idx, *captured];
     mask_mod's are [b, h, q_idx, kv_idx, *captured]. The captured placeholders
-    map positionally to `captured_meta`.
+    map positionally to `captured_meta` (each a `_CapturedBuf` or
+    `_CapturedScalar`).
     """
     fixed: dict[str, str] = {}
-    captured_views: dict[str, _CapturedBuf] = {}
+    captured: dict[str, Any] = {}
     n_fixed = len(placeholder_metal_names)
     for i, node in enumerate(
         n for n in graph_module.graph.nodes if n.op == "placeholder"
@@ -281,10 +375,8 @@ def _compile_subgraph_to_metal(
         if i < n_fixed:
             fixed[node.name] = placeholder_metal_names[i]
         else:
-            captured_views[node.name] = captured_meta[i - n_fixed]
-    return _fx_graph_to_metal(
-        graph_module, fixed, captured_views, output_var, var_prefix
-    )
+            captured[node.name] = captured_meta[i - n_fixed]
+    return _fx_graph_to_metal(graph_module, fixed, captured, output_var, var_prefix)
 
 
 def _generate_mma_shader(
@@ -302,6 +394,10 @@ def _generate_mma_shader(
     mask_code,
     has_full_blocks,
     scale,
+    lse_param="",
+    lse_write_code="",
+    max_param="",
+    max_write_code="",
 ):
     """Generate Metal shader using simdgroup_matrix for Q@K^T."""
 
@@ -326,7 +422,7 @@ def _generate_mma_shader(
                 int d = i % D_QK;
                 if (n_local < tile_size) {{
                     int n_global = tile_start + n_local;
-                    long k_off = b_idx * stride_kz + hkv_idx * stride_kh + (long)n_global * stride_kn + (long)d * stride_kk;
+                    long k_off = b_kv * stride_kz + hkv_idx * stride_kh + (long)n_global * stride_kn + (long)d * stride_kk;
                     KV_tg[n_local * D_QK + d] = K[k_off];
                 }} else {{
                     KV_tg[n_local * D_QK + d] = ({metal_dtype})0;
@@ -362,7 +458,7 @@ def _generate_mma_shader(
                 int n_local = i / D_V;
                 int d = i % D_V;
                 int n_global = tile_start + n_local;
-                long v_off = b_idx * stride_vz + hkv_idx * stride_vh + (long)n_global * stride_vn + (long)d * stride_vk;
+                long v_off = b_kv * stride_vz + hkv_idx * stride_vh + (long)n_global * stride_vn + (long)d * stride_vk;
                 KV_tg[n_local * D_V + d] = V[v_off];
             }}
             threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -414,7 +510,7 @@ kernel void flex_attn_fwd(
     constant {metal_dtype}* V [[buffer(3)]],
     constant int* kv_num_blocks [[buffer(4)]],
     constant int* kv_indices [[buffer(5)]],
-{full_kv_params}{captured_params}{scalar_params_str},
+{full_kv_params}{captured_params}{lse_param}{max_param}{scalar_params_str},
     uint3 tgpos [[threadgroup_position_in_grid]],
     uint tid [[thread_index_in_threadgroup]]
 ) {{
@@ -423,6 +519,7 @@ kernel void flex_attn_fwd(
     int q_block = tgpos.x;
     int h_idx = tgpos.y;
     int b_idx = tgpos.z;
+    int b_kv = b_idx % (int)Bkv;
     int m_base = q_block * BLOCK_M;
     int m_idx = m_base + (int)tid;
     bool active = (m_idx < N_Q);
@@ -486,7 +583,7 @@ kernel void flex_attn_fwd(
 
     shader += f"""
     if (active) {{
-        if (row_sum == 0.0f) row_sum = 1.0f;
+{lse_write_code}{max_write_code}        if (row_sum == 0.0f) row_sum = 1.0f;
         long out_base = b_idx * stride_oz + h_idx * stride_oh + (long)m_idx * stride_om;
         for (int d = 0; d < D_V; d++)
             out[out_base + (long)d * stride_ok] = {metal_dtype}(o_acc[d] / row_sum);
@@ -507,11 +604,15 @@ def _generate_metal_shader(
     scale: float,
     score_captured: Sequence[tuple] = (),
     mask_captured: Sequence[tuple] = (),
+    write_lse: bool = False,
+    write_max: bool = False,
 ) -> str:
     """Generate the complete Metal shader source for flex attention.
 
-    `score_captured` / `mask_captured` are the buffers captured by score_mod /
-    mask_mod, as (sizes, strides, dtype) tuples in placeholder order.
+    `score_captured` / `mask_captured` describe the captures of score_mod /
+    mask_mod in placeholder order. Each entry is a tagged tuple: a tensor
+    capture ("tensor", sizes, strides, dtype) becomes an extra Metal buffer,
+    while a SymInt capture ("scalar",) is read from the packed scalar buffer.
     """
     metal_dtype = METAL_DTYPE_MAP[dtype]
 
@@ -548,13 +649,21 @@ def _generate_metal_shader(
     else:
         full_kv_params = ""
 
-    # Captured tensors follow the (full) kv buffers as extra Metal arguments, in
-    # the order built in lower_mps: score captures first, then mask captures.
+    # Captures follow the (full) kv buffers, in the order built in lower_mps:
+    # score captures first, then mask captures. Tensor captures become extra
+    # Metal buffers; SymInt captures are read from the packed scalar buffer
     captured_decls: list[str] = []
-    score_meta: list[_CapturedBuf] = []
-    mask_meta: list[_CapturedBuf] = []
+    scalar_capture_names: list[str] = []
+    score_meta: list[Any] = []
+    mask_meta: list[Any] = []
     for meta_list, caps in ((score_meta, score_captured), (mask_meta, mask_captured)):
-        for sizes, strides, cap_dtype in caps:
+        for entry in caps:
+            if entry[0] == "scalar":
+                sname = f"capsym{len(scalar_capture_names)}"
+                scalar_capture_names.append(sname)
+                meta_list.append(_CapturedScalar(sname))
+                continue
+            _, sizes, strides, cap_dtype = entry
             mtype = CAPTURE_DTYPE_MAP.get(cap_dtype)
             if mtype is None:
                 raise NotImplementedError(
@@ -572,6 +681,7 @@ def _generate_metal_shader(
     # Pack scalars into one buffer to stay under Metal's 31-buffer limit.
     scalar_names = [
         "B",
+        "Bkv",
         "Hq",
         "Hkv",
         "N_Q",
@@ -615,6 +725,31 @@ def _generate_metal_shader(
             "full_kv_idx_stride_q",
             "full_kv_idx_stride_b",
         ]
+    scalar_names += scalar_capture_names
+    lse_param = ""
+    lse_write_code = ""
+    if write_lse:
+        lse_param = f"    device float* lse [[buffer({buf_idx})]],\n"
+        buf_idx += 1
+        lse_write_code = (
+            "        lse[(long)b_idx * (Hq * N_Q)"
+            " + (long)h_idx * N_Q + (long)m_idx]"
+            " = (row_sum > 0.0f)"
+            f" ? (row_max + metal::precise::log(row_sum)) * {RCP_LN2}"
+            " : -INFINITY;\n"
+        )
+
+    max_param = ""
+    max_write_code = ""
+    if write_max:
+        max_param = f"    device float* max_scores [[buffer({buf_idx})]],\n"
+        buf_idx += 1
+        max_write_code = (
+            "        max_scores[(long)b_idx * (Hq * N_Q)"
+            " + (long)h_idx * N_Q + (long)m_idx]"
+            f" = row_max * {RCP_LN2};\n"
+        )
+
     scalar_params_str = f"    constant long* _params [[buffer({buf_idx})]]"
 
     score_code = _compile_subgraph_to_metal(
@@ -652,6 +787,10 @@ def _generate_metal_shader(
             mask_code,
             has_full_blocks,
             scale,
+            lse_param=lse_param,
+            lse_write_code=lse_write_code,
+            max_param=max_param,
+            max_write_code=max_write_code,
         )
 
     # Fallback: per-thread dot product with cooperative K/V tiling.
@@ -674,7 +813,7 @@ def _generate_metal_shader(
                 int n_local = i / D_QK;
                 int d = i % D_QK;
                 int n_global = tile_start + n_local;
-                long k_off = b_idx * stride_kz + hkv_idx * stride_kh + (long)n_global * stride_kn + (long)d * stride_kk;
+                long k_off = b_kv * stride_kz + hkv_idx * stride_kh + (long)n_global * stride_kn + (long)d * stride_kk;
                 K_tile[n_local * D_QK + d] = K[k_off];
             }}
 
@@ -682,7 +821,7 @@ def _generate_metal_shader(
                 int n_local = i / D_V;
                 int d = i % D_V;
                 int n_global = tile_start + n_local;
-                long v_off = b_idx * stride_vz + hkv_idx * stride_vh + (long)n_global * stride_vn + (long)d * stride_vk;
+                long v_off = b_kv * stride_vz + hkv_idx * stride_vh + (long)n_global * stride_vn + (long)d * stride_vk;
                 V_tile[n_local * D_V + d] = V[v_off];
             }}
 
@@ -741,7 +880,7 @@ kernel void flex_attn_fwd(
     constant {metal_dtype}* V [[buffer(3)]],
     constant int* kv_num_blocks [[buffer(4)]],
     constant int* kv_indices [[buffer(5)]],
-{full_kv_params}{captured_params}{scalar_params_str},
+{full_kv_params}{captured_params}{lse_param}{max_param}{scalar_params_str},
     uint3 tgpos [[threadgroup_position_in_grid]],
     uint tid [[thread_index_in_threadgroup]]
 ) {{
@@ -750,6 +889,7 @@ kernel void flex_attn_fwd(
     int q_block = tgpos.x;
     int h_idx = tgpos.y;
     int b_idx = tgpos.z;
+    int b_kv = b_idx % (int)Bkv;
     int m_idx = q_block * BLOCK_M + (int)tid;
     bool active = (m_idx < N_Q);
 
@@ -804,7 +944,7 @@ kernel void flex_attn_fwd(
 
     shader += f"""
     if (active) {{
-        if (row_sum == 0.0f) row_sum = 1.0f;
+{lse_write_code}{max_write_code}        if (row_sum == 0.0f) row_sum = 1.0f;
         long out_base = b_idx * stride_oz + h_idx * stride_oh + (long)m_idx * stride_om;
         for (int d = 0; d < D_V; d++) {{
             out[out_base + (long)d * stride_ok] = {metal_dtype}(o_acc[d] / row_sum);
@@ -826,6 +966,7 @@ class MetalFlexAttentionNode(ir.ExternKernelAlloc):
         scalar_args: list[Any],
         grid: tuple[Any, ...],
         block_m: int,
+        num_mutated_outputs: int = 0,
     ):
         super().__init__(
             layout=layout,
@@ -836,6 +977,13 @@ class MetalFlexAttentionNode(ir.ExternKernelAlloc):
         self.scalar_args = scalar_args
         self.grid = grid
         self.block_m = block_m
+        # The last num_mutated_outputs inputs (logsumexp, max_scores) are written
+        # in place by the kernel.
+        self.mutation_outputs = [
+            # pyrefly: ignore [bad-argument-type]
+            ir.MutationOutput(ir.NoneLayout(device=layout.device), buf, self)
+            for buf in self.inputs[len(self.inputs) - num_mutated_outputs :]
+        ]
 
     def codegen(self, wrapper) -> None:
         wrapper.add_import_once(

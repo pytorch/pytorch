@@ -107,7 +107,7 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
         # allowing for proper validation and error handling
         return False
 
-    def hash_impl(self, tx: Any) -> tuple[int, bool]:
+    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # OpaqueObjectClassVariable wraps the CLASS, not an instance.
         # Classes are always hashable in CPython (type.__hash__ = object.__hash__).
         return hash(self.value), False
@@ -574,7 +574,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
             return self.value
         return super().as_python_constant()
 
-    def hash_impl(self, tx: Any) -> tuple[int, bool]:
+    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         from ..exc import raise_type_error
 
         real_obj = self.as_python_constant()
@@ -582,13 +582,6 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
             return hash(real_obj), False
         except TypeError:
             raise_type_error(tx, f"unhashable type: '{type(real_obj).__name__}'")
-
-    def is_python_equal(self, other: object) -> bool:
-        if not isinstance(other, VariableTracker):
-            raise AssertionError(f"Expected VariableTracker, got {type(other)}")
-        real_self = self.as_python_constant()
-        real_other = other.as_python_constant()
-        return real_self == real_other
 
     def get_real_value(self) -> Any:
         return self.as_python_constant()

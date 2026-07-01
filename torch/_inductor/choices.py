@@ -231,7 +231,8 @@ class InductorChoices:
         """
         # Extract device_type from kernel_inputs
         device_type = kernel_inputs.device_type
-        assert device_type is not None, "get_ktc requires a valid device type"
+        if device_type is None:
+            raise AssertionError("get_ktc requires a valid device type")
         # Extract template_name from the template object
         template_name = template.uid
 
@@ -274,8 +275,15 @@ class InductorChoices:
 
         # Origami requires fixed layouts (grid/workgroup mappings depend on exact
         # strides). Gate on IS_ROCM so a stray TORCHINDUCTOR_ORIGAMI=1 on CUDA
-        # doesn't disable flexible layouts unnecessarily.
-        if _origami_enabled() and IS_ROCM:
+        # doesn't disable flexible layouts unnecessarily. Also gate on max-autotune:
+        # origami only contributes Triton GEMM configs under autotuning, so with it
+        # off there is nothing that needs fixed strides and flexible layouts should
+        # be preserved (matches non-origami behavior).
+        if (
+            _origami_enabled()
+            and IS_ROCM
+            and (config.max_autotune or config.max_autotune_gemm)
+        ):
             return True
         # Since the following backends are not using get_mm_configs yet through the singular call,
         if not (config.max_autotune or config.max_autotune_gemm):

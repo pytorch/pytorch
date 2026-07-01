@@ -1530,6 +1530,56 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(cnts.op_count, 2)
 
+    def test_ngb_suppressed_for_inline_module(self):
+        """NGB should be suppressed for functions in NGB_SUPPRESS_INLINELIST."""
+        from unittest.mock import patch
+
+        def inner(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            return x + 2
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def outer(x):
+            return inner(x) + 3
+
+        inp = torch.randn(3)
+        inner_file = inner.__code__.co_filename
+        with patch(
+            "torch._dynamo.trace_rules.is_ngb_suppressed_inline",
+            side_effect=lambda f: f == inner_file,
+        ):
+            self.assertEqual(outer(inp), inp + 6)
+
+        # NGB normally handles an inlined graph break in 2 frames.
+        # With suppression, the break propagates to the parent, producing more.
+        self.assertGreater(cnts.frame_count, 2)
+
+    def test_fstring_graph_break_in_custom_str(self):
+        """f-string formatting of an object whose __str__ causes a graph break.
+
+        Regression test: when generic_str inlines __str__ and compile_subgraph
+        is called (setting should_exit=True) but fails with Unsupported,
+        _format_value must re-raise rather than silently swallowing the error.
+        """
+        import inspect
+
+        def target_fn(x: list[int]) -> int:
+            return sum(x)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(x):
+            sig = inspect.signature(target_fn)
+            f"{sig}"
+            return x + 1
+
+        inp = torch.randn(3)
+        self.assertEqual(fn(inp), inp + 1)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
