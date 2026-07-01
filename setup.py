@@ -1125,6 +1125,7 @@ def configure_extension_build() -> tuple[
         "mpi = torch.distributed.distributed_c10d:_register_builtin_mpi_backend",
         "gloo = torch.distributed.distributed_c10d:_register_builtin_gloo_backend",
         "nccl = torch.distributed.distributed_c10d:_register_builtin_nccl_backend",
+        "nccl2 = torch.distributed.distributed_c10d:_register_builtin_nccl2_backend",
         "ucc = torch.distributed.distributed_c10d:_register_builtin_ucc_backend",
         "xccl = torch.distributed.distributed_c10d:_register_builtin_xccl_backend",
     ]
