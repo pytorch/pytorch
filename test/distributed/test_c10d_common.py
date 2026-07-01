@@ -1793,9 +1793,6 @@ class DummyProcessGroup(dist.ProcessGroup):
     def eager_connect_single_device(self, device=None):
         self._bound_device_id = device
 
-    def _set_sequence_number_for_group(self):
-        pass
-
     def _get_backend(self, device):
         return self
 
