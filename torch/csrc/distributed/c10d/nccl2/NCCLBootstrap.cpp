@@ -4,23 +4,23 @@
 #include <fmt/core.h>
 #include <nccl.h>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
-#include <torch/csrc/distributed/c10d/nccltc/Logging.hpp>
-#include <torch/csrc/distributed/c10d/nccltc/ProcessGroupNCCLTC.hpp>
-#include <torch/csrc/distributed/c10d/nccltc/StoreManager.hpp>
-#include <torch/csrc/distributed/c10d/nccltc/TorchCommNCCLBootstrap.hpp>
-#include <torch/csrc/distributed/c10d/nccltc/Utils.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/NCCLBootstrap.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/StoreManager.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/Utils.hpp>
 #include <set>
 
-namespace c10d::nccltc {
+namespace c10d::nccl2 {
 
 // Initialize the static counter
-int TorchCommNCCLBootstrap::counter_ = 0;
+int NCCLBootstrap::counter_ = 0;
 
 const std::string kUniqueidXchgMethodAuto = "auto";
 const std::string kUniqueidXchgMethodTCPStore = "tcpstore";
 const std::string kUniqueidXchgMethodDefault = kUniqueidXchgMethodAuto;
 
-TorchCommNCCLBootstrap::TorchCommNCCLBootstrap(
+NCCLBootstrap::NCCLBootstrap(
     c10::intrusive_ptr<c10d::Store> store,
     c10::Device device,
     int rank,
@@ -80,7 +80,7 @@ TorchCommNCCLBootstrap::TorchCommNCCLBootstrap(
       "Failed to allocate barrier buffer");
 }
 
-TorchCommNCCLBootstrap::~TorchCommNCCLBootstrap() noexcept {
+NCCLBootstrap::~NCCLBootstrap() noexcept {
   if (barrier_buffer_ != nullptr) {
     CUDA_CHECK_IGNORE(
         cuda_api_,
@@ -90,21 +90,21 @@ TorchCommNCCLBootstrap::~TorchCommNCCLBootstrap() noexcept {
   }
 }
 
-std::string TorchCommNCCLBootstrap::getNCCLStoreKey() {
+std::string NCCLBootstrap::getNCCLStoreKey() {
   std::string key = fmt::format("{}{}", getNCCLStoreKeyPrefix(), counter_);
   counter_++;
   return key;
 }
 
-std::string TorchCommNCCLBootstrap::getNCCLStoreKeyPrefix() {
+std::string NCCLBootstrap::getNCCLStoreKeyPrefix() {
   return "nccl_storekey_";
 };
 
-int TorchCommNCCLBootstrap::getNCCLStoreKeyCounter() {
+int NCCLBootstrap::getNCCLStoreKeyCounter() {
   return counter_;
 }
 
-ncclUniqueId TorchCommNCCLBootstrap::exchangeUniqueIdStore() {
+ncclUniqueId NCCLBootstrap::exchangeUniqueIdStore() {
   ncclUniqueId uniqueId;
 
   auto key = getNCCLStoreKey();
@@ -135,19 +135,18 @@ ncclUniqueId TorchCommNCCLBootstrap::exchangeUniqueIdStore() {
   return uniqueId;
 }
 
-ncclUniqueId TorchCommNCCLBootstrap::exchangeUniqueIdTCPStore(
-    std::string_view name) {
+ncclUniqueId NCCLBootstrap::exchangeUniqueIdTCPStore(std::string_view name) {
   store_ = createPrefixStore(std::string(name), timeout_);
   created_internal_store_ = true;
 
   return exchangeUniqueIdStore();
 }
 
-bool TorchCommNCCLBootstrap::isTCPStoreEnabled() {
+bool NCCLBootstrap::isTCPStoreEnabled() {
   return std::getenv("MASTER_ADDR") && std::getenv("MASTER_PORT");
 }
 
-ncclUniqueId TorchCommNCCLBootstrap::exchangeUniqueId(std::string_view name) {
+ncclUniqueId NCCLBootstrap::exchangeUniqueId(std::string_view name) {
   if (store_ != nullptr) {
     return exchangeUniqueIdStore();
   }
@@ -164,7 +163,7 @@ ncclUniqueId TorchCommNCCLBootstrap::exchangeUniqueId(std::string_view name) {
   return exchangeUniqueIdTCPStore(name);
 }
 
-void TorchCommNCCLBootstrap::cleanupTCPStore(ncclComm_t nccl_comm) {
+void NCCLBootstrap::cleanupTCPStore(ncclComm_t nccl_comm) {
   if (created_internal_store_) {
     // Delete the internal store object and do a barrier to ensure that all
     // processes have deleted their store object too.  This way, when we
@@ -194,9 +193,9 @@ void TorchCommNCCLBootstrap::cleanupTCPStore(ncclComm_t nccl_comm) {
 }
 
 // TorchComm-layer hint keys that are consumed by the backend init code
-// (ProcessGroupNCCLTC::init), not by ncclConfig.  Skip them here to avoid
+// (ProcessGroupNCCL::init), not by ncclConfig.  Skip them here to avoid
 // spurious "unsupported hint" warnings.
-static const std::set<std::string> kTorchCommLayerHints = {
+static const std::set<std::string> kLayerHints = {
     "is_high_priority_stream",
     std::string(kHintMaxEventPoolSize),
 };
@@ -212,7 +211,7 @@ void populateNcclConfigFromHints(
   // ncclCommInitRankConfig call, so we use .c_str() directly.
 
   for (const auto& [key, val] : hints) {
-    if (kTorchCommLayerHints.count(key)) {
+    if (kLayerHints.count(key)) {
       continue;
     } else if (key == "blocking") {
       config.blocking = std::stoi(val);
@@ -286,7 +285,7 @@ void populateNcclConfigFromHints(
   }
 }
 
-ncclComm_t TorchCommNCCLBootstrap::createNcclComm(
+ncclComm_t NCCLBootstrap::createNcclComm(
     const std::string& name,
     const std::unordered_map<std::string, std::string>& hints) {
   ncclUniqueId uniqueId;
@@ -318,4 +317,4 @@ ncclComm_t TorchCommNCCLBootstrap::createNcclComm(
   return nccl_comm;
 }
 
-} // namespace c10d::nccltc
+} // namespace c10d::nccl2
