@@ -875,8 +875,8 @@ jobs:
         run: |
           set -x
           HF_CACHE="${RUNNER_TEMP}/hf_cache"
-          if [[ -z "${HF_CACHE_S3_BUCKET:-}" ]]; then
-            echo "HF_CACHE_S3_BUCKET unset (not an hf-cache runner) - skipping sync"
+          if [[ -z "${HF_CACHE_S3_BUCKET:-}" || -z "${HF_CACHE_S3_REGION:-}" ]]; then
+            echo "HF_CACHE_S3_BUCKET/REGION unset (not an hf-cache runner) - skipping sync"
             exit 0
           fi
           if [[ ! -d "${HF_CACHE}/hub" ]]; then
