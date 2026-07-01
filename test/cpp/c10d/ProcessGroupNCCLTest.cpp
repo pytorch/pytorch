@@ -666,14 +666,6 @@ void testReduceScatter(const std::string& path, int rank, int size) {
   }
 }
 
-void testSequenceNumInit(const std::string& path, int rank, int size) {
-  NCCLTest test(path, rank, size);
-  test.initialize(rank, size);
-  test.getProcessGroup()->setSequenceNumberForGroup();
-  auto seqNum = test.getProcessGroup()->getSequenceNumberForGroup();
-  EXPECT_EQ(seqNum, 0);
-}
-
 void testSplittingCommunicator(const std::string& path, int rank, int size) {
   auto test1 = BroadcastNCCLTest(path, rank, size);
   test1.initialize(rank, size);
@@ -831,13 +823,6 @@ TEST_F(ProcessGroupNCCLTest, testReduceScatter) {
     return;
   }
   multiThreadRun(testReduceScatter);
-}
-
-TEST_F(ProcessGroupNCCLTest, testSequenceNumInit) {
-  if (skipTest()) {
-    return;
-  }
-  multiThreadRun(testSequenceNumInit);
 }
 
 TEST_F(ProcessGroupNCCLTest, testReduceScatterBase) {

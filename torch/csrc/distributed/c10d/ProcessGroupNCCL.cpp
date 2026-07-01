@@ -1244,9 +1244,6 @@ c10::intrusive_ptr<intra_node_comm::IntraNodeComm> ProcessGroupNCCL::
   }
 }
 
-void ProcessGroupNCCL::setSequenceNumberForGroup() {
-} // NCCL just starts sequence numbers at 0.
-
 uint64_t ProcessGroupNCCL::getSequenceNumberForGroup() {
   return seqCollective_;
 }

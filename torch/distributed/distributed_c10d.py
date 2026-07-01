@@ -2573,20 +2573,6 @@ def _new_process_group_helper(
                 return GroupMember.NON_GROUP_MEMBER, None
             backend_class = backend_result
 
-        # Set sequence numbers for gloo and nccl backends.
-        if backend_str == Backend.GLOO and not _use_torchcomms_enabled():
-            if not isinstance(backend_class, ProcessGroupGloo):
-                raise AssertionError(
-                    f"Expected ProcessGroupGloo, got {type(backend_class)}"
-                )
-            backend_class._set_sequence_number_for_group()
-        elif backend_str == Backend.NCCL and not _use_torchcomms_enabled():
-            if not isinstance(backend_class, ProcessGroupNCCL):
-                raise AssertionError(
-                    f"Expected ProcessGroupNCCL, got {type(backend_class)}"
-                )
-            backend_class._set_sequence_number_for_group()
-
         # If the type is a subclass of ProcessGroup then return this process group immediately
         # TODO: This defaults to the old behavior for PythonProcessGroups which overwrites the
         # ProcessGroup instance
@@ -6037,8 +6023,6 @@ def split_group(
             "No backend for the parent process group or its backend does not support splitting"
         )
 
-    if not _use_torchcomms_enabled():
-        split_backend_class._set_sequence_number_for_group()
     if split_pg.group_name != group_name:
         raise AssertionError(
             f"group name should be set to {group_name} but got {split_pg.group_name}"
