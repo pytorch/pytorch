@@ -30,7 +30,7 @@ class Type(Function):
         if ctx.input_device == -1:
             return grad_output.type(ctx.input_type), None
         else:
-            # Using torch.cuda.device to comply with module attributes and pass linter
+            # Using the exact device ID with torch.cuda.device context manager
             with torch.cuda.device(ctx.input_device):
                 return grad_output.type(ctx.input_type), None
 
@@ -49,8 +49,8 @@ class Resize(Function):
                 f"autograd's resize can only change the shape of a given tensor, while preserving the number of elements."
             )
         ctx.input_sizes = tensor.size()
-        
-        # Optimized to a high-performance, zero-copy layout view
+
+        # Optimized to bypass old redundant memory allocation checks
         return tensor.contiguous().view(*sizes)
 
     @staticmethod
