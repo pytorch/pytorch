@@ -915,14 +915,22 @@ def materialize_flex_gemm_epilogue(
     local_reduce_feed_main = None
     local_reduce_aux = None
     local_reduce_feed_main_input = None
-    if local_reduce is not None:
-        if local_reduce.feeds_main:
-            local_reduce_feed_main = local_reduce.value_node
-            reduction = reduction_from_node(local_reduce.value_node)
+    match local_reduce:
+        case FlexGemmOutputLocalReducePlan(
+            feeds_main=True, value_node=value_node, store_node=store_node
+        ):
+            local_reduce_feed_main = value_node
+            reduction = reduction_from_node(value_node)
             local_reduce_feed_main_input = (
                 reduction[0] if reduction is not None else None
             )
-        local_reduce_aux = local_reduce.store_node
+            local_reduce_aux = store_node
+        case FlexGemmOutputLocalReducePlan(store_node=store_node):
+            local_reduce_aux = store_node
+        case None:
+            pass
+        case _:
+            raise AssertionError("unhandled FlexGEMM local-reduce output plan")
     with V.set_kernel_handler(kernel), V.set_ops_handler(FlexGemmCuteDSLOpOverrides()):
         for index, node in enumerate(epilogue_arg_placeholders):
             epilogue_arg_meta = node.meta["val"]
