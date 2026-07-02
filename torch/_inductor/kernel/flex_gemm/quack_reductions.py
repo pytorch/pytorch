@@ -99,15 +99,14 @@ def _syntactic_grouped_tensor_layout(
     return None
 
 
-def _dimension_matches(actual: Any, expected: Any) -> bool:
-    return statically_known_equal(actual, expected)
-
-
-def _explicit_split_matches(dim: Any, selected_size: Any, group: int) -> bool:
-    """Accept inferred splits and validate explicit grouped split sizes."""
-    if dim == -1:
-        return True
-    return statically_known_equal(dim * group, selected_size)
+def _group_count_matches_selected_dim(
+    group_count: Any, selected_size: Any, group: int
+) -> bool:
+    match group_count:
+        case -1:
+            return True
+        case _:
+            return statically_known_equal(group_count * group, selected_size)
 
 
 def _grouped_layout_matches_source_shape(
@@ -115,19 +114,38 @@ def _grouped_layout_matches_source_shape(
     source_shape: tuple[Any, ...],
     layout: GroupedTensorSSALayout,
 ) -> bool:
-    """Require the grouped reshape to split exactly M or N, not flattened MxN."""
-    if len(source_shape) != 2:
-        return True
+    """Require a 2-D GEMM output reshape to split exactly M or N."""
     if len(shape) != 3:
         return False
+
     m, n = source_shape
-    if layout.axis == 1:
-        return _dimension_matches(shape[0], m) and _explicit_split_matches(
-            shape[1], n, layout.group_size
-        )
-    return _dimension_matches(shape[2], n) and _explicit_split_matches(
-        shape[0], m, layout.group_size
-    )
+    match layout.axis, shape:
+        case 1, (kept_m, group_count, group) if group == layout.group_size:
+            return statically_known_equal(
+                kept_m, m
+            ) and _group_count_matches_selected_dim(group_count, n, group)
+        case 0, (group_count, group, kept_n) if group == layout.group_size:
+            return statically_known_equal(
+                kept_n, n
+            ) and _group_count_matches_selected_dim(group_count, m, group)
+        case _:
+            return False
+
+
+def _grouped_layout_from_source_shape(
+    shape: tuple[Any, ...], source_shape: tuple[Any, ...]
+) -> GroupedTensorSSALayout | None:
+    candidates = []
+    match shape:
+        case (*_, int(group)) if group > 0:
+            candidates.append(GroupedTensorSSALayout(axis=1, group_size=group))
+    match shape:
+        case (*_, int(group), _) if group > 0:
+            candidates.append(GroupedTensorSSALayout(axis=0, group_size=group))
+    for layout in candidates:
+        if _grouped_layout_matches_source_shape(shape, source_shape, layout):
+            return layout
+    return None
 
 
 def grouped_tensor_layout(
@@ -139,17 +157,16 @@ def grouped_tensor_layout(
         return None
     if len(shape) == 1 and isinstance(shape[0], (list, tuple, torch.Size)):
         shape = normalize_shape(shape[0])
-    layout = _syntactic_grouped_tensor_layout(shape)
-    if layout is None:
-        return None
-    if source_shape is None:
-        return layout
-    source_shape = normalize_shape(source_shape)
-    if not isinstance(source_shape, tuple):
-        return layout
-    if not _grouped_layout_matches_source_shape(shape, source_shape, layout):
-        raise NotImplementedError(LOCAL_REDUCE_GROUPED_RESHAPE_ERROR)
-    return layout
+    if source_shape is not None:
+        source_shape = normalize_shape(source_shape)
+        if isinstance(source_shape, tuple) and len(source_shape) == 2:
+            layout = _grouped_layout_from_source_shape(shape, source_shape)
+            if layout is not None:
+                return layout
+            if _syntactic_grouped_tensor_layout(shape) is not None:
+                raise NotImplementedError(LOCAL_REDUCE_GROUPED_RESHAPE_ERROR)
+            return None
+    return _syntactic_grouped_tensor_layout(shape)
 
 
 def _cute_op_name(target: Any) -> str | None:
