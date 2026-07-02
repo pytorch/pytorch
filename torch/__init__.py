@@ -2976,6 +2976,112 @@ class _TorchCompileWrapper:
             self.compiler_fn.reset()
 
 
+class _MakeFxTracerWrapper:
+    """Tracer backend for ``torch.compile(tracer="make_fx")``.
+
+    Rather than routing frames through TorchDynamo, this lazily traces ``model``
+    with ``make_fx`` on the first invocation using the real call arguments,
+    hands the resulting ATen-level ``GraphModule`` to the configured backend
+    (e.g. inductor), and caches the compiled callable. There are no guards or
+    recompilation: the graph captured on the first call is reused for every
+    subsequent call, so callers are responsible for shape stability.
+
+    Symbolic shapes are honored by fakeifying the inputs before tracing. When
+    ``dynamic`` is set, or an input carries ``mark_dynamic``/``mark_unbacked``
+    annotations, each dim is assigned a ``DimDynamic`` (mirroring Dynamo:
+    unbacked -> ``UNBACKED``, dynamic -> ``DYNAMIC``, otherwise ``DUCK`` when
+    ``dynamic`` else ``STATIC``) and the resulting fake tensors carrying the
+    shared shape env are handed to the backend, so it emits a single kernel
+    with the requested backed/unbacked symbols.
+    """
+
+    def __init__(
+        self,
+        model: _Callable[..., _Any],
+        backend: _Any,
+        dynamic: builtins.bool | None,
+    ) -> None:
+        self.model = model
+        self.backend = backend
+        self.dynamic = dynamic
+        self.compiled_fn: _Callable[..., _Any] | None = None
+        # The ATen GraphModule captured by make_fx on the first call, retained
+        # for debugging and introspection (e.g. checking captured symbols).
+        self.gm: torch.fx.GraphModule | None = None
+
+    def _symbolic_context(self, t: torch.Tensor) -> _Any:
+        from torch.fx.experimental.symbolic_shapes import (
+            DimDynamic,
+            StatelessSymbolicContext,
+        )
+
+        unbacked = getattr(t, "_dynamo_unbacked_indices", ())
+        dynamic = getattr(t, "_dynamo_dynamic_indices", ())
+        dynamic_sizes = []
+        for i in builtins.range(t.dim()):
+            if i in unbacked:
+                dynamic_sizes.append(DimDynamic.UNBACKED)
+            elif i in dynamic:
+                dynamic_sizes.append(DimDynamic.DYNAMIC)
+            else:
+                dynamic_sizes.append(
+                    DimDynamic.DUCK if self.dynamic else DimDynamic.STATIC
+                )
+        return StatelessSymbolicContext(
+            dynamic_sizes=dynamic_sizes,
+            unbacked_bounds=getattr(t, "_dynamo_unbacked_bounds", None),
+            shape_ids=getattr(t, "_dynamo_shape_ids", None),
+        )
+
+    def __call__(self, *args: _Any, **kwargs: _Any) -> _Any:
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch.utils._pytree import tree_flatten, tree_unflatten
+
+        flat_args, in_spec = tree_flatten((args, kwargs))
+
+        if self.compiled_fn is None:
+
+            def flat_model(*flat: _Any) -> _Any:
+                fn_args, fn_kwargs = tree_unflatten(list(flat), in_spec)
+                return self.model(*fn_args, **fn_kwargs)
+
+            def _annotated(t: _Any) -> builtins.bool:
+                return isinstance(t, torch.Tensor) and builtins.bool(
+                    getattr(t, "_dynamo_unbacked_indices", None)
+                    or getattr(t, "_dynamo_dynamic_indices", None)
+                )
+
+            if self.dynamic or builtins.any(_annotated(t) for t in flat_args):
+                from torch._dynamo.source import ConstantSource
+                from torch._subclasses.fake_tensor import FakeTensorMode
+                from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+                shape_env = ShapeEnv()
+                fake_mode = FakeTensorMode(
+                    shape_env=shape_env, allow_non_fake_inputs=True
+                )
+                with fake_mode:
+                    with shape_env.ignore_fresh_unbacked_symbols():
+                        example_inputs = [
+                            fake_mode.from_tensor(
+                                t,
+                                source=ConstantSource(f"input{i}"),
+                                symbolic_context=self._symbolic_context(t),
+                                static_shapes=False,
+                            )
+                            if isinstance(t, torch.Tensor)
+                            else t
+                            for i, t in enumerate(flat_args)
+                        ]
+                    self.gm = make_fx(flat_model, tracing_mode="real")(*example_inputs)
+                    self.compiled_fn = self.backend(self.gm, example_inputs)
+            else:
+                self.gm = make_fx(flat_model, tracing_mode="real")(*flat_args)
+                self.compiled_fn = self.backend(self.gm, list(flat_args))
+
+        return self.compiled_fn(*flat_args)
+
+
 _InputT = _ParamSpec("_InputT")
 _RetT = _TypeVar("_RetT")
 
@@ -2992,6 +3098,7 @@ def compile(
     | None = None,
     name: str | None = None,
     disable: builtins.bool = False,
+    tracer: str = "dynamo",
     dynamic_shapes: _Any = None,
 ) -> _Callable[_InputT, _RetT]: ...
 
@@ -3008,6 +3115,7 @@ def compile(
     | None = None,
     name: str | None = None,
     disable: builtins.bool = False,
+    tracer: str = "dynamo",
     dynamic_shapes: _Any = None,
 ) -> _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]: ...
 
@@ -3025,6 +3133,7 @@ def compile(
     disable: builtins.bool = False,
     recompile_limit: builtins.int | None = None,
     isolate_recompiles: builtins.bool = False,
+    tracer: str = "dynamo",
     dynamic_shapes: _Any = None,
 ) -> (
     _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]
@@ -3137,6 +3246,22 @@ def compile(
         by a non-isolated region hitting its recompile limit does NOT bleed
         into isolated regions — each region manages its own RUN_ONLY state.
         Default False.
+       tracer (str): Which mechanism captures the graph that ``backend`` compiles.
+
+        - "dynamo" (default) uses TorchDynamo, i.e. bytecode analysis with guards,
+          graph breaks and automatic recompilation.
+
+        - "make_fx" bypasses TorchDynamo and traces the function with
+          ``torch.fx.experimental.proxy_tensor.make_fx`` on its first call using
+          the real arguments, then hands the resulting ATen-level graph to
+          ``backend``. This is experimental: there are no guards or
+          recompilation, so the graph captured on the first call is reused for
+          every subsequent call, and ``fullgraph`` is ignored. ``dynamic=True``
+          traces with backed symbolic shapes and produces a single dynamic
+          kernel; otherwise shapes are specialized to the first call. Per-dim
+          ``torch._dynamo.mark_dynamic`` (backed) and ``mark_unbacked``
+          (unbacked) annotations on the input tensors are honored regardless of
+          ``dynamic``.
 
     Example::
 
@@ -3158,6 +3283,11 @@ def compile(
         raise RuntimeError(
             "torch.compile is not supported on Python < 3.13.3 built with GIL disabled. "
             "Please use Python 3.13.3+."
+        )
+
+    if tracer not in ("dynamo", "make_fx"):
+        raise RuntimeError(
+            f'Unknown tracer {tracer!r}, expected one of "dynamo" or "make_fx".'
         )
 
     if backend is None:
@@ -3196,6 +3326,7 @@ def compile(
                 disable=disable,
                 recompile_limit=recompile_limit,
                 isolate_recompiles=isolate_recompiles,
+                tracer=tracer,
                 dynamic_shapes=dynamic_shapes,
             )
 
@@ -3246,6 +3377,11 @@ def compile(
             backend = _TorchCompileInductorWrapper(mode, options, dynamic, name)
     else:
         backend = _TorchCompileWrapper(backend, mode, options, dynamic)
+
+    if tracer == "make_fx":
+        if disable:
+            return model
+        return _MakeFxTracerWrapper(model, backend, dynamic)
 
     return torch._dynamo.optimize(
         backend=backend,
