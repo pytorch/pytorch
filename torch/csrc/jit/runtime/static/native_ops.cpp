@@ -1102,7 +1102,7 @@ c10::intrusive_ptr<Future> createFutureTypeFromGraphOutput(
 /*
   prim::fork forks the execution of a subgraph. It returns a future on which
   the corresponding aten::wait op waits until future is marked complete
-  Current implementation creates a instance of StaticModule uses it to
+  Current implementation creates an instance of StaticModule uses it to
   create StaticRuntime instances on the fly during runtime to handle the
   execution of forked subgraph. Async execution is handled by
   aten::ParallelThreadPoolNative threadpool.
@@ -1489,7 +1489,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
           std::stringstream ss;
           ss << "Cannot input a tensor of type " << tensor.scalar_type()
              << " as an integral argument";
-          throw std::runtime_error(ss.str());
+          throw std::runtime_error(std::move(ss).str());
         }
         pnode->Output(0) = at::native::item(tensor).toInt();
       };

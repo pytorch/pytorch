@@ -22,7 +22,10 @@ from torch.distributed.tensor._op_schema import (
     RuntimeSchemaInfo,
     TupleStrategy,
 )
-from torch.distributed.tensor._ops._matrix_ops import mm_single_dim_strategy
+from torch.distributed.tensor._ops._matrix_ops import (
+    mm_single_dim_strategy,
+    scaled_dot_product_efficient_attention_single_dim_strategy,
+)
 from torch.distributed.tensor._ops._pointwise_ops import (
     _BINARY_ADDITIVE_RULES,
     _common_pointwise_single_dim_strategy,
@@ -372,9 +375,20 @@ class TestExpandPlaceholder(TestCase):
             self.assertIsInstance(strategy, OpStrategy)
             return strategy
 
-        # Note: using sizes that are multiples of mesh sizes so every sharding option is valid,
-        # (S1, S2, Psum, R) ** mesh.ndim
-        expected_num_strategies = 4**3
+        # Sizes are multiples of mesh dims so every shard option is valid.
+        # Per mesh dim: 3 non-partial (S1,S2,R) + 4 partial rules
+        # (1 Psum, 1 Pavg, 1 Pmax, 1 Pmin). S0 is excluded because cat dim 0
+        # needs redistribution. Mixed-partial filter allows Psum+Pavg to
+        # coexist but rejects other mixes. By inclusion-exclusion on a 3D mesh
+        # (n=3 non-partial):
+        #   no partials:    3^3                                    = 27
+        #   Psum only:      (3+1)^3 - 3^3                         = 37
+        #   Pavg only:      (3+1)^3 - 3^3                         = 37
+        #   Pmax only:      (3+1)^3 - 3^3                         = 37
+        #   Pmin only:      (3+1)^3 - 3^3                         = 37
+        #   Psum+Pavg mix:  (3+1+1)^3 - 2 * (3+1)^3 + 3^3        = 24
+        #   total:                                                 = 199
+        expected_num_strategies = 199
         # Test Replicate + Shard gives Shard
         inputs = [torch.empty((8, 8, 8))] * 2
         placements = [
@@ -993,6 +1007,72 @@ class TestExpandPlaceholder(TestCase):
 
             self.assertEqual(len(op_spec.input_specs), 1, "Should have 1 input tensor")
 
+    def test_sdpa_efficient_attention_preserves_none_scalar_outputs(self):
+        mesh = DeviceMesh("cpu", mesh=torch.arange(4).reshape(2, 2))
+
+        op = torch.ops.aten._scaled_dot_product_efficient_attention.default
+        q = torch.empty((4, 4, 8, 16), device="meta")
+        outputs = op(q, q, q, None, True)
+        output_metas = tuple(TensorMeta(t.shape, t.stride(), t.dtype) for t in outputs)
+
+        input_meta = TensorMeta(q.shape, q.stride(), q.dtype)
+        input_spec = DTensorSpec(
+            mesh,
+            (Replicate(), Shard(1)),
+            tensor_meta=input_meta,
+        )
+        input_strategy = OpStrategy([OpSpec(input_spec)])
+        op_schema = OpSchema(
+            op=op,
+            args_schema=(input_strategy,) * 3 + (None, True),
+            kwargs_schema={},
+        )
+
+        expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
+            mesh,
+            op_schema,
+            _SingleDimStrategyInfo(
+                scaled_dot_product_efficient_attention_single_dim_strategy
+            ),
+            output_metas,
+        )
+        strategy = expanded_strategy_fn(
+            op_schema.op,
+            op_schema.args_meta,
+            op_schema.kwargs_meta,
+        )
+
+        for op_spec in strategy.strategies:
+            output_specs = op_spec.output_specs
+            self.assertIsInstance(output_specs, tuple)
+            self.assertEqual(output_specs[2:4], (None, None))
+
+    def test_expand_rejects_mixed_none_output_placements(self):
+        mesh = DeviceMesh("cpu", mesh=torch.arange(4).reshape(2, 2))
+        meta = TensorMeta(torch.Size([8, 8]), (8, 1), torch.float32)
+        input_spec = DTensorSpec(
+            mesh,
+            (Replicate(), Replicate()),
+            tensor_meta=meta,
+        )
+        op_schema = OpSchema(
+            op=torch.ops.aten.add.Tensor,
+            args_schema=(OpStrategy([OpSpec(input_spec)]),),
+            kwargs_schema={},
+        )
+
+        with self.assertRaisesRegex(AssertionError, "mixes None with placements"):
+            expand_to_full_mesh_op_strategy(
+                mesh,
+                op_schema,
+                [
+                    [Replicate(), Replicate()],
+                    [None, Replicate()],
+                ],
+                output_tensor_meta=meta,
+                input_index=1,
+            )
+
     def test_inplace_op_partial_input_raises_clear_error(self):
         """Test that inplace ops with Partial input raise a clear error.
 
@@ -1107,7 +1187,7 @@ class TestExpandPlaceholder(TestCase):
                 self.assertEqual(
                     partial_reduce_ops,
                     {"sum", "avg"},
-                    f"Found invalid mixed partials: {partial_reduce_ops}",
+                    lambda msg: f"{msg}\nFound invalid mixed partials: {partial_reduce_ops}",
                 )
 
         # Verify that homogeneous partial strategies ARE included
@@ -1594,7 +1674,7 @@ class TestDijkstraExpandSingleDimStrategy(TestCase):
         self.assertEqual(
             missing,
             set(),
-            f"PQ search missed {len(missing)} strategies reachable by full expansion",
+            lambda msg: f"{msg}\nPQ search missed {len(missing)} strategies reachable by full expansion",
         )
 
     def test_single_dim_transition_reachability(self):
@@ -1685,7 +1765,7 @@ class TestDijkstraExpandSingleDimStrategy(TestCase):
                     self.assertEqual(
                         visited,
                         all_placements,
-                        f"input_idx={input_idx}, mesh_dim={mesh_dim}: "
+                        lambda msg: f"{msg}\ninput_idx={input_idx}, mesh_dim={mesh_dim}: "
                         f"from {start}, unreachable: {all_placements - visited}",
                     )
 

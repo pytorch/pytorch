@@ -235,7 +235,7 @@ def split_by_tags(
                 f"order={comp.order} and max={mx}"
             )
 
-        # Map a input of `node` to nodes in the component's graph.
+        # Map an input of `node` to nodes in the component's graph.
         def remap_func(x: torch.fx.Node) -> torch.fx.Node:
             # If input is a get_attr node, copy it to current component's graph.
             # Returns the get_attr node in current component's graph.

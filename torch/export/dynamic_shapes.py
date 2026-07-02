@@ -723,7 +723,12 @@ def _tree_map_with_path(
         raise
 
 
-def _signature(f):
+_DynamicShapesSpec = dict[str, Any] | tuple[Any, ...] | list[Any]
+
+
+def _signature(
+    f: ExportedProgram | torch.nn.Module | Callable[..., Any],
+) -> inspect.Signature:
     if isinstance(f, ExportedProgram):
         f = f.module()
     return (
@@ -733,25 +738,57 @@ def _signature(f):
     )
 
 
-def _combine_args(f, args, kwargs) -> dict[str, Any]:
-    # combine args and kwargs following the signature of f, as it happens
-    # in the body of f when called with *args, **kwargs
-    signature = _signature(f)
+def _combine_args_from_signature(
+    signature: inspect.Signature,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any] | None,
+) -> dict[str, Any]:
     kwargs = kwargs if kwargs is not None else {}
     return signature.bind(*args, **kwargs).arguments
+
+
+def _combine_args(
+    f: ExportedProgram | torch.nn.Module | Callable[..., Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any] | None,
+) -> dict[str, Any]:
+    # combine args and kwargs following the signature of f, as it happens
+    # in the body of f when called with *args, **kwargs
+    return _combine_args_from_signature(_signature(f), args, kwargs)
 
 
 _MISSING = object()
 
 
-def _var_keyword_param_name(signature) -> str | None:
+def _var_keyword_param_name(signature: inspect.Signature) -> str | None:
     for name, param in signature.parameters.items():
         if param.kind == inspect.Parameter.VAR_KEYWORD:
             return name
     return None
 
 
-def _colliding_variadic_kwarg_names(signature, args, var_kwargs) -> list[str]:
+def _variadic_kwargs_info(
+    f: ExportedProgram | torch.nn.Module | Callable[..., Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any] | None,
+) -> tuple[inspect.Signature, dict[str, Any], str | None, dict[str, Any]]:
+    signature = _signature(f)
+    combined_args = _combine_args_from_signature(signature, args, kwargs)
+    var_keyword_name = _var_keyword_param_name(signature)
+    if var_keyword_name is None or var_keyword_name not in combined_args:
+        return signature, combined_args, var_keyword_name, {}
+
+    var_kwargs = combined_args[var_keyword_name]
+    if not isinstance(var_kwargs, dict):
+        return signature, combined_args, var_keyword_name, {}
+    return signature, combined_args, var_keyword_name, var_kwargs
+
+
+def _colliding_variadic_kwarg_names(
+    signature: inspect.Signature,
+    args: tuple[Any, ...],
+    var_kwargs: dict[str, Any],
+) -> list[str]:
     positional_names = set()
     arg_i = 0
     for param in signature.parameters.values():
@@ -759,7 +796,7 @@ def _colliding_variadic_kwarg_names(signature, args, var_kwargs) -> list[str]:
             break
         if param.kind == inspect.Parameter.VAR_POSITIONAL:
             positional_names.update(
-                f"{param.name}_{i}" for i, _ in enumerate(args[arg_i:])
+                f"{param.name}_{i}" for i in range(len(args) - arg_i)
             )
             break
         if param.kind in {
@@ -773,23 +810,23 @@ def _colliding_variadic_kwarg_names(signature, args, var_kwargs) -> list[str]:
     return sorted(set(var_kwargs) & positional_names)
 
 
-def _normalize_dynamic_shapes(dynamic_shapes, f, args, kwargs):
+def _normalize_dynamic_shapes(
+    dynamic_shapes: _DynamicShapesSpec | None,
+    f: ExportedProgram | torch.nn.Module | Callable[..., Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any] | None,
+) -> _DynamicShapesSpec | None:
     """
     Normalize call-like dynamic shape specs for **kwargs to the signature-shaped
     structure used by the rest of dynamic shapes processing.
     """
-    if dynamic_shapes is None or len(dynamic_shapes) == 0:
+    if not dynamic_shapes:
         return dynamic_shapes
 
-    kwargs = kwargs if kwargs is not None else {}
-    signature = _signature(f)
-    combined_args = _combine_args(f, args, kwargs)
-    var_keyword_name = _var_keyword_param_name(signature)
-    if var_keyword_name is None or var_keyword_name not in combined_args:
-        return dynamic_shapes
-
-    var_kwargs = combined_args[var_keyword_name]
-    if not isinstance(var_kwargs, dict) or not var_kwargs:
+    signature, combined_args, var_keyword_name, var_kwargs = _variadic_kwargs_info(
+        f, args, kwargs
+    )
+    if var_keyword_name is None or not var_kwargs:
         return dynamic_shapes
 
     from torch._dynamo.exc import UserError, UserErrorType
@@ -852,13 +889,19 @@ def _normalize_dynamic_shapes(dynamic_shapes, f, args, kwargs):
     return result
 
 
-def _combine_args_for_tracing(f, args, kwargs, dynamic_shapes):
-    if dynamic_shapes is None or len(dynamic_shapes) == 0:
+def _combine_args_for_tracing(
+    f: ExportedProgram | torch.nn.Module | Callable[..., Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any] | None,
+    dynamic_shapes: Any,
+) -> tuple[dict[Any, Any], Any]:
+    if not dynamic_shapes:
         return _combine_args(f, args, kwargs), dynamic_shapes
 
-    signature = _signature(f)
     kwargs = kwargs if kwargs is not None else {}
-    combined_args = _combine_args(f, args, kwargs)
+    signature, combined_args, var_keyword_name, var_kwargs = _variadic_kwargs_info(
+        f, args, kwargs
+    )
     if isinstance(dynamic_shapes, (tuple, list)):
         dynamic_shapes_by_name = dict(zip(combined_args, dynamic_shapes))
     else:
@@ -866,11 +909,6 @@ def _combine_args_for_tracing(f, args, kwargs, dynamic_shapes):
 
     if not isinstance(dynamic_shapes_by_name, dict):
         return combined_args, dynamic_shapes
-
-    var_keyword_name = _var_keyword_param_name(signature)
-    var_kwargs = (
-        combined_args.get(var_keyword_name, {}) if var_keyword_name is not None else {}
-    )
 
     traced_args = []
     traced_dynamic_shapes = []
@@ -898,17 +936,12 @@ def _combine_args_for_tracing(f, args, kwargs, dynamic_shapes):
             arg_i += 1
 
     for key, arg in kwargs.items():
-        if (
-            var_keyword_name is not None
-            and isinstance(var_kwargs, dict)
-            and key in var_kwargs
-        ):
-            traced_args.append(arg)
+        traced_args.append(arg)
+        traced_names.append(key)
+        if var_keyword_name is not None and key in var_kwargs:
             traced_dynamic_shapes.append(dynamic_shapes_by_name[var_keyword_name][key])
         else:
-            traced_args.append(arg)
             traced_dynamic_shapes.append(dynamic_shapes_by_name[key])
-        traced_names.append(key)
 
     if isinstance(dynamic_shapes, dict) and len(set(traced_names)) == len(traced_names):
         return dict(zip(traced_names, traced_args)), dict(
@@ -921,6 +954,9 @@ class ShapesCollection:
     """
     Builder for dynamic_shapes.
     Used to assign dynamic shape specifications to tensors that appear in inputs.
+
+    Note: this produces the ``Dim``-based ``dynamic_shapes`` format only; it does
+    not (yet) emit the structured ``ShapesSpec`` / ``ParamsSpec`` API.
 
     This is useful particularly when :func:`args` is a nested input structure, and it's
     easier to index the input tensors, than to replicate the structure of :func:`args` in
@@ -1017,6 +1053,9 @@ class ShapesCollection:
 class AdditionalInputs:
     """
     Infers dynamic_shapes based on additional inputs.
+
+    Note: this produces the ``Dim``-based ``dynamic_shapes`` format only; it does
+    not (yet) emit the structured ``ShapesSpec`` / ``ParamsSpec`` API.
 
     This is useful particularly for deployment engineers who, on the one hand, may
     have access to ample testing or profiling data that can provide a fair sense of

@@ -252,14 +252,14 @@ void FunctionExtractor::DebugPrintScopeContexts(
       for (const auto& child_scope : it.second->children_) {
         ss << child_scope->name().toDisplayString() << ' ';
       }
-      return ss.str();
+      return std::move(ss).str();
     }());
     GRAPH_UPDATE("Node types: \n", [&]() {
       std::stringstream ss;
       for (auto n : it.second->nlist_) {
         ss << "  " << *n;
       }
-      return ss.str();
+      return std::move(ss).str();
     }());
     GRAPH_UPDATE("Node count: ", it.second->nlist_.size());
   }

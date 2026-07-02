@@ -35,6 +35,7 @@ from torch._guards import compile_context, CompileContext
 from torch._higher_order_ops.wrap import inductor_compiled_code
 from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
+    cudagraph_trees_clone_live_user_visible_outputs,
     CudagraphCachedInfo,
     CudagraphMetadata,
     get_input_storage_mutation_info,
@@ -135,14 +136,20 @@ def index_expanded_dims(t: torch.Tensor, expanded_dims: list[int]) -> torch.Tens
 # self-overlaps and a regular strided copy_ would be ambiguous: the overlap
 # pattern reproduces in dst because the underlying bytes are copied verbatim.
 def copy_strided_storage_(dst: torch.Tensor, src: torch.Tensor) -> None:
-    assert dst.dtype == src.dtype
-    assert tuple(dst.size()) == tuple(src.size())
-    assert tuple(dst.stride()) == tuple(src.stride())
+    if dst.dtype != src.dtype:
+        raise AssertionError(f"dtype mismatch: dst={dst.dtype} src={src.dtype}")
+    if tuple(dst.size()) != tuple(src.size()):
+        raise AssertionError(
+            f"size mismatch: dst={tuple(dst.size())} src={tuple(src.size())}"
+        )
+    if tuple(dst.stride()) != tuple(src.stride()):
+        raise AssertionError(
+            f"stride mismatch: dst={tuple(dst.stride())} src={tuple(src.stride())}"
+        )
     if dst.numel() == 0:
         return
-    assert all(st >= 0 for st in src.stride()), (
-        "copy_strided_storage_ requires non-negative strides"
-    )
+    if not (all(st >= 0 for st in src.stride())):
+        raise AssertionError("copy_strided_storage_ requires non-negative strides")
     elem = src.element_size()
     nbytes = (sum((s - 1) * st for s, st in zip(src.size(), src.stride())) + 1) * elem
     src_off = src.storage_offset() * elem
@@ -156,22 +163,26 @@ def maybe_handle_backward_generation(
     compiled_graph: CompiledFxGraph,
     boxed_forward_device_index: BoxedDeviceIndex | None,
 ) -> None:
-    assert compiled_graph.current_callable is not None
+    if compiled_graph.current_callable is None:
+        raise AssertionError("compiled_graph.current_callable must not be None")
     is_backward = compiled_graph.fx_kwargs["is_backward"]
 
     # See [Backward Generation Handling]
     # if cudagraph'd the forward and set the device, we need to let the cudagraph manager
-    # know we are we running the backward even if we will not run it in cudagraphs
+    # know we are running the backward even if we will not run it in cudagraphs
     if is_backward and config.triton.cudagraph_trees:
-        assert boxed_forward_device_index is not None
-        assert boxed_forward_device_index.value is not None
+        if boxed_forward_device_index is None:
+            raise AssertionError("boxed_forward_device_index must not be None")
+        if boxed_forward_device_index.value is None:
+            raise AssertionError("boxed_forward_device_index.value must not be None")
         compiled_graph_callable = compiled_graph.current_callable
 
         manager = torch._inductor.cudagraph_trees.get_manager(
             boxed_forward_device_index.value, create_if_none_exists=False
         )
         # should already exist from forward
-        assert manager is not None
+        if manager is None:
+            raise AssertionError("CUDAGraph manager must not be None")
 
         def compiled_artifact(new_inputs: list[Any]) -> Callable[..., Any]:
             manager.set_to_running_backward()  # type: ignore[union-attr]
@@ -211,8 +222,10 @@ def cudagraph_post_compile(
     """
     from torch._inductor.compiler_bisector import CompilerBisector
 
-    assert compiled_graph.current_callable is not None
-    assert compiled_graph.cudagraph_info is not None
+    if compiled_graph.current_callable is None:
+        raise AssertionError("compiled_graph.current_callable must not be None")
+    if compiled_graph.cudagraph_info is None:
+        raise AssertionError("compiled_graph.cudagraph_info must not be None")
     cached_info = compiled_graph.cudagraph_info
     cudagraph_fail_reasons = cached_info.cudagraph_fail_reasons
     is_inference = compiled_graph.fx_kwargs["is_inference"]
@@ -231,16 +244,19 @@ def cudagraph_post_compile(
 
         placeholders = cached_info.placeholders
         stack_traces = cached_info.stack_traces
-        assert stack_traces is not None, (
-            "stack_traces should not be None in cudagraph_post_compile"
-        )
+        if stack_traces is None:
+            raise AssertionError(
+                "stack_traces should not be None in cudagraph_post_compile"
+            )
+        user_visible_output_idxs = getattr(cached_info, "user_visible_output_idxs", ())
 
         prepare_cudagraph_post_compile(
             compiled_graph, example_inputs, boxed_forward_device_index
         )
 
         current_callable = compiled_graph.current_callable
-        assert current_callable is not None
+        if current_callable is None:
+            raise AssertionError("current_callable must not be None")
         # Filter to only tensor constants (exclude opaque value type classes)
         tensor_constants = {
             k: v for k, v in constants.items() if isinstance(v, torch.Tensor)
@@ -255,6 +271,8 @@ def cudagraph_post_compile(
             constants=tuple(tensor_constants.values()),
             placeholders=placeholders,
             mutated_input_idxs=tuple(compiled_graph.mutated_input_idxs),
+            kernel_free_cudagraph=compiled_graph.kernel_free_cudagraph,
+            user_visible_output_idxs=tuple(user_visible_output_idxs),
         )
 
         policy = config.cudagraph_policy
@@ -299,7 +317,7 @@ def cudagraph_partition_post_compile(
     boxed_forward_device_index: BoxedDeviceIndex | None,
 ) -> None:
     """
-    Cudagraphify each partition functions, which first prepares the necessary
+    Cudagraphify each partition function, which first prepares the necessary
     metadata and then applies the cudagraphify function to each partition.
 
     Assuming all partition functions are cudagraphified and share the same order
@@ -313,7 +331,8 @@ def cudagraph_partition_post_compile(
         log_cudagraph_skip_and_bump_counter("skipping cudagraphs due to bisector")
         return
 
-    assert compiled_graph.cudagraph_info is not None
+    if compiled_graph.cudagraph_info is None:
+        raise AssertionError("compiled_graph.cudagraph_info must not be None")
     cudagraph_fail_reasons = compiled_graph.cudagraph_info.cudagraph_fail_reasons
 
     if (
@@ -326,8 +345,10 @@ def cudagraph_partition_post_compile(
         maybe_handle_backward_generation(compiled_graph, boxed_forward_device_index)
         return
 
-    assert compiled_graph.current_callable is not None
-    assert compiled_graph.recursively_apply_fns is not None
+    if compiled_graph.current_callable is None:
+        raise AssertionError("compiled_graph.current_callable must not be None")
+    if compiled_graph.recursively_apply_fns is None:
+        raise AssertionError("compiled_graph.recursively_apply_fns must not be None")
     is_inference = compiled_graph.fx_kwargs["is_inference"]
     is_backward = compiled_graph.fx_kwargs["is_backward"]
     static_input_idxs = OrderedSet(compiled_graph.fx_kwargs["static_input_idxs"] or ())
@@ -339,14 +360,18 @@ def cudagraph_partition_post_compile(
         k: v for k, v in constants.items() if isinstance(v, torch.Tensor)
     }
 
-    assert compiled_graph.cudagraph_info.stack_traces is not None, (
-        "stack_traces should not be None in cudagraph_partition_post_compile"
-    )
+    if compiled_graph.cudagraph_info.stack_traces is None:
+        raise AssertionError(
+            "stack_traces should not be None in cudagraph_partition_post_compile"
+        )
     graph_metadata = CudagraphMetadata(
         compiled_graph.cudagraph_info.placeholders,
         static_input_idxs,
         mutated_input_idxs,
         compiled_graph.cudagraph_info.stack_traces,
+        OrderedSet(
+            getattr(compiled_graph.cudagraph_info, "user_visible_output_idxs", ())
+        ),
         tensor_constants,
     )
 
@@ -376,6 +401,8 @@ def cudagraph_partition_post_compile(
             constants=tuple(partition_metadata.constants.values()),
             placeholders=partition_metadata.placeholders,
             mutated_input_idxs=tuple(partition_metadata.mutated_input_idxs),
+            kernel_free_cudagraph=compiled_graph.kernel_free_cudagraph,
+            user_visible_output_idxs=tuple(partition_metadata.user_visible_output_idxs),
         )
         cudagraphify_fns.append(cudagraphify_fn)
 
@@ -407,7 +434,8 @@ def maybe_realign_inputs(
             # FXIR) need the full wrapper.
             check_idxs = [i for i in inputs_to_check if i in mutated_inputs_idxs]
         if check_idxs:
-            assert compiled_graph.current_callable is not None
+            if compiled_graph.current_callable is None:
+                raise AssertionError("compiled_graph.current_callable must not be None")
             new_callable = align_inputs_from_check_idxs(
                 compiled_graph.current_callable,
                 check_idxs,
@@ -436,7 +464,8 @@ class CompiledFxGraphConstants:
     """
 
     def unwrap(self, g: CompiledFxGraph) -> dict[str, torch.Tensor | type]:
-        assert g.constants is not None
+        if g.constants is None:
+            raise AssertionError("g.constants must not be None")
         return {**g.constants, **g.opaque_value_type_classes}
 
 
@@ -499,6 +528,7 @@ class CompiledFxGraph(OutputCode):
     extern_libs_key: str | None
     inductor_provenance_mapping_str: str | None
     inductor_provenance_stack_traces_str: str | None
+    kernel_free_cudagraph: bool
 
     cudagraph_info: CudagraphCachedInfo | None
     partition_maps: list[GraphPartitionMap] | None
@@ -585,6 +615,7 @@ class CompiledFxGraph(OutputCode):
         self.opaque_value_type_classes = graph.opaque_value_type_classes
         self.output_strides = output_strides
         self.disabled_cudagraphs_reason = disabled_cudagraphs_reason
+        self.kernel_free_cudagraph = graph.kernel_free_cudagraph
         self.metrics_deltas = metrics_deltas
         self.counter_deltas = counter_deltas
         self.guards_expr = None
@@ -661,7 +692,10 @@ class CompiledFxGraph(OutputCode):
                 ]
                 output = output_node(gm)
                 # output args are tuple of first argument
-                assert len(output.args) == 1
+                if len(output.args) != 1:
+                    raise AssertionError(
+                        f"Expected output.args to have length 1, got {len(output.args)}"
+                    )
                 # Use stack traces captured on the output node before
                 # post-grad passes, which may strip stack_trace from
                 # individual arg nodes.
@@ -669,10 +703,18 @@ class CompiledFxGraph(OutputCode):
                     (arg.stack_trace if isinstance(arg, torch.fx.node.Node) else None)
                     for arg in output.args[0]  # type: ignore[union-attr]
                 ]
+                user_visible_output_idxs = (
+                    output.meta.get("user_visible_output_idxs", ())
+                    if cudagraph_trees_clone_live_user_visible_outputs()
+                    else ()
+                )
                 cudagraph_fail_reasons = [s for b, s in cudagraph_tests if not b]
                 placeholders = tuple(get_placeholder_info(gm.graph))
                 cudagraph_info = CudagraphCachedInfo(
-                    placeholders, stack_traces, cudagraph_fail_reasons
+                    placeholders,
+                    stack_traces,
+                    tuple(user_visible_output_idxs),
+                    cudagraph_fail_reasons,
                 )
 
         self.cudagraph_info = cudagraph_info
@@ -719,7 +761,8 @@ class CompiledFxGraph(OutputCode):
         )
 
     def __call__(self, inputs: Sequence[Any]) -> Any:
-        assert self.current_callable is not None
+        if self.current_callable is None:
+            raise AssertionError("self.current_callable must not be None")
 
         if (
             torch._inductor.debug.RECORD_GRAPH_EXECUTION
@@ -791,8 +834,10 @@ class CompiledFxGraph(OutputCode):
         """
         if config.graph_partition and _unstable_customized_partition_wrapper.wrapper:
             # Mechanically apply user-specified cudagraph wrappers without modification
-            assert self.recursively_apply_fns is not None
-            assert self.compiled_fn_runner is not None
+            if self.recursively_apply_fns is None:
+                raise AssertionError("self.recursively_apply_fns must not be None")
+            if self.compiled_fn_runner is None:
+                raise AssertionError("self.compiled_fn_runner must not be None")
             num_partitions = len(self.compiled_fn_runner.partitions)
             wrapper_metadatas = [
                 CUDAGraphWrapperMetadata(num_partitions, i)
@@ -807,8 +852,10 @@ class CompiledFxGraph(OutputCode):
             return
 
         set_tracing_context_output_strides(example_inputs, self)
-        assert graph_kwargs["cudagraphs"] is not None
-        assert graph_kwargs["is_backward"] is not None
+        if graph_kwargs["cudagraphs"] is None:
+            raise AssertionError("graph_kwargs['cudagraphs'] must not be None")
+        if graph_kwargs["is_backward"] is None:
+            raise AssertionError("graph_kwargs['is_backward'] must not be None")
         is_backward = graph_kwargs["is_backward"]
         cudagraphs: BoxedBool = graph_kwargs["cudagraphs"]
 
@@ -836,7 +883,10 @@ class CompiledFxGraph(OutputCode):
                 BoxedBool.disable(cudagraphs)
             else:
                 if is_backward:
-                    assert "boxed_forward_device_index" in graph_kwargs
+                    if "boxed_forward_device_index" not in graph_kwargs:
+                        raise AssertionError(
+                            "Expected 'boxed_forward_device_index' in graph_kwargs"
+                        )
                     boxed_forward_device_index = graph_kwargs[
                         "boxed_forward_device_index"
                     ]
@@ -1199,7 +1249,8 @@ class RegionalOutputCode(OutputCode):
         serialized_wrappers = []
         if isinstance(module, torch._dynamo.OptimizedModule):
             dynamo_ctx = module.dynamo_ctx
-            assert isinstance(dynamo_ctx, torch._dynamo.eval_frame.DisableContext)
+            if not isinstance(dynamo_ctx, torch._dynamo.eval_frame.DisableContext):
+                raise AssertionError(f"Expected DisableContext, got {type(dynamo_ctx)}")
             serialized_wrappers.append(
                 (
                     torch._dynamo.disable,
@@ -1207,7 +1258,8 @@ class RegionalOutputCode(OutputCode):
                 )
             )
             module = module._orig_mod
-        assert isinstance(module, torch.fx.GraphModule)
+        if not isinstance(module, torch.fx.GraphModule):
+            raise AssertionError(f"Expected torch.fx.GraphModule, got {type(module)}")
         return serialized_wrappers, module
 
     def post_compile(
@@ -1224,7 +1276,8 @@ class RegionalOutputCode(OutputCode):
         """
         if self._graph_module is not None:
             return
-        assert self._serialized_graph_module is not None
+        if self._serialized_graph_module is None:
+            raise AssertionError("self._serialized_graph_module must not be None")
         # Get fake mode from example inputs
         from torch._guards import detect_fake_mode
 
@@ -1239,7 +1292,8 @@ class RegionalOutputCode(OutputCode):
         from torch.fx._graph_pickler import GraphPickler
 
         gm = GraphPickler.loads(self._serialized_graph_module, fake_mode)
-        assert isinstance(gm, torch.fx.GraphModule)
+        if not isinstance(gm, torch.fx.GraphModule):
+            raise AssertionError(f"Expected torch.fx.GraphModule, got {type(gm)}")
         gm.recompile()
         for fn, kwargs in reversed(self._serialized_wrappers):
             gm = fn(gm, **kwargs)

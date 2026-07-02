@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import contextlib
+import functools
 import itertools
 import logging
 import os
@@ -46,6 +47,7 @@ from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import (
     CDNA2OrLater,
+    CDNA5OrLater,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_FP8_GROUPED_GEMM,
@@ -72,7 +74,6 @@ from torch.testing._internal.common_quantization import (
 )
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
-    IS_ARM64,
     IS_CI,
     IS_FBCODE,
     IS_MACOS,
@@ -89,7 +90,6 @@ from torch.testing._internal.common_utils import (
     skipIfXpu,
     TEST_MPS,
     TEST_WITH_ROCM,
-    xfailIf,
 )
 from torch.testing._internal.custom_tensor import CustomTensorPlainOut
 from torch.testing._internal.inductor_utils import (
@@ -121,6 +121,16 @@ def caching_allocator_disabled():
             yield
     else:
         yield
+
+
+def requires_autotune_at_compile_time(fn):
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        if config.triton.autotune_at_compile_time is False:
+            raise unittest.SkipTest("requires triton.autotune_at_compile_time=True")
+        return fn(self, *args, **kwargs)
+
+    return wrapper
 
 
 @contextlib.contextmanager
@@ -391,6 +401,30 @@ class AOTInductorTestsTemplate:
                 FileCheck().check(file_extension).run(code)
 
     def test_small_constant(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        example_inputs = (torch.randn(4, 4, device=self.device),)
+        with config.patch({"always_keep_tensor_constants": True}):
+            self.check_model(Model().to(self.device), example_inputs)
+
+    @unittest.skipIf(
+        not HAS_GPU or GPU_TYPE != "cuda" or TEST_WITH_ROCM,
+        "Pinned async constant copy is CUDA-only",
+    )
+    @patch.dict(
+        os.environ,
+        {
+            "AOTI_COPY_USE_PINNED_ASYNC": "1",
+            "AOTI_COPY_STAGE_BUFFER_BYTES": "1024",
+        },
+    )
+    def test_small_constant_pinned_async_copy(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -2033,8 +2067,6 @@ class AOTInductorTestsTemplate:
         with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
             self.check_model(Model(self.device), example_inputs)
 
-    @xfailIf(IS_ARM64)
-    # see https://github.com/pytorch/pytorch/issues/177254
     @skipIfNoFBGEMM
     def test_quanatized_int8_linear(self):
         class Model(torch.nn.Module):
@@ -2445,9 +2477,6 @@ class AOTInductorTestsTemplate:
         }
         self.check_model(Repro(), example_inputs, dynamic_shapes=spec)
 
-    @skipIfXpu(
-        msg="FlashAttentionForward headdim limitation on xpu - torch-xpu-ops: 2698"
-    )
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Some archs don't support flash SDPA"
     )
@@ -2704,11 +2733,11 @@ class AOTInductorTestsTemplate:
         model = CondModelWithViewAndLinear().to(device=self.device)
         exported_program = torch.export.export(model, example_input)
         program = exported_program.run_decompositions()
-        gm = ReplaceViewOpsWithViewCopyOpsPass()(program.graph_module).graph_module
+        program = program._transform_do_not_use(ReplaceViewOpsWithViewCopyOpsPass())
         with config.patch(
             {"max_autotune": True, "max_autotune_gemm_backends": "TRITON,ATEN"}
         ):
-            _ = torch._inductor.aot_compile(gm, example_input)
+            torch._inductor.aoti_compile_and_package(program)
 
     def test_cond_with_multiple_outputs(self):
         inputs = (
@@ -3345,11 +3374,11 @@ class AOTInductorTestsTemplate:
         Original PR: https://github.com/pytorch/pytorch/pull/139054
         """
         from torch.testing._internal.common_quantization import (
-            _static_reference_quantized_linear_module,
+            _static_quantized_linear_module,
         )
 
         example_inputs = (torch.randn(32, 16),)
-        model = _static_reference_quantized_linear_module(
+        model = _static_quantized_linear_module(
             N=15, K=16, bias=True, example_input=example_inputs[0]
         )
         model = torch.export.export(model, example_inputs, strict=True).module()
@@ -6040,7 +6069,8 @@ class AOTInductorTestsTemplate:
         config.triton.native_matmul, "different kernel name when native matmul"
     )
     @common_utils.parametrize("enable_kernel_profile", (True, False))
-    def test_aoti_profiler(self, enable_kernel_profile):
+    @common_utils.parametrize("enable_kernel_context_guard", (True, False))
+    def test_aoti_profiler(self, enable_kernel_context_guard, enable_kernel_profile):
         # basic addmm model
         class Model(torch.nn.Module):
             def __init__(self, n, k, device):
@@ -6068,15 +6098,26 @@ class AOTInductorTestsTemplate:
             if self.device == GPU_TYPE
             else "aoti_torch_cpu_addmm_out"
         )
-        with config.patch({"cpp.enable_kernel_profile": enable_kernel_profile}):
+        with config.patch(
+            {
+                "cpp.enable_kernel_profile": enable_kernel_profile,
+                "cpp.enable_kernel_context_guard": enable_kernel_context_guard,
+            }
+        ):
             _, code = run_and_get_cpp_code(
                 AOTIRunnerUtil.compile, model, example_inputs
             )
             shim_fn_codes = f'RAIIAtenRecordFunctionHandle .*\\("{kernel_calls}"'
             if enable_kernel_profile:
+                if enable_kernel_context_guard:
+                    FileCheck().check("KernelContextGuard").run(code)
+                else:
+                    FileCheck().check_not("KernelContextGuard").run(code)
                 FileCheck().check_regex(shim_fn_codes).run(code)
             else:
-                FileCheck().check_not("RAIIAtenRecordFunctionHandle").run(code)
+                FileCheck().check_not("RAIIAtenRecordFunctionHandle").check_not(
+                    "KernelContextGuard"
+                ).run(code)
 
             self.check_model(Model(N, K, self.device), example_inputs)
 
@@ -6531,6 +6572,38 @@ class AOTInductorTestsTemplate:
         with config.patch({"scalar_asserts": False}):
             AOTIRunnerUtil.run_multiple(model, [example_inputs, unexpected_inputs])
 
+    def test_multi_input_nonzero_slice_shared_dim(self):
+        # Regression: when multiple inputs share a dynamic batch dim and are
+        # sliced with the same nonzero result, the generated C++ guard code
+        # referenced symbolic variables that were replaced during constraint
+        # solving but never defined in the wrapper.
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(4, 4)
+
+            def forward(self, x, a, b, mask):
+                n = torch.nonzero(mask).shape[0]
+                return self.linear(x[n:]) + a[n:] + b[n:]
+
+        B = Dim("B", min=1, max=1024)
+        dynamic_shapes = {
+            "x": {0: B},
+            "a": {0: B},
+            "b": {0: B},
+            "mask": {0: B},
+        }
+        example_inputs = (
+            torch.randn(8, 4, device=self.device),
+            torch.randn(8, 4, device=self.device),
+            torch.randn(8, 4, device=self.device),
+            torch.tensor(
+                [True, True, False, True, False, False, True, True],
+                device=self.device,
+            ),
+        )
+        self.check_model(Model(), example_inputs, dynamic_shapes=dynamic_shapes)
+
     def test_none_args_aot_codegen(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
@@ -6582,6 +6655,9 @@ class AOTInductorTestsTemplate:
         self.check_model(sin_triton, not_none_inputs)
 
     @skipIfRocm  # RoCM does not support the config block size in test suite.
+    @skipIfXpu(
+        msg="SYCL work-item index overflow issue when block sizes are used in this test."
+    )
     def test_autotune_int64_user_defined_triton_kernel(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
@@ -6722,6 +6798,30 @@ class AOTInductorTestsTemplate:
         self.assertEqual(expect_res, true_res)
         all_ops = [event.key for event in prof.key_averages()]
         self.assertTrue(not any("aten::contiguous" in op for op in all_ops))
+
+    @requires_multigpu()
+    def test_cuda_to_cuda_device_copy(self):
+        if self.device != GPU_TYPE or GPU_TYPE != "cuda" or TEST_WITH_ROCM:
+            raise unittest.SkipTest("This test requires CUDA")
+
+        device0 = torch.device(type=GPU_TYPE, index=0)
+        device1 = torch.device(type=GPU_TYPE, index=1)
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x, x.to(device1)
+
+        model = Model().to(device0)
+        x = torch.randn(10, device=device0)
+        package_path = AOTIRunnerUtil.compile(model, (x,))
+        aoti_model = torch._inductor.aoti_load_package(package_path, device_index=0)
+
+        expected = model(x)
+        actual = aoti_model(x)
+
+        self.assertEqual(actual[0].device, device0)
+        self.assertEqual(actual[1].device, device1)
+        self.assertEqual(actual, expected)
 
     def test_so_without_weight(self):
         class Model(torch.nn.Module):
@@ -7641,6 +7741,8 @@ class AOTInductorTestsTemplate:
             raise unittest.SkipTest("requires GPU")
 
         if TEST_WITH_ROCM:
+            if CDNA5OrLater():
+                self.skipTest("int4 mm not yet implemented for gfx1250 (needs WMMA)")
             if not CDNA2OrLater():
                 self.skipTest("_int4_mm is supported only for CDNA2 or later")
 
@@ -7678,6 +7780,8 @@ class AOTInductorTestsTemplate:
             raise unittest.SkipTest("requires Intel GPU")
 
         if TEST_WITH_ROCM:
+            if CDNA5OrLater():
+                self.skipTest("int4 mm not yet implemented for gfx1250 (needs WMMA)")
             if not CDNA2OrLater():
                 self.skipTest("_int4_mm is supported only for CDNA2 or later")
 
@@ -7781,6 +7885,7 @@ class AOTInductorTestsTemplate:
             )
 
     @runOnRocm
+    @requires_autotune_at_compile_time
     def test_rocm_triton_autotuning(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
@@ -7822,6 +7927,7 @@ class AOTInductorTestsTemplate:
         ):
             torch._export.aot_compile(Model(), (x, y, m))
 
+    @requires_autotune_at_compile_time
     def test_triton_autotuning(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
@@ -7869,6 +7975,7 @@ class AOTInductorTestsTemplate:
                 f"grid_0={actual_grid} not in expected {expected_grids} from kernel configs",
             )
 
+    @requires_autotune_at_compile_time
     def test_triton_mutated_autotuning(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
@@ -7928,6 +8035,7 @@ class AOTInductorTestsTemplate:
             )
 
     @patch.dict(os.environ, {"TRITON_DEBUG": "1"})
+    @requires_autotune_at_compile_time
     def test_triton_dynamic_launcher_grid(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
@@ -7973,6 +8081,7 @@ class AOTInductorTestsTemplate:
             self.check_model(Model(), example_inputs, dynamic_shapes=dynamic_shapes)
 
     @patch.dict(os.environ, {"TRITON_DEBUG": "1"})
+    @requires_autotune_at_compile_time
     def test_triton_dynamic_launcher_grid_infer_from_tensor(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
@@ -8030,6 +8139,30 @@ class AOTInductorTestsTemplate:
             "x": {0: dim_even},
         }
         self.check_model(Model(), example_inputs, dynamic_shapes=dynamic_shapes)
+
+    def test_composed_dynamic_size_integer_symbol_recovery(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x.unflatten(0, (-1, 1496)).sum(dim=1)
+
+        model = Model().to(self.device)
+        dynamic_shapes = {
+            "x": {0: 1496 * Dim("batch", min=1, max=8)},
+        }
+        compile_inputs = (torch.ones(4 * 1496, 2, device=self.device),)
+        package_path, code = run_and_get_cpp_code(
+            AOTIRunnerUtil.compile,
+            model,
+            compile_inputs,
+            dynamic_shapes=dynamic_shapes,
+        )
+        self.assertIn("c10::div_floor_integer", code)
+        self.assertNotIn("(1.0/1496.0)", code)
+
+        optimized = torch._inductor.aoti_load_package(package_path)
+        for batch in (1, 2, 3, 4, 8):
+            inputs = (torch.ones(batch * 1496, 2, device=self.device),)
+            self.assertEqual(optimized(*inputs), model(*inputs))
 
     def test_boolean_indexing(self):
         class Model(torch.nn.Module):
@@ -8587,6 +8720,7 @@ class AOTInductorTestsTemplate:
         self.check_model(Model(), example_inputs, move_model_to_device=False)
 
     @requires_gpu
+    @requires_autotune_at_compile_time
     def test_constant_int_kernel_input(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
@@ -8646,7 +8780,54 @@ torch._inductor.aoti_load_package("{model_path}")
             self.assertEqual(
                 result.returncode,
                 0,
-                f"Failed to load package in subprocess: {result.stdout + result.stderr}",
+                lambda msg: f"{msg}\nFailed to load package in subprocess: {result.stdout + result.stderr}",
+            )
+
+    @unittest.skipIf(
+        IS_FBCODE, "Subprocess spawning doesn't work in fbcode Buck environment"
+    )
+    def test_python_custom_op_load_package_error_in_fresh_subprocess(self):
+        if self.device != "cpu":
+            raise unittest.SkipTest("Only needs one no-Python custom op coverage")
+
+        @torch.library.custom_op("aoti_python_custom_ops::custom_add", mutates_args=())
+        def custom_add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            return x + y
+
+        @custom_add.register_fake
+        def _(x, y):
+            return x + y
+
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.ops.aoti_python_custom_ops.custom_add(x, y)
+
+        example_inputs = (torch.randn(2, 3), torch.randn(2, 3))
+        exported = torch.export.export(Model(), example_inputs)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            model_path = pathlib.Path(tmpdir) / "model.pt2"
+            torch._inductor.aoti_compile_and_package(
+                exported, package_path=str(model_path)
+            )
+
+            script = f"""
+import torch
+
+torch._inductor.aoti_load_package("{model_path}")
+"""
+            result = subprocess.run(
+                [sys.executable, "-c", script], capture_output=True, text=True
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "Could not find schema for aoti_python_custom_ops::custom_add. "
+                "Custom operators created via torch.library.custom_op cannot be run "
+                "via AOTI without Python environment. Consider using C++ "
+                "TORCH_LIBRARY APIs. See the Custom Operators Landing Page "
+                "https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html "
+                "for more details.",
+                result.stdout + result.stderr,
             )
 
     @unittest.skip(
@@ -8947,6 +9128,9 @@ GPU_TEST_FAILURES = {
     "test_quantized_linear": fail_gpu(("cuda", "xpu")),
     "test_quanatized_int8_linear": fail_gpu(("cuda", "xpu")),
     "test_quantized_linear_bias_none": fail_gpu(("cuda", "xpu")),
+    # This test forces lazy dual-wrapper mode; torch.cond support for that
+    # mode is covered by AOTInductorTestDualWrapper skips below.
+    "test_cond_symint_input_disable_one_pass": fail_gpu(("cuda", "xpu"), is_skip=True),
 }
 
 MPS_TEST_FAILURES = {
@@ -9049,6 +9233,40 @@ copy_tests(
     AOTInductorTestABICompatibleGpu,
     GPU_TYPE,
     GPU_TEST_FAILURES,
+)
+
+
+# Lazy-autotune-mode-specific failures go here. Inherits regular GPU failures.
+GPU_LAZY_AUTOTUNE_TEST_FAILURES = {
+    **GPU_TEST_FAILURES,
+}
+
+
+@unittest.skipIf(sys.platform == "darwin", "No CUDA on MacOS")
+class AOTInductorTestDualWrapper(TestCase):
+    """Run AOTInductor tests with autotune_at_compile_time=False, exercising
+    the lazy Triton compile + dual-wrapper-mode codegen path."""
+
+    device = GPU_TYPE
+    device_type = GPU_TYPE
+    check_model = check_model
+    check_model_with_multiple_inputs = check_model_with_multiple_inputs
+    code_check_count = code_check_count
+    allow_stack_allocation = False
+    use_minimal_arrayref_interface = False
+
+    def setUp(self):
+        super().setUp()
+        ctx = torch._inductor.config.patch("triton.autotune_at_compile_time", False)
+        ctx.__enter__()
+        self.addCleanup(ctx.__exit__, None, None, None)
+
+
+copy_tests(
+    AOTInductorTestsTemplate,
+    AOTInductorTestDualWrapper,
+    GPU_TYPE,
+    GPU_LAZY_AUTOTUNE_TEST_FAILURES,
 )
 
 

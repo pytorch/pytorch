@@ -52,6 +52,21 @@ def _warn_once(msg, category=UserWarning, stacklevel=2):
         warn(msg, category=category, stacklevel=stacklevel)
 
 
+def _parse_custom_profiler_config(
+    experimental_config: _ExperimentalConfig | None,
+) -> dict[str, Any]:
+    if experimental_config is None:
+        return {}
+    raw = getattr(experimental_config, "custom_profiler_config", None)
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return {"backend": raw}
+    return parsed if isinstance(parsed, dict) else {}
+
+
 class _NumpyEncoder(json.JSONEncoder):
     """
     Json encoder for numpy types (np.int, np.float, np.array etc.)
@@ -255,6 +270,33 @@ class _KinetoProfile:
         # user-defined metadata to be amended to the trace
         self.preset_metadata: dict[str, str] = {}
         self._trace_metadata: dict[str, str] = {}
+        self._custom_profiler_config = _parse_custom_profiler_config(
+            self.experimental_config
+        )
+        self._use_cupti_monitor = self._custom_profiler_config.get(
+            "backend"
+        ) == "cupti_monitor" or bool(self._custom_profiler_config.get("cupti_monitor"))
+        # The ProfilerObserver driving the shared CUPTI monitor this session; window opened
+        # at start, closed at stop (_monitor_window_id), exported by export_chrome_trace.
+        self._cupti_profiler_observer: Any = None
+        self._monitor_window_id: int | None = None
+        # cupti_monitor exports synchronously by default (like the stock profiler).
+        # {"cupti_monitor_async_export": true} hands the merge+write off-thread, joined by
+        # wait_for_exports; cupti_monitor-only, rejected elsewhere.
+        self._cupti_async_export = False
+        if self._use_cupti_monitor:
+            if ProfilerActivity.CPU not in self.activities:
+                raise ValueError(
+                    "cupti_monitor profiler backend currently requires CPU activity"
+                )
+            self._cupti_async_export = bool(
+                self._custom_profiler_config.get("cupti_monitor_async_export", False)
+            )
+        elif "cupti_monitor_async_export" in self._custom_profiler_config:
+            raise ValueError(
+                "cupti_monitor_async_export is only supported with the cupti_monitor "
+                "backend"
+            )
 
     def start(self) -> None:
         self.prepare_trace()
@@ -275,9 +317,10 @@ class _KinetoProfile:
                 "To keep events across cycles, set acc_events=True."
             )
         if (self.profiler is None) or (not self.acc_events):
+            use_device = None if self._use_cupti_monitor else self.use_device
             self.profiler = prof.profile(
                 use_cpu=(ProfilerActivity.CPU in self.activities),
-                use_device=self.use_device,
+                use_device=use_device,
                 record_shapes=self.record_shapes,
                 with_flops=self.with_flops,
                 profile_memory=self.profile_memory,
@@ -292,6 +335,23 @@ class _KinetoProfile:
                 if self.activity_filters
                 else None,
             )
+        if self._use_cupti_monitor:
+            from torch.profiler._cupti.observers.profiler import ProfilerObserver
+
+            self._monitor_trace_window = None
+            # Constructing the observer registers it with the shared monitor and starts
+            # collection. cuda_sync events are opt-in via the config, matching kineto's flag.
+            self._cupti_profiler_observer = ProfilerObserver(
+                enable_cuda_sync=bool(
+                    self._custom_profiler_config.get("enable_cuda_sync_events")
+                ),
+                # Synchronous export finalizes on the calling thread, so skip the poll thread.
+                defer_export=self._cupti_async_export,
+            )
+            # Publish the observer so record_function routes annotations to it. The reference
+            # lives in torch.autograd (not the cupti package), so record_function never
+            # imports the cupti chain on a non-cupti run.
+            prof._set_active_cupti_profiler_observer(self._cupti_profiler_observer)
         self.profiler._prepare_trace()
 
     def start_trace(self) -> None:
@@ -300,6 +360,10 @@ class _KinetoProfile:
         if self.profiler is None:
             raise AssertionError("Profiler must be initialized before starting trace")
         self.profiler._start_trace()
+        if self._use_cupti_monitor and self._cupti_profiler_observer is not None:
+            # Open the trace window here (stamps the start boundary, native clock, no
+            # device sync); records before this are excluded from the window.
+            self._cupti_profiler_observer.open_window()
 
         if self.profile_memory:
             self.add_metadata_json("profile_memory", "1")
@@ -346,6 +410,13 @@ class _KinetoProfile:
             self.execution_trace_observer.stop()
         if self.profiler is None:
             raise AssertionError("Profiler must be initialized before stopping trace")
+        if self._use_cupti_monitor:
+            # Unpublish the observer (record_function stops routing here) and close the trace
+            # window (end boundary, native clock, no device sync), queuing it for deferred
+            # export; the observer is kept alive past stop for the async write.
+            prof._set_active_cupti_profiler_observer(None)
+            if self._cupti_profiler_observer is not None:
+                self._monitor_window_id = self._cupti_profiler_observer.close_window()
         self.profiler.__exit__(None, None, None)
 
     def export_chrome_trace(self, path: str, use_python_export: bool = False):
@@ -357,6 +428,41 @@ class _KinetoProfile:
             raise AssertionError(
                 "Profiler must be initialized before exporting chrome trace"
             )
+        if self._use_cupti_monitor:
+            obs = self._cupti_profiler_observer
+            if obs is None or not obs.available or self._monitor_window_id is None:
+                # Nothing to export this cycle: the per-cycle ProfilerObserver didn't register
+                # with the CUPTI monitor (available is False -- the intermittent case), or its
+                # window wasn't opened/closed (window id None). Skip rather than crash -- a
+                # profiler-trace hiccup must not take down a training run -- and clean up below.
+                _warn_once(
+                    "CUPTI monitor observer unavailable; skipping chrome trace export"
+                )
+                # join() tears down the poll thread + monitor registration, which exist only
+                # when the observer registered (available). An unavailable observer never
+                # started either, so just drop the reference and let it be GC'd.
+                if obs is not None and obs.available:
+                    obs.join()
+                self._cupti_profiler_observer = None
+                self._monitor_window_id = None
+                return
+            # Capture the profiler's CPU-side trace (cheap, no device sync) and hand it + the
+            # output path to the observer. Async: the poller merges + writes `path` once the
+            # GPU records arrive; wait_for_exports() blocks for it.
+            fp = tempfile.NamedTemporaryFile(  # noqa: SIM115
+                "w+t", suffix=".json", delete=False
+            )
+            fp.close()
+            self.profiler.export_chrome_trace(fp.name, self._trace_metadata)
+            self._cupti_profiler_observer.set_export(
+                self._monitor_window_id, fp.name, path
+            )
+            if not self._cupti_async_export:
+                # Synchronous: finalize + write now, so `path` exists on return.
+                self._cupti_profiler_observer.join()
+                self._cupti_profiler_observer = None
+                self._monitor_window_id = None
+            return
         if use_python_export:
             self.profiler.export_chrome_trace(
                 path, self._trace_metadata, use_python_export=True
@@ -368,6 +474,26 @@ class _KinetoProfile:
                     fout.writelines(fin)
         else:
             self.profiler.export_chrome_trace(path, self._trace_metadata)
+
+    def wait_for_exports(self) -> None:
+        """Block until every deferred cupti_monitor export is written, then unregister.
+        No-op unless the cupti_monitor backend is active. Call on the training thread when
+        you need the file(s) on disk; the finalize force-flushes CUPTI (safe here)."""
+        if self._use_cupti_monitor and self._cupti_profiler_observer is not None:
+            self._cupti_profiler_observer.join()
+            self._cupti_profiler_observer = None
+            self._monitor_window_id = None
+
+    def take_pending_cupti_export(self) -> Any:
+        """Detach this cycle's cupti_monitor ProfilerObserver (with its unwritten window) so
+        the deferred export can be finalized OFF the training thread (call
+        ``obs.join(force=False)`` on a worker). None for non-cupti backends."""
+        if not self._use_cupti_monitor:
+            return None
+        obs = self._cupti_profiler_observer
+        self._cupti_profiler_observer = None
+        self._monitor_window_id = None
+        return obs
 
     def export_stacks(self, path: str, metric: str = "self_cpu_time_total"):
         """Save stack traces to a file
@@ -809,7 +935,7 @@ class profile(_KinetoProfile):
             # In this example with wait=1, warmup=1, active=2, repeat=1,
             # profiler will skip the first step/iteration,
             # start warming up on the second, record
-            # the third and the forth iterations,
+            # the third and the fourth iterations,
             # after which the trace will become available
             # and on_trace_ready (when set) is called;
             # the cycle repeats starting with the next step

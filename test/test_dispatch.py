@@ -950,7 +950,7 @@ CompositeImplicitAutograd[alias] (inactive): fn1 :: (Tensor _0) -> Tensor _0 [ b
         self.assertEqual(
             0,
             len(dangling_impls),
-            msg=f"Expect zero dangling impls, but found: {dangling_impls}",
+            msg=lambda msg: f"{msg}\nExpect zero dangling impls, but found: {dangling_impls}",
         )
 
     def test_find_dangling_impls_ext(self):
