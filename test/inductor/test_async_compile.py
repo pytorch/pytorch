@@ -2,6 +2,7 @@
 import multiprocessing
 import os
 import queue
+import sys
 import tempfile
 import textwrap
 import traceback
@@ -19,7 +20,7 @@ from torch._inductor.runtime.triton_heuristics import (
     generate_lookup_hash_from_source_code,
 )
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import fresh_cache
+from torch._inductor.utils import ensure_nv_universal_gemm_available, fresh_cache
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -271,6 +272,34 @@ class TestAsyncCompile(TestCase):
             AsyncCompile.wait_pool_ready()
             self.assertTrue(AsyncCompile._ready_future.done())
             self.assertTrue(AsyncCompile.use_process_pool())
+
+    def test_subprocess_pool_registers_multiprocessing_finalizer(self):
+        class FakeSubprocPool:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def shutdown(self):
+                pass
+
+        shutdown_compile_workers()
+        try:
+            with (
+                config.patch(worker_start_method="subprocess", compile_threads=2),
+                patch("torch._inductor.async_compile.SubprocPool", FakeSubprocPool),
+                patch(
+                    "torch._inductor.async_compile.multiprocessing.util.Finalize"
+                ) as finalize,
+            ):
+                pool = AsyncCompile.process_pool()
+
+                finalize.assert_called_once()
+                args, kwargs = finalize.call_args
+                self.assertIsNone(args[0])
+                self.assertIs(args[1].__self__, pool)
+                self.assertIs(args[1].__func__, FakeSubprocPool.shutdown)
+                self.assertEqual(kwargs, {"exitpriority": sys.maxsize})
+        finally:
+            shutdown_compile_workers()
 
     @requires_gpu()
     @requires_triton()
@@ -1309,6 +1338,146 @@ class TestCuteDSLSubprocessCompile(TestCase):
             if os.path.exists(sentinel_path):
                 os.unlink(sentinel_path)
 
+    @unittest.skipIf(
+        not ensure_nv_universal_gemm_available(),
+        "NVIDIA Universal GEMM (cutlass_api) library not available",
+    )
+    def test_nv_universal_gemm_subprocess_precompile_skips_bad_fork(self):
+        """NV Universal GEMM precompile skips compile in bad-fork workers."""
+        import json
+        import uuid
+
+        sentinel_name = f"nvgemm_bad_fork_precompile_{uuid.uuid4().hex[:8]}"
+        precompile_sentinel_path = os.path.join(tempfile.gettempdir(), sentinel_name)
+        compile_sentinel_path = f"{precompile_sentinel_path}_compile"
+
+        source = textwrap.dedent(f"""\
+            import json
+            import cutlass
+            import torch
+            import torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel as _nvgemm_mod
+            from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+                _nvgemm_precompile,
+            )
+            from torch._inductor.utils import _ensure_fp4_dtype_registered
+
+            _ensure_fp4_dtype_registered()
+
+            _KERNEL_NAME = "test_kernel_manifest"
+            _DISK_CACHE_CONFIG_KEY = (_KERNEL_NAME,)
+            _compiled_cache = {{}}
+            _disk_fn_cache = {{}}
+            _VARIANT_KWARGS = None
+            _ACC_TYPE = cutlass.Float32
+            _INPUT_PARAM_NAMES = ["in_ptr0", "in_ptr1"]
+
+            _PRECOMPILE_SENTINEL_PATH = {precompile_sentinel_path!r}
+            _COMPILE_SENTINEL_PATH = {compile_sentinel_path!r}
+
+            class _TestKernel:
+                def compile(self, args):
+                    with open(_COMPILE_SENTINEL_PATH, "w") as f:
+                        json.dump({{"called": True}}, f)
+                    raise AssertionError(
+                        "bad-fork NVGEMM precompile should not call kernel.compile"
+                    )
+
+            _nvgemm_mod._lookup_gemm_kernel = lambda kernel_name, **kwargs: _TestKernel()
+
+            def test_kernel_main(in_ptr0, in_ptr1, out_ptr0, stream=None):
+                return None
+
+            def test_kernel_precompile(
+                precompile_shapes,
+                precompile_strides,
+                precompile_dtypes,
+                device_index=0,
+                device_capability=None,
+                **kwargs,
+            ):
+                with open(_PRECOMPILE_SENTINEL_PATH, "w") as f:
+                    json.dump({{
+                        "name": _KERNEL_NAME,
+                        "in_bad_fork": torch.cuda._is_in_bad_fork(),
+                    }}, f)
+                _nvgemm_precompile(
+                    precompile_shapes,
+                    precompile_strides,
+                    precompile_dtypes,
+                    device_index,
+                    device_capability,
+                    variant_name="GEMM",
+                    kernel_name=_KERNEL_NAME,
+                    accumulator_type=_ACC_TYPE,
+                    compiled_cache=_compiled_cache,
+                    disk_fn_cache=_disk_fn_cache,
+                    module_path=__file__,
+                    disk_config_key=_DISK_CACHE_CONFIG_KEY,
+                    input_param_names=_INPUT_PARAM_NAMES,
+                    variant_kwargs=_VARIANT_KWARGS,
+                    max_active_clusters=kwargs.get("max_active_clusters"),
+                )
+        """)
+
+        dev_idx = torch.cuda.current_device()
+        dev_cap = torch.cuda.get_device_capability(dev_idx)
+        metadata = {
+            "precompile_shapes": {
+                "in_ptr0": [4, 4],
+                "in_ptr1": [4, 4],
+                "output": [4, 4],
+            },
+            "precompile_strides": {
+                "in_ptr0": [4, 1],
+                "in_ptr1": [4, 1],
+                "output": [4, 1],
+            },
+            "precompile_dtypes": {
+                "in_ptr0": "float32",
+                "in_ptr1": "float32",
+                "output": "float32",
+            },
+            "device_index": dev_idx,
+            "device_capability": dev_cap,
+            "max_active_clusters": 1,
+        }
+
+        try:
+            shutdown_compile_workers()
+            with config.patch(worker_start_method="subprocess", compile_threads=4):
+                AsyncCompile.wait_pool_ready()
+                self.assertTrue(AsyncCompile.use_process_pool())
+
+                with fresh_cache():
+                    async_compile = AsyncCompile()
+                    wrapper = async_compile.nv_universal_gemm(
+                        "test_kernel", source, precompile_metadata=metadata
+                    )
+                    wrapper.result()
+
+            self.assertTrue(
+                os.path.exists(precompile_sentinel_path),
+                "NVGEMM subprocess precompile was not invoked.",
+            )
+            self.assertFalse(
+                os.path.exists(compile_sentinel_path),
+                "bad-fork NVGEMM precompile should skip kernel.compile(args).",
+            )
+
+            with open(precompile_sentinel_path) as f:
+                sentinel_data = json.load(f)
+            self.assertEqual(sentinel_data["name"], "test_kernel_manifest")
+            self.assertTrue(
+                sentinel_data["in_bad_fork"],
+                "Precompile did not run in a forked-after-CUDA-init subprocess. "
+                "This test only validates the guard when the worker inherits CUDA state.",
+            )
+        finally:
+            if os.path.exists(precompile_sentinel_path):
+                os.unlink(precompile_sentinel_path)
+            if os.path.exists(compile_sentinel_path):
+                os.unlink(compile_sentinel_path)
+
     def test_concurrent_disk_cache_set_atomic(self):
         """Verify concurrent disk_cache_set calls to the same key don't corrupt the .o file.
 
@@ -1406,7 +1575,9 @@ class TestCuteDSLSubprocessCompile(TestCase):
                 with ThreadPoolExecutor(max_workers=num_threads) as pool:
                     list(pool.map(write_to_cache, range(num_threads)))
 
-                self.assertEqual(errors, [], f"Concurrent writes failed: {errors}")
+                self.assertEqual(
+                    errors, [], lambda msg: f"{msg}\nConcurrent writes failed: {errors}"
+                )
 
                 # Verify the file is valid by loading it
                 fresh_mem: dict = {}

@@ -64,15 +64,32 @@ def evaluate_gfx_arch_within(arch_list):
     # Hence the matching should be done reversely
     return any(arch in effective_arch for arch in arch_list)
 
+# Per-generation gfx targets, ordered oldest -> newest. Each "OrLater" helper
+# below unions its own generation with every newer one, so the predicates are
+# nested by construction: CDNA5OrLater => CDNA3OrLater => CDNA2OrLater.
+_CDNA2_ARCHS = ["gfx90a"]
+_CDNA3_ARCHS = ["gfx942", "gfx950"]
+# GFX1250 (CDNA 5)
+_CDNA5_ARCHS = ["gfx1250"]
+
+def CDNA5OrLater():
+    return evaluate_gfx_arch_within(_CDNA5_ARCHS)
+
 def CDNA3OrLater():
-    return evaluate_gfx_arch_within(["gfx942", "gfx950"])
+    return evaluate_gfx_arch_within(_CDNA3_ARCHS + _CDNA5_ARCHS)
 
 def CDNA2OrLater():
-    return evaluate_gfx_arch_within(["gfx90a", "gfx942", "gfx950"])
+    return evaluate_gfx_arch_within(_CDNA2_ARCHS + _CDNA3_ARCHS + _CDNA5_ARCHS)
+
+# Archs that take the opportunistic_fastAtomicAdd path (packed 2x16 atomics + DPP
+# lane coalescing) in ScatterGatherKernel.cu. Keep in sync with that kernel's arch
+# gate; this is intentionally not CDNA3OrLater (gfx1250 uses plain fastAtomicAdd).
+def gfx_arch_supports_opportunistic_fastatomics():
+    return evaluate_gfx_arch_within(["gfx942", "gfx950"])
 
 def evaluate_platform_supports_flash_attention():
     if TEST_WITH_ROCM:
-        arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950"]
+        arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950", "gfx1250"]
         if os.environ.get("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "0") != "0":
             arch_list += ["gfx1101", "gfx1102", "gfx1150", "gfx1151", "gfx1200"]
         return evaluate_gfx_arch_within(arch_list)
@@ -90,7 +107,7 @@ def evaluate_platform_supports_ck_sdpa():
 
 def evaluate_platform_supports_efficient_attention():
     if TEST_WITH_ROCM:
-        arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950"]
+        arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950", "gfx1250"]
         if os.environ.get("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "0") != "0":
             arch_list += ["gfx1101", "gfx1102", "gfx1150", "gfx1151", "gfx1200"]
         return evaluate_gfx_arch_within(arch_list)
@@ -104,14 +121,12 @@ def evaluate_platform_supports_cudnn_attention():
     return (not TEST_WITH_ROCM) and SM80OrLater and (TEST_CUDNN_VERSION >= 90000)
 
 def evaluate_platform_supports_green_context():
-    if IS_WINDOWS:
+    from torch.cuda.green_contexts import _ensure_supported
+    try:
+        _ensure_supported()
+        return True
+    except RuntimeError:
         return False
-    if not _get_torch_cuda_version() >= (12, 8):
-        return False
-    driver_version = torch.utils.collect_env.get_nvidia_driver_version(torch.utils.collect_env.run)
-    if driver_version is None:
-        return False
-    return int(driver_version.split('.')[0]) >= 570
 
 PLATFORM_SUPPORTS_FLASH_ATTENTION: bool = LazyVal(lambda: evaluate_platform_supports_flash_attention())
 PLATFORM_SUPPORTS_MEM_EFF_ATTENTION: bool = LazyVal(lambda: evaluate_platform_supports_efficient_attention())
@@ -157,14 +172,13 @@ PLATFORM_SUPPORTS_HALF_ATOMICS: bool = LazyVal(lambda: evaluate_platform_support
 PLATFORM_SUPPORTS_GREEN_CONTEXT: bool = LazyVal(lambda: evaluate_platform_supports_green_context())
 
 def evaluate_platform_supports_workqueue_config():
-    if IS_WINDOWS:
+    from torch.cuda.green_contexts import _ensure_supported, _ensure_workqueue_supported
+    try:
+        _ensure_supported()
+        _ensure_workqueue_supported()
+        return True
+    except RuntimeError:
         return False
-    if not _get_torch_cuda_version() >= (13, 1):
-        return False
-    driver_version = torch.utils.collect_env.get_nvidia_driver_version(torch.utils.collect_env.run)
-    if driver_version is None:
-        return False
-    return int(driver_version.split('.')[0]) >= 590
 
 PLATFORM_SUPPORTS_WORKQUEUE_CONFIG: bool = LazyVal(lambda: evaluate_platform_supports_workqueue_config())
 
@@ -176,6 +190,8 @@ def evaluate_platform_supports_fp8():
                 archs.extend(['gfx120'])
             if ROCM_VERSION >= (6, 5):
                 archs.append('gfx95')
+            if ROCM_VERSION >= (7, 14):
+                archs.append('gfx1250')
             for arch in archs:
                 if arch in torch.cuda.get_device_properties(0).gcnArchName:
                     return True
@@ -192,6 +208,8 @@ def evaluate_platform_supports_fp8_grouped_gemm():
         if torch.version.hip:
             if "USE_MSLK" not in torch.__config__.show():
                 return False
+            # gfx1250 omitted: MSLK only builds gfx942/gfx950 kernels (see the arch
+            # filter in aten/src/ATen/CMakeLists.txt). Add gfx1250 here once MSLK does.
             archs = ['gfx942', 'gfx950']
             for arch in archs:
                 if arch in torch.cuda.get_device_properties(0).gcnArchName:
@@ -204,7 +222,8 @@ def evaluate_platform_supports_mx_gemm():
     if torch.cuda.is_available():
         if torch.version.hip:
             if ROCM_VERSION >= (7, 0):
-                return 'gfx950' in torch.cuda.get_device_properties(0).gcnArchName
+                gcn_name = torch.cuda.get_device_properties(0).gcnArchName
+                return 'gfx950' in gcn_name or ('gfx1250' in gcn_name and ROCM_VERSION >= (7, 14))
         else:
             return SM100OrLater
     return False

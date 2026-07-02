@@ -2,7 +2,7 @@
 """Captured aux tensor vectorization analysis for flex attention."""
 
 import dataclasses
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from enum import auto, Enum
 
 import sympy
@@ -48,9 +48,13 @@ class AuxLoadVecInfo:
     def __post_init__(self) -> None:
         """Validate that only contiguous loads carry a vector width."""
         if self.kind is LoadKind.CONTIGUOUS:
-            assert self.vec_size is not None
+            if self.vec_size is None:
+                raise AssertionError("CONTIGUOUS load requires a vec_size")
         else:
-            assert self.vec_size is None
+            if self.vec_size is not None:
+                raise AssertionError(
+                    f"non-CONTIGUOUS load must not carry vec_size, got {self.vec_size}"
+                )
 
     @classmethod
     def gather(cls) -> "AuxLoadVecInfo":
@@ -114,6 +118,8 @@ def make_fx_index_symbols(
     q_idx_node: torch.fx.Node,
     kv_idx_node: torch.fx.Node,
     non_lane_index_nodes: Sequence[torch.fx.Node] = (),
+    *,
+    kv_expr: sympy.Expr | None = None,
 ) -> tuple[sympy.Symbol, sympy.Symbol, dict[torch.fx.Node, sympy.Expr]]:
     """Build symbolic replacements for lane and non-lane FX index nodes."""
     q_idx = sympy.Symbol("q_idx", integer=True, nonnegative=True)
@@ -123,7 +129,7 @@ def make_fx_index_symbols(
         for node in non_lane_index_nodes
     }
     index_symbols[q_idx_node] = q_idx
-    index_symbols[kv_idx_node] = kv_idx
+    index_symbols[kv_idx_node] = kv_idx if kv_expr is None else kv_expr
     return q_idx, kv_idx, index_symbols
 
 
@@ -159,9 +165,9 @@ def select_score_mod_vec_size(
 ) -> int | None:
     """Select score_mod vector width for captured aux loads.
 
-    Wider score_mod.__vec_size__ values remain legal when score_mod has no
-    captured tensors. For captured tensors, direct vector loads are capped to
-    the SM100 CuTe score_mod aux-load path's supported width of 8.
+    A return value of None means there are no captured tensor loads constraining
+    score_mod.__vec_size__. For captured tensors, direct vector loads are capped
+    to the SM100 CuTe score_mod aux-load path's supported width of 8.
     """
     if not has_score_mod or not has_aux_tensors:
         return None
@@ -249,7 +255,8 @@ def select_aux_mod_vec_size(
                 pass
             case LoadKind.CONTIGUOUS:
                 contiguous_vec_size = aux_load_vec_info.vec_size
-                assert contiguous_vec_size is not None
+                if contiguous_vec_size is None:
+                    raise AssertionError("CONTIGUOUS load must have a vec_size")
                 selected_vec_size = min(selected_vec_size, contiguous_vec_size)
                 found_vectorizable_load = True
 
@@ -291,7 +298,10 @@ def direct_aux_load_vec_size_and_kind(
     """
     if not isinstance(indices, (list, tuple)) or not indices:
         return AuxLoadVecInfo.gather()
-    assert max_vec_size >= 2 and max_vec_size.bit_count() == 1
+    if not (max_vec_size >= 2 and max_vec_size.bit_count() == 1):
+        raise AssertionError(
+            f"max_vec_size must be a power of two >= 2, got {max_vec_size}"
+        )
 
     _, kv_idx, index_symbols = make_fx_index_symbols(
         q_idx_node, kv_idx_node, non_lane_index_nodes
@@ -339,6 +349,7 @@ def direct_aux_load_vec_size_and_kind(
 def fx_aux_index_to_sympy(
     index: object,
     index_symbols: Mapping[torch.fx.Node, sympy.Expr],
+    node_to_sympy: Callable[[torch.fx.Node], sympy.Expr | None] | None = None,
 ) -> sympy.Expr | None:
     """Translate the supported FX integer index operations to sympy."""
     if isinstance(index, int | sympy.Integer):
@@ -347,6 +358,10 @@ def fx_aux_index_to_sympy(
         return None
     if index in index_symbols:
         return index_symbols[index]
+    if node_to_sympy is not None:
+        expr = node_to_sympy(index)
+        if expr is not None:
+            return expr
     if index.op != "call_function":
         return None
 
@@ -354,8 +369,8 @@ def fx_aux_index_to_sympy(
     target = index.target
     if len(args) < 2:
         return None
-    lhs = fx_aux_index_to_sympy(args[0], index_symbols)
-    rhs = fx_aux_index_to_sympy(args[1], index_symbols)
+    lhs = fx_aux_index_to_sympy(args[0], index_symbols, node_to_sympy)
+    rhs = fx_aux_index_to_sympy(args[1], index_symbols, node_to_sympy)
     if lhs is None or rhs is None:
         return None
     match target:

@@ -21,7 +21,7 @@ from torch._inductor.autotune_process import (
 )
 from torch._inductor.choices import InductorChoices
 from torch._inductor.codegen.common import KernelTemplate
-from torch._inductor.ir import FixedLayout
+from torch._inductor.ir import FixedLayout, ShapeAsConstantBuffer
 from torch._inductor.kernel_inputs import KernelInputs
 from torch._inductor.runtime.triton_compat import Config as TritonConfig
 from torch._inductor.select_algorithm import (
@@ -33,14 +33,13 @@ from torch._inductor.select_algorithm import (
     TritonTemplateKernel,
 )
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import is_big_gpu, run_and_get_kernels
+from torch._inductor.utils import is_big_gpu, run_and_get_code, run_and_get_kernels
 from torch._inductor.virtualized import V
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     IS_LINUX,
     MI200_ARCH,
-    skipIfRocm,
     skipIfRocmArch,
     skipIfXpu,
     TEST_WITH_ROCM,
@@ -117,6 +116,14 @@ class TestAlgorithmSelectorChoiceTypes(TestCase):
                     ),
                     expected,
                 )
+
+    def test_realize_inputs_preserves_shape_constant(self):
+        import sympy
+
+        out = select_algorithm.realize_inputs(sympy.Integer(2048))
+
+        self.assertIsInstance(out, ShapeAsConstantBuffer)
+        self.assertEqual(out.expr, sympy.Integer(2048))
 
 
 class TestSelectAlgorithm(TestCase):
@@ -477,7 +484,6 @@ class TestSelectAlgorithm(TestCase):
         if not torch.version.hip:  # autotuning is not guaranteed to run on ROCm
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
-    @skipIfRocm
     @patches
     def test_mm_dropout(self):
         @torch.compile
@@ -486,18 +492,27 @@ class TestSelectAlgorithm(TestCase):
             rnd = torch.ops.prims.inductor_random.default(mm_4.shape, seed, "rand")
             return mm_4 * rnd
 
-        if GPU_TYPE == "xpu":
+        # Triton MFMA matmul on AMD GPUs and Intel XPUs produces
+        # ~1 ULP fp16 rounding differences vs the aten reference used by the
+        # autotuner's internal VERIFY path. Max abs diff 0.0625 (= 2^-4),
+        # max rel diff 2^-10 (fp16 mantissa LSB). Benign; expand tolerance
+        # to match the existing XPU pattern.
+        if GPU_TYPE == "xpu" or torch.version.hip:
             patcher = patch.object(
                 select_algorithm, "VERIFY", dict(atol=1e-3, rtol=1e-3)
             )
             fn = patcher(fn)
 
         # sizes picked so triton autotuning wins
-        fn(
+        _, (code,) = run_and_get_code(
+            fn,
             torch.randn(512, 1024, dtype=torch.float16, device=GPU_TYPE),
             torch.randn(384, 512, dtype=torch.float16, device=GPU_TYPE),
             torch.tensor(12345, device=GPU_TYPE),
         )
+        if GPU_TYPE == "cuda" and not torch.version.hip:
+            self.assertEqual(code.count("triton_helpers.rand4x"), 0)
+            self.assertEqual(code.count("tl.rand("), 1)
         if not torch.version.hip:  # autotuning is not guaranteed to run on ROCm
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
@@ -711,6 +726,66 @@ class TestSelectAlgorithm(TestCase):
         )
         caller_str = str(caller)
         self.assertEqual(caller_str, f"TritonTemplateCaller({module_path}, extra)")
+
+
+class TestSelectAlgorithmCleanup(TestCase):
+    def test_benchmark_only_clears_matching_precompile_cache_entry(self):
+        """
+        Autotune cleanup should release only the closure for the active site.
+        Clearing the whole precompile cache regresses compile-time reuse for
+        unrelated autotune sites.
+        """
+        cache = select_algorithm.AlgorithmSelectorCache()
+        cache.precompile_cache = {"keep": dict, "drop": dict}
+
+        with patch.object(cache, "make_benchmark_fn", return_value=lambda _choices: {}):
+            cache.benchmark([], [], unittest.mock.Mock(), None, precompile_key="drop")
+
+        self.assertIn("keep", cache.precompile_cache)
+        self.assertNotIn("drop", cache.precompile_cache)
+
+    def test_release_benchmark_artifacts_closes_and_clears_state(self):
+        """
+        Benchmark-only autotuners own temporary launchers and compile results.
+        Cleanup must close their module owners and clear the references that
+        otherwise keep Triton ``CompiledKernel`` objects alive.
+        """
+        from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+
+        closed = []
+
+        class FakeKernel:
+            def __init__(self, name):
+                self.name = name
+
+            def close(self):
+                closed.append(self.name)
+
+        class FakeCompileResult:
+            def __init__(self, name):
+                self.kernel = FakeKernel(name)
+
+        def fake_launcher():
+            return None
+
+        launcher_kernel = FakeKernel("launcher")
+        fake_launcher.__self__ = launcher_kernel  # type: ignore[attr-defined]
+
+        autotuner = object.__new__(CachingAutotuner)
+        autotuner.launchers = [fake_launcher]
+        autotuner.compile_results = [FakeCompileResult("compile_result")]
+        autotuner.benchmark_failure_reasons = {fake_launcher: "failed"}
+        autotuner._cached_launcher = fake_launcher
+        autotuner._debug_call = object()
+
+        autotuner.release_benchmark_artifacts()
+
+        self.assertEqual(closed, ["launcher", "compile_result"])
+        self.assertEqual(autotuner.launchers, [])
+        self.assertEqual(autotuner.compile_results, [])
+        self.assertEqual(autotuner.benchmark_failure_reasons, {})
+        self.assertIsNone(autotuner._cached_launcher)
+        self.assertIsNone(autotuner._debug_call)
 
 
 class TestExternKernelCaller(TestCase):
@@ -985,7 +1060,7 @@ class TestDtypeViewAutotuning(TestCase):
         self.assertEqual(
             captured_results["example_dtype"],
             torch.float4_e2m1fn_x2,
-            f"benchmark_example_value should preserve float4_e2m1fn_x2 dtype "
+            lambda msg: f"{msg}\nbenchmark_example_value should preserve float4_e2m1fn_x2 dtype "
             f"after unwrapping the view, but got {captured_results['example_dtype']}",
         )
         self.assertEqual(captured_results["example_shape"], (m, k))
@@ -1177,6 +1252,41 @@ class TestTemplateRender(TestCase):
                 raise AssertionError
             FileCheck().check("triton_meta=").check(str(custom_triton_meta)).run(
                 kernels[0]
+            )
+
+    def test_subgraph_nodes_participate_in_template_index_dtype(self):
+        """Covers implicit template buffers that are not explicit arguments."""
+        import sympy
+
+        from torch._inductor import ir
+        from torch._inductor.dependencies import MemoryDep, ReadWrites
+        from torch._inductor.select_algorithm import template_subgraph_index_dtype_nodes
+        from torch._inductor.virtualized import V
+        from torch.utils._ordered_set import OrderedSet
+
+        large_capture = ir.Buffer(
+            name="large_capture",
+            layout=FixedLayout(torch.device("cpu"), torch.float32, [2**31 + 1]),
+        )
+
+        class FakeSubgraph:
+            def get_read_writes(self):
+                return ReadWrites(
+                    reads=OrderedSet(
+                        [MemoryDep("large_capture", sympy.Integer(0), (), ())]
+                    ),
+                    writes=OrderedSet(),
+                    index_exprs=OrderedSet(),
+                )
+
+        class FakeGraph:
+            def try_get_buffer(self, name):
+                return large_capture if name == "large_capture" else None
+
+        with V.set_graph_handler(FakeGraph()):
+            self.assertEqual(
+                template_subgraph_index_dtype_nodes([FakeSubgraph()]),
+                (large_capture,),
             )
 
     @unittest.skipIf(

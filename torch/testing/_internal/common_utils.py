@@ -1175,7 +1175,6 @@ def discover_test_cases_recursively(suite_or_case):
         return [suite_or_case]
     rc = []
     for element in suite_or_case:
-        print(element)
         rc.extend(discover_test_cases_recursively(element))
     return rc
 
@@ -1694,6 +1693,8 @@ TEST_CUDA_CUDSS = TEST_CUDA and torch.version.cuda is not None
 TEST_CUDA_GRAPH_CONDITIONAL_NODES = TEST_CUDA_GRAPH and torch.version.cuda is not None
 
 TEST_CUDA_PYTHON_BINDINGS = _check_module_exists("cuda.bindings") and torch.version.cuda is not None
+TEST_NVMATH = _check_module_exists("nvmath.bindings") and torch.version.cuda is not None
+skipIfNoNvmath = unittest.skipIf(not TEST_NVMATH, "nvmath-python not available")
 
 if TEST_CUDA_PYTHON_BINDINGS:
     def cuda_python_error_check(function_call_output):
@@ -2417,7 +2418,7 @@ def setBlasBackendsToDefaultFinally(fn):
             if torch.backends.cuda.is_built():
                 torch._C._cuda_resetCublasWorkspaceSize()
                 torch._C._cuda_resetCublasLtWorkspaceSize()
-                torch._C._cuda_clearCublasWorkspaces()
+                torch.cuda._clear_cublas_workspaces()
     return _fn
 
 def setSdpaBackendsToDefaultFinally(fn):
@@ -2718,6 +2719,44 @@ def set_default_dtype(dtype):
     finally:
         torch.set_default_dtype(saved_dtype)
 
+
+class set_default_dtype_if_supported:
+    """Decorator like set_default_dtype, but only sets the dtype if the device
+    supports it.
+
+    Calls the test object's `DeviceTypeTestBase.get_primary_device()` method at
+    call time, so this only works on test classes that have had
+    `instantiate_device_type_tests` applied to them.
+    """
+
+    def __init__(self, dtype):
+        self._dtype = dtype
+
+    def __call__(self, fn):
+        @functools.wraps(fn)
+        def wrapper(test_self, *args, **kwargs):
+            device = test_self.get_primary_device()
+            dtype_supported = True
+            try:
+                torch.empty(0, device=device, dtype=self._dtype)
+            except TypeError:
+                dtype_supported = False
+
+            saved_dtype = None
+
+            if dtype_supported:
+                saved_dtype = torch.get_default_dtype()
+                torch.set_default_dtype(self._dtype)
+
+            try:
+                return fn(test_self, *args, **kwargs)
+            finally:
+                if saved_dtype is not None:
+                    torch.set_default_dtype(saved_dtype)
+
+        return wrapper
+
+
 @contextlib.contextmanager
 def set_default_tensor_type(tensor_type):
     saved_tensor_type = torch.tensor([]).type()
@@ -2819,7 +2858,7 @@ class CudaMemoryLeakCheck:
             #   because the driver will always have some bytes in use (context size?)
             if caching_allocator_mem_allocated > 0:
                 gc.collect()
-                torch._C._cuda_clearCublasWorkspaces()
+                torch.cuda._clear_cublas_workspaces()
                 torch.cuda.empty_cache()
                 break
 
@@ -2837,17 +2876,17 @@ class CudaMemoryLeakCheck:
 
         self.testcase.before_cuda_memory_leak_check()
         gc.collect()
-        torch._C._cuda_clearCublasWorkspaces()
+        num_devices = torch.cuda.device_count()
+        torch.cuda._clear_cublas_workspaces()
         torch.cuda.empty_cache()
 
         # Compares caching allocator before/after statistics
         # An increase in allocated memory is a discrepancy indicating a possible
         #   memory leak
         discrepancy_detected = False
-        num_devices = torch.cuda.device_count()
+        # avoid counting cublasWorkspace allocations
+        torch.cuda._clear_cublas_workspaces()
         for i in range(num_devices):
-            # avoid counting cublasWorkspace allocations
-            torch._C._cuda_clearCublasWorkspaces()
             caching_allocator_mem_allocated = torch.cuda.memory_allocated(i)
 
             if caching_allocator_mem_allocated > self.caching_allocator_befores[i]:
@@ -5785,14 +5824,18 @@ def get_cycles_per_ms(device: str = "cuda") -> float:
             return cycles_per_ms
     else:
         def measure() -> float:
-            start = torch.cuda.Event(enable_timing=True)
-            end = torch.cuda.Event(enable_timing=True)
-            start.record()
-            torch.cuda._sleep(test_cycles)
-            end.record()
-            end.synchronize()
-            cycles_per_ms = test_cycles / start.elapsed_time(end)
-            return cycles_per_ms
+            if hasattr(torch.get_device_module(device), "_sleep"):
+                start = torch.Event(enable_timing=True)
+                end = torch.Event(enable_timing=True)
+                start.record()
+                torch.get_device_module(device)._sleep(test_cycles)
+                end.record()
+                end.synchronize()
+                cycles_per_ms = test_cycles / start.elapsed_time(end)
+                return cycles_per_ms
+            else:
+                cycles_per_ms = 1000000.0
+                return cycles_per_ms
 
     # Get 10 values and remove the 2 max and 2 min and return the avg.
     # This is to avoid system disturbance that skew the results, e.g.
