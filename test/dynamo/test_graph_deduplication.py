@@ -180,10 +180,9 @@ class GraphModule(torch.nn.Module):
     def forward(self, L_x_: "f32[10, 10]"):
         l_x_ = L_x_
 
-        subgraph_0 = self.subgraph_0
-
         add: "f32[10, 10]" = l_x_ + 2;  l_x_ = None
 
+        subgraph_0 = self.subgraph_0
         invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', add);  add = None
 
         getitem: "f32[10, 10]" = invoke_subgraph[0];  invoke_subgraph = None
@@ -293,11 +292,9 @@ class GraphModule(torch.nn.Module):
         l_x_ = L_x_
         l_y_ = L_y_
 
-        subgraph_0 = self.subgraph_0
-        subgraph_1 = self.subgraph_1
-
         cos: "f32[10, 10]" = torch.cos(l_x_)
 
+        subgraph_0 = self.subgraph_0
         invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_x_, l_y_)
 
         getitem: "f32[]" = invoke_subgraph[0];  invoke_subgraph = None
@@ -312,6 +309,7 @@ class GraphModule(torch.nn.Module):
 
         getitem_2: "f32[]" = invoke_subgraph_2[0];  invoke_subgraph_2 = None
 
+        subgraph_1 = self.subgraph_1
         invoke_subgraph_3 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_1', cos, sin);  invoke_subgraph_3 = None
         invoke_subgraph_4 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_1', cos, sin);  subgraph_1 = cos = sin = None
 
@@ -1011,13 +1009,13 @@ class <lambda>(torch.nn.Module):
 def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
     l_x_ = L_x_
     l_y_ = L_y_
-    subgraph_0 = self.subgraph_0
     view = l_x_.view((10, 10))
     view_1 = l_x_.view((10, 10))
     view_2 = view.view((10, 10));  view = None
     view_3 = view_1.view((10, 10));  view_1 = None
     add_ = l_x_.add_(l_x_);  add_ = None
     add = view_2 + view_3;  view_2 = view_3 = None
+    subgraph_0 = self.subgraph_0
     invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_x_, l_y_)
     mul_ = l_y_.mul_(l_y_);  mul_ = None
     getitem = invoke_subgraph[0];  invoke_subgraph = None
@@ -1048,7 +1046,6 @@ def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
 def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
     l_x_ = L_x_
     l_y_ = L_y_
-    subgraph_0 = self.subgraph_0
     view = l_x_.view((10, 10))
     view_1 = l_x_.view((10, 10))
     view_2 = view.view((10, 10));  view = None
@@ -1056,6 +1053,7 @@ def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
     mul_ = l_y_.mul_(l_y_);  mul_ = None
     add = view_2 + view_3;  view_2 = view_3 = None
     add_ = l_x_.add_(l_x_);  add_ = None
+    subgraph_0 = self.subgraph_0
     invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_x_, l_y_)
     getitem = invoke_subgraph[0];  invoke_subgraph = None
     invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_x_, l_y_);  subgraph_0 = l_x_ = l_y_ = None
@@ -1079,13 +1077,13 @@ def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
 def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
     l_x_ = L_x_
     l_y_ = L_y_
-    subgraph_0 = self.subgraph_0
     view = l_x_.view((10, 10))
     view_1 = l_x_.view((10, 10))
     view_2 = view.view((10, 10));  view = None
     view_3 = view_1.view((10, 10));  view_1 = None
     add = view_2 + view_3;  view_2 = view_3 = None
     add_ = l_x_.add_(l_x_);  add_ = None
+    subgraph_0 = self.subgraph_0
     invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_x_, l_y_)
     mul_ = l_y_.mul_(l_y_);  mul_ = None
     getitem = invoke_subgraph[0];  invoke_subgraph = None
