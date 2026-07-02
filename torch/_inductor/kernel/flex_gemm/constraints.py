@@ -11,7 +11,6 @@ from torch._inductor.virtualized import V
 from torch.fx.experimental.symbolic_shapes import (
     statically_known_true as fx_statically_known_true,
 )
-from torch.utils._ordered_set import OrderedSet
 
 
 LOCAL_REDUCE_FEED_MAIN_ARG_NAME: Final = "local_reduce0"
@@ -19,15 +18,6 @@ LOCAL_REDUCE_COMBINE_FN_SUFFIX: Final = "_local_reduce_combine_fn"
 LOCAL_REDUCE_FINALIZE_FN_SUFFIX: Final = "_local_reduce_finalize_fn"
 LOCAL_REDUCE_COMBINE_KEY_SUFFIX: Final = ":local_reduce_combine"
 LOCAL_REDUCE_FINALIZE_KEY_SUFFIX: Final = ":local_reduce_finalize"
-LOCAL_REDUCE_RETURNS_KWARG: Final = "tensor_epilogue_returns_local_reduce"
-LOCAL_REDUCE_OUT_KWARG: Final = "local_reduce_out"
-LOCAL_REDUCE_GROUP_KWARG: Final = "local_reduce_group"
-LOCAL_REDUCE_AXIS_KWARG: Final = "local_reduce_axis"
-LOCAL_REDUCE_FEEDS_MAIN_KWARG: Final = "local_reduce_feeds_main"
-LOCAL_REDUCE_COMBINE_FN_KWARG: Final = "local_reduce_combine_fn"
-LOCAL_REDUCE_COMBINE_KEY_KWARG: Final = "local_reduce_combine_key"
-LOCAL_REDUCE_FINALIZE_FN_KWARG: Final = "local_reduce_finalize_fn"
-LOCAL_REDUCE_FINALIZE_KEY_KWARG: Final = "local_reduce_finalize_key"
 
 
 def grouped_reduce_dims_match(dim: Any, reduce_dims: Sequence[Any]) -> bool:
@@ -39,6 +29,7 @@ def grouped_reduce_dims_match(dim: Any, reduce_dims: Sequence[Any]) -> bool:
 # Feed-main currently reduces only within one lane-layout M group; cross-warp M
 # stitching needs the two-phase/replay path used by compressed aux reductions.
 MAX_SAME_WARP_LOCAL_REDUCE_FEED_MAIN_GROUP = 32
+MAX_TENSORSSA_LOCAL_REDUCE_GROUP_WITHOUT_PHYSICAL_CALLBACKS = 16
 LOCAL_REDUCE_FEED_MAIN_AXIS_ERROR = (
     "FlexGEMM local-reduce feed-main currently supports only axis 0"
 )
@@ -255,6 +246,14 @@ def validate_local_reduce_tensorssa_group_size(axis: int, group: int) -> None:
         raise NotImplementedError(LOCAL_REDUCE_TENSORSSA_FRAGMENT_DIVISIBLE_ERROR)
 
 
+def local_reduce_needs_physical_callbacks(axis: int, group: int) -> bool:
+    """Return whether QuACK must merge TensorSSA partials outside the fragment path."""
+    return (
+        axis == 0
+        or group > MAX_TENSORSSA_LOCAL_REDUCE_GROUP_WITHOUT_PHYSICAL_CALLBACKS
+    )
+
+
 def validate_local_reduce_runtime_dense_mm(ndim: int) -> None:
     """Keep runtime wrappers on the only layout QuACK currently contracts for.
 
@@ -359,25 +358,25 @@ def validate_flex_gemm_local_reduce_config(config: Any, group: int, axis: int) -
     )
 
 
+def flex_gemm_local_reduce_candidate_groups(config: Any, axis: int) -> tuple[int, ...]:
+    """Enumerate group sizes worth checking against the config capability gate."""
+    if axis not in (0, 1):
+        return ()
+    _, tile_m, tile_n, _, _ = flex_gemm_local_reduce_config_fields(config)
+    tile = tile_n if axis == 1 else tile_m
+    return (2, 4, 8, 16, 32, *range(64, tile + 1, 32))
+
+
 def max_flex_gemm_local_reduce_group_for_configs(
     configs: Sequence[Any], axis: int
 ) -> int | None:
     """Return the largest group accepted by the current local-reduce config gate."""
-    candidates: OrderedSet[int] = OrderedSet()
-    for config in configs:
-        swap_ab, tile_m, tile_n, cluster_m, cluster_n = (
-            flex_gemm_local_reduce_config_fields(config)
-        )
-        if axis not in (0, 1) or swap_ab or tile_n < 128 or tile_n % 64 != 0:
-            continue
-        tile = tile_n if axis == 1 else tile_m
-        for group in (2, 4, 8, 16, 32):
-            if group < tile and tile % group == 0:
-                candidates.add(group)
-        if tile_m == 128 and cluster_m == 1 and cluster_n == 1:
-            for group in range(64, tile + 1, 32):
-                if tile % group == 0:
-                    candidates.add(group)
+    candidates = [
+        group
+        for config in configs
+        for group in flex_gemm_local_reduce_candidate_groups(config, axis)
+        if validate_flex_gemm_local_reduce_config(config, group, axis)
+    ]
     return max(candidates) if candidates else None
 
 
@@ -412,7 +411,7 @@ class FlexGemmLocalReduceGeometry:
 
     @property
     def needs_physical_callbacks(self) -> bool:
-        return self.axis == 0 or self.group > 16
+        return local_reduce_needs_physical_callbacks(self.axis, self.group)
 
 
 @dataclasses.dataclass(frozen=True)
