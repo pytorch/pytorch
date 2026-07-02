@@ -17,7 +17,7 @@ from torch._guards import detect_fake_mode
 from torch._higher_order_ops.invoke_subgraph import get_invoke_subgraph_compile_options
 from torch._inductor.output_code import RegionalOutputCode
 from torch._inductor.test_case import run_tests
-from torch._inductor.utils import run_fw_bw_and_get_code
+from torch._inductor.utils import run_and_get_code, run_fw_bw_and_get_code
 from torch.fx._graph_pickler import GraphPickler
 from torch.fx.passes.regional_inductor import regional_inductor
 from torch.fx.passes.regional_inductor_invoke_subgraph import (
@@ -590,6 +590,54 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
 @torch._dynamo.config.patch("enable_invoke_subgraph_regional_compile", True)
 @instantiate_parametrized_tests
 class RegionalInductorInvokeSubgraphTests(torch._inductor.test_case.TestCase):
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    def test_normal_inductor_hop_subgraph_uses_nested_post_grad_config(self):
+        outer_pass_targets = []
+        inner_pass_targets = []
+
+        def outer_pass(graph):
+            outer_pass_targets.append(
+                [node.target for node in graph.nodes if node.op == "call_function"]
+            )
+
+        def inner_pass(graph):
+            inner_pass_targets.append(
+                [node.target for node in graph.nodes if node.op == "call_function"]
+            )
+
+        nested_config = get_invoke_subgraph_compile_options(
+            inductor_config_patches={"post_grad_custom_pre_pass": inner_pass}
+        )
+
+        @torch.compiler.nested_compile_region(options=nested_config)
+        def g(x):
+            return torch.sin(x)
+
+        def fn(x):
+            return g(torch.cos(x)) + 1
+
+        opt_fn = torch.compile(fn, fullgraph=True)
+        x = torch.randn(10)
+
+        with torch._inductor.config.patch(
+            {
+                "post_grad_custom_pre_pass": outer_pass,
+            }
+        ):
+            result, codes = run_and_get_code(lambda: opt_fn(x))
+
+        self.assertEqual(result, fn(x))
+        self.assertEqual(len(codes), 1)
+        self.assertEqual(len(inner_pass_targets), 1)
+        self.assertEqual(len(outer_pass_targets), 1)
+
+        inner_target_names = [str(target) for target in inner_pass_targets[0]]
+        outer_target_names = [str(target) for target in outer_pass_targets[0]]
+        self.assertTrue(any("aten.sin.default" in name for name in inner_target_names))
+        self.assertFalse(any("invoke_subgraph" in name for name in inner_target_names))
+        self.assertTrue(any("invoke_subgraph" in name for name in outer_target_names))
+        self.assertFalse(any("aten.sin.default" in name for name in outer_target_names))
+
     def test_custom_decomposition(self):
         # Test that custom decompositions are applied to the subgraph.
 

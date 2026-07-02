@@ -19,6 +19,7 @@ import torch.nn as nn
 from torch._dynamo.backends.debugging import aot_eager_decomp_partition_with_mode
 from torch._dynamo.utils import counters
 from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
+from torch._higher_order_ops.invoke_subgraph import get_invoke_subgraph_compile_options
 from torch._inductor import config
 from torch._inductor.codecache import FxGraphCache
 from torch._inductor.compile_fx import compile_fx_inner
@@ -453,6 +454,105 @@ if HAS_CUDA_AND_TRITON:
                 FileCheck().check(
                     "skipping cudagraphs due to graph with symbolic shapes inputs"
                 ).run(utils_log_stream.getvalue())
+
+        @dynamo_config.patch("enable_invoke_subgraph_regional_compile", True)
+        @dynamo_config.patch("inline_single_use_invoke_subgraph", False)
+        @config.patch("graph_partition", True)
+        def test_normal_inductor_hop_subgraph_inner_cudagraph_off_outer_on(self):
+            nested_config = get_invoke_subgraph_compile_options(
+                inductor_config_patches={
+                    "triton.cudagraphs": False,
+                }
+            )
+
+            @torch.compiler.nested_compile_region(options=nested_config)
+            def g(x, y):
+                return torch.cos(x), torch.sin(y)
+
+            def fn(x, y):
+                a, b = g(x, y)
+                return a + b
+
+            opt_fn = torch.compile(fn, fullgraph=True)
+            x = torch.randn(10, 4, device="cuda")
+            y = torch.randn(10, 4, device="cuda")
+
+            result, codes = run_and_get_code(lambda: opt_fn(x, y))
+
+            self.assertEqual(result, fn(x, y))
+            self.assertEqual(len(codes), 1)
+
+            code = codes[0]
+            # Outer graph has cudagraphs enabled, so it is graph partitioned into a
+            # top-level partition fn that calls the lifted subgraph launcher.
+            self.assertIn("def partition_0(args):", code)
+            self.assertIn("def repeated_subgraph0(args):", code)
+            outer_partition_code = code.split("def partition_0(args):", 1)[1]
+            self.assertIn(
+                "repeated_subgraph0(repeated_subgraph0_args)", outer_partition_code
+            )
+            # Inner subgraph opts out of cudagraphs, so it keeps all ops in its
+            # launcher and emits no inner partition fn.
+            self.assertNotIn("def repeated_subgraph0_partition_0(args):", code)
+
+            # Outer graph has cudagraphs enabled, so its partition is captured at
+            # runtime. Run a few steps and check the cudagraph tree manager
+            # recorded a graph.
+            for _ in range(3):
+                self.assertEqual(opt_fn(x, y), fn(x, y))
+            self.assertIsNotNone(self.get_manager())
+            self.assertGreater(self.get_manager().new_graph_id().id, 0)
+
+        @dynamo_config.patch("enable_invoke_subgraph_regional_compile", True)
+        @dynamo_config.patch("inline_single_use_invoke_subgraph", False)
+        @config.patch("graph_partition", True)
+        @config.patch("triton.cudagraphs", False)
+        def test_normal_inductor_hop_subgraph_inner_cudagraph_on_outer_off(self):
+            nested_config = get_invoke_subgraph_compile_options(
+                inductor_config_patches={
+                    "triton.cudagraphs": True,
+                }
+            )
+
+            @torch.compiler.nested_compile_region(options=nested_config)
+            def g(x, y):
+                return torch.cos(x), torch.sin(y)
+
+            def fn(x, y):
+                a, b = g(x, y)
+                return a + b
+
+            opt_fn = torch.compile(fn, fullgraph=True)
+            x = torch.randn(10, 4, device="cuda")
+            y = torch.randn(10, 4, device="cuda")
+
+            result, codes = run_and_get_code(lambda: opt_fn(x, y))
+
+            self.assertEqual(result, fn(x, y))
+            self.assertEqual(len(codes), 1)
+
+            code = codes[0]
+            # Inner subgraph opts into cudagraphs, so its ops are graph
+            # partitioned and the lifted launcher dispatches the partition through
+            # the root's single shared Runner (a subgraph partition joins the root
+            # runner rather than getting its own).
+            self.assertIn("def partition_0(args):", code)
+            self.assertIn("def repeated_subgraph0(args):", code)
+            inner_launcher_code = code.split("def repeated_subgraph0(args):", 1)[1]
+            self.assertIn("runner.partitions[0](partition0_args)", inner_launcher_code)
+            # Outer graph keeps cudagraphs off, so it is not partitioned: the
+            # Runner holds only the inner partition and no top-level partition fn
+            # is emitted.
+            self.assertIn("runner = Runner(partitions=[partition_0", code)
+            self.assertNotIn("def partition_1(args):", code)
+
+            # The inner region opted into cudagraphs, so its partition is
+            # captured at runtime even though the top-level config has them off.
+            # Run a few steps and check the cudagraph tree manager recorded it.
+            for _ in range(3):
+                self.assertEqual(opt_fn(x, y), fn(x, y))
+            self.assertIsNotNone(self.get_manager())
+            self.assertGreater(self.get_manager().new_graph_id().id, 0)
 
         @parametrize("backend", ("inductor", "cudagraphs"))
         @torch._dynamo.config.patch("cudagraph_backend_keep_input_mutation", True)
