@@ -309,6 +309,26 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(len(set(picks)), 4)
         self.assertTrue(all(p in "abcdefghij" for p in picks))
 
+    def test_random_module_seed_shuffle(self):
+        # Module-level random.seed is bound to the global random.Random instance
+        # and must trace under fullgraph rather than graph-breaking on a skipped
+        # function. A seed() inside the compiled region makes the subsequent
+        # shuffle deterministic, matching the CPython test_sort
+        # TestOptimizedCompares pattern (seed(0) then shuffle).
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            items = list(range(10))
+            random.seed(0)
+            random.shuffle(items)
+            return items, x + 1
+
+        compiled_items, _ = fn(torch.zeros(2))
+
+        expected = list(range(10))
+        random.seed(0)
+        random.shuffle(expected)
+        self.assertEqual(compiled_items, expected)
+
     def test_random_object_overridden_methods(self):
         # these will result in graph breaks, but we shouldn't crash
         def get_rng():
