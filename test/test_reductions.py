@@ -3177,7 +3177,6 @@ class TestReductionsOnlyCPU(TestCase):
     def test_min_elementwise(self, device):
         self._testCSelection(torch.min, min)
 
-
     # TODO: kill this and replace with common creation ops
     def _make_tensors(self, shape, val_range=(-100, 100), use_floating=True, use_integral=True,
                       use_complex=False) -> dict[str, list[torch.Tensor]]:
@@ -3394,7 +3393,6 @@ class TestReductionsOnlyCPU(TestCase):
 
     def test_cumprod_integer_upcast(self, device):
         self._test_reduce_integer_upcast(lambda x, **kwargs: torch.cumprod(x, 0, **kwargs))
-
 
     # TODO: make work on CUDA, too
     def test_accreal_type(self, device) -> None:
