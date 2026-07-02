@@ -7,10 +7,12 @@ and coexists with the activity subscriber, but it locks the GPU clocks while act
 shift absolute kernel durations) -- so it is opt-in via custom_profiler_config
 {"enable_pm_sampling": true}, not always-on like the environment counters.
 
-The HW units sample autonomously into a device-side ring (KEEP_LATEST) between start and decode,
-so there is no background thread: the first consumer opens the session and the ring is drained by
-:meth:`~PmSampler.poll` (and a final tail-drain when the last consumer leaves) -- crucially
-*before* disabling, since a wrapped ring is only decodable while sampling is active. A window that
+The HW units sample autonomously into a device-side ring (KEEP_LATEST) between start and decode, so
+the engine spawns no thread of its own -- collection is passive and the caller drives
+:meth:`~PmSampler.poll` on its own cadence (the cupti_monitor backend polls from its flush thread).
+The first consumer opens the session; poll() drains the ring and a final tail-drain runs when the
+last consumer leaves -- crucially *before* disabling, since a wrapped ring is only decodable while
+sampling is active. A window that
 fits the ring yields all its samples; one that exceeds it keeps the most recent (the trace's tail)
 rather than erroring. ``decode`` drains the whole ring in one call and caps at its ``max_samples``
 (a second call does not resume), so the host image is sized above the ring's sample capacity.
