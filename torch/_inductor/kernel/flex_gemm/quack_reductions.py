@@ -3,9 +3,9 @@
 
 FlexGEMM recognizes a narrow local-reduction contract inside the GEMM output
 tile: an epilogue reshapes the accumulator to expose contiguous groups along M
-or N, then reduces only that grouped dimension. N-axis groups that fit in one
-32-lane TensorSSA fragment lower as ordinary in-fragment TensorSSA reductions;
-larger N groups produce TensorSSA partials that QuACK combines physically.
+or N, then reduces only that grouped dimension. Supported small N-axis groups
+lower as ordinary in-fragment TensorSSA reductions; larger N groups produce
+TensorSSA partials that QuACK combines physically.
 M-axis groups currently always use QuACK's physical row-lane/warp combine path,
 even when the group is small enough to fit in one fragment. Inductor owns the
 FX pattern matching and output contracts; these helpers describe the supported
@@ -25,11 +25,11 @@ from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
 )
 from torch._inductor.kernel.flex_gemm.constraints import (
     grouped_reduce_dims_match,
-    local_reduce_needs_physical_callbacks,
     LOCAL_REDUCE_EXPLICIT_DTYPE_ERROR,
     LOCAL_REDUCE_GROUPED_RESHAPE_ERROR,
     LOCAL_REDUCE_INNERMOST_GROUPED_DIM_ERROR,
     LOCAL_REDUCE_MIXED_GROUPED_LAYOUT_ERROR,
+    local_reduce_needs_physical_callbacks,
     LOCAL_REDUCE_PARTIAL_OUTPUT_CONTRACT_ERROR,
     statically_known_equal,
     validate_local_reduce_tensorssa_group_size,
@@ -423,6 +423,33 @@ def propagate_grouped_tensorssa_info(
     return GroupedTensorSSAInfo(layout)
 
 
+def view_or_reshape_args(node: torch.fx.Node) -> tuple[Any, tuple[Any, ...]] | None:
+    if node.op == "call_method" and node.target in ("view", "reshape"):
+        return node.args[0], tuple(node.args[1:])
+    if node.op == "call_function" and node.target in (
+        torch.ops.aten.view.default,
+        torch.ops.aten.reshape.default,
+    ):
+        shape = node.args[1]
+        if isinstance(shape, (tuple, list, torch.Size)):
+            return node.args[0], tuple(shape)
+    return None
+
+
+def squeeze_source_node(node: torch.fx.Node) -> torch.fx.Node | None:
+    if node.op == "call_method" and node.target == "squeeze":
+        source_node = node.args[0]
+    elif node.op == "call_function" and node.target in (
+        torch.ops.aten.squeeze.dim,
+        torch.ops.aten.squeeze.dims,
+        torch.ops.aten.squeeze.default,
+    ):
+        source_node = node.args[0]
+    else:
+        return None
+    return source_node if isinstance(source_node, torch.fx.Node) else None
+
+
 def lower_view_or_reshape(
     node: torch.fx.Node,
     env: dict[torch.fx.Node, Any],
@@ -431,17 +458,10 @@ def lower_view_or_reshape(
     local_reduce_store_sources: dict[torch.fx.Node, Any],
     preserve_value_layout: bool = False,
 ) -> Any | None:
-    if node.op == "call_method" and node.target in ("view", "reshape"):
-        source_node = node.args[0]
-        shape = node.args[1:]
-    elif node.op == "call_function" and node.target in (
-        torch.ops.aten.view.default,
-        torch.ops.aten.reshape.default,
-    ):
-        source_node = node.args[0]
-        shape = node.args[1]
-    else:
+    view_args = view_or_reshape_args(node)
+    if view_args is None:
         return None
+    source_node, shape = view_args
     if (
         isinstance(source_node, torch.fx.Node)
         and source_node in local_reduce_store_sources
@@ -553,17 +573,8 @@ def lower_squeeze(
     env: dict[torch.fx.Node, Any],
     local_reduce_store_sources: dict[torch.fx.Node, Any],
 ) -> Any | None:
-    if node.op == "call_method" and node.target == "squeeze":
-        source_node = node.args[0]
-    elif node.op == "call_function" and node.target in (
-        torch.ops.aten.squeeze.dim,
-        torch.ops.aten.squeeze.dims,
-        torch.ops.aten.squeeze.default,
-    ):
-        source_node = node.args[0]
-    else:
-        return None
-    if not isinstance(source_node, torch.fx.Node) or source_node not in env:
+    source_node = squeeze_source_node(node)
+    if source_node is None or source_node not in env:
         return None
     if source_node in local_reduce_store_sources:
         local_reduce_store_sources[node] = local_reduce_store_sources[source_node]
