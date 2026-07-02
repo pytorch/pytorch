@@ -1428,36 +1428,35 @@ def fill_none_with_masks(data: list[torch.Tensor | None], masks: list[bool]):
     return [next(data_iter) if kept else None for kept in masks]
 
 
-def materialize_bw_fn_filter_non_tensor_grads(
-    bw_fn: Callable[_P, list[torch.Tensor | None]],
-    args: tuple[Any, ...],
-    include_key_set: torch._C.DispatchKeySet,
-    exclude_key_set: torch._C.DispatchKeySet,
-) -> tuple[torch.fx.GraphModule, list[bool]]:
-    """Materialize a single-step bw_fn to a GraphModule, dropping non-Tensor
-    gradients from the output.
+def create_fn_remove_none(
+    fn: Callable[_P, Any],
+) -> tuple[Callable[_P, list[torch.Tensor]], list[bool]]:
+    """Wrap ``fn`` so its non-Tensor output leaves are dropped, and expose the
+    mask of which leaves survived.
 
-    create_bw_fn returns one gradient per forward input. For non-differentiable
-    inputs (e.g. SymInt) the gradient is None, which the inductor codegen for
-    HOP subgraphs cannot handle uniformly. This helper traces the bw_fn once,
-    records which outputs are Tensors, and returns (gm, mask) where gm only
-    returns the Tensor-typed grads. Use fill_none_with_masks(gm_grads, mask)
-    to reconstruct the full grad list with Nones in the original slots.
+    Returns ``(wrapped, mask)``:
+      - ``wrapped(*args)`` calls ``fn(*args)``, flattens the pytree result and
+        returns only its Tensor leaves as a list.
+      - ``mask`` is a list populated whenever ``wrapped`` runs -- one bool per
+        leaf, ``True`` where the leaf is a Tensor. Callers should read it
+        AFTER invoking ``wrapped`` (typically indirectly via
+        ``materialize_as_graph``), then pass it to ``fill_none_with_masks``
+        to reconstruct the full output with ``None`` at the dropped slots.
+
+    Used in HOP autograd impls in two places:
+      - Around a forward branch that may return non-Tensor leaves (None,
+        int/SymInt), so ``create_bw_fn``'s joint sees a tensor-only signature.
+      - Around the resulting backward joint whose grad list contains ``None``
+        at non-differentiable input slots, so the materialized ``GraphModule``
+        returns a uniform Tensor list.
     """
-    grads_tensor_masks: list[bool] = []
+    mask: list[bool] = []
 
-    @functools.wraps(bw_fn)
-    def wrapped(*inner_args, **inner_kwargs):
-        nonlocal grads_tensor_masks
-        grads = bw_fn(*inner_args, **inner_kwargs)
-        grads_tensor_masks = [isinstance(g, torch.Tensor) for g in grads]
-        return filter_with_masks(grads, grads_tensor_masks)
+    @functools.wraps(fn)
+    def wrapped(*args, **kwargs):
+        leaves = pytree.tree_leaves(fn(*args, **kwargs))
+        mask.clear()
+        mask.extend(isinstance(o, torch.Tensor) for o in leaves)
+        return filter_with_masks(leaves, mask)
 
-    gm = materialize_as_graph(
-        wrapped,
-        args,
-        include_key_set,
-        exclude_key_set,
-        force_enable_grad=True,
-    )
-    return gm, grads_tensor_masks
+    return wrapped, mask

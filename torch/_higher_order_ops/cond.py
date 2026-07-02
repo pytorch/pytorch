@@ -20,8 +20,9 @@ from torch._higher_order_ops.utils import (
     _maybe_run_with_interpreter,
     check_input_alias_and_mutation_return_outputs,
     create_bw_fn,
+    create_fn_remove_none,
     fill_none_with_masks,
-    materialize_bw_fn_filter_non_tensor_grads,
+    materialize_as_graph,
     reenter_make_fx,
     save_values_for_backward,
     saved_values,
@@ -345,17 +346,21 @@ class CondAutogradOp(torch.autograd.Function):
         args = operands + flat_grads
         # TODO: we need to materialize the bw graphs because dynamo is unable to
         # trace through the joint function when torch.compile torch.autograd.grad.
-        true_bw_gm, grads_tensor_masks = materialize_bw_fn_filter_non_tensor_grads(
-            ctx._true_bw_fn,
+        true_wrapped, grads_tensor_masks = create_fn_remove_none(ctx._true_bw_fn)
+        true_bw_gm = materialize_as_graph(
+            true_wrapped,
             args,
             ctx._fw_include_key_set,
             ctx._fw_exclude_key_set,
+            force_enable_grad=True,
         )
-        false_bw_gm, _ = materialize_bw_fn_filter_non_tensor_grads(
-            ctx._false_bw_fn,
+        false_wrapped, _ = create_fn_remove_none(ctx._false_bw_fn)
+        false_bw_gm = materialize_as_graph(
+            false_wrapped,
             args,
             ctx._fw_include_key_set,
             ctx._fw_exclude_key_set,
+            force_enable_grad=True,
         )
         grads = cond_op(
             ctx._pred,

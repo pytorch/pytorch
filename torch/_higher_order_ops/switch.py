@@ -4,7 +4,6 @@ import logging
 import warnings
 from collections.abc import Callable
 from typing import Any
-from typing_extensions import ParamSpec
 
 import torch
 import torch.utils._pytree as pytree
@@ -13,10 +12,11 @@ from torch._functorch.utils import exposed_in
 from torch._higher_order_ops.utils import (
     _maybe_compile_and_run_fn,
     _maybe_run_with_interpreter,
-    create_bw_fn,
     check_input_alias_and_mutation_return_outputs,
+    create_bw_fn,
+    create_fn_remove_none,
     fill_none_with_masks,
-    materialize_bw_fn_filter_non_tensor_grads,
+    materialize_as_graph,
     reenter_make_fx,
     save_values_for_backward,
     saved_values,
@@ -30,9 +30,6 @@ from torch.utils._python_dispatch import _get_current_dispatch_mode
 
 
 log = logging.getLogger(__name__)
-
-
-_P = ParamSpec("_P")
 
 
 class SwitchOp(HigherOrderOperator):
@@ -270,21 +267,6 @@ def switch_op_dense(index, branches, operands):
     return branches[clamped_idx](*operands)
 
 
-def _branch_tensor_outputs_only(
-    branch: Callable[_P, Any],
-) -> Callable[_P, tuple[torch.Tensor, ...]]:
-    """Wrap a branch so it only returns its Tensor leaves."""
-
-    @functools.wraps(branch)
-    def wrapped(*args, **kwargs):
-        branch_outs = branch(*args, **kwargs)
-        return tuple(
-            o for o in pytree.tree_leaves(branch_outs) if isinstance(o, torch.Tensor)
-        )
-
-    return wrapped
-
-
 class SwitchAutogradOp(torch.autograd.Function):
     @staticmethod
     # pyrefly: ignore [bad-override]
@@ -295,7 +277,11 @@ class SwitchAutogradOp(torch.autograd.Function):
         *operands,
     ):
         ctx._index = index
-        ctx._branches = list(branches)
+        # Build one bw fn per branch.
+        ctx._branch_bw_fns = [
+            create_bw_fn(create_fn_remove_none(branch)[0], operands)
+            for branch in branches
+        ]
 
         # We snapshot the dispatch keys in forward for materializing the
         # bw_graph in backward.
@@ -317,8 +303,6 @@ class SwitchAutogradOp(torch.autograd.Function):
     @staticmethod
     def backward(ctx, *flat_grads):
         operands = saved_values(ctx)
-        # Drop tangents at non-Tensor output positions so that the joint
-        # signature matches the tensor-only wrapped branches.
         tensor_grads = tuple(
             g for g, keep in zip(flat_grads, ctx._fw_output_is_tensor) if keep
         )
@@ -327,26 +311,27 @@ class SwitchAutogradOp(torch.autograd.Function):
         # trace through the joint function when torch.compile torch.autograd.grad.
 
         branches_bw_gm: list[torch.fx.GraphModule] = []
-        grad_input_is_tensor: list[bool] = []
+        grads_tensor_masks: list[bool] = []
         # All branches share the same input signature (see _validate_input)
-        for branch in ctx._branches:
-            bw_fn = create_bw_fn(_branch_tensor_outputs_only(branch), operands)
-            bw_gm, mask = materialize_bw_fn_filter_non_tensor_grads(
-                bw_fn,
+        for bw_fn in ctx._branch_bw_fns:
+            wrapped_bw, mask = create_fn_remove_none(bw_fn)
+            bw_gm = materialize_as_graph(
+                wrapped_bw,
                 args,
                 ctx._fw_include_key_set,
                 ctx._fw_exclude_key_set,
+                force_enable_grad=True,
             )
             branches_bw_gm.append(bw_gm)
-            if not grad_input_is_tensor:
-                grad_input_is_tensor = mask
+            if not grads_tensor_masks:
+                grads_tensor_masks = mask
 
         grads = switch_op(
             ctx._index,
             branches_bw_gm,
             args,
         )
-        return None, None, *fill_none_with_masks(grads, grad_input_is_tensor)
+        return None, None, *fill_none_with_masks(grads, grads_tensor_masks)
 
 
 @switch_op.py_autograd_impl
