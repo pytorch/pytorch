@@ -84,9 +84,20 @@ def get_added_lines(filename: str) -> set[int]:
             timeout=600,
         )
         if result.returncode != 0:
-            raise RuntimeError(
-                f"Failed to fetch origin. Error: {result.stderr.strip()}"
+            # A parallel fetcher may have advanced origin/main while we were
+            # fetching, producing a lock error. If origin/main resolves locally,
+            # the existing ref is at least as fresh as what we asked for.
+            verify = subprocess.run(
+                ["git", "rev-parse", "--verify", "origin/main"],
+                capture_output=True,
+                text=True,
+                timeout=5,
             )
+            if verify.returncode != 0:
+                raise RuntimeError(
+                    f"Failed to fetch origin/main and no usable local copy exists. "
+                    f"Fetch error: {result.stderr.strip()}"
+                )
 
         result = subprocess.run(
             ["git", "merge-base", "HEAD", "origin/main"],

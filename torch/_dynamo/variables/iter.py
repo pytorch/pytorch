@@ -6,7 +6,7 @@ during symbolic execution and tracing.
 The module includes:
 - Base iterator variable classes for tracking iterator state
 - Implementations of built-in iterators (zip, map, filter)
-- Support for itertools functions (product, accumulate, combinations, etc.)
+- Support for itertools functions (product, groupby, count, etc.)
 - Mutation tracking and reconstruction capabilities for iterator operations
 
 These classes integrate with Dynamo's variable tracking system to enable proper
@@ -34,7 +34,13 @@ from ..utils import unpack_iterable
 from .base import ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .hashable import HashableTracker
-from .object_protocol import generic_iternext
+from .object_protocol import generic_getiter, generic_iternext
+
+
+# chain.from_iterable is a method descriptor that creates a new object on each
+# attribute access (a is b → False). Capture once at import time for stable
+# identity comparisons in ItertoolsVariable.call_function.
+_CHAIN_FROM_ITERABLE = itertools.chain.from_iterable
 
 
 if TYPE_CHECKING:
@@ -61,7 +67,9 @@ class ItertoolsVariable(VariableTracker):
         super().__init__(**kwargs)
         self.value = value
 
-    def richcompare_impl(self, tx, other, op):
+    def richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
         from .object_protocol import python_constant_richcompare_impl
 
         return python_constant_richcompare_impl(self, tx, other, op)
@@ -75,6 +83,13 @@ class ItertoolsVariable(VariableTracker):
     def get_real_python_backed_value(self) -> Any:
         return self.value
 
+    def getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> "VariableTracker":
+        if self.value is itertools.chain and name == "from_iterable":
+            return ItertoolsVariable(_CHAIN_FROM_ITERABLE)
+        return super().getattro_impl(tx, name)
+
     def call_function(
         self,
         tx: "InstructionTranslatorBase",
@@ -83,7 +98,35 @@ class ItertoolsVariable(VariableTracker):
     ) -> "VariableTracker":
         # See also: module `torch._dynamo.polyfills.itertools`
 
-        if self.value is itertools.product:
+        if self.value is itertools.chain and not kwargs:
+            # Wrap args in a ListIteratorVariable so sub-iterables are pulled lazily.
+            # generic_getiter on each sub-iterable is deferred to tp_iternext_impl,
+            # matching CPython's behavior (iter() on each arg is lazy, not at construction).
+            source = variables.ListIteratorVariable(
+                list(args), mutation_type=ValueMutationNew()
+            )
+            return ChainVariable(source, mutation_type=ValueMutationNew())
+        elif self.value is _CHAIN_FROM_ITERABLE and not kwargs and len(args) == 1:
+            # Convert outer iterable to iterator; each sub-iterable converted lazily.
+            source = generic_getiter(tx, args[0])
+            return ChainVariable(source, mutation_type=ValueMutationNew())
+        elif self.value is itertools.zip_longest:
+            fillvalue_vt = kwargs.pop("fillvalue", ConstantVariable.create(None))
+            if kwargs:
+                unimplemented(
+                    gb_type="Unsupported kwargs for itertools.zip_longest",
+                    context=f"call_function {self} {args} {kwargs}",
+                    explanation=f"Expected kwargs: 'fillvalue', but got "
+                    f"{','.join(set(kwargs.keys()) - {'fillvalue'})}",
+                    hints=[*graph_break_hints.USER_ERROR],
+                )
+            iterables = [generic_getiter(tx, arg) for arg in args]
+            return ZipLongestVariable(
+                iterables,
+                fillvalue=fillvalue_vt,
+                mutation_type=ValueMutationNew(),
+            )
+        elif self.value is itertools.product:
             if any(kw != "repeat" for kw in kwargs):
                 unimplemented(
                     gb_type="Unsupported kwargs for itertools.product",
@@ -102,22 +145,6 @@ class ItertoolsVariable(VariableTracker):
                 variables.TupleVariable(list(item))
                 for item in itertools.product(*seqs, repeat=r)
             ]
-            return variables.ListIteratorVariable(
-                items,  # type: ignore[arg-type]
-                mutation_type=ValueMutationNew(),
-            )
-        elif (
-            self.value is itertools.combinations
-            and not kwargs
-            and len(args) == 2
-            and args[1].is_python_constant()
-        ):
-            iterable = unpack_iterable(tx, args[0])
-            r = args[1].as_python_constant()
-
-            items = []
-            for item in itertools.combinations(iterable, r):
-                items.append(variables.TupleVariable(list(item)))
             return variables.ListIteratorVariable(
                 items,  # type: ignore[arg-type]
                 mutation_type=ValueMutationNew(),
@@ -229,23 +256,6 @@ class ItertoolsVariable(VariableTracker):
                     mutation_type=ValueMutationNew(),
                 )
             return super().call_function(tx, args, kwargs)
-        elif (
-            self.value is itertools.permutations
-            and (len(args) == 1 or (len(args) == 2 and args[1].is_python_constant()))
-            and not kwargs
-        ):
-            if len(args) == 2:
-                r = args[1].as_python_constant()
-            else:
-                r = None
-            items = [
-                variables.TupleVariable(list(item))
-                for item in itertools.permutations(unpack_iterable(tx, args[0]), r)
-            ]
-            return variables.ListIteratorVariable(
-                items,  # type: ignore[arg-type]
-                mutation_type=ValueMutationNew(),
-            )
         else:
             return super().call_function(tx, args, kwargs)
 
@@ -254,7 +264,9 @@ class IteratorVariable(VariableTracker):
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
 
-    def richcompare_impl(self, tx, other, op):
+    def richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
         from .object_protocol import object_richcompare
 
         return object_richcompare(self, tx, other, op)
@@ -277,6 +289,83 @@ class IteratorVariable(VariableTracker):
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         """Iterators are their own iterator."""
         return self
+
+
+class ChainVariable(IteratorVariable):
+    """
+    Represents itertools.chain(*iterables) — yields one item per tp_iternext_impl call.
+
+    Uses a source_iterator that yields raw sub-iterables (not yet converted to
+    iterators). Conversion happens lazily in tp_iternext_impl so that non-iterable
+    args raise TypeError at iteration time, matching CPython's behavior.
+    """
+
+    # ref: https://github.com/python/cpython/blob/3.13/Modules/itertoolsmodule.c#L225-L310
+    _cpython_type = itertools.chain
+
+    def __init__(
+        self,
+        source_iterator: "VariableTracker",
+        current: "VariableTracker | None" = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        # source_iterator yields raw sub-iterables; converted lazily per tp_iternext_impl
+        self.source_iterator = source_iterator
+        # current sub-iterator (None = not started or just exhausted a sub-iterable)
+        self.current = current
+
+    def python_type(self) -> type:
+        return itertools.chain
+
+    def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
+        if not self.is_mutable():
+            raise AssertionError("ChainVariable must be mutable for next()")
+        while True:
+            if self.current is None:
+                # Pull next sub-iterable from source (source is always an iterator)
+                try:
+                    next_raw = generic_iternext(tx, self.source_iterator)
+                except ObservedUserStopIteration:
+                    handle_observed_exception(tx)
+                    raise_observed_exception(StopIteration, tx)
+                # Convert sub-iterable to iterator lazily — may raise TypeError
+                it = generic_getiter(tx, next_raw)
+                tx.output.side_effects.mutation(self)
+                self.current = it
+            try:
+                return generic_iternext(tx, self.current)
+            except ObservedUserStopIteration:
+                handle_observed_exception(tx)
+                tx.output.side_effects.mutation(self)
+                self.current = None
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        # Reconstruct as itertools.chain(current, itertools.chain.from_iterable(source))
+        codegen.add_push_null(
+            lambda: codegen.extend_output(
+                [
+                    codegen.create_load_python_module(itertools),
+                    codegen.create_load_attr("chain"),
+                ]
+            )
+        )
+        if self.current is not None:
+            codegen(self.current)
+        # chain.from_iterable(source_iterator) for remaining sub-iterables
+        codegen.add_push_null(
+            lambda: codegen.extend_output(
+                [
+                    codegen.create_load_python_module(itertools),
+                    codegen.create_load_attr("chain"),
+                    codegen.create_load_attr("from_iterable"),
+                ]
+            )
+        )
+        codegen(self.source_iterator)
+        codegen.extend_output(create_call_function(1, False))
+        n_args = (1 if self.current is not None else 0) + 1
+        codegen.extend_output(create_call_function(n_args, False))
 
 
 class RepeatIteratorVariable(IteratorVariable):
@@ -441,6 +530,99 @@ class ZipVariable(IteratorVariable):
         )
 
 
+class ZipLongestVariable(IteratorVariable):
+    """
+    Represents itertools.zip_longest(*iterables, fillvalue=None)
+    """
+
+    # ref: https://github.com/python/cpython/blob/3.13/Modules/itertoolsmodule.c#L2822-L2887
+    _cpython_type = itertools.zip_longest
+
+    _nonvar_fields = {
+        "exhausted",
+        *IteratorVariable._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        iterables: "list[VariableTracker]",
+        fillvalue: "VariableTracker",
+        exhausted: "list[bool] | None" = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.iterables = iterables
+        self.fillvalue = fillvalue
+        self.exhausted = (
+            exhausted if exhausted is not None else [False] * len(iterables)
+        )
+
+    def python_type(self) -> type:
+        return itertools.zip_longest
+
+    def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
+        # ref: https://github.com/python/cpython/blob/3.13/Modules/itertoolsmodule.c#L2737-L2808
+        if not self.is_mutable():
+            raise AssertionError("ZipLongestVariable must be mutable for next()")
+        if all(self.exhausted):
+            raise_observed_exception(StopIteration, tx)
+        values = []
+        # CPython: when the last active iterator exhausts, return without yielding.
+        any_active = False
+        for i, it in enumerate(self.iterables):
+            if self.exhausted[i]:
+                values.append(self.fillvalue)
+            else:
+                try:
+                    values.append(generic_iternext(tx, it))
+                    any_active = True
+                except ObservedUserStopIteration:
+                    handle_observed_exception(tx)
+                    tx.output.side_effects.mutation(self)
+                    self.exhausted[i] = True
+                    values.append(self.fillvalue)
+        if not any_active:
+            raise_observed_exception(StopIteration, tx)
+        return variables.TupleVariable(values)
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.add_push_null(
+            lambda: codegen.extend_output(
+                [
+                    codegen.create_load_python_module(itertools),
+                    codegen.create_load_attr("zip_longest"),
+                ]
+            ),
+            call_function_ex=True,
+        )
+        for i, it in enumerate(self.iterables):
+            if not self.exhausted[i]:
+                codegen(it)
+            else:
+                codegen.add_push_null(
+                    lambda: codegen.append_output(
+                        codegen.create_load_python_module(iter)  # type: ignore[arg-type]
+                    )
+                )
+                codegen.extend_output(
+                    [
+                        create_instruction("BUILD_TUPLE", arg=0),
+                        *create_call_function(1, False),
+                    ]
+                )
+        codegen.extend_output(
+            [create_instruction("BUILD_TUPLE", arg=len(self.iterables))]
+        )
+        codegen.extend_output([codegen.create_load_const("fillvalue")])
+        codegen(self.fillvalue)
+        codegen.extend_output(
+            [
+                create_instruction("BUILD_MAP", arg=1),
+                *create_call_function_ex(True, False),
+            ]
+        )
+
+
 class MapVariable(IteratorVariable):
     """
     Represents map(fn, *iterables)
@@ -472,9 +654,6 @@ class MapVariable(IteratorVariable):
 
     def python_type(self) -> type:
         return map
-
-    def has_unpack_var_sequence(self, tx: "InstructionTranslatorBase") -> bool:
-        return False
 
     def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Python/bltinmodule.c#L1409-L1450

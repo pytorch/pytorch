@@ -316,6 +316,12 @@ class PallasKernelOverrides(OpOverrides):
         return PallasKernelOverrides.to_dtype(var, dtype)
 
     @staticmethod
+    def value_expr(expr: sympy.Expr, dtype: torch.dtype) -> str:
+        # Pallas index_expr already emits the requested dtype, so value_expr has
+        # the same lowering here.
+        return PallasKernelOverrides.index_expr(expr, dtype)
+
+    @staticmethod
     def constant(val, dtype: torch.dtype) -> str:
         """Convert a constant value to JAX representation."""
         jax_dtype = torch_dtype_to_jax(dtype)
@@ -2387,9 +2393,10 @@ class PallasKernel(SIMDKernel):
                     # Fused nodes may re-visit the same indirect load (e.g.
                     # a reduction + pointwise over the same embedding).
                     # Allow that, but reject truly different indirect accesses.
-                    assert indirect == self.indirect_access, (
-                        "only one indirect access per kernel supported"
-                    )
+                    if indirect != self.indirect_access:
+                        raise AssertionError(
+                            "only one indirect access per kernel supported"
+                        )
                 self.indirect_access = indirect
                 return f"{buf}[0]"
 
@@ -3294,7 +3301,8 @@ class PallasKernel(SIMDKernel):
 
         The reduction happens over the loaded block of data.
         """
-        assert self.inside_reduction
+        if not self.inside_reduction:
+            raise AssertionError("expected to be inside a reduction")
 
         # Handle welford_reduce using the fallback (computes via sum reductions)
         if reduction_type == "welford_reduce":
@@ -3906,7 +3914,8 @@ class PallasKernel(SIMDKernel):
         kernel_body: IndentedBuffer,
     ) -> None:
         """Emit kernel, JIT wrapper, and main entry for scalar prefetch."""
-        assert self.indirect_access is not None
+        if self.indirect_access is None:
+            raise AssertionError("expected indirect_access to be set")
         indirect = self.indirect_access
         code = ctx.code
 

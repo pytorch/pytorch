@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: pt2"]
 name: inductor-periodic
 
 on:
@@ -30,7 +31,7 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
-      check_experiments: arc
+      check_experiments: arc,amd-do
       opt_out_experiments: lf
 
   periodic-dynamo-benchmarks-build:
@@ -61,7 +62,7 @@ jobs:
           { config: "aot_inductor_torchbench", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
         ]}
       build-additional-packages: "vision audio fbgemm torchao"
-      use-arc: ${{ needs.get-default-label-prefix.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.10"
       compiler: gcc11
       cuda-version: "13.0"
@@ -77,7 +78,7 @@ jobs:
       build-environment: ${{ needs.periodic-dynamo-benchmarks-build.outputs.build-environment }}
       docker-image: ${{ needs.periodic-dynamo-benchmarks-build.outputs.docker-image }}
       test-matrix: ${{ needs.periodic-dynamo-benchmarks-build.outputs.test-matrix }}
-      use-arc: ${{ needs.get-default-label-prefix.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.10"
       compiler: gcc11
       cuda-version: "13.0"
@@ -87,21 +88,22 @@ jobs:
     if: github.repository_owner == 'pytorch'
     name: rocm-periodic-dynamo-benchmarks-build
     uses: ./.github/workflows/_linux-build.yml
+    needs: get-default-label-prefix
     with:
-      build-environment: linux-jammy-rocm-py3.10-mi355
+      build-environment: linux-jammy-rocm-py3.10-mi350
       docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3-benchmarks
       test-matrix: |
         { include: [
-          { config: "dynamic_inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "dynamic_inductor_timm", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "dynamic_inductor_timm", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "dynamic_inductor_torchbench", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "dynamic_inductor_torchbench", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "aot_inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "aot_inductor_timm", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "aot_inductor_timm", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "aot_inductor_torchbench", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "aot_inductor_torchbench", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "dynamic_inductor_huggingface", shard: 1, num_shards: 1, runner: "${{ needs.get-default-label-prefix.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
+          { config: "dynamic_inductor_timm", shard: 1, num_shards: 2, runner: "${{ needs.get-default-label-prefix.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
+          { config: "dynamic_inductor_timm", shard: 2, num_shards: 2, runner: "${{ needs.get-default-label-prefix.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
+          { config: "dynamic_inductor_torchbench", shard: 1, num_shards: 2, runner: "${{ needs.get-default-label-prefix.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
+          { config: "dynamic_inductor_torchbench", shard: 2, num_shards: 2, runner: "${{ needs.get-default-label-prefix.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
+          { config: "aot_inductor_huggingface", shard: 1, num_shards: 1, runner: "${{ needs.get-default-label-prefix.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
+          { config: "aot_inductor_timm", shard: 1, num_shards: 2, runner: "${{ needs.get-default-label-prefix.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
+          { config: "aot_inductor_timm", shard: 2, num_shards: 2, runner: "${{ needs.get-default-label-prefix.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
+          { config: "aot_inductor_torchbench", shard: 1, num_shards: 2, runner: "${{ needs.get-default-label-prefix.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
+          { config: "aot_inductor_torchbench", shard: 2, num_shards: 2, runner: "${{ needs.get-default-label-prefix.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
         ]}
     secrets: inherit
 
@@ -132,7 +134,7 @@ jobs:
           { config: "inductor_torchbench_smoketest_perf", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
         ]}
       build-additional-packages: "vision audio fbgemm torchao"
-      use-arc: ${{ needs.get-default-label-prefix.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.10"
       compiler: gcc11
       cuda-version: "13.0"
@@ -148,15 +150,15 @@ jobs:
       build-environment: ${{ needs.inductor-smoke-build.outputs.build-environment }}
       docker-image: ${{ needs.inductor-smoke-build.outputs.docker-image }}
       test-matrix: ${{ needs.inductor-smoke-build.outputs.test-matrix }}
-      use-arc: ${{ needs.get-default-label-prefix.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.10"
       compiler: gcc11
       cuda-version: "13.0"
     secrets: inherit
 
 
-  periodic-dynamo-benchmarks-cpu-build:
-    name: periodic-dynamo-benchmarks-cpu-build
+  periodic-inductor-benchmarks-cpu-build:
+    name: periodic-inductor-benchmarks-cpu-build
     uses: ./.github/workflows/_linux-build.yml
     needs: get-default-label-prefix
     with:
@@ -204,23 +206,23 @@ jobs:
           { config: "dynamic_cpu_aot_inductor_amp_freezing_torchbench", shard: 2, num_shards: 2, runner: "linux.8xlarge.amx" },
         ]}
       build-additional-packages: "vision audio torchao"
-      use-arc: ${{ needs.get-default-label-prefix.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.10"
       compiler: gcc11
       cuda-version: cpu
     secrets: inherit
 
-  periodic-dynamo-benchmarks-cpu-test:
-    name: periodic-dynamo-benchmarks-cpu-test
+  periodic-inductor-benchmarks-cpu-test:
+    name: periodic-inductor-benchmarks-cpu-test
     uses: ./.github/workflows/_linux-test.yml
     needs:
-      - periodic-dynamo-benchmarks-cpu-build
+      - periodic-inductor-benchmarks-cpu-build
       - get-default-label-prefix
     with:
-      build-environment: ${{ needs.periodic-dynamo-benchmarks-cpu-build.outputs.build-environment }}
-      docker-image: ${{ needs.periodic-dynamo-benchmarks-cpu-build.outputs.docker-image }}
-      test-matrix: ${{ needs.periodic-dynamo-benchmarks-cpu-build.outputs.test-matrix }}
-      use-arc: ${{ needs.get-default-label-prefix.outputs.use-arc == 'true' }}
+      build-environment: ${{ needs.periodic-inductor-benchmarks-cpu-build.outputs.build-environment }}
+      docker-image: ${{ needs.periodic-inductor-benchmarks-cpu-build.outputs.docker-image }}
+      test-matrix: ${{ needs.periodic-inductor-benchmarks-cpu-build.outputs.test-matrix }}
+      use-arc: true
       python-version: "3.10"
       compiler: gcc11
       cuda-version: cpu

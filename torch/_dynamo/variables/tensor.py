@@ -26,6 +26,7 @@ from contextlib import nullcontext
 from itertools import chain
 from types import NoneType
 from typing import Any, NoReturn, Optional, TYPE_CHECKING
+from typing_extensions import NotRequired, TypedDict
 
 import sympy
 
@@ -177,6 +178,26 @@ def _tensor_debug_repr(value: torch.Tensor, type_name: str = "Tensor") -> str:
     return f"{type_name}(shape={tuple(value.shape)}, dtype={value.dtype})"
 
 
+class TensorSpecializedProps(TypedDict):
+    """Static tensor metadata produced by TensorVariable.specialize; the keys
+    map 1:1 to the corresponding TensorVariable.__init__ kwargs. The size,
+    stride and contiguity keys are only populated for fully static shapes."""
+
+    dtype: torch.dtype
+    device: torch.device
+    layout: torch.layout
+    ndim: int
+    requires_grad: bool
+    is_nested: bool
+    is_quantized: bool
+    is_sparse: bool
+    class_type: type
+    has_grad_fn: bool
+    _size: NotRequired[tuple[Any, ...]]
+    stride: NotRequired[tuple[Any, ...]]
+    is_contiguous: NotRequired[tuple[torch.memory_format, ...] | None]
+
+
 class TensorVariable(VariableTracker):
     """A torch.Tensor input or an intermediate value in the FX graph"""
 
@@ -232,7 +253,7 @@ class TensorVariable(VariableTracker):
         has_grad_fn: bool,
         _size: tuple[Any, ...] | None = None,
         stride: tuple[Any, ...] | None = None,
-        is_contiguous: bool | None = None,
+        is_contiguous: tuple[torch.memory_format, ...] | None = None,
         _is_name_set: bool | None = None,
         **kwargs: Any,
     ) -> None:
@@ -342,7 +363,7 @@ class TensorVariable(VariableTracker):
         """Tensor tp_richcompare: element-wise comparison producing an FX proxy."""
         from .builder import wrap_fx_proxy_cls
 
-        if isinstance(other, UserDefinedClassVariable):
+        if not isinstance(other, (SymNodeVariable, ConstantVariable, TensorVariable)):
             return ConstantVariable.create(NotImplemented)
         op_fn = cmp_name_to_op_mapping[op]
         proxy = tx.output.create_proxy(
@@ -351,8 +372,15 @@ class TensorVariable(VariableTracker):
         return wrap_fx_proxy_cls(type(self), tx, proxy)
 
     @staticmethod
-    def specialize(value: torch.Tensor) -> dict[str, Any]:
-        props: dict[str, Any] = {
+    def specialize(value: torch.Tensor) -> TensorSpecializedProps:
+        try:
+            has_grad_fn = value.grad_fn is not None
+        except Exception:
+            # Workaround for issues with create_parameter_op in Dynamo. Reading
+            # grad_fn should never cause an issue.
+            has_grad_fn = False
+
+        props: TensorSpecializedProps = {
             "dtype": value.dtype,
             "device": value.device,
             "layout": value.layout,
@@ -362,13 +390,8 @@ class TensorVariable(VariableTracker):
             "is_quantized": value.is_quantized,
             "is_sparse": value.is_sparse,
             "class_type": type(value),
+            "has_grad_fn": has_grad_fn,
         }
-        try:
-            props["has_grad_fn"] = value.grad_fn is not None
-        except Exception:
-            # Workaround for issues with create_parameter_op in Dynamo. Reading
-            # grad_fn should never cause an issue.
-            props["has_grad_fn"] = False
 
         if is_sparse_any(value) and not has_free_symbols(value):
             props["_size"] = tuple(
@@ -567,7 +590,7 @@ class TensorVariable(VariableTracker):
     def method_attr_retain_grad(self, tx: "InstructionTranslatorBase") -> NoReturn:
         unimplemented(
             gb_type="Tensor.retain_grad() with AOTDispatcher",
-            context=f"var_getattr {self} retain_grad",
+            context=f"getattro_impl {self} retain_grad",
             explanation="`Tensor.retain_grad()` does not work with AOTDispatcher.",
             hints=[],
         )
@@ -577,7 +600,12 @@ class TensorVariable(VariableTracker):
     ) -> VariableTracker | None:
         if tx.output.side_effects.has_pending_mutation_of_attr(self, "grad"):
             return tx.output.side_effects.load_attr(self, "grad")
-        # None tells var_getattr to use default .grad handling
+        if (
+            isinstance(self.mutation_type, AttributeMutationNew)
+            and not self.has_grad_fn
+        ):
+            return ConstantVariable.create(None)
+        # None tells getattro_impl to use default .grad handling
         return None
 
     def method_attr_data(self, tx: "InstructionTranslatorBase") -> VariableTracker:
@@ -591,7 +619,7 @@ class TensorVariable(VariableTracker):
         if self.has_grad_fn:
             unimplemented(
                 gb_type="Tensor with grad_fn()",
-                context=f"var_getattr {self} grad_fn",
+                context=f"getattro_impl {self} grad_fn",
                 explanation="Dynamo does not support tracing tensors with a grad_fn directly.",
                 hints=[],
             )
@@ -611,7 +639,7 @@ class TensorVariable(VariableTracker):
         from . import GetAttrVariable
 
         # TODO - This is not a good solution but solves an accuracy issue.
-        # Today, var_getattr returns GetAttrVariable for both non-existent
+        # Today, getattro_impl returns GetAttrVariable for both non-existent
         # attributes and existing attributes. This is a bug and requires more
         # deep dive.
         if name in all_tensor_attrs:
@@ -636,14 +664,27 @@ class TensorVariable(VariableTracker):
 
         return VariableTracker.build(tx, ret_val)
 
-    def var_getattr(
+    def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
+        fake_val = self.as_proxy().node.meta["example_value"]
+        if (
+            isinstance(fake_val, torch.Tensor)
+            and is_sparse_any(fake_val)
+            and (not tx.export or not config.capture_sparse_compute)
+        ):
+            unimplemented(
+                gb_type="Attempted to wrap sparse Tensor",
+                context="",
+                explanation="torch.compile does not support sparse Tensors",
+                hints=[*graph_break_hints.SPARSE_TENSOR],
+            )
+
         if self.is_strict_mode(tx):
             if name in self._strict_mode_banned_ops():
                 unimplemented(
                     gb_type="Strict mode banned op",
-                    context=f"var_getattr {self} {name}",
+                    context=f"getattro_impl {self} {name}",
                     explanation=f"Getattr invocation '{name}' in strict mode is not supported.",
                     hints=[
                         f"Remove `{name}` from the list of banned ops by "
@@ -688,6 +729,14 @@ class TensorVariable(VariableTracker):
                 return variables.misc.DelayGraphBreakVariable(
                     source=AttrSource(self.source, name),
                     msg="Getting an inplace view on a graph input is not supported",
+                    hints=[
+                        "Avoid mutating a graph input's tensor metadata with in-place view ops. "
+                        "If the mutation is only needed inside the compiled region, replace the in-place call "
+                        "with an out-of-place view, for example `x = x.transpose(1, 2)` instead of "
+                        "`x.transpose_(1, 2)`.",
+                        "If you need to mutate the input tensor's metadata, move the in-place view call outside "
+                        "`torch.compile`.",
+                    ],
                 )
 
         # For attributes (not methods) that were not caught in the special handling above,
@@ -728,9 +777,6 @@ class TensorVariable(VariableTracker):
         if result is None:
             raise NotImplementedError
         return result
-
-    def has_unpack_var_sequence(self, tx: "InstructionTranslatorBase") -> bool:
-        return self.ndim > 0
 
     def unpack_var_sequence(
         self, tx: "InstructionTranslatorBase", idxes: Sequence[int] | None = None
@@ -1236,7 +1282,7 @@ class TensorVariable(VariableTracker):
             context=f"{self}.as_subclass({cls})",
             explanation="Currently not supported",
             hints=[
-                "Avoid this call or move it outside `torch.compile` regione",
+                "Avoid this call or move it outside `torch.compile` region",
                 *graph_break_hints.SUPPORTABLE,
             ],
         )
@@ -1719,6 +1765,25 @@ class TensorVariable(VariableTracker):
     def method___abs__(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return self.nb_absolute_impl(tx)
 
+    def nb_invert_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+    ) -> VariableTracker:
+        from .builder import wrap_fx_proxy
+
+        return wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_function",
+                operator.invert,
+                (self.as_proxy(),),
+                {},
+            ),
+        )
+
+    def method___invert__(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return self.nb_invert_impl(tx)
+
     def method___getitem__(
         self,
         tx: "InstructionTranslatorBase",
@@ -2058,7 +2123,7 @@ class TensorVariable(VariableTracker):
                         "register_hook",
                         source_target=None,
                         enable_grad=None,
-                        set_subgraph_inputs="automatic_with_forced_inputs",  # pyrefly: ignore[bad-argument-type]
+                        set_subgraph_inputs="automatic_with_forced_inputs",
                         restore_side_effects=True,
                     )
             except torch._dynamo.exc.UnknownPropertiesDuringBackwardTrace:
@@ -2251,8 +2316,8 @@ class TensorVariable(VariableTracker):
                 return None
         fwd_kwargs = dict(kwargs)
         fwd_kwargs.pop("layout", None)
-        fwd_kwargs.setdefault("dtype", self.var_getattr(tx, "dtype"))
-        fwd_kwargs.setdefault("device", self.var_getattr(tx, "device"))
+        fwd_kwargs.setdefault("dtype", self.getattro_impl(tx, "dtype"))
+        fwd_kwargs.setdefault("device", self.getattro_impl(tx, "device"))
         return variables.TorchInGraphFunctionVariable(torch.tensor).call_function(
             tx,
             [data_arg],
@@ -2297,15 +2362,16 @@ class TensorVariable(VariableTracker):
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
+        from .builder import wrap_fx_proxy
+
         if not other.is_symnode_like():
             return VariableTracker.build(tx, NotImplemented)
-        args = [other, self] if reverse else [self, other]
-        return SymNodeVariable.create(
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return wrap_fx_proxy(
             tx,
             tx.output.create_proxy(
-                "call_function", operator.lshift, *proxy_args_kwargs(args, {})
+                "call_function", operator.lshift, *proxy_args_kwargs([lhs, rhs], {})
             ),
-            sym_num=None,
         )
 
     def nb_rshift_impl(
@@ -2314,15 +2380,16 @@ class TensorVariable(VariableTracker):
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
+        from .builder import wrap_fx_proxy
+
         if not other.is_symnode_like():
             return VariableTracker.build(tx, NotImplemented)
-        args = [other, self] if reverse else [self, other]
-        return SymNodeVariable.create(
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return wrap_fx_proxy(
             tx,
             tx.output.create_proxy(
-                "call_function", operator.rshift, *proxy_args_kwargs(args, {})
+                "call_function", operator.rshift, *proxy_args_kwargs([lhs, rhs], {})
             ),
-            sym_num=None,
         )
 
     def nb_or_impl(
@@ -2331,14 +2398,52 @@ class TensorVariable(VariableTracker):
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
+        from .builder import wrap_fx_proxy
+
         if not other.is_symnode_like():
             return VariableTracker.build(tx, NotImplemented)
-        return SymNodeVariable.create(
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return wrap_fx_proxy(
             tx,
             tx.output.create_proxy(
-                "call_function", operator.or_, *proxy_args_kwargs([self, other], {})
+                "call_function", operator.or_, *proxy_args_kwargs([lhs, rhs], {})
             ),
-            sym_num=None,
+        )
+
+    def nb_and_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        from .builder import wrap_fx_proxy
+
+        if not other.is_symnode_like():
+            return VariableTracker.build(tx, NotImplemented)
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.and_, *proxy_args_kwargs([lhs, rhs], {})
+            ),
+        )
+
+    def nb_xor_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        from .builder import wrap_fx_proxy
+
+        if not other.is_symnode_like():
+            return VariableTracker.build(tx, NotImplemented)
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.xor, *proxy_args_kwargs([lhs, rhs], {})
+            ),
         )
 
     def nb_multiply_impl(
@@ -2357,6 +2462,69 @@ class TensorVariable(VariableTracker):
             tx,
             tx.output.create_proxy(
                 "call_function", operator.mul, *proxy_args_kwargs([lhs, rhs], {})
+            ),
+        )
+
+    def nb_floor_divide_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # Reaches here only via direct ``tensor.__floordiv__(x)`` calls — the
+        # ``operator.floordiv`` path goes through ``_handle_insert_op_in_graph``
+        # in ``BuiltinVariable``.  Build the same FX proxy.
+        if not (isinstance(other, TensorVariable) or _is_sym_arith_operand(other)):
+            return VariableTracker.build(tx, NotImplemented)
+        from .builder import wrap_fx_proxy
+
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.floordiv, *proxy_args_kwargs([lhs, rhs], {})
+            ),
+        )
+
+    def nb_true_divide_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # Reaches here only via direct ``tensor.__truediv__(x)`` calls — the
+        # ``operator.truediv`` path goes through ``_handle_insert_op_in_graph``
+        # in ``BuiltinVariable``.  Build the same FX proxy.
+        if not (isinstance(other, TensorVariable) or _is_sym_arith_operand(other)):
+            return VariableTracker.build(tx, NotImplemented)
+        from .builder import wrap_fx_proxy
+
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.truediv, *proxy_args_kwargs([lhs, rhs], {})
+            ),
+        )
+
+    def nb_remainder_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # Reaches here only via direct ``tensor.__mod__(x)`` calls — the
+        # ``operator.mod`` path goes through ``_handle_insert_op_in_graph``
+        # in ``BuiltinVariable``.  Build the same FX proxy.
+        if not (isinstance(other, TensorVariable) or _is_sym_arith_operand(other)):
+            return VariableTracker.build(tx, NotImplemented)
+        from .builder import wrap_fx_proxy
+
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.mod, *proxy_args_kwargs([lhs, rhs], {})
             ),
         )
 
@@ -2385,12 +2553,27 @@ class TensorVariable(VariableTracker):
             sym_num=None,
         )
 
-    def is_python_equal(self, other: object) -> bool:
-        if not isinstance(other, VariableTracker):
-            return False
-        a = self.as_proxy().node.meta["example_value"]
-        b = other.as_proxy().node.meta["example_value"]
-        return a is b
+    def nb_power_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        z: VariableTracker | None,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # Reaches here only via direct ``tensor.__pow__(x)`` calls — the
+        # ``operator.pow`` path goes through ``_handle_insert_op_in_graph``
+        # in ``BuiltinVariable``.  Build the same FX proxy.
+        if not (isinstance(other, TensorVariable) or _is_sym_arith_operand(other)) or z:
+            return VariableTracker.build(tx, NotImplemented)
+        from .builder import wrap_fx_proxy
+
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.pow, *proxy_args_kwargs([lhs, rhs], {})
+            ),
+        )
 
 
 class SymNodeVariable(VariableTracker):
@@ -2599,6 +2782,38 @@ class SymNodeVariable(VariableTracker):
             sym_num=None,
         )
 
+    def nb_and_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        if not other.is_symnode_like():
+            return VariableTracker.build(tx, NotImplemented)
+        return SymNodeVariable.create(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.and_, *proxy_args_kwargs([self, other], {})
+            ),
+            sym_num=None,
+        )
+
+    def nb_xor_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        if not other.is_symnode_like():
+            return VariableTracker.build(tx, NotImplemented)
+        return SymNodeVariable.create(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.xor, *proxy_args_kwargs([self, other], {})
+            ),
+            sym_num=None,
+        )
+
     def nb_lshift_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -2669,6 +2884,57 @@ class SymNodeVariable(VariableTracker):
             sym_num=None,
         )
 
+    def nb_floor_divide_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        if not _is_sym_arith_operand(other):
+            return VariableTracker.build(tx, NotImplemented)
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return SymNodeVariable.create(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.floordiv, *proxy_args_kwargs([lhs, rhs], {})
+            ),
+            sym_num=None,
+        )
+
+    def nb_true_divide_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        if not _is_sym_arith_operand(other):
+            return VariableTracker.build(tx, NotImplemented)
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return SymNodeVariable.create(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.truediv, *proxy_args_kwargs([lhs, rhs], {})
+            ),
+            sym_num=None,
+        )
+
+    def nb_remainder_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        if not _is_sym_arith_operand(other):
+            return VariableTracker.build(tx, NotImplemented)
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return SymNodeVariable.create(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.mod, *proxy_args_kwargs([lhs, rhs], {})
+            ),
+            sym_num=None,
+        )
+
     def nb_float_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -2734,6 +3000,26 @@ class SymNodeVariable(VariableTracker):
             sym_num=None,
         )
 
+    def nb_power_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        z: VariableTracker | None,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        if z is not None:
+            return VariableTracker.build(tx, NotImplemented)
+        if not _is_sym_arith_operand(other):
+            return VariableTracker.build(tx, NotImplemented)
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return SymNodeVariable.create(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.pow, *proxy_args_kwargs([lhs, rhs], {})
+            ),
+            sym_num=None,
+        )
+
     def method___abs__(
         self, tx: "InstructionTranslatorBase", *args: Any, **kwargs: Any
     ) -> VariableTracker:
@@ -2746,15 +3032,6 @@ class SymNodeVariable(VariableTracker):
         # Essentially convert the SymNode to a constant variable whenever its
         # searched for a dict key.
         return hash(self.evaluate_expr())
-
-    def is_python_equal(self, other: object) -> bool:
-        if isinstance(other, SymNodeVariable):
-            return self.evaluate_expr() == other.evaluate_expr()
-        # could be constant variable as well
-        return (
-            isinstance(other, VariableTracker)
-            and self.evaluate_expr() == other.as_python_constant()
-        )
 
 
 class NumpyNdarrayVariable(TensorVariable):
@@ -2793,7 +3070,7 @@ class NumpyNdarrayVariable(TensorVariable):
         """ndarray tp_richcompare: element-wise comparison via numpy_operator_wrapper."""
         from ..utils import numpy_operator_wrapper
 
-        if isinstance(other, UserDefinedClassVariable):
+        if not isinstance(other, (SymNodeVariable, ConstantVariable, TensorVariable)):
             return ConstantVariable.create(NotImplemented)
         op_fn = cmp_name_to_op_mapping[op]
         proxy = tx.output.create_proxy(
@@ -2804,7 +3081,7 @@ class NumpyNdarrayVariable(TensorVariable):
         )
         return NumpyNdarrayVariable.create(tx, proxy)
 
-    def var_getattr(
+    def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         # NB: This INTENTIONALLY does not call super(), because there is
@@ -2862,14 +3139,14 @@ class NumpyNdarrayVariable(TensorVariable):
         elif name in ["base", "flags", "dtype"]:
             unimplemented(
                 gb_type="Unsupported ndarray attribute access",
-                context=f"var_getattr {self} {name}",
+                context=f"getattro_impl {self} {name}",
                 explanation=f"Dynamo currently does not support tracing `ndarray.{name}`.",
                 hints=[],
             )
         elif name == "__version__":
             unimplemented(
                 gb_type="Unsupported ndarray.__version__ access",
-                context=f"var_getattr {self} {name}",
+                context=f"getattro_impl {self} {name}",
                 explanation=f"Dynamo currently does not support tracing `ndarray.{name}`.",
                 hints=[],
             )
@@ -3031,7 +3308,7 @@ class TensorSubclassVariable(UserDefinedClassVariable):
                     explanation="Currently not supported",
                     hints=[
                         "Avoid this constructor call or move it outside "
-                        "`torch.compile` regione",
+                        "`torch.compile` region",
                         *graph_break_hints.SUPPORTABLE,
                     ],
                 )

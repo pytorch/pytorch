@@ -4200,7 +4200,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         # for higher dim input sizes.
         # See https://github.com/pytorch/pytorch/issues/141112
         B, D, max_seq_len = 64, 512, 100
-        torch._C._cuda_clearCublasWorkspaces()
+        torch.cuda._clear_cublas_workspaces()
         m = torch.nn.Linear(D, D, device=device)
         nt = torch.nested.as_nested_tensor(
             [
@@ -7136,7 +7136,8 @@ torch.cuda.synchronize()
             with torch.nn.attention.sdpa_kernel(
                 torch.nn.attention.SDPBackend.CUDNN_ATTENTION
             ):
-                check_forward_backward()
+                with self.assertRaisesRegex(RuntimeError, "No viable backend"):
+                    check_forward_backward(skip_backward=True)
 
     @skipIfTorchDynamo("SDPA test compiles internally")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
