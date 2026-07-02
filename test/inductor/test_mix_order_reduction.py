@@ -146,11 +146,9 @@ class MixOrderReductionTest(TestBase):
         )
 
     def test_wide_reduction_respects_row_floor(self):
-        """The relaxed wide-reduction path still requires a minimum row count.
-        A wide reduction with too few rows (nrow < 4096) lacks parallelism to
-        split the other reduction across rows and tends to stay L2-resident, so
-        it is left unfused in strict mode. This guards the wide path against
-        over-fusing short tensors (2048x8192).
+        """The wide-reduction path still requires nrow >= 4096: too few rows
+        lacks the parallelism to split the other reduction across, so the shape
+        is left unfused in strict mode (guards against over-fusing 2048x8192).
         """
         if not inductor_config.triton.mix_order_reduction:
             self.skipTest("Mix order reduction not enabled")

@@ -401,12 +401,9 @@ class MixOrderReduction:
             ):
                 return False
 
-            # Fuse when either:
-            # 1, ncol is wide enough that the per-row persistent reduction is
-            #    efficient on its own, or
-            # 2, there are at least twice as many rows as columns, so the other
-            #    reduction can be split efficiently across the rows.
-            # Until now, `nrow >= ncol * 2` rejected profitable wide reductions
+            # Fuse when wide (large ncol => the per-row persistent reduction is
+            # efficient) or tall (nrow >= ncol*2 => the other reduction splits
+            # well across rows).
             wide_enough = V.graph.sizevars.evaluate_expr(
                 sympy.Ge(ncol, 4096),
                 size_oblivious=True,
@@ -420,9 +417,8 @@ class MixOrderReduction:
             if not (wide_enough or tall_enough):
                 return False
 
-            # Require a minimum number of rows. With few rows there is not
-            # enough parallelism to split the other reduction across, and the
-            # tensor tends to be small enough to stay cached.
+            # Need enough rows to split the other reduction across; too few
+            # gives insufficient parallelism to justify the fusion overhead.
             if not V.graph.sizevars.evaluate_expr(
                 sympy.Ge(nrow, 4096),
                 size_oblivious=True,
