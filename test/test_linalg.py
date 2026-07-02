@@ -1646,7 +1646,14 @@ class TestLinalg(TestCase):
         # check invalid norm type
         a = torch.ones(3, 3, dtype=dtype, device=device)
         for p in ['wrong_norm', 5]:
-            with self.assertRaisesRegex(RuntimeError, f"linalg.cond got an invalid norm type: {p}"):
+            with self.assertRaisesRegex(ValueError, f"linalg.cond got an invalid norm type: {p}"):
+                torch.linalg.cond(a, p)
+
+        # a complex scalar is not a valid order of norm
+        # https://github.com/pytorch/pytorch/issues/137466
+        a = torch.ones(3, 3, dtype=dtype, device=device)
+        for p in [1j, 2 + 2j]:
+            with self.assertRaisesRegex(ValueError, "Expected a non-complex scalar as the order of norm"):
                 torch.linalg.cond(a, p)
 
     # This test calls torch.linalg.norm and numpy.linalg.norm with illegal arguments
