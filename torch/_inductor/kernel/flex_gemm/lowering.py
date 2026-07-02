@@ -132,6 +132,21 @@ def allocate_flex_gemm_aux_outs(
     )
 
 
+def flex_gemm_ordered_outputs(result, aux_outs, local_reduce_outs, local_reduce_index):
+    """Return generated outputs in the user-visible tuple order."""
+    if not local_reduce_outs:
+        return (result, *aux_outs)
+    local_reduce_out = local_reduce_outs[0]
+    if local_reduce_index is None:
+        return (result, *aux_outs, local_reduce_out)
+    return (
+        result,
+        *aux_outs[:local_reduce_index],
+        local_reduce_out,
+        *aux_outs[local_reduce_index:],
+    )
+
+
 def validate_flex_gemm_local_reduce_scope(
     gemm_op: torch._ops.OpOverload, local_reduce
 ) -> None:
@@ -164,65 +179,41 @@ def flex_gemm_config_keys_for_local_reduce(
     tuned: bool,
 ) -> tuple[tuple[Any, ...], ...]:
     """Select QuACK config keys after applying local-reduce layout constraints."""
-    if tuned:
-        from torch._inductor.template_heuristics.flex_gemm import (
-            candidate_gemm_configs_for_device,
-            gemm_config_key,
-        )
-
-        candidate_configs = candidate_gemm_configs_for_device(device)
-        if local_reduce is not None:
-            local_reduce_configs = tuple(
-                config
-                for config in candidate_configs
-                if validate_flex_gemm_local_reduce_config(
-                    config, local_reduce.group, local_reduce.axis
-                )
-            )
-            if not local_reduce_configs:
-                raise NotImplementedError(
-                    flex_gemm_local_reduce_config_error(
-                        candidate_configs,
-                        local_reduce.group,
-                        local_reduce.axis,
-                    )
-                )
-            candidate_configs = local_reduce_configs
-        return tuple(gemm_config_key(config) for config in candidate_configs)
-
     from torch._inductor.template_heuristics.flex_gemm import (
         candidate_gemm_configs_for_device,
         default_gemm_config_key,
         gemm_config_key,
     )
 
-    default_key = default_gemm_config_key(device, m, n)
+    if not tuned:
+        default_key = default_gemm_config_key(device, m, n)
+        if local_reduce is None or validate_flex_gemm_local_reduce_config(
+            dict(default_key), local_reduce.group, local_reduce.axis
+        ):
+            return (default_key,)
+
+    candidate_configs = candidate_gemm_configs_for_device(device)
     if local_reduce is None:
-        return (default_key,)
-    default_config = dict(default_key)
-    if validate_flex_gemm_local_reduce_config(
-        default_config, local_reduce.group, local_reduce.axis
-    ):
-        return (default_key,)
-    candidate_config = next(
-        (
-            config
-            for config in candidate_gemm_configs_for_device(device)
-            if validate_flex_gemm_local_reduce_config(
-                config, local_reduce.group, local_reduce.axis
-            )
-        ),
-        None,
+        return tuple(gemm_config_key(config) for config in candidate_configs)
+
+    local_reduce_configs = tuple(
+        config
+        for config in candidate_configs
+        if validate_flex_gemm_local_reduce_config(
+            config, local_reduce.group, local_reduce.axis
+        )
     )
-    if candidate_config is None:
+    if not local_reduce_configs:
         raise NotImplementedError(
             flex_gemm_local_reduce_config_error(
-                candidate_gemm_configs_for_device(device),
+                candidate_configs,
                 local_reduce.group,
                 local_reduce.axis,
             )
         )
-    return (gemm_config_key(candidate_config),)
+    if tuned:
+        return tuple(gemm_config_key(config) for config in local_reduce_configs)
+    return (gemm_config_key(local_reduce_configs[0]),)
 
 
 @register_lowering(flex_gemm_hop, type_promotion_kind=None)
@@ -380,4 +371,6 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     result, _ = autotune_select_algorithm(
         "flex_gemm_epilogue", choices, input_nodes, layout
     )
-    return (result, *aux_outs, *local_reduce_outs)
+    return flex_gemm_ordered_outputs(
+        result, aux_outs, local_reduce_outs, outputs.local_reduce_aux_index
+    )
