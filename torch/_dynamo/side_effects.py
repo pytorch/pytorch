@@ -36,8 +36,8 @@ from typing import Any, overload, TYPE_CHECKING
 
 import torch
 import torch.nn
-from torch._library.utils import RegistrationHandle
 from torch._dynamo.variables.misc import AutogradFunctionContextVariable
+from torch._library.utils import RegistrationHandle
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import is_structseq_class
 
@@ -152,9 +152,7 @@ class _SideEffectReplayRegistry:
 
         return RegistrationHandle(deregister)
 
-    def lookup_rule(
-        self, ctx: SideEffectReplayContext
-    ) -> SideEffectReplayRule | None:
+    def lookup_rule(self, ctx: SideEffectReplayContext) -> SideEffectReplayRule | None:
         return self._lookup_unique("side effect replay rule", self.rules, ctx)
 
     def lookup_handler(
@@ -187,15 +185,10 @@ class _SideEffectReplayRegistry:
 _side_effect_replay_registry = _SideEffectReplayRegistry()
 
 
-def _attach_registration_handle(fn: Callable[..., Any], handle: RegistrationHandle) -> None:
-    setattr(fn, "_side_effect_replay_handle", handle)
-
-
 @overload
 def register_side_effect_replay_rule(
     rule: SideEffectReplayRule,
-) -> RegistrationHandle:
-    ...
+) -> RegistrationHandle: ...
 
 
 @overload
@@ -206,8 +199,7 @@ def register_side_effect_replay_rule(
     reason: str,
     cache_key: Hashable,
     priority: int = 0,
-) -> SideEffectReplayRuleDecorator:
-    ...
+) -> SideEffectReplayRuleDecorator: ...
 
 
 def register_side_effect_replay_rule(
@@ -222,15 +214,19 @@ def register_side_effect_replay_rule(
     if rule is not None:
         return _side_effect_replay_registry.register_rule(rule)
 
-    assert name is not None
-    assert matcher is not None
-    assert reason is not None
-    assert cache_key is not None
+    if name is None:
+        raise AssertionError("side effect replay rule name must be set")
+    if matcher is None:
+        raise AssertionError("side effect replay rule matcher must be set")
+    if reason is None:
+        raise AssertionError("side effect replay rule reason must be set")
+    if cache_key is None:
+        raise AssertionError("side effect replay rule cache key must be set")
 
     def decorator(
         operation: SideEffectReplayRuleOperation,
     ) -> SideEffectReplayRuleOperation:
-        handle = _side_effect_replay_registry.register_rule(
+        _side_effect_replay_registry.register_rule(
             SideEffectReplayRule(
                 name=name,
                 matcher=matcher,
@@ -240,7 +236,6 @@ def register_side_effect_replay_rule(
                 priority=priority,
             )
         )
-        _attach_registration_handle(operation, handle)
         return operation
 
     return decorator
@@ -265,7 +260,7 @@ def register_side_effect_replay_handler(
     def decorator(
         codegen: SideEffectReplayCodegen,
     ) -> SideEffectReplayCodegen:
-        handle = _register_side_effect_replay_handler(
+        _register_side_effect_replay_handler(
             SideEffectReplayHandler(
                 name=name,
                 matcher=matcher,
@@ -273,7 +268,6 @@ def register_side_effect_replay_handler(
                 priority=priority,
             )
         )
-        _attach_registration_handle(codegen, handle)
         return codegen
 
     return decorator
@@ -1648,11 +1642,13 @@ class SideEffects:
 @register_side_effect_replay_handler(
     name="list_mutation",
     matcher=lambda ctx: isinstance(ctx.var, variables.ListVariable),
+    priority=90,
 )
 def _codegen_list_mutation(ctx: SideEffectReplayContext) -> None:
     cg = ctx.codegen
     var = ctx.var
-    assert isinstance(var, variables.ListVariable)
+    if not isinstance(var, variables.ListVariable):
+        raise AssertionError(type(var))
     # old[:] = new
     cg(var, allow_cache=False)  # Don't codegen via source
     cg(var.source)  # type: ignore[attr-defined]
@@ -1670,11 +1666,13 @@ def _codegen_list_mutation(ctx: SideEffectReplayContext) -> None:
 @register_side_effect_replay_handler(
     name="deque_mutation",
     matcher=lambda ctx: isinstance(ctx.var, variables.lists.DequeVariable),
+    priority=80,
 )
 def _codegen_deque_mutation(ctx: SideEffectReplayContext) -> None:
     cg = ctx.codegen
     var = ctx.var
-    assert isinstance(var, variables.lists.DequeVariable)
+    if not isinstance(var, variables.lists.DequeVariable):
+        raise AssertionError(type(var))
     # For limited maxlen, the order of operations matter for side effect, but we
     # currently don't track the order, so no support.
     if not var.maxlen.is_constant_none():
@@ -1715,11 +1713,13 @@ def _codegen_deque_mutation(ctx: SideEffectReplayContext) -> None:
     matcher=lambda ctx: isinstance(
         ctx.var, (variables.ConstDictVariable, variables.SetVariable)
     ),
+    priority=70,
 )
 def _codegen_const_dict_or_set_mutation(ctx: SideEffectReplayContext) -> None:
     cg = ctx.codegen
     var = ctx.var
-    assert isinstance(var, (variables.ConstDictVariable, variables.SetVariable))
+    if not isinstance(var, (variables.ConstDictVariable, variables.SetVariable)):
+        raise AssertionError(type(var))
     # Reconstruct works as follow:
     # (1) Skip codegen if there are no new items
     # (2) codegen(...) each pair of key/value
@@ -1760,17 +1760,17 @@ def _codegen_const_dict_or_set_mutation(ctx: SideEffectReplayContext) -> None:
     matcher=lambda ctx: isinstance(
         ctx.var, variables.torch_function.TorchFunctionModeStackVariable
     ),
+    priority=60,
 )
 def _codegen_torch_function_mode_stack_mutation(
     ctx: SideEffectReplayContext,
 ) -> None:
     cg = ctx.codegen
     var = ctx.var
-    assert isinstance(var, variables.torch_function.TorchFunctionModeStackVariable)
+    if not isinstance(var, variables.torch_function.TorchFunctionModeStackVariable):
+        raise AssertionError(type(var))
     cg.add_push_null(
-        lambda: cg.load_import_from(
-            utils.__name__, "set_torch_function_mode_stack"
-        )
+        lambda: cg.load_import_from(utils.__name__, "set_torch_function_mode_stack")
     )
 
     cg.foreach(var.symbolic_stack)
@@ -1784,13 +1784,15 @@ def _codegen_torch_function_mode_stack_mutation(
     name="cell_mutation",
     matcher=lambda ctx: isinstance(ctx.var, variables.CellVariable)
     and ctx.var.local_name is not None,
-    priority=10,
+    priority=50,
 )
 def _codegen_cell_mutation(ctx: SideEffectReplayContext) -> None:
     cg = ctx.codegen
     var = ctx.var
-    assert isinstance(var, variables.CellVariable)
-    assert var.local_name is not None
+    if not isinstance(var, variables.CellVariable):
+        raise AssertionError(type(var))
+    if var.local_name is None:
+        raise AssertionError("cell mutation local name must be set")
     # Emit more readable and performant bytecode.
     # TODO generalize this for cells created during inlining.
     if var in ctx.side_effects.store_attr_mutations:
@@ -1803,7 +1805,8 @@ def _codegen_cell_mutation(ctx: SideEffectReplayContext) -> None:
 def _codegen_user_defined_dict_mutation(ctx: SideEffectReplayContext) -> None:
     cg = ctx.codegen
     var = ctx.var
-    assert isinstance(var, variables.UserDefinedDictVariable)
+    if not isinstance(var, variables.UserDefinedDictVariable):
+        raise AssertionError(type(var))
     # Do dict related update manually here. The store_attr mutations will be
     # applied later.
     varname_map = {}
@@ -1857,7 +1860,8 @@ def _codegen_user_defined_dict_mutation(ctx: SideEffectReplayContext) -> None:
 def _codegen_user_defined_list_mutation(ctx: SideEffectReplayContext) -> None:
     cg = ctx.codegen
     var = ctx.var
-    assert isinstance(var, variables.UserDefinedListVariable)
+    if not isinstance(var, variables.UserDefinedListVariable):
+        raise AssertionError(type(var))
     # Update the list to the updated items. Be careful in calling the list
     # methods and not the overridden methods.
     varname_map = {}
@@ -1896,7 +1900,8 @@ def _codegen_user_defined_list_mutation(ctx: SideEffectReplayContext) -> None:
 def _codegen_user_defined_deque_mutation(ctx: SideEffectReplayContext) -> None:
     cg = ctx.codegen
     var = ctx.var
-    assert isinstance(var, variables.UserDefinedDequeVariable)
+    if not isinstance(var, variables.UserDefinedDequeVariable):
+        raise AssertionError(type(var))
     # Update the deque to the updated items. Be careful in calling the deque
     # methods and not the overridden methods.
     varname_map = {}
@@ -1963,6 +1968,7 @@ def _skip_attribute_mutation_replay(var: VariableTracker) -> bool:
 @register_side_effect_replay_handler(
     name="attribute_mutation",
     matcher=lambda ctx: ctx.side_effects.is_attribute_mutation(ctx.var),
+    priority=40,
 )
 def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
     cg = ctx.codegen
@@ -1979,18 +1985,16 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
         and var._base_vt.has_new_items()  # type: ignore[union-attr]
     ):
         _codegen_user_defined_dict_mutation(ctx)
-    elif (
-        isinstance(var, variables.UserDefinedListVariable)
-        and side_effects.is_modified(
-            var._base_vt  # pyrefly: ignore[bad-argument-type]
-        )
+    elif isinstance(
+        var, variables.UserDefinedListVariable
+    ) and side_effects.is_modified(
+        var._base_vt  # pyrefly: ignore[bad-argument-type]
     ):
         _codegen_user_defined_list_mutation(ctx)
-    elif (
-        isinstance(var, variables.UserDefinedDequeVariable)
-        and side_effects.is_modified(
-            var._base_vt  # pyrefly: ignore[bad-argument-type]
-        )
+    elif isinstance(
+        var, variables.UserDefinedDequeVariable
+    ) and side_effects.is_modified(
+        var._base_vt  # pyrefly: ignore[bad-argument-type]
     ):
         _codegen_user_defined_deque_mutation(ctx)
 
@@ -2100,11 +2104,13 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
 @register_side_effect_replay_handler(
     name="list_iterator_mutation",
     matcher=lambda ctx: isinstance(ctx.var, variables.ListIteratorVariable),
+    priority=30,
 )
 def _codegen_list_iterator_mutation(ctx: SideEffectReplayContext) -> None:
     cg = ctx.codegen
     var = ctx.var
-    assert isinstance(var, variables.ListIteratorVariable)
+    if not isinstance(var, variables.ListIteratorVariable):
+        raise AssertionError(type(var))
     for _ in range(var.index):
         cg.add_push_null(lambda: cg.load_import_from(utils.__name__, "iter_next"))
         cg(var.source)  # type: ignore[attr-defined]
@@ -2116,11 +2122,13 @@ def _codegen_list_iterator_mutation(ctx: SideEffectReplayContext) -> None:
 @register_side_effect_replay_handler(
     name="count_iterator_mutation",
     matcher=lambda ctx: isinstance(ctx.var, variables.CountIteratorVariable),
+    priority=20,
 )
 def _codegen_count_iterator_mutation(ctx: SideEffectReplayContext) -> None:
     cg = ctx.codegen
     var = ctx.var
-    assert isinstance(var, variables.CountIteratorVariable)
+    if not isinstance(var, variables.CountIteratorVariable):
+        raise AssertionError(type(var))
     for _ in range(var.advance_count):
         cg.add_push_null(lambda: cg.load_import_from(utils.__name__, "iter_next"))
         cg(var.source)  # type: ignore[attr-defined]
@@ -2132,11 +2140,13 @@ def _codegen_count_iterator_mutation(ctx: SideEffectReplayContext) -> None:
 @register_side_effect_replay_handler(
     name="random_mutation",
     matcher=lambda ctx: isinstance(ctx.var, variables.RandomVariable),
+    priority=10,
 )
 def _codegen_random_mutation(ctx: SideEffectReplayContext) -> None:
     cg = ctx.codegen
     var = ctx.var
-    assert isinstance(var, variables.RandomVariable)
+    if not isinstance(var, variables.RandomVariable):
+        raise AssertionError(type(var))
 
     def gen_fn() -> None:
         cg(var.source)  # type: ignore[attr-defined]
