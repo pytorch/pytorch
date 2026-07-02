@@ -102,7 +102,7 @@ def _reduced_shape(shape, empty_dim_as_none=False, dim=None, keepdim=False):
 
     return result
 
-class TestReductionsDevice(TestCase):
+class TestReductions(TestCase):
     ###########################################################################
     # ReductionOpInfo unit tests
     ###########################################################################
@@ -3954,7 +3954,7 @@ as the input tensor excluding its innermost dimension'):
             self.assertEqual(torch.mean(t), expected)
 
 
-class TestReductions(TestCase):
+class TestReductionsGeneric(TestCase):
     def test_scalar_tensor_as_dim_argument(self):
         """Tests that scalar tensors work correctly as dimension arguments.
 
@@ -3993,7 +3993,7 @@ class TestReductions(TestCase):
         self.assertEqual(result_eager.shape, result_compiled.shape)
         self.assertEqual(result_eager.shape, torch.Size([2, 2]))
 
-instantiate_device_type_tests(TestReductionsDevice, globals(), allow_xpu=True, allow_mps=True)
+instantiate_device_type_tests(TestReductions, globals(), allow_xpu=True, allow_mps=True)
 
 if __name__ == '__main__':
     run_tests()
