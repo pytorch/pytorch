@@ -793,9 +793,11 @@ class GraphLowering(torch.fx.Interpreter):
             return True
 
         conv_nodes = [
-            n for n in gm.graph.nodes if n.target in (
-                torch.ops.aten.convolution.default,
-                torch.ops.aten.convolution_backward.default,
+            n for n in gm.graph.nodes
+            if n.target is torch.ops.aten.convolution.default
+            or (
+                n.target is torch.ops.aten.convolution_backward.default
+                and n.args[0].meta["val"].device.type in SUPPORTED_MKLDNN_DEVICES
             )
         ]
 
