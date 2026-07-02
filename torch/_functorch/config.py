@@ -454,7 +454,7 @@ selective_decompose: bool = False
 # `torch._subclasses.complex_tensor.ComplexTensor` by decomposing everything into
 # real-valued operations, passing through the regular pipeline as necessary,
 # then converting back to a regular tensor.
-enable_complex_wrapper: bool = False
+enable_complex_wrapper: bool = True
 
 
 if TYPE_CHECKING:
