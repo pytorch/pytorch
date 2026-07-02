@@ -346,6 +346,7 @@ batch_fusion = True
 # batch fusion options:
 # batch_linear
 # batch_linear_lhs
+# cat_linear
 # batch_layernorm
 # batch_tanh
 # batch_relu
@@ -372,6 +373,14 @@ post_grad_fusion_options: dict[str, dict[str, Any]] = {}
 
 # enable reordering pass for improving memory locality
 reorder_for_locality = True
+
+# Also run reorder_for_locality (a semantics-preserving pass; see
+# reorder_for_locality in fx_passes/post_grad.py for the cases it guards) on
+# training graphs, not just inference. Default off. Gated by reorder_for_locality
+# above: enabling this while that is False does nothing.
+reorder_for_locality_in_training = (
+    os.environ.get("TORCHINDUCTOR_REORDER_LOCALITY_TRAINING", "0") == "1"
+)
 
 # Scale down Rn_BLOCK for better occupancy
 dynamic_scale_rblock = os.environ.get("TORCHINDUCTOR_DYNAMIC_SCALE_RBLOCK", "1") == "1"
