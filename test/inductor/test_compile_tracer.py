@@ -1,7 +1,15 @@
 # Owner(s): ["module: inductor"]
 import torch
+from torch._dynamo import mark_dynamic
+from torch._dynamo.decorators import mark_unbacked
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
+
+
+def _placeholder_shape(compiled):
+    """The shape of the first placeholder in the make_fx-captured graph."""
+    ph = next(n for n in compiled.gm.graph.nodes if n.op == "placeholder")
+    return ph.meta["val"].shape
 
 
 class TestCompileTracer(TestCase):
@@ -25,6 +33,50 @@ class TestCompileTracer(TestCase):
 
         compiled = torch.compile(f, tracer="make_fx", disable=True)
         self.assertIs(compiled, f)
+
+    def test_mark_unbacked_produces_unbacked_symbol(self):
+        def f(x):
+            return (x + 1).relu()
+
+        x = torch.randn(8, 4)
+        mark_unbacked(x, 0)
+        compiled = torch.compile(f, tracer="make_fx")
+        compiled(x)
+        d0, d1 = _placeholder_shape(compiled)
+        self.assertTrue(str(d0).startswith("u"), f"expected unbacked symbol, got {d0}")
+        self.assertEqual(d1, 4)
+
+    def test_mark_dynamic_produces_backed_symbol(self):
+        def f(x):
+            return (x + 1).relu()
+
+        x = torch.randn(8, 4)
+        mark_dynamic(x, 0)
+        compiled = torch.compile(f, tracer="make_fx")
+        compiled(x)
+        d0, d1 = _placeholder_shape(compiled)
+        self.assertTrue(str(d0).startswith("s"), f"expected backed symbol, got {d0}")
+        self.assertEqual(d1, 4)
+
+    def test_no_annotation_static_is_specialized(self):
+        def f(x):
+            return (x + 1).relu()
+
+        x = torch.randn(8, 4)
+        compiled = torch.compile(f, tracer="make_fx")
+        compiled(x)
+        self.assertEqual(tuple(_placeholder_shape(compiled)), (8, 4))
+
+    def test_dynamic_true_all_dims_backed(self):
+        def f(x):
+            return (x + 1).relu()
+
+        x = torch.randn(8, 4)
+        compiled = torch.compile(f, tracer="make_fx", dynamic=True)
+        compiled(x)
+        self.assertTrue(
+            all(str(d).startswith("s") for d in _placeholder_shape(compiled))
+        )
 
 
 class TestCompileTracerNumerics(TestCase):
@@ -99,6 +151,21 @@ class TestCompileTracerNumerics(TestCase):
         compiled = torch.compile(f, tracer="make_fx", dynamic=False)
         x = torch.randn(8, device=device)
         self.assertEqual(compiled(x), f(x))
+
+    def test_make_fx_mark_unbacked_runs_across_sizes(self, device):
+        def f(x):
+            return (x + 1).relu() * 2
+
+        x = torch.randn(8, 4, device=device)
+        mark_unbacked(x, 0)
+        compiled = torch.compile(f, tracer="make_fx")
+        self.assertEqual(compiled(x), f(x))
+
+        # The unbacked kernel must serve other sizes, including small ones that
+        # a specialized kernel would have baked in.
+        for n in (16, 1, 3):
+            xr = torch.randn(n, 4, device=device)
+            self.assertEqual(compiled(xr), f(xr))
 
     def test_make_fx_nn_module(self, device):
         mod = torch.nn.Sequential(
