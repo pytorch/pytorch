@@ -549,6 +549,26 @@ def _propagate_invoke_subgraph_nested_region_config(gm: GraphModule) -> None:
             subgraph.meta.setdefault("nested_region_config", nested_config)
 
 
+def _any_subgraph_enables_cudagraphs(gm: GraphModule) -> bool:
+    """
+    True if any invoke_subgraph region (at any depth) carries a nested inductor
+    config patch enabling triton.cudagraphs. Such a region wants cudagraphs even
+    when the top-level config disables them, so the shared cudagraphs decision
+    must be enabled to let the region be captured at runtime.
+    """
+    for mod in gm.modules():
+        if not isinstance(mod, GraphModule):
+            continue
+        for node in mod.graph.find_nodes(
+            op="call_function", target=torch.ops.higher_order.invoke_subgraph
+        ):
+            nested_config = node.meta.get("custom", {}).get("nested_region_config")
+            patches = getattr(nested_config, "inductor_config_patches", None)
+            if patches and patches.get("triton.cudagraphs"):
+                return True
+    return False
+
+
 def _recursive_pre_grad_passes(
     gm: GraphModule,
     example_inputs: Sequence[InputType],
@@ -2501,11 +2521,14 @@ def get_num_model_outputs(model: GraphModule) -> int:
 
 def cudagraph_annotation_context(
     cudagraphs: BoxedBool,
+    patch_config: bool = True,
 ) -> contextlib.AbstractContextManager[None]:
-    # When an annotation force-enables cudagraphs but the global config has them
-    # off, patch config.triton.cudagraphs for the duration of compilation,
-    # so existing codepaths that access config.triton.cudagraphs work
-    if cudagraphs.value and not config.triton.cudagraphs:
+    # When cudagraphs are force-enabled but the global config has them off, patch
+    # config.triton.cudagraphs for the duration of compilation so existing
+    # codepaths that access config.triton.cudagraphs work. Skipped when only a
+    # nested region opted in (patch_config is False), so the enclosing graph
+    # keeps its own compile-time cudagraph decision.
+    if patch_config and cudagraphs.value and not config.triton.cudagraphs:
         return config.patch({"triton.cudagraphs": True})
     return contextlib.nullcontext()
 
@@ -2517,6 +2540,10 @@ class CompilerConfigExtra:
     forward_device: BoxedDeviceIndex
     forward_is_partitioned: BoxedBool
     cudagraphs_bwd_override: bool | None = None
+    # Whether cudagraph_annotation_context should patch config.triton.cudagraphs.
+    # True only when config/annotation enable cudagraphs, not when only a nested
+    # invoke_subgraph region opted in.
+    patch_config_for_cudagraphs: bool = False
 
 
 def create_compiler_config_extra(
@@ -2558,6 +2585,25 @@ def create_compiler_config_extra(
                 "disabling cudagraphs for backward due to override_cudagraphs annotation"
             )
 
+    # config + the override_cudagraphs annotation decide the top-level cudagraph
+    # decision; cudagraph_annotation_context patches config.triton.cudagraphs to
+    # match so the whole graph's codegen sees it.
+    patch_config_for_cudagraphs = cudagraphs.value
+
+    # A nested invoke_subgraph region may opt into cudagraphs (triton.cudagraphs
+    # in its config patches) even when the top level has them off. Enable the
+    # runtime cudagraphs decision so the region's partition is captured, but do
+    # NOT patch the top-level config: the region applies its own config during
+    # its own codegen, and the enclosing graph keeps its (off) decision.
+    if not cudagraphs.value:
+        inner_gm = gm if isinstance(gm, GraphModule) else getattr(gm, "gm", None)
+        if inner_gm is not None and _any_subgraph_enables_cudagraphs(inner_gm):
+            cudagraphs = BoxedBool(True)
+            cudagraphs_log.info(
+                "enabling cudagraphs at runtime for a nested invoke_subgraph "
+                "region that opted in (top-level config left unchanged)"
+            )
+
     # TODO: The modern style is to use CompileId from TracingContext to
     # identify Inductor compilation.  However, this CompileId cannot
     # uniquely identify multiple Inductor compilations that arise from
@@ -2578,6 +2624,7 @@ def create_compiler_config_extra(
         forward_device=forward_device,
         cudagraphs_bwd_override=cudagraphs_bwd_override,
         forward_is_partitioned=forward_is_partitioned,
+        patch_config_for_cudagraphs=patch_config_for_cudagraphs,
     )
 
 
@@ -2707,7 +2754,10 @@ def compile_fx_forward(
     # original strides
     _recursive_record_user_visible_output_idxs(gm)
 
-    with cudagraph_annotation_context(compiler_config_extra.cudagraphs):
+    with cudagraph_annotation_context(
+        compiler_config_extra.cudagraphs,
+        compiler_config_extra.patch_config_for_cudagraphs,
+    ):
         result = inner_compile(
             gm,
             example_inputs,
@@ -2778,7 +2828,9 @@ def compile_fx_backward(
                 if config.cpp_wrapper
                 else contextlib.nullcontext()
             ),
-            cudagraph_annotation_context(cudagraphs),
+            cudagraph_annotation_context(
+                cudagraphs, compiler_config_extra.patch_config_for_cudagraphs
+            ),
         ):
             return inner_compile(
                 gm,
