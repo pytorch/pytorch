@@ -408,7 +408,7 @@ class TorchBindLiteInterpreterTestStruct
     ss << "Hello! Your tensor has ";
     ss << t.numel();
     ss << " elements!";
-    return ss.str();
+    return std::move(ss).str();
   }
 };
 

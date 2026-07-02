@@ -44,7 +44,7 @@ window_common_args = merge_dicts(
 def _add_docstr(*args: str) -> Callable[[_T], _T]:
     r"""Adds docstrings to a given decorated function.
 
-    Specially useful when then docstrings needs string interpolation, e.g., with
+    Specially useful when the docstrings need string interpolation, e.g., with
     str.format().
     REMARK: Do not use this function if the docstring doesn't need string
     interpolation, just write a conventional docstring.
@@ -358,11 +358,11 @@ Keyword args:
 
 Examples::
 
-    >>> # Generates a symmetric gaussian window with a standard deviation of 1.0.
+    >>> # Generates a symmetric Kaiser window with a shape parameter of 12.0.
     >>> torch.signal.windows.kaiser(5)
     tensor([4.0065e-05, 2.1875e-03, 4.3937e-02, 3.2465e-01, 8.8250e-01, 8.8250e-01, 3.2465e-01, 4.3937e-02, 2.1875e-03, 4.0065e-05])
-    >>> # Generates a periodic gaussian window and standard deviation equal to 0.9.
-    >>> torch.signal.windows.kaiser(5, sym=False,std=0.9)
+    >>> # Generates a periodic Kaiser window and shape parameter equal to 0.9.
+    >>> torch.signal.windows.kaiser(5, sym=False, beta=0.9)
     tensor([1.9858e-07, 5.1365e-05, 3.8659e-03, 8.4658e-02, 5.3941e-01, 1.0000e+00, 5.3941e-01, 8.4658e-02, 3.8659e-03, 5.1365e-05])
 """.format(
         **window_common_args,
@@ -854,7 +854,7 @@ References::
 
 Examples::
 
-    >>> # Generates a symmetric Nutall window.
+    >>> # Generates a symmetric Nuttall window.
     >>> torch.signal.windows.general_hamming(5, sym=True)
     tensor([3.6280e-04, 2.2698e-01, 1.0000e+00, 2.2698e-01, 3.6280e-04])
 

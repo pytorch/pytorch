@@ -3069,8 +3069,6 @@ def constant_pad_nd(
     if builtins.all(p < 0 for p in pad):
         return c_input.clone()
 
-    new_shape = list(input_sizes[:l_diff])
-
     for i in range(l_pad):
         pad_idx = len(pad) - ((i + 1) * 2)
         new_dim = input_sizes[l_diff + i] + pad[pad_idx] + pad[pad_idx + 1]
@@ -3080,34 +3078,39 @@ def constant_pad_nd(
             f"{pad[pad_idx]} and {pad[pad_idx + 1]} resulted in a negative output size, "
             f"which is invalid. Check dimension {l_diff + i} of your input.",
         )
-        new_shape.append(new_dim)
-
-    memory_format = utils.suggest_memory_format(input)
-    output = torch.empty(
-        new_shape,
-        dtype=input.dtype,
-        device=input.device,
-        requires_grad=input.requires_grad,
-        memory_format=memory_format,
-    )
 
     if value == 0 and input.dtype == torch.bool:
         value = False
-    # torch.fill isn't typed to allow complex values
-    output = torch.fill(output, value)  # type: ignore[arg-type]
 
-    c_output = output
+    result = c_input
     for i in range(l_diff, l_inp):
         pad_idx = 2 * (l_inp - i - 1)
-        if pad[pad_idx] >= 0:
-            c_output = c_output.narrow(
-                i, pad[pad_idx], c_output.shape[i] - pad[pad_idx]
+        left = max(pad[pad_idx], 0)
+        right = max(pad[pad_idx + 1], 0)
+        if left == 0 and right == 0:
+            continue
+        parts = []
+        if left > 0:
+            left_shape = list(result.shape)
+            left_shape[i] = left
+            # torch.full isn't typed to allow complex values
+            parts.append(
+                torch.full(left_shape, value, dtype=input.dtype, device=input.device)  # type: ignore[arg-type]
             )
-        if pad[pad_idx + 1] >= 0:
-            c_output = c_output.narrow(i, 0, c_output.shape[i] - pad[pad_idx + 1])
+        parts.append(result)
+        if right > 0:
+            right_shape = list(result.shape)
+            right_shape[i] = right
+            # torch.full isn't typed to allow complex values
+            parts.append(
+                torch.full(right_shape, value, dtype=input.dtype, device=input.device)  # type: ignore[arg-type]
+            )
+        result = torch.cat(parts, dim=i)
 
-    prims.copy_to(c_output, c_input)
-    return output
+    if result is c_input:
+        result = result.clone()
+
+    return result.contiguous(memory_format=utils.suggest_memory_format(input))
 
 
 def contiguous(
@@ -3427,6 +3430,66 @@ def native_group_norm(
     return (out, mean, rstd)
 
 
+_SCALAR_TYPE_NAME_OVERRIDES = {
+    "uint8": "Byte",
+    "int8": "Char",
+    "int16": "Short",
+    "int32": "Int",
+    "int64": "Long",
+    "float16": "Half",
+    "float32": "Float",
+    "float64": "Double",
+    "complex32": "ComplexHalf",
+    "complex64": "ComplexFloat",
+    "complex128": "ComplexDouble",
+    "bool": "Bool",
+    "qint8": "QInt8",
+    "quint8": "QUInt8",
+    "qint32": "QInt32",
+    "bfloat16": "BFloat16",
+    "quint4x2": "QUInt4x2",
+    "quint2x4": "QUInt2x4",
+    "bcomplex32": "BComplex32",
+}
+
+
+def _scalar_type_name(dtype: torch.dtype) -> str:
+    dtype_name = str(dtype).removeprefix("torch.")
+    if dtype_name in _SCALAR_TYPE_NAME_OVERRIDES:
+        return _SCALAR_TYPE_NAME_OVERRIDES[dtype_name]
+    if dtype_name.startswith("uint"):
+        return "UInt" + dtype_name.removeprefix("uint")
+    return dtype_name[:1].upper() + dtype_name[1:]
+
+
+def _check_native_layer_norm_cuda_param_dtype(
+    input: Tensor,
+    normalized_ndim: int,
+    weight: Tensor | None,
+    bias: Tensor | None,
+) -> None:
+    if input.device.type != "cuda":
+        return
+
+    mismatched_dtype = None
+    if weight is not None and weight.dtype != input.dtype:
+        mismatched_dtype = weight.dtype
+    elif bias is not None and bias.dtype != input.dtype:
+        mismatched_dtype = bias.dtype
+
+    if mismatched_dtype is None:
+        return
+
+    axis = input.ndim - normalized_ndim
+    num_rows = math.prod(input.shape[:axis])
+    expected_dtype = _scalar_type_name(input.dtype)
+    found_dtype = _scalar_type_name(mismatched_dtype)
+    torch._check(
+        num_rows == 0,
+        lambda: f"expected scalar type {expected_dtype} but found {found_dtype}",
+    )
+
+
 @register_decomposition(aten.native_layer_norm)
 @out_wrapper("out0", "out1", "out2")
 def native_layer_norm(
@@ -3483,6 +3546,7 @@ def native_layer_norm(
         not input.is_complex(),
         lambda: "native_layer_norm does not support complex inputs",
     )
+    _check_native_layer_norm_cuda_param_dtype(input, normalized_ndim, weight, bias)
 
     input = contiguous(input)
     if weight is not None:
@@ -3821,20 +3885,47 @@ def istft(
     else:
         end = expected_output_signal_len
 
-    y = aten.slice.Tensor(y, 1, start, end, 1)
-    window_envelop = aten.slice.Tensor(window_envelop, 1, start, end, 1)
+    # Clamp end to the valid signal range before slicing so that downstream
+    # meta / fake-tensor execution never sees an out-of-bounds access.
+    # The eager C++ path relies on slice's implicit clamping, but the
+    # compile path may convert slice to narrow which does not clamp.
+    # Use sym_min (not the builtin min) so the clamp stays symbolic under
+    # dynamic shapes: builtin min would evaluate ``end < expected_output_signal_len``
+    # to a concrete bool, installing a guard for backed symints (forcing a
+    # recompile when the relationship flips) or raising
+    # GuardOnDataDependentSymNode for unbacked symints.
+    clamped_end = sym_min(end, expected_output_signal_len)
+
+    y = aten.slice.Tensor(y, 1, start, clamped_end, 1)
+    window_envelop = aten.slice.Tensor(window_envelop, 1, start, clamped_end, 1)
 
     y = y / window_envelop
     if original_ndim == 2:
         y = y.squeeze(0)
 
-    if end > expected_output_signal_len:
+    # Pad the tail symbolically so dynamic shapes don't force a guard on the
+    # ``end`` vs ``expected_output_signal_len`` relationship. sym_max keeps the
+    # pad >= 0, so a zero pad is a no-op when the signal already covers the
+    # requested length. The warning needs a concrete decision, so it is gated on
+    # statically_known_true: it fires for the common concrete-int case but
+    # installs no guard when the relationship isn't statically known.
+    from torch.fx.experimental.symbolic_shapes import statically_known_true
+
+    if statically_known_true(end > expected_output_signal_len):
         warnings.warn(
             "The length of signal is shorter than the length parameter. Result is being "
             + "padded with zeros in the tail. Please check your center and hop_length settings",
             stacklevel=2,
         )
-        y = aten.constant_pad_nd(y, (0, end - expected_output_signal_len), 0)
+    # Only emit the pad when the signal may be shorter than the requested
+    # length. Skipping it in the statically-known no-pad case avoids turning the
+    # view returned by eager (e.g. the squeeze) into a copy, which keeps
+    # _refs.istft view-consistent with the aten op. When the relationship is not
+    # statically known (dynamic shapes), pad symbolically with sym_max so a zero
+    # pad is a no-op and no specializing guard is installed.
+    if not statically_known_true(end <= expected_output_signal_len):
+        pad = sym_max(end - expected_output_signal_len, 0)
+        y = aten.constant_pad_nd(y, (0, pad), 0)
     return y
 
 
@@ -4641,7 +4732,19 @@ def diagonal_scatter(
 ) -> TensorLikeType:
     from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_or
 
-    out = utils.clone_preserve_strides(input)
+    # Mirror at::native::clone_preserve_strides: when the input has internal
+    # memory overlap (e.g. an expand from a scalar with stride 0), we cannot
+    # preserve its strides because copy_to() below would write through aliased
+    # storage and corrupt non-diagonal positions. This arises in the backward
+    # of diagonal_scatter(x, src).sum(), where grad_output is expanded. Fall
+    # back to a plain clone, which materializes a contiguous buffer.
+    if builtins.any(
+        guard_or_false(sz > 1) and guard_or_false(s == 0)
+        for sz, s in zip(input.size(), input.stride())
+    ):
+        out = input.clone()
+    else:
+        out = utils.clone_preserve_strides(input)
     diag = out.diagonal(offset, dim1, dim2)
     # Use sym_or + guard_or_false to handle unbacked symbolic dimensions.
     torch._check(
@@ -4685,7 +4788,7 @@ def diagonal(
         storage_offset -= offset * self.stride()[dim1]
 
     sizes = [s for i, s in enumerate(self.size()) if i not in (dim1, dim2)]
-    sizes.append(diag_size)
+    sizes.append(diag_size)  # type: ignore[arg-type]
 
     strides = [s for i, s in enumerate(self.stride()) if i not in (dim1, dim2)]
     strides.append(self.stride()[dim1] + self.stride()[dim2])
@@ -6000,7 +6103,9 @@ def _uniform_helper(
         raise AssertionError(f"low must be Number, got {type(low)}")
     if not isinstance(high, Number):
         raise AssertionError(f"high must be Number, got {type(high)}")
+    # pyrefly: ignore [bad-assignment]
     low = sym_float(low)
+    # pyrefly: ignore [bad-assignment]
     high = sym_float(high)
 
     if not isinstance(dtype, torch.dtype):
@@ -6951,6 +7056,16 @@ def _internal_new_from_data(
         tensor = _recursive_build(inferred_scalar_type, data)
 
         tensor = tensor.to(device, inferred_scalar_type, non_blocking=False, copy=False)
+        if pin_memory and torch.device(device).type == "cpu":
+            pinned_tensor = torch.empty_strided(
+                tensor.shape,
+                tensor.stride(),
+                dtype=tensor.dtype,
+                device=tensor.device,
+                pin_memory=True,
+            )
+            pinned_tensor.copy_(tensor)
+            tensor = pinned_tensor
 
     # NB: lift_fresh is not needed, because we built the tensor from scalars
     # guaranteeing a fresh tensor in this case

@@ -5,8 +5,10 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import types
 import unittest
 from threading import Event
+from unittest.mock import patch
 
 import torch._inductor.config as config
 from torch._inductor.compile_worker.subproc_pool import (
@@ -17,7 +19,7 @@ from torch._inductor.compile_worker.subproc_pool import (
 from torch._inductor.compile_worker.timer import Timer
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import IS_FBCODE, IS_LINUX, skipIfWindows
-from torch.testing._internal.inductor_utils import HAS_CPU
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_TRITON
 
 
 class TestCompileWorker(TestCase):
@@ -151,7 +153,7 @@ class TestCompileWorker(TestCase):
         self.assertEqual(
             result.returncode,
             0,
-            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+            lambda msg: f"{msg}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}",
         )
         self.assertIn("shutdown returned", result.stdout)
 
@@ -326,6 +328,70 @@ class TestSetTritonLibdevicePath(TestCase):
         from triton import knobs
 
         self.assertEqual(knobs.nvidia.libdevice_path, expected)
+
+
+class TestTritonCompileWorker(TestCase):
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    def test_worker_compile_triton_warm_cache_skips_gpu_driver_setup(self):
+        from torch._inductor.runtime import triton_helpers
+        from torch._inductor.runtime.compile_tasks import _worker_compile_triton
+
+        class RaisingDriver:
+            @staticmethod
+            def is_active():
+                raise RuntimeError("0 active drivers ([]). There should only be one.")
+
+        class FakeKernel:
+            def __init__(self):
+                self.precompile_calls = []
+                self.prepared = False
+
+            def precompile(self, warm_cache_only=False):
+                self.precompile_calls.append(warm_cache_only)
+                triton_helpers.set_driver_to_gpu()
+
+            def prepare_for_pickle(self):
+                self.prepared = True
+
+        kernel = FakeKernel()
+
+        def load_kernel():
+            triton_helpers.set_driver_to_gpu()
+            return kernel
+
+        fake_backends = {"nvidia": types.SimpleNamespace(driver=RaisingDriver)}
+        with patch.object(triton_helpers.triton.backends, "backends", fake_backends):
+            result, _elapsed_us = _worker_compile_triton(load_kernel, {}, {})
+            self.assertIs(result, kernel)
+            self.assertEqual(kernel.precompile_calls, [True])
+            self.assertTrue(kernel.prepared)
+
+            # The skip is scoped to the worker compile call and restored afterward.
+            with self.assertRaisesRegex(RuntimeError, "0 active drivers"):
+                triton_helpers.set_driver_to_gpu()
+
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    def test_worker_compile_triton_restores_gpu_driver_setup_after_error(self):
+        from torch._inductor.runtime import triton_helpers
+        from torch._inductor.runtime.compile_tasks import _worker_compile_triton
+
+        class RaisingDriver:
+            @staticmethod
+            def is_active():
+                raise RuntimeError("0 active drivers ([]). There should only be one.")
+
+        def load_kernel():
+            triton_helpers.set_driver_to_gpu()
+            raise ValueError("compile failed")
+
+        fake_backends = {"nvidia": types.SimpleNamespace(driver=RaisingDriver)}
+        with patch.object(triton_helpers.triton.backends, "backends", fake_backends):
+            with self.assertRaisesRegex(ValueError, "compile failed"):
+                _worker_compile_triton(load_kernel, {}, {})
+
+            # The skip is restored even if worker compilation raises.
+            with self.assertRaisesRegex(RuntimeError, "0 active drivers"):
+                triton_helpers.set_driver_to_gpu()
 
 
 if __name__ == "__main__":
