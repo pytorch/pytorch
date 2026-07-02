@@ -44,7 +44,7 @@ from typing_extensions import TypeIs
 from weakref import WeakKeyDictionary
 
 import torch
-from torch._opaque_base import OpaqueBase, OpaqueBaseMeta
+from torch._custom_class_base import CustomClassBase, CustomClassBaseMeta
 
 
 if TYPE_CHECKING:
@@ -91,7 +91,7 @@ OpaqueType = NewType("OpaqueType", torch._C.ScriptObject)
 # Should derive the object from existing graph inputs or return None to fall
 # back to get_attr.  Args: (obj, get_tracked_proxy, tracer).
 ReconstructFn: TypeAlias = Callable[
-    [OpaqueBase, Callable[[OpaqueBase], "Proxy | None"], "PythonKeyTracer"],
+    [CustomClassBase, Callable[[CustomClassBase], "Proxy | None"], "PythonKeyTracer"],
     "Proxy | None",
 ]
 
@@ -204,11 +204,11 @@ def register_opaque_type(
         )
 
     # Value types store the real object directly during tracing (no
-    # FakeScriptObject wrapper), so they don't need OpaqueBaseMeta.
-    if typ != "value" and not isinstance(cls, OpaqueBaseMeta):
+    # FakeScriptObject wrapper), so they don't need CustomClassBaseMeta.
+    if typ != "value" and not isinstance(cls, CustomClassBaseMeta):
         raise TypeError(
-            f"Opaque type {cls} must subclass torch._opaque_base.OpaqueBase "
-            "or 'metaclass=torch._opaque_base.OpaqueBaseMeta'. "
+            f"Custom class {cls} must subclass torch._custom_class_base.CustomClassBase "
+            "or 'metaclass=torch._custom_class_base.CustomClassBaseMeta'. "
             "This is required so that FakeScriptObject can be registered "
             "as a virtual subclass, allowing isinstance() checks to work "
             "during torch.compile tracing. "
@@ -289,7 +289,7 @@ def should_hoist(cls: Any) -> bool:
     return info.hoist
 
 
-def get_reconstruct_fn(cls: type[OpaqueBase]) -> ReconstructFn | None:
+def get_reconstruct_fn(cls: type[CustomClassBase]) -> ReconstructFn | None:
     info = _resolve_opaque_type_info(cls)
     if info is None:
         return None

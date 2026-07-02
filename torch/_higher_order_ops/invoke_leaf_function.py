@@ -8,7 +8,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey, DispatchKeySet
 from torch._higher_order_ops.utils import register_fake
-from torch._library.opaque_object import OpaqueBase, register_opaque_type
+from torch._library.opaque_object import CustomClassBase, register_opaque_type
 from torch._ops import HigherOrderOperator
 from torch.autograd.graph import get_gradient_edge
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
@@ -48,7 +48,7 @@ def reset_makefx_module_storage() -> None:
     _makefx_module_storage.clear()
 
 
-class _LeafCallable(OpaqueBase):
+class _LeafCallable(CustomClassBase):
     def __init__(self, fn: Callable) -> None:
         self._fn = fn
 

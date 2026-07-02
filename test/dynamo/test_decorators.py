@@ -508,7 +508,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
         self.assertEqual(ref, res)
 
     def test_nonstrict_trace_pre_existing_register_constant_type_guard(self):
-        class State(torch._opaque_base.OpaqueBase):
+        class State(torch._custom_class_base.CustomClassBase):
             def __init__(self, n):
                 self.n = n
 
@@ -810,7 +810,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
             )
 
     def test_nonstrict_newly_constructed_trace_register_constant_type_error(self):
-        class State(torch._opaque_base.OpaqueBase):
+        class State(torch._custom_class_base.CustomClassBase):
             def __init__(self, n):
                 self.n = n
 

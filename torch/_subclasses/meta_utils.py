@@ -36,9 +36,9 @@ from torch._C._functorch import (
     maybe_get_level,
     peek_interpreter_stack,
 )
+from torch._custom_class_base import CustomClassBase
 from torch._dispatch.python import enable_python_dispatcher
 from torch._logging import trace_structured
-from torch._opaque_base import OpaqueBase
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._typing_utils import not_none
@@ -409,7 +409,7 @@ class MetaTensorDescriber:
                 match inner:
                     case torch.Tensor():
                         attrs[attr] = self.describe_tensor(inner, trace=trace)
-                    case OpaqueBase():
+                    case CustomClassBase():
                         from torch._library.fake_class_registry import (
                             maybe_unwrap_fake_script_object,
                         )
@@ -417,7 +417,7 @@ class MetaTensorDescriber:
                         opaque_attrs[attr] = maybe_unwrap_fake_script_object(inner)
                     case _:
                         raise AssertionError(
-                            f"expected Tensor or OpaqueBase, got {type(inner)}"
+                            f"expected Tensor or CustomClassBase, got {type(inner)}"
                         )
             type_v = type(t)
 
@@ -725,7 +725,7 @@ class MetaTensorDesc(Generic[_TensorT]):
     attrs: dict[str, MetaTensorDesc[Any]] | None = None  # is_traceable_wrapper_subclass
     # A Tensor subclass containing opaque references is almost certainly NOT
     # serializable.
-    opaque_attrs: dict[str, OpaqueBase] | None = (
+    opaque_attrs: dict[str, CustomClassBase] | None = (
         None  # non-tensor attrs from __tensor_flatten__
     )
     creation_meta: CreationMeta | None = None
@@ -1029,7 +1029,7 @@ class MetaConverter(Generic[_TensorT]):
                 symbolic_context,
             )
 
-        inner_tensors: dict[str, torch.Tensor | OpaqueBase] = {}
+        inner_tensors: dict[str, torch.Tensor | CustomClassBase] = {}
         for attr, meta_tensor_desc in t.attrs.items():
             current_context = None
             if symbolic_context is not None:

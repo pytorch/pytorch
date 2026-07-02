@@ -662,10 +662,10 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         """TSOV.as_python_constant must succeed for reference-type opaque
         objects. Without this, __eq__ between two opaque objects graph breaks.
         """
+        import torch._custom_class_base
         import torch._library.opaque_object
-        import torch._opaque_base
 
-        class Config(torch._opaque_base.OpaqueBase):
+        class Config(torch._custom_class_base.CustomClassBase):
             def __init__(self, v):
                 self.v = v
 

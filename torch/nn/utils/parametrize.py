@@ -9,8 +9,8 @@ from copy import deepcopy
 import torch
 from torch import Tensor
 from torch.__future__ import get_swap_module_params_on_conversion
+from torch._custom_class_base import CustomClassBase
 from torch._library.opaque_object import is_opaque_reference_type
-from torch._opaque_base import OpaqueBase
 from torch.nn.modules.container import Module, ModuleDict, ModuleList
 from torch.nn.parameter import Parameter
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -207,7 +207,7 @@ class ParametrizationList(ModuleList):
         else:
             for i, originali in enumerate(new):
                 match originali:
-                    case OpaqueBase():
+                    case CustomClassBase():
                         if not is_opaque_reference_type(type(originali)):
                             raise ValueError(
                                 f"'right_inverse' must return a Tensor or a reference-type "
@@ -304,7 +304,7 @@ class ParametrizationList(ModuleList):
                 for i, tensor in enumerate(value):
                     original_i = getattr(self, f"original{i}")
                     match tensor:
-                        case OpaqueBase():
+                        case CustomClassBase():
                             if is_opaque_reference_type(type(tensor)):
                                 setattr(self, f"original{i}", tensor)
                                 continue

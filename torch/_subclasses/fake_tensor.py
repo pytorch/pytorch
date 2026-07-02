@@ -22,10 +22,10 @@ import torch
 import torch._library.utils as library_utils
 from torch import SymBool, SymFloat, SymInt, Tensor
 from torch._C._functorch import is_functorch_wrapped_tensor, is_legacy_batchedtensor
+from torch._custom_class_base import CustomClassBase
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.fake_profile import MissingOpProfile
 from torch._logging import dtrace_structured
-from torch._opaque_base import OpaqueBase
 from torch._prims_common import suggest_memory_format
 from torch._subclasses.meta_utils import (
     assert_eq,
@@ -227,8 +227,8 @@ def disable_fake_tensor_cache(fake_mode: FakeTensorMode) -> Generator[None, None
 def get_plain_tensors(
     subclass: Tensor | TraceableWrapperSubclass,
     *,
-    out: list[Tensor | int | SymInt | OpaqueBase],
-) -> list[Tensor | int | SymInt | OpaqueBase]:
+    out: list[Tensor | int | SymInt | CustomClassBase],
+) -> list[Tensor | int | SymInt | CustomClassBase]:
     # This function is used in Runtime, do not add redundant asserts
     todo = [subclass]
     while todo:
@@ -259,11 +259,11 @@ def is_fake(x: object) -> TypeGuard[Tensor]:
                         got_fake = fake
                     elif got_fake != fake:
                         raise AssertionError("got mixed fake and real tensors!")
-                case OpaqueBase():
+                case CustomClassBase():
                     pass
                 case unexpected:
                     raise AssertionError(
-                        f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
                     )
         return got_fake or False
     elif isinstance(x, FunctionalTensor):
@@ -294,11 +294,11 @@ def maybe_get_fake_mode(t: object) -> FakeTensorMode | None:
                         mode = m
                     elif mode is not m:
                         raise AssertionError("All fake tensor modes must be the same")
-                case OpaqueBase():
+                case CustomClassBase():
                     pass
                 case unexpected:
                     raise AssertionError(
-                        f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
                     )
         return mode
     elif isinstance(t, FunctionalTensor):

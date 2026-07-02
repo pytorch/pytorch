@@ -9,7 +9,7 @@ from itertools import zip_longest
 from typing import Any, TYPE_CHECKING
 
 import torch
-from torch._opaque_base import OpaqueBase
+from torch._custom_class_base import CustomClassBase
 from torch.distributed import is_available
 from torch.distributed._mesh_layout import _FlatLayout, _MeshLayout
 from torch.types import IntLikeType
@@ -150,7 +150,7 @@ else:
         """
         return getattr(torch, device_type, None)
 
-    class DeviceMesh(OpaqueBase):
+    class DeviceMesh(CustomClassBase):
         """
         DeviceMesh represents a mesh of devices, where layout of devices could be
         represented as a n-d dimension array, and each value of the n-d dimensional
@@ -1596,8 +1596,8 @@ _distributed_opaque_types_registered = False
 
 
 def _device_mesh_reconstruct_fn(
-    mesh: "OpaqueBase",
-    get_tracked_proxy: Callable[["OpaqueBase"], "torch.fx.Proxy | None"],
+    mesh: "CustomClassBase",
+    get_tracked_proxy: Callable[["CustomClassBase"], "torch.fx.Proxy | None"],
     tracer: Any,
 ) -> "torch.fx.Proxy | None":
     """Reconstruct a DeviceMesh submesh from a tracked ancestor mesh.
