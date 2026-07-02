@@ -57,7 +57,7 @@ class _LeafCallable(CustomClassBase):
         return self._fn(*args, **kwargs)
 
 
-register_custom_class(_LeafCallable, typ="reference")
+register_custom_class(_LeafCallable, typ="symbolic")
 
 
 def set_leaf_function_module_retriever(retriever: Callable[[int], Any]) -> None:

@@ -79,7 +79,7 @@ class _CudagraphTestScaleFactor(CustomClassBase):
         self.factor = factor
 
 
-register_custom_class(_CudagraphTestScaleFactor, typ="reference")
+register_custom_class(_CudagraphTestScaleFactor, typ="symbolic")
 
 
 def get_compile_fn(backend):

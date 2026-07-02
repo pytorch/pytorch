@@ -315,10 +315,10 @@ def _(x, s):
     return torch.empty_like(x)
 
 
-register_custom_class(OpaqueQueue, typ="reference")
+register_custom_class(OpaqueQueue, typ="symbolic")
 register_custom_class(
     RNGState,
-    typ="reference",
+    typ="symbolic",
     guard_fn=lambda obj: [obj.seed],
     members={
         "seed": MemberType.USE_REAL,
@@ -328,13 +328,13 @@ register_custom_class(
 )
 register_custom_class(
     Counter,
-    typ="reference",
+    typ="symbolic",
     guard_fn=lambda obj: [obj.start],
     members={"start": MemberType.USE_REAL, "get_start_tensor": MemberType.INLINED},
 )
 register_custom_class(
     NestedCounters,
-    typ="reference",
+    typ="symbolic",
     members={
         "c": MemberType.USE_REAL,
         "get_c": MemberType.USE_REAL,
@@ -344,20 +344,20 @@ register_custom_class(
 )
 register_custom_class(
     NestedQueue,
-    typ="reference",
+    typ="symbolic",
     members={
         "q": MemberType.USE_REAL,
         "get_q": MemberType.INLINED,
         "pop_q": MemberType.INLINED,
     },
 )
-register_custom_class(AddModule, typ="reference")
+register_custom_class(AddModule, typ="symbolic")
 register_custom_class(ValueConfig, typ="value")
 register_custom_class(SizeStore, typ="value")
 register_custom_class(NestedValueSize, typ="value")
-register_custom_class(OpaqueMultiplier, typ="reference")
-register_custom_class(Color, typ="reference")
-register_custom_class(ColorWithDescriptor, typ="reference")
+register_custom_class(OpaqueMultiplier, typ="symbolic")
+register_custom_class(Color, typ="symbolic")
+register_custom_class(ColorWithDescriptor, typ="symbolic")
 
 
 # A tensor subclass (similar to TwoTensor) that also holds an opaque Counter
@@ -1784,7 +1784,7 @@ def forward(self, primals, tangents):
             TypeError,
             "must subclass torch._custom_class_base.CustomClassBase",
         ):
-            register_custom_class(NoOpaqueBase, typ="reference")
+            register_custom_class(NoOpaqueBase, typ="symbolic")
 
         class BadMember(CustomClassBase):
             def __init__(self, x):
@@ -1794,7 +1794,7 @@ def forward(self, primals, tangents):
             return y + bad.x
 
         register_custom_class(
-            BadMember, typ="reference", members={"y": MemberType.USE_REAL}
+            BadMember, typ="symbolic", members={"y": MemberType.USE_REAL}
         )
         with self.assertRaisesRegex(
             torch._dynamo.exc.InternalTorchDynamoError,
@@ -1890,7 +1890,7 @@ def forward(self, primals, tangents):
     def test_invalid_opaque_obj_types(self):
         for t in [str, bool, int, float, torch.Tensor]:
             with self.assertRaisesRegex(ValueError, "Unable to register built-in type"):
-                register_custom_class(t, typ="reference")
+                register_custom_class(t, typ="symbolic")
 
         @dataclass
         class Bad1(CustomClassBase):
@@ -1902,7 +1902,7 @@ def forward(self, primals, tangents):
                 ValueError,
                 "cannot be registered as an opaque object as it has been registered as a pytree.",
             ):
-                register_custom_class(Bad1, typ="reference")
+                register_custom_class(Bad1, typ="symbolic")
         finally:
             # Clean up pytree registration to avoid leaking state to other tests
             pytree.SUPPORTED_NODES.pop(Bad1, None)
@@ -1913,7 +1913,7 @@ def forward(self, primals, tangents):
         class Bad2(CustomClassBase):
             x: int
 
-        register_custom_class(Bad2, typ="reference")
+        register_custom_class(Bad2, typ="symbolic")
         with self.assertRaisesRegex(
             ValueError,
             "cannot be registered as a pytree as it has been registered as an opaque object.",
@@ -2813,7 +2813,7 @@ class GraphModule(torch.nn.Module):
             def __hash__(self):
                 return hash(self.name)
 
-        register_custom_class(Tag, typ="reference")
+        register_custom_class(Tag, typ="symbolic")
 
         class TwoRefSubclass(torch.Tensor):
             @staticmethod
