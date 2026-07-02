@@ -91,6 +91,24 @@ class TestOnlineSoftmax(TestCase):
 
         self.assertEqual(wrapper_code.count("for r0_offset in"), 2)
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @parametrize("use_log_softmax", [False, True])
+    def test_codegen_online_softmax_unbacked_non_reduction_dim(self, use_log_softmax):
+        def f(x, n):
+            x = x[: n.item(), :]
+            if use_log_softmax:
+                return torch.log_softmax(x, dim=-1)
+            else:
+                return torch.softmax(x, dim=-1)
+
+        x = torch.randn(1024, 2048, dtype=torch.bfloat16, device=GPU_TYPE)
+        n = torch.tensor(1024)
+        _, source_codes = run_and_get_code(torch.compile(f, fullgraph=True), x, n)
+        wrapper_code = "\n".join(source_codes)
+
+        self.assertEqual(wrapper_code.count("for r0_offset in"), 2)
+        self.assertTrue("online_softmax_reduce" in wrapper_code)
+
     def test_no_online_softmax_for_cpu(self):
         code = self.get_softmax_wrapper(V=2048, device="cpu")
 
@@ -160,6 +178,111 @@ class TestOnlineSoftmax(TestCase):
                 # A single loop due to online softmax
                 expected_num_loop = 1
             self.assertEqual(code.count("for r0_offset in"), expected_num_loop)
+
+    def test_prepare_softmax_after_partitioning(self):
+        from torch._dynamo.backends.common import aot_autograd
+        from torch._functorch.aot_autograd import make_boxed_func
+        from torch._functorch.partitioners import min_cut_rematerialization_partition
+        from torch._inductor.decomposition import select_decomp_table
+        from torch._inductor.fx_passes import post_grad
+        from torch._inductor.fx_passes.joint_graph import joint_graph_passes
+        from torch._inductor.pattern_matcher import (
+            fwd_only,
+            PatternMatcherPass,
+            register_replacement,
+        )
+
+        def apply_online_softmax_in_joint_graph(gm):
+            patterns = PatternMatcherPass(pass_name="test_joint_online_softmax")
+            register_replacement(
+                post_grad.prepare_softmax_pattern,
+                post_grad.prepare_softmax_replacement,
+                [torch.empty(4, 8)],
+                fwd_only,
+                patterns,
+                scalar_workaround={"dim": -1},
+                extra_check=post_grad.prepare_softmax_extra_check,
+            )
+            return patterns.apply(gm.graph)
+
+        def saved_activation_bytes(fw_module, num_fwd_outputs):
+            (output_node,) = fw_module.graph.find_nodes(op="output")
+            saved_values = output_node.args[0][num_fwd_outputs:]
+            total = 0
+            for node in saved_values:
+                if not isinstance(node, torch.fx.Node):
+                    continue
+                value = node.meta.get("val")
+                if isinstance(value, torch.Tensor):
+                    total += value.numel() * value.element_size()
+            return total
+
+        def compile_and_capture_saved_bytes(apply_joint_online_softmax):
+            captured = {}
+
+            def partition_fn(gm, joint_inputs, *, num_fwd_outputs, **kwargs):
+                joint_graph_passes(gm)
+                if apply_joint_online_softmax:
+                    captured["joint_online_softmax_count"] = (
+                        apply_online_softmax_in_joint_graph(gm)
+                    )
+                    gm.graph.lint()
+                    gm.recompile()
+                captured["joint_graph_code"] = gm.code
+                fw_module, bw_module = min_cut_rematerialization_partition(
+                    gm,
+                    joint_inputs,
+                    num_fwd_outputs=num_fwd_outputs,
+                    **kwargs,
+                )
+                captured["saved_activation_bytes"] = saved_activation_bytes(
+                    fw_module, num_fwd_outputs
+                )
+                return fw_module, bw_module
+
+            def compiler(gm, example_inputs):
+                return make_boxed_func(gm.forward)
+
+            backend = aot_autograd(
+                fw_compiler=compiler,
+                bw_compiler=compiler,
+                partition_fn=partition_fn,
+                decompositions=select_decomp_table(),
+            )
+
+            def fn(q, k, target):
+                scores = q @ k.transpose(-2, -1)
+                probs = scores.softmax(dim=-1)
+                return (probs * target).sum() + scores.sin().sum()
+
+            B, S, D = 2, 128, 16
+            args = (
+                torch.randn(
+                    B, S, D, device=GPU_TYPE, dtype=torch.float16, requires_grad=True
+                ),
+                torch.randn(
+                    B, S, D, device=GPU_TYPE, dtype=torch.float16, requires_grad=True
+                ),
+                torch.randn(
+                    B, S, S, device=GPU_TYPE, dtype=torch.float16, requires_grad=True
+                ),
+            )
+
+            torch._dynamo.reset()
+            loss = torch.compile(fn, backend=backend, fullgraph=True)(*args)
+            torch.autograd.grad(loss, args)
+            return captured
+
+        current = compile_and_capture_saved_bytes(apply_joint_online_softmax=False)
+        joint_online = compile_and_capture_saved_bytes(apply_joint_online_softmax=True)
+
+        self.assertNotIn("prepare_softmax_online", current["joint_graph_code"])
+        self.assertEqual(joint_online["joint_online_softmax_count"], 1)
+        self.assertIn("prepare_softmax_online", joint_online["joint_graph_code"])
+        self.assertLessEqual(
+            joint_online["saved_activation_bytes"],
+            current["saved_activation_bytes"],
+        )
 
     def test_split_reduction(self):
         """

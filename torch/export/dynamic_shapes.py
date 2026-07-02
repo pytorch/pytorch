@@ -743,6 +743,9 @@ class ShapesCollection:
     Builder for dynamic_shapes.
     Used to assign dynamic shape specifications to tensors that appear in inputs.
 
+    Note: this produces the ``Dim``-based ``dynamic_shapes`` format only; it does
+    not (yet) emit the structured ``ShapesSpec`` / ``ParamsSpec`` API.
+
     This is useful particularly when :func:`args` is a nested input structure, and it's
     easier to index the input tensors, than to replicate the structure of :func:`args` in
     the :func:`dynamic_shapes` specification.
@@ -838,6 +841,9 @@ class ShapesCollection:
 class AdditionalInputs:
     """
     Infers dynamic_shapes based on additional inputs.
+
+    Note: this produces the ``Dim``-based ``dynamic_shapes`` format only; it does
+    not (yet) emit the structured ``ShapesSpec`` / ``ParamsSpec`` API.
 
     This is useful particularly for deployment engineers who, on the one hand, may
     have access to ample testing or profiling data that can provide a fair sense of

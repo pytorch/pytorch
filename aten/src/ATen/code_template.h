@@ -84,7 +84,7 @@ struct TemplateEnv {
   [[noreturn]] void notFound(const std::string& k) const {
     std::stringstream ss;
     ss << "key not found: " << k;
-    throw std::logic_error(ss.str());
+    throw std::logic_error(std::move(ss).str());
   }
 
   std::unordered_map<std::string, std::string> strings_;
@@ -116,7 +116,7 @@ struct CodeTemplate {
         bool comma_before = false;
         bool comma_after = false;
         size_t new_pos = parseKey(pos, kss, comma_before, comma_after);
-        std::string k = kss.str();
+        std::string k = std::move(kss).str();
         bool is_string = env.keyIsString(k);
         if (all_whitespace) {
           if (is_string)
@@ -143,7 +143,7 @@ struct CodeTemplate {
         pos++;
       }
     }
-    return out.str();
+    return std::move(out).str();
   }
 
  private:
