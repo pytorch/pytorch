@@ -7,8 +7,9 @@ from typing import Any, NamedTuple
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey, DispatchKeySet
+from torch._custom_class_base import CustomClassBase
 from torch._higher_order_ops.utils import register_fake
-from torch._library.opaque_object import CustomClassBase, register_opaque_type
+from torch._library.opaque_object import register_custom_class
 from torch._ops import HigherOrderOperator
 from torch.autograd.graph import get_gradient_edge
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
@@ -56,7 +57,7 @@ class _LeafCallable(CustomClassBase):
         return self._fn(*args, **kwargs)
 
 
-register_opaque_type(_LeafCallable, typ="reference")
+register_custom_class(_LeafCallable, typ="reference")
 
 
 def set_leaf_function_module_retriever(retriever: Callable[[int], Any]) -> None:

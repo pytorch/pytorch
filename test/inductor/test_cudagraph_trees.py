@@ -71,7 +71,7 @@ requires_multigpu = functools.partial(
 )
 from io import StringIO
 
-from torch._library.opaque_object import CustomClassBase, register_opaque_type
+from torch._library.opaque_object import CustomClassBase, register_custom_class
 
 
 class _CudagraphTestScaleFactor(CustomClassBase):
@@ -79,7 +79,7 @@ class _CudagraphTestScaleFactor(CustomClassBase):
         self.factor = factor
 
 
-register_opaque_type(_CudagraphTestScaleFactor, typ="reference")
+register_custom_class(_CudagraphTestScaleFactor, typ="reference")
 
 
 def get_compile_fn(backend):

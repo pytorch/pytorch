@@ -140,10 +140,10 @@ class PytreeTuple(torch._custom_class_base.CustomClassBase):
 
 # Register PytreeTuple as an opaque value type to enable Dynamo to handle
 # instances created during tracing
-from torch._library.opaque_object import MemberType, register_opaque_type
+from torch._library.opaque_object import MemberType, register_custom_class
 
 
-register_opaque_type(
+register_custom_class(
     PytreeTuple,
     typ="value",
     members={

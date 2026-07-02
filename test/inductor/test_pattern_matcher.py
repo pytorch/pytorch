@@ -36,7 +36,7 @@ from torch._inductor.virtualized import V
 from torch._library.opaque_object import (
     CustomClassBase,
     get_opaque_type_name,
-    register_opaque_type,
+    register_custom_class,
 )
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
@@ -72,7 +72,7 @@ class OpaqueScaleFactor(CustomClassBase):
         )
 
 
-register_opaque_type(OpaqueScaleFactor, typ="value", hoist=True)
+register_custom_class(OpaqueScaleFactor, typ="value", hoist=True)
 
 
 @instantiate_parametrized_tests
