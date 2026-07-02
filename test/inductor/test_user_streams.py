@@ -200,7 +200,7 @@ class TestStreamCodegen(InductorTestCase):
 with torch.cuda._DeviceGuard(0):
     torch.cuda.set_device(0)
     default_stream = torch.cuda.current_stream()
-    stream1 = get_external_object_by_index(3)
+    stream1 = _get_stream_by_index(3)
     with stream1:
 """,
             ),
@@ -211,7 +211,7 @@ with torch.cuda._DeviceGuard(0):
 with torch.xpu._DeviceGuard(0):
     torch.xpu.set_device(0)
     default_stream = torch.xpu.current_stream()
-    stream1 = get_external_object_by_index(3)
+    stream1 = _get_stream_by_index(3)
     with stream1:
 """,
             ),
@@ -222,6 +222,7 @@ with torch.xpu._DeviceGuard(0):
                 graph = SimpleNamespace(
                     cpp_wrapper=False,
                     device_ops=device_ops,
+                    device_type=device,
                 )
 
                 code = IndentedBuffer()
@@ -272,6 +273,48 @@ with torch.xpu._DeviceGuard(0):
 
         # The exit just unindents, verify no error
         self.assertIsNotNone(code.getvalue())
+
+    def test_default_stream_setup_only_once_per_device(self):
+        """default_stream capture should only run once per device entry."""
+        from torch._inductor.codegen.wrapper import (
+            EnterDeviceContextManagerWithStreamInfoLine,
+        )
+
+        last_device = None
+        stream_map = {1: 10}
+
+        def make_line(device_idx):
+            nonlocal last_device
+            setup = last_device != device_idx
+            last_device = device_idx
+            return EnterDeviceContextManagerWithStreamInfoLine(
+                device_idx=device_idx,
+                last_seen_device_guard_index=None,
+                num_streams=2,
+                stream_idx_to_user_obj_idx=stream_map,
+                setup_stream_cache=setup,
+            )
+
+        self.assertTrue(make_line(0).setup_stream_cache)
+        self.assertFalse(make_line(0).setup_stream_cache)
+        self.assertTrue(make_line(1).setup_stream_cache)
+        self.assertTrue(make_line(0).setup_stream_cache)
+
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    def test_generated_code_uses_get_stream_by_index(self):
+        """Generated inductor code should use _get_stream_by_index."""
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(x):
+            s = torch.Stream(device="cuda")
+            with s:
+                return x + 1
+
+        x = torch.ones(4, 4, device="cuda")
+        result, code = run_and_get_code(torch.compile(fn), x)
+        FileCheck().check("_get_stream_by_index").run(code[0])
+        expected = fn(torch.ones(4, 4, device="cuda"))
+        torch.testing.assert_close(result, expected)
 
 
 @unittest.skipIf(not TEST_CUDA, "requires CUDA")
@@ -351,7 +394,7 @@ class TestUserStreamCompile(InductorTestCase):
         torch.cuda.synchronize()
 
         self.assertEqual(actual, expected)
-        self.assertIn("stream1 = get_external_object_by_index", code)
+        self.assertIn("stream1 = _get_stream_by_index", code)
         self.assertIn("raw_stream1 = get_raw_stream(1)", code)
         self.assertNotRegex(code, r"(?m)^\s*stream1 = get_raw_stream\(1\)")
 
@@ -1160,12 +1203,12 @@ class TestUserStreamCompile(InductorTestCase):
         self.assertEqual(
             len(stream_kernels.get("s1", [])),
             1,
-            f"Expected 1 kernel on s1, got: {stream_kernels}",
+            lambda msg: f"{msg}\nExpected 1 kernel on s1, got: {stream_kernels}",
         )
         self.assertEqual(
             len(stream_kernels.get("s2", [])),
             1,
-            f"Expected 1 kernel on s2, got: {stream_kernels}",
+            lambda msg: f"{msg}\nExpected 1 kernel on s2, got: {stream_kernels}",
         )
 
     def test_no_buffer_reuse_across_streams(self):
@@ -1396,18 +1439,21 @@ arg0_1, = args
 with torch.cuda._DeviceGuard(0):
     torch.cuda.set_device(0)
     default_stream = torch.cuda.current_stream()
-    stream1 = get_external_object_by_index(1)
+    stream1 = _get_stream_by_index(1)
     with stream1:
         arg0_1 = copy_if_misaligned(arg0_1)
         buf0 = empty_strided_cuda((1024, ), (1, ), torch.float32)
         raw_stream = get_raw_stream(0)
         triton_kernel.run(arg0_1, buf0, 1024, stream=raw_stream)
     with default_stream:
-        buf3 = empty_strided_cuda((1024, ), (1, ), torch.float32)
+        buf1 = empty_strided_cuda((1024, ), (1, ), torch.float32)
         raw_stream0 = get_raw_stream(0)
-        triton_kernel.run(arg0_1, buf0, buf3, 1024, stream=raw_stream0)
+        triton_kernel.run(arg0_1, buf1, 1024, stream=raw_stream0)
         torch.ops.streams.synchronize_stream.default(1)
-    return (buf3, )""",
+        buf5 = empty_strided_cuda((1024, ), (1, ), torch.float32)
+        raw_stream0 = get_raw_stream(0)
+        triton_kernel.run(buf1, buf0, buf5, 1024, stream=raw_stream0)
+    return (buf5, )""",
         )
 
     def test_codegen_structure_pipeline(self):
@@ -2105,7 +2151,7 @@ class TestStreamIdentity(InductorTestCase):
     """Verify that compiled code uses the user's original stream objects."""
 
     def test_single_stream_identity(self):
-        """Codegen should retrieve the user's stream via get_external_object_by_index."""
+        """Codegen should retrieve the user's stream via _get_stream_by_index."""
         from torch._inductor.utils import run_and_get_code
 
         user_stream = torch.cuda.Stream()
@@ -2118,7 +2164,7 @@ class TestStreamIdentity(InductorTestCase):
         result, (code,) = run_and_get_code(torch.compile(fn), x)
 
         self.assertEqual(result, fn(x))
-        self.assertIn("get_external_object_by_index", code)
+        self.assertIn("_get_stream_by_index", code)
         self.assertNotIn("torch.cuda.Stream(device=", code)
 
     def test_multiple_stream_identity(self):
@@ -2143,8 +2189,8 @@ class TestStreamIdentity(InductorTestCase):
         result, (code,) = run_and_get_code(torch.compile(fn), x)
 
         self.assertEqual(result, fn(x))
-        # Should have two distinct get_external_object_by_index calls
-        matches = re.findall(r"get_external_object_by_index\((\d+)\)", code)
+        # Should have two distinct _get_stream_by_index calls
+        matches = re.findall(r"_get_stream_by_index\((\d+)\)", code)
         self.assertEqual(len(matches), 2)
         self.assertNotEqual(matches[0], matches[1])
         self.assertNotIn("torch.cuda.Stream(device=", code)
@@ -2607,6 +2653,26 @@ instantiate_parametrized_tests(TestGenericStreamCompile)
 instantiate_parametrized_tests(TestStreamIdentity)
 instantiate_parametrized_tests(TestPDLWithMultiStream)
 instantiate_parametrized_tests(TestStreamCudagraphInteraction)
+
+
+@unittest.skipIf(not TEST_CUDA, "requires CUDA")
+class TestStreamExternalObjectRestore(InductorTestCase):
+    def test_restore_external_objects_before_backward(self):
+        """Forward snapshots external object registry, backward restores it."""
+        from torch._dynamo.graph_bytecode_inputs import store_user_object_weakrefs
+
+        def fn(x):
+            s = torch.Stream(device="cuda")
+            with s:
+                return x * 2 + 1
+
+        compiled_fn = torch.compile(fn)
+        x = torch.randn(4, 4, device="cuda", requires_grad=True)
+        out = compiled_fn(x)
+        store_user_object_weakrefs(torch.cuda.Stream())
+        out.sum().backward()
+        self.assertIsNotNone(x.grad)
+        torch.testing.assert_close(x.grad, torch.full_like(x, 2.0))
 
 
 if __name__ == "__main__":

@@ -107,7 +107,21 @@ def initialize_lazy_module(
             elif isinstance(x, (list, tuple, set)):
                 return type(x)(convert_to_fake(elem) for elem in x)
             elif isinstance(x, torch.fx.Proxy):
-                return get_fake_value(x.node, tx)
+                fake = get_fake_value(x.node, tx)
+                if isinstance(fake, torch.Tensor) and any(
+                    isinstance(s, torch.SymInt) for s in fake.shape
+                ):
+                    # _infer_parameters runs real ops on the module, so
+                    # symbolic shapes must be concretized to their hints.
+                    shape = [
+                        s.node.hint if isinstance(s, torch.SymInt) else s
+                        for s in fake.shape
+                    ]
+                    assert all(isinstance(s, int) for s in shape), shape  # noqa: S101
+                    return torch.empty(  # pyrefly: ignore[no-matching-overload]
+                        shape, dtype=fake.dtype, device=fake.device
+                    )
+                return fake
             else:
                 return x
 
@@ -1379,7 +1393,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                                 GuardBuilder.EMPTY_NN_MODULE_HOOKS_DICT
                             )
                         )
-                    return variables.ConstDictVariable({})
+                    return variables.ConstDictVariable({}, user_cls=type(hooks_dict))
 
         # For non-empty hook dicts, one way is to just fallback to VariableTracker.build() and create a ConstDictVariable.
         # However, ConstDictVariable guards on keys. This can cause recompiles when the same hook is installed for

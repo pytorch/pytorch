@@ -202,7 +202,6 @@ class TestSqConcat(torch._dynamo.test_case.TestCase):
 
     # --- User-defined deque subclass concatenation ---
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_user_defined_deque_concat(self):
         a = UserDefinedDeque([1, 2])
@@ -210,6 +209,33 @@ class TestSqConcat(torch._dynamo.test_case.TestCase):
         result = a + b
         self.assertEqual(list(result), [1, 2, 3, 4])
 
+    @make_dynamo_test
+    def test_user_defined_deque_maxlen(self):
+        d = UserDefinedDeque([1, 2, 3], maxlen=2)
+        self.assertEqual(list(d), [2, 3])
+        self.assertEqual(d.maxlen, 2)
+
+    def test_user_defined_deque_graph_input(self):
+        # A deque subclass passed in as a graph input is built by builder.py
+        # (sourced path), and in-place mutations are replayed onto the original.
+        def fn(d):
+            d.append(99)
+            return len(d)
+
+        for maxlen in (None, 3):
+            d = UserDefinedDeque([1, 2, 3], maxlen=maxlen)
+            ref = UserDefinedDeque([1, 2, 3], maxlen=maxlen)
+            ref_ret = fn(ref)
+            ret = torch.compile(fn, backend="eager", fullgraph=True)(d)
+            self.assertEqual(ret, ref_ret)
+            self.assertEqual(list(d), list(ref))
+            self.assertEqual(d.maxlen, ref.maxlen)
+
+    # In-place concat (+=) on a deque subclass is not yet supported: it routes
+    # to the base deque __iadd__, whose type-identity check rejects the RHS
+    # UserDefinedDeque operand (it is not unwrapped to its base deque first),
+    # raising TypeError. Eager's deque.__iadd__ accepts any iterable. Tracked
+    # for a later gate.
     @unittest.expectedFailure
     @make_dynamo_test
     def test_user_defined_deque_inplace_concat(self):
@@ -255,6 +281,35 @@ class TestSqConcat(torch._dynamo.test_case.TestCase):
         d += collections.deque([3, 4])
         # Result respects maxlen of 3
         self.assertEqual(list(d), [2, 3, 4])
+
+    # --- list re-init (list.__init__) ---
+
+    @make_dynamo_test
+    def test_list_reinit_clears_and_extends(self):
+        x = list(range(-5, 0))
+        x.__init__(range(3))
+        self.assertEqual(x, [0, 1, 2])
+
+    @make_dynamo_test
+    def test_list_reinit_empty(self):
+        x = [1, 2, 3]
+        x.__init__()
+        self.assertEqual(x, [])
+
+    @make_dynamo_test
+    def test_list_reinit_self_referential(self):
+        # CPython clears before extending, so a.__init__(a) yields [].
+        x = [1, 2, 3]
+        x.__init__(x)
+        self.assertEqual(x, [])
+
+    @make_dynamo_test
+    def test_list_reinit_non_iterable_clears_then_raises(self):
+        # clear happens before extend, so the TypeError leaves the list empty.
+        x = [1, 2, 3]
+        with self.assertRaises(TypeError):
+            x.__init__(5)
+        self.assertEqual(x, [])
 
     # --- deque re-init (deque.__init__) ---
 
