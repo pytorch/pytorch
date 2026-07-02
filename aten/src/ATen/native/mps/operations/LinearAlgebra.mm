@@ -800,6 +800,10 @@ static Tensor& addbmm_or_baddbmm_out_mps_impl(const Tensor& input,
       result.zero_();
       return result;
     }
+  } else if (result.numel() == 0) {
+    // Empty baddbmm output (e.g. a zero-sized batch dim): nothing to compute,
+    // avoid feeding empty buffers to the MPSGraph / Metal kernel paths.
+    return result;
   }
 
   // Use Metal kernels for integer and complex types
