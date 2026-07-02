@@ -47,11 +47,12 @@ jobs:
       contents: read
     container:
       image: ${{ inputs.docker_image }}
-      # OSDC runners get /mnt/hf_cache injected by the runner hook (a bind mount here
-      # would break the hook's mount check). DGX B200 (non-OSDC) has no injection, so
-      # bind-mount its writable host cache dir via -v. Set on options (a scalar) rather
-      # than volumes (a sequence) so the conditional expression stays valid YAML.
-      options: ${{ contains(inputs.runner, 'b200') && '--gpus all --ipc=host --tty -v /mnt/hf_cache:/mnt/hf_cache' || '--gpus all --ipc=host --tty' }}
+      # OSDC runners (h100 and OSDC b200) get /mnt/hf_cache injected by the runner
+      # hook — a bind mount here would break the hook's mount check. Only non-OSDC
+      # DGX (linux.dgx.*) has no injection, so bind-mount its writable host cache dir
+      # via -v. Discriminate on 'dgx', not 'b200' (OSDC b200 behaves like h100). Set
+      # on options (a scalar) not volumes (a sequence) so the expression is valid YAML.
+      options: ${{ contains(inputs.runner, 'dgx') && '--gpus all --ipc=host --tty -v /mnt/hf_cache:/mnt/hf_cache' || '--gpus all --ipc=host --tty' }}
     steps:
       - name: Install system dependencies
         run: |
@@ -63,7 +64,7 @@ jobs:
       # content that actions/checkout can't delete (uid mismatch: GH hook 1001 vs
       # CI image 1000). Same fix as setup-linux's "Fix workspace permissions".
       - name: Fix workspace permissions
-        if: ${{ !contains(inputs.runner, 'b200') }}
+        if: ${{ !contains(inputs.runner, 'dgx') }}
         shell: bash
         run: |
           sudo chmod -R 777 "$GITHUB_WORKSPACE"
@@ -91,8 +92,8 @@ jobs:
           submodules: recursive
           show-progress: false
 
-      - name: Authenticate with AWS
-        if: ${{ always() && contains(inputs.runner, 'b200') }}
+      - name: Authenticate with AWS (DGX)
+        if: ${{ always() && contains(inputs.runner, 'dgx') }}
         uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_upload-benchmark-results
@@ -103,7 +104,7 @@ jobs:
       # OSDC runners have no ambient AWS creds; assume the ARC OIDC role so the
       # S3 artifact download below can authenticate (mirrors _linux-test test-osdc).
       - name: Authenticate with AWS (OSDC)
-        if: ${{ !contains(inputs.runner, 'b200') }}
+        if: ${{ !contains(inputs.runner, 'dgx') }}
         uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
         with:
           role-to-assume: arn:aws:iam::308535385114:role/arc
