@@ -712,6 +712,44 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)({"a": 1})
         self.assertEqual(result, "keys")
 
+    def test_pybind11_class_attr_constant_fold(self):
+        """LOAD_ATTR on a constant class with a pybind11 metaclass (which
+        overrides __getattribute__) should constant-fold rather than
+        graph-break."""
+
+        def fn(x):
+            return x + torch.nn.attention.SDPBackend.MATH.value
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_constant_fold_fallback_recompiles_on_change(self):
+        """When _load_attr constant-folds because the metaclass overrides
+        __getattribute__, the guard must trigger recompilation if the
+        attribute value changes."""
+
+        class Meta(type):
+            def __getattribute__(cls, name):
+                return type.__getattribute__(cls, name)
+
+        class MyClass(metaclass=Meta):
+            value = 10
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def fn(x):
+            return x + MyClass.value
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), x + 10)
+        self.assertEqual(cnt.frame_count, 1)
+
+        MyClass.value = 20
+        self.assertEqual(fn(x), x + 20)
+        self.assertEqual(cnt.frame_count, 2)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
