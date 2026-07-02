@@ -518,7 +518,7 @@ sycl::event scaled_matmul(
   // 3. execute
 
   const int64_t M = mat1.size(0);
-  bool is_fp4 = (mat1.scalar_type() == at::ScalarType::Float4_e2m1fn_x2);
+  const bool is_fp4 = (mat1.scalar_type() == at::ScalarType::Float4_e2m1fn_x2);
   if (is_fp4) {
     TORCH_INTERNAL_ASSERT(
         mat2.scalar_type() == at::ScalarType::Float4_e2m1fn_x2,
