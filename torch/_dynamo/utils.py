@@ -85,6 +85,7 @@ from torch._utils_internal import (
     record_chromium_event_internal,
     signpost_event,
 )
+from torch.fx._lazy_graph_module import _LazyGraphModule
 from torch.fx._utils import _format_graph_code, lazy_format_graph_code
 from torch.monitor import _WaitCounter
 from torch.nn.modules.lazy import LazyModuleMixin
@@ -1513,6 +1514,43 @@ def istensor(obj: Any) -> bool:
 
 def is_lazy_module(mod: Any) -> bool:
     return isinstance(mod, LazyModuleMixin)
+
+
+def force_lazy_graph_module_recompile(gm: Any) -> None:
+    """
+    Materialize a lazy FX GraphModule before Dynamo inspects or invokes forward.
+
+    _LazyGraphModule.forward starts as a skipped `_lazy_forward` stub. Dynamo
+    must force recompilation at boundaries that resolve `forward`, inline a
+    GraphModule call, or turn a lazy bound forward into a callable; otherwise
+    tracing sees the stub instead of the generated forward code.
+    """
+    _LazyGraphModule.force_recompile(gm)
+
+
+def is_lazy_graph_module_forward(fn: Any) -> bool:
+    return (
+        isinstance(fn, types.MethodType)
+        and isinstance(fn.__self__, _LazyGraphModule)
+        and fn.__name__ == "_lazy_forward"
+    )
+
+
+def materialize_lazy_graph_module(
+    fn: Any, *, preserve_lazy_forward_call_semantics: bool = True
+) -> Any:
+    if isinstance(fn, _LazyGraphModule):
+        _LazyGraphModule.force_recompile(fn)
+        return fn
+
+    if is_lazy_graph_module_forward(fn):
+        lazy_gm = fn.__self__
+        _LazyGraphModule.force_recompile(lazy_gm)
+        if preserve_lazy_forward_call_semantics:
+            return lazy_gm
+        return lazy_gm.forward
+
+    return fn
 
 
 @functools.lru_cache(4096)

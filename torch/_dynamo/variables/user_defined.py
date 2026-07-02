@@ -80,9 +80,11 @@ from ..utils import (
     deque_methods,
     dict_methods,
     exception_methods,
+    force_lazy_graph_module_recompile,
     frozenset_methods,
     get_custom_getattr,
     has_torch_function,
+    is_lazy_graph_module_forward,
     is_lru_cache_wrapped_function,
     is_namedtuple_cls,
     is_pybind11_enum_member,
@@ -3170,6 +3172,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 )
             if self.source is None:
                 raise AssertionError("source must not be None for bound method call")
+            if is_lazy_graph_module_forward(self.value):
+                force_lazy_graph_module_recompile(obj)
+                obj_var = VariableTracker.build(
+                    tx, obj, AttrSource(self.source, "__self__")
+                )
+                return obj_var.call_function(tx, args, kwargs)  # type: ignore[attr-defined]
             func_src = AttrSource(self.source, "__func__")
             func_var = VariableTracker.build(tx, func, func_src, realize=True)
             obj_src = AttrSource(self.source, "__self__")
@@ -4238,6 +4246,13 @@ class SourcelessGraphModuleVariable(UserDefinedObjectVariable):
     ) -> None:
         super().__init__(value, **kwargs)
 
+    def getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        if name == "forward":
+            force_lazy_graph_module_recompile(self.value)
+        return super().getattro_impl(tx, name)
+
     def call_method(
         self,
         tx: "InstructionTranslatorBase",
@@ -4245,6 +4260,10 @@ class SourcelessGraphModuleVariable(UserDefinedObjectVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if name != "forward":
+            return super().call_method(tx, name, args, kwargs)
+
+        force_lazy_graph_module_recompile(self.value)
         fn_variable = VariableTracker.build(tx, self.value.forward.__func__)  # type: ignore[attr-defined]
         args = [self] + args
         return tx.inline_user_function_return(
