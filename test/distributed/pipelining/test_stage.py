@@ -1,6 +1,9 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 
+import os
+import tempfile
+
 from model_registry import ExampleCode, ModelWithKwargs, MultiMLP
 
 import torch
@@ -11,7 +14,7 @@ from torch.distributed.pipelining import (
     PipelineStage,
     ScheduleGPipe,
 )
-from torch.distributed.pipelining._utils import PipeliningMetadataError
+from torch.distributed.pipelining._utils import InferenceMode, PipeliningMetadataError
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     requires_accelerator_dist_backend,
@@ -22,6 +25,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skip_but_pass_in_sandcastle_if,
     TEST_MULTIACCELERATOR,
+    TestCase,
 )
 from torch.utils._pytree import tree_map_only
 
@@ -34,6 +38,63 @@ device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else 
 backend = dist.get_default_backend_for_device(device_type)
 
 torch.manual_seed(0)
+
+
+class PipelineStageMetadataInferenceTest(TestCase):
+    def test_dynamic_metadata_inference_restores_module_buffers(self):
+        class BufferMutatingModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+                self.register_buffer("counter", torch.zeros(4))
+
+            def forward(self, x):
+                with torch.no_grad():
+                    self.counter.add_(1)
+                out = self.linear(x)
+                if out.requires_grad:
+                    out.register_hook(self._backward_hook)
+                return out
+
+            def _backward_hook(self, grad):
+                with torch.no_grad():
+                    self.counter.add_(10)
+                return grad
+
+        device = torch.device("cpu")
+        init_pg = not dist.is_initialized()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            if init_pg:
+                dist.init_process_group(
+                    "gloo",
+                    init_method=f"file://{os.path.join(tmpdir, 'pg')}",
+                    rank=0,
+                    world_size=1,
+                )
+            try:
+                mod = BufferMutatingModule().to(device)
+                stage = PipelineStage(
+                    mod,
+                    stage_index=0,
+                    num_stages=1,
+                    device=device,
+                )
+                stage._inference_mode = InferenceMode.DYNAMIC
+
+                initial_counter = mod.counter.clone()
+                x = torch.randn(2, 4, device=device, requires_grad=True)
+                stage._prepare_forward_infra(1, (x,), {}, has_backward=True)
+                self.assertEqual(mod.counter, initial_counter)
+
+                def loss_fn(out, target):
+                    return out.sum() + target.sum() * 0
+
+                target = torch.zeros((), device=device)
+                stage._prepare_backward_infra(1, loss_fn=loss_fn, target=target)
+                self.assertEqual(mod.counter, initial_counter)
+            finally:
+                if init_pg:
+                    dist.destroy_process_group()
 
 
 def get_dtype_change_hook(new_dtype):
