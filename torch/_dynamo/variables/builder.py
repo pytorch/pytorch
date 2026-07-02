@@ -1471,16 +1471,17 @@ class VariableBuilder:
             )
         elif (
             isinstance(value, types.MethodType)
-            and value.__name__ in ("shuffle", "sample")
+            and value.__name__ in ("shuffle", "sample", "seed")
             and isinstance(value.__self__, random.Random)
             and RandomVariable.is_supported_random_obj(value.__self__)
         ):
-            # Module-level random.shuffle/random.sample are methods bound to the
-            # module-global random.Random instance. The scalar-returning helpers
-            # (random.random/randint/randrange/uniform) already have a dedicated
-            # RandomValueSource path in UserDefinedObjectVariable; shuffle/sample
-            # return sequences instead, so route them through RandomVariable to
-            # model the RNG state rather than skipping into the random module.
+            # Module-level random.shuffle/random.sample/random.seed are methods
+            # bound to the module-global random.Random instance. The
+            # scalar-returning helpers (random.random/randint/randrange/uniform)
+            # already have a dedicated RandomValueSource path in
+            # UserDefinedObjectVariable; these return sequences or mutate the RNG
+            # state instead, so route them through RandomVariable to model the
+            # RNG state rather than skipping into the random module.
             random_self = value.__self__
             obj_source = self.source and AttrSource(self.source, "__self__")
             obj_vt = VariableTracker.build(self.tx, random_self, obj_source)
