@@ -22,8 +22,9 @@ from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.eval_frame import unsupported
 from torch._dynamo.mutation_guard import GenerationTracker
 from torch._dynamo.testing import same
-from torch._dynamo.utils import ifdynstaticdefault
+from torch._dynamo.utils import ifdynstaticdefault, materialize_lazy_graph_module
 from torch._dynamo.variables.torch_function import TensorWithTFOverrideVariable
+from torch.fx._lazy_graph_module import _LazyGraphModule
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.nn.parameter import Parameter, UninitializedParameter
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -1578,6 +1579,160 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             "Module should be transformed to an instance of BatchNorm3d.",
         )
         self.assertEqual(cnt.frame_count, 1, "No guards should have triggered.")
+
+    def test_lazy_graph_module_fullgraph_call(self):
+        def graph(x):
+            return x + 10
+
+        def make_lazy_graph_module():
+            gm = torch.fx.symbolic_trace(graph)
+            return _LazyGraphModule.from_graphmodule(gm)
+
+        class LazyGraphModuleCall(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lazy_gm = make_lazy_graph_module()
+
+            def forward(self, x):
+                return self.lazy_gm(x)
+
+        class LazyGraphModuleForwardCall(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lazy_gm = make_lazy_graph_module()
+
+            def forward(self, x):
+                return self.lazy_gm.forward(x)
+
+        def check_fullgraph(fn, lazy_gm, x):
+            self.assertTrue(lazy_gm._needs_recompile())
+            cnt = torch._dynamo.testing.CompileCounter()
+            opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+            self.assertEqual(opt_fn(x), graph(x))
+            self.assertEqual(cnt.frame_count, 1)
+            self.assertFalse(lazy_gm._needs_recompile())
+
+        x = torch.randn(10, 10)
+
+        lazy_gm = make_lazy_graph_module()
+
+        def fn(x):
+            return lazy_gm(x)
+
+        check_fullgraph(fn, lazy_gm, x)
+
+        lazy_gm = make_lazy_graph_module()
+
+        def fn_forward(x):
+            return lazy_gm.forward(x)
+
+        check_fullgraph(fn_forward, lazy_gm, x)
+        lazy_gm = make_lazy_graph_module()
+        check_fullgraph(lazy_gm, lazy_gm, x)
+        lazy_gm = make_lazy_graph_module()
+        check_fullgraph(lazy_gm.forward, lazy_gm, x)
+        lazy_gm = make_lazy_graph_module()
+        lazy_forward = lazy_gm.forward
+
+        def fn_captured_forward(x):
+            return lazy_forward(x)
+
+        check_fullgraph(fn_captured_forward, lazy_gm, x)
+
+        lazy_gm = make_lazy_graph_module()
+        lazy_forward = lazy_gm.forward
+        lazy_gm.register_forward_hook(lambda mod, inp, out: out + 100)
+
+        def fn_captured_forward_with_hook(x):
+            return lazy_forward(x)
+
+        self.assertTrue(lazy_gm._needs_recompile())
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(
+            fn_captured_forward_with_hook, backend=cnt, fullgraph=True
+        )
+        self.assertEqual(opt_fn(x), graph(x) + 100)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertFalse(lazy_gm._needs_recompile())
+
+        for get_fn in (lambda gm: gm, lambda gm: gm.forward):
+            lazy_gm = make_lazy_graph_module()
+            with torch._dynamo.config.patch(caching_precompile=True):
+                opt_fn = torch.compile(get_fn(lazy_gm), backend="eager", fullgraph=True)
+                self.assertEqual(opt_fn(x), graph(x))
+            self.assertFalse(lazy_gm._needs_recompile())
+
+        mod = LazyGraphModuleCall()
+        check_fullgraph(mod, mod.lazy_gm, x)
+
+        mod = LazyGraphModuleForwardCall()
+        check_fullgraph(mod, mod.lazy_gm, x)
+
+        lazy_gm = make_lazy_graph_module()
+        lazy_gm.register_forward_hook(lambda mod, inp, out: out + 100)
+        lazy_forward = lazy_gm.forward
+        self.assertEqual(materialize_lazy_graph_module(lazy_forward)(x), graph(x) + 100)
+
+        lazy_gm = make_lazy_graph_module()
+        lazy_gm.register_forward_hook(lambda mod, inp, out: out + 100)
+        lazy_forward = lazy_gm.forward
+        self.assertEqual(
+            materialize_lazy_graph_module(
+                lazy_forward, preserve_lazy_forward_call_semantics=False
+            )(x),
+            graph(x),
+        )
+
+    def test_sourceless_lazy_graph_module_materializes_forward(self):
+        from torch._dynamo.variables.base import VariableTracker
+        from torch._dynamo.variables.user_defined import (
+            SourcelessGraphModuleVariable,
+            UserDefinedObjectVariable,
+        )
+
+        def graph(x):
+            return x + 10
+
+        def make_lazy_graph_module():
+            gm = torch.fx.symbolic_trace(graph)
+            return _LazyGraphModule.from_graphmodule(gm)
+
+        sentinel = object()
+
+        lazy_gm = make_lazy_graph_module()
+        self.assertTrue(lazy_gm._needs_recompile())
+        with patch.object(
+            UserDefinedObjectVariable, "getattro_impl", return_value=sentinel
+        ) as getattro_impl:
+            result = SourcelessGraphModuleVariable(lazy_gm).getattro_impl(
+                None, "forward"
+            )
+        self.assertIs(result, sentinel)
+        getattro_impl.assert_called_once_with(None, "forward")
+        self.assertFalse(lazy_gm._needs_recompile())
+
+        class DummyTx:
+            def inline_user_function_return(self, fn_variable, args, kwargs):
+                self.call_args = (fn_variable, args, kwargs)
+                return sentinel
+
+        lazy_gm = make_lazy_graph_module()
+        self.assertTrue(lazy_gm._needs_recompile())
+        tx = DummyTx()
+        fn_variable = object()
+        arg = object()
+        with patch.object(VariableTracker, "build", return_value=fn_variable) as build:
+            result = SourcelessGraphModuleVariable(lazy_gm).call_method(
+                tx, "forward", [arg], {}
+            )
+        self.assertIs(result, sentinel)
+        build.assert_called_once_with(tx, lazy_gm.forward.__func__)
+        fn_var_arg, args_arg, kwargs_arg = tx.call_args
+        self.assertIs(fn_var_arg, fn_variable)
+        self.assertIsInstance(args_arg[0], SourcelessGraphModuleVariable)
+        self.assertEqual(args_arg[1:], [arg])
+        self.assertEqual(kwargs_arg, {})
+        self.assertFalse(lazy_gm._needs_recompile())
 
     def test_lazy_module2(self):
         # Test FX graph 'call_module' works well if argument is lazy module
