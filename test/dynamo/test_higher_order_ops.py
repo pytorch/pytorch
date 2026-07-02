@@ -794,8 +794,6 @@ class GraphModule(torch.nn.Module):
     def forward(self, L_x_: "f32[3]"):
         l_x_ = L_x_
 
-        wrap_body_1 = self.wrap_body_1
-
         nonzero: "i64[u0, 1]" = l_x_.nonzero()
         sym_size_int: "Sym(u0)" = torch.ops.aten.sym_size.int(nonzero, 0)
         ge: "Sym(u0 >= 0)" = sym_size_int >= 0
@@ -803,6 +801,7 @@ class GraphModule(torch.nn.Module):
         le: "Sym(u0 <= 3)" = sym_size_int <= 3
         _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(le, "Runtime assertion failed for expression u0 <= 3 on node 'le'");  le = _assert_scalar_default_1 = None
 
+        wrap_body_1 = self.wrap_body_1
         wrap = torch.ops.higher_order.wrap(wrap_body_1, l_x_, sym_size_int, nonzero);  wrap_body_1 = l_x_ = sym_size_int = nonzero = None
         getitem: "f32[3]" = wrap[0]
         getitem_1: "f32[u0, 1]" = wrap[1];  wrap = None
