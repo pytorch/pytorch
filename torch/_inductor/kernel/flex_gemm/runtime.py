@@ -10,17 +10,10 @@ import torch._vendor.quack.gemm_config as quack_gemm_config
 from torch._inductor.kernel.flex_gemm.constraints import (
     FlexGemmLocalReduceConsumerKind,
     FlexGemmLocalReduceSpec,
-    LOCAL_REDUCE_AXIS_KWARG,
     LOCAL_REDUCE_CALLBACKS_REQUIRED_ERROR,
-    LOCAL_REDUCE_COMBINE_KEY_KWARG,
     LOCAL_REDUCE_COMBINE_KEY_SUFFIX,
     local_reduce_compressed_shape,
-    LOCAL_REDUCE_FEEDS_MAIN_KWARG,
-    LOCAL_REDUCE_FINALIZE_KEY_KWARG,
     LOCAL_REDUCE_FINALIZE_KEY_SUFFIX,
-    LOCAL_REDUCE_GROUP_KWARG,
-    LOCAL_REDUCE_OUT_KWARG,
-    LOCAL_REDUCE_RETURNS_KWARG,
     LOCAL_REDUCE_RUNTIME_FEED_MAIN_OUT_ERROR,
     LOCAL_REDUCE_RUNTIME_OUT_ERROR,
     LOCAL_REDUCE_SWAP_AB_ERROR,
@@ -307,12 +300,12 @@ def local_reduce_gemm_act_kwargs(
     if local_reduce is None:
         return {}
     return {
-        LOCAL_REDUCE_RETURNS_KWARG: local_reduce_out is not None,
-        LOCAL_REDUCE_OUT_KWARG: local_reduce_out,
-        LOCAL_REDUCE_GROUP_KWARG: local_reduce.group,
-        LOCAL_REDUCE_AXIS_KWARG: local_reduce.axis,
-        LOCAL_REDUCE_COMBINE_KEY_KWARG: local_reduce.combine_key,
-        LOCAL_REDUCE_FINALIZE_KEY_KWARG: local_reduce.finalize_key,
+        "tensor_epilogue_returns_local_reduce": local_reduce_out is not None,
+        "local_reduce_out": local_reduce_out,
+        "local_reduce_group": local_reduce.group,
+        "local_reduce_axis": local_reduce.axis,
+        "local_reduce_combine_key": local_reduce.combine_key,
+        "local_reduce_finalize_key": local_reduce.finalize_key,
     }
 
 
