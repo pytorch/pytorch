@@ -6,6 +6,11 @@
 
 namespace c10::xpu::XPUCachingAllocator {
 
+struct ShareableHandle {
+  std::ptrdiff_t offset;
+  std::string handle;
+};
+
 class XPUAllocator : public DeviceAllocator {
  public:
   virtual void init(c10::DeviceIndex device_count) = 0;
@@ -105,6 +110,12 @@ C10_XPU_API void releasePool(
 C10_XPU_API int getPoolUseCount(
     c10::DeviceIndex device,
     c10::MempoolId_t mempool_id);
+
+C10_XPU_API ShareableHandle shareIpcHandle(void* ptr);
+
+C10_XPU_API std::shared_ptr<void> getIpcDevPtr(
+    std::string handle,
+    c10::DeviceIndex device);
 
 } // namespace c10::xpu::XPUCachingAllocator
 

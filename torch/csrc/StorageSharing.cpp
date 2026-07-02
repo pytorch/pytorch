@@ -26,6 +26,12 @@
 #include <cuda_runtime.h>
 #endif
 
+#ifdef USE_XPU
+#include <c10/core/DeviceGuard.h>
+#include <c10/xpu/XPUCachingAllocator.h>
+#include <c10/xpu/XPUStream.h>
+#endif
+
 #include <ATen/MapAllocator.h>
 #include <ATen/StorageUtils.h>
 #include <torch/csrc/utils/python_numbers.h>
@@ -633,6 +639,158 @@ static PyObject* THPStorage_isShared(PyObject* self, PyObject* noargs) {
   }
 }
 
+#ifdef USE_XPU
+namespace {
+
+struct XpuSharedStorageArgs {
+  c10::DeviceIndex device;
+  std::string handle;
+  size_t storage_size;
+  ptrdiff_t storage_offset_bytes;
+};
+
+bool isImportedStorage(const c10::StorageImpl& storage) {
+  return const_cast<c10::StorageImpl&>(storage).received_cuda();
+}
+
+void markImportedStorage(c10::StorageImpl& storage) {
+  storage.set_received_cuda(true);
+}
+
+THPObjectPtr createXpuShareTuple(const at::Storage& storage) {
+  THPObjectPtr tuple(PyTuple_New(4));
+  THPObjectPtr device(THPUtils_packInt32(storage.device().index()));
+  THPObjectPtr handle(Py_NewRef(Py_None));
+  THPObjectPtr size_bytes(THPUtils_packUInt64(storage.nbytes()));
+  THPObjectPtr offset_bytes(THPUtils_packInt32(0));
+
+  if (storage.data()) {
+    c10::xpu::syncStreamsOnDevice(storage.device().index());
+    auto shandle =
+        c10::xpu::XPUCachingAllocator::shareIpcHandle(storage.mutable_data());
+    handle = PyBytes_FromStringAndSize(
+        shandle.handle.c_str(), static_cast<Py_ssize_t>(shandle.handle.size()));
+    offset_bytes = PyLong_FromSsize_t(static_cast<Py_ssize_t>(shandle.offset));
+  }
+
+  if (!tuple || !device || !handle || !size_bytes || !offset_bytes) {
+    return {};
+  }
+
+  PyTuple_SET_ITEM(tuple.get(), 0, device.release());
+  PyTuple_SET_ITEM(tuple.get(), 1, handle.release());
+  PyTuple_SET_ITEM(tuple.get(), 2, size_bytes.release());
+  PyTuple_SET_ITEM(tuple.get(), 3, offset_bytes.release());
+  return tuple;
+}
+
+bool parseXpuSharedStorageArgs(PyObject* args, XpuSharedStorageArgs& parsed) {
+  TORCH_CHECK(PyTuple_GET_SIZE(args) == 4, "tuple of 4 items expected");
+  PyObject* device = PyTuple_GET_ITEM(args, 0);
+  PyObject* handle = PyTuple_GET_ITEM(args, 1);
+  PyObject* size_bytes = PyTuple_GET_ITEM(args, 2);
+  PyObject* offset_bytes = PyTuple_GET_ITEM(args, 3);
+
+  if (!(THPUtils_checkLong(device) && PyBytes_Check(handle) &&
+        THPUtils_checkLong(size_bytes) && THPUtils_checkLong(offset_bytes))) {
+    THPUtils_invalidArguments(
+        args,
+        nullptr,
+        "_new_shared in XPU mode",
+        1,
+        "(int device, bytes handle, int storage_size_bytes, int storage_offset_bytes)");
+    return false;
+  }
+
+  parsed.storage_size = THPUtils_unpackUInt64(size_bytes) / sizeof(uint8_t);
+  parsed.storage_offset_bytes =
+      static_cast<ptrdiff_t>(THPUtils_unpackLong(offset_bytes));
+  parsed.device = c10::checked_convert<c10::DeviceIndex>(
+      THPUtils_unpackLong(device), "c10::DeviceIndex");
+
+  char* handle_data = nullptr;
+  Py_ssize_t handle_size = 0;
+  if (PyBytes_AsStringAndSize(handle, &handle_data, &handle_size) == -1) {
+    TORCH_CHECK(false, "Failed to extract IPC handle bytes");
+  }
+  parsed.handle = std::string(handle_data, handle_size);
+  return true;
+}
+
+c10::intrusive_ptr<at::StorageImpl> createStorageImplFromXpuShared(
+    const XpuSharedStorageArgs& args) {
+  c10::DeviceGuard device_guard(c10::Device(c10::kXPU, args.device));
+  auto base_ptr =
+      c10::xpu::XPUCachingAllocator::getIpcDevPtr(args.handle, args.device);
+
+  void* dev_ptr = base_ptr.get();
+  dev_ptr = static_cast<char*>(dev_ptr) + args.storage_offset_bytes;
+
+  c10::DataPtr data_ptr(
+      dev_ptr,
+      new std::shared_ptr<void>(base_ptr),
+      +[](void* ctx_) {
+        auto* base_ptr_ctx = static_cast<std::shared_ptr<void>*>(ctx_);
+        delete base_ptr_ctx;
+      },
+      at::Device(at::DeviceType::XPU, args.device));
+
+  auto storage = c10::make_intrusive<at::StorageImpl>(
+      c10::StorageImpl::use_byte_size_t(),
+      args.storage_size,
+      std::move(data_ptr),
+      nullptr,
+      false);
+  markImportedStorage(*storage);
+  return storage;
+}
+
+} // namespace
+
+static PyObject* THPStorage_shareXpu(PyObject* self, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  THPStorage_assertNotNull(self);
+  const auto& storage = THPStorage_Unpack(self);
+  TORCH_CHECK(
+      storage.device_type() == at::kXPU, "_share_xpu_: only available on XPU");
+
+  c10::StorageImpl* storage_impl = storage.unsafeGetStorageImpl();
+  if (isImportedStorage(*storage_impl)) {
+    TORCH_CHECK(
+        false,
+        "Attempted to send XPU tensor received from another process; "
+        "this is not currently supported. Consider cloning before sending.");
+  }
+
+  at::DeviceGuard device_guard(storage.device());
+
+  try {
+    auto tuple = createXpuShareTuple(storage);
+    return tuple.release();
+  } catch (const c10::Error& e) {
+    TORCH_CHECK(false, "Failed to get XPU IPC handle: ", e.what());
+  }
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPStorage_newSharedXpu(PyObject* _unused, PyObject* args) {
+  HANDLE_TH_ERRORS
+  XpuSharedStorageArgs parsed;
+  if (!parseXpuSharedStorageArgs(args, parsed)) {
+    return nullptr;
+  }
+
+  try {
+    auto storage = createStorageImplFromXpuShared(parsed);
+    return THPStorage_NewWithStorage(THPStorageClass, std::move(storage));
+  } catch (const c10::Error& e) {
+    TORCH_CHECK(false, "Failed to open XPU IPC memory: ", e.what());
+  }
+  END_HANDLE_TH_ERRORS
+}
+
+#endif // USE_XPU
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static PyMethodDef THPStorage_sharingMethods[] = {
     {"_new_with_weak_ptr",
@@ -648,6 +806,13 @@ static PyMethodDef THPStorage_sharingMethods[] = {
      THPStorage_releaseIPCCounter,
      METH_VARARGS | METH_STATIC,
      nullptr},
+#ifdef USE_XPU
+    {"_share_xpu_", THPStorage_shareXpu, METH_NOARGS, nullptr},
+    {"_new_shared_xpu",
+     THPStorage_newSharedXpu,
+     METH_VARARGS | METH_STATIC,
+     nullptr},
+#endif
     {"_share_fd_cpu_", THPStorage_shareFd, METH_NOARGS, nullptr},
     {"_new_shared_fd_cpu",
      THPStorage_newSharedFd,

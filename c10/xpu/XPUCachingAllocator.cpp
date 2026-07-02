@@ -1,16 +1,65 @@
+#include <c10/core/DeviceGuard.h>
+#include <c10/util/CallOnce.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
 #include <c10/xpu/XPUCachingAllocator.h>
 
+#include <cerrno>
+#include <cstdlib>
 #include <deque>
 #include <mutex>
 #include <set>
 #include <vector>
 
+#if defined(__linux__)
+#include <sys/prctl.h>
+#endif
+#include <unistd.h>
+
+#include <sycl/ext/oneapi/experimental/ipc_memory.hpp>
+
 namespace c10::xpu::XPUCachingAllocator {
 
 using namespace c10::CachingAllocator;
 using namespace c10::CachingDeviceAllocator;
+
+namespace {
+
+struct PtracerAnyStatus {
+  bool supported;
+  bool enabled;
+  int error_code;
+};
+
+PtracerAnyStatus tryEnablePtracerAnyForIpcImport() {
+#if defined(__linux__) && defined(PR_SET_PTRACER_ANY)
+  static c10::once_flag prctl_once;
+  static bool ptracer_enabled = false;
+  static int ptracer_error = 0;
+
+  c10::call_once(prctl_once, []() {
+    if (::prctl(PR_SET_PTRACER, PR_SET_PTRACER_ANY, 0, 0, 0) == 0) {
+      ptracer_enabled = true;
+      return;
+    }
+    ptracer_error = errno;
+  });
+
+  return {
+      true,
+      ptracer_enabled,
+      ptracer_error,
+  };
+#else
+  return {
+      false,
+      false,
+      0,
+  };
+#endif
+}
+
+} // namespace
 
 // newly allocated memory with 512-byte alignment.
 constexpr size_t kDeviceAlignment = 512;
@@ -1785,6 +1834,98 @@ class DeviceCachingAllocator {
   }
 };
 
+namespace xpu_ipc {
+
+using SyclIpcHandle =
+    sycl::ext::oneapi::experimental::ipc_memory::handle_data_t;
+
+// Caches opened IPC memory pointers to avoid repeated open/close operations.
+// The cache key is the serialized IPC handle data, and the value is a
+// shared_ptr that manages the lifetime of the opened memory.
+struct IpcMemoryCache {
+  std::mutex cache_mutex;
+  ska::flat_hash_map<std::string, std::weak_ptr<void>> handle_to_ptr;
+
+  // Opens or retrieves a cached IPC handle for the given device
+  std::shared_ptr<void> getOrOpenHandle(
+      const SyclIpcHandle& handle_data,
+      c10::DeviceIndex device) {
+    std::lock_guard<std::mutex> lock(cache_mutex);
+
+    // Serialize handle for use as cache key
+    auto handle_key = std::string(
+        reinterpret_cast<const char*>(handle_data.data()), handle_data.size());
+
+    auto it = handle_to_ptr.find(handle_key);
+    if (it != handle_to_ptr.end()) {
+      auto shared_ptr = it->second.lock();
+      if (shared_ptr) {
+        return shared_ptr;
+      }
+      // Cached weak_ptr has expired, remove it
+      handle_to_ptr.erase(it);
+    }
+
+    // Open the IPC handle using SYCL API
+    c10::DeviceGuard guard(c10::Device(c10::kXPU, device));
+    auto& current_queue = xpu::getCurrentXPUStream(device).queue();
+    sycl::context ctx = current_queue.get_context();
+    sycl::device dev = current_queue.get_device();
+    void* raw_ptr = nullptr;
+
+    auto open_handle = [&]() {
+      raw_ptr = sycl::ext::oneapi::experimental::ipc_memory::open(
+          handle_data, ctx, dev);
+      TORCH_CHECK(raw_ptr != nullptr, "Failed to open XPU IPC handle");
+    };
+
+    try {
+      open_handle();
+    } catch (const std::exception& first_error) {
+      const auto ptracer_status = tryEnablePtracerAnyForIpcImport();
+      if (ptracer_status.enabled) {
+        try {
+          open_handle();
+        } catch (const std::exception& second_error) {
+          TORCH_CHECK(
+              false,
+              "XPU IPC open failed after enabling PR_SET_PTRACER_ANY: ",
+              second_error.what());
+        }
+      }
+
+      if (ptracer_status.supported && ptracer_status.error_code != 0) {
+        TORCH_CHECK(
+            false,
+            "XPU IPC open failed: ",
+            first_error.what(),
+            ". Failed to enable PR_SET_PTRACER_ANY (errno=",
+            ptracer_status.error_code,
+            ")");
+      }
+
+      TORCH_CHECK(false, "XPU IPC open failed: ", first_error.what());
+    }
+
+    // Create a shared_ptr with custom deleter that closes the handle
+    auto shared_ptr = std::shared_ptr<void>(raw_ptr, [device](void* ptr) {
+      try {
+        c10::DeviceGuard guard(c10::Device(c10::kXPU, device));
+        sycl::ext::oneapi::experimental::ipc_memory::close(ptr);
+      } catch (const std::exception& e) {
+        TORCH_WARN("XPU IPC close failed: ", e.what());
+      }
+    });
+
+    handle_to_ptr[handle_key] = shared_ptr;
+    return shared_ptr;
+  }
+};
+
+static IpcMemoryCache ipc_memory_cache;
+
+} // namespace xpu_ipc
+
 static void local_raw_delete(void* ptr);
 
 class NativeCachingAllocator : public XPUAllocator {
@@ -2054,6 +2195,59 @@ class NativeCachingAllocator : public XPUAllocator {
     assertValidDevice(device);
     return device_allocators[device]->getPoolUseCount(std::move(mempool_id));
   }
+
+  // XPU IPC Support: Export allocated memory for inter-process sharing
+  ShareableHandle shareIpcHandle(void* ptr) {
+    Block* block = get_allocated_block(ptr);
+    TORCH_CHECK(block, "Invalid device pointer for XPU IPC: ", ptr);
+    TORCH_CHECK(
+        !block->expandable_segment,
+        "XPU IPC is not supported for expandable segments");
+
+    // Find the base block (first block in the chain)
+    Block* base_block = block;
+    while (base_block->prev != nullptr) {
+      base_block = base_block->prev;
+    }
+
+    // Calculate offset within the base block
+    const auto storage_offset_bytes = static_cast<ptrdiff_t>(
+        reinterpret_cast<char*>(block->ptr) -
+        reinterpret_cast<char*>(base_block->ptr));
+
+    try {
+      c10::DeviceGuard guard(c10::Device(c10::kXPU, block->device));
+      auto& current_queue = xpu::getCurrentXPUStream(block->device).queue();
+      sycl::context ctx = current_queue.get_context();
+      // Use SYCL experimental IPC API to get the handle
+      auto handle = sycl::ext::oneapi::experimental::ipc_memory::get(
+          base_block->ptr, ctx);
+      auto handle_data = handle.data();
+
+      // Return handle and offset for multiprocessing
+      return {
+          storage_offset_bytes,
+          std::string(
+              reinterpret_cast<const char*>(handle_data.data()),
+              handle_data.size())};
+    } catch (const std::exception& e) {
+      TORCH_CHECK(false, "Failed to get XPU IPC handle: ", e.what());
+    }
+  }
+
+  // XPU IPC Support: Import shared memory from another process
+  std::shared_ptr<void> getIpcDevPtr(
+      std::string handle_str,
+      c10::DeviceIndex device) {
+    // Reconstruct the handle from the serialized string
+    xpu_ipc::SyclIpcHandle handle_data(
+        reinterpret_cast<const std::byte*>(handle_str.data()),
+        reinterpret_cast<const std::byte*>(handle_str.data()) +
+            handle_str.size());
+
+    // Use the cache to efficiently manage opened IPC handles
+    return xpu_ipc::ipc_memory_cache.getOrOpenHandle(handle_data, device);
+  }
 };
 
 static NativeCachingAllocator native_allocator;
@@ -2134,6 +2328,17 @@ void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) {
 
 int getPoolUseCount(c10::DeviceIndex device, MempoolId_t mempool_id) {
   return native_allocator.getPoolUseCount(device, mempool_id);
+}
+
+// XPU IPC Support API
+ShareableHandle shareIpcHandle(void* ptr) {
+  return native_allocator.shareIpcHandle(ptr);
+}
+
+std::shared_ptr<void> getIpcDevPtr(
+    std::string handle,
+    c10::DeviceIndex device) {
+  return native_allocator.getIpcDevPtr(std::move(handle), device);
 }
 
 } // namespace c10::xpu::XPUCachingAllocator
