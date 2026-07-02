@@ -100,6 +100,16 @@ jobs:
           role-duration-seconds: 18000
           aws-region: us-east-1
 
+      # OSDC runners have no ambient AWS creds; assume the ARC OIDC role so the
+      # S3 artifact download below can authenticate (mirrors _linux-test test-osdc).
+      - name: Authenticate with AWS (OSDC)
+        if: ${{ !contains(inputs.runner, 'b200') }}
+        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/arc
+          role-duration-seconds: 18000
+          aws-region: us-east-1
+
       - name: Download build artifacts
         # Full repo path, not ./ — local actions don't resolve on the OSDC ARC runner.
         uses: pytorch/pytorch/.github/actions/download-build-artifacts@main
