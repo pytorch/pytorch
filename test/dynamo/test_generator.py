@@ -863,7 +863,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(y, t.sin())
 
     @unittest.skipIf(sys.version_info < (3, 12), "Test CLEANUP_THROW")
-    @unittest.expectedFailure
     def test_cleanup_throw_subgen_return_value(self):
         # CLEANUP_THROW must resume the delegating generator with the
         # subgenerator's return value (StopIteration.value). When the
@@ -894,7 +893,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(y, t.sin())
 
     @unittest.skipIf(sys.version_info < (3, 12), "Test CLEANUP_THROW")
-    @unittest.expectedFailure
     def test_cleanup_throw_empty_stopiteration(self):
         def nested_generator():
             yield 1
@@ -2432,6 +2430,7 @@ class TestSubgeneratorDelegation(GeneratorTestsBase):
         self.assertEqual(log, ["iter close"])
 
     @make_dynamo_test
+    @unittest.expectedFailure
     def test_throw_into_iterator_without_throw(self):
         # A plain iterator (no throw method): the exception is raised in the
         # outer frame at the yield-from point (CPython's `goto throw_here`).

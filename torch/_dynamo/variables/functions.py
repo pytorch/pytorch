@@ -1448,6 +1448,10 @@ class LocalGeneratorObjectVariable(VariableTracker):
         # * If the generator exits without yielding, raise StopIteration
         # * If the generator function does not catch the passed-in exception,
         # or raises a different exception, then that exception propagates to the caller.
+        def throw_here():
+            self._setup_exception(tx, arg)
+            return self.gen_send_ex(tx, ConstantVariable.create(None), True)
+
         from torch._dynamo.symbolic_convert import pyerr_given_exception_match
 
         yf = self.pygen_yf()
@@ -1456,21 +1460,20 @@ class LocalGeneratorObjectVariable(VariableTracker):
         if yf:
             # CPython has an extra flag for handling async generators
             if pyerr_given_exception_match(arg, GeneratorExit):
-                with tracer.temporarily_set_frame_state(FrameState.FRAME_EXECUTING):
-                    try:
-                        # CPython uses gen_close_iter here
-                        yf.call_method(tx, "close", [], {})
-                    except ObservedException:
-                        return self.gen_send_ex(tx, ConstantVariable.create(None), True)
-
-            with tracer.temporarily_set_frame_state(FrameState.FRAME_EXECUTING):
                 try:
-                    return yf.call_method(tx, "throw", [arg], {})
+                    # CPython uses gen_close_iter here
+                    with tracer.temporarily_set_frame_state(FrameState.FRAME_EXECUTING):
+                        yf.call_method(tx, "close", [], {})
                 except ObservedException:
-                    return self.gen_send_ex(tx, ConstantVariable.create(None), True)
+                    return throw_here()
 
-        self._setup_exception(tx, arg)
-        return self.gen_send_ex(tx, ConstantVariable.create(None), True)
+            try:
+                with tracer.temporarily_set_frame_state(FrameState.FRAME_EXECUTING):
+                    return yf.call_method(tx, "throw", [arg], {})
+            except ObservedException:
+                return self.gen_send_ex(tx, ConstantVariable.create(None), True)
+
+        return throw_here()
 
     def call_method(
         self,
