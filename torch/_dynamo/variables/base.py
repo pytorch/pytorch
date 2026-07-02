@@ -367,6 +367,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         Implemented with an explicit worklist rather than recursion so that
         deeply chained structures (e.g. the ~N-node buffer built by
         itertools.tee over a long iterable) do not overflow the Python stack.
+        Children are pushed in reverse so they are popped in their original
+        order, matching the pre-order DFS the previous recursive version
+        produced (callers rely on the visitation order, e.g. for graph output
+        ordering).
         """
         if cache is None:
             cache = {}
@@ -380,20 +384,29 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             # save `cur` to keep it alive and ensure id() isn't reused
             cache[idx] = cur
 
+            children: list[Any]
             if isinstance(cur, VariableTracker):
                 cur = cur.unwrap()
                 fn(cur)
                 cur = cur.unwrap()  # calling fn() might have realized it
                 nonvars = cur._nonvar_fields
-                for key, subvalue in cur.__dict__.items():
-                    if key not in nonvars:
-                        worklist.append(subvalue)
-                if side_effects is not None and cur in side_effects.store_attr_mutations:
-                    worklist.extend(side_effects.store_attr_mutations[cur].values())
+                children = [
+                    subvalue
+                    for key, subvalue in cur.__dict__.items()
+                    if key not in nonvars
+                ]
+                if (
+                    side_effects is not None
+                    and cur in side_effects.store_attr_mutations
+                ):
+                    children.extend(side_effects.store_attr_mutations[cur].values())
             elif istype(cur, (list, tuple)):
-                worklist.extend(cur)
+                children = list(cur)
             elif istype(cur, (dict, collections.OrderedDict)):
-                worklist.extend(cur.values())
+                children = list(cur.values())
+            else:
+                continue
+            worklist.extend(reversed(children))
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}()"
