@@ -180,6 +180,24 @@ class InductorChoices:
         flex_heuristics = self.get_config_heuristics(device_type)
         return flex_heuristics.get_flex_decode_configs(head_dim, dtype)
 
+    def append_flex_attention_choices(
+        self,
+        choices: list[Any],
+        configs: list[Any],
+        input_nodes: list[Any],
+        subgraphs: list[Any],
+        layout: Any,
+        kernel_options: dict[str, Any],
+        sparse_q_block_size: int,
+        sparse_kv_block_size: int,
+    ) -> list[Any]:
+        """Append backend-specific flex-attention template choices.
+
+        Default is a no-op. Subclasses may override to inject additional
+        autotuning candidates (e.g. TLX templates in fbcode).
+        """
+        return choices
+
     def _logging_context(self) -> dict[str, Any]:
         """Extra fields for the per-shape log row. Subclasses may override."""
         return {}
