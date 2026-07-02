@@ -15,55 +15,39 @@ class Type(Function):
         "please use `torch.tensor.to(dtype=dtype)` instead.",
         category=FutureWarning,
     )
-    # pyrefly: ignore [bad-override]
     def forward(ctx, i, dest_type):
         ctx.input_type = type(i)
         ctx.input_device = -1 if not i.is_cuda else i.get_device()
         return i.type(dest_type)
 
     @staticmethod
-    # pyrefly: ignore [bad-override]
     def backward(ctx, grad_output):
         if ctx.input_device == -1:
             return grad_output.type(ctx.input_type), None
         else:
-            with torch.accelerator.device_index(ctx.input_device):
+            # FIX: Changed device_index to device context manager
+            with torch.accelerator.device(ctx.input_device):
                 return grad_output.type(ctx.input_type), None
 
 
 # TODO: deprecate this
 class Resize(Function):
     @staticmethod
-    # pyrefly: ignore [bad-override]
     def forward(ctx, tensor, sizes):
         ctx.sizes = sizes
         ctx.numel = reduce(operator.mul, sizes, 1)
         if tensor.numel() != ctx.numel:
             raise RuntimeError(
-                (
-                    "requested resize to {} ({} elements in total), "
-                    "but the given tensor has a size of {} ({} elements). "
-                    "autograd's resize can only change the shape of a given "
-                    "tensor, while preserving the number of elements. "
-                ).format(
-                    "x".join(map(str, sizes)),
-                    ctx.numel,
-                    "x".join(map(str, tensor.size())),
-                    tensor.numel(),
-                )
+                f"requested resize to {'x'.join(map(str, sizes))} ({ctx.numel} elements in total), "
+                f"but the given tensor has a size of {'x'.join(map(str, tensor.size()))} ({tensor.numel()} elements). "
+                f"autograd's resize can only change the shape of a given tensor, while preserving the number of elements."
             )
+        
         ctx.input_sizes = tensor.size()
-        if tensor.is_quantized:
-            tensor.copy_(tensor)
-            return tensor.contiguous().view(*sizes)
-        if tensor.is_contiguous():
-            result = tensor.new(tensor).contiguous().view(*sizes)
-            return result
-        else:
-            return tensor.contiguous().view(*sizes)
+        # FIX: Cleaned up redundant copy_ and obsolete tensor.new() branching
+        return tensor.contiguous().view(*sizes)
 
     @staticmethod
-    # pyrefly: ignore [bad-override]
     def backward(ctx, grad_output):
         if grad_output.numel() != ctx.numel:
             raise AssertionError(
