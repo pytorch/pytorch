@@ -2152,16 +2152,6 @@
       ]
     }
   ],
-  "GB2525": [
-    {
-      "Gb_type": "torch.scan: non-Tensor, non-None init leaf",
-      "Context": "str(v)",
-      "Explanation": "Expected init leaves to be torch.Tensor or None but got {v.as_python_constant()}",
-      "Hints": [
-        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
-      ]
-    }
-  ],
   "GB0149": [
     {
       "Gb_type": "Unsupported functorch tracing attempt",

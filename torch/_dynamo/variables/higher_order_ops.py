@@ -3290,31 +3290,13 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     *graph_break_hints.SUPPORTABLE,
                 ],
             )
-        # init leaves may be None
-        for v in init_vars:
-            if v.is_python_constant() and v.as_python_constant() is not None:
-                unimplemented(
-                    gb_type="torch.scan: non-Tensor, non-None init leaf",
-                    context=str(v),
-                    explanation=f"Expected init leaves to be torch.Tensor or None but got {v.as_python_constant()!r}",
-                    hints=[*graph_break_hints.USER_ERROR],
-                )
-        _check_all_tensorvariable(
-            [
-                v
-                for v in init_vars
-                if not (v.is_python_constant() and v.as_python_constant() is None)
-            ]
-        )
+        _check_all_tensorvariable(init_vars)
         _check_all_tensorvariable(xs_vars)
         _check_all_tensorvariable(additional_inputs_vars)
 
         with discard_graph_changes(tx):
             sub_args_init = [
-                ini.call_method(tx, "clone", args=[], kwargs={})
-                if not (ini.is_python_constant() and ini.as_python_constant() is None)
-                else ini
-                for ini in init_vars
+                ini.call_method(tx, "clone", args=[], kwargs={}) for ini in init_vars
             ]
             # The sub_args_inp is a slice of original input, e.g. if input.size is (3, 4), and scan dim=0
             # the sub_args_inp shape will be (4, ).

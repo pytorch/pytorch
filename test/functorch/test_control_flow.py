@@ -2904,7 +2904,8 @@ def forward(self, pred_1, x_1):
             combine_fn=counting_combine,
             spec_init=pytree.tree_flatten(init)[1],
             spec_xs=pytree.tree_flatten(xs)[1],
-            num_init_leaves=len(init),
+            init_tensor_mask=[True] * len(init),
+            num_tensor_init=len(init),
             num_inp_leaves=len(xs),
         )
 
@@ -2919,7 +2920,8 @@ def forward(self, pred_1, x_1):
             combine_fn=counting_combine,
             spec_init=pytree.tree_flatten(init)[1],
             spec_xs=pytree.tree_flatten(xs_one)[1],
-            num_init_leaves=len(init),
+            init_tensor_mask=[True] * len(init),
+            num_tensor_init=len(init),
             num_inp_leaves=len(xs_one),
         )
         counter[0] = 0
@@ -3394,8 +3396,8 @@ class GraphModule(torch.nn.Module):
             a: "f32[1, 10, 2]" = child + child_2;  child = None
             b: "f32[1, 10, 2]" = child_1 - child_2;  child_1 = child_2 = None
 
-            child_3: "f32[1, 10, 2]" = a - b
-            return [a, b, child_3]
+            y: "f32[1, 10, 2]" = a - b
+            return [a, b, y]
 """,
         )
 
@@ -4268,10 +4270,6 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
         ):
             scan(fct_carry_output_alias, init, inp, dim=0)
 
-    # ------------------------------------------------------------------ #
-    # None carry and None y tests                                          #
-    # ------------------------------------------------------------------ #
-
     @skipIfTorchDynamo("don't test compile on compile")
     @requires_cuda
     @parametrize("compile_mode", ["none", "eager"])
@@ -4283,7 +4281,6 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
         lambda params: params["autograd"],
     )
     def test_scan_none_carry(self, compile_mode, reverse, device, autograd):
-        """init=None: no recurrent state; scan returns (None, stacked_ys)."""
         scan_fct = compile_mode_helper(scan, compile_mode)
         xs = torch.arange(4.0, device=device, requires_grad=autograd)
 
@@ -4310,7 +4307,6 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
         lambda params: params["autograd"],
     )
     def test_scan_none_y(self, compile_mode, reverse, device, autograd):
-        """Body returns None as y: scan returns (final_carry, None)."""
         scan_fct = compile_mode_helper(scan, compile_mode)
         init = torch.tensor(0.0, device=device, requires_grad=autograd)
         xs = torch.arange(4.0, device=device, requires_grad=autograd)
@@ -4332,7 +4328,6 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
     @parametrize("compile_mode", ["none", "eager"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     def test_scan_none_carry_and_none_y(self, compile_mode, device):
-        """Both init=None and body returning None as y: no tensor outputs to diff."""
         scan_fct = compile_mode_helper(scan, compile_mode)
         xs = torch.arange(4.0, device=device)
 
@@ -4356,7 +4351,6 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
         lambda params: params["autograd"],
     )
     def test_scan_mixed_pytree_carry_none_slot(self, compile_mode, device, autograd):
-        """Carry pytree with a None slot: init=(tensor, None)."""
         scan_fct = compile_mode_helper(scan, compile_mode)
         xs = torch.arange(4.0, device=device, requires_grad=autograd)
         init = (torch.tensor(0.0, device=device, requires_grad=autograd), None)
@@ -4387,7 +4381,6 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
         lambda params: params["autograd"],
     )
     def test_scan_mixed_y_none_slot(self, compile_mode, device, autograd):
-        """Output y pytree with a None slot: body returns (carry, (tensor, None))."""
         scan_fct = compile_mode_helper(scan, compile_mode)
         init = torch.tensor(0.0, device=device, requires_grad=autograd)
         xs = torch.arange(4.0, device=device, requires_grad=autograd)
@@ -4408,7 +4401,6 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
             self.check_autograd((carry, ys[0]), (carry_f, ys_f[0]), (init, xs))
 
     def test_scan_none_carry_invalid_init_type_raises(self):
-        """Non-None, non-Tensor init leaf should still raise."""
         xs = torch.arange(4.0)
 
         def body(c, x):
@@ -4420,7 +4412,6 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
             scan(body, 3.14, xs)
 
     def test_scan_none_carry_vmap(self):
-        """init=None + vmap: scan batch rule handles None carry correctly."""
         xs = torch.arange(12.0).reshape(3, 4)
 
         @torch.vmap
