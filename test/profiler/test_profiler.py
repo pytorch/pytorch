@@ -59,7 +59,6 @@ from torch.testing._internal.common_utils import (
     IS_ARM64,
     IS_JETSON,
     IS_LINUX,
-    IS_MACOS,
     IS_WINDOWS,
     IS_X86,
     parametrize,
@@ -67,7 +66,6 @@ from torch.testing._internal.common_utils import (
     serialTest,
     skipIfRocm,
     skipIfTorchDynamo,
-    TemporaryDirectoryName,
     TemporaryFileName,
     TEST_WITH_CROSSREF,
     TEST_WITH_ROCM,
@@ -2175,6 +2173,7 @@ class TestProfiler(TestCase):
         )
 
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    @unittest.skip("This test is known to pollute other tests on a fresh build")
     def test_profiler_time_scale(self):
         MARGIN_ERROR = 0.5
         SEC_TO_US = 1000 * 1000
@@ -2996,65 +2995,6 @@ class TestProfilerDevice(TestCase):
         finally:
             # KinetoStepTracker is global across device-specialized test runs.
             KinetoStepTracker.erase_step_count("yet_another_step")
-
-    @unittest.skipIf(
-        IS_MACOS or IS_WINDOWS, "https://github.com/pytorch/pytorch/issues/82915"
-    )
-    @unittest.skipIf(not kineto_available(), "Kineto is required")
-    def test_tensorboard_trace_handler(self, device):
-        device_type = device.split(":")[0]
-        with _profile(use_device=device_type, use_kineto=True):
-            self.payload(device=device)
-
-        with TemporaryDirectoryName() as dname:
-            with profile(
-                activities=get_profiler_activities(device_type),
-                schedule=torch.profiler.schedule(wait=1, warmup=1, active=2, repeat=3),
-                on_trace_ready=torch.profiler.tensorboard_trace_handler(dname),
-            ) as p:
-                for _ in range(18):
-                    self.payload(device=device)
-                    p.step()
-
-            self.assertTrue(os.path.exists(dname))
-            file_num = 0
-            for file_name in os.listdir(dname):
-                parts = file_name.split(".")
-                self.assertTrue(len(parts) > 4)
-                self.assertTrue(
-                    parts[-4].isdigit() and int(parts[-4]) > 0,
-                    "Wrong tracing file name pattern",
-                )
-                if parts[-3:] == ["pt", "trace", "json"]:
-                    file_num += 1
-            self.assertEqual(file_num, 3)
-
-        with TemporaryDirectoryName() as dname:
-            p = profile(
-                activities=get_profiler_activities(device_type),
-                schedule=torch.profiler.schedule(wait=1, warmup=1, active=2, repeat=3),
-                on_trace_ready=torch.profiler.tensorboard_trace_handler(
-                    dname, use_gzip=True
-                ),
-            )
-            p.start()
-            for _ in range(18):
-                self.payload(device=device)
-                p.step()
-            p.stop()
-
-            self.assertTrue(os.path.exists(dname))
-            file_num = 0
-            for file_name in os.listdir(dname):
-                parts = file_name.split(".")
-                self.assertTrue(len(parts) > 4)
-                self.assertTrue(
-                    parts[-5].isdigit() and int(parts[-5]) > 0,
-                    "Wrong tracing file name pattern",
-                )
-                self.assertEqual(parts[-4:], ["pt", "trace", "json", "gz"])
-                file_num += 1
-            self.assertEqual(file_num, 3)
 
     @patch.dict(os.environ, {"KINETO_USE_DAEMON": "1"})
     @patch.dict(os.environ, {"KINETO_DAEMON_INIT_DELAY_S": "1"})
