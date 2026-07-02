@@ -83,7 +83,9 @@ static PyObject* MPSModule_emptyCache(PyObject* _unused, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* MPSModule_clearGraphCache(PyObject* _unused, PyObject* noargs) {
+static PyObject* MPSModule_clearGraphCache(
+    PyObject* _unused,
+    PyObject* noargs) {
   HANDLE_TH_ERRORS
   at::detail::getMPSHooks().clearGraphCache();
   Py_RETURN_NONE;
