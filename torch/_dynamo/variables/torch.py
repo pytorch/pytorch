@@ -1036,7 +1036,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     raise AssertionError(
                         "Expected first argument to accumulate_grad_ to be a tensor"
                     )
-                variable_grad = variable.var_getattr(tx, "grad")
+                variable_grad = variable.getattro_impl(tx, "grad")
                 updated_grad = tx.inline_user_function_return(
                     VariableTracker.build(tx, polyfills.accumulate_grad),
                     [variable, variable_grad, new_grad],
@@ -2356,8 +2356,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 source = CallFunctionNoArgsSource(self.source)
                 install_guard(source.make_guard(GuardBuilder.ID_MATCH))
             # assumes `module` is in the form `torch.xyz`
+            torch_source = ImportSource("torch")
+            install_guard(torch_source.make_guard(GuardBuilder.ID_MATCH))
             new_source = AttrSource(
-                ImportSource("torch"),
+                torch_source,
                 module.__name__.rsplit(".", maxsplit=1)[-1],
             )
             return VariableTracker.build(tx, module, new_source)
@@ -2721,8 +2723,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     tx,
                     f"{fn.__name__} takes exactly one argument ({len(args)} given)",
                 )
+            torch_source = ImportSource("torch")
+            install_guard(torch_source.make_guard(GuardBuilder.ID_MATCH))
             current_device_source = CallFunctionNoArgsSource(
-                AttrSource(AttrSource(ImportSource("torch"), "cuda"), "current_device")
+                AttrSource(AttrSource(torch_source, "cuda"), "current_device")
             )
             install_guard(current_device_source.make_guard(GuardBuilder.EQUALS_MATCH))
             arg = args[0].as_python_constant()
@@ -3141,6 +3145,22 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             return None
 
         return handlers
+
+    def getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> "VariableTracker":
+        source = self.source and AttrSource(self.source, name)
+        try:
+            member = getattr(self.value, name)
+        except AttributeError:
+            raise_observed_exception(AttributeError, tx)
+            raise
+
+        if isinstance(
+            member, (torch._ops.OpOverloadPacket, torch._ops.OpOverload)
+        ) and torch._dynamo.trace_rules.is_aten_op_or_tensor_method(member):
+            return TorchInGraphFunctionVariable(member, source=source)
+        return variables.GetAttrVariable(self, name, source=source)
 
     def call_function(
         self,
@@ -3938,9 +3958,9 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             )
 
         try:
-            shape = tuple(data.var_getattr(tx, "shape").as_python_constant())
-            dtype = data.var_getattr(tx, "dtype").as_python_constant()
-            device = data.var_getattr(tx, "device").as_python_constant()
+            shape = tuple(data.getattro_impl(tx, "shape").as_python_constant())
+            dtype = data.getattro_impl(tx, "dtype").as_python_constant()
+            device = data.getattro_impl(tx, "device").as_python_constant()
         except NotImplementedError as e:
             unimplemented(
                 gb_type="`torch.nn.Parameter` with non-constant Tensor attributes",

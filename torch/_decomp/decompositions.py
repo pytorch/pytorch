@@ -5023,7 +5023,7 @@ def _grid_sampler_2d(
 
     if _expand_grid:
         # Let's expand grid to [N, C, oH, oW, 2]
-        # This allows to generate a single triton cuda kernel instead of two kernels.
+        # This allows generating a single triton cuda kernel instead of two kernels.
         # Two kernels are due source indices, weights have shape (N, 1, oH, oW), xnumel=N*oH*oW
         # and output has shape (N, C, oH, oW), xnumel=N*C*oH*oW
         # Expanding grid to (N, C, oH, oW, two) unifies xnumel to N*C*oH*oW
