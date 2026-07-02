@@ -281,10 +281,8 @@ class TestGpuWrapper(InductorTestCase):
                 'aoti_torch_call_dispatcher("mylib_symint::add_symint"', code
             )
 
+    @skipIfXpu(msg="tests CUDA/ROCm CUDADeviceOpOverrides codegen")
     def test_cpp_scratch_scales_with_grid_size_for_tma(self):
-        if GPU_TYPE != "cuda" or torch.version.hip:
-            self.skipTest("CUDA-only codegen test")
-
         scratch_def, scratch_var = CUDADeviceOpOverrides().cpp_scratch(
             0,
             TritonScratchWorkspace(
@@ -297,10 +295,8 @@ class TestGpuWrapper(InductorTestCase):
             "static_cast<int64_t>(256) * grid_0 * grid_1 * grid_2", scratch_def[0]
         )
 
+    @skipIfXpu(msg="tests CUDA/ROCm CUDADeviceOpOverrides codegen")
     def test_triton_wrapper_scales_scratch_with_num_ctas(self):
-        if GPU_TYPE != "cuda" or torch.version.hip:
-            self.skipTest("CUDA-only codegen test")
-
         class FakeWrapper:
             device = "cuda"
 
