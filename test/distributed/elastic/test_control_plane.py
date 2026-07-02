@@ -273,14 +273,14 @@ class WorkerServerTest(TestCase):
             self.assertEqual(
                 counter_data["total_calls"],
                 3,
-                f"Expected 3 calls, got {counter_data['total_calls']}",
+                lambda msg: f"{msg}\nExpected 3 calls, got {counter_data['total_calls']}",
             )
 
             # Verify active_count is 0 (no active waiters)
             self.assertEqual(
                 counter_data["active_count"],
                 0,
-                f"Expected 0 active, got {counter_data['active_count']}",
+                lambda msg: f"{msg}\nExpected 0 active, got {counter_data['active_count']}",
             )
 
             # total_time_us and max_time_us may be 0 or very small for fast operations

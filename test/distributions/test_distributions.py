@@ -4467,7 +4467,7 @@ class TestDistributions(DistributionsTestCase):
             self.assertEqual(
                 actual_size,
                 expected_size,
-                msg=f"{dist} actual size: {actual_size} != expected size: {expected_size}",
+                msg=lambda msg: f"{msg}\n{dist} actual size: {actual_size} != expected size: {expected_size}",
             )
 
             sample_shape = torch.Size((2,))
@@ -4476,7 +4476,7 @@ class TestDistributions(DistributionsTestCase):
             self.assertEqual(
                 actual_size,
                 expected_size,
-                msg=f"{dist} actual size: {actual_size} != expected size: {expected_size}",
+                msg=lambda msg: f"{msg}\n{dist} actual size: {actual_size} != expected size: {expected_size}",
             )
 
     def test_invalid_parameter_broadcasting(self):
@@ -6299,7 +6299,7 @@ class TestNumericalStability(DistributionsTestCase):
             expected_value,
             atol=atol,
             rtol=0,
-            msg=f"Incorrect value for tensor type: {type(x)}. Expected = {expected_value}, Actual = {log_pdf}",
+            msg=lambda msg: f"{msg}\nIncorrect value for tensor type: {type(x)}. Expected = {expected_value}, Actual = {log_pdf}",
         )
         if expected_gradient is not None:
             self.assertEqual(
@@ -6307,7 +6307,7 @@ class TestNumericalStability(DistributionsTestCase):
                 expected_gradient,
                 atol=atol,
                 rtol=0,
-                msg=f"Incorrect gradient for tensor type: {type(x)}. Expected = {expected_gradient}, Actual = {p.grad}",
+                msg=lambda msg: f"{msg}\nIncorrect gradient for tensor type: {type(x)}. Expected = {expected_gradient}, Actual = {p.grad}",
             )
 
     def test_bernoulli_gradient(self):
@@ -7194,7 +7194,7 @@ class TestJit(DistributionsTestCase):
             self.assertEqual(
                 expected,
                 actual,
-                msg=f"{Dist.__name__}\nExpected:\n{expected}\nActual:\n{actual}",
+                msg=lambda msg: f"{msg}\n{Dist.__name__}\nExpected:\n{expected}\nActual:\n{actual}",
             )
 
     def test_enumerate_support(self):
@@ -7221,7 +7221,7 @@ class TestJit(DistributionsTestCase):
             self.assertEqual(
                 expected,
                 actual,
-                msg=f"{Dist.__name__}\nExpected:\n{expected}\nActual:\n{actual}",
+                msg=lambda msg: f"{msg}\n{Dist.__name__}\nExpected:\n{expected}\nActual:\n{actual}",
             )
 
     def test_mean(self):
@@ -7246,7 +7246,7 @@ class TestJit(DistributionsTestCase):
             self.assertEqual(
                 expected,
                 actual,
-                msg=f"{Dist.__name__}\nExpected:\n{expected}\nActual:\n{actual}",
+                msg=lambda msg: f"{msg}\n{Dist.__name__}\nExpected:\n{expected}\nActual:\n{actual}",
             )
 
     def test_variance(self):
@@ -7273,7 +7273,7 @@ class TestJit(DistributionsTestCase):
             self.assertEqual(
                 expected,
                 actual,
-                msg=f"{Dist.__name__}\nExpected:\n{expected}\nActual:\n{actual}",
+                msg=lambda msg: f"{msg}\n{Dist.__name__}\nExpected:\n{expected}\nActual:\n{actual}",
             )
 
     @set_default_dtype(torch.double)
@@ -7301,7 +7301,7 @@ class TestJit(DistributionsTestCase):
             self.assertEqual(
                 expected,
                 actual,
-                msg=f"{Dist.__name__}\nExpected:\n{expected}\nActual:\n{actual}",
+                msg=lambda msg: f"{msg}\n{Dist.__name__}\nExpected:\n{expected}\nActual:\n{actual}",
             )
 
     @set_default_dtype(torch.double)
@@ -7326,7 +7326,7 @@ class TestJit(DistributionsTestCase):
             self.assertEqual(
                 expected,
                 actual,
-                msg=f"{Dist.__name__}\nExpected:\n{expected}\nActual:\n{actual}",
+                msg=lambda msg: f"{msg}\n{Dist.__name__}\nExpected:\n{expected}\nActual:\n{actual}",
             )
 
 

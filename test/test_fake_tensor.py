@@ -2104,7 +2104,7 @@ for t in threads:
         self.assertEqual(
             result.returncode,
             0,
-            msg=f"subprocess failed:\n{result.stderr.decode()}",
+            msg=lambda msg: f"{msg}\nsubprocess failed:\n{result.stderr.decode()}",
         )
 
     @unittest.skipIf(not torch.cuda._is_compiled(), "requires CUDA-compiled PyTorch")
@@ -2151,7 +2151,7 @@ assert not torch.cuda.is_initialized()
         self.assertEqual(
             result.returncode,
             0,
-            msg=f"subprocess failed:\n{result.stderr.decode()}",
+            msg=lambda msg: f"{msg}\nsubprocess failed:\n{result.stderr.decode()}",
         )
 
     @unittest.skipIf(
