@@ -297,8 +297,7 @@ struct MPSKernelCache {
       auto it = cache_.find(hash);
       if (it != cache_.end()) {
         auto& entry = it->second;
-        TORCH_CHECK(mpsCacheSecondHash(key) == entry.verifyHash_,
-                    "Hash collision in MPS kernel cache for key: ", key);
+        TORCH_CHECK(mpsCacheSecondHash(key) == entry.verifyHash_, "Hash collision in MPS kernel cache for key: ", key);
         cachedKernel = entry.cachedKernel_;
       } else {
         cachedKernel = createCacheBlock();
@@ -400,8 +399,7 @@ struct MPSGraphCache {
       auto it = cache_.find(hash);
       if (it != cache_.end()) {
         auto& entry = it->second;
-        TORCH_CHECK(mpsCacheSecondHash(key) == entry.verifyHash_,
-                    "Hash collision in MPS graph cache for key: ", key);
+        TORCH_CHECK(mpsCacheSecondHash(key) == entry.verifyHash_, "Hash collision in MPS graph cache for key: ", key);
         cachedGraph = entry.cachedGraph_;
       } else {
         cachedGraph = createCacheBlock();
