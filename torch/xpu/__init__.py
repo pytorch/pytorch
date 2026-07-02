@@ -1017,6 +1017,7 @@ def _get_zes_power_handle(device: Device = None) -> c_void_p:
         return info.power_handle
 
     device_handle = info.device_handle
+    subdevice_id = info.subdevice_id
 
     # Enumerate all power domains under this device handle.
     power_count = c_uint32(0)
@@ -1034,10 +1035,40 @@ def _get_zes_power_handle(device: Device = None) -> c_void_p:
         "Can't get Level Zero Sysman power domain handles.",
     )
 
-    # TODO: pyzes lacks zesPowerGetProperties, so we cannot filter by
-    # subdevice or domain type. We assume index 0 (ZES_POWER_DOMAIN_CARD)
-    # is the GPU card power domain.
-    power_handle = power_handles[0]
+    if _get_pyzes_version() < (0, 1, 2):
+        power_handle = power_handles[0]
+        info.power_handle = power_handle
+        return power_handle
+
+    power_handle = None
+    for pwr_handle in power_handles:
+        pwr_props = pyzes.zes_power_properties_t()
+        pwr_props.stype = pyzes.ZES_STRUCTURE_TYPE_POWER_PROPERTIES
+        ext_pwr_props = pyzes.zes_power_ext_properties_t()
+        ext_pwr_props.stype = pyzes.ZES_STRUCTURE_TYPE_POWER_EXT_PROPERTIES
+        pwr_props.pNext = cast(pointer(ext_pwr_props), c_void_p)
+        _zes_check(
+            pyzes.zesPowerGetProperties(pwr_handle, byref(pwr_props)),
+            "Can't get Level Zero Sysman power properties.",
+        )
+        if ext_pwr_props.domain not in (
+            pyzes.ZES_POWER_DOMAIN_CARD,
+            pyzes.ZES_POWER_DOMAIN_PACKAGE,
+        ):
+            continue
+        if subdevice_id is not None:
+            if pwr_props.onSubdevice and pwr_props.subdeviceId == subdevice_id:
+                power_handle = pwr_handle
+                if ext_pwr_props.domain == pyzes.ZES_POWER_DOMAIN_CARD:
+                    break
+        else:
+            if not pwr_props.onSubdevice:
+                power_handle = pwr_handle
+                if ext_pwr_props.domain == pyzes.ZES_POWER_DOMAIN_CARD:
+                    break
+
+    if power_handle is None:
+        raise RuntimeError("No Level Zero Sysman GPU power handle found.")
     info.power_handle = power_handle
     return power_handle
 
@@ -1057,6 +1088,9 @@ def power_draw(device: Device = None) -> float:
         sampling interval required to compute an accurate power reading.
 
     .. note:: This API may require elevated privileges (e.g. ``sudo``) to access GPU power information.
+
+    .. note:: On Intel Xe2 and newer GPUs, card-level power is reported directly. On older GPUs,
+        package-level power is used as a fallback and may not reflect the full card power draw.
     """
     power_handle = _get_zes_power_handle(device)
 
