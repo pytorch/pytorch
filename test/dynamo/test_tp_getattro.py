@@ -56,6 +56,106 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)()
         self.assertFalse(result)
 
+    def test_hasattr_constant_true(self):
+        def fn():
+            return hasattr("hello", "upper")
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertTrue(result)
+
+    def test_hasattr_false_then_access(self):
+        """hasattr returning False must not leak exception state."""
+
+        def fn(x):
+            _ = hasattr(42, "nonexistent")
+            return x.shape[0]
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(5))
+        self.assertEqual(result, 5)
+
+    def test_hasattr_sequence(self):
+        """Multiple hasattr calls must each restore exception state."""
+
+        def fn():
+            a = hasattr(42, "__add__")
+            b = hasattr(42, "nonexistent")
+            c = hasattr("hi", "upper")
+            d = hasattr("hi", "nonexistent")
+            return (a, b, c, d)
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, (True, False, True, False))
+
+    def test_hasattr_false_in_except(self):
+        """hasattr inside an except block must preserve the active exception."""
+        import sys
+
+        def fn(x):
+            try:
+                raise ValueError("test")
+            except ValueError:
+                has = hasattr(42, "nonexistent")
+                exc_type = sys.exc_info()[0]
+                if not has and exc_type is ValueError:
+                    return x + 1
+            return x
+
+        x = torch.randn(3)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(result, x + 1)
+
+    def test_hasattr_user_function_true(self):
+        def bar():
+            pass
+
+        def fn():
+            return hasattr(bar, "__name__")
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertTrue(result)
+
+    def test_hasattr_user_function_false(self):
+        def bar():
+            pass
+
+        def fn():
+            return hasattr(bar, "nonexistent")
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertFalse(result)
+
+    def test_hasattr_skip_function_true(self):
+        def fn():
+            return hasattr(print, "__name__")
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertTrue(result)
+
+    def test_hasattr_skip_function_false(self):
+        def fn():
+            return hasattr(print, "nonexistent")
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertFalse(result)
+
+    def test_hasattr_python_module_true(self):
+        import math
+
+        def fn():
+            return hasattr(math, "sqrt")
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertTrue(result)
+
+    def test_hasattr_python_module_false(self):
+        import math
+
+        def fn():
+            return hasattr(math, "nonexistent")
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertFalse(result)
+
     # --- Tensor attributes ---
 
     def test_tensor_shape(self):
