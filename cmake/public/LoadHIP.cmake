@@ -123,6 +123,41 @@ message(STATUS "HIP language enabled with compiler: ${CMAKE_HIP_COMPILER}")
 message(STATUS "HIP architectures: ${CMAKE_HIP_ARCHITECTURES}")
 
 if(WIN32)
+  # CMake 4.3.0+ regression: the Windows-MSVC platform module seeds
+  # CMAKE_HIP_FLAGS{,_<CONFIG>} with MSVC-style defaults (/DWIN32 /D_WINDOWS,
+  # /O2 /Ob2 /DNDEBUG) when C/CXX use clang-cl. clang++ (GNU frontend) for HIP
+  # rejects them. Strip them out. Not needed on CMake 4.2.x, but safe there.
+  foreach(_cfg "" _DEBUG _RELEASE _MINSIZEREL _RELWITHDEBINFO)
+    if(DEFINED CMAKE_HIP_FLAGS${_cfg})
+      string(REGEX REPLACE "(^| )/[a-zA-Z][a-zA-Z0-9_:=.]*" "" CMAKE_HIP_FLAGS${_cfg} "${CMAKE_HIP_FLAGS${_cfg}}")
+      string(STRIP "${CMAKE_HIP_FLAGS${_cfg}}" CMAKE_HIP_FLAGS${_cfg})
+    endif()
+  endforeach()
+
+  # Reinstate GNU-equivalent optimization flags. The generated HIP compile
+  # rule's <FLAGS> includes CMAKE_HIP_FLAGS but, on this code path, does
+  # not include CMAKE_HIP_FLAGS_<CONFIG> (verified via build.ninja), so
+  # appending to the per-config variables is dead code. Inject the per-config
+  # flags into CMAKE_HIP_FLAGS instead, gated on CMAKE_BUILD_TYPE for
+  # single-config generators (Ninja, Makefiles). Without this, clang++
+  # falls back to -O0 and HIP kernels are unoptimized (~99% conv2d FP16
+  # perf regression on gfx1150; TheRock#5157, #183853).
+  if(NOT CMAKE_CONFIGURATION_TYPES)
+    string(TOUPPER "${CMAKE_BUILD_TYPE}" _hip_cfg)
+    if(_hip_cfg STREQUAL "DEBUG")
+      string(APPEND CMAKE_HIP_FLAGS " -O0 -g")
+    elseif(_hip_cfg STREQUAL "RELWITHDEBINFO")
+      string(APPEND CMAKE_HIP_FLAGS " -O2 -DNDEBUG -g")
+    elseif(_hip_cfg STREQUAL "MINSIZEREL")
+      string(APPEND CMAKE_HIP_FLAGS " -Os -DNDEBUG")
+    else()  # Release or unset
+      string(APPEND CMAKE_HIP_FLAGS " -O3 -DNDEBUG")
+    endif()
+    unset(_hip_cfg)
+  endif()
+endif()
+
+if(WIN32)
   # After enable_language(HIP), the platform module Windows-Clang-HIP.cmake
   # sets MSVC-style compile/link rules (because C/CXX use MSVC frontend).
   # Override them all with GNU-style rules for clang++.

@@ -22,11 +22,11 @@ _P = ParamSpec("_P")
 _R = TypeVar("_R")
 
 
-def _dynamo_disable(func):
+def _dynamo_disable(func: Callable[_P, _R]) -> Callable[_P, _R]:
     """Disable dynamo tracing for FSDP hooks."""
 
     @functools.wraps(func)
-    def wrapper(*args, **kwargs):
+    def wrapper(*args: _P.args, **kwargs: _P.kwargs):
         return torch._dynamo.disable(
             func, recursive=True, reason="skipping FSDP hooks"
         )(*args, **kwargs)
@@ -74,6 +74,10 @@ class FSDPMeshInfo(DataParallelMeshInfo):
         self.shard_mesh_size: int = self.mesh.size(self.shard_mesh_dim)
         self.shard_process_group = self.mesh.get_group(self.shard_mesh_dim)
         self.shard_mesh_rank: int = self.shard_process_group.rank()
+        # Reduce-scatter shares the shard PG (one NCCL communicator) by default;
+        # FSDPModule.set_separate_reduce_scatter_group assigns a dedicated PG
+        # here so reduce-scatter can overlap all-gather in backward.
+        self.reduce_scatter_process_group: dist.ProcessGroup | None = None
 
 
 @dataclass

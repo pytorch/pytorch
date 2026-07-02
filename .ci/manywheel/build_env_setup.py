@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
 """GPU/toolchain environment setup (runs once before any wheel is built).
 
-When running on a standard manylinux container (no pre-installed GPU
-toolkits), installs CUDA, cuDNN, NCCL, MAGMA, cuSPARSELt, etc. via the
-.ci/docker/common/install_*.sh scripts.
+The manywheel builder image (.ci/docker/manywheel/Dockerfile_2_28) is
+expected to ship the heavy build dependencies (CUDA, cuDNN, NCCL, MAGMA,
+cuSPARSELt, MKL, plus the standard OS package set). This script:
+
+  * Installs the two packages historically added at wheel-build time
+    (zip, openssl) to match the legacy build_common.sh contract.
+  * Falls back to running install_cuda.sh / install_magma.sh /
+    install_mkl.sh if CUDA, MAGMA, or MKL is missing, so the script
+    remains usable on a lean manylinux base.
+  * Wires the symlinks/env to target the requested CUDA version.
 
 Build-flag exports (USE_CUDA, TH_BINARY_BUILD, ...) are written to the file
 given by --env-out; the caller (build.sh) sources it so the values reach
@@ -124,6 +131,32 @@ CPU_BUILD_ENV: dict[str, str] = {
     "USE_CUDA": "0",
 }
 
+# XPU builds source the oneAPI environment and enable SYCL/MKL/XCCL.
+XPU_BUILD_ENV: dict[str, str] = {
+    "TH_BINARY_BUILD": "1",
+    "USE_CUDA": "0",
+    "USE_STATIC_MKL": "1",
+    "USE_ONEMKL": "1",
+    "USE_XCCL": "1",
+    "USE_MPI": "0",
+    "INSTALL_TEST": "0",
+}
+
+# ROCm builds use static linking and skip debug info; mirror the original
+# build_rocm.sh. ROCM_HOME is also read by repair_wheel.py to discover libs.
+ROCM_BUILD_ENV_STATIC: dict[str, str] = {
+    "ROCM_HOME": "/opt/rocm",
+    "MAGMA_HOME": "/opt/rocm/magma",
+    "BUILD_DEBUG_INFO": "0",
+    "TH_BINARY_BUILD": "1",
+    "USE_STATIC_CUDNN": "1",
+    "USE_STATIC_NCCL": "1",
+    "ATEN_STATIC_CUDA": "1",
+    "USE_CUDA_STATIC_LINK": "1",
+    "INSTALL_TEST": "0",
+    "FORCE_RPATH": "--force-rpath",
+}
+
 PLATFORM_TAGS: dict[str, str] = {
     "x86_64": "manylinux_2_28_x86_64",
     "aarch64": "manylinux_2_28_aarch64",
@@ -147,53 +180,19 @@ def os_name() -> str:
 
 
 def install_os_packages() -> None:
+    # Everything else the build needs is baked into the manywheel image
+    # (.ci/docker/manywheel/Dockerfile_2_28). Only zip + openssl are not,
+    # matching the legacy build_common.sh contract.
     name = os_name()
     if any(distro in name for distro in ("AlmaLinux", "CentOS", "Red Hat")):
         subprocess.run(
-            [
-                "yum",
-                "install",
-                "-q",
-                "-y",
-                "zip",
-                "openssl",
-                "openssl-devel",
-                "sudo",
-                "wget",
-                "curl",
-                "perl",
-                "util-linux",
-                "xz",
-                "bzip2",
-                "git",
-                "patch",
-                "which",
-                "zlib-devel",
-            ],
+            ["yum", "install", "-q", "-y", "zip", "openssl"],
             check=True,
         )
     elif "Ubuntu" in name:
-        # Disable nvidia apt repos that may 404 on plain Ubuntu images
-        for entry in Path("/etc/apt").rglob("*.list"):
-            text = entry.read_text()
-            new = "\n".join(
-                f"# {line}" if "nvidia" in line else line for line in text.splitlines()
-            )
-            if new != text:
-                entry.write_text(new + ("\n" if text.endswith("\n") else ""))
         subprocess.run(["apt-get", "update", "-qq"], check=True)
         subprocess.run(
-            [
-                "apt-get",
-                "-y",
-                "-qq",
-                "install",
-                "zip",
-                "openssl",
-                "wget",
-                "curl",
-                "git",
-            ],
+            ["apt-get", "-y", "-qq", "install", "zip", "openssl"],
             check=True,
         )
 
@@ -330,6 +329,49 @@ def cleanup_cuda_for_cpu_build() -> None:
             shutil.rmtree(entry, ignore_errors=True)
 
 
+def source_oneapi_env() -> dict[str, str]:
+    """Source Intel oneAPI environment scripts and return the env diff.
+
+    The vars.sh scripts set PATH, LD_LIBRARY_PATH, CMAKE_PREFIX_PATH, and
+    various Intel-specific variables. We spawn a shell, source them, then
+    capture the resulting env. Returns a dict of new/changed variables so
+    the caller can propagate them to the ENV_FILE for build.sh to source.
+    """
+    scripts = [
+        "/opt/intel/oneapi/compiler/latest/env/vars.sh",
+        "/opt/intel/oneapi/pti/latest/env/vars.sh",
+        "/opt/intel/oneapi/umf/latest/env/vars.sh",
+        "/opt/intel/oneapi/ccl/latest/env/vars.sh",
+        "/opt/intel/oneapi/mpi/latest/env/vars.sh",
+    ]
+    existing = [s for s in scripts if Path(s).is_file()]
+    if not existing:
+        print("WARNING: No oneAPI env scripts found, skipping")
+        return {}
+    old_env = dict(os.environ)
+    source_cmds = " && ".join(f"source {s} >/dev/null 2>&1" for s in existing)
+    result = subprocess.run(
+        ["bash", "-c", f"{source_cmds} && env -0"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    new_env: dict[str, str] = {}
+    for entry in result.stdout.split("\0"):
+        if "=" in entry:
+            key, _, value = entry.partition("=")
+            new_env[key] = value
+    # Compute the diff: new or changed variables.
+    diff = {
+        key: value
+        for key, value in new_env.items()
+        if key not in old_env or old_env[key] != value
+    }
+    os.environ.update(diff)
+    print(f"Sourced {len(existing)} oneAPI env scripts ({len(diff)} env vars changed)")
+    return diff
+
+
 def write_env_exports(env: dict[str, str], path: Path | None) -> None:
     """Write `export KEY=VALUE` lines for the parent shell to source."""
     if path is None:
@@ -389,7 +431,20 @@ def main() -> None:
         cleanup_cuda_for_cpu_build()
         env_out.update(CPU_BUILD_ENV)
         print("CPU environment configured")
-    # ROCm and XPU use the legacy Docker-in-Docker workflow and skip this script.
+    elif gpu_arch_type == "xpu":
+        oneapi_env = source_oneapi_env()
+        cleanup_cuda_for_cpu_build()
+        env_out.update(oneapi_env)
+        env_out.update(XPU_BUILD_ENV)
+        print("XPU environment configured")
+    elif gpu_arch_type == "rocm":
+        env_out.update(ROCM_BUILD_ENV_STATIC)
+        # DESIRED_CUDA is "rocmX.Y.Z" -- normalize so build_amd.py and
+        # downstream tools see the rocm-prefixed form (matches build_rocm.sh).
+        desired = os.environ.get("DESIRED_CUDA", "")
+        if desired and not desired.startswith("rocm"):
+            env_out["DESIRED_CUDA"] = f"rocm{desired}"
+        print(f"ROCm environment configured ({desired})")
 
     write_env_exports(env_out, args.env_out)
     print("before-all setup complete")

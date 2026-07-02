@@ -568,6 +568,8 @@ class EventMetadata(NamedTuple):
     graph_node_id: int | None
     stream: int | None
     context: int | None
+    channel: int | None
+    channel_type: int | None
     # Memory fields
     bytes: int | None
     bandwidth_gb_s: float | None
@@ -615,6 +617,8 @@ _EVENT_METADATA_KEYS: dict[str, tuple[str, Callable[[str], Any]]] = {
     "graph node id": ("graph_node_id", int),
     "stream": ("stream", int),
     "context": ("context", int),
+    "channel": ("channel", int),
+    "channel_type": ("channel_type", int),
     "bytes": ("bytes", int),
     "memory bandwidth (GB/s)": ("bandwidth_gb_s", float),
     "Collective name": ("collective_name", _to_str),
@@ -1572,9 +1576,14 @@ def _canonicalize_profiler_events(events):
         node_name = event["args"].get("node_name", "")
         stack_trace = event["args"].get("stack_trace", "")
 
-        # Get the last non-empty line of the stack trace
+        # Get the last non-empty line of the stack trace that is actual source,
+        # not a caret-marker line. Python 3.11+ appends "^^^^"/"~~~~" indicator
+        # lines below the source when a FrameSummary has colno/end_colno set
+        # (e.g. dynamo-generated stack traces); those lines must be skipped so
+        # we still surface the source code line in canonicalized output.
         lines = [s.strip() for s in stack_trace.split("\n") if s.strip()]
-        stack_trace = lines[-1] if lines else ""
+        source_lines = [s for s in lines if not set(s).issubset({"^", "~", " "})]
+        stack_trace = source_lines[-1] if source_lines else ""
 
         events_with_traces.append(
             {

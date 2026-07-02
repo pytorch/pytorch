@@ -56,7 +56,10 @@ def main() -> None:
 
     os.chdir(args.package_dir)
     pip_install("-qU", "-r", "requirements-build.txt")
-    subprocess.run([sys.executable, "setup.py", "clean"], check=True)
+    # Skip when sharing build/ across Pythons in build_all.sh -- the per-Python
+    # bits (libtorch_python, _C.so) are invalidated by tools/setup_helpers/cmake.py.
+    if not os.environ.get("SKIP_SETUP_CLEAN"):
+        subprocess.run([sys.executable, "setup.py", "clean"], check=True)
     pip_install("-q", "-r", "requirements.txt")
     pip_install("-q", "--pre", f"numpy=={numpy_pin()}")
 

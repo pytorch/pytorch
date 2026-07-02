@@ -51,9 +51,14 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.fx.graph import _illegal_char_regex
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_LINUX,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    has_cpp_wrapper_for_device,
+    HAS_GPU,
+)
 from torch.utils._import_utils import import_dill
 
 
@@ -1370,6 +1375,7 @@ def forward(self, arg0_1, arg1_1):
         res = torch.compile(foo, fullgraph=True, backend="inductor")(rng, x)
         self.assertFalse(torch.allclose(res, x * x + x))
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/184597")
     def test_reference_type_recompile(self):
         cnt = CompileCounter()
 
@@ -3008,7 +3014,7 @@ def forward(self, primals_2, tangents_1):
 
         This tests the code path where:
         1. An opaque class (like Color) is accessed via OpaqueObjectClassVariable
-        2. Attribute access (Color.RED) goes through var_getattr with static getattr
+        2. Attribute access (Color.RED) goes through getattro_impl with static getattr
         3. The opaque object is correctly lifted as a graph input
         """
         from torch._library.opaque_object import is_opaque_reference_type
@@ -3197,7 +3203,7 @@ def forward(self, L_x_ : torch.Tensor):
     def test_opaque_class_staticmethod(self):
         """Test that accessing a staticmethod on an opaque class works correctly.
 
-        This verifies that OpaqueObjectClassVariable.var_getattr properly handles
+        This verifies that OpaqueObjectClassVariable.getattro_impl properly handles
         staticmethod descriptors (instead of raising 'Unsupported descriptor').
         """
         captured = {"graph": None}
@@ -3220,7 +3226,7 @@ def forward(self, L_x_ : torch.Tensor):
     def test_opaque_class_property(self):
         """Test that accessing a property descriptor on an opaque class works correctly.
 
-        This verifies that OpaqueObjectClassVariable.var_getattr properly handles
+        This verifies that OpaqueObjectClassVariable.getattro_impl properly handles
         property descriptors. When accessing a property on the class (not instance),
         you get the property object back.
         """
@@ -3762,6 +3768,33 @@ class GraphModule(torch.nn.Module):
         compiled = compile_fx_inner(gm, [m, x])
         result = compiled([m, x])
         self.assertEqual(result, (x * 2,))
+
+    @unittest.skipIf(
+        not has_cpp_wrapper_for_device("cpu"),
+        "requires CPU cpp wrapper",
+    )
+    @inductor_config.patch(cpp_wrapper=True)
+    def test_cpp_wrapper_opaque_object_state_input_slot(self):
+        m = OpaqueMultiplier(2.0)
+        x = torch.ones(3)
+        y = torch.arange(3, dtype=torch.float32)
+
+        graph = torch.fx.Graph()
+        fake_mode = FakeTensorMode()
+        x_node = graph.placeholder("x")
+        x_node.meta["val"] = fake_mode.from_tensor(x)
+        m_node = graph.placeholder("m")
+        m_node.meta["val"] = m
+        y_node = graph.placeholder("y")
+        y_node.meta["val"] = fake_mode.from_tensor(y)
+        out = graph.call_function(torch.ops.aten.add.Tensor, (x_node, y_node))
+        out.meta["val"] = fake_mode.from_tensor(x + y)
+        graph.output((out,))
+
+        gm = torch.fx.GraphModule({}, graph)
+        compiled = compile_fx_inner(gm, [x, m, y], cpp_wrapper=True)
+        result = compiled([x, m, y])
+        self.assertEqual(result, (x + y,))
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_benchmark_harness_no_pickle_for_opaque_inputs(self):

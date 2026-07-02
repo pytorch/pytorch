@@ -2,7 +2,7 @@
 import contextlib
 import io
 from collections.abc import Callable
-from typing import Any, TypeVar
+from typing import Any, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -12,11 +12,16 @@ from . import config
 from ._cache import CacheInfo
 
 
+if TYPE_CHECKING:
+    from torch._dynamo.eval_frame import StanceStr
+
+
 __all__ = [
     "compile",
     "config",
     "assume_constant_result",
     "reset",
+    "nonstrict_trace",
     "allow_in_graph",
     "substitute_in_graph",
     "list_backends",
@@ -59,9 +64,11 @@ def compile(*args, **kwargs):
 
 def reset() -> None:
     """
-    This function clears all compilation caches and restores the system to its initial state.
-    It is recommended to call this function, especially after using operations like `torch.compile(...)`
-    to ensure a clean state before another unrelated compilation
+    Reset the in-process compiler state.
+
+    This function clears Dynamo's in-memory compilation caches and related
+    process-local state used by :func:`torch.compile`. It does not delete
+    filesystem caches, such as Inductor's disk cache.
     """
     import torch._dynamo
 
@@ -122,6 +129,8 @@ def allow_in_graph(fn):
     - all Tensors used inside of ``fn`` must be passed directly as inputs to ``fn``
       (as opposed to being captured variables).
 
+    See also :func:`nonstrict_trace()`, which has slightly fewer restrictions on the inputs.
+
     Args:
         fn: A callable representing the function to be included in the graph.
             If ``fn`` is a list or tuple of callables it recursively applies
@@ -149,6 +158,75 @@ def allow_in_graph(fn):
     import torch._dynamo
 
     return torch._dynamo.allow_in_graph(fn)
+
+
+def nonstrict_trace(traceable_fn: Callable[_P, _R]) -> Callable[_P, _R]:
+    """
+    Decorator to mark a function as nonstrict-traceable for dynamo.
+
+    A nonstrict-traced function appears as an opaque call in the dynamo graph.
+    Dynamo does not trace into the function body (hence the "nonstrict"), but
+    aot_autograd will trace into it.
+
+    This is similar to ``allow_in_graph`` but with enhanced support for:
+    - User-defined classes as inputs (must be registered with pytree)
+    - ``nn.Module`` as input arguments (parameters and buffers are tracked for autograd)
+    - Global/captured tensors treated as constants (assumed not updated during execution)
+
+    Note:
+        - With ``backend="eager"``, the original Python function runs directly.
+          With ``backend="aot_eager"``, the graph traced by aot_autograd runs.
+          With ``backend="inductor"``, the traced graph is compiled with inductor.
+
+        - Training is supported: you can call ``.backward()`` on outputs and gradients
+          will flow through the nonstrict-traced function.
+
+    Dangerous patterns (may cause silent incorrectness):
+        - Side effects between nonstric_trace'd fn and compiled region: The function should
+          not depend on variables mutated by other code inside the compiled function, and code
+          after the call should not depend on mutations made by it.
+
+        - Implicit inputs (closures/globals): Tensors captured from enclosing scopes
+          are treated as constants. Gradients will NOT flow back to them. Pass tensors
+          as explicit arguments if gradients are needed.
+
+    Restrictions:
+        - Both inputs and outputs must use pytree-compatible types. User-defined classes
+          must be registered via :func:`torch.utils._pytree.register_pytree_node`,
+          :func:`torch.utils._pytree.register_dataclass`, or
+          :func:`torch.utils._pytree.register_constant`. Tensors, Python primitives (int, float, bool, str),
+          symbolic types (SymInt, SymFloat, SymBool), and built-in containers (list,
+          tuple, dict) are already handled by default.
+        - Primitive values and container structure are specialized per call site:
+          each call site expects the same primitives and structure on every execution.
+
+    Example::
+
+        >>> import torch
+        >>> @torch.compiler.nonstrict_trace
+        ... def traced_forward(model, x):
+        ...     # It's OK to have dynamo graph break within nonstrict_trace region
+        ...     torch._dynamo.graph_break()
+        ...     return model(x) + x
+        ...
+        >>> class MyModule(torch.nn.Module):
+        ...     def __init__(self):
+        ...         super().__init__()
+        ...         self.inner = torch.nn.Linear(10, 10)
+        ...
+        ...     def forward(self, x):
+        ...         return traced_forward(self.inner, x)
+        ...
+        >>> # Compile and run
+        >>> model = MyModule()
+        >>> opt_model = torch.compile(model, backend="aot_eager", fullgraph=True)
+        >>> out = opt_model(torch.randn(10, 10))
+        >>> out.sum().backward()  # Gradients flow through traced_forward
+
+    """
+    import torch._dynamo
+
+    return torch._dynamo.nonstrict_trace(traceable_fn)
 
 
 def substitute_in_graph(
@@ -236,7 +314,7 @@ def assume_constant_result(fn):
         fn: The function to be marked as having a constant result.
 
     .. warning::
-        `assume_constant_result` can if invalid cause safety and soundness issues, :func:`torch.compile`
+        `assume_constant_result` can, if invalid, cause safety and soundness issues, :func:`torch.compile`
         will not attempt to validate whether the constant assumption is true or not
 
     """
@@ -294,7 +372,7 @@ def get_default_backend() -> str | Callable[..., Any]:
 
 
 def set_stance(
-    stance: str = "default",
+    stance: "StanceStr" = "default",
     *,
     skip_guard_eval_unsafe: bool = False,
     force_backend: str | Callable[..., Any] | None = None,
@@ -391,7 +469,7 @@ def set_enable_guard_collectives(enabled: bool):
     for all ranks to compile at the same time to run compiler collectives).  Like
     compiler collectives, you can only run this on SPMD programs; you will hang
     otherwise.  Note that a guard collective is only issued if there is any
-    compiled code to guard on; if this the first time we encounter a frame or
+    compiled code to guard on; if this is the first time we encounter a frame or
     the frame is skipped, we don't issue collectives.
 
     Returns the previous setting of enabled.
@@ -514,6 +592,20 @@ def _non_strict_tracing_context():
 
 
 @contextlib.contextmanager
+def _compile_session_context():
+    """Context manager that sets _is_compiling_flag for the duration of a
+    torch.compile session.
+    """
+    global _is_compiling_flag
+    old = _is_compiling_flag
+    try:
+        _is_compiling_flag = True
+        yield
+    finally:
+        _is_compiling_flag = old
+
+
+@contextlib.contextmanager
 def _patch_autograd_grad():
     """Patch autograd.grad for non-strict make_fx tracing.
 
@@ -613,7 +705,7 @@ def is_dynamo_compiling() -> bool:
 
 def is_exporting() -> bool:
     """
-    Indicated whether we're under exporting.
+    Indicates whether we're under exporting.
 
     It's stricter than is_compiling() flag, as it would only be set to True when
     torch.export is used.
@@ -880,7 +972,7 @@ def load_compiled_function(
         file: A file-like object containing the serialized compiled function.
         f_globals: Optional global scope enclosing the compiled function.
         external_data: Optional data to be loaded into the runtime environment
-                       of the compiled function. This should contains the same
+                       of the compiled function. This should contain the same
                        data as AOTCompileResult.external_data returned from save_compiled_function() call.
 
     Returns:

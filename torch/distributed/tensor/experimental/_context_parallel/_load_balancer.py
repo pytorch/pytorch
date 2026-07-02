@@ -472,7 +472,7 @@ def _create_default_load_balancer(
 ) -> _LoadBalancer | None:
     from ._attention import _cp_options
 
-    if _cp_options.enable_load_balance:
+    if _cp_options.enable_load_balance and seq_length % (world_size * 2) == 0:
         return _HeadTailLoadBalancer(seq_length, world_size, device)
     else:
         return None

@@ -208,8 +208,24 @@ if(USE_FLASH_ATTENTION)
         if(ENV{USE_ROCM_CK_SDPA} EQUAL 1)
           caffe2_update_option(USE_ROCM_CK_SDPA ON)
         endif()
-    else()
+    elseif(NOT WIN32)
       caffe2_update_option(USE_ROCM_CK_SDPA ON)
+    endif()
+    # CK SDPA only supports gfx942/gfx950. Auto-disable when none of those archs
+    # are in PYTORCH_ROCM_ARCH; otherwise the ck_sdpa target ends up with an
+    # empty HIP_ARCHITECTURES and CMake errors out.
+    if(USE_ROCM_CK_SDPA)
+      set(_have_ck_sdpa_arch FALSE)
+      foreach(ARCH gfx942 gfx950)
+        if("${ARCH}" IN_LIST PYTORCH_ROCM_ARCH)
+          set(_have_ck_sdpa_arch TRUE)
+          break()
+        endif()
+      endforeach()
+      if(NOT _have_ck_sdpa_arch)
+        message(STATUS "USE_ROCM_CK_SDPA disabled: PYTORCH_ROCM_ARCH (${PYTORCH_ROCM_ARCH}) has no MI3xx arch (gfx942/gfx950)")
+        caffe2_update_option(USE_ROCM_CK_SDPA OFF)
+      endif()
     endif()
   endif()
   if(USE_ROCM AND USE_ROCM_CK_SDPA)
@@ -228,18 +244,17 @@ if(USE_FLASH_ATTENTION)
         -fhip-new-launch-api
         -fgnuc-version=4.2.1
         -fno-implicit-modules
-        -fskip-odr-check-in-gmf
         -fcxx-exceptions
         -fexceptions
         -fcolor-diagnostics
         -faddrsig
         -fno-rounding-math
-        -mconstructor-aliases
         -mllvm=-amdgpu-internalize-symbols
         -fvisibility=hidden
         -Wno-float-equal
         -fgpu-flush-denormals-to-zero
-        -Wno-unused-parameter)
+        -Wno-unused-parameter
+        -Wno-unknown-warning-option)
 
     #TODO: The following flags are specific to 8-bit width types which are not integrated via CK yet.
     #      Add once that support is integrated
@@ -276,6 +291,7 @@ if(USE_FLASH_ATTENTION)
         CK_USE_FNUZ_FP8
         CK_USE_GFX94
         CK_USE_XDL
+        ENABLE_CK
         __HIP_PLATFORM_AMD__=1
         __HIP_PLATFORM_HCC__=1
         CK_TILE_FMHA_FWD_FAST_EXP2=1
@@ -295,12 +311,11 @@ if(USE_FLASH_ATTENTION)
 
     set_source_files_properties(${ck_sdpa_sources_hip} PROPERTIES LANGUAGE HIP)
 
-    # ck_sdpa is not supported on gfx9 "0x" family parts; filter them out of the
-    # per-target HIP arch list so we don't try to codegen for them.
-    set(CK_SDPA_HIP_EXCLUDE_ARCHS gfx900 gfx906 gfx90c)
+    # Only build for MI3xx series architectures as building for all targets takes too long
+    # We will selectively add supported architectures when/if needed
     set(_ck_sdpa_hip_arches "")
-    foreach(ARCH ${PYTORCH_ROCM_ARCH})
-      if(NOT "${ARCH}" IN_LIST CK_SDPA_HIP_EXCLUDE_ARCHS)
+    foreach(ARCH gfx942 gfx950)
+      if("${ARCH}" IN_LIST PYTORCH_ROCM_ARCH)
         list(APPEND _ck_sdpa_hip_arches ${ARCH})
       endif()
     endforeach()
@@ -424,6 +439,21 @@ IF(USE_MSLK)
     # Add MSLK include directories for gemm_torch.h
     list(APPEND ATen_CUDA_INCLUDE ${MSLK_INCLUDE})
   elseif(USE_ROCM)
+    # MSLK only supports gfx942/gfx950. Auto-disable when none of those archs
+    # are in PYTORCH_ROCM_ARCH; otherwise the mslk target ends up with an empty
+    # HIP_ARCHITECTURES and CMake errors out.
+    set(_mslk_hip_arches "")
+    foreach(ARCH gfx942 gfx950)
+      if(${ARCH} IN_LIST PYTORCH_ROCM_ARCH)
+        list(APPEND _mslk_hip_arches ${ARCH})
+      endif()
+    endforeach()
+  endif()
+  if(USE_MSLK AND USE_ROCM AND _mslk_hip_arches STREQUAL "")
+    message(STATUS "USE_MSLK disabled: PYTORCH_ROCM_ARCH (${PYTORCH_ROCM_ARCH}) has no MI3xx arch (gfx942/gfx950)")
+    caffe2_update_option(USE_MSLK OFF)
+  endif()
+  if(USE_MSLK AND USE_ROCM)
     # Path to vendored CK
     set(MSLK_CK_DIR "${MSLK_THIRD_PARTY}/composable_kernel")
     rocm_generate_ck_conf(
@@ -444,14 +474,6 @@ IF(USE_MSLK)
     if(DEFINED ROCM_VERSION_DEV AND ROCM_VERSION_DEV VERSION_LESS "7.2.0")
         list(PREPEND MSLK_EXTRA_HIP_FLAGS -mllvm=-amdgpu-coerce-illegal-types=1)
       endif()
-
-    # Only compile for gfx942 and gfx950.
-    set(_mslk_hip_arches "")
-    foreach(ARCH gfx942 gfx950)
-      if(${ARCH} IN_LIST PYTORCH_ROCM_ARCH)
-        list(APPEND _mslk_hip_arches ${ARCH})
-      endif()
-    endforeach()
 
     add_library(mslk STATIC ${mslk_native_rocm_hip})
     set_target_properties(mslk PROPERTIES
@@ -474,7 +496,9 @@ IF(USE_MSLK)
   endif()
 
   # Ensure torch_cpu is built before mslk to avoid race conditions
-  add_dependencies(mslk torch_cpu)
+  if(TARGET mslk)
+    add_dependencies(mslk torch_cpu)
+  endif()
 endif()
 
 # XNNPACK
@@ -750,10 +774,6 @@ if(USE_MKLDNN_ACL)
     list(APPEND ATen_CPU_DEPENDENCY_LIBS ${ACL_LIBRARIES})
 endif()
 
-if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(s390x|ppc64le)$")
-  list(APPEND ATen_CPU_DEPENDENCY_LIBS cpuinfo)
-endif()
-
 if(NOT EMSCRIPTEN AND NOT INTERN_BUILD_MOBILE)
   if(NOT MSVC)
     # Bump up optimization level for sleef to -O1, since at -O0 the compiler
@@ -894,6 +914,7 @@ if(USE_MPS)
     include(../../../cmake/Metal.cmake)
 
     set(ATen_MPS_SRCS ${ATen_MPS_SRCS} ${mps_cpp} ${mps_mm} ${mps_h} ${native_mps_cpp} ${native_mps_mm} ${native_mps_h} ${native_sparse_mps_mm})
+    set(METALLIB_DEPS)
 
     if(CAN_COMPILE_METAL)
         foreach(SHADER ${native_mps_metal} ${native_mps_sparse_metal})
@@ -903,7 +924,7 @@ if(USE_MPS)
             metal_to_air(${SHADER} ${TGT_BASIC} "-std=metal3.1")
         endforeach()
         air_to_metallib(kernels_basic.metallib ${AIR_BASIC})
-        set(METALLIB_DEPS kernels_basic.metallib)
+        list(APPEND METALLIB_DEPS kernels_basic.metallib)
         if(CAN_COMPILE_METAL_40)
             foreach(SHADER ${native_mps_metal} ${native_mps_sparse_metal})
                 cmake_path(GET SHADER STEM TGT_STEM)
@@ -919,15 +940,15 @@ if(USE_MPS)
                           DEPENDS ${METALLIB_DEPS}
                           OUTPUT metallib_dummy.cpp
                           COMMENT "Updating metallibs timestamp")
-        add_custom_target(metallibs DEPENDS ${METALLIB_DEPS} metallib_dummy.cpp)
+        list(APPEND METALLIB_DEPS metallib_dummy.cpp)
     else()
-        file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/native/mps")
         foreach(SHADER ${native_mps_metal} ${native_mps_sparse_metal})
-            cmake_path(GET SHADER STEM TGT_STEM)
-            string(CONCAT SHADER_HDR_NAME  "${CMAKE_CURRENT_BINARY_DIR}" /native/mps/ ${TGT_STEM} "_metallib.h")
-            metal_to_metallib_h(${SHADER} ${SHADER_HDR_NAME})
+            metal_to_metallib_h(${SHADER})
+            list(APPEND METALLIB_DEPS ${SHADER_HDR})
         endforeach()
     endif()
+
+    add_custom_target(metallibs DEPENDS ${METALLIB_DEPS})
 endif()
 
 if(USE_ROCM)
@@ -979,6 +1000,12 @@ foreach(HEADER ${generated_headers} ${cuda_generated_headers})
   # NB: Assumed to be flat
   install(FILES ${HEADER} DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen)
 endforeach()
+
+if(USE_XPU)
+  foreach(HEADER ${xpu_generated_headers})
+    install(FILES ${HEADER} DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen)
+  endforeach()
+endif()
 
 message("AT_INSTALL_INCLUDE_DIR ${AT_INSTALL_INCLUDE_DIR}/ATen/core")
 foreach(HEADER ${core_generated_headers})

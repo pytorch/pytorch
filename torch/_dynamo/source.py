@@ -159,6 +159,20 @@ class LocalSource(Source):
     # or `co_freevars`.
     is_derefed_cell_contents: bool = False
 
+    # Whether this local is the function's varargs (``*args``) parameter.
+    # Set from ``co_flags & CO_VARARGS`` at frame-entry time. Element accesses
+    # like ``args[N]`` produce a ``GetItemSource`` whose base has this flag.
+    # Useful for distinguishing ``*args`` from a regular list-typed input.
+    # ``repr=False`` so the vast majority of locals (which are not varargs) do
+    # not get a noisy ``is_varargs=False`` in every debug string.
+    is_varargs: bool = dataclasses.field(default=False, repr=False)
+
+    # Whether this local is the function's varkw (``**kwargs``) parameter.
+    # Set from ``co_flags & CO_VARKEYWORDS`` at frame-entry time. Element
+    # accesses like ``kwargs["k"]`` produce a ``DictGetItemSource`` whose base
+    # has this flag. ``repr=False`` for the same reason as ``is_varargs``.
+    is_varkw: bool = dataclasses.field(default=False, repr=False)
+
     def reconstruct(self, codegen: "PyCodegen") -> None:
         if self.is_derefed_cell_contents:
             codegen.load_deref(self.local_name)
@@ -803,10 +817,24 @@ class NonSerializableSetGetItemSource(ChainedSource):
         codegen.append_output(codegen.create_load_const(self.index))
         codegen.extend_output(create_call_function(2, False))
 
+    def get_value(
+        self,
+        globals: dict[str, Any],
+        locals: dict[str, Any],
+        cache: dict[Source, Any],
+    ) -> Any:
+        if self in cache:
+            return cache[self]
+        value = utils.set_getitem(
+            self.base.get_value(globals, locals, cache), self.index
+        )
+        cache[self] = value
+        return value
+
     @functools.cached_property
     def _name_template(self) -> str:
         # set ordering might not be stable
-        return f"list({{0}})[{_esc_str(self.index, apply_repr=True)}]"
+        return f"___set_getitem({{0}}, {_esc_str(self.index, apply_repr=True)})"
 
     def is_dict_key(self) -> bool:
         return False

@@ -19,7 +19,7 @@ from torch.distributed.fsdp import (
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, MLP
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, skipIfRocm
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
@@ -47,6 +47,7 @@ class TestTrackerFullyShard1DTrainingCore(FSDPTest):
     def world_size(self) -> int:
         return min(4, torch.accelerator.device_count())
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/129390")
     @skip_if_lt_x_gpu(2)
     def test_tracker_multi_group_eager(self):
         """

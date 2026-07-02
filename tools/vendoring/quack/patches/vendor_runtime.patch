@@ -1,0 +1,23 @@
+# Rename upstream QuACK runtime entrypoints for the vendored package layout.
+#
+# The vendored copy must run independently of any top-level quack installation,
+# so worker imports and cache package names are rewritten to torch._vendor.quack
+# and torch_vendor_quack.
+#
+
+--- a/_compile_worker.py
++++ b/_compile_worker.py
+@@ -16 +16 @@
+-import quack.cache
++from . import cache
+@@ -88 +88 @@
+-quack.cache._COMPILE_ONLY_DEPTH.set(quack.cache._COMPILE_ONLY_DEPTH.get() + 1)
++cache._COMPILE_ONLY_DEPTH.set(cache._COMPILE_ONLY_DEPTH.get() + 1)
+--- a/autotuner.py
++++ b/autotuner.py
+@@ -34 +34 @@
+-PACKAGE_NAME = "quack"
++PACKAGE_NAME = "torch_vendor_quack"
+@@ -465 +465 @@
+-                [sys.executable, "-m", "quack._compile_worker"],
++                [sys.executable, "-m", "torch._vendor.quack._compile_worker"],

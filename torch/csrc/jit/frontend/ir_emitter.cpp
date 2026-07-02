@@ -416,7 +416,7 @@ struct Environment {
                    "of another type (torch.jit.annotate(List[T, []]) where T "
                    "is the type of elements in the list for Python 2)";
         }
-        error << '\n' << why_not.str();
+        error << '\n' << std::move(why_not).str();
         throw ErrorReport(error);
       }
     }
@@ -669,7 +669,7 @@ struct to_ir {
 
     // At this point, we might have received a graph that is compiled with
     // old operator schemas that might not exist in the system anymore.
-    // Therefore, we replace such ops with its' valid upgrader.
+    // Therefore, we replace such ops with its valid upgrader.
     ReplaceOldOperatorsWithUpgraders(graph);
 
     // NB ORDERING: SSA conversion has to occur before
@@ -970,7 +970,7 @@ struct to_ir {
       const std::string& stmt_name) {
     if (loop_status_ == LoopStatus::NOT_IN_LOOP) {
       throw(
-          ErrorReport(loc) << "SyntaxError: '" << stmt_name << "'"
+          ErrorReport(loc) << "SyntaxError: '" << stmt_name << '\''
                            << " outside loop");
     } else if (loop_status_ == LoopStatus::IN_UNROLLED_LOOP) {
       throw(
@@ -1370,7 +1370,7 @@ struct to_ir {
       if (!is_dict_constructor && candidate_types.empty()) {
         throw(
             ErrorReport(src)
-            << "Expected an Union type annotation "
+            << "Expected a Union type annotation "
             << "with an inner " << match_repr << " type, but got "
             << (*refined_type_hint_ptr)->repr_str());
       } else if (candidate_types.size() == 1) {
@@ -1446,7 +1446,7 @@ struct to_ir {
       }
       throw(
           ErrorReport(src) << "Union type annotation `" << type_hint->repr_str()
-                           << "` can hold " << vector_repr.str()
+                           << "` can hold " << std::move(vector_repr).str()
                            << ", but none of "
                            << "those types match the types of the given list "
                            << "elements, which were unified to "
@@ -1499,7 +1499,7 @@ struct to_ir {
       }
       throw(
           ErrorReport(src) << "Union type annotation `" << type_hint->repr_str()
-                           << "` can hold " << vector_repr.str()
+                           << "` can hold " << std::move(vector_repr).str()
                            << ", but none of "
                            << "those dict types can hold the types of the given"
                            << " keys and values, which were unified to Dict["
@@ -1738,11 +1738,11 @@ struct to_ir {
               << "` did not match the "
               << "type of an actual value type `" << v->type()->repr_str()
               << "`\n"
-              << ss.str();
+              << std::move(ss).str();
         }
 
         if (!is_key_subtype || !is_value_subtype) {
-          throw(ErrorReport(dc) << err.str());
+          throw(ErrorReport(dc) << std::move(err).str());
         }
       }
 
@@ -2034,7 +2034,7 @@ struct to_ir {
                  << "The source info is eliminated due to the source file is too large. "
                  << "To get it back, please set PYTORCH_JIT_ENABLE_LARGE_SOURCE_LOCATION=1 "
                  << "as env var";
-              return ss.str();
+              return std::move(ss).str();
             });
           }
         }
@@ -2059,7 +2059,7 @@ struct to_ir {
                  << "The source info is eliminated due to the source file is too large. "
                  << "To get it back, please set PYTORCH_JIT_ENABLE_LARGE_SOURCE_LOCATION=1 "
                  << "as env var";
-              return ss.str();
+              return std::move(ss).str();
             });
           }
         }
@@ -3448,7 +3448,7 @@ struct to_ir {
               ErrorReport(apply.inputs())
               << "expected an expression of type " << type->repr_str()
               << " but found " << expr->type()->repr_str() << '\n'
-              << why_not.str());
+              << std::move(why_not).str());
         }
 
         // None is a subtype of Optional[T], but we want to remember what T is
@@ -3681,7 +3681,7 @@ struct to_ir {
             throw(
                 ErrorReport(loc)
                 << "enumerate expected kwarg name 'start', got '"
-                << attributes[0].name().name() << "'");
+                << attributes[0].name().name() << '\'');
           }
           start_index =
               emitSugaredExpr(attributes[0].value(), 1)->asValue(loc, method);
@@ -3830,11 +3830,11 @@ struct to_ir {
         err << "Generated value type " << value_type->repr_str()
             << " did not match the annotated value type, which was "
             << annotated_v_type->repr_str() << '\n'
-            << ss.str();
+            << std::move(ss).str();
       }
 
       if (!is_key_subtype || !is_value_subtype) {
-        throw(ErrorReport(apply) << err.str());
+        throw(ErrorReport(apply) << std::move(err).str());
       }
     };
 
