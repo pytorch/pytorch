@@ -40,6 +40,7 @@ from ..utils import (
     TMA_DESCRIPTOR_SIZE,
     triton_type,
     using_b200,
+    using_rocm_rdna3,
 )
 from ..virtualized import V
 from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
@@ -1181,7 +1182,9 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         ]
 
     # Flex attn helpers
-    def get_flex_attn_fwd_configs(self, head_dim: int, dtype: Any) -> list[FlexConfig]:
+    def get_flex_attn_fwd_configs(
+        self, head_dim: int, seq_len: sympy.Expr, dtype: Any
+    ) -> list[FlexConfig]:
         flex_attn_fwd_configs: list[FlexConfig] = []
 
         if config.max_autotune:
@@ -1390,7 +1393,9 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
             if BLOCK_N % BLOCK_M == 0
         ]
 
-    def get_flex_attn_fwd_configs(self, head_dim: int, dtype: Any) -> list[FlexConfig]:
+    def get_flex_attn_fwd_configs(
+        self, head_dim: int, seq_len: sympy.Expr, dtype: Any
+    ) -> list[FlexConfig]:
         capability = torch.cuda.get_device_capability()
         flex_attn_fwd_configs: list[FlexConfig] = []
 
@@ -1654,6 +1659,28 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             (torch.float16, 256): ROCmFlexConfig(32, 32, 1, 8, kpack=default_kpack),
         }
 
+        # RDNA3 (gfx11xx) optimal configs profiled on gfx1151 (head_dim=256).
+        # Three seq_len tiers to match CU occupancy on 16-CU RDNA3:
+        #   short  (seq < 128): BLOCK_M=16, tiny tiles keep all CUs busy
+        #   medium (128 <= seq < 512): BLOCK_M=32, transitional tile size
+        #   long   (seq >= 512): BLOCK_M=64, enough seq rows to fill all CUs
+        self.rdna3_short_seq_flex_config = {
+            (torch.bfloat16, 256): ROCmFlexConfig(16, 16, 1, 4, waves_per_eu=2),
+            (torch.float16, 256): ROCmFlexConfig(16, 16, 1, 4, waves_per_eu=2),
+        }
+        self.rdna3_medium_seq_flex_config = {
+            (torch.bfloat16, 256): ROCmFlexConfig(
+                32, 16, 1, 4, matrix_instr_nonkdim=16, waves_per_eu=2
+            ),
+            (torch.float16, 256): ROCmFlexConfig(
+                32, 16, 1, 4, matrix_instr_nonkdim=16, waves_per_eu=2
+            ),
+        }
+        self.rdna3_default_flex_config = {
+            (torch.bfloat16, 256): ROCmFlexConfig(64, 16, 1, 4, waves_per_eu=2),
+            (torch.float16, 256): ROCmFlexConfig(64, 16, 1, 4, waves_per_eu=2),
+        }
+
         self.flex_attn_fwd_autotune_configs: list[FlexConfig] = [
             ROCmFlexConfig(BLOCK1, BLOCK2, 1, w, kpack=default_kpack)
             for BLOCK1 in [16, 64, 128]
@@ -1828,7 +1855,9 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                     kwargs["GROUP_M"] = group_m
                 yield self.triton_config(**kwargs)
 
-    def get_flex_attn_fwd_configs(self, head_dim: int, dtype: Any) -> list[FlexConfig]:
+    def get_flex_attn_fwd_configs(
+        self, head_dim: int, seq_len: sympy.Expr, dtype: Any
+    ) -> list[FlexConfig]:
         flex_attn_fwd_configs: list[FlexConfig] = []
 
         if config.max_autotune:
@@ -1844,7 +1873,21 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                 default_config = ROCmFlexConfig(64, 64, 1, 4, kpack=default_kpack)
             else:
                 default_config = ROCmFlexConfig(128, 64, 1, 4, kpack=default_kpack)
-            if capability >= (9, 5):  # gfx950 (MI350X/MI355X)
+            if using_rocm_rdna3():
+                sizevars = V.graph.sizevars
+                if sizevars.statically_known_lt(seq_len, 128):
+                    default_config = self.rdna3_short_seq_flex_config.get(
+                        (dtype, head_dim), default_config
+                    )
+                elif sizevars.statically_known_lt(seq_len, 512):
+                    default_config = self.rdna3_medium_seq_flex_config.get(
+                        (dtype, head_dim), default_config
+                    )
+                else:
+                    default_config = self.rdna3_default_flex_config.get(
+                        (dtype, head_dim), default_config
+                    )
+            elif capability >= (9, 5):  # gfx950 (MI350X/MI355X)
                 default_config = self.gfx950_default_flex_config.get(
                     (dtype, head_dim), default_config
                 )
@@ -1976,7 +2019,9 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
                 FlexDecodeConfig(64, 2, 1),
             ]
 
-    def get_flex_attn_fwd_configs(self, head_dim: int, dtype: Any) -> list[FlexConfig]:
+    def get_flex_attn_fwd_configs(
+        self, head_dim: int, seq_len: sympy.Expr, dtype: Any
+    ) -> list[FlexConfig]:
         flex_attn_fwd_configs: list[FlexConfig] = []
 
         if config.max_autotune:
@@ -2677,20 +2722,33 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
             # Need to unsqueeze bias from [N] -> [1, N]
             bias = L[aten.unsqueeze](bias, 0)
 
-        if len(scale_a.get_size()) == 0 or len(scale_b.get_size()) == 0:
-            if len(scale_a.get_size()) != len(scale_b.get_size()):
-                raise AssertionError(
-                    f"scale_a and scale_b must have same ndim, got "
-                    f"{len(scale_a.get_size())} and {len(scale_b.get_size())}"
+        def is_tensorwise_scale(scale: Any) -> bool:
+            size = scale.get_size()
+            return len(size) == 0 or all(
+                V.graph.sizevars.statically_known_equals(dim, 1) for dim in size
+            )
+
+        def normalize_tensorwise_scale(scale: Any, *, allow_high_rank: bool) -> Any:
+            if not is_tensorwise_scale(scale):
+                return scale
+            if not allow_high_rank and len(scale.get_size()) > 2:
+                raise RuntimeError(
+                    f"t() expects a tensor with <= 2 dimensions, "
+                    f"but self is {len(scale.get_size())}D"
                 )
-            # Need to unsqueeze scale from [] -> [1, 1]
-            scale_a = L[aten.unsqueeze](L[aten.unsqueeze](scale_a, 0), 1)
-            scale_b = L[aten.unsqueeze](L[aten.unsqueeze](scale_b, 0), 1)
+            return L[aten.reshape](scale, [1, 1])
+
+        # The templates load scale suffixes with 2D output indices. Eager accepts
+        # high-rank all-ones scale_a, but scale_b is internally transposed and
+        # rank > 2 is invalid.
+        scale_a = normalize_tensorwise_scale(scale_a, allow_high_rank=True)
+        scale_b = normalize_tensorwise_scale(scale_b, allow_high_rank=False)
         nodes = [mat_a, mat_b, scale_a, scale_b]
         if bias:
             nodes.append(bias)
         return MMKernelInputs(
             nodes,
+            scalars=kernel_inputs._scalars,
             mat1_idx=kernel_inputs._mat1_idx,
             mat2_idx=kernel_inputs._mat2_idx,
             out_dtype=kernel_inputs._out_dtype,
