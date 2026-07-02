@@ -52,7 +52,7 @@ from torch._export.serde.serialize import (
     SerializeError,
 )
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
-from torch._library.opaque_object import get_opaque_type_name, register_opaque_type
+from torch._library.opaque_object import get_opaque_type_name, register_custom_class
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.export import Dim, export, load, save, unflatten
 from torch.export.pt2_archive.constants import ARCHIVE_VERSION_PATH
@@ -81,7 +81,7 @@ class _OpaqueConfig(torch._custom_class_base.CustomClassBase):
         )
 
 
-register_opaque_type(_OpaqueConfig, typ="value")
+register_custom_class(_OpaqueConfig, typ="value")
 
 
 class _OpaqueEngine(torch._custom_class_base.CustomClassBase):
@@ -90,7 +90,7 @@ class _OpaqueEngine(torch._custom_class_base.CustomClassBase):
         self.multiplier = multiplier
 
 
-register_opaque_type(_OpaqueEngine, typ="reference")
+register_custom_class(_OpaqueEngine, typ="reference")
 
 
 def get_filtered_export_db_tests():

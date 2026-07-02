@@ -26,7 +26,7 @@ from torch._dynamo.variables.lists import BaseListVariable, DequeVariable, Range
 from torch._library.opaque_object import (
     CustomClassBase,
     MemberType,
-    register_opaque_type,
+    register_custom_class,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON, HAS_GPU
 
@@ -748,7 +748,7 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
             def __getitem__(self, idx):
                 return self.items[idx]
 
-        register_opaque_type(
+        register_custom_class(
             OpaqueScaler,
             typ="reference",
             members={
@@ -756,7 +756,7 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
                 "apply": MemberType.INLINED,
             },
         )
-        register_opaque_type(
+        register_custom_class(
             OpaqueContainer,
             typ="reference",
             members={

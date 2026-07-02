@@ -15,7 +15,7 @@ the anything (including tensors) within the object, the object must be an
 input to the graph.
 
 You can register a custom class as being a reference-based opaque object class
-through `register_opaque_type(MyClass, typ="reference")`.
+through `register_custom_class(MyClass, typ="reference")`.
 
 VALUE TYPES:
 
@@ -32,7 +32,7 @@ implemented before registering it as a value-typed opaque object class:
     repr_string to their corresponding types.
 
 You can register a custom class as being a reference-based opaque object class
-through `register_opaque_type(MyClass, typ="value")`.
+through `register_custom_class(MyClass, typ="value")`.
 """
 
 import logging
@@ -144,12 +144,12 @@ def get_opaque_type_name(cls: Any) -> str:
     if info is None:
         raise ValueError(
             f"Class {cls} is not registered as an opaque type. "
-            f"Call register_opaque_type({cls.__name__}) first."
+            f"Call register_custom_class({cls.__name__}) first."
         )
     return info.class_name
 
 
-def register_opaque_type(
+def register_custom_class(
     cls: Any,
     *,
     typ: str,
@@ -268,8 +268,28 @@ def register_opaque_type(
     torch._C._register_opaque_type(name)
 
 
+def register_opaque_type(
+    cls: Any,
+    *,
+    typ: str,
+    hoist=False,
+    guard_fn: Any = None,
+    members: dict[str, MemberType] | None = None,
+    reconstruct_fn: ReconstructFn | None = None,
+) -> None:
+    log.warning("register_opaque_type is deprecated, use register_custom_class instead")
+    register_custom_class(
+        cls,
+        typ=typ,
+        hoist=hoist,
+        guard_fn=guard_fn,
+        members=members,
+        reconstruct_fn=reconstruct_fn,
+    )
+
+
 # Enums are always opaque value types.
-register_opaque_type(Enum, typ="value")
+register_custom_class(Enum, typ="value")
 
 
 def is_opaque_value(value: object) -> TypeIs[OpaqueType]:

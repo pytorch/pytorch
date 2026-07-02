@@ -14534,7 +14534,7 @@ graph():
             def forward(self, x, f):
                 return x + f.int_1 + f.int_2
 
-        torch._library.opaque_object.register_opaque_type(MyInput, typ="value")
+        torch._library.opaque_object.register_custom_class(MyInput, typ="value")
         self.addCleanup(
             lambda name=torch._library.opaque_object.get_opaque_type_name(MyInput): (
                 torch._C._unregister_opaque_type(name),

@@ -1675,11 +1675,11 @@ def _register_distributed_opaque_types():
         return
     _distributed_opaque_types_registered = True
 
-    from torch._library.opaque_object import MemberType, register_opaque_type
+    from torch._library.opaque_object import MemberType, register_custom_class
 
     _register_process_group_opaque_type()
 
-    register_opaque_type(
+    register_custom_class(
         DeviceMesh,
         typ="reference",
         reconstruct_fn=_device_mesh_reconstruct_fn,

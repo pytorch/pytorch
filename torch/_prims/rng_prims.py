@@ -418,7 +418,7 @@ from torch._custom_class_base import CustomClassBaseMeta
 
 torch._C._set_generator_metaclass(CustomClassBaseMeta)
 
-torch._library.opaque_object.register_opaque_type(
+torch._library.opaque_object.register_custom_class(
     torch._C.Generator,
     typ="reference",
     guard_fn=lambda gen: [gen.device],

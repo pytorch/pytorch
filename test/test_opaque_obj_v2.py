@@ -42,7 +42,7 @@ from torch._library.opaque_object import (
     is_opaque_type,
     is_opaque_value_type,
     MemberType,
-    register_opaque_type,
+    register_custom_class,
 )
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx._graph_pickler import GraphPickler, Options
@@ -298,7 +298,7 @@ class HoistedString(torch._custom_class_base.CustomClassBase):
         return (f"HoistedString('{self.val}')", {"HoistedString": HoistedString})
 
 
-register_opaque_type(HoistedString, typ="value", hoist=True)
+register_custom_class(HoistedString, typ="value", hoist=True)
 
 
 @torch.library.custom_op("mylib::op_with_string", mutates_args=())
@@ -315,8 +315,8 @@ def _(x, s):
     return torch.empty_like(x)
 
 
-register_opaque_type(OpaqueQueue, typ="reference")
-register_opaque_type(
+register_custom_class(OpaqueQueue, typ="reference")
+register_custom_class(
     RNGState,
     typ="reference",
     guard_fn=lambda obj: [obj.seed],
@@ -326,13 +326,13 @@ register_opaque_type(
         "noisy_inject": MemberType.INLINED,
     },
 )
-register_opaque_type(
+register_custom_class(
     Counter,
     typ="reference",
     guard_fn=lambda obj: [obj.start],
     members={"start": MemberType.USE_REAL, "get_start_tensor": MemberType.INLINED},
 )
-register_opaque_type(
+register_custom_class(
     NestedCounters,
     typ="reference",
     members={
@@ -342,7 +342,7 @@ register_opaque_type(
         "__getitem__": MemberType.INLINED,
     },
 )
-register_opaque_type(
+register_custom_class(
     NestedQueue,
     typ="reference",
     members={
@@ -351,13 +351,13 @@ register_opaque_type(
         "pop_q": MemberType.INLINED,
     },
 )
-register_opaque_type(AddModule, typ="reference")
-register_opaque_type(ValueConfig, typ="value")
-register_opaque_type(SizeStore, typ="value")
-register_opaque_type(NestedValueSize, typ="value")
-register_opaque_type(OpaqueMultiplier, typ="reference")
-register_opaque_type(Color, typ="reference")
-register_opaque_type(ColorWithDescriptor, typ="reference")
+register_custom_class(AddModule, typ="reference")
+register_custom_class(ValueConfig, typ="value")
+register_custom_class(SizeStore, typ="value")
+register_custom_class(NestedValueSize, typ="value")
+register_custom_class(OpaqueMultiplier, typ="reference")
+register_custom_class(Color, typ="reference")
+register_custom_class(ColorWithDescriptor, typ="reference")
 
 
 # A tensor subclass (similar to TwoTensor) that also holds an opaque Counter
@@ -1784,7 +1784,7 @@ def forward(self, primals, tangents):
             TypeError,
             "must subclass torch._custom_class_base.CustomClassBase",
         ):
-            register_opaque_type(NoOpaqueBase, typ="reference")
+            register_custom_class(NoOpaqueBase, typ="reference")
 
         class BadMember(CustomClassBase):
             def __init__(self, x):
@@ -1793,7 +1793,7 @@ def forward(self, primals, tangents):
         def foo(bad, y):
             return y + bad.x
 
-        register_opaque_type(
+        register_custom_class(
             BadMember, typ="reference", members={"y": MemberType.USE_REAL}
         )
         with self.assertRaisesRegex(
@@ -1810,7 +1810,7 @@ def forward(self, primals, tangents):
         with self.assertRaisesRegex(
             TypeError, "expected to have a non-default `__eq__`"
         ):
-            register_opaque_type(NoEq, typ="value")
+            register_custom_class(NoEq, typ="value")
 
         class NoHash(CustomClassBase):
             def __init__(self, x):
@@ -1822,7 +1822,7 @@ def forward(self, primals, tangents):
         with self.assertRaisesRegex(
             TypeError, "expected to have a non-default `__hash__`"
         ):
-            register_opaque_type(NoHash, typ="value")
+            register_custom_class(NoHash, typ="value")
 
         class NoRepr(CustomClassBase):
             def __init__(self, x):
@@ -1835,7 +1835,7 @@ def forward(self, primals, tangents):
                 return hash(self.x)
 
         with self.assertRaisesRegex(TypeError, "expected to have a `__fx_repr__`"):
-            register_opaque_type(NoRepr, typ="value")
+            register_custom_class(NoRepr, typ="value")
 
         class SpecifyMember(CustomClassBase):
             def __init__(self, x):
@@ -1851,7 +1851,7 @@ def forward(self, primals, tangents):
                 return f"SpecifyMember({self.x})"
 
         with self.assertRaisesRegex(TypeError, "No need to specify `guard_fn`"):
-            register_opaque_type(SpecifyMember, typ="value", guard_fn=lambda obj: [])
+            register_custom_class(SpecifyMember, typ="value", guard_fn=lambda obj: [])
 
     def test_invalid_schema(self):
         with self.assertRaisesRegex(
@@ -1890,7 +1890,7 @@ def forward(self, primals, tangents):
     def test_invalid_opaque_obj_types(self):
         for t in [str, bool, int, float, torch.Tensor]:
             with self.assertRaisesRegex(ValueError, "Unable to register built-in type"):
-                register_opaque_type(t, typ="reference")
+                register_custom_class(t, typ="reference")
 
         @dataclass
         class Bad1(CustomClassBase):
@@ -1902,7 +1902,7 @@ def forward(self, primals, tangents):
                 ValueError,
                 "cannot be registered as an opaque object as it has been registered as a pytree.",
             ):
-                register_opaque_type(Bad1, typ="reference")
+                register_custom_class(Bad1, typ="reference")
         finally:
             # Clean up pytree registration to avoid leaking state to other tests
             pytree.SUPPORTED_NODES.pop(Bad1, None)
@@ -1913,7 +1913,7 @@ def forward(self, primals, tangents):
         class Bad2(CustomClassBase):
             x: int
 
-        register_opaque_type(Bad2, typ="reference")
+        register_custom_class(Bad2, typ="reference")
         with self.assertRaisesRegex(
             ValueError,
             "cannot be registered as a pytree as it has been registered as an opaque object.",
@@ -2094,7 +2094,7 @@ def forward(self, arg0_1):
                 def __fx_repr__(self):
                     return f"TmpClass(value={self.value!r})", {"TmpClass": TmpClass}
 
-            register_opaque_type(TmpClass, typ="value")
+            register_custom_class(TmpClass, typ="value")
 
             self.assertTrue(is_opaque_type(TmpClass))
             self.assertTrue(is_opaque_value_type(TmpClass))
@@ -2813,7 +2813,7 @@ class GraphModule(torch.nn.Module):
             def __hash__(self):
                 return hash(self.name)
 
-        register_opaque_type(Tag, typ="reference")
+        register_custom_class(Tag, typ="reference")
 
         class TwoRefSubclass(torch.Tensor):
             @staticmethod
