@@ -1851,6 +1851,10 @@ if(USE_ROCM)
     target_link_libraries(torch_hip PRIVATE ck_sdpa)
   endif()
 
+  if(TARGET ck_gemm)
+    target_link_libraries(torch_hip PRIVATE ck_gemm)
+  endif()
+
   if(USE_MSLK)
     if(USE_ROCM)
       target_link_libraries(torch_hip PRIVATE mslk)
