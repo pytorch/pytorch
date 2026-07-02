@@ -101,7 +101,8 @@ jobs:
           aws-region: us-east-1
 
       - name: Download build artifacts
-        uses: ./.github/actions/download-build-artifacts
+        # Full repo path, not ./ — local actions don't resolve on the OSDC ARC runner.
+        uses: pytorch/pytorch/.github/actions/download-build-artifacts@main
         with:
           name: ${{ inputs.build_environment }}
           s3-bucket: gha-artifacts
