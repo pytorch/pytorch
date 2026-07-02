@@ -145,6 +145,7 @@ from .source import (
 )
 from .utils import (
     _extract_tensor_dict,
+    _get_cudagraph_override,
     checkpoint_params,
     CleanupHook,
     clone_inputs,
@@ -806,10 +807,21 @@ class OutputGraph(OutputGraphCommon):
             "co_firstlineno": f_code.co_firstlineno,
         }
 
-        # Cudagraph annotation is set during inlining in
-        # InliningInstructionTranslator.build_inline_tracer when a decorated
-        # function is inlined.
+        # The cudagraph annotation is normally set while tracing an
+        # `override_cudagraphs` context manager / decorator within this
+        # frame (see CudagraphOverrideVariable). Seed it here from any
+        # runtime-active override so a callee compiled as a separate frame
+        # (e.g. because it contains a graph break and cannot be inlined)
+        # inherits the override that lives lexically in a caller's frame.
+        # NOTE: we intentionally do not guard on the override state, so the
+        # override is sticky per code object (first compile wins): a function
+        # reached both inside and outside an override keeps whichever override
+        # was active when it first compiled.
         self.cudagraph_annotation: _CudagraphAnnotation | None = None
+        if (_override := _get_cudagraph_override()) is not None:
+            from torch._inductor import _CudagraphAnnotation as _CGA
+
+            self.cudagraph_annotation = _CGA(fwd=_override[0], bwd=_override[1])
 
         self.region_tracker = GraphRegionTracker()
         self._emit_debugger_breakpoint: bool = False
