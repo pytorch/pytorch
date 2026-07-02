@@ -10,17 +10,10 @@ import torch._vendor.quack.gemm_config as quack_gemm_config
 from torch._inductor.kernel.flex_gemm.constraints import (
     FlexGemmLocalReduceCallbacks,
     FlexGemmLocalReduceGeometry,
-    LOCAL_REDUCE_AXIS_KWARG,
     LOCAL_REDUCE_CALLBACKS_REQUIRED_ERROR,
-    LOCAL_REDUCE_COMBINE_KEY_KWARG,
     LOCAL_REDUCE_COMBINE_KEY_SUFFIX,
     local_reduce_compressed_shape,
-    LOCAL_REDUCE_FEEDS_MAIN_KWARG,
-    LOCAL_REDUCE_FINALIZE_KEY_KWARG,
     LOCAL_REDUCE_FINALIZE_KEY_SUFFIX,
-    LOCAL_REDUCE_GROUP_KWARG,
-    LOCAL_REDUCE_OUT_KWARG,
-    LOCAL_REDUCE_RETURNS_KWARG,
     LOCAL_REDUCE_RUNTIME_OUT_ERROR,
     LOCAL_REDUCE_SWAP_AB_ERROR,
     validate_local_reduce_feed_main_capability,
@@ -224,7 +217,6 @@ def validate_runtime_local_reduce(
     plan: FlexGemmRuntimeLocalReducePlan | None,
     a: torch.Tensor,
     expected_shape: tuple[int, ...],
-    aux_outs: tuple[torch.Tensor, ...],
     effective_C: torch.Tensor | None,
     alpha: float,
     beta: float,
@@ -235,8 +227,6 @@ def validate_runtime_local_reduce(
     validate_local_reduce_runtime_dense_mm(a.ndim)
     validate_local_reduce_selected_dim_divisible(expected_shape, plan.group, plan.axis)
     validate_local_reduce_no_c_alpha_beta(effective_C, alpha, beta)
-    if plan.feeds_main:
-        validate_local_reduce_feed_main_capability(plan.axis, plan.group)
     local_reduce_out = plan.out
     if local_reduce_out is None:
         return
@@ -294,13 +284,13 @@ def local_reduce_gemm_act_kwargs(
         return {}
     local_reduce_combine_key, local_reduce_finalize_key = callback_keys
     return {
-        LOCAL_REDUCE_RETURNS_KWARG: local_reduce_out is not None,
-        LOCAL_REDUCE_FEEDS_MAIN_KWARG: local_reduce.feeds_main,
-        LOCAL_REDUCE_OUT_KWARG: local_reduce_out,
-        LOCAL_REDUCE_GROUP_KWARG: local_reduce.group,
-        LOCAL_REDUCE_AXIS_KWARG: local_reduce.axis,
-        LOCAL_REDUCE_COMBINE_KEY_KWARG: local_reduce_combine_key,
-        LOCAL_REDUCE_FINALIZE_KEY_KWARG: local_reduce_finalize_key,
+        "tensor_epilogue_returns_local_reduce": local_reduce_out is not None,
+        "local_reduce_feeds_main": local_reduce.feeds_main,
+        "local_reduce_out": local_reduce_out,
+        "local_reduce_group": local_reduce.group,
+        "local_reduce_axis": local_reduce.axis,
+        "local_reduce_combine_key": local_reduce_combine_key,
+        "local_reduce_finalize_key": local_reduce_finalize_key,
     }
 
 
@@ -494,7 +484,6 @@ def gemm_epilogue(
         local_reduce,
         a,
         expected_shape,
-        aux_outs,
         effective_C,
         alpha,
         beta,

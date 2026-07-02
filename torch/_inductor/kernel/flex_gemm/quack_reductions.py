@@ -25,6 +25,7 @@ from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
 )
 from torch._inductor.kernel.flex_gemm.constraints import (
     grouped_reduce_dims_match,
+    local_reduce_needs_physical_callbacks,
     LOCAL_REDUCE_EXPLICIT_DTYPE_ERROR,
     LOCAL_REDUCE_GROUPED_RESHAPE_ERROR,
     LOCAL_REDUCE_INNERMOST_GROUPED_DIM_ERROR,
@@ -84,7 +85,7 @@ class GroupedTensorSSALayout:
 
     @property
     def needs_physical_combine(self) -> bool:
-        return self.axis == 0 or self.group_size > 16
+        return local_reduce_needs_physical_callbacks(self.axis, self.group_size)
 
     @property
     def reduction_profile(self) -> str:
@@ -466,80 +467,31 @@ def lower_view_or_reshape(
     )
 
 
-def reduction_from_node(node: torch.fx.Node) -> tuple[Any, Any, Any, Any, str] | None:
-    if node.op == "call_method" and node.target in (
-        "sum",
-        "mean",
-        "prod",
-        "amax",
-        "amin",
-    ):
-        input_node = node.args[0]
-        dim = node.args[1] if len(node.args) > 1 else node.kwargs.get("dim")
-        keepdim = (
-            node.args[2] if len(node.args) > 2 else node.kwargs.get("keepdim", False)
-        )
-        dtype = node.args[3] if len(node.args) > 3 else node.kwargs.get("dtype")
-        reduction_type = {"amax": "max", "amin": "min"}.get(node.target, node.target)
-        return input_node, dim, keepdim, dtype, reduction_type
-    if node.op == "call_function" and node.target in (
-        torch.ops.aten.sum.dim_IntList,
-        torch.ops.aten.mean.dim,
-        torch.mean,
-    ):
-        input_node = node.args[0]
-        dim = node.args[1] if len(node.args) > 1 else node.kwargs.get("dim")
-        keepdim = (
-            node.args[2] if len(node.args) > 2 else node.kwargs.get("keepdim", False)
-        )
-        dtype = node.args[3] if len(node.args) > 3 else node.kwargs.get("dtype")
-        reduction_type = (
-            "mean" if node.target in (torch.ops.aten.mean.dim, torch.mean) else "sum"
-        )
-        return input_node, dim, keepdim, dtype, reduction_type
-    if node.op == "call_function" and node.target == torch.ops.aten.prod.dim_int:
-        input_node = node.args[0]
-        dim = node.args[1] if len(node.args) > 1 else node.kwargs.get("dim")
-        keepdim = (
-            node.args[2] if len(node.args) > 2 else node.kwargs.get("keepdim", False)
-        )
-        dtype = node.args[3] if len(node.args) > 3 else node.kwargs.get("dtype")
-        return input_node, dim, keepdim, dtype, "prod"
-    if node.op == "call_function" and node.target in (
-        torch.ops.aten.amax.default,
-        torch.amax,
-    ):
-        input_node = node.args[0]
-        dim = node.args[1] if len(node.args) > 1 else node.kwargs.get("dim")
-        keepdim = (
-            node.args[2] if len(node.args) > 2 else node.kwargs.get("keepdim", False)
-        )
-        return input_node, dim, keepdim, None, "max"
-    if node.op == "call_function" and node.target in (
-        torch.ops.aten.amin.default,
-        torch.amin,
-    ):
-        input_node = node.args[0]
-        dim = node.args[1] if len(node.args) > 1 else node.kwargs.get("dim")
-        keepdim = (
-            node.args[2] if len(node.args) > 2 else node.kwargs.get("keepdim", False)
-        )
-        return input_node, dim, keepdim, None, "min"
-    return None
+METHOD_REDUCTION_TYPES = {
+    "sum": "sum",
+    "mean": "mean",
+    "prod": "prod",
+    "amax": "max",
+    "amin": "min",
+}
 
+FUNCTION_REDUCTION_TYPES = {
+    torch.ops.aten.sum.dim_IntList: ("sum", True),
+    torch.ops.aten.mean.dim: ("mean", True),
+    torch.mean: ("mean", True),
+    torch.ops.aten.prod.dim_int: ("prod", True),
+    torch.ops.aten.amax.default: ("max", False),
+    torch.amax: ("max", False),
+    torch.ops.aten.amin.default: ("min", False),
+    torch.amin: ("min", False),
+}
 
-def unsupported_reduction_from_node(node: torch.fx.Node) -> str | None:
-    target = node.target
-    if node.op == "call_method" and node.target in (
-        "all",
-        "any",
-        "argmax",
-        "argmin",
-        "std",
-        "var",
-    ):
-        return str(node.target)
-    if node.op == "call_function" and target in (
+METHOD_UNSUPPORTED_REDUCTIONS = frozenset(
+    ("all", "any", "argmax", "argmin", "std", "var")
+)
+
+FUNCTION_UNSUPPORTED_REDUCTIONS = frozenset(
+    (
         torch.ops.aten.all.dim,
         torch.ops.aten.all.dims,
         torch.ops.aten.all.default,
@@ -552,8 +504,38 @@ def unsupported_reduction_from_node(node: torch.fx.Node) -> str | None:
         torch.ops.aten.std.dim,
         torch.ops.aten.var.correction,
         torch.ops.aten.var.dim,
-    ):
-        return str(target)
+    )
+)
+
+
+def reduction_node_args(
+    node: torch.fx.Node, *, has_dtype: bool
+) -> tuple[Any, Any, Any, Any]:
+    """Extract the common Tensor reduction argument convention from FX nodes."""
+    input_node = node.args[0]
+    dim = node.args[1] if len(node.args) > 1 else node.kwargs.get("dim")
+    keepdim = node.args[2] if len(node.args) > 2 else node.kwargs.get("keepdim", False)
+    dtype = node.args[3] if len(node.args) > 3 else node.kwargs.get("dtype")
+    return input_node, dim, keepdim, dtype if has_dtype else None
+
+
+def reduction_from_node(node: torch.fx.Node) -> tuple[Any, Any, Any, Any, str] | None:
+    if node.op == "call_method" and node.target in METHOD_REDUCTION_TYPES:
+        return (
+            *reduction_node_args(node, has_dtype=True),
+            METHOD_REDUCTION_TYPES[node.target],
+        )
+    if node.op == "call_function" and node.target in FUNCTION_REDUCTION_TYPES:
+        reduction_type, has_dtype = FUNCTION_REDUCTION_TYPES[node.target]
+        return (*reduction_node_args(node, has_dtype=has_dtype), reduction_type)
+    return None
+
+
+def unsupported_reduction_from_node(node: torch.fx.Node) -> str | None:
+    if node.op == "call_method" and node.target in METHOD_UNSUPPORTED_REDUCTIONS:
+        return str(node.target)
+    if node.op == "call_function" and node.target in FUNCTION_UNSUPPORTED_REDUCTIONS:
+        return str(node.target)
     return None
 
 

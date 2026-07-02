@@ -705,7 +705,6 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
                 torch.empty(130, 64),
                 (130, 64),
                 None,
-                None,
                 1.0,
                 1.0,
             )
@@ -726,7 +725,6 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
                 compressed_plan,
                 torch.empty(1, 128, 64),
                 (1, 128, 64),
-                None,
                 None,
                 1.0,
                 1.0,
@@ -758,7 +756,6 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
                         plan,
                         torch.empty(128, 64),
                         (128, 64),
-                        (),
                         effective_C,
                         alpha,
                         beta,
@@ -2226,7 +2223,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
         def epilogue_fn(acc):
             x = acc.float().view(-1, group, n)
-            return acc.relu(), (x * 0.5).view(m, n), x.sum(1)
+            return acc.relu(), x.sum(1), (x * 0.5).view(m, n)
 
         def fn(a, b):
             return flex_gemm(
@@ -2238,27 +2235,27 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
         a = torch.randn(m, 64, device="cuda", dtype=torch.bfloat16)
         b = torch.randn(64, n, device="cuda", dtype=torch.bfloat16)
-        (actual, same_shape_aux, local_reduce_aux), (code,) = run_and_get_code(
+        (actual, local_reduce_aux, same_shape_aux), (code,) = run_and_get_code(
             torch.compile(fn, backend="inductor", fullgraph=True), a, b
         )
-        expected_actual, expected_aux, _ = epilogue_fn(a @ b)
+        expected_actual, _, expected_aux = epilogue_fn(a @ b)
         (
             high_precision_actual,
-            high_precision_aux,
             high_precision_local_reduce_aux,
+            high_precision_aux,
         ) = epilogue_fn(a.double() @ b.double())
 
         self.assertMatchesLowPrecisionEager(
             actual, expected_actual, high_precision_actual, a.shape[1]
-        )
-        self.assertMatchesLowPrecisionEager(
-            same_shape_aux, expected_aux, high_precision_aux, a.shape[1]
         )
         torch.testing.assert_close(
             local_reduce_aux,
             high_precision_local_reduce_aux.float(),
             atol=1e-3,
             rtol=1e-3,
+        )
+        self.assertMatchesLowPrecisionEager(
+            same_shape_aux, expected_aux, high_precision_aux, a.shape[1]
         )
         FileCheck().check("aux_outs=").run(code)
         self.assertLocalReduceAuxCode(code, group, axis=0, callbacks=True)
