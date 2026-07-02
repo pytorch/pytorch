@@ -218,8 +218,9 @@ class CuptiMonitor:
         ] = {}
         self._pm_sampler: Any = None
         # Monotonic time of the last PM poll, to rate-limit polling to the sampler's suggested
-        # cadence (~one look-back window minus a buffer) rather than every flush -- each decode
-        # re-reads the whole ring, so per-flush polling would redundantly re-decode.
+        # cadence (see suggested_poll_interval_ns) rather than every flush. decode drains, so this is
+        # not about avoiding redundant work -- it drains before the ring overflows without a flood of
+        # tiny per-flush decodes.
         self._pm_last_poll_s = 0.0
         # Serializes PM add/poll/remove so a flush-thread poll never decodes the collector while the
         # foreground is tearing it down (concurrent decode on one collector is unsafe).
@@ -606,9 +607,9 @@ class CuptiMonitor:
                 self._pm_sampler = None
 
     def _poll_pm_sampler(self) -> None:
-        """Decode the ring without stopping, rate-limited to the sampler's suggested cadence (~one
-        look-back window minus a buffer): each decode re-reads the whole ring, so polling every
-        flush would redundantly re-decode. The final drain at release/stop still catches the tail."""
+        """Decode the ring without stopping, rate-limited to the sampler's suggested cadence (see
+        suggested_poll_interval_ns): decode drains, so this drains before the ring overflows without a
+        flood of tiny per-flush decodes. The final drain at release/stop catches the tail."""
         with self._pm_lock:
             sampler = self._pm_sampler
             if sampler is None:

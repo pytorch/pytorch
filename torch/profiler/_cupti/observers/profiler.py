@@ -276,7 +276,7 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
         # Rolling retention: PM sampling is continuous, so samples must survive across windows
         # (unlike _timed_frames, consumed per window) until a window harvests their time range.
         self._pm_retained: list[dict[str, Any]] = []
-        # Per-device max start_ns accepted, to dedup a ring re-decode (a poll may re-emit rows).
+        # Per-device max start_ns retained: a monotonic guard so each sample is kept at most once.
         self._pm_last_ns: dict[int, int] = {}
         if self._pm_enabled and self._monitor is not None:
             self._monitor.request_pm_sampling(self.on_pm_samples, self._pm_metrics)
@@ -356,10 +356,12 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
     # --- async window API (the cupti_monitor profiler backend drives these) ----
 
     def on_pm_samples(self, frame: dict[str, Any]) -> None:
-        # Monitor flush-thread hook: retain the frame in a rolling last-N-seconds buffer, deduped
-        # by per-device monotonic start_ns (a ring re-decode re-emits already-seen rows). Each
-        # finalized window slices its [start, boundary) samples from this buffer; it is trimmed to
-        # the retention horizon so it does not grow without bound between windows.
+        # Monitor flush-thread hook: retain the frame in a rolling last-N-seconds buffer, keeping only
+        # samples newer than the last per device. decode drains (each sample is delivered once, in
+        # increasing start_ns), so this normally keeps everything -- it's a cheap monotonic guard
+        # against any duplicate or out-of-order delivery. Each finalized window slices its
+        # [start, boundary) samples from this buffer; it is trimmed to the retention horizon so it
+        # does not grow without bound between windows.
         ts = frame.get("start_ns")
         if ts is None or not len(ts):
             return
