@@ -529,25 +529,11 @@ sycl::event scaled_matmul(
   const int64_t K = mat1.size(1) * K_multiplier;
   const int64_t N = mat2.size(1);
 
-  // 1.1 Create memory descriptors
-  // For FP4 types, the logical K dimension differs from the tensor dimension
-  // due to 2-element packing, so we must use format tags with the logical
-  // shape. For all other types, use get_onednn_md() to respect actual tensor
-  // strides (fixes stride mismatch for non-contiguous inputs).
-  dnnl::memory::desc src_md, weights_md;
-  if (is_fp4) {
-    src_md = dnnl::memory::desc(
-        {M, K},
-        get_onednn_dtype_include_double(mat1),
-        dnnl::memory::format_tag::ab);
-    weights_md = dnnl::memory::desc(
-        {K, N},
-        get_onednn_dtype_include_double(mat2),
-        dnnl::memory::format_tag::ba);
-  } else {
-    src_md = get_onednn_md(mat1);
-    weights_md = get_onednn_md(mat2);
-  }
+  // 1.1 Create memory descriptors. get_onednn_md() respects the tensor's real
+  // strides and unpacks Float4_e2m1fn_x2 (2 logical elements per byte) into the
+  // logical shape oneDNN's f4_e2m1 descriptor expects.
+  dnnl::memory::desc src_md = get_onednn_md(mat1);
+  dnnl::memory::desc weights_md = get_onednn_md(mat2);
   dnnl::memory::desc dst_md = get_onednn_md(result);
 
   dnnl::memory::desc bias_md;

@@ -133,10 +133,36 @@ dnnl::memory::dims get_onednn_strides(const at::Tensor& tensor) {
 
 dnnl::memory::desc get_onednn_md(const at::Tensor& tensor) {
   Tensor t = tensor.sizes().empty() ? tensor.unsqueeze(0) : tensor;
-  return {
-      get_onednn_dims(t),
-      get_onednn_dtype_include_double(t),
-      get_onednn_strides(t)};
+  auto dims = get_onednn_dims(t);
+  auto strides = get_onednn_strides(t);
+
+  // Float4_e2m1fn_x2 packs 2 logical elements into one byte along the
+  // contiguous (stride-1) dimension, so the tensor reports packed sizes and
+  // strides. oneDNN's sub-byte f4_e2m1 descriptor expects the logical
+  // (unpacked) shape with element-unit strides: double the packed dim's extent
+  // and scale every other dim's stride by 2 (the packed dim stays stride 1).
+  if (t.scalar_type() == at::ScalarType::Float4_e2m1fn_x2) {
+    int packed_dim = -1;
+    for (size_t i = 0; i < strides.size(); ++i) {
+      if (strides[i] == 1) {
+        packed_dim = static_cast<int>(i);
+        break;
+      }
+    }
+    TORCH_CHECK(
+        packed_dim >= 0,
+        "oneDNN FP4 matmul requires a contiguous (stride-1) packed dimension, got strides ",
+        t.strides());
+    for (size_t i = 0; i < strides.size(); ++i) {
+      if (static_cast<int>(i) == packed_dim) {
+        dims[i] *= 2;
+      } else {
+        strides[i] *= 2;
+      }
+    }
+  }
+
+  return {dims, get_onednn_dtype_include_double(t), strides};
 }
 
 bool onednn_strides_check(const Tensor& src) {
