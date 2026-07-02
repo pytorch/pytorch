@@ -10006,8 +10006,7 @@ class TestLinalgCudaOnly(TestCase):
             results_filename = torch.cuda.tunable.get_filename()
             validators = torch.cuda.tunable.get_validators()
             with open(results_filename, "w") as file:
-                for key, value in validators:
-                    file.write(f"Validator,{key},{value}\n")
+                file.writelines(f"Validator,{key},{value}\n" for key, value in validators)
                 file.write(
                     "GemmTunableOp_Half_NN,nn_96_128_256_ld_96_256_96,"
                     "Gemm_Cublaslt_id_999999_tile_999999_stages_999999_"
