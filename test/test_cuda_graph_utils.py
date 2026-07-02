@@ -6,6 +6,7 @@ import unittest
 
 import torch
 from torch.cuda._graph_annotations import (
+    _get_node_type,
     _get_stream_id,
     _is_tools_id_unavailable,
     _rekey_annotations,
@@ -15,6 +16,7 @@ from torch.cuda._graph_annotations import (
     mark_stream,
     resolve_pending_annotations,
 )
+from torch.cuda._utils import _check_cuda_bindings
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -58,6 +60,51 @@ class TestMarkKernels(TestCase):
         with mark_kernels("test"):
             _ = x + 1
         self.assertEqual(len(get_kernel_annotations()), 0)
+
+    def test_memset_nodes_are_annotated(self):
+        """Memset graph nodes get annotated, not just kernels and memcpys.
+
+        A large reduction emits a ``cudaMemset`` node (zeroing the multi-block
+        reduction semaphores) alongside the reduction kernel. ``keep_graph=True``
+        retains the captured cudaGraph so its nodes can be classified, and defers
+        the remap so node toolsIds stay keyed to the capture graph.
+        """
+        from cuda.bindings import driver, runtime as cuda_runtime
+
+        memset_type = driver.CUgraphNodeType.CU_GRAPH_NODE_TYPE_MEMSET
+        big = torch.randn(8192, 8192, device="cuda")
+        graph = torch.cuda.CUDAGraph(keep_graph=True)
+
+        with torch.cuda.graph(graph, enable_annotations=True):
+            with mark_kernels("reduction"):
+                _ = torch.sum(big)
+
+        raw_graph = graph.raw_cuda_graph()
+        _, num_nodes = _check_cuda_bindings(cuda_runtime.cudaGraphGetNodes(raw_graph))
+        nodes, _ = _check_cuda_bindings(
+            cuda_runtime.cudaGraphGetNodes(raw_graph, numNodes=num_nodes)
+        )
+
+        annotations = get_kernel_annotations()
+        memset_tools_ids = [
+            _check_cuda_bindings(cuda_runtime.cudaGraphNodeGetToolsId(node))
+            for node in nodes[:num_nodes]
+            if _get_node_type(node) == memset_type
+        ]
+
+        self.assertGreater(
+            len(memset_tools_ids),
+            0,
+            "expected the reduction to emit at least one memset node; "
+            "did the reduction lowering change?",
+        )
+        for tools_id in memset_tools_ids:
+            self.assertIn(
+                tools_id,
+                annotations,
+                lambda msg: f"{msg}\nmemset toolsId {hex(tools_id)} was not annotated",
+            )
+            self.assertEqual(annotations[tools_id], [{"str": "reduction"}])
 
     def test_single_scope_at_capture_start_uses_root_fallback(self):
         graph = torch.cuda.CUDAGraph()
