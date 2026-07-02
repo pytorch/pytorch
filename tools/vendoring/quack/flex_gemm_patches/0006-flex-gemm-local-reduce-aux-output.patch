@@ -9,7 +9,7 @@ diff --git a/epi_ops.py b/epi_ops.py
 index 2ed67a1a0ed..61b9592259a 100644
 --- a/epi_ops.py
 +++ b/epi_ops.py
-@@ -1098,6 +1098,221 @@ class VecReduce(EpiOp):
+@@ -1098,6 +1098,222 @@ class VecReduce(EpiOp):
          return result
 
 
@@ -22,7 +22,7 @@ index 2ed67a1a0ed..61b9592259a 100644
 +    def to_params(self, gemm, args):
 +        return {
 +            self.name: (
-+                assume_stride_divisibility(getattr(args, self.name)),
++                getattr(args, self.name),
 +                args.local_reduce_combine_fn,
 +                args.local_reduce_finalize_fn,
 +            )
@@ -138,6 +138,7 @@ index 2ed67a1a0ed..61b9592259a 100644
 +            if const_expr(
 +                axis == 0
 +                and param_tensor.element_type == Float32
++                and param_tensor.iterator.alignment >= 16
 +                and cute.size(tDrReduce_flt) % 4 == 0
 +                and tile_N % 4 == 0
 +            ):
@@ -235,7 +236,16 @@ diff --git a/gemm_act.py b/gemm_act.py
 index 2d83846f77a..c40382b93a1 100644
 --- a/gemm_act.py
 +++ b/gemm_act.py
-@@ -25,6 +25,7 @@ from .epi_ops import (
+@@ -4,5 +4,6 @@ import math
+ from typing import NamedTuple, Tuple, Optional, Callable, Type
+-
++
+ from torch import Tensor
++from torch._subclasses.fake_tensor import FakeTensor
+-
++
+ import cutlass
+@@ -25,6 +26,7 @@ from .epi_ops import (
      RowVecLoad,
      RowVecTupleLoad,
      ColVecTupleLoad,
@@ -243,15 +253,49 @@ index 2d83846f77a..c40382b93a1 100644
      Scalar,
      TileTupleLoad,
      TileStore,
-@@ -54,6 +55,8 @@ from .rounding import RoundingMode, convert_f32_to_bf16_sr, epilogue_aux_out_sr_
-
-
+@@ -52,3 +53,41 @@ from .activation import act_fn_map, gate_fn_map
+ from .rounding import RoundingMode, convert_f32_to_bf16_sr, epilogue_aux_out_sr_seed
+-
++
  _tensor_epilogue_fns: dict[str, Callable] = {}
 +_local_reduce_combine_fns: dict[str, Callable] = {}
 +_local_reduce_finalize_fns: dict[str, Callable] = {}
-
-
- def register_tensor_epilogue_fn(
++
++
++def power_of_2_divisibility(value: int, max_divisibility: int) -> int:
++    value = abs(int(value))
++    if value == 0:
++        return max_divisibility
++    divisibility = 1
++    while divisibility * 2 <= max_divisibility and value % (divisibility * 2) == 0:
++        divisibility *= 2
++    return divisibility
++
++
++def tensor_stride_divisibility(
++    tensor: Tensor | None,
++    dtype: Type[cutlass.Numeric],
++    leading_dim: int,
++) -> int:
++    """Return the strongest 16-byte-capped layout contract true for a tensor."""
++    if tensor is None:
++        return 1
++    max_divisibility = div_for_dtype(dtype)
++    divisibility = max_divisibility
++    for dim, stride in enumerate(tensor.stride()):
++        if dim != leading_dim:
++            divisibility = min(
++                divisibility, power_of_2_divisibility(stride, max_divisibility)
++            )
++    if isinstance(tensor, FakeTensor) or tensor.is_meta:
++        # AOT inputs have no real pointer; reuse this contract only when the
++        # runtime tensor has the allocator-backed base alignment assumed here.
++        return divisibility
++    element_bytes = max(dtype.width // 8, 1)
++    return min(
++        divisibility,
++        power_of_2_divisibility(tensor.data_ptr() // element_bytes, max_divisibility),
++    )
 @@ -62,6 +65,16 @@ def register_tensor_epilogue_fn(
      _tensor_epilogue_fns[tensor_epilogue_key] = tensor_epilogue_fn
 
@@ -356,7 +400,7 @@ index 2d83846f77a..c40382b93a1 100644
                  tRS_rAuxOut = cute.make_rmem_tensor(
                      epilogue_result.shape, self.acc_dtype
                  )
-@@ -427,11 +463,18 @@ def _compile_gemm_act(
+@@ -427,11 +463,19 @@ def _compile_gemm_act(
      tensor_epilogue_key,
      tensor_epilogue_arg_kinds,
      tensor_epilogue_returns_aux,
@@ -370,12 +414,13 @@ index 2d83846f77a..c40382b93a1 100644
 +    local_reduce_ndim,
 +    local_reduce_group,
 +    local_reduce_axis,
++    local_reduce_stride_divisibility,
 +    local_reduce_combine_key,
 +    local_reduce_finalize_key,
      alpha_mode,
      beta_mode,
      rowvec_dtype,
-@@ -511,12 +554,48 @@ def _compile_gemm_act(
+@@ -511,12 +554,42 @@ def _compile_gemm_act(
          )
          for dtype, ndim in zip(tensor_epilogue_colvec_dtypes, tensor_epilogue_colvec_ndims)
      ) or None
@@ -393,17 +438,11 @@ index 2d83846f77a..c40382b93a1 100644
 +        mLocalReduce = None
 +    else:
 +        local_reduce_leading_dim = 2 if local_reduce_ndim == 3 else 1
-+        local_reduce_stride = tuple(
-+            1
-+            if i == local_reduce_leading_dim
-+            else cute.sym_int64(divisibility=1)
-+            for i in range(local_reduce_ndim)
-+        )
-+        mLocalReduce = cute.runtime.make_fake_tensor(
++        mLocalReduce = fake_tensor(
 +            local_reduce_dtype,
 +            local_reduce_shape,
-+            stride=local_reduce_stride,
-+            assumed_align=16,
++            leading_dim=local_reduce_leading_dim,
++            divisibility=local_reduce_stride_divisibility,
 +        )
 
      tensor_epilogue_fn = (
@@ -469,7 +508,7 @@ index 2d83846f77a..c40382b93a1 100644
      alpha: float | Tensor = 1.0,
      beta: float | Tensor = 1.0,
      device_capacity_override: tuple[int, int] | None = None,
-@@ -703,6 +788,25 @@ def gemm_act(
+@@ -703,6 +788,40 @@ def gemm_act(
          raise NotImplementedError(
              "QUACK tensor epilogue aux args cannot be combined with C/alpha/beta yet"
          )
@@ -493,9 +532,24 @@ index 2d83846f77a..c40382b93a1 100644
 +        if local_reduce_out.ndim != 3:
 +            raise NotImplementedError("QUACK local_reduce_out must be 3-D")
      concat_layout = tuple(sorted(concat_layout)) if concat_layout else ()
++    local_reduce_dtype = (
++        torch2cute_dtype_map[local_reduce_out.dtype]
++        if local_reduce_out is not None
++        else None
++    )
++    local_reduce_leading_dim = (
++        2 if local_reduce_out is not None and local_reduce_out.ndim == 3 else 1
++    )
++    local_reduce_stride_divisibility = (
++        tensor_stride_divisibility(
++            local_reduce_out, local_reduce_dtype, local_reduce_leading_dim
++        )
++        if local_reduce_out is not None
++        else 1
++    )
      compiled_fn = _compile_gemm_act(
          a_dtype,
-@@ -724,11 +833,18 @@ def gemm_act(
+@@ -724,11 +848,19 @@ def gemm_act(
          tensor_epilogue_key,
          tensor_epilogue_arg_kind_codes,
          tensor_epilogue_returns_aux,
@@ -505,10 +559,11 @@ index 2d83846f77a..c40382b93a1 100644
          tuple(tensor.ndim for tensor in tensor_epilogue_colvec_biases),
          tuple(torch2cute_dtype_map[tensor.dtype] for tensor in tensor_epilogue_tile_biases_p),
          tuple(get_major(tensor, "m", "n") for tensor in tensor_epilogue_tile_biases_p),
-+        torch2cute_dtype_map[local_reduce_out.dtype] if local_reduce_out is not None else None,
++        local_reduce_dtype,
 +        local_reduce_out.ndim if local_reduce_out is not None else 0,
 +        local_reduce_group,
 +        local_reduce_axis,
++        local_reduce_stride_divisibility,
 +        local_reduce_combine_key,
 +        local_reduce_finalize_key,
          alpha_mode,
