@@ -655,11 +655,8 @@ nvgemm_supplement_configs: bool = (
 )
 
 
-# Default backends for conv backward autotune (weight + input grads below).
-# Triton conv-backward templates compile pathologically slowly on some ROCm
-# arches (e.g. gfx1100/RDNA3), which times out CI; default to ATEN-only. Opt back
-# into Triton via TORCHINDUCTOR_MAX_AUTOTUNE_BWD_{WEIGHT,INPUT}_CONV_BACKENDS.
-_conv_default_backends = "ATEN"
+# Triton conv templates show wins on ROCm; on CUDA, profiling shows no gains on H100.
+_conv_default_backends = "ATEN,TRITON" if torch.version.hip else "ATEN"
 
 # As above, specify candidate backends for conv autotune.
 # NB: in some cases for 1x1 convs we emit as matmul,

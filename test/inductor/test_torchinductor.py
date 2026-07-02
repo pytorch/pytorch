@@ -106,6 +106,7 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_X86,
     MACOS_VERSION,
+    MI350_ARCH,
     NAVI_ARCH,
     parametrize,
     serialTest,
@@ -5949,6 +5950,9 @@ for dtype in (torch.int32, torch.int64):
             check_lowp=False,
         )
 
+    # The forced Triton conv-backward autotune below compiles pathologically
+    # slowly on these ROCm arches, timing out CI. Skip until fixed (see #178945).
+    @skipIfRocmArch(NAVI_ARCH + MI350_ARCH)
     @skip_if_cpu
     @config.patch(
         {
