@@ -3118,7 +3118,7 @@ class TestReductions(TestCase):
 
 
 
-class TestReductionsCPU(TestCase):
+class TestReductionsOnlyCPU(TestCase):
 
     @dtypes(torch.float, torch.bfloat16)
     def test_dim_reduction_lastdim(self, device, dtype):
@@ -3983,7 +3983,7 @@ class TestReductionsGeneric(TestCase):
         self.assertEqual(result_eager.shape, torch.Size([2, 2]))
 
 instantiate_device_type_tests(TestReductions, globals(), allow_xpu=True, allow_mps=True)
-instantiate_device_type_tests(TestReductionsCPU, globals(), only_for="cpu")
+instantiate_device_type_tests(TestReductionsOnlyCPU, globals(), only_for="cpu")
 
 if __name__ == '__main__':
     run_tests()
