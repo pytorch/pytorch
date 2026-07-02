@@ -825,10 +825,18 @@ print(t.is_pinned())
                 self.assertTrue(default == torch._C._BlasBackend.Cublas)
             else:
                 # ROCm logic is less so, it's cublaslt for some Instinct, cublas for all else
-                gcn_arch = str(
-                    torch.cuda.get_device_properties(0).gcnArchName.split(":", 1)[0]
-                )
-                if gcn_arch in ["gfx90a", "gfx942", "gfx950", "gfx1200", "gfx1201"]:
+                # Mirror CUDAHooks::getHipblasltPreferredArchs in CUDAHooks.cpp
+                ROCM_VERSION = tuple(int(v) for v in torch.version.hip.split(".")[:2])
+                archs = ["gfx90a", "gfx942"]
+                if ROCM_VERSION >= (6, 4):
+                    archs.extend(["gfx1200", "gfx1201"])
+                if ROCM_VERSION >= (7, 0):
+                    archs.append("gfx950")
+                if ROCM_VERSION >= (7, 13):
+                    archs.extend(["gfx1100", "gfx1101", "gfx1151"])
+                gcn_arch_name = torch.cuda.get_device_properties(0).gcnArchName
+                hipblaslt_preferred = any(arch in gcn_arch_name for arch in archs)
+                if hipblaslt_preferred:
                     self.assertTrue(default == torch._C._BlasBackend.Cublaslt)
                 else:
                     self.assertTrue(default == torch._C._BlasBackend.Cublas)
@@ -1403,8 +1411,8 @@ print(t.is_pinned())
         # out-of-range device_index must not OOB-index the static stream pool.
         num_devices = torch.cuda.device_count()
         for di in (-2, -8, num_devices, num_devices + 16, 128):
-            s = torch.cuda.Stream(stream_id=3, device_index=di, device_type=1)
-            with self.assertRaisesRegex(RuntimeError, "Device index value"):
+            with self.assertRaisesRegex(RuntimeError, "Device index (must be|value)"):
+                s = torch.cuda.Stream(stream_id=3, device_index=di, device_type=1)
                 _ = s.cuda_stream
 
     def test_stream_event_repr(self):
