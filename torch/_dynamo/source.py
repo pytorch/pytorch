@@ -1100,11 +1100,6 @@ class ImportSource(Source):
 
     module_name: str
 
-    def __post_init__(self) -> None:
-        from .guards import GuardBuilder, install_guard
-
-        install_guard(self.make_guard(GuardBuilder.ID_MATCH))
-
     @functools.cached_property
     def _name_template(self) -> str:
         return f"__import__('{self.module_name}')"

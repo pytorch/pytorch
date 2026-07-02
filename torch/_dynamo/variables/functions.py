@@ -142,6 +142,8 @@ class ClosureConversionError(NotImplementedError):
 
 @functools.lru_cache
 def get_pytree_SUPPORTED_NODES_source() -> AttrSource:
+    # Cached, so callers are responsible for installing the ID_MATCH guard on the
+    # embedded ImportSource("torch") themselves.
     return AttrSource(
         AttrSource(AttrSource(ImportSource("torch"), "utils"), "_pytree"),
         "SUPPORTED_NODES",
@@ -3724,7 +3726,9 @@ class PyTreeGetNodeTypeFunctionVariable(UserFunctionVariable):
             type_source = TypeSource(args[0].source)
         python_type = args[0].python_type()
         if is_namedtuple_class(python_type):
-            type_source = AttrSource(ImportSource("collections"), "namedtuple")
+            collections_source = ImportSource("collections")
+            install_guard(collections_source.make_guard(GuardBuilder.ID_MATCH))
+            type_source = AttrSource(collections_source, "namedtuple")
             return VariableTracker.build(
                 tx, vars(collections)["namedtuple"], type_source
             )
@@ -3776,6 +3780,9 @@ class PyTreeTreeIsLeafFunctionVariable(UserFunctionVariable):
 
         # If the SUPPORTED_NODES was seen earlier and mutated, there would be a
         # source and that will give us the mutated SUPPORTED_NODES.
+        # get_pytree_SUPPORTED_NODES_source is cached, so install its
+        # ImportSource("torch") ID_MATCH guard here.
+        install_guard(ImportSource("torch").make_guard(GuardBuilder.ID_MATCH))
         supported_nodes_var = VariableTracker.build(
             tx,
             torch.utils._pytree.SUPPORTED_NODES,
