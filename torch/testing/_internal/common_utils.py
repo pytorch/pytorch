@@ -2418,7 +2418,7 @@ def setBlasBackendsToDefaultFinally(fn):
             if torch.backends.cuda.is_built():
                 torch._C._cuda_resetCublasWorkspaceSize()
                 torch._C._cuda_resetCublasLtWorkspaceSize()
-                torch.cuda._clear_cublas_workspaces()
+                torch._C._cuda_clearCublasWorkspaces()
     return _fn
 
 def setSdpaBackendsToDefaultFinally(fn):
@@ -2858,7 +2858,7 @@ class CudaMemoryLeakCheck:
             #   because the driver will always have some bytes in use (context size?)
             if caching_allocator_mem_allocated > 0:
                 gc.collect()
-                torch.cuda._clear_cublas_workspaces()
+                torch._C._cuda_clearCublasWorkspaces()
                 torch.cuda.empty_cache()
                 break
 
@@ -2876,17 +2876,17 @@ class CudaMemoryLeakCheck:
 
         self.testcase.before_cuda_memory_leak_check()
         gc.collect()
-        num_devices = torch.cuda.device_count()
-        torch.cuda._clear_cublas_workspaces()
+        torch._C._cuda_clearCublasWorkspaces()
         torch.cuda.empty_cache()
 
         # Compares caching allocator before/after statistics
         # An increase in allocated memory is a discrepancy indicating a possible
         #   memory leak
         discrepancy_detected = False
-        # avoid counting cublasWorkspace allocations
-        torch.cuda._clear_cublas_workspaces()
+        num_devices = torch.cuda.device_count()
         for i in range(num_devices):
+            # avoid counting cublasWorkspace allocations
+            torch._C._cuda_clearCublasWorkspaces()
             caching_allocator_mem_allocated = torch.cuda.memory_allocated(i)
 
             if caching_allocator_mem_allocated > self.caching_allocator_befores[i]:
