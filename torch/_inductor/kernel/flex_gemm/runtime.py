@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import os
 from typing import Any, TypeAlias
@@ -337,7 +338,6 @@ def dispatch_gemm_act(
         if local_reduce is not None:
             raise NotImplementedError(LOCAL_REDUCE_SWAP_AB_ERROR)
         quack_aux_outs = tuple(aux_out.mT for aux_out in aux_outs)
-        quack_local_reduce_out = None
         quack_c = None if C is None else C.mT
         row_args, col_args = col_args, row_args
         tile_args = tuple(tile.mT for tile in tile_args)
@@ -414,6 +414,7 @@ def gemm_epilogue(
     config_key: GemmConfigKey | None = None,
     expected_ndim: int | None = None,
     device_capacity_override: tuple[int, int] | None = None,
+    stream: int | None = None,
     quack_cache_dir: str | None = None,
 ) -> torch.Tensor:
     """Run a dense GEMM through QuACK with a CuTeDSL epilogue.
@@ -435,6 +436,7 @@ def gemm_epilogue(
         config_key: Optional explicit QuACK config key selected by Inductor autotune.
         expected_ndim: Optional generated-op rank contract for A and B operands.
         device_capacity_override: Parent-computed capability for compile-only workers.
+        stream: Optional raw CUDA stream pointer supplied by the generated wrapper.
         quack_cache_dir: Optional scoped cache root for Inductor-generated QuACK work.
 
     Returns:
@@ -532,7 +534,12 @@ def gemm_epilogue(
     )
     from torch._vendor.quack.cache import cache_dir_override
 
-    with cache_dir_override(quack_cache_dir):
+    stream_context = (
+        torch.cuda.stream(torch.cuda.ExternalStream(stream, device=a.device))
+        if stream is not None
+        else contextlib.nullcontext()
+    )
+    with cache_dir_override(quack_cache_dir), stream_context:
         dispatch_gemm_act(
             a,
             b,
