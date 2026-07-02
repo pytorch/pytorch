@@ -86,7 +86,7 @@ class LoggingTest(TestCase):
             self.assertEqual(
                 result.returncode,
                 0,
-                f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+                lambda msg: f"{msg}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}",
             )
             self.assertIn("issue173759 component log", result.stderr)
             self.assertIn("issue173759 artifact log", result.stderr)

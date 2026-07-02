@@ -101,6 +101,7 @@ class ConstDictVariable(VariableTracker):
 
     _nonvar_fields = {
         "user_cls",
+        "_checking_python_constant",
         *VariableTracker._nonvar_fields,
     }
 
@@ -116,6 +117,8 @@ class ConstDictVariable(VariableTracker):
             kwargs.pop("original_items")
         if "should_reconstruct_all" in kwargs:
             kwargs.pop("should_reconstruct_all")
+        if "_checking_python_constant" in kwargs:
+            kwargs.pop("_checking_python_constant")
 
         super().__init__(**kwargs)
 
@@ -146,6 +149,11 @@ class ConstDictVariable(VariableTracker):
         )
         self.original_items = items.copy()
         self.user_cls = user_cls
+        # Re-entrancy guard for is_python_constant against self-referential
+        # dicts (d[k] = d, directly or via an OrderedDict/defaultdict wrapper
+        # whose _base_vt is this instance). Both forms re-enter this same
+        # instance's is_python_constant, so a per-instance flag suffices.
+        self._checking_python_constant = False
 
     def _get_dict_cls_from_user_cls(self, user_cls: type) -> type:
         accepted_dict_types = (dict, collections.OrderedDict, collections.defaultdict)
@@ -177,6 +185,25 @@ class ConstDictVariable(VariableTracker):
             val_str = _item_debug_repr(v)
             items.append(f"{key_str}: {val_str}")
         return "{" + ", ".join(items) + "}"
+
+    def is_python_constant(self) -> bool:
+        # Avoid the base implementation, which probes as_python_constant() and
+        # thus rebuilds a real dict, re-hashing the keys (wrong for keys with a
+        # side-effecting __hash__).  Check element constness directly instead.
+        # Re-entrancy guard: a self-referential dict (d[k] = d, directly or via
+        # an OrderedDict/defaultdict wrapper delegating to this _base_vt) would
+        # otherwise recurse forever. A cyclic dict is not a flat python
+        # constant; return False so reconstruct handles the cycle.
+        if self._checking_python_constant:
+            return False
+        self._checking_python_constant = True
+        try:
+            return all(
+                k.vt.is_python_constant() and v.is_python_constant()
+                for k, v in self.items.items()
+            )
+        finally:
+            self._checking_python_constant = False
 
     def as_python_constant(self) -> dict[Any, Any]:
         return {
@@ -515,6 +542,19 @@ class ConstDictVariable(VariableTracker):
             tx.output.guard_on_key_order.add(self.source)
         return DictIterator(self.items.keys())
 
+    def tp_init_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        from . import DictBuiltinVariable
+
+        temp_dict_vt = DictBuiltinVariable.call_custom_dict(tx, dict, *args, **kwargs)
+        tx.output.side_effects.mutation(self)
+        self.items.update(temp_dict_vt.items)  # type: ignore[attr-defined]
+        return ConstantVariable.create(None)
+
     def call_method(
         self,
         tx: "InstructionTranslatorBase",
@@ -529,18 +569,9 @@ class ConstDictVariable(VariableTracker):
         # corresponding value VT. For __contains__, we add a DICT_CONTAINS
         # guard. But for all the other methods, we insert the DICT_KEYS_MATCH
         # guard to be conservative.
-        from . import DictBuiltinVariable
-
         Hashable = HashableTracker
 
-        if name == "__init__":
-            temp_dict_vt = DictBuiltinVariable.call_custom_dict(
-                tx, dict, *args, **kwargs
-            )
-            tx.output.side_effects.mutation(self)
-            self.items.update(temp_dict_vt.items)  # type: ignore[attr-defined]
-            return ConstantVariable.create(None)
-        elif name == "items":
+        if name == "items":
             if args or kwargs:
                 raise_args_mismatch(
                     tx,
@@ -743,7 +774,7 @@ class ConstDictVariable(VariableTracker):
 
     def nb_or_impl(
         self,
-        tx: Any,
+        tx: "InstructionTranslatorBase",
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
@@ -757,7 +788,7 @@ class ConstDictVariable(VariableTracker):
 
     def nb_inplace_or_impl(
         self,
-        tx: Any,
+        tx: "InstructionTranslatorBase",
         other: VariableTracker,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Objects/dictobject.c#L4660-L4667
@@ -1058,6 +1089,16 @@ class DictViewVariable(VariableTracker):
         if name in self.python_type().__dict__:
             return ConstantVariable.create(True)
         return ConstantVariable.create(False)
+
+    def var_getattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        # dictview_mapping getset returns a read-only mappingproxy of the
+        # underlying dict for dict_keys/values/items.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L5032-L5040
+        if name == "mapping":
+            return MappingProxyVariable(self.dv_dict)
+        return super().var_getattr(tx, name)
 
     def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         if self.kv == "keys":
@@ -1519,10 +1560,12 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
         return self.item_dict[name]
 
     def __setitem__(self, key: kV, value: VariableTracker) -> None:
-        # Find a way to not hash the key using HashableTracker
+        # Find a way to not hash the key using HashableTracker. CPython's
+        # instance __dict__ accepts arbitrary hashable keys when set via the
+        # mapping API (only attribute access via setattr requires str), and
+        # instance-dict mutations replay with object_setattr_ignore_descriptor
+        # (a plain __dict__ store), so a non-str constant key is fine.
         name = self._maybe_unwrap_key(key)
-        if not istype(name, str):
-            raise AssertionError(f"Expected str key, got {type(name)}")
         self.side_effects.store_instance_dict_attr(self.item, name, value)
 
     def __delitem__(self, key: kV) -> None:

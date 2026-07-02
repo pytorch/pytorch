@@ -22,9 +22,10 @@ void initPlacementBindings(PyObject* module) {
   auto py_module = py::reinterpret_borrow<py::module>(module);
   auto distributed_module = py_module.def_submodule("_distributed");
 
-  // Use CustomClassBase as the metaclass to allow isinstance(fake_obj, Placement) to
-  // work.
-  py::object opaque_base_module = py::module_::import("torch._custom_class_base");
+  // Use CustomClassBase as the metaclass to allow isinstance(fake_obj,
+  // Placement) to work.
+  py::object opaque_base_module =
+      py::module_::import("torch._custom_class_base");
   py::object opaque_base = opaque_base_module.attr("CustomClassBaseMeta");
 
   auto placement_cls =

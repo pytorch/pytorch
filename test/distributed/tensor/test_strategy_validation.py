@@ -732,7 +732,7 @@ class TestCreatePartialInput(TestCase):
                         self.assertNotEqual(
                             vals[idx],
                             vals[idx + 1],
-                            f"Mask should alternate along dim 0 at [{':,'}{j},{k},{l}], "
+                            lambda msg: f"{msg}\nMask should alternate along dim 0 at [{':,'}{j},{k},{l}], "
                             f"got {vals}",
                         )
 
@@ -765,7 +765,7 @@ class TestCreatePartialInput(TestCase):
             self.assertNotEqual(
                 r0.argmin().item(),
                 r1.argmin().item(),
-                f"P({reduce_op}) ranks should disagree on argmin with adaptive offset",
+                lambda msg: f"{msg}\nP({reduce_op}) ranks should disagree on argmin with adaptive offset",
             )
 
 
@@ -1445,7 +1445,7 @@ class TestMainModule(TestCase):
         self.assertEqual(
             result.returncode,
             0,
-            f"Module exited with code {result.returncode}.\n"
+            lambda msg: f"{msg}\nModule exited with code {result.returncode}.\n"
             f"stderr: {result.stderr[-2000:]}",
         )
         return result.stdout

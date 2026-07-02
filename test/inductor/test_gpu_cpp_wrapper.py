@@ -7,11 +7,12 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 import torch
 from torch._inductor import config
 from torch._inductor.codegen.common import TritonScratchWorkspace
+from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
 from torch._inductor.codegen.cpp_wrapper_gpu import (
     CppWrapperGpu,
     DeferredTritonCallWrapper,
@@ -97,6 +98,27 @@ def _register_fbcode_cpp_wrapper_arg_helper_op(m, device):
 
 class TestGpuWrapper(InductorTestCase):
     device = GPU_TYPE
+
+    def test_cpp_wrapper_compile_timing_recorded(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+
+        from torch._dynamo.utils import compilation_time_metrics
+        from torch._inductor.utils import fresh_cache
+
+        def fn(x, y):
+            return (x @ y).relu()
+
+        x = torch.randn(64, 64, device=self.device)
+        y = torch.randn(64, 64, device=self.device)
+        compilation_time_metrics.pop("cpp_wrapper_compile", None)
+        with fresh_cache():
+            compiled = torch.compile(options={"cpp_wrapper": True})(fn)
+            result = compiled(x, y)
+        self.assertEqual(result, fn(x, y))
+        self.assertIn("cpp_wrapper_compile", compilation_time_metrics)
+        durations = compilation_time_metrics["cpp_wrapper_compile"]
+        self.assertTrue(any(t > 0 for t in durations))
 
     def test_aoti_debug_printer_works_on_constants(self):
         batch_size = 32
@@ -224,10 +246,43 @@ class TestGpuWrapper(InductorTestCase):
             actual = torch.compile(fullgraph=True, options={"cpp_wrapper": True})(fn)(x)
             self.assertEqual(actual, expected)
 
-    def test_cpp_scratch_scales_with_grid_size_for_tma(self):
-        if GPU_TYPE != "cuda" or torch.version.hip:
-            self.skipTest("CUDA-only codegen test")
+    @config.patch(implicit_fallbacks=True)
+    def test_custom_op_fallback_symint_dispatch(self):
+        # A custom op with a SymInt argument (e.g.
+        # fbgemm::permute_2D_sparse_data_input1D) must not be routed to the
+        # StableIValue path.  SymInt is reported as IntType by JitType.type, so
+        # such ops used to pass _compatible_with_stableivalue and then fail at
+        # runtime with 'aoti_torch_call_dispatcher(...) API call failed'.  They
+        # must use the boxed dispatch path, which handles c10::SymInt correctly.
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
 
+        device = self.device
+        with torch.library._scoped_library("mylib_symint", "FRAGMENT") as m:
+            m.define("add_symint(Tensor x, SymInt n) -> Tensor")
+            m.impl("add_symint", lambda x, n: x + n, GPU_TYPE.upper())
+            m.impl("add_symint", lambda x, n: torch.empty_like(x), "Meta")
+
+            op = torch.ops.mylib_symint.add_symint.default
+            self.assertFalse(CppWrapperCpu._compatible_with_stableivalue(op))
+            self.assertTrue(CppWrapperCpu._compatible_with_cpp_boxed_dispatch(op))
+
+            def fn(x):
+                # x.shape[0] is symbolic once dim 0 is dynamic, so n is a SymInt.
+                return torch.ops.mylib_symint.add_symint(x, x.shape[0])
+
+            x = torch.randn(8, 4, device=device)
+            torch._dynamo.mark_dynamic(x, 0)
+            expected = fn(x)
+            compiled = torch.compile(fullgraph=True, options={"cpp_wrapper": True})(fn)
+            actual, code = test_torchinductor.run_and_get_cpp_code(compiled, x)
+            self.assertEqual(actual, expected)
+            self.assertNotIn(
+                'aoti_torch_call_dispatcher("mylib_symint::add_symint"', code
+            )
+
+    @skipIfXpu(msg="tests CUDA/ROCm CUDADeviceOpOverrides codegen")
+    def test_cpp_scratch_scales_with_grid_size_for_tma(self):
         scratch_def, scratch_var = CUDADeviceOpOverrides().cpp_scratch(
             0,
             TritonScratchWorkspace(
@@ -240,10 +295,8 @@ class TestGpuWrapper(InductorTestCase):
             "static_cast<int64_t>(256) * grid_0 * grid_1 * grid_2", scratch_def[0]
         )
 
+    @skipIfXpu(msg="tests CUDA/ROCm CUDADeviceOpOverrides codegen")
     def test_triton_wrapper_scales_scratch_with_num_ctas(self):
-        if GPU_TYPE != "cuda" or torch.version.hip:
-            self.skipTest("CUDA-only codegen test")
-
         class FakeWrapper:
             device = "cuda"
 
@@ -334,7 +387,7 @@ class TestGpuWrapper(InductorTestCase):
                 self.assertEqual(
                     xblocks,
                     [DEFAULT_COMBO_BLOCK_SIZE_1D],
-                    f"{name} got xblocks={xblocks}, "
+                    lambda msg: f"{msg}\n{name} got xblocks={xblocks}, "
                     f"expected [{DEFAULT_COMBO_BLOCK_SIZE_1D}]",
                 )
 
@@ -489,6 +542,29 @@ class TestGpuWrapper(InductorTestCase):
         opt_fn = torch.compile(fn, fullgraph=True, options={"cpp_wrapper": True})
         self.assertEqual(opt_fn(xs), expected)
 
+    def test_any_fallback_cpp_wrapper(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+
+        with torch.library._scoped_library("mylib_fallback", "FRAGMENT") as m:
+            m.define("any_fallback(Tensor x, Any y) -> Tensor")
+
+            def any_fallback(x: torch.Tensor, y: Any) -> torch.Tensor:
+                torch._check(y is not None)
+                return x.clone()
+
+            m.impl("any_fallback", any_fallback, GPU_TYPE.upper())
+            m.impl("any_fallback", any_fallback, "Meta")
+
+            @torch.compile(fullgraph=True, options={"cpp_wrapper": True})
+            def test_fn(x: torch.Tensor, y: Any) -> torch.Tensor:
+                return torch.ops.mylib_fallback.any_fallback(x, y)
+
+            test_fn(
+                torch.randn(4, device=self.device), torch.randn(4, device=self.device)
+            )
+            test_fn(torch.randn(4, device=self.device), "string")
+
 
 instantiate_parametrized_tests(TestGpuWrapper)
 
@@ -558,7 +634,11 @@ class TestLazyCompileKernelCollision(InductorTestCase):
                 text=True,
                 env=env,
             )
-            self.assertEqual(r1.returncode, 0, f"Cold run failed:\n{r1.stderr[-2000:]}")
+            self.assertEqual(
+                r1.returncode,
+                0,
+                lambda msg: f"{msg}\nCold run failed:\n{r1.stderr[-2000:]}",
+            )
             # Second run: warm caches trigger the collision without the fix.
             r2 = subprocess.run(
                 [sys.executable, "-c", _LAZY_COMPILE_COLLISION_SCRIPT],
@@ -567,7 +647,11 @@ class TestLazyCompileKernelCollision(InductorTestCase):
                 text=True,
                 env=env,
             )
-            self.assertEqual(r2.returncode, 0, f"Warm run failed:\n{r2.stderr[-2000:]}")
+            self.assertEqual(
+                r2.returncode,
+                0,
+                lambda msg: f"{msg}\nWarm run failed:\n{r2.stderr[-2000:]}",
+            )
 
 
 # Helper script for test_static_init_dlopen_does_not_deadlock
@@ -628,7 +712,7 @@ class TestCppWrapperStaticInitDeadlock(InductorTestCase):
         self.assertEqual(
             r.returncode,
             0,
-            f"Subprocess failed:\nstderr:\n{r.stderr[-2000:]}\nstdout:\n{r.stdout[-2000:]}",
+            lambda msg: f"{msg}\nSubprocess failed:\nstderr:\n{r.stderr[-2000:]}\nstdout:\n{r.stdout[-2000:]}",
         )
 
 
@@ -768,7 +852,7 @@ class TestLazyTmaGlobalScratch(InductorTestCase):
         self.assertEqual(
             result.returncode,
             0,
-            "lazy TMA scratch regression subprocess failed:\n"
+            lambda msg: f"{msg}\nlazy TMA scratch regression subprocess failed:\n"
             f"returncode: {result.returncode}\n"
             f"stderr tail:\n{stderr_tail}",
         )

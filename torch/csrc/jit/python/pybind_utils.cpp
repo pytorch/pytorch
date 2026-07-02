@@ -1016,8 +1016,8 @@ std::optional<InferredType> detail::_tryToInferTypeImpl(py::handle input) {
   }
   // During Dynamo tracing with compile-on-one-rank (CooR), opaque reference
   // types like ProcessGroup are wrapped in FakeScriptObject.  Python-level
-  // isinstance() sees through the wrapper (via CustomClassBaseMeta), but the C++
-  // py::isinstance above does too — yet the subsequent pybind11 cast would
+  // isinstance() sees through the wrapper (via CustomClassBaseMeta), but the
+  // C++ py::isinstance above does too -- yet the subsequent pybind11 cast would
   // fail because FakeScriptObject is not a C++ bound object.  Detect this
   // case by checking for the wrapped real_obj attribute.
   if (py::hasattr(input, "real_obj")) {

@@ -34,6 +34,7 @@ from .common import (
     freeze_irnodes,
     get_fwd_subgraph_outputs,
     infer_dense_strides,
+    is_tensor_ir_node,
     load_flex_template,
     maybe_realize,
     realize_captures_for_cutedsl,
@@ -565,9 +566,9 @@ def flex_attention(
     out, _ = autotune_select_algorithm(
         "flex_attention",
         choices,
-        # Need to filter out symbols since there is an invariant
-        # that all input_nodes are of type IRNode
-        [x for x in inputs_for_autotuning if isinstance(x, torch._inductor.ir.IRNode)],
+        # Autotuning materializes benchmark tensors. Scalar shape captures stay
+        # in subgraph_inps below for dependency tracking and codegen.
+        [x for x in inputs_for_autotuning if is_tensor_ir_node(x)],
         layout,
         input_gen_fns=input_gen_fns,
     )
@@ -1107,6 +1108,9 @@ def flex_attention_backward(*args, **kwargs):
             SPARSE_KV_BLOCK_SIZE,
         )
 
+    score_mod_other_buffers = maybe_realize(score_mod_other_buffers)
+    mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
+
     inputs_for_autotuning = (
         [
             query,
@@ -1144,7 +1148,9 @@ def flex_attention_backward(*args, **kwargs):
     broadcasted_grad_key, _ = autotune_select_algorithm(
         "flex_attention_backward",
         choices,
-        [x for x in inputs_for_autotuning if isinstance(x, torch._inductor.ir.IRNode)],
+        # Autotuning materializes benchmark tensors. Scalar shape captures stay
+        # in subgraph_inps below for dependency tracking and codegen.
+        [x for x in inputs_for_autotuning if is_tensor_ir_node(x)],
         layout_broadcasted_k,
         input_gen_fns=input_gen_fns,
     )  # [Bq, Hkv, seq_len_kv, k_head_dim]

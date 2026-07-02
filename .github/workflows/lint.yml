@@ -102,6 +102,8 @@ jobs:
       script: |
         CHANGED_FILES="${{ needs.get-changed-files.outputs.changed-files }}"
         echo "Running all other linters"
+        # Cap parallelism to the pod's CPU budget; os.cpu_count() overcounts on k8s and OOMs.
+        export MAX_JOBS="$(nproc --ignore=2)"
         if [ "$CHANGED_FILES" = '*' ]; then
           ADDITIONAL_LINTRUNNER_ARGS="--skip CLANGTIDY,CLANGTIDY_EXECUTORCH_COMPATIBILITY,CLANGFORMAT,PYREFLY --all-files" .github/scripts/lintrunner.sh
         else

@@ -4136,6 +4136,10 @@ class Scheduler:
         with dynamo_timed("Scheduler.__init__"):
             self._init(nodes)
 
+    @staticmethod
+    def count_kernel_nodes(nodes: Sequence[BaseSchedulerNode]) -> int:
+        return sum(1 for node in nodes if not isinstance(node, NopKernelSchedulerNode))
+
     def _init(self, nodes: list[ir.Operation]) -> None:
         super().__init__()
         V.graph.scheduler = self
@@ -4325,6 +4329,24 @@ class Scheduler:
                     ),
                 )
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
+
+        if config.aten_distributed_optimizations.enable_simple_overlap:
+            if (
+                not config.reorder_for_peak_memory
+                and not config.reorder_for_compute_comm_overlap
+            ):
+                from .memory import assign_memory_planning_info_for_scheduler_buffers
+
+                assign_memory_planning_info_for_scheduler_buffers(
+                    self.nodes, self.name_to_buf
+                )
+            with dynamo_timed(
+                "Scheduler.simple_overlap",
+                log_pt2_compile_event=True,
+                log_waitcounter=True,
+            ):
+                self.nodes = comms.simple_overlap(self.nodes)
+
         self.process_grouped_nodes()
 
         if (
@@ -4692,6 +4714,13 @@ class Scheduler:
                     )
                 for alt_name in buf.get_mutations():
                     alt_name = rename(alt_name)
+                    is_ordering_only = getattr(buf, "ordering_only", False)
+                    if is_ordering_only:
+                        add_user(alt_name, node, is_weak=True)
+                        node.add_fake_dep(
+                            WeakDep(alt_name, mutating_buf=buf.get_name(), is_fake=True)
+                        )
+                        continue
                     # this node must run after the prior writer
                     add_user(alt_name, node)
                     node.add_fake_dep(StarDep(alt_name, mode=node_mode))
@@ -7679,10 +7708,24 @@ class Scheduler:
                 )
             written_buffer_name = node1.node.mutation_outputs[0].name
 
-            # The epilogue can only read from the output buffer.
+            # The epilogue must be an in-place, unary pointwise operation.
             # Any other tensor/s would require additional load expressions.
-            if any(dep.name != written_buffer_name for dep in node2.read_writes.reads):
-                why("epilogue reads from buffers other than the mutated output")
+            epilogue_reads = list(node2.read_writes.reads)
+            epilogue_writes = list(node2.read_writes.writes)
+            if (
+                len(epilogue_reads) != 1
+                or len(epilogue_writes) != 1
+                or epilogue_reads[0].name != written_buffer_name
+            ):
+                why("epilogue is not a unary read of the output buffer")
+                return False
+
+            write_dep = epilogue_writes[0]
+            read_dep = epilogue_reads[0]
+            assert isinstance(read_dep, MemoryDep)  # noqa: S101
+            assert isinstance(write_dep, MemoryDep)  # noqa: S101
+            if read_dep.index != write_dep.index or read_dep.size != write_dep.size:
+                why("epilogue's read and write indices differ")
                 return False
 
             # the epilogue depends on expressions which may not available in the user triton kernel
@@ -8955,9 +8998,9 @@ class Scheduler:
         name_to_graph_input_index = {
             name: idx for idx, name in enumerate(V.graph.graph_inputs)
         }
-        name_to_graph_output_index = {
-            name: idx for idx, name in enumerate(V.graph.get_output_names())
-        }
+        name_to_graph_output_indices: dict[str, list[int]] = defaultdict(list)
+        for idx, name in enumerate(V.graph.get_output_names()):
+            name_to_graph_output_indices[name].append(idx)
 
         V.graph.partition_maps = []
         for partition_id, signature in enumerate(signatures):
@@ -8974,7 +9017,9 @@ class Scheduler:
 
             output_mapping = []
             for node in signature.output_nodes:
-                output_mapping.append(name_to_graph_output_index.get(node.get_name()))
+                output_mapping.append(
+                    name_to_graph_output_indices.get(node.get_name(), [])
+                )
 
             V.graph.partition_maps.append(
                 GraphPartitionMap(
@@ -9394,12 +9439,7 @@ class Scheduler:
         if min_size > 0:
             for i, (partition, skip) in enumerate(zip(partitions, skip_cudagraphs)):
                 if not skip:
-                    # Count kernels excluding NopKernelSchedulerNode
-                    kernel_count = sum(
-                        1
-                        for n in partition
-                        if not isinstance(n, NopKernelSchedulerNode)
-                    )
+                    kernel_count = self.count_kernel_nodes(partition)
                     if kernel_count < min_size:
                         skip_cudagraphs[i] = True
                         cudagraphs_log.debug(

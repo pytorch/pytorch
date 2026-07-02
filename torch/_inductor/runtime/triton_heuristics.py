@@ -37,6 +37,7 @@ from torch._inductor.config import triton as inductor_triton_config
 from torch._prims_common import compute_required_storage_length
 from torch.utils._debug_mode import get_active_debug_mode
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._triton import get_triton_version
 
 from ..triton_bundler import TritonBundler
 from ..utils import (
@@ -119,6 +120,22 @@ class NoTritonConfigsError(RuntimeError):
     pass
 
 
+def _should_enable_triton_debug_asserts(inductor_meta: dict[str, Any]) -> bool:
+    """
+    Enable Triton debug asserts whenever indirect indexing asserts are on,
+    except on HIP where older Triton releases lack the required support.
+
+    Triton 3.7 is the first release that includes the upstream debug-assert
+    support needed by ROCm, so HIP kernels must keep this disabled below that
+    version to remain compatible.
+    """
+    if not inductor_meta.get("assert_indirect_indexing", True):
+        return False
+    if not inductor_meta.get("is_hip", False):
+        return True
+    return get_triton_version() >= (3, 7)
+
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Container, Hashable
 
@@ -141,6 +158,7 @@ if get_args(_KernelType) != _T.__constraints__:
     raise AssertionError("_KernelType args must match _T type constraints")
 
 log = logging.getLogger(__name__)
+autotuning_inputs_log = torch._logging.getArtifactLogger(__name__, "autotuning_inputs")
 
 triton_name_sub = re.compile(r"^def [^(]+\(")
 
@@ -716,13 +734,31 @@ class CachingAutotuner(KernelInterface):
             and self.inductor_meta.get("dynamic_scale_rblock", True)
             and not self.inductor_meta.get("persistent_reduction")
             and self.heuristic_type == HeuristicType.REDUCTION
-            and self.size_hints is not None
+            # Combo kernels with per-subkernel blocks set size_hints=None but
+            # carry per-subkernel size hints in combo_grid_meta.
+            and (self.size_hints is not None or self._combo_has_reduction_subkernel)
             # Disable for Intel as Triton is not ready to return n_regs for a compiled_binary.
             and device_prop.type in ["cuda", "hip"]
             and bool(device_prop.major)
             and (device_prop.major >= 8 or torch.version.hip)
             and device_prop.regs_per_multiprocessor is not None
             and device_prop.warp_size is not None
+        )
+
+    @functools.cached_property
+    def _combo_has_reduction_subkernel(self) -> bool:
+        """True for a combo kernel (per-subkernel blocks) with a non-persistent
+        reduction sub-kernel; these carry size_hints=None at the autotuner level."""
+        combo_meta = self.inductor_meta.get("combo_grid_meta")
+        if combo_meta is None or "heuristic_0" not in combo_meta:
+            return False
+        # No-bench stitched combos use a single fixed config and don't autotune;
+        # don't add scaling candidates for them.
+        if "stitched_num_warps" in combo_meta:
+            return False
+        return any(
+            combo_meta.get(f"heuristic_{i}") == "reduction"
+            for i in range(combo_meta["num_kernels"])
         )
 
     def _iter_rblock_scale_candidates(self):
@@ -745,19 +781,44 @@ class CachingAutotuner(KernelInterface):
             raise AssertionError("device_prop.warp_size is not set")
         seen_config_hashes: OrderedSet[Hashable] | None = None
         warp_size = device_prop.warp_size
+        # Combo kernels with per-subkernel blocks pass size_hints=None and carry
+        # per-subkernel xnumel_i / XBLOCK_i in combo_grid_meta. Only total_block
+        # is derived differently; reduction-block selection and the occupancy
+        # logic below are shared with the single-kernel path.
+        combo_meta = (
+            self.inductor_meta.get("combo_grid_meta")
+            if self.size_hints is None
+            else None
+        )
         for result in self.compile_results:
             triton_config = result.config
             compiled_binary = result.kernel
-            if len(self.size_hints) < 2:
-                raise AssertionError(
-                    f"Expected at least 2 size_hints, got {len(self.size_hints)}"
-                )
-            xblock = triton_config.kwargs.get("XBLOCK", 1)
+            if combo_meta is not None:
+                # Combo grid sums each sub-kernel's blocks (SequentialFlatten);
+                # xnumel_i is None for dynamic shapes, so those dims are skipped.
+                total_block = 0
+                for i in range(combo_meta["num_kernels"]):
+                    xnumel = combo_meta.get(f"xnumel_{i}")
+                    if isinstance(xnumel, int):
+                        xblock = triton_config.kwargs.get(f"XBLOCK_{i}", 1)
+                        total_block += (xnumel + xblock - 1) // xblock
+            else:
+                if len(self.size_hints) < 2:
+                    raise AssertionError(
+                        f"Expected at least 2 size_hints, got {len(self.size_hints)}"
+                    )
+                xblock = triton_config.kwargs.get("XBLOCK", 1)
+                total_block = (self.size_hints["x"] + xblock - 1) // xblock
+            # Tunable reduction blocks. Combo's per-subkernel kwargs are suffixed
+            # (R0_BLOCK_0, R1_BLOCK_0, R0_BLOCK_1, ...); persistent/pointwise
+            # sub-kernels carry no R*_BLOCK kwarg so they drop out naturally. Same
+            # rule for both paths.
             reduction_kwargs = [
                 kwarg for kwarg in triton_config.kwargs if kwarg.startswith("R")
             ]
+            if not reduction_kwargs:
+                continue
             rblocks = [triton_config.kwargs[kwarg] for kwarg in reduction_kwargs]
-            total_block = (self.size_hints["x"] + xblock - 1) // xblock
             nreg = getattr(compiled_binary, "n_regs", None)
             if nreg is None:
                 continue
@@ -811,7 +872,7 @@ class CachingAutotuner(KernelInterface):
             min_rblock = self.inductor_meta.get("min_rblock")
             if (
                 min_rblock is not None
-                and largest_rkwarg == "R0_BLOCK"
+                and largest_rkwarg.startswith("R0_BLOCK")
                 and new_rblock < min_rblock
             ):
                 continue
@@ -834,6 +895,33 @@ class CachingAutotuner(KernelInterface):
             )
             self._ensure_kernel_loaded()
             yield new_config
+
+            # Combo kernels additionally offer an all-reduction-blocks-halved
+            # candidate. A combo's register count is the max across sub-kernel
+            # branches, so a balanced combo (sub-kernels with similar register
+            # use) only drops below the occupancy limit when every branch
+            # shrinks, not just the largest.
+            if combo_meta is not None and len(reduction_kwargs) > 1:
+                all_halved = copy.deepcopy(triton_config)
+                too_small = False
+                for kwarg in reduction_kwargs:
+                    halved = triton_config.kwargs[kwarg] // 2
+                    # A block that is already 1 would halve to 0 (invalid -> Triton
+                    # compile error). Skip the candidate rather than emit a 0 block.
+                    if halved < 1 or (
+                        min_rblock is not None
+                        and kwarg.startswith("R0_BLOCK")
+                        and halved < min_rblock
+                    ):
+                        too_small = True
+                        break
+                    all_halved.kwargs[kwarg] = halved
+                if not too_small:
+                    all_hash = triton_config_to_hashable(all_halved)
+                    if all_hash not in seen_config_hashes:
+                        seen_config_hashes.add(all_hash)
+                        self._ensure_kernel_loaded()
+                        yield all_halved
 
     def _dynamic_scale_rblock(self):
         if (
@@ -1073,7 +1161,7 @@ class CachingAutotuner(KernelInterface):
                 cfg, "num_buffers_warp_spec", 0
             )
 
-        compile_meta["debug"] = self.inductor_meta.get("assert_indirect_indexing", True)
+        compile_meta["debug"] = _should_enable_triton_debug_asserts(self.inductor_meta)
 
         # device type will be "hip" rather than "cuda" here
         compile_meta["device_type"] = self.device_props.type
@@ -1503,6 +1591,79 @@ class CachingAutotuner(KernelInterface):
                         close()
             self.compile_results = keep_results
 
+    def _log_autotune_inputs(self, args, kwargs) -> None:
+        """Log input tensor shapes/dtypes and scalar values for autotuning."""
+        kernel_name = self.inductor_meta.get("kernel_name", self.fn.__name__)
+        signature = self.triton_meta.get("signature", {})
+        arg_names = list(signature.keys())
+
+        autotuning_inputs_log.debug("=" * 60)
+        autotuning_inputs_log.debug("Autotuning inputs for kernel: %s", kernel_name)
+        autotuning_inputs_log.debug("=" * 60)
+        autotuning_inputs_log.debug("  Heuristic type: %s", self.heuristic_type)
+        autotuning_inputs_log.debug("  Size hints: %s", self.size_hints)
+        autotuning_inputs_log.debug(
+            "  Num configs to benchmark: %d", len(self.launchers)
+        )
+        autotuning_inputs_log.debug(
+            "  Device: %s (index=%s)", self.device_props.type, self.device_props.index
+        )
+        autotuning_inputs_log.debug("-" * 60)
+        autotuning_inputs_log.debug("Arguments:")
+
+        for i, arg in enumerate(args):
+            arg_name = arg_names[i] if i < len(arg_names) else f"arg_{i}"
+            arg_signature = signature.get(arg_name, "unknown")
+            if isinstance(arg, torch.Tensor):
+                autotuning_inputs_log.debug(
+                    "  [%d] %s (%s): Tensor(shape=%s, dtype=%s, device=%s, stride=%s, contiguous=%s)",
+                    i,
+                    arg_name,
+                    arg_signature,
+                    tuple(arg.shape),
+                    arg.dtype,
+                    arg.device,
+                    arg.stride(),
+                    arg.is_contiguous(),
+                )
+            elif isinstance(arg, (int, float, bool)):
+                autotuning_inputs_log.debug(
+                    "  [%d] %s (%s): %s (type=%s)",
+                    i,
+                    arg_name,
+                    arg_signature,
+                    arg,
+                    type(arg).__name__,
+                )
+            else:
+                autotuning_inputs_log.debug(
+                    "  [%d] %s (%s): %s (type=%s)",
+                    i,
+                    arg_name,
+                    arg_signature,
+                    repr(arg)[:100],
+                    type(arg).__name__,
+                )
+
+        if kwargs:
+            autotuning_inputs_log.debug("-" * 60)
+            autotuning_inputs_log.debug("Keyword arguments:")
+            for k, v in kwargs.items():
+                if isinstance(v, torch.Tensor):
+                    autotuning_inputs_log.debug(
+                        "  %s: Tensor(shape=%s, dtype=%s, device=%s)",
+                        k,
+                        tuple(v.shape),
+                        v.dtype,
+                        v.device,
+                    )
+                else:
+                    autotuning_inputs_log.debug(
+                        "  %s: %s (type=%s)", k, v, type(v).__name__
+                    )
+
+        autotuning_inputs_log.debug("=" * 60)
+
     def benchmark_all_configs(self, *args, **kwargs):
         with (
             dynamo_timed(
@@ -1567,7 +1728,10 @@ class CachingAutotuner(KernelInterface):
             return timings
 
     def autotune_to_one_config(self, *args, **kwargs):
-        """Do the actual autotuning"""
+        """Execute autotuning to select the optimal kernel configuration."""
+        if autotuning_inputs_log.isEnabledFor(logging.DEBUG):
+            self._log_autotune_inputs(args, kwargs)
+
         start_time = time.time_ns()
         timings = self.benchmark_all_configs(*args, **kwargs)
         benchmark_time_taken_ns = time.time_ns() - start_time

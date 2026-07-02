@@ -322,6 +322,10 @@ if(USE_CUFILE AND NOT USE_ROCM)
   target_compile_definitions(torch_python PRIVATE USE_CUFILE)
 endif()
 
+if(BUILD_LAZY_TS_BACKEND)
+  target_compile_definitions(torch_python PRIVATE BUILD_LAZY_TS_BACKEND)
+endif()
+
 if(HAVE_SOVERSION)
   set_target_properties(torch_python PROPERTIES
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
@@ -472,27 +476,38 @@ if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
   # ---[ NCCL EP extension (torch._nccl_ep)
   # Optional standalone extension holding the NCCL EP bindings, imported lazily
   # by torch/distributed/_token_switch.py so libtorch_cuda never references
-  # ncclEp*. It statically links libnccl_ep.a (from the same submodule build as
-  # torch's NCCL), so the extension is self-contained: its nccl* references bind
-  # to torch_cuda's embedded NCCL, and there is no runtime libnccl_ep.so or
-  # nccl4py dependency. The runtime JIT headers come from the submodule build
-  # dir, baked in below.
+  # ncclEp*. How it links libnccl_ep follows how torch links NCCL:
+  #  - USE_SYSTEM_NCCL=OFF: __caffe2_nccl_ep is libnccl_ep.a, statically linked
+  #    here -- self-contained (nccl* bind to torch_cuda's embedded NCCL; JIT
+  #    headers baked from the submodule build dir; no nccl4py).
+  #  - USE_SYSTEM_NCCL=ON: __caffe2_nccl_ep is libnccl_ep.so, NEEDED-linked here
+  #    and resolved from the nccl4py wheel at runtime (RPATH to nccl/ep/lib; JIT
+  #    headers also from nccl4py, so nothing is baked).
   if(USE_NCCL_EP)
     Python_add_library(_nccl_ep MODULE WITH_SOABI
       "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/nccl_ep.cu"
       "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/nccl_ep_pybind.cpp")
-    target_compile_definitions(_nccl_ep PRIVATE USE_NCCL_EP USE_C10D_NCCL
-      # Default NCCL_EP_HOME / NCCL_HOME for nccl-ep's runtime JIT; the extension
-      # sets these at import (without overriding a user-provided value).
-      "NCCL_EP_JIT_HOME=\"${NCCL_EP_JIT_HOME}\"")
+    target_compile_definitions(_nccl_ep PRIVATE USE_NCCL_EP USE_C10D_NCCL)
     # torch_python: pybind + Tensor/ProcessGroup casters; torch_cuda:
     # ProcessGroupNCCL::getCommPtr, getNcclDataType, CUDA stream, embedded NCCL;
-    # __caffe2_nccl_ep: libnccl_ep.a (static) + nccl_ep headers.
+    # __caffe2_nccl_ep: libnccl_ep (static .a or shared .so) + nccl_ep headers.
     target_link_libraries(_nccl_ep PRIVATE
       torch_python torch_cuda __caffe2_nccl_ep pybind::pybind11)
     set_target_properties(_nccl_ep PROPERTIES
-      LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/torch"
-      INSTALL_RPATH "${_rpath_portable_origin}/lib")
+      LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/torch")
+    if(USE_SYSTEM_NCCL)
+      # Dynamic: resolve nccl4py's libnccl_ep.so (site-packages/nccl/ep/lib, one
+      # dir up from torch/ via $ORIGIN/..) at import.
+      set_target_properties(_nccl_ep PROPERTIES
+        INSTALL_RPATH "${_rpath_portable_origin}/lib;${_rpath_portable_origin}/../nccl/ep/lib")
+    else()
+      # Static: only torch's own libs needed; bake the in-tree JIT header dir so
+      # the extension self-configures NCCL_EP_HOME / NCCL_HOME at import.
+      target_compile_definitions(_nccl_ep PRIVATE
+        "NCCL_EP_JIT_HOME=\"${NCCL_EP_JIT_HOME}\"")
+      set_target_properties(_nccl_ep PROPERTIES
+        INSTALL_RPATH "${_rpath_portable_origin}/lib")
+    endif()
     if(NOT WIN32)
       set_target_properties(_nccl_ep PROPERTIES C_VISIBILITY_PRESET "default")
     endif()

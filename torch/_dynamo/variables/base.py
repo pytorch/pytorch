@@ -28,7 +28,7 @@ from typing import Any, NoReturn, TYPE_CHECKING
 
 from .. import graph_break_hints, variables
 from ..current_scope_id import current_scope_id
-from ..exc import raise_observed_exception, unimplemented
+from ..exc import raise_observed_exception, raise_type_error, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, Source
 from ..utils import format_source_range, istype, raise_args_mismatch
@@ -674,12 +674,38 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             hints=[*graph_break_hints.SUPPORTABLE],
         )
 
+    def tp_init_impl(
+        self,
+        tx: InstructionTranslatorBase,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        """tp_init slot (__init__). VTs override to initialize instances."""
+        unimplemented(
+            gb_type="missing tp_init",
+            context=f"tp_init_impl not implemented for {self.python_type_name()}",
+            explanation=f"Dynamo does not know how to trace __init__ on `{self.debug_repr()}`.",
+            hints=[*graph_break_hints.DYNAMO_BUG],
+        )
+
     def call_function(
         self,
         tx: Any,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        # Reaching this base fallback means no subclass handled the call. If the
+        # object's type has no tp_call slot, it is genuinely not callable, so
+        # mirror CPython's PyObject_Call TypeError. Otherwise the type is
+        # callable in principle but unsupported by Dynamo -> graph break.
+        from .object_protocol import pycallable_check
+
+        try:
+            obj_type = self.python_type()
+        except NotImplementedError:
+            obj_type = None
+        if obj_type is not None and not pycallable_check(obj_type):
+            raise_type_error(tx, f"'{self.python_type_name()}' object is not callable")
         unimplemented(
             gb_type="Unsupported function call",
             context=f"call_function {self} {args} {kwargs}",
@@ -852,6 +878,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return self.tp_iter_impl(tx)
         elif name == "__next__" and not args and not kwargs:
             return self.tp_iternext_impl(tx)
+        elif name == "__init__":
+            return self.tp_init_impl(tx, args, kwargs)
+        elif name == "__call__":
+            return self.call_function(tx, args, kwargs)
         elif name == "__contains__" and not kwargs:
             if len(args) != 1:
                 msg = VariableTracker.build(tx, f"expected 1 argument, got {len(args)}")
@@ -1237,31 +1267,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             explanation=(
                 f"Dynamo does not support next() on {self.python_type_name()}."
                 " Add tp_iternext_impl to this VariableTracker subclass."
-            ),
-            hints=[*graph_break_hints.SUPPORTABLE],
-        )
-
-    def tp_iteritem_impl(
-        self, tx: InstructionTranslatorBase, index: VariableTracker
-    ) -> tuple[VariableTracker, VariableTracker]:
-        """
-        Implements the 3.15 _tp_iteritem slot used by the virtual-iterator
-        FOR_ITER/SEND fast paths.
-
-        Mirrors CPython's slot signature: takes (self, index) and returns
-        (next_value, next_index).  Exhaustion is signaled by raising
-        StopIteration via raise_observed_exception, matching how the rest
-        of Dynamo signals iterator end.
-
-        ref: https://github.com/python/cpython/blob/f31a89bb901067dd105b00cfa90523cf7ffdbbdd/Include/object.h#L312-L313
-        """
-        unimplemented(
-            gb_type="Missing tp_iteritem",
-            context=f"_tp_iteritem on {self.python_type_name()}",
-            explanation=(
-                f"Dynamo does not support virtual iteration on "
-                f"{self.python_type_name()}."
-                " Add tp_iteritem_impl to this VariableTracker subclass."
             ),
             hints=[*graph_break_hints.SUPPORTABLE],
         )

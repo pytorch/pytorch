@@ -1238,7 +1238,7 @@ else:
             return self._coordinate_on_dim
 
         def _sym_get_coordinate(self, index: int) -> IntLikeType:
-            import torch.distributed.config as config
+            import torch.compiler.config as config
             from torch._guards import detect_fake_mode
 
             if (

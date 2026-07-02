@@ -44,6 +44,7 @@
 #include <ATen/ATen.h>
 
 #include <structmember.h>
+#include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <sstream>
@@ -1165,7 +1166,7 @@ class NativeOpSchema {
       }
     }
     ss << ')';
-    return std::move(ss).str();
+    return ss.str();
   }
 
  private:
@@ -1229,7 +1230,7 @@ void log_sharding_prop_cache_hit(
   if (!output_spec.is_none()) {
     ss << " -> " << py::str(output_spec).cast<std::string>();
   }
-  dtensor_dispatch_logger.attr("debug")(std::move(ss).str());
+  dtensor_dispatch_logger.attr("debug")(ss.str());
 }
 } // namespace
 
@@ -1631,11 +1632,12 @@ py::object dispatchDTensorOp(
   // enough for now.
   const bool is_inplace_op =
       !operator_name.name.empty() && operator_name.name.back() == '_';
-  // Simple analysis of function schema to determine if this is an
-  // ou variant. It might not be entirely correct, but it's good
-  // enough for now.
+  const auto& schema_arguments = op.schema().arguments();
   const bool is_out_variant_op = !is_inplace_op &&
-      operator_name.overload_name.find("out") != std::string::npos;
+      std::any_of(
+          schema_arguments.begin(),
+          schema_arguments.end(),
+          [](const c10::Argument& argument) { return argument.is_out(); });
 
   // Fast path for default or view ops.
   const auto output_spec =
@@ -3345,29 +3347,35 @@ static PyObject* THPVariable_get_itemsize(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
+static inline int copy_value_(const Tensor& self, PyObject* value) {
+  if (THPVariable_Check(value)) {
+    auto value_ = THPVariable_Unpack(value);
+    {
+      pybind11::gil_scoped_release no_gil;
+      self.copy_(value_);
+      return 0;
+    }
+  } else {
+    auto scalar = valueToScalar(self.options(), value);
+    {
+      pybind11::gil_scoped_release no_gil;
+      self.fill_(scalar);
+      return 0;
+    }
+  }
+}
+
 static int THPVariable_set_real(PyObject* self, PyObject* real, void* unused) {
   HANDLE_TH_ERRORS
   auto& self_ = THPVariable_Unpack(self);
-  auto self_real = at::real(self_);
-  auto real_ = valueToTensor(self_real.options(), real, self_real.device());
-  {
-    pybind11::gil_scoped_release no_gil;
-    self_real.copy_(real_);
-    return 0;
-  }
+  return copy_value_(at::real(self_), real);
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
 static int THPVariable_set_imag(PyObject* self, PyObject* imag, void* unused) {
   HANDLE_TH_ERRORS
   auto& self_ = THPVariable_Unpack(self);
-  auto self_imag = at::imag(self_);
-  auto imag_ = valueToTensor(self_imag.options(), imag, self_imag.device());
-  {
-    pybind11::gil_scoped_release no_gil;
-    self_imag.copy_(imag_);
-    return 0;
-  }
+  return copy_value_(at::imag(self_), imag);
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 

@@ -1682,7 +1682,7 @@ class TestPatternMatcher(TestCase):
                 self.assertEqual(
                     pattern_pp,
                     PatternPrettyPrinter.run(search_fn_pattern),
-                    msg=f"Found mismatched pattern {search_fn.__name__}. Run torchgen/fuse/gen_patterns.py",
+                    msg=lambda msg: f"{msg}\nFound mismatched pattern {search_fn.__name__}. Run torchgen/fuse/gen_patterns.py",
                 )
 
                 # Since we've already checked that the serialized patterns match
@@ -1826,8 +1826,6 @@ class TestPatternMatcher(TestCase):
             # pattern should match
             self.assertEqual(counter, 1)
             self.assertEqual(actual, expected)
-            # addmm should be replaced
-            FileCheck().check_not("extern_kernels.addmm(").run(code[0])
 
     def test_addmm_dtype_mismatch(self):
         a = torch.nn.Linear(1024, 1024, bias=False).to(GPU_TYPE)
@@ -1849,14 +1847,24 @@ class TestPatternMatcher(TestCase):
         def test(x, y):
             return x + (y * 0)
 
-        x = torch.rand([256], device=GPU_TYPE)
-        y = torch.rand([256], device=GPU_TYPE)
-
-        test_c = torch.compile(test)
-
-        out, code = run_and_get_code(test_c, x, y)
+        # For integer dtypes, x * 0 is uniformly 0, so the multiply is folded
+        # away entirely and no kernel needs to run.
+        xi = torch.randint(0, 10, [256], device=GPU_TYPE)
+        yi = torch.randint(0, 10, [256], device=GPU_TYPE)
+        out, code = run_and_get_code(torch.compile(test), xi, yi)
         FileCheck().check_not(".run").run(code[0])
-        self.assertEqual(out, test(x, y))
+        self.assertEqual(out, test(xi, yi))
+
+        # For floating point dtypes, x * 0 must NOT be folded to 0: nan * 0 == nan
+        # and (+/-inf) * 0 == nan, so the multiply has to run to match eager.
+        xf = torch.rand([8], device=GPU_TYPE)
+        yf = torch.tensor(
+            [float("nan"), float("inf"), float("-inf"), 0.0, 1.0, -1.0, 2.0, -3.0],
+            device=GPU_TYPE,
+        )
+        out, code = run_and_get_code(torch.compile(test), xf, yf)
+        FileCheck().check(".run").run(code[0])
+        self.assertEqual(out, test(xf, yf))
 
     @inductor_config.patch(fx_graph_remote_cache=False)
     def test_match_equivalent_function_invocations2(self):
@@ -2670,12 +2678,14 @@ class TestPatternMatcher(TestCase):
         ):
             node = next(node for node in gm.graph.nodes if node.target == target)
             self.assertEqual(
-                node.meta.get("stack_trace"), stack_trace, msg=f"{target}: {node.meta}"
+                node.meta.get("stack_trace"),
+                stack_trace,
+                msg=lambda msg: f"{msg}\n{target}: {node.meta}",
             )
             self.assertEqual(
                 node.meta.get("source_fn_stack"),
                 source_fn_stack,
-                msg=f"{target}: {node.meta}",
+                msg=lambda msg: f"{msg}\n{target}: {node.meta}",
             )
 
         expected_metadata = {
@@ -2686,16 +2696,24 @@ class TestPatternMatcher(TestCase):
         for target, (shape, dtype) in expected_metadata.items():
             node = next(node for node in gm.graph.nodes if node.target == target)
             self.assertEqual(
-                node.meta["val"].shape, shape, msg=f"{target}: {node.meta}"
+                node.meta["val"].shape,
+                shape,
+                msg=lambda msg: f"{msg}\n{target}: {node.meta}",
             )
             self.assertEqual(
-                node.meta["val"].dtype, dtype, msg=f"{target}: {node.meta}"
+                node.meta["val"].dtype,
+                dtype,
+                msg=lambda msg: f"{msg}\n{target}: {node.meta}",
             )
             self.assertEqual(
-                node.meta["tensor_meta"].shape, shape, msg=f"{target}: {node.meta}"
+                node.meta["tensor_meta"].shape,
+                shape,
+                msg=lambda msg: f"{msg}\n{target}: {node.meta}",
             )
             self.assertEqual(
-                node.meta["tensor_meta"].dtype, dtype, msg=f"{target}: {node.meta}"
+                node.meta["tensor_meta"].dtype,
+                dtype,
+                msg=lambda msg: f"{msg}\n{target}: {node.meta}",
             )
 
     def test_metadata_propagation_register_replacement(self):

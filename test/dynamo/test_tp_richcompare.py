@@ -1776,6 +1776,71 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(s1, s2)
         self.assertEqual(result, expected)
 
+    def test_set_subclass_inherited_cmp_uses_internal_contents(self):
+        class LyingSet(set):
+            def __iter__(self):
+                return iter([99])
+
+            def __len__(self):
+                raise RuntimeError("__len__ should not be called")
+
+            def __contains__(self, item):
+                raise RuntimeError("__contains__ should not be called")
+
+        class LyingFrozenSet(frozenset):
+            def __iter__(self):
+                return iter([99])
+
+            def __len__(self):
+                raise RuntimeError("__len__ should not be called")
+
+            def __contains__(self, item):
+                raise RuntimeError("__contains__ should not be called")
+
+        def fn(x, a, b):
+            offset = 0
+            comparisons = (
+                a == b,
+                b == a,
+                a != b,
+                b != a,
+                a <= b,
+                b <= a,
+                a < b,
+                b < a,
+                a >= b,
+                b >= a,
+                a > b,
+                b > a,
+            )
+            for i, pred in enumerate(comparisons):
+                if pred:
+                    offset += 1 << i
+            return x + offset
+
+        cases = (
+            ({1, 2, 3}, LyingSet({1, 2, 3})),
+            (LyingSet({1, 2, 3}), {1, 2, 3}),
+            (LyingSet({1, 2}), LyingSet({1, 2, 3})),
+            ({1, 2, 3}, LyingFrozenSet({1, 2, 3})),
+        )
+
+        def base_len(obj):
+            if isinstance(obj, set):
+                return set.__len__(obj)
+            return frozenset.__len__(obj)
+
+        for a, b in cases:
+            with self.subTest(a=type(a), b=type(b), sizes=(base_len(a), base_len(b))):
+                x = torch.ones(())
+                expected = fn(x, a, b)
+                cnt = torch._dynamo.testing.CompileCounter()
+                opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+                self.assertEqual(opt_fn(x, a, b), expected)
+                self.assertEqual(opt_fn(x, a, b), expected)
+                self.assertEqual(cnt.frame_count, 1)
+            torch._dynamo.reset()
+
     # =====================================================================
     # Tensor vs non-proxyable types (followups)
     # =====================================================================
