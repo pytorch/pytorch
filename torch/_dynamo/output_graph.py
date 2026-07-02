@@ -2211,7 +2211,7 @@ class OutputGraph(OutputGraphCommon):
         graph_output_var = None
 
         # call compiled fx graph and codegen all values - stack and locals
-        if (
+        can_use_fast_path = (
             self.root_tx is tx  # single frame
             and stack_values_flat
             and all(
@@ -2233,8 +2233,15 @@ class OutputGraph(OutputGraphCommon):
             and not self.backward_state
             and not all_stack_locals_metas[-1].stack_null_idxes
             and not all_stack_locals_metas[-1].locals_null_keys
-            and not self.local_generators
-        ):
+        )
+
+        # Generators that don't escape the frame must still have their finally
+        # blocks run at frame exit (CPython does this via tp_finalize on GC).
+        if can_use_fast_path and self.local_generators:
+            self.close_local_generators(tx)
+            can_use_fast_path = self.side_effects.is_empty()
+
+        if can_use_fast_path:
             # optimization to generate better code in a common case
 
             # codegen cells
