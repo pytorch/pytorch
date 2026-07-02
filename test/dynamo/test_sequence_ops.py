@@ -1127,6 +1127,73 @@ class TestRangeUserIndex(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(), "type_error")
 
 
+class TestRangeIteratorSetstate(torch._dynamo.test_case.TestCase):
+    # range_iterator.__setstate__(k) sets the iterator index, clamped to
+    # [0, len], mirroring CPython rangeiter_setstate.
+
+    def test_setstate_resumes_from_index(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            it = iter(range(10, 20, 2))
+            it.__setstate__(2)
+            return list(it)
+
+        self.assertEqual(fn(), [14, 16, 18])
+
+    def test_setstate_on_reversed(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            it = reversed(range(10, 20, 2))
+            it.__setstate__(3)
+            return list(it)
+
+        self.assertEqual(fn(), [12, 10])
+
+    def test_setstate_negative_clamps_to_zero(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            it = iter(range(5))
+            it.__setstate__(-100)
+            return list(it)
+
+        self.assertEqual(fn(), [0, 1, 2, 3, 4])
+
+    def test_setstate_overshoot_clamps_to_len(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            it = iter(range(5))
+            it.__setstate__(100)
+            return list(it)
+
+        self.assertEqual(fn(), [])
+
+    def test_setstate_after_partial_consume(self):
+        # __setstate__ is RELATIVE to the current advanced position: after two
+        # next() calls (index 2), __setstate__(7) advances 7 more -> index 9,
+        # so only [9] remains. Matches eager CPython.
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            it = iter(range(10))
+            next(it)
+            next(it)
+            it.__setstate__(7)
+            return list(it)
+
+        self.assertEqual(fn(), [9])
+
+    def test_length_hint_tracks_index(self):
+        # After one next() (index 1), __setstate__(4) advances 4 -> index 5,
+        # so 5 items remain. Matches eager CPython.
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            it = iter(range(10))
+            next(it)
+            it.__setstate__(4)
+            return it.__length_hint__()
+
+        self.assertEqual(fn(), 5)
+
+
 class TestRangeDynamicBounds(torch._dynamo.test_case.TestCase):
     # With assume_static_by_default=False a captured range object's
     # start/stop/step are wrapped as symbolic ints; range math must specialize
