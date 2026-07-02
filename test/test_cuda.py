@@ -1133,10 +1133,14 @@ print(t.is_pinned())
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled for async")
     @setBlasBackendsToDefaultFinally
-    def test_cublas_workspace_lazy_reallocation(self):
-        torch.backends.cuda.preferred_blas_library("cublas")
-
-        original_size = torch.backends.cuda.cublas_workspace_size()
+    @parametrize("backend", ("cublas", "cublaslt"))
+    def test_cublas_workspace_lazy_reallocation(self, backend):
+        torch.backends.cuda.preferred_blas_library(backend)
+        small_size = 1024
+        bigger_size = 64 * 1024 * 1024
+        if backend == "cublaslt":
+            torch.backends.cuda.cublas_workspace_size(small_size)
+        torch.backends.cuda.blas_workspace_size(small_size, backend=backend)
         torch.cuda._clear_cublas_workspaces()
 
         # Trigger initial allocation with matmul
@@ -1144,21 +1148,22 @@ print(t.is_pinned())
         with torch.no_grad():
             torch.matmul(a, a)
 
-        mem_after_first = torch.cuda.memory_stats()["active_bytes.all.allocated"]
+        mem_after_first = torch.cuda.memory_stats()["active_bytes.all.current"]
 
         # Increase workspace size
-        bigger_size = original_size + 32 * 1024 * 1024  # +32 MiB
-        torch.backends.cuda.cublas_workspace_size(bigger_size)
+        if backend == "cublaslt":
+            torch.backends.cuda.cublas_workspace_size(bigger_size)
+        torch.backends.cuda.blas_workspace_size(bigger_size, backend=backend)
 
         # No immediate memory change (lazy reallocation)
-        mem_after_set = torch.cuda.memory_stats()["active_bytes.all.allocated"]
+        mem_after_set = torch.cuda.memory_stats()["active_bytes.all.current"]
         self.assertEqual(mem_after_first, mem_after_set)
 
         # Next matmul triggers reallocation
         with torch.no_grad():
             torch.matmul(a, a)
 
-        mem_after_realloc = torch.cuda.memory_stats()["active_bytes.all.allocated"]
+        mem_after_realloc = torch.cuda.memory_stats()["active_bytes.all.current"]
         self.assertGreater(mem_after_realloc, mem_after_first)
 
     def test_cublas_allow_tf32_get_set(self):

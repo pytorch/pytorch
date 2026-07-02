@@ -311,7 +311,8 @@ void setCublasWorkspace(cublasHandle_t handle, c10::cuda::CUDAStream stream) {
     return;
   }
 
-  auto [it, _] = workspace_map.emplace(key, std::make_pair(getNewWorkspace(), workspace_size));
+  auto [it, _] = workspace_map.insert_or_assign(
+      key, std::make_pair(getNewWorkspace(), workspace_size));
   TORCH_CUDABLAS_CHECK(
       cublasSetWorkspace(handle, it->second.first.get(), workspace_size));
 }
@@ -324,20 +325,24 @@ void* getCUDABlasLtWorkspace() {
 #ifndef USE_ROCM
   if (unified_cublas_and_lt_workspaces()) {
     auto& workspace_map = at::cuda::cublas_stream_to_workspace();
+    size_t workspace_size = getChosenWorkspaceSize();
     auto workspace_it = workspace_map.find(key);
-    if (workspace_it != workspace_map.end()) {
+    if (workspace_it != workspace_map.end() && workspace_it->second.second >= workspace_size) {
       return workspace_it->second.first.mutable_get();
     }
-    auto [it, _] = workspace_map.emplace(key, std::make_pair(getNewWorkspace(), getChosenWorkspaceSize()));
+    auto [it, _] = workspace_map.insert_or_assign(
+        key, std::make_pair(getNewWorkspace(), workspace_size));
     return it->second.first.mutable_get();
   }
 #endif
   auto& workspace_map = cublaslt_stream_to_workspace();
+  size_t workspace_size = getCUDABlasLtWorkspaceSize();
   auto workspace_it = workspace_map.find(key);
-  if (workspace_it != workspace_map.end()) {
+  if (workspace_it != workspace_map.end() && workspace_it->second.second >= workspace_size) {
     return workspace_it->second.first.mutable_get();
   }
-  auto [it, _] = workspace_map.emplace(key, std::make_pair(getNewCUDABlasLtWorkspace(), getCUDABlasLtWorkspaceSize()));
+  auto [it, _] = workspace_map.insert_or_assign(
+      key, std::make_pair(getNewCUDABlasLtWorkspace(), workspace_size));
   return it->second.first.mutable_get();
 }
 
