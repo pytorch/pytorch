@@ -11,7 +11,6 @@ from torch._inductor.virtualized import V
 from torch.fx.experimental.symbolic_shapes import (
     statically_known_true as fx_statically_known_true,
 )
-from torch.utils._ordered_set import OrderedSet
 
 
 LOCAL_REDUCE_COMPRESSED_AUX: Final = "compressed_aux"
@@ -21,15 +20,6 @@ LOCAL_REDUCE_COMBINE_FN_SUFFIX: Final = "_local_reduce_combine_fn"
 LOCAL_REDUCE_FINALIZE_FN_SUFFIX: Final = "_local_reduce_finalize_fn"
 LOCAL_REDUCE_COMBINE_KEY_SUFFIX: Final = ":local_reduce_combine"
 LOCAL_REDUCE_FINALIZE_KEY_SUFFIX: Final = ":local_reduce_finalize"
-LOCAL_REDUCE_RETURNS_KWARG: Final = "tensor_epilogue_returns_local_reduce"
-LOCAL_REDUCE_OUT_KWARG: Final = "local_reduce_out"
-LOCAL_REDUCE_GROUP_KWARG: Final = "local_reduce_group"
-LOCAL_REDUCE_AXIS_KWARG: Final = "local_reduce_axis"
-LOCAL_REDUCE_FEEDS_MAIN_KWARG: Final = "local_reduce_feeds_main"
-LOCAL_REDUCE_COMBINE_FN_KWARG: Final = "local_reduce_combine_fn"
-LOCAL_REDUCE_COMBINE_KEY_KWARG: Final = "local_reduce_combine_key"
-LOCAL_REDUCE_FINALIZE_FN_KWARG: Final = "local_reduce_finalize_fn"
-LOCAL_REDUCE_FINALIZE_KEY_KWARG: Final = "local_reduce_finalize_key"
 FlexGemmLocalReduceConsumerKind: TypeAlias = Literal["compressed_aux", "feed_main"]
 
 
@@ -92,6 +82,10 @@ LOCAL_REDUCE_AUX_TENSORSSA_ERROR = (
 LOCAL_REDUCE_AUX_OUTPUT_CONTRACT_ERROR = (
     "FlexGEMM does not support this aux output shape yet. Please file an issue "
     "with the FlexGEMM epilogue expression."
+)
+LOCAL_REDUCE_AUX_OUT_COMPOSITION_ERROR = (
+    "FlexGEMM local-reduce aux outputs cannot be combined with same-shape aux "
+    "outputs yet"
 )
 LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR = (
     "FlexGEMM local-reduce broadcast values support one generated physical reduction"
@@ -390,25 +384,25 @@ def validate_flex_gemm_local_reduce_config(config: Any, group: int, axis: int) -
     )
 
 
+def flex_gemm_local_reduce_candidate_groups(config: Any, axis: int) -> tuple[int, ...]:
+    """Enumerate group sizes worth checking against the config capability gate."""
+    if axis not in (0, 1):
+        return ()
+    _, tile_m, tile_n, _, _ = flex_gemm_local_reduce_config_fields(config)
+    tile = tile_n if axis == 1 else tile_m
+    return (2, 4, 8, 16, 32, *range(64, tile + 1, 32))
+
+
 def max_flex_gemm_local_reduce_group_for_configs(
     configs: Sequence[Any], axis: int
 ) -> int | None:
     """Return the largest group accepted by the current local-reduce config gate."""
-    candidates: OrderedSet[int] = OrderedSet()
-    for config in configs:
-        swap_ab, tile_m, tile_n, cluster_m, cluster_n = (
-            flex_gemm_local_reduce_config_fields(config)
-        )
-        if axis not in (0, 1) or swap_ab or tile_n < 128 or tile_n % 64 != 0:
-            continue
-        tile = tile_n if axis == 1 else tile_m
-        for group in (2, 4, 8, 16, 32):
-            if group < tile and tile % group == 0:
-                candidates.add(group)
-        if tile_m == 128 and cluster_m == 1 and cluster_n == 1:
-            for group in range(64, tile + 1, 32):
-                if tile % group == 0:
-                    candidates.add(group)
+    candidates = [
+        group
+        for config in configs
+        for group in flex_gemm_local_reduce_candidate_groups(config, axis)
+        if validate_flex_gemm_local_reduce_config(config, group, axis)
+    ]
     return max(candidates) if candidates else None
 
 
