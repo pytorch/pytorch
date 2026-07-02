@@ -706,11 +706,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         True/False.
         https://github.com/python/cpython/blob/848cb25624ab44c9fef2966c777419376b65af1b/Objects/object.c#L1346
         """
-        result = self._hasattr_check_side_effects(tx, name)
-        if result is not None:
-            return result
-
-
         try:
             self.getattro_impl(tx, name)
             return variables.ConstantVariable.create(True)
