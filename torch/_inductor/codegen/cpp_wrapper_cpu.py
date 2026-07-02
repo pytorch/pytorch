@@ -3787,6 +3787,12 @@ if (!custom_op_wrapper) {
 
             def codegen_ivalue(raw_arg: Any, arg_type: torch.JitType) -> str:
                 if raw_arg is None:
+                    # A None at a non-optional Tensor arg means an absent tensor.
+                    # Box it as an undefined at::Tensor (ATen's absent-tensor
+                    # sentinel, matching eager value_or(Tensor())); boxing None
+                    # would fail to unbox as `const Tensor&`.  Optionals stay None.
+                    if isinstance(arg_type, torch.TensorType):
+                        return "c10::IValue(at::Tensor())"
                     return "c10::IValue()"
 
                 if isinstance(arg_type, torch.OptionalType):
