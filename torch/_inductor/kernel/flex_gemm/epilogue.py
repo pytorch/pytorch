@@ -38,6 +38,7 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     local_reduce_unsupported_tensorssa_error,
     validate_local_reduce_feed_main_capability,
     validate_local_reduce_group_axis,
+    validate_local_reduce_tensorssa_group_size,
 )
 from torch._inductor.kernel.flex_gemm.quack_reductions import (
     _cute_arg,
@@ -57,8 +58,10 @@ from torch._inductor.kernel.flex_gemm.quack_reductions import (
     lower_view_or_reshape,
     propagate_grouped_tensorssa_info,
     reduction_from_node,
+    squeeze_source_node,
     tensor_meta_shape,
     unsupported_reduction_from_node,
+    view_or_reshape_args,
 )
 from torch._inductor.virtualized import V
 from torch.utils._ordered_set import OrderedSet
@@ -248,6 +251,7 @@ class FlexGemmLocalReduceAnalysis:
         layout = grouped_tensor_layout(shape, source_shape)
         if layout is None or not isinstance(source, torch.fx.Node):
             return False
+        validate_local_reduce_tensorssa_group_size(layout.axis, layout.group_size)
         self.grouped_tensors[node] = GroupedTensorSSAInfo(layout)
         return True
 
@@ -436,9 +440,9 @@ def has_physical_grouped_input(
     if value in seen:
         return False
     seen.add(value)
-    shape = view_or_reshape_shape(value)
-    if shape is not None:
-        source_node = value.args[0]
+    view_args = view_or_reshape_args(value)
+    if view_args is not None:
+        source_node, shape = view_args
         source_shape = (
             tensor_meta_shape(source_node)
             if isinstance(source_node, torch.fx.Node)
@@ -551,10 +555,10 @@ def local_reduce_feed_main_candidate_contract(
         value, torch.fx.Node
     ):
         return None
-    input_shape = view_or_reshape_shape(grouped_source)
-    if input_shape is None:
+    view_args = view_or_reshape_args(grouped_source)
+    if view_args is None:
         return None
-    source_node = grouped_source.args[0]
+    source_node, input_shape = view_args
     if not isinstance(source_node, torch.fx.Node):
         return None
     layout = grouped_tensor_layout(input_shape, tensor_meta_shape(source_node))
@@ -610,10 +614,10 @@ def local_reduce_feed_main_plan(
     output: torch.fx.Node,
 ) -> FlexGemmLocalReduceContract | None:
     """Match same-warp grouped-M reductions that QuACK can broadcast."""
-    output_shape = view_or_reshape_shape(output)
-    if output_shape is None:
+    view_args = view_or_reshape_args(output)
+    if view_args is None:
         return None
-    source = output.args[0]
+    source, _ = view_args
     if not isinstance(source, torch.fx.Node):
         return None
     return local_reduce_feed_main_source_contract(source, output.meta.get("val"))
@@ -689,32 +693,6 @@ def compose_physical_reduction_finalize(
     return finalize_expr
 
 
-def view_or_reshape_shape(node: torch.fx.Node) -> tuple[Any, ...] | None:
-    if node.op == "call_method" and node.target in ("view", "reshape"):
-        return tuple(node.args[1:])
-    if node.op == "call_function" and node.target in (
-        torch.ops.aten.view.default,
-        torch.ops.aten.reshape.default,
-    ):
-        shape = node.args[1]
-        return tuple(shape) if isinstance(shape, (tuple, list, torch.Size)) else None
-    return None
-
-
-def squeeze_source_node(node: torch.fx.Node) -> torch.fx.Node | None:
-    if node.op == "call_method" and node.target == "squeeze":
-        source_node = node.args[0]
-    elif node.op == "call_function" and node.target in (
-        torch.ops.aten.squeeze.dim,
-        torch.ops.aten.squeeze.dims,
-        torch.ops.aten.squeeze.default,
-    ):
-        source_node = node.args[0]
-    else:
-        return None
-    return source_node if isinstance(source_node, torch.fx.Node) else None
-
-
 def local_reduce_contract_from_grouped_input(
     node: torch.fx.Node,
     input_node: Any,
@@ -749,9 +727,9 @@ def local_reduce_analysis(
             break
         if node.op not in ("call_function", "call_method"):
             continue
-        shape = view_or_reshape_shape(node)
-        if shape is not None:
-            source_node = node.args[0]
+        view_args = view_or_reshape_args(node)
+        if view_args is not None:
+            source_node, shape = view_args
             if analysis.copy_contract(node, source_node):
                 continue
             if analysis.bind_grouped_layout(node, shape, source_node):
