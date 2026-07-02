@@ -12,7 +12,6 @@ import unittest
 import torch
 from torch.profiler._cupti.pm_sampling import (
     _DEFAULT_WINDOW_NS,
-    _MAX_SAMPLES_CAP,
     _SAMPLING_INTERVAL_NS,
     PmSampler,
     supported_metrics,
@@ -96,10 +95,10 @@ class TestPmSamplingWindowSizing(TestCase):
         return sampler, frames
 
     def test_max_samples_from_process_config(self):
-        # max_samples = look-back / interval (process-wide env), clamped to the cap; accepted by a
-        # real configure()/decode() (start sizes the ring from it via get_counter_data_size).
+        # max_samples = look-back / interval (process-wide env); accepted by a real
+        # configure()/decode() (start sizes the ring from it via get_counter_data_size).
         sampler, _ = self._collect()
-        expected = min(_DEFAULT_WINDOW_NS // _SAMPLING_INTERVAL_NS, _MAX_SAMPLES_CAP)
+        expected = max(1, _DEFAULT_WINDOW_NS // _SAMPLING_INTERVAL_NS)
         self.assertEqual(sampler._max_samples, expected)
 
     def test_empty_metrics_rejected(self):
@@ -143,8 +142,8 @@ class TestPmSamplingWindowSizing(TestCase):
         self.assertEqual(PmSampler._active, before)
 
     def test_suggested_poll_interval_under_ring_span(self):
-        # The recommended poll cadence drains a little before the ring fills (one window span minus a
-        # buffer), so periodic polls are productive without hitting the decode overflow cap.
+        # The recommended poll cadence stays under the ring's fill boundary (drains before it
+        # overflows, dropping samples), so periodic polls never lose data to a wrapped ring.
         sampler = PmSampler(torch.cuda.current_device())
         span = sampler._max_samples * sampler._sampling_interval_ns
         self.assertGreater(sampler.suggested_poll_interval_ns, 0)
