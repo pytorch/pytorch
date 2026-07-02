@@ -97,6 +97,7 @@
 #include <ATen/ops/linalg_matrix_power_native.h>
 #include <ATen/ops/linalg_matrix_rank.h>
 #include <ATen/ops/linalg_matrix_rank_native.h>
+#include <ATen/ops/linalg_matrix_sqrth_native.h>
 #include <ATen/ops/linalg_multi_dot_native.h>
 #include <ATen/ops/linalg_norm.h>
 #include <ATen/ops/linalg_norm_native.h>
@@ -2805,6 +2806,33 @@ Tensor linalg_matrix_exp(const Tensor& a) {
 // Alias
 Tensor matrix_exp(const Tensor& a) {
   return at::linalg_matrix_exp(a);
+}
+
+// Principal square root of a symmetric/Hermitian positive-definite matrix.
+// Computed from the eigendecomposition A = Q diag(lambda) Q^H as
+// A^{1/2} = Q diag(sqrt(lambda)) Q^H. Only the lower triangle of `a` is read
+// (via linalg_eigh, UPLO="L"); `a` is assumed Hermitian. The custom backward in
+// FunctionsManual.cpp (linalg_matrix_sqrth_differential) uses the Daleckii-Krein
+// formula, whose denominator sqrt(lambda_i) + sqrt(lambda_j) stays well-defined
+// even at degenerate eigenvalues.
+Tensor linalg_matrix_sqrth(const Tensor& a) {
+  squareCheckInputs(a, "linalg.matrix_sqrth");
+  checkFloatingOrComplex(
+      a, "linalg.matrix_sqrth", /*allow_low_precision_dtypes=*/false);
+
+  NoTF32Guard disable_tf32;
+
+  if (a.sym_size(-1) == 0) {
+    return a.clone();
+  }
+  auto [eigvals, eigvecs] = at::linalg_eigh(a);
+
+  // PSD input may still show small eigenvalues due to roundoff.
+  // The clamp_min zeroes them.
+  auto sqrt_eigvals = eigvals.clamp_min(0).sqrt();
+  auto result = at::matmul(eigvecs * sqrt_eigvals.unsqueeze(-2), eigvecs.mH());
+  // The reconstruction is Hermitian up to roundoff; symmetrize to enforce it.
+  return 0.5 * (result + result.mH());
 }
 
 // TODO This should be deprecated in favor of linalg_matrix_exp_differential

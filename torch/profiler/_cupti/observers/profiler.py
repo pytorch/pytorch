@@ -24,7 +24,7 @@ from torch.profiler._cupti.observers.base import (
     ObserverAnnotationSettings,
 )
 from torch.profiler._cupti.observers.observation_window import WindowFinalizerMixin
-from torch.profiler._cupti.pm_sampling import is_available as pm_is_available, PmSampler
+from torch.profiler._cupti.pm_sampling import is_available as pm_is_available
 from torch.profiler._cupti.records import (
     Api,
     CudaEvent,
@@ -33,6 +33,7 @@ from torch.profiler._cupti.records import (
     Field,
     Kernel,
     Memcpy,
+    Memcpy2,
     Memset,
     Overhead,
     Sync,
@@ -40,7 +41,7 @@ from torch.profiler._cupti.records import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
 
 
 def _current_thread_resource_tuple() -> tuple[int, int, int]:
@@ -102,6 +103,25 @@ PROFILER_FIELDS: dict[ActivityKind, set[Field]] = {
         Memcpy.SRC_KIND,
         Memcpy.DST_KIND,
         Memcpy.FLAGS,
+    },
+    # Peer-to-peer / cross-device copies (e.g. tensor.to(other_gpu), pipeline sends). CUPTI
+    # records these under MEMCPY2, NOT MEMCPY, so without this they never appear as GPU spans
+    # even though they drive NVLink. Folded into the same "gpu_memcpy" frame (see
+    # _memcpy2_columns) so they render as Memcpy spans on the issuing device's lane.
+    ActivityKind.MEMCPY2: {
+        Memcpy2.START,
+        Memcpy2.END,
+        Memcpy2.DEVICE_ID,
+        Memcpy2.CONTEXT_ID,
+        Memcpy2.STREAM_ID,
+        Memcpy2.CORRELATION_ID,
+        Memcpy2.GRAPH_NODE_ID,
+        Memcpy2.GRAPH_ID,
+        Memcpy2.BYTES,
+        Memcpy2.COPY_KIND,
+        Memcpy2.SRC_KIND,
+        Memcpy2.DST_KIND,
+        Memcpy2.FLAGS,
     },
     ActivityKind.MEMSET: {
         Memset.START,
@@ -180,6 +200,11 @@ SYNC_FIELDS: dict[ActivityKind, set[Field]] = {
 }
 
 
+# PM sampling is continuous, so its decoded samples are retained in a rolling buffer for this long
+# (well above any single profiling window) and sliced per window; older samples age out.
+_PM_RETAIN_NS = 60 * 1_000_000_000
+
+
 class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
     """Accumulates decoded records and exports them as chrome-trace windows. A window opens
     at trace start (:meth:`open_window`), closes at stop (:meth:`close_window`), and its
@@ -192,7 +217,7 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
         enable_cuda_sync: bool = False,
         defer_export: bool = True,
         enable_pm_sampling: bool = False,
-        pm_sampling_interval_us: int = 1000,
+        pm_metrics: Iterable[str] | None = None,
     ) -> None:
         self._lock = threading.Lock()
         # Decoded activity kept COLUMNAR (frames of named numpy columns, not per-record
@@ -236,16 +261,25 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
                 thread_name="cupti-profiler-export",
                 auto_start_poller=defer_export,
             )
-        # Opt-in PM sampling (true SM-active % + DRAM-throughput %): a dedicated poller whose
-        # decoded samples land as a "pm_sampling" timed frame, bucketed into the window like any
-        # other and rendered as GPU counter tracks. Off by default -- it locks GPU clocks.
-        self._pm_sampler: PmSampler | None = None
-        if enable_pm_sampling and self.available and pm_is_available():
-            self._pm_sampler = PmSampler(
-                self._pm_sink,
-                self.convert_time_array,
-                sampling_interval_ns=pm_sampling_interval_us * 1000,
-            )
+        # Opt-in PM sampling (true SM-active % + DRAM-throughput %): the monitor registers us as a
+        # consumer (with our metrics) of the current device's shared session, delivering decoded
+        # frames to on_pm_samples. We keep a rolling last-N-seconds buffer that each window slices
+        # its in-range samples from (they render as GPU counter tracks). Off by default -- it locks
+        # GPU clocks; also a no-op when no metrics are configured (pm_metrics).
+        self._pm_metrics = list(pm_metrics or [])
+        self._pm_enabled = (
+            enable_pm_sampling
+            and bool(self._pm_metrics)
+            and self.available
+            and pm_is_available()
+        )
+        # Rolling retention: PM sampling is continuous, so samples must survive across windows
+        # (unlike _timed_frames, consumed per window) until a window harvests their time range.
+        self._pm_retained: list[dict[str, Any]] = []
+        # Per-device max start_ns accepted, to dedup a ring re-decode (a poll may re-emit rows).
+        self._pm_last_ns: dict[int, int] = {}
+        if self._pm_enabled and self._monitor is not None:
+            self._monitor.request_pm_sampling(self.on_pm_samples, self._pm_metrics)
 
     def _boundary_clock_ns(self) -> int:
         # Stamp the boundary in the converted clock the events' start_ns use (convert_time
@@ -321,13 +355,32 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
 
     # --- async window API (the cupti_monitor profiler backend drives these) ----
 
-    def _pm_sink(self, frame: dict[str, Any]) -> None:
-        # Sink for PM-sampling decode (drained at close_window): append a converted sample frame
-        # as a timed "pm_sampling" frame, but only while a window is open/pending (else no window
-        # will consume it).
+    def on_pm_samples(self, frame: dict[str, Any]) -> None:
+        # Monitor flush-thread hook: retain the frame in a rolling last-N-seconds buffer, deduped
+        # by per-device monotonic start_ns (a ring re-decode re-emits already-seen rows). Each
+        # finalized window slices its [start, boundary) samples from this buffer; it is trimmed to
+        # the retention horizon so it does not grow without bound between windows.
+        ts = frame.get("start_ns")
+        if ts is None or not len(ts):
+            return
+        dev = frame["device_id"]
         with self._lock:
-            if self._open_start is not None or self._windows:
-                self._timed_frames.append(("pm_sampling", frame))
+            keep = np.zeros(len(ts), dtype=bool)
+            for d in np.unique(dev):
+                keep |= (dev == d) & (ts > self._pm_last_ns.get(int(d), -1))
+            if not keep.any():
+                return
+            kept = _slice_frame(frame, keep)
+            kts, kdev = kept["start_ns"], kept["device_id"]
+            for d in np.unique(kdev):
+                self._pm_last_ns[int(d)] = int(kts[kdev == d].max())
+            self._pm_retained.append(kept)
+            horizon = (
+                max(int(f["start_ns"].max()) for f in self._pm_retained) - _PM_RETAIN_NS
+            )
+            self._pm_retained = [
+                f for f in self._pm_retained if int(f["start_ns"].max()) >= horizon
+            ]
 
     def open_window(self) -> None:
         """Start a trace window; records before this are excluded (no prepare-phase leak)."""
@@ -336,18 +389,12 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
         self._record_calling_thread()
         with self._lock:
             self._open_start = self._boundary_clock_ns()
-        if self._pm_sampler is not None:
-            self._pm_sampler.start()
 
     def close_window(self) -> int | None:
         """End the open window and queue it for deferred export; snapshots its annotations +
         thread map now. Pair with :meth:`set_export` for the paths. Returns the window id."""
         if not self.available:
             return None
-        # Stop the PM poller first (it does a final tail decode): _open_start is still set, so
-        # those tail frames pass _pm_sink's active check and land in this window.
-        if self._pm_sampler is not None:
-            self._pm_sampler.stop()
         with self._lock:
             start = self._open_start if self._open_start is not None else 0
             self._open_start = None
@@ -391,6 +438,10 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
         (default) sync-flushes the tail, for use on the training thread. ``force=False`` (an
         off-thread finalize) must NOT flush, so it waits up to ``timeout_s`` for the poller to
         cover the windows, force-draining only if it stalls."""
+        # Release PM sampling first: its final tail decode must land in _pm_retained BEFORE the
+        # windows finalize, so those samples can be sliced into the closing window.
+        if self._pm_enabled and self._monitor is not None:
+            self._monitor.release_pm_sampling(self.on_pm_samples)
         if getattr(self, "_boundaries", None) is not None:
             sync = force
             if not force:
@@ -405,8 +456,6 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
                         self._boundaries
                     )  # stalled -> fall back to a forced drain
             self._stop_observation_window(sync=sync)
-        if self._pm_sampler is not None:
-            self._pm_sampler.stop()  # idempotent; covers a join without a close_window
         # Write on the foreground (here and in set_export), never the poll thread, so it
         # stays inside the caller's temp-dir lifetime.
         for window_id in list(self._windows):
@@ -452,6 +501,13 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
                 if keep_mask.any():
                     keep.append((kind_str, _slice_frame(frame, keep_mask)))
             self._timed_frames = keep
+            # PM samples are retained rolling (continuous, shared across windows), not consumed:
+            # slice this window's [start, boundary) range without dropping the buffer.
+            for frame in self._pm_retained:
+                s = frame["start_ns"]
+                in_mask = (s >= start) & (s < boundary_ns)
+                if in_mask.any():
+                    in_window.append(("pm_sampling", _slice_frame(frame, in_mask)))
             # Untimestamped join frames ride along; consume the buffered ones now.
             ext, self._ext_frames = self._ext_frames, []
             meta, self._ext_metadata = self._ext_metadata, {}
@@ -646,6 +702,31 @@ def _memcpy_columns(cols, convert, resolver):
     }
 
 
+def _memcpy2_columns(cols, convert, resolver):
+    # Peer-to-peer (MEMCPY2): same output columns as _memcpy_columns so the frames concatenate
+    # under one "gpu_memcpy" kind; reads the MEMCPY2 field ids (src/dst device fields shift
+    # correlation/graph ids). src/dst device aren't surfaced (the span on the issuing device's
+    # lane is what's wanted), but they're available on Memcpy2 if needed later.
+    gnid = cols[Memcpy2.GRAPH_NODE_ID.id].astype(np.int64)
+    corr = cols[Memcpy2.CORRELATION_ID.id].astype(np.int64)
+    return {
+        "start_ns": convert(cols[Memcpy2.START.id]),
+        "end_ns": convert(cols[Memcpy2.END.id]),
+        "device_id": cols[Memcpy2.DEVICE_ID.id].astype(np.int64),
+        "context_id": cols[Memcpy2.CONTEXT_ID.id].astype(np.int64),
+        "stream_id": cols[Memcpy2.STREAM_ID.id].astype(np.int64),
+        "correlation_id": corr,
+        "graph_node_id": gnid,
+        "graph_id": cols[Memcpy2.GRAPH_ID.id].astype(np.int64),
+        "annotation": _resolve_annotation_column(resolver, gnid),
+        "bytes": cols[Memcpy2.BYTES.id].astype(np.int64),
+        "copy_kind": cols[Memcpy2.COPY_KIND.id].astype(np.int64),
+        "src_kind": cols[Memcpy2.SRC_KIND.id].astype(np.int64),
+        "dst_kind": cols[Memcpy2.DST_KIND.id].astype(np.int64),
+        "flags": cols[Memcpy2.FLAGS.id].astype(np.int64),
+    }
+
+
 def _memset_columns(cols, convert, resolver):
     gnid = cols[Memset.GRAPH_NODE_ID.id].astype(np.int64)
     corr = cols[Memset.CORRELATION_ID.id].astype(np.int64)
@@ -749,6 +830,7 @@ def _environment_columns(cols, convert, resolver):
 _COLUMN_BUILDERS: dict[int, tuple[str, Any, bool]] = {
     int(ActivityKind.CONCURRENT_KERNEL): ("kernel", _kernel_columns, True),
     int(ActivityKind.MEMCPY): ("gpu_memcpy", _memcpy_columns, True),
+    int(ActivityKind.MEMCPY2): ("gpu_memcpy", _memcpy2_columns, True),
     int(ActivityKind.MEMSET): ("gpu_memset", _memset_columns, True),
     int(ActivityKind.RUNTIME): ("cuda_runtime", _api_columns, True),
     int(ActivityKind.DRIVER): ("cuda_driver", _api_columns, True),

@@ -2999,7 +2999,6 @@ class TMACompatibilityChecker:
         # and in that case we should fall back to the generic analysis below.
         if (
             self.kernel.persistent_reduction
-            and not self.for_store
             and innermost_block_symt in TritonSymbols.reduction_types
         ):
             # For a discontiguous tensor, a 1D block will be split across several
@@ -3034,7 +3033,7 @@ class TMACompatibilityChecker:
                 innermost_block_bytes, sympy.Integer(16)
             ):
                 log.debug(
-                    "%s persistent reduction innermost block shape cannot load 16 bytes. Block shape: %s, persistent RBLOCK: %d",
+                    "%s persistent reduction innermost block shape cannot transfer 16 bytes. Block shape: %s, persistent RBLOCK: %d",
                     self.failed_debug_prefix,
                     block_params.block_shape,
                     persistent_rblock,
@@ -3080,6 +3079,38 @@ class TMACompatibilityChecker:
                         "%s the minimum block size to satisfy expression %s is too large: %d",
                         self.failed_debug_prefix,
                         solve_expr_simplified,
+                        min_block_size,
+                    )
+                    return False
+
+                # When no_x_dim is True, XBLOCK is fixed at 1. TMA cannot
+                # be used if the innermost block is XBLOCK and the minimum
+                # required size exceeds 1.
+                if (
+                    self.kernel.no_x_dim
+                    and innermost_block_symt == SymT.XBLOCK
+                    and min_block_size > 1
+                ):
+                    log.debug(
+                        "%s no_x_dim kernel has XBLOCK fixed at 1 but TMA requires min block size %d",
+                        self.failed_debug_prefix,
+                        min_block_size,
+                    )
+                    return False
+
+                # In combo kernels without per-subkernel blocks, XBLOCK is
+                # shared and may be forced to 1 by a sibling sub-kernel.
+                # Reject TMA when the innermost block is XBLOCK since we
+                # cannot guarantee it will meet the 16-byte minimum.
+                if (
+                    self.kernel.is_combo_kernel
+                    and not self.kernel.per_subkernel_blocks
+                    and innermost_block_symt == SymT.XBLOCK
+                    and min_block_size > 1
+                ):
+                    log.debug(
+                        "%s combo kernel with shared XBLOCK cannot guarantee TMA min block size %d",
+                        self.failed_debug_prefix,
                         min_block_size,
                     )
                     return False

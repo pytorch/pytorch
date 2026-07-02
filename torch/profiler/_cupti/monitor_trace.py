@@ -1143,12 +1143,17 @@ def _build_gpu_counters(env: dict | None, active_devices: set):
     )
 
 
+# PM counter descriptor ids: a high base disjoint from the env counters (1-5) and the per-kernel
+# cycle counter (10), leaving room for an arbitrary, caller-chosen PM metric set.
+_FIRST_PM_COUNTER_ID = 100
+
+
 def _build_pm_counters(pm: dict | None, active_devices: set):
     """Build the GpuCounterEvent payload from PM-sampling columns (start_ns/device_id plus one
-    ``c<counter_id>`` value column per metric, see pm_sampling.PM_METRICS): same tuple shape as
-    :func:`_build_gpu_counters`. Restricted to devices that ran GPU work."""
-    from torch.profiler._cupti.pm_sampling import PM_METRICS
-
+    value column per metric, keyed by the CUPTI metric name): same tuple shape as
+    :func:`_build_gpu_counters`. The metric columns are self-describing, so each is assigned a
+    GpuCounterDescriptor id here (from :data:`_FIRST_PM_COUNTER_ID`) and labeled with its metric
+    name. Restricted to devices that ran GPU work."""
     if not pm or not len(pm.get("start_ns", ())):
         return None
     ts = np.ascontiguousarray(pm["start_ns"], dtype=np.int64)
@@ -1160,11 +1165,13 @@ def _build_pm_counters(pm: dict | None, active_devices: set):
     )
     if not base.any():
         return None
+    metric_cols = [k for k in pm if k not in ("start_ns", "device_id")]
     specs, gpu_l, ts_l, cid_l, val_l = [], [], [], [], []
-    for cid, name, _ in PM_METRICS:
-        col = pm.get(f"c{cid}")
+    for i, name in enumerate(metric_cols):
+        col = pm.get(name)
         if col is None:
             continue
+        cid = _FIRST_PM_COUNTER_ID + i
         specs.append((cid, name))
         gpu_l.append(dev[base])
         ts_l.append(ts[base])

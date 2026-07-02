@@ -80,127 +80,6 @@ def _deref_cstr(ptr: int) -> str:
     return value.decode(errors="replace") if value is not None else ""
 
 
-class CuptiMonitorBuffer:
-    """A completed CUPTI buffer (the item from ``_cupti_monitor.get_completed()``)
-    plus the record layout CUPTI captured for it. Owns the buffer for its lifetime:
-    it returns the buffer to the native pool on destruction (RAII), so the worker
-    loop never has to. ``decode()`` demuxes its records columnar against the captured
-    layout."""
-
-    def __init__(self, item: tuple) -> None:
-        # Bind _returned first so __del__ is safe even if unpacking fails.
-        self._returned = False
-        self.buffer_ptr, self.valid_size, self.ctx, self.stream, self.layouts = item
-
-    def __del__(self) -> None:
-        if not self._returned:
-            self._returned = True
-            _cupti_monitor_native.return_buffer(self.buffer_ptr)
-
-    def decode(self) -> dict[int, dict[int, Any]]:
-        """Demux this buffer into ``{kind: {field_id: column}}`` against the record
-        layout CUPTI captured for it (``self.layouts``: ``[(kind, record_size,
-        [(field_id, offset, size), ...]), ...]``). Every field in the layout is
-        decoded -- the layout holds exactly the enabled selection (the observers'
-        field union), so there is nothing extra to filter (the per-observer slice
-        happens in dispatch).
-
-        Records begin with *_FIELD_KIND (id 0, a 4-byte kind) at offset 0 and are
-        sized by their kind's record_size. Three strategies, fastest first: one kind
-        -> homogeneous stride; uniform size -> stride + dispatch by the KIND column;
-        variable size -> per-record walk (CUPTI records aren't self-synchronizing).
-        A bounds guard drops any trailing record that would run past valid_size."""
-        buffer_ptr, valid_size, record_layouts = (
-            self.buffer_ptr,
-            self.valid_size,
-            self.layouts,
-        )
-        # kind -> (record_size, {field_id: (offset, size)}).
-        layouts: dict[int, tuple[int, dict[int, tuple[int, int]]]] = {}
-        for kind, rsz, fields in record_layouts:
-            if rsz > 0:
-                layouts[kind] = (rsz, {fid: (off, sz) for fid, off, sz in fields})
-        if not layouts or valid_size == 0:
-            return {}
-
-        raw = np.ctypeslib.as_array(
-            (ctypes.c_uint8 * valid_size).from_address(buffer_ptr)
-        )
-
-        rszs = {rsz for rsz, _ in layouts.values()}
-        positions: dict[int, Any] = {}
-        if len(layouts) == 1:
-            ((kind, (rsz, _)),) = layouts.items()
-            n = valid_size // rsz
-            if n:
-                positions[kind] = np.arange(n, dtype=np.int64) * rsz
-        elif len(rszs) == 1:
-            rsz = next(iter(rszs))
-            n = valid_size // rsz
-            if n:
-                starts = np.arange(n, dtype=np.int64) * rsz
-                kinds_col = (
-                    raw[starts[:, None] + np.arange(4)].copy().view("<u4").ravel()
-                )
-                for kind in layouts:
-                    sel = starts[kinds_col == kind]
-                    if sel.size:
-                        positions[kind] = sel
-        else:
-            pos_lists: dict[int, list[int]] = {k: [] for k in layouts}
-            pos = 0
-            while pos + 4 <= valid_size:
-                kind = int(raw[pos : pos + 4].view("<u4")[0])
-                ent = layouts.get(kind)
-                if ent is None:
-                    break  # unknown kind: can't size it, stop
-                pos_lists[kind].append(pos)
-                pos += ent[0]
-            positions = {
-                k: np.array(v, dtype=np.int64) for k, v in pos_lists.items() if v
-            }
-
-        # Bounds guard: only decode records that fully fit in the valid region.
-        for kind in list(positions):
-            rsz = layouts[kind][0]
-            fitted = positions[kind][positions[kind] + rsz <= valid_size]
-            if len(fitted):
-                positions[kind] = fitted
-            else:
-                del positions[kind]
-
-        out: dict[int, dict[int, Any]] = {}
-        for kind, pos_arr in positions.items():
-            fields = layouts[kind][1]
-            str_fields = STRING_FIELDS.get(kind, frozenset())
-            cols: dict[int, Any] = {}
-            for fid, (off, size) in fields.items():
-                if fid in str_fields and size == 8:
-                    # const char* field: deref each pointer to a str now.
-                    ptrs = (
-                        raw[pos_arr[:, None] + np.arange(off, off + 8)]
-                        .copy()
-                        .view("<u8")
-                        .ravel()
-                    )
-                    cols[fid] = np.array(
-                        [_deref_cstr(int(p)) for p in ptrs], dtype=object
-                    )
-                    continue
-                if size not in (1, 2, 4, 8):
-                    # Oversized field (the 20-byte CUpti_ActivityEnvironment union): keep its
-                    # first 8 bytes (the primary metric pair), split downstream by kind.
-                    if size > 8:
-                        idx = pos_arr[:, None] + np.arange(off, off + 8)
-                        cols[fid] = raw[idx].copy().view("<u8").ravel()
-                    continue
-                idx = pos_arr[:, None] + np.arange(off, off + size)
-                cols[fid] = raw[idx].copy().view(f"<u{size}").ravel()
-            if cols:
-                out[kind] = cols
-        return out
-
-
 class _Observer:
     """A registered consumer of the monitor's records: the activity kinds it
     requested, its per-kind field selection (``{kind: frozenset(field_ids)}``), and
@@ -325,6 +204,27 @@ class CuptiMonitor:
         self._outstanding_warned = False
         self._dropped_records = 0
 
+        # Opt-in PM sampling (true SM-active % / DRAM-throughput % counters): the monitor registers
+        # each requesting observer as a consumer of the current device's per-device PmSampler
+        # (only one PM session per device is possible), polls the ring on the flush cadence, and
+        # converts each frame's raw CUPTI-clock timestamps into the trace clock before delivery (the
+        # sampler is clock-agnostic; conversion lives here, where the clock base does). Each consumer
+        # brings its own metrics; the shared session samples their union. The session starts on the
+        # first consumer and disables after the last. self._pm_consumers maps an observer's sink to
+        # its (handle, wrapped-sink) so release can unregister it.
+        self._pm_consumers: dict[
+            Callable[[dict[str, Any]], None],
+            tuple[Any, Callable[[dict[str, Any]], None]],
+        ] = {}
+        self._pm_sampler: Any = None
+        # Monotonic time of the last PM poll, to rate-limit polling to the sampler's suggested
+        # cadence (~one look-back window minus a buffer) rather than every flush -- each decode
+        # re-reads the whole ring, so per-flush polling would redundantly re-decode.
+        self._pm_last_poll_s = 0.0
+        # Serializes PM add/poll/remove so a flush-thread poll never decodes the collector while the
+        # foreground is tearing it down (concurrent decode on one collector is unsafe).
+        self._pm_lock = threading.Lock()
+
     def register_callbacks(self) -> None:
         if self._callbacks_registered:
             return
@@ -419,6 +319,9 @@ class CuptiMonitor:
             if self._flush_thread.is_alive():
                 logger.warning("CUPTI monitor flush thread did not stop within 5s")
             self._flush_thread = None
+        # Flush thread is down (no concurrent poll): final tail-drain + disable the PM sessions
+        # while observers are still registered, so their last samples are delivered.
+        self._stop_pm_sampler()
         # Drain everything in flight (incl. CUPTI's async deliveries) before we tear
         # the decoder down, so the final window is complete. Then stop the native
         # decode worker while the subscriber is STILL valid -- it may still decode a
@@ -485,6 +388,7 @@ class CuptiMonitor:
             self._cupti.activity_flush_all()
             self._account_dropped_records(0, 0)
             self._drain_and_dispatch()
+            self._poll_pm_sampler()
             return
         added = self._begin_fence_kind()
         try:
@@ -513,6 +417,7 @@ class CuptiMonitor:
             # The fence guarantees everything up to the sync point is decoded; hand
             # the accumulated window to the observers now.
             self._drain_and_dispatch()
+            self._poll_pm_sampler()
 
     def _begin_fence_kind(self) -> bool:
         """Enable + make decodable the SYNCHRONIZATION sync-point kind for the
@@ -649,6 +554,81 @@ class CuptiMonitor:
             self.stop()
         else:
             self._apply_selection()
+
+    # --- PM sampling (opt-in GPU utilization counters) -----------------------
+
+    def request_pm_sampling(
+        self, sink: Callable[[dict[str, Any]], None], metrics: Iterable[str]
+    ) -> None:
+        """Register ``sink`` as a PM-sampling consumer wanting ``metrics`` on the current device.
+        The shared per-device session samples the union of all consumers' metrics; the first
+        consumer starts it (see pm_sampling env vars for interval/look-back). Frames arrive on the
+        flush thread with ``start_ns`` already converted into the trace clock. No-op if PM sampling
+        is unavailable, no metrics are given, or ``sink`` is already registered."""
+        from torch.profiler._cupti.pm_sampling import (
+            is_available as pm_is_available,
+            PmSampler,
+        )
+
+        metrics = list(metrics)
+        if not pm_is_available() or not metrics:
+            return
+        with self._pm_lock:
+            if sink in self._pm_consumers:
+                return
+
+            # Wrap the observer's sink to convert the sampler's raw CUPTI-clock timestamps into the
+            # trace clock before delivery (the observer buckets frames by trace-time start_ns).
+            def wrapped(frame: dict[str, Any], _sink=sink) -> None:
+                frame = dict(frame)
+                frame["start_ns"] = self.convert_time_array(frame["start_ns"])
+                _sink(frame)
+
+            sampler = PmSampler.for_device()
+            try:
+                handle = sampler.add_consumer(metrics, wrapped)
+            except Exception as e:
+                logger.warning("PM sampling could not register consumer: %s", e)
+                return
+            self._pm_sampler = sampler
+            self._pm_last_poll_s = 0.0  # poll promptly after a (re)start
+            self._pm_consumers[sink] = (handle, wrapped)
+
+    def release_pm_sampling(self, sink: Callable[[dict[str, Any]], None]) -> None:
+        """Unregister a PM-sampling consumer; the session disables once the last one leaves.
+        Idempotent. Removing a consumer drains the tail to it first, so its final samples land."""
+        with self._pm_lock:
+            entry = self._pm_consumers.pop(sink, None)
+            sampler = self._pm_sampler
+            if entry is not None and sampler is not None:
+                sampler.remove_consumer(entry[0])
+            if not self._pm_consumers:
+                self._pm_sampler = None
+
+    def _poll_pm_sampler(self) -> None:
+        """Decode the ring without stopping, rate-limited to the sampler's suggested cadence (~one
+        look-back window minus a buffer): each decode re-reads the whole ring, so polling every
+        flush would redundantly re-decode. The final drain at release/stop still catches the tail."""
+        with self._pm_lock:
+            sampler = self._pm_sampler
+            if sampler is None:
+                return
+            now = time.monotonic()
+            if (now - self._pm_last_poll_s) * 1e9 < sampler.suggested_poll_interval_ns:
+                return
+            self._pm_last_poll_s = now
+            sampler.poll()
+
+    def _stop_pm_sampler(self) -> None:
+        """Unregister the monitor's PM consumers (final tail-drain + disable when the last leaves).
+        Called at monitor stop in case observers have not released yet."""
+        with self._pm_lock:
+            sampler, self._pm_sampler = self._pm_sampler, None
+            entries = list(self._pm_consumers.values())
+            self._pm_consumers.clear()
+            if sampler is not None:
+                for handle, _ in entries:
+                    sampler.remove_consumer(handle)
 
     def _normalize_activities(
         self, activities: ActivitiesSpec
@@ -970,8 +950,7 @@ class CuptiMonitor:
     ) -> dict[int, Any]:
         """Turn one native group's ``{field_id: (field_size, bytes)}`` into
         ``{field_id: column}``: numeric fields are viewed as ``<u{size}``; const
-        char* (string) fields are dereferenced to str. Mirrors the strategy in
-        ``CuptiMonitorBuffer.decode`` (the Python reference decoder)."""
+        char* (string) fields are dereferenced to str."""
         str_fields = STRING_FIELDS.get(kind, frozenset())
         cols: dict[int, Any] = {}
         for fid, (size, raw) in fields.items():
@@ -980,8 +959,7 @@ class CuptiMonitor:
                 cols[fid] = np.array([_deref_cstr(int(p)) for p in ptrs], dtype=object)
             elif size in (1, 2, 4, 8):
                 # .copy() so the column is writable and owns its memory (the
-                # frombuffer view is read-only over the transient bytes), matching
-                # CuptiMonitorBuffer.decode's contract.
+                # frombuffer view is read-only over the transient bytes).
                 cols[fid] = np.frombuffer(raw, dtype=f"<u{size}").copy()
             elif size > 8:
                 # Oversized field (the 20-byte CUpti_ActivityEnvironment union): keep its
