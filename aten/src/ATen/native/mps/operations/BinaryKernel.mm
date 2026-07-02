@@ -277,10 +277,12 @@ static void fmod_mps_kernel(TensorIteratorBase& iter) {
 }
 
 static void igamma_mps_kernel(TensorIteratorBase& iter) {
+  TORCH_CHECK_TYPE(isFloatingType(iter.common_dtype()), "igamma_mps not implemented for ", iter.common_dtype());
   lib.exec_binary_kernel(iter, "igamma");
 }
 
 static void igammac_mps_kernel(TensorIteratorBase& iter) {
+  TORCH_CHECK_TYPE(isFloatingType(iter.common_dtype()), "igammac_mps not implemented for ", iter.common_dtype());
   lib.exec_binary_kernel(iter, "igammac");
 }
 
@@ -292,6 +294,12 @@ static void gcd_mps_kernel(TensorIteratorBase& iter) {
   TORCH_CHECK_NOT_IMPLEMENTED(
       c10::isIntegralType(iter.common_dtype(), false), "gcd_mps not implemented for ", iter.common_dtype());
   lib.exec_binary_kernel(iter, "gcd");
+}
+
+static void lcm_mps_kernel(TensorIteratorBase& iter) {
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      c10::isIntegralType(iter.common_dtype(), false), "lcm_mps not implemented for ", iter.common_dtype());
+  lib.exec_binary_kernel(iter, "lcm");
 }
 
 static void bitwise_and_mps_kernel(TensorIteratorBase& iter) {
@@ -307,10 +315,16 @@ static void bitwise_xor_mps_kernel(TensorIteratorBase& iter) {
 }
 
 static void bitwise_left_shift_mps_kernel(TensorIteratorBase& iter) {
+  TORCH_CHECK_NOT_IMPLEMENTED(c10::isIntegralType(iter.common_dtype(), /*includeBool=*/false),
+                              "bitwise_left_shift not implemented for ",
+                              iter.common_dtype());
   lib.exec_binary_kernel(iter, "bitwise_left_shift");
 }
 
 static void bitwise_right_shift_mps_kernel(TensorIteratorBase& iter) {
+  TORCH_CHECK_NOT_IMPLEMENTED(c10::isIntegralType(iter.common_dtype(), /*includeBool=*/false),
+                              "bitwise_right_shift not implemented for ",
+                              iter.common_dtype());
   lib.exec_binary_kernel(iter, "bitwise_right_shift");
 }
 
@@ -379,6 +393,7 @@ REGISTER_DISPATCH(igamma_stub, &igamma_mps_kernel)
 REGISTER_DISPATCH(igammac_stub, &igammac_mps_kernel)
 REGISTER_DISPATCH(hypot_stub, &hypot_mps_kernel)
 REGISTER_DISPATCH(gcd_stub, &gcd_mps_kernel)
+REGISTER_DISPATCH(lcm_stub, &lcm_mps_kernel)
 REGISTER_DISPATCH(bitwise_and_stub, &bitwise_and_mps_kernel)
 REGISTER_DISPATCH(bitwise_or_stub, &bitwise_or_mps_kernel)
 REGISTER_DISPATCH(bitwise_xor_stub, &bitwise_xor_mps_kernel)
