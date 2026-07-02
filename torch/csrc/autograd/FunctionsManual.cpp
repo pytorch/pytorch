@@ -3657,7 +3657,7 @@ Tensor svd_backward(
   // action is free and proper (as U(1)^k \iso (S^1)^k is compact). For this
   // reason, pi : St_k(C^n) x U(n) -> M forms a principal bundle.
   //
-  // To think about M, consider the case case k = 1. The, we have the bundle
+  // To think about M, consider the case k = 1. Then, we have the bundle
   // pi : St_1(C^n) x U(1) -> M
   // now, St_1(C^n) are just vectors of norm 1 in C^n. That's exactly the sphere
   // of dimension 2n-1 in C^n \iso R^{2n} S^{2n-1} = { z \in C^n | z^H z = 1}.
@@ -4325,6 +4325,32 @@ Tensor linalg_matrix_exp_differential(
 
   return differential_analytic_matrix_function(
       self, grad, at::linalg_matrix_exp, /* adjoint */ adjoint);
+}
+
+// Differential of the symmetric/Hermitian matrix square root, used for both
+// reverse-mode (grad = cotangent) and forward-mode (grad = input tangent).
+// For A = Q diag(lambda) Q^H the Daleckii-Krein/Loewner derivative is
+// T(E) = Q (W o (Q^H sym(E) Q)) Q^H with W_ij = 1 / (sqrt(l_i) + sqrt(l_j)),
+// which for f = sqrt needs no separate diagonal case and no divided-difference
+// cancellation handling. W is real symmetric and Q unitary, so T is
+// self-adjoint w.r.t. the real trace inner product; hence the same operator
+// serves the VJP and the JVP. Requires positive-definite input (the denominator
+// vanishes at a zero eigenvalue).
+Tensor linalg_matrix_sqrth_differential(
+    const Tensor& self,
+    const Tensor& grad) {
+  if (!grad.defined()) {
+    return {};
+  }
+  at::NoTF32Guard disable_tf32;
+  auto [eigvals, eigvecs] = at::linalg_eigh(self);
+  auto sqrt_eigvals = eigvals.clamp_min(0).sqrt();
+  auto denom = sqrt_eigvals.unsqueeze(-1) + sqrt_eigvals.unsqueeze(-2);
+  auto grad_sym = 0.5 * (grad + grad.mH());
+  auto inner =
+      at::matmul(at::matmul(eigvecs.mH(), grad_sym), eigvecs).div(denom);
+  auto out = at::matmul(at::matmul(eigvecs, inner), eigvecs.mH());
+  return 0.5 * (out + out.mH());
 }
 
 template <typename F1, typename F2, typename... Ts>

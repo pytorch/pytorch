@@ -175,8 +175,8 @@ use_lazy_graph_module = (
 assume_static_by_default = True
 
 # Internal: Shape specification patched during tracing by enter_exit_hooks.
-# Set via torch.compile(shapes_spec=...), not directly by users.
-_shapes_spec = None
+# Set via torch.compile(dynamic_shapes=...), not directly by users.
+_dynamic_shapes_spec = None
 
 # This flag changes how dynamic_shapes=True works, and is meant to be used in conjunction
 # with assume_static_by_default=True.
