@@ -1931,10 +1931,10 @@ def forward(self, x, y):
 def forward(self, x):
     arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     l_x_ = arg0
-    cond_false_0 = self.cond_false_0
-    cond_true_0 = self.cond_true_0
     sym_size_int = torch.ops.aten.sym_size.int(l_x_, 0)
     le = sym_size_int <= 2;  sym_size_int = None
+    cond_false_0 = self.cond_false_0
+    cond_true_0 = self.cond_true_0
     cond = torch.ops.higher_order.cond(le, cond_true_0, cond_false_0, (l_x_,));  le = cond_true_0 = cond_false_0 = l_x_ = None
     getitem = cond[0]
     sym_size_int_1 = torch.ops.aten.sym_size.int(getitem, 0);  getitem = None
@@ -3841,12 +3841,12 @@ def forward(self, pred, x):
     arg0, arg1, = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
     l_pred_ = arg0
     l_x_ = arg1
-    cond_false_0 = self.cond_false_0
-    cond_true_0 = self.cond_true_0
     ones = torch.ones(6, 4)
     ones_1 = torch.ones(6, 4)
     ones_2 = torch.ones(6, 4)
     ones_3 = torch.ones(6, 4)
+    cond_false_0 = self.cond_false_0
+    cond_true_0 = self.cond_true_0
     cond = torch.ops.higher_order.cond(l_pred_, cond_true_0, cond_false_0, (ones, ones_1, l_x_, ones_3, ones_2));  l_pred_ = cond_true_0 = cond_false_0 = ones = ones_1 = l_x_ = ones_3 = ones_2 = None
     getitem = cond[0];  cond = None
     return pytree.tree_unflatten([getitem], self._out_spec)""",
