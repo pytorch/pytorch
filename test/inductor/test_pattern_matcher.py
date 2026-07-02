@@ -72,7 +72,7 @@ class OpaqueScaleFactor(CustomClassBase):
         )
 
 
-register_custom_class(OpaqueScaleFactor, typ="value", hoist=True)
+register_custom_class(OpaqueScaleFactor, typ="constant", hoist=True)
 
 
 @instantiate_parametrized_tests

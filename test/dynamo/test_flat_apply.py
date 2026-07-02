@@ -37,7 +37,7 @@ class Norm(torch._custom_class_base.CustomClassBase):
         return f"Norm(typ={self.typ!r})", {"Norm": Norm}
 
 
-torch._library.opaque_object.register_custom_class(Norm, typ="value")
+torch._library.opaque_object.register_custom_class(Norm, typ="constant")
 
 
 @dataclass

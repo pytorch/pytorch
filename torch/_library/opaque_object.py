@@ -4,7 +4,7 @@ Note [Opaque Objects]
 Opaque objects are the way we allow custom operators to accept a user-defined
 "black box" object as an input.
 
-There are two kinds of opaque types: VALUE type and SYMBOLIC type.
+There are two kinds of opaque types: CONSTANT type and SYMBOLIC type.
 The distinction determines how torch.compile handles the object.
 
 SYMBOLIC TYPES (default):
@@ -17,12 +17,12 @@ input to the graph.
 You can register a custom class as being a symbolic-typed opaque object class
 through `register_custom_class(MyClass, typ="symbolic")`.
 
-VALUE TYPES:
+CONSTANT TYPES:
 
-Value-typed opaque objects represent constant values.
+Constant-typed opaque objects represent constant values.
 In torch.compile, the graph specializes on the object like how other constants
 are. Therefore there are a couple of methods on the class that must be
-implemented before registering it as a value-typed opaque object class:
+implemented before registering it as a constant-typed opaque object class:
   - __eq__: torch.compile will create guards based on the equality of this
   object, meaning that a recompilation will happen if __eq__ returns False.
   - __hash__: This must be implemented for Fake Tensor caching
@@ -31,8 +31,8 @@ implemented before registering it as a value-typed opaque object class:
     where repr_string can reconstruct the object and the dict maps names used in
     repr_string to their corresponding types.
 
-You can register a custom class as being a reference-based opaque object class
-through `register_custom_class(MyClass, typ="value")`.
+You can register a custom class as being a constant-typed opaque object class
+through `register_custom_class(MyClass, typ="constant")`.
 """
 
 import logging
@@ -99,7 +99,7 @@ ReconstructFn: TypeAlias = Callable[
 @dataclass
 class _OpaqueTypeInfo:
     class_name: str
-    opaque_typ: Literal["symbolic", "value"]
+    opaque_typ: Literal["symbolic", "constant"]
     guard_fn: Callable[
         [Any], list[Any]
     ]  # Callable that takes the object and returns list of values to guard on
@@ -108,9 +108,9 @@ class _OpaqueTypeInfo:
     reconstruct_fn: ReconstructFn | None
 
 
-# Mapping of type -> (string name, symbolic/value type)
+# Mapping of type -> (string name, symbolic/constant type)
 _OPAQUE_TYPES: WeakKeyDictionary[Any, _OpaqueTypeInfo] = WeakKeyDictionary()
-# Mapping of class_name -> (type, symbolic/value type)
+# Mapping of class_name -> (type, symbolic/constant type)
 _OPAQUE_TYPES_BY_NAME: dict[str, _OpaqueTypeInfo] = {}
 
 
@@ -167,9 +167,9 @@ def register_custom_class(
 
     Args:
         cls (type): The class to register as an opaque type.
-        typ (str): Either "symbolic" or "value". See Note [Opaque Objects] for
+        typ (str): Either "symbolic" or "constant". See Note [Opaque Objects] for
             more details.
-        hoist (bool): Only applies to value types. A hoist=True value type
+        hoist (bool): Only applies to constant types. A hoist=True constant type
             object is lifted as an input to the torch.compile'd graph, instead
             of being a constant baked into the graph. This is useful to
             improve compilation times in hierarchical compilation
@@ -203,9 +203,17 @@ def register_custom_class(
             "registered as a pytree. Opaque objects must be pytree leaves."
         )
 
-    # Value types store the real object directly during tracing (no
+    if typ == "reference":
+        log.warning("typ='reference' is deprecated, use typ='symbolic' instead")
+        typ = "symbolic"
+
+    if typ == "value":
+        log.warning("typ='value' is deprecated, use typ='constant' instead")
+        typ = "constant"
+
+    # Constant types store the real object directly during tracing (no
     # FakeScriptObject wrapper), so they don't need CustomClassBaseMeta.
-    if typ != "value" and not isinstance(cls, CustomClassBaseMeta):
+    if typ != "constant" and not isinstance(cls, CustomClassBaseMeta):
         raise TypeError(
             f"Custom class {cls} must subclass torch._custom_class_base.CustomClassBase "
             "or 'metaclass=torch._custom_class_base.CustomClassBaseMeta'. "
@@ -214,16 +222,12 @@ def register_custom_class(
             "during torch.compile tracing. "
         )
 
-    if typ == "reference":
-        log.warning("typ='reference' is deprecated, use typ='symbolic' instead")
-        typ = "symbolic"
-
-    if typ not in ["symbolic", "value"]:
+    if typ not in ["symbolic", "constant"]:
         raise AssertionError(
-            f"Custom class type must be either 'symbolic' or 'value', got {typ!r}"
+            f"Custom class type must be either 'symbolic' or 'constant', got {typ!r}"
         )
 
-    if typ == "value":
+    if typ == "constant":
         # Enums use identity-based equality (singletons), which is fine for guarding.
         if not issubclass(cls, Enum) and cls.__eq__ is object.__eq__:  # type: ignore[comparison-overlap]
             raise TypeError(
@@ -292,8 +296,8 @@ def register_opaque_type(
     )
 
 
-# Enums are always opaque value types.
-register_custom_class(Enum, typ="value")
+# Enums are always opaque constant types.
+register_custom_class(Enum, typ="constant")
 
 
 def is_opaque_value(value: object) -> TypeIs[OpaqueType]:
@@ -355,12 +359,12 @@ def is_opaque_value_type(cls: type[Any] | str) -> bool:
         return False
 
     if isinstance(cls, str):
-        return _OPAQUE_TYPES_BY_NAME[cls].opaque_typ == "value"
+        return _OPAQUE_TYPES_BY_NAME[cls].opaque_typ == "constant"
 
     info = _resolve_opaque_type_info(cls)
     if info is None:
         return False
-    return info.opaque_typ == "value"
+    return info.opaque_typ == "constant"
 
 
 def is_opaque_reference_type(cls: Any) -> bool:
