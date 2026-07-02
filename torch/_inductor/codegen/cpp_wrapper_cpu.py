@@ -3180,8 +3180,21 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 return type_supported(t.getElementType())
             return isinstance(t, supported_types)
 
+        def uses_symint(t: torch.JitType) -> bool:
+            # SymInt/SymBool/SymFloat are reported as Int/Bool/Float by
+            # JitType.type, so they pass type_supported above.  But the
+            # StableIValue codegen below emits no symbolic-int-aware conversion,
+            # so route such ops to the boxed dispatch path, which handles
+            # c10::SymInt correctly.  real_type preserves the symbolic types.
+            if isinstance(t, (torch.OptionalType, torch.ListType)):
+                return uses_symint(t.getElementType())
+            return (
+                isinstance(t, (torch.SymIntType, torch.SymBoolType))
+                or repr(t) == "SymFloat"
+            )
+
         return all(
-            type_supported(a.type)
+            type_supported(a.type) and not uses_symint(a.real_type)
             for a in chain(op._schema.arguments, op._schema.returns)
         )
 
@@ -3444,12 +3457,12 @@ if (!custom_op_wrapper) {
 
         def generate_py_arg_inner(lines, raw_arg, arg_type):
             def handle_scalar(scalar):
+                if isinstance(scalar, bool):
+                    return f"PyBool_FromLong({1 if scalar else 0})"
                 if isinstance(scalar, int):
                     return f"PyLong_FromLongLong({scalar})"
                 if isinstance(scalar, float):
                     return f"PyFloat_FromDouble({self.generate_float_value(scalar)})"
-                if isinstance(scalar, bool):
-                    return f"PyBool_FromLong({1 if scalar else 0})"
                 if isinstance(scalar, complex):
                     real = self.generate_float_value(scalar.real)
                     imag = self.generate_float_value(scalar.imag)
@@ -3465,11 +3478,16 @@ if (!custom_op_wrapper) {
                     f"scalar {scalar}, {type(scalar)} cannot be handled by handle_scalar"
                 )
 
+            is_any = isinstance(arg_type, torch.AnyType)
+
+            def handle_any(types: type | tuple[type, ...]):
+                return is_any and isinstance(raw_arg, types)
+
             if raw_arg is None:
                 # Py_None is a singleton, so we have to explicitly incref it here
                 lines.append("Py_INCREF(Py_None);\n")
                 return "Py_None"
-            elif isinstance(arg_type, torch.TensorType):
+            elif isinstance(arg_type, torch.TensorType) or handle_any(ir.IRNode):
                 # In some cases, scalar arguments may be passed in place of tensors.
                 if not hasattr(raw_arg, "codegen_reference"):
                     return handle_scalar(raw_arg)
@@ -3483,22 +3501,24 @@ if (!custom_op_wrapper) {
                 return f"PyCapsule_New(reinterpret_cast<void*>({base_handle}.get()), NULL, NULL)"
             elif isinstance(arg_type, torch.OptionalType):
                 return generate_py_arg_inner(lines, raw_arg, arg_type.getElementType())
-            elif isinstance(arg_type, torch.IntType):
+            elif isinstance(arg_type, torch.BoolType) or handle_any(bool):
+                return f"PyBool_FromLong({1 if raw_arg else 0})"
+            elif isinstance(arg_type, torch.IntType) or handle_any(int):
                 # int
                 return f"PyLong_FromLongLong({raw_arg})"
-            elif isinstance(arg_type, torch.SymIntType):
+            elif isinstance(arg_type, torch.SymIntType) or handle_any(torch.SymInt):
                 # SymInt
                 expr = (
                     raw_arg.node.expr if isinstance(raw_arg, torch.SymInt) else raw_arg
                 )
                 return f"PyLong_FromLongLong({cexpr(expr)})"
-            elif isinstance(arg_type, torch.FloatType):
+            elif isinstance(arg_type, torch.FloatType) or handle_any(float):
                 return f"PyFloat_FromDouble({self.generate_float_value(raw_arg)})"
-            elif isinstance(arg_type, torch.BoolType):
-                return f"PyBool_FromLong({1 if raw_arg else 0})"
-            elif isinstance(arg_type, torch.StringType):
+            elif isinstance(arg_type, torch.StringType) or handle_any(str):
                 return f'PyUnicode_FromString("{raw_arg}")'
-            elif isinstance(arg_type, torch.NumberType):
+            elif isinstance(arg_type, torch.NumberType) or handle_any(
+                (*SymTypes, torch.types.Number, complex)
+            ):
                 # Union[bool, int, float, complex]
                 # torch/_prims_common/__init__.py
                 return handle_scalar(raw_arg)
