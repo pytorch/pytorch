@@ -948,6 +948,32 @@ class SideEffects:
                     )
                 init_live_vars.append(cur_tx.post_prune_cell_and_freevars)
             cur_tx = cur_tx.parent
+
+        # Generators tracked for close-on-exit have their close() called in
+        # compile_subgraph after pruning. Closing may forward into a
+        # subiterator suspended on the generator's stack and run its finally
+        # blocks, which read attributes recorded during tracing (e.g. a `log`
+        # captured in __init__). These objects do not escape, so we must not
+        # keep them in id_to_variable (that would reconstruct them into the
+        # output and assign a TempLocalSource). Instead we preserve only their
+        # attribute-mutation bookkeeping so load_attr still works during close.
+        gen_reachable_new: set[VariableTracker] = set()
+
+        def visit_gen(var: VariableTracker) -> None:
+            if var in gen_reachable_new:
+                return
+            if isinstance(var.mutation_type, AttributeMutationNew):
+                gen_reachable_new.add(var)
+            if var in self.store_attr_mutations:
+                VariableTracker.visit(visit_gen, self.store_attr_mutations[var])
+
+        for gen in tx.output.local_generators:
+            gen_tracer = gen.inline_tracer
+            VariableTracker.visit(
+                visit_gen, [gen_tracer.stack, gen_tracer.symbolic_locals]
+            )
+        del visit_gen
+
         VariableTracker.visit(
             visit,
             # TODO track from all possible sources.
@@ -973,10 +999,14 @@ class SideEffects:
             k: v for k, v in self.id_to_variable.items() if is_live(v)
         }
         self.store_attr_mutations = {
-            k: v for k, v in self.store_attr_mutations.items() if is_live(k)
+            k: v
+            for k, v in self.store_attr_mutations.items()
+            if is_live(k) or k in gen_reachable_new
         }
         self.attr_mutation_kinds = {
-            k: v for k, v in self.attr_mutation_kinds.items() if is_live(k)
+            k: v
+            for k, v in self.attr_mutation_kinds.items()
+            if is_live(k) or k in gen_reachable_new
         }
 
     def mutation(self, var: VariableTracker) -> None:
