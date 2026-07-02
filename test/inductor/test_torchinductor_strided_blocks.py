@@ -295,9 +295,7 @@ class CommonTemplate:
         [
             tma_xfail((8, 8), (8, 1), cpu=True),  # R3: y inner dim 1*4B < 16B
             ((8, 8), (1, 8)),
-            tma_xfail(
-                (4, 1, 4), (1, 4, 1), cpu=True
-            ),  # R3: y inner dim 1*4B < 16B
+            tma_xfail((4, 1, 4), (1, 4, 1), cpu=True),  # R3: y inner dim 1*4B < 16B
             ((1, 1, 1, 4), (4, 4, 4, 4)),  # Unmatched dims for first operand.
         ],
     )
