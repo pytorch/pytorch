@@ -604,6 +604,17 @@ Tensor& multinomial_out(const Tensor& self,
     }
     at::_assert_async(~zero_prob_condition, "invalid multinomial distribution (sum of probabilities <= 0)");
 
+    if (!with_replacement) {
+      at::Tensor not_enough_nonzero;
+      if (self.dim() == 1) {
+        not_enough_nonzero = (self > 0).sum() < n_sample;
+      } else {
+        not_enough_nonzero = ((self > 0).sum(1) < n_sample).any();
+      }
+      at::_assert_async(~not_enough_nonzero,
+          "cannot sample n_sample > number of categories with nonzero probability without replacement");
+    }
+
     // The algorithm is from gumbel softmax.
     // s = argmax( logp - log(-log(eps)) ) where eps ~ U(0, 1)
     // Here we can apply exp to the formula which will not affect result of
