@@ -1149,7 +1149,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
         self.code = code
         self.f_globals = f_globals
         self.inline_tracer = inline_tracer
-        self.remaining_items: list[VariableTracker] | None = None
+        self.remaining_items: list[VariableTracker] = []
 
     def get_code(self) -> types.CodeType:
         return self.code
@@ -1187,12 +1187,10 @@ class LocalGeneratorObjectVariable(VariableTracker):
         temp = temporarely_allow_writes_to_output_graph(tx)
 
         with save, disallow, temp:
-            if self.remaining_items is None:
+            if not self.remaining_items:
                 tracer = self.inline_tracer
                 if not tracer.generator_exhausted:
                     self.remaining_items = unpack_iterable(tx, self)  # type: ignore[bad-argument-type]
-                else:
-                    self.remaining_items = []
             variables.ListIteratorVariable(self.remaining_items).reconstruct(codegen)
 
     def get_globals(self) -> dict[str, Any]:
