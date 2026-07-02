@@ -181,6 +181,7 @@ class FlexGemmOutputPlan:
     output: torch.fx.Node
     aux_outputs: tuple[torch.fx.Node, ...] = ()
     local_reduce: FlexGemmOutputLocalReducePlan | None = None
+    local_reduce_aux_index: int | None = None
 
     def __post_init__(self) -> None:
         """Reject plans that cannot bind FX tensor outputs downstream."""
@@ -188,6 +189,8 @@ class FlexGemmOutputPlan:
             isinstance(aux_output, torch.fx.Node) for aux_output in self.aux_outputs
         ):
             raise RuntimeError(FLEX_GEMM_OUTPUT_PLAN_NODE_ERROR)
+        if self.local_reduce_aux_index is not None and self.local_reduce is None:
+            raise RuntimeError(LOCAL_REDUCE_OUTPUT_PLAN_NODE_ERROR)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -865,6 +868,7 @@ def tuple_output_plan(
                     if index != local_reduce_index
                 ),
                 local_reduce=compressed_aux_plan,
+                local_reduce_aux_index=local_reduce_index,
             )
     feed_main_plan = local_reduce_feed_main_output_plan(output, aux_outputs)
     if feed_main_plan is not None:
