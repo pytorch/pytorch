@@ -656,7 +656,7 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
             def __fx_repr__(self):
                 return (f"_HashTestOpaque({self.x})", {})
 
-        register_custom_class(_HashTestOpaque, typ="value")
+        register_custom_class(_HashTestOpaque, typ="constant")
         self._assert_hash_equals(_HashTestOpaque(42))
 
     # --- Dunder __hash__ and consistency ---

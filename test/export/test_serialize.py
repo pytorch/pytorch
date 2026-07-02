@@ -81,7 +81,7 @@ class _OpaqueConfig(torch._custom_class_base.CustomClassBase):
         )
 
 
-register_custom_class(_OpaqueConfig, typ="value")
+register_custom_class(_OpaqueConfig, typ="constant")
 
 
 class _OpaqueEngine(torch._custom_class_base.CustomClassBase):

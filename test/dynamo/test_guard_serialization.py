@@ -315,7 +315,7 @@ class CustomConstantType(torch._custom_class_base.CustomClassBase):
         }
 
 
-torch._library.opaque_object.register_custom_class(CustomConstantType, typ="value")
+torch._library.opaque_object.register_custom_class(CustomConstantType, typ="constant")
 
 
 class TestGuardSerializationBase(torch._inductor.test_case.TestCase):

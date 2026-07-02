@@ -30,7 +30,7 @@ class _OpaqueVal(torch._custom_class_base.CustomClassBase):
         return (f"_OpaqueVal({self.val})", {"_OpaqueVal": _OpaqueVal})
 
 
-register_custom_class(_OpaqueVal, typ="value", hoist=True)
+register_custom_class(_OpaqueVal, typ="constant", hoist=True)
 
 
 class TpRichcompareTests(torch._dynamo.test_case.TestCase):

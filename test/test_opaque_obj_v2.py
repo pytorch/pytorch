@@ -298,7 +298,7 @@ class HoistedString(torch._custom_class_base.CustomClassBase):
         return (f"HoistedString('{self.val}')", {"HoistedString": HoistedString})
 
 
-register_custom_class(HoistedString, typ="value", hoist=True)
+register_custom_class(HoistedString, typ="constant", hoist=True)
 
 
 @torch.library.custom_op("mylib::op_with_string", mutates_args=())
@@ -352,9 +352,9 @@ register_custom_class(
     },
 )
 register_custom_class(AddModule, typ="symbolic")
-register_custom_class(ValueConfig, typ="value")
-register_custom_class(SizeStore, typ="value")
-register_custom_class(NestedValueSize, typ="value")
+register_custom_class(ValueConfig, typ="constant")
+register_custom_class(SizeStore, typ="constant")
+register_custom_class(NestedValueSize, typ="constant")
 register_custom_class(OpaqueMultiplier, typ="symbolic")
 register_custom_class(Color, typ="symbolic")
 register_custom_class(ColorWithDescriptor, typ="symbolic")
@@ -1810,7 +1810,7 @@ def forward(self, primals, tangents):
         with self.assertRaisesRegex(
             TypeError, "expected to have a non-default `__eq__`"
         ):
-            register_custom_class(NoEq, typ="value")
+            register_custom_class(NoEq, typ="constant")
 
         class NoHash(CustomClassBase):
             def __init__(self, x):
@@ -1822,7 +1822,7 @@ def forward(self, primals, tangents):
         with self.assertRaisesRegex(
             TypeError, "expected to have a non-default `__hash__`"
         ):
-            register_custom_class(NoHash, typ="value")
+            register_custom_class(NoHash, typ="constant")
 
         class NoRepr(CustomClassBase):
             def __init__(self, x):
@@ -1835,7 +1835,7 @@ def forward(self, primals, tangents):
                 return hash(self.x)
 
         with self.assertRaisesRegex(TypeError, "expected to have a `__fx_repr__`"):
-            register_custom_class(NoRepr, typ="value")
+            register_custom_class(NoRepr, typ="constant")
 
         class SpecifyMember(CustomClassBase):
             def __init__(self, x):
@@ -1851,7 +1851,9 @@ def forward(self, primals, tangents):
                 return f"SpecifyMember({self.x})"
 
         with self.assertRaisesRegex(TypeError, "No need to specify `guard_fn`"):
-            register_custom_class(SpecifyMember, typ="value", guard_fn=lambda obj: [])
+            register_custom_class(
+                SpecifyMember, typ="constant", guard_fn=lambda obj: []
+            )
 
     def test_invalid_schema(self):
         with self.assertRaisesRegex(
@@ -2094,7 +2096,7 @@ def forward(self, arg0_1):
                 def __fx_repr__(self):
                     return f"TmpClass(value={self.value!r})", {"TmpClass": TmpClass}
 
-            register_custom_class(TmpClass, typ="value")
+            register_custom_class(TmpClass, typ="constant")
 
             self.assertTrue(is_opaque_type(TmpClass))
             self.assertTrue(is_opaque_value_type(TmpClass))

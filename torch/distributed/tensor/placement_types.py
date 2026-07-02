@@ -2031,24 +2031,24 @@ def _register_placements_as_opaque():
         "is_replicate": MemberType.USE_REAL,
         "__eq__": MemberType.USE_REAL,
     }
-    register_custom_class(Placement, typ="value", members=allowed_members)
+    register_custom_class(Placement, typ="constant", members=allowed_members)
     register_custom_class(
-        Shard, typ="value", members=allowed_members | {"dim": MemberType.USE_REAL}
+        Shard, typ="constant", members=allowed_members | {"dim": MemberType.USE_REAL}
     )
-    register_custom_class(Replicate, typ="value", members=allowed_members)
+    register_custom_class(Replicate, typ="constant", members=allowed_members)
     register_custom_class(
         Partial,
-        typ="value",
+        typ="constant",
         members=allowed_members | {"reduce_op": MemberType.USE_REAL},
     )
     register_custom_class(
         _StridedShard,
-        typ="value",
+        typ="constant",
         members=allowed_members | {"dim": MemberType.USE_REAL},
     )
     register_custom_class(
         _MaskPartial,
-        typ="value",
+        typ="constant",
         members=allowed_members | {"reduce_op": MemberType.USE_REAL},
     )
 

@@ -145,7 +145,7 @@ from torch._library.opaque_object import MemberType, register_custom_class
 
 register_custom_class(
     PytreeTuple,
-    typ="value",
+    typ="constant",
     members={
         "__getitem__": MemberType.USE_REAL,
         "__iter__": MemberType.USE_REAL,
