@@ -15,6 +15,7 @@ handling of iterator operations during code transformation and optimization.
 
 import inspect
 import itertools
+import operator
 import sys
 from typing import Any, TYPE_CHECKING
 
@@ -887,6 +888,21 @@ class DictViewIterator(IteratorVariable):
                 tx,
                 args=[VariableTracker.build(tx, a) for a in e.args],
             )
+
+    def call_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> VariableTracker:
+        # dictiter_len/setiter_len: __length_hint__ returns the number of
+        # not-yet-consumed elements. self._iter is a live Python iterator over
+        # the captured items, so its own length hint already reflects any
+        # next() calls made during tracing.
+        if name == "__length_hint__":
+            return ConstantVariable.create(operator.length_hint(self._iter))
+        return super().call_method(tx, name, args, kwargs)
 
     def python_type(self) -> type:
         if self.view_type == "keys":
