@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import operator
 from functools import reduce
+
 from typing_extensions import deprecated
 
 import torch
@@ -50,14 +51,15 @@ class Resize(Function):
                 f"while preserving the number of elements."
             )
         ctx.input_sizes = tensor.size()
-        
-        # Handle different tensor types appropriately
+
         if tensor.is_quantized:
-            # Quantized tensors require explicit copy for memory layout preservation
-            tensor = tensor.copy_()
-        
-        # Ensure contiguity before view (safe for all tensor types)
-        return tensor.contiguous().view(*sizes)
+            tensor.copy_(tensor)
+            return tensor.contiguous().view(*sizes)
+        if tensor.is_contiguous():
+            result = tensor.new(tensor).contiguous().view(*sizes)
+            return result
+        else:
+            return tensor.contiguous().view(*sizes)
 
     @staticmethod
     # pyrefly: ignore [bad-override]
