@@ -177,6 +177,14 @@
 ```
 
 ```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    clear_cublas_workspaces
+```
+
+```{eval-rst}
 .. autoclass:: torch.cuda.use_mem_pool
 ```
 

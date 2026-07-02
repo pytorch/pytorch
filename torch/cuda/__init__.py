@@ -20,6 +20,7 @@ import warnings
 from collections.abc import Callable
 from functools import lru_cache
 from typing import Any, cast, NewType, Optional, TYPE_CHECKING
+from typing_extensions import deprecated
 
 import torch
 import torch._C
@@ -1329,10 +1330,22 @@ def current_solver_handle():
 _ClearCublasWorkspaces = None
 
 
-def _clear_cublas_workspaces(device: Device = None) -> None:
-    r"""Clear cuBLAS workspaces on this thread and CUDA autograd worker threads.
-    Note that this enables multithreaded autograd during cleanup to reach
+def clear_cublas_workspaces(device: Device = None) -> None:
+    r"""Clear cuBLAS workspace memory allocations.
+
+    cuBLAS maintains persistent workspace allocations for operations that
+    are not released by :func:`~torch.cuda.empty_cache`. This function explicitly
+    frees those workspace allocations on the current thread and CUDA autograd
     worker threads.
+
+    Args:
+        device (torch.device or int, optional): Selected device. If :attr:`device`
+            is None (default), clears workspaces for all devices. If specified,
+            only clears workspaces for the given device.
+
+    .. note::
+        This function clears workspaces on CUDA autograd worker threads by
+        enabling multithreaded autograd during cleanup.
     """
     if not hasattr(torch._C, "_cuda_clearCublasWorkspaces"):
         return
@@ -1394,6 +1407,15 @@ def _clear_cublas_workspaces(device: Device = None) -> None:
     finally:
         if set_autograd_compiler is not None:
             set_autograd_compiler(prior_compiler, prior_dynamic)
+
+
+@deprecated(
+    "torch.cuda._clear_cublas_workspaces is deprecated; "
+    "use torch.cuda.clear_cublas_workspaces instead.",
+    category=FutureWarning,
+)
+def _clear_cublas_workspaces(device: Device = None) -> None:
+    return clear_cublas_workspaces(device)
 
 
 def set_sync_debug_mode(debug_mode: int | str) -> None:
@@ -2125,6 +2147,7 @@ __all__ = [
     "caching_allocator_enable",
     "can_device_access_peer",
     "check_error",
+    "clear_cublas_workspaces",
     "cudaStatus",
     "cudart",
     "current_blas_handle",
