@@ -45,8 +45,10 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import (
     get_func_call,
     GPU_TYPE,
+    HAS_CPU,
     HAS_CUDA_AND_TRITON,
     HAS_GPU,
+    TRITON_HAS_CPU,
     HAS_XPU_AND_TRITON,
 )
 from torch.testing._internal.logging_utils import log_settings, logs_to_string
@@ -4624,6 +4626,118 @@ class MutationTests(torch._inductor.test_case.TestCase):
         write_names = [dep.name for dep in tensor_accesses.read_writes.writes]
         self.assertListEqual(read_names, ["in_ptr0", "in_ptr1"])
         self.assertListEqual(write_names, ["out_ptr"])
+
+    @unittest.skipUnless(
+        HAS_GPU or (HAS_CPU and TRITON_HAS_CPU),
+        "requires gpu or triton cpu",
+    )
+    def test_custom_tma_descriptor_ops_keep_triton_launcher(self):
+        from torch._higher_order_ops import triton_kernel_wrap as tkw
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            identify_accessed_tensors,
+            Intermediate,
+            Op,
+            Param,
+        )
+        import triton
+
+        custom_store = "custom_tma.descriptor_store"
+        custom_load = "custom_tma.descriptor_load"
+        device = GPU_TYPE if HAS_GPU else "cpu"
+
+        functions = {
+            "mul2_kernel": {
+                Intermediate(idx=0): [
+                    Op(
+                        "tt.make_tensor_descriptor",
+                        None,
+                        [Param(idx=0)],
+                        Intermediate(idx=0),
+                    )
+                ],
+                Intermediate(idx=1): [
+                    Op(
+                        "tt.make_tensor_descriptor",
+                        None,
+                        [Param(idx=1)],
+                        Intermediate(idx=1),
+                    )
+                ],
+                Intermediate(idx=2): [
+                    Op(custom_load, None, [Intermediate(idx=0)], Intermediate(idx=2))
+                ],
+                Intermediate(idx=-1): [
+                    Op(
+                        custom_store,
+                        None,
+                        [Intermediate(idx=1), Intermediate(idx=2)],
+                        Intermediate(idx=-1),
+                    )
+                ],
+            }
+        }
+
+        old_tma_store_ops = tkw.TMA_STORE_OPS.copy()
+        old_write_ops = tkw.WRITE_OPS.copy()
+        old_read_ops = tkw.READ_OPS.copy()
+        try:
+            tkw.TMA_STORE_OPS[custom_store] = tkw._safe_at_least_one_arg
+            tkw.WRITE_OPS[custom_store] = tkw._safe_at_least_one_arg
+            tkw.READ_OPS[custom_load] = lambda op: [0]
+            with (
+                mock.patch.object(
+                    tkw,
+                    "generate_ttir",
+                    return_value=(
+                        object(),
+                        ["in_ptr0", "out_ptr", "n_elements", "BLOCK_SIZE"],
+                    ),
+                ),
+                mock.patch.object(tkw, "ttir_to_functions", return_value=functions),
+            ):
+                x = torch.rand(16, device=device)
+                tensor_accesses = identify_accessed_tensors(
+                    mul2_kernel,
+                    {
+                        "in_ptr0": x,
+                        "out_ptr": x,
+                        "n_elements": x.numel(),
+                        "BLOCK_SIZE": 16,
+                    },
+                    {},
+                )
+                read_names = [dep.name for dep in tensor_accesses.read_writes.reads]
+                write_names = [dep.name for dep in tensor_accesses.read_writes.writes]
+                self.assertListEqual(read_names, ["in_ptr0"])
+                self.assertListEqual(write_names, ["out_ptr"])
+
+                def f(x):
+                    output = torch.zeros_like(x)
+                    grid = (triton.cdiv(x.numel(), 16),)
+                    mul2_kernel[grid](x, output, x.numel(), BLOCK_SIZE=16)
+                    return output
+
+                config_patch = (
+                    inductor_config.patch("cpu_backend", "triton")
+                    if device == "cpu"
+                    else contextlib.nullcontext()
+                )
+                with config_patch:
+                    actual, (code,) = run_and_get_code(torch.compile(f), x)
+                self.assertEqual(actual, 2 * x)
+                if inductor_config.cpp_wrapper:
+                    self.assertIn("launchKernel(mul2_kernel_0", code)
+                else:
+                    self.assertIn("mul2_kernel_0.run(", code)
+        finally:
+            tkw.TMA_STORE_OPS.clear()
+            tkw.TMA_STORE_OPS.update(old_tma_store_ops)
+            tkw.WRITE_OPS.clear()
+            tkw.WRITE_OPS.update(old_write_ops)
+            tkw.READ_OPS.clear()
+            tkw.READ_OPS.update(old_read_ops)
+            tkw.get_tma_stores.reset()
+            tkw.analyze_kernel_access.reset()
 
 
 if HAS_GPU:
