@@ -38,6 +38,7 @@ from torch.utils._sympy.functions import (
 )
 from torch.utils._triton import (
     get_triton_version,
+    has_triton_cpu_backend,
     has_triton_package,
     has_triton_stable_tma_api,
 )
@@ -3171,6 +3172,48 @@ class TMACompatibilityChecker:
         return self.force
 
 
+class CPUDescriptorChecker(TMACompatibilityChecker):
+    def can_use_tma(self):
+        if self.force:
+            return True
+        if not (
+            config.triton.use_tensor_descriptor
+            and has_triton_cpu_backend()
+            and has_triton_stable_tma_api()
+        ):
+            log.debug(
+                "%s Requires Triton CPU backend and `use_tensor_descriptor` option enabled",
+                self.failed_debug_prefix,
+            )
+            return False
+        return True
+
+    def are_block_parameters_compatible(
+        self,
+        block_params: BlockParameters,
+        constant_offset: sympy.Expr | int = 0,
+    ) -> bool:
+        del constant_offset
+
+        if self.force:
+            strides = [
+                V.graph.sizevars.replace_backed_symbols_with_hints(st)
+                for st in block_params.strides
+            ]
+        else:
+            strides = block_params.strides
+
+        if not V.graph.sizevars.statically_known_equals(strides[-1], sympy.Integer(1)):
+            log.debug(
+                "%s CPU tensor descriptors require innermost stride to be 1. Strides are: %s",
+                self.failed_debug_prefix,
+                strides,
+            )
+            return False
+
+        return True
+
+
 class TritonKernel(SIMDKernel[TritonCSEVariable]):
     """A class to represent a triton kernel and helpers to generate
     triton kernel programmatically
@@ -3245,6 +3288,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.has_load_with_contiguous_rdim = False
         # We track the store name since a store can be canceled later
         self.stores_with_contiguous_rdim: list[str] = []
+
+        # Only override the checker cls if the class attribute points to the
+        # default CUDA based checker.
+        if (
+            V.graph.get_current_device_or_throw().type == "cpu"
+            and self.tma_compatibility_checker_cls is TMACompatibilityChecker
+        ):
+            self.tma_compatibility_checker_cls = CPUDescriptorChecker
 
     def triton_tensor_ndim(self) -> int:
         return sum(int(tree.tensor_dim is not None) for tree in self.range_trees)

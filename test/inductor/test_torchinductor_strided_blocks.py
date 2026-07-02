@@ -63,7 +63,7 @@ def _get_no_split_threshold() -> int:
     return 8192
 
 
-def tma_xfail(*args, extra_decorators=None):
+def tma_xfail(*args, cpu=False, extra_decorators=None):
     """Mark a subtest as expected to fail with TMA tensor descriptors.
 
     TMA restrictions (see Note: TMA API Restrictions in config.py):
@@ -71,7 +71,9 @@ def tma_xfail(*args, extra_decorators=None):
       R2: outer strides must be 16-byte aligned
       R3: innermost dimension must load at least 16 bytes
     """
-    decorators = [xfail_if_use_tensor_descriptor]
+    decorators = [xfail_if_cuda_tensor_descriptor]
+    if cpu:
+        decorators.append(xfail_if_cpu_tensor_descriptor)
     if extra_decorators:
         decorators += list(extra_decorators)
     return subtest(arg_values=args, decorators=decorators)
@@ -84,11 +86,20 @@ tiled_reduction_config = {
 }
 
 
-# These xfails are due to the current restrictions with the TMA descriptor API.
-# see Note: TMA API Restrictions. In some cases TMA descriptors cannot be generated, and so tests
-# that assert on the expected number of descriptors (= equivalent block ptrs) will fail
-def xfail_if_use_tensor_descriptor(fn):
-    fn._expected_failure_use_tensor_descriptor = True
+def xfail_if_cpu_tensor_descriptor(fn):
+    fn._expected_failure_cpu_tensor_descriptor = True
+    return fn
+
+
+def xfail_if_cuda_tensor_descriptor(fn):
+    fn._expected_failure_cuda_tensor_descriptor = True
+    return fn
+
+
+# These xfails are due to restrictions shared by the CPU and CUDA tensor descriptor paths.
+def xfail_if_tensor_descriptor(fn):
+    fn._expected_failure_cpu_tensor_descriptor = True
+    fn._expected_failure_cuda_tensor_descriptor = True
     return fn
 
 
@@ -218,7 +229,9 @@ class CommonTemplate:
             ),  # R3: inner dim 2*4B < 16B
             ((8, 8, 8, 8), (4, 4, 4, 4), None, None, True),
             ((8, 8), (4, 4), None, 10, True),  # Storage offset
-            tma_xfail((8, 8), (4, 4), (16, 2), None, True),  # R1: inner stride 2 != 1
+            tma_xfail(
+                (8, 8), (4, 4), (16, 2), None, True, cpu=True
+            ),  # R1: inner stride 2 != 1
             ((8, 8), (4, 4), (1, 8), None, True),  # Transposed strides
             tma_xfail(
                 (5, 9), (5, 8), None, None, True
@@ -280,9 +293,11 @@ class CommonTemplate:
     @parametrize(
         "x_size,y_size",
         [
-            tma_xfail((8, 8), (8, 1)),  # R3: y inner dim 1*4B < 16B
+            tma_xfail((8, 8), (8, 1), cpu=True),  # R3: y inner dim 1*4B < 16B
             ((8, 8), (1, 8)),
-            tma_xfail((4, 1, 4), (1, 4, 1)),  # R3: y inner dim 1*4B < 16B
+            tma_xfail(
+                (4, 1, 4), (1, 4, 1), cpu=True
+            ),  # R3: y inner dim 1*4B < 16B
             ((1, 1, 1, 4), (4, 4, 4, 4)),  # Unmatched dims for first operand.
         ],
     )
@@ -432,7 +447,7 @@ class CommonTemplate:
 
         result, (triton_code,) = self._run_and_compare(foo, x, y)
 
-    @xfail_if_use_tensor_descriptor
+    @xfail_if_tensor_descriptor
     @parametrize("prefer_nd_tiling", [False, True])
     @config.patch("triton.skip_l1_cache", False)
     def test_pointwise_broadcast_nonzero_strides(self, prefer_nd_tiling: bool):
@@ -506,7 +521,7 @@ class CommonTemplate:
             # 2-kernel split xfails TMA; on SM100+ uses single persistent kernel and passes.
             subtest(
                 arg_values=((128, 128), 3, 2),
-                decorators=[] if SM100OrLater else [xfail_if_use_tensor_descriptor],
+                decorators=[] if SM100OrLater else [xfail_if_cuda_tensor_descriptor],
             ),
         ],
     )
@@ -597,7 +612,7 @@ class CommonTemplate:
             expected_num_triton_kernels=num_triton_kernels,
         )
 
-    @xfail_if_use_tensor_descriptor
+    @xfail_if_cuda_tensor_descriptor
     def test_multiple_max_block_non_power_of_2(self):
         """
         Check that we support dims of size n * MAX_BLOCK, where n is any positive integer, not
@@ -628,7 +643,7 @@ class CommonTemplate:
         "nd_tiling,num_block_pointers",
         [
             subtest(
-                (True, 2), decorators=[xfail_if_use_tensor_descriptor]
+                (True, 2), decorators=[xfail_if_cuda_tensor_descriptor]
             ),  # With tiling, the index is affine.
             (False, 1),  # We can't infer that the load is a power of 2.
         ],
@@ -654,7 +669,7 @@ class CommonTemplate:
         "with_tiling,num_block_pointers",
         [
             subtest(
-                (True, 1), decorators=[xfail_if_use_tensor_descriptor]
+                (True, 1), decorators=[xfail_if_cuda_tensor_descriptor]
             ),  # With tiling, the index is affine.
             (False, 0),  # We can't infer that the load is a power of 2.
         ],
@@ -702,7 +717,7 @@ class CommonTemplate:
         )
 
     @decorateIf(
-        xfail_if_use_tensor_descriptor,
+        xfail_if_cuda_tensor_descriptor,
         lambda param_kwargs: not (
             param_kwargs["num_block_pointers"] == 3 and param_kwargs["num_tiles"] == 1
         ),
@@ -783,7 +798,7 @@ class CommonTemplate:
                 else:
                     self.assertNotIn(tile_name, program)
 
-    @xfail_if_use_tensor_descriptor
+    @xfail_if_cuda_tensor_descriptor
     @parametrize(
         "view_size,num_block_pointers,num_triton_kernels,reduction_op",
         [
@@ -863,7 +878,7 @@ class CommonTemplate:
             ((8, 8), 1, 1, True),  # Persistent Welford fallback
             subtest(
                 ((128, 128), 7, 2, False),
-                decorators=[] if SM100OrLater else [xfail_if_use_tensor_descriptor],
+                decorators=[] if SM100OrLater else [xfail_if_cuda_tensor_descriptor],
             ),  # Looped Welford reduction
         ],
     )
@@ -1003,7 +1018,7 @@ class CommonTemplate:
         # Check for 2 reduction dimensions.
         self._assert_reduction_ndims(code, 2)
 
-    @xfail_if_use_tensor_descriptor
+    @xfail_if_cuda_tensor_descriptor
     def test_fused_2d_reduction(
         self,
     ):
@@ -1060,7 +1075,7 @@ class CommonTemplate:
 
     @parametrize(
         "tile_reductions",
-        [False, subtest(True, decorators=[xfail_if_use_tensor_descriptor])],
+        [False, subtest(True, decorators=[xfail_if_cuda_tensor_descriptor])],
     )
     def test_enable_tiled_reductions(self, tile_reductions: bool):
         """
@@ -1085,7 +1100,7 @@ class CommonTemplate:
 
     # FIXME: fails for Triton CPU. Tiling does not contain YBLOCK.
     @test_torchinductor.xfail_if_triton_cpu
-    @xfail_if_use_tensor_descriptor
+    @xfail_if_tensor_descriptor
     def test_reduction_padded_output_tiling(self):
         """
         Test a [Y, X, R0] reduction with tiled output dimensions.
@@ -1112,7 +1127,7 @@ class CommonTemplate:
         self._assert_pointwise_ndims(code, 2)
         self._assert_reduction_ndims(code, 1)
 
-    @xfail_if_use_tensor_descriptor
+    @xfail_if_cuda_tensor_descriptor
     @parametrize("unroll", (False, True))
     def test_reduce_trailing_dims_discontiguous_input(self, unroll: bool):
         """
@@ -1120,6 +1135,13 @@ class CommonTemplate:
         only reduce over the last two dimensions.
         """
         view = self._discontiguous_tensor((7, 5, 3, 2), self.device)
+        expected_num_block_pointers = 7 if unroll else 2
+        if (
+            unroll
+            and self.device == "cpu"
+            and self.block_descriptor_constructor_str == "tl.make_tensor_descriptor"
+        ):
+            expected_num_block_pointers = 1
 
         # We expect block pointers for the inputs and output.
         # Note there are more inputs if unrolled.
@@ -1129,7 +1151,7 @@ class CommonTemplate:
                 dim=(-1, -2),
             ),
             view,
-            expected_num_block_pointers=7 if unroll else 2,
+            expected_num_block_pointers=expected_num_block_pointers,
             expected_num_triton_kernels=1,
             config_patches={
                 "unroll_reductions_threshold": 1e4 if unroll else 1,
@@ -1202,7 +1224,7 @@ class CommonTemplate:
         )
         self.assertTrue("Min" not in code[0])
 
-    @xfail_if_use_tensor_descriptor
+    @xfail_if_tensor_descriptor
     @requires_gpu()  # FIXME this test failed on Triton-CPU
     def test_3d_permute_tiling(self):
         """
@@ -1269,6 +1291,7 @@ class CommonTemplate:
     # bernoulli operation
     # TODO: fails for triton CPU "Failed to convert to LLVM IR"
     @test_torchinductor.xfail_if_triton_cpu
+    @xfail_if_cpu_tensor_descriptor
     # Disable split_reductions on this test for now due to the interaction with LOAF
     @config.patch(split_reductions=False)
     def test_removed_buffers(self):
@@ -1287,7 +1310,7 @@ class CommonTemplate:
             rtol=0.06,
         )
 
-    @xfail_if_use_tensor_descriptor
+    @xfail_if_tensor_descriptor
     def test_pointwise_index_order(self):
         """
         Test the order of indices in pointwise kernels. Expect Z to be the leading dim,
@@ -1469,7 +1492,7 @@ class CommonTemplate:
     #   offsets=[(xoffset//64), ModularIndexing(xoffset, 8, 8), ModularIndexing(xoffset, 1, 8)]
     #   )
     # constant_offset = 1911
-    @xfail_if_use_tensor_descriptor
+    @xfail_if_tensor_descriptor
     def test_negative_strides(self):
         def model(x, y):
             # Slice in reverse order via a negative stride
@@ -1503,7 +1526,7 @@ class CommonTemplate:
             ),
         ],
     )
-    @xfail_if_use_tensor_descriptor
+    @xfail_if_tensor_descriptor
     def test_boundary_check(self, block_multiple, ynumel_exceed_ygrid_size, include_z):
         @dataclasses.dataclass
         class InputShape:
@@ -1571,21 +1594,6 @@ class CommonTemplate:
                 self.assertTrue("boundary_check=[0, 1]" in code)
 
 
-@unittest.skipIf(not TRITON_HAS_CPU, "requires triton CPU backend")
-@config.patch(cpu_backend="triton")
-@config.patch("triton.use_block_ptr", True)
-class TritonBlockPointerTestCPU(BlockDescriptorTestBase):
-    device = "cpu"
-
-
-test_torchinductor.copy_tests(
-    CommonTemplate,
-    TritonBlockPointerTestCPU,
-    "cpu",
-    xfail_prop="_expected_failure_triton_cpu",
-)
-
-
 @unittest.skipIf(not HAS_GPU, "requires triton GPU backend")
 @config.patch("triton.use_block_ptr", True)
 class TritonBlockPointerTestGPU(BlockDescriptorTestBase):
@@ -1593,6 +1601,14 @@ class TritonBlockPointerTestGPU(BlockDescriptorTestBase):
 
 
 test_torchinductor.copy_tests(CommonTemplate, TritonBlockPointerTestGPU, GPU_TYPE)
+
+
+@unittest.skipIf(not TRITON_HAS_CPU, "requires triton CPU backend")
+@config.patch({"triton.use_tensor_descriptor": True, "cpu_backend": "triton"})
+@instantiate_parametrized_tests
+class TritonTensorDescriptorTestCPU(BlockDescriptorTestBase):
+    block_descriptor_constructor_str = "tl.make_tensor_descriptor"
+    device = "cpu"
 
 
 @unittest.skipIf(
@@ -1739,9 +1755,16 @@ class TritonTensorDescriptorTestCUDA(BlockDescriptorTestBase):
 
 test_torchinductor.copy_tests(
     CommonTemplate,
+    TritonTensorDescriptorTestCPU,
+    "cpu",
+    xfail_prop="_expected_failure_cpu_tensor_descriptor",
+)
+
+test_torchinductor.copy_tests(
+    CommonTemplate,
     TritonTensorDescriptorTestCUDA,
     GPU_TYPE,
-    xfail_prop="_expected_failure_use_tensor_descriptor",
+    xfail_prop="_expected_failure_cuda_tensor_descriptor",
 )
 
 
