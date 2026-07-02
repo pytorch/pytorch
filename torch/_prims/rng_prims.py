@@ -420,7 +420,7 @@ torch._C._set_generator_metaclass(CustomClassBaseMeta)
 
 torch._library.opaque_object.register_custom_class(
     torch._C.Generator,
-    typ="reference",
+    typ="symbolic",
     guard_fn=lambda gen: [gen.device],
     members={
         "device": torch._library.opaque_object.MemberType.USE_REAL,

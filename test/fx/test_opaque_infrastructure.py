@@ -19,7 +19,7 @@ class OpaqueCounter(torch._custom_class_base.CustomClassBase):
 
 
 # Register it as an opaque type (reference semantics for identity/mutation tracking)
-register_custom_class(OpaqueCounter, typ="reference")
+register_custom_class(OpaqueCounter, typ="symbolic")
 
 
 # Define a wrapper class that holds an opaque object as an attribute

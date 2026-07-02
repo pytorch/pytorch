@@ -678,7 +678,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             def __hash__(self):
                 return hash(self.v)
 
-        torch._library.opaque_object.register_custom_class(Config, typ="reference")
+        torch._library.opaque_object.register_custom_class(Config, typ="symbolic")
 
         cfg = Config(42)
 

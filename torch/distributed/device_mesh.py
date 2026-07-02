@@ -1681,7 +1681,7 @@ def _register_distributed_opaque_types():
 
     register_custom_class(
         DeviceMesh,
-        typ="reference",
+        typ="symbolic",
         reconstruct_fn=_device_mesh_reconstruct_fn,
         guard_fn=lambda obj: [
             obj._flatten_rank_map,

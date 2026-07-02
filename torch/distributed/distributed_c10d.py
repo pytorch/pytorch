@@ -71,7 +71,7 @@ def _register_process_group_opaque_type() -> None:
 
     register_custom_class(
         ProcessGroup,
-        typ="reference",
+        typ="symbolic",
         members={
             "size": MemberType.USE_REAL,
             "rank": MemberType.USE_REAL,

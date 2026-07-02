@@ -90,7 +90,7 @@ class _OpaqueEngine(torch._custom_class_base.CustomClassBase):
         self.multiplier = multiplier
 
 
-register_custom_class(_OpaqueEngine, typ="reference")
+register_custom_class(_OpaqueEngine, typ="symbolic")
 
 
 def get_filtered_export_db_tests():

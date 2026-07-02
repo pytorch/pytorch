@@ -750,7 +750,7 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
 
         register_custom_class(
             OpaqueScaler,
-            typ="reference",
+            typ="symbolic",
             members={
                 "scale": MemberType.USE_REAL,
                 "apply": MemberType.INLINED,
@@ -758,7 +758,7 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
         )
         register_custom_class(
             OpaqueContainer,
-            typ="reference",
+            typ="symbolic",
             members={
                 "items": MemberType.USE_REAL,
                 "__getitem__": MemberType.INLINED,

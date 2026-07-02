@@ -333,7 +333,7 @@ class _CyclicOpaque(torch._custom_class_base.CustomClassBase):
 
 
 if not torch._library.opaque_object.is_opaque_type(_CyclicOpaque):
-    torch._library.opaque_object.register_custom_class(_CyclicOpaque, typ="reference")
+    torch._library.opaque_object.register_custom_class(_CyclicOpaque, typ="symbolic")
 
 
 def _custom_empty(*args: object, **kwargs: object) -> None:
