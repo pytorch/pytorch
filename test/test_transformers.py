@@ -3520,6 +3520,42 @@ class TestSDPACudaOnly(NNTestCase):
         self.assertEqual(actual_mask.grad, expected_mask.grad, atol=1e-5, rtol=1e-5)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
+    @parametrize("mask_factory", ["ones", "new_ones"])
+    def test_mem_efficient_attention_vmap_attn_mask(self, device, mask_factory: str):
+        """Exercise vmap masking through the fused memory-efficient SDPA batch rule."""
+        batch, vmap_batch, num_heads, seq_len, embed_dim = 2, 8, 2, 4, 64
+        x = torch.randn(batch, vmap_batch, seq_len, embed_dim, device=device)
+
+        def run_attention(x):
+            qkv = x.view(batch, seq_len, num_heads, embed_dim // num_heads).transpose(1, 2)
+            if mask_factory == "new_ones":
+                attn_mask = x.new_ones(seq_len, seq_len, dtype=torch.bool)
+            else:
+                attn_mask = torch.ones(seq_len, seq_len, device=x.device, dtype=torch.bool)
+            out = F.scaled_dot_product_attention(qkv, qkv, qkv, attn_mask=attn_mask)
+            return out.transpose(1, 2).contiguous().view(batch, seq_len, embed_dim)
+
+        with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
+            actual = torch.vmap(run_attention, in_dims=1, out_dims=1)(x)
+            expected = torch.stack([run_attention(x[:, i]) for i in range(vmap_batch)], dim=1)
+        self.assertEqual(actual, expected)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
+    def test_mem_efficient_attention_vmap_attn_mask_only(self, device):
+        """Exercise vmap when only the SDPA attention mask is batched."""
+        vmap_batch, batch, num_heads, seq_len, head_dim = 8, 2, 2, 4, 32
+        query = torch.randn(batch, num_heads, seq_len, head_dim, device=device)
+        attn_masks = torch.ones(vmap_batch, seq_len, seq_len, device=device, dtype=torch.bool)
+
+        def run_attention(attn_mask):
+            return F.scaled_dot_product_attention(query, query, query, attn_mask=attn_mask)
+
+        with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
+            actual = torch.vmap(run_attention)(attn_masks)
+            expected = torch.stack([run_attention(attn_masks[i]) for i in range(vmap_batch)])
+        self.assertEqual(actual, expected)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("dtype", [torch.float, torch.float16])
     def test_mem_eff_attention_non_contiguous_mask(self, device, dtype):
         make_tensor = partial(torch.rand, device=device, dtype=dtype, requires_grad=True)
