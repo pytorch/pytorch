@@ -2919,6 +2919,15 @@ class GraphLowering(torch.fx.Interpreter):
 
             result = self.wrapper_code.generate(self.is_inference)
             self.wrapper_code.pop_codegened_graph()
+
+            if config.graph_partition:
+                # Surface the root wrapper's flat partition map list (covering
+                # the top-level graph and all subgraphs) for output_code /
+                # cudagraph. See [Note: Shared Graph Partition State].
+                self.partition_maps = (
+                    self.wrapper_code.get_partition_state_owner().partition_maps_flat
+                )
+
             return result
 
     def codegen_subgraph(self, parent_graph: GraphLowering) -> None:
@@ -3119,8 +3128,18 @@ class SubgraphLowering(GraphLowering):
         parent_wrapper_code: PythonWrapperCodegen | None = None,
         partition_signatures: GraphPartitionSignature | None = None,
     ) -> None:
-        super().init_wrapper_code(
-            is_subgraph=True,
-            subgraph_name=self.name,
-            parent_wrapper_code=self.parent.wrapper_code,
-        )
+        if partition_signatures is not None:
+            # Creating a graph-partition wrapper *inside* this subgraph: forward
+            # the partition arguments instead of this subgraph's own identity.
+            super().init_wrapper_code(
+                is_subgraph=True,
+                subgraph_name=subgraph_name,
+                parent_wrapper_code=parent_wrapper_code,
+                partition_signatures=partition_signatures,
+            )
+        else:
+            super().init_wrapper_code(
+                is_subgraph=True,
+                subgraph_name=self.name,
+                parent_wrapper_code=self.parent.wrapper_code,
+            )

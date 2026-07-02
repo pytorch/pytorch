@@ -1553,6 +1553,37 @@ if HAS_CUDA_AND_TRITON:
                 self.assertEqual(eager_out, compiled_out)
 
         @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_invoke_subgraph(self):
+            @torch.compiler.nested_compile_region
+            def gn(a, b):
+                return torch.relu(torch.matmul(a, b) + 1)
+
+            def fn(a, b):
+                return gn(gn(a, b), b)
+
+            compiled = torch.compile(fn, mode="reduce-overhead", fullgraph=True)
+            a = torch.randn(8, 8, device="cuda")
+            b = torch.randn(8, 8, device="cuda")
+            _, codes = run_and_get_code(compiled, a, b)
+            for _ in range(3):
+                self.assertEqual(compiled(a, b), fn(a, b))
+            self.assertGreater(self.get_manager().new_graph_id().id, 0)
+
+            # The lifted invoke_subgraph body is deduplicated into a single
+            # launcher invoked from both call sites, and the cudagraph-eligible
+            # ops inside it form a partition dispatched through the root's single
+            # shared Runner (so cudagraph capture is not nested).
+            self.assertEqual(len(codes), 1)
+            code = codes[0]
+            self.assertEqual(code.count("def repeated_subgraph0(args):"), 1)
+            self.assertEqual(
+                code.count("repeated_subgraph0(repeated_subgraph0_args)"), 2
+            )
+            self.assertIn("def partition_0(args):", code)
+            self.assertIn("runner.partitions[0](partition0_args)", code)
+            self.assertIn("runner = Runner(partitions=[partition_0", code)
+
+        @torch._inductor.config.patch("graph_partition", True)
         @torch._inductor.config.patch("triton.cudagraph_trees", False)
         def test_graph_partition_gc(self):
             def _test_dummy():

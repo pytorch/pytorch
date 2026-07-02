@@ -4145,7 +4145,6 @@ class Scheduler:
         V.graph.scheduler = self
         self.backends: dict[torch.device, BaseScheduling] = {}
         self.post_grad_graph_id = next(_post_grad_graph_counter)
-        self._graph_partition_counter = itertools.count()
 
         self.completed_operations: OrderedSet[str] = OrderedSet()
         self.available_buffer_names = OrderedSet(
@@ -8902,6 +8901,24 @@ class Scheduler:
         if isinstance(node.node, ir.Conditional):
             return "Conditional ops"
 
+        if isinstance(node.node, ir.InvokeSubgraph):
+            # invoke_subgraph is a partition boundary: its lifted body is
+            # partitioned and cudagraphed on its own, so the op itself must stay
+            # in the inlined non-cudagraph region. Otherwise the body's
+            # partitions would be invoked from within an enclosing cudagraph,
+            # causing nested cudagraph capture (deadlock).
+            return "invoke_subgraph ops"
+
+        # A MultiOutput extracting an invoke_subgraph result indexes its Python
+        # output container (e.g. buf[i] where buf is a list). Keep it in the
+        # inlined non-cudagraph region with the op rather than letting it form
+        # its own cudagraph partition, since a cudagraph partition cannot take a
+        # Python container as an input.
+        if isinstance(node.node, ir.MultiOutput) and any(
+            isinstance(inp, ir.InvokeSubgraph) for inp in node.node.inputs
+        ):
+            return "MultiOutput of invoke_subgraph"
+
         if getattr(node.node, "unbacked_bindings", None):
             return "unbacked binding ops"
 
@@ -8987,48 +9004,55 @@ class Scheduler:
 
         return name_to_node
 
-    def compute_graph_partition_maps(
+    def _build_graph_partition_map(
         self,
-        signatures: list[GraphPartitionSignature],
-    ) -> None:
+        partition_id: int,
+        signature: GraphPartitionSignature,
+        is_subgraph_partition: bool,
+    ) -> GraphPartitionMap:
         """
-        computes a mapping from partition input/output indices to graph input/output
-        indices for each partition.
+        Build a GraphPartitionMap for one cudagraph partition. The input/output
+        index mappings translate partition input/output indices to ROOT graph
+        input/output indices and are consumed at runtime in
+        get_partition_cudagraph_metadata.
+
+        Note: [Graph Partition Map for CUDAGraph]
+        The number of partition maps must equal the number of generated
+        partition functions; cudagraphify is applied to each partition function
+        positionally by zipping with this list.
+
+        For a partition codegened inside a subgraph, the partition
+        inputs/outputs are subgraph-local buffers, never root graph
+        inputs/outputs, so input mappings are None and output mappings are
+        empty. The runtime tolerates this by creating dummy placeholders and
+        treating the inputs as non-static (i.e. copied into the cudagraph
+        capture buffers on every replay). See [Note: Shared Graph Partition
+        State].
         """
-        name_to_graph_input_index = {
-            name: idx for idx, name in enumerate(V.graph.graph_inputs)
-        }
-        name_to_graph_output_indices: dict[str, list[int]] = defaultdict(list)
-        for idx, name in enumerate(V.graph.get_output_names()):
-            name_to_graph_output_indices[name].append(idx)
+        if is_subgraph_partition:
+            input_mapping: list[int | None] = [None] * len(signature.input_nodes)
+            output_mapping: list[list[int]] = [[] for _ in signature.output_nodes]
+        else:
+            name_to_graph_input_index = {
+                name: idx for idx, name in enumerate(V.graph.graph_inputs)
+            }
+            name_to_graph_output_indices: dict[str, list[int]] = defaultdict(list)
+            for idx, name in enumerate(V.graph.get_output_names()):
+                name_to_graph_output_indices[name].append(idx)
+            input_mapping = [
+                name_to_graph_input_index.get(name) for name in signature.input_nodes
+            ]
+            output_mapping = [
+                name_to_graph_output_indices.get(node.get_name(), [])
+                for node in signature.output_nodes
+            ]
 
-        V.graph.partition_maps = []
-        for partition_id, signature in enumerate(signatures):
-            if signature.skip_cudagraph:
-                # Note: [Graph Partition Map for CUDAGraph]
-                # number of partition map should be the same as the number of generated
-                # partition functions. This assumption will be used when cudagraphify
-                # each partition function.
-                continue
-
-            input_mapping = []
-            for name in signature.input_nodes:
-                input_mapping.append(name_to_graph_input_index.get(name))
-
-            output_mapping = []
-            for node in signature.output_nodes:
-                output_mapping.append(
-                    name_to_graph_output_indices.get(node.get_name(), [])
-                )
-
-            V.graph.partition_maps.append(
-                GraphPartitionMap(
-                    partition_id,
-                    input_mapping,
-                    output_mapping,
-                    signature.constant_names,
-                )
-            )
+        return GraphPartitionMap(
+            partition_id,
+            input_mapping,
+            output_mapping,
+            signature.constant_names,
+        )
 
     def get_graph_partition_symbol_inputs(
         self,
@@ -9452,7 +9476,6 @@ class Scheduler:
         signatures = self.get_graph_partition_signature(
             partitions=partitions, skip_cudagraphs=skip_cudagraphs
         )
-        self.compute_graph_partition_maps(signatures)
 
         self._log_graph_partitions(partitions, signatures)
 
@@ -9535,8 +9558,16 @@ class Scheduler:
         from .codegen.wrapper import SubgraphPythonWrapperCodegen
 
         parent_wrapper_code = V.graph.wrapper_code
-        graph_partition_id = next(self._graph_partition_counter)
+        owner = parent_wrapper_code.get_partition_state_owner()
+        graph_partition_id = owner._num_partitions
+        owner._num_partitions += 1
         graph_name = parent_wrapper_code.get_partition_name(graph_partition_id)
+        # The graph being partitioned is a subgraph when its wrapper is a
+        # SubgraphPythonWrapperCodegen; such partitions have subgraph-local
+        # inputs/outputs. See [Note: Shared Graph Partition State].
+        is_subgraph_partition = isinstance(
+            parent_wrapper_code, SubgraphPythonWrapperCodegen
+        )
 
         with V.graph.set_current_wrapper_code():
             V.graph.init_wrapper_code(
@@ -9578,6 +9609,15 @@ class Scheduler:
         V.graph.wrapper_code.codegen_partition_call(graph_partition_id, signature)
         V.graph.wrapper_code.allocated.update(  # type: ignore[has-type]
             [node.get_name() for node in signature.output_nodes]
+        )
+
+        # Append the map co-located with id allocation so partition_maps_flat
+        # stays in the same order as runner.partitions (cudagraphify is applied
+        # positionally). See [Note: Shared Graph Partition State].
+        owner.partition_maps_flat.append(
+            self._build_graph_partition_map(
+                graph_partition_id, signature, is_subgraph_partition
+            )
         )
 
     def use_default_device_context(
@@ -9677,16 +9717,19 @@ class Scheduler:
                 else:
                     self._codegen_partition_wrapper(partition, signature)
 
-        num_partitions = next(self._graph_partition_counter)
-        V.graph.wrapper_code.set_all_partition_names(num_partitions)
+        # Only the root graph finalizes the shared partition state: it owns the
+        # full flat list of partitions across the top-level graph and all
+        # subgraphs. See [Note: Shared Graph Partition State].
+        owner = V.graph.wrapper_code.get_partition_state_owner()
+        if owner is V.graph.wrapper_code:
+            num_partitions = owner._num_partitions
+            V.graph.wrapper_code.set_all_partition_names(num_partitions)
 
-        # See [Note: Graph Partition Map for CUDAGraph]
-        if num_partitions > 0:
-            if V.graph.partition_maps is None:
-                raise AssertionError("expected V.graph.partition_maps to be set")
-            if num_partitions != len(V.graph.partition_maps):
+            # See [Note: Graph Partition Map for CUDAGraph]
+            if num_partitions > 0 and num_partitions != len(owner.partition_maps_flat):
                 raise AssertionError(
-                    f"Expect {num_partitions} partition maps but got {len(V.graph.partition_maps)}"
+                    f"Expect {num_partitions} partition maps but got "
+                    f"{len(owner.partition_maps_flat)}"
                 )
 
     def _codegen(self, nodes: list[BaseSchedulerNode]) -> None:
