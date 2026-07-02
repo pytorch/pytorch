@@ -878,6 +878,33 @@ class TestAvgPool(TestCaseMPS):
 
 
 class TestMPS(TestCaseMPS):
+    def test_metalshaderlibrary_destructor_clean_exit(self):
+        # Regression for MetalShaderLibrary destructor crashes on macOS 15+
+        # where the Metal runtime tears down before __cxa_finalize fires,
+        # making ObjC messages to Metal objects during static destruction
+        # unsafe. The fix nulls every ObjC member pointer in the destructor
+        # before implicit member destructors run, so each one calls
+        # objc_release(nil) -- a guaranteed no-op even after Metal is gone.
+        # Without the fix, the test subprocess crashes during interpreter
+        # shutdown with a non-zero return code (SIGSEGV).
+        snippet = """
+import torch
+# Touch enough of the MPS kernel-library surface that MetalShaderLibrary
+# instances get instantiated and registered with the bundled-library global.
+x = torch.randn(8, device='mps')
+_ = x.relu()
+_ = x + 1.5
+torch.mps.synchronize()
+"""
+        proc = subprocess.run([sys.executable, "-c", snippet],
+                              capture_output=True, text=True, timeout=60)
+        self.assertEqual(
+            proc.returncode, 0,
+            f"Interpreter exit was unclean (returncode={proc.returncode}). "
+            f"Likely MetalShaderLibrary destructor regression.\n"
+            f"stderr tail:\n{proc.stderr[-1000:]}",
+        )
+
     def ulpAssertAllClose(self, output, reference, n_ulps):
         """
         Wrapper for element-wise tolerances with known
