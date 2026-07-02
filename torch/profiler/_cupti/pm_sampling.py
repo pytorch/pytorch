@@ -19,13 +19,14 @@ consumer's job (the sampler has no clock dependency), and doing so against the b
 record timestamps use aligns them with the activity records; they surface as GPU counter tracks
 (siblings of the environment counters).
 
-There is one :class:`PmSampler` per CUDA device -- a per-device singleton (see
-:meth:`~PmSampler.for_device`), a single collector per device. Lifecycle follows NVIDIA's
-cupti-python PM sampling sample: ``enable`` -> ``configure`` -> ``start`` -> drain -> ``stop`` ->
-``disable``, where ``disable`` deinitializes the process-global CUPTI profiler. That deinit is
-*not* refcounted, so the per-device singleton matters: it keeps init/deinit balanced one-per-cycle
-(two concurrent collectors each disabling would double-deinit and segfault -- why we sample only
-the one device we profile)."""
+Each CUDA device has at most one :class:`PmSampler` -- a per-device singleton (``PmSampler(device)``
+returns the one instance) -- so no device is ever driven by two collectors. Lifecycle follows
+NVIDIA's cupti-python PM sampling sample: ``enable`` -> ``configure`` -> ``start`` -> drain ->
+``stop`` -> release. ``enable`` initializes the *process-global* CUPTI profiler (idempotent), but
+its deinitialize is NOT refcounted by CUPTI -- a second call segfaults -- so PmSampler refcounts its
+live collectors and deinitializes exactly once, when the last is released. That makes sampling
+several devices at once safe: one device's teardown never deinitializes a profiler another device is
+still using."""
 
 from __future__ import annotations
 
@@ -40,6 +41,7 @@ import numpy as np
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
+    from typing_extensions import Self
 
 
 logger = logging.getLogger(__name__)
@@ -91,9 +93,11 @@ def _counter_data_size(
     return p.counter_data_size
 
 
+@functools.cache
 def _device_chip_name(device: int) -> str:
     """The CUPTI chip name (e.g. 'GB100') for a CUDA device index -- the key the profiler-host
-    metric queries use."""
+    metric queries use. Cached: constant per device for the life of the process (queried on every
+    add_consumer via the single-pass check)."""
     from cupti import cupti as c  # pyrefly: ignore[missing-import]
 
     p = c.Device_GetChipName_Params()
@@ -101,6 +105,28 @@ def _device_chip_name(device: int) -> str:
     p.device_index = device
     c.device_get_chip_name(p.ptr)
     return p.p_chip_name
+
+
+def _pm_sampling_disable(pm_sampling_object: int) -> None:
+    """Free a device's PM sampling object -- the per-device half of ``Collector.disable`` -- WITHOUT
+    the process-global ``profiler_deinitialize`` it bundles in, so PmSampler can refcount that deinit
+    across devices (see ``PmSampler._active``)."""
+    from cupti import cupti as c  # pyrefly: ignore[missing-import]
+
+    p = c.PmSampling_Disable_Params()
+    p.struct_size = c.PM_SAMPLING_DISABLE_PARAMS_STRUCT_SIZE
+    p.p_pm_sampling_object = pm_sampling_object
+    c.pm_sampling_disable(p.ptr)
+
+
+def _profiler_deinitialize() -> None:
+    """Deinitialize the process-global CUPTI profiler. CUPTI does NOT refcount this (a second call
+    segfaults), so PmSampler calls it exactly once -- when its last live collector is torn down."""
+    from cupti import cupti as c  # pyrefly: ignore[missing-import]
+
+    p = c.Profiler_DeInitialize_Params()
+    p.struct_size = c.PROFILER_DEINITIALIZE_PARAMS_STRUCT_SIZE
+    c.profiler_deinitialize(p.ptr)
 
 
 @functools.cache
@@ -173,10 +199,12 @@ class _Consumer:
 
 
 class PmSampler:
-    """The single PM-sampling session on one CUDA device -- a per-device singleton (see
-    :meth:`for_device`). Only one PM session per device is possible, and the shared CUPTI profiler's
-    init/deinit is not refcounted (two concurrent collectors each disabling would double-deinit and
-    segfault), so all users of a device share this one object.
+    """The single PM-sampling session on one CUDA device -- a per-device singleton
+    (``PmSampler(device)`` returns the one instance, default the current device). Only one PM session
+    per device is possible, so all users of a device share this one object. The process-global CUPTI
+    profiler deinit is not refcounted by CUPTI, so PmSampler refcounts its live collectors
+    (:attr:`_active`) and deinitializes once, when the last is torn down -- keeping concurrent
+    sampling on multiple devices safe.
 
     Consumers register with :meth:`add_consumer` (the metrics they want + a sink) and unregister
     with :meth:`remove_consumer`. The session samples the *union* of all consumers' metrics and
@@ -191,13 +219,17 @@ class PmSampler:
     collected in one PM-sampling pass is rejected (:meth:`add_consumer` raises), leaving the running
     session untouched."""
 
-    # One sampler per CUDA device index; get via for_device(), don't construct directly.
+    # One sampler per CUDA device index; PmSampler(device) returns the per-device singleton (default
+    # the current device), so PmSampler(0) is PmSampler(0). Construction routes through __new__.
     _instances: dict[int, PmSampler] = {}
     _instances_lock = threading.Lock()
+    # Count of live collectors across the process, guarded by _instances_lock. The CUPTI profiler's
+    # deinit is process-global and NOT refcounted by CUPTI (a second deinit segfaults), so we refcount
+    # it: initialize is idempotent (each enable() may call it), but deinitialize runs exactly once,
+    # when this drops to 0 -- which lets samplers on different devices coexist safely.
+    _active = 0
 
-    @classmethod
-    def for_device(cls, device: int | None = None) -> PmSampler:
-        """The singleton PM sampler for a CUDA device (default the current device)."""
+    def __new__(cls, device: int | None = None) -> Self:
         import torch
 
         if device is None:
@@ -205,19 +237,17 @@ class PmSampler:
         with cls._instances_lock:
             inst = cls._instances.get(device)
             if inst is None:
-                inst = cls(device)
+                inst = super().__new__(cls)
+                inst._init(device)
                 cls._instances[device] = inst
             return inst
 
-    def __init__(self, device: int) -> None:
-        # Prefer for_device(); direct construction bypasses the per-device singleton.
+    def _init(self, device: int) -> None:
+        # One-time setup, run by __new__ the first time a device is seen. Deliberately not __init__:
+        # __init__ would re-run on every PmSampler(device) call (Python calls it on the returned
+        # singleton) and reset the live session.
         self._device = device
-        # Interval + look-back are process-wide (env); the HW sampling interval in ns:
         self._sampling_interval_ns = _SAMPLING_INTERVAL_NS
-        # max_samples (decode image + ring capacity) = look-back / interval, clamped to
-        # _MAX_SAMPLES_CAP so an extreme env config can't allocate an unbounded image; a decode that
-        # finds more in the ring caps and drops the newest, and _start() sizes the ring to hold this
-        # many (see _counter_data_size). The retained window is truncated when clamped.
         requested = max(1, _DEFAULT_WINDOW_NS // _SAMPLING_INTERVAL_NS)
         self._max_samples = min(requested, _MAX_SAMPLES_CAP)
         if requested > _MAX_SAMPLES_CAP:
@@ -254,7 +284,7 @@ class PmSampler:
             # without disturbing the running session.
             self._check_single_pass(self._union_of([*self._consumers, consumer]))
             # Flush ring samples (collected under the old metric union) to the EXISTING consumers
-            # before the resize; done here, pre-append, so the drain's column set matches the old
+            # before the union may change; done pre-append so the drain's column set matches the old
             # union (the new consumer's metrics aren't sampled yet).
             self._drain()
             self._consumers.append(consumer)
@@ -323,24 +353,34 @@ class PmSampler:
                 logger.exception("PM sampling poll decode error")
 
     def _start(self) -> None:
-        # Enable + configure + start the collector for self._metric_names (the union). enable()
-        # initializes the process-global CUPTI profiler; _teardown() disables it. A failure tears the
-        # partial enable down so a later retry is clean. Caller holds _lock.
+        # Enable + configure + start the collector for self._metric_names (the union). enable() also
+        # initializes the process-global CUPTI profiler (idempotent); _teardown() releases this
+        # collector's profiler ref. A failure after enable tears the partial session down so a later
+        # retry is clean. Caller holds _lock.
         if self._col is not None or not is_available() or not self._metric_names:
             return
-        try:
-            from cupti import pm_sampling as pm  # pyrefly: ignore[missing-import]
+        from cupti import pm_sampling as pm  # pyrefly: ignore[missing-import]
 
-            self._warn_unsupported()
-            self._col = pm.Collector(device_index=self._device)
-            self._col.enable()
+        self._warn_unsupported()
+        try:
+            col = pm.Collector(device_index=self._device)
+            col.enable()
+        except Exception as e:
+            logger.warning("PM sampling could not start: %s", e)
+            return
+        # enable() succeeded -> this collector holds a process-global profiler ref; count it before
+        # anything below can fail, so _teardown() balances the refcount.
+        self._col = col
+        with type(self)._instances_lock:
+            type(self)._active += 1
+        try:
             # Size the ring to hold the window's samples: the counter-data-image bytes for
             # max_samples (exact, via CUPTI) is >= the device records for the same count, so the ring
             # never wraps before the window is full.
-            self._col.configure(
+            col.configure(
                 metrics=self._metric_names,
                 hardware_buffer_size=_counter_data_size(
-                    self._col._pm_sampling_object, self._metric_names, self._max_samples
+                    col._pm_sampling_object, self._metric_names, self._max_samples
                 ),
                 sampling_interval=self._sampling_interval_ns,
                 trigger_mode=pm.TriggerMode.GPU_TIME_INTERVAL,
@@ -348,16 +388,18 @@ class PmSampler:
                 # (the trace's tail) instead of erroring. Requires decoding before disabling.
                 hw_buffer_append_mode=pm.HardwareBuffer_AppendMode.KEEP_LATEST,
             )
-            self._col.start()
+            col.start()
         except Exception as e:
             logger.warning("PM sampling could not start: %s", e)
             self._teardown()
 
     def _teardown(self) -> None:
-        # Canonical teardown: stop sampling, then Collector.disable() frees this session's PM object
-        # and deinitializes the process-global CUPTI profiler (NVIDIA's cupti-python sample pattern).
-        # Safe because there is one collector per device -- one balanced init/deinit per cycle. A
-        # wrapped KEEP_LATEST ring must already be drained (callers drain first). Caller holds _lock.
+        # Release this device's collector: stop sampling, free its PM object, and drop our
+        # process-global profiler ref -- deinitializing the profiler only when the last collector in
+        # the process goes (Collector.disable() would deinit unconditionally, which is unsafe once a
+        # second device is sampling). Detach the collector's GC finalizer so it can't later re-run
+        # that bundled disable+deinit. A wrapped KEEP_LATEST ring must already be drained (callers
+        # drain first). Caller holds _lock.
         col, self._col = self._col, None
         self._metric_names = []
         if col is None:
@@ -367,9 +409,18 @@ class PmSampler:
         except Exception:
             logger.exception("PM sampling stop error")
         try:
-            col.disable()
+            col._finalizer.detach()
+            _pm_sampling_disable(col._pm_sampling_object)
         except Exception:
             logger.exception("PM sampling disable error")
+        with type(self)._instances_lock:
+            type(self)._active -= 1
+            last = type(self)._active == 0
+        if last:
+            try:
+                _profiler_deinitialize()
+            except Exception:
+                logger.exception("PM sampling profiler deinit error")
 
     def _warn_unsupported(self) -> None:
         # Warn (don't fail) for any sampled metric the chip does not report; enable/configure is the
