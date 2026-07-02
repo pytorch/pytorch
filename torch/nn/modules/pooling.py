@@ -117,8 +117,8 @@ class MaxPool1d(_MaxPoolNd):
           where ``ceil_mode = True``
 
           .. math::
-              L_{out} = \left\lceil \frac{L_{in} + 2 \times \text{padding} - \text{dilation}
-                    \times (\text{kernel\_size} - 1) - 1 + (stride - 1)}{\text{stride}}\right\rceil + 1
+              L_{out} = \left\lfloor \frac{L_{in} + 2 \times \text{padding} - \text{dilation}
+                    \times (\text{kernel\_size} - 1) - 1 + (\text{stride} - 1)}{\text{stride}}\right\rfloor + 1
 
         - Ensure that the last pooling starts inside the image, make :math:`L_{out} = L_{out} - 1`
           when :math:`(L_{out} - 1) * \text{stride} >= L_{in} + \text{padding}`.
