@@ -1452,9 +1452,8 @@ def forward(self, a_1):
             r, """\
 def forward(self, x_1):
     sym_size_int = torch.ops.aten.sym_size.int(x_1, 0)
-    scalar_tensor = torch.ops.aten.scalar_tensor.default(sym_size_int, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'));  sym_size_int = None
     select = torch.ops.aten.select.int(x_1, 0, 0)
-    copy_ = torch.ops.aten.copy_.default(select, scalar_tensor);  select = scalar_tensor = copy_ = None
+    fill_ = torch.ops.aten.fill_.Scalar(select, sym_size_int);  select = sym_size_int = fill_ = None
     return x_1"""
         )
 
@@ -1492,11 +1491,9 @@ def forward(self, gravity_1, mask_1):
 def forward(self, crop_camera_1, mask_1):
     index = torch.ops.aten.index.Tensor(crop_camera_1, [mask_1])
     eye = torch.ops.aten.eye.default(3, device = device(type='cpu'), pin_memory = False)
-    _tensor_constant0 = self._tensor_constant0
-    lift_fresh_copy = torch.ops.aten.lift_fresh_copy.default(_tensor_constant0);  _tensor_constant0 = None
     select = torch.ops.aten.select.int(eye, 0, 0)
     select_1 = torch.ops.aten.select.int(select, 0, 0);  select = None
-    copy_ = torch.ops.aten.copy_.default(select_1, lift_fresh_copy);  select_1 = lift_fresh_copy = copy_ = None
+    fill_ = torch.ops.aten.fill_.Scalar(select_1, -1);  select_1 = fill_ = None
     sym_size_int = torch.ops.aten.sym_size.int(index, 0)
     expand = torch.ops.aten.expand.default(eye, [sym_size_int, 3, 3])
     view = torch.ops.aten.view.default(expand, [sym_size_int, 3, 3]);  expand = None

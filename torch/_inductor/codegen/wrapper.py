@@ -4377,9 +4377,9 @@ class PythonWrapperCodegen(CodeGen):
         return f"partition_{partition_id}"
 
     def set_all_partition_names(self, num_partitions: int):
-        self.all_partition_names = [
-            self.get_partition_name(idx) for idx in range(num_partitions)
-        ]
+        self.all_partition_names = list(
+            map(self.get_partition_name, range(num_partitions))
+        )
 
     def get_partition_state_owner(self) -> PythonWrapperCodegen:
         # See [Note: Shared Graph Partition State]. The root wrapper owns the
