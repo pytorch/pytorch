@@ -473,7 +473,7 @@ class ConstantVariable(VariableTracker):
 
     def nb_index_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
     ) -> VariableTracker:
         # CPython: int and bool define nb_index (returns self for int,
         # int(self) for bool). All other constant types do not.
@@ -485,7 +485,7 @@ class ConstantVariable(VariableTracker):
 
     def nb_int_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
     ) -> VariableTracker:
         # CPython: int defines nb_int (long_long, returns copy).
         # bool inherits nb_int from int via slot inheritance.
@@ -494,7 +494,7 @@ class ConstantVariable(VariableTracker):
 
     def nb_float_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
     ) -> VariableTracker:
         # CPython: float defines nb_float (float_float, returns copy).
         # int defines nb_float (long_float, converts to float).
@@ -529,7 +529,7 @@ class ConstantVariable(VariableTracker):
 
     def nb_lshift_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
@@ -543,7 +543,7 @@ class ConstantVariable(VariableTracker):
 
     def nb_rshift_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
@@ -642,7 +642,7 @@ class ConstantVariable(VariableTracker):
 
     def nb_or_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
@@ -659,7 +659,7 @@ class ConstantVariable(VariableTracker):
 
     def nb_subtract_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
@@ -753,7 +753,7 @@ class ConstantVariable(VariableTracker):
 
     def nb_negative_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
     ) -> VariableTracker:
         # int: https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L5179-L5189
         # float: https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L839-L849
@@ -763,7 +763,7 @@ class ConstantVariable(VariableTracker):
 
     def nb_positive_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
     ) -> VariableTracker:
         # int: https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L5619 (long_long)
         # float: https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L1114 (float_float)
@@ -773,7 +773,7 @@ class ConstantVariable(VariableTracker):
 
     def nb_add_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
@@ -838,7 +838,7 @@ class ConstantVariable(VariableTracker):
 
     def nb_absolute_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
     ) -> VariableTracker:
         # int: https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L5184-L5190
         # float: https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L847-L850
@@ -906,7 +906,7 @@ class FakeIdVariable(VariableTracker):
     def python_type(self) -> type:
         return int
 
-    def hash_impl(self, tx: Any) -> tuple[int, bool]:
+    def hash_impl(self, tx: InstructionTranslatorBase) -> tuple[int, bool]:
         return hash(self.value), True
 
     def richcompare_impl(

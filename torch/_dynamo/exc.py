@@ -20,6 +20,32 @@ Observed Exceptions:
     - Special handling for StopIteration, LookupError, etc.
     - Exception state management during compilation
 
+    When an exception is raised inside a ``torch.compile`` region,
+    TorchDynamo does **not** immediately propagate it to the caller.
+    Instead, Dynamo symbolically traces the exception so that
+    ``try``/``except`` blocks inside the compiled function can be
+    captured in the FX graph and reasoned about statically.
+
+    Common Python exception types are wrapped in ``ObservedException``
+    subclasses (e.g. ``StopIteration`` → ``ObservedUserStopIteration``,
+    ``KeyError`` → ``ObservedKeyError``).  The full mapping is defined in
+    ``observed_exception_map``.  For exception types not present in that
+    map, :func:`get_dynamo_observed_exception` creates a new
+    ``ObservedException`` subclass dynamically at tracing time.
+
+    If an observed exception is **not caught** inside the compiled region
+    it propagates out and is re-raised as the original exception type in
+    eager mode, preserving the original traceback for the user.
+
+    .. note::
+        This behaviour means that exception-based control flow (e.g.
+        ``StopIteration`` from a custom iterator, ``KeyError`` from a
+        dict access) is generally supported inside ``torch.compile``
+        regions.  However, raising or catching exceptions that depend on
+        *data-dependent* conditions may still cause a graph break because
+        Dynamo cannot statically determine which branch will be taken at
+        compile time.
+
 Error Formatting:
     - Stack trace filtering and formatting
     - Error message augmentation

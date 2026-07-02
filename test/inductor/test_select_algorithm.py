@@ -1060,7 +1060,7 @@ class TestDtypeViewAutotuning(TestCase):
         self.assertEqual(
             captured_results["example_dtype"],
             torch.float4_e2m1fn_x2,
-            f"benchmark_example_value should preserve float4_e2m1fn_x2 dtype "
+            lambda msg: f"{msg}\nbenchmark_example_value should preserve float4_e2m1fn_x2 dtype "
             f"after unwrapping the view, but got {captured_results['example_dtype']}",
         )
         self.assertEqual(captured_results["example_shape"], (m, k))

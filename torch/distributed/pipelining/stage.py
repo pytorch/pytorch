@@ -1779,6 +1779,9 @@ class PipelineStage(_PipelineStageBase):
         self._fwd_outputs_for_bwd_meta: tuple[torch.Tensor, ...] | None = None
         self._fwd_inputs_for_bwd_meta: tuple[torch.Tensor, ...] | None = None
         self._fwd_kwargs_tensors_for_bwd_meta: tuple[torch.Tensor, ...] | None = None
+        self._metadata_inference_buffer_backup: (
+            list[tuple[torch.Tensor, torch.Tensor]] | None
+        ) = None
 
         # Validate and normalize args to tuples
         inputs = validate_and_normalize_to_tuple(input_args)
@@ -1971,6 +1974,26 @@ class PipelineStage(_PipelineStageBase):
                 run_check=False,
             )
         return local_ones
+
+    def _pre_metadata_inference_backup(self) -> None:
+        """Back up state that dynamic metadata inference must not publish.
+
+        Dynamic metadata inference executes representative real forwards and
+        backwards before the first runtime microbatch. Those executions are
+        allowed to observe module buffers, but they must not publish training
+        state updates such as running counters or routing statistics.
+        """
+        if self._inference_mode != InferenceMode.DYNAMIC:
+            return
+        if self._metadata_inference_buffer_backup is not None:
+            raise RuntimeError(
+                "Metadata inference buffer backup already exists. "
+                "Run _post_metadata_inference_cleanup before backing up again."
+            )
+        self._metadata_inference_buffer_backup = [
+            (buffer, buffer.detach().clone())
+            for _, buffer in self.submod.named_buffers(remove_duplicate=False)
+        ]
 
     def _forward_metadata_inference(
         self,
@@ -2201,9 +2224,19 @@ class PipelineStage(_PipelineStageBase):
             return None
 
     def _post_metadata_inference_cleanup(self) -> None:
-        """Clean up FSDP side effects (unsharded params, stale grads, stored
-        tensors) after metadata inference with real tensors.
+        """Restore state and clean up side effects from metadata inference.
+
+        Buffer restore is intentionally delayed until after both forward and
+        backward metadata inference. Restoring immediately after forward can
+        bump autograd version counters for buffers saved by the forward graph.
         """
+        buffer_backup = self._metadata_inference_buffer_backup
+        if buffer_backup is not None:
+            with torch.no_grad():
+                for buffer, saved_buffer in buffer_backup:
+                    buffer.copy_(saved_buffer)
+            self._metadata_inference_buffer_backup = None
+
         # Clear stored inference tensors (frees autograd graph + activations)
         self._fwd_outputs_for_bwd_meta = None
         self._fwd_inputs_for_bwd_meta = None

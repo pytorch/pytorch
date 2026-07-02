@@ -193,12 +193,6 @@ class C10_API Scalar {
     return Tag::HAS_d == tag || Tag::HAS_sd == tag;
   }
 
-  [[deprecated(
-      "isIntegral is deprecated. Please use the overload with 'includeBool' parameter instead.")]] bool
-  isIntegral() const {
-    return Tag::HAS_i == tag || Tag::HAS_si == tag || Tag::HAS_u == tag;
-  }
-
   bool isIntegral(bool includeBool) const {
     return Tag::HAS_i == tag || Tag::HAS_si == tag || Tag::HAS_u == tag ||
         (includeBool && isBoolean());

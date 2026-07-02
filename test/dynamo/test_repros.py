@@ -4719,6 +4719,49 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(x1.data, x2.data)
         self.assertEqual(y1, y2)
 
+    @requires_cuda
+    def test_tensor_set_data_cross_device(self):
+        def func(x):
+            x.data = x.data.to("cuda")
+            return x + 1
+
+        x_eager = torch.randn(4, device="cpu")
+        x_compiled = x_eager.clone()
+
+        out_eager = func(x_eager)
+        out_compiled = torch.compile(func, backend="eager", fullgraph=True)(x_compiled)
+
+        self.assertEqual(out_eager, out_compiled)
+        self.assertEqual(x_eager.device, x_compiled.device)
+
+    @requires_cuda
+    def test_tensor_set_data_cross_device_shape_mismatch_graphbreaks(self):
+        def func(x):
+            x.data = torch.randn(8, device="cuda")
+            return x + 1
+
+        x = torch.randn(4, device="cpu")
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(func, backend="eager", fullgraph=True)(x)
+
+    @requires_cuda
+    def test_tensor_set_data_cross_device_placeholder_metadata(self):
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+
+        def func(x):
+            x.data = x.data.to("cuda")
+            return x + 1
+
+        x = torch.randn(4, device="cpu")
+        torch.compile(func, backend=backend, fullgraph=True)(x)
+
+        gm = backend.graphs[0]
+        for node in gm.graph.nodes:
+            if node.op == "placeholder":
+                ev = node.meta.get("example_value")
+                if isinstance(ev, torch.Tensor):
+                    self.assertEqual(ev.device.type, "cpu")
+
     def test_user_ctor_ctx_manager(self):
         class UserCtxManager:
             def __enter__(self):
@@ -9474,7 +9517,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertEqual(
             a_stride,
             cloned_stride,
-            f"Strides should match in eager: {a_stride} against {cloned_stride}",
+            lambda msg: f"{msg}\nStrides should match in eager: {a_stride} against {cloned_stride}",
         )
 
         compiled_a_stride, compiled_cloned_stride = torch.compile(fn, backend="eager")(
@@ -9483,7 +9526,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertEqual(
             compiled_a_stride,
             compiled_cloned_stride,
-            f"Strides should match in eager: {compiled_a_stride} against {compiled_cloned_stride}",
+            lambda msg: f"{msg}\nStrides should match in eager: {compiled_a_stride} against {compiled_cloned_stride}",
         )
 
 
