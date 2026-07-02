@@ -23,11 +23,7 @@ from torch.fx.experimental._backward_state import BackwardState
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config
-from .functional_utils import (
-    _check_if_mutation_can_be_in_graph,
-    SubclassViewMetaSequence,
-    ViewMetaSequence,
-)
+from .functional_utils import _check_if_mutation_can_be_in_graph, ViewMetaSequence
 from .utils import strict_zip
 
 
@@ -127,7 +123,7 @@ class OutputAliasInfo:
     # We need to wrap the actual list of ViewMeta with this class so that
     # we compare the ViewMeta elements appropriately, i.e. their type and
     # the elements returned by the `as_tuple()` call.
-    view_meta_sequence: ViewMetaSequence | SubclassViewMetaSequence | None = None
+    view_meta_sequence: ViewMetaSequence | None = None
 
 
 class MutationType(Enum):
@@ -146,6 +142,7 @@ class InputAliasInfo:
     mutations_under_no_grad_or_inference_mode: bool
     mutation_inductor_storage_resize: bool
     mutates_storage_metadata: bool
+    mutation_is_shallow_copy_data: bool
     requires_grad: bool
     keep_input_mutations: bool
 
@@ -764,17 +761,10 @@ class ViewAndMutationMeta:
         # be used at runtime anyway (gen_alias_from_base skips view replay for
         # symbolic inputs) and the SymInt references make it unpicklable.
         for i, out_info in enumerate(self.output_info):
-            runtime_safe_view_meta_sequence = (
-                None
-                if out_info.view_meta_sequence is None
-                else out_info.view_meta_sequence.make_runtime_safe()
-            )
-            # make_runtime_safe only returns the original object or None, so
-            # identity comparison is enough here and avoids __eq__(None) quirks.
-            if runtime_safe_view_meta_sequence is not out_info.view_meta_sequence:
-                self.output_info[i] = replace(
-                    out_info, view_meta_sequence=runtime_safe_view_meta_sequence
-                )
+            if out_info.view_meta_sequence is not None and any(
+                vm.has_symbolic_inputs for vm in out_info.view_meta_sequence.sequence
+            ):
+                self.output_info[i] = replace(out_info, view_meta_sequence=None)
 
     @property
     def tensors_saved_for_backwards_slice(self) -> slice:

@@ -31,7 +31,14 @@ from torch.utils._dtype_abbrs import dtype_abbrs
 from . import _pytree as fx_pytree
 from ._compatibility import compatibility
 from .immutable_collections import immutable_dict
-from .node import _get_qualified_name, _type_repr, Argument, Node, Target
+from .node import (
+    _device_annotation,
+    _get_qualified_name,
+    _type_repr,
+    Argument,
+    Node,
+    Target,
+)
 from .tensor_type import TensorType
 
 
@@ -728,6 +735,10 @@ class CodeGen:
                 if stack_trace := node.stack_trace:
                     if parsed_stack_trace := _parse_stack_trace(stack_trace):
                         stack_trace_str = parsed_stack_trace.get_summary_str()
+                        if node.meta.get("autograd_backward", False):
+                            stack_trace_str = (
+                                f"Backward of forward node: {stack_trace_str}"
+                            )
 
                 maybe_recompute_info = ""
                 if hasattr(node, "meta") and node.meta:
@@ -782,7 +793,7 @@ class CodeGen:
 
                 def _tensor_annotation(t: torch.Tensor) -> str:
                     stride = stringify_shape(t.stride()) if include_stride else ""
-                    device = f"{t.device}" if include_device else ""
+                    device = _device_annotation(t.device) if include_device else ""
                     return (
                         f"{red(dtype_abbrs[t.dtype])}"
                         f"{blue(stringify_shape(t.shape))}"

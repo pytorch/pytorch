@@ -915,9 +915,7 @@ class CPUReproTests(TestCase):
         inp = v.clone()
         result, code = run_and_get_cpp_code(fn_opt, inp)
         self.assertIn(
-            "aoti_torch_cpu_set__source_Tensor"
-            if config.cpp_wrapper
-            else "aten.set_.source_Tensor",
+            "shallow_copy_data_",
             code,
         )
         expected = model(inp)
@@ -1557,6 +1555,34 @@ class CPUReproTests(TestCase):
             ref = fn(*inp_clone2)
             res = cfn(*inp_clone3)
             self.assertEqual(ref, res, atol=1e-3, rtol=1e-3)
+
+    def test_randperm_full_advanced_indexing_issue_158457(self):
+        def full_index(x):
+            perm = torch.randperm(x.size(0))
+            return x[perm]
+
+        x = torch.arange(12, dtype=torch.float32).reshape(3, 4)
+
+        full_actual = torch.compile(full_index, backend="inductor", fullgraph=True)(x)
+        self.assertEqual(full_actual.shape, x.shape)
+        self.assertEqual(torch.sort(full_actual[:, 0]).values, x[:, 0])
+
+    def test_randperm_sliced_advanced_indexing_issue_158457(self):
+        def sliced_index(x):
+            perm = torch.randperm(x.size(0))[:2]
+            return x[perm]
+
+        x = torch.arange(12, dtype=torch.float32).reshape(3, 4)
+
+        sliced_actual = torch.compile(sliced_index, backend="inductor", fullgraph=True)(
+            x
+        )
+        self.assertEqual(sliced_actual.shape, (2, x.size(1)))
+        self.assertEqual(sliced_actual[:, 1:], sliced_actual[:, :1] + x[0, 1:])
+        self.assertTrue((sliced_actual[:, :1] == x[:, 0]).any(dim=1).all().item())
+        self.assertEqual(
+            torch.unique(sliced_actual[:, 0]).numel(), sliced_actual.size(0)
+        )
 
     def test_ModularIndexing_range_issue_103133(self):
         def fn(q, k):
@@ -3126,6 +3152,27 @@ class CPUReproTests(TestCase):
                 raise AssertionError(
                     f"Expected 2 vec kernels, got {metrics.generated_cpp_vec_kernel_count}"
                 )
+
+    @requires_vectorization
+    def test_index_put_accumulate_atomic_add_vec_scalar_index(self):
+        def fn(values, idx0, idx1):
+            out = torch.zeros(1, 32, 1, 1)
+            return aten.index_put(out, [None, None, idx0, idx1], values, True)
+
+        inps = (
+            torch.ones(1, 32, 10, 20),
+            torch.zeros(10, 1, dtype=torch.long),
+            torch.zeros(20, dtype=torch.long),
+        )
+
+        with set_num_threads(2):
+            torch._dynamo.reset()
+            metrics.reset()
+            opt_fn = torch.compile(fn, backend="inductor")
+            actual, code = run_and_get_cpp_code(opt_fn, *inps)
+        FileCheck().check("atomic_add_vec").run(code)
+        self.assertEqual(fn(*inps), actual)
+        self.assertGreater(metrics.generated_cpp_vec_kernel_count, 0)
 
     def test_large_mean(self):
         size = (30000, 100000)
@@ -5391,7 +5438,7 @@ class CPUReproTests(TestCase):
         self.assertEqual(
             x.to(torch.uint8),
             fn(x),
-            msg=f"Expected {x.to(torch.uint8)} but got {fn(x)}",
+            msg=lambda msg: f"{msg}\nExpected {x.to(torch.uint8)} but got {fn(x)}",
         )
 
     def test_non_contiguous_reduction_store(self):

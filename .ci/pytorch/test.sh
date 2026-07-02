@@ -424,6 +424,7 @@ test_python_smoke() {
   time python test/run_test.py --include inductor/test_flex_attention -k test_tma_with_customer_kernel_options $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include test_matmul_cuda test_scaled_matmul_cuda inductor/test_fp8 inductor/test_max_autotune inductor/test_cutedsl_grouped_mm $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include test_foreach -k TestForeachMM $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include test_linalg -k polar $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
 }
 
@@ -670,12 +671,7 @@ test_inductor_aoti_cpp() {
     # We need to hipify before building again
     python3 tools/amd_build/build_amd.py
   fi
-  if [[ "$BUILD_ENVIRONMENT" == *sm86* ]]; then
-    # TODO: Replace me completely, as one should not use conda libstdc++, nor need special path to TORCH_LIB
-    TEST_ENVS=(CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="/opt/conda/envs/py_3.10/lib:${TORCH_LIB_DIR}:${LD_LIBRARY_PATH}")
-  else
-    TEST_ENVS=(CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}")
-  fi
+  TEST_ENVS=(CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}")
 
   /usr/bin/env "${TEST_ENVS[@]}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_shim cpp/test_aoti_inference cpp/test_vec_half_AVX2 -dist=loadfile
 }
@@ -1487,15 +1483,12 @@ test_libtorch_jit() {
   python cpp/jit/tests_setup.py setup
   popd
 
-  # Run jit and lazy tensor cpp tests one at a time; running them concurrently
-  # has been observed to hang pytest-xdist worker teardown on some runners.
+  # Run jit and lazy tensor cpp tests together to finish them faster
   if [[ "$BUILD_ENVIRONMENT" == *cuda* && "$TEST_CONFIG" != *nogpu* ]]; then
-    LTC_TS_CUDA=1 python test/run_test.py --cpp --verbose -i cpp/test_jit
-    LTC_TS_CUDA=1 python test/run_test.py --cpp --verbose -i cpp/test_lazy
+    LTC_TS_CUDA=1 python test/run_test.py --cpp --verbose -i cpp/test_jit cpp/test_lazy
   else
     # CUDA tests have already been skipped when CUDA is not available
-    python test/run_test.py --cpp --verbose -i cpp/test_jit -k "not CUDA"
-    python test/run_test.py --cpp --verbose -i cpp/test_lazy -k "not CUDA"
+    python test/run_test.py --cpp --verbose -i cpp/test_jit cpp/test_lazy -k "not CUDA"
   fi
 
   # Cleaning up test artifacts in the test folder
@@ -1549,6 +1542,10 @@ test_libtorch_api() {
 test_xpu_bin(){
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
+
+  # Build binaries carry absolute RPATHs that don't exist on the test runner;
+  # point LD_LIBRARY_PATH at the installed torch libs so the linker finds them.
+  export LD_LIBRARY_PATH="${TORCH_LIB_DIR}:${LD_LIBRARY_PATH}"
 
   for xpu_case in "${BUILD_BIN_DIR}"/*{xpu,sycl}*; do
     if [[ "$xpu_case" != *"*"* && "$xpu_case" != *.so && "$xpu_case" != *.a ]]; then

@@ -87,6 +87,40 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         y = fn(x)
         self.assertEqual(y, x.sin())
 
+    def test_do_not_rehash_dict_keys(self):
+        # Building a set/frozenset (or subclass) from a dict must reuse the
+        # dict's stored hashes instead of re-invoking __hash__, mirroring
+        # CPython's set_update_internal fast path.  Also covers the explicit
+        # base-slot call `int.__hash__(self)` inside the custom __hash__.
+        class HashCountingInt(int):
+            def __init__(self, *args):
+                self.hash_count = 0
+
+            def __hash__(self):
+                self.hash_count += 1
+                return int.__hash__(self)
+
+        def run(thetype, n):
+            d = dict.fromkeys(map(HashCountingInt, range(n)))
+            counts = [sum(e.hash_count for e in d)]
+            s = thetype(d)
+            counts.append(sum(e.hash_count for e in d))
+            s.difference(d)
+            counts.append(sum(e.hash_count for e in d))
+            dict.fromkeys(set(d))
+            counts.append(sum(e.hash_count for e in d))
+            dict.fromkeys(frozenset(d))
+            counts.append(sum(e.hash_count for e in d))
+            return counts, len(s)
+
+        for thetype in (set, frozenset, SetSubclass, FrozenstSubclass):
+            n = 10
+            ref = run(thetype, n)
+            res = torch.compile(run, backend="eager", fullgraph=True)(thetype, n)
+            self.assertEqual(ref, res)
+            # Every key hashed exactly once (during the initial fromkeys).
+            self.assertEqual(ref[0], [n] * 5)
+
 
 class TestSetGuards(LoggingTestCase):
     def test_set_with_function(self):

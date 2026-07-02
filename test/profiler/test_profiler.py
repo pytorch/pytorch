@@ -5,7 +5,6 @@ import collections
 import contextlib
 import copy
 import gc
-import gzip
 import json
 import mmap
 import os
@@ -21,11 +20,8 @@ import time
 import types
 import unittest
 import warnings
-from dataclasses import dataclass, field
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 from unittest.mock import patch
-
-import expecttest
 
 
 # Suppress libkineto USDT profiler_start/profiler_stop logs in this verbose
@@ -51,7 +47,7 @@ from torch.profiler import (
     record_function,
     supported_activities,
 )
-from torch.testing._internal.common_cuda import SM100OrLater, TEST_MULTIGPU
+from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
@@ -79,16 +75,10 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xfailIfNoAcceleratorTriton,
 )
-from torch.utils._import_utils import _check_module_exists
 
 
 if TYPE_CHECKING:
     from torch.autograd.profiler_util import FunctionEvent
-
-
-# cupti-python is pip-installable on ROCm hosts too, but CUPTI itself is a no-op
-# there, so gate the monitor tests off ROCm as well.
-TEST_CUPTI_PYTHON = _check_module_exists("cupti") and not TEST_WITH_ROCM
 
 
 def get_profiler_activities(device_type):
@@ -477,312 +467,6 @@ with profile(activities=[ProfilerActivity.CUDA]):
                 y = torch.mm(x, x)
         self.assertGreater(len(p.events()), 0)
 
-    @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
-    @unittest.skipUnless(
-        SM100OrLater, "hardware event sampling requires GB200+ (sm_100)"
-    )
-    def test_cupti_monitor_enable_hes_early_guard(self):
-        import subprocess
-
-        subprocess.check_call(
-            [
-                sys.executable,
-                "-c",
-                """
-import torch
-from torch.profiler import _cupti_monitor
-
-_cupti_monitor.enable_hes_early()
-assert _cupti_monitor.is_hes_enabled()
-""",
-            ],
-            text=True,
-            timeout=60,
-        )
-
-        p = subprocess.run(
-            [
-                sys.executable,
-                "-c",
-                """
-import torch
-from torch.profiler import _cupti_monitor
-
-torch.randn(1, device="cuda")
-_cupti_monitor.enable_hes_early()
-""",
-            ],
-            text=True,
-            timeout=60,
-            capture_output=True,
-        )
-        self.assertNotEqual(p.returncode, 0)
-        self.assertIn(
-            "enable_hes_early() must be called before CUDA context creation",
-            p.stderr,
-        )
-
-    @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
-    def test_cupti_monitor_collection_raw_dump_smoke(self):
-        from torch.profiler import _cupti_monitor
-
-        with TemporaryDirectoryName() as out_dir:
-            self.assertIsNone(_cupti_monitor.get_monitor())
-            monitor = _cupti_monitor.start_collection(out_dir)
-            self.assertIs(monitor, _cupti_monitor.get_monitor())
-
-            x = torch.randn(64, 64, device="cuda")
-            y = torch.relu(x + 1)
-            y.sum().item()
-            torch.cuda.synchronize()
-
-            stats = _cupti_monitor.stop_collection()
-            self.assertIsNotNone(stats)
-            self.assertIsNone(_cupti_monitor.get_monitor())
-            # The native C++ pool must actually have been exercised: catches a
-            # silent regression to a no-op (e.g. broken callback registration or
-            # symbol export) that would still produce passing file-existence
-            # checks if the worker never saw a buffer.
-            self.assertGreater(stats["buffers_allocated"], 0)
-            self.assertGreater(stats["buffers_completed"], 0)
-            self.assertEqual(stats["buffers_pending"], 0)
-            self.assertTrue(
-                os.path.exists(os.path.join(out_dir, _cupti_monitor._META_FILE))
-            )
-            self.assertTrue(
-                os.path.exists(os.path.join(out_dir, _cupti_monitor._RAW_BUFFER_FILE))
-            )
-            self.assertGreater(
-                os.path.getsize(os.path.join(out_dir, _cupti_monitor._META_FILE)), 0
-            )
-            self.assertGreater(
-                os.path.getsize(os.path.join(out_dir, _cupti_monitor._RAW_BUFFER_FILE)),
-                0,
-            )
-
-    @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
-    def test_cupti_monitor_collection_repeated_lifecycle(self):
-        from torch.profiler import _cupti_monitor
-
-        for _ in range(2):
-            with TemporaryDirectoryName() as out_dir:
-                self.assertIsNone(_cupti_monitor.get_monitor())
-                _cupti_monitor.start_collection(out_dir)
-
-                x = torch.randn(32, 32, device="cuda")
-                y = torch.sigmoid(x)
-                y.sum().item()
-                torch.cuda.synchronize()
-
-                stats = _cupti_monitor.stop_collection()
-                self.assertIsNotNone(stats)
-                self.assertIsNone(_cupti_monitor.get_monitor())
-
-                self.assertTrue(
-                    os.path.exists(os.path.join(out_dir, _cupti_monitor._META_FILE))
-                )
-                self.assertTrue(
-                    os.path.exists(
-                        os.path.join(out_dir, _cupti_monitor._RAW_BUFFER_FILE)
-                    )
-                )
-                self.assertGreater(
-                    os.path.getsize(
-                        os.path.join(out_dir, _cupti_monitor._RAW_BUFFER_FILE)
-                    ),
-                    0,
-                )
-
-    @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
-    def test_cupti_monitor_multithread_runtime_thread_assignment(self):
-        x1 = torch.randn(256, 256, device="cuda")
-        x2 = torch.randn(256, 256, device="cuda")
-        y1 = torch.randn(256, 256, device="cuda")
-        y2 = torch.randn(256, 256, device="cuda")
-
-        # Warm up kernel/runtime state so the profiled region is dominated by the
-        # launches from the two worker threads.
-        _ = torch.relu(x1 + y1)
-        _ = torch.relu(x2 + y2)
-        torch.cuda.synchronize()
-
-        start_evt = threading.Event()
-
-        def worker(name, x, y):
-            start_evt.wait()
-            with record_function(name):
-                z = torch.relu(x + y)
-                z.sum().item()
-                torch.cuda.synchronize()
-
-        cfg = _ExperimentalConfig(
-            profile_all_threads=True,
-            custom_profiler_config='{"backend":"cupti_monitor"}',
-        )
-
-        with TemporaryFileName(mode="w+") as trace_path:
-            with profile(
-                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-                experimental_config=cfg,
-            ) as prof:
-                threads = [
-                    threading.Thread(target=worker, args=("worker_a", x1, y1)),
-                    threading.Thread(target=worker, args=("worker_b", x2, y2)),
-                ]
-                for thread in threads:
-                    thread.start()
-                start_evt.set()
-                for thread in threads:
-                    thread.join()
-
-            prof.export_chrome_trace(trace_path)
-
-            opener = gzip.open if trace_path.endswith(".gz") else open
-            with opener(trace_path, "rt") as f:
-                data = json.load(f)
-
-        events = data["traceEvents"]
-        worker_tids = sorted(
-            {
-                e["tid"]
-                for e in events
-                if e.get("ph") == "X"
-                and e.get("cat") == "user_annotation"
-                and e.get("name") in {"worker_a", "worker_b"}
-                and isinstance(e.get("tid"), int)
-            }
-        )
-        launch_tids = sorted(
-            {
-                e["tid"]
-                for e in events
-                if e.get("ph") == "X"
-                and e.get("cat") == "cuda_runtime"
-                and e.get("name") == "cudaLaunchKernel"
-                and isinstance(e.get("tid"), int)
-            }
-        )
-
-        self.assertEqual(len(worker_tids), 2)
-        self.assertGreater(len(launch_tids), 0)
-        self.assertTrue(set(launch_tids).issubset(set(worker_tids)))
-
-    @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
-    def test_cupti_monitor_trace_has_expected_events(self):
-        cfg = _ExperimentalConfig(
-            custom_profiler_config='{"backend":"cupti_monitor"}',
-        )
-        with TemporaryFileName(mode="w+") as trace_path:
-            with profile(
-                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-                experimental_config=cfg,
-            ) as prof:
-                with record_function("monitor_region"):
-                    a = torch.randn(128, 128, device="cuda")
-                    b = torch.randn(128, 128, device="cuda")
-                    c = (a @ b).relu()
-                    _ = c.cpu()
-                    torch.cuda.synchronize()
-            prof.export_chrome_trace(trace_path)
-            with open(trace_path) as f:
-                events = json.load(f)["traceEvents"]
-
-        cats = {e.get("cat") for e in events if e.get("ph") == "X"}
-        for expected in (
-            "kernel",
-            "cuda_runtime",
-            "gpu_memcpy",
-            "cpu_op",
-            "user_annotation",
-        ):
-            self.assertIn(
-                expected,
-                cats,
-                f"missing {expected}; got {sorted(c for c in cats if c)}",
-            )
-
-        kernels = [e for e in events if e.get("cat") == "kernel" and e.get("ph") == "X"]
-        self.assertGreater(len(kernels), 0)
-        self.assertTrue(all(e["dur"] > 0 for e in kernels))
-
-        runtime_names = {
-            e.get("name") for e in events if e.get("cat") == "cuda_runtime"
-        }
-        self.assertIn("cudaLaunchKernel", runtime_names)
-
-        user_names = {
-            e["name"]
-            for e in events
-            if e.get("cat") == "user_annotation" and e.get("ph") == "X"
-        }
-        self.assertIn("monitor_region", user_names)
-
-    @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
-    def test_cupti_monitor_record_shapes(self):
-        cfg = _ExperimentalConfig(
-            custom_profiler_config='{"backend":"cupti_monitor"}',
-        )
-
-        def shaped_cpu_ops(record_shapes):
-            with TemporaryFileName(mode="w+") as trace_path:
-                with profile(
-                    activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-                    record_shapes=record_shapes,
-                    experimental_config=cfg,
-                ) as prof:
-                    a = torch.randn(64, 64, device="cuda")
-                    (a @ a).relu()
-                    torch.cuda.synchronize()
-                prof.export_chrome_trace(trace_path)
-                with open(trace_path) as f:
-                    events = json.load(f)["traceEvents"]
-            return [
-                e
-                for e in events
-                if e.get("cat") == "cpu_op" and "Input Dims" in e.get("args", {})
-            ]
-
-        # record_shapes is a CPU-side setting, so it must flow through the monitor
-        # backend just like the stock profiler.
-        self.assertEqual(shaped_cpu_ops(record_shapes=False), [])
-        self.assertGreater(len(shaped_cpu_ops(record_shapes=True)), 0)
-
-    @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
-    def test_cupti_monitor_matches_stock_op_and_kernel_names(self):
-        def trace_summary(use_monitor):
-            cfg = _ExperimentalConfig(
-                custom_profiler_config='{"backend":"cupti_monitor"}'
-                if use_monitor
-                else ""
-            )
-            with TemporaryFileName(mode="w+") as trace_path:
-                with profile(
-                    activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-                    experimental_config=cfg,
-                ) as prof:
-                    a = torch.randn(128, 128, device="cuda")
-                    b = torch.randn(128, 128, device="cuda")
-                    (a @ b).relu().sum()
-                    torch.cuda.synchronize()
-                prof.export_chrome_trace(trace_path)
-                with open(trace_path) as f:
-                    events = json.load(f)["traceEvents"]
-            aten_ops = {
-                e["name"]
-                for e in events
-                if e.get("cat") == "cpu_op" and e.get("name", "").startswith("aten::")
-            }
-            n_kernels = sum(
-                1 for e in events if e.get("cat") == "kernel" and e.get("ph") == "X"
-            )
-            return aten_ops, n_kernels
-
-        stock_ops, stock_kernels = trace_summary(use_monitor=False)
-        monitor_ops, monitor_kernels = trace_summary(use_monitor=True)
-        self.assertGreater(stock_kernels, 0)
-        self.assertGreater(monitor_kernels, 0)
-        self.assertEqual(monitor_ops, stock_ops)
-
 
 @unittest.skipIf(not torch.profiler.itt.is_available(), "ITT is required")
 class TestProfilerITT(TestCase):
@@ -827,245 +511,6 @@ class TestProfiler(TestCase):
         finally:
             current.clear()
             current.update(previous)
-
-    @skipIfTorchDynamo("native ctypes/CUPTI probe; nothing to compile")
-    @parametrize("version", [1, 2])
-    def test_cupti_monitor_buffer_pool_reuse(self, version):
-        # The CUPTI monitor's buffer pool is pure C++ (no CUDA/cupti-python), so
-        # drive its native buffer-requested / buffer-completed callbacks directly
-        # via ctypes to verify returned buffers are recycled rather than
-        # reallocated. Both the v1 (cuptiActivityRegisterCallbacks) and v2
-        # (cuptiActivityRegisterCallbacks_v2) callback signatures feed the same
-        # pool/queue; v2's request appends an (ignored) info pointer, and v2's
-        # complete reorders args and drops the (CUcontext, streamId) that v1
-        # carries, so v2-completed buffers report ctx/stream of 0.
-        import ctypes
-
-        pyprof = torch._C._profiler
-        pyprof._cupti_monitor_reset_buffers()
-        self.addCleanup(pyprof._cupti_monitor_reset_buffers)
-        buffer_size = 64 * 1024
-        pyprof._cupti_monitor_configure_buffers(buffer_size)
-
-        if version == 1:
-            request_t = ctypes.CFUNCTYPE(
-                None,
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_size_t),
-                ctypes.POINTER(ctypes.c_size_t),
-            )
-            complete_t = ctypes.CFUNCTYPE(
-                None,
-                ctypes.c_void_p,
-                ctypes.c_uint32,
-                ctypes.c_void_p,
-                ctypes.c_size_t,
-                ctypes.c_size_t,
-            )
-        else:
-            request_t = ctypes.CFUNCTYPE(
-                None,
-                ctypes.POINTER(ctypes.c_void_p),
-                ctypes.POINTER(ctypes.c_size_t),
-                ctypes.POINTER(ctypes.c_size_t),
-                ctypes.c_void_p,
-            )
-            complete_t = ctypes.CFUNCTYPE(
-                None,
-                ctypes.c_void_p,
-                ctypes.c_size_t,
-                ctypes.c_size_t,
-                ctypes.c_void_p,
-            )
-        request = request_t(
-            pyprof._cupti_monitor_buffer_request_callback_address(version)
-        )
-        complete = complete_t(
-            pyprof._cupti_monitor_buffer_complete_callback_address(version)
-        )
-
-        def do_request():
-            buf = ctypes.c_void_p()
-            size = ctypes.c_size_t()
-            max_records = ctypes.c_size_t()
-            args = [ctypes.byref(buf), ctypes.byref(size), ctypes.byref(max_records)]
-            if version == 2:
-                args.append(None)  # CUpti_BufferCallbackRequestInfo*
-            request(*args)
-            return buf.value, size.value
-
-        def do_complete(ptr):
-            if version == 1:
-                complete(
-                    ctypes.c_void_p(0xABCD), 7, ctypes.c_void_p(ptr), buffer_size, 4096
-                )
-            else:
-                complete(ctypes.c_void_p(ptr), buffer_size, 4096, None)
-
-        # v1 carries ctx/stream through to the completed record; v2 reports 0.
-        expected_ctx, expected_stream = (0xABCD, 7) if version == 1 else (0, 0)
-
-        # First request has an empty free list, so it allocates.
-        ptr_a, size_a = do_request()
-        self.assertEqual(size_a, buffer_size)
-        self.assertEqual(pyprof._cupti_monitor_allocated_buffers(), 1)
-
-        # Complete it, drain it, and return it to the pool.
-        do_complete(ptr_a)
-        self.assertEqual(pyprof._cupti_monitor_pending_buffers(), 1)
-        item = pyprof._cupti_monitor_get_completed()
-        # 5th field is layout_epoch, 0 here (no reconfiguration in this test).
-        self.assertEqual(item, (ptr_a, 4096, expected_ctx, expected_stream, 0))
-        self.assertEqual(pyprof._cupti_monitor_pending_buffers(), 0)
-        pyprof._cupti_monitor_return_buffer(ptr_a)
-
-        # The next request reuses the freed buffer: same pointer, no new alloc.
-        ptr_b, _ = do_request()
-        self.assertEqual(ptr_b, ptr_a)
-        self.assertEqual(pyprof._cupti_monitor_allocated_buffers(), 1)
-
-        # A second concurrently-outstanding buffer forces a fresh allocation.
-        ptr_c, _ = do_request()
-        self.assertNotEqual(ptr_c, ptr_b)
-        self.assertEqual(pyprof._cupti_monitor_allocated_buffers(), 2)
-
-    @skipIfTorchDynamo("native ctypes/CUPTI probe; nothing to compile")
-    def test_cupti_monitor_v2_record_layout_capture(self):
-        # The v2 complete callback snapshots the CUPTI user-defined record layout
-        # (valid only during the callback) into the current layout epoch, so the
-        # decode thread can parse records afterward and reconfiguring (a new
-        # epoch) does not clobber the layout of buffers still queued under the old
-        # one. Build the CUPTI >= 13.2 complete-info / record-layout structs with
-        # ctypes and drive the native v2 callbacks directly (no CUDA/cupti-python);
-        # this also pins the C++ ABI mirror of those structs.
-        import ctypes
-
-        pyprof = torch._C._profiler
-        pyprof._cupti_monitor_reset_buffers()
-        self.addCleanup(pyprof._cupti_monitor_reset_buffers)
-        pyprof._cupti_monitor_configure_buffers(64 * 1024)
-
-        class FieldEntry(ctypes.Structure):
-            _fields_ = [
-                ("structSize", ctypes.c_size_t),
-                ("fieldId", ctypes.c_int),
-                ("offset", ctypes.c_size_t),
-                ("size", ctypes.c_size_t),
-                ("alignment", ctypes.c_size_t),
-            ]
-
-        class RecordLayout(ctypes.Structure):
-            _fields_ = [
-                ("structSize", ctypes.c_size_t),
-                ("pEntries", ctypes.POINTER(FieldEntry)),
-                ("numFields", ctypes.c_size_t),
-                ("recordSize", ctypes.c_size_t),
-            ]
-
-        class CompleteInfo(ctypes.Structure):
-            _fields_ = [
-                ("structSize", ctypes.c_size_t),
-                ("threadId", ctypes.c_uint64),
-                ("ppRecordLayouts", ctypes.POINTER(ctypes.POINTER(RecordLayout))),
-                ("numRecordLayouts", ctypes.c_size_t),
-            ]
-
-        # One activity kind (9) with two selected fields; the first must be the
-        # *_FIELD_KIND id (0). ppRecordLayouts is indexed by kind, null elsewhere.
-        entries = (FieldEntry * 2)(
-            FieldEntry(ctypes.sizeof(FieldEntry), 0, 0, 4, 4),
-            FieldEntry(ctypes.sizeof(FieldEntry), 5, 8, 8, 8),
-        )
-        layout = RecordLayout(
-            ctypes.sizeof(RecordLayout),
-            ctypes.cast(entries, ctypes.POINTER(FieldEntry)),
-            2,
-            16,
-        )
-        n_kinds = 10
-        layouts_arr = (ctypes.POINTER(RecordLayout) * n_kinds)()
-        layouts_arr[9] = ctypes.pointer(layout)
-        info = CompleteInfo(
-            ctypes.sizeof(CompleteInfo),
-            1234,
-            ctypes.cast(layouts_arr, ctypes.POINTER(ctypes.POINTER(RecordLayout))),
-            n_kinds,
-        )
-
-        request_t = ctypes.CFUNCTYPE(
-            None,
-            ctypes.POINTER(ctypes.c_void_p),
-            ctypes.POINTER(ctypes.c_size_t),
-            ctypes.POINTER(ctypes.c_size_t),
-            ctypes.c_void_p,
-        )
-        complete_t = ctypes.CFUNCTYPE(
-            None,
-            ctypes.c_void_p,
-            ctypes.c_size_t,
-            ctypes.c_size_t,
-            ctypes.c_void_p,
-        )
-        request = request_t(pyprof._cupti_monitor_buffer_request_callback_address(2))
-        complete = complete_t(pyprof._cupti_monitor_buffer_complete_callback_address(2))
-
-        buf = ctypes.c_void_p()
-        size = ctypes.c_size_t()
-        max_records = ctypes.c_size_t()
-        request(ctypes.byref(buf), ctypes.byref(size), ctypes.byref(max_records), None)
-        complete(
-            ctypes.c_void_p(buf.value),
-            16,
-            16,
-            ctypes.cast(ctypes.pointer(info), ctypes.c_void_p),
-        )
-        # Drain the completed buffer so the pool is tidy for the reset cleanup.
-        item = pyprof._cupti_monitor_get_completed()
-        pyprof._cupti_monitor_return_buffer(item[0])
-        # Captured under the initial epoch 0, and the buffer is tagged with it.
-        self.assertEqual(item[4], 0)
-        self.assertEqual(
-            pyprof._cupti_monitor_record_layouts(0),
-            [(9, 16, [(0, 0, 4), (5, 8, 8)])],
-        )
-
-        # Reconfiguring opens a new epoch with a different layout; the old epoch's
-        # layout is retained so buffers still queued under it decode correctly.
-        self.assertEqual(pyprof._cupti_monitor_next_layout_epoch(), 1)
-        entries_b = (FieldEntry * 1)(FieldEntry(ctypes.sizeof(FieldEntry), 0, 0, 4, 4))
-        layout_b = RecordLayout(
-            ctypes.sizeof(RecordLayout),
-            ctypes.cast(entries_b, ctypes.POINTER(FieldEntry)),
-            1,
-            8,
-        )
-        layouts_arr_b = (ctypes.POINTER(RecordLayout) * 4)()
-        layouts_arr_b[3] = ctypes.pointer(layout_b)
-        info_b = CompleteInfo(
-            ctypes.sizeof(CompleteInfo),
-            1234,
-            ctypes.cast(layouts_arr_b, ctypes.POINTER(ctypes.POINTER(RecordLayout))),
-            4,
-        )
-        request(ctypes.byref(buf), ctypes.byref(size), ctypes.byref(max_records), None)
-        complete(
-            ctypes.c_void_p(buf.value),
-            8,
-            8,
-            ctypes.cast(ctypes.pointer(info_b), ctypes.c_void_p),
-        )
-        item_b = pyprof._cupti_monitor_get_completed()
-        pyprof._cupti_monitor_return_buffer(item_b[0])
-        self.assertEqual(item_b[4], 1)
-        self.assertEqual(
-            pyprof._cupti_monitor_record_layouts(1),
-            [(3, 8, [(0, 0, 4)])],
-        )
-        # Epoch 0 still holds the original layout.
-        self.assertEqual(
-            pyprof._cupti_monitor_record_layouts(0),
-            [(9, 16, [(0, 0, 4), (5, 8, 8)])],
-        )
 
     def test_build_flow_mapping_supports_sparse_flow_ids(self):
         flow_id = 1_000_000_000
@@ -1679,7 +1124,9 @@ class TestProfiler(TestCase):
         )
         expected_threads = prior_threads + 1
         self.assertEqual(
-            len(tid_counts), expected_threads, f"{expected_threads}, {tid_counts}"
+            len(tid_counts),
+            expected_threads,
+            lambda msg: f"{msg}\n{expected_threads}, {tid_counts}",
         )
         self.assertEqual(len(nodes), sum(tid_counts.values()))
 
@@ -2060,7 +1507,7 @@ class TestProfiler(TestCase):
             self.assertEqual(
                 missing,
                 set(),
-                f"{op}: metadata keys missing in trace_only: {missing}",
+                lambda msg: f"{msg}\n{op}: metadata keys missing in trace_only: {missing}",
             )
 
         if use_cuda:
@@ -2079,7 +1526,7 @@ class TestProfiler(TestCase):
                 self.assertEqual(
                     default_counts[cat],
                     trace_only_counts[cat],
-                    f"{cat} event count mismatch",
+                    lambda msg: f"{msg}\n{cat} event count mismatch",
                 )
 
         # events() must raise in trace_only mode
@@ -2384,8 +1831,13 @@ class TestProfiler(TestCase):
 
     def test_profiler_correlation_id(self):
         """
-        We expect the correlation_id to be unique across multiple invocation of the profiler,
-        So we will reuse id_uniqueness_set.
+        We expect the correlation_id of CPU operator events to be unique across
+        multiple invocations of the profiler, so we will reuse id_uniqueness_set.
+        Only cpu_op events are checked: with CUDA available, profile() also
+        collects CUDA activities, and CUPTI's device-enumeration calls at startup
+        (cudaGetDeviceCount, etc.) are recorded as cuda_runtime events whose
+        correlation ids come from a separate counter (also starting at 1) and
+        would otherwise collide with the operator ids.
         """
         id_uniqueness_set = set()
         model = torch.nn.Sequential(
@@ -2401,7 +1853,8 @@ class TestProfiler(TestCase):
                 model(inputs)
             for event in prof.profiler.kineto_results.events():
                 corr_id = event.correlation_id()
-                if (corr_id) and event.device_type() == DeviceType.CPU:
+                is_cpu = event.device_type() == DeviceType.CPU
+                if corr_id and is_cpu and event.activity_type() == "cpu_op":
                     self.assertTrue(corr_id not in id_uniqueness_set)
                     id_uniqueness_set.add(corr_id)
                     self.assertTrue(corr_id < uint32_max)
@@ -3090,54 +2543,6 @@ class SimpleNet(nn.Module):
 
     def forward(self, x):
         return self.fc2(self.fc1(x))
-
-
-@dataclass(frozen=True)
-class MockKinetoEvent:
-    _name: str
-    _start_us: int
-    _duration_us: int
-    _linked_correlation_id: int
-    _device_type: int
-
-    @property
-    def name(self) -> str:
-        return self._name
-
-    def start_ns(self) -> int:
-        return self._start_us * 1000
-
-    def duration_ns(self) -> int:
-        return self._duration_us * 1000
-
-    def linked_correlation_id(self) -> int:
-        return self._linked_correlation_id
-
-    def device_type(self) -> DeviceType:
-        return DeviceType.CUDA if self._device_type == 1 else DeviceType.CPU
-
-
-@dataclass(frozen=True)
-class MockProfilerEvent:
-    _name: str
-    id: int
-    start_time_ns: int
-    duration_time_ns: int
-    correlation_id: int = 0
-    children: list["MockProfilerEvent"] = field(default_factory=list)
-    parent: Optional["MockProfilerEvent"] = None
-
-    @property
-    def end_time_ns(self):
-        return self.start_time_ns + self.duration_time_ns
-
-    @property
-    def name(self) -> str:
-        return self._name
-
-    def __post__init__(self, parent, children):
-        object.__setattr__(self, "parent", parent)
-        object.__setattr__(self, "children", children)
 
 
 class MockNode:
@@ -4066,7 +3471,7 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
                 self.assertEqual(
                     has_grid,
                     has_block,
-                    f"kernel '{name}' should provide grid and block together",
+                    lambda msg: f"{msg}\nkernel '{name}' should provide grid and block together",
                 )
                 has_kernel_launch_metadata |= has_grid
             self.assertTrue(
@@ -4108,269 +3513,6 @@ class TestExperimentalUtils(TestCase):
         self.assertEqual(
             " ".join(i.name for i in _utils.traverse_bfs(self.make_tree())),
             "root_0 root_1 1 3 6 7 8 2 4 5 9 10",
-        )
-
-    @staticmethod
-    def generate_mock_profile():
-        cuda_events = [
-            MockKinetoEvent("cudaLaunchKernel", 400, 100, 1, 0),
-            MockKinetoEvent("cudaLaunchKernel", 500, 100, 2, 0),
-            MockKinetoEvent("cudaLaunchKernel", 600, 100, 3, 0),
-            MockKinetoEvent("cudaLaunchKernel", 700, 100, 4, 0),
-            MockKinetoEvent("cudaLaunchKernel", 800, 100, 5, 0),
-            MockKinetoEvent("cudaLaunchKernel", 1500, 100, 6, 0),
-            MockKinetoEvent("GPU", 900, 100, 1, 1),
-            MockKinetoEvent("GPU", 1000, 100, 2, 1),
-            MockKinetoEvent("GPU", 1100, 100, 3, 1),
-            MockKinetoEvent("GPU", 1200, 100, 4, 1),
-            MockKinetoEvent("GPU", 1300, 100, 5, 1),
-            MockKinetoEvent("GPU", 1700, 100, 6, 1),
-        ]
-        cpu_events = [
-            MockProfilerEvent("CPU (Before cudaLaunchKernel)", 1, 0, 100000),
-            MockProfilerEvent("CPU (Before cudaLaunchKernel)", 2, 100000, 100000),
-            MockProfilerEvent("CPU (Before cudaLaunchKernel)", 3, 200000, 100000),
-            MockProfilerEvent("CPU (Before cudaLaunchKernel)", 4, 300000, 100000),
-            MockProfilerEvent("CPU (After cudaLaunchKernel)", 5, 400000, 100000),
-            MockProfilerEvent("CPU (After cudaLaunchKernel)", 6, 500000, 100000),
-            MockProfilerEvent("CPU (After cudaLaunchKernel)", 7, 600000, 100000),
-            MockProfilerEvent("CPU (After cudaLaunchKernel)", 8, 700000, 100000),
-            MockProfilerEvent("CPU (After GPU)", 9, 800000, 100000),
-            MockProfilerEvent("CPU (After GPU)", 10, 900000, 100000),
-            MockProfilerEvent("CPU (After GPU)", 11, 1100000, 100000),
-            MockProfilerEvent("CPU (After GPU)", 12, 1200000, 500000),
-        ]
-
-        profiler = unittest.mock.Mock()
-        profiler.kineto_results = unittest.mock.Mock()
-        profiler.kineto_results.events = unittest.mock.Mock(return_value=cuda_events)
-        profiler.kineto_results.experimental_event_tree = unittest.mock.Mock(
-            return_value=cpu_events
-        )
-        return profiler
-
-    @staticmethod
-    def load_mock_profile():
-        accept = expecttest.ACCEPT
-        json_file_path = os.path.join(
-            os.path.dirname(os.path.realpath(__file__)),
-            "profiler_utils_mock_events.json",
-        )
-        if accept and torch.cuda.is_available():
-
-            def garbage_code(x):
-                for i in range(5):
-                    x[0, i] = i
-
-            x = torch.ones((4096, 4096), device="cuda")
-            x = x @ x
-            with profile(
-                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-                record_shapes=True,
-                with_stack=True,
-            ) as prof:
-                for _ in range(5):
-                    x = x @ x
-                garbage_code(x)
-                for _ in range(5):
-                    x = x @ x
-
-            kineto_events = [
-                {
-                    "_name": e.name,
-                    "_start_ns": e.start_ns(),
-                    "_duration_ns": e.duration_ns(),
-                    "_linked_correlation_id": e.linked_correlation_id(),
-                    "_device_type": 1 if e.device_type() == DeviceType.CUDA else 0,
-                }
-                for e in prof.profiler.kineto_results.events()
-            ]
-
-            def EventTreeDFS(event_tree):
-                from collections import deque
-
-                stack = deque(event_tree)
-                while stack:
-                    curr_event = stack.pop()
-                    yield curr_event
-                    for child_event in curr_event.children:
-                        stack.append(child_event)
-
-            profiler_events = [
-                {
-                    "_name": e.name,
-                    "id": e.id,
-                    "start_time_ns": e.start_time_ns,
-                    "duration_time_ns": e.duration_time_ns,
-                    "correlation_id": e.correlation_id,
-                    "children": [child.id for child in e.children],
-                    "parent": e.parent.id if e.parent else None,
-                }
-                for e in EventTreeDFS(
-                    prof.profiler.kineto_results.experimental_event_tree()
-                )
-            ]
-
-            with open(json_file_path, "w") as f:
-                json.dump([kineto_events, profiler_events], f)
-
-        if not os.path.exists(json_file_path):
-            raise AssertionError(f"JSON file not found: {json_file_path}")
-        with open(json_file_path) as f:
-            kineto_events, profiler_events = json.load(f)
-
-        cuda_events = [MockKinetoEvent(*event.values()) for event in kineto_events]
-        cpu_events = []
-        id_map = {}
-        for e in profiler_events:
-            event = MockProfilerEvent(**e)
-            id_map[event.id] = event
-            cpu_events.append(event)
-        for event in cpu_events:
-            parent = None if event.parent is None else id_map[event.parent]
-            children = [id_map[child] for child in event.children]
-            event.__post__init__(parent, children)
-        cpu_events = [event for event in cpu_events if event.parent is None]
-        profiler = unittest.mock.Mock()
-        profiler.kineto_results = unittest.mock.Mock()
-        profiler.kineto_results.events = unittest.mock.Mock(return_value=cuda_events)
-        profiler.kineto_results.experimental_event_tree = unittest.mock.Mock(
-            return_value=cpu_events
-        )
-        return profiler
-
-    def test_utils_compute_self_time(self):
-        with profile() as prof:
-            t1, t2 = (
-                torch.ones(1, requires_grad=True),
-                torch.ones(1, requires_grad=True),
-            )
-            z = torch.add(t1, t2)
-            y = torch.ones(1)
-            loss = torch.nn.functional.binary_cross_entropy_with_logits(z, y)
-            loss.backward()
-        basic_eval = _utils.BasicEvaluation(prof.profiler)
-        metrics = basic_eval.metrics
-        self.assertTrue(len(metrics) > 0)
-        for event_key, event_metrics in metrics.items():
-            self.assertEqual(
-                event_metrics.self_time_ns,
-                event_key.event.duration_time_ns
-                - sum(child.duration_time_ns for child in event_key.event.children),
-            )
-
-    def test_utils_intervals_overlap(self):
-        event = _utils.EventKey(MockProfilerEvent("Event 1", 1, 5, 5))
-        intervals = [
-            _utils.Interval(0, 9),
-            _utils.Interval(1, 2),
-            _utils.Interval(2, 3),
-            _utils.Interval(3, 4),
-            _utils.Interval(4, 5),
-            _utils.Interval(8, 12),
-        ]
-        print(event.intervals_overlap(intervals))
-        self.assertEqual(event.intervals_overlap(intervals), 5)
-
-    def test_utils_compute_queue_depth(self):
-        def format_queue_depth(queue_depth_list, events):
-            res = ""
-            for data, event in zip(queue_depth_list, events):
-                res += f"{data.queue_depth} [{event.name}]\n"
-            return res
-
-        # We have to use Mock because time series data is too flaky to test
-        profiler = self.generate_mock_profile()
-        basic_evaluation = _utils.BasicEvaluation(profiler)
-        self.assertExpectedInline(
-            format_queue_depth(
-                basic_evaluation.queue_depth_list, basic_evaluation.cuda_events
-            ),
-            """\
-1 [cudaLaunchKernel]
-2 [cudaLaunchKernel]
-3 [cudaLaunchKernel]
-4 [cudaLaunchKernel]
-5 [cudaLaunchKernel]
-4 [GPU]
-3 [GPU]
-2 [GPU]
-1 [GPU]
-0 [GPU]
-1 [cudaLaunchKernel]
-0 [GPU]
-""",
-        )
-        self.assertExpectedInline(
-            format_queue_depth(
-                [basic_evaluation.metrics[k] for k in basic_evaluation.event_keys],
-                basic_evaluation.events,
-            ),
-            """\
-0 [CPU (Before cudaLaunchKernel)]
-0 [CPU (Before cudaLaunchKernel)]
-0 [CPU (Before cudaLaunchKernel)]
-0 [CPU (Before cudaLaunchKernel)]
-1 [CPU (After cudaLaunchKernel)]
-2 [CPU (After cudaLaunchKernel)]
-3 [CPU (After cudaLaunchKernel)]
-4 [CPU (After cudaLaunchKernel)]
-5 [CPU (After GPU)]
-4 [CPU (After GPU)]
-2 [CPU (After GPU)]
-1 [CPU (After GPU)]
-""",
-        )
-
-    def test_utils_compute_queue_depth_when_no_cuda_events(self):
-        # For traces with only cpu events, we expect empty queue depth list
-        x = torch.ones((100, 100))
-        with profile() as prof:
-            for _ in range(5):
-                x = x @ x
-        basic_evaluation = _utils.BasicEvaluation(prof.profiler)
-        self.assertFalse(basic_evaluation.compute_queue_depth())
-
-    def test_utils_compute_idle_time(self):
-        profiler = self.generate_mock_profile()
-        basic_evaluation = _utils.BasicEvaluation(profiler)
-        expected_output = "\n".join(
-            [
-                f"{basic_evaluation.metrics[event_key].idle_time_ns} [{event_key.event.name}]"
-                for event_key in basic_evaluation.event_keys
-            ]
-        )
-        self.assertExpectedInline(
-            expected_output,
-            """\
-100000 [CPU (Before cudaLaunchKernel)]
-100000 [CPU (Before cudaLaunchKernel)]
-100000 [CPU (Before cudaLaunchKernel)]
-100000 [CPU (Before cudaLaunchKernel)]
-0 [CPU (After cudaLaunchKernel)]
-0 [CPU (After cudaLaunchKernel)]
-0 [CPU (After cudaLaunchKernel)]
-0 [CPU (After cudaLaunchKernel)]
-0 [CPU (After GPU)]
-0 [CPU (After GPU)]
-0 [CPU (After GPU)]
-100000 [CPU (After GPU)]""",
-        )
-
-    @unittest.skipIf(IS_JETSON, "JSON not behaving as expected on Jetson")
-    def test_utils_get_optimizable_events(self):
-        basic_evaluation = _utils.BasicEvaluation(self.load_mock_profile())
-        optimizable_events = basic_evaluation.get_optimizable_events(
-            2, print_enable=False
-        )
-        expected_output = "\n".join(
-            [f"{event_key.event.name}" for event_key in optimizable_events]
-        )
-        self.assertExpectedInline(
-            expected_output,
-            """\
-<built-in function _cuda_synchronize>
-aten::copy_""",
         )
 
     @unittest.skipIf(
@@ -5642,7 +4784,7 @@ For a model PR to follow, see: https://github.com/pytorch/pytorch/pull/180100
             self.assertEqual(
                 actual_meta,
                 expected_meta,
-                f"{key}: structured metadata differs between events() and Chrome trace JSON",
+                lambda msg: f"{msg}\n{key}: structured metadata differs between events() and Chrome trace JSON",
             )
 
 
@@ -5695,7 +4837,7 @@ class TestPythonChromeTraceExport(TestCase):
         self.assertEqual(
             len(kineto_acts),
             len(py_acts),
-            f"Activity event count mismatch: kineto={len(kineto_acts)}, python={len(py_acts)}",
+            lambda msg: f"{msg}\nActivity event count mismatch: kineto={len(kineto_acts)}, python={len(py_acts)}",
         )
 
         from collections import Counter
@@ -5727,7 +4869,7 @@ class TestPythonChromeTraceExport(TestCase):
             self.assertEqual(
                 ke,
                 pe,
-                f"Event mismatch for {ke['cat']}::{ke['name']} at ts={ke['ts']}",
+                lambda msg: f"{msg}\nEvent mismatch for {ke['cat']}::{ke['name']} at ts={ke['ts']}",
             )
 
         # Flow event parity (ph, id, cat).

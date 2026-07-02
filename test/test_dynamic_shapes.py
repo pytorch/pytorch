@@ -3454,33 +3454,6 @@ class TestGuardsExpressions(TestCase):
             shape_env.evaluate_guards_expression(guards, [guarding_hint_or_throw(s2)])
         )
 
-    def test_guards_expression_source_info(self):
-        from torch._guards import ShapeGuard, SLoc
-
-        shape_env = ShapeEnv()
-        s0 = create_symint(shape_env, 6)
-        guard_bool(s0 * s0 < 40)
-
-        sloc = SLoc("_inductor/codegen/simd.py:2011 in can_use_32bit_indexing", None)
-        guard = shape_env.guards[-1]
-        shape_env.guards[-1] = ShapeGuard(guard.expr, sloc, guard.size_oblivious)
-
-        guards, guards_with_source = (
-            shape_env.produce_guards_expression_with_source_info([s0])
-        )
-        self.assertIsNotNone(guards)
-        self.assertIsNotNone(guards_with_source)
-        self.assertIn(str(sloc), {str(g.sloc) for g in guards_with_source})
-
-        new_shape_env = ShapeEnv()
-        new_s0 = create_symint(new_shape_env, 6)
-        self.assertTrue(
-            new_shape_env.evaluate_guards_expression_with_source_info(
-                guards_with_source, [new_s0]
-            )
-        )
-        self.assertIn(str(sloc), {str(g.sloc) for g in new_shape_env.guards})
-
     def test_guards_float_print(self):
         shape_env = ShapeEnv()
         s0 = create_symint(shape_env, 3)
@@ -3669,7 +3642,7 @@ class TestGuardsExpressions(TestCase):
         self.assertEqual(
             cnt.frame_count,
             1,
-            f"Expected 1 compilation, got {cnt.frame_count}. "
+            lambda msg: f"{msg}\nExpected 1 compilation, got {cnt.frame_count}. "
             f"Size comparison should not cause recompilation.",
         )
 
@@ -3706,7 +3679,7 @@ class TestGuardsExpressions(TestCase):
         self.assertEqual(
             cnt.frame_count,
             1,
-            f"Expected 1 compilation, got {cnt.frame_count}. "
+            lambda msg: f"{msg}\nExpected 1 compilation, got {cnt.frame_count}. "
             f"PythonMod padding should not cause recompilation.",
         )
 

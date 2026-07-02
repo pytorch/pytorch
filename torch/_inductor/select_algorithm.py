@@ -360,7 +360,7 @@ class SubgraphInfo:
     loads: IndentedBuffer = dataclasses.field(default_factory=IndentedBuffer)
     stores: IndentedBuffer = dataclasses.field(default_factory=IndentedBuffer)
     ops_handler: V.WrapperHandler | None = None  # type: ignore[name-defined]
-    cse: Optional["CSE[Any]"] = None
+    cse: Optional["CSE[Any, str]"] = None
 
     # only copied over if not None
     range_trees: list["IterationRangesRoot"] | None = None
@@ -1761,7 +1761,7 @@ class TritonTemplateKernel(TritonKernel):
     def make_load(self, name, indices, mask):
         """
         Optional helper called from template code to generate the code
-        needed to load from an tensor.
+        needed to load from a tensor.
         """
         if not isinstance(indices, (list, tuple)):
             raise AssertionError(
@@ -2513,6 +2513,33 @@ class GeneratedCodeCacheEntry(NamedTuple):
     events: list[Any]
 
 
+def template_subgraph_index_dtype_nodes(
+    subgraphs: Sequence[Any] | None,
+) -> tuple[ir.IRNode, ...]:
+    """Return graph buffers referenced by template subgraphs for index-width selection."""
+    if subgraphs is None:
+        return ()
+
+    nodes: list[ir.IRNode] = []
+    seen_names: OrderedSet[str] = OrderedSet()
+    pending: list[Any] = list(reversed(subgraphs))
+    while pending:
+        subgraph = pending.pop()
+        if isinstance(subgraph, (list, tuple)):
+            pending.extend(reversed(subgraph))
+            continue
+        if subgraph is None:
+            continue
+        for dep in subgraph.get_read_writes().reads_and_writes():
+            if dep.name in seen_names:
+                continue
+            buffer = V.graph.try_get_buffer(dep.name)
+            if isinstance(buffer, ir.IRNode):
+                nodes.append(buffer)
+                seen_names.add(dep.name)
+    return tuple(nodes)
+
+
 class GeneratedCodeCache:
     """
     Cache for generated code. The cache key is a string representation of the input nodes,
@@ -2568,8 +2595,8 @@ class GeneratedCodeCache:
             if isinstance(layout, ir.FlexibleLayout):
                 return True
 
-            for input in input_nodes:
-                if isinstance(input.get_layout(), ir.FlexibleLayout):
+            for input_node in input_nodes:
+                if isinstance(input_node.get_layout(), ir.FlexibleLayout):
                     return True
             return False
 
@@ -2771,7 +2798,11 @@ class TritonTemplate(KernelTemplate):
         kernel_name = f"triton_{self.name}"
 
         numel = sympy_product(layout.size)
-        buffers = itertools.chain(input_nodes, (fake_out,))
+        buffers = itertools.chain(
+            input_nodes,
+            template_subgraph_index_dtype_nodes(subgraphs),
+            (fake_out,),
+        )
 
         if TritonScheduling.can_use_32bit_indexing(numel, buffers):
             index_dtype = "tl.int32"
@@ -6010,7 +6041,12 @@ def clear_preprocessing_fns(clear_defaults: bool = False):
 
 def realize_inputs(*args):
     if len(args) == 1:
-        return ir.ExternKernel.require_stride1(ir.ExternKernel.realize_input(args[0]))
+        realized = ir.ExternKernel.realize_input(args[0])
+        # Shape scalars are represented as scalar IR, e.g. ShapeAsConstantBuffer.
+        # Tensor layout constraints such as stride-1 only apply to tensor IR.
+        if not realized.has_tensor_output():
+            return realized
+        return ir.ExternKernel.require_stride1(realized)
     return [realize_inputs(x) for x in args]
 
 

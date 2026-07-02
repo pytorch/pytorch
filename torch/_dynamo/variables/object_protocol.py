@@ -287,6 +287,12 @@ def type_implements_tp_str(obj_type: type) -> bool:
     return has_slot(type_slot, PyTypeSlots.TP_STR)
 
 
+def type_implements_tp_call(obj_type: type) -> bool:
+    """Check whether obj_type implements the tp_call slot."""
+    _, _, _, type_slot = _get_cached_slots(obj_type)
+    return has_slot(type_slot, PyTypeSlots.TP_CALL)
+
+
 def pyiter_check(obj_type: type) -> bool:
     # ref: https://github.com/python/cpython/blob/3.13/Objects/abstract.c#L2891-L2897
     # CPython checks if tp_iternext != _PyObject_NextNotImplemented
@@ -308,6 +314,17 @@ def pyindex_check(obj_type: type) -> bool:
     return type_implements_nb_index(obj_type)
 
 
+def pycallable_check(obj_type: type) -> bool:
+    """Implements PyCallable_Check: type(x)->tp_call != NULL.
+
+    obj_type is the object's Python type (Py_TYPE(x)); a non-NULL tp_call
+    slot on it means instances are callable.
+
+    ref: https://github.com/python/cpython/blob/v3.13.0/Objects/call.c#L52-L57
+    """
+    return type_implements_tp_call(obj_type)
+
+
 def maybe_get_python_type(obj: VariableTracker) -> type:
     try:
         return obj.python_type()
@@ -321,29 +338,6 @@ def maybe_get_python_type(obj: VariableTracker) -> type:
                 *graph_break_hints.DYNAMO_BUG,
             ],
         )
-
-
-def validate_sequence_index(
-    tx: "InstructionTranslatorBase",
-    key: VariableTracker,
-    container_name: str,
-) -> VariableTracker:
-    """_PyIndex_Check → nb_index path used by list/tuple/range/str/bytes subscript.
-
-    ref: https://github.com/python/cpython/blob/v3.13.3/Include/internal/pycore_abstract.h (_PyIndex_Check)
-    """
-    key_type = maybe_get_python_type(key)
-    if key_type not in (int, bool, slice):
-        if not type_implements_nb_index(key_type):
-            raise_observed_exception(
-                TypeError,
-                tx,
-                args=[
-                    f"{container_name} indices must be integers or slices, not {key.python_type_name()}"
-                ],
-            )
-        key = key.nb_index_impl(tx)
-    return key
 
 
 def vt_mapping_size(
@@ -461,17 +455,24 @@ def generic_str(
 
     Resolution order: str identity check -> tp_str (str_impl) -> tp_repr fallback.
     """
+    from ..exc import TorchDynamoException
+
     if maybe_get_python_type(obj) is str:
         return obj
 
     obj_type = maybe_get_python_type(obj)
-    if (
-        type_implements_tp_str(obj_type)
-        and type(obj).str_impl is not VariableTracker.str_impl
-    ):
-        result = obj.str_impl(tx)
-    else:
-        result = generic_repr(tx, obj)
+    try:
+        if (
+            type_implements_tp_str(obj_type)
+            and type(obj).str_impl is not VariableTracker.str_impl
+        ):
+            result = obj.str_impl(tx)
+        else:
+            result = generic_repr(tx, obj)
+    except TorchDynamoException:
+        raise
+    except Exception as exc:
+        raise_observed_exception(type(exc), tx, args=list(exc.args))
 
     result_type = maybe_get_python_type(result)
     if not issubclass(result_type, str):
@@ -510,7 +511,7 @@ def vt_getitem(
     if type_implements_sq_item(obj_type):
         key_type = maybe_get_python_type(key)
         if type_implements_nb_index(key_type):
-            key = key.nb_index_impl(tx)
+            key = pynumber_as_ssize_t(tx, key, IndexError)
             return vt_sequence_getitem(tx, obj, key)
         raise_type_error(
             tx,
@@ -598,8 +599,8 @@ def generic_setitem(
     if type_implements_sq_ass_item(o_type):
         key_type = maybe_get_python_type(key)
         if pyindex_check(key_type):
-            key = key.nb_index_impl(tx)
-            return vt_sequence_setitem(tx, o, key, value)
+            key_value = pynumber_as_ssize_t(tx, key, err=IndexError)
+            return vt_sequence_setitem(tx, o, key_value, value)
         raise_type_error(
             tx, f"sequence index must be integer, not '{key.python_type_name()}'"
         )
@@ -737,6 +738,87 @@ def generic_float(
         f"float() argument must be a string or a real number, "
         f"not '{obj.python_type_name()}'",
     )
+
+
+def pylong_as_ssize_t(tx: "InstructionTranslatorBase", obj: VariableTracker) -> int:
+    """Mirrors PyLong_AsSsize_t: requires an int (or subclass).
+    values outside the Py_ssize_t range raise OverflowError.
+
+    https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Objects/longobject.c#L576
+    """
+    # Starting on Python 3.16, this will explicitly require an integer instance
+    # https://docs.python.org/3/deprecations/index.html#pending-removal-in-python-3-16
+    if not issubclass(obj.python_type(), int):
+        raise_type_error(tx, "an integer is required")
+    val = obj.as_python_constant()
+    if not -sys.maxsize - 1 <= val <= sys.maxsize:
+        raise_observed_exception(
+            OverflowError,
+            tx,
+            args=["Python int too large to convert to C ssize_t"],
+        )
+    return val
+
+
+def pynumber_as_ssize_t(
+    tx: "InstructionTranslatorBase",
+    item: VariableTracker,
+    err: type[Exception] | None = IndexError,
+) -> VariableTracker:
+    """Mirrors PyNumber_AsSsize_t: _PyNumber_Index(item) then PyLong_AsSsize_t.
+
+    On overflow (value outside the Py_ssize_t range) CPython remaps the
+    OverflowError to `err`, or clips to the Py_ssize_t bounds when err is None.
+
+    https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Objects/abstract.c#L1469
+    """
+    from .tensor import SymNodeVariable
+
+    value = pynumber_index(tx, item)
+
+    # PyLong_AsSsize_t: a symbolic int must be specialized to a concrete
+    # ssize_t (with guard) to be usable as a C index.
+    if isinstance(value, SymNodeVariable):
+        val = value.evaluate_expr(tx.output)
+    else:
+        val = value.as_python_constant()
+
+    if not isinstance(val, int):
+        raise AssertionError("pynumber_index did not return an int-like value")
+
+    if -sys.maxsize - 1 <= val <= sys.maxsize:
+        return ConstantVariable.create(int(val))
+    if err is None:
+        r = sys.maxsize if val > 0 else -sys.maxsize - 1
+        return ConstantVariable.create(r)
+    raise_observed_exception(
+        err,
+        tx,
+        args=[f"cannot fit '{item.python_type_name()}' into an index-sized integer"],
+    )
+
+
+def pynumber_index(
+    tx: "InstructionTranslatorBase", obj: VariableTracker
+) -> "VariableTracker":
+    """Mirrors PyNumber_Index (index(x) dispatch)."""
+    obj_type = maybe_get_python_type(obj)
+
+    if not type_implements_nb_index(obj_type):
+        raise_type_error(
+            tx,
+            f"'{obj.python_type_name()}' object cannot be interpreted as an integer",
+        )
+
+    result = obj.nb_index_impl(tx)
+
+    if not issubclass(result.python_type(), int):
+        raise_type_error(
+            tx,
+            f"__index__ returned non-int (type {result.python_type_name()})",
+        )
+
+    return result
 
 
 def generic_iternext(
@@ -1798,33 +1880,3 @@ def generic_issubclass(
 
     # Coerce to bool (PyObject_IsTrue, abstract.c L2812).
     return generic_bool(tx, result)
-
-
-def virtual_iterator_next(
-    tx: "InstructionTranslatorBase",
-    iter_: VariableTracker,
-    null_or_idx: VariableTracker,
-) -> tuple[VariableTracker, VariableTracker]:
-    """
-    Mirrors _PyForIter_VirtualIteratorNext.
-
-    When ``null_or_idx`` is a tagged int (3.15+ virtual-iter path), dispatch
-    to the iterable's ``_tp_iteritem`` slot via ``tp_iteritem_impl`` and
-    return ``(value, next_index)``.  Otherwise fall back to the standard
-    iterator protocol (``tp_iternext``) and return ``(value, NULL)``.
-
-    Iterator exhaustion is signaled by ``ObservedUserStopIteration``
-    propagating out of the slot impl, matching the rest of Dynamo's
-    iterator protocol.
-
-    https://github.com/python/cpython/blob/f31a89bb901067dd105b00cfa90523cf7ffdbbdd/Python/ceval.c#L3733
-    """
-    from .misc import NullVariable
-
-    if (
-        not isinstance(null_or_idx, NullVariable)
-        and maybe_get_python_type(null_or_idx) is int
-    ):
-        return iter_.tp_iteritem_impl(tx, null_or_idx)
-    next_ = generic_iternext(tx, iter_)
-    return next_, NullVariable()

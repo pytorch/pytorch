@@ -7,8 +7,6 @@
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
-#include <torch/csrc/distributed/c10d/control_collectives/ControlCollectives.hpp>
-#include <torch/csrc/distributed/c10d/control_collectives/StoreCollectives.hpp>
 #include <torch/csrc/distributed/c10d/control_plane/WorkerServer.hpp>
 #include <string_view>
 #include <utility>
@@ -1278,7 +1276,14 @@ Example:
       .def_readwrite("group_id", &::c10d::DistributedBackendOptions::group_id)
       .def_readwrite(
           "global_ranks_in_group",
-          &::c10d::DistributedBackendOptions::global_ranks_in_group);
+          &::c10d::DistributedBackendOptions::global_ranks_in_group)
+      .def_readwrite(
+          "process_group", &::c10d::DistributedBackendOptions::process_group)
+      .def_readwrite(
+          "split_from", &::c10d::DistributedBackendOptions::split_from)
+      .def_readwrite(
+          "enable_reconfigure",
+          &::c10d::DistributedBackendOptions::enable_reconfigure);
 
   py::class_<
       ::c10d::DMAConnectivity,
@@ -1319,10 +1324,10 @@ Example:
           py::arg("tensor"))
       .def_property_static(
           "signal_pad_size",
-          [](py::object /* self */) {
+          [](const py::object& /* self */) {
             return ::c10d::symmetric_memory::get_signal_pad_size();
           },
-          [](py::object /* self */, size_t size) {
+          [](const py::object& /* self */, size_t size) {
             ::c10d::symmetric_memory::set_signal_pad_size(size);
           })
       .def_static(
@@ -1461,7 +1466,9 @@ Example:
             group_name,
             "'");
         ::c10d::symmetric_memory::NCCLDevCommManager::get(device).register_comm(
-            group_name, reinterpret_cast<ncclComm_t>(comm_ptr));
+            group_name,
+            // NOLINTNEXTLINE(performance-no-int-to-ptr)
+            reinterpret_cast<ncclComm_t>(comm_ptr));
       },
       py::arg("group_name"),
       py::arg("comm_ptr"),
@@ -2043,14 +2050,14 @@ Example::
             }
 
             ::c10d::TCPStoreOptions opts{
-                port,
-                isServer,
-                numWorkers,
-                waitWorkers,
-                timeout,
-                multiTenant,
-                masterListenFd,
-                useLibUV};
+                .port = port,
+                .isServer = isServer,
+                .numWorkers = numWorkers,
+                .waitWorkers = waitWorkers,
+                .timeout = timeout,
+                .multiTenant = multiTenant,
+                .masterListenFd = masterListenFd,
+                .useLibUV = useLibUV};
 
             return c10::make_intrusive<::c10d::TCPStore>(host, opts);
           }),
@@ -2118,215 +2125,10 @@ Arguments:
           &::c10d::PrefixStore::getUnderlyingNonPrefixStore,
           R"(Recursively to get the store before layers of wrapping with PrefixStore.)");
 
-  using namespace std::chrono_literals;
-
-  auto collectives =
-      py::class_<
-          ::c10d::ControlCollectives,
-          c10::intrusive_ptr<::c10d::ControlCollectives>>(
-          module,
-          "_ControlCollectives",
-          R"(
-Base class for all ControlCollectives implementations.
-)")
-          .def(
-              "barrier",
-              &::c10d::ControlCollectives::barrier,
-              py::arg("key"),
-              py::arg("timeout") = 5min,
-              py::arg("block") = true,
-              py::call_guard<py::gil_scoped_release>(),
-              R"(
-Blocks until all workers have entered this function.
-
-Arguments:
-    key (str): The unique key used to identify this operation.
-    timeout (duration): The timeout for this operation.
-    block (bool): whether to block this working waiting on the results of the barrier.
-)")
-          .def(
-              "all_sum",
-              &::c10d::ControlCollectives::allSum,
-              py::arg("key"),
-              py::arg("data"),
-              py::arg("timeout") = 5min,
-              py::call_guard<py::gil_scoped_release>(),
-              R"(
-Computes a sum across all workers and returns the final value.
-
-Arguments:
-    key (str): The unique key used to identify this operation.
-    data (int): The data to sum.
-    timeout (duration): The timeout for this operation.
-)")
-          .def(
-              "broadcast_send",
-              [](::c10d::ControlCollectives& collectives,
-                 const std::string& key,
-                 const std::string& data,
-                 std::chrono::milliseconds timeout = 5min) {
-                collectives.broadcastSend(key, toVec8(data), timeout);
-              },
-              py::arg("key"),
-              py::arg("data"),
-              py::arg("timeout") = 5min,
-              py::call_guard<py::gil_scoped_release>(),
-              R"(
-Sends data to all other workers. Must be only called from one worker.
-
-Arguments:
-    key (str): The unique key used to identify this operation.
-    data (str): The data to send.
-    timeout (duration): The timeout for this operation.
-)")
-          .def(
-              "broadcast_recv",
-              [](::c10d::ControlCollectives& collectives,
-                 const std::string& key,
-                 std::chrono::milliseconds timeout = 5min) {
-                auto out = [&]() {
-                  py::gil_scoped_release guard;
-                  return collectives.broadcastRecv(key, timeout);
-                }();
-                return toPyBytes(out);
-              },
-              py::arg("key"),
-              py::arg("timeout") = 5min,
-              R"(
-Receives data broadcasted from 1 worker.
-
-Arguments:
-    key (str): The unique key used to identify this operation.
-    timeout (duration): The timeout for this operation.
-)")
-          .def(
-              "gather_send",
-              [](::c10d::ControlCollectives& collectives,
-                 const std::string& key,
-                 const std::string& data,
-                 std::chrono::milliseconds timeout = 5min) {
-                collectives.gatherSend(key, toVec8(data), timeout);
-              },
-              py::arg("key"),
-              py::arg("data"),
-              py::arg("timeout") = 5min,
-              py::call_guard<py::gil_scoped_release>(),
-              R"(
-Sends data to one other worker.
-
-Arguments:
-    key (str): The unique key used to identify this operation.
-    data (str): The data to send.
-    timeout (duration): The timeout for this operation.
-)")
-          .def(
-              "gather_recv",
-              [](::c10d::ControlCollectives& collectives,
-                 const std::string& key,
-                 const std::string& data,
-                 std::chrono::milliseconds timeout = 5min) {
-                auto out = [&]() {
-                  py::gil_scoped_release guard;
-                  return collectives.gatherRecv(key, toVec8(data), timeout);
-                }();
-                return toPyBytes(out);
-              },
-              py::arg("key"),
-              py::arg("data"),
-              py::arg("timeout") = 5min,
-              R"(
-Receives data broadcasted from all workers. Must only be called by one worker.
-
-Arguments:
-    key (str): The unique key used to identify this operation.
-    timeout (duration): The timeout for this operation.
-)")
-
-          .def(
-              "scatter_send",
-              [](::c10d::ControlCollectives& collectives,
-                 const std::string& key,
-                 const std::vector<std::string>& data,
-                 std::chrono::milliseconds timeout = 5min) {
-                auto out = [&]() {
-                  py::gil_scoped_release guard;
-                  return collectives.scatterSend(key, toVec8(data), timeout);
-                }();
-                return toPyBytes(out);
-              },
-              py::arg("key"),
-              py::arg("data"),
-              py::arg("timeout") = 5min,
-              R"(
-Sends rank specific data to all other workers.
-
-Arguments:
-    key (str): The unique key used to identify this operation.
-    data (str): The data to send.
-    timeout (duration): The timeout for this operation.
-)")
-          .def(
-              "scatter_recv",
-              [](::c10d::ControlCollectives& collectives,
-                 const std::string& key,
-                 std::chrono::milliseconds timeout = 5min) {
-                auto out = [&]() {
-                  py::gil_scoped_release guard;
-                  return collectives.scatterRecv(key, timeout);
-                }();
-                return toPyBytes(out);
-              },
-              py::arg("key"),
-              py::arg("timeout") = 5min,
-              R"(
-Receives rank specific data from one worker.
-
-Arguments:
-    key (str): The unique key used to identify this operation.
-    timeout (duration): The timeout for this operation.
-)")
-
-          .def(
-              "all_gather",
-              [](::c10d::ControlCollectives& collectives,
-                 const std::string& key,
-                 const std::string& data,
-                 std::chrono::milliseconds timeout = 5min) {
-                auto out = [&]() {
-                  py::gil_scoped_release guard;
-                  return collectives.allGather(key, toVec8(data), timeout);
-                }();
-                return toPyBytes(out);
-              },
-              py::arg("key"),
-              py::arg("data"),
-              py::arg("timeout") = 5min,
-              R"(
-Sends data to all workers and receives data from all other workers.
-
-Arguments:
-    key (str): The unique key used to identify this operation.
-    data (str): The data to send.
-    timeout (duration): The timeout for this operation.
-)");
-
-  intrusive_ptr_class_<::c10d::StoreCollectives>(
-      module,
-      "_StoreCollectives",
-      collectives,
-      R"(
-An implementation of ControlCollectives that uses the provided store as the underlying
-communication mechanism.
-      )")
-      .def(
-          py::init<c10::intrusive_ptr<::c10d::Store>, int, int>(),
-          py::arg("store"),
-          py::arg("rank"),
-          py::arg("world_size"));
-
-  // Use CustomClassBase as the metaclass to allow isinstance(fake_obj, ProcessGroup)
-  // to work.
-  py::object opaque_base_module = py::module_::import("torch._custom_class_base");
+  // Use CustomClassBase as the metaclass to allow isinstance(fake_obj,
+  // ProcessGroup) to work.
+  py::object opaque_base_module =
+      py::module_::import("torch._custom_class_base");
   py::object opaque_base = opaque_base_module.attr("CustomClassBaseMeta");
 
   auto processGroup =
@@ -2880,10 +2682,6 @@ communication mechanism.
 
               See :func:`torch.distributed.barrier` for more details.)")
           .def(
-              "_set_sequence_number_for_group",
-              &::c10d::ProcessGroup::setSequenceNumberForGroup,
-              py::call_guard<py::gil_scoped_release>())
-          .def(
               "_get_sequence_number_for_group",
               &::c10d::ProcessGroup::getSequenceNumberForGroup,
               py::call_guard<py::gil_scoped_release>())
@@ -2945,6 +2743,16 @@ communication mechanism.
               py::arg("backend") =
                   std::optional<c10::intrusive_ptr<::c10d::Backend>>(),
               py::call_guard<py::gil_scoped_release>())
+          .def(
+              "get_backend",
+              [](const py::object& self, const c10::Device& device) {
+                return self.attr("_get_backend")(device);
+              },
+              py::arg("device"),
+              R"(Return the underlying backend implementation for this process group and device.
+
+This API bypasses torch.compile tracing and other hooks. Backend methods are
+experimental and subject to breakage without warning.)")
           .def(
               "_get_backend",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,

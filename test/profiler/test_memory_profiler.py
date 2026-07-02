@@ -1542,7 +1542,7 @@ class TestMemoryProfilerTimeline(TestCase):
             self.assertEqual(
                 actual,
                 expected,
-                f"expected does not match actual: {actual}",
+                lambda msg: f"{msg}\nexpected does not match actual: {actual}",
             )
 
 

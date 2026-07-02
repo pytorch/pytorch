@@ -629,7 +629,7 @@ struct AutocastState {
     if (cache_enabled != o.cache_enabled) {
       os << "autocast_cache_enabled ";
     }
-    return std::move(os).str();
+    return os.str();
   }
 
   template <typename T>
@@ -722,7 +722,7 @@ struct GlobalStateGuard {
       os << "num_threads ";
     if (_default_dtype != at::get_default_dtype())
       os << "default_dtype ";
-    return std::move(os).str();
+    return os.str();
   }
 
   template <typename T>
@@ -2107,7 +2107,13 @@ class LENGTH_CHECK : public LeafGuard {
   bool check_nopybind(PyObject* value) override { // borrowed ref
     // PySequence_Length returns -1 if the object is not a sequence. So, we
     // don't have to test for PySequence_Check.
-    return PySequence_Length(value) == _length;
+    Py_ssize_t length{
+        PyAnySet_Check(value) ? PySet_Size(value) : PySequence_Length(value)};
+    if (length == -1) {
+      PyErr_Clear();
+      return false;
+    }
+    return length == _length;
   }
 
  private:
@@ -5683,8 +5689,38 @@ class ListGetItemGuardAccessor : public GuardAccessor {
   Py_ssize_t _index{-1};
 };
 
+static PyObject* set_getitem_new_ref(PyObject* obj, Py_ssize_t index) {
+  if (index < 0) {
+    return nullptr;
+  }
+
+  PyObject* iter = nullptr;
+  if (PySet_Check(obj)) {
+    iter = PySet_Type.tp_iter(obj);
+  } else if (PyFrozenSet_Check(obj)) {
+    iter = PyFrozenSet_Type.tp_iter(obj);
+  } else {
+    iter = PyObject_GetIter(obj);
+  }
+  if (iter == nullptr) {
+    return nullptr;
+  }
+
+  PyObject* item = nullptr;
+  for (Py_ssize_t i = 0; i <= index; i++) {
+    Py_XDECREF(item);
+    item = PyIter_Next(iter);
+    if (item == nullptr) {
+      Py_DECREF(iter);
+      return nullptr;
+    }
+  }
+  Py_DECREF(iter);
+  return item;
+}
+
 /**
- * Represents set[index] accessor by converting the set into a list.
+ * Represents set[index] accessor by walking the set iterator.
  */
 class SetGetItemGuardAccessor : public GuardAccessor {
  public:
@@ -5707,29 +5743,28 @@ class SetGetItemGuardAccessor : public GuardAccessor {
   bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
       override { // borrowed ref
 
-    PyObject* lst = PySequence_List(obj);
-    PyObject* x = PyList_GetItem(lst, _index); // borrowed ref
-    Py_XDECREF(lst);
+    PyObject* x = set_getitem_new_ref(obj, _index);
     if (x == nullptr) {
       PyErr_Clear();
       return false;
     }
-    bool result = _guard_manager->check_nopybind(x);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    bool result{_guard_manager->check_nopybind(x)};
+    Py_DECREF(x);
     return result;
   }
 
   GuardDebugInfo check_verbose_nopybind(
       PyObject* obj) override { // borrowed ref
 
-    PyObject* lst = PySequence_List(obj);
-    PyObject* x = PyList_GetItem(lst, _index); // borrowed ref
-    Py_XDECREF(lst);
+    PyObject* x = set_getitem_new_ref(obj, _index);
 
     if (x == nullptr) {
       PyErr_Clear();
       return GuardDebugInfo(false, 0);
     }
-    GuardDebugInfo result = _guard_manager->check_verbose_nopybind(x);
+    GuardDebugInfo result{_guard_manager->check_verbose_nopybind(x)};
+    Py_DECREF(x);
     return result;
   }
 

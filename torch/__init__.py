@@ -36,6 +36,7 @@ from typing import (
 )
 from typing_extensions import (
     deprecated as _deprecated,
+    LiteralString as _LiteralString,
     Never as _Never,
     ParamSpec as _ParamSpec,
     Self as _Self,
@@ -339,7 +340,7 @@ def _preload_cuda_lib(lib_folder: str, lib_name: str, required: bool = True) -> 
         ctypes.CDLL(lib_path)
 
 
-def _preload_cuda_deps(err: OSError | None = None) -> None:
+def _preload_cuda_deps(err: OSError | None = None, required: bool = True) -> None:
     cuda_libs: list[tuple[str, str]] = [
         # NOTE: Order matters! We must preload libcublasLt BEFORE libcublas to prevent
         # libcublas from loading a mismatched system-wide libcublasLt via its RUNPATH.
@@ -369,9 +370,12 @@ def _preload_cuda_deps(err: OSError | None = None) -> None:
     ]:
         raise err
 
-    # Otherwise, try to preload dependencies from site-packages
+    # Otherwise, try to preload dependencies from site-packages. With
+    # required=False each lib is best-effort: a partial install that only ships
+    # some of these wheels (e.g. just a cupti wheel alongside a system CUDA)
+    # preloads the ones present instead of aborting on the first missing one.
     for lib_folder, lib_name in cuda_libs:
-        _preload_cuda_lib(lib_folder, lib_name)
+        _preload_cuda_lib(lib_folder, lib_name, required=required)
 
     # libnvToolsExt is Optional Dependency
     _preload_cuda_lib("nvtx", "libnvToolsExt.so.*[0-9]", required=False)
@@ -403,8 +407,15 @@ def _load_global_deps() -> None:
             # libtorch_global_deps.so always depends in cudart, check if its installed and loaded
             if "libcudart.so" not in _maps:
                 return
-            # If all above-mentioned conditions are met, preload CUDA dependencies
-            _preload_cuda_deps()
+            # If all above-mentioned conditions are met, preload CUDA dependencies.
+            # Only libtorch_global_deps is loaded so far (it pulls libcudart, not
+            # the rest); libtorch_cpu, which DT_NEEDEDs the other CUDA libs, is
+            # imported below via torch._C. So be best-effort and front-load any
+            # component wheels that ARE present now, before that import, so they
+            # win libtorch_cpu's DT_NEEDED soname lookups (e.g. a newer cupti
+            # wheel over a system copy). A missing wheel must not abort -- rpath
+            # will satisfy libtorch_cpu's DT_NEEDED for whatever isn't preloaded.
+            _preload_cuda_deps(required=False)
         except Exception:
             pass
 
@@ -1760,6 +1771,7 @@ def use_deterministic_algorithms(
         * :func:`torch.Tensor.scatter` when `src` type is Tensor and called on CUDA tensor
         * :func:`torch.Tensor.scatter_reduce` when ``reduce='sum'`` or ``reduce='mean'`` and called on CUDA tensor
         * :class:`torch.nn.MaxPool3d` when attempting to differentiate a CUDA tensor
+        * :class:`torch.nn.Embedding` when attempting to differentiate a CUDA tensor
 
     The following normally-nondeterministic operations will throw a
     :class:`RuntimeError` when ``mode=True``:
@@ -2040,7 +2052,7 @@ def is_warn_always_enabled() -> builtins.bool:
 def _check_with(
     error_type: type[BaseException],
     cond: builtins.bool | SymBool,
-    message: str | _Callable[[], object] | None,
+    message: _LiteralString | _Callable[[], object] | None,
 ) -> None:
     if not isinstance(cond, (builtins.bool, SymBool)):
         if isinstance(cond, torch.Tensor):
@@ -2078,7 +2090,8 @@ def _check_with(
 
 
 def _check(
-    cond: builtins.bool | SymBool, message: str | _Callable[[], object] | None = None
+    cond: builtins.bool | SymBool,
+    message: _LiteralString | _Callable[[], object] | None = None,
 ) -> None:
     r"""Throws error containing an optional message if the specified condition
     is False.
@@ -2090,9 +2103,10 @@ def _check(
     Args:
         cond (:class:`bool`): If False, throw error
 
-        message (str or Callable, optional): A string, or a callable that
-            returns a string or an object with a ``__str__()`` method, to be
-            used as the error message. Default: ``None``
+        message (LiteralString or Callable, optional): A literal string, or a
+            callable that returns a string or an object with a ``__str__()``
+            method, to be used as the error message. Use the callable form for a
+            dynamically constructed message. Default: ``None``
     """
     _check_with(RuntimeError, cond, message)
 
@@ -2104,7 +2118,7 @@ def _check(
 )
 def _check_is_size(
     i: "IntLikeType",
-    message: str | _Callable[[], object] | None = None,
+    message: _LiteralString | _Callable[[], object] | None = None,
     *,
     max: "IntLikeType | None" = None,
 ) -> None:
@@ -2139,7 +2153,8 @@ def _check_is_size(
 
 
 def _check_index(
-    cond: builtins.bool | SymBool, message: str | _Callable[[], object] | None = None
+    cond: builtins.bool | SymBool,
+    message: _LiteralString | _Callable[[], object] | None = None,
 ) -> None:
     r"""Throws error containing an optional message if the specified condition
     is False.
@@ -2151,15 +2166,17 @@ def _check_index(
     Args:
         cond (:class:`bool`): If False, throw error
 
-        message (str or Callable, optional): A string, or a callable that
-            returns a string or an object with a ``__str__()`` method, to be
-            used as the error message. Default: ``None``
+        message (LiteralString or Callable, optional): A literal string, or a
+            callable that returns a string or an object with a ``__str__()``
+            method, to be used as the error message. Use the callable form for a
+            dynamically constructed message. Default: ``None``
     """
     _check_with(IndexError, cond, message)
 
 
 def _check_value(
-    cond: builtins.bool | SymBool, message: str | _Callable[[], object] | None = None
+    cond: builtins.bool | SymBool,
+    message: _LiteralString | _Callable[[], object] | None = None,
 ) -> None:
     r"""Throws error containing an optional message if the specified condition
     is False.
@@ -2171,15 +2188,17 @@ def _check_value(
     Args:
         cond (:class:`bool`): If False, throw error
 
-        message (str or Callable, optional): A string, or a callable that
-            returns a string or an object with a ``__str__()`` method, to be
-            used as the error message. Default: ``None``
+        message (LiteralString or Callable, optional): A literal string, or a
+            callable that returns a string or an object with a ``__str__()``
+            method, to be used as the error message. Use the callable form for a
+            dynamically constructed message. Default: ``None``
     """
     _check_with(ValueError, cond, message)
 
 
 def _check_type(
-    cond: builtins.bool | SymBool, message: str | _Callable[[], object] | None = None
+    cond: builtins.bool | SymBool,
+    message: _LiteralString | _Callable[[], object] | None = None,
 ) -> None:
     r"""Throws error containing an optional message if the specified condition
     is False.
@@ -2191,15 +2210,17 @@ def _check_type(
     Args:
         cond (:class:`bool`): If False, throw error
 
-        message (str or Callable, optional): A string, or a callable that
-            returns a string or an object with a ``__str__()`` method, to be
-            used as the error message. Default: ``None``
+        message (LiteralString or Callable, optional): A literal string, or a
+            callable that returns a string or an object with a ``__str__()``
+            method, to be used as the error message. Use the callable form for a
+            dynamically constructed message. Default: ``None``
     """
     _check_with(TypeError, cond, message)
 
 
 def _check_not_implemented(
-    cond: builtins.bool | SymBool, message: str | _Callable[[], object] | None = None
+    cond: builtins.bool | SymBool,
+    message: _LiteralString | _Callable[[], object] | None = None,
 ) -> None:
     r"""Throws error containing an optional message if the specified condition
     is False.
@@ -2211,9 +2232,10 @@ def _check_not_implemented(
     Args:
         cond (:class:`bool`): If False, throw error
 
-        message (str or Callable, optional): A string, or a callable that
-            returns a string or an object with a ``__str__()`` method, to be
-            used as the error message. Default: ``None``
+        message (LiteralString or Callable, optional): A literal string, or a
+            callable that returns a string or an object with a ``__str__()``
+            method, to be used as the error message. Use the callable form for a
+            dynamically constructed message. Default: ``None``
     """
     _check_with(NotImplementedError, cond, message)
 
@@ -2221,7 +2243,7 @@ def _check_not_implemented(
 def _check_tensor_all_with(
     error_type: type[BaseException],
     cond: "torch.Tensor",
-    message: str | _Callable[[], object] | None = None,
+    message: _LiteralString | _Callable[[], object] | None = None,
 ) -> None:
     if not is_tensor(cond):
         raise TypeError(f"cond must be a tensor, but got {type(cond)}")
@@ -2234,7 +2256,8 @@ def _check_tensor_all_with(
 
 # C++ equivalent: `TORCH_CHECK_TENSOR_ALL`
 def _check_tensor_all(
-    cond: "torch.Tensor", message: str | _Callable[[], object] | None = None
+    cond: "torch.Tensor",
+    message: _LiteralString | _Callable[[], object] | None = None,
 ) -> None:
     r"""Throws error containing an optional message if the specified condition
     is False.
@@ -2247,9 +2270,10 @@ def _check_tensor_all(
         cond (:class:`torch.Tensor`): Tensor of dtype ``torch.bool``. If any
             element is ``False``, throw error
 
-        message (str or Callable, optional): A string, or a callable that
-            returns a string or an object with a ``__str__()`` method, to be
-            used as the error message. Default: ``None``
+        message (LiteralString or Callable, optional): A literal string, or a
+            callable that returns a string or an object with a ``__str__()``
+            method, to be used as the error message. Use the callable form for a
+            dynamically constructed message. Default: ``None``
     """
     _check_tensor_all_with(RuntimeError, cond, message)
 
@@ -2968,7 +2992,7 @@ def compile(
     | None = None,
     name: str | None = None,
     disable: builtins.bool = False,
-    shapes_spec: _Any = None,
+    dynamic_shapes: _Any = None,
 ) -> _Callable[_InputT, _RetT]: ...
 
 
@@ -2984,7 +3008,7 @@ def compile(
     | None = None,
     name: str | None = None,
     disable: builtins.bool = False,
-    shapes_spec: _Any = None,
+    dynamic_shapes: _Any = None,
 ) -> _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]: ...
 
 
@@ -3001,7 +3025,7 @@ def compile(
     disable: builtins.bool = False,
     recompile_limit: builtins.int | None = None,
     isolate_recompiles: builtins.bool = False,
-    shapes_spec: _Any = None,
+    dynamic_shapes: _Any = None,
 ) -> (
     _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]
     | _Callable[_InputT, _RetT]
@@ -3142,11 +3166,18 @@ def compile(
         backend = get_default_backend()
 
     # Auto-wrap ParamsSpec → ShapesSpec for convenience
-    if shapes_spec is not None:
+    if dynamic_shapes is not None:
         from torch.fx.experimental.dynamic_spec import ParamsSpec, ShapesSpec
 
-        if isinstance(shapes_spec, ParamsSpec):
-            shapes_spec = ShapesSpec(shapes_spec)
+        if isinstance(dynamic_shapes, ParamsSpec):
+            dynamic_shapes = ShapesSpec(dynamic_shapes)
+
+    # If ``model`` carries an ``@dynamic_spec(...)`` decorator, the attached
+    # ``ShapesSpec`` is used as ``dynamic_shapes``. Passing both raises.
+    if model is not None:
+        from torch.fx.experimental.dynamic_spec import _resolve_dynamic_shapes
+
+        dynamic_shapes = _resolve_dynamic_shapes(model, dynamic_shapes)
 
     # Decorator mode
     if model is None:
@@ -3165,7 +3196,7 @@ def compile(
                 disable=disable,
                 recompile_limit=recompile_limit,
                 isolate_recompiles=isolate_recompiles,
-                shapes_spec=shapes_spec,
+                dynamic_shapes=dynamic_shapes,
             )
 
         return fn
@@ -3224,7 +3255,7 @@ def compile(
         guard_filter_fn=guard_filter_fn,
         recompile_limit=recompile_limit,
         isolate_recompiles=isolate_recompiles,
-        shapes_spec=shapes_spec,
+        dynamic_shapes=dynamic_shapes,
     )(model)  # type: ignore[return-value]
 
 

@@ -2407,7 +2407,9 @@ class TestSaveLoad(TestCase):
         loaded_ep = load(buffer)
         loaded_sd = loaded_ep.state_dict
         for name, param in loaded_sd.items():
-            self.assertEqual(param.device.type, "cuda", f"{name} not on cuda")
+            self.assertEqual(
+                param.device.type, "cuda", lambda msg: f"{msg}\n{name} not on cuda"
+            )
         self.assertEqual(m(*inp), loaded_ep.module()(*inp))
 
     def test_from_node_metadata_serialization(self):

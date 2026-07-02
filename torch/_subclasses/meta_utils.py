@@ -65,6 +65,26 @@ def _is_fake_tensor(t: object) -> TypeIs[FakeTensor]:
     return isinstance(t, FakeTensor)
 
 
+def _unwrap_python_functional_tensor(t: torch.Tensor) -> torch.Tensor:
+    # Avoid a top-level import cycle: functional_tensor imports this module.
+    from torch._subclasses.functional_tensor import FunctionalTensor
+
+    if isinstance(t, FunctionalTensor):
+        return t.from_functional()
+    return t
+
+
+def _clone_real_storage_from_tensor(t: torch.Tensor) -> torch.UntypedStorage:
+    t = _unwrap_python_functional_tensor(t)
+    if _is_fake_tensor(t):
+        if t.real_tensor is None:
+            raise AssertionError(
+                "t.real_tensor must not be None when copy_data is True"
+            )
+        t = t.real_tensor
+    return t.untyped_storage().clone()
+
+
 DimList = list
 _TensorLikeT = TypeVar("_TensorLikeT", "MetaTensorDesc[Any]", torch.Tensor)
 _T = TypeVar("_T")
@@ -264,14 +284,18 @@ class MetaTensorDescriber:
         return self.lookup_storage[s]
 
     def describe_storage(
-        self, s: torch.UntypedStorage, *, trace: bool = False
+        self,
+        s: torch.UntypedStorage,
+        *,
+        data: torch.Tensor | None = None,
+        trace: bool = False,
     ) -> MetaStorageDesc:
         r = MetaStorageDesc(
             id=self.get_storage_id(s),
             size=s.size(),
             # NB: We don't do the copy yet; copy happens when we start
             # creating the new storages
-            data=s if self.copy_data else None,
+            data=data if data is not None else s if self.copy_data else None,
         )
         if trace and r.id not in self.traced_storages:
             trace_structured(
@@ -284,6 +308,7 @@ class MetaTensorDescriber:
     def describe_tensor(
         self, t: torch.Tensor, *, recurse: bool = True, trace: bool = False
     ) -> MetaTensorDesc[Any]:
+        data = _unwrap_python_functional_tensor(t) if self.copy_data else None
         is_leaf = safe_is_leaf(t)
         is_view = t._is_view()
         is_sparse = t.is_sparse
@@ -314,7 +339,7 @@ class MetaTensorDescriber:
         ):
             # NB: We actually don't use storage to do views, but might as well
             # put it in for accuracy
-            storage = self.describe_storage(t.untyped_storage(), trace=trace)
+            storage = self.describe_storage(t.untyped_storage(), data=data, trace=trace)
             storage_offset = t.storage_offset()  # type: ignore[assignment]
 
         stride = None
@@ -509,7 +534,7 @@ class MetaTensorDescriber:
             functorch_stack=maybe_functorch_stack,
             autograd_meta_from=autograd_meta_from,
             current_level=current_level,
-            data=t if self.copy_data else None,
+            data=data,
         )
         if trace and r.id not in self.traced_tensors:
             trace_structured(
@@ -526,7 +551,7 @@ class MetaStorageDesc:
     size: int
     # NB: this is only populated with copy_data True, it is not directly
     # serializable in JSON, you want to do something special here anyway
-    data: torch.UntypedStorage | None
+    data: torch.UntypedStorage | torch.Tensor | None
 
     def as_json(self, describer_id: _DescriberId) -> dict[str, object]:
         metadata: dict[str, object] = {
@@ -948,7 +973,11 @@ class MetaConverter(Generic[_TensorT]):
                         raise AssertionError(
                             "s.data must not be None when copy_data is True"
                         )
-                    _set_real_storage(r_s, s.data.clone())
+                    if isinstance(s.data, torch.Tensor):
+                        real_storage = _clone_real_storage_from_tensor(s.data)
+                    else:
+                        real_storage = s.data.clone()
+                    _set_real_storage(r_s, real_storage)
             self.set_storage_memo(s, r_s)
             return r_s
         else:
@@ -2068,96 +2097,160 @@ class MetaConverter(Generic[_TensorT]):
                             # pyrefly: ignore [bad-argument-type]
                             r = self._backward_error(r)
 
-                    s = t.storage
-                    if s is None:
-                        raise AssertionError("t.storage must not be None")
-                    from torch.fx.experimental.symbolic_shapes import (
-                        guard_or_false,
-                        sym_eq,
-                    )
-
-                    if s.id not in self.storage_memo and (
-                        r.is_nested
-                        or (
-                            guard_or_false(sym_eq(r.stride(), strides))
-                            and guard_or_false(r.storage_offset() == storage_offset)
+                    # Storage aliasing for traceable wrapper subclasses is tracked
+                    # through their inner tensors. Memoizing the wrapper placeholder
+                    # storage can later force a cross-device set_ on the wrapper.
+                    if not t.is_traceable_wrapper_subclass:
+                        s = t.storage
+                        if s is None:
+                            raise AssertionError("t.storage must not be None")
+                        from torch.fx.experimental.symbolic_shapes import (
+                            guard_or_false,
+                            sym_eq,
                         )
-                    ):
-                        # You're normal and happy, install the fresh storage into the memo
-                        self.set_storage_memo(s, r.untyped_storage())
-                        if self.copy_data:
-                            if not _is_fake_tensor(r):
-                                raise AssertionError("Expected r to be a FakeTensor")
-                            if r.real_tensor is None:
-                                raise AssertionError(
-                                    "r.real_tensor must not be None when copy_data is True"
+
+                        storage_needs_resize = False
+                        source_storage_size = s.size
+                        source_storage_is_zero = (
+                            isinstance(source_storage_size, int)
+                            and source_storage_size == 0
+                        )
+                        if not r.is_nested:
+                            r_storage = r.untyped_storage()
+                            r_storage_size = r_storage.size()
+                            if isinstance(r_storage_size, int) and isinstance(
+                                source_storage_size, int
+                            ):
+                                storage_needs_resize = (
+                                    source_storage_size != 0
+                                    and r_storage_size < source_storage_size
                                 )
-                            _set_real_storage(
-                                r.untyped_storage(), r.real_tensor.untyped_storage()
+                        if s.id not in self.storage_memo and (
+                            r.is_nested
+                            or (
+                                guard_or_false(sym_eq(r.stride(), strides))
+                                and guard_or_false(r.storage_offset() == storage_offset)
                             )
-                    else:
-                        # You're in crazy town; somehow you gave us a tensor
-                        # that wasn't a view, but had nonzero storage offset,
-                        # nontrivial strides (such that clone() couldn't
-                        # preserve them), or already aliases with another
-                        # tensor's storage.  The most typical way to end
-                        # up here is with set_.  So use set_ to bludgeon this
-                        # in.
-                        r_s = self.meta_storage(s, callback=callback)
-                        # NB: In principle, this should always work, but there
-                        # is some subtle difference in the autograd metadata
-                        # that means we will backprop the set_ call, even if
-                        # r is declared as an input to grad.
-                        # See https://github.com/pytorch/pytorch/issues/87956
-                        # for the reproducer.
-                        # NB: The in_kernel_invocation_manager here is necessary
-                        # for fake tensor.  If we run the set_ call with fake
-                        # tensor on, r will improperly report that it is NOT a
-                        # meta tensor but a cpu tensor, and then the set_ call
-                        # will fail due to device mismatch.  no_dispatch() is
-                        # not enough, because the fake tensor will still claim
-                        # to be a CPU tensor and you'll end up in the CPU
-                        # kernel.  Arguably this is a hack; a cleaner way to
-                        # solve this is to have a FakeStorage concept which
-                        # would report it's CPU device--no problem now!  But
-                        # this is difficult to do because we don't have storage
-                        # subclasses.  Relevant test is
-                        # DynamicShapesFunctionTests::test_add_dynamic_shapes in
-                        # test/dynamo/test_dynamic_shapes.py
-                        maybe_fake_mgr: AbstractContextManager[None] = (
-                            contextlib.nullcontext()
-                        )
-                        from torch._subclasses.fake_tensor import (
-                            in_kernel_invocation_manager,
-                            maybe_get_fake_mode,
-                        )
-
-                        mb_fake_mode = maybe_get_fake_mode(r)
-                        if mb_fake_mode is not None:
-                            maybe_fake_mgr = in_kernel_invocation_manager(mb_fake_mode)
-                        with torch.no_grad(), maybe_suppress():
-                            with maybe_fake_mgr:
-                                r.set_(r_s, storage_offset, sizes, strides)
+                        ):
+                            if not r.is_nested:
+                                # The freshly allocated tensor storage can stand in
+                                # for the source storage only if it covers the whole
+                                # storage. Parameters made from views are not
+                                # autograd views, but can still share a larger
+                                # storage with later parameters. Leave symbolic
+                                # sizes alone; this preserves the fast path for
+                                # dynamic inputs without adding storage-size guards.
+                                # Zero-sized source storages are handled by the
+                                # resize_(0) below.
+                                if storage_needs_resize:
+                                    r.untyped_storage().resize_(s.size)
+                            # You're normal and happy, install the fresh storage into the memo
+                            self.set_storage_memo(s, r.untyped_storage())
                             if self.copy_data:
-                                with torch.no_grad(), no_dispatch():
-                                    if not _is_fake_tensor(r):
+                                if not _is_fake_tensor(r):
+                                    raise AssertionError(
+                                        "Expected r to be a FakeTensor"
+                                    )
+                                if r.real_tensor is None:
+                                    raise AssertionError(
+                                        "r.real_tensor must not be None when copy_data is True"
+                                    )
+                                if source_storage_is_zero:
+                                    _set_real_storage(
+                                        r.untyped_storage(),
+                                        r.real_tensor.untyped_storage(),
+                                    )
+                                else:
+                                    if t.size is None:
                                         raise AssertionError(
-                                            "Expected r to be a FakeTensor"
-                                        )
-                                    if r.real_tensor is None:
-                                        raise AssertionError(
-                                            "r.real_tensor must not be None when copy_data is True"
+                                            "t.size must not be None when copy_data is True"
                                         )
                                     if t.stride is None:
                                         raise AssertionError(
                                             "t.stride must not be None when copy_data is True"
                                         )
-                                    r.real_tensor.set_(
-                                        _get_real_storage(r_s),
-                                        t.storage_offset,
-                                        t.size,
-                                        t.stride,
-                                    )
+                                    if t.data is None:
+                                        raise AssertionError(
+                                            "t.data must not be None when copy_data is True"
+                                        )
+                                    with torch.no_grad(), no_dispatch():
+                                        real_storage = _clone_real_storage_from_tensor(
+                                            t.data
+                                        )
+                                        _set_real_storage(
+                                            r.untyped_storage(), real_storage
+                                        )
+                                        r.real_tensor.set_(
+                                            real_storage,
+                                            t.storage_offset,
+                                            t.size,
+                                            t.stride,
+                                        )
+                        else:
+                            # You're in crazy town; somehow you gave us a tensor
+                            # that wasn't a view, but had nonzero storage offset,
+                            # nontrivial strides (such that clone() couldn't
+                            # preserve them), or already aliases with another
+                            # tensor's storage.  The most typical way to end
+                            # up here is with set_.  So use set_ to bludgeon this
+                            # in.
+                            r_s = self.meta_storage(s, callback=callback)
+                            # NB: In principle, this should always work, but there
+                            # is some subtle difference in the autograd metadata
+                            # that means we will backprop the set_ call, even if
+                            # r is declared as an input to grad.
+                            # See https://github.com/pytorch/pytorch/issues/87956
+                            # for the reproducer.
+                            # NB: The in_kernel_invocation_manager here is necessary
+                            # for fake tensor.  If we run the set_ call with fake
+                            # tensor on, r will improperly report that it is NOT a
+                            # meta tensor but a cpu tensor, and then the set_ call
+                            # will fail due to device mismatch.  no_dispatch() is
+                            # not enough, because the fake tensor will still claim
+                            # to be a CPU tensor and you'll end up in the CPU
+                            # kernel.  Arguably this is a hack; a cleaner way to
+                            # solve this is to have a FakeStorage concept which
+                            # would report it's CPU device--no problem now!  But
+                            # this is difficult to do because we don't have storage
+                            # subclasses.  Relevant test is
+                            # DynamicShapesFunctionTests::test_add_dynamic_shapes in
+                            # test/dynamo/test_dynamic_shapes.py
+                            maybe_fake_mgr: AbstractContextManager[None] = (
+                                contextlib.nullcontext()
+                            )
+                            from torch._subclasses.fake_tensor import (
+                                in_kernel_invocation_manager,
+                                maybe_get_fake_mode,
+                            )
+
+                            mb_fake_mode = maybe_get_fake_mode(r)
+                            if mb_fake_mode is not None:
+                                maybe_fake_mgr = in_kernel_invocation_manager(
+                                    mb_fake_mode
+                                )
+                            with torch.no_grad(), maybe_suppress():
+                                with maybe_fake_mgr:
+                                    r.set_(r_s, storage_offset, sizes, strides)
+                                if self.copy_data:
+                                    with torch.no_grad(), no_dispatch():
+                                        if not _is_fake_tensor(r):
+                                            raise AssertionError(
+                                                "Expected r to be a FakeTensor"
+                                            )
+                                        if r.real_tensor is None:
+                                            raise AssertionError(
+                                                "r.real_tensor must not be None when copy_data is True"
+                                            )
+                                        if t.stride is None:
+                                            raise AssertionError(
+                                                "t.stride must not be None when copy_data is True"
+                                            )
+                                        r.real_tensor.set_(
+                                            _get_real_storage(r_s),
+                                            t.storage_offset,
+                                            t.size,
+                                            t.stride,
+                                        )
 
                 if t.grad is not None:
                     from torch._dynamo.source import AttrSource
@@ -2258,7 +2351,7 @@ class MetaConverter(Generic[_TensorT]):
                 t.is_quantized
                 or
                 # Views out of sparse tensors not currently supported (plain
-                # sparse is supported htough)
+                # sparse is supported though)
                 (t._is_view() and t._base is not None and t._base.is_sparse)
             ):
                 self.miss += 1

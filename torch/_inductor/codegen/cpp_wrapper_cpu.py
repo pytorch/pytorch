@@ -672,38 +672,24 @@ class CppWrapperCpu(PythonWrapperCodegen):
             return f"{name}_stride"
 
         def maybe_emit_replacement_aliases(sym: sympy.Symbol) -> None:
-            # Deferred runtime asserts and graph input metadata can reference
-            # either side of a backed-symbol replacement. Emit aliases so both
-            # the pre-replacement and canonical names are defined.
-            def is_backed_symbol(s: sympy.Symbol) -> bool:
-                return not symbol_is_type(s, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT))
-
-            def decl_type(s: sympy.Symbol) -> str:
-                if s.is_integer:
-                    return "int64_t"
-                if s.is_float:
-                    return "double"
-                raise AssertionError("Unexpected symbol type")
+            # Deferred runtime asserts reference pre-replacement backed
+            # symbols (e.g. s77) that were replaced to this canonical
+            # symbol (s31) during constraint solving. Emit aliases so
+            # the asserts compile. Skip unbacked symbols — they are
+            # defined separately by the unbacked symbol codegen path.
+            from torch.utils._sympy.symbol import symbol_is_type, SymT
 
             for src, tgt in V.graph.sizevars.shape_env.replacements.items():
                 if (
                     tgt == sym
                     and isinstance(src, sympy.Symbol)
                     and src not in bound_vars
-                    and is_backed_symbol(src)
-                    and is_backed_symbol(sym)
+                    and not symbol_is_type(
+                        src, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT)
+                    )
                 ):
-                    code.writeline(f"{decl_type(src)} {src} = {sym};")
+                    code.writeline(f"int64_t {src} = {sym};")
                     bound_vars.add(src)
-                elif (
-                    src == sym
-                    and isinstance(tgt, sympy.Symbol)
-                    and tgt not in bound_vars
-                    and is_backed_symbol(sym)
-                    and is_backed_symbol(tgt)
-                ):
-                    code.writeline(f"{decl_type(tgt)} {tgt} = {sym};")
-                    bound_vars.add(tgt)
 
         def codegen_symbol(
             sym_or_exp: sympy.Symbol | sympy.Expr,
@@ -765,8 +751,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 codegen_symbol(size, name, sizeof, dim)
             for dim, stride in enumerate(value.get_stride()):
                 codegen_symbol(stride, name, strideof, dim)
-        elif isinstance(value, ir.TorchBindObject):
-            # torchbind objects are loaded in proxy executor
+        elif isinstance(
+            value, (ir.TorchBindObject, ir.GeneratorState, ir.OpaqueObjectState)
+        ):
+            # Python-only inputs do not define C++ shape symbols.
             pass
         else:
             raise AssertionError(f"Unknown value type: {type(value)}")
@@ -1724,7 +1712,34 @@ class CppWrapperCpu(PythonWrapperCodegen):
             )
             """)
 
-        wrapper_body = "input_tensors = [arg if isinstance(arg, torch.Tensor) else torch.tensor(arg, device='cpu') for arg in args]"
+        input_python_indices = [
+            idx
+            for idx, value in enumerate(V.graph.graph_inputs.values())
+            if isinstance(
+                value,
+                (ir.TorchBindObject, ir.GeneratorState, ir.OpaqueObjectState),
+            )
+        ]
+        python_only_input_indices = (
+            "set()"
+            if not input_python_indices
+            else "{" + ", ".join(map(str, input_python_indices)) + "}"
+        )
+        wrapper_body = f"""
+                    python_only_input_indices = {python_only_input_indices}
+                    input_tensors = []
+                    input_handle_positions = []
+                    # Preserve graph input slots: Python-only inputs stay None
+                    # and are unpacked as nullptrs by the JIT cpp wrapper.
+                    input_handles = [None] * len(args)
+                    for idx, arg in enumerate(args):
+                        if idx in python_only_input_indices:
+                            continue
+                        input_handle_positions.append(idx)
+                        input_tensors.append(
+                            arg if isinstance(arg, torch.Tensor) else torch.tensor(arg, device='cpu')
+                        )
+        """
         if V.graph.constants:
             # Append constants to the input args for cpp wrapper.
             # Python wrapper directly gets the value inside the wrapper call
@@ -1737,16 +1752,25 @@ class CppWrapperCpu(PythonWrapperCodegen):
             constants_str = f"[{', '.join(V.graph.constants.keys())}]"
             wrapper_body += f"""
                     constants_tensor = {constants_str}
+                    constants_start_idx = len(input_handles)
+                    input_handles.extend([None] * len(constants_tensor))
+                    input_handle_positions.extend(
+                        range(constants_start_idx, constants_start_idx + len(constants_tensor))
+                    )
                     input_tensors.extend(constants_tensor)
             """
         # Convert vector of at::Tensor to vector of AtenTensorHandle.
         # If we pass at::Tensor, the compilation will be too slow.
         wrapper_body += """
-                    input_handles = torch._C._aoti.unsafe_alloc_void_ptrs_from_tensors(input_tensors)
+                    packed_input_handles = torch._C._aoti.unsafe_alloc_void_ptrs_from_tensors(input_tensors)
+                    for idx, handle in zip(input_handle_positions, packed_input_handles):
+                        input_handles[idx] = handle
         """
         # Release the inputs for memory reuse.
         wrapper_body += """
                     args.clear()
+                    del input_handle_positions
+                    del packed_input_handles
                     del input_tensors
         """
 
@@ -3156,8 +3180,21 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 return type_supported(t.getElementType())
             return isinstance(t, supported_types)
 
+        def uses_symint(t: torch.JitType) -> bool:
+            # SymInt/SymBool/SymFloat are reported as Int/Bool/Float by
+            # JitType.type, so they pass type_supported above.  But the
+            # StableIValue codegen below emits no symbolic-int-aware conversion,
+            # so route such ops to the boxed dispatch path, which handles
+            # c10::SymInt correctly.  real_type preserves the symbolic types.
+            if isinstance(t, (torch.OptionalType, torch.ListType)):
+                return uses_symint(t.getElementType())
+            return (
+                isinstance(t, (torch.SymIntType, torch.SymBoolType))
+                or repr(t) == "SymFloat"
+            )
+
         return all(
-            type_supported(a.type)
+            type_supported(a.type) and not uses_symint(a.real_type)
             for a in chain(op._schema.arguments, op._schema.returns)
         )
 
@@ -3420,12 +3457,12 @@ if (!custom_op_wrapper) {
 
         def generate_py_arg_inner(lines, raw_arg, arg_type):
             def handle_scalar(scalar):
+                if isinstance(scalar, bool):
+                    return f"PyBool_FromLong({1 if scalar else 0})"
                 if isinstance(scalar, int):
                     return f"PyLong_FromLongLong({scalar})"
                 if isinstance(scalar, float):
                     return f"PyFloat_FromDouble({self.generate_float_value(scalar)})"
-                if isinstance(scalar, bool):
-                    return f"PyBool_FromLong({1 if scalar else 0})"
                 if isinstance(scalar, complex):
                     real = self.generate_float_value(scalar.real)
                     imag = self.generate_float_value(scalar.imag)
@@ -3441,11 +3478,16 @@ if (!custom_op_wrapper) {
                     f"scalar {scalar}, {type(scalar)} cannot be handled by handle_scalar"
                 )
 
+            is_any = isinstance(arg_type, torch.AnyType)
+
+            def handle_any(types: type | tuple[type, ...]):
+                return is_any and isinstance(raw_arg, types)
+
             if raw_arg is None:
                 # Py_None is a singleton, so we have to explicitly incref it here
                 lines.append("Py_INCREF(Py_None);\n")
                 return "Py_None"
-            elif isinstance(arg_type, torch.TensorType):
+            elif isinstance(arg_type, torch.TensorType) or handle_any(ir.IRNode):
                 # In some cases, scalar arguments may be passed in place of tensors.
                 if not hasattr(raw_arg, "codegen_reference"):
                     return handle_scalar(raw_arg)
@@ -3459,22 +3501,24 @@ if (!custom_op_wrapper) {
                 return f"PyCapsule_New(reinterpret_cast<void*>({base_handle}.get()), NULL, NULL)"
             elif isinstance(arg_type, torch.OptionalType):
                 return generate_py_arg_inner(lines, raw_arg, arg_type.getElementType())
-            elif isinstance(arg_type, torch.IntType):
+            elif isinstance(arg_type, torch.BoolType) or handle_any(bool):
+                return f"PyBool_FromLong({1 if raw_arg else 0})"
+            elif isinstance(arg_type, torch.IntType) or handle_any(int):
                 # int
                 return f"PyLong_FromLongLong({raw_arg})"
-            elif isinstance(arg_type, torch.SymIntType):
+            elif isinstance(arg_type, torch.SymIntType) or handle_any(torch.SymInt):
                 # SymInt
                 expr = (
                     raw_arg.node.expr if isinstance(raw_arg, torch.SymInt) else raw_arg
                 )
                 return f"PyLong_FromLongLong({cexpr(expr)})"
-            elif isinstance(arg_type, torch.FloatType):
+            elif isinstance(arg_type, torch.FloatType) or handle_any(float):
                 return f"PyFloat_FromDouble({self.generate_float_value(raw_arg)})"
-            elif isinstance(arg_type, torch.BoolType):
-                return f"PyBool_FromLong({1 if raw_arg else 0})"
-            elif isinstance(arg_type, torch.StringType):
+            elif isinstance(arg_type, torch.StringType) or handle_any(str):
                 return f'PyUnicode_FromString("{raw_arg}")'
-            elif isinstance(arg_type, torch.NumberType):
+            elif isinstance(arg_type, torch.NumberType) or handle_any(
+                (*SymTypes, torch.types.Number, complex)
+            ):
                 # Union[bool, int, float, complex]
                 # torch/_prims_common/__init__.py
                 return handle_scalar(raw_arg)
@@ -3928,14 +3972,30 @@ if (!custom_op_wrapper) {
             }}
             """)
 
-        if len(output_args) == 1 and (output := output_args[0]) is not None:
+        if raw_outputs:
+            num_returned_outputs = 0
+            returned_output_slots = []
+            for output_arg, raw_output_arg in zip(output_args, raw_outputs):
+                if isinstance(raw_output_arg, ir.MutationOutput):
+                    continue
+                if output_arg is not None:
+                    returned_output_slots.append((num_returned_outputs, output_arg))
+                num_returned_outputs += 1
+        else:
+            num_returned_outputs = len(output_args)
+            returned_output_slots = [
+                (idx, output_arg)
+                for idx, output_arg in enumerate(output_args)
+                if output_arg is not None
+            ]
+
+        if num_returned_outputs == 1 and returned_output_slots:
             # result is a single tensor
+            _, output = returned_output_slots[0]
             lines += f"{output} = reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(py_{buf_name}.get(), NULL));\n"
         else:
             # result is a tuple of tensors
-            for idx, output_arg in enumerate(output_args):
-                if output_arg is None:
-                    continue
+            for idx, output_arg in returned_output_slots:
                 lines += f"{output_arg} = reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(PyList_GET_ITEM(py_{buf_name}.get(), {idx}), NULL));\n"
 
         if raw_outputs:

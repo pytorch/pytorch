@@ -1480,7 +1480,7 @@ class TestFP8Lowering(TestCase):
                     self.assertEqual(
                         input_values[0][i],
                         input_values[1][i],
-                        msg=f"idx {i} seed {seed}",
+                        msg=lambda msg: f"{msg}\nidx {i} seed {seed}",
                     )
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
@@ -1598,6 +1598,50 @@ class TestFP8Lowering(TestCase):
             output_dtype=torch.bfloat16,
         )
         self.assertEqual(out_no_swizzle, out_explicit)
+
+    @onlyCUDA
+    @skipIfRocm  # ROCm MX gemm requires NO_SWIZZLE; swizzle is NVIDIA-only
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, "Not supported on non B200")
+    def test_scaled_mm_v2_swizzle_compile(self, device):
+        """Swizzled scales (MX recipes on NVIDIA require SWIZZLE_32_4_4) are
+        not supported by any inductor template; the lowering must fall back
+        to the ATen kernel instead of failing compile."""
+        from torch.nn.functional import SwizzleType
+
+        M, K, N = 128, 128, 128
+        BLOCK_SIZE = 32
+        A_ref = torch.eye(M, device=device, dtype=torch.bfloat16)
+        B_ref = torch.eye(N, device=device, dtype=torch.bfloat16)
+        A = A_ref.to(torch.float8_e4m3fn)
+        B = B_ref.to(torch.float8_e4m3fn)
+        A_scale = torch.full(
+            (M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu
+        )
+        B_scale = torch.full(
+            (N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu
+        )
+        A_scale = to_blocked(A_scale)
+        B_scale = to_blocked(B_scale)
+
+        def fn(A, B, A_scale, B_scale):
+            return scaled_mm(
+                A,
+                B.t(),
+                A_scale,
+                ScalingType.BlockWise1x32,
+                B_scale,
+                ScalingType.BlockWise1x32,
+                swizzle_a=SwizzleType.SWIZZLE_32_4_4,
+                swizzle_b=SwizzleType.SWIZZLE_32_4_4,
+                output_dtype=torch.bfloat16,
+            )
+
+        y_eager = fn(A, B, A_scale, B_scale)
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+        y_compiled, (code,) = run_and_get_code(compiled, A, B, A_scale, B_scale)
+        torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.07)
+        # The swizzled path must use the ATen fallback, not a generated kernel
+        FileCheck().check("_scaled_mm_v2").run(code)
 
     @onlyOn(["cuda", "xpu"])
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, "Not supported on non B200")

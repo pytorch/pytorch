@@ -55,6 +55,22 @@ def _first_tensor_placeholder_shape(gm):
     raise AssertionError("no tensor placeholder found")
 
 
+def _placeholder_dim0_sym_names(gm):
+    """Return the stringified dim-0 SymInt name for each tensor placeholder.
+
+    Used to keep ``assertExpectedInline`` snapshots stable against
+    ShapeEnv's process-wide fresh-symbol counter (which ``setUp`` does
+    not reset).
+    """
+    names = []
+    for _node, val in _user_input_placeholders(gm):
+        if isinstance(val, torch.Tensor):
+            sym = val.shape[0]
+            if isinstance(sym, torch.SymInt):
+                names.append(str(sym))
+    return names
+
+
 def _has_assert_scalar(gm):
     """True if the graph contains an aten._assert_scalar runtime-assert node."""
     return any(
@@ -86,7 +102,7 @@ class _ModBranch(torch.nn.Module):
         return x - 1
 
 
-class TestExportDynamicSpec(TestCase):
+class _TestExportDynamicSpecBase(TestCase):
     """torch.export.export support for the new ShapesSpec/ParamsSpec API."""
 
     def setUp(self):
@@ -100,11 +116,11 @@ class TestExportDynamicSpec(TestCase):
             _ModX(),
             (torch.randn(8, 3),),
             dynamic_shapes=PARAMS({"x": x_spec}),
-            strict=True,
+            strict=self.strict,
         )
         shape = _first_tensor_placeholder_shape(ep.graph_module)
         self.assertIsInstance(shape[0], torch.SymInt)
-        self.assertGreater(len(free_unbacked_symbols(shape[0])), 0)
+        self.assertEqual(len(free_unbacked_symbols(shape[0])), 1)
         self.assertExpectedInline(
             str(ep).strip(),
             """\
@@ -129,15 +145,24 @@ Range constraints: {u0: VR[0, int_oo]}""",
         ep.module()(torch.randn(32, 3))
 
     def test_static_int_spec_mismatch_raises(self):
-        with self.assertRaisesRegex(
-            ValueError,
-            r"shapes_spec declared L\['flat_args'\]\[1\] as static with value 10, but while tracing we found that it was actually 42",
-        ):
+        # Source-name format differs: strict uses dynamo's flat-args path,
+        # non-strict uses pytree keypath sources.
+        if self.strict:
+            regex = (
+                r"shapes_spec declared L\['flat_args'\]\[1\] as static with "
+                r"value 10, but got 42 at trace time"
+            )
+        else:
+            regex = (
+                r"shapes_spec declared L\['n'\] as static with value 10, "
+                r"but got 42 at trace time"
+            )
+        with self.assertRaisesRegex(ValueError, regex):
             export(
                 _ModXN(),
                 (torch.randn(4), 42),
                 dynamic_shapes=PARAMS({"n": 10}),
-                strict=True,
+                strict=self.strict,
             )
 
     def test_static_tensor_dim_mismatch_raises(self):
@@ -149,7 +174,7 @@ Range constraints: {u0: VR[0, int_oo]}""",
                 _ModXPlus(),
                 (torch.randn(4, 5),),
                 dynamic_shapes=PARAMS({"x": T([VAR("batch"), 3])}),
-                strict=True,
+                strict=self.strict,
             )
 
     def test_params_spec_shorthand(self):
@@ -157,7 +182,7 @@ Range constraints: {u0: VR[0, int_oo]}""",
             _ModX(),
             (torch.randn(8, 3),),
             dynamic_shapes=PARAMS({"x": T([VAR("batch"), STATIC])}),
-            strict=True,
+            strict=self.strict,
         )
         shape = _first_tensor_placeholder_shape(ep.graph_module)
         self.assertIsInstance(shape[0], torch.SymInt)
@@ -169,22 +194,27 @@ Range constraints: {u0: VR[0, int_oo]}""",
             _ModBranch(),
             (torch.randn(20, 3),),
             dynamic_shapes=PARAMS({"x": T([VAR("batch", min=10, max=100), STATIC])}),
-            strict=True,
+            strict=self.strict,
         )
 
     @_fx_experimental_config.patch(no_data_dependent_graph_break=True)
     def test_unbacked_raises_dde_on_branching(self):
-        """Without min/max, branching on a ShapeVar dim raises a DDE
-        (export wraps it as a UserError)."""
+        """Without min/max, branching on a ShapeVar dim raises a DDE.
+        Strict wraps it as UserError; non-strict raises the raw DDE.
+        """
+        exc = (
+            torch._dynamo.exc.UserError
+            if self.strict
+            else torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
+        )
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UserError,
-            r"Could not guard on data-dependent expression",
+            exc, r"Could not guard on data-dependent expression"
         ):
             export(
                 _ModBranch(),
                 (torch.randn(10, 3),),
                 dynamic_shapes=PARAMS({"x": T([VAR(), STATIC])}),
-                strict=True,
+                strict=self.strict,
             )
 
     def test_tensor_dim_optimization_hint_in_shape_env(self):
@@ -193,7 +223,7 @@ Range constraints: {u0: VR[0, int_oo]}""",
             _ModX(),
             (torch.randn(8, 3),),
             dynamic_shapes=PARAMS({"x": T([b, STATIC])}),
-            strict=True,
+            strict=self.strict,
         )
         shape = _first_tensor_placeholder_shape(ep.graph_module)
         sym = shape[0]
@@ -223,7 +253,7 @@ Range constraints: {u0: VR[0, int_oo]}""",
                     "y": T([VAR("Y"), STATIC]),
                 }
             ),
-            strict=True,
+            strict=self.strict,
         )
         # Placeholders follow call order (x, z, n, y), not signature order:
         # x and y are spec'd by name → unbacked (u0, u1); z (kwarg, no spec)
@@ -274,7 +304,7 @@ Range constraints: {u0: VR[0, int_oo], u1: VR[0, int_oo]}""",
                     "n": IntVar("n_size"),
                 }
             ),
-            strict=True,
+            strict=self.strict,
         )
         ep_str = str(ep)
         self.assertRegex(ep_str, r'n: "Sym\(u\d+\)"')
@@ -294,7 +324,7 @@ Range constraints: {u0: VR[0, int_oo], u1: VR[0, int_oo]}""",
                 M(),
                 args=([torch.randn(8, 3), torch.randn(8, 3)],),
                 dynamic_shapes=PARAMS({"xs": T([VAR("B"), STATIC])}),
-                strict=True,
+                strict=self.strict,
             )
 
     def test_multi_leaf_arg_no_spec_stays_static(self):
@@ -306,7 +336,7 @@ Range constraints: {u0: VR[0, int_oo], u1: VR[0, int_oo]}""",
             M(),
             args=([torch.randn(8, 3), torch.randn(8, 3)],),
             dynamic_shapes=ShapesSpec(),  # no params → all static
-            strict=True,
+            strict=self.strict,
         )
         ep_str = str(ep)
         # Both list elements come through as static placeholders.
@@ -335,7 +365,7 @@ Range constraints: {u0: VR[0, int_oo], u1: VR[0, int_oo]}""",
                         "y": T([VAR("Y"), STATIC]),  # no such arg
                     }
                 ),
-                strict=True,
+                strict=self.strict,
             )
 
     def test_explicit_none_spec_for_passed_arg_does_not_raise(self):
@@ -347,23 +377,10 @@ Range constraints: {u0: VR[0, int_oo], u1: VR[0, int_oo]}""",
             _ModXPlus(),
             args=(torch.randn(8, 3),),
             dynamic_shapes=PARAMS({"x": None}),
-            strict=True,
+            strict=self.strict,
         )
         shape = _first_tensor_placeholder_shape(ep.graph_module)
         self.assertEqual(tuple(shape), (8, 3))
-
-    def test_non_strict_raises_not_implemented(self):
-        with self.assertRaisesRegex(
-            NotImplementedError,
-            r"ShapesSpec/ParamsSpec in dynamic_shapes is not yet supported "
-            r"in non-strict export",
-        ):
-            export(
-                _ModX(),
-                (torch.randn(8, 3),),
-                dynamic_shapes=PARAMS({"x": T([VAR("batch"), STATIC])}),
-                strict=False,
-            )
 
     def test_named_dims_vs_shapes_spec(self):
         from torch.export import Dim
@@ -376,28 +393,30 @@ Range constraints: {u0: VR[0, int_oo], u1: VR[0, int_oo]}""",
             M(),
             (torch.randn(8, 3),),
             dynamic_shapes={"x": (Dim("B"), None)},
-            strict=True,
+            strict=self.strict,
         )
         ep_new = export(
             M(),
             (torch.randn(8, 3),),
             dynamic_shapes=PARAMS({"x": T([VAR("B"), STATIC])}),
-            strict=True,
+            strict=self.strict,
         )
 
         # Snapshot legacy graph (backed s* symbol, range constraint).
+        # Symbol name is whatever ShapeEnv allocated (counter is process-wide).
+        (legacy_sym,) = _placeholder_dim0_sym_names(ep_legacy.graph_module)
         self.assertExpectedInline(
             str(ep_legacy).strip(),
-            """\
+            f"""\
 ExportedProgram:
     class GraphModule(torch.nn.Module):
-        def forward(self, x: "f32[s6, 3]"):
+        def forward(self, x: "f32[{legacy_sym}, 3]"):
             sum_1: "f32[3]" = torch.ops.aten.sum.dim_IntList(x, [0]);  x = None
             return (sum_1,)
 Graph signature:
     x: USER_INPUT
     sum_1: USER_OUTPUT
-Range constraints: {s6: VR[0, int_oo]}""",
+Range constraints: {{{legacy_sym}: VR[0, int_oo]}}""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -444,7 +463,7 @@ Range constraints: {u0: VR[0, int_oo]}""",
             args=(torch.randn(8, 3),),
             kwargs={"y": torch.randn(5, 3)},
             dynamic_shapes={"x": (Dim("X"), None), "y": (Dim("Y"), None)},
-            strict=True,
+            strict=self.strict,
         )
         ep_new = export(
             M(),
@@ -456,16 +475,18 @@ Range constraints: {u0: VR[0, int_oo]}""",
                     "y": T([VAR("Y"), STATIC]),
                 }
             ),
-            strict=True,
+            strict=self.strict,
         )
 
         # Snapshot legacy: placeholders are (x, y) in signature order.
+        # Symbol names are whatever ShapeEnv allocated (counter is process-wide).
+        sx, sy = _placeholder_dim0_sym_names(ep_legacy.graph_module)
         self.assertExpectedInline(
             str(ep_legacy).strip(),
-            """\
+            f"""\
 ExportedProgram:
     class GraphModule(torch.nn.Module):
-        def forward(self, x: "f32[s6, 3]", y: "f32[s27, 3]"):
+        def forward(self, x: "f32[{sx}, 3]", y: "f32[{sy}, 3]"):
             sum_1: "f32[3]" = torch.ops.aten.sum.dim_IntList(x, [0]);  x = None
             sum_2: "f32[3]" = torch.ops.aten.sum.dim_IntList(y, [0]);  y = None
             mul: "f32[3]" = torch.ops.aten.mul.Tensor(sum_2, 1);  sum_2 = None
@@ -475,7 +496,7 @@ Graph signature:
     x: USER_INPUT
     y: USER_INPUT
     add: USER_OUTPUT
-Range constraints: {s6: VR[0, int_oo], s27: VR[0, int_oo]}""",
+Range constraints: {{{sx}: VR[0, int_oo], {sy}: VR[0, int_oo]}}""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -524,28 +545,30 @@ Range constraints: {u0: VR[0, int_oo], u1: VR[0, int_oo]}""",
             M(),
             args=(torch.randn(8, 3),),
             dynamic_shapes={"x": (Dim("X"), None)},
-            strict=True,
+            strict=self.strict,
         )
         ep_new = export(
             M(),
             args=(torch.randn(8, 3),),
             dynamic_shapes=PARAMS({"x": T([VAR("X"), STATIC])}),
-            strict=True,
+            strict=self.strict,
         )
 
         # Legacy: only x in graph signature, no y placeholder.
+        # Symbol name is whatever ShapeEnv allocated (counter is process-wide).
+        (legacy_sym,) = _placeholder_dim0_sym_names(ep_legacy.graph_module)
         self.assertExpectedInline(
             str(ep_legacy).strip(),
-            """\
+            f"""\
 ExportedProgram:
     class GraphModule(torch.nn.Module):
-        def forward(self, x: "f32[s6, 3]"):
+        def forward(self, x: "f32[{legacy_sym}, 3]"):
             sum_1: "f32[3]" = torch.ops.aten.sum.dim_IntList(x, [0]);  x = None
             return (sum_1,)
 Graph signature:
     x: USER_INPUT
     sum_1: USER_OUTPUT
-Range constraints: {s6: VR[0, int_oo]}""",
+Range constraints: {{{legacy_sym}: VR[0, int_oo]}}""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -585,7 +608,7 @@ Range constraints: {u0: VR[0, int_oo]}""",
                     ]
                 }
             ),
-            strict=True,
+            strict=self.strict,
         )
         ep_str = str(ep)
         # Both args dim 0 are unbacked (different symbols).
@@ -610,7 +633,7 @@ Range constraints: {u0: VR[0, int_oo]}""",
                     ],
                 },
             ),
-            strict=True,
+            strict=self.strict,
         )
         ep_str = str(ep)
         self.assertRegex(ep_str, r'x: "f32\[u\d+, 3\]"')
@@ -633,7 +656,7 @@ Range constraints: {u0: VR[0, int_oo]}""",
                     ]
                 }
             ),
-            strict=True,
+            strict=self.strict,
         )
         ep_str = str(ep)
         # First arg dynamic, others literally sized.
@@ -658,7 +681,7 @@ Range constraints: {u0: VR[0, int_oo]}""",
                     }
                 }
             ),
-            strict=True,
+            strict=self.strict,
         )
         ep_str = str(ep)
         self.assertRegex(ep_str, r'foo: "f32\[u\d+, 3\]"')
@@ -678,7 +701,7 @@ Range constraints: {u0: VR[0, int_oo]}""",
                 _ModX(),
                 (torch.randn(8, 3),),
                 dynamic_shapes=PARAMS({"x": T([VAR("batch"), STATIC])}),
-                strict=True,
+                strict=self.strict,
                 prefer_deferred_runtime_asserts_over_guards=True,
             )
 
@@ -706,7 +729,7 @@ Range constraints: {u0: VR[0, int_oo]}""",
                     "y": T([B * 2, STATIC]),
                 }
             ),
-            strict=True,
+            strict=self.strict,
         )
         ep_str = str(ep)
         # y dim 0 is the derived expression 2*u0.
@@ -737,7 +760,7 @@ Range constraints: {u0: VR[0, int_oo]}""",
                     "z": T([A * B + 1, STATIC]),
                 }
             ),
-            strict=True,
+            strict=self.strict,
         )
         self.assertTrue(_has_assert_scalar(ep.graph_module))
         # Correct: z.shape[0] == 3 * 4 + 1 == 13.
@@ -770,7 +793,7 @@ Range constraints: {u0: VR[0, int_oo]}""",
                 ),
                 assumptions=[A > B],
             ),
-            strict=True,
+            strict=self.strict,
         )
         self.assertTrue(_has_assert_scalar(ep.graph_module))
         # Correct: a=5 > b=3.
@@ -784,7 +807,7 @@ Range constraints: {u0: VR[0, int_oo]}""",
             _ModX(),
             (torch.randn(20, 3),),
             dynamic_shapes=PARAMS({"x": T([VAR("b", min=10, max=100), STATIC])}),
-            strict=True,
+            strict=self.strict,
         )
         rcs = ep.range_constraints
         self.assertEqual(len(rcs), 1)
@@ -792,23 +815,78 @@ Range constraints: {u0: VR[0, int_oo]}""",
         self.assertEqual(int(vr.lower), 10)
         self.assertEqual(int(vr.upper), 100)
 
+    # ---- @dynamic_spec(...) decorator (auto-attach) ----
 
-class TestExportDynamicSpecInternalAPIs(TestCase):
-    """Direct unit tests for the internal ``torch.export._trace`` entrypoints
-    with ShapesSpec. The public ``TestExportDynamicSpec`` only exercises these
-    transitively through ``torch.export.export``; these call them in isolation.
-    """
+    def test_spec_decorator_per_param_form(self):
+        """``@dynamic_spec({"x": ...})`` attached to ``forward`` is auto-applied."""
+        from torch.fx.experimental.dynamic_spec import dynamic_spec
 
-    def setUp(self):
-        super().setUp()
-        _reset_uid_counter()
+        class M(torch.nn.Module):
+            @dynamic_spec({"x": T([VAR("B"), STATIC])})
+            def forward(self, x):
+                return x.sum(0)
 
-    def _spec(self):
-        return PARAMS({"x": T([VAR("batch"), STATIC])})
+        ep = export(M(), (torch.randn(8, 3),), strict=self.strict)
+        shape = _first_tensor_placeholder_shape(ep.graph_module)
+        self.assertIsInstance(shape[0], torch.SymInt)
+        self.assertEqual(len(free_unbacked_symbols(shape[0])), 1)
+
+    def test_spec_decorator_full_form_with_assumptions(self):
+        """``@dynamic_spec(ShapesSpec(params=..., assumptions=...))`` form is auto-applied,
+        and the assumption is enforced as a runtime assertion."""
+        from torch.fx.experimental.dynamic_spec import dynamic_spec
+
+        B = VAR("batch")
+
+        class M(torch.nn.Module):
+            @dynamic_spec(
+                ShapesSpec(
+                    PARAMS({"x": T([B, STATIC])}),
+                    assumptions=[B % 2 == 0],
+                )
+            )
+            def forward(self, x):
+                return x.sum(0)
+
+        ep = export(M(), (torch.randn(8, 3),), strict=self.strict)
+        # Valid input (dim 0 is even) -- runs cleanly.
+        ep.module()(torch.randn(8, 3))
+        ep.module()(torch.randn(20, 3))
+        # Violation (dim 0 is odd) -- runtime assertion fires, proving the
+        # assumption from the decorator was actually wired into the graph.
+        with self.assertRaisesRegex(RuntimeError, "Runtime assertion failed"):
+            ep.module()(torch.randn(7, 3))
+
+    def test_spec_decorator_and_explicit_dynamic_shapes_raises(self):
+        """Mixing ``@dynamic_spec(...)`` with an explicit ``dynamic_shapes=`` kwarg
+        is ambiguous and must raise."""
+        from torch.fx.experimental.dynamic_spec import dynamic_spec
+
+        class M(torch.nn.Module):
+            @dynamic_spec({"x": T([VAR("B"), STATIC])})
+            def forward(self, x):
+                return x.sum(0)
+
+        with self.assertRaisesRegex(
+            ValueError,
+            r"`@dynamic_spec\(\.\.\.\)` is attached.*AND a `dynamic_shapes=`",
+        ):
+            export(
+                M(),
+                (torch.randn(8, 3),),
+                dynamic_shapes=PARAMS({"x": T([VAR("B"), STATIC])}),
+                strict=self.strict,
+            )
 
     def test_export_to_torch_ir_shapes_spec_direct(self):
+        # Strict-only internal-API test; skip in non-strict mode.
+        if not self.strict:
+            self.skipTest("strict-only internal-API test")
         gm = _export_to_torch_ir(
-            _ModX(), (torch.randn(8, 3),), {}, dynamic_shapes=self._spec()
+            _ModX(),
+            (torch.randn(8, 3),),
+            {},
+            dynamic_shapes=PARAMS({"x": T([VAR("batch"), STATIC])}),
         )
         self.assertIsInstance(gm, torch.fx.GraphModule)
         # The user placeholder carries an unbacked dim (u0).
@@ -827,6 +905,9 @@ class GraphModule(torch.nn.Module):
         )
 
     def test_export_to_torch_ir_legacy_v1_shapes_spec_raises(self):
+        # Strict-only internal-API test; skip in non-strict mode.
+        if not self.strict:
+            self.skipTest("strict-only internal-API test")
         with mock.patch.object(
             torch._export.config, "use_new_tracer_experimental", False
         ):
@@ -835,17 +916,23 @@ class GraphModule(torch.nn.Module):
                 r"ShapesSpec is not supported on the legacy v1",
             ):
                 _export_to_torch_ir(
-                    _ModX(), (torch.randn(8, 3),), {}, dynamic_shapes=self._spec()
+                    _ModX(),
+                    (torch.randn(8, 3),),
+                    {},
+                    dynamic_shapes=PARAMS({"x": T([VAR("batch"), STATIC])}),
                 )
 
     def test_strict_export_shapes_spec_direct(self):
+        # Strict-only internal-API test; skip in non-strict mode.
+        if not self.strict:
+            self.skipTest("strict-only internal-API test")
         args = (torch.randn(8, 3),)
         _, in_spec = pytree.tree_flatten((args, {}))
         artifact = _strict_export(
             mod=_ModX(),
             args=args,
             kwargs={},
-            dynamic_shapes=self._spec(),
+            dynamic_shapes=PARAMS({"x": T([VAR("batch"), STATIC])}),
             preserve_module_call_signature=(),
             orig_in_spec=in_spec,
             prefer_deferred_runtime_asserts_over_guards=False,
@@ -865,26 +952,51 @@ class <lambda>(torch.nn.Module):
             ignore_empty_lines=True,
         )
 
-    def test_non_strict_export_shapes_spec_raises_direct(self):
+    def test_non_strict_export_shapes_spec_direct(self):
+        # Non-strict-only internal-API test; skip in strict mode.
+        # Verifies ``_non_strict_export`` with ``_to_aten_func=_export_to_aten_ir``
+        # accepts ShapesSpec (replaces the old NotImplementedError gate test).
+        if self.strict:
+            self.skipTest("non-strict-only internal-API test")
         args = (torch.randn(8, 3),)
         _, in_spec = pytree.tree_flatten((args, {}))
-        with self.assertRaisesRegex(
-            NotImplementedError,
-            r"not yet supported .*in non-strict export",
-        ):
-            _non_strict_export(
-                mod=_ModX(),
-                args=args,
-                kwargs={},
-                dynamic_shapes=self._spec(),
-                preserve_module_call_signature=(),
-                orig_in_spec=in_spec,
-                prefer_deferred_runtime_asserts_over_guards=False,
-                _to_aten_func=_export_to_aten_ir,
-            )
+        artifact = _non_strict_export(
+            mod=_ModX(),
+            args=args,
+            kwargs={},
+            dynamic_shapes=PARAMS({"x": T([VAR("batch"), STATIC])}),
+            preserve_module_call_signature=(),
+            orig_in_spec=in_spec,
+            prefer_deferred_runtime_asserts_over_guards=False,
+            _to_aten_func=_export_to_aten_ir,
+        )
+        self.assertExpectedInline(
+            artifact.aten.gm.print_readable(print_output=False),
+            """\
+class <lambda>(torch.nn.Module):
+    def forward(self, x: "f32[u0, 3]"):
+        sym_size_int: "Sym(u0)" = torch.ops.aten.sym_size.int(x, 0)
+        ge: "Sym(u0 >= 0)" = sym_size_int >= 0;  sym_size_int = None
+        _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
+        sum_1: "f32[3]" = torch.ops.aten.sum.dim_IntList(x, [0]);  x = None
+        return (sum_1,)""",
+            ignore_comments=True,
+            ignore_empty_lines=True,
+        )
 
 
-class TestContainerSpec(TestCase):
+class TestExportDynamicSpecStrict(_TestExportDynamicSpecBase):
+    strict = True
+
+
+class TestExportDynamicSpecNonStrict(_TestExportDynamicSpecBase):
+    strict = False
+
+
+del _TestExportDynamicSpecBase
+
+
+class _TestContainerSpecBase(TestCase):
     def setUp(self):
         super().setUp()
         _reset_uid_counter()
@@ -911,7 +1023,7 @@ class TestContainerSpec(TestCase):
                     )
                 }
             ),
-            strict=True,
+            strict=self.strict,
         )
         ep_str = str(ep)
         # Both list elements have unbacked dim 0.
@@ -928,7 +1040,7 @@ class TestContainerSpec(TestCase):
             M(),
             args=({"a": torch.randn(7, 3), "b": torch.randn(8, 3)},),
             dynamic_shapes=PARAMS({"d": DICT({"b": T([VAR("B"), STATIC])})}),
-            strict=True,
+            strict=self.strict,
         )
         ep_str = str(ep)
         # a is omitted from the spec → static; b is dynamic.
@@ -948,7 +1060,7 @@ class TestContainerSpec(TestCase):
             M(),
             args=(Pair(torch.randn(5, 3), torch.randn(8, 3)),),
             dynamic_shapes=PARAMS({"p": OBJ({"second": T([VAR("S"), STATIC])})}),
-            strict=True,
+            strict=self.strict,
         )
         ep_str = str(ep)
         # first is omitted from the spec → static; second is dynamic.
@@ -968,7 +1080,7 @@ class TestContainerSpec(TestCase):
             M(),
             args=(Pair(torch.randn(5, 3), torch.randn(8, 3)),),
             dynamic_shapes=PARAMS({"p": L([None, T([VAR("B"), STATIC])])}),
-            strict=True,
+            strict=self.strict,
         )
         ep_str = str(ep)
         # Position 0 → static (None entry); position 1 → dynamic.
@@ -1018,7 +1130,7 @@ class TestContainerSpec(TestCase):
             M(),
             args=(MyContainer(torch.randn(5, 3), torch.randn(8, 3)),),
             dynamic_shapes=PARAMS({"c": OBJ({"b": T([VAR("B"), STATIC])})}),
-            strict=True,
+            strict=self.strict,
         )
         ep_str = str(ep)
         # a is omitted from the spec → static; b is dynamic.
@@ -1045,7 +1157,7 @@ class TestContainerSpec(TestCase):
             M(),
             args=(ExportedBox(torch.randn(5, 3), torch.randn(8, 3)),),
             dynamic_shapes=PARAMS({"box": OBJ({"y": T([VAR("Y"), STATIC])})}),
-            strict=True,
+            strict=self.strict,
         )
         ep_str = str(ep)
         # x is omitted from the spec → static; y is dynamic.
@@ -1070,7 +1182,7 @@ class TestContainerSpec(TestCase):
             M(),
             args=(Box(torch.randn(5, 3), torch.randn(8, 3)),),
             dynamic_shapes=PARAMS({"box": OBJ({"y": T([VAR("Y"), STATIC])})}),
-            strict=True,
+            strict=self.strict,
         )
         ep_str = str(ep)
         # x is omitted from the spec → static; y is dynamic.
@@ -1102,7 +1214,7 @@ class TestContainerSpec(TestCase):
                     )
                 }
             ),
-            strict=True,
+            strict=self.strict,
         )
         ep_str = str(ep)
         self.assertRegex(ep_str, r'd_foo_0: "f32\[u\d+, 3\]"')
@@ -1130,7 +1242,7 @@ class TestContainerSpec(TestCase):
                     ),
                 }
             ),
-            strict=True,
+            strict=self.strict,
         )
         ep_str = str(ep)
         self.assertRegex(ep_str, r'a: "f32\[u\d+, 3\]"')
@@ -1148,7 +1260,7 @@ class TestContainerSpec(TestCase):
             M(),
             args=([torch.randn(8, 3), torch.randn(5, 3), torch.randn(6, 3)],),
             dynamic_shapes=PARAMS({"xs": L([T([VAR("A"), STATIC])])}),
-            strict=True,
+            strict=self.strict,
         )
         ep_str = str(ep)
         self.assertRegex(ep_str, r'xs_0: "f32\[u\d+, 3\]"')
@@ -1170,7 +1282,7 @@ class TestContainerSpec(TestCase):
                 M(),
                 args=({"a": torch.randn(4)},),
                 dynamic_shapes=PARAMS({"d": L([T([VAR("A")])])}),
-                strict=True,
+                strict=self.strict,
             )
 
     def test_seq_spec_longer_than_runtime_list_raises(self):
@@ -1195,7 +1307,7 @@ class TestContainerSpec(TestCase):
                         )
                     }
                 ),
-                strict=True,
+                strict=self.strict,
             )
 
     def test_dict_spec_key_not_in_runtime_dict_raises(self):
@@ -1211,7 +1323,7 @@ class TestContainerSpec(TestCase):
                 M(),
                 args=({"a": torch.randn(4)},),
                 dynamic_shapes=PARAMS({"d": DICT({"missing": T([VAR("A")])})}),
-                strict=True,
+                strict=self.strict,
             )
 
     def test_object_spec_attr_not_on_runtime_object_raises(self):
@@ -1235,7 +1347,7 @@ class TestContainerSpec(TestCase):
                 M(),
                 args=(Box2(torch.randn(4)),),
                 dynamic_shapes=PARAMS({"box": OBJ({"nope": T([VAR("A")])})}),
-                strict=True,
+                strict=self.strict,
             )
 
     def test_where_path_accumulates_in_nested_error(self):
@@ -1284,7 +1396,7 @@ class TestContainerSpec(TestCase):
                         )
                     }
                 ),
-                strict=True,
+                strict=self.strict,
             )
 
     def test_object_spec_on_pytree_node_without_keys_fn_raises(self):
@@ -1312,7 +1424,7 @@ class TestContainerSpec(TestCase):
                 M(),
                 args=(KeyslessContainer(torch.randn(4)),),
                 dynamic_shapes=PARAMS({"c": OBJ({"x": T([VAR("A")])})}),
-                strict=True,
+                strict=self.strict,
             )
 
     # ---- Alignment invariant: walker order == pytree.tree_flatten order ----
@@ -1332,7 +1444,7 @@ class TestContainerSpec(TestCase):
         """
         import dataclasses
 
-        from torch._dynamo.functional_export import _walk_spec
+        from torch.fx.experimental._spec_binding import _walk_spec
 
         @dataclasses.dataclass
         class _Box:
@@ -1393,7 +1505,9 @@ class TestContainerSpec(TestCase):
             leaves = pytree.tree_leaves(arg_value)
             out = _walk_spec(spec, arg_value, where="<root>")
             self.assertEqual(
-                len(out), len(leaves), f"leaf-count drift for case {arg_value!r}"
+                len(out),
+                len(leaves),
+                lambda msg: f"{msg}\nleaf-count drift for case {arg_value!r}",
             )
             # Per-slot check: each slot's spec name must match the
             # tensor at that flat position from pytree.tree_flatten.
@@ -1410,7 +1524,7 @@ class TestContainerSpec(TestCase):
                     actual,
                     expected,
                     msg=(
-                        f"alignment drift at slot {i}: spec name "
+                        lambda msg: f"{msg}\nalignment drift at slot {i}: spec name "
                         f"{actual!r} does not match pytree-flatten leaf "
                         f"name {expected!r} for case {arg_value!r}"
                     ),
@@ -1420,7 +1534,7 @@ class TestContainerSpec(TestCase):
         """When user_spec=None, the walker must return exactly
         len(pytree.tree_leaves(value)) — i.e. no-spec subtrees stay in
         lockstep with pytree's flatten."""
-        from torch._dynamo.functional_export import _walk_spec
+        from torch.fx.experimental._spec_binding import _walk_spec
 
         cases = [
             torch.randn(3),
@@ -1432,9 +1546,20 @@ class TestContainerSpec(TestCase):
             expected = len(pytree.tree_leaves(arg_value))
             out = _walk_spec(None, arg_value, where="<root>")
             self.assertEqual(
-                len(out), expected, f"no-spec leaf-count drift for {arg_value!r}"
+                len(out),
+                expected,
+                lambda msg: f"{msg}\nno-spec leaf-count drift for {arg_value!r}",
             )
 
 
+class TestContainerSpecStrict(_TestContainerSpecBase):
+    strict = True
+
+
+class TestContainerSpecNonStrict(_TestContainerSpecBase):
+    strict = False
+
+
+del _TestContainerSpecBase
 if __name__ == "__main__":
     run_tests()

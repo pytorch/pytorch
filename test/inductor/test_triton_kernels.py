@@ -522,7 +522,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
             gm.code.strip(),
             """\
 def forward(self, x_1, output_1):
-    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 3, grid = [(5,)], tma_descriptor_metadata = {}, kwargs = {'in_ptr0': x_1, 'out_ptr': output_1}, tensors_to_clone = ['in_ptr0', 'out_ptr'], launch_kwargs = ());  x_1 = output_1 = None
+    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 3, grid = [(5,)], tma_descriptor_metadata = {}, kwargs = {'in_ptr0': x_1, 'out_ptr': output_1}, tensors_to_clone = ['in_ptr0', 'out_ptr']);  x_1 = output_1 = None
     getitem = triton_kernel_wrapper_functional_proxy['in_ptr0'];  getitem = None
     getitem_1 = triton_kernel_wrapper_functional_proxy['out_ptr'];  triton_kernel_wrapper_functional_proxy = None
     return getitem_1""",
@@ -2376,7 +2376,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     add_2 = arg0_1 + 256;  arg0_1 = None
     sub_1 = add_2 - 1;  add_2 = None
     floordiv = sub_1 // 256;  sub_1 = None
-    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(floordiv, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('stable', ([256],)), 'in_desc_ptr1': ('stable', ([256],)), 'out_desc_ptr': ('stable', ([256],))}, kwargs = {'in_desc_ptr0': arg1_1, 'in_desc_ptr1': arg2_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr'], launch_kwargs = ());  floordiv = arg1_1 = arg2_1 = zeros_like = None
+    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(floordiv, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('stable', ([256],)), 'in_desc_ptr1': ('stable', ([256],)), 'out_desc_ptr': ('stable', ([256],))}, kwargs = {'in_desc_ptr0': arg1_1, 'in_desc_ptr1': arg2_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr']);  floordiv = arg1_1 = arg2_1 = zeros_like = None
     getitem = triton_kernel_wrapper_functional_proxy['out_desc_ptr'];  triton_kernel_wrapper_functional_proxy = None
     return (getitem,)""",
                 )
@@ -2389,7 +2389,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     add_2 = arg0_1 + 256
     sub_1 = add_2 - 1;  add_2 = None
     floordiv = sub_1 // 256;  sub_1 = None
-    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(floordiv, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('experimental', ([arg0_1], [256], 4)), 'in_desc_ptr1': ('experimental', ([arg0_1], [256], 4)), 'out_desc_ptr': ('experimental', ([arg0_1], [256], 4))}, kwargs = {'in_desc_ptr0': arg1_1, 'in_desc_ptr1': arg2_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr'], launch_kwargs = ());  floordiv = arg0_1 = arg1_1 = arg2_1 = zeros_like = None
+    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(floordiv, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('experimental', ([arg0_1], [256], 4)), 'in_desc_ptr1': ('experimental', ([arg0_1], [256], 4)), 'out_desc_ptr': ('experimental', ([arg0_1], [256], 4))}, kwargs = {'in_desc_ptr0': arg1_1, 'in_desc_ptr1': arg2_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr']);  floordiv = arg0_1 = arg1_1 = arg2_1 = zeros_like = None
     getitem = triton_kernel_wrapper_functional_proxy['out_desc_ptr'];  triton_kernel_wrapper_functional_proxy = None
     return (getitem,)""",
                 )
@@ -2400,7 +2400,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                     """\
 def forward(self, arg0_1, arg1_1):
     zeros_like = torch.ops.aten.zeros_like.default(arg0_1, pin_memory = False)
-    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(2, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('stable', ([256],)), 'in_desc_ptr1': ('stable', ([256],)), 'out_desc_ptr': ('stable', ([256],))}, kwargs = {'in_desc_ptr0': arg0_1, 'in_desc_ptr1': arg1_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr'], launch_kwargs = ());  arg0_1 = arg1_1 = zeros_like = None
+    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(2, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('stable', ([256],)), 'in_desc_ptr1': ('stable', ([256],)), 'out_desc_ptr': ('stable', ([256],))}, kwargs = {'in_desc_ptr0': arg0_1, 'in_desc_ptr1': arg1_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr']);  arg0_1 = arg1_1 = zeros_like = None
     getitem = triton_kernel_wrapper_functional_proxy['out_desc_ptr'];  triton_kernel_wrapper_functional_proxy = None
     return (getitem,)""",
                 )
@@ -2410,7 +2410,7 @@ def forward(self, arg0_1, arg1_1):
                     """\
 def forward(self, arg0_1, arg1_1):
     zeros_like = torch.ops.aten.zeros_like.default(arg0_1, pin_memory = False)
-    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(2, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('experimental', ([301], [256], 4)), 'in_desc_ptr1': ('experimental', ([301], [256], 4)), 'out_desc_ptr': ('experimental', ([301], [256], 4))}, kwargs = {'in_desc_ptr0': arg0_1, 'in_desc_ptr1': arg1_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr'], launch_kwargs = ());  arg0_1 = arg1_1 = zeros_like = None
+    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(2, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('experimental', ([301], [256], 4)), 'in_desc_ptr1': ('experimental', ([301], [256], 4)), 'out_desc_ptr': ('experimental', ([301], [256], 4))}, kwargs = {'in_desc_ptr0': arg0_1, 'in_desc_ptr1': arg1_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr']);  arg0_1 = arg1_1 = zeros_like = None
     getitem = triton_kernel_wrapper_functional_proxy['out_desc_ptr'];  triton_kernel_wrapper_functional_proxy = None
     return (getitem,)""",
                 )
@@ -2902,7 +2902,7 @@ def forward(self, arg0_1, arg1_1):
             for node in captured_gms[0].graph.nodes
             if node.op == "call_function"
             and node.target is triton_kernel_wrapper_mutation
-            and "enable_fp_fusion" in node.kwargs["launch_kwargs"]
+            and "enable_fp_fusion" in node.kwargs.get("launch_kwargs", ())
         )
         constant_args = kernel_side_table.get_constant_args(
             hop_node.kwargs["constant_args_idx"]
@@ -3081,7 +3081,7 @@ def forward(self, arg0_1, arg1_1):
         self.assertNotIn("BLOCK_SIZE", hop_node.kwargs["kwargs"])
         self.assertNotIn("BLOCK_SIZE", constant_args)
         self.assertEqual(hop_node.kwargs["grid"], [(1, 1, 1)])
-        self.assertEqual(hop_node.kwargs["launch_kwargs"], ())
+        self.assertNotIn("launch_kwargs", hop_node.kwargs)
 
     @requires_gpu
     def test_capture_triton_dynamic_backend_options_error(self):
@@ -6443,6 +6443,29 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
         out, code = run_and_get_code(torch.compile(fn), a, b)
         self.assertEqual(out, fn(a, b))
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
+
+    @requires_cuda_and_triton
+    def test_no_fusion_for_out_of_place_epilogue(self):
+        @triton.jit
+        def add_kernel(in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(0)
+            offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offs < n_elements
+            x = tl.load(in_ptr0 + offs, mask=mask)
+            y = tl.load(in_ptr1 + offs, mask=mask)
+            tl.store(out_ptr + offs, x + y, mask=mask)
+
+        def fn(a, b):
+            out = torch.empty_like(a)
+            grid = (triton.cdiv(a.numel(), 1024),)
+            add_kernel[grid](a, b, out, a.numel(), BLOCK_SIZE=1024)
+            return out.T.contiguous().relu()
+
+        a = torch.randn(32, 32, device="cuda")
+        b = torch.randn(32, 32, device="cuda")
+        out, code = run_and_get_code(torch.compile(fn), a, b)
+        self.assertEqual(out, fn(a, b))
+        self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=3)
 
 
 if HAS_CUDA_AND_TRITON:
