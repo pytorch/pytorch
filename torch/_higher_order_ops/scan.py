@@ -58,14 +58,7 @@ def wrap_combine_fn_flat(
     num_tensor_init,
     num_inp_leaves,
 ):
-    """Adapt user's combine_fn so the HOP sees only tensor init/carry leaves.
-
-    ``init_tensor_mask`` selects tensor slots in ``init``'s flattened leaves;
-    ``None`` slots are re-injected before calling the user combine_fn, and
-    Nones are filtered back out of the returned new carry. The ``y`` pytree is
-    returned verbatim; Nones inside ``y`` are handled by ScanHigherOrderVariable
-    (compile path) and ``_fake_scan`` (test-reference path).
-    """
+    """Adapt user's combine_fn so the HOP sees only tensor init/carry leaves."""
     if len(tensor_args) != num_tensor_init + num_inp_leaves:
         raise AssertionError(
             f"combine_fn received wrong number of arguments, expected {num_tensor_init + num_inp_leaves}, "
@@ -82,9 +75,7 @@ def wrap_combine_fn_flat(
 
     new_carry_leaves = pytree.tree_leaves(new_carry)
     new_carry_tensor_mask = get_tensor_mask(new_carry_leaves)
-    # Only reject when the LENGTHS match but the None/Tensor pattern differs.
-    # If the lengths differ, let downstream check_meta_consistency emit its
-    # specific "same number of outputs" error.
+
     if (
         len(new_carry_tensor_mask) == len(init_tensor_mask)
         and new_carry_tensor_mask != init_tensor_mask
@@ -508,10 +499,15 @@ def trace_scan(
         raise AssertionError("no output node found in combine_graph")
 
     carry, output = _extract_carry_and_out(outputs, len(init))
-    # init and carry are guaranteed tensor-only (front-end scan filtered Nones).
+    init_fake_tensors: list[torch.Tensor | torch.SymInt | int] = [
+        i.clone() if isinstance(i, torch.Tensor) else i for i in init
+    ]
+    carry_fake_tensors: list[torch.Tensor | torch.SymInt | int] = [
+        c.meta["val"] for c in carry
+    ]
     check_meta_consistency(
-        [i.clone() for i in init],
-        [c.meta["val"] for c in carry],
+        init_fake_tensors,
+        carry_fake_tensors,
         "init",
         "carry",
         include_contiguity=False,
@@ -536,7 +532,6 @@ def trace_scan(
         fake_carry, fake_outputs = _extract_carry_and_out(
             [o.meta["val"] if o is not None else None for o in outputs], len(init)
         )
-        # fake_carry is tensor-only; y may contain None slots.
         out = (
             *fake_carry,
             *(stack_y(t, scan_length) if t is not None else None for t in fake_outputs),
@@ -1042,7 +1037,6 @@ def scan_fake_tensor_mode(
             ),
             len(init),
         )
-        # carry is tensor-only; y may contain None slots.
         out = (
             *carry,
             *(stack_y(t, scan_length) if t is not None else None for t in outputs),
@@ -1181,8 +1175,6 @@ def _fake_scan(combine_fn, init, xs=None, dim=0, reverse=False):
     if xs is None or len(inp_leaves) == 0:
         return init, []
 
-    # Filter None slots at entry, run a tensor-only loop, then re-inject on
-    # return — mirrors torch.scan's front-end wrapper.
     init_tensor_mask = get_tensor_mask(carry_leaves)
     carry_tensors = filter_with_masks(carry_leaves, init_tensor_mask)
 

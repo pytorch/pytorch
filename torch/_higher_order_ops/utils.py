@@ -1415,7 +1415,7 @@ def _has_gen_schema(op: HigherOrderOperator):
     )
 
 
-def filter_with_masks(data: Sequence[Any], masks: Sequence[bool]) -> list[Any]:
+def filter_with_masks(data: Sequence[torch.Tensor | None], masks: list[bool]):
     if len(data) != len(masks):
         raise AssertionError(
             f"data length ({len(data)}) != masks length ({len(masks)})"
@@ -1423,6 +1423,6 @@ def filter_with_masks(data: Sequence[Any], masks: Sequence[bool]) -> list[Any]:
     return [item for item, keep in zip(data, masks) if keep]
 
 
-def fill_none_with_masks(data: Sequence[Any], masks: Sequence[bool]) -> list[Any]:
+def fill_none_with_masks(data: Sequence[torch.Tensor | None], masks: list[bool]):
     data_iter = iter(data)
     return [next(data_iter) if kept else None for kept in masks]
