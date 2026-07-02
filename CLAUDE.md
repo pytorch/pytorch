@@ -55,6 +55,16 @@ Generally, use `spin lint` as to run the lint and `spin fixlint` to apply automa
 When the user asks you to commit or amend, run `lintrunner -a` before creating
 the commit. Fix any lint errors it reports, then commit.
 
+# Git
+
+This refines the Bash tool's `# Git` guidance to "branch first" when on the
+default branch:
+
+- If HEAD is detached, that is intentional (the ghstack workflow). Do NOT
+  create a new branch; commit directly onto the current detached HEAD.
+- If you are on an actual branch (including `main`), follow the default
+  guidance and branch first before committing.
+
 # Commit messages
 
 Don't commit unless the user explicitly asks you to.
@@ -139,6 +149,13 @@ Follow these rules for all code changes in this repository:
 - Assume the reader has familiarity with PyTorch. They may not be the expert
   on the code that is being read, but they should have some experience in the
   area.
+- Splitting code across multiple lines (due to ruff’s column limit rule) is less
+  readable than having code on a single line. When the linter splits your
+  code across multiple lines, please try to put it back on a single line by
+  changing variable names or by using helper local variables. For tests that assert
+  against a golden string, keep just the golden string on one line instead of
+  splitting it across multiple lines and opt-out of the ruff column limit rule
+  via `noqa: B950`.
 - ASCII only in newly added code comments. Do not introduce Unicode characters
   (e.g., smart quotes, em dashes, arrows, non-ASCII letters) in new comments.
   Leave preexisting Unicode in untouched comments alone; only enforce this for
@@ -150,6 +167,19 @@ If uncertain, choose the simpler, more concise implementation.
 
 Use `torch.cuda._utils._check_cuda_bindings` to error-check `cuda.bindings`
 runtime calls. Do not write inline error-checking helpers.
+
+# cuda.bindings Raw Handles
+
+`cuda.bindings` runtime functions accept a raw handle passed as a Python `int`
+directly as their handle argument. Whenever you already have an int handle --
+from `CUDAGraph.raw_cuda_graph()` / `raw_cuda_graph_exec()`, a stream's
+`.cuda_stream`, `int(node)`, or any other source -- pass it straight in. Do NOT
+construct a typed wrapper (`cudaGraph_t(init_value=...)`,
+`cudaGraphExec_t(init_value=...)`, `cudaStream_t(init_value=...)`, etc.) just to
+hand an int you already have to a bindings call. For example
+`_cuda_runtime.cudaGraphGetId(g.raw_cuda_graph())`, not
+`cudaGraphGetId(cudaGraph_t(init_value=g.raw_cuda_graph()))`. Only build the
+typed object when you genuinely need it as a value in its own right.
 
 # Dynamo Config
 

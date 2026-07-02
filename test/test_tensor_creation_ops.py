@@ -201,21 +201,21 @@ class TestTensorCreation(TestCase):
 
         single_roll = numbers.roll(1, 0)
         expected = torch.tensor([8, 1, 2, 3, 4, 5, 6, 7], device=device)
-        self.assertEqual(single_roll, expected, msg=f"{single_roll} did not equal expected result")
+        self.assertEqual(single_roll, expected, msg=lambda msg: f"{msg}\n{single_roll} did not equal expected result")
 
         roll_backwards = numbers.roll(-2, 0)
         expected = torch.tensor([3, 4, 5, 6, 7, 8, 1, 2], device=device)
-        self.assertEqual(roll_backwards, expected, msg=f"{roll_backwards} did not equal expected result")
+        self.assertEqual(roll_backwards, expected, msg=lambda msg: f"{msg}\n{roll_backwards} did not equal expected result")
 
         data = numbers.view(2, 2, 2)
         rolled = data.roll(1, 0)
         expected = torch.tensor([5, 6, 7, 8, 1, 2, 3, 4], device=device).view(2, 2, 2)
-        self.assertEqual(expected, rolled, msg=f"{rolled} did not equal expected result: {expected}")
+        self.assertEqual(expected, rolled, msg=lambda msg: f"{msg}\n{rolled} did not equal expected result: {expected}")
 
         data = data.view(2, 4)
         # roll a loop until back where started
         loop_rolled = data.roll(2, 0).roll(4, 1)
-        self.assertEqual(data, loop_rolled, msg=f"{loop_rolled} did not equal the original: {data}")
+        self.assertEqual(data, loop_rolled, msg=lambda msg: f"{msg}\n{loop_rolled} did not equal the original: {data}")
         # multiple inverse loops
         self.assertEqual(data, data.roll(-20, 0).roll(-40, 1))
         self.assertEqual(torch.tensor([8, 1, 2, 3, 4, 5, 6, 7], device=device), numbers.roll(1, 0))
@@ -227,7 +227,7 @@ class TestTensorCreation(TestCase):
         expected = torch.tensor([4, 8, 1, 5, 2, 6, 3, 7]).view(4, 2)
         rolled = strided.roll(1, 0)
         self.assertEqual(expected, rolled,
-                         msg=f"non contiguous tensor rolled to {rolled} instead of {expected} ")
+                         msg=lambda msg: f"{msg}\nnon contiguous tensor rolled to {rolled} instead of {expected} ")
 
         # test roll with no dimension specified
         expected = numbers.roll(1, 0).view(2, 4)
@@ -238,7 +238,7 @@ class TestTensorCreation(TestCase):
         expected = torch.tensor([[7, 8, 5, 6], [3, 4, 1, 2]], device=device)
         double_rolled = data.roll(shifts=(2, -1), dims=(1, 0))
         self.assertEqual(double_rolled, expected,
-                         msg=f"should be able to roll over two dimensions, got {double_rolled}")
+                         msg=lambda msg: f"{msg}\nshould be able to roll over two dimensions, got {double_rolled}")
 
         self.assertRaisesRegex(RuntimeError, "required", lambda: data.roll(shifts=(), dims=()))
         self.assertRaisesRegex(RuntimeError, "required", lambda: data.roll(shifts=(), dims=1))
@@ -539,9 +539,9 @@ class TestTensorCreation(TestCase):
         # Regression test for https://github.com/pytorch/pytorch/issues/155306
         msg = "expected a non-empty list of Tensors"
         with self.assertRaisesRegex(ValueError, msg):
-            torch.concat([], dim='N')
+            torch.concat([], dim=0)
         with self.assertRaisesRegex(ValueError, msg):
-            torch.concatenate([], dim='N')
+            torch.concatenate([], dim=0)
 
     def test_cat_out(self, device):
         x = torch.zeros((0), device=device)
@@ -2850,9 +2850,9 @@ class TestTensorCreation(TestCase):
         cpu_device = torch.device('cpu')
         tensor = torch.tensor((1, 2, 3), device=device)
 
-        # need more than one device_type to test this
-        if self.device_type != 'cuda':
-            raise AssertionError(f"device_type should be 'cuda', got {self.device_type!r}")
+        # need a non-CPU device (with its own device memory) to test this
+        if self.device_type == 'cpu':
+            raise AssertionError(f"expected a non-CPU device, got {self.device_type!r}")
         for left, right in product([tensor, tensor.cpu()], [tensor, tensor.cpu()]):
             for device_arg in [torch_device, cpu_device, None]:
                 if device_arg is None:
@@ -4127,6 +4127,63 @@ class TestBufferProtocol(TestCase):
         self.assertEqual(tensor.numel(), 2)
         self.assertSequenceEqual(tensor, [255, 255])
 
+class TestFromBlob(TestCase):
+    def _make_data(self, dtype, numel):
+        numpy_dtype = torch_to_numpy_dtype_dict[dtype]
+        arr = np.arange(1, numel + 1, dtype=numpy_dtype)
+        return arr, arr.ctypes.data
+
+    @dtypes(*all_types_and_complex_and(torch.half))
+    def test_basic(self, device, dtype):
+        arr, ptr = self._make_data(dtype, 6)
+        t = torch._from_blob(ptr, [6], dtype=dtype)
+        self.assertEqual(t, torch.from_numpy(arr))
+
+    @dtypes(*all_types_and_complex_and(torch.half))
+    def test_2d(self, device, dtype):
+        arr, ptr = self._make_data(dtype, 6)
+        t = torch._from_blob(ptr, [2, 3], dtype=dtype)
+        self.assertEqual(t, torch.from_numpy(arr.reshape(2, 3)))
+
+    @dtypes(torch.float32, torch.float64, torch.int32, torch.int64)
+    def test_strides(self, device, dtype):
+        arr, ptr = self._make_data(dtype, 6)
+        t = torch._from_blob(ptr, [2, 3], [1, 2], dtype=dtype)
+        expected = torch.from_numpy(arr.reshape(2, 3, order="F"))
+        self.assertEqual(t, expected)
+
+    @dtypes(torch.float32, torch.int64)
+    def test_shared_memory(self, device, dtype):
+        numpy_dtype = torch_to_numpy_dtype_dict[dtype]
+        arr = np.array([1, 2, 3, 4], dtype=numpy_dtype)
+        t = torch._from_blob(arr.ctypes.data, [4], dtype=dtype)
+        arr[0] = 99
+        self.assertEqual(t[0].item(), 99)
+        t[1] = 77
+        self.assertEqual(arr[1], 77)
+
+    def test_explicit_device(self, device):
+        arr = np.array([1.0, 2.0], dtype=np.float32)
+        t = torch._from_blob(arr.ctypes.data, [2], dtype=torch.float32, device="cpu")
+        self.assertEqual(t.device, torch.device("cpu"))
+        self.assertEqual(t, torch.from_numpy(arr))
+
+    def test_default_dtype(self, device):
+        arr = np.array([1.0, 2.0], dtype=np.float32)
+        with set_default_dtype(torch.float32):
+            t = torch._from_blob(arr.ctypes.data, [2])
+            self.assertEqual(t.dtype, torch.float32)
+        with set_default_dtype(torch.float64):
+            t = torch._from_blob(arr.ctypes.data, [2])
+            self.assertEqual(t.dtype, torch.float64)
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
+    def test_invalid_device(self, device):
+        arr = np.array([1.0, 2.0], dtype=np.float32)
+        with self.assertRaises(RuntimeError):
+            torch._from_blob(arr.ctypes.data, [2], dtype=torch.float32, device="cuda")
+
+
 # Tests for the `asarray` function:
 #   Constructs tensors from a Python object that has one of the following
 #   characteristics:
@@ -4470,6 +4527,7 @@ instantiate_device_type_tests(TestTensorCreation, globals())
 instantiate_device_type_tests(TestRandomTensorCreation, globals())
 instantiate_device_type_tests(TestLikeTensorCreation, globals())
 instantiate_device_type_tests(TestBufferProtocol, globals(), only_for="cpu")
+instantiate_device_type_tests(TestFromBlob, globals(), only_for="cpu")
 instantiate_device_type_tests(TestAsArray, globals())
 
 if __name__ == '__main__':

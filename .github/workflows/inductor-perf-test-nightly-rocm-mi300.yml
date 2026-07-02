@@ -1,3 +1,4 @@
+# Owner(s): ["module: rocm"]
 name: inductor-perf-nightly-rocm-mi300
 
 on:
@@ -84,7 +85,11 @@ jobs:
     if: github.repository_owner == 'pytorch'
     name: linux-jammy-rocm-py3.10-mi300
     uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
     with:
+      runner_prefix: "mt-"
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+      use-arc: true
       build-environment: linux-jammy-rocm-py3.10-mi300
       docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3-benchmarks
       test-matrix: |

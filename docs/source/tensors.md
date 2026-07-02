@@ -295,7 +295,6 @@ view of a storage and defines numeric operations on it.
     Tensor.ceil
     Tensor.ceil_
     Tensor.char
-    Tensor.cholesky
     Tensor.cholesky_inverse
     Tensor.cholesky_solve
     Tensor.chunk
@@ -561,6 +560,7 @@ view of a storage and defines numeric operations on it.
     Tensor.nextafter
     Tensor.nextafter_
     Tensor.nonzero
+    Tensor.nonzero_static
     Tensor.norm
     Tensor.normal_
     Tensor.numel
