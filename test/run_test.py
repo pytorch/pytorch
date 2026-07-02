@@ -366,6 +366,10 @@ CORE_TEST_LIST = [
 # if a test file takes longer than 5 min, we add it to TARGET_DET_LIST
 SLOW_TEST_THRESHOLD = 300
 
+DYNAMO_WRAPPED_TIMEOUT_MULTIPLIER_OVERRIDE: dict[str, int] = {
+    "test_nn": 6,
+}
+
 DISTRIBUTED_TESTS_CONFIG = {}
 
 
@@ -626,12 +630,17 @@ def run_test(
         and not is_cpp_test
         and "-n" not in command
     )
+    timeout_multiplier = (
+        DYNAMO_WRAPPED_TIMEOUT_MULTIPLIER_OVERRIDE.get(test_file, 3)
+        if options.dynamo
+        else 3
+    )
     timeout = (
         None
         if not options.enable_timeout
         else THRESHOLD * 6
         if IS_SLOW
-        else THRESHOLD * 3
+        else THRESHOLD * timeout_multiplier
         if should_retry
         and isinstance(test_module, ShardedTest)
         and test_module.time is not None

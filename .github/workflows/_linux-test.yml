@@ -729,6 +729,21 @@ jobs:
         run: |
           echo "timeout=$((JOB_TIMEOUT-30))" >> "${GITHUB_OUTPUT}"
 
+      - name: Resolve HF cache mode
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "schedule" \
+             || "${{ github.event_name }}" == "workflow_dispatch" \
+             || "${{ contains(steps.keep-going.outputs.labels, 'ci-refresh-hf-cache') }}" == "true" ]]; then
+            OFFLINE=0
+          else
+            OFFLINE=1
+          fi
+          {
+            echo "TRANSFORMERS_OFFLINE=${OFFLINE}"
+            echo "HF_DATASETS_OFFLINE=${OFFLINE}"
+          } >> "${GITHUB_ENV}"
+
       - name: Test
         id: test
         timeout-minutes: ${{ fromJson(steps.test-timeout.outputs.timeout) }}
@@ -769,8 +784,6 @@ jobs:
           ENABLE_TORCH_TRACE: ${{ inputs.enable-torch-trace }}
           VLLM_TEST_HUGGING_FACE_TOKEN: ${{ secrets.VLLM_TEST_HUGGING_FACE_TOKEN }}
           HF_CACHE: /mnt/hf_cache
-          TRANSFORMERS_OFFLINE: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || contains(steps.keep-going.outputs.labels, 'ci-refresh-hf-cache')) && '0' || '1' }}
-          HF_DATASETS_OFFLINE: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || contains(steps.keep-going.outputs.labels, 'ci-refresh-hf-cache')) && '0' || '1' }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
           ARTIFACTS_FILE_SUFFIX: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.setup-linux.outputs.job-id }}
@@ -786,14 +799,17 @@ jobs:
             TEST_COMMAND=.ci/pytorch/test.sh
           fi
 
-          # Just create an empty HF_CACHE dir if it doesn't exist. This dir is not
-          # used for anything besides vLLM jobs
-          if [[ ! -d "${HF_CACHE}" ]]; then
+          # HF model cache. Offline (the default for PRs): read the shared, pre-seeded
+          # read-only cache mounted at /mnt/hf_cache. Online (refresh runs: schedule,
+          # workflow_dispatch, or the ci-refresh-hf-cache label): download into a
+          # writable dir that the "Refresh the HF cache in S3" step below syncs back
+          # into the shared bucket. Also fall back to online+writable if the mount is
+          # absent (e.g. a runner without the shared cache).
+          if [[ "${TRANSFORMERS_OFFLINE}" == "1" && -d /mnt/hf_cache ]]; then
+            export HF_CACHE=/mnt/hf_cache
+          else
             export HF_CACHE="${RUNNER_TEMP}/hf_cache"
             mkdir -p "${HF_CACHE}"
-
-            # When there is no cache directory, e.g. benchmark, the job has no
-            # way but to reach out to HF if needed
             export TRANSFORMERS_OFFLINE=0
             export HF_DATASETS_OFFLINE=0
           fi
@@ -843,3 +859,37 @@ jobs:
           file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.setup-linux.outputs.job-id }}
           use-gha: ${{ inputs.use-gha }}
           s3-bucket: ${{ inputs.s3-bucket }}
+
+      - name: Authenticate to refresh the HF cache in S3
+        if: always() && steps.test.conclusion && env.TRANSFORMERS_OFFLINE == '0'
+        continue-on-error: true
+        uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_hf-cache-write
+          aws-region: us-east-1
+
+      - name: Refresh the HF cache in S3
+        if: always() && steps.test.conclusion && env.TRANSFORMERS_OFFLINE == '0'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -x
+          HF_CACHE="${RUNNER_TEMP}/hf_cache"
+          if [[ -z "${HF_CACHE_S3_BUCKET:-}" || -z "${HF_CACHE_S3_REGION:-}" ]]; then
+            echo "HF_CACHE_S3_BUCKET/REGION unset (not an hf-cache runner) - skipping sync"
+            exit 0
+          fi
+          if [[ ! -d "${HF_CACHE}/hub" ]]; then
+            echo "No ${HF_CACHE}/hub to sync - skipping"
+            exit 0
+          fi
+          # The test image doesn't ship the AWS CLI (awscli is excluded from
+          # requirements-ci.txt), so fall back to a throwaway venv when it's absent.
+          AWS=aws
+          if ! command -v aws >/dev/null 2>&1; then
+            python3 -m venv /tmp/awscli-venv
+            /tmp/awscli-venv/bin/pip install --quiet awscli==1.45.39
+            AWS=/tmp/awscli-venv/bin/aws
+          fi
+          "${AWS}" s3 sync "${HF_CACHE}/hub" "s3://${HF_CACHE_S3_BUCKET}/hub" \
+            --region "${HF_CACHE_S3_REGION}" --no-progress
