@@ -97,6 +97,12 @@ def CDNA3OrLater():
 def CDNA2OrLater():
     return evaluate_gfx_arch_within(_CDNA2_ARCHS + _CDNA3_ARCHS + _CDNA5_ARCHS)
 
+# Archs that take the opportunistic_fastAtomicAdd path (packed 2x16 atomics + DPP
+# lane coalescing) in ScatterGatherKernel.cu. Keep in sync with that kernel's arch
+# gate; this is intentionally not CDNA3OrLater (gfx1250 uses plain fastAtomicAdd).
+def gfx_arch_supports_opportunistic_fastatomics():
+    return evaluate_gfx_arch_within(["gfx942", "gfx950"])
+
 def evaluate_platform_supports_flash_attention():
     if TEST_WITH_ROCM:
         # NOTE: gfx1250 is omitted until flash-attention artifacts ship for it.
@@ -230,8 +236,9 @@ def evaluate_platform_supports_fp8_grouped_gemm():
         if torch.version.hip:
             if "USE_MSLK" not in torch.__config__.show():
                 return False
-            # CMake MSLK arch filters need to include gfx1250 accordingly.
-            archs = ['gfx942', 'gfx950', 'gfx1250']
+            # gfx1250 omitted: MSLK only builds gfx942/gfx950 kernels (see the arch
+            # filter in aten/src/ATen/CMakeLists.txt). Add gfx1250 here once MSLK does.
+            archs = ['gfx942', 'gfx950']
             for arch in archs:
                 if arch in torch.cuda.get_device_properties(0).gcnArchName:
                     return True

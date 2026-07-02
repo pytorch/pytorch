@@ -179,7 +179,7 @@ case "$tag" in
     ROCM_VERSION=7.2
     TRITON=yes
     KATEX=yes
-    PYTORCH_ROCM_ARCH="gfx90a;gfx942;gfx950;gfx1100;gfx1250"
+    PYTORCH_ROCM_ARCH="gfx90a;gfx942;gfx950;gfx1100"
     if [[ $tag =~ "benchmarks" ]]; then
       INDUCTOR_BENCHMARKS=yes
     fi

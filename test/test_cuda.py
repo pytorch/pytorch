@@ -923,7 +923,7 @@ print(t.is_pinned())
             gcn_arch = str(
                 torch.cuda.get_device_properties(0).gcnArchName.split(":", 1)[0]
             )
-            if "gfx94" in gcn_arch or "gfx95" in gcn_arch or "gfx1250" in gcn_arch:
+            if gcn_arch in ["gfx942", "gfx950", "gfx1250"]:
                 default_workspace_size = 1024 * 128 * 1024  # :1024:128
         else:
             default_workspace_size = (
@@ -10098,11 +10098,12 @@ class TestCompileKernel(TestCase):
         # Test error handling with more than supported shared memory size
         if torch.version.hip:
             gcn_arch = get_device_properties().gcnArchName.split(":", 1)[0]
-            max_smem = (
-                65536
-                if gcn_arch not in ["gfx950", "gfx1250"]
-                else (320 * 1024 if gcn_arch == "gfx1250" else 160 * 1024)
-            )
+            if gcn_arch == "gfx1250":
+                max_smem = 320 * 1024
+            elif gcn_arch == "gfx950":
+                max_smem = 160 * 1024
+            else:
+                max_smem = 65536
         else:
             max_smem = get_device_properties().shared_memory_per_block_optin
         excessive_shared_mem = max_smem * 2
