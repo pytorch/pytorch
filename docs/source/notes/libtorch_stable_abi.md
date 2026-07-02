@@ -72,9 +72,6 @@ Two things set this class apart from the rest of the stable ABI:
   `STABLE_TORCH_LIBRARY` op: the dispatcher may run its kernel with the GIL released
   (backward, `torch.compile`, intra-op worker threads).
 
-For a runnable example see `test/cpp_extensions/libtorch_python_interop_2_14_extension`
-and `test/cpp_extensions/test_libtorch_python_interop.py`.
-
 ## Migrating your kernel to the LibTorch stable ABI
 
 If you'd like your kernel to be ABI stable with LibTorch, meaning you'd the ability to build for one version and run on another, your kernel must only use the limited stable ABI. This following section goes through some steps of migrating an existing kernel and APIs we imagine you would need to swap over.
