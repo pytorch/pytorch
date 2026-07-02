@@ -87,8 +87,13 @@ Tensor repeat_interleave_symint(
     TORCH_CHECK(false, "repeats must be 0-dim or 1-dim tensor");
   }
 
-  auto ret = input.index_select(
-      dim.value(), at::repeat_interleave_symint(repeats_, std::move(output_size)));
+  Tensor repeat_indices =
+      at::repeat_interleave_symint(repeats_, std::move(output_size));
+  if (repeat_indices.scalar_type() != at::kLong &&
+      repeat_indices.scalar_type() != at::kInt) {
+    repeat_indices = repeat_indices.to(at::kLong);
+  }
+  auto ret = input.index_select(dim.value(), repeat_indices);
   // Restore conj and neg bits
   if (conj) {
     ret = ret.conj();
