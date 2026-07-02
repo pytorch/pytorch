@@ -508,7 +508,7 @@ class ConstantVariable(VariableTracker):
 
     def _nb_binary_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
         op: Any,
         type_check: Any,
@@ -562,7 +562,7 @@ class ConstantVariable(VariableTracker):
 
     def nb_floor_divide_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
@@ -583,7 +583,7 @@ class ConstantVariable(VariableTracker):
 
     def nb_true_divide_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
@@ -604,7 +604,7 @@ class ConstantVariable(VariableTracker):
 
     def nb_remainder_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
@@ -626,7 +626,7 @@ class ConstantVariable(VariableTracker):
 
     def nb_divmod_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
@@ -726,7 +726,7 @@ class ConstantVariable(VariableTracker):
 
     def nb_and_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
@@ -742,7 +742,7 @@ class ConstantVariable(VariableTracker):
 
     def nb_xor_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
@@ -794,7 +794,7 @@ class ConstantVariable(VariableTracker):
 
     def nb_power_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
         z: VariableTracker | None,
         reverse: bool = False,
@@ -825,7 +825,7 @@ class ConstantVariable(VariableTracker):
 
     def nb_power_z_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         v: VariableTracker,
         w: VariableTracker,
     ) -> VariableTracker:
@@ -858,7 +858,7 @@ class ConstantVariable(VariableTracker):
 
     def nb_invert_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
     ) -> VariableTracker:
         # int: https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L5163-L5177
         #   long_invert implements ~x as -(x+1).
@@ -915,7 +915,7 @@ class FakeIdVariable(VariableTracker):
         return hash(self.value), True
 
     def richcompare_impl(
-        self, tx: Any, other: VariableTracker, op: str
+        self, tx: InstructionTranslatorBase, other: VariableTracker, op: str
     ) -> VariableTracker:
         if (
             isinstance(other, FakeIdVariable)
