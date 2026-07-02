@@ -3104,6 +3104,28 @@ struct to_ir {
     }
   }
 
+  // Parse a value's declared type annotation. Bare `list`/`tuple` resolve to
+  // the type-erased AnyListType/AnyTupleType, which are only meaningful as
+  // `isinstance` targets, not as a value's element type. Reject them here (as
+  // is already done for `typing.List`/`typing.Tuple`) instead of letting them
+  // flow into the emitters, where they crash or produce confusing errors.
+  TypePtr parseTypeHintFromExpr(const Expr& type_expr) {
+    auto type = typeParser_.parseTypeFromExpr(type_expr);
+    const char* container = nullptr;
+    if (type->kind() == AnyListType::Kind) {
+      container = "list";
+    } else if (type->kind() == AnyTupleType::Kind) {
+      container = "tuple";
+    }
+    if (container) {
+      throw(
+          ErrorReport(type_expr)
+          << "Attempted to use " << container << " without a contained type. "
+          << "Please add a contained type, e.g. " << container << "[int]");
+    }
+    return type;
+  }
+
   void emitSingleAssignment(const Assign& stmt) {
     if (!stmt.rhs().present()) {
       throw(
@@ -3116,7 +3138,7 @@ struct to_ir {
         auto v = Var(stmt.lhs());
         TypePtr type = nullptr;
         if (stmt.type().present()) {
-          type = typeParser_.parseTypeFromExpr(stmt.type().get());
+          type = parseTypeHintFromExpr(stmt.type().get());
         }
         auto rhs_sugared_val = emitSugaredExpr(rhs, 1, type);
         // START BC HACK
@@ -3178,7 +3200,7 @@ struct to_ir {
 
     TypePtr type_hint = nullptr;
     if (stmt.type().present()) {
-      type_hint = typeParser_.parseTypeFromExpr(stmt.type().get());
+      type_hint = parseTypeHintFromExpr(stmt.type().get());
     }
     const auto lhs = Select(stmt.lhs());
     auto lhsObject = emitSugaredExpr(lhs.value(), 1);
