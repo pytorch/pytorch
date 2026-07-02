@@ -30,8 +30,8 @@ class Type(Function):
         if ctx.input_device == -1:
             return grad_output.type(ctx.input_type), None
         else:
-            # Using the exact device ID with torch.cuda.device context manager
-            with torch.cuda.device(ctx.input_device):
+            # Use torch.accelerator for cross-device compatibility
+            with torch.accelerator.device_index(ctx.input_device):
                 return grad_output.type(ctx.input_type), None
 
 
@@ -46,11 +46,17 @@ class Resize(Function):
             raise RuntimeError(
                 f"requested resize to {'x'.join(map(str, sizes))} ({ctx.numel} elements in total), "
                 f"but the given tensor has a size of {'x'.join(map(str, tensor.size()))} ({tensor.numel()} elements). "
-                f"autograd's resize can only change the shape of a given tensor, while preserving the number of elements."
+                f"autograd's resize can only change the shape of a given tensor, "
+                f"while preserving the number of elements."
             )
         ctx.input_sizes = tensor.size()
-
-        # Optimized to bypass old redundant memory allocation checks
+        
+        # Handle different tensor types appropriately
+        if tensor.is_quantized:
+            # Quantized tensors require explicit copy for memory layout preservation
+            tensor = tensor.copy_()
+        
+        # Ensure contiguity before view (safe for all tensor types)
         return tensor.contiguous().view(*sizes)
 
     @staticmethod
