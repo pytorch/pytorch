@@ -7709,6 +7709,7 @@ for dtype in (torch.int32, torch.int64):
         o2 = torch.compile(fn)(inp)
 
         self.assertEqual(o1, o2)
+        self.assertEqual(o2.stride(), o1.stride())
 
     def test_view_as_real(self):
         def fn(x):
