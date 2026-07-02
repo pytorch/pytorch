@@ -29,14 +29,16 @@ def implicit_replication() -> Iterator[None]:
         DTensor._op_dispatcher._allow_implicit_replication = False
 
 
-@functools.wraps(_attention.context_parallel)
+_ASSIGNMENTS = tuple(a for a in functools.WRAPPER_ASSIGNMENTS if a != "__module__")
+
+@functools.wraps(_attention.context_parallel, assigned=_ASSIGNMENTS)
 def context_parallel(*args: Any, **kwargs: Any) -> Any:
     return _attention.context_parallel(*args, **kwargs)
 
-@functools.wraps(_func_map.local_map)
+@functools.wraps(_func_map.local_map, assigned=_ASSIGNMENTS)
 def local_map(*args: Any, **kwargs: Any) -> Any:
     return _func_map.local_map(*args, **kwargs)
 
-@functools.wraps(_register_sharding.register_sharding)
+@functools.wraps(_register_sharding.register_sharding, assigned=_ASSIGNMENTS)
 def register_sharding(*args: Any, **kwargs: Any) -> Any:
     return _register_sharding.register_sharding(*args, **kwargs)
