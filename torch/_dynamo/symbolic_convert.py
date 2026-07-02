@@ -2774,9 +2774,7 @@ class InstructionTranslatorBase(
         # https://github.com/python/cpython/pull/96010
         tos = self.stack[-1]
         if not isinstance(tos, ExceptionVals):
-            raise AssertionError(
-                "expected isinstance(tos, ExceptionVals) to be true"
-            )
+            raise AssertionError("expected isinstance(tos, ExceptionVals) to be true")
         if issubclass(tos.exc_type, StopIteration):
             self.popn(3)
             self.push(ConstantVariable.create(None))

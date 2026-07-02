@@ -950,29 +950,24 @@ class SideEffects:
             cur_tx = cur_tx.parent
 
         # Generators tracked for close-on-exit have their close() called in
-        # compile_subgraph after pruning. Closing may forward into a
-        # subiterator suspended on the generator's stack and run its finally
-        # blocks, which read attributes recorded during tracing (e.g. a `log`
-        # captured in __init__). These objects do not escape, so we must not
-        # keep them in id_to_variable (that would reconstruct them into the
-        # output and assign a TempLocalSource). Instead we preserve only their
-        # attribute-mutation bookkeeping so load_attr still works during close.
+        # compile_subgraph after pruning.
         gen_reachable_new: set[VariableTracker] = set()
 
         def visit_gen(var: VariableTracker) -> None:
-            if var in gen_reachable_new:
-                return
             if isinstance(var.mutation_type, AttributeMutationNew):
                 gen_reachable_new.add(var)
-            if var in self.store_attr_mutations:
-                VariableTracker.visit(visit_gen, self.store_attr_mutations[var])
 
+        # Pass side_effects so the walk follows store_attr_mutations, and share
+        # one cache across all generators to dedup shared subiterators.
+        gen_visit_cache: dict[int, Any] = {}
         for gen in tx.output.local_generators:
             gen_tracer = gen.inline_tracer
             VariableTracker.visit(
-                visit_gen, [gen_tracer.stack, gen_tracer.symbolic_locals]
+                visit_gen,
+                [gen_tracer.stack, gen_tracer.symbolic_locals],
+                gen_visit_cache,
+                self,
             )
-        del visit_gen
 
         VariableTracker.visit(
             visit,
