@@ -1,7 +1,10 @@
 # Owner(s): ["module: nn"]
 
 import torch
-from torch._native.ops.bmm_outer_product.triton_impl import _is_outer_product
+from torch._native.ops.bmm_outer_product.triton_impl import (
+    _bmm_outer_product_cond,
+    _is_outer_product,
+)
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
     instantiate_device_type_tests,
@@ -102,13 +105,13 @@ class TestBmmOuterProductDevice(TestCase):
     def test_non_current_device_outer_product(self, devices):
         old_device = torch.accelerator.current_device_index()
         try:
-            torch.accelerator.set_device_index(0)
+            torch.accelerator.set_device_index(devices[0])
             a = torch.randn(4, 8, 1, device=devices[1])
             b = torch.randn(4, 1, 16, device=devices[1])
 
             out = torch.bmm(a, b)
 
-            self.assertEqual(torch.accelerator.current_device_index(), 0)
+            self.assertEqual(torch.accelerator.current_device_index(), devices[0])
             self.assertEqual(out.device, torch.device(devices[1]))
             self.assertEqual(out, a * b)
 
@@ -117,6 +120,39 @@ class TestBmmOuterProductDevice(TestCase):
                 torch.bmm(mismatched_a, b)
         finally:
             torch.accelerator.set_device_index(old_device)
+
+    @onlyAccelerator
+    def test_cow_inputs_accepted_by_override(self, device):
+        # The override accepts copy-on-write inputs (it wraps its read-only
+        # inputs in ConstTensorWrapper and reads through const_data_ptr()).
+        # Assert the cond fires on COW inputs -- it previously excluded them --
+        # so a regression back to declining COW would be caught here.
+        a = torch.randn(4, 64, 1, device=device)
+        b = torch.randn(4, 1, 48, device=device)
+        a_cow = a._lazy_clone()
+        b_cow = b._lazy_clone()
+        self.assertTrue(torch._C._is_cow_tensor(a_cow))
+        self.assertTrue(torch._C._is_cow_tensor(b_cow))
+
+        self.assertTrue(_bmm_outer_product_cond(a_cow, b_cow))
+
+    @onlyAccelerator
+    def test_cow_inputs_not_materialized(self, device):
+        # A copy-on-write input routed through the override is read via
+        # const_data_ptr() and not materialized. Verify the result is correct
+        # and the inputs stay COW across the call.
+        a = torch.randn(4, 64, 1, device=device)
+        b = torch.randn(4, 1, 48, device=device)
+        a_cow = a._lazy_clone()
+        b_cow = b._lazy_clone()
+        self.assertTrue(torch._C._is_cow_tensor(a_cow))
+        self.assertTrue(torch._C._is_cow_tensor(b_cow))
+
+        out = torch.bmm(a_cow, b_cow)
+
+        self.assertEqual(out, a @ b)
+        self.assertTrue(torch._C._is_cow_tensor(a_cow))
+        self.assertTrue(torch._C._is_cow_tensor(b_cow))
 
 
 class TestBmmOuterProduct(TestCase):

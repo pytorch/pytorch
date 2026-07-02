@@ -2692,6 +2692,14 @@ def _rocm_native_device_arch_name(device: str) -> str:
     return torch.cuda.get_device_properties(device).gcnArchName
 
 
+@functools.lru_cache
+def using_rocm_rdna3() -> bool:
+    """Returns true if the device is based on RDNA3, otherwise returns false."""
+    return torch.cuda.is_available() and _rocm_native_device_arch_name(
+        "cuda"
+    ).startswith("gfx11")
+
+
 @functools.cache
 def try_import_ck_lib() -> tuple[
     str | None, Callable[[], list[Any]], Callable[[], list[Any]], type[Any]
