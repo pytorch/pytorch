@@ -161,6 +161,21 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         for i in range(1, 5):
             self.assertFalse(same(res[i - 1], res[i]))
 
+    def test_module_random_random_fullgraph(self):
+        # random.random is a C builtin method bound to the module-global
+        # Random instance (unlike randint/randrange/uniform, which are Python
+        # methods); it must still route through the RandomValueSource path
+        # rather than graph-breaking on a skipped builtin.
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            return (x + 1) * random.random()
+
+        res = []
+        for _ in range(5):
+            res.append(fn(torch.ones(2)))
+        for i in range(1, 5):
+            self.assertFalse(same(res[i - 1], res[i]))
+
     def test_random_call_with_while_loop(self):
         def fn(x):
             dim1 = random.randrange(start=0, stop=3)
