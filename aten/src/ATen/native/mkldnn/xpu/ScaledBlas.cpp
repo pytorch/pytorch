@@ -1151,14 +1151,21 @@ TORCH_IMPL_FUNC(_scaled_mm_xpu_v2_out)
   }
   {
     auto bias_ = bias.has_value() ? *bias : Tensor();
-    // NOLINTNEXTLINE(*c-array*)
-    TensorArg targs[]{
+    std::vector<TensorArg> targs{
         {out, "out", 0},
         {mat_a, "mat_a", 1},
         {mat_b, "mat_b", 2},
         {bias_, "bias", 3},
         {scale_a[0], "scale_a", 4},
         {scale_b[0], "scale_b", 5}};
+    // Two-level NVFP4 additionally passes per-tensor fp32 global scales as
+    // scale_a[1]/scale_b[1].
+    if (scale_a.size() > 1) {
+      targs.emplace_back(scale_a[1], "scale_a_global", 6);
+    }
+    if (scale_b.size() > 1) {
+      targs.emplace_back(scale_b[1], "scale_b_global", 7);
+    }
     checkAllSameGPU(__func__, targs);
   }
 
