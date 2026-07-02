@@ -58,6 +58,7 @@ from ..utils import (
     DelayReplaceLine,
     get_benchmark_name,
     get_dtype_size,
+    GraphPartitionMap,
     IndentedBuffer,
     is_codegen_graph_partition_subgraph,
     is_using_cudagraph_partition,
@@ -1432,6 +1433,15 @@ class PythonWrapperCodegen(CodeGen):
         self.multi_kernel_state = MultiKernelState()
         self.already_codegened_subgraphs: OrderedSet[str] = OrderedSet()
         self.allocated_workspaces: dict[str, Any] = {}
+        # [Note: Shared Graph Partition State]
+        # The root wrapper owns the partition id counter, the flat list of
+        # partition maps, and the partition names. Partitions codegened inside
+        # subgraphs (currently invoke_subgraph bodies) reach these via
+        # get_partition_state_owner so all partitions share one flat namespace
+        # and one runtime Runner.
+        self._num_partitions = 0
+        self.partition_maps_flat: list[GraphPartitionMap] = []
+        self.all_partition_names: list[str] = []
 
         # intermediate tensor value printing utility
         self.debug_printer = DebugPrinterManager(
@@ -4359,7 +4369,7 @@ class PythonWrapperCodegen(CodeGen):
 
         # Call the subgraph launcher function
         self.writeline(
-            f"({outputs}) = self.partitions[{partition_id}](partition{partition_id}_args)"
+            f"({outputs}) = {self.partition_call_prefix()}[{partition_id}](partition{partition_id}_args)"
         )
         self.writeline(f"del partition{partition_id}_args")
 
@@ -4370,6 +4380,14 @@ class PythonWrapperCodegen(CodeGen):
         self.all_partition_names = list(
             map(self.get_partition_name, range(num_partitions))
         )
+
+    def get_partition_state_owner(self) -> PythonWrapperCodegen:
+        # See [Note: Shared Graph Partition State]. The root wrapper owns the
+        # state; subgraph wrappers defer to their root.
+        return self
+
+    def partition_call_prefix(self) -> str:
+        return "self.partitions"
 
     def codegen_subgraph_call_with_flattened_outputs(
         self, subgraph, outer_inputs, outer_flattened_outputs
@@ -4406,7 +4424,7 @@ class PythonWrapperCodegen(CodeGen):
             f"{outer_buffer_name} = {subgraph.graph.name}({subgraph.graph.name}_args)"
         )
 
-    def codegen_subgraph_common(self, subgraph):
+    def codegen_subgraph_common(self, subgraph, allow_graph_partition=False):
         self.push_codegened_graph(subgraph.graph)
         self.make_comment("")
         self.make_comment(f"{self.comment} subgraph: {subgraph.name}")
@@ -4419,10 +4437,16 @@ class PythonWrapperCodegen(CodeGen):
             # If it is already codegened, the parent wrapper already has
             # subgraph fn by name subgraph.graph.name
             with V.set_graph_handler(subgraph.graph):
-                # do not graph partition for subgraph
-                with config.patch("graph_partition", False):
-                    # Call the codegen of subgraph recursively
+                if allow_graph_partition:
+                    # Graph partition is allowed inside invoke_subgraph bodies;
+                    # the partitions join the root's flat Runner via
+                    # get_partition_state_owner.
                     subgraph_code, _ = subgraph.graph.codegen()
+                else:
+                    # Control-flow subgraphs (cond/while_loop) are not yet
+                    # partitioned.
+                    with config.patch("graph_partition", False):
+                        subgraph_code, _ = subgraph.graph.codegen()
             subgraph_name = subgraph.graph.name
             self.already_codegened_subgraphs.add(subgraph_name)
             self.define_subgraph_launcher_fn(subgraph_name, subgraph_code)
@@ -4455,7 +4479,12 @@ class PythonWrapperCodegen(CodeGen):
                 invoke_subgraph.subgraph, outer_inputs, outer_outputs
             )
         else:
-            self.codegen_subgraph(invoke_subgraph.subgraph, outer_inputs, name)
+            # invoke_subgraph bodies may be graph-partitioned (unlike cond /
+            # while_loop), so codegen them with partitioning enabled.
+            self.codegen_subgraph_common(
+                invoke_subgraph.subgraph, allow_graph_partition=True
+            )
+            self.codegen_subgraph_call(invoke_subgraph.subgraph, outer_inputs, name)
 
     def codegen_conditional(self, conditional) -> None:
         name = conditional.get_name()
@@ -4807,6 +4836,15 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         if not isinstance(root, PythonWrapperCodegen):
             raise AssertionError(f"expected PythonWrapperCodegen, got {type(root)}")
         return root
+
+    def get_partition_state_owner(self) -> PythonWrapperCodegen:
+        return self.get_root_graph()
+
+    def partition_call_prefix(self) -> str:
+        # Subgraph launcher fns are lifted to module scope and only called from
+        # within the root Runner.call, where the module-global `runner` is
+        # already bound, so nested partition calls go through runner.partitions.
+        return "runner.partitions"
 
     def generate_and_run_autotune_block(self):
         # Only execute auto-tuning block in the main graph
