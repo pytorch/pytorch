@@ -30,6 +30,7 @@ It consists of
 - torch/csrc/stable/ops.h: Provides a stable interface for calling ATen ops from `native_functions.yaml`.
 - torch/csrc/stable/accelerator.h: Provides a stable interface for device-generic objects and APIs
 (e.g. `getCurrentStream`, `DeviceGuard`).
+- torch/csrc/stable/python/interop.h: Provides `torch::stable::from_pyobject` and `to_pyobject` to convert between a Python `torch.Tensor` and `torch::stable::Tensor`. These depend on `libtorch_python`; see the Python interop shims section below.
 
 We are continuing to improve coverage in our `torch/csrc/stable` APIs. Please file an issue if you'd like to see support for particular APIs in your custom extension.
 
@@ -43,11 +44,36 @@ The stable C headers started by AOTInductor form the foundation of the stable AB
 - [torch/csrc/inductor/aoti_torch/generated/c_shim_aten.h](https://github.com/pytorch/pytorch/blob/main/torch/csrc/inductor/aoti_torch/generated/c_shim_aten.h): Includes C-style shim APIs for ATen ops from `native_functions.yaml` (e.g. `aoti_torch_aten_new_empty`).
 - [torch/csrc/inductor/aoti_torch/generated/c_shim_*.h](https://github.com/pytorch/pytorch/blob/main/torch/csrc/inductor/aoti_torch/generated): Includes C-style shim APIs for specific backend kernels dispatched from `native_functions.yaml` (e.g. `aoti_torch_cuda_pad`). These APIs should only be used for the specific backend they are named after (e.g. `aoti_torch_cuda_pad` should only be used within CUDA kernels), as they opt out of the dispatcher.
 - [torch/csrc/stable/c/shim.h](https://github.com/pytorch/pytorch/blob/main/torch/csrc/stable/c/shim.h): We are building out more ABIs to logically live in `torch/csrc/stable/c` instead of continuing the AOTI naming that no longer makes sense for our general use case.
+- [torch/csrc/stable/python/c/shim.h](https://github.com/pytorch/pytorch/blob/main/torch/csrc/stable/python/c/shim.h): C entry points backing `from_pyobject`/`to_pyobject`; implemented in `libtorch_python`, not `libtorch` (see the Python interop shims section below).
 
 These headers are promised to be ABI stable across releases and adhere to a stronger backwards compatibility policy than LibTorch. Specifically, we promise not to modify them for at least 2 years after they are released. However, this is **use at your own risk**. For example, users must handle the memory lifecycle of objects returned by certain APIs. Further, the stack-based APIs discussed below which allow the user to call into the PyTorch dispatcher do not provide strong guarantees on forward and backward compatibility of the underlying op that is called.
 
 Unless absolutely necessary, we recommend the high-level C++ API in `torch/csrc/stable`
 which will handle all the rough edges of the C API for the user.
+
+### Python interop shims
+
+A small set of shims in `torch/csrc/stable/python` differ from everything above:
+they depend on `libtorch_python` in addition to `libtorch`. They convert between a
+Python `torch.Tensor` and a `torch::stable::Tensor`:
+
+- `torch::stable::from_pyobject` and `torch::stable::to_pyobject` in
+  `torch/csrc/stable/python/interop.h`.
+
+Two things set this class apart from the rest of the stable ABI:
+
+- **It requires `libtorch_python`.** A `PyObject*` crosses the ABI as an opaque
+  `void*` (the public header does not include `Python.h`), but the implementation
+  lives in `libtorch_python`. An extension using these must
+  link `torch_python` and cannot run in a Python-free (libtorch-only) deployment. It
+  remains abi3 (portable across Python versions).
+- **The caller must hold the GIL.** Call these only from code entered directly from
+  Python (a `PyMethodDef` or pybind function). Do not call them from a boxed
+  `STABLE_TORCH_LIBRARY` op: the dispatcher may run its kernel with the GIL released
+  (backward, `torch.compile`, intra-op worker threads).
+
+For a runnable example see `test/cpp_extensions/libtorch_python_interop_2_14_extension`
+and `test/cpp_extensions/test_libtorch_python_interop.py`.
 
 ## Migrating your kernel to the LibTorch stable ABI
 
