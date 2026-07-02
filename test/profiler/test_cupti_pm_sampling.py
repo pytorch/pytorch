@@ -86,7 +86,7 @@ class TestPmSamplingWindowSizing(TestCase):
         # Real session: the first add_consumer enables PM sampling on the current device via CUPTI,
         # we drive some GPU work, and poll() decodes the ring into `frames` (raw HW-ns timestamps).
         frames: list = []
-        sampler = PmSampler.for_device(torch.cuda.current_device())
+        sampler = PmSampler(torch.cuda.current_device())
         handle = sampler.add_consumer(list(metrics), frames.append)
         self.addCleanup(sampler.remove_consumer, handle)
         if sampler._col is None:
@@ -104,7 +104,7 @@ class TestPmSamplingWindowSizing(TestCase):
 
     def test_empty_metrics_rejected(self):
         # A consumer must bring a non-empty metric set; add_consumer rejects an empty one.
-        sampler = PmSampler.for_device(torch.cuda.current_device())
+        sampler = PmSampler(torch.cuda.current_device())
         with self.assertRaises(ValueError):
             sampler.add_consumer((), lambda frame: None)
         self.assertIsNone(sampler._col)
@@ -112,7 +112,7 @@ class TestPmSamplingWindowSizing(TestCase):
     def test_multipass_metrics_rejected(self):
         # PM sampling is single-pass only; a metric that needs multiple passes (sm__throughput.*
         # needs ~8) is rejected by add_consumer -> ValueError, no session, running state untouched.
-        sampler = PmSampler.for_device(torch.cuda.current_device())
+        sampler = PmSampler(torch.cuda.current_device())
         with self.assertRaises(ValueError) as cm:
             sampler.add_consumer(
                 ["sm__throughput.avg.pct_of_peak_sustained_elapsed"],
@@ -121,10 +121,31 @@ class TestPmSamplingWindowSizing(TestCase):
         self.assertIn("pass", str(cm.exception).lower())
         self.assertIsNone(sampler._col)
 
+    def test_returns_per_device_singleton(self):
+        # PmSampler(device) returns the one instance for that device -- repeated construction and the
+        # no-arg (current device) form resolve to the same object, so all consumers share one session.
+        dev = torch.cuda.current_device()
+        self.assertIs(PmSampler(dev), PmSampler(dev))
+        self.assertIs(PmSampler(dev), PmSampler())
+
+    def test_profiler_refcount_balanced(self):
+        # The process-global profiler deinit is refcounted (not by CUPTI): a full add/remove cycle
+        # returns the live-collector count to where it started, so the profiler is torn down exactly
+        # once and can be re-initialized on the next session.
+        before = PmSampler._active
+        sampler = PmSampler(torch.cuda.current_device())
+        handle = sampler.add_consumer(list(_TEST_METRICS), lambda frame: None)
+        if sampler._col is None:
+            sampler.remove_consumer(handle)
+            self.skipTest("PM sampling could not start on this GPU")
+        self.assertEqual(PmSampler._active, before + 1)
+        sampler.remove_consumer(handle)
+        self.assertEqual(PmSampler._active, before)
+
     def test_suggested_poll_interval_under_ring_span(self):
         # The recommended poll cadence drains a little before the ring fills (one window span minus a
         # buffer), so periodic polls are productive without hitting the decode overflow cap.
-        sampler = PmSampler.for_device(torch.cuda.current_device())
+        sampler = PmSampler(torch.cuda.current_device())
         span = sampler._max_samples * sampler._sampling_interval_ns
         self.assertGreater(sampler.suggested_poll_interval_ns, 0)
         self.assertLess(sampler.suggested_poll_interval_ns, span)
@@ -181,7 +202,7 @@ class TestPmSamplingWindowSizing(TestCase):
         supported = supported_metrics()
         if not supported:
             self.skipTest("profiler host could not enumerate metrics on this chip")
-        sampler = PmSampler.for_device(torch.cuda.current_device())
+        sampler = PmSampler(torch.cuda.current_device())
         with self.assertLogs(
             "torch.profiler._cupti.pm_sampling", level="WARNING"
         ) as cm:
@@ -197,7 +218,7 @@ class TestPmSamplingWindowSizing(TestCase):
         a_metrics, b_metrics = [_TEST_METRICS[0]], list(_TEST_METRICS[1:3])
         a_frames: list = []
         b_frames: list = []
-        sampler = PmSampler.for_device(torch.cuda.current_device())
+        sampler = PmSampler(torch.cuda.current_device())
         a = sampler.add_consumer(a_metrics, a_frames.append)
         self.addCleanup(sampler.remove_consumer, a)
         b = sampler.add_consumer(b_metrics, b_frames.append)

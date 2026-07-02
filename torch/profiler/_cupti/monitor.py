@@ -584,7 +584,7 @@ class CuptiMonitor:
                 frame["start_ns"] = self.convert_time_array(frame["start_ns"])
                 _sink(frame)
 
-            sampler = PmSampler.for_device()
+            sampler = PmSampler()  # per-device singleton for the current device
             try:
                 handle = sampler.add_consumer(metrics, wrapped)
             except Exception as e:
