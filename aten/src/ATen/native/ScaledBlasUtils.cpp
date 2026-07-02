@@ -337,6 +337,24 @@ void validate_scaled_mm_v2_inputs(
     return sym_ceil_div(a, b) * b;
   };
 
+  // XPU (oneDNN) also accepts a column-major (transpose-contiguous) layout
+  // because it calls .contiguous() internally; CUDA/ROCm require a plain
+  // contiguous scale.
+  auto scale_layout_ok = [is_xpu](const Tensor& s) {
+    return is_xpu ? (s.is_contiguous() || s.t().is_contiguous())
+                  : s.is_contiguous();
+  };
+
+  // NVFP4 (BlockWise1x16) blockwise scale element count for a given outer
+  // dim, shared by the single- and two-level NVFP4 recipes. XPU uses the
+  // unpadded shape; NVIDIA the L4-padded SWIZZLE_32_4_4 shape. ROCm doesn't
+  // support NVFP4, so only these two cases arise.
+  auto nvfp4_scale_elems = [&](const c10::SymInt& dim) {
+    return is_xpu ? dim * sym_ceil_div(K_unpacked, 16)
+                  : sym_round_up(dim, 128) *
+            sym_round_up(sym_ceil_div(K_unpacked, 16), 4);
+  };
+
   // Per-recipe scale checks. Shapes and dtypes mirror the per-recipe
   // acceptance functions in aten/src/ATen/native/cuda/ScaledBlas.cpp so a
   // configuration that survives the meta also survives the kernel
@@ -418,21 +436,9 @@ void validate_scaled_mm_v2_inputs(
             scale_b[0].scalar_type() == ScalarType::Float8_e8m0fnu,
         "For Blockwise scaling scale_b should have ", expected_b_elems,
         " elements, got: ", scale_b.empty() ? c10::SymInt(0) : scale_b[0].sym_numel());
-    TORCH_CHECK_VALUE(
-        is_xpu || (scale_a[0].is_contiguous() && scale_b[0].is_contiguous()),
-        "For Blockwise scaling both scales should be contiguous");
   } else if (is_nv_1x16) {
-    c10::SymInt expected_a_elems;
-    c10::SymInt expected_b_elems;
-    if (is_xpu) {
-      expected_a_elems = M * sym_ceil_div(K_unpacked, 16);
-      expected_b_elems = N * sym_ceil_div(K_unpacked, 16);
-    } else {
-      expected_a_elems = sym_round_up(M, 128) *
-          sym_round_up(sym_ceil_div(K_unpacked, 16), 4);
-      expected_b_elems = sym_round_up(N, 128) *
-          sym_round_up(sym_ceil_div(K_unpacked, 16), 4);
-    }
+    const auto expected_a_elems = nvfp4_scale_elems(M);
+    const auto expected_b_elems = nvfp4_scale_elems(N);
     TORCH_CHECK_VALUE(
         scale_a.size() == 1 && scale_a[0].sym_numel() == expected_a_elems &&
             scale_a[0].scalar_type() == ScalarType::Float8_e4m3fn,
@@ -443,21 +449,9 @@ void validate_scaled_mm_v2_inputs(
             scale_b[0].scalar_type() == ScalarType::Float8_e4m3fn,
         "For Blockwise scaling scale_b should have ", expected_b_elems,
         " elements, got: ", scale_b.empty() ? c10::SymInt(0) : scale_b[0].sym_numel());
-    TORCH_CHECK_VALUE(
-        is_xpu || (scale_a[0].is_contiguous() && scale_b[0].is_contiguous()),
-        "For Blockwise scaling both scales should be contiguous");
   } else if (is_nv_2lvl) {
-    c10::SymInt expected_a_elems;
-    c10::SymInt expected_b_elems;
-    if (is_xpu) {
-      expected_a_elems = M * sym_ceil_div(K_unpacked, 16);
-      expected_b_elems = N * sym_ceil_div(K_unpacked, 16);
-    } else {
-      expected_a_elems = sym_round_up(M, 128) *
-          sym_round_up(sym_ceil_div(K_unpacked, 16), 4);
-      expected_b_elems = sym_round_up(N, 128) *
-          sym_round_up(sym_ceil_div(K_unpacked, 16), 4);
-    }
+    const auto expected_a_elems = nvfp4_scale_elems(M);
+    const auto expected_b_elems = nvfp4_scale_elems(N);
     // Split the count check from the per-element check so the error
     // message points at the actual mismatch.
     TORCH_CHECK_VALUE(
@@ -478,9 +472,6 @@ void validate_scaled_mm_v2_inputs(
             scale_b[1].scalar_type() == ScalarType::Float,
         "For Blockwise scaling scale_b should have ", expected_b_elems,
         " elements, got: ", scale_b[0].sym_numel());
-    TORCH_CHECK_VALUE(
-        is_xpu || (scale_a[0].is_contiguous() && scale_b[0].is_contiguous()),
-        "For Blockwise scaling both scales should be contiguous");
   } else if (!is_deepseek) {
     // Match the kernel's `find_scaled_gemm_impl` fall-through so unrecognized
     // recipe combinations fail at trace time rather than at kernel dispatch.
@@ -499,6 +490,14 @@ void validate_scaled_mm_v2_inputs(
   // swizzle; tensorwise/rowwise/deepseek paths don't.
   const bool is_mx_or_nvfp = is_mx_1x32 || is_nv_1x16 || is_nv_2lvl;
   if (is_mx_or_nvfp) {
+    // Blockwise scales must be contiguous (checked once for all MX/NVFP4
+    // recipes). scale_a[0]/scale_b[0] are the blockwise scales and were
+    // size-validated in the per-recipe branches above.
+    TORCH_CHECK_VALUE(
+        scale_layout_ok(scale_a[0]) && scale_layout_ok(scale_b[0]),
+        is_xpu
+            ? "For Blockwise scaling both scales should be contiguous (row-major or column-major)"
+            : "For Blockwise scaling both scales should be contiguous");
     const auto num_args_a = recipe_a.size();
     const auto num_args_b = recipe_b.size();
     const bool is_rocm = at::globalContext().hasROCM();
