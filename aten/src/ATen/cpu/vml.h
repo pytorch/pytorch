@@ -114,6 +114,9 @@ static_assert(
 // low-precision results for its whole chunk (observed on oneMKL 2024.2: AVX2
 // EP kernel served despite VML_HA requested, on AVX512 hardware). A
 // serialized warm-up call resolves the dispatch before any concurrent use.
+// Reproduces on oneMKL 2024.2.0 through 2024.2.2; not reproducible on
+// >= 2025.0, so this can be dropped once the minimum supported oneMKL moves
+// past 2024.2.x. See https://github.com/pytorch/pytorch/issues/188792.
 #define IMPLEMENT_VML_MKL_WARMUP(mklop, type, mkltype)                  \
   {                                                                     \
     static c10::once_flag vml_dispatch_resolved;                        \
