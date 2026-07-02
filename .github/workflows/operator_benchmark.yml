@@ -87,7 +87,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-aarch64-py3.10
       runner: linux.arm64.m7g.4xlarge
-      docker-image-name: ci-image:pytorch-linux-jammy-aarch64-py3.10-gcc15
+      docker-image-name: ci-image:pytorch-linux-jammy-aarch64-py3.10-gcc13
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
@@ -95,7 +95,7 @@ jobs:
         ]}
       use-arc: true
       python-version: "3.10"
-      compiler: gcc15
+      compiler: gcc13
       cuda-version: cpu
     secrets: inherit
 
@@ -111,6 +111,6 @@ jobs:
       test-matrix: ${{ needs.aarch64-opbenchmark-build.outputs.test-matrix }}
       use-arc: true
       python-version: "3.10"
-      compiler: gcc15
+      compiler: gcc13
       cuda-version: cpu
     secrets: inherit

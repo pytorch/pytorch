@@ -31,10 +31,9 @@ from torch.testing._internal.common_utils import \
      runOnRocmArch, MI200_ARCH, MI300_ARCH, MI350_ARCH, NAVI_ARCH, TEST_CUDA,
      skipIfNoNvmath)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, dtypes, has_cusolver, onlyCPU, skipIf, skipCPUIfNoLapack, precisionOverride,
+    (instantiate_device_type_tests, dtypes, has_cusolver, onlyCPU, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIf,
-     skipCUDAIfNoCusolver, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoMagmaAndNoLinalgsolver,
-     skipCUDAIfRocm, onlyNativeDeviceTypes, dtypesIfCUDA,
+     skipCUDAIfNoCusolver, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoMagmaAndNoLinalgsolver, onlyNativeDeviceTypes, dtypesIfCUDA,
      onlyCUDA, onlyAccelerator, skipMeta, skipCUDAIfNotRocm, dtypesIfMPS, largeTensorTest,
      e4m3_type, e5m2_type)
 from torch.testing import make_tensor
@@ -1647,7 +1646,14 @@ class TestLinalg(TestCase):
         # check invalid norm type
         a = torch.ones(3, 3, dtype=dtype, device=device)
         for p in ['wrong_norm', 5]:
-            with self.assertRaisesRegex(RuntimeError, f"linalg.cond got an invalid norm type: {p}"):
+            with self.assertRaisesRegex(ValueError, f"linalg.cond got an invalid norm type: {p}"):
+                torch.linalg.cond(a, p)
+
+        # a complex scalar is not a valid order of norm
+        # https://github.com/pytorch/pytorch/issues/137466
+        a = torch.ones(3, 3, dtype=dtype, device=device)
+        for p in [1j, 2 + 2j]:
+            with self.assertRaisesRegex(ValueError, "Expected a non-complex scalar as the order of norm"):
                 torch.linalg.cond(a, p)
 
     # This test calls torch.linalg.norm and numpy.linalg.norm with illegal arguments
@@ -2003,62 +2009,16 @@ class TestLinalg(TestCase):
                     run_test_case(input, ord, dim, keepdim)
 
     # Test degenerate shape results match numpy for linalg.norm matrix norms
-    @skipIf(np.lib.NumpyVersion(np.__version__) < '2.3.0', 'Numpy changed handling of degenerate inputs in 2.3.0')
     @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_norm_matrix_degenerate_shapes(self, device, dtype):
+        new_numpy = tuple(int(x) for x in np.__version__.split('.')[:2]) >= (2, 3)
+
         def run_test_case(input, ord, dim, keepdim, should_error):
             msg = f'input.size()={input.size()}, ord={ord}, dim={dim}, keepdim={keepdim}, dtype={dtype}'
             input_numpy = input.cpu().numpy()
             ops = [torch.linalg.norm]
-
-            if ord is not None and dim is not None:
-                ops.append(torch.linalg.matrix_norm)
-
-            if should_error:
-                with self.assertRaises(ValueError):
-                    np.linalg.norm(input_numpy, ord, dim, keepdim)
-                for op in ops:
-                    with self.assertRaises(IndexError):
-                        op(input, ord, dim, keepdim)
-            else:
-                result_numpy = np.linalg.norm(input_numpy, ord, dim, keepdim)
-                for op in ops:
-                    result = op(input, ord, dim, keepdim)
-                    self.assertEqual(result, result_numpy, msg=msg)
-
-        ord_matrix = ['fro', 'nuc', 1, 2, inf, -1, -2, -inf, None]
-        S = 10
-        test_cases = [
-            # input size, p settings that cause error, dim
-            ((0, 0), [-1, -2, -inf], None),
-            ((0, S), [-2, -inf], None),
-            ((S, 0), [-1, -2], None),
-            ((S, S, 0), [], (0, 1)),
-            ((1, S, 0), [], (0, 1)),
-            ((0, 0, S), [-1, -2, -inf], (0, 1)),
-            ((0, 0, S), [-1, -2, -inf], (1, 0)),
-        ]
-
-        for keepdim in [True, False]:
-            for input_size, error_ords, dim in test_cases:
-                input = torch.randn(*input_size, dtype=dtype, device=device)
-                for ord in ord_matrix:
-                    run_test_case(input, ord, dim, keepdim, ord in error_ords)
-
-    # TODO this is redundant with test_norm_matrix_degenerate_shapes above,
-    # remove when old numpy versions are dropped
-    @skipIf(np.lib.NumpyVersion(np.__version__) >= '2.3.0', 'Numpy changed handling of degenerate inputs in 2.3.0')
-    @skipCUDAIfNoMagmaAndNoLinalgsolver
-    @skipCPUIfNoLapack
-    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
-    def test_norm_matrix_degenerate_shapes_old_numpy(self, device, dtype):
-        def run_test_case(input, ord, dim, keepdim, should_error):
-            msg = f'input.size()={input.size()}, ord={ord}, dim={dim}, keepdim={keepdim}, dtype={dtype}'
-            input_numpy = input.cpu().numpy()
-            ops = [torch.linalg.norm]
-
             if ord is not None and dim is not None:
                 ops.append(torch.linalg.matrix_norm)
 
@@ -2069,22 +2029,29 @@ class TestLinalg(TestCase):
                     with self.assertRaises(IndexError):
                         op(input, ord, dim, keepdim)
             elif should_error == 'np_only':
-                with self.assertRaises(ValueError):
-                    np.linalg.norm(input_numpy, ord, dim, keepdim)
-                for op in ops:
-                    result = op(input, ord, dim, keepdim)
-                    dim_ = dim
-                    if dim_ is None:
-                        dim_ = (0, 1)
-                    expected_shape = list(input.shape)
-                    if keepdim:
-                        expected_shape[dim_[0]] = 1
-                        expected_shape[dim_[1]] = 1
-                    else:
-                        del expected_shape[max(dim_)]
-                        del expected_shape[min(dim_)]
-                    expected = torch.zeros(expected_shape, dtype=dtype.to_real())
-                    self.assertEqual(expected, result, msg=msg)
+                if new_numpy:
+                    # numpy 2.3.0 fixed this — both now return a result
+                    result_numpy = np.linalg.norm(input_numpy, ord, dim, keepdim)
+                    for op in ops:
+                        result = op(input, ord, dim, keepdim)
+                        self.assertEqual(result, result_numpy, msg=msg)
+                else:
+                    with self.assertRaises(ValueError):
+                        np.linalg.norm(input_numpy, ord, dim, keepdim)
+                    for op in ops:
+                        result = op(input, ord, dim, keepdim)
+                        dim_ = dim
+                        if dim_ is None:
+                            dim_ = (0, 1)
+                        expected_shape = list(input.shape)
+                        if keepdim:
+                            expected_shape[dim_[0]] = 1
+                            expected_shape[dim_[1]] = 1
+                        else:
+                            del expected_shape[max(dim_)]
+                            del expected_shape[min(dim_)]
+                        expected = torch.zeros(expected_shape, dtype=dtype.to_real())
+                        self.assertEqual(expected, result, msg=msg)
             else:
                 result_numpy = np.linalg.norm(input_numpy, ord, dim, keepdim)
                 for op in ops:
@@ -2094,8 +2061,7 @@ class TestLinalg(TestCase):
         ord_matrix = ['fro', 'nuc', 1, 2, inf, -1, -2, -inf, None]
         S = 10
         test_cases = [
-            # input size, p settings that cause error,
-            # p settings that error numpy but not torch, dim
+            # shape, error_ords, np_only_ords, dim
             ((0, 0), [-1, -2, -inf], [inf, 1, 2], None),
             ((0, S), [-2, -inf], [inf, 2], None),
             ((S, 0), [-1, -2], [1, 2], None),
@@ -2114,7 +2080,7 @@ class TestLinalg(TestCase):
                     elif ord in np_error_ords:
                         should_error = 'np_only'
                     else:
-                        should_error = 'no'
+                        should_error = None
                     run_test_case(input, ord, dim, keepdim, should_error)
 
     def test_norm_fastpaths(self, device):
@@ -2150,7 +2116,6 @@ class TestLinalg(TestCase):
         not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 8) and not torch.cuda.has_magma,
         "torch.linalg.eig requires MAGMA for CUDA versions < 12.8",
     )
-    @skipCUDAIf(TEST_WITH_ROCM and not torch.cuda.has_magma, "ROCm hipsolver backend does not currently support eig")
     # NumPy computes only in float64 and complex128 precisions
     # for float32 or complex64 results might be very different from float64 or complex128
     @dtypes(torch.float64, torch.complex128)
@@ -2203,7 +2168,6 @@ class TestLinalg(TestCase):
         not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 8) and not torch.cuda.has_magma,
         "torch.linalg.eig requires MAGMA for CUDA versions < 12.8",
     )
-    @skipCUDAIf(TEST_WITH_ROCM and not torch.cuda.has_magma, "ROCm hipsolver backend does not currently support eig")
     @dtypes(*floating_and_complex_types())
     def test_eig_identity(self, device, dtype):
 
@@ -2267,7 +2231,6 @@ class TestLinalg(TestCase):
         not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 8) and not torch.cuda.has_magma,
         "torch.linalg.eig requires MAGMA for CUDA versions < 12.8",
     )
-    @skipCUDAIf(TEST_WITH_ROCM and not torch.cuda.has_magma, "ROCm hipsolver backend does not currently support eig")
     @dtypes(*floating_and_complex_types())
     def test_eigvals_out_variants(self, device, dtype):
         from torch.testing._internal.common_utils import random_symmetric_matrix
@@ -2313,7 +2276,6 @@ class TestLinalg(TestCase):
         not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 8) and not torch.cuda.has_magma,
         "torch.linalg.eig requires MAGMA for CUDA versions < 12.8",
     )
-    @skipCUDAIf(TEST_WITH_ROCM and not torch.cuda.has_magma, "ROCm hipsolver backend does not currently support eig")
     @dtypes(*floating_and_complex_types())
     def test_eig_out_variants(self, device, dtype):
         from torch.testing._internal.common_utils import random_symmetric_matrix
@@ -2370,7 +2332,6 @@ class TestLinalg(TestCase):
         not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 8) and not torch.cuda.has_magma,
         "torch.linalg.eig requires MAGMA for CUDA versions < 12.8",
     )
-    @skipCUDAIf(TEST_WITH_ROCM and not torch.cuda.has_magma, "ROCm hipsolver backend does not currently support eig")
     @dtypes(torch.float32, torch.float64)
     def test_eig_cuda_complex_eigenvectors(self, device, dtype):
         """Test CUDA eigenvector decoding with known ground truth, including batching."""
@@ -2460,7 +2421,6 @@ class TestLinalg(TestCase):
         not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 8) and not torch.cuda.has_magma,
         "torch.linalg.eig requires MAGMA for CUDA versions < 12.8",
     )
-    @skipCUDAIf(TEST_WITH_ROCM and not torch.cuda.has_magma, "ROCm hipsolver backend does not currently support eig")
     @dtypes(*floating_and_complex_types())
     def test_eig_errors_and_warnings(self, device, dtype):
         # eig requires the input to be at least 2 dimensional tensor
@@ -2526,7 +2486,6 @@ class TestLinalg(TestCase):
         not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 8) and not torch.cuda.has_magma,
         "torch.linalg.eig requires MAGMA for CUDA versions < 12.8",
     )
-    @skipCUDAIf(TEST_WITH_ROCM and not torch.cuda.has_magma, "ROCm hipsolver backend does not currently support eig")
     @dtypes(*floating_and_complex_types())
     def test_eig_with_nan(self, device, dtype):
         for val in [np.inf, np.nan]:
@@ -2542,7 +2501,6 @@ class TestLinalg(TestCase):
         not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 8) and not torch.cuda.has_magma,
         "torch.linalg.eig requires MAGMA for CUDA versions < 12.8",
     )
-    @skipCUDAIf(TEST_WITH_ROCM and not torch.cuda.has_magma, "ROCm hipsolver backend does not currently support eig")
     # NumPy computes only in float64 and complex128 precisions
     # for float32 or complex64 results might be very different from float64 or complex128
     @dtypes(torch.float64, torch.complex128)
@@ -2593,7 +2551,6 @@ class TestLinalg(TestCase):
         not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 8) and not torch.cuda.has_magma,
         "torch.linalg.eig requires MAGMA for CUDA versions < 12.8",
     )
-    @skipCUDAIf(TEST_WITH_ROCM and not torch.cuda.has_magma, "ROCm hipsolver backend does not currently support eig")
     @dtypes(*floating_and_complex_types())
     def test_eigvals_errors_and_warnings(self, device, dtype):
         # eig requires the input to be at least 2 dimensional tensor
@@ -3026,7 +2983,6 @@ class TestLinalg(TestCase):
         not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 8) and not torch.cuda.has_magma,
         "torch.linalg.eig requires MAGMA for CUDA versions < 12.8",
     )
-    @skipCUDAIf(TEST_WITH_ROCM and not torch.cuda.has_magma, "ROCm hipsolver backend does not currently support eig")
     @dtypes(torch.complex128)
     def test_invariance_error_spectral_decompositions(self, device, dtype):
         make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=True)
@@ -4882,7 +4838,6 @@ class TestLinalg(TestCase):
     @slowTest
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Test fails for float64 on GPU (P100, V100) on Meta infra")
     @onlyCUDA
-    @unittest.skipIf(TEST_WITH_ROCM and not torch.cuda.has_magma, "MAGMA required for ROCm")
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-2, torch.complex64: 1e-2,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
@@ -4942,7 +4897,6 @@ class TestLinalg(TestCase):
             A_triangular.diagonal(dim1=-2, dim2=-1).fill_(1.)
         return b, A_triangular
 
-    @unittest.skipIf(TEST_WITH_ROCM and not torch.cuda.has_magma, "MAGMA required for ROCm")
     @skipCPUIfNoLapack
     @skipIfTorchDynamo("flaky, needs investigation")
     @dtypes(*floating_and_complex_types())
@@ -4962,7 +4916,6 @@ class TestLinalg(TestCase):
                 self.assertEqual(b, np.matmul(A.cpu(), x.cpu()))
 
     @skipCPUIfNoLapack
-    @unittest.skipIf(TEST_WITH_ROCM and not torch.cuda.has_magma, "MAGMA required for ROCm")
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
@@ -5011,7 +4964,6 @@ class TestLinalg(TestCase):
                                                upper, unitriangular, transpose)
 
     @slowTest
-    @unittest.skipIf(TEST_WITH_ROCM and not torch.cuda.has_magma, "MAGMA required for ROCm")
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
@@ -5041,7 +4993,6 @@ class TestLinalg(TestCase):
 
             self.assertEqual(torch.matmul(A, x), b)
 
-    @unittest.skipIf(TEST_WITH_ROCM and not torch.cuda.has_magma, "MAGMA required for ROCm")
     @skipCPUIfNoLapack
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     @skipIfTorchDynamo("flaky, needs investigation")
@@ -5087,7 +5038,6 @@ class TestLinalg(TestCase):
         X = torch.linalg.solve_triangular(A, B, upper=False)
         self.assertEqual(A @ X, B)
 
-    @unittest.skipIf(TEST_WITH_ROCM and not torch.cuda.has_magma, "MAGMA required for ROCm")
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_triangular_solve_out_errors_and_warnings(self, device, dtype):
@@ -5136,11 +5086,11 @@ class TestLinalg(TestCase):
             if x.dtype.is_floating_point or x.dtype.is_complex:
                 k = max(x.shape[-1], 1)  # Scale the atol with the size of the matrix
                 self.assertEqual(answer, expected,
-                                 msg=f"{x.shape} x {y.shape} = {answer.shape}",
+                                 msg=lambda msg: f"{msg}\n{x.shape} x {y.shape} = {answer.shape}",
                                  atol=k * 5e-5,
                                  rtol=1e-4)
             else:
-                self.assertEqual(answer, expected, msg=f"{x.shape} x {y.shape} = {answer.shape}")
+                self.assertEqual(answer, expected, msg=lambda msg: f"{msg}\n{x.shape} x {y.shape} = {answer.shape}")
 
         # test x @ y
         expected = np.matmul(x.cpu(), y.cpu())
@@ -5622,7 +5572,7 @@ class TestLinalg(TestCase):
         for p in [1, 2, 3, 4, inf]:
             res = x.renorm(p, 1, 1)
             expected = x / x.norm(p, 0, keepdim=True).clamp(min=1)
-            self.assertEqual(res, expected, msg=f"renorm failed for {p}-norm")
+            self.assertEqual(res, expected, msg=lambda msg: f"{msg}\nrenorm failed for {p}-norm")
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoCusolver
@@ -8111,15 +8061,15 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
             # Test det
             self.assertEqual(det, target_sdet * target_logabsdet.exp(),
-                             atol=1e-6, rtol=0, msg=f'{desc} (det)')
+                             atol=1e-6, rtol=0, msg=lambda msg: f'{msg}\n{desc} (det)')
 
             # Test slogdet
             # Compare the overall value rather than individual parts because of
             # precision issues when det is near zero.
             self.assertEqual(sdet * logabsdet.exp(), target_sdet * target_logabsdet.exp(),
-                             atol=1e-6, rtol=0, msg=f'{desc} (slogdet)')
+                             atol=1e-6, rtol=0, msg=lambda msg: f'{msg}\n{desc} (slogdet)')
             self.assertEqual(linalg_sdet * linalg_logabsdet.exp(), target_sdet * target_logabsdet.exp(),
-                             atol=1e-6, rtol=0, msg=f'{desc} (linalg_slogdet)')
+                             atol=1e-6, rtol=0, msg=lambda msg: f'{msg}\n{desc} (linalg_slogdet)')
 
             # Test logdet
             # Compare logdet against our own pytorch slogdet because they should
@@ -8130,7 +8080,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                 self.assertTrue(logdet.item() != logdet.item(), f'{desc} (logdet negative case)')
             else:
                 self.assertEqual(logdet.exp(), target_logabsdet.exp(),
-                                 atol=1e-6, rtol=0, msg=f'{desc} (logdet non-negative case)')
+                                 atol=1e-6, rtol=0, msg=lambda msg: f'{msg}\n{desc} (logdet non-negative case)')
 
         eye = torch.eye(5, dtype=dtype, device=device)
         test_single_det(eye, (torch.ones((), dtype=dtype, device=device), torch.zeros((), dtype=dtype, device=device)), 'identity')
@@ -8945,7 +8895,11 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
     @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
-    @skipCUDAIfRocm
+    @skipCUDAIf(
+        TEST_WITH_ROCM and (torch.version.hip is None or
+            tuple(int(x) for x in torch.version.hip.split(".")[:2]) < (7, 14)),
+        "hipsolverDnXsytrs requires ROCm >= 7.14"
+    )
     @dtypes(*floating_and_complex_types())
     def test_ldl_solve(self, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix
@@ -9237,11 +9191,11 @@ class TestLinalgCudaOnly(TestCase):
             if x.dtype.is_floating_point or x.dtype.is_complex:
                 k = max(x.shape[-1], 1)
                 self.assertEqual(answer, expected,
-                                 msg=f"{x.shape} x {y.shape} = {answer.shape}",
+                                 msg=lambda msg: f"{msg}\n{x.shape} x {y.shape} = {answer.shape}",
                                  atol=k * 5e-5,
                                  rtol=1e-4)
             else:
-                self.assertEqual(answer, expected, msg=f"{x.shape} x {y.shape} = {answer.shape}")
+                self.assertEqual(answer, expected, msg=lambda msg: f"{msg}\n{x.shape} x {y.shape} = {answer.shape}")
 
         expected = np.matmul(x.cpu(), y.cpu())
         ans = torch.matmul(x, y)
@@ -9358,6 +9312,11 @@ class TestLinalgCudaOnly(TestCase):
         # Initialize and then tear down TunableOp
         import glob
         import os
+        prev_cublaslt_count = (
+            torch.cuda.tunable.get_cublaslt_requested_algo_count()
+            if torch.cuda.is_available()
+            else None
+        )
         self._set_tunableop_defaults()
         torch.cuda.tunable.enable(True)
 
@@ -9366,6 +9325,10 @@ class TestLinalgCudaOnly(TestCase):
         finally:
             # disables TunableOp
             torch.cuda.tunable.enable(False)
+            if prev_cublaslt_count is not None:
+                torch.cuda.tunable.set_cublaslt_requested_algo_count(
+                    prev_cublaslt_count
+                )
 
             # clean up, remove any files that were generated
             results_filename = torch.cuda.tunable.get_filename()
@@ -9403,6 +9366,7 @@ class TestLinalgCudaOnly(TestCase):
         torch.cuda.tunable.tuning_enable(True)
         torch.cuda.tunable.set_max_tuning_duration(30)
         torch.cuda.tunable.set_max_tuning_iterations(100)
+        torch.cuda.tunable.set_cublaslt_requested_algo_count(8)
         torch.cuda.tunable.set_rotating_buffer_size(-1)
         torch.cuda.tunable.set_numerical_check_tolerances(False)
         ordinal = torch.cuda.current_device()
@@ -9432,10 +9396,11 @@ class TestLinalgCudaOnly(TestCase):
                 untuned_csv_entries = {(row[0], row[1]) for row in untuned_reader}
 
                 tuned_reader = csv.reader(file2)
-                for _ in range(5):  # Skip the first 5 lines for the validator
-                    next(tuned_reader, None)
-
-                result_csv_entries = {(row[0], row[1]) for row in tuned_reader}
+                result_csv_entries = {
+                    (row[0], row[1])
+                    for row in tuned_reader
+                    if row and row[0] != "Validator"
+                }
 
                 missing = untuned_csv_entries - result_csv_entries
 
@@ -9489,7 +9454,6 @@ class TestLinalgCudaOnly(TestCase):
             # clean up intermediate files
             self._set_tunableop_defaults()
 
-    @skipCUDAIfNotRocm
     @dtypes(torch.half)
     def test_matmul_offline_tunableop(self, device, dtype):
         import os
@@ -9703,7 +9667,6 @@ class TestLinalgCudaOnly(TestCase):
             self.assertTrue(ok)
 
     @unittest.skipIf(not TEST_MULTIGPU, "Requires at least 2 GPUs")
-    @skipCUDAIfNotRocm
     @dtypes(torch.float)
     def test_matmul_offline_mgpu_tunableop(self, device, dtype):
         # Offline tuning with multiple GPUs.
@@ -9785,9 +9748,30 @@ class TestLinalgCudaOnly(TestCase):
         torch.cuda.tunable.set_rotating_buffer_size(-1)
         self.assertEqual(torch.cuda.tunable.get_rotating_buffer_size(), l2_cache_size)
 
-    @skipCUDAIfNotRocm
+    @skipIfRocm
     @dtypes(torch.float)
-    def test_bmm_tunableop_rocm(self, device, dtype):
+    def test_cublaslt_requested_algo_count_tunableop(self, device, dtype):
+        import os
+        env_key = "PYTORCH_TUNABLEOP_CUBLASLT_REQUESTED_ALGO_COUNT"
+        prev_env = os.environ.pop(env_key, None)
+        self._set_tunableop_defaults()
+        original = torch.cuda.tunable.get_cublaslt_requested_algo_count()
+        try:
+            torch.cuda.tunable.set_cublaslt_requested_algo_count(7)
+            self.assertEqual(torch.cuda.tunable.get_cublaslt_requested_algo_count(), 7)
+            torch.cuda.tunable.set_cublaslt_requested_algo_count(1)
+            self.assertEqual(torch.cuda.tunable.get_cublaslt_requested_algo_count(), 1)
+            torch.cuda.tunable.set_cublaslt_requested_algo_count(0)
+            self.assertEqual(torch.cuda.tunable.get_cublaslt_requested_algo_count(), 1)
+            torch.cuda.tunable.set_cublaslt_requested_algo_count(-7)
+            self.assertEqual(torch.cuda.tunable.get_cublaslt_requested_algo_count(), 1)
+        finally:
+            torch.cuda.tunable.set_cublaslt_requested_algo_count(original)
+            if prev_env is not None:
+                os.environ[env_key] = prev_env
+
+    @dtypes(torch.float)
+    def test_bmm_tunableop(self, device, dtype):
         # buffer rotation (on by default) with strided batched gemm tunableop was causing a mem fault
         with self._tunableop_ctx():
             torch.cuda.tunable.set_max_tuning_iterations(10)
@@ -9836,11 +9820,10 @@ class TestLinalgCudaOnly(TestCase):
             k_chunks = k.split(64, dim=-2)
             C = torch.matmul(q_chunks[0], k_chunks[0])
 
-    @skipCUDAIfNotRocm
     @dtypes(torch.bfloat16)
-    def test_numeric_check_leak_tunableop_rocm(self, device, dtype):
+    def test_numeric_check_leak_tunableop(self, device, dtype):
         from torch.testing._internal.common_utils import CudaMemoryLeakCheck
-        # run operator first without tuning to ensure all rocm libs are loaded,
+        # run operator first without tuning to ensure all libs are loaded,
         # otherwise false positive mem leak
         B = 5
         N = M = K = 29
@@ -9892,6 +9875,23 @@ class TestLinalgCudaOnly(TestCase):
             self.assertTrue(re.match(r'^\d+[a-z0-9.]+$', validators["ROCBLAS_VERSION"]))
             self.assertTrue("HIPBLASLT_VERSION" in validators)
             self.assertTrue(re.match(r'^\d+-[a-z0-9]+$', validators["HIPBLASLT_VERSION"]))
+
+    @skipIfRocm
+    @dtypes(torch.float)
+    def test_validator_tunableop_cuda(self, device, dtype):
+        with self._tunableop_ctx():
+            torch.cuda.tunable.set_max_tuning_iterations(1)
+
+            A = torch.randn(4, 4, device=device, dtype=dtype)
+            B = torch.randn(4, 4, device=device, dtype=dtype)
+            torch.matmul(A, B)
+
+            validators = get_tunableop_validators()
+            for key in ("PT_VERSION", "CUBLASLT_VERSION", "CUDA_DEVICE"):
+                self.assertIn(key, validators)
+
+            self.assertRegex(validators["CUBLASLT_VERSION"], r"^\d+$")
+            self.assertRegex(validators["CUDA_DEVICE"], r"^\d+\.\d+:.+")
 
     @dtypes(torch.half)
     def test_minimum_tuning_iteration_tunableop(self, device, dtype):
@@ -9945,6 +9945,97 @@ class TestLinalgCudaOnly(TestCase):
             # the this test and verify that it agrees with the number of
             # GEMMs.
             self.assertEqual((total_num_results - ref_num_results), count_matmul)
+
+    @skipIfRocm
+    @dtypes(torch.bfloat16)
+    def test_cublaslt_candidate_tunableop(self, device, dtype):
+        if not torch.cuda.is_bf16_supported():
+            raise unittest.SkipTest("bfloat16 not supported on this CUDA device")
+
+        with self._tunableop_ctx():
+            torch.cuda.tunable.set_rotating_buffer_size(0)
+            torch.cuda.tunable.set_max_tuning_duration(1)
+            torch.cuda.tunable.set_max_tuning_iterations(3)
+
+            A = torch.randn(128, 256, device=device, dtype=dtype)
+            B = torch.randn(256, 96, device=device, dtype=dtype)
+            torch.matmul(A, B)
+
+            X = torch.randn(512, 512, device=device, dtype=dtype)
+            W = torch.randn(512, 512, device=device, dtype=dtype)
+            bias = torch.randn(512, device=device, dtype=dtype)
+            torch.nn.functional.linear(X, W, bias)
+
+            for b, m, k, n in (
+                    (8, 128, 256, 192),
+                    (16, 128, 256, 256),
+                    (8, 256, 256, 256),
+                    (2, 512, 512, 512)):
+                batch_A = torch.randn(b, m, k, device=device, dtype=dtype)
+                batch_B = torch.randn(b, k, n, device=device, dtype=dtype)
+                torch.bmm(batch_A, batch_B)
+
+            results = torch.cuda.tunable.get_results()
+            result_strings = [str(row) for row in results]
+            self.assertTrue(
+                any("Gemm_Cublaslt_" in row for row in result_strings), results)
+            self.assertTrue(
+                any("GemmTunableOp" in row for row in result_strings), results)
+            self.assertTrue(
+                any("GemmStridedBatchedTunableOp" in row for row in result_strings),
+                results)
+            self.assertTrue(
+                any("GemmAndBiasTunableOp" in row for row in result_strings),
+                results)
+
+    @skipIfRocm
+    @dtypes(torch.half)
+    def test_invalid_cublaslt_candidate_fallback_tunableop(self, device, dtype):
+        with self._tunableop_ctx():
+            torch.cuda.tunable.set_rotating_buffer_size(0)
+            torch.cuda.tunable.tuning_enable(False)
+
+            results_filename = torch.cuda.tunable.get_filename()
+            validators = torch.cuda.tunable.get_validators()
+            with open(results_filename, "w") as file:
+                for key, value in validators:
+                    file.write(f"Validator,{key},{value}\n")
+                file.write(
+                    "GemmTunableOp_Half_NN,nn_96_128_256_ld_96_256_96,"
+                    "Gemm_Cublaslt_id_999999_tile_999999_stages_999999_"
+                    "splitk_1_red_0_swizzle_0_custom_0_inner_0_cluster_0,0.1\n"
+                )
+
+            A = torch.randn(128, 256, device=device, dtype=dtype)
+            B = torch.randn(256, 96, device=device, dtype=dtype)
+            C = torch.matmul(A, B)
+            self.assertEqual(C.shape, (128, 96))
+
+    @skipIfRocm
+    @dtypes(torch.half)
+    def test_cuda_graph_capture_skips_first_tuning_tunableop(self, device, dtype):
+        with self._tunableop_ctx():
+            torch.cuda.tunable.set_rotating_buffer_size(0)
+            torch.cuda.tunable.set_max_tuning_duration(1)
+            torch.cuda.tunable.set_max_tuning_iterations(1)
+            ref_num_results = len(torch.cuda.tunable.get_results())
+
+            A = torch.randn(64, 64, device=device, dtype=dtype)
+            B = torch.randn(64, 64, device=device, dtype=dtype)
+            C = torch.empty(64, 64, device=device, dtype=dtype)
+
+            torch.cuda.tunable.enable(False)
+            torch.mm(A, B, out=C)
+            torch.cuda.synchronize()
+            torch.cuda.tunable.enable(True)
+
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph):
+                torch.mm(A, B, out=C)
+            graph.replay()
+            torch.cuda.synchronize()
+
+            self.assertEqual(len(torch.cuda.tunable.get_results()), ref_num_results)
 
     @dtypes(torch.float)
     def test_disable_tuning_tunableop(self, device, dtype):
@@ -10054,7 +10145,6 @@ class TestLinalgCudaOnly(TestCase):
             # There must be a new tuning result
             self.assertEqual((total_num_results - ref_num_results), 2)
 
-    @skipCUDAIfNotRocm
     @dtypes(torch.bfloat16)
     def test_gemm_bias_offline_tunableop(self, device, dtype):
         import os
@@ -10188,7 +10278,6 @@ class TestLinalgCudaOnly(TestCase):
                 count = 6
             self.assertEqual((total_num_results - ref_num_results), count)
 
-    @skipCUDAIfNotRocm
     @runOnRocmArch(MI300_ARCH)
     @dtypes(torch.float)
     def test_tf32_tunableop(self, device, dtype):
@@ -10248,7 +10337,6 @@ class TestLinalgCudaOnly(TestCase):
             # Disable TF32
             torch.backends.cuda.matmul.allow_tf32 = False
 
-    @skipCUDAIfNotRocm
     @runOnRocmArch(MI300_ARCH)
     @dtypes(torch.float)
     def test_tf32_offline_tunableop(self, device, dtype):
@@ -10318,7 +10406,6 @@ class TestLinalgCudaOnly(TestCase):
             # Disable TF32
             torch.backends.cuda.matmul.allow_tf32 = False
 
-    @skipCUDAIfNotRocm
     @dtypes(torch.float16)
     def test_blaslog_tunableop(self, device, dtype):
         # Test that PYTORCH_TUNABLEOP_BLAS_LOG=1 gives
@@ -10393,16 +10480,13 @@ class TestLinalgCudaOnly(TestCase):
             # Check that there BLAS PARAMS are in the CSV file
             with open(result_filename) as file:
                 reader = csv.reader(file)
-                for _ in range(5):  # Skip the first 5 lines for the validator
-                    next(reader, None)
+                first_row = next(row for row in reader if row[0] != "Validator")
                 # Check for extra column
-                first_row = next(reader)
                 self.assertGreater(len(first_row), 5)
                 # Check for YAML entry to the right of
                 # BLAS PARAMS
                 self.assertTrue("{ function:" in first_row[4])
 
-    @skipCUDAIfNotRocm
     # Fails with triton 3.7
     @dtypes(torch.float)
     def test_mm_submatrix_offline_tunableop(self, device, dtype):
@@ -10538,7 +10622,7 @@ class TestLinalgCudaOnly(TestCase):
             # With hipBLASLt preferred, the two linear/addmm+bias calls are
             # tracked as GemmAndBias tunables (+2). With rocBLAS preferred,
             # they fall back to regular GEMM signatures and don't add entries.
-            expected_num_results = 10 if preferred_blas == "_BlasBackend.Cublaslt" else 8
+            expected_num_results = 10 if not TEST_WITH_ROCM or preferred_blas == "_BlasBackend.Cublaslt" else 8
             self.assertEqual(total_num_results, expected_num_results)
 
             results_filename = torch.cuda.tunable.get_filename()
@@ -10549,7 +10633,6 @@ class TestLinalgCudaOnly(TestCase):
             ok = self._compare_untuned_tuned_entries()
             self.assertTrue(ok)
 
-    @skipCUDAIfNotRocm
     @dtypes(torch.float32)
     def test_ops_append_to_existing_file_tunableop(self, device, dtype):
         """If a TunableOp results file already exists (with matching Validator),
@@ -10602,7 +10685,6 @@ class TestLinalgCudaOnly(TestCase):
 
             self.assertGreater(final_count, initial_count)
 
-    @skipCUDAIfNotRocm
     @dtypes(torch.float32)
     def test_offline_tuning_append_to_existing_file_tunableop(self, device, dtype):
         """If an offline tuning untuned file already exists,
@@ -10652,7 +10734,6 @@ class TestLinalgCudaOnly(TestCase):
             # Verify the seeded entry is still present (proving it wasn't overwritten)
             self.assertIn(seed_lines[0], final_content)
 
-    @skipCUDAIfNotRocm
     @dtypes(torch.float32)
     def test_matmul_empty_existing_file_tunableop(self, device, dtype):
         """ Test that if an existing results file is empty/corrupted, then the default behaviour should hold """
@@ -10703,7 +10784,6 @@ class TestLinalgCudaOnly(TestCase):
         delta = tuned_default_scaled_mm - ref_scaled_mm
         self.assertTrue(torch.all(delta == 0))
 
-    @skipCUDAIfNotRocm
     @dtypes(torch.float)
     def test_call_count_tunableop(self, device, dtype):
         # Test that after tuning a GEMM in TunableOp, we only call the GEMM kernel once
@@ -10742,7 +10822,7 @@ class TestLinalgCudaOnly(TestCase):
             # Check that after tuning, there was only one kernel
             # launched per PyTorch API. The kernels have string
             # that always starts with `Cijk*`
-            mm_key = 'Cijk'
+            mm_key = 'Cijk' if TEST_WITH_ROCM else 'kernel'
             events = prof.events()
             for evt in events:
                 if mm_key in evt.name:
@@ -10752,7 +10832,6 @@ class TestLinalgCudaOnly(TestCase):
             # There must be exactly three kernels only
             self.assertEqual(kernel_count, 3)
 
-    @skipCUDAIfNotRocm
     @dtypes(torch.float16)
     def test_numerical_check_python_binding_tunableop(self, device, dtype):
         with self._tunableop_ctx():
@@ -10773,7 +10852,6 @@ class TestLinalgCudaOnly(TestCase):
             with self.assertRaisesRegex(RuntimeError, r"positive"):
                 torch.cuda.tunable.set_numerical_check_tolerances(True, -1e-5, -1e5)
 
-    @skipCUDAIfNotRocm
     @dtypes(torch.float16, torch.float32)
     def test_numerical_check_accuracy_tunableop(self, device, dtype):
         shapes = [(127, 193, 61), (251, 317, 73), (89, 149, 41)]
@@ -10791,14 +10869,13 @@ class TestLinalgCudaOnly(TestCase):
                 C_numeric = a @ b
             self.assertTrue(torch.allclose(C_baseline, C_numeric, atol=atol, rtol=rtol))
 
-    @skipCUDAIfNotRocm
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 5e-2,
                         torch.half: 5e-2, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
     @dtypesIfCUDA(*floating_types_and(torch.bfloat16, torch.half))
     @dtypes(*floating_types_and(torch.bfloat16))
     @tf32_on_and_off(0.05)
     @reduced_f32_on_and_off(0.05)
-    def test_addmm_relu_tunableop_rocm(self, device, dtype):
+    def test_addmm_relu_tunableop(self, device, dtype):
         if torch.version.hip and isRocmArchAnyOf(MI350_ARCH) and dtype is torch.double:
             self.skipTest("Currently failing on rocm mi350, hipblaslt mem fault")
         with self._tunableop_ctx():
