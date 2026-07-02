@@ -10,7 +10,9 @@
 #include <ATen/core/boxing/BoxedKernel.h>
 
 #include <c10/util/Metaprogramming.h>
+#include <cstddef>
 #include <type_traits>
+#include <utility>
 
 namespace c10::impl {
 
@@ -76,18 +78,6 @@ using can_unbox = std::conjunction<
         std::is_same<void, T>>,
     std::negation<std::is_lvalue_reference<T>>>;
 
-//
-// boxArgs - utility for pushing unboxed args onto IValue stack
-//
-template <class... Args>
-torch::jit::Stack boxArgs(Args... args) {
-  // TODO Reuse stack vector instead of allocating?
-  torch::jit::Stack stack;
-  stack.reserve(sizeof...(Args));
-  torch::jit::push(stack, std::forward<Args>(args)...);
-  return stack;
-}
-
 template <class T>
 inline constexpr size_t boxed_size_one() {
   static_assert(
@@ -117,9 +107,13 @@ static inline constexpr size_t boxed_size() {
   return BoxedSize<Args...>::value;
 }
 
-template <typename T>
-C10_ALWAYS_INLINE_UNLESS_MOBILE void boxToStack(IValue*& dest, T& arg) {
-  new (dest++) IValue(arg);
+template <
+    typename T,
+    std::enable_if_t<
+        !std::is_same_v<std::decay_t<T>, c10::TensorOptions>,
+        int> = 0>
+C10_ALWAYS_INLINE_UNLESS_MOBILE void boxToStack(IValue*& dest, T&& arg) {
+  new (dest++) IValue(std::forward<T>(arg));
 }
 
 C10_ALWAYS_INLINE_UNLESS_MOBILE void boxToStack(
@@ -136,10 +130,56 @@ inline void boxArgsToStack(IValue*& /*unused*/) {}
 template <typename T, typename... Args>
 C10_ALWAYS_INLINE_UNLESS_MOBILE void boxArgsToStack(
     IValue*& dest,
-    T& arg,
-    Args&... args) {
-  boxToStack(dest, arg);
-  boxArgsToStack(dest, args...);
+    T&& arg,
+    Args&&... args) {
+  boxToStack(dest, std::forward<T>(arg));
+  boxArgsToStack(dest, std::forward<Args>(args)...);
+}
+
+//
+// boxArgs - utility for boxing unboxed args into an IValue stack
+//
+// The args are boxed into a stack-local buffer and moved into the returned
+// vector by a shared non-template helper, so each instantiation only emits
+// the type-dependent IValue constructions. This keeps the per-signature
+// code size of BoxedKernelWrapper instantiations small (there are hundreds
+// of them in libtorch).
+//
+
+// Moves [begin, end) into a freshly allocated Stack and destroys the moved
+// IValues. On exception (allocation failure) the buffer is left untouched.
+TORCH_API torch::jit::Stack boxedBufferToStack(IValue* begin, IValue* end);
+
+namespace detail {
+// Destroys [begin, cur) on unwind if boxing an argument throws.
+struct BoxedBufferGuard final {
+  IValue* begin;
+  IValue* cur;
+  ~BoxedBufferGuard() {
+    while (cur != begin) {
+      (--cur)->~IValue();
+    }
+  }
+};
+} // namespace detail
+
+template <class... Args>
+torch::jit::Stack boxArgs(Args... args) {
+  constexpr size_t num_boxed = boxed_size<Args...>();
+  if constexpr (num_boxed == 0) {
+    return torch::jit::Stack();
+  } else {
+    // See Dispatcher::callWithDispatchKeySlowPath for why this is not an
+    // std::array<IValue, num_boxed>.
+    // NOLINTNEXTLINE(*array*)
+    alignas(IValue) std::byte buffer[num_boxed * sizeof(IValue)];
+    IValue* const buffer_begin = reinterpret_cast<IValue*>(buffer);
+    detail::BoxedBufferGuard guard{buffer_begin, buffer_begin};
+    boxArgsToStack(guard.cur, std::forward<Args>(args)...);
+    torch::jit::Stack stack = boxedBufferToStack(guard.begin, guard.cur);
+    guard.cur = guard.begin;
+    return stack;
+  }
 }
 
 //
