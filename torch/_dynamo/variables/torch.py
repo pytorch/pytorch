@@ -2356,8 +2356,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 source = CallFunctionNoArgsSource(self.source)
                 install_guard(source.make_guard(GuardBuilder.ID_MATCH))
             # assumes `module` is in the form `torch.xyz`
+            torch_source = ImportSource("torch")
+            install_guard(torch_source.make_guard(GuardBuilder.ID_MATCH))
             new_source = AttrSource(
-                ImportSource("torch"),
+                torch_source,
                 module.__name__.rsplit(".", maxsplit=1)[-1],
             )
             return VariableTracker.build(tx, module, new_source)
@@ -2721,8 +2723,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     tx,
                     f"{fn.__name__} takes exactly one argument ({len(args)} given)",
                 )
+            torch_source = ImportSource("torch")
+            install_guard(torch_source.make_guard(GuardBuilder.ID_MATCH))
             current_device_source = CallFunctionNoArgsSource(
-                AttrSource(AttrSource(ImportSource("torch"), "cuda"), "current_device")
+                AttrSource(AttrSource(torch_source, "cuda"), "current_device")
             )
             install_guard(current_device_source.make_guard(GuardBuilder.EQUALS_MATCH))
             arg = args[0].as_python_constant()
