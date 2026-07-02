@@ -2766,7 +2766,7 @@ class InstructionTranslatorBase(
         tos = self.stack[-1]
         if not isinstance(tos, ExceptionVals):
             raise AssertionError(
-                "expected isinstance(tos, ExceptionVariable) to be true"
+                "expected isinstance(tos, ExceptionVals) to be true"
             )
         if issubclass(tos.exc_type, StopIteration):
             self.popn(3)
