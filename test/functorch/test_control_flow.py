@@ -4593,10 +4593,6 @@ class AssociativeScanTests(TestCase):
             )
 
     def test_associative_scan_pointwise_cpu_lowering_error(self):
-        # The device constraint for pointwise associative_scan is enforced in the
-        # Inductor lowering (the default CPU backend lacks scan support), not the
-        # eager wrapper. The check fires before any codegen, so no GPU is
-        # required. See https://github.com/pytorch/pytorch/issues/186594.
         def combine_fn(x, y):
             return x + y
 
@@ -4613,10 +4609,6 @@ class AssociativeScanTests(TestCase):
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     def test_associative_scan_pointwise_mixed_device_lowering_error(self):
-        # The lowering checks every leaf's device, not just the first, so a
-        # multi-leaf input with an unsupported-device leaf is rejected even when
-        # the first leaf is on a supported device. See
-        # https://github.com/pytorch/pytorch/issues/186594.
         def combine_fn(x, y):
             return (x[0] + y[0], x[1] + y[1])
 

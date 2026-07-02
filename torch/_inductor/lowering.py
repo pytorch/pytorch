@@ -9069,9 +9069,10 @@ def associative_scan(combine_fn: ir.Subgraph, xs, additional_inputs: tuple[Any, 
     for x in xs:
         device = x.get_device()
         if not V.graph.has_feature(device, BackendFeature.SCAN):
+            device_str = device.type if device is not None else "unknown device"
             raise RuntimeError(
                 "associative_scan with combine_mode='pointwise' is not supported "
-                f"on {device.type if device is not None else device}"
+                f"on {device_str}. Try to use combine_mode='generic'."
             )
 
     num_scan_inputs = 2 * len(xs)
