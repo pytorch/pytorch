@@ -375,6 +375,47 @@ class TestSqConcat(torch._dynamo.test_case.TestCase):
         d = collections.deque(range(5), maxlen=True)
         self.assertEqual(list(d), [4])
 
+    # --- deque copy (deque.copy / copy.copy / __copy__) ---
+
+    @make_dynamo_test
+    def test_deque_copy_method(self):
+        d = collections.deque([1, 2, 3])
+        e = d.copy()
+        self.assertEqual(list(e), [1, 2, 3])
+        self.assertIsNone(e.maxlen)
+        d.append(4)
+        self.assertEqual(list(e), [1, 2, 3])
+
+    @make_dynamo_test
+    def test_deque_copy_preserves_maxlen(self):
+        d = collections.deque([1, 2, 3], maxlen=3)
+        e = d.copy()
+        self.assertEqual(list(e), [1, 2, 3])
+        self.assertEqual(e.maxlen, 3)
+
+    @make_dynamo_test
+    def test_deque_copy_module(self):
+        import copy
+
+        d = collections.deque([1, 2], maxlen=5)
+        e = copy.copy(d)
+        self.assertEqual(list(e), [1, 2])
+        self.assertEqual(e.maxlen, 5)
+
+    @make_dynamo_test
+    def test_deque_copy_shares_elements(self):
+        mut = [10]
+        d = collections.deque([mut])
+        e = d.copy()
+        mut[0] = 11
+        self.assertEqual(list(d), list(e))
+
+    @make_dynamo_test
+    def test_deque_copy_too_many_args(self):
+        d = collections.deque([1, 2])
+        with self.assertRaises(TypeError):
+            d.copy(1)
+
     # --- torch.Size concatenation ---
 
     @make_dynamo_test

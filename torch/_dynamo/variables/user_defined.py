@@ -1023,14 +1023,15 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif self.value is collections.OrderedDict and name == "move_to_end":
             return args[0].call_method(tx, name, [*args[1:]], kwargs)
         elif (
-            self.value is collections.defaultdict
+            self.value in {collections.defaultdict, collections.deque}
             and name == "__copy__"
             and len(args) == 1
             and not kwargs
         ):
-            # copy.copy(dd) resolves type(dd).__copy__ and calls it with the
+            # copy.copy(x) resolves type(x).__copy__ and calls it with the
             # instance as the sole argument; dispatch to the instance so the
-            # default_factory and contents are preserved.
+            # contents (and defaultdict default_factory / deque maxlen) are
+            # preserved.
             return args[0].call_method(tx, name, [], kwargs)
         elif name == "__len__" and len(args) == 1 and not kwargs:
             from .object_protocol import generic_len
