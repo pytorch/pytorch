@@ -397,7 +397,7 @@ class DTensorPPIntegrationBase(MultiProcContinuousTest):
             self.assertEqual(
                 pp_meta.get_diff(ref_meta),
                 [],
-                f"DTensor metadata mismatch for {param_fqn}",
+                lambda msg: f"{msg}\nDTensor metadata mismatch for {param_fqn}",
             )
             pp_for_compare = pp_grad.to_local()
             ref_for_compare = ref_grad.to_local()

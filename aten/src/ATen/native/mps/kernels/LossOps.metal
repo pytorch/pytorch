@@ -46,9 +46,9 @@ static void calc_log_alpha_beta(
     device T* log_alpha,
     constant T* log_probs,
     constant T_target* targets,
-    constant T_index* input_lengths,
-    constant T_index* target_lengths,
-    constant T_index* target_batch_offsets,
+    constant T_index*,
+    constant T_index*,
+    constant T_index*,
     constant CTCLossParams<T_index>& params,
     uint tid,
     uint tptg,
@@ -103,7 +103,7 @@ static void calc_log_alpha_beta(
     if (s < S && target_length > 0) {
       target_token =
           get_target_prime(targets, params.tg_target_stride, s, params.BLANK);
-      if constexpr (beta) {
+      if IF_CONSTEXPR (beta) {
         use_C = ((s + 2) < S) &&
             (get_target_prime(
                  targets, params.tg_target_stride, s + 2, params.BLANK) !=
