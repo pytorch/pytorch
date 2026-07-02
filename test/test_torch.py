@@ -2055,10 +2055,15 @@ class TestTorchDeviceType(TestCase):
             else:
                 return 2 * x
 
+        def _set_real_imag(tensor, real, imag):
+            tensor.real = real
+            tensor.imag = imag
+
         # prepare inputs for subsequent ops
         size = 4
         x = torch.rand(size, device=device)
         y = torch.rand((), device=device)
+        z = torch.randn(size, device=device, dtype=torch.complex64)
         ind = torch.randint(size, (3,), device=device)
         ind_cpu = ind.cpu()
         repeats = torch.full((1,), 2, device=device)
@@ -2069,6 +2074,7 @@ class TestTorchDeviceType(TestCase):
                           lambda: _ind_put_fn(x, ind, y),
                           lambda: _ind_put_fn(x, 0, 5.),
                           lambda: _ind_put_fn(x, slice(0, 1), 5.),
+                          lambda: _set_real_imag(z, 3., 5.),
                           lambda: _ind_get_fn(x, mask_cpu),
                           lambda: _ind_get_fn(x, ind),
                           lambda: torch.nn.functional.one_hot(ind, num_classes=size),
@@ -2858,6 +2864,11 @@ class TestTorchDeviceType(TestCase):
         test_ops(torch.cummin, "cummin", torch.tensor([[1, 0, 1],
                                                        [0, 0, 0],
                                                        [0, 0, 0]]), expected_out)
+
+        for op in [torch.cummax, torch.cummin]:
+            x = torch.randn(5, dtype=torch.complex64, device=device)
+            with self.assertRaisesRegex(RuntimeError, "not implemented for 'ComplexFloat'"):
+                op(x, 0)
 
     def test_logcumsumexp(self, device):
         def logcumsumexp(a, axis):
