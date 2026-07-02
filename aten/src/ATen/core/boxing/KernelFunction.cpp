@@ -53,4 +53,21 @@ bool KernelFunction::_equalsBoxedAndUnboxed(const KernelFunction& other) const {
          unboxed_kernel_func_ == other.unboxed_kernel_func_;
 }
 
+namespace impl {
+
+torch::jit::Stack boxedBufferToStack(IValue* begin, IValue* end) {
+  torch::jit::Stack stack;
+  stack.reserve(static_cast<size_t>(end - begin));
+  for (IValue* it = begin; it != end; ++it) {
+    // push_back into reserved capacity is noexcept (IValue's move
+    // constructor is noexcept), so a partially drained buffer is not
+    // observable by the caller's cleanup guard.
+    stack.push_back(std::move(*it));
+    it->~IValue();
+  }
+  return stack;
+}
+
+} // namespace impl
+
 } // namespace c10
