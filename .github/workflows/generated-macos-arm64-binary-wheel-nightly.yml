@@ -74,7 +74,7 @@ jobs:
           git clean -fxd
       - name: Install libomp
         run: |
-          "${PYTORCH_ROOT}/.ci/wheel/install_libomp.sh"
+          "${PYTORCH_ROOT}/.ci/macwheel/install_libomp.sh"
       - name: Install uv
         uses: pytorch/test-infra/.github/actions/setup-uv@main
         with:
@@ -89,10 +89,9 @@ jobs:
         run: uv python install $DESIRED_PYTHONS
       - name: Build all wheels
         run: |
-          "${PYTORCH_ROOT}/.ci/wheel/build_all_macos_wheels.sh"
-      - name: Delocate all wheels
-        run: |
-          "${PYTORCH_ROOT}/.ci/wheel/delocate_wheels.sh"
+          # Per-Python build now delocates inline (repair_wheel.py); no
+          # separate delocation step.
+          "${PYTORCH_ROOT}/.ci/macwheel/build_all_macos_wheels.sh"
       # Upload phase: each wheel becomes its own artifact (one call per name).
       - name: Upload wheel-py3_10-cpu
         uses: actions/upload-artifact@v4.4.0
