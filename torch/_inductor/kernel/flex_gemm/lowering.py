@@ -22,6 +22,7 @@ from .constraints import (
     LOCAL_REDUCE_AUX_OUTPUT_CONTRACT_ERROR,
     LOCAL_REDUCE_DENSE_MM_SCOPE_ERROR,
     LOCAL_REDUCE_PARTIAL_OUTPUT_CONTRACT_ERROR,
+    statically_known_shape_equal,
     validate_flex_gemm_local_reduce_config,
 )
 
@@ -75,11 +76,11 @@ def infer_flex_gemm_epilogue_arg_kinds(
     epilogue_arg_kinds = []
     for epilogue_arg in epilogue_args:
         epilogue_arg_size = epilogue_arg.get_size()
-        if epilogue_arg_size == output_size:
+        if statically_known_shape_equal(epilogue_arg_size, output_size):
             epilogue_arg_kinds.append("tile")
-        elif epilogue_arg_size == [1, n]:
+        elif statically_known_shape_equal(epilogue_arg_size, [1, n]):
             epilogue_arg_kinds.append("row")
-        elif epilogue_arg_size == [m, 1]:
+        elif statically_known_shape_equal(epilogue_arg_size, [m, 1]):
             epilogue_arg_kinds.append("col")
         else:
             raise NotImplementedError(
@@ -109,7 +110,7 @@ def validate_flex_gemm_aux_outputs(
                 "FlexGEMM generic aux tuple epilogues require aux output metadata"
             )
         aux_size = ir.convert_shape_to_inductor(aux_meta.shape)
-        if aux_size != output_size:
+        if not statically_known_shape_equal(aux_size, output_size):
             if is_flex_gemm_partial_reduction_shape(aux_size, output_size):
                 raise NotImplementedError(LOCAL_REDUCE_PARTIAL_OUTPUT_CONTRACT_ERROR)
             raise NotImplementedError(LOCAL_REDUCE_AUX_OUTPUT_CONTRACT_ERROR)

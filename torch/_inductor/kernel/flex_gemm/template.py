@@ -139,6 +139,7 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
         call_kwargs += (
             f", out={self.get_output()}, "
             f"expected_ndim={config.gemm_op.input_ndim}, "
+            "stream=stream, "
             "device_capacity_override=device_capacity_override, "
             "quack_cache_dir=quack_cache_dir"
         )
