@@ -30,6 +30,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import (
+    tf32_on_and_off,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     SM80OrLater,
@@ -532,6 +533,7 @@ class CudaReproTests(TestCase):
 
         self._test_split_reduction_impl(x)
 
+    @tf32_on_and_off(0.001)
     def test_split_with_sizes_reshape_cat_cantsplit_regression(self):
         class Repro(nn.Module):
             def __init__(self):
@@ -572,7 +574,7 @@ class CudaReproTests(TestCase):
             eager_out = model(x, indices)
             compiled_out = torch.compile(model)(x, indices)
 
-        torch.testing.assert_close(compiled_out, eager_out)
+        self.assertEqual(compiled_out, eager_out)
 
     @config.patch({"emulate_precision_casts": True})
     def test_bool_emulate_low_precision(self):
