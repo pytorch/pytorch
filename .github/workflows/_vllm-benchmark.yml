@@ -92,9 +92,6 @@ jobs:
           submodules: recursive
           show-progress: false
 
-      # role/arc reads gha-artifacts and is assumable from any pytorch/pytorch OIDC
-      # (OSDC and DGX alike), so one ungated auth covers the artifact download for all
-      # runners. Results upload re-auths to upload-benchmark-results further down.
       - name: Authenticate with AWS
         uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
         with:
