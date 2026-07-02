@@ -4,6 +4,7 @@ r"""This package adds support for device memory management implemented in CUDA."
 import collections
 import contextlib
 import ctypes
+import operator
 import pickle
 import sys
 import threading
@@ -119,6 +120,7 @@ def caching_allocator_alloc(size, device: "Device" = None, stream=None):
         See :ref:`cuda-memory-management` for more details about GPU memory
         management.
     """
+    size = operator.index(size)
     if size < 0:
         raise ValueError(
             f"Invalid memory size: {size}. "
