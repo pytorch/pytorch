@@ -346,6 +346,7 @@ batch_fusion = True
 # batch fusion options:
 # batch_linear
 # batch_linear_lhs
+# cat_linear
 # batch_layernorm
 # batch_tanh
 # batch_relu
