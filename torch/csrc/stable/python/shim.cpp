@@ -14,6 +14,9 @@ AOTITorchError torch_tensor_from_pyobject(
     void* py_obj,
     AtenTensorHandle* ret) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(
+        PyGILState_Check(),
+        "torch_tensor_from_pyobject requires the GIL to be held");
     TORCH_CHECK(py_obj != nullptr, "py_obj must not be null");
     TORCH_CHECK(ret != nullptr, "ret must not be null");
 
@@ -32,6 +35,9 @@ AOTITorchError torch_tensor_to_pyobject(
     void* py_type,
     void** ret) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(
+        PyGILState_Check(),
+        "torch_tensor_to_pyobject requires the GIL to be held");
     TORCH_CHECK(ath != nullptr, "ath must not be null");
     TORCH_CHECK(ret != nullptr, "ret must not be null");
 
