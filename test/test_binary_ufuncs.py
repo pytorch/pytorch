@@ -3346,7 +3346,11 @@ class TestBinaryUfuncsDevice(TestCase):
                 iterator = chain(range(-100, -1), range(bits, 100))
             for shift in iterator:
                 shift_left = input << shift
-                self.assertEqual(shift_left, shift_left_expected, msg=f"<< {shift}")
+                self.assertEqual(
+                    shift_left,
+                    shift_left_expected,
+                    msg=lambda msg: f"{msg}\n<< {shift}",
+                )
                 self.compare_with_numpy(
                     lambda x: x << shift,
                     lambda x: np.left_shift(x, shift),
@@ -3355,7 +3359,11 @@ class TestBinaryUfuncsDevice(TestCase):
                     msg=f"<< {shift}",
                 )
                 shift_right = input >> shift
-                self.assertEqual(shift_right, shift_right_expected, msg=f">> {shift}")
+                self.assertEqual(
+                    shift_right,
+                    shift_right_expected,
+                    msg=lambda msg: f"{msg}\n>> {shift}",
+                )
                 self.compare_with_numpy(
                     lambda x: x >> shift,
                     lambda x: np.right_shift(x, shift),

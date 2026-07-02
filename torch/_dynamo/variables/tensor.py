@@ -26,6 +26,7 @@ from contextlib import nullcontext
 from itertools import chain
 from types import NoneType
 from typing import Any, NoReturn, Optional, TYPE_CHECKING
+from typing_extensions import NotRequired, TypedDict
 
 import sympy
 
@@ -177,6 +178,26 @@ def _tensor_debug_repr(value: torch.Tensor, type_name: str = "Tensor") -> str:
     return f"{type_name}(shape={tuple(value.shape)}, dtype={value.dtype})"
 
 
+class TensorSpecializedProps(TypedDict):
+    """Static tensor metadata produced by TensorVariable.specialize; the keys
+    map 1:1 to the corresponding TensorVariable.__init__ kwargs. The size,
+    stride and contiguity keys are only populated for fully static shapes."""
+
+    dtype: torch.dtype
+    device: torch.device
+    layout: torch.layout
+    ndim: int
+    requires_grad: bool
+    is_nested: bool
+    is_quantized: bool
+    is_sparse: bool
+    class_type: type
+    has_grad_fn: bool
+    _size: NotRequired[tuple[Any, ...]]
+    stride: NotRequired[tuple[Any, ...]]
+    is_contiguous: NotRequired[tuple[torch.memory_format, ...] | None]
+
+
 class TensorVariable(VariableTracker):
     """A torch.Tensor input or an intermediate value in the FX graph"""
 
@@ -232,7 +253,7 @@ class TensorVariable(VariableTracker):
         has_grad_fn: bool,
         _size: tuple[Any, ...] | None = None,
         stride: tuple[Any, ...] | None = None,
-        is_contiguous: bool | None = None,
+        is_contiguous: tuple[torch.memory_format, ...] | None = None,
         _is_name_set: bool | None = None,
         **kwargs: Any,
     ) -> None:
@@ -351,8 +372,15 @@ class TensorVariable(VariableTracker):
         return wrap_fx_proxy_cls(type(self), tx, proxy)
 
     @staticmethod
-    def specialize(value: torch.Tensor) -> dict[str, Any]:
-        props: dict[str, Any] = {
+    def specialize(value: torch.Tensor) -> TensorSpecializedProps:
+        try:
+            has_grad_fn = value.grad_fn is not None
+        except Exception:
+            # Workaround for issues with create_parameter_op in Dynamo. Reading
+            # grad_fn should never cause an issue.
+            has_grad_fn = False
+
+        props: TensorSpecializedProps = {
             "dtype": value.dtype,
             "device": value.device,
             "layout": value.layout,
@@ -362,13 +390,8 @@ class TensorVariable(VariableTracker):
             "is_quantized": value.is_quantized,
             "is_sparse": value.is_sparse,
             "class_type": type(value),
+            "has_grad_fn": has_grad_fn,
         }
-        try:
-            props["has_grad_fn"] = value.grad_fn is not None
-        except Exception:
-            # Workaround for issues with create_parameter_op in Dynamo. Reading
-            # grad_fn should never cause an issue.
-            props["has_grad_fn"] = False
 
         if is_sparse_any(value) and not has_free_symbols(value):
             props["_size"] = tuple(
@@ -567,7 +590,7 @@ class TensorVariable(VariableTracker):
     def method_attr_retain_grad(self, tx: "InstructionTranslatorBase") -> NoReturn:
         unimplemented(
             gb_type="Tensor.retain_grad() with AOTDispatcher",
-            context=f"var_getattr {self} retain_grad",
+            context=f"getattro_impl {self} retain_grad",
             explanation="`Tensor.retain_grad()` does not work with AOTDispatcher.",
             hints=[],
         )
@@ -582,7 +605,7 @@ class TensorVariable(VariableTracker):
             and not self.has_grad_fn
         ):
             return ConstantVariable.create(None)
-        # None tells var_getattr to use default .grad handling
+        # None tells getattro_impl to use default .grad handling
         return None
 
     def method_attr_data(self, tx: "InstructionTranslatorBase") -> VariableTracker:
@@ -596,7 +619,7 @@ class TensorVariable(VariableTracker):
         if self.has_grad_fn:
             unimplemented(
                 gb_type="Tensor with grad_fn()",
-                context=f"var_getattr {self} grad_fn",
+                context=f"getattro_impl {self} grad_fn",
                 explanation="Dynamo does not support tracing tensors with a grad_fn directly.",
                 hints=[],
             )
@@ -616,7 +639,7 @@ class TensorVariable(VariableTracker):
         from . import GetAttrVariable
 
         # TODO - This is not a good solution but solves an accuracy issue.
-        # Today, var_getattr returns GetAttrVariable for both non-existent
+        # Today, getattro_impl returns GetAttrVariable for both non-existent
         # attributes and existing attributes. This is a bug and requires more
         # deep dive.
         if name in all_tensor_attrs:
@@ -641,14 +664,27 @@ class TensorVariable(VariableTracker):
 
         return VariableTracker.build(tx, ret_val)
 
-    def var_getattr(
+    def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
+        fake_val = self.as_proxy().node.meta["example_value"]
+        if (
+            isinstance(fake_val, torch.Tensor)
+            and is_sparse_any(fake_val)
+            and (not tx.export or not config.capture_sparse_compute)
+        ):
+            unimplemented(
+                gb_type="Attempted to wrap sparse Tensor",
+                context="",
+                explanation="torch.compile does not support sparse Tensors",
+                hints=[*graph_break_hints.SPARSE_TENSOR],
+            )
+
         if self.is_strict_mode(tx):
             if name in self._strict_mode_banned_ops():
                 unimplemented(
                     gb_type="Strict mode banned op",
-                    context=f"var_getattr {self} {name}",
+                    context=f"getattro_impl {self} {name}",
                     explanation=f"Getattr invocation '{name}' in strict mode is not supported.",
                     hints=[
                         f"Remove `{name}` from the list of banned ops by "
@@ -2087,7 +2123,7 @@ class TensorVariable(VariableTracker):
                         "register_hook",
                         source_target=None,
                         enable_grad=None,
-                        set_subgraph_inputs="automatic_with_forced_inputs",  # pyrefly: ignore[bad-argument-type]
+                        set_subgraph_inputs="automatic_with_forced_inputs",
                         restore_side_effects=True,
                     )
             except torch._dynamo.exc.UnknownPropertiesDuringBackwardTrace:
@@ -2280,8 +2316,8 @@ class TensorVariable(VariableTracker):
                 return None
         fwd_kwargs = dict(kwargs)
         fwd_kwargs.pop("layout", None)
-        fwd_kwargs.setdefault("dtype", self.var_getattr(tx, "dtype"))
-        fwd_kwargs.setdefault("device", self.var_getattr(tx, "device"))
+        fwd_kwargs.setdefault("dtype", self.getattro_impl(tx, "dtype"))
+        fwd_kwargs.setdefault("device", self.getattro_impl(tx, "device"))
         return variables.TorchInGraphFunctionVariable(torch.tensor).call_function(
             tx,
             [data_arg],
@@ -3045,7 +3081,7 @@ class NumpyNdarrayVariable(TensorVariable):
         )
         return NumpyNdarrayVariable.create(tx, proxy)
 
-    def var_getattr(
+    def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         # NB: This INTENTIONALLY does not call super(), because there is
@@ -3103,14 +3139,14 @@ class NumpyNdarrayVariable(TensorVariable):
         elif name in ["base", "flags", "dtype"]:
             unimplemented(
                 gb_type="Unsupported ndarray attribute access",
-                context=f"var_getattr {self} {name}",
+                context=f"getattro_impl {self} {name}",
                 explanation=f"Dynamo currently does not support tracing `ndarray.{name}`.",
                 hints=[],
             )
         elif name == "__version__":
             unimplemented(
                 gb_type="Unsupported ndarray.__version__ access",
-                context=f"var_getattr {self} {name}",
+                context=f"getattro_impl {self} {name}",
                 explanation=f"Dynamo currently does not support tracing `ndarray.{name}`.",
                 hints=[],
             )
