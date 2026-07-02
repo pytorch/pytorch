@@ -127,7 +127,7 @@ def summarize_job(
     name: str,
     statuses: list[dict[str, Any]],
     oldest_sha: str | None,
-    commit_meta: dict[str, dict[str, Any]],
+    commit_meta: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     real = [j for j in statuses if not is_skipped(j)]
     streak = current_failure_streak(statuses)
@@ -154,7 +154,7 @@ def summarize_job(
     )
     # When the start is pinned (not clipped), surface the suspected culprit: the
     # commit/PR the streak began at. Left blank when clipped -- we don't know it.
-    meta = commit_meta.get(failing_since_sha) if not clipped else None
+    meta = commit_meta.get(failing_since_sha) if (commit_meta and not clipped) else None
     pr_num = meta.get("prNum") if meta else None
     return {
         "job_name": name,
