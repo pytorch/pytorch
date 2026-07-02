@@ -1203,12 +1203,12 @@ class TestUserStreamCompile(InductorTestCase):
         self.assertEqual(
             len(stream_kernels.get("s1", [])),
             1,
-            f"Expected 1 kernel on s1, got: {stream_kernels}",
+            lambda msg: f"{msg}\nExpected 1 kernel on s1, got: {stream_kernels}",
         )
         self.assertEqual(
             len(stream_kernels.get("s2", [])),
             1,
-            f"Expected 1 kernel on s2, got: {stream_kernels}",
+            lambda msg: f"{msg}\nExpected 1 kernel on s2, got: {stream_kernels}",
         )
 
     def test_no_buffer_reuse_across_streams(self):
