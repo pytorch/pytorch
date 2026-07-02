@@ -724,7 +724,11 @@ class TestInductorDynamic(DynamicShapesTestCase):
         else:
             # CUDA limits number of blocks only — 600M/64 ≈ 9.4M blocks,
             # well within 2^31-1, so no scaling should occur
-            self.assertEqual(result_x, 64, f"XBLOCK should remain 64 (got {result_x})")
+            self.assertEqual(
+                result_x,
+                64,
+                lambda msg: f"{msg}\nXBLOCK should remain 64 (got {result_x})",
+            )
             self.assertLessEqual(result_num_blocks, max_grid_x)
 
     @torch._dynamo.config.patch(

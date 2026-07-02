@@ -62,7 +62,12 @@ from .base import (
 )
 from .constant import ConstantVariable
 from .hashable import HashableTracker, is_hashable, raise_unhashable
-from .object_protocol import generic_richcompare_bool, vt_getitem
+from .object_protocol import (
+    _is_method_type,
+    generic_richcompare_bool,
+    mro_lookup,
+    vt_getitem,
+)
 from .sets import SetVariable
 
 
@@ -823,6 +828,21 @@ class ConstDictVariable(VariableTracker):
             tx.output.guard_on_key_order.add(self.source)
         return DictIterator(self.items.keys())
 
+    def tp_init_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        from . import DictBuiltinVariable
+
+        temp_dict_vt = DictBuiltinVariable.call_custom_dict(tx, dict, *args, **kwargs)
+        if isinstance(temp_dict_vt, ConstDictVariable):
+            self._check_removable_handle_id_dict_merge(tx, temp_dict_vt)
+        tx.output.side_effects.mutation(self)
+        self.items.update(temp_dict_vt.items)  # type: ignore[attr-defined]
+        return ConstantVariable.create(None)
+
     def call_method(
         self,
         tx: "InstructionTranslatorBase",
@@ -837,20 +857,9 @@ class ConstDictVariable(VariableTracker):
         # corresponding value VT. For __contains__, we add a DICT_CONTAINS
         # guard. But for all the other methods, we insert the DICT_KEYS_MATCH
         # guard to be conservative.
-        from . import DictBuiltinVariable
-
         Hashable = HashableTracker
 
-        if name == "__init__":
-            temp_dict_vt = DictBuiltinVariable.call_custom_dict(
-                tx, dict, *args, **kwargs
-            )
-            if isinstance(temp_dict_vt, ConstDictVariable):
-                self._check_removable_handle_id_dict_merge(tx, temp_dict_vt)
-            tx.output.side_effects.mutation(self)
-            self.items.update(temp_dict_vt.items)  # type: ignore[attr-defined]
-            return ConstantVariable.create(None)
-        elif name == "items":
+        if name == "items":
             if args or kwargs:
                 raise_args_mismatch(
                     tx,
@@ -1106,7 +1115,7 @@ class ConstDictVariable(VariableTracker):
 
     def nb_or_impl(
         self,
-        tx: Any,
+        tx: "InstructionTranslatorBase",
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
@@ -1124,7 +1133,7 @@ class ConstDictVariable(VariableTracker):
 
     def nb_inplace_or_impl(
         self,
-        tx: Any,
+        tx: "InstructionTranslatorBase",
         other: VariableTracker,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Objects/dictobject.c#L4660-L4667
@@ -1235,10 +1244,17 @@ class ConstDictVariable(VariableTracker):
             return VariableTracker.build(tx, not eq_result.as_python_constant())
         return eq_result
 
-    def var_getattr(self, tx: "InstructionTranslatorBase", name: str):
+    def getattro_impl(self, tx: "InstructionTranslatorBase", name: str):
         if name == "__class__":
             return VariableTracker.build(tx, self.python_type())
-        return super().var_getattr(tx, name)
+        # DictGuardManager does not support getattr_manager for plain dicts,
+        # so AttrSource chains through a dict source break guard creation.
+        # Return CallMethodVariable directly for methods, bypassing the
+        # MRO walk in object_generic_getattr that would create that chain.
+        type_attr = mro_lookup(self.python_type(), name)
+        if type_attr is not NO_SUCH_SUBOBJ and _is_method_type(type_attr):
+            return variables.CallMethodVariable(self, name)
+        return super().getattro_impl(tx, name)
 
 
 class MappingProxyVariable(VariableTracker):
@@ -1531,6 +1547,16 @@ class DictViewVariable(VariableTracker):
         if name in self.python_type().__dict__:
             return ConstantVariable.create(True)
         return ConstantVariable.create(False)
+
+    def getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        # dictview_mapping getset returns a read-only mappingproxy of the
+        # underlying dict for dict_keys/values/items.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L5032-L5040
+        if name == "mapping":
+            return MappingProxyVariable(self.dv_dict)
+        return super().getattro_impl(tx, name)
 
     def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         if self.kv == "keys":
@@ -2006,10 +2032,12 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
         return self.item_dict[name]
 
     def __setitem__(self, key: kV, value: VariableTracker) -> None:
-        # Find a way to not hash the key using HashableTracker
+        # Find a way to not hash the key using HashableTracker. CPython's
+        # instance __dict__ accepts arbitrary hashable keys when set via the
+        # mapping API (only attribute access via setattr requires str), and
+        # instance-dict mutations replay with object_setattr_ignore_descriptor
+        # (a plain __dict__ store), so a non-str constant key is fine.
         name = self._maybe_unwrap_key(key)
-        if not istype(name, str):
-            raise AssertionError(f"Expected str key, got {type(name)}")
         self.side_effects.store_instance_dict_attr(self.item, name, value)
 
     def __delitem__(self, key: kV) -> None:

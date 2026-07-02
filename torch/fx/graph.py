@@ -735,6 +735,10 @@ class CodeGen:
                 if stack_trace := node.stack_trace:
                     if parsed_stack_trace := _parse_stack_trace(stack_trace):
                         stack_trace_str = parsed_stack_trace.get_summary_str()
+                        if node.meta.get("autograd_backward", False):
+                            stack_trace_str = (
+                                f"Backward of forward node: {stack_trace_str}"
+                            )
 
                 maybe_recompute_info = ""
                 if hasattr(node, "meta") and node.meta:

@@ -14,8 +14,6 @@
 
 namespace at::cuda {
 
-static bool _cuda_graphs_debug = false;
-
 // To support stream capture across multiple threads, we use a global
 // hashmap mapping cuda stream capture IDs to CUDAGraph objects. This
 // was originally a thread_local std::stack<CUDAGraph*>, but that was
@@ -82,6 +80,35 @@ void CUDAGraph::register_generator_state(
   captured_generator_states_[std::move(state)] = 0;
 }
 
+bool CUDAGraph::has_retained_pool(MempoolId_t pool) const {
+  for (const auto& retained_pool : retained_mempool_ids_) {
+    if (retained_pool == pool) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void CUDAGraph::record_retained_pool(MempoolId_t pool) {
+  if (!has_retained_pool(pool)) {
+    retained_mempool_ids_.push_back(pool);
+  }
+}
+
+void CUDAGraph::retain_pool(MempoolId_t pool) {
+  TORCH_CHECK(
+      capture_id_ != 0 && !capture_ended_,
+      "CUDAGraph::retain_pool may only be called during capture.");
+  TORCH_CHECK(
+      pool.first != 0 || pool.second != 0,
+      "CUDAGraph::retain_pool expected a non-default memory pool.");
+  if (has_retained_pool(pool)) {
+    return;
+  }
+  c10::cuda::CUDACachingAllocator::createOrIncrefPool(capture_dev_, pool);
+  record_retained_pool(pool);
+}
+
 template <>
 std::function<bool(cudaStream_t)> CUDAGraph::create_allocate_filter<cudaStream_t>() const {
   return [this](cudaStream_t stream) {
@@ -145,6 +172,7 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode 
   // due to the capture status being updated _after_ a capture had already started.
   c10::cuda::CUDACachingAllocator::beginAllocateToPool(
       capture_dev_, mempool_id_, create_allocate_filter<cudaStream_t>());
+  record_retained_pool(mempool_id_);
 
   at::getHostAllocator(at::kCUDA)->begin_allocate_to_pool(mempool_id_, create_allocate_filter<c10::Stream>());
 
@@ -168,8 +196,10 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode 
 // capture_end is split so callers can run work on the captured cudaGraph_t
 // (e.g. read its id, dump it, transform it) in the window between the end of
 // capture and finalization, when graph_ is live for both keep_graph modes.
-// capture_end_post finalizes (instantiate + destroy for keep_graph=false);
-// capture_end runs the two back to back for callers that don't need the window.
+// capture_end_post finalizes by destroying the template for keep_graph=false;
+// instantiation is driven separately (by capture_end for C++ callers, or by the
+// Python wrapper) so it has a single entry point. capture_end runs the whole
+// sequence for callers that don't need the window.
 void CUDAGraph::capture_end_pre() {
   auto stream = at::cuda::getCurrentCUDAStream();
 
@@ -217,17 +247,20 @@ void CUDAGraph::capture_end_pre() {
 }
 
 void CUDAGraph::capture_end_post() {
-  if (!keep_graph_) {
-    instantiate();
-    if (!_cuda_graphs_debug) {
-      AT_CUDA_CHECK(cudaGraphDestroy(graph_));
-    }
+  // Destroy-only: when keep_graph=false the template is not retained. The graph
+  // must already be instantiated (capture_end and the Python wrapper instantiate
+  // before calling this).
+  if (!keep_graph_ && has_graph_) {
+    AT_CUDA_CHECK(cudaGraphDestroy(graph_));
     has_graph_ = false;
   }
 }
 
 void CUDAGraph::capture_end() {
   capture_end_pre();
+  if (!keep_graph_) {
+    instantiate();
+  }
   capture_end_post();
 }
 
@@ -281,23 +314,11 @@ void CUDAGraph::replay() {
 }
 
 void CUDAGraph::enable_debug_mode() {
-  _cuda_graphs_debug = true;
-}
-
-void CUDAGraph::debug_dump(const std::string& debug_path) {
-  if (_cuda_graphs_debug || keep_graph_) {
-    TORCH_WARN("DEBUG: calling debug_dump()");
-    if (has_graph_) {
-      TORCH_WARN("DEBUG: calling cudaGraphDebugDotPrint() with ", debug_path);
-      C10_CUDA_CHECK_WARN(cudaGraphDebugDotPrint(graph_, debug_path.c_str(), cudaGraphDebugDotFlagsVerbose)); // most verbose output
-      if (!keep_graph_) {
-        AT_CUDA_CHECK(cudaGraphDestroy(graph_));
-        has_graph_ = false;
-      }
-    }
-  } else {
-    TORCH_WARN("CUDA Graphs debug not enabled, set with [graph].enable_debug_mode()");
-  }
+  // Debug mode just retains the template after capture so it can be inspected
+  // (e.g. dumped); that is exactly what keep_graph does. Unify on keep_graph_
+  // rather than a second flag. dot dumping itself lives in Python now
+  // (torch.cuda.CUDAGraph.debug_dump via cuda.bindings).
+  keep_graph_ = true;
 }
 
 cudaGraph_t CUDAGraph::raw_cuda_graph() {
@@ -358,7 +379,10 @@ void CUDAGraph::reset() {
     clearCublasWorkspacesForStream(capture_stream_.stream());
 
     // notifyCaptureDestroy may throw. How should we handle this?
-    c10::cuda::CUDACachingAllocator::releasePool(capture_dev_, mempool_id_);
+    for (const auto& pool : retained_mempool_ids_) {
+      c10::cuda::CUDACachingAllocator::releasePool(capture_dev_, pool);
+    }
+    retained_mempool_ids_.clear();
     at::getHostAllocator(at::kCUDA)->release_pool(mempool_id_);
     capture_ended_ = false;
   }
@@ -382,6 +406,12 @@ MempoolId_t CUDAGraph::pool() {
   TORCH_CHECK(capture_ended_,
               "Called CUDAGraph::pool() without a preceding successful capture.");
   return mempool_id_;
+}
+
+std::vector<MempoolId_t> CUDAGraph::pools() {
+  TORCH_CHECK(capture_ended_,
+              "Called CUDAGraph::pools() without a preceding successful capture.");
+  return retained_mempool_ids_;
 }
 
 CUDAGraph::~CUDAGraph() {

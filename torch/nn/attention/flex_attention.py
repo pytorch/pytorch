@@ -53,6 +53,19 @@ if typing.TYPE_CHECKING:
 #
 _FLEX_ATTENTION_DISABLE_COMPILE_DEBUG = False
 
+_BLOCK_MASK_TOO_SMALL_ERROR = (
+    "block_mask was created for a smaller length than you're "
+    "using it for, you likely need to create a new block mask."
+)
+_BLOCK_MASK_TOO_LARGE_ERROR = (
+    "block_mask was created for a larger length than you're "
+    "using it for, you can either 1. create a new block mask with "
+    "the correct length, or 2. 'adjust' the existing block mask to "
+    "the correct length by calling block_mask._adjust(q_len, kv_len). "
+    "This essentially 'crops' the block mask to the upper left corner, "
+    "which does not work for all mask_mods!"
+)
+
 _WARNINGS_SHOWN: set[str] = set()
 
 
@@ -433,9 +446,13 @@ def _dense_to_ordered(dense_mask: Tensor) -> tuple[Tensor, Tensor]:
 
 
 def _transpose_ordered(
-    num_blocks_in_row: Tensor, col_indices: Tensor
+    num_blocks_in_row: Tensor, col_indices: Tensor, num_cols: int | None = None
 ) -> tuple[Tensor, Tensor]:
-    dense = _ordered_to_dense(num_blocks_in_row, col_indices, col_indices.shape[-1])
+    dense = _ordered_to_dense(
+        num_blocks_in_row,
+        col_indices,
+        col_indices.shape[-1] if num_cols is None else num_cols,
+    )
     return _dense_to_ordered(dense.transpose(-2, -1))
 
 
@@ -445,10 +462,16 @@ def _adjust_num_blocks_and_indices(
     new_num_rows: int,
     new_num_cols: int,
 ) -> tuple[Tensor, Tensor]:
+    """Crop an ordered block list while ignoring undefined entries past num_blocks."""
     indices = indices[:, :, :new_num_rows, :new_num_cols]
     num_blocks = num_blocks[:, :, :new_num_rows]
-    num_blocks = torch.where(num_blocks < new_num_cols, num_blocks, new_num_cols)
-    num_blocks = torch.sum(indices < num_blocks[:, :, :, None], dim=-1).to(torch.int32)
+    valid_entries = (
+        torch.arange(indices.shape[-1], dtype=num_blocks.dtype, device=indices.device)
+        < num_blocks[..., None]
+    )
+    num_blocks = torch.sum(valid_entries & (indices < new_num_cols), dim=-1).to(
+        torch.int32
+    )
     return num_blocks, indices
 
 
@@ -1033,21 +1056,6 @@ class BlockMask:
                 "full_kv_num_blocks and full_kv_indices must be both provided or omitted"
             )
 
-        # Generate q_num_blocks and q_indices
-        if compute_q_blocks:
-            q_num_blocks, q_indices = _transpose_ordered(kv_num_blocks, kv_indices)
-            if full_kv_num_blocks is not None:
-                if full_kv_indices is None:
-                    raise AssertionError("full_kv_indices must not be None")
-                full_q_num_blocks, full_q_indices = _transpose_ordered(
-                    full_kv_num_blocks, full_kv_indices
-                )
-            else:
-                full_q_num_blocks, full_q_indices = None, None
-        else:
-            q_num_blocks, q_indices = None, None
-            full_q_num_blocks, full_q_indices = None, None
-
         if isinstance(BLOCK_SIZE, int):
             BLOCK_SIZE = (BLOCK_SIZE, BLOCK_SIZE)
 
@@ -1056,6 +1064,24 @@ class BlockMask:
             q_length = kv_indices.shape[-2] * BLOCK_SIZE[0]
             kv_length = kv_indices.shape[-1] * BLOCK_SIZE[1]
             seq_lengths = (q_length, kv_length)
+        kv_num_cols = (seq_lengths[1] + BLOCK_SIZE[1] - 1) // BLOCK_SIZE[1]
+
+        # Generate q_num_blocks and q_indices
+        if compute_q_blocks:
+            q_num_blocks, q_indices = _transpose_ordered(
+                kv_num_blocks, kv_indices, kv_num_cols
+            )
+            if full_kv_num_blocks is not None:
+                if full_kv_indices is None:
+                    raise AssertionError("full_kv_indices must not be None")
+                full_q_num_blocks, full_q_indices = _transpose_ordered(
+                    full_kv_num_blocks, full_kv_indices, kv_num_cols
+                )
+            else:
+                full_q_num_blocks, full_q_indices = None, None
+        else:
+            q_num_blocks, q_indices = None, None
+            full_q_num_blocks, full_q_indices = None, None
 
         if dq_kv_order is not None and not isinstance(dq_kv_order, (bool, Tensor)):
             raise ValueError("dq_kv_order must be a bool, Tensor, or None")
@@ -2113,10 +2139,10 @@ def _apply_kernel_options(
             "Use return_aux=AuxRequest(lse=True) or omit max_scores."
         )
     kernel_options["OUTPUT_MAX"] = output_max
-    if (any_inputs_on_cpu_device or any_inputs_on_mps_device) and output_max:
-        # CPU/MPS don't support returning max yet
-        # TODO: support CPU/MPS for returning max
-        raise NotImplementedError("Returning max scores is not supported on CPU/MPS.")
+    if any_inputs_on_cpu_device and output_max:
+        # CPU doesn't support returning max yet
+        # TODO: support CPU for returning max
+        raise NotImplementedError("Returning max scores is not supported on CPU.")
 
     return kernel_options
 
@@ -2428,39 +2454,23 @@ def flex_attention(
         block_mask_q_len = block_mask.shape[-2]
         block_mask_kv_len = block_mask.shape[-1]
 
-        def block_mask_too_small_error():
-            return (
-                "block_mask was created for a smaller length than you're "
-                "using it for, you likely need to create a new block mask."
-            )
-
-        def block_mask_too_large_error():
-            return (
-                "block_mask was created for a larger length than you're "
-                "using it for, you can either 1. create a new block mask with "
-                "the correct length, or 2. 'adjust' the existing block mask to "
-                "the correct length by calling block_mask._adjust(q_len, kv_len). "
-                "This essentially 'crops' the block mask to the upper left corner, "
-                "which does not work for all mask_mods!"
-            )
-
         # Keep these as separate checks: explicit sym_and/sym_or calls become
         # trace-visible non-Tensor ops under Dynamo.
         torch._check(
             q_len <= block_mask_q_len,
-            block_mask_too_small_error,
+            _BLOCK_MASK_TOO_SMALL_ERROR,
         )
         torch._check(
             kv_len <= block_mask_kv_len,
-            block_mask_too_small_error,
+            _BLOCK_MASK_TOO_SMALL_ERROR,
         )
         torch._check(
             q_len >= block_mask_q_len,
-            block_mask_too_large_error,
+            _BLOCK_MASK_TOO_LARGE_ERROR,
         )
         torch._check(
             kv_len >= block_mask_kv_len,
-            block_mask_too_large_error,
+            _BLOCK_MASK_TOO_LARGE_ERROR,
         )
 
     if scale is None:
