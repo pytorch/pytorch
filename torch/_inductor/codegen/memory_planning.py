@@ -718,7 +718,11 @@ class MemoryPlanner:
         outputs = OrderedSet(V.graph.get_output_names())
         unique_groups = [*{id(g): g for g in name_to_group.values()}.values()]
         for group in unique_groups:
-            group.is_output = any(x in outputs for x in group.names)
+            group.is_output = any(x in outputs for x in group.names) or any(
+                any(user.node.get_name() == "OUTPUT" for user in buf.users)
+                for name in group.names
+                if (buf := V.graph.scheduler.name_to_buf.get(name)) is not None
+            )
 
         if self.buffer_groups is not None:
             raise AssertionError("buffer_groups already computed")

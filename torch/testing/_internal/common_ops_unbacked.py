@@ -84,6 +84,7 @@ ops_dde_xfail = {
     xfail("linalg.pinv"),
     xfail("linalg.pinv", "hermitian"),
     xfail("linalg.pinv", "singular"),
+    xfail("linalg.polar"),
     xfail("linalg.solve"),
     xfail("linalg.solve_ex"),
     xfail("linalg.solve_triangular"),

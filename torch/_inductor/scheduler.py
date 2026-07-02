@@ -4329,6 +4329,24 @@ class Scheduler:
                     ),
                 )
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
+
+        if config.aten_distributed_optimizations.enable_simple_overlap:
+            if (
+                not config.reorder_for_peak_memory
+                and not config.reorder_for_compute_comm_overlap
+            ):
+                from .memory import assign_memory_planning_info_for_scheduler_buffers
+
+                assign_memory_planning_info_for_scheduler_buffers(
+                    self.nodes, self.name_to_buf
+                )
+            with dynamo_timed(
+                "Scheduler.simple_overlap",
+                log_pt2_compile_event=True,
+                log_waitcounter=True,
+            ):
+                self.nodes = comms.simple_overlap(self.nodes)
+
         self.process_grouped_nodes()
 
         if (
@@ -4696,6 +4714,13 @@ class Scheduler:
                     )
                 for alt_name in buf.get_mutations():
                     alt_name = rename(alt_name)
+                    is_ordering_only = getattr(buf, "ordering_only", False)
+                    if is_ordering_only:
+                        add_user(alt_name, node, is_weak=True)
+                        node.add_fake_dep(
+                            WeakDep(alt_name, mutating_buf=buf.get_name(), is_fake=True)
+                        )
+                        continue
                     # this node must run after the prior writer
                     add_user(alt_name, node)
                     node.add_fake_dep(StarDep(alt_name, mode=node_mode))
@@ -8973,9 +8998,9 @@ class Scheduler:
         name_to_graph_input_index = {
             name: idx for idx, name in enumerate(V.graph.graph_inputs)
         }
-        name_to_graph_output_index = {
-            name: idx for idx, name in enumerate(V.graph.get_output_names())
-        }
+        name_to_graph_output_indices: dict[str, list[int]] = defaultdict(list)
+        for idx, name in enumerate(V.graph.get_output_names()):
+            name_to_graph_output_indices[name].append(idx)
 
         V.graph.partition_maps = []
         for partition_id, signature in enumerate(signatures):
@@ -8992,7 +9017,9 @@ class Scheduler:
 
             output_mapping = []
             for node in signature.output_nodes:
-                output_mapping.append(name_to_graph_output_index.get(node.get_name()))
+                output_mapping.append(
+                    name_to_graph_output_indices.get(node.get_name(), [])
+                )
 
             V.graph.partition_maps.append(
                 GraphPartitionMap(
