@@ -25,12 +25,20 @@ import torch
 import torch.utils._pytree as pytree
 from torch._C import _fx_map_arg as map_arg, _NodeIter
 from torch._library.opaque_object import get_opaque_obj_repr, is_opaque_value_type
+from torch.types import py_sym_types
 from torch.utils._dtype_abbrs import dtype_abbrs
 
 from . import _pytree as fx_pytree
 from ._compatibility import compatibility
 from .immutable_collections import immutable_dict
-from .node import _get_qualified_name, _type_repr, Argument, Node, Target
+from .node import (
+    _device_annotation,
+    _get_qualified_name,
+    _type_repr,
+    Argument,
+    Node,
+    Target,
+)
 from .tensor_type import TensorType
 
 
@@ -38,7 +46,10 @@ log = logging.getLogger(__name__)
 
 __all__ = ["PythonCode", "CodeGen", "Graph"]
 
+
 if TYPE_CHECKING:
+    import sympy
+
     from ._symbolic_trace import Tracer
     from .graph_module import GraphModule
 
@@ -612,6 +623,12 @@ class CodeGen:
                 cls = arg.__class__
                 clsname = add_global(cls.__name__, cls)
                 return f"{clsname}.{arg.name}"
+            elif isinstance(arg, complex):
+                if arg.real == 0.0 or arg.imag == 0.0:
+                    # complex.__repr__ is not a safe source representation for
+                    # signed zero components, e.g. eval("(-0-1j)") loses the sign.
+                    return f"complex({_get_repr(arg.real)}, {_get_repr(arg.imag)})"
+                return blue(repr(arg))
             elif isinstance(arg, torch.Tensor):
                 size = list(arg.size())
                 dtype = str(arg.dtype).split(".")[-1]
@@ -718,6 +735,10 @@ class CodeGen:
                 if stack_trace := node.stack_trace:
                     if parsed_stack_trace := _parse_stack_trace(stack_trace):
                         stack_trace_str = parsed_stack_trace.get_summary_str()
+                        if node.meta.get("autograd_backward", False):
+                            stack_trace_str = (
+                                f"Backward of forward node: {stack_trace_str}"
+                            )
 
                 maybe_recompute_info = ""
                 if hasattr(node, "meta") and node.meta:
@@ -772,7 +793,7 @@ class CodeGen:
 
                 def _tensor_annotation(t: torch.Tensor) -> str:
                     stride = stringify_shape(t.stride()) if include_stride else ""
-                    device = f"{t.device}" if include_device else ""
+                    device = _device_annotation(t.device) if include_device else ""
                     return (
                         f"{red(dtype_abbrs[t.dtype])}"
                         f"{blue(stringify_shape(t.shape))}"
@@ -906,9 +927,68 @@ class CodeGen:
                         f"{repr(node)}{maybe_type_annotation} = {_format_target(_get_repr(node.args[0]), node.args[1])}"
                     )
                     return
-                body.append(
-                    f"{repr(node)}{maybe_type_annotation} = {global_name}({_format_args(node.args, node.kwargs)})"
-                )
+                meta = node.meta
+                boxed_arg_indices = getattr(node.target, "_boxed_arg_indices", ())
+                boxed_arg_indices = meta.get("boxed_arg_indices", boxed_arg_indices)
+                boxed_arg_names: dict[int, str] = {}
+                for i in boxed_arg_indices:
+                    name = f"{node.name}_boxed_arg_{i}"
+                    boxed_arg_names[i] = namespace.create_name(name, None)
+
+                if boxed_arg_names:
+                    # Generate the boxed arguments on separate lines so the
+                    # original node locals can be cleared before the call.
+                    boxed_assignments = []
+                    for i, name in boxed_arg_names.items():
+                        boxed_assignments.append(f"{name} = {_get_repr(node.args[i])}")
+                    body.append("\n".join(boxed_assignments))
+
+                    # If this call is the last use of nodes inside the boxed
+                    # args, clear those node locals after creating the boxed
+                    # args and before emitting the call.
+                    boxed_nodes: set[Node] = set()
+                    unboxed_nodes: set[Node] = set()
+                    boxed_args = tuple(node.args[i] for i in boxed_arg_names)
+                    unboxed_args = []
+                    for i, arg in enumerate(node.args):
+                        if i not in boxed_arg_names:
+                            unboxed_args.append(arg)
+                    map_arg(boxed_args, boxed_nodes.add)
+                    map_arg((unboxed_args, node.kwargs), unboxed_nodes.add)
+
+                    last_uses = user_to_last_uses.get(node, [])
+                    only_in_boxes = boxed_nodes - unboxed_nodes
+                    nodes_to_delete = [n for n in last_uses if n in only_in_boxes]
+                    if nodes_to_delete:
+                        last_uses = [n for n in last_uses if n not in nodes_to_delete]
+                        user_to_last_uses[node] = last_uses
+                        to_delete_str = " = ".join(
+                            [repr(n) for n in nodes_to_delete] + ["None"]
+                        )
+                        body.append(f";  {dim(to_delete_str)}")
+                    body.append("\n")
+
+                    # Rewrite the generated call to use the boxed arg locals
+                    # instead of rebuilding the boxed args inline.
+                    kwargs = node.kwargs.items()
+                    call_args = [_get_repr(arg) for arg in node.args]
+                    for i, name in boxed_arg_names.items():
+                        call_args[i] = name
+                    call_args.extend(f"{k} = {_get_repr(v)}" for k, v in kwargs)
+                    formatted_args_str = ", ".join(call_args)
+                else:
+                    formatted_args_str = _format_args(node.args, node.kwargs)
+
+                lhs = f"{repr(node)}{maybe_type_annotation}"
+                rhs = f"{global_name}({formatted_args_str})"
+                body.append(f"{lhs} = {rhs}")
+
+                if boxed_arg_names:
+                    # Clear the generated boxed arg locals after the call. The
+                    # call is their only generated use, and these locals are not
+                    # FX nodes tracked by normal last-use cleanup.
+                    boxed_names_str = " = ".join([*boxed_arg_names.values(), "None"])
+                    body.append(f";  {dim(boxed_names_str)}")
                 if node.meta.get("is_wrapped", False):
                     wrapped_fns.setdefault(global_name)
                 return
@@ -1109,7 +1189,8 @@ class _PyTreeCodeGen(CodeGen):
         if expanded_def:
             return "\n    " + "\n    ".join(has_annotation)
         else:
-            return "\n    " + "".join(x + "; " for x in has_annotation) + "\n"
+            # Use join() to avoid trailing whitespace (breaks expecttest snapshots).
+            return "\n    " + "; ".join(has_annotation) + ";\n"
 
     def gen_var_bindings(
         self, fn_args: list[str], free_vars: list[str], expanded_def: bool
@@ -1538,6 +1619,20 @@ class Graph:
             if not isinstance(kwargs, dict):
                 raise AssertionError(f"kwargs must be a dict, got {type(kwargs)}")
 
+        # TODO: Generalize this invariant to all FX node args once the broader
+        # FX argument contract no longer permits raw symbolic leaves.
+        if op in ("call_function", "call_method", "call_module") and (args or kwargs):
+            for val in pytree.tree_iter((args, kwargs)):
+                if isinstance(val, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+                    warnings.warn(
+                        f"Raw {type(val).__name__} value ({val}) passed as argument to "
+                        f"Graph.create_node(op='{op}', target={target}). "
+                        f"Use create_*_node() helpers for tensor metadata queries "
+                        f"or materialize_symints() for general symbolic expressions.",
+                        stacklevel=2,
+                    )
+                    break
+
         candidate = name if name is not None else self._target_to_str(target)
         name = self._graph_namespace.create_name(candidate, None)
         n = Node(self, name, op, target, args, kwargs, type_expr)
@@ -1893,6 +1988,391 @@ class Graph:
             "call_function", the_function, args, kwargs, name=name, type_expr=type_expr
         )
 
+    @staticmethod
+    def _get_tensor_meta_val(tensor_node: Node) -> tuple[Any, str]:
+        """Read the example tensor stored on ``tensor_node`` under either
+        ``meta['val']`` (export / proxy_tensor convention) or
+        ``meta['example_value']`` (dynamo convention).
+
+        Returns ``(value, key)`` where ``key`` is the meta key the value was
+        found under (defaulting to ``"val"`` if no meta is present). Callers
+        that emit a new node should mirror ``key`` so the new node matches
+        the surrounding graph's convention.
+        """
+        if "val" in tensor_node.meta:
+            return tensor_node.meta["val"], "val"
+        if "example_value" in tensor_node.meta:
+            return tensor_node.meta["example_value"], "example_value"
+        return None, "val"
+
+    @compatibility(is_backward_compatible=False)
+    def create_size_node(self, tensor_node: Node, dim: int) -> Node:
+        """Create an FX node for ``tensor_node.size(dim)``."""
+        val, key = self._get_tensor_meta_val(tensor_node)
+        node = self.call_function(torch.ops.aten.sym_size.int, (tensor_node, dim))
+        if val is not None:
+            node.meta[key] = val.size(dim)
+        return node
+
+    @compatibility(is_backward_compatible=False)
+    def create_stride_node(self, tensor_node: Node, dim: int) -> Node:
+        """Create an FX node for ``tensor_node.stride(dim)``."""
+        val, key = self._get_tensor_meta_val(tensor_node)
+        node = self.call_function(torch.ops.aten.sym_stride.int, (tensor_node, dim))
+        if val is not None:
+            node.meta[key] = val.stride(dim)
+        return node
+
+    @compatibility(is_backward_compatible=False)
+    def create_storage_offset_node(self, tensor_node: Node) -> Node:
+        """Create an FX node for ``tensor_node.storage_offset()``."""
+        val, key = self._get_tensor_meta_val(tensor_node)
+        node = self.call_function(
+            torch.ops.aten.sym_storage_offset.default, (tensor_node,)
+        )
+        if val is not None:
+            node.meta[key] = val.storage_offset()
+        return node
+
+    @compatibility(is_backward_compatible=False)
+    def _resolve_unbacked_binding(
+        self,
+        producer: Node,
+        keypath: tuple[object, ...],
+        lower_symint: Callable[[torch.SymInt], Node | int],
+    ) -> Node:
+        """Walk an ``unbacked_bindings`` keypath, emitting FX ops on this
+        graph to recover the bound SymInt from ``producer``'s result.
+
+        ``lower_symint`` is invoked for the only keypath component that may
+        carry a non-literal value: ``DivideByKey`` with a SymInt divisor.
+        Callers must provide one (e.g. a wrapper around their sympy interp
+        cache).
+        """
+        import operator
+
+        from torch.fx.experimental.symbolic_shapes import (
+            CallMethodKey,
+            ConvertIntKey,
+            DivideByKey,
+            InnerTensorKey,
+        )
+
+        node = producer
+        i = 0
+        while i < len(keypath):
+            k = keypath[i]
+            nxt = keypath[i + 1] if i + 1 < len(keypath) else None
+            if isinstance(k, CallMethodKey) and isinstance(nxt, pytree.SequenceKey):
+                idx = nxt.idx
+                if k.name == "size":
+                    node = self.create_size_node(node, idx)
+                elif k.name == "stride":
+                    node = self.create_stride_node(node, idx)
+                else:
+                    node = self.call_method(k.name, (node, idx))
+                i += 2
+            elif isinstance(k, CallMethodKey):
+                if k.name == "storage_offset":
+                    node = self.create_storage_offset_node(node)
+                else:
+                    node = self.call_method(k.name, (node,))
+                i += 1
+            elif isinstance(k, pytree.SequenceKey):
+                node = self.call_function(operator.getitem, (node, k.idx))
+                i += 1
+            elif isinstance(k, ConvertIntKey):
+                node = self.call_function(torch.sym_ite, (node, 1, 0))
+                i += 1
+            elif isinstance(k, DivideByKey):
+                divisor = k.divisor
+                if isinstance(divisor, torch.SymInt):
+                    divisor = lower_symint(divisor)
+                node = self.call_function(operator.floordiv, (node, divisor))
+                i += 1
+            elif isinstance(k, InnerTensorKey):
+                node = self.call_function(getattr, (node, k.inner_name))
+                i += 1
+            else:
+                raise AssertionError(f"unrecognized keypath component {k}")
+        return node
+
+    @compatibility(is_backward_compatible=False)
+    def materialize_symints(
+        self, values: Sequence[torch.SymInt | int]
+    ) -> list[Node | int]:
+        """Materialize a list of ``SymInt``/``int`` values as FX subgraphs rooted
+        at existing nodes in this graph whose meta produces the referenced
+        symbols (typically SymInt placeholders or other sym ops).
+
+        consider a graph with a tensor placeholder
+        ``%x`` of shape ``(s32, s32)`` and we want to record this stride
+        as an FX value to pass to a later op, two ways to do it.
+
+        * ``g.create_stride_node(%x, 0)`` emits ``%t = aten.sym_stride.int(%x, 0)``.
+          The semantics of this op are "ask ``%x`` for its current stride at
+          dim 0". If a later pass (e.g. mkldnn channels-last conversion) mutates
+          ``%x``'s layout, re-running ``FakeTensorProp`` will overwrite
+          ``%t.meta["val"]`` with the NEW stride. This is the right behavior
+          when you want a *live* query on the producer.
+
+        * ``g.materialize_symints([%x.meta["val"].stride(0)])`` walks the sympy
+          expression ``s32`` and emits an FX subgraph that recomputes it from
+          the existing producer of ``s32`` (here the placeholder ``%x`` itself
+          via ``aten.sym_size.int(%x, 0)``, or a SymInt placeholder if one
+          exists). The resulting node's value is "what ``s32`` is at runtime"
+          -- which is determined by the input's shape and is INDEPENDENT of any
+          layout change to ``%x``. This is the right behavior when you want to
+          *freeze* the trace-time stride into the graph.
+
+        Note: like other ``Graph`` node-creation APIs (``call_function``,
+        ``create_size_node``, etc.), nodes are emitted at the graph's current
+        insertion point. The default insertion point (``Graph._root.prepend``)
+        appends new nodes to the end of the graph, which on a graph that
+        already has an ``output`` node means they land *after* ``return``
+        (orphaned). Callers typically scope this in
+        ``with graph.inserting_before(graph.output_node()):`` so the new
+        nodes land in the body.
+
+        Performance: each call performs an O(graph_size) producer-discovery
+        scan and builds a per-call ``expr_to_proxy`` hash-cons cache. Prefer
+        batching every SymInt you need to lift into a single call (or as few
+        calls as possible) over calling it once per value -- this amortises
+        the graph scan and lets symints with shared sub-expressions get
+        hash-consed into a single subgraph.
+        """
+        # Local imports keep sympy off the ``import torch`` path; the helper
+        # is only invoked from passes that already depend on symbolic shapes.
+        import operator
+
+        import sympy
+
+        from torch.utils._sympy.interp import _run_sympy_handler, sympy_interp
+        from torch.utils._sympy.reference import PythonReferenceAnalysis
+
+        # TODO: consider caching `expr_to_proxy` / `sym_size_sources` across
+        # calls.
+        # Read tensor/SymInt metadata with fallback. Edge graphs can have
+        # a mixed convention: lifted parameters carry both ``"val"`` and
+        # ``"example_value"`` (dynamo-style) while real user inputs carry
+        # only ``"val"`` (export-style). Probing the graph for a single
+        # key would lock onto one convention and silently miss symbols on
+        # the others; reading per-node with fallback handles both.
+        def _node_val(n: Node) -> Any:
+            val = n.meta.get("val")
+            if val is not None:
+                return val
+            return n.meta.get("example_value")
+
+        def _set_node_val(n: Node, val: Any) -> None:
+            """Set ``n.meta['val']`` and, if any of ``n``'s input nodes carry
+            ``"example_value"``, mirror it there too so the new node matches
+            the surrounding graph's meta-key convention."""
+            n.meta["val"] = val
+            if any(isinstance(a, Node) and "example_value" in a.meta for a in n.args):
+                n.meta["example_value"] = val
+
+        # Build the symbol -> Proxy map once; shared across all inputs so common
+        # sub-expressions across symints get hash-consed into single subgraphs.
+        tracer = torch.fx.proxy.GraphAppendingTracer(self)
+        expr_to_proxy: dict[sympy.Expr, torch.fx.Proxy] = {}
+
+        # Pass 1: walk the graph to discover producers. All backed symbols
+        # must be found here -- their only safe producer is an input.
+        # Populates:
+        #   - ``expr_to_proxy``: SymInt placeholders -> Proxy (direct).
+        #   - ``sym_size_sources``: tensor placeholder shape symbol
+        #     -> (placeholder, dim, divisor) (lazy, used by Pass 2).
+        #     divisor=1 when the placeholder dim IS the bare ``Symbol``;
+        #     divisor>1 when the dim is ``Symbol * c`` (the ``Dim("h")*N``
+        #     derived-shape pattern). Recovery emits
+        #     ``sym_size.int(ph, dim) // divisor``.
+        #   - ``sym_to_binding``: unbacked symbol -> (producer node, keypath)
+        #     from ``node.meta["unbacked_bindings"]`` (lazy, used by Pass 2).
+        sym_size_sources: dict[sympy.Symbol, tuple[Node, int, int]] = {}
+        sym_to_binding: dict[sympy.Symbol, tuple[Node, tuple[object, ...]]] = {}
+
+        def _record_shape_source(expr: sympy.Expr, node: Node, dim: int) -> None:
+            """Register ``(node, dim)`` as a recoverable source for ``expr``.
+
+            - bare ``Symbol``: divisor = 1.
+            - ``Symbol * c`` (positive integer constant): divisor = c.
+              Recovery is ``sym_size.int(ph, dim) // c``.
+            - anything else: skipped (general inverse needs sympy.solve).
+            """
+            if isinstance(expr, sympy.Symbol):
+                sym_size_sources.setdefault(expr, (node, dim, 1))
+                return
+            if isinstance(expr, sympy.Mul) and len(expr.args) == 2:
+                a, b = expr.args
+                if isinstance(b, sympy.Symbol) and isinstance(a, sympy.Integer):
+                    a, b = b, a  # normalize to (Symbol, Integer) order
+                if (
+                    isinstance(a, sympy.Symbol)
+                    and isinstance(b, sympy.Integer)
+                    and int(b) > 0
+                ):
+                    sym_size_sources.setdefault(a, (node, dim, int(b)))
+
+        for node in self.nodes:
+            if node.op == "placeholder":
+                val = _node_val(node)
+                if isinstance(val, py_sym_types):
+                    expr = val.node.expr
+                    if isinstance(expr, sympy.Symbol) and expr not in expr_to_proxy:
+                        expr_to_proxy[expr] = torch.fx.Proxy(node, tracer=tracer)
+                elif isinstance(val, torch.Tensor):
+                    for dim, s in enumerate(val.shape):
+                        if isinstance(s, torch.SymInt):
+                            _record_shape_source(s.node.expr, node, dim)
+            else:
+                bindings = node.meta.get("unbacked_bindings")
+                if bindings:
+                    for sym, keypath in bindings.items():
+                        sym_to_binding.setdefault(sym, (node, tuple(keypath)))
+
+        from sympy.logic.boolalg import BooleanAtom
+
+        from torch.fx.experimental.symbolic_shapes import (
+            DivideByKey,
+            free_unbacked_symbols,
+        )
+
+        def _arg_meta_val(a: Any) -> Any:
+            if isinstance(a, torch.fx.Node):
+                return _node_val(a)
+            return a
+
+        def _sympy_interp_cached(expr: sympy.Expr) -> Any:
+            # Common expressions cached in expr_to_proxy
+            if expr in expr_to_proxy:
+                return expr_to_proxy[expr]
+            if isinstance(
+                expr, (sympy.Integer, sympy.Number, sympy.Symbol, BooleanAtom)
+            ):
+                # handle leaf terms.
+                return sympy_interp(PythonReferenceAnalysis, expr_to_proxy, expr)
+            # handle composite expressions.
+            result = _run_sympy_handler(
+                PythonReferenceAnalysis,
+                [_sympy_interp_cached(arg) for arg in expr.args],
+                expr,
+            )
+            if not isinstance(result, torch.fx.Proxy):
+                return result
+            expr_to_proxy[expr] = result
+            node = result.node
+            target = node.target
+            if not callable(target):
+                return result
+            try:
+                fake_args = tuple(_arg_meta_val(a) for a in node.args)
+                fake_kwargs = {k: _arg_meta_val(v) for k, v in node.kwargs.items()}
+                _set_node_val(node, target(*fake_args, **fake_kwargs))
+            except (TypeError, ValueError, AttributeError) as e:
+                log.debug(
+                    "materialize_symints: skipping meta annotation for %s: %s",
+                    expr,
+                    e,
+                )
+            return result
+
+        def _lower_symint_divisor(d: torch.SymInt) -> Node | int:
+            r = _sympy_interp_cached(d.node.expr)
+            return r.node if isinstance(r, torch.fx.Proxy) else r
+
+        # Pass 2 (lazy, recursive): materialize a producer for each needed
+        # symbol. Three cases:
+        #   - already in expr_to_proxy: nothing to do.
+        #   - in sym_size_sources: emit sym_size.int for shape symbols
+        #     recoverable from a tensor placeholder shape.
+        #   - in sym_to_binding: fallback for missing unbacked symbols. Use
+        #     the node.meta["unbacked_bindings"] map -- the authoritative
+        #     source for "this node produces these unbacked symbols". The
+        #     keypath tells us how to recover the SymInt from the node's
+        #     result (e.g. .size(i), .stride(i), storage_offset()).
+        def _ensure_produced(sym: sympy.Symbol) -> None:
+            if sym in expr_to_proxy:
+                return
+            if sym in sym_size_sources:
+                ph, dim, divisor = sym_size_sources[sym]
+                sym_node = self.call_function(torch.ops.aten.sym_size.int, (ph, dim))
+                tensor = _node_val(ph)
+                if isinstance(tensor, torch.Tensor):
+                    _set_node_val(sym_node, tensor.shape[dim])
+                if divisor != 1:
+                    # Placeholder dim was ``sym * divisor`` (e.g. from
+                    # ``Dim("h") * N``); recover the underlying symbol as
+                    # ``sym_size.int(ph, dim) // divisor``.
+                    div_node = self.call_function(
+                        operator.floordiv, (sym_node, divisor)
+                    )
+                    if isinstance(tensor, torch.Tensor):
+                        _set_node_val(div_node, tensor.shape[dim] // divisor)
+                    expr_to_proxy[sym] = torch.fx.Proxy(div_node, tracer=tracer)
+                else:
+                    expr_to_proxy[sym] = torch.fx.Proxy(sym_node, tracer=tracer)
+                return
+            if sym in sym_to_binding:
+                if not free_unbacked_symbols(sym):
+                    raise AssertionError(
+                        f"materialize_symints: backed symbol {sym} has no "
+                        f"input producer (backed symbols cannot be recovered "
+                        f"from non-placeholder nodes)"
+                    )
+                producer_node, keypath = sym_to_binding[sym]
+                for k in keypath:
+                    if isinstance(k, DivideByKey) and isinstance(
+                        k.divisor, torch.SymInt
+                    ):
+                        for s2 in k.divisor.node.expr.free_symbols:
+                            _ensure_produced(s2)
+                producer = self._resolve_unbacked_binding(
+                    producer_node, keypath, lower_symint=_lower_symint_divisor
+                )
+                expr_to_proxy[sym] = torch.fx.Proxy(producer, tracer=tracer)
+                return
+            raise AssertionError(f"materialize_symints: no producer for {sym}")
+
+        out: list[Node | int] = []
+        for s in values:
+            if isinstance(s, torch.SymInt):
+                pass
+            elif isinstance(s, int):  # also covers bool (subclass of int)
+                out.append(s)
+                continue
+            else:
+                raise TypeError(
+                    f"materialize_symints: expected SymInt or int, got "
+                    f"{type(s).__name__} ({s!r})"
+                )
+            target_expr = s.node.expr
+            if target_expr.is_number:
+                out.append(int(s))
+                continue
+            for sym in target_expr.free_symbols:
+                _ensure_produced(sym)
+            result = _sympy_interp_cached(target_expr)
+            if not isinstance(result, torch.fx.Proxy):
+                # ``target_expr`` was non-constant per sympy but our interpreter
+                # still folded it to a Python int/bool. Unwrap to that constant.
+                if not isinstance(result, (int, bool)):
+                    raise AssertionError(
+                        f"materialize_symints: non-Proxy result {result!r} for "
+                        f"non-constant target {target_expr!r}"
+                    )
+                out.append(int(result))
+                continue
+            out_node = result.node
+            _set_node_val(out_node, s)
+            out.append(out_node)
+        return out
+
+    @compatibility(is_backward_compatible=False)
+    def materialize_symint(self, value: torch.SymInt | int) -> Node | int:
+        """Single-value convenience wrapper around :meth:`materialize_symints`."""
+        return self.materialize_symints([value])[0]
+
     @compatibility(is_backward_compatible=True)
     def node_copy(
         self, node: Node, arg_transform: Callable[[Node], Argument] = lambda x: x
@@ -2005,7 +2485,7 @@ class Graph:
         # When generating Python code, we need to make sure to name things
         # appropriately. In particular:
         # - All names should be unique, to avoid weird shadowing bugs.
-        # - These names need to be consistent, e.g. a object should always be
+        # - These names need to be consistent, e.g. an object should always be
         #   referenced by the same name.
         #
         # To do this, we create a new namespace just for this source. All names
