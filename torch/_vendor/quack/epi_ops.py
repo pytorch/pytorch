@@ -1172,7 +1172,7 @@ class GroupedLocalReduce(VecReduce):
     def to_params(self, gemm, args):
         return {
             self.name: (
-                assume_stride_divisibility(getattr(args, self.name)),
+                getattr(args, self.name),
                 args.local_reduce_combine_fn,
                 args.local_reduce_finalize_fn,
             )
@@ -1412,6 +1412,7 @@ class GroupedLocalReduce(VecReduce):
             if const_expr(
                 axis == 0
                 and param_tensor.element_type == Float32
+                and param_tensor.iterator.alignment >= 16
                 and cute.size(tDrReduce_flt) % 4 == 0
                 and tile_N % 4 == 0
             ):
