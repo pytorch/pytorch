@@ -1688,7 +1688,6 @@ bool isValidDLPackCapsule(PyObject* data) {
 // an explicit dtype rather than silently producing wrong results.
 ScalarType scalar_type_from_buffer_format(PyObject* obj) {
   Py_buffer view;
-  
   if (PyObject_GetBuffer(obj, &view, PyBUF_FORMAT | PyBUF_STRIDES) < 0) {
     PyErr_Clear();
     TORCH_CHECK_VALUE(
@@ -1696,7 +1695,6 @@ ScalarType scalar_type_from_buffer_format(PyObject* obj) {
         "could not infer a dtype from the buffer's format. "
         "Please pass an explicit dtype= to torch.asarray.");
   }
-  
   std::string format = view.format != nullptr ? view.format : "B";
   auto itemsize = view.itemsize;
   PyBuffer_Release(&view);
