@@ -76,7 +76,7 @@ from torch.utils.checkpoint import checkpoint
 dev_type = torch.device(get_devtype())
 
 
-class PytreeTuple(torch._opaque_base.OpaqueBase):
+class PytreeTuple(torch._custom_class_base.CustomClassBase):
     """
     Tuple-like values that are treated as leaves of a PyTree.
     """

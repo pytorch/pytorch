@@ -11,7 +11,7 @@ import torch._dynamo.testing
 from torch._library.opaque_object import register_opaque_type
 
 
-class _OpaqueVal(torch._opaque_base.OpaqueBase):
+class _OpaqueVal(torch._custom_class_base.CustomClassBase):
     def __init__(self, val):
         self.val = val
 

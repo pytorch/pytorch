@@ -71,7 +71,7 @@ from torch.testing._internal.torchbind_impls import init_torchbind_implementatio
 
 
 @dataclass(frozen=True)
-class _OpaqueConfig(torch._opaque_base.OpaqueBase):
+class _OpaqueConfig(torch._custom_class_base.CustomClassBase):
     scale: int
 
     def __fx_repr__(self):
@@ -84,7 +84,7 @@ class _OpaqueConfig(torch._opaque_base.OpaqueBase):
 register_opaque_type(_OpaqueConfig, typ="value")
 
 
-class _OpaqueEngine(torch._opaque_base.OpaqueBase):
+class _OpaqueEngine(torch._custom_class_base.CustomClassBase):
     def __init__(self, multiplier: int):
         super().__init__()
         self.multiplier = multiplier
