@@ -45,3 +45,4 @@ L2:
   - pytorch/crcr-test
   - TorchedHat/pytorch-redhat-ci
   - Ascend/pytorch
+  - torch-spyre/torch-spyre
