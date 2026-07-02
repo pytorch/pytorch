@@ -3180,7 +3180,9 @@ class InstructionTranslatorBase(
             if not obj.is_python_constant():
                 raise
             source = AttrSource(obj.source, attr) if obj.source else None
-            result = VariableTracker.build(self, getattr(obj.as_python_constant(), attr), source=source)
+            result = VariableTracker.build(
+                self, getattr(obj.as_python_constant(), attr), source=source
+            )
         self.push(result)
 
     def LOAD_ATTR(self, inst: Instruction) -> None:
