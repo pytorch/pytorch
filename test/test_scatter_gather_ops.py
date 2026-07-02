@@ -8,7 +8,7 @@ import torch
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import \
-    (instantiate_parametrized_tests, parametrize, run_tests, skipIfNoCuteDSL,
+    (gradcheck, instantiate_parametrized_tests, parametrize, run_tests, skipIfNoCuteDSL,
      subtest, TestCase, DeterministicGuard, TEST_CUDA, TEST_WITH_ROCM, serialTest)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, onlyCPU, onlyAccelerator, dtypes, dtypesIfCUDA,
@@ -508,6 +508,74 @@ class TestScatterGather(TestCase):
                 res = inp.clone().scatter_add_(d, idx, src)
             self.assertEqual(res, ref)
 
+    @dtypes(torch.double)
+    def test_scatter_grads_index_smaller_than_src(self, device, dtype):
+        # Regression test for https://github.com/pytorch/pytorch/issues/94336
+        # The scatter family allows index.size(d) <= src.size(d) and an empty
+        # index of any dimensionality: only the src region covered by index
+        # participates in the output, so the remaining src elements must get
+        # zero gradient. The src gradient used to be index-shaped instead:
+        # backward errored for scatter/scatter_add/scatter_reduce(sum/mean)
+        # and was silently wrong for scatter_reduce(prod/amax/amin).
+        ops = [("scatter", None, None), ("scatter_add", None, None)]
+        ops += [("scatter_reduce", r, inc)
+                for r in ("sum", "prod", "mean", "amax", "amin")
+                for inc in (True, False)]
+
+        def apply_op(op, reduce, include_self, inp, idx, src):
+            if op == "scatter_reduce":
+                return torch.scatter_reduce(inp, 0, idx, src, reduce=reduce, include_self=include_self)
+            return getattr(torch, op)(inp, 0, idx, src)
+
+        # distinct, well-separated, nonzero values keep prod/amax/amin
+        # gradients well-defined and gradcheck stable
+        inp2 = torch.tensor([[8., -12., 3.], [-5., 10., -2.]], device=device, dtype=dtype)
+        src2 = torch.tensor([[6., -9., 14.], [-15., 4., -7.]], device=device, dtype=dtype)
+        inp1 = torch.tensor([8., -12., 3.], device=device, dtype=dtype)
+        src1 = torch.tensor([6., -9., 14.], device=device, dtype=dtype)
+        src0 = torch.tensor(6., device=device, dtype=dtype)
+        cases = ((inp2, src2, torch.empty(0, dtype=torch.long, device=device)),
+                 (inp2, src2, torch.empty(0, 3, dtype=torch.long, device=device)),
+                 (inp2, src2, torch.tensor([[0, 1]], device=device)),
+                 (inp2, src2, torch.tensor([[1], [0]], device=device)),
+                 # legacy rank mismatches: missing index dims act as size 1
+                 (inp1, src1, torch.tensor(1, device=device)),
+                 (inp1, src0, torch.tensor([1], device=device)))
+
+        for op, reduce, include_self in ops:
+            for inp_vals, src_vals, idx in cases:
+                msg = f"{op} reduce={reduce} include_self={include_self} index_shape={tuple(idx.shape)}"
+                inp = inp_vals.clone().requires_grad_()
+                src = src_vals.clone().requires_grad_()
+                out = apply_op(op, reduce, include_self, inp, idx, src)
+                grad_out = torch.arange(1., out.numel() + 1, device=device, dtype=dtype).view_as(out)
+                out.backward(grad_out)
+                if idx.numel() == 0:
+                    self.assertEqual(out, inp_vals, msg=msg)
+                    self.assertEqual(inp.grad, grad_out, msg=msg)
+                    self.assertEqual(src.grad, torch.zeros_like(src_vals), msg=msg)
+                else:
+                    # reference: the same op with index reshaped to its
+                    # effective sizes and src pre-narrowed to match, which
+                    # takes the equal-shape path
+                    eff = [idx.size(d) if d < idx.dim() else 1 for d in range(src_vals.dim())]
+                    domain = tuple(slice(s) for s in eff)
+                    inp_ref = inp_vals.clone().requires_grad_()
+                    src_ref = src_vals[domain].clone().requires_grad_()
+                    out_ref = apply_op(op, reduce, include_self, inp_ref, idx.reshape(eff), src_ref)
+                    self.assertEqual(out, out_ref, msg=msg)
+                    out_ref.backward(grad_out)
+                    expected_src_grad = torch.zeros_like(src_vals)
+                    expected_src_grad[domain] = src_ref.grad
+                    self.assertEqual(src.grad, expected_src_grad, msg=msg)
+                    self.assertEqual(inp.grad, inp_ref.grad, msg=msg)
+
+                # forward-mode AD with an empty or non-broadcastable smaller
+                # index used to fail as well (scatter_reduce prod has no jvp)
+                forward_ad = not (op == "scatter_reduce" and reduce == "prod")
+                gradcheck(lambda inp, src, idx=idx: apply_op(op, reduce, include_self, inp, idx, src),
+                          (inp_vals.clone().requires_grad_(), src_vals.clone().requires_grad_()),
+                          check_forward_ad=forward_ad)
 
     @onlyCPU
     @dtypes(torch.float32, torch.float64, torch.bfloat16)
