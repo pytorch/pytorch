@@ -5,6 +5,7 @@ import operator
 import unittest
 
 import torch
+import torch._dynamo
 import torch._inductor
 import torch._inductor.fx_passes.group_batch_fusion
 from torch._dynamo.utils import counters
@@ -685,6 +686,7 @@ class TestGroupBatchFusion(TestCase):
         counters.clear()
 
     @requires_gpu()
+    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=False)
     @torch._inductor.config.patch(
         pre_grad_fusion_options={},
         post_grad_fusion_options={
