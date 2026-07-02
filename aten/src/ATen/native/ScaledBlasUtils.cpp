@@ -502,14 +502,13 @@ void validate_scaled_mm_v2_inputs(
     const auto num_args_b = recipe_b.size();
     const bool is_rocm = at::globalContext().hasROCM();
     if (is_xpu) {
-      // XPU consumes unswizzled scales for all MX/NVFP4 recipes.
+      // XPU consumes unswizzled scales for all MX/NVFP4 recipes. The public
+      // API (F.scaled_mm) defaults swizzle to None, which becomes an empty
+      // list, so accept an empty list (treated as NO_SWIZZLE) and only require
+      // NO_SWIZZLE when entries are present, mirroring the XPU kernel.
       TORCH_CHECK_VALUE(
-          swizzle_a.size() == num_args_a && swizzle_b.size() == num_args_b,
-          "swizzle_a/swizzle_b must match the number of scale recipes, got ",
-          swizzle_a.size(), " and ", swizzle_b.size());
-      TORCH_CHECK_VALUE(
-          swizzle_a[0] == SwizzleType::NO_SWIZZLE &&
-              swizzle_b[0] == SwizzleType::NO_SWIZZLE,
+          (swizzle_a.empty() || swizzle_a[0] == SwizzleType::NO_SWIZZLE) &&
+              (swizzle_b.empty() || swizzle_b[0] == SwizzleType::NO_SWIZZLE),
           "For XPU MX/NVFP4 gemm, scale_a and scale_b must both be NO_SWIZZLE");
     } else if (!is_rocm) {
       TORCH_CHECK_VALUE(
