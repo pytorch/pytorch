@@ -51,7 +51,7 @@ index 26fe87e..79b69de 100644
      dim = 0
      epi_m_major_preference = -1
 @@ -1175,6 +1213,7 @@ class GroupedLocalReduce(VecReduce):
-                 assume_stride_divisibility(getattr(args, self.name)),
+                 getattr(args, self.name),
                  args.local_reduce_combine_fn,
                  args.local_reduce_finalize_fn,
 +                args.local_reduce_feeds_main,
@@ -318,7 +318,16 @@ index 692b821..7b482fc 100644
      if local_reduce_out is not None and tensor_epilogue_fn is None and tensor_epilogue_key is None:
          raise RuntimeError("local_reduce_out requires tensor_epilogue_fn")
      if local_reduce_out is not None:
-@@ -964,12 +1018,17 @@ def gemm_act(
+@@ -946,7 +1000,7 @@ def gemm_act(
+     local_reduce_dtype = (
+         torch2cute_dtype_map[local_reduce_out.dtype]
+         if local_reduce_out is not None
+-        else None
++        else (Float32 if local_reduce_feeds_main else None)
+     )
+     local_reduce_leading_dim = (
+         2 if local_reduce_out is not None and local_reduce_out.ndim == 3 else 1
+@@ -964,12 +1018,13 @@ def gemm_act(
          tensor_epilogue_arg_kind_codes,
          tensor_epilogue_returns_aux,
          tensor_epilogue_returns_local_reduce,
@@ -328,12 +337,7 @@ index 692b821..7b482fc 100644
          tuple(tensor.ndim for tensor in tensor_epilogue_colvec_biases),
          tuple(torch2cute_dtype_map[tensor.dtype] for tensor in tensor_epilogue_tile_biases_p),
          tuple(get_major(tensor, "m", "n") for tensor in tensor_epilogue_tile_biases_p),
--        torch2cute_dtype_map[local_reduce_out.dtype] if local_reduce_out is not None else None,
-+        (
-+            torch2cute_dtype_map[local_reduce_out.dtype]
-+            if local_reduce_out is not None
-+            else (Float32 if local_reduce_feeds_main else None)
-+        ),
+         local_reduce_dtype,
          local_reduce_out.ndim if local_reduce_out is not None else 0,
          local_reduce_group,
          local_reduce_axis,

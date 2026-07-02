@@ -4,6 +4,7 @@ import math
 from typing import NamedTuple, Tuple, Optional, Callable, Type
 
 from torch import Tensor
+from torch._subclasses.fake_tensor import FakeTensor
 
 import cutlass
 import cutlass.cute as cute
@@ -61,6 +62,42 @@ _local_reduce_combine_fns: dict[str, Callable] = {}
 _local_reduce_finalize_fns: dict[str, Callable] = {}
 # Feed-main must fit within grouped_rowvec_reduce_value's lane-layout M extent.
 MAX_SAME_WARP_LOCAL_REDUCE_FEED_MAIN_GROUP = 32
+
+
+def power_of_2_divisibility(value: int, max_divisibility: int) -> int:
+    value = abs(int(value))
+    if value == 0:
+        return max_divisibility
+    divisibility = 1
+    while divisibility * 2 <= max_divisibility and value % (divisibility * 2) == 0:
+        divisibility *= 2
+    return divisibility
+
+
+def tensor_stride_divisibility(
+    tensor: Tensor | None,
+    dtype: Type[cutlass.Numeric],
+    leading_dim: int,
+) -> int:
+    """Return the strongest 16-byte-capped layout contract true for a tensor."""
+    if tensor is None:
+        return 1
+    max_divisibility = div_for_dtype(dtype)
+    divisibility = max_divisibility
+    for dim, stride in enumerate(tensor.stride()):
+        if dim != leading_dim:
+            divisibility = min(
+                divisibility, power_of_2_divisibility(stride, max_divisibility)
+            )
+    if isinstance(tensor, FakeTensor) or tensor.is_meta:
+        # AOT inputs have no real pointer; reuse this contract only when the
+        # runtime tensor has the allocator-backed base alignment assumed here.
+        return divisibility
+    element_bytes = max(dtype.width // 8, 1)
+    return min(
+        divisibility,
+        power_of_2_divisibility(tensor.data_ptr() // element_bytes, max_divisibility),
+    )
 
 
 def register_tensor_epilogue_fn(
@@ -604,6 +641,7 @@ def _compile_gemm_act(
     local_reduce_ndim,
     local_reduce_group,
     local_reduce_axis,
+    local_reduce_stride_divisibility,
     local_reduce_combine_key,
     local_reduce_finalize_key,
     alpha_mode,
@@ -717,17 +755,11 @@ def _compile_gemm_act(
         mLocalReduce = None
     else:
         local_reduce_leading_dim = 2 if local_reduce_ndim == 3 else 1
-        local_reduce_stride = tuple(
-            1
-            if i == local_reduce_leading_dim
-            else cute.sym_int64(divisibility=1)
-            for i in range(local_reduce_ndim)
-        )
-        mLocalReduce = cute.runtime.make_fake_tensor(
+        mLocalReduce = fake_tensor(
             local_reduce_dtype,
             local_reduce_shape,
-            stride=local_reduce_stride,
-            assumed_align=16,
+            leading_dim=local_reduce_leading_dim,
+            divisibility=local_reduce_stride_divisibility,
         )
 
     tensor_epilogue_fn = (
@@ -1005,6 +1037,21 @@ def gemm_act(
         if local_reduce_out.ndim != 3:
             raise NotImplementedError("QUACK local_reduce_out must be 3-D")
     concat_layout = tuple(sorted(concat_layout)) if concat_layout else ()
+    local_reduce_dtype = (
+        torch2cute_dtype_map[local_reduce_out.dtype]
+        if local_reduce_out is not None
+        else (Float32 if local_reduce_feeds_main else None)
+    )
+    local_reduce_leading_dim = (
+        2 if local_reduce_out is not None and local_reduce_out.ndim == 3 else 1
+    )
+    local_reduce_stride_divisibility = (
+        tensor_stride_divisibility(
+            local_reduce_out, local_reduce_dtype, local_reduce_leading_dim
+        )
+        if local_reduce_out is not None
+        else 1
+    )
     compiled_fn = _compile_gemm_act(
         a_dtype,
         b_dtype,
@@ -1032,14 +1079,11 @@ def gemm_act(
         tuple(tensor.ndim for tensor in tensor_epilogue_colvec_biases),
         tuple(torch2cute_dtype_map[tensor.dtype] for tensor in tensor_epilogue_tile_biases_p),
         tuple(get_major(tensor, "m", "n") for tensor in tensor_epilogue_tile_biases_p),
-        (
-            torch2cute_dtype_map[local_reduce_out.dtype]
-            if local_reduce_out is not None
-            else (Float32 if local_reduce_feeds_main else None)
-        ),
+        local_reduce_dtype,
         local_reduce_out.ndim if local_reduce_out is not None else 0,
         local_reduce_group,
         local_reduce_axis,
+        local_reduce_stride_divisibility,
         local_reduce_combine_key,
         local_reduce_finalize_key,
         alpha_mode,
