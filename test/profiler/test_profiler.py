@@ -4388,6 +4388,30 @@ class TestProfilerEventsParity(TestCase):
             self.assertEqual(fe_mod.python_parent_id, args["Python parent id"])
             self.assertEqual(fe_mod.python_module_id, args["Python module id"])
 
+    def test_key_averages_excludes_python_functions_by_default(self):
+        """key_averages() must not include Python function events (e.g. threading.py: wait)
+        by default; they can be opted in with include_python_functions=True."""
+        t = threading.Thread(target=lambda: time.sleep(0.05))
+        with profile(activities=[ProfilerActivity.CPU], with_stack=True) as prof:
+            t.start()
+            t.join()
+
+        avgs = prof.key_averages()
+        threading_entries = [e for e in avgs if "threading" in e.key]
+        self.assertEqual(
+            len(threading_entries),
+            0,
+            f"key_averages() should not include threading.py events by default, got: {[e.key for e in threading_entries]}",
+        )
+
+        avgs_with_py = prof.key_averages(include_python_functions=True)
+        threading_entries_with_py = [e for e in avgs_with_py if "threading" in e.key]
+        self.assertGreater(
+            len(threading_entries_with_py),
+            0,
+            "key_averages(include_python_functions=True) should include threading.py events",
+        )
+
     def test_profiler_flow_events_parity(self):
         """Verify that async CPU->GPU flow fields on events() match Chrome trace JSON."""
         with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
