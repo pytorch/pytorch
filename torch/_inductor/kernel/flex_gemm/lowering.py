@@ -135,17 +135,20 @@ def allocate_flex_gemm_aux_outs(
 
 def flex_gemm_ordered_outputs(result, aux_outs, local_reduce_outs, local_reduce_index):
     """Return generated outputs in the user-visible tuple order."""
-    if not local_reduce_outs:
-        return (result, *aux_outs)
-    local_reduce_out = local_reduce_outs[0]
-    if local_reduce_index is None:
-        return (result, *aux_outs, local_reduce_out)
-    return (
-        result,
-        *aux_outs[:local_reduce_index],
-        local_reduce_out,
-        *aux_outs[local_reduce_index:],
-    )
+    match local_reduce_outs, local_reduce_index:
+        case (), _:
+            return (result, *aux_outs)
+        case (local_reduce_out,), None:
+            return (result, *aux_outs, local_reduce_out)
+        case (local_reduce_out,), index:
+            return (
+                result,
+                *aux_outs[:index],
+                local_reduce_out,
+                *aux_outs[index:],
+            )
+        case _:
+            raise AssertionError("FlexGEMM expects at most one local-reduce output")
 
 
 def validate_flex_gemm_local_reduce_scope(
