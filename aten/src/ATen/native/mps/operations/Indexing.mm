@@ -362,6 +362,18 @@ static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int
     at::native::resize_output(out_, {0, nDim});
     return;
   }
+
+  // Metal's thread_position_in_grid is uint32, so a single 1D dispatch is
+  // bounded at UINT32_MAX threads. Enforce that here. This also bounds the
+  // prefix-sum accumulators and the total-nonzero count to fit in uint32.
+  TORCH_CHECK(numel <= std::numeric_limits<uint32_t>::max(),
+              "nonzero: tensor has ",
+              numel,
+              " elements which exceeds the "
+              "supported MPS limit of ",
+              std::numeric_limits<uint32_t>::max(),
+              ".");
+
   const auto type_str = scalarToMetalTypeString(input);
   MPSStream* stream = getCurrentMPSStream();
 
@@ -377,6 +389,11 @@ static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int
               "nonzero: tensor too large for single-pass prefix sum (num_blocks exceeds uint32)");
   uint32_t num_blocks_u32 = static_cast<uint32_t>(num_blocks);
 
+  // Storage for the four helper buffers is a single int32-typed tensor (same
+  // 4 bytes/slot as uint32 on-device), but the Metal kernels write and read
+  // them as uint32. Reading `total_nonzero_buf.item<int32_t>()` and casting
+  // to uint32 recovers the correct count even when it exceeds INT_MAX
+  // (dense masks on tensors larger than 2^31 elements).
   auto tmp = at::empty({numel + 2 * num_blocks_u32 + 1}, input.options().dtype(kInt));
   Tensor prefix_buf = tmp.slice(0, 0, numel);
   Tensor block_sums_buf = tmp.slice(0, numel, numel + num_blocks_u32);
@@ -401,8 +418,10 @@ static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int
   });
 
   if (!max_elements) {
-    // Dynamic path: sync to learn output size
-    const int64_t total_nonzero = total_nonzero_buf.item<int>();
+    // Dynamic path: sync to learn output size. Reinterpret the int32 slot
+    // as uint32 so counts above INT_MAX round-trip correctly.
+    const uint32_t total_nonzero_u32 = static_cast<uint32_t>(total_nonzero_buf.item<int32_t>());
+    const int64_t total_nonzero = static_cast<int64_t>(total_nonzero_u32);
     at::native::resize_output(out_, {total_nonzero, nDim});
     max_elements = total_nonzero;
   }
@@ -415,7 +434,7 @@ static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int
   Tensor out = contiguous_output ? out_ : at::empty_like(out_, MemoryFormat::Contiguous);
 
   int ndim_int = static_cast<int>(nDim);
-  int max_entries = static_cast<int>(*max_elements);
+  uint32_t max_entries = static_cast<uint32_t>(*max_elements);
 
   // Step 3: scatter indices, capped at max_entries
   dispatch_sync_with_rethrow(stream->queue(), ^() {

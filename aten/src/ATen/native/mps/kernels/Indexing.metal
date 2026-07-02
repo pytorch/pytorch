@@ -977,12 +977,19 @@ inline bool is_nonzero(T val) {
   return val.x != 0 || val.y != 0;
 }
 
+// Nonzero uses uint32 buffers and accumulators throughout: the host guards
+// against numel > UINT32_MAX (Metal's thread_position_in_grid is 32 bits),
+// so per-block sums, prefix values, and the total nonzero count all fit in
+// uint32. Metal's simd_shuffle_and_fill_up does not accept 64-bit integers
+// on Metal 3.x, so int/uint is the widest scan primitive available; index
+// math for the output address is widened to int64 explicitly at the write
+// site (see scatter_nonzero_indices).
 template <typename T>
 [[max_total_threads_per_threadgroup(1024)]]
 kernel void count_nonzero_prefix_sum(
     const device T* input [[buffer(0)]],
-    device int* prefix [[buffer(1)]],
-    device int* block_sums [[buffer(2)]],
+    device uint* prefix [[buffer(1)]],
+    device uint* block_sums [[buffer(2)]],
     uint tid [[thread_position_in_grid]],
     uint lid [[thread_position_in_threadgroup]],
     uint tgsize [[threads_per_threadgroup]],
@@ -991,19 +998,19 @@ kernel void count_nonzero_prefix_sum(
     uint simd_group_id [[simdgroup_index_in_threadgroup]]) {
   uint num_simds = (tgsize + simdgroup_size - 1) / simdgroup_size;
 
-  int flag = is_nonzero(input[tid]) ? 1 : 0;
+  uint flag = is_nonzero(input[tid]) ? 1u : 0u;
 
   // Inclusive prefix sum within SIMD group using shuffle
-  int val = flag;
+  uint val = flag;
   for (uint offset = 1; offset < simdgroup_size; offset <<= 1) {
-    int other = simd_shuffle_and_fill_up(val, 0, static_cast<ushort>(offset));
+    uint other = simd_shuffle_and_fill_up(val, 0u, static_cast<ushort>(offset));
     val += other;
   }
 
   // The last lane in each simd group writes its total.
   // For full groups this is lane 31; for the last (partial) group we compute
   // which lane is actually last.
-  threadgroup int simdgroup_totals[32];
+  threadgroup uint simdgroup_totals[32];
   bool is_last_lane_in_simd;
   if (simd_group_id < num_simds - 1) {
     is_last_lane_in_simd = (simd_lane_id == simdgroup_size - 1);
@@ -1017,21 +1024,22 @@ kernel void count_nonzero_prefix_sum(
   threadgroup_barrier(mem_flags::mem_threadgroup);
 
   // First simd group computes exclusive prefix sum of simd group totals
-  threadgroup int simdgroup_offsets[32];
+  threadgroup uint simdgroup_offsets[32];
   if (simd_group_id == 0) {
-    int sg_val =
-        (simd_lane_id < num_simds) ? simdgroup_totals[simd_lane_id] : 0;
+    uint sg_val =
+        (simd_lane_id < num_simds) ? simdgroup_totals[simd_lane_id] : 0u;
     for (uint offset = 1; offset < simdgroup_size; offset <<= 1) {
-      int other =
-          simd_shuffle_and_fill_up(sg_val, 0, static_cast<ushort>(offset));
+      uint other =
+          simd_shuffle_and_fill_up(sg_val, 0u, static_cast<ushort>(offset));
       sg_val += other;
     }
-    int exclusive = simd_shuffle_and_fill_up(sg_val, 0, static_cast<ushort>(1));
+    uint exclusive =
+        simd_shuffle_and_fill_up(sg_val, 0u, static_cast<ushort>(1));
     simdgroup_offsets[simd_lane_id] = exclusive;
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
 
-  int exclusive_val = val - flag + simdgroup_offsets[simd_group_id];
+  uint exclusive_val = val - flag + simdgroup_offsets[simd_group_id];
 
   prefix[tid] = exclusive_val;
 
@@ -1041,15 +1049,15 @@ kernel void count_nonzero_prefix_sum(
   }
 }
 
-// Step 2: exclusive prefix sum of block_sums → block_offsets, and write
+// Step 2: exclusive prefix sum of block_sums, block_offsets, and write
 // total nonzero count to a 1-element buffer.  Runs in a single threadgroup.
 // Each thread handles ceil(num_blocks / tgsize) consecutive blocks via a
 // serial loop, then the per-thread totals are scanned in parallel.
 [[max_total_threads_per_threadgroup(1024)]]
 kernel void prefix_sum_blocks(
-    const device int* block_sums [[buffer(0)]],
-    device int* block_offsets [[buffer(1)]],
-    device int* total_nonzero [[buffer(2)]],
+    const device uint* block_sums [[buffer(0)]],
+    device uint* block_offsets [[buffer(1)]],
+    device uint* total_nonzero [[buffer(2)]],
     constant uint& num_blocks [[buffer(3)]],
     uint lid [[thread_position_in_threadgroup]],
     uint tgsize [[threads_per_threadgroup]],
@@ -1063,19 +1071,19 @@ kernel void prefix_sum_blocks(
   uint end = min(start + chunk_size, num_blocks);
 
   // Serial sum over this thread's chunk
-  int chunk_total = 0;
+  uint chunk_total = 0u;
   for (uint i = start; i < end; i++) {
     chunk_total += block_sums[i];
   }
 
   // Parallel inclusive prefix sum of chunk_totals across threads
-  int val = chunk_total;
+  uint val = chunk_total;
   for (uint offset = 1; offset < simdgroup_size; offset <<= 1) {
-    int other = simd_shuffle_and_fill_up(val, 0, static_cast<ushort>(offset));
+    uint other = simd_shuffle_and_fill_up(val, 0u, static_cast<ushort>(offset));
     val += other;
   }
 
-  threadgroup int simdgroup_totals[32];
+  threadgroup uint simdgroup_totals[32];
   bool is_last_lane_in_simd;
   if (simd_group_id < num_simds - 1) {
     is_last_lane_in_simd = (simd_lane_id == simdgroup_size - 1);
@@ -1088,26 +1096,27 @@ kernel void prefix_sum_blocks(
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
 
-  threadgroup int simdgroup_offsets[32];
+  threadgroup uint simdgroup_offsets[32];
   if (simd_group_id == 0) {
-    int sg_val =
-        (simd_lane_id < num_simds) ? simdgroup_totals[simd_lane_id] : 0;
+    uint sg_val =
+        (simd_lane_id < num_simds) ? simdgroup_totals[simd_lane_id] : 0u;
     for (uint offset = 1; offset < simdgroup_size; offset <<= 1) {
-      int other =
-          simd_shuffle_and_fill_up(sg_val, 0, static_cast<ushort>(offset));
+      uint other =
+          simd_shuffle_and_fill_up(sg_val, 0u, static_cast<ushort>(offset));
       sg_val += other;
     }
-    int exclusive = simd_shuffle_and_fill_up(sg_val, 0, static_cast<ushort>(1));
+    uint exclusive =
+        simd_shuffle_and_fill_up(sg_val, 0u, static_cast<ushort>(1));
     simdgroup_offsets[simd_lane_id] = exclusive;
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
 
   // This thread's exclusive offset = inclusive_scan - chunk_total +
   // simdgroup_offset
-  int thread_offset = val - chunk_total + simdgroup_offsets[simd_group_id];
+  uint thread_offset = val - chunk_total + simdgroup_offsets[simd_group_id];
 
   // Write block_offsets for this thread's chunk using a serial exclusive scan
-  int running = thread_offset;
+  uint running = thread_offset;
   for (uint i = start; i < end; i++) {
     block_offsets[i] = running;
     running += block_sums[i];
@@ -1121,29 +1130,32 @@ kernel void prefix_sum_blocks(
 
 // Scatter the multi-dimensional indices of nonzero elements.
 // Output layout: out[position * ndim + d] = index along dimension d.
+// The output-address arithmetic is done in int64 because pos * ndim can
+// exceed UINT32_MAX even when pos and ndim individually fit in uint32.
 template <typename T>
 [[max_total_threads_per_threadgroup(1024)]]
 kernel void scatter_nonzero_indices(
     const device T* input [[buffer(0)]],
-    const device int* prefix [[buffer(1)]],
+    const device uint* prefix [[buffer(1)]],
     device int64_t* output [[buffer(2)]],
     constant int& ndim [[buffer(3)]],
     constant int64_t* sizes [[buffer(4)]],
-    constant int* block_offsets [[buffer(5)]],
-    constant int& max_entries [[buffer(6)]],
+    constant uint* block_offsets [[buffer(5)]],
+    constant uint& max_entries [[buffer(6)]],
     uint tid [[thread_position_in_grid]],
     uint tgid [[threadgroup_position_in_grid]]) {
   if (!is_nonzero(input[tid]))
     return;
 
-  int pos = block_offsets[tgid] + prefix[tid];
+  uint pos = block_offsets[tgid] + prefix[tid];
   if (pos >= max_entries)
     return;
 
   uint64_t flat = tid;
+  int64_t out_base = static_cast<int64_t>(pos) * static_cast<int64_t>(ndim);
   for (int d = ndim - 1; d >= 0; d--) {
     int64_t dim_size = sizes[d];
-    output[pos * ndim + d] =
+    output[out_base + d] =
         static_cast<int64_t>(flat % static_cast<uint64_t>(dim_size));
     flat /= static_cast<uint64_t>(dim_size);
   }
@@ -1153,8 +1165,8 @@ kernel void scatter_nonzero_indices(
   template [[host_name("count_nonzero_prefix_sum_" #DTYPE)]] [[kernel]] void \
   count_nonzero_prefix_sum<DTYPE>(                                           \
       const device DTYPE* input [[buffer(0)]],                               \
-      device int* prefix [[buffer(1)]],                                      \
-      device int* block_sums [[buffer(2)]],                                  \
+      device uint* prefix [[buffer(1)]],                                     \
+      device uint* block_sums [[buffer(2)]],                                 \
       uint tid [[thread_position_in_grid]],                                  \
       uint lid [[thread_position_in_threadgroup]],                           \
       uint tgsize [[threads_per_threadgroup]],                               \
@@ -1165,12 +1177,12 @@ kernel void scatter_nonzero_indices(
   template [[host_name("scatter_nonzero_indices_" #DTYPE)]] [[kernel]] void  \
   scatter_nonzero_indices<DTYPE>(                                            \
       const device DTYPE* input [[buffer(0)]],                               \
-      const device int* prefix [[buffer(1)]],                                \
+      const device uint* prefix [[buffer(1)]],                               \
       device int64_t* output [[buffer(2)]],                                  \
       constant int& ndim [[buffer(3)]],                                      \
       constant int64_t* sizes [[buffer(4)]],                                 \
-      constant int* block_offsets [[buffer(5)]],                             \
-      constant int& max_entries [[buffer(6)]],                               \
+      constant uint* block_offsets [[buffer(5)]],                            \
+      constant uint& max_entries [[buffer(6)]],                              \
       uint tid [[thread_position_in_grid]],                                  \
       uint tgid [[threadgroup_position_in_grid]])
 

@@ -10212,11 +10212,13 @@ class TestMPS(TestCaseMPS):
         x = (torch.randn(4, 5, 6, device="mps") > 0).to(torch.int)
         self.assertEqual(x.nonzero(), x.cpu().nonzero())
 
-    @unittest.skipIf(torch.mps.recommended_max_memory() < 4 * 1024**3,
-                     "needs at least 4 GiB unified memory to allocate a >INT_MAX bool tensor")
+    # ~10 GiB unified memory needed: the input bool tensor is ~2.2 GiB and the
+    # int32 prefix-sum temporary buffer is ~8 GiB (numel * 4 bytes).
+    @unittest.skipIf(torch.mps.recommended_max_memory() < 12 * 1024**3,
+                     "needs at least 12 GiB unified memory for the input plus the int32 prefix buffer")
     def test_nonzero_large_64bit(self):
         # >INT_MAX elements: previously raised; now must succeed and match CPU on a sparse pattern.
-        # Use ~2.2B bool elements (~2.2 GiB) with ~10 nonzero set positions so the comparison is fast.
+        # Use ~2.2B bool elements (~2.2 GiB) with ~6 nonzero set positions so the comparison is fast.
         n = (1 << 31) + 1024
         x = torch.zeros(n, dtype=torch.bool, device="mps")
         positions = torch.tensor([0, 7, 1023, (1 << 30), (1 << 31) - 1, n - 1], device="mps")
@@ -10224,10 +10226,11 @@ class TestMPS(TestCaseMPS):
         out = x.nonzero().squeeze(-1)
         self.assertEqual(out, positions.sort().values.to(torch.int64))
 
-    def test_nonzero_kernel_offsets_above_uint32(self):
-        # Non-large smoke test that the 64-bit `flat` accumulator in scatter_nonzero_indices is wired
-        # through end to end: the highest set position must be reported correctly even when the value
-        # would have wrapped under the old uint32 path on a sufficiently large tensor.
+    def test_nonzero_scatter_uses_64bit_index_math(self):
+        # Regression smoke test for the 64-bit `flat` accumulator in
+        # scatter_nonzero_indices: multi-dim decomposition must not wrap the
+        # linear index when a nonzero sits at the largest position. Small
+        # enough to run on any machine.
         x = torch.zeros(1 << 20, dtype=torch.bool, device="mps")
         x[(1 << 20) - 1] = True
         out = x.nonzero().squeeze(-1)
