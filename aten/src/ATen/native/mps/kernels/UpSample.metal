@@ -703,10 +703,11 @@ kernel void upsample_2d_aa_backward(
   auto y_max = min(
       input_sizes.z, long(ceil(y_center + f.area_factor * clamped_scales.y)));
   float ws = 0.0;
+  auto clamped_scales_recip = 1 / clamped_scales;
   for (auto y = y_min; y < y_max; ++y) {
-    auto dy = f((y - y_center) / clamped_scales.y);
+    auto dy = f((y - y_center) * clamped_scales_recip.y);
     for (auto x = x_min; x < x_max; ++x) {
-      ws += f((x - x_center) / clamped_scales.x) * dy;
+      ws += f((x - x_center) * clamped_scales_recip.x) * dy;
     }
   }
   for (int n = 0; n < output_sizes.x; n++) {
@@ -716,9 +717,9 @@ kernel void upsample_2d_aa_backward(
               [n * output_strides.x + c * output_strides.y +
                output_y * output_strides.z + output_x * output_strides.w]);
       for (auto y = y_min; y < y_max; ++y) {
-        auto dy = f((y - y_center) / clamped_scales.y);
+        auto dy = f((y - y_center) * clamped_scales_recip.y);
         for (auto x = x_min; x < x_max; ++x) {
-          auto dx = f((x - x_center) / clamped_scales.x);
+          auto dx = f((x - x_center) * clamped_scales_recip.x);
           upsample_increment_value_bounded<T>(
               gradInputData,
               input_sizes,

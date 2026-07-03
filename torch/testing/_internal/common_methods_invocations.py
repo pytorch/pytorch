@@ -1436,6 +1436,7 @@ def sample_inputs_baddbmm(op_info, device, dtype, requires_grad, **kwargs):
                   ((1,), (S, S, S), (S, S, M), 0.6, 0.2, True),
                   ((), (S, S, S), (S, S, M), 1, 1, True),
                   ((), (S, S, S), (S, S, M), 0.6, 0.2, True),
+                  ((), (0, S, S), (0, S, M), 1, 1, True),  # empty batch, see #188765
                   ]
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, low=None, high=None)
     for (input_shape, batch1_shape, batch2_shape, alpha, beta, broadcasts_input) in test_cases:
@@ -5427,7 +5428,10 @@ def sample_inputs_cutedsl_topk(op_info, device, dtype, requires_grad, **kwargs):
         _REGISTER_N_RANGE,
     )
 
-    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
+    def make_arg(shape):
+        # Generic tests compare indices exactly; tie behavior has dedicated tests.
+        values = torch.randperm(math.prod(shape), dtype=torch.int64, device=device)
+        return values.reshape(shape).to(dtype)
 
     # M=256 is >= typical GPU SM count so the cond's SM-wave gate passes.
     for K in (64, 128, 256, 512, 1024):
