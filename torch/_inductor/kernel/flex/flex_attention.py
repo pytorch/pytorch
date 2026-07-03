@@ -436,7 +436,7 @@ def flex_attention(
     dtype = query.get_dtype()
     head_dim = V.graph.sizevars.guard_int(query.get_size()[-1])
     configs: list[FlexConfig] = V.choices.get_flex_attention_fwd_configs(
-        head_dim, dtype, query.get_device().type
+        head_dim, seq_len_q, dtype, query.get_device().type
     )
 
     # Mark SPARSE_KV_BLOCK_SIZE & SPARSE_Q_BLOCK_SIZE as static shapes and add guards.
@@ -531,6 +531,29 @@ def flex_attention(
         )
         if error is not None and len(configs) == 1:
             raise error
+
+    # Let the active choices handler append any backend-specific flex-attention
+    # template choices (e.g. TLX on Blackwell in fbcode). No-op by default.
+    choices = V.choices.append_flex_attention_choices(
+        choices,
+        configs,
+        [
+            query,
+            key,
+            value,
+            logsumexp,
+            max_scores,
+            kv_num_blocks,
+            kv_indices,
+            full_kv_num_blocks,
+            full_kv_indices,
+        ],
+        [subgraph_buffer, mask_graph_buffer],
+        layout,
+        original_kernel_options,
+        SPARSE_Q_BLOCK_SIZE,
+        SPARSE_KV_BLOCK_SIZE,
+    )
 
     if not choices and invalid_block_options is not None:
         raise_flex_kernel_options_error(
