@@ -344,6 +344,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _cdist_backward_backward(
     // Closed form via matmuls, avoiding the (r1, r2, m) materialization below.
     auto W = (grad_output / cdist).masked_fill(zero, 0);
     Tensor P;
+    
     if (need_go || need_cdist) {
       P = ((grad * x1).sum(-1, true) - grad.matmul(x2.mT())) / cdist;
       P = P.masked_fill(zero, 0);
@@ -362,9 +363,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _cdist_backward_backward(
     if (need_go) {
       auto diff = x1.unsqueeze(-2) - x2.unsqueeze(-3);
       auto s = diff.sgn();
+
       if (std::isinf(p)) {
         s = s * (diff.abs() == cdist.unsqueeze(-1));
       }
+
       grad_grad_output = (grad.unsqueeze(-2) * s).sum(-1);
     }
     if (need_x1)
@@ -380,9 +383,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _cdist_backward_backward(
     auto cdist_pow = cdist.pow(p - 1);
     auto W = (grad_output / cdist_pow).masked_fill(zero, 0);
     Tensor P;
+    
     if (need_go || need_cdist) {
       auto signpow = (diff.sgn() * adiff.pow(p - 1)).masked_fill(diff_zero, 0);
       auto num = (grad.unsqueeze(-2) * signpow).sum(-1);
+
       P = (num / cdist_pow).masked_fill(zero, 0);
     }
     if (need_go)
@@ -392,6 +397,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _cdist_backward_backward(
     if (need_x1 || need_x2) {
       auto adpow = adiff.pow(p - 2).masked_fill(diff_zero, 0);
       auto weighted = W.unsqueeze(-1) * adpow;
+      
       if (need_x1)
         grad_x1 = (p - 1) * grad * weighted.sum(-2);
       if (need_x2)
