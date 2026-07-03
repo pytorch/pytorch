@@ -629,6 +629,10 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         # Maps generated CSE names back to their original index expressions so
         # vector-load analysis can reason about the source indexing semantics.
         self._semantic_index_replacements: dict[sympy.Symbol, sympy.Expr] = {}
+        # Symbols whose value passed through a negative-index wrap. The wrap can
+        # remap individual lanes (idx + size for negatives only), so these may
+        # classify as lane-uniform but never as contiguous.
+        self._wrap_tainted_symbols: OrderedSet[sympy.Symbol] = OrderedSet()
 
     def _get_input_dtype(self, name: str) -> torch.dtype:
         """Get the dtype for an input from the kernel's named_input_nodes."""
@@ -891,13 +895,22 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
     def _emit_per_lane_gather_load(
         self, var: str, idx_vars: list[CuteDSLIndexFragment], val_frag: str
     ) -> None:
-        """Emit scalar per-lane loads for non-contiguous gather indices."""
+        """Emit scalar per-lane loads for non-contiguous gather indices.
+
+        Lane-uniform index fragments hold a single element, so they are indexed
+        at [0] rather than [load_idx] (which would read out of bounds and
+        silently corrupt the gathered rows).
+        """
         self.kernel.body.writeline(
             f"for load_idx in cutlass.range(cute.size({val_frag}.shape), unroll_full=True):"
         )
         with self.kernel.body.indent():
             load_indices = [
-                idx.code if idx.is_static_int else f"{idx.code}[load_idx]"
+                idx.code
+                if idx.is_static_int
+                else f"{idx.code}[0]"
+                if idx.is_lane_uniform
+                else f"{idx.code}[load_idx]"
                 for idx in idx_vars
             ]
             self.kernel.body.writeline(
@@ -928,7 +941,8 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
             )
 
         is_lane_uniform, is_contiguous, contiguous_width = self._analyze_index_fragment(
-            self._semantic_index_expr(expr)
+            self._semantic_index_expr(expr),
+            wrap_tainted=bool(expr.free_symbols & self._wrap_tainted_symbols),
         )
         result = self.kernel.cse.newvar(dtype=torch_dtype)
         self.kernel.body.writeline(
@@ -943,7 +957,7 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         )
 
     def _analyze_index_fragment(
-        self, semantic_expr: sympy.Expr
+        self, semantic_expr: sympy.Expr, wrap_tainted: bool = False
     ) -> tuple[bool, bool, int | None]:
         if self.vector_load_config is None:
             return False, False, None
@@ -956,6 +970,10 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
             max_width=self.vector_load_config.vec_size,
             uniform_symbols=self._lane_uniform_symbols(),
         )
+        if wrap_tainted:
+            # The wrap remaps negative lanes individually, so contiguity of the
+            # pre-wrap expression does not survive; uniformity does.
+            return lane_info.is_uniform, False, None
         return (
             lane_info.is_uniform,
             lane_info.is_contiguous,
@@ -1030,7 +1048,13 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
                 f"{wrapped} = cute.where("
                 f"{index_var} < 0, {index_var} + {size_expr}, {index_var})"
             )
-            return sympy_index_symbol(str(wrapped))
+            symbol = sympy_index_symbol(str(wrapped))
+            # Preserve the pre-wrap semantics so lane analysis sees the true
+            # lane structure instead of an unknown (default lane-uniform)
+            # symbol, which broadcast lane 0's gather to the whole group.
+            self._semantic_index_replacements[symbol] = index_var.index_expr
+            self._wrap_tainted_symbols.add(symbol)
+            return symbol
         source_name = None
         for expr, var in self.kernel.cse._cache.items():
             if var is index_var:

@@ -909,6 +909,25 @@ GQA_MQA_BLOCK_MASK_CASES = [
 class TestFlexFlash(InductorTestCase):
     # `FlashAttentionForwardSm120` does not have `apply_score_mod`.
     @xfailIfSM120OrLater
+    def test_vectorized_group_per_lane_gather(self):
+        """Per-lane gather + lane-uniform load in one vec group (#188871).
+
+        The uniform scale load enables score_mod vectorization; the rel-pos
+        gather's wrapped index must still classify per-lane, not lane-uniform
+        (which silently broadcast lane 0's bias across the group).
+        """
+        seq_len = 512
+        rel_bias = torch.randn(2 * seq_len, device="cuda")
+        head_scale = torch.randn(4, device="cuda")
+        offset = seq_len - 1
+
+        def score_mod(score, _b, h, q_idx, kv_idx):
+            return score + rel_bias[q_idx - kv_idx + offset] * head_scale[h]
+
+        q, k, v = create_test_tensors(seq_len=seq_len, device="cuda")
+        flash_vs_triton(q, k, v, score_mod=score_mod)
+
+    @xfailIfSM120OrLater
     def test_captured_table_int64_index(self):
         """Widening index casts must not break index-fragment materialization (#188871)."""
         seq_len = 512
