@@ -1,8 +1,8 @@
 # mypy: allow-untyped-defs
 r"""Contains definitions of the methods used by the _BaseDataLoaderIter to put fetched tensors into pinned memory.
 
-These **need** to be in global scope since Py2 doesn't support serializing
-static methods.
+These **need** to be at module scope so 'spawn'/'forkserver' can pickle them by
+qualified name.
 """
 
 import collections

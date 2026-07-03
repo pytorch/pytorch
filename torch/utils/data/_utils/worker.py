@@ -1,8 +1,8 @@
 # mypy: allow-untyped-defs
 r"""Contains definitions of the methods used by the _BaseDataLoaderIter workers.
 
-These **need** to be in global scope since Py2 doesn't support serializing
-static methods.
+These **need** to be at module scope so 'spawn'/'forkserver' can pickle them by
+qualified name.
 """
 
 from __future__ import annotations
@@ -125,19 +125,17 @@ def get_worker_info() -> WorkerInfo | None:
     return _worker_info
 
 
-r"""Dummy class used to signal the end of an IterableDataset"""
-
-
 @dataclass(frozen=True)
 class _IterableDatasetStopIteration:
+    r"""Sentinel sent from an IterableDataset worker to signal it is exhausted."""
+
     worker_id: int
-
-
-r"""Dummy class used to resume the fetching when worker reuse is enabled"""
 
 
 @dataclass(frozen=True)
 class _ResumeIteration:
+    r"""Control message telling reused workers to resume fetching with a new seed."""
+
     seed: int | None = None
 
 
