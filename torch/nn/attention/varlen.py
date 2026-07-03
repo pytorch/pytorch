@@ -323,6 +323,25 @@ def varlen_attn(
             f"but got Hq={num_heads_q} and Hkv={num_heads_k}. "
             f"Try setting enable_gqa=True for GQA."
         )
+
+    # Validate tensor lengths match cu_seqlens (fixes #176793)
+    # When query/key tensors are longer than cu_seqlens, backward produces NaN
+    total_q = cu_seq_q[-1].item()
+    if query.size(0) > total_q:
+        raise ValueError(
+            f"query has {query.size(0)} tokens but cu_seq_q[-1] = {total_q}. "
+            f"query length must not exceed cu_seq_q[-1]. "
+            f"See https://github.com/pytorch/pytorch/issues/176793."
+        )
+    if cu_seq_k is not None:
+        total_k = cu_seq_k[-1].item()
+        if key.size(0) > total_k:
+            raise ValueError(
+                f"key has {key.size(0)} tokens but cu_seq_k[-1] = {total_k}. "
+                f"key length must not exceed cu_seq_k[-1]. "
+                f"See https://github.com/pytorch/pytorch/issues/176793."
+            )
+
     if enable_gqa and num_heads_q % num_heads_k != 0:
         raise ValueError(
             f"Expect number of query heads to be a multiple of kv heads for GQA "
