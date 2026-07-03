@@ -21,7 +21,7 @@ import torch.nn.functional as F
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.eval_frame import unsupported
 from torch._dynamo.mutation_guard import GenerationTracker
-from torch._dynamo.testing import expectedFailureDynamic, same
+from torch._dynamo.testing import same
 from torch._dynamo.utils import ifdynstaticdefault
 from torch._dynamo.variables.torch_function import TensorWithTFOverrideVariable
 from torch.nn.modules.lazy import LazyModuleMixin
@@ -1511,8 +1511,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.op_count, 1)
         self.assertTrue(torch._dynamo.testing.same(out1, out2))
 
-    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
-    @expectedFailureDynamic
     def test_lazy_module1(self):
         input_shape = (16, 3, 6, 7, 8)
 
@@ -1581,8 +1579,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         )
         self.assertEqual(cnt.frame_count, 1, "No guards should have triggered.")
 
-    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
-    @expectedFailureDynamic
     def test_lazy_module2(self):
         # Test FX graph 'call_module' works well if argument is lazy module
         m = LazyMLP()
@@ -1594,8 +1590,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         ref = m(x)
         self.assertTrue(torch.allclose(ref, res))
 
-    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
-    @expectedFailureDynamic
     def test_lazy_module4(self):
         m = LazyMLP()
         x = torch.rand([10, 10])
@@ -1612,8 +1606,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         except RuntimeError:
             self.assertIn("must have same reduction dim", traceback.format_exc())
 
-    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
-    @expectedFailureDynamic
     def test_lazy_module5(self):
         # Test lazy module works well with list/tuple input
         m = LazyModuleWithListInput()
@@ -1623,8 +1615,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         ref = m(x)
         self.assertTrue(torch.allclose(ref, res))
 
-    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
-    @expectedFailureDynamic
     def test_lazy_module6(self):
         # Test new lazy submodule in lazy module's initialize_parameters
         m = LazyModuleWithLazySubmodule()
@@ -1634,8 +1624,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         ref = m(x)
         self.assertTrue(torch.allclose(ref, res))
 
-    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
-    @expectedFailureDynamic
     def test_lazy_module7(self):
         # Test lazy module works well with namedtuple/dict input
         m = LazyModuleWithNamedTupleInput()
@@ -1691,8 +1679,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         with self.assertRaises(AttributeError):
             exp_res = opt_m(x, y)
 
-    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
-    @expectedFailureDynamic
     def test_lazy_module_speculation_log_divergence(self):
         class ModWithOneLazyLinear(torch.nn.Module):
             def __init__(self) -> None:
@@ -1729,6 +1715,22 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         expect_res = mod(x)
         self.assertTrue(torch.allclose(expect_res, actual_res))
         self.assertEqual(cnt.frame_count, 1)
+
+    def test_lazy_module_symbolic_shapes(self):
+        # Regression test: lazy module initialization must handle symbolic
+        # shapes from dynamic inputs without hitting "SymIntArrayRef expected
+        # to contain only concrete integers".
+        m = torch.nn.LazyBatchNorm1d()
+
+        @torch.compile(backend="eager", dynamic=True)
+        def fn(x):
+            return m(x)
+
+        x = torch.randn(16, 3, 6)
+        result = fn(x)
+        self.assertEqual(result.shape, x.shape)
+        self.assertIsInstance(m, torch.nn.BatchNorm1d)
+        self.assertEqual(m.num_features, 3)
 
     def test_call_fn_with_non_const_inputs_safe(self):
         class ModuleSpecialFwd(torch.nn.Module):
@@ -1816,7 +1818,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
 
 
 class NNModuleTestsDevice(torch._dynamo.test_case.TestCase):
-    @expectedFailureDynamic
     @skipIfHpu
     def test_lazy_module3(self, device):
         m = LazyMLP()

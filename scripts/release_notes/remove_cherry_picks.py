@@ -130,8 +130,7 @@ def main():
 
     # Write log file
     with open(log_path, "w") as f:
-        for entry in log_entries:
-            f.write(entry + "\n")
+        f.writelines(entry + "\n" for entry in log_entries)
     logger.info(f"Wrote removal log to {log_path}")
 
 
