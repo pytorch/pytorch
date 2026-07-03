@@ -2030,7 +2030,6 @@ class GraphLowering(torch.fx.Interpreter):
             self.fx_fqn_map[n.name] = f"{_innermost}.{_strip_instance_suffix(n.name)}"
         with (
             ir.IRNode.current_origins(origins),
-            ir.IRNode.current_primary_node(n),
             ir.IRNode.current_stream_idx(self._get_node_stream(n)),
             ir.IRNode.current_mempool(node_mempool),
             self.set_current_node(n),
