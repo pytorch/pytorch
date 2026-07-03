@@ -114,6 +114,8 @@ def parse_backend_yaml(
     symint_set = set(symint)
 
     supported_autograd = yaml_values.pop("autograd", [])
+    if supported_autograd is None:
+        supported_autograd = []  # Allow an empty autograd section
     if not isinstance(supported_autograd, list):
         raise AssertionError(
             f'expected "autograd" to be a list, but got: {supported_autograd}'

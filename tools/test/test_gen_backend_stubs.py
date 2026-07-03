@@ -90,6 +90,15 @@ autograd:
         # so there's no reason to parse the backend
         self.assert_success_from_gen_backend_stubs(yaml_str)
 
+    def test_valid_zero_autograd_ops(self) -> None:
+        yaml_str = """\
+backend: XLA
+cpp_namespace: torch_xla
+supported:
+- abs
+autograd:"""
+        self.assert_success_from_gen_backend_stubs(yaml_str)
+
     def test_missing_backend(self) -> None:
         yaml_str = """\
 cpp_namespace: torch_xla
