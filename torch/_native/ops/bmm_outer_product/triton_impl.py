@@ -41,7 +41,7 @@ def _bmm_outer_product_cond(
     # a and b are read-only here: the kernel wraps them in ConstTensorWrapper and
     # reads through const_data_ptr(), so copy-on-write inputs are not
     # materialized and need not be excluded.
-    if _is_gpu_tensor(a) and _is_gpu_tensor(b) and a.device == b.device and _is_outer_product(a, b):
+    if _is_acc_tensor(a) and a.device == b.device and _is_outer_product(a, b):
         return True
     return False
 
