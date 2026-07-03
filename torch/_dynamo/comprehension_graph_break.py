@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 
     from .symbolic_convert import InstructionTranslatorBase
 
+from . import config
 from .bytecode_transformation import (
     create_copy,
     create_dup_top,
@@ -638,6 +639,9 @@ def maybe_setup_comprehension_speculation(
         return False
 
     if not _is_comprehension_start(tx):
+        return False
+
+    if config.nested_graph_breaks:
         return False
 
     can_speculate = (
