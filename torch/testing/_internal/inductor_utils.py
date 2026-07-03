@@ -78,7 +78,7 @@ if HAS_TRITON:
     import triton
 
     TRITON_HAS_CPU = "cpu" in triton.backends.backends
-    TRITON_HAS_XPU = "xpu" in triton.backends.backends
+    TRITON_HAS_XPU = "intel" in triton.backends.backends
 else:
     TRITON_HAS_CPU = False
     TRITON_HAS_XPU = False
