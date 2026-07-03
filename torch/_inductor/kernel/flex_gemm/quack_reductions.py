@@ -114,7 +114,9 @@ def _group_count_matches_selected_dim(
         case -1:
             return True
         case _:
-            return statically_known_equal(group_count * group, selected_size)
+            return statically_known_equal(
+                group_count * group, selected_size
+            ) or statically_known_equal(group_count, selected_size // group)
 
 
 def _grouped_layout_matches_source_shape(
@@ -497,16 +499,24 @@ def propagate_grouped_tensorssa_info(
     return GroupedTensorSSAInfo(layout)
 
 
+def shape_arg_value(value: Any) -> Any:
+    match value:
+        case torch.fx.Node(meta={"val": shape_value}):
+            return shape_value
+        case _:
+            return value
+
+
 def view_or_reshape_args(node: torch.fx.Node) -> tuple[Any, tuple[Any, ...]] | None:
     if node.op == "call_method" and node.target in ("view", "reshape"):
-        return node.args[0], tuple(node.args[1:])
+        return node.args[0], tuple(shape_arg_value(arg) for arg in node.args[1:])
     if node.op == "call_function" and node.target in (
         torch.ops.aten.view.default,
         torch.ops.aten.reshape.default,
     ):
         shape = node.args[1]
         if isinstance(shape, (tuple, list, torch.Size)):
-            return node.args[0], tuple(shape)
+            return node.args[0], tuple(shape_arg_value(arg) for arg in shape)
     return None
 
 
