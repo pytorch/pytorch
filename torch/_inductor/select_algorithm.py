@@ -4663,6 +4663,13 @@ class AlgorithmSelectorCache(PersistentCache):
             log.debug("Precompile function found in cache, returning it")
             return precompile_func
 
+        try:
+            from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
+                NVUniversalGemmCaller,
+            )
+        except ImportError:
+            NVUniversalGemmCaller = None  # type: ignore[assignment, misc]
+
         log.info(
             "Multithreaded precompilation for %d choices using %d worker threads",
             len(choices),
@@ -4708,6 +4715,21 @@ class AlgorithmSelectorCache(PersistentCache):
         # Some choices only differ in runtime arguments, so we
         # skip a choice if it has the same hash as a previously seen choice
         seen_choices: OrderedSet[str] = OrderedSet()
+
+        # Count NVGEMM choices to decide whether subprocess precompile
+        # is worth the IPC overhead (break-even is ~20 NVGEMM choices).
+        _NVGEMM_SUBPROCESS_PRECOMPILE_THRESHOLD = 20
+        nvgemm_count = sum(
+            1
+            for c in choices
+            if NVUniversalGemmCaller is not None
+            and isinstance(c, NVUniversalGemmCaller)
+        )
+        use_nvgemm_subprocess = (
+            async_compile.use_process_pool()
+            and nvgemm_count >= _NVGEMM_SUBPROCESS_PRECOMPILE_THRESHOLD
+        )
+
         for c in choices:
             # Skip choices which we have already issued a precompile
             if c.kernel_hash_key() in seen_choices:
@@ -4720,6 +4742,11 @@ class AlgorithmSelectorCache(PersistentCache):
                 triton_cuda_choice = isinstance(c, TritonTemplateCaller) and isinstance(
                     c.bmreq, TritonGPUBenchmarkRequest
                 )
+                nvgemm_choice = (
+                    isinstance(c, NVUniversalGemmCaller)
+                    if NVUniversalGemmCaller is not None
+                    else False
+                )
                 if triton_cuda_choice and async_compile.use_process_pool():
                     with open(c.bmreq.module_path) as file:
                         source_code = file.read()
@@ -4727,6 +4754,35 @@ class AlgorithmSelectorCache(PersistentCache):
                         kernel_name=c.bmreq.kernel_name, source_code=source_code
                     ).future
                     log.debug("Submitted triton async compile for choice: %s", c)
+                elif nvgemm_choice and use_nvgemm_subprocess:
+                    from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+                        CUDAContextMetadata,
+                    )
+
+                    cuda_ctx = CUDAContextMetadata.from_kernel(
+                        c.bmreq.kernel, c.bmreq.input_tensor_meta[0].device
+                    )
+                    future = async_compile.nvgemm_precompile(
+                        kernel_name=c.bmreq.kernel.metadata.kernel_name,
+                        variant_name=c.bmreq.variant.name,
+                        accumulator_type=c.bmreq.accumulator_type,
+                        input_tensor_meta=c.bmreq.input_tensor_meta,
+                        output_tensor_meta=c.bmreq.output_tensor_meta,
+                        cuda_ctx=cuda_ctx,
+                        scale_type_a=c.bmreq.scale_type_a,
+                        scale_type_b=c.bmreq.scale_type_b,
+                        swizzle_type_a=c.bmreq.swizzle_type_a,
+                        swizzle_type_b=c.bmreq.swizzle_type_b,
+                    )
+                    log.debug(
+                        "Submitted nvgemm subprocess precompile for choice: %s", c
+                    )
+                elif nvgemm_choice:
+                    # CuTeDSL compilation is not thread-safe; below the
+                    # subprocess threshold or without the process pool,
+                    # skip precompile and compile lazily at benchmark time.
+                    log.debug("Skipping nvgemm precompile: %s", c)
+                    continue
                 else:
                     future = executor.submit(precompile_with_captured_stdout, c)
                     log.debug("Submitted precompile for choice: %s", c)
