@@ -306,9 +306,22 @@ TORCH_API void record_kernel_function_dtype(std::string name);
   AT_DISPATCH_CASE_COMPLEX_TYPES(__VA_ARGS__)               \
   AT_DISPATCH_CASE(SCALARTYPE, __VA_ARGS__)
 
+#define AT_DISPATCH_CASE_COMPLEX_TYPES_AND2(SCALARTYPE1, SCALARTYPE2, ...) \
+  AT_DISPATCH_CASE_COMPLEX_TYPES(__VA_ARGS__)                              \
+  AT_DISPATCH_CASE(SCALARTYPE1, __VA_ARGS__)                               \
+  AT_DISPATCH_CASE(SCALARTYPE2, __VA_ARGS__)
+
 #define AT_DISPATCH_COMPLEX_TYPES_AND(SCALARTYPE, TYPE, NAME, ...) \
   AT_DISPATCH_SWITCH(                                              \
       TYPE, NAME, AT_DISPATCH_CASE_COMPLEX_TYPES_AND(SCALARTYPE, __VA_ARGS__))
+
+#define AT_DISPATCH_COMPLEX_TYPES_AND2(        \
+    SCALARTYPE1, SCALARTYPE2, TYPE, NAME, ...) \
+  AT_DISPATCH_SWITCH(                          \
+      TYPE,                                    \
+      NAME,                                    \
+      AT_DISPATCH_CASE_COMPLEX_TYPES_AND2(     \
+          SCALARTYPE1, SCALARTYPE2, __VA_ARGS__))
 
 #define AT_DISPATCH_CASE_FLOATING_AND_COMPLEX_TYPES(...) \
   AT_DISPATCH_CASE_FLOATING_TYPES(__VA_ARGS__)           \

@@ -60,6 +60,8 @@ from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
     MI200_ARCH,
     run_tests,
+    skipIfRocm,
+    skipIfTorchInductor,
     TEST_CUDA_GRAPH,
     TEST_HPU,
     TEST_XPU,
@@ -139,6 +141,23 @@ class TestFullyShardForwardInputs(FSDPTestMultiThread):
         self.assertEqual(ys[0].device, torch.device("cpu"))
         self.assertEqual(ys[1].device, torch.device("cpu"))
         model(x, ys)
+
+    def test_root_no_forward_inputs(self):
+        device = torch.device(device_type.type, 0)
+
+        class ParameterOnlyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = nn.Parameter(torch.randn(4, 4, device=device))
+
+            def forward(self):
+                return self.weight @ self.weight
+
+        model = ParameterOnlyModule()
+        fully_shard(model)
+        out = model()
+        self.assertEqual(out.shape, (4, 4))
+        out.sum().backward()
 
 
 class TestFullyShardRegisteredParams(FSDPTestMultiThread):
@@ -413,6 +432,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             self._test_train_parity_multi_group,
         )
 
+    @skipIfTorchInductor(msg="https://github.com/pytorch/pytorch/issues/148901")
     @skip_if_lt_x_gpu(2, allow_cpu=True)
     @unittest.skipIf(TEST_HPU or TEST_XPU, "sleep kernel not supported on HPU/XPU")
     def test_train_parity_multi_group_cpu_offload_eager(self):
@@ -524,8 +544,8 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
 
         delay_in_ms = 100
-        orig_all_gather = dist.all_gather_into_tensor
-        orig_reduce_scatter = dist.reduce_scatter_tensor
+        orig_all_gather = dist.all_gather_single
+        orig_reduce_scatter = dist.reduce_scatter_single
 
         def delayed_all_gather(*args, **kwargs):
             device_sleep(
@@ -1017,9 +1037,13 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
             if do_grouping_parity:
                 ug_loss, ug_head_grad = _run_chunked(ungrouped_model, expected_h_dtype)
                 ctx = f"grouped-vs-ungrouped iter {iter_idx}"
-                self.assertEqual(ug_loss, fsdp_loss, msg=f"Loss {ctx}")
                 self.assertEqual(
-                    ug_head_grad, fsdp_head_grad, msg=f"head.weight.grad {ctx}"
+                    ug_loss, fsdp_loss, msg=lambda msg: f"{msg}\nLoss {ctx}"
+                )
+                self.assertEqual(
+                    ug_head_grad,
+                    fsdp_head_grad,
+                    msg=lambda msg: f"{msg}\nhead.weight.grad {ctx}",
                 )
                 for (name, ug_p), (_, fsdp_p) in zip(
                     ungrouped_model.named_parameters(), model.named_parameters()
@@ -1027,7 +1051,7 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
                     self.assertEqual(
                         ug_p.grad.to_local(),
                         fsdp_p.grad.to_local(),
-                        msg=f"Grad mismatch for {name} ({ctx})",
+                        msg=lambda msg: f"{msg}\nGrad mismatch for {name} ({ctx})",
                     )
 
             if do_parity:
@@ -1040,9 +1064,13 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
                 ref_head_grad.div_(self.world_size)
                 ctx = f"iter {iter_idx}"
                 self.assertEqual(
-                    fsdp_head_grad, ref_head_grad, msg=f"head.weight.grad {ctx}"
+                    fsdp_head_grad,
+                    ref_head_grad,
+                    msg=lambda msg: f"{msg}\nhead.weight.grad {ctx}",
                 )
-                self.assertEqual(ref_loss, fsdp_loss, msg=f"Loss {ctx}")
+                self.assertEqual(
+                    ref_loss, fsdp_loss, msg=lambda msg: f"{msg}\nLoss {ctx}"
+                )
                 check_sharded_parity(self, ref_model, model)
                 ref_optim.step()
                 ref_optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
@@ -1058,7 +1086,7 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
                     self.assertEqual(
                         ug_p.to_local(),
                         fsdp_p.to_local(),
-                        msg=f"Param mismatch grouped-vs-ungrouped for {name} at iter {iter_idx}",
+                        msg=lambda msg: f"{msg}\nParam mismatch grouped-vs-ungrouped for {name} at iter {iter_idx}",
                     )
 
     @skip_if_lt_x_gpu(2, allow_cpu=True)
@@ -1154,7 +1182,7 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
             self.assertEqual(
                 ref_p.grad.to_local(),
                 fsdp_p.grad.to_local(),
-                msg=f"grad mismatch for {name} after grad-accum + chunks",
+                msg=lambda msg: f"{msg}\ngrad mismatch for {name} after grad-accum + chunks",
             )
 
     @skip_if_lt_x_gpu(2, allow_cpu=True)
@@ -2472,6 +2500,7 @@ class TestFullyShardShareCommContext(FSDPTest):
             fully_shard(layer)
             layer._get_fsdp_state()._lazy_init()
         share_comm_ctx(list(model))
+        shared_comm_ctx = model[0]._get_fsdp_state()._comm_ctx
 
         torch.manual_seed(42 + self.rank + 1)
         inp = torch.randn(4, 3, lin_dim, device=device_type.type)
@@ -2561,6 +2590,7 @@ class TestFullyShardShareCommContext(FSDPTest):
                 dist.all_reduce(param.grad, op=dist.ReduceOp.AVG)
         self.assertEqual(len(all_gather_streams), 1)
         self.assertEqual(len(reduce_scatter_streams), 1)
+        self.assertEqual(len(shared_comm_ctx._last_post_reduce_events), 0)
         check_sharded_parity(self, ref_model, model)
 
 
@@ -2631,6 +2661,7 @@ class TestFullyShardCudaGraph(FSDPTest):
     def world_size(self) -> int:
         return 2
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/173761")
     @skip_if_lt_x_gpu(2, allow_cpu=True)
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"

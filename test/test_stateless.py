@@ -9,9 +9,20 @@ import unittest
 
 import torch
 import torch.nn.utils.stateless as stateless
-from torch.testing._internal.common_cuda import TEST_MULTIGPU
-from torch.testing._internal.common_utils import run_tests, TestCase, parametrize, instantiate_parametrized_tests, \
-    subtest
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    subtest,
+    TestCase,
+    TEST_MULTIACCELERATOR,
+)
+
+device_type = (
+    acc.type
+    if (acc := torch.accelerator.current_accelerator(check_available=True))
+    else "cpu"
+)
 
 
 class MockModule(torch.nn.Module):
@@ -119,7 +130,7 @@ class TestStatelessFunctionalAPI(TestCase):
         ):
             self._run_call_with_mock_module(traced_module, functional_call)
 
-    @unittest.skipIf(not TEST_MULTIGPU, 'multi-GPU not supported')
+    @unittest.skipIf(not TEST_MULTIACCELERATOR, 'multi-GPU not supported')
     @unittest.skip("This doesn't work right now")
     @parametrize("functional_call", [
         subtest(torch.func.functional_call, "torch_func"),
@@ -127,24 +138,24 @@ class TestStatelessFunctionalAPI(TestCase):
     ])
     def test_functional_call_with_data_parallel(self, functional_call):
         module = MockModule()
-        module.cuda()
+        module.to(device_type)
         dp_module = torch.nn.DataParallel(module, [0, 1])
-        self._run_call_with_mock_module(dp_module, functional_call, device='cuda', prefix='module')
+        self._run_call_with_mock_module(dp_module, functional_call, device=device_type, prefix='module')
 
-    @unittest.skipIf(not TEST_MULTIGPU, 'multi-GPU not supported')
+    @unittest.skipIf(not TEST_MULTIACCELERATOR, 'multi-GPU not supported')
     @parametrize("functional_call", [
         subtest(torch.func.functional_call, "torch_func"),
         subtest(stateless.functional_call, "stateless")
     ])
     def test_functional_call_with_data_parallel_error(self, functional_call):
         module = MockModule()
-        module.cuda()
+        module.to(device_type)
         dp_module = torch.nn.DataParallel(module, [0, 1])
         with self.assertRaisesRegex(RuntimeError, r'used with nn.DataParallel module'):
             functional_call(
                 dp_module,
-                {'module.weight': torch.zeros(5, device='cuda')},
-                (torch.ones(2, 5, device='cuda'),))
+                {'module.weight': torch.zeros(5, device=device_type)},
+                (torch.ones(2, 5, device=device_type),))
 
     @parametrize("functional_call", [
         subtest(torch.func.functional_call, "torch_func"),
