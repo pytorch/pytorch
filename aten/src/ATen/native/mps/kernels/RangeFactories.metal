@@ -1,86 +1,65 @@
+#include <c10/metal/utils.h>
 #include <metal_stdlib>
 using namespace metal;
 
-template <typename T>
-inline T linspace_cast(float v) {
-  return static_cast<T>(v);
-}
-template <>
-inline float2 linspace_cast(float v) {
-  return float2(v, 0.0);
-}
-
-struct RangeVals {
-  float start;
-  float step;
-  float end;
-};
-
-template <typename I>
-struct RangeIdx {
-  I halfway;
-  I steps;
-  I stride;
-};
-
 // Halfway split anchors both endpoints exactly (out[0]==start,
-// out[steps-1]==end).
+// out[steps-1]==end). v = {start, step, end}.
 template <typename I>
-inline float linspace_value(I i, RangeVals v, I halfway, I steps) {
-  return i < halfway ? v.start + v.step * static_cast<float>(i)
-                     : v.end - v.step * static_cast<float>(steps - i - 1);
+inline float linspace_value(I i, constant array<float, 3>& v, I steps) {
+  const I halfway = steps / 2;
+  return i < halfway ? v[0] + v[1] * static_cast<float>(i)
+                     : v[2] - v[1] * static_cast<float>(steps - i - 1);
 }
 
+// p = {steps, stride}.
 template <typename T, typename I>
 kernel void linspace(
     device T* out [[buffer(0)]],
-    constant RangeVals& v [[buffer(1)]],
-    constant RangeIdx<I>& p [[buffer(2)]],
+    constant array<float, 3>& v [[buffer(1)]],
+    constant array<I, 2>& p [[buffer(2)]],
     uint index [[thread_position_in_grid]]) {
   const I i = static_cast<I>(index);
-  const float val = linspace_value(i, v, p.halfway, p.steps);
-  out[i * p.stride] = linspace_cast<T>(val);
+  out[i * p[1]] = c10::metal::cast_to<T>(linspace_value(i, v, p[0]));
 }
 
-// Multi-dim non-contiguous output: scatter each element to its strided offset.
 template <typename T>
 kernel void linspace_strided(
     device T* out [[buffer(0)]],
-    constant RangeVals& v [[buffer(1)]],
-    constant RangeIdx<long>& p [[buffer(2)]],
+    constant array<float, 3>& v [[buffer(1)]],
+    constant uint& steps [[buffer(2)]],
     constant int& ndim [[buffer(3)]],
     constant long* sizes [[buffer(4)]],
     constant long* strides [[buffer(5)]],
     uint index [[thread_position_in_grid]]) {
-  const long i = static_cast<long>(index);
-  const float val = linspace_value(i, v, p.halfway, p.steps);
+  const float val = linspace_value(index, v, steps);
   long off = 0;
-  long rem = i;
+  uint rem = index;
   for (int d = ndim - 1; d >= 0; --d) {
-    off += (rem % sizes[d]) * strides[d];
-    rem /= sizes[d];
+    const uint sz = static_cast<uint>(sizes[d]);
+    off += static_cast<long>(rem % sz) * strides[d];
+    rem /= sz;
   }
-  out[off] = linspace_cast<T>(val);
+  out[off] = c10::metal::cast_to<T>(val);
 }
 
 #define REGISTER_LINSPACE_OP(DTYPE)                              \
   template [[host_name("linspace_" #DTYPE "_i32")]] kernel void  \
   linspace<DTYPE, int>(                                          \
       device DTYPE * out [[buffer(0)]],                          \
-      constant RangeVals & v [[buffer(1)]],                      \
-      constant RangeIdx<int> & p [[buffer(2)]],                  \
+      constant array<float, 3> & v [[buffer(1)]],                \
+      constant array<int, 2> & p [[buffer(2)]],                  \
       uint index [[thread_position_in_grid]]);                   \
   template [[host_name("linspace_" #DTYPE "_i64")]] kernel void  \
   linspace<DTYPE, long>(                                         \
       device DTYPE * out [[buffer(0)]],                          \
-      constant RangeVals & v [[buffer(1)]],                      \
-      constant RangeIdx<long> & p [[buffer(2)]],                 \
+      constant array<float, 3> & v [[buffer(1)]],                \
+      constant array<long, 2> & p [[buffer(2)]],                 \
       uint index [[thread_position_in_grid]]);                   \
   template [[host_name("linspace_strided_" #DTYPE)]] kernel void \
   linspace_strided<DTYPE>(                                       \
       device DTYPE * out [[buffer(0)]],                          \
-      constant RangeVals & v [[buffer(1)]],                      \
-      constant RangeIdx<long> & p [[buffer(2)]],                 \
+      constant array<float, 3> & v [[buffer(1)]],                \
+      constant uint & steps [[buffer(2)]],                       \
       constant int& ndim [[buffer(3)]],                          \
       constant long* sizes [[buffer(4)]],                        \
       constant long* strides [[buffer(5)]],                      \

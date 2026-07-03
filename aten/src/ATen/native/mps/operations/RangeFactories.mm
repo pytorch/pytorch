@@ -8,6 +8,7 @@
 #include <ATen/ops/arange_native.h>
 #include <ATen/ops/linspace_native.h>
 #include <ATen/ops/range_native.h>
+#include <array>
 #include <cmath>
 #include <limits>
 
@@ -20,19 +21,6 @@ static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 #endif
 
 namespace {
-// Mirror the kernel-side layouts in RangeFactories.metal.
-struct RangeVals {
-  float start;
-  float step;
-  float end;
-};
-template <typename I>
-struct RangeIdx {
-  I halfway;
-  I steps;
-  I stride;
-};
-
 struct RangeCachedGraph : public mps::MPSCachedGraph {
   API_AVAILABLE(macosx(12.3))
   RangeCachedGraph(MPSGraph* mpsGraph, MPSDataType dataType, int32_t shapeVal) : MPSCachedGraph(mpsGraph) {
@@ -208,59 +196,50 @@ Tensor& linspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
     return result;
   }
 
-  // Integral outputs truncate the endpoints to the integer type first (matches
-  // CPU/CUDA); float/complex interpolate the real endpoints in float32.
-  RangeVals vals{};
+  float s = 0, e = 0;
   if (isIntegralType(result.scalar_type(), /*includeBool=*/false)) {
     AT_DISPATCH_INTEGRAL_TYPES(result.scalar_type(), "linspace_mps", [&]() {
-      const auto s = static_cast<float>(start.to<scalar_t>());
-      const auto e = static_cast<float>(end.to<scalar_t>());
-      vals = {s, (e - s) / static_cast<float>(steps - 1), e};
+      s = static_cast<float>(start.to<scalar_t>());
+      e = static_cast<float>(end.to<scalar_t>());
     });
   } else {
-    const auto s = start.to<float>();
-    const auto e = end.to<float>();
-    vals = {s, (e - s) / static_cast<float>(steps - 1), e};
+    s = start.to<float>();
+    e = end.to<float>();
   }
-  const auto halfway = steps / 2;
+  const std::array<float, 3> vals{s, (e - s) / static_cast<float>(steps - 1), e};
 
   auto stream = getCurrentMPSStream();
   auto encoder = stream->commandEncoder();
   const auto tname = scalarToMetalTypeString(result);
 
   if (result.is_contiguous() || result.dim() == 1) {
-    // Fast path: contiguous (stride 1) or a 1-D strided view writes in place at
-    // index*stride, no scatter. Narrow the index math to int32 when it fits.
     const auto stride = result.is_contiguous() ? 1 : result.stride(0);
     const auto abs_stride = stride < 0 ? -stride : stride;
     const auto use32 = std::max<int64_t>(steps, (steps - 1) * abs_stride) <= std::numeric_limits<int32_t>::max();
     auto pso = lib.getPipelineStateForFunc("linspace_" + tname + (use32 ? "_i32" : "_i64"));
-    dispatch_sync(stream->queue(), ^() {
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
       @autoreleasepool {
         [encoder setComputePipelineState:pso];
         if (use32) {
-          RangeIdx<int32_t> idx{int32_t(halfway), int32_t(steps), int32_t(stride)};
-          mtl_setArgs(encoder, result, vals, idx);
+          std::array<int32_t, 2> p{int32_t(steps), int32_t(stride)};
+          mtl_setArgs(encoder, result, vals, p);
         } else {
-          RangeIdx<int64_t> idx{halfway, steps, stride};
-          mtl_setArgs(encoder, result, vals, idx);
+          std::array<int64_t, 2> p{steps, stride};
+          mtl_setArgs(encoder, result, vals, p);
         }
         mtl_dispatch1DJob(encoder, pso, static_cast<NSUInteger>(steps));
       }
     });
   } else {
-    // Multi-dim non-contiguous out=: scatter to each element's strided offset.
     auto pso = lib.getPipelineStateForFunc("linspace_strided_" + tname);
     const auto ndim = static_cast<int>(result.dim());
     const auto sizes = result.sizes();
     const auto strides = result.strides();
-    RangeIdx<int64_t> idx{halfway, steps, 1};
-    dispatch_sync(stream->queue(), ^() {
+    const auto steps32 = static_cast<uint32_t>(steps);
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
       @autoreleasepool {
         [encoder setComputePipelineState:pso];
-        mtl_setArgs(encoder, result, vals, idx, ndim);
-        [encoder setBytes:sizes.data() length:ndim * sizeof(int64_t) atIndex:4];
-        [encoder setBytes:strides.data() length:ndim * sizeof(int64_t) atIndex:5];
+        mtl_setArgs(encoder, result, vals, steps32, ndim, sizes, strides);
         mtl_dispatch1DJob(encoder, pso, static_cast<NSUInteger>(steps));
       }
     });
