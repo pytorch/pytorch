@@ -2213,8 +2213,18 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     # pyrefly: ignore [bad-override]
     def signbit(x):
-        # x < 0 is wrong for -0.0 in floating point, so use libdevice for
-        # supported floating dtypes.
+        # x < 0 is wrong for -0.0 in floating point, so use libdevice for supported floating
+        # dtypes on CUDA. On XPU, libdevice.signbit has a wrong float64 signature
+        # (https://github.com/intel/intel-xpu-backend-for-triton/issues/7345); use a bitcast-based
+        # sign-bit extraction as a workaround until the triton updates.
+        if V.graph.get_current_device_or_throw().type == "xpu":
+            return (
+                f"({x}).to(tl.int64, bitcast=True) < 0 "
+                f"if ({x}).dtype is tl.float64 "
+                f"else (libdevice.signbit({x}) != 0) "
+                f"if ({x}).dtype is tl.float32 "
+                f"else {x} < 0"
+            )
         return (
             f"(libdevice.signbit({x}) != 0) "
             f"if ({x}).dtype is tl.float32 or ({x}).dtype is tl.float64 "
