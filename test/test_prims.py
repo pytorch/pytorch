@@ -321,6 +321,17 @@ class TestPrims(TestCase):
         self.assertEqual(ref1, res3)
         self.assertEqual(ref2, res4)
 
+    def test_functional_rng_wrapper_with_positional_device(self):
+        import torch._inductor.inductor_prims
+
+        rng_state, result = torch._prims.rng_prims.run_and_save_rng_state(
+            torch.ops.prims.inductor_seeds.default, 1, torch.device("cpu")
+        )
+
+        self.assertEqual(rng_state.device.type, "cpu")
+        self.assertEqual(result.device.type, "cpu")
+        self.assertEqual(result.shape, (1,))
+
 class TestPrimsBasic(TestCase):
     def test_torch_ops(self):
         r = make_tensor((2,), device='cpu', dtype=torch.float)

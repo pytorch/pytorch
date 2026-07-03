@@ -85,14 +85,14 @@ class NCCLCopyEngineCollectives(MultiProcContinuousTest):
 
         with prof:
             # SM
-            dist.all_gather_into_tensor(out_golden, inp_golden)
+            dist.all_gather_single(out_golden, inp_golden)
             # CE + async
-            work = dist.all_gather_into_tensor(out, inp, async_op=True)
+            work = dist.all_gather_single(out, inp, async_op=True)
             work.wait()
             # CE + side stream
             stream.wait_stream(current_stream)
             with torch.cuda.stream(stream):
-                dist.all_gather_into_tensor(out2, inp)
+                dist.all_gather_single(out2, inp)
 
             prof.step()
 

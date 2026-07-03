@@ -2848,6 +2848,7 @@ def cross_entropy_loss_reference(input, target, weight=None, ignore_index=-100, 
 
 
 def linear_cross_entropy_loss_reference(input, linear_weight, target,
+                                        linear_bias=None,
                                         weight=None,
                                         ignore_index=None,
                                         reduction='mean',
@@ -2858,7 +2859,8 @@ def linear_cross_entropy_loss_reference(input, linear_weight, target,
     num_batches = input.shape[:-1]
     logits = F.linear(
         input,
-        linear_weight.reshape((-1, in_features))
+        linear_weight.reshape((-1, in_features)),
+        linear_bias.reshape(-1) if linear_bias is not None else None,
     ).reshape((*num_batches, num_classes, *out_features))
     ignore_index = ignore_index if ignore_index is not None else -100
     return F.cross_entropy(
@@ -3375,7 +3377,7 @@ class TestBase:
                 if name in {'constructor_args', 'extra_args'}:
                     kwargs[name] = ()
                 else:
-                    raise ValueError(f"{self.get_name()}: Specify {name} by a value, a function to generate it, or it's size!")
+                    raise ValueError(f"{self.get_name()}: Specify {name} by a value, a function to generate it, or its size!")
         self._extra_kwargs = kwargs
         self._arg_cache = {}
 

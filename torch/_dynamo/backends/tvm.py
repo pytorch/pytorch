@@ -53,9 +53,15 @@ def tvm(
         options = MappingProxyType({"scheduler": None, "trials": 20000, "opt_level": 3})
     if options is None:
         raise AssertionError("options must not be None")
-    import tvm  # type: ignore[import]
-    from tvm import relay  # type: ignore[import]
-    from tvm.contrib import graph_executor  # type: ignore[import]
+    try:
+        import tvm  # type: ignore[import]
+        from tvm import relay  # type: ignore[import]
+        from tvm.contrib import graph_executor  # type: ignore[import]
+    except ImportError as e:
+        raise ImportError(
+            "Please install apache-tvm to use the tvm backend. "
+            "See https://tvm.apache.org/docs/install/index.html for instructions."
+        ) from e
 
     jit_mod = torch.jit.trace(gm, example_inputs)
     device = device_from_inputs(example_inputs)

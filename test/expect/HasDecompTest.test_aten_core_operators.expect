@@ -34,6 +34,10 @@ aten::acos_
 aten::acosh
 aten::acosh.out
 aten::acosh_
+aten::adaptive_max_pool2d
+aten::adaptive_max_pool2d.out
+aten::adaptive_max_pool3d
+aten::adaptive_max_pool3d.out
 aten::add.Scalar
 aten::add.Scalar_out
 aten::add.Tensor
@@ -315,8 +319,6 @@ aten::lgamma_
 aten::lift
 aten::lift.out
 aten::lift_fresh
-aten::linalg_vector_norm
-aten::linalg_vector_norm.out
 aten::log
 aten::log.out
 aten::log10
