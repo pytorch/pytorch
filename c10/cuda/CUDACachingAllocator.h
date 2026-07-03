@@ -152,6 +152,13 @@ class CUDAAllocator : public DeviceAllocator {
   virtual void endAllocateToPool(
       c10::DeviceIndex device,
       MempoolId_t mempool_id) = 0;
+  // Notify the allocator that a CUDA stream capture has actually started /
+  // ended. Distinct from begin/endAllocateToPool, which only routes
+  // allocations into a private mempool and can be invoked without an active
+  // cudaStreamBeginCapture (e.g. from torch.cuda.use_mem_pool, NCCL
+  // registration, or inductor cudagraph_trees warmup).
+  virtual void markCaptureBegin(c10::DeviceIndex /*device*/) {}
+  virtual void markCaptureEnd(c10::DeviceIndex /*device*/) {}
   virtual void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) = 0;
   virtual int getPoolUseCount(
       c10::DeviceIndex /*device*/,
@@ -269,6 +276,13 @@ class CUDAAllocator : public DeviceAllocator {
   virtual CheckpointDelta setCheckpointPoolState(
       c10::DeviceIndex device,
       std::shared_ptr<AllocatorState> pps) = 0;
+  virtual DataPtr allocateWithAddress(size_t size, void* addr) {
+    TORCH_CHECK(
+        false,
+        name(),
+        " does not yet support allocateWithAddress. "
+        "If you need it, please file an issue describing your use case.");
+  }
   virtual std::string name() = 0;
   std::pair<size_t, size_t> getMemoryInfo(c10::DeviceIndex device) override {
     c10::DeviceGuard device_guard({at::kCUDA, device});
@@ -375,6 +389,10 @@ inline CheckpointDelta setCheckpointPoolState(
   return get()->setCheckpointPoolState(device, std::move(pps));
 }
 
+inline DataPtr allocateWithAddress(size_t size, void* addr) {
+  return get()->allocateWithAddress(size, addr);
+}
+
 // CUDAGraph interactions
 inline void beginAllocateToPool(
     c10::DeviceIndex device,
@@ -385,6 +403,14 @@ inline void beginAllocateToPool(
 
 inline void endAllocateToPool(c10::DeviceIndex device, MempoolId_t mempool_id) {
   get()->endAllocateToPool(device, mempool_id);
+}
+
+inline void markCaptureBegin(c10::DeviceIndex device) {
+  get()->markCaptureBegin(device);
+}
+
+inline void markCaptureEnd(c10::DeviceIndex device) {
+  get()->markCaptureEnd(device);
 }
 
 inline void recordHistory(

@@ -472,8 +472,8 @@ class SACEstimator(TorchDispatchMode):
             op_group.add(op_idx)
 
         # Like inplace ops, all of the random ops in the function/module should all be either recomputed or saved
-        # as a group. This is because, they affect the ranom seed generator. If force_store_random is set True,
-        # all of the random ops will be stored by default. For easy of manageability, we store the top-most random op
+        # as a group. This is because, they affect the random seed generator. If force_store_random is set True,
+        # all of the random ops will be stored by default. For ease of manageability, we store the top-most random op
         # as the leader of the random_ops_group.
         random_ops_group: dict[int, set[int]] = {}
         random_group_head_idx = min(sac_stats.rand_ops, default=-1)

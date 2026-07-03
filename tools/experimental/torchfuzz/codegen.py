@@ -143,6 +143,10 @@ class FuzzTemplate:
         """Return flag/setup lines emitted at the top of the generated file."""
         return []
 
+    def setseed_codegen(self, seed: int):
+        """Return lines emitted to set the random seed."""
+        return [f"torch.manual_seed({seed})", ""]
+
     def epilogue_codegen(self):
         """Return lines emitted at the very end of the generated file."""
         return []
@@ -467,8 +471,7 @@ def convert_graph_to_python_code(
 
     # Add single seed at the top if seed is provided
     if seed is not None:
-        code_lines.append(f"torch.manual_seed({seed})")
-        code_lines.append("")
+        code_lines.extend(fuzz_template.setseed_codegen(seed))
 
     code_lines.append(function_signature + ":")
 

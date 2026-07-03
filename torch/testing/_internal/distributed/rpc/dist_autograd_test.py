@@ -4,6 +4,7 @@ import random
 import sys
 import threading
 import time
+import unittest
 from datetime import timedelta
 from enum import Enum
 
@@ -169,7 +170,7 @@ def _all_contexts_cleaned_up(timeout_seconds=10):
     return success
 
 
-# This function creates a dis autograd context, run rpc_sync on the given ps,
+# This function creates a dist autograd context, run rpc_sync on the given ps,
 # and then blocks until the ps has verified the grads are correctly accumulated.
 def _run_trainer(rref_t1, t2, ps, rank_diff, sparse):
     with dist_autograd.context() as context_id:
@@ -978,7 +979,7 @@ class CommonDistAutogradTest(RpcAgentTestFixture):
         send_functions = ctx._send_functions()
         self.assertEqual(2, len(send_functions))
 
-        # For send function when making nest rpc call,
+        # For send function when making nested rpc call,
         # next functions of the send function are two recv functions
         # for received two tensors from previous call
         next_funcs = next(iter(send_functions.values())).next_functions
@@ -2517,6 +2518,7 @@ class DistAutogradTest(CommonDistAutogradTest):
 
 
 class CudaDistAutogradTest(CommonDistAutogradTest):
+    @unittest.skipIf(IS_MACOS, "https://github.com/pytorch/pytorch/issues/70753")
     @skip_if_lt_x_gpu(1)
     @dist_init
     def test_gpu_simple(self):

@@ -179,8 +179,8 @@ def install_config_module(module: ModuleType) -> None:
     class ConfigModuleInstance(ConfigModule):
         # __annotations__ is written to by Sphinx autodoc
         _bypass_keys = {
-            "_is_dirty",
-            "_hash_digest",
+            "_hash_dirty_var",
+            "_hash_cache_var",
             "_get_dict_dirty_keys_var",
             "_get_dict_cache_var",
             "__annotations__",
@@ -248,8 +248,10 @@ def install_config_module(module: ModuleType) -> None:
     module._config = config  # type: ignore[attr-defined]
     module._compile_ignored_keys = compile_ignored_keys  # type: ignore[attr-defined]
     module.__class__ = ConfigModuleInstance
-    module._is_dirty = True  # type: ignore[attr-defined]
-    module._hash_digest = None  # type: ignore[attr-defined]
+    module._hash_dirty_var = ContextVar(f"{module.__name__}._hash_dirty", default=True)  # type: ignore[attr-defined]  # pyrefly: ignore[missing-attribute]
+    module._hash_cache_var = ContextVar(  # pyrefly: ignore[missing-attribute]
+        f"{module.__name__}._hash_cache", default=None
+    )  # type: ignore[attr-defined]
     module._get_dict_dirty_keys_var = ContextVar(  # pyrefly: ignore[missing-attribute]
         f"{module.__name__}._get_dict_dirty_keys", default=None
     )  # type: ignore[attr-defined]
@@ -387,8 +389,8 @@ class ConfigModule(ModuleType):
     _config: dict[str, _ConfigEntry]
     _bypass_keys: set[str]
     _compile_ignored_keys: set[str]
-    _is_dirty: bool
-    _hash_digest: bytes | None
+    _hash_dirty_var: ContextVar[bool]
+    _hash_cache_var: ContextVar[bytes | None]
     # Per-thread cache state, backed by ContextVar so each thread/context gets
     # its own dirty set and cache (config values are per-thread via ContextVar).
     # None means fully dirty (initial state or >_GET_DICT_DIRTY_KEYS_CAP keys
@@ -427,7 +429,7 @@ class ConfigModule(ModuleType):
                 self._set_alias_val(config, value)
             else:
                 config.user_override.set(value)
-                self._is_dirty = True
+                self._hash_dirty_var.set(True)
                 self._mark_get_dict_dirty(name)
                 config.hide = False
 
@@ -471,7 +473,7 @@ class ConfigModule(ModuleType):
             raise AttributeError(f"{self.__name__}.{name} does not exist") from e
 
     def __delattr__(self, name: str) -> None:
-        self._is_dirty = True
+        self._hash_dirty_var.set(True)
         self._mark_get_dict_dirty(name)
         # must support delete because unittest.mock.patch deletes
         # then recreate things
@@ -744,16 +746,23 @@ class ConfigModule(ModuleType):
 
     def get_hash(self) -> bytes:
         """Hashes the configs that are not compile_ignored"""
-        if self._is_dirty or self._hash_digest is None:
+        if self._hash_dirty_var.get() or self._hash_cache_var.get() is None:
             dict_to_hash = self._get_dict(
                 ignored_keys=list(self._compile_ignored_keys), readonly_values=True
             )
             string_to_hash = repr(sorted(dict_to_hash.items()))
-            self._hash_digest = hashlib.md5(
-                string_to_hash.encode("utf-8"), usedforsecurity=False
-            ).digest()
-            self._is_dirty = False
-        return self._hash_digest
+            self._hash_cache_var.set(
+                hashlib.md5(
+                    string_to_hash.encode("utf-8"), usedforsecurity=False
+                ).digest()
+            )
+            self._hash_dirty_var.set(False)
+        result = self._hash_cache_var.get()
+        if result is None:
+            raise AssertionError(
+                "_hash_cache_var should not be None after recomputation"
+            )
+        return result
 
     @deprecated(
         "`config.to_dict()` has been deprecated. It no longer changes the underlying config."
@@ -905,11 +914,13 @@ class ConfigModule(ModuleType):
             prior = {k: config[k].user_override.get() for k in changes}
             for k, v in changes.items():
                 config[k].user_override.set(v)
+                self._hash_dirty_var.set(True)
                 self._mark_get_dict_dirty(k)
 
             def revert() -> None:
                 for k, v in prior.items():
                     config[k].user_override.set(v)
+                    self._hash_dirty_var.set(True)
                     self._mark_get_dict_dirty(k)
 
             return revert
