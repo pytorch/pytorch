@@ -86,7 +86,7 @@ def shard_dim_alltoall(input, gather_dim, shard_dim, mesh, mesh_dim):
             logger,
             "CPU process group does not support alltoall yet, falling back with allgather + chunk!",
         )
-        out = funcol.all_gather_tensor(input, gather_dim, (mesh, mesh_dim))
+        out = funcol.all_gather_single(input, gather_dim, (mesh, mesh_dim))
         if isinstance(out, funcol.AsyncCollectiveTensor):
             # stick to the same behavior for the alltoall case, remove this once we enable alltoall async
             out = out.wait()
@@ -228,6 +228,14 @@ def pad_tensor(
             return tensor
     elif not _are_we_tracing() and guard_or_false(pad_size == 0):
         return tensor
+    if _are_we_tracing():
+        from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
+
+        if has_free_unbacked_symbols(tensor):
+            pad_shape: list[IntLikeType] = list(tensor.shape)
+            pad_shape[pad_dim] = pad_size
+            return torch.cat([tensor, tensor.new_zeros(pad_shape)], dim=pad_dim)
+
     pad = [0, 0] * (tensor.ndim - pad_dim)
     pad[-1] = pad_size  # pyrefly: ignore[unsupported-operation]
     return torch.nn.functional.pad(tensor, pad)

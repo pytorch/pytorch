@@ -73,7 +73,7 @@ class TestSortAndSelect(TestCase):
                 self.assertEqual(
                     x[k][ixx[k][j]],
                     mxx[k][j],
-                    msg=f"torch.sort ({order}) indices wrong for {task}",
+                    msg=lambda msg: f"{msg}\ntorch.sort ({order}) indices wrong for {task}",
                 )
                 seen.add(ixx[k][j])
             self.assertEqual(len(seen), size)
@@ -189,16 +189,16 @@ class TestSortAndSelect(TestCase):
         # tests direct cub path
         x = torch.randn(4, 1024000, device=device)
         res1val, res1ind = torch.sort(x, stable=True)
-        torch.cuda.synchronize()
+        torch.get_device_module().synchronize()
         # assertIsOrdered is too slow, so just compare to cpu
         res1val_cpu, res1ind_cpu = torch.sort(x.cpu(), stable=True)
-        self.assertEqual(res1val, res1val_cpu.cuda())
-        self.assertEqual(res1ind, res1ind_cpu.cuda())
+        self.assertEqual(res1val, res1val_cpu.to(device))
+        self.assertEqual(res1ind, res1ind_cpu.to(device))
         res1val, res1ind = torch.sort(x, descending=True, stable=True)
-        torch.cuda.synchronize()
+        torch.get_device_module().synchronize()
         res1val_cpu, res1ind_cpu = torch.sort(x.cpu(), descending=True, stable=True)
-        self.assertEqual(res1val, res1val_cpu.cuda())
-        self.assertEqual(res1ind, res1ind_cpu.cuda())
+        self.assertEqual(res1val, res1val_cpu.to(device))
+        self.assertEqual(res1ind, res1ind_cpu.to(device))
 
     @dtypes(*all_types_and(torch.bool, torch.half, torch.bfloat16))
     def test_stable_sort(self, device, dtype):
@@ -878,7 +878,7 @@ class TestSortAndSelect(TestCase):
                     self.assertEqual(
                         vals,
                         ref,
-                        f"value/index mismatch k={k} slice_size={slice_size} "
+                        lambda msg: f"{msg}\nvalue/index mismatch k={k} slice_size={slice_size} "
                         f"dtype={dtype} largest={largest}",
                     )
 
@@ -1423,7 +1423,9 @@ class TestSortAndSelect(TestCase):
         cpu_indices_copy.copy_(indices.squeeze(0))
         total_unique = torch.unique(cpu_indices_copy).numel()
         self.assertEqual(
-            total_unique, k, f"Duplicates found in topk test: {k - total_unique}"
+            total_unique,
+            k,
+            lambda msg: f"{msg}\nDuplicates found in topk test: {k - total_unique}",
         )
         # for random case, values must match at returned indices (use pre-allocated tensor)
         if test_case == "random":
@@ -1439,7 +1441,9 @@ class TestSortAndSelect(TestCase):
                     data[0], 0, chunk_indices, out=gpu_chunk_values[:chunk_size_actual]
                 )
                 self.assertEqual(
-                    chunk_values, actual_values, msg=f"Value mismatch in chunk {i + 1}"
+                    chunk_values,
+                    actual_values,
+                    msg=lambda msg: f"{msg}\nValue mismatch in chunk {i + 1}",
                 )
 
         # for identical case, all values must equal to constant

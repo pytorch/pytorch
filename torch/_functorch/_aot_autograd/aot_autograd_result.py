@@ -564,6 +564,7 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
                 disable_amp=disable_amp,
                 indices_of_inps_to_detach=self.indices_of_inps_to_detach,
                 lazy_backward_info=cached_lazy_backward,
+                bw_compiler=None,
                 aot_config=aot_config,
                 fw_metadata=self.runtime_metadata,
                 try_save_cache_entry=None,

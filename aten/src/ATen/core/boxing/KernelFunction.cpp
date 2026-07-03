@@ -32,16 +32,6 @@ void ambiguous_autogradother_kernel(OperatorKernel* /*unused*/, const OperatorHa
     "\nCanonical state\n~~~~~~~~~~~\n", op.dumpState(), "\n\n");
 }
 
-void named_not_supported_kernel(OperatorKernel* /*unused*/, const OperatorHandle& op, DispatchKeySet /*unused*/, Stack* /*unused*/) {
-  // DO NOT LOOK AT STACK, YOU HAVE SHORT CIRCUITED BOXING
-  // See Note [named_not_supported_kernel]
-  TORCH_CHECK(0,
-    op.operator_name(), " is not yet supported with named tensors. Please drop names via "
-    "`tensor = tensor.rename(None)`, call the op with an unnamed tensor, "
-    "and set names on the result of the operation."
-    );
-}
-
 // single line summary of state
 std::string KernelFunction::dumpState() const {
   std::ostringstream oss;

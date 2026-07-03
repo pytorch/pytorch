@@ -480,7 +480,9 @@ for batch_ndx, sample in enumerate(loader):
 ```
 
 ```{eval-rst}
-.. autofunction:: torch.utils.data.random_split
+.. currentmodule:: torch.utils.data.dataset
+
+.. autofunction:: random_split
 ```
 
 ```{eval-rst}
@@ -512,6 +514,14 @@ for batch_ndx, sample in enumerate(loader):
 
 ```
 
+```{eval-rst}
+.. currentmodule:: torch.utils.data.graph
+
+.. autofunction:: traverse
+
+.. autofunction:: traverse_dps
+```
+
 % These modules are documented as part of torch/data listing them here for
 
 % now until we have a clearer fix
@@ -533,6 +543,27 @@ for batch_ndx, sample in enumerate(loader):
 ```
 
 ```{eval-rst}
+.. py:module:: torch.utils.data.datapipes.utils
+```
+
+```{eval-rst}
+.. currentmodule:: torch.utils.data.datapipes.utils.decoder
+
+.. autofunction:: basichandlers
+
+.. autofunction:: handle_extension
+```
+
+```{eval-rst}
+.. automodule:: torch.utils.data.datapipes.utils.common
+
+.. currentmodule:: torch.utils.data.datapipes.utils.common
+
+.. autofunction:: validate_input_col
+
+```
+
+```{eval-rst}
 .. automodule:: torch.utils.data.datapipes.iter.streamreader
 
 .. currentmodule:: torch.utils.data.datapipes.iter.streamreader
@@ -545,8 +576,6 @@ for batch_ndx, sample in enumerate(loader):
 ```
 
 ```{eval-rst}
-.. automodule:: torch.utils.data.datapipes.utils.common
-
 .. currentmodule:: torch.utils.data.datapipes.utils.common
 
 .. autosummary::
@@ -554,8 +583,4 @@ for batch_ndx, sample in enumerate(loader):
     :nosignatures:
 
     StreamWrapper
-```
-
-```{eval-rst}
-.. py:module:: torch.utils.data.datapipes.utils
 ```
