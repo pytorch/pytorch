@@ -806,6 +806,48 @@ class AsyncCompile:
                 getattr(mod, main_func_name), kernel_path=path
             )
 
+    def nvgemm_precompile(
+        self,
+        kernel_name,
+        variant_name,
+        accumulator_type,
+        input_tensor_meta,
+        output_tensor_meta,
+        cuda_ctx,
+        scale_type_a=None,
+        scale_type_b=None,
+        swizzle_type_a=None,
+        swizzle_type_b=None,
+    ):
+        """Submit NVGEMM kernel precompilation to the subprocess pool.
+
+        Compiles the CuTeDSL kernel artifact in a subprocess worker so the
+        thread-unsafe kernel.compile() call is process-isolated. The compiled
+        artifact is saved to the disk cache; the main process loads it on the
+        next cache lookup during benchmarking.
+        """
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+            _worker_nvgemm_autotuning_precompile,
+        )
+
+        env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TORCHINDUCTOR_CUTLASS_DIR"]
+        extra_env = {v: os.environ[v] for v in env_vars if v in os.environ}
+
+        return self.process_pool().submit(
+            _worker_nvgemm_autotuning_precompile,
+            kernel_name,
+            variant_name,
+            accumulator_type,
+            input_tensor_meta,
+            output_tensor_meta,
+            extra_env,
+            cuda_ctx,
+            scale_type_a,
+            scale_type_b,
+            swizzle_type_a,
+            swizzle_type_b,
+        )
+
     def metal(self, kernel_name: str, source: str, headers: list[str]) -> None:
         """Register a Metal kernel body; wait() compiles all registered kernels into one library."""
         if self._metal_sources is None:
