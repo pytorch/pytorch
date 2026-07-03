@@ -8117,6 +8117,33 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         self.assertTrue(torch.allclose(f(), torch.tensor([2.0])))
 
+    def test_opaque_value_instance_staticmethod(self):
+        from torch._library.opaque_object import register_opaque_type
+
+        class Quantizer:
+            def __eq__(self, other):
+                return type(self) is type(other)
+
+            def __hash__(self):
+                return hash(type(self))
+
+            def __fx_repr__(self):
+                name = type(self).__name__
+                return f"{name}()", {name: type(self)}
+
+            @staticmethod
+            def get_shape(shape):
+                return shape
+
+        register_opaque_type(Quantizer, typ="value")
+        q = Quantizer()
+
+        def fn(x):
+            return x + q.get_shape((3,))[0]
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(torch.zeros(3)), torch.full((3,), 3.0))
+
     def test_user_function_variable_supports_type_abcmeta_argument(self):
         class Foo(metaclass=abc.ABCMeta):
             @abc.abstractclassmethod
