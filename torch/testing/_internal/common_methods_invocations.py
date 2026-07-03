@@ -13790,7 +13790,7 @@ op_db: list[OpInfo] = [
            dtypes=floating_types(),
            dtypesIfMPS=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
-           supports_gradgrad=False,
+           supports_gradgrad=True,
            assert_autodiffed=False,
            sample_inputs_func=sample_inputs_cdist,
            skips=(
@@ -23632,7 +23632,7 @@ op_db: list[OpInfo] = [
         sample_inputs_func=sample_inputs_pdist,
         dtypes=floating_types(),
         supports_out=False,
-        supports_gradgrad=False,
+        supports_gradgrad=True,
         skips=(
             DecorateInfo(unittest.skip("Unsupported on MPS for now"), 'TestCommon', 'test_numpy_ref_mps'),
             # NotImplementedError: The operator 'aten::_pdist_forward' is not

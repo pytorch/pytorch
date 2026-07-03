@@ -88,6 +88,9 @@ ALLOW_LIST = [
     ("aten::eig.e", datetime.date(9999, 1, 1)),
     ("aten::adaptive_avg_pool3d_backward", datetime.date(9999, 1, 1)),
     ("aten::_embedding_bag_dense_backward", datetime.date(9999, 1, 1)),
+    # Renamed first argument grad -> grad_output to implement double backward.
+    ("aten::_cdist_backward", datetime.date(9999, 1, 1)),
+    ("aten::_pdist_backward", datetime.date(9999, 1, 1)),
     ("aten::matrix_rank", datetime.date(9999, 1, 1)),
     ("aten::matrix_rank.tol", datetime.date(9999, 1, 1)),
     ("aten::randperm", datetime.date(9999, 1, 1)),
