@@ -954,11 +954,9 @@ def materialize_flex_gemm_epilogue(
         for node in graph_module.graph.nodes:
             if node is gemm or node.op in ("placeholder", "output"):
                 continue
+            if isinstance(node.meta.get("val"), (int, torch.SymInt)):
+                continue
             with V.set_current_node(node):
-                node_args = tuple(_cute_arg(arg, env) for arg in node.args)
-                node_kwargs = {
-                    key: _cute_arg(value, env) for key, value in node.kwargs.items()
-                }
                 if node.op in ("call_function", "call_method"):
                     lowered_full_scalar = lower_full_scalar(node)
                     if lowered_full_scalar is not None:
@@ -1072,6 +1070,11 @@ def materialize_flex_gemm_epilogue(
                         env[node] = _cute_call(node.target, store_args, store_kwargs)
                         local_reduce_store_sources[node] = env[node]
                     else:
+                        node_args = tuple(_cute_arg(arg, env) for arg in node.args)
+                        node_kwargs = {
+                            key: _cute_arg(value, env)
+                            for key, value in node.kwargs.items()
+                        }
                         env[node] = _cute_call(node.target, node_args, node_kwargs)
                     if is_shape_preserving:
                         grouped_info = propagate_grouped_tensorssa_info(

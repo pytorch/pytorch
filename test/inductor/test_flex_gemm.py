@@ -2181,6 +2181,42 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @parametrize("axis", (0, 1))
+    def test_mm_tuple_aux_local_reduce_dynamic_explicit_group_count(self, axis):
+        def epilogue_fn(acc):
+            m, n = acc.shape
+            match axis:
+                case 1:
+                    x = acc.float().view(m, n // 16, 16)
+                    return acc.relu(), x.sum(-1)
+                case 0:
+                    x = acc.float().view(m // 16, 16, n)
+                    return acc.relu(), x.sum(1)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True, dynamic=True)
+        cases = (
+            ((128, 64, 128), (128, 64, 192))
+            if axis == 0
+            else ((128, 64, 128), (256, 64, 128))
+        )
+        for m, k, n in cases:
+            a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+            b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+            actual, aux = compiled(a, b)
+
+            self.assertLocalReduceAuxMatches(actual, aux, a, b, epilogue_fn)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     @parametrize("group", (2, 16, 32))
     @parametrize(
         "case",
