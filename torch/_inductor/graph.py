@@ -950,7 +950,7 @@ class GraphLowering(torch.fx.Interpreter):
 
     def find_nodes_prefer_channels_last(self) -> OrderedSet[Node]:
         """
-        The rule to decide if an node prefer channels last is simple.
+        The rule to decide if a node prefers channels last is simple.
         1. if it's input/output of a convolution
         2. if one of its user prefers channels last
 

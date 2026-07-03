@@ -22,16 +22,18 @@ void initPlacementBindings(PyObject* module) {
   auto py_module = py::reinterpret_borrow<py::module>(module);
   auto distributed_module = py_module.def_submodule("_distributed");
 
-  // Subclass OpaqueBase so pybind sees a real Python base while
+  // Subclass CustomClassBase so pybind sees a real Python base while
   // isinstance(fake_obj, Placement) still unwraps real_obj.
-  py::object opaque_base_module = py::module_::import("torch._opaque_base");
-  py::object opaque_base = opaque_base_module.attr("OpaqueBase");
+  py::object custom_class_base_module =
+      py::module_::import("torch._custom_class_base");
+  py::object custom_class_base =
+      custom_class_base_module.attr("CustomClassBase");
 
   auto placement_cls =
       py::class_<Placement>(
           distributed_module,
           "Placement",
-          opaque_base,
+          custom_class_base,
           placement_class_docstring)
           .def(py::init<>()) // Allow construction of Python subclasses.
           .def(

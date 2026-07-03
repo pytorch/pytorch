@@ -2049,6 +2049,14 @@ class ProcessGroupOpaqueTypeTest(TestCase):
                 process_group.rank(),
             )
 
+        store = dist.PrefixStore("opaque_base", dist.HashStore())
+        process_group = ProcessGroup(store, 0, 1)
+        self.assertIsInstance(process_group, OpaqueBase)
+        self.assertEqual(
+            ProcessGroup.unbox(process_group.boxed()).rank(),
+            process_group.rank(),
+        )
+
     def test_process_group_python_subclass_must_initialize_pybind_base(self):
         class BadProcessGroup(ProcessGroup):
             def __init__(self):

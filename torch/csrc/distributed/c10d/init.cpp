@@ -2125,17 +2125,19 @@ Arguments:
           &::c10d::PrefixStore::getUnderlyingNonPrefixStore,
           R"(Recursively to get the store before layers of wrapping with PrefixStore.)");
 
-  // Subclass OpaqueBase so pybind sees a real Python base while
+  // Subclass CustomClassBase so pybind sees a real Python base while
   // isinstance(fake_obj, ProcessGroup) still unwraps real_obj.
-  py::object opaque_base_module = py::module_::import("torch._opaque_base");
-  py::object opaque_base = opaque_base_module.attr("OpaqueBase");
+  py::object custom_class_base_module =
+      py::module_::import("torch._custom_class_base");
+  py::object custom_class_base =
+      custom_class_base_module.attr("CustomClassBase");
 
   auto processGroup =
       intrusive_ptr_no_gil_destructor_trampoline_class_<
           ::c10d::ProcessGroup, ::c10d::PyProcessGroup>(
           module,
           "ProcessGroup",
-          opaque_base,
+          custom_class_base,
           R"(A ProcessGroup is a communication primitive that allows for
           collective operations across a group of processes.
 
@@ -2680,10 +2682,6 @@ Arguments:
               then all leave the call together.
 
               See :func:`torch.distributed.barrier` for more details.)")
-          .def(
-              "_set_sequence_number_for_group",
-              &::c10d::ProcessGroup::setSequenceNumberForGroup,
-              py::call_guard<py::gil_scoped_release>())
           .def(
               "_get_sequence_number_for_group",
               &::c10d::ProcessGroup::getSequenceNumberForGroup,
