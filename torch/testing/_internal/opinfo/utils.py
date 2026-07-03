@@ -265,7 +265,7 @@ def reference_reduction_numpy(f, supports_keepdims=True):
 def prod_numpy(a, *args, **kwargs):
     """
     The function will call np.prod with type as np.int64 if the input type
-    is int or uint64 if is uint. This is necessary because windows np.prod uses by default
+    is int or uint64 if it is uint. This is necessary because windows np.prod uses by default
     int32 while on linux it uses int64.
     This is for fixing integer overflow https://github.com/pytorch/pytorch/issues/77320
 

@@ -897,7 +897,21 @@ class MultiprocessContext(PContext):
                     # If the process exited because of some reason,
                     # `ProcessLookupError` will be raised, it is safe to ignore it.
                     pass
-            proc.join()
+            # Bounded join: a process stuck in uninterruptible kernel sleep
+            # (Linux D-state, common with hung NCCL/GPU collectives) cannot
+            # be reaped by SIGKILL. Without a timeout the agent itself would
+            # wedge here and the supervising launcher could never exit.
+            proc.join(timeout)
+            if proc.is_alive():
+                logger.error(
+                    "Process %s did not exit after %s within %ss;"
+                    " abandoning and continuing teardown."
+                    " Worker may be in uninterruptible kernel sleep"
+                    " (e.g. wedged on GPU/NIC); host may need to be recycled.",
+                    proc.pid,
+                    _get_kill_signal().name,
+                    timeout,
+                )
 
 
 class SubprocessContext(PContext):
@@ -1037,4 +1051,20 @@ class SubprocessContext(PContext):
                     _get_kill_signal(),
                 )
                 handler.close(death_sig=_get_kill_signal())
-                handler.proc.wait()
+                # Bounded wait: a process stuck in uninterruptible kernel sleep
+                # (Linux D-state, common with hung NCCL/GPU collectives) cannot
+                # be reaped by SIGKILL. Without a timeout the agent itself would
+                # wedge here and the supervising launcher could never exit.
+                try:
+                    handler.proc.wait(timeout)
+                except subprocess.TimeoutExpired:
+                    logger.error(
+                        "Process %s did not exit after %s within %ss;"
+                        " abandoning and continuing teardown."
+                        " Worker may be in uninterruptible kernel sleep"
+                        " (e.g. wedged on GPU/NIC);"
+                        " host may need to be recycled.",
+                        handler.proc.pid,
+                        _get_kill_signal().name,
+                        timeout,
+                    )

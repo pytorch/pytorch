@@ -32,10 +32,13 @@ from torch.testing._internal.common_device_type import (
     onlyOn,
     OpDTypes,
     ops,
+    skip,
     skipCUDAIfNotRocm,
     skipMeta,
     skipMPS,
+    skipOps,
     skipXPU,
+    xfail,
 )
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and,
@@ -50,11 +53,8 @@ from torch.testing._internal.common_methods_invocations import (
     python_ref_db,
     ReductionOpInfo,
     ReductionPythonRefInfo,
-    skip,
-    skipOps,
     SpectralFuncInfo,
     UnaryUfuncInfo,
-    xfail,
 )
 from torch.testing._internal.common_utils import (
     clone_input_helper,
@@ -139,7 +139,6 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("all"),
     xfail("amax"),
     xfail("amin"),
-    xfail("aminmax"),
     xfail("any"),
     xfail("bucketize"),
     xfail("conj_physical"),
@@ -169,6 +168,7 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("linalg.lu_factor"),
     xfail("linalg.lu_factor_ex"),
     xfail("linalg.lu_solve"),
+    xfail("linalg.polar"),
     xfail("linalg.qr"),
     xfail("linalg.slogdet"),
     xfail("linalg.solve"),
@@ -239,7 +239,6 @@ class TestCommon(TestCase):
             if len(filtered_ops) != 0:
                 raise AssertionError(err_msg)
 
-    # Validates that each OpInfo works correctly on different CUDA devices
     @onlyAccelerator
     @deviceCountAtLeast(2)
     @ops(op_db, allowed_dtypes=(torch.float32, torch.long))
@@ -274,14 +273,10 @@ class TestCommon(TestCase):
             "aten.max.default",
             "aten.max.dim",
             "aten.max.dim_max",
-            "aten.max.names_dim",
-            "aten.max.names_dim_max",
             "aten.max.unary_out",
             "aten.min.default",
             "aten.min.dim",
             "aten.min.dim_min",
-            "aten.min.names_dim",
-            "aten.min.names_dim_min",
             "aten.min.unary_out",
             # not pointwise
             "aten.isin.Tensor_Tensor",
@@ -291,8 +286,6 @@ class TestCommon(TestCase):
             "aten.isin.Scalar_Tensor",
             "aten.isin.Scalar_Tensor_out",
             "aten.mode.default",
-            "aten.mode.dimname",
-            "aten.mode.dimname_out",
             "aten.mode.values",
         )
 
@@ -328,9 +321,7 @@ class TestCommon(TestCase):
                     kernel = get_opoverloadpacket_from_dispatch(kernel)
                     overloadpacket = getattr(torch.ops.aten, kernel)
 
-                    for overload_name in overloadpacket.overloads():
-                        overload = getattr(overloadpacket, overload_name)
-
+                    for overload in overloadpacket.op_overloads():
                         if not torch._C._dispatch_has_kernel(overload.name()):
                             continue
 
@@ -406,9 +397,7 @@ class TestCommon(TestCase):
 
                     overloadpacket = getattr(torch.ops.aten, kernel)
 
-                    for overload_name in overloadpacket.overloads():
-                        overload = getattr(overloadpacket, overload_name)
-
+                    for overload in overloadpacket.op_overloads():
                         if not torch._C._dispatch_has_kernel(overload.name()):
                             continue
 
@@ -452,12 +441,17 @@ class TestCommon(TestCase):
                 for dim in reduction_dims:
                     reduction_factor *= sample.input.shape[dim]
 
+                # An empty reduction axis means there is nothing to reduce over
+                # and the numel-by-factor relationship below does not hold.
+                if reduction_factor == 0:
+                    continue
+
                 expected_numel = sample.input.numel() // reduction_factor
 
                 self.assertEqual(
                     result.numel(),
                     expected_numel,
-                    f"{op.name} with dim={dim_val} should reduce numel by factor of {reduction_factor} "
+                    lambda msg: f"{msg}\n{op.name} with dim={dim_val} should reduce numel by factor of {reduction_factor} "
                     f"(input: {sample.input.numel()}, expected: {expected_numel}, got: {result.numel()})",
                 )
 
@@ -477,8 +471,7 @@ class TestCommon(TestCase):
             and op.formatted_name
             in ("signal_windows_exponential", "signal_windows_bartlett")
             and dtype == torch.float64
-            and ("cuda" in device or "xpu" in device)
-            or "cpu" in device
+            and ("cpu" in device or "cuda" in device or "xpu" in device)
         ):
             raise unittest.SkipTest("XXX: raises tensor-likes are not close.")
 
@@ -601,10 +594,11 @@ class TestCommon(TestCase):
             if skip_bfloat and (
                 (
                     isinstance(sample.input, torch.Tensor)
-                    and sample.input.dtype == torch.bfloat16
+                    and sample.input.dtype in {torch.bfloat16, torch.bcomplex32}
                 )
                 or any(
-                    isinstance(arg, torch.Tensor) and arg.dtype == torch.bfloat16
+                    isinstance(arg, torch.Tensor)
+                    and arg.dtype in {torch.bfloat16, torch.bcomplex32}
                     for arg in sample.args
                 )
             ):
@@ -913,7 +907,7 @@ class TestCommon(TestCase):
 
             msg = "Got different gradients for contiguous / non-contiguous inputs wrt input {}."
             for i, (t, n) in enumerate(zip(t_grads, n_grads)):
-                self.assertEqual(t, n, msg=msg.format(i))
+                self.assertEqual(t, n, msg=lambda _m: f"{_m}\n" + (msg.format(i)))
 
     # Separates one case from the following test_out because many ops don't properly implement the
     #   incorrectly sized out parameter warning properly yet
@@ -981,7 +975,7 @@ class TestCommon(TestCase):
                 return tuple(t.stride() for t in out)
 
             # Extracts data pointers from a tensor or iterable of tensors into a tuple
-            # NOTE: only extracts on the CPU and CUDA device types since some
+            # NOTE: only extracts on the CPU and CUDA/XPU device types since some
             #   device types don't have storage
             def _extract_data_ptrs(out):
                 if self.device_type not in ["cpu", "cuda", "xpu"]:
@@ -1530,12 +1524,20 @@ class TestCommon(TestCase):
             unittest.skip("Does not support complex32")
 
         for sample in op.sample_inputs(device, dtype):
+            # MPS doesn't support float64
+            if torch.float64 in (
+                *sample.args,
+                *sample.kwargs.values(),
+            ) and not op.supports_dtype(torch.float64, device):
+                continue
+
             actual = op(sample.input, *sample.args, **sample.kwargs)
             # sample.transform applies the lambda to torch.Tensor and torch.dtype.
             # However, we only want to apply it to Tensors with dtype `torch.complex32`..
             transformed_sample = sample.transform(
                 lambda x: x.to(torch.complex64)
-                if isinstance(x, torch.Tensor) and x.dtype is torch.complex32
+                if isinstance(x, torch.Tensor)
+                and x.dtype in (torch.complex32, torch.bcomplex32)
                 else x
             )
             expected = op(
@@ -1816,11 +1818,7 @@ class TestCommon(TestCase):
     # of other concrete devices (e.g. CPU and CUDA).
     @onlyCPU
     @ops([op for op in op_db if op.supports_out], allowed_dtypes=(torch.float32,))
-    @skipOps(
-        "TestCommon",
-        "test_meta_consistency_out_dtype_mismatch",
-        meta_consistency_out_dtype_mismatch_xfails,
-    )
+    @skipOps(meta_consistency_out_dtype_mismatch_xfails)
     @skipIfTorchDynamo("meta device runs only on eager")
     def test_meta_consistency_out_dtype_mismatch(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype)
@@ -1897,6 +1895,36 @@ class TestCompositeCompliance(TestCase):
     @unittest.skipIf(
         IS_FBCODE or IS_SANDCASTLE, "__torch_dispatch__ does not work in fbcode"
     )
+    @skipOps(
+        {
+            xfail("item"),
+            xfail("narrow"),
+            xfail("nn.functional.gaussian_nll_loss"),
+            xfail("tensor_split"),
+            skip("empty"),
+            skip("empty_like"),
+            skip("empty_permuted"),
+            skip("empty_strided"),
+            skip("jiterator_2inputs_2outputs"),
+            skip("jiterator_4inputs_with_extra_args"),
+            skip("jiterator_binary"),
+            skip("jiterator_binary_return_by_ref"),
+            skip("jiterator_unary"),
+            skip("new_empty"),
+            skip("new_empty_strided"),
+            skip("nn.functional.embedding"),
+            skip("nn.functional.embedding_bag"),
+            skip("nn.functional.multi_head_attention_forward"),
+            skip("resize_"),
+            skip("resize_as_"),
+            skip("sparse.mm", variant_name="reduce"),
+            skip("sparse.sampled_addmm"),
+            skip("to_sparse"),
+            skip("bmm", variant_name="triton_optimized"),
+            skip("topk", variant_name="cutedsl_optimized"),
+            skip("topk", variant_name="cutedsl_optimized_deterministic"),
+        }
+    )
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_operator(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=False)
@@ -1911,6 +1939,22 @@ class TestCompositeCompliance(TestCase):
 
     @unittest.skipIf(
         IS_FBCODE or IS_SANDCASTLE, "__torch_dispatch__ does not work in fbcode"
+    )
+    @skipOps(
+        {
+            xfail("istft"),
+            xfail("narrow"),
+            xfail("nn.functional.gaussian_nll_loss"),
+            xfail("tensor_split"),
+            skip("normal", variant_name="number_mean"),
+            skip("sparse.mm", variant_name="reduce"),
+            skip("sparse.sampled_addmm"),
+            skip("to_sparse"),
+            skip("bmm", variant_name="triton_optimized"),
+            skip("topk", variant_name="cutedsl_optimized"),
+            skip("topk", variant_name="cutedsl_optimized_deterministic"),
+            skip("nn.functional.linear_cross_entropy", variant_name="chunked_none"),
+        }
     )
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
     def test_backward(self, device, dtype, op):
@@ -1933,6 +1977,19 @@ class TestCompositeCompliance(TestCase):
     @unittest.skipIf(
         IS_FBCODE or IS_SANDCASTLE, "__torch_dispatch__ does not work in fbcode"
     )
+    @skipOps(
+        {
+            xfail("narrow"),
+            xfail("nn.functional.gaussian_nll_loss"),
+            xfail("tensor_split"),
+            skip("nn.functional.max_unpool2d"),
+            skip("nn.functional.max_unpool3d"),
+            skip("nn.functional.multi_head_attention_forward"),
+            skip("bmm", variant_name="triton_optimized"),
+            skip("topk", variant_name="cutedsl_optimized"),
+            skip("topk", variant_name="cutedsl_optimized_deterministic"),
+        }
+    )
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_forward_ad(self, device, dtype, op):
         if torch.float not in op.supported_backward_dtypes(device):
@@ -1952,6 +2009,13 @@ class TestCompositeCompliance(TestCase):
                 op.get_op(), args, kwargs, op.gradcheck_wrapper, self.assertEqual
             )
 
+    @skipOps(
+        {
+            skip("bmm", variant_name="triton_optimized"),
+            skip("topk", variant_name="cutedsl_optimized"),
+            skip("topk", variant_name="cutedsl_optimized_deterministic"),
+        }
+    )
     @skipXPU
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_cow_input(self, device, dtype, op):
@@ -2133,6 +2197,13 @@ class TestCompositeCompliance(TestCase):
                             allow_list=op.allow_cow_input_materialize_backward,
                         )
 
+    @skipOps(
+        {
+            skip("bmm", variant_name="triton_optimized"),
+            skip("topk", variant_name="cutedsl_optimized"),
+            skip("topk", variant_name="cutedsl_optimized_deterministic"),
+        }
+    )
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_view_replay(self, device, dtype, op):
         def _assert_match_metadata(a, b):
@@ -2405,6 +2476,15 @@ class _TestTagsMode(TorchDispatchMode):
 @unMarkDynamoStrictTest
 class TestTags(TestCase):
     @onlyCPU
+    @skipOps(
+        {
+            skip("sparse.sampled_addmm"),
+            skip("sparse.mm", variant_name="reduce"),
+            skip("nn.functional.max_pool1d"),
+            skip("to_sparse"),
+            skip("bmm", variant_name="triton_optimized"),
+        }
+    )
     @ops(ops_and_refs, dtypes=OpDTypes.any_one)
     def test_tags(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=False)
@@ -2481,7 +2561,6 @@ class TestRefsOpsInfo(TestCase):
         "_refs.index_add_",
         "_refs.index_copy_",
         "_refs.index_fill_",
-        "_refs.native_group_norm",
     }
 
     not_in_decomp_table = {
@@ -2550,6 +2629,9 @@ class TestRefsOpsInfo(TestCase):
         "_refs.nn.functional.poisson_nll_loss",
         "_refs.nn.functional.softmax",
         "_refs.nn.functional.softmin",
+        # The frontend ref validates min_val <= max_val, but aten.hardtanh
+        # preserves native ATen semantics and allows inverted bounds.
+        "_refs.nn.functional.hardtanh",
         "_refs.positive",
         "_refs.ravel",
         "_refs.reshape",
@@ -2720,6 +2802,7 @@ fake_backward_skips = {
 
 fake_backward_xfails = {skip(s) for s in fake_backward_skips} | {
     skip("nn.functional.ctc_loss"),
+    skip("bmm", variant_name="triton_optimized"),
 }
 
 fake_autocast_backward_xfails = {
@@ -2855,6 +2938,7 @@ class TestFakeTensor(TestCase):
                     allow_dynamic_output_shape_mode, match_results=False
                 )
 
+    @skipOps({skip("bmm", variant_name="triton_optimized")})
     @ops(op_db, dtypes=OpDTypes.any_one)
     def test_pointwise_ops(self, device, dtype, op):
         name = op.name
@@ -2908,10 +2992,24 @@ class TestFakeTensor(TestCase):
                 with mode:
                     op(input, *args, **kwargs)
 
+    @skipOps(
+        {
+            xfail("item"),
+            skip("native_batch_norm"),
+            skip("bmm", variant_name="triton_optimized"),
+        }
+    )
     @ops(op_db, dtypes=OpDTypes.any_one)
     def test_fake(self, device, dtype, op):
         self._test_fake_helper(device, dtype, op, contextlib.nullcontext)
 
+    @skipOps(
+        {
+            xfail("item"),
+            skip("native_batch_norm"),
+            skip("bmm", variant_name="triton_optimized"),
+        }
+    )
     @ops(op_db, dtypes=OpDTypes.any_one)
     def test_fake_autocast(self, device, dtype, op):
         device_type = torch.device(device).type
@@ -2960,19 +3058,13 @@ class TestFakeTensor(TestCase):
 
     @onlyAccelerator
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
-    @skipOps(
-        "TestFakeTensor", "test_fake_crossref_backward_no_amp", fake_backward_xfails
-    )
+    @skipOps(fake_backward_xfails | {skip("sparse.sampled_addmm")})
     def test_fake_crossref_backward_no_amp(self, device, dtype, op):
         self._test_fake_crossref_helper(device, dtype, op, contextlib.nullcontext)
 
     @onlyAccelerator
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
-    @skipOps(
-        "TestFakeTensor",
-        "test_fake_crossref_backward_amp",
-        fake_backward_xfails | fake_autocast_backward_xfails,
-    )
+    @skipOps(fake_backward_xfails | fake_autocast_backward_xfails)
     def test_fake_crossref_backward_amp(self, device, dtype, op):
         self._test_fake_crossref_helper(device, dtype, op, torch.cuda.amp.autocast)
 
@@ -3012,14 +3104,18 @@ class TestForwardADWithScalars(TestCase):
                 result = op(dual0d, 2.0)
                 p, t = torch.autograd.forward_ad.unpack_dual(result)
                 self.assertEqual(
-                    p.dtype, t.dtype, f"{op.name} and scalar on RHS - dtype mismatch"
+                    p.dtype,
+                    t.dtype,
+                    lambda msg: f"{msg}\n{op.name} and scalar on RHS - dtype mismatch",
                 )
             # Test with scalar on LHS
             if op.supports_one_python_scalar:
                 result = op(2.0, dual0d)
                 p, t = torch.autograd.forward_ad.unpack_dual(result)
                 self.assertEqual(
-                    p.dtype, t.dtype, f"{op.name} and scalar on LHS - dtype mismatch"
+                    p.dtype,
+                    t.dtype,
+                    lambda msg: f"{msg}\n{op.name} and scalar on LHS - dtype mismatch",
                 )
 
 

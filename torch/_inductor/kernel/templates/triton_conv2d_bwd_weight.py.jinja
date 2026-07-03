@@ -1,0 +1,104 @@
+{% macro loop_body_bwd_weight_2d() -%}
+
+        idx_k = k + tl.arange(0, BLOCK_K)
+        n  = (idx_k // (OUT_H * OUT_W)).to(tl.int32)
+        rem = idx_k % (OUT_H * OUT_W)
+        yh = (rem // OUT_W).to(tl.int32)
+        yw = (rem %  OUT_W).to(tl.int32)
+
+        m  = (m0 + tl.arange(0, BLOCK_M)).to(tl.int32)
+        ic = (m // (KERNEL_H * KERNEL_W)).to(tl.int32)
+        ij =  m %  (KERNEL_H * KERNEL_W)
+        i  = (ij // KERNEL_W).to(tl.int32)
+        j  = (ij %  KERNEL_W).to(tl.int32)
+
+        xh = yh[:, None] * STRIDE_H - PADDING_H + i[None, :] * DILATION_H
+        xw = yw[:, None] * STRIDE_W - PADDING_W + j[None, :] * DILATION_W
+
+        x_ptrs = X_base \
+            + n[:,    None]  * stride_xn \
+            + ic[None,    :] * stride_xc \
+            + xh             * stride_xh \
+            + xw             * stride_xw
+
+        mask_x = (
+            (n[:,    None]  < BATCH) &
+            (ic[None,    :] < GROUP_IN_C) &
+            (xh >= 0) & (xh < IN_H) &
+            (xw >= 0) & (xw < IN_W)
+        )
+        matrix_x = tl.load(x_ptrs, mask=mask_x, other=0.0)
+        matrix_x = tl.trans(matrix_x)
+
+        dy_ptrs = dY_base \
+            + n[:,    None]  * stride_dyn \
+            + oc[None,    :] * stride_dyc \
+            + yh[:,   None]  * stride_dyh \
+            + yw[:,   None]  * stride_dyw
+
+        mask_dy = (
+            (n[:,    None]  < BATCH) &
+            (oc[None,    :] < GROUP_OUT_C) &
+            (yh[:,   None]  < OUT_H) &
+            (yw[:,   None]  < OUT_W)
+        )
+        matrix_dy = tl.load(dy_ptrs, mask=mask_dy, other=0.0)
+
+        acc += tl.dot(matrix_x, matrix_dy, allow_tf32=ALLOW_TF32)
+{%- endmacro %}
+
+{{def_kernel("X", "dY")}}
+
+    BATCH = {{size("X", 0)}}
+    IN_C  = {{size("X", 1)}}
+    IN_H  = {{size("X", 2)}}
+    IN_W  = {{size("X", 3)}}
+    OUT_C = {{size("dY", 1)}}
+    OUT_H = {{size("dY", 2)}}
+    OUT_W = {{size("dY", 3)}}
+
+    stride_xn = {{stride("X", 0)}}
+    stride_xc = {{stride("X", 1)}}
+    stride_xh = {{stride("X", 2)}}
+    stride_xw = {{stride("X", 3)}}
+
+    stride_dyn = {{stride("dY", 0)}}
+    stride_dyc = {{stride("dY", 1)}}
+    stride_dyh = {{stride("dY", 2)}}
+    stride_dyw = {{stride("dY", 3)}}
+
+    m0 = tl.program_id(0).to(INDEX_DTYPE) * BLOCK_M
+    oc = tl.program_id(1).to(INDEX_DTYPE) * BLOCK_N + tl.arange(0, BLOCK_N)
+
+{% if GROUPS == 1 %}
+    group = 0
+    GROUP_IN_C  = IN_C
+    GROUP_OUT_C = OUT_C
+{% else %}
+    group = tl.program_id(2).to(INDEX_DTYPE)
+    GROUP_IN_C  = IN_C  // GROUPS
+    GROUP_OUT_C = OUT_C // GROUPS
+{% endif %}
+
+    X_base  = X  + group * GROUP_IN_C  * stride_xc
+    dY_base = dY + group * GROUP_OUT_C * stride_dyc
+
+    acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
+
+    K_TOTAL = BATCH * OUT_H * OUT_W
+    for k in range(0, K_TOTAL, BLOCK_K):
+        {{ loop_body_bwd_weight_2d() }}
+
+    m = m0 + tl.arange(0, BLOCK_M)
+    ic = m // (KERNEL_H * KERNEL_W)
+    ij = m % (KERNEL_H * KERNEL_W)
+    i  = ij // KERNEL_W
+    j  = ij % KERNEL_W
+
+    out_ic = ic
+    out_oc = oc + group * GROUP_OUT_C
+
+    mask = (out_ic[:, None] < GROUP_IN_C) & (oc[None, :] < GROUP_OUT_C)
+
+    {{store_output(("out_oc[None, :]", "out_ic[:, None]", "i[:, None]", "j[:, None]"),
+                   "acc", "mask", val_shape=("BLOCK_M", "BLOCK_N"))}}
