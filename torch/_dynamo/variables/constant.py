@@ -906,6 +906,13 @@ class FakeIdVariable(VariableTracker):
     def hash_impl(self, tx: InstructionTranslatorBase) -> tuple[int, bool]:
         return hash(self.value), True
 
+    def repr_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
+        # Mirrors int.__repr__: the value is an int, so str()/repr() yield its
+        # decimal string. The distinct-but-compile-time-only identity carried by
+        # the fake id is preserved in the resulting string, matching how
+        # FakeIdVariable already resolves same-kind id()/hash() comparisons.
+        return ConstantVariable.create(repr(self.value))
+
     def richcompare_impl(
         self, tx: InstructionTranslatorBase, other: VariableTracker, op: str
     ) -> VariableTracker:
