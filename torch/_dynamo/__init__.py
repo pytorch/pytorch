@@ -67,6 +67,7 @@ from .mutation_guard import GenerationTracker
 from .pgo import reset_code_state
 from .symbolic_convert import TensorifyState
 from .utils import (
+    cleanup_all_guarded_eager_fallback_codes,
     graph_break_reasons,
     guard_failures,
     orig_code_map,
@@ -204,6 +205,7 @@ def reset_code_caches() -> None:
             code = weak_code()
             if code:
                 reset_code(code)
+        cleanup_all_guarded_eager_fallback_codes()
         code_context.clear()
 
 

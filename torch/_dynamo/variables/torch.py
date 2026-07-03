@@ -1783,11 +1783,14 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             condition: VariableTracker,
             message: VariableTracker,
         ) -> VariableTracker | None:
-            if (condition.is_python_constant() and condition.as_python_constant()) or (
-                isinstance(condition, variables.SymNodeVariable)
-                and condition.evaluate_expr()
-            ):
-                return ConstantVariable.create(None)
+            if condition.is_python_constant():
+                if condition.as_python_constant():
+                    return ConstantVariable.create(None)
+                raise_observed_exception(AssertionError, tx, args=[message])
+            if isinstance(condition, variables.SymNodeVariable):
+                if condition.evaluate_expr():
+                    return ConstantVariable.create(None)
+                raise_observed_exception(AssertionError, tx, args=[message])
             return None
 
         @register(SDPAParams)

@@ -338,8 +338,11 @@ class GraphCompileReason:
     # Indicates if this was a graph break reason due to graph break.
     graph_break: bool = True
 
+    # Indicates if this graph break should be counted in diagnostics.
+    record_graph_break: bool = True
+
     def __post_init__(self) -> None:
-        if self.graph_break:
+        if self.graph_break and self.record_graph_break:
             graph_break_reasons.append(self)
 
 
