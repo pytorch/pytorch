@@ -101,7 +101,9 @@ void XPUGraphImpl::capture_begin(
         return filter(XPUStream(XPUStream::UNCHECKED, stream));
       });
 
-  auto graph_impl = xpuGraph_t(capture_stream_.queue());
+  auto graph_impl = xpuGraph_t(
+      capture_stream_.queue(),
+      sycl::property_list{property::graph::enable_native_recording{}});
   graph_ = std::make_unique<xpuGraph_t>(std::move(graph_impl));
   graph_->begin_recording(capture_stream_.queue());
 
