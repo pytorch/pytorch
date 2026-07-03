@@ -60,6 +60,7 @@
 #include <ATen/ops/_prelu_kernel_backward_native.h>
 #include <ATen/ops/relu6_native.h>
 #include <ATen/ops/relu_native.h>
+#include <ATen/ops/result_type.h>
 #include <ATen/ops/rrelu_native.h>
 #include <ATen/ops/rrelu_with_noise.h>
 #include <ATen/ops/rrelu_with_noise_backward_native.h>
@@ -756,16 +757,20 @@ Tensor infinitely_differentiable_gelu_backward(
     const Tensor& grad,
     const Tensor& self) {
   constexpr double kAlpha = M_2_SQRTPI * M_SQRT1_2 * 0.5;
-  Tensor cdf = (1.0 + (self * M_SQRT1_2).erf_()).mul_(0.5);
-  Tensor pdf = (-0.5 * self * self).exp_();
-  return cdf.addcmul_(self, pdf, kAlpha).mul_(grad);
+  const auto result_dtype = at::result_type(grad, self);
+  const auto opmath_dtype = at::toOpMathType(result_dtype);
+  const Tensor grad_ = grad.to(opmath_dtype);
+  const Tensor self_ = self.to(opmath_dtype);
+  Tensor cdf = (1.0 + (self_ * M_SQRT1_2).erf_()).mul_(0.5);
+  Tensor pdf = (-0.5 * self_ * self_).exp_();
+  return cdf.addcmul_(self_, pdf, kAlpha).mul_(grad_).to(result_dtype);
 }
 
 std::tuple<Tensor, Tensor> log_sigmoid_forward_cpu(const Tensor& input) {
   auto result = at::empty_like(input, at::MemoryFormat::Contiguous);
   auto buffer = at::empty_like(input, at::MemoryFormat::Contiguous);
   log_sigmoid_cpu_stub(kCPU, result, buffer, input.contiguous());
-  return std::make_tuple(result, buffer);
+  return std::make_tuple(std::move(result), std::move(buffer));
 }
 
 std::tuple<Tensor&, Tensor&> log_sigmoid_forward_out_cpu(const Tensor& input, Tensor& result, Tensor& buffer) {

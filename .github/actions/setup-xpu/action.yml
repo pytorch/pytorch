@@ -57,17 +57,17 @@ runs:
       shell: bash
       run: |
         RUNNER_ARTIFACT_DIR="${RUNNER_TEMP}/artifacts"
-        rm -rf "${RUNNER_ARTIFACT_DIR}"
+        sudo rm -rf "${RUNNER_ARTIFACT_DIR}"
         mkdir -p "${RUNNER_ARTIFACT_DIR}"
         echo "RUNNER_ARTIFACT_DIR=${RUNNER_ARTIFACT_DIR}" >> "${GITHUB_ENV}"
 
         RUNNER_TEST_RESULTS_DIR="${RUNNER_TEMP}/test-results"
-        rm -rf "${RUNNER_TEST_RESULTS_DIR}"
+        sudo rm -rf "${RUNNER_TEST_RESULTS_DIR}"
         mkdir -p "${RUNNER_TEST_RESULTS_DIR}"
         echo "RUNNER_TEST_RESULTS_DIR=${RUNNER_TEST_RESULTS_DIR}" >> "${GITHUB_ENV}"
 
         RUNNER_DOCS_DIR="${RUNNER_TEMP}/docs"
-        rm -rf "${RUNNER_DOCS_DIR}"
+        sudo rm -rf "${RUNNER_DOCS_DIR}"
         mkdir -p "${RUNNER_DOCS_DIR}"
         echo "RUNNER_DOCS_DIR=${RUNNER_DOCS_DIR}" >> "${GITHUB_ENV}"
 

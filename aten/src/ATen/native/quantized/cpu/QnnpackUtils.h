@@ -433,7 +433,7 @@ namespace {
   // Since weight scale is allocated with padding
   // weight_scales.numel() gives us padded num elements.
   const auto num_output_channels_padded = weight_scales.numel();
-  float *const weight_scales_data = weight_scales.data_ptr<float>();
+  const float *const weight_scales_data = weight_scales.const_data_ptr<float>();
   if (static_cast<int64_t>(requant_scales.size()) < num_output_channels_padded) {
     requant_scales.resize(num_output_channels_padded);
   }
@@ -470,7 +470,7 @@ make_zero_points_and_scales_tensor(
         weight_contig.q_per_channel_zero_points().scalar_type() == at::kLong,
         "Per channel zero points dtype must be long int.");
     const int64_t* per_channel_zero_points =
-      weight_contig.q_per_channel_zero_points().data_ptr<int64_t>();
+      weight_contig.q_per_channel_zero_points().const_data_ptr<int64_t>();
     for (const auto i : c10::irange(num_output_channels)) {
       weight_zp[i] = (uint8_t)(per_channel_zero_points[i] + 128);
     }

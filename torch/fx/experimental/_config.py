@@ -99,6 +99,13 @@ meta_nonzero_assume_all_nonzero = False
 # Currently an experimental option for export.
 backed_size_oblivious = False
 
+# When True, the size-oblivious fallback in `_view_unbacked_meta` (used when
+# `backed_size_oblivious=True`) will, before falling through to the specializing
+# recursion that emits Eq(s, 1) via eval_eager, try to discover and commit
+# cross-symbol equalities (Eq(x, y)) that satisfy the view's numel constraint.
+# Only applies when `backed_size_oblivious=True`. Defaults to False.
+unify_view_symbols_bso_meta = False
+
 # Skip dtype check in meta registrations. Only used for systems that does its own dtype checking.
 skip_dtype_check_in_meta_registrations = False
 

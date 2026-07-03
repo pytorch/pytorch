@@ -412,7 +412,7 @@ def rewrite_script_object_meta(
     """When tracing, we produce a graph with FakeScriptObject in the
     meta["val"].
 
-    For now, we rewrie meta["val"] to be a placeholder CustomObjArgument
+    For now, we rewrite meta["val"] to be a placeholder CustomObjArgument
     """
     constants: dict[
         str,
