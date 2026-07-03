@@ -121,7 +121,8 @@ void dispatch_gemv(const Tensor& A,
                    const GemvPolicy& policy,
                    bool m_is_one,
                    int64_t outlen,
-                   int64_t K) {
+                   int64_t K,
+                   bool idx64) {
   const auto dt = out.scalar_type();
   const std::string dt_str = scalarToMetalTypeString(out);
   constexpr int64_t r = 0, c = 1;
@@ -131,7 +132,15 @@ void dispatch_gemv(const Tensor& A,
   // gemv_t when the output runs along the matrix's columns; else gemv_nt.
   const bool gemv_use_t = m_is_one ? !mat.trans : mat.trans;
   const int64_t align = mat.ld | mat.view.storage_offset();
-  GemvConfig cfg = gemv_use_t ? policy.pick_t(dt, outlen, K, align) : policy.pick_nt(dt, outlen, K, align);
+  GemvConfig cfg;
+  if (idx64) {
+    // Offsets overflow int32: such operands are DRAM-bound, so skip the
+    // policy and use the fixed configs the _i64 variants are built at.
+    cfg = gemv_use_t ? GemvConfig{16, 2} : GemvConfig{8, dt == at::kFloat ? 4 : 8};
+    cfg = gemv_use_t ? GemvPolicy::clamp_t(cfg, align) : GemvPolicy::clamp_nt(cfg, align);
+  } else {
+    cfg = gemv_use_t ? policy.pick_t(dt, outlen, K, align) : policy.pick_nt(dt, outlen, K, align);
+  }
   // T2D loads a full 16 bytes per lane; misaligned matrices fall back to the
   // scalar-column standard kernel.
   const int t2d_vec = static_cast<int>(16 / c10::elementSize(dt));
@@ -148,38 +157,40 @@ void dispatch_gemv(const Tensor& A,
   const bool xc = !gemv_use_t && launch_cfg.vec > 1 && vec_xs == 1 && (vvec.storage_offset() % launch_cfg.vec) == 0;
 
   Tensor self_e;
-  int32_t out_stride = 0;
+  int64_t out_stride = 0;
   if (epi == at_gemm::GemmEpilogue::AlphaBeta) {
     TORCH_INTERNAL_ASSERT(self.has_value());
     self_e = self->expand_as(out);
-    out_stride = static_cast<int32_t>(m_is_one ? self_e.stride(c) : self_e.stride(r));
+    out_stride = m_is_one ? self_e.stride(c) : self_e.stride(r);
   } else {
     self_e = mat.view; // dummy binding for buffer(4); never dereferenced
   }
 
   // gemv_t indexes self at (0,n) -> self_c; gemv_nt at (row,0) -> self_r.
   at_gemm::GemvDims dims;
-  dims.n = static_cast<int>(outlen);
-  dims.K = static_cast<int>(K);
-  dims.ld = static_cast<int>(mat.ld);
-  dims.xs = static_cast<int>(vec_xs);
+  dims.n = outlen;
+  dims.K = K;
+  dims.ld = mat.ld;
+  dims.xs = vec_xs;
   dims.self_r = gemv_use_t ? 0 : out_stride;
   dims.self_c = gemv_use_t ? out_stride : 0;
 
   const auto epi_str = epi == at_gemm::GemmEpilogue::AlphaBeta ? "ab" : "none";
+  const auto idx_str = idx64 ? "_i64" : "";
   std::string fname;
   if (gemv_t2d) {
     fname = fmt::format("gemv_t2d_{}_{}_{}_{}", dt_str, launch_cfg.nsimd, launch_cfg.kq, epi_str);
   } else if (gemv_use_t) {
-    fname = fmt::format("gemv_t_{}_{}_{}_{}", dt_str, launch_cfg.nsimd, launch_cfg.vec, epi_str);
+    fname = fmt::format("gemv_t_{}_{}_{}_{}{}", dt_str, launch_cfg.nsimd, launch_cfg.vec, epi_str, idx_str);
   } else {
-    fname = fmt::format("gemv_nt_{}_{}_{}_{}_{}{}",
+    fname = fmt::format("gemv_nt_{}_{}_{}_{}_{}{}{}",
                         dt_str,
                         launch_cfg.nsimd,
                         launch_cfg.vec,
                         epi_str,
                         xc ? "xc" : "xs",
-                        launch_cfg.rows > 1 ? fmt::format("_r{}", launch_cfg.rows) : "");
+                        launch_cfg.rows > 1 ? fmt::format("_r{}", launch_cfg.rows) : "",
+                        idx_str);
   }
   auto pso = lib.getPipelineStateForFunc(fname);
   const NSUInteger threads_per_tg = static_cast<NSUInteger>(launch_cfg.nsimd * 32);
@@ -229,8 +240,14 @@ bool try_mps_gemv(const Tensor& A,
   if (!out_unit) {
     return false;
   }
+  // The kernels index device memory with 32-bit signed ints in the fast path
+  // (e.g. k*ld + n); operands whose largest offset would not fit dispatch the
+  // 64-bit-index variants instead. K alone can exceed int32 while all offsets
+  // fit when a broadcast operand has stride-0 dims.
+  const bool idx64 = K >= std::numeric_limits<int32_t>::max() || !offsetsFitIn<int32_t>(A, B, out) ||
+      (self.has_value() && !offsetsFitIn<int32_t>(*self));
   const GemvPolicy policy = GemvPolicy::current();
-  dispatch_gemv(A, B, out, self, alpha, beta, epi, policy, m_is_one, outlen, K);
+  dispatch_gemv(A, B, out, self, alpha, beta, epi, policy, m_is_one, outlen, K, idx64);
   return true;
 }
 

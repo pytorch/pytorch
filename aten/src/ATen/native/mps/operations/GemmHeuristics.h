@@ -21,7 +21,7 @@ struct GemvConfig {
 
 class GemvPolicy {
  public:
-  explicit GemvPolicy(at::mps::AppleGPUFamily family);
+  GemvPolicy(at::mps::AppleGPUFamily family, uint32_t cores);
 
   static GemvPolicy current();
 
@@ -41,6 +41,7 @@ class GemvPolicy {
 
  private:
   at::mps::AppleGPUFamily family_;
+  uint32_t cores_; // scales the occupancy targets with device size
 };
 
 } // namespace at::native::mps

@@ -35,9 +35,10 @@ enum class GemmEpilogue : int { None = 0, AlphaBeta = 1 };
 // ld - matrix row stride
 // xs - vector stride
 // self_r/self_c - row/col strides of the bias (for addmm)
+// 64-bit so huge operands fit; kernels narrow to their IDX template width.
 struct GemvDims {
-  int n, K, ld, xs;
-  int self_r, self_c;
+  int64_t n, K, ld, xs;
+  int64_t self_r, self_c;
 };
 
 } // namespace at_gemm

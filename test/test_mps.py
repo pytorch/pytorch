@@ -1418,6 +1418,27 @@ class TestMPS(TestCaseMPS):
         out_cpu = torch.nn.functional.linear(x.cpu(), w.cpu(), bias.cpu())
         self.assertEqual(out_cpu, out.cpu(), **tol)
 
+    @parametrize("layout", ["t", "nt"])
+    @parametrize("check", ["head", "tail"])
+    def test_gemv_int64_indexing(self, layout, check):
+        # Matrices with > 2**31 elements overflow the kernels' int32 indexing
+        # and must dispatch the _i64 variants; odd N also hits the i64 vec
+        # clamp. nt is the lm_head decode layout (x @ W.t()) + bias epilogue.
+        if torch.mps.recommended_max_memory() < 12 * 1024**3:
+            raise unittest.SkipTest("needs ~5 GB of MPS memory")
+        K, N = 65536, 32769  # max offset 65535*32769 + 32768 > INT32_MAX
+        a = torch.randn(1, K, device="mps", dtype=torch.bfloat16)
+        b = self._gemv_mat(K, N, torch.bfloat16, transpose=layout == "nt")  # 4.3 GB
+        bias = torch.randn(1, N, device="mps", dtype=torch.bfloat16) if layout == "nt" else None
+        got = a @ b if bias is None else torch.addmm(bias, a, b)
+        self.assertFalse(got.isnan().any().item())
+        # CPU reference over a column slice to stay within RAM.
+        sl = slice(0, 2048) if check == "head" else slice(-2048, None)
+        ref = a.float().cpu() @ b[:, sl].float().cpu()
+        if bias is not None:
+            ref += bias[:, sl].float().cpu()
+        self.assertEqual(got[:, sl].float().cpu(), ref, atol=2e-1, rtol=5e-2)
+
     @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
     @parametrize("case", [
         ((1, 64, 12), "inner"),
