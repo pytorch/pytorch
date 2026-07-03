@@ -1363,13 +1363,6 @@ class InstructionTranslatorBase(
 ):
     output: OutputGraph
     symbolic_locals: dict[str, VariableTracker]
-    # Cell/free variables that share a name with a fast local (e.g. an inlined
-    # comprehension iteration variable shadowing an enclosing `nonlocal`). In
-    # CPython these occupy distinct `localsplus` offsets; keying both on a name
-    # in `symbolic_locals` would let fast-local ops (LOAD_FAST_AND_CLEAR) clobber
-    # the cell, so the colliding cell lives here instead. Non-colliding cells
-    # stay in `symbolic_locals`.
-    symbolic_cellvars: dict[str, VariableTracker]
     symbolic_globals: dict[str, VariableTracker]
     symbolic_torch_function_state: SymbolicTorchFunctionState
     symbolic_stream_state: SymbolicStreamState
@@ -1472,19 +1465,6 @@ class InstructionTranslatorBase(
             self._cell_and_freevars = self.cellvars() + self.freevars()
         return self._cell_and_freevars
 
-    def _split_colliding_cells(self) -> None:
-        # Move any free var that shares its name with a fast local into
-        # symbolic_cellvars. CPython gives such names two distinct localsplus
-        # slots (e.g. an inlined comprehension iteration variable shadowing an
-        # enclosing `nonlocal`); keeping the cell out of symbolic_locals stops
-        # fast-local ops (LOAD_FAST_AND_CLEAR) from clobbering it. Cellvars that
-        # match a fast local are merged into one slot by CPython and need no
-        # split. Idempotent: a second call finds the names already moved.
-        fastlocals = set(self.f_code.co_varnames)
-        for name in self.f_code.co_freevars:
-            if name in fastlocals and name in self.symbolic_locals:
-                self.symbolic_cellvars[name] = self.symbolic_locals.pop(name)
-
     def prune_dead_locals(self) -> None:
         # keep cell and freevar references alive
         self.post_prune_cell_and_freevars = {
@@ -1492,8 +1472,6 @@ class InstructionTranslatorBase(
             for k, v in self.symbolic_locals.items()
             if k in self.cell_and_freevars()
         }
-        # Colliding cells live in symbolic_cellvars rather than symbolic_locals.
-        self.post_prune_cell_and_freevars.update(self.symbolic_cellvars)
         # Only keep the locals that must remain on the stack.
         reads = livevars_analysis(self.instructions, self.current_instruction)
         # inspect.signature() renames ".N" to "implicitN" for comprehension
@@ -2101,7 +2079,7 @@ class InstructionTranslatorBase(
             self.exec_recorder.add_local_var(name, self.f_locals[name])
 
         try:
-            self.push(self._cellvar(name).unwrap())
+            self.push(self.symbolic_locals[name].unwrap())
         except KeyError:
             if name.startswith("."):
                 try:
@@ -2130,19 +2108,12 @@ class InstructionTranslatorBase(
         if name.startswith("__stack"):
             self.symbolic_locals.pop(name)
 
-    def _cellvar(self, name: str) -> VariableTracker:
-        # A colliding cell lives in `symbolic_cellvars`; otherwise it shares the
-        # `symbolic_locals` slot with no same-named fast local.
-        if name in self.symbolic_cellvars:
-            return self.symbolic_cellvars[name]
-        return self.symbolic_locals[name]
-
     def LOAD_DEREF(self, inst: Instruction) -> None:
         if inst.argval not in self.cell_and_freevars():
             raise AssertionError(
                 "expected inst.argval in self.cell_and_freevars() to be true"
             )
-        cell = self._cellvar(inst.argval)
+        cell = self.symbolic_locals[inst.argval]
         contents_var = self.output.side_effects.load_cell(cell)
         self.push(contents_var)
 
@@ -2215,7 +2186,7 @@ class InstructionTranslatorBase(
             raise AssertionError(
                 "expected inst.argval in self.cell_and_freevars() to be true"
             )
-        cell = self._cellvar(inst.argval)
+        cell = self.symbolic_locals[inst.argval]
         val = self.pop()
         self.output.side_effects.store_cell(cell, val)
 
@@ -2226,15 +2197,7 @@ class InstructionTranslatorBase(
         if cell.local_name is not None:
             val.set_name_hint(cell.local_name)  # type: ignore[attr-defined]
 
-    def LOAD_CLOSURE(self, inst: Instruction) -> None:
-        # LOAD_CLOSURE pushes the cell object itself. A colliding cell is in
-        # symbolic_cellvars; otherwise it shares the symbolic_locals slot, so
-        # fall back to LOAD_FAST.
-        name = inst.argval
-        if name in self.symbolic_cellvars:
-            self.push(self.symbolic_cellvars[name])
-        else:
-            self.LOAD_FAST(inst)
+    LOAD_CLOSURE = LOAD_FAST
 
     def _load_const(self, inst: Instruction) -> VariableTracker:
         i = inst.arg
@@ -4721,19 +4684,13 @@ class InstructionTranslatorBase(
         if sys.version_info >= (3, 12) and not self.accept_prefix_inst:
             # In 3.12+, MAKE_CELL is not longer necessarily a prefix instruction.
             # It can be generated by inlined comprehensions.
-            name = inst.argval
-            if not isinstance(self.symbolic_locals[name], NullVariable):
+            if not isinstance(self.symbolic_locals[inst.argval], NullVariable):
                 raise AssertionError(
                     "expected isinstance(self.symbolic_locals[inst.argval], NullVariable) to be true"
                 )
-            cell_var = self.output.side_effects.track_cell_new()
-            cell_var.local_name = name  # type: ignore[attr-defined]
-            # If the name also names a fast local, keep the cell out of
-            # symbolic_locals so fast-local ops can't clobber it.
-            if name in self.f_code.co_varnames:
-                self.symbolic_cellvars[name] = cell_var
-            else:
-                self.symbolic_locals[name] = cell_var
+            self.symbolic_locals[inst.argval] = (
+                self.output.side_effects.track_cell_new()
+            )
         else:
             self.append_prefix_inst(inst)
 
@@ -5284,7 +5241,6 @@ class InstructionTranslatorBase(
         # Mutable state checkpointed by copy_graphstate()
         self.output = output
         self.symbolic_locals = symbolic_locals
-        self.symbolic_cellvars = {}
         self.symbolic_globals = symbolic_globals
         self.symbolic_torch_function_state = symbolic_torch_function_state
         self.symbolic_stream_state = symbolic_stream_state
@@ -5328,10 +5284,6 @@ class InstructionTranslatorBase(
         self.code_options: CodeOptions = code_options
         self.f_code: types.CodeType = f_code
         self.closure = closure
-        # Inlined frames receive a fully-populated symbolic_locals (cells
-        # included); split out any colliding cells now. Root frames populate
-        # symbolic_locals after super().__init__ and split again there.
-        self._split_colliding_cells()
 
         # Execution record for replaying errors
         if closure is not None and config.replay_record_enabled:
@@ -5588,10 +5540,6 @@ class InstructionTranslator(InstructionTranslatorBase):
                 )
                 cell_var.local_name = name  # type: ignore[attr-defined]
                 self.symbolic_locals[name] = cell_var
-
-            # symbolic_locals is now fully populated; move colliding cells into
-            # symbolic_cellvars (base __init__ ran before this population).
-            self._split_colliding_cells()
 
             self.symbolic_torch_function_state = SymbolicTorchFunctionState(
                 torch_function_mode_stack,
