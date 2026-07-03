@@ -219,7 +219,7 @@ Tensor& _scaled_gemm(
         "scaled_mm: fast_accum is not supported in XPU for now. It would silently set use_fast_accum to false.");
   }
   // TODO: scale_result is not defined or used!
-  std::optional<Tensor> scaled_result = std::nullopt;
+  std::optional<Tensor> scale_result = std::nullopt;
   at::native::onednn::scaled_matmul(
       mat1,
       mat2,
@@ -229,7 +229,7 @@ Tensor& _scaled_gemm(
       scaling_choice_a,
       scaling_choice_b,
       bias,
-      scaled_result,
+      scale_result,
       false /* use_fast_accum */,
       alpha);
 
