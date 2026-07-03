@@ -5463,6 +5463,50 @@ class TestCompileTransforms(TestCase):
         result = compiled(x)
         self.assertEqual(result, expected)
 
+    @parametrize("backend", ["aot_eager", "inductor"])
+    @parametrize(
+        "input_shape",
+        [(16, 3, 6), (2, 4, 3, 6)],
+        name_fn=lambda shape: f"{len(shape)}d",
+    )
+    @onlyCPU
+    def test_compile_grad_linear_nd_input(self, device, backend, input_shape):
+        # Regression test for https://github.com/pytorch/pytorch/issues/181304
+        linear = nn.Linear(6, 52).to(device)
+
+        def model(x):
+            return torch.abs(linear(x)).mean()
+
+        x = torch.randn(*input_shape, device=device)
+        expected = grad(model)(x)
+
+        torch._dynamo.reset()
+        compiled = torch.compile(grad(model), backend=backend)
+        result = compiled(x)
+        self.assertEqual(result, expected)
+
+    @onlyCPU
+    def test_compile_grad_pool_linear_adaptive_pool(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/181304
+        avg_pool = nn.AvgPool2d(2).to(device)
+        linear = nn.Linear(6, 52).to(device)
+        adaptive_pool = nn.AdaptiveAvgPool2d((1, 1)).to(device)
+
+        def model(x):
+            x = avg_pool(x)
+            x = linear(x)
+            x = torch.abs(x)
+            x = adaptive_pool(x)
+            return x.mean()
+
+        x = torch.randn(16, 7, 7, 13, device=device)
+        expected = grad(model)(x)
+
+        torch._dynamo.reset()
+        compiled = torch.compile(grad(model))
+        result = compiled(x)
+        self.assertEqual(result, expected)
+
     def test_compile_dynamic_grad_vjp_index_select_pytree(self, device):
         # Regression test for https://github.com/pytorch/pytorch/issues/171537
         from torch.utils import _pytree as pytree
