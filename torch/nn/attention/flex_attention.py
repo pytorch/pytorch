@@ -402,7 +402,7 @@ _DEFAULT_SPARSE_BLOCK_SIZE = 128
 _LARGE_SPARSE_BLOCK_SIZE = 1 << 30
 
 
-def cdiv(a: int, b: int) -> int:
+def _cdiv(a: int, b: int) -> int:
     return (a + b - 1) // b
 
 
@@ -1404,7 +1404,7 @@ class BlockMask:
         """Computes the percentage of blocks that are sparse (i.e. not computed)"""
         total_blocks = math.prod(self.kv_num_blocks.shape[:-1])
         for seq_len, block_size in zip(self.seq_lengths, self.BLOCK_SIZE, strict=True):
-            total_blocks *= cdiv(seq_len, block_size)
+            total_blocks *= _cdiv(seq_len, block_size)
 
         computed_blocks = self.kv_num_blocks.sum()
         if self.full_kv_num_blocks is not None:
@@ -1463,8 +1463,8 @@ class BlockMask:
                 else:
                     return "░"
 
-            row_step = max(1, cdiv(num_rows, max_rows))
-            col_step = max(1, cdiv(num_cols, max_cols))
+            row_step = max(1, _cdiv(num_rows, max_rows))
+            col_step = max(1, _cdiv(num_cols, max_cols))
 
             for r in range(0, num_rows, row_step):
                 for c in range(0, num_cols, col_step):
