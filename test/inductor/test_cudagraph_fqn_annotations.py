@@ -25,11 +25,9 @@ from torch.cuda._graph_annotations import (
     _is_tools_id_unavailable,
     clear_kernel_annotations,
     disable_annotations,
-    enable_annotations,
     get_kernel_annotations,
     register_fqn_annotation_hooks,
     remap_to_exec_graph,
-    resolve_pending_annotations,
     save_kernel_annotations,
 )
 from torch.testing._internal.common_utils import run_tests, TemporaryFileName, TestCase
@@ -248,12 +246,10 @@ class TestCudagraphFqnAnnotations(TestCase):
         torch.cuda.current_stream().wait_stream(s)
         torch.cuda.synchronize()
 
-        enable_annotations()
         handles = register_fqn_annotation_hooks(model)
         g = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(g):
+        with torch.cuda.graph(g, enable_annotations=True):
             static_output = model(static_input)
-            resolve_pending_annotations()
         for h in handles:
             h.remove()
         remap_to_exec_graph(g)
@@ -409,6 +405,45 @@ class TestCudagraphFqnAnnotations(TestCase):
             any("L.model.layers." in s for s in fqns),
             f"joined table lacks per-layer FQNs; saw {sorted(set(fqns))[:8]}",
         )
+
+
+class TestGraphViewHelpers(TestCase):
+    """Unit tests for _clean_stack_name and _strip_instance_suffix."""
+
+    def test_clean_stack_name_module_subscript(self):
+        from torch._inductor.fx_passes.graph_view import _clean_stack_name
+
+        inp = "L['self']._modules['layers']['0']._modules['attention']"
+        self.assertEqual(_clean_stack_name(inp), "layers.0.attention")
+
+    def test_clean_stack_name_dot_attr(self):
+        from torch._inductor.fx_passes.graph_view import _clean_stack_name
+
+        self.assertEqual(
+            _clean_stack_name("L['self'].networks.1.conv"), "networks.1.conv"
+        )
+
+    def test_clean_stack_name_root(self):
+        from torch._inductor.fx_passes.graph_view import _clean_stack_name
+
+        self.assertEqual(_clean_stack_name("L['self']"), "")
+
+    def test_strip_instance_suffix_removes_trailing_digit(self):
+        from torch._inductor.fx_passes.graph_view import _strip_instance_suffix
+
+        self.assertEqual(_strip_instance_suffix("convolution_1"), "convolution")
+        self.assertEqual(_strip_instance_suffix("addmm_3"), "addmm")
+
+    def test_strip_instance_suffix_no_suffix(self):
+        from torch._inductor.fx_passes.graph_view import _strip_instance_suffix
+
+        self.assertEqual(_strip_instance_suffix("linear"), "linear")
+
+    def test_strip_instance_suffix_keeps_mid_digit(self):
+        from torch._inductor.fx_passes.graph_view import _strip_instance_suffix
+
+        # digits in the middle of a name are not stripped
+        self.assertEqual(_strip_instance_suffix("conv2d"), "conv2d")
 
 
 if __name__ == "__main__":
