@@ -34,9 +34,9 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
 from torch._library.opaque_object import (
+    CustomClassBase,
     get_opaque_type_name,
-    OpaqueBase,
-    register_opaque_type,
+    register_custom_class,
 )
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
@@ -55,7 +55,7 @@ from torch.utils import _pytree as pytree
 aten = torch.ops.aten
 
 
-class OpaqueScaleFactor(OpaqueBase):
+class OpaqueScaleFactor(CustomClassBase):
     def __init__(self, val):
         self.val = val
 
@@ -72,7 +72,7 @@ class OpaqueScaleFactor(OpaqueBase):
         )
 
 
-register_opaque_type(OpaqueScaleFactor, typ="value", hoist=True)
+register_custom_class(OpaqueScaleFactor, typ="constant", hoist=True)
 
 
 @instantiate_parametrized_tests
