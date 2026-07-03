@@ -35,8 +35,11 @@ from torch.nn.attention.flex_attention import (
     _compute_dq_write_order_from_block_mask,
     _create_empty_block_mask,
     _DEFAULT_SPARSE_BLOCK_SIZE,
+    _detect_blocks_are_contiguous,
     _identity,
+    _indices_are_consecutive,
     _mask_mod_signature,
+    _resolve_rocm_kernel_options,
     _score_mod_signature,
     and_masks,
     AuxOutput,
@@ -7119,6 +7122,180 @@ class TestBlockMask(InductorTestCase):
         self.assertEqual(block_mask.sparsity(), 29.1015625)
         self.assertTrue(block_mask.sparsity() < block_mask[0].sparsity())
         self.assertTrue(block_mask[0].sparsity() > block_mask[1].sparsity())
+
+    @supported_platform
+    def test_indices_are_consecutive_predicate(self, device):
+        # Platform-independent predicate: only the first num_blocks entries of
+        # each row must form a consecutive run (offsets allowed).
+        def t(rows):
+            return torch.tensor([[rows]], device=device, dtype=torch.int32)
+
+        def n(vals):
+            return torch.tensor([[vals]], device=device, dtype=torch.int32)
+
+        # consecutive from 0 (trailing garbage past num_blocks is ignored)
+        self.assertTrue(_indices_are_consecutive(n([3]), t([[0, 1, 2, 99]])))
+        # consecutive but offset from a non-zero base
+        self.assertTrue(_indices_are_consecutive(n([3]), t([[5, 6, 7, 0]])))
+        # gap in the valid region -> not consecutive
+        self.assertFalse(_indices_are_consecutive(n([3]), t([[0, 2, 4, 0]])))
+        # empty rows are trivially consecutive
+        self.assertTrue(_indices_are_consecutive(n([0]), t([[7, 1, 4, 2]])))
+
+    @supported_platform
+    def test_blocks_are_contiguous_detection(self, device):
+        B, H, S = 1, 1, 1024
+        BLK = _DEFAULT_SPARSE_BLOCK_SIZE
+
+        def checkerboard(b, h, q_idx, kv_idx):
+            return ((q_idx // BLK) + (kv_idx // BLK)) % 2 == 0
+
+        def strided(b, h, q_idx, kv_idx):
+            # only even KV blocks attended -> blocks are not physically adjacent
+            return ((kv_idx // BLK) % 2 == 0) & (q_idx >= kv_idx)
+
+        bm_noop = create_block_mask(noop_mask, B, H, S, S, device=device)
+        bm_causal = create_block_mask(
+            lambda b, h, q, kv: q >= kv, B, H, S, S, device=device
+        )
+        bm_checker = create_block_mask(checkerboard, B, H, S, S, device=device)
+        bm_strided = create_block_mask(strided, B, H, S, S, device=device)
+
+        # The eager attribute (and the full detector, which validates both KV-
+        # and Q-side indices) is only populated on ROCm, where the kernel fast
+        # path pays off; elsewhere it stays at the conservative default False.
+        if TEST_WITH_ROCM:
+            self.assertTrue(bm_noop._blocks_are_contiguous)
+            self.assertTrue(bm_causal._blocks_are_contiguous)
+            self.assertTrue(_detect_blocks_are_contiguous(bm_causal))
+            self.assertFalse(bm_checker._blocks_are_contiguous)
+            self.assertFalse(bm_strided._blocks_are_contiguous)
+        else:
+            self.assertFalse(bm_causal._blocks_are_contiguous)
+            self.assertFalse(_detect_blocks_are_contiguous(bm_causal))
+
+    @supported_platform
+    def test_prescale_qk_default_gating(self, device):
+        # PRESCALE_QK must only be auto-enabled (ROCm) when no additive score_mod
+        # is present; an additive bias would be exponentiated in the wrong base.
+        q, k, v = (
+            torch.randn(1, 1, 256, 64, device=device, dtype=torch.float16)
+            for _ in range(3)
+        )
+
+        opts_identity = _apply_kernel_options(q, k, v, False, None)
+        # _apply_kernel_options itself keeps the conservative default; the ROCm
+        # opt-in happens at the flex_attention call site, so the default here is
+        # always False regardless of platform.
+        self.assertFalse(opts_identity["PRESCALE_QK"])
+
+        # An explicitly pinned value is always respected.
+        opts_pinned = _apply_kernel_options(q, k, v, False, {"PRESCALE_QK": True})
+        self.assertTrue(opts_pinned["PRESCALE_QK"])
+
+    @supported_platform
+    def test_resolve_rocm_kernel_options(self, device):
+        # Pure gating helper that backs the flex_attention call-site auto opt-ins.
+        # It takes is_rocm explicitly, so the safety-critical branches are tested
+        # on every platform (no AMD GPU required).
+        def resolve(**kwargs):
+            base = {
+                "is_rocm": True,
+                "blocks_are_contiguous": False,
+                "score_mod_is_identity": True,
+                "user_set_blocks_contiguous": False,
+                "user_set_prescale": False,
+            }
+            base.update(kwargs)
+            return _resolve_rocm_kernel_options({}, **base)
+
+        # Off ROCm: never auto-enables anything, regardless of inputs.
+        off = _resolve_rocm_kernel_options(
+            {},
+            is_rocm=False,
+            blocks_are_contiguous=True,
+            score_mod_is_identity=True,
+            user_set_blocks_contiguous=False,
+            user_set_prescale=False,
+        )
+        self.assertNotIn("BLOCKS_ARE_CONTIGUOUS", off)
+        self.assertNotIn("PRESCALE_QK", off)
+
+        # Identity score_mod on ROCm -> PRESCALE_QK auto-enabled.
+        self.assertTrue(resolve(score_mod_is_identity=True)["PRESCALE_QK"])
+
+        # SAFETY: an additive (non-identity) score_mod must NOT get PRESCALE_QK,
+        # otherwise the bias is exponentiated in the wrong base.
+        self.assertNotIn("PRESCALE_QK", resolve(score_mod_is_identity=False))
+
+        # Contiguous blocks -> BLOCKS_ARE_CONTIGUOUS auto-enabled; non-contiguous
+        # masks leave it alone.
+        self.assertTrue(resolve(blocks_are_contiguous=True)["BLOCKS_ARE_CONTIGUOUS"])
+        self.assertNotIn(
+            "BLOCKS_ARE_CONTIGUOUS", resolve(blocks_are_contiguous=False)
+        )
+
+        # A user-pinned value is never overridden by the auto opt-in.
+        pinned_prescale = _resolve_rocm_kernel_options(
+            {"PRESCALE_QK": False},
+            is_rocm=True,
+            blocks_are_contiguous=True,
+            score_mod_is_identity=True,
+            user_set_blocks_contiguous=True,
+            user_set_prescale=True,
+        )
+        self.assertFalse(pinned_prescale["PRESCALE_QK"])
+        self.assertNotIn("BLOCKS_ARE_CONTIGUOUS", pinned_prescale)
+
+    @supported_platform
+    def test_blocks_are_contiguous_survives_to(self, device):
+        # BlockMask.to() preserves block structure, so the detected contiguity
+        # flag must survive the move (it is otherwise re-detected nowhere).
+        B, H, S = 1, 1, 1024
+        bm = create_block_mask(
+            lambda b, h, q, kv: q >= kv, B, H, S, S, device=device
+        )
+        moved = bm.to(device)
+        self.assertEqual(moved._blocks_are_contiguous, bm._blocks_are_contiguous)
+        if TEST_WITH_ROCM:
+            self.assertTrue(moved._blocks_are_contiguous)
+
+    @supported_platform
+    def test_prescale_qk_numerics(self, device):
+        # End-to-end check that the PRESCALE_QK fast path (auto-enabled by
+        # default on ROCm for an identity score_mod) is numerically equivalent
+        # to the non-prescale path. Prescale folds the softmax scale + change of
+        # base into the Q feed, which is a mathematically-equivalent
+        # reassociation, so both must track the float32 golden equally well.
+        B, H, S, D = 2, 2, 512, 64
+        make = functools.partial(
+            torch.randn, B, H, S, D, device=device, dtype=torch.float16
+        )
+        q, k, v = make(), make(), make()
+        q_gold, k_gold, v_gold = (x.detach().to(torch.float32) for x in (q, k, v))
+
+        block_mask = create_block_mask(
+            lambda b, h, qi, kvi: qi >= kvi, B, H, S, S, device=device
+        )
+
+        compiled = torch.compile(flex_attention, fullgraph=True)
+        golden = flex_attention(q_gold, k_gold, v_gold, block_mask=block_mask)
+        out_prescale = compiled(
+            q, k, v, block_mask=block_mask, kernel_options={"PRESCALE_QK": True}
+        )
+        out_no_prescale = compiled(
+            q, k, v, block_mask=block_mask, kernel_options={"PRESCALE_QK": False}
+        )
+
+        # The prescale path must not be meaningfully worse than the baseline:
+        # its error vs. the float32 golden stays within a small fudge of the
+        # non-prescale path's error.
+        prescale_err = (golden - out_prescale.to(torch.float32)).abs().mean()
+        baseline_err = (golden - out_no_prescale.to(torch.float32)).abs().mean()
+        self.assertFalse(torch.isnan(prescale_err).any())
+        torch.testing.assert_close(
+            prescale_err, baseline_err, rtol=1.1, atol=1e-3
+        )
 
     @supported_platform
     def test_adjust_block_mask_ignores_entries_past_num_blocks(self, device):

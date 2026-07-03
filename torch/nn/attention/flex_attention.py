@@ -896,6 +896,9 @@ class BlockMask:
     dq_kv_order_spt: bool | None
     BLOCK_SIZE: tuple[int, int]
     mask_mod: _mask_mod_signature
+    # Whether every query/kv block visits a physically contiguous run of blocks
+    # (true for causal / dense masks). Enables the kernel's contiguous fast path.
+    _blocks_are_contiguous: bool
 
     # Attribute lists for pytree flatten/unflatten
     _TENSOR_ATTRS = [
@@ -917,6 +920,7 @@ class BlockMask:
         "BLOCK_SIZE",
         "mask_mod",
         "dq_kv_order_spt",
+        "_blocks_are_contiguous",
     ]
 
     def __init__(
@@ -940,6 +944,7 @@ class BlockMask:
         dq_write_order_full: Tensor | None = None,
         dq_kv_order: Tensor | None = None,
         dq_kv_order_spt: bool | None = None,
+        _blocks_are_contiguous: bool = False,
     ) -> None:
         if kv_indices.dim() < 2:
             raise RuntimeError("BlockMask must have at least 2 dimensions")
@@ -974,6 +979,7 @@ class BlockMask:
         self.dq_kv_order_spt = dq_kv_order_spt
         self.BLOCK_SIZE = BLOCK_SIZE
         self.mask_mod = mask_mod
+        self._blocks_are_contiguous = _blocks_are_contiguous
 
     def _dq_kv_order(self) -> Tensor | bool | None:
         if self.dq_kv_order is not None:
@@ -1088,6 +1094,13 @@ class BlockMask:
         dq_kv_order_tensor = dq_kv_order if isinstance(dq_kv_order, Tensor) else None
         dq_kv_order_spt = dq_kv_order if isinstance(dq_kv_order, bool) else None
 
+        # NOTE: _blocks_are_contiguous intentionally falls back to its
+        # conservative default (False) here. Reconstruction paths that route
+        # through from_kv_blocks (slicing via __getitem__, _adjust) can change
+        # which blocks are visited, so a previously-contiguous mask may no
+        # longer be; re-detection is deliberately not run here. Dropping the
+        # flag only forfeits a fast path, it never enables an unsafe one. Use
+        # BlockMask.to(), which preserves structure, to retain it across moves.
         return cls(
             seq_lengths=seq_lengths,
             kv_num_blocks=kv_num_blocks,
@@ -1519,6 +1532,10 @@ class BlockMask:
             BLOCK_SIZE=self.BLOCK_SIZE,
             mask_mod=self.mask_mod,
             dq_kv_order_spt=self.dq_kv_order_spt,
+            # A device move copies the index tensors value-for-value, so block
+            # contiguity is invariant under .to(). Propagate the detected flag so
+            # a mask detected on-device doesn't silently lose the fast path.
+            _blocks_are_contiguous=self._blocks_are_contiguous,
         )
 
     @staticmethod
@@ -1609,6 +1626,9 @@ class BlockMask:
             ),
             dq_kv_order=cast(Tensor | None, tensor_values["dq_kv_order"]),
             dq_kv_order_spt=cast(bool | None, context_values["dq_kv_order_spt"]),
+            _blocks_are_contiguous=cast(
+                bool, context_values.get("_blocks_are_contiguous", False)
+            ),
         )
 
     def _flatten_with_keys(
@@ -1918,6 +1938,102 @@ def _compute_dq_write_order_from_block_mask(
     return dq_write_order, dq_write_order_full
 
 
+def _indices_are_consecutive(num_blocks: Tensor, indices: Tensor) -> bool:
+    """Return True if, for every row, the first ``num_blocks`` entries of
+    ``indices`` form a consecutive run (i.e. ``indices[..., i] == indices[..., 0] + i``).
+
+    This is the exact precondition required by the kernel's contiguous fast path,
+    which advances the KV pointer by one physical block per step instead of
+    gathering the next block index. The check runs a single reduction and a
+    one-time device->host sync; callers gate it so it only fires on ROCm and
+    outside of compilation.
+    """
+    if indices.numel() == 0:
+        return True
+    max_n = indices.shape[-1]
+    ar = torch.arange(max_n, device=indices.device)
+    valid = ar < num_blocks.unsqueeze(-1)
+    expected = indices[..., :1] + ar
+    return bool(((indices == expected) | ~valid).all().item())
+
+
+def _detect_blocks_are_contiguous(block_mask: BlockMask) -> bool | None:
+    """Detect whether a block mask only visits contiguous blocks.
+
+    Causal and dense masks satisfy this and benefit from the kernel's contiguous
+    fast path. The ``BLOCKS_ARE_CONTIGUOUS`` flag is consumed by BOTH the forward
+    (KV-side traversal) and the backward (Q-side traversal, in the dK/dV loop), so
+    every index tensor that the flag governs must be contiguous before we enable
+    it. We therefore require all of ``kv_indices``, ``full_kv_indices``,
+    ``q_indices`` and ``full_q_indices`` to be consecutive; otherwise enabling the
+    flag would corrupt gradients for masks that are KV-contiguous but not
+    Q-contiguous.
+
+    Returns ``None`` when contiguity cannot be safely determined *right now* (the
+    determination needs a device->host sync, which is unsafe while a CUDA/HIP
+    graph is capturing or while tracing on fake tensors); the caller should treat
+    that as "unknown, stay conservative" without caching. Otherwise returns a
+    definitive bool. Restricted to ROCm, where the fast path is profitable.
+    """
+    # Tracing on fake tensors: a data-dependent ``.item()`` is impossible.
+    if torch.compiler.is_compiling():
+        return None
+    # Non-ROCm never consumes the flag -> definitively False (safe to cache).
+    if not (block_mask.kv_indices.is_cuda and torch.version.hip is not None):
+        return False
+    # A device->host sync is illegal while a CUDA/HIP graph captures the stream.
+    if torch.cuda.is_available() and torch.cuda.is_current_stream_capturing():
+        return None
+
+    # (num_blocks, indices) pairs governed by BLOCKS_ARE_CONTIGUOUS in fwd + bwd.
+    index_pairs = [
+        (block_mask.kv_num_blocks, block_mask.kv_indices),
+        (block_mask.full_kv_num_blocks, block_mask.full_kv_indices),
+        (block_mask.q_num_blocks, block_mask.q_indices),
+        (block_mask.full_q_num_blocks, block_mask.full_q_indices),
+    ]
+    return all(
+        _indices_are_consecutive(num_blocks, indices)
+        for num_blocks, indices in index_pairs
+        if num_blocks is not None and indices is not None
+    )
+
+
+def _resolve_rocm_kernel_options(
+    kernel_options: dict[str, Any],
+    *,
+    is_rocm: bool,
+    blocks_are_contiguous: bool,
+    score_mod_is_identity: bool,
+    user_set_blocks_contiguous: bool,
+    user_set_prescale: bool,
+) -> dict[str, Any]:
+    """Apply the ROCm-only auto opt-ins to ``kernel_options`` in place.
+
+    This is intentionally pure / hardware-independent: callers pass ``is_rocm``
+    explicitly so the gating logic can be unit-tested without an AMD GPU. Both
+    opt-ins are gated on ``is_rocm`` so the call-site intent is local and robust
+    even if a ``BlockMask`` carries a flag set on a different device. A value
+    the user pinned in ``kernel_options`` is never overridden.
+
+    - ``BLOCKS_ARE_CONTIGUOUS``: enabled when the mask only visits contiguous
+      blocks (causal / dense / document masks).
+    - ``PRESCALE_QK``: enabled ONLY for the identity ``score_mod``. An additive
+      ``score_mod`` (a bias) must NOT get prescale, since the bias would be
+      exponentiated in the wrong (base-2 vs base-e) space.
+    """
+    if not is_rocm:
+        return kernel_options
+
+    if not user_set_blocks_contiguous and blocks_are_contiguous:
+        kernel_options["BLOCKS_ARE_CONTIGUOUS"] = True
+
+    if not user_set_prescale and score_mod_is_identity:
+        kernel_options["PRESCALE_QK"] = True
+
+    return kernel_options
+
+
 def create_block_mask(
     mask_mod: _mask_mod_signature,
     B: int | None,
@@ -2037,6 +2153,14 @@ def create_block_mask(
         block_mask.dq_write_order_full = dq_wo_full
         block_mask.dq_kv_order = None
         block_mask.dq_kv_order_spt = dq_kv_order
+
+    # Resolve contiguity eagerly so the BLOCKS_ARE_CONTIGUOUS kernel constexpr is
+    # a ready host bool before the forward is traced. _detect is ROCm-gated and
+    # returns None when contiguity can't be determined safely right now.
+    detected = _detect_blocks_are_contiguous(block_mask)
+    block_mask._blocks_are_contiguous = (
+        bool(detected) if detected is not None else False
+    )
 
     return block_mask
 
@@ -2496,6 +2620,11 @@ def flex_attention(
             category=FutureWarning,
         )
 
+    user_set_blocks_contiguous = (
+        kernel_options is not None and "BLOCKS_ARE_CONTIGUOUS" in kernel_options
+    )
+    user_set_prescale = kernel_options is not None and "PRESCALE_QK" in kernel_options
+
     kernel_options = _apply_kernel_options(
         query,
         key,
@@ -2503,6 +2632,22 @@ def flex_attention(
         return_lse,
         kernel_options,
         return_aux,
+    )
+
+    _is_rocm = query.device.type == "cuda" and torch.version.hip is not None
+
+    # On ROCm, opt into two kernel fast paths by default (never overriding a
+    # user-pinned value): the contiguous-blocks traversal for masks that only
+    # visit adjacent blocks, and Q pre-scaling for the identity score_mod (an
+    # additive bias is unsafe to prescale -- it would be exponentiated in the
+    # wrong base). See _resolve_rocm_kernel_options for the full reasoning.
+    kernel_options = _resolve_rocm_kernel_options(
+        kernel_options,
+        is_rocm=_is_rocm,
+        blocks_are_contiguous=getattr(block_mask, "_blocks_are_contiguous", False),
+        score_mod_is_identity=score_mod is _identity,
+        user_set_blocks_contiguous=user_set_blocks_contiguous,
+        user_set_prescale=user_set_prescale,
     )
 
     def _finalize_outputs(
