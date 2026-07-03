@@ -2973,6 +2973,7 @@ make_fallback(aten.randint)
 make_fallback(aten.rand_like, override_decomp=True)
 make_fallback(aten.randn_like, override_decomp=True)
 make_fallback(aten.randint_like, override_decomp=True)
+make_fallback(aten.normal, override_decomp=True)
 make_fallback(aten.rrelu_with_noise_functional)
 
 # TODO: mlazos reevaluate if we want to codegen something different
@@ -9339,19 +9340,16 @@ from . import kernel
 
 import_submodule(kernel)
 
-from . import quantized_lowerings
-
-
-quantized_lowerings.register_quantized_ops()
-quantized_lowerings.register_woq_mm_ops()
-
 from . import (
     jagged_lowerings,
     mkldnn_lowerings,  # noqa: F401  # registers oneDNN fusion ops on import
+    quantized_lowerings,
 )
 
 
 jagged_lowerings.register_jagged_ops()
+quantized_lowerings.register_quantized_ops()
+quantized_lowerings.register_woq_mm_ops()
 
 
 @contextlib.contextmanager
