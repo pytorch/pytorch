@@ -260,7 +260,7 @@ __device__ inline void cmtdStore(void* address, T value) {
 #if defined(__GFX12__)
         asm volatile("s_wait_storecnt(0)" ::: "memory");
 #elif defined(__GFX10__) || defined(__GFX11__)
-        asm volatile("s_waitcnt_vscnt(0)" ::: "memory");
+        asm volatile("s_waitcnt_vscnt null, 0" ::: "memory");
 #else
         // Older architectures have only 'vmcnt' counter.
         asm volatile("s_waitcnt vmcnt(0)" ::: "memory");
