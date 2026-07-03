@@ -4363,8 +4363,13 @@ class PythonWrapperCodegen(CodeGen):
         )
         self.writeline(f"del partition{partition_id}_args")
 
+    def get_partition_name(self, partition_id: int) -> str:
+        return f"partition_{partition_id}"
+
     def set_all_partition_names(self, num_partitions: int):
-        self.all_partition_names = [f"partition_{idx}" for idx in range(num_partitions)]
+        self.all_partition_names = list(
+            map(self.get_partition_name, range(num_partitions))
+        )
 
     def codegen_subgraph_call_with_flattened_outputs(
         self, subgraph, outer_inputs, outer_flattened_outputs
