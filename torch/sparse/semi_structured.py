@@ -281,7 +281,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
             # TODO in the future we can add in padding to support sparse dimensions that aren't perfect multiples
             raise RuntimeError(
                 f"Error original_tensor.shape {original_tensor.shape} is not supported! "
-                f"Both dimensions must be larger or equal than and a multiple of ({min_rows}, {min_cols})"
+                f"Both dimensions must be larger than or equal to and a multiple of ({min_rows}, {min_cols})"
             )
 
     def to_dense(self):  # type:ignore[override]
