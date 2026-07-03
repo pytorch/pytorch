@@ -189,6 +189,7 @@ from .utils import (
     normalize_count_iter,
     normalize_range_iter,
     orig_code_map,
+    set_getitem,
     tuple_iterator_getitem,
     tuple_iterator_len,
     verify_guard_fn_signature,
@@ -197,6 +198,9 @@ from .utils import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    GuardCheckGetMetadataFn = Callable[[Guard, Any], Any]
+    GuardCheckEvalFn = Callable[[Any, Any], bool]
 
 
 guard_manager_testing_hook_fn: Callable[[Any, Any, Any], Any] | None = None
@@ -225,6 +229,14 @@ recompiles_verbose_log = torch._logging.getArtifactLogger(
     __name__, "recompiles_verbose"
 )
 verbose_guards_log = torch._logging.getArtifactLogger(__name__, "verbose_guards")
+
+
+def _sequence_length(value: Any) -> int:
+    if isinstance(value, set):
+        return set.__len__(value)
+    if isinstance(value, frozenset):
+        return frozenset.__len__(value)
+    return len(value)
 
 
 dunder_attrs_assumed_constants = (
@@ -773,6 +785,7 @@ def _get_closure_vars() -> dict[str, object]:
             "___normalize_count_iter": normalize_count_iter,
             "___normalize_range_iter": normalize_range_iter,
             "___tuple_iterator_getitem": tuple_iterator_getitem,
+            "___set_getitem": set_getitem,
             "___dataclass_fields": dataclass_fields,
             "___namedtuple_fields": lambda x: x._fields,
             "___get_torch_function_mode_stack_at": get_torch_function_mode_stack_at,
@@ -1053,8 +1066,8 @@ class GuardCheckSpec(NamedTuple):
         time using a fresh value and the previously saved metadata.
     """
 
-    get_metadata_fn: Any
-    eval_fn: Any
+    get_metadata_fn: GuardCheckGetMetadataFn
+    eval_fn: GuardCheckEvalFn
 
 
 SKIP_GUARD = object()
@@ -1172,9 +1185,17 @@ def _constant_subclass_base_value(value: Any) -> Any:
     raise TypeError(f"Not a constant subclass: {type(value)}")
 
 
+def _guard_create_fn_keyword(guard: Guard, name: str) -> Any:
+    """Read a keyword bound into a guard's create_fn functools.partial."""
+    create_fn = guard.create_fn
+    if not isinstance(create_fn, functools.partial):
+        raise TypeError(f"Guard create_fn is not a functools.partial: {create_fn}")
+    return create_fn.keywords[name]
+
+
 def register_guard_check_spec(
-    get_metadata_fn,
-    eval_fn,
+    get_metadata_fn: GuardCheckGetMetadataFn,
+    eval_fn: GuardCheckEvalFn,
 ):
     """Attach a GuardCheckSpec to a guard method for auto-dispatch."""
     handler = GuardCheckSpec(get_metadata_fn=get_metadata_fn, eval_fn=eval_fn)
@@ -2137,8 +2158,8 @@ class GuardBuilder(GuardBuilderBase):
 
     @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: (
-            guard.create_fn.keywords["attr"],
-            hasattr(value, guard.create_fn.keywords["attr"]),
+            _guard_create_fn_keyword(guard, "attr"),
+            hasattr(value, _guard_create_fn_keyword(guard, "attr")),
         ),
         eval_fn=lambda value, metadata: hasattr(value, metadata[0]) == metadata[1],
     )
@@ -2199,11 +2220,11 @@ class GuardBuilder(GuardBuilderBase):
         self.already_added_code_parts.add(code)
 
     @register_guard_check_spec(
-        get_metadata_fn=lambda guard, value: guard.create_fn.keywords["attr"],
+        get_metadata_fn=lambda guard, value: _guard_create_fn_keyword(guard, "attr"),
         eval_fn=lambda value, metadata: metadata not in value.__dict__,
     )
     def NOT_PRESENT_IN_GENERIC_DICT(
-        self, guard: Guard, attr: Any | None = None
+        self, guard: Guard, attr: str | None = None
     ) -> None:
         if attr is None:
             raise AssertionError(
@@ -2318,7 +2339,7 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     @register_guard_check_spec(
-        get_metadata_fn=lambda guard, value: guard.create_fn.keywords["key"],
+        get_metadata_fn=lambda guard, value: _guard_create_fn_keyword(guard, "key"),
         eval_fn=lambda value, metadata: metadata in value,
     )
     def DICT_CONTAINS(self, guard: Guard, key: str) -> None:
@@ -2338,7 +2359,7 @@ class GuardBuilder(GuardBuilderBase):
         self.already_added_code_parts.add(code)
 
     @register_guard_check_spec(
-        get_metadata_fn=lambda guard, value: guard.create_fn.keywords["key"],
+        get_metadata_fn=lambda guard, value: _guard_create_fn_keyword(guard, "key"),
         eval_fn=lambda value, metadata: metadata not in value,
     )
     def DICT_NOT_CONTAINS(self, guard: Guard, key: str) -> None:
@@ -2358,7 +2379,7 @@ class GuardBuilder(GuardBuilderBase):
         self.already_added_code_parts.add(code)
 
     @register_guard_check_spec(
-        get_metadata_fn=lambda guard, value: guard.create_fn.keywords["key"],
+        get_metadata_fn=lambda guard, value: _guard_create_fn_keyword(guard, "key"),
         eval_fn=lambda value, metadata: metadata in value,
     )
     def SET_CONTAINS(self, guard: Guard, key: Any) -> None:
@@ -2380,7 +2401,7 @@ class GuardBuilder(GuardBuilderBase):
         self.already_added_code_parts.add(code)
 
     @register_guard_check_spec(
-        get_metadata_fn=lambda guard, value: guard.create_fn.keywords["key"],
+        get_metadata_fn=lambda guard, value: _guard_create_fn_keyword(guard, "key"),
         eval_fn=lambda value, metadata: metadata not in value,
     )
     def SET_NOT_CONTAINS(self, guard: Guard, key: Any) -> None:
@@ -2935,35 +2956,40 @@ class GuardBuilder(GuardBuilderBase):
         return self.id_match_unchecked(guard)
 
     @register_guard_check_spec(
-        get_metadata_fn=lambda guard, value: len(value),
-        eval_fn=lambda value, metadata: len(value) == metadata,
+        get_metadata_fn=lambda guard, value: _sequence_length(value),
+        eval_fn=lambda value, metadata: _sequence_length(value) == metadata,
     )
     def SEQUENCE_LENGTH(self, guard: Guard) -> None:
         # This guard is used to check length of PySequence objects like list,
         # tuple, collections.deque etc
         ref = self.arg_ref(guard)
         value = self.get(guard)
+        length = _sequence_length(value)
 
         if not isinstance(value, dict):
             # C++ DICT_LENGTH checks for type
             self.TYPE_MATCH(guard)
 
         code = []
-        if len(value) == 0:
+        if isinstance(value, set):
+            code.append(f"set.__len__({ref}) == {length}")
+        elif isinstance(value, frozenset):
+            code.append(f"frozenset.__len__({ref}) == {length}")
+        elif length == 0:
             code.append(f"not {ref}")
         else:
-            code.append(f"len({ref}) == {len(value)}")
+            code.append(f"len({ref}) == {length}")
 
         self._set_guard_export_info(guard, code)
         if isinstance(value, dict):
             self.get_guard_manager(guard).add_dict_length_check_guard(
-                len(value),
+                length,
                 get_verbose_code_parts(code, guard),
                 guard.user_stack,
             )
         else:
             self.get_guard_manager(guard).add_length_check_guard(
-                len(value),
+                length,
                 get_verbose_code_parts(code, guard),
                 guard.user_stack,
             )
@@ -5252,8 +5278,7 @@ def get_guard_fail_reason_helper(
     guard_manager: GuardManagerWrapper,
     f_locals: dict[str, object],
     compile_id: CompileId | None,
-    # pyrefly: ignore [implicit-any]
-    backend: Callable | None,
+    backend: Callable[..., object] | None,
 ) -> str:
     """
     Return the reason why `guard_manager` failed.
@@ -5366,8 +5391,7 @@ def get_guard_fail_reason(
     code: types.CodeType,
     f_locals: dict[str, object],
     compile_id: CompileId,
-    # pyrefly: ignore [implicit-any]
-    backend: Callable,
+    backend: Callable[..., object],
     skip_logging: bool = False,
 ) -> str:
     if isinstance(guard_manager, DeletedGuardManagerWrapper):
@@ -5395,8 +5419,7 @@ def get_guard_fail_reason(
 def get_and_maybe_log_recompilation_reasons(
     cache_entries: list[CacheEntry],
     frame: DynamoFrameType,
-    # pyrefly: ignore [implicit-any]
-    backend: Callable,
+    backend: Callable[..., object],
     skip_logging: bool = False,
 ) -> list[str]:
     """

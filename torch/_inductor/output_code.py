@@ -30,6 +30,7 @@ from functools import partial
 from typing import Any, cast, TYPE_CHECKING, TypeAlias
 
 import torch
+from torch._custom_class_base import CustomClassBase
 from torch._dynamo.utils import counters, get_runtime_metrics_context
 from torch._guards import compile_context, CompileContext
 from torch._higher_order_ops.wrap import inductor_compiled_code
@@ -55,7 +56,6 @@ from torch._inductor.utils import (
     output_node,
     set_tracing_context_output_strides,
 )
-from torch._opaque_base import OpaqueBase
 from torch.fx._graph_pickler import _node_metadata_key_filter_safe, _ops_filter_safe
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_in_torch_dispatch_mode
@@ -682,7 +682,7 @@ class CompiledFxGraph(OutputCode):
                                     torch.Tensor,
                                     torch.SymInt,
                                     torch.Generator,
-                                    OpaqueBase,
+                                    CustomClassBase,
                                 ),
                             )
                             for t in example_inputs

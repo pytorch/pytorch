@@ -159,14 +159,14 @@ class TestTensorMetaProp(torch._dynamo.test_case.TestCase):
             self.assertEqual(
                 x_eager.requires_grad,
                 x_compiled.requires_grad,
-                msg=f"{op.name}: requires_grad mismatch (eager={x_eager.requires_grad}, compiled={x_compiled.requires_grad})",
+                msg=lambda msg: f"{msg}\n{op.name}: requires_grad mismatch (eager={x_eager.requires_grad}, compiled={x_compiled.requires_grad})",
             )
 
             # Test 3: Verify gradients match (with tolerance for float16/bfloat16)
             self.assertEqual(
                 args_eager[requires_grad_idx].grad,
                 args_compiled[requires_grad_idx].grad,
-                msg=f"{op.name}: Gradient mismatch indicates metadata not propagated during tracing",
+                msg=lambda msg: f"{msg}\n{op.name}: Gradient mismatch indicates metadata not propagated during tracing",
             )
 
 
