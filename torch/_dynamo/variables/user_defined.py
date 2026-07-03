@@ -5196,6 +5196,27 @@ class UserDefinedListVariable(UserDefinedObjectVariable):
         if self._base_vt is None:
             raise AssertionError("_base_vt must not be None after initialization")
 
+    def call_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # CPython's list.__init__ (Argument Clinic) enforces the no-keyword-args
+        # check only when the type does not override __new__ (tp_new). A list
+        # subclass with a custom __new__ tolerates and ignores keyword args; the
+        # positional count is still validated by the base __init__.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/clinic/listobject.c.h
+        if (
+            name == "__init__"
+            and kwargs
+            and self._maybe_get_baseclass_method(name) is list.__init__
+            and type(self.value).__new__ is not list.__new__
+        ):
+            kwargs = {}
+        return super().call_method(tx, name, args, kwargs)
+
 
 class UserDefinedDequeVariable(UserDefinedObjectVariable):
     """
