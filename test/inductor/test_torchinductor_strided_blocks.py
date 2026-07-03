@@ -1695,6 +1695,35 @@ class TritonTensorDescriptorTestCUDA(BlockDescriptorTestBase):
         actual = torch.compile(f)(x)
         self.assertEqual(actual, expected)
 
+    def test_persistent_reduction_store_small_rblock_skips_tma(self):
+        """
+        When a persistent reduction has rnumel < 16/element_size, the fixed
+        R0_BLOCK cannot satisfy TMA's 16-byte minimum.  The store must fall
+        back to scalar indexing instead of emitting an invalid descriptor.
+        """
+
+        def fn(x, running_mean, running_var, weight, bias):
+            return torch.nn.functional.batch_norm(
+                x, running_mean, running_var, weight, bias, training=True
+            )
+
+        # Input (2, 1): reduction over batch dim of size 2.
+        # R0_BLOCK = next_power_of_2(2) = 2, so 2 * 4 bytes = 8 < 16.
+        x = torch.randn(2, 1, device=GPU_TYPE)
+        weight = torch.randn(1, device=GPU_TYPE)
+        bias = torch.randn(1, device=GPU_TYPE)
+        running_mean = torch.randn(1, device=GPU_TYPE)
+        running_var = torch.randn(1, device=GPU_TYPE).abs()
+
+        result, (code,) = run_and_get_code(
+            torch.compile(fn), x, running_mean, running_var, weight, bias
+        )
+        expected = fn(x, running_mean, running_var, weight, bias)
+        self.assertEqual(result, expected)
+        # The store must fall back to scalar indexing, not TMA.
+        self.assertIn("tl.store", code)
+        self.assertNotIn("make_tensor_descriptor", code)
+
     def test_bool_dtype_skips_tma(self):
         """
         torch.bool buffers map to Triton tl.int1 which has no
