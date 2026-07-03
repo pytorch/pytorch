@@ -57,11 +57,11 @@ import torch.utils._pytree as pytree
 # NB: The sym_* functions are used via getattr() and must be imported here.
 from torch import SymBool, SymFloat, SymInt
 from torch._C._functorch import get_unwrapped, is_batchedtensor, is_gradtrackingtensor
+from torch._custom_class_base import CustomClassBase
 from torch._guards import ShapeGuard, SLoc, Source, TracingContext
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_opaque_value
 from torch._logging import dtrace_structured, LazyString, structured, trace_structured
-from torch._opaque_base import OpaqueBase
 from torch._subclasses.meta_utils import is_sparse_any
 from torch._utils_internal import signpost_event
 from torch.fx.experimental import _config as config
@@ -6465,11 +6465,11 @@ class ShapeEnv:
                                     inner_context.constraint_strides,  # type: ignore[attr-defined]
                                 )
                             )
-                        case OpaqueBase():
+                        case CustomClassBase():
                             pass
                         case unexpected:
                             raise AssertionError(
-                                f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                                f"expected Tensor or CustomClassBase, got {type(unexpected)}"
                             )
             else:
                 sources_tensors_constraints = [
