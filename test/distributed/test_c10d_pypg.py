@@ -354,6 +354,54 @@ class TestPyProcessGroup(TestCase):
         self.assertIn("reduce_scatter_single", pg.collectives_called)
         self.assertEqual(output, torch.ones(2))
 
+    # reduce / gather / scatter / alltoall share their Python name with the
+    # bound method, so a plain instance call hits the Python override directly
+    # (a sanity check that it runs and forwards its buffers; no functional
+    # collective dispatches to these as ProcessGroup virtuals). recvAnysource is
+    # bound under the non-shadowed name recv_anysource, so pg.recv_anysource()
+    # routes through the C++ virtual into the trampoline. DummyProcessGroup
+    # records each dispatched collective and applies a recognizable mutation
+    # (reduce adds 3, recvAnysource adds 4, gather/scatter/alltoall copy).
+    def test_reduce(self):
+        pg = test_c10d_common.DummyProcessGroup(0, 1)
+        tensor = torch.zeros(4)
+        pg.reduce([tensor]).wait()
+        self.assertIn("reduce", pg.collectives_called)
+        self.assertEqual(tensor, torch.zeros(4) + 3)
+
+    def test_gather(self):
+        pg = test_c10d_common.DummyProcessGroup(0, 1)
+        input = torch.arange(4, dtype=torch.float32)
+        output = torch.zeros(4)
+        pg.gather([[output]], [input]).wait()
+        self.assertIn("gather", pg.collectives_called)
+        self.assertEqual(output, input)
+
+    def test_scatter(self):
+        pg = test_c10d_common.DummyProcessGroup(0, 1)
+        input = torch.arange(4, dtype=torch.float32)
+        output = torch.zeros(4)
+        pg.scatter([output], [[input]]).wait()
+        self.assertIn("scatter", pg.collectives_called)
+        self.assertEqual(output, input)
+
+    def test_alltoall(self):
+        pg = test_c10d_common.DummyProcessGroup(0, 1)
+        input = torch.arange(4, dtype=torch.float32)
+        output = torch.zeros(4)
+        pg.alltoall([output], [input]).wait()
+        self.assertIn("alltoall", pg.collectives_called)
+        self.assertEqual(output, input)
+
+    def test_recv_anysource(self):
+        # recv_anysource is bound to the recvAnysource virtual under a different
+        # name, so this routes through the C++ trampoline into the override.
+        pg = test_c10d_common.DummyProcessGroup(0, 1)
+        tensor = torch.zeros(4)
+        pg.recv_anysource([tensor], 7).wait()
+        self.assertIn("recvAnysource", pg.collectives_called)
+        self.assertEqual(tensor, torch.zeros(4) + 4)
+
     def test_coalescing_manager(self):
         # The coalescing manager calls _start_coalescing / _end_coalescing, which
         # route through the C++ virtual into the PyProcessGroup trampoline and

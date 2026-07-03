@@ -1846,7 +1846,11 @@ void scaled_gemm(
   }
   else if (mat1_scale_dtype == kFloat8_e8m0fnu && mat2_scale_dtype == kFloat8_e8m0fnu) {
   #if ROCM_VERSION >= 70000
-            if (at::detail::getCUDAHooks().isGPUArch({"gfx950"})) {
+            std::vector<std::string> mx_archs{"gfx950"};
+  #if ROCM_VERSION >= 71400
+            mx_archs.push_back("gfx1250");
+  #endif
+            if (at::detail::getCUDAHooks().isGPUArch(mx_archs)) {
                 // TODO: add constraints based on hipblaslt internals
                 TORCH_CHECK((m % 16 == 0) && (n % 16 == 0) && (k % 128 == 0),
                            "M, N must be multiples of 16 and K should be multiple of 128 for MX format. "
