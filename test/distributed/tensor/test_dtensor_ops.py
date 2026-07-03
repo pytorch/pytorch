@@ -161,6 +161,7 @@ dtensor_fails = {
     xfail("sparse.mm", "reduce"),
     # meta tensor data not allocated yet during tensor_split
     xfail("tensor_split"),
+    xfail("torch.ops.aten._scaled_dot_product_flash_attention_for_cpu"),
     # /TODO(whc) debug/triage
     # ops inside this might even fail without dtensor
     # tests, as we rescale op db common test size factor (i.e. L, M, S)
@@ -858,6 +859,7 @@ ops_unbacked_dtensor_dde = {
     xfail("view"),
     xfail("view_as"),
     xfail("view_as_complex"),
+    xfail("torch.ops.aten._scaled_dot_product_flash_attention_for_cpu"),
 }
 
 
