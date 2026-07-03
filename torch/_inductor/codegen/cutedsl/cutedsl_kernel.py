@@ -657,6 +657,10 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
             dim_sizes = buffer.get_size()
             if len(dim_sizes) == 0:
                 dim_indices = ()
+            # Per-dimension indices into captured buffers are bounded by dim
+            # sizes (not flattened offsets), so Int32 is safe whatever index
+            # dtype the consuming kernel passes in; wider index expressions are
+            # narrowed at fragment materialization.
             idx_vars = [
                 self._emit_index_fragment(
                     dim_index, dim_size, "cutlass.Int32", torch.int32
@@ -1016,7 +1020,12 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
             and not V.graph.sizevars.statically_known_geq(index_var.index_expr, 0)
         ):
             wrapped = self.kernel.cse.newvar(dtype=index_var.dtype)
-            size_expr = self.kernel.kexpr(size)
+            # Dynamic sizes render as Int64 aux_scalars; cast to the index dtype so
+            # both cute.where branches agree (per-dim size, so narrowing is safe).
+            index_cute_dtype = CuteDSLOpOverrides.TORCH_TO_CUTE_DTYPE.get(
+                index_var.dtype, "cutlass.Int32"
+            )
+            size_expr = f"{index_cute_dtype}({self.kernel.kexpr(size)})"
             self.kernel.body.writeline(
                 f"{wrapped} = cute.where("
                 f"{index_var} < 0, {index_var} + {size_expr}, {index_var})"

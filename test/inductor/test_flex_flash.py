@@ -909,6 +909,18 @@ GQA_MQA_BLOCK_MASK_CASES = [
 class TestFlexFlash(InductorTestCase):
     # `FlashAttentionForwardSm120` does not have `apply_score_mod`.
     @xfailIfSM120OrLater
+    def test_captured_table_int64_index(self):
+        """Widening index casts must not break index-fragment materialization (#188871)."""
+        seq_len = 512
+        tbl = torch.randn(seq_len, device="cuda")
+
+        def score_mod(score, _b, _h, _q, kv_idx):
+            return score + tbl[kv_idx.to(torch.int64)]
+
+        q, k, v = create_test_tensors(seq_len=seq_len, device="cuda")
+        flash_vs_triton(q, k, v, score_mod=score_mod)
+
+    @xfailIfSM120OrLater
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("case", SCORE_MOD_CASES, name_fn=score_case_name)
     def test_flash_attention_score_mod_cases(self, device, dtype, case):
@@ -2443,6 +2455,24 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
             return score + (kv_idx - q_idx) * slopes[h]
 
         self._run_dynamic_test(seq_lens=[128, 256, 512], score_mod=alibi_score_mod)
+
+    @xfailIfSM120OrLater
+    def test_dynamic_captured_table_negative_index_wrap(self):
+        """Rel-pos table gather with a shape-dependent offset (#188871).
+
+        Once shapes go dynamic, the table length and offset are rendered as Int64
+        aux scalars; the emitted negative-index wrap must cast them to the Int32
+        index dtype or cute.where rejects the mixed operands.
+        """
+        for seq_len in [512, 1024]:
+            tbl = torch.randn(2 * seq_len, device="cuda")
+            offset = seq_len - 1
+
+            def score_mod(score, _b, _h, q_idx, kv_idx):
+                return score + tbl[q_idx - kv_idx + offset]
+
+            q, k, v = create_test_tensors(seq_len=seq_len, device="cuda")
+            flash_vs_triton(q, k, v, score_mod=score_mod, dynamic=True)
 
     @xfailIfSM120OrLater
     def test_dynamic_seq_len_with_block_mask(self):
