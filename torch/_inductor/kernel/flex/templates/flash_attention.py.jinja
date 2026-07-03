@@ -1,10 +1,14 @@
-{% if NEEDS_BLOCK_MASK %}
+{% if NEEDS_BLOCK_MASK and HAS_FULL_BLOCKS %}
 {{def_kernel("Q", "K", "V", "LOGSUMEXP", "KV_NUM_BLKS", "KV_IDX", "FULL_KV_NUM_BLKS", "FULL_KV_IDX")}}
+{% elif NEEDS_BLOCK_MASK %}
+{{def_kernel("Q", "K", "V", "LOGSUMEXP", "KV_NUM_BLKS", "KV_IDX")}}
 {% else %}
 {{def_kernel("Q", "K", "V", "LOGSUMEXP")}}
 {% endif %}
     from flash_attn.cute.interface import _flash_attn_fwd
+    {% if NEEDS_BLOCK_MASK %}
     from flash_attn.cute.block_sparsity import BlockSparseTensorsTorch
+    {% endif %}
     {% if MASK_MOD_PACKED_INTERVALS is not none %}
     import flash_attn.cute.utils as utils
     {% endif %}
@@ -56,7 +60,7 @@
     output = {{get_output()}}
     output_transposed = output.transpose(1, 2)
 
-    {% if NEEDS_BLOCK_MASK %}
+    {% if HAS_MASK_MOD %}
     {# mask_mod is subgraph 1 when HAS_SCORE_MOD, else subgraph 0 #}
     {% set mask_subgraph_idx = 1 if HAS_SCORE_MOD else 0 %}
     @cute.jit
@@ -104,10 +108,19 @@
     {% if MASK_MOD_VEC_SIZE %}
     mask_mod.__vec_size__ = {{ MASK_MOD_VEC_SIZE }}
     {% endif %}
-    block_sparse_tensors = BlockSparseTensorsTorch(KV_NUM_BLKS, KV_IDX, FULL_KV_NUM_BLKS, FULL_KV_IDX, block_size=({{SPARSE_Q_BLOCK_SIZE}}, {{SPARSE_KV_BLOCK_SIZE}}))
+    {% else %}
+    mask_mod = None
+    {% endif %}
+    {% if NEEDS_BLOCK_MASK %}
+    block_sparse_tensors = BlockSparseTensorsTorch(
+        KV_NUM_BLKS,
+        KV_IDX,
+        {% if HAS_FULL_BLOCKS %}FULL_KV_NUM_BLKS{% else %}KV_NUM_BLKS.new_zeros(KV_NUM_BLKS.shape){% endif %},
+        {% if HAS_FULL_BLOCKS %}FULL_KV_IDX{% else %}KV_IDX.new_zeros(KV_IDX.shape){% endif %},
+        block_size=({{SPARSE_Q_BLOCK_SIZE}}, {{SPARSE_KV_BLOCK_SIZE}}),
+    )
     {% else %}
     block_sparse_tensors = None
-    mask_mod = None
     {% endif %}
 
     # Collect any additional tensor buffers that were added during modifications
