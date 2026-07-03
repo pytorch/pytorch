@@ -50,18 +50,17 @@ jobs:
   set-parameters:
     if: ${{ !github.event.pull_request.head.repo.fork && github.repository_owner == 'pytorch' }}
     runs-on: mt-l-x86iamx-8-16
+    # OSDC ARC forbids container-less jobs; the actions-runner image is a
+    # lightweight base (its uid matches the runner hook, so no workspace-perm fix
+    # is needed — unlike the CI-image build job).
+    container:
+      image: ghcr.io/actions/actions-runner:latest
     outputs:
       benchmark_matrix: ${{ steps.set-parameters.outputs.benchmark_matrix }}
       docker_image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       torch_cuda_arch_list: '8.0 8.9 9.0 10.0 12.0'
       build_environment: linux-jammy-cuda13.0-py3.12-gcc11
     steps:
-      - name: Fix workspace permissions
-        shell: bash
-        run: |
-          sudo chmod -R 777 "$GITHUB_WORKSPACE"
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-
       - uses: pytorch/test-infra/.github/actions/setup-uv@main
         with:
           python-version: "3.12"
