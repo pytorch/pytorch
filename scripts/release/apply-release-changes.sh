@@ -44,13 +44,6 @@ echo "XLA Changes"
 sed -i -e s#--quiet#-b\ r"${RELEASE_VERSION}"# .ci/pytorch/common_utils.sh
 sed -i -e s#.*#r"${RELEASE_VERSION}"# .github/ci_commit_pins/xla.txt
 
-# Strip +PTX from CUDA arch lists in release builds. main keeps +PTX for
-# forward-compat on nightlies; releases ship SASS-only to keep wheel size down.
-# The arch list moved from build_cuda.sh into build_env_setup.py, where the
-# "+PTX" suffix is driven by the _PTX_ARCHES set, so empty that set.
-echo "Stripping +PTX from CUDA arch lists"
-sed -i 's/^_PTX_ARCHES: set\[int\] = .*/_PTX_ARCHES: set[int] = set()/' .ci/manywheel/build_env_setup.py
-
 # Regenerate templates
 export RELEASE_VERSION_TAG=${RELEASE_VERSION}
 ./.github/regenerate.sh
