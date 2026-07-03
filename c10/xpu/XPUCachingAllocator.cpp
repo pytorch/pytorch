@@ -1748,12 +1748,15 @@ class DeviceCachingAllocator {
 
   ShareableHandle shareIpcHandle(Block* block) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
+#ifdef _WIN32
+    TORCH_CHECK(false, "IPC sharing is not supported on Windows.");
+#endif
     std::ostringstream ss;
     ss.put(SHAREABLE_HANDLE_VERSION);
     ptrdiff_t offset = 0;
     TORCH_CHECK(
         !block->expandable_segment,
-        "shareIpcHandle: expandable segments are not supported for IPC sharing.");
+        "expandable segments are not supported for IPC sharing.");
     ss.put(SHAREABLE_XPU_MALLOC);
     Block* base_block = block;
     while (base_block->prev) {
@@ -1761,6 +1764,7 @@ class DeviceCachingAllocator {
     }
     offset = static_cast<const char*>(block->ptr) -
         static_cast<const char*>(base_block->ptr);
+#if SYCL_COMPILER_VERSION >= 20260000
     sycl::ext::oneapi::experimental::ipc_memory::handle handle =
         sycl::ext::oneapi::experimental::ipc_memory::get(
             base_block->ptr, c10::xpu::get_device_context());
@@ -1768,11 +1772,16 @@ class DeviceCachingAllocator {
         handle.data();
     TORCH_INTERNAL_ASSERT(
         handle_data.size() <= std::numeric_limits<char>::max(),
-        "shareIpcHandle: ipc handle size exceeds maximum allowed size.");
+        "IPC handle size exceeds maximum allowed size.");
     ss.put(static_cast<char>(handle_data.size()));
     ss.write(
         reinterpret_cast<const char*>(handle_data.data()), handle_data.size());
     return ShareableHandle{.offset = offset, .handle = ss.str()};
+#else
+    TORCH_CHECK(
+        false, "IPC sharing requires SYCL compiler version 2026.0 or later.");
+    return ShareableHandle{};
+#endif
   }
 
   // Called by XPUGraph::capture_begin
@@ -1829,16 +1838,20 @@ class NativeCachingAllocator : public XPUAllocator {
   // pointer, ensuring each handle is opened at most once per process.
   struct MemHandleCacheEntry {
     MemHandleCacheEntry(c10::DeviceIndex device, std::string& handle) {
+#ifdef _WIN32
+      TORCH_CHECK(false, "IPC sharing is not supported on Windows.");
+#endif
       std::istringstream ss(handle);
       auto version = ss.get();
       TORCH_CHECK(
           version <= SHAREABLE_HANDLE_VERSION,
-          "received sharable handle from a future version of torch that this version does not know how to handle")
+          "received sharable handle from a future version of torch that this version does not know how to handle.");
       int type = ss.get();
       TORCH_CHECK(
           type == SHAREABLE_XPU_MALLOC,
-          "unexpected or illformed shareable handle type");
+          "unexpected or illformed shareable handle type.");
       auto handle_size = static_cast<size_t>(ss.get());
+#if SYCL_COMPILER_VERSION >= 20260000
       sycl::ext::oneapi::experimental::ipc_memory::handle_data_t handle_data(
           handle_size);
       ss.read(
@@ -1849,6 +1862,10 @@ class NativeCachingAllocator : public XPUAllocator {
           handle_data,
           c10::xpu::get_device_context(),
           c10::xpu::get_raw_device(device));
+#else
+      TORCH_CHECK(
+          false, "IPC sharing requires SYCL compiler version 2026.0 or later.");
+#endif
     }
 
     // clear() must be called explicitly to release IPC resources. Using a
@@ -1856,8 +1873,10 @@ class NativeCachingAllocator : public XPUAllocator {
     // has already shut down during process exit.
     void clear() {
       if (xpu_ipc_ptr) {
+#if SYCL_COMPILER_VERSION >= 20260000
         sycl::ext::oneapi::experimental::ipc_memory::close(
             xpu_ipc_ptr, c10::xpu::get_device_context());
+#endif
         xpu_ipc_ptr = nullptr;
       }
     }
