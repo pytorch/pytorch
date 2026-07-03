@@ -5053,6 +5053,75 @@ class TestMPS(TestCaseMPS):
             torch.ones((), dtype=torch.float32), xg.cpu(), tg.cpu(), 2, grad_input=gig_ref)
         self.assertEqual(gig.cpu(), gig_ref, atol=5e-2, rtol=5e-2)
 
+    def test_smooth_l1_huber_metal_paths(self):
+        # Committed coverage for the native Metal smooth_l1/huber kernels:
+        # both ops x reductions x {f32,f16,bf16} x {contig,noncontig} fwd+bwd
+        # vs an fp32 CPU reference over the same rounded inputs, across beta/
+        # delta values including the beta=0 L1 degeneracy, plus a large shape
+        # reaching the multi-threadgroup fused reduce, misaligned slice views,
+        # and the dtype/error contracts.
+        def run(fn, shape, reduction, dtype, betakw, noncontig=False):
+            x0 = torch.randn(shape, dtype=torch.float32)
+            t0 = torch.randn(shape, dtype=torch.float32)
+            xm = x0.to("mps", dtype)
+            tm = t0.to("mps", dtype)
+            if noncontig:
+                xm = xm.t().contiguous().t()
+                tm = tm.t().contiguous().t()
+                self.assertFalse(xm.is_contiguous())
+            xm.requires_grad_()
+            xc = xm.detach().cpu().float().requires_grad_()
+            tc = tm.detach().cpu().float()
+            tol = dict(atol=5e-2, rtol=5e-2) if dtype != torch.float32 else dict(atol=1e-4, rtol=1e-4)
+            oc = fn(xc, tc, reduction=reduction, **betakw)
+            om = fn(xm, tm, reduction=reduction, **betakw)
+            self.assertEqual(om.float(), oc, **tol)
+            g = torch.ones_like(oc)
+            oc.backward(g)
+            om.backward(g.to("mps", dtype))
+            self.assertEqual(xm.grad.float(), xc.grad, **tol)
+
+        cases = [
+            (F.smooth_l1_loss, {"beta": 1.0}),
+            (F.smooth_l1_loss, {"beta": 0.37}),
+            (F.smooth_l1_loss, {"beta": 0.0}),  # degenerates to L1
+            (F.huber_loss, {"delta": 1.0}),
+            (F.huber_loss, {"delta": 2.5}),
+        ]
+        for fn, betakw in cases:
+            for reduction in ("none", "mean", "sum"):
+                run(fn, (64, 33), reduction, torch.float32, betakw)
+        for fn, betakw in ((F.smooth_l1_loss, {"beta": 1.0}), (F.huber_loss, {"delta": 1.0})):
+            for reduction in ("none", "mean", "sum"):
+                for dtype in (torch.float16, torch.bfloat16):
+                    run(fn, (64, 33), reduction, dtype, betakw)
+                run(fn, (64, 33), reduction, torch.float32, betakw, noncontig=True)
+            run(fn, (2048, 2048), "mean", torch.float32, betakw)  # multi-TG reduce
+            run(fn, (2048, 2048), "mean", torch.float16, betakw)
+
+        # Misaligned storage offsets (slice views) stay correct on the scalar
+        # paths.
+        base_x = torch.randn(64 * 33 + 1)
+        base_t = torch.randn(64 * 33 + 1)
+        xo_c = base_x[1:].view(64, 33)
+        to_c = base_t[1:].view(64, 33)
+        xo = base_x.to("mps")[1:].view(64, 33)
+        to = base_t.to("mps")[1:].view(64, 33)
+        self.assertNotEqual(xo.storage_offset() % 4, 0)
+        for reduction in ("none", "mean", "sum"):
+            self.assertEqual(
+                F.huber_loss(xo, to, reduction=reduction, delta=1.3).cpu(),
+                F.huber_loss(xo_c, to_c, reduction=reduction, delta=1.3), atol=1e-4, rtol=1e-4)
+
+        # Error contracts match CPU: negative beta / non-positive delta raise,
+        # and huber on integral inputs raises (the MPSGraph-era integer
+        # promotion is gone).
+        xi = torch.randint(0, 5, (8, 8), device="mps", dtype=torch.int32)
+        with self.assertRaises((RuntimeError, TypeError)):
+            F.huber_loss(xi, xi.clone())
+        with self.assertRaisesRegex(RuntimeError, "delta"):
+            F.huber_loss(torch.rand(4, device="mps"), torch.rand(4, device="mps"), delta=0.0)
+
     def test_mse_loss(self):
         def helper(shape, reduction):
             # create the criterion

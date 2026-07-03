@@ -545,6 +545,52 @@ kernel void fused_loss_bwd(
       constant FusedLossParams&,                            \
       uint)
 
+struct SmoothL1Op {
+  // p0 = beta on the forward pass; pass 2 folds the mean divide.
+  static inline float fwd(float a, float b, constant FusedLossParams& p) {
+    float d = a - b;
+    float ad = fabs(d);
+    return ad < p.p0 ? 0.5f * d * d / p.p0 : ad - 0.5f * p.p0;
+  }
+  // p0 = norm (mean scale), p1 = beta on the backward pass.
+  static inline float bwd(
+      float a,
+      float b,
+      float g,
+      constant FusedLossParams& p) {
+    float d = a - b;
+    float clip = fabs(d) < p.p1 ? d / p.p1 : sign(d);
+    return p.p0 * clip * g;
+  }
+};
+
+struct HuberOp {
+  // p0 = delta on the forward pass; pass 2 folds the mean divide.
+  static inline float fwd(float a, float b, constant FusedLossParams& p) {
+    float d = a - b;
+    float ad = fabs(d);
+    return ad < p.p0 ? 0.5f * d * d : p.p0 * (ad - 0.5f * p.p0);
+  }
+  // p0 = norm (mean scale), p1 = delta on the backward pass.
+  static inline float bwd(
+      float a,
+      float b,
+      float g,
+      constant FusedLossParams& p) {
+    float d = a - b;
+    float clip = fabs(d) < p.p1 ? d : p.p1 * sign(d);
+    return p.p0 * clip * g;
+  }
+};
+
 INSTANTIATE_FUSED_LOSS(mse, MSEOp, float);
 INSTANTIATE_FUSED_LOSS(mse, MSEOp, half);
 INSTANTIATE_FUSED_LOSS(mse, MSEOp, bfloat);
+
+INSTANTIATE_FUSED_LOSS(smooth_l1, SmoothL1Op, float);
+INSTANTIATE_FUSED_LOSS(smooth_l1, SmoothL1Op, half);
+INSTANTIATE_FUSED_LOSS(smooth_l1, SmoothL1Op, bfloat);
+
+INSTANTIATE_FUSED_LOSS(huber, HuberOp, float);
+INSTANTIATE_FUSED_LOSS(huber, HuberOp, half);
+INSTANTIATE_FUSED_LOSS(huber, HuberOp, bfloat);
