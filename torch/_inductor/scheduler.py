@@ -3605,6 +3605,99 @@ def _prune_redundant_deps(
         node.set_read_writes(node.read_writes.remove_reads(deps_to_prune))
 
 
+def get_fused_kernel_module_fqn(scheduler_nodes: Any) -> str | None:
+    """
+    Return a human-readable FQN annotation for a fused kernel.
+
+    Uses V.graph.fx_fqn_map — built once during lowering in graph.py:run_node —
+    to map FX node names to FQN strings, e.g.
+    "convolution_1" -> "L.networks.1.conv.convolution".
+
+    Two-pass hybrid algorithm:
+
+    Pass 1 — anchor prefixes via lowering_fx_node:
+        For each snode, lowering_fx_node is the direct FX node whose run_node
+        call created the IR buffer.  It is never transitively accumulated,
+        so it gives an unambiguous block identity.  Look it up in fqn_map
+        to get the anchor FQN, then read its nn_module_stack outermost
+        entry to get the block-level prefix (e.g. "L.networks.3").
+
+    Pass 2 — collect FQNs from origins with prefix filter:
+        Walk all origins across every snode.  origins is transitively
+        accumulated (cascading history from upstream blocks), but each
+        entry is looked up in fqn_map and filtered by the anchor prefix.
+        This correctly captures inline ops (relu, add) that share the
+        same block but were inlined into a parent buffer and never became
+        their own snodes, while excluding cascaded history from upstream
+        blocks.
+    """
+    from torch._inductor.fx_passes.graph_view import _outermost_prefix
+
+    fqn_map: dict[str, str] = V.graph.fx_fqn_map
+    log.debug("get_fused_kernel_module_fqn: snodes=%d", len(scheduler_nodes))
+
+    # Pass 1: derive block anchor prefixes from each snode's lowering_fx_node.
+    # lowering_fx_node is the direct FX node lowered to produce the IR node,
+    # giving clean block identity.
+    # Fallback: when lowering_fx_node is absent or a placeholder (not in fqn_map),
+    # walk origins to find the first non-placeholder op in fqn_map.
+    anchor_prefixes: OrderedSet[str] = OrderedSet()
+    for snode in scheduler_nodes:
+        if snode.node is None:
+            continue
+        origin = snode.node.get_lowering_fx_node()
+        origin_name = origin.name if origin is not None else None
+        anchor_fqn = fqn_map.get(origin_name) if origin_name else None
+        if anchor_fqn:
+            stack = origin.meta.get("nn_module_stack")
+            prefix = _outermost_prefix(stack) if stack else None
+            if prefix:
+                anchor_prefixes.add(prefix)
+            continue
+
+        # lowering_fx_node absent or not in fqn_map.
+        # For placeholders: scan FX consumers (users) — they identify which
+        # block uses this parameter, not the upstream producers in origins.
+        # For None lowering_fx_node: fall back to scanning origins.
+        if origin is not None and origin.op == "placeholder":
+            fallback_source = origin.users
+        else:
+            fallback_source = snode.node.origins
+        for fx_node in fallback_source:
+            fallback_fqn = fqn_map.get(fx_node.name)
+            if fallback_fqn:
+                stack = fx_node.meta.get("nn_module_stack")
+                prefix = _outermost_prefix(stack) if stack else None
+                if prefix:
+                    anchor_prefixes.add(prefix)
+                break
+    if not anchor_prefixes:
+        return None
+
+    # Pass 2: walk all origins across every snode (the transitively accumulated
+    # set), look each up in fqn_map, and include only those whose FQN prefix
+    # matches an anchor.  This captures inline ops (e.g. relu, add inlined into
+    # a parent buffer) while rejecting cascaded history from upstream blocks.
+    extern_fqns: OrderedSet[str] = V.graph.fx_extern_fqns
+    module_names: OrderedSet[str] = OrderedSet()
+    for snode in scheduler_nodes:
+        if snode.node is None:
+            continue
+        for fx_node in snode.node.origins:
+            fqn = fqn_map.get(fx_node.name)
+            if not fqn:
+                continue
+            if fqn in extern_fqns:
+                continue
+            if not any(fqn == p or fqn.startswith(p + ".") for p in anchor_prefixes):
+                continue
+            module_names.add(fqn)
+
+    result = " + ".join(f"L.{fqn}" for fqn in module_names) if module_names else None
+    log.debug("get_fused_kernel_module_fqn: result=%s", result)
+    return result
+
+
 class ExternKernelSchedulerNode(BaseSchedulerNode):
     def __init__(self, scheduler: Scheduler, node: ir.Operation) -> None:
         super().__init__(scheduler)
@@ -3649,27 +3742,25 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
             from torch._inductor.fx_passes.graph_view import (
                 _clean_stack_name,
                 _strip_instance_suffix,
-                get_fused_kernel_module_fqn,
             )
 
             module_fqn = None
-            origin_node = self.node.origin_node
-            if origin_node is not None:
-                stack = origin_node.meta.get("nn_module_stack")
+            lowering_node = self.node.get_lowering_fx_node()
+            if lowering_node is not None:
+                stack = lowering_node.meta.get("nn_module_stack")
                 if stack:
                     module_path = _clean_stack_name(next(reversed(stack.values()))[0])
                     if module_path:
-                        op_name = _strip_instance_suffix(origin_node.name)
+                        op_name = _strip_instance_suffix(lowering_node.name)
                         module_fqn = f"{module_path}.{op_name}"
             else:
-                # origin_node not set for this extern kernel (e.g. convolution);
+                # lowering_fx_node not set for this extern kernel (e.g. convolution);
                 # fall back to walking origins. For ops whose inputs are weights
                 # or placeholders (no nn_module_stack), this produces a clean
                 # single-FQN result without cascading upstream names.
                 module_fqn = get_fused_kernel_module_fqn([self])
-            if module_fqn and hasattr(V.graph, "fx_extern_fqns"):
-                V.graph.fx_extern_fqns.add(module_fqn)
             if module_fqn:
+                V.graph.fx_extern_fqns.add(module_fqn)
                 n_before = len(wrapper.lines)
                 self.node.codegen(wrapper)
                 inner_lines = wrapper.lines[n_before:]

@@ -1195,20 +1195,17 @@ def register_fqn_annotation_hooks(
     Example::
 
         from torch.cuda._graph_annotations import (
-            enable_annotations,
             register_fqn_annotation_hooks,
             remap_to_exec_graph,
             clear_kernel_annotations,
         )
 
         clear_kernel_annotations()
-        enable_annotations()
         handles = register_fqn_annotation_hooks(model)
 
         g = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(g):
+        with torch.cuda.graph(g, enable_annotations=True):
             output = model(x)
-            resolve_pending_annotations()
 
         for h in handles:
             h.remove()

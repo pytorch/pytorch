@@ -4375,7 +4375,7 @@ class PythonWrapperCodegen(CodeGen):
             original_fxnode_name=original_fxnode_name,
             current_stream_idx=current_stream_idx,
         )
-        module_fqn = getattr(V.graph, "_current_kernel_module_fqn", None)
+        module_fqn = V.graph._current_kernel_module_fqn
         if module_fqn and config.triton.cudagraph_kernel_annotations:
             self.writeline(AnnotatedKernelCallLine(kernel_line, module_fqn))
         else:
