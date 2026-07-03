@@ -684,7 +684,7 @@ static bool ivalue_tags_match(const Module& lhs, const Module& rhs) {
       auto ad = item.a.toGenericDict();
       auto bd = item.b.toGenericDict();
       for (auto& item : ad) {
-        // Dictionaory keys cannot contain List/Dicts that require tags
+        // Dictionary keys cannot contain List/Dicts that require tags
         // so we do not have to check them.
         // Furthermore without ordered dicts it is expensive to find the
         // equivalent key
@@ -1052,7 +1052,7 @@ void initJitScriptBindings(PyObject* module) {
                       err << qualname->qualifiedName() << ' ';
                     }
                     err << "which does not have a __setstate__ method defined!";
-                    throw std::runtime_error(err.str());
+                    throw std::runtime_error(std::move(err).str());
                   }
                 }
 
@@ -1062,7 +1062,7 @@ void initJitScriptBindings(PyObject* module) {
                   err << qualname->qualifiedName() << ' ';
                 }
                 err << "which does not have a __getstate__ method defined!";
-                throw std::runtime_error(err.str());
+                throw std::runtime_error(std::move(err).str());
               })
           .def(py::pickle(
               [](const Object& self)
@@ -1079,7 +1079,7 @@ void initJitScriptBindings(PyObject* module) {
                   err << qualname->qualifiedName() << ' ';
                 }
                 err << "which does not have a __getstate__ method defined!";
-                throw std::runtime_error(err.str());
+                throw std::runtime_error(std::move(err).str());
               },
               [](const std::tuple<py::object, std::string>& state_tup)
                   -> Object {
@@ -1116,7 +1116,7 @@ void initJitScriptBindings(PyObject* module) {
                   err << qualname->qualifiedName() << ' ';
                 }
                 err << "which does not have a __setstate__ method defined!";
-                throw std::runtime_error(err.str());
+                throw std::runtime_error(std::move(err).str());
               }));
 
   py::class_<Object::Property>(m, "ScriptObjectProperty")
@@ -1156,7 +1156,8 @@ void initJitScriptBindings(PyObject* module) {
         if (!method) {
           std::stringstream ss;
           ss << std::hex << static_cast<const void*>(&self);
-          return py::str("<torch.ScriptObject object at " + ss.str() + ">");
+          return py::str(
+              "<torch.ScriptObject object at " + std::move(ss).str() + ">");
         }
         return invokeScriptMethodFromPython(*method, args, kwargs);
       });

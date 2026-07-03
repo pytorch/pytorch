@@ -716,7 +716,7 @@ if __name__ == "__main__":
 
     description = (
         "Generate a flamegraph that shows segments (aka blocks) that have been added "
-        "or removed between two different memorys snapshots."
+        "or removed between two different memory snapshots."
     )
     compare_a = subparsers.add_parser("compare", description=description)
     compare_a.add_argument("before", help=pickled)

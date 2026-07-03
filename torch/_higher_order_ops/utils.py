@@ -317,7 +317,7 @@ def _set_compilation_env():
     # but it exposes some bugs in existing tests so we have to have a temporary flag to control
     # the behavior, which allows dynamo to store an empty graph for a frame without falling back to eager
     try:
-        # We need to turn off the is_fx_tracing_flag. Remove this flag check from dyanmo
+        # We need to turn off the is_fx_tracing_flag. Remove this flag check from dynamo
         # once we are confident fx tracing works with dynamo.
         torch.fx._symbolic_trace._is_fx_tracing_flag = False
         # pyrefly: ignore [bad-assignment]
@@ -1132,23 +1132,35 @@ def check_input_alias_and_mutation_return_outputs(
 
 registered_hop_fake_fns: dict[torch._ops.OpOverload, Callable] = {}
 
+# Set skip_cache=True for HOPs that should not be cached in FakeTensorMode
+# (previously these ops were registered with .py_impl(FakeTensorMode)) and
+# were never cached so we are just preserving original behaviour
+hops_that_skip_faketensor_cache: set[torch._ops.OpOverload] = set()
+
 
 F = TypeVar("F", bound=Callable)
 
 
 @overload
-def register_fake(hop, fn: None = None) -> Callable[[F], F]: ...
+def register_fake(
+    hop, fn: None = None, *, skip_cache: bool = ...
+) -> Callable[[F], F]: ...
 
 
 @overload
-def register_fake(hop, fn: F) -> F: ...
+def register_fake(hop, fn: F, *, skip_cache: bool = ...) -> F: ...
 
 
-def register_fake(hop, fn=None):
+def register_fake(hop, fn=None, *, skip_cache=False):
     """
     Register a fake function for a HOP. This is conceptually equivalent of the
     register_fake utility for the custom ops. The registered function is called
     inside the fake_tensor _dispatch_impl.
+
+    Set skip_cache=True to keep a HOP's fake output out of the FakeTensorMode
+    cache -- either to preserve the historical uncached behavior of
+    py_impl(FakeTensorMode), or because its outputs alias in ways the cache
+    cannot reconstruct (e.g. auto_functionalized).
     """
     if hop in registered_hop_fake_fns:
         raise AssertionError(f"hop {hop} already registered in registered_hop_fake_fns")
@@ -1159,6 +1171,8 @@ def register_fake(hop, fn=None):
         redirect_to_mode(hop, FakeTensorMode)
 
         registered_hop_fake_fns[hop] = func
+        if skip_cache:
+            hops_that_skip_faketensor_cache.add(hop)
         return func
 
     if fn is None:

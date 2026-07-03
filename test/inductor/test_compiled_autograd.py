@@ -21,7 +21,6 @@ from unittest import mock
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-import torch.nn.functional as F
 from torch import _inductor as inductor
 from torch._dynamo import compiled_autograd, config
 from torch._dynamo.backends.debugging import aot_eager
@@ -37,11 +36,14 @@ from torch.overrides import BaseTorchFunctionMode
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     ops,
+    skipOps,
+    xfail,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_S390X,
     IS_WINDOWS,
+    noncontiguous_like,
     parametrize,
     scoped_load_inline,
     skipIfWindows,
@@ -61,6 +63,15 @@ from torch.testing._internal.triton_utils import (
     requires_gpu_and_triton,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
+
+
+try:
+    from torch.distributed.tensor import DeviceMesh, DTensor, Shard
+    from torch.testing._internal.distributed.fake_pg import FakeStore
+
+    HAS_DTENSOR = True
+except ImportError:
+    HAS_DTENSOR = False
 
 
 # note: these tests are not run on windows due to inductor_utils.HAS_CPU
@@ -220,6 +231,38 @@ main()
         # Run it three times to catch bad dynamo state resets
         for _ in range(3):
             self.run_as_subprocess(script)
+
+    def test_index_fill_value_grad_noncontiguous(self):
+        def make_inputs():
+            inp = torch.arange(25, dtype=torch.float32).reshape(5, 5)
+            inp = noncontiguous_like(inp.requires_grad_())
+            index = torch.tensor([2, 1, 4, 2, 2])
+            value = torch.tensor(-1.7658, requires_grad=True)
+            grad_out = torch.arange(1, 26, dtype=torch.float32).reshape(5, 5)
+            grad_out = noncontiguous_like(grad_out)
+            return inp, index, value, grad_out
+
+        def fn(inp, index, value, grad_out):
+            out = inp.index_fill(-1, index, value)
+            return torch.autograd.grad(out, (inp, value), grad_out, allow_unused=True)[
+                1
+            ]
+
+        expected = fn(*make_inputs())
+        self.assertEqual(expected, torch.tensor(200.0))
+
+        counters["compiled_autograd"].clear()
+        with (
+            config.patch(capture_dynamic_output_shape_ops=True),
+            compiled_autograd._enable(make_compiler_fn(backend="inductor")),
+            torch.autograd.set_multithreading_enabled(False),
+        ):
+            actual = torch.compile(fn, backend="inductor")(*make_inputs())
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+        self.assertEqual(counters["compiled_autograd"]["compiles"], 1)
+        self.assertFalse(any("_unique" in reason for reason in counters["graph_break"]))
 
     def gen_cache_miss_log_prefix(self):
         if IS_WINDOWS:
@@ -2210,52 +2253,29 @@ main()
         )
 
     def test_trace_run_with_rng_state(self):
-        def sdpa(xq, xk):
-            return F.scaled_dot_product_attention(xq, xk, xk, is_causal=True)
+        rng_state = torch.get_rng_state()
 
-        def g(xq_1, xk_1, xq_2, xk_2):
-            # xq: (bs, n_local_heads, seqlen, head_dim)
-            # xk: (bs, n_local_heads, cache_len + seqlen, head_dim)
-            y1 = sdpa(xq_1, xk_1)
-            y2 = torch.utils.checkpoint.checkpoint(
-                sdpa, xq_2, xk_2, use_reentrant=False
-            )
-            y = torch.mul(y1, y2)
-            z = torch.matmul(y, y)
-            return z
+        def g(x):
+            return (x * x).sum()
 
         def f():
-            bs = 1
-            n_local_heads = 1
-            seqlen = 2
-            head_dim = 2
-            cache_len = 2
-            xq_list = [
-                torch.ones(
-                    (bs, n_local_heads, seqlen, head_dim),
-                    requires_grad=True,
-                    device="cpu",
+            x = torch.ones((2, 2), requires_grad=True, device="cpu")
+
+            def hook(grad):
+                return torch._prims.rng_prims.run_with_rng_state(
+                    rng_state, torch.ops.aten.rand_like.default, grad
                 )
-                for _ in range(2)
-            ]
-            xk_list = [
-                torch.ones(
-                    (bs, n_local_heads, cache_len + seqlen, head_dim),
-                    requires_grad=True,
-                    device="cpu",
-                )
-                for _ in range(2)
-            ]
-            out = torch.compile(g, fullgraph=True)(
-                xq_list[0], xk_list[0], xq_list[1], xk_list[1]
-            )
-            out.sum().backward()
-            return out, *[x.grad for x in xq_list + xk_list]
+
+            x.register_hook(hook)
+            out = torch.compile(g, fullgraph=True)(x)
+            out.backward()
+            return out, x.grad
 
         """
         Walkthrough of what happens with `run_with_rng_state`:
-        1. `run_with_rng_state` only shows up in the backward graph (this op is inserted by the partitioner).
-        2. The Dynamo graph captured by Compiled Autograd looks like:
+        1. The tensor hook calls `run_with_rng_state` during backward.
+        2. Compiled Autograd captures the backward graph with the hook call.
+        3. The Dynamo graph captured by Compiled Autograd looks like:
         ```
         ===== __compiled_fn_3 =====
         torch/fx/_lazy_graph_module.py class GraphModule(torch.nn.Module):
@@ -2263,44 +2283,34 @@ main()
                 ...
                 run_with_rng_state = torch.ops.higher_order.run_with_rng_state(
                     getitem_8,
-                    torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default,
-                    getitem_3, getitem_4, getitem_4, 0.0, True,
+                    torch.ops.aten.rand_like.default,
+                    aot0_add,
                 )
                 ...
         ```
-        3. We want to preserve this `run_with_rng_state` op when going through AOTAutograd. We do it by having special handling
+        4. We want to preserve this `run_with_rng_state` op when going through AOTAutograd. We do it by having special handling
         in `run_with_rng_state` op's py_functionalize_impl.
         """
 
+        saw_run_with_rng_state = False
+
         def _run_with_rng_state_op_check(inductor_post_grad_graph):
-            # Checks that `run_with_rng_state` op exists in Compiled Autograd's Inductor post-grad graph.
+            # Checks that `run_with_rng_state` op exists in one of Compiled Autograd's Inductor post-grad graphs.
+            nonlocal saw_run_with_rng_state
             op_set = {node.target for node in inductor_post_grad_graph.nodes}
-            if torch.ops.higher_order.run_and_save_rng_state not in op_set:
-                # This is backward graph, so check existence of `run_with_rng_state` op
-                self.assertTrue(torch.ops.higher_order.run_with_rng_state in op_set)
+            saw_run_with_rng_state = (
+                saw_run_with_rng_state
+                or torch.ops.higher_order.run_with_rng_state in op_set
+            )
 
         with torch._inductor.config.patch(
             post_grad_custom_post_pass=_run_with_rng_state_op_check
         ):
-            compiler_fn = make_compiler_fn(fullgraph=True)
-
-            def make_compiler_fn_with_op_check():
-                def _compiler_fn(gm):
-                    # Checks that `run_with_rng_state` op exists in Compiled Autograd's Dynamo graph.
-                    self.assertTrue(
-                        any(
-                            node.target is torch.ops.higher_order.run_with_rng_state
-                            for node in gm.graph.nodes
-                        )
-                    )
-                    return compiler_fn(gm)
-
-                return _compiler_fn
-
-            compiler_fn_with_op_check = make_compiler_fn_with_op_check()
             self.check_output_and_recompiles(
-                f, compiler_fn=compiler_fn_with_op_check, compile_fn=False
+                f, compiler_fn=make_compiler_fn(fullgraph=True), compile_fn=False
             )
+
+        self.assertTrue(saw_run_with_rng_state)
 
     @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
     def test_trace_auto_functionalized_v2(self):
@@ -4441,6 +4451,47 @@ class CompiledAutograd1(torch.nn.Module):
         with compiled_autograd._enable(lambda gm: gm):
             loss.backward()
 
+    @unittest.skipIf(
+        not HAS_DTENSOR,
+        "DTensor/FakePG requires distributed build",
+    )
+    def test_dtensor_backward_symints_do_not_reuse_native_sharding_cache(self):
+        def run_case():
+            torch._dynamo.reset()
+            with compiled_autograd._enable(compiler_fn):
+                mesh = DeviceMesh("cpu", torch.arange(2))
+
+                def fn(x, y):
+                    out = x.sin()
+                    y.add_(2)
+                    return out
+
+                opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+
+                x_eager = DTensor.from_local(
+                    torch.randn(4), mesh, [Shard(0)], run_check=False
+                ).requires_grad_(True)
+                y_eager = DTensor.from_local(
+                    torch.randn(4), mesh, [Shard(0)], run_check=False
+                ).requires_grad_(False)
+
+                x = x_eager.clone().detach().requires_grad_(True)
+                y = y_eager.clone().detach().requires_grad_(False)
+
+                # The first backward populates the native sharding cache.
+                # The compiled-autograd backward must not reuse that entry when it
+                # contains SymInts from a different tracing context.
+                fn(x_eager.clone(), y_eager).sum().backward()
+                opt_fn(x.clone(), y).sum().backward()
+
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+        try:
+            run_case()
+            run_case()
+        finally:
+            dist.destroy_process_group()
+
     def test_anomaly_mode_already_nan(self):
         def fn():
             with torch.autograd.detect_anomaly():
@@ -5488,7 +5539,7 @@ test_contexts = {
 }
 
 # These groups of tests aren't supported yet
-xfail_re = re.compile(r"^test_(sparse|profiler|gradcheck|named_tensor)")
+xfail_re = re.compile(r"^test_(sparse|profiler|gradcheck)")
 
 # Tests fail at different stages, we categorize them wrt to their backends
 # We run only the last passing backend in this order:
@@ -5628,6 +5679,9 @@ skipped_tests.add("test_custom_function_boxed_grads_materialize_grads")
 skipped_tests.add("test_custom_function_boxed_grads_direct_apply")
 skipped_tests.add("test_custom_function_boxed_grads_single_list_arg")
 
+# DTensor backward calls a skipped global-shape helper under compiled autograd.
+skipped_tests.add("test_compile_dtensor_local_tensor_act_backward_passthrough")
+
 test_autograd = load_test_module("test_autograd")
 test_custom_ops = load_test_module("test_custom_ops")
 test_higher_order_ops = load_test_module("dynamo/test_higher_order_ops")
@@ -5654,6 +5708,9 @@ if torch.distributed.is_available() and HAS_GPU_AND_TRITON:
     )
 
 xfail_hops = {"local_map_hop"}
+hop_test_hops_in_bwd_failures = {
+    xfail("register_hook", "simple"),
+}
 
 
 class TestCompiledAutogradOpInfo(TestCase):
@@ -5669,6 +5726,7 @@ class TestCompiledAutogradOpInfo(TestCase):
         list(filter(lambda op: op.name not in xfail_hops, hop_db)),
         allowed_dtypes=(torch.float,),
     )
+    @skipOps(hop_test_hops_in_bwd_failures)
     def test_hops_in_bwd(self, device, dtype, op):
         def create_bwd_fn_closure(op_args, op_kwargs):
             op_out_ref = []

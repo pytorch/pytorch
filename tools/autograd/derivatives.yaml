@@ -395,9 +395,6 @@
   self: zeros_like(grad)
   result: auto_element_wise
 
-- name: cholesky(Tensor self, bool upper=False) -> Tensor
-  self: cholesky_backward(grad, upper, result)
-
 - name: chunk(Tensor(a -> *) self, int chunks, int dim=0) -> Tensor(a)[]
   dispatch:
     Default:
@@ -1121,6 +1118,10 @@
 - name: linalg_matrix_exp(Tensor self) -> Tensor
   self: linalg_matrix_exp_differential(self, grad, /*adjoint*/ true)
   result: linalg_matrix_exp_differential(self_p, self_t, /*adjoint*/ false)
+
+- name: linalg_matrix_sqrth(Tensor self) -> Tensor
+  self: linalg_matrix_sqrth_differential(self, grad)
+  result: linalg_matrix_sqrth_differential(self_p, self_t)
 
 - name: max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   self: value_selecting_reduction_backward_symint(grad, dim, indices, self.sym_sizes(), keepdim)
@@ -3281,3 +3282,7 @@
 - name: _foreach_norm.Scalar(Tensor[] self, Scalar ord=2, ScalarType? dtype=None) -> Tensor[]
   self: norm_backward(grads[i], self[i], ord, result[i])
   result: norm_jvp(self_p, self_t, ord, result[i])
+
+- name: _foreach_mm(Tensor[] self, Tensor[] mat2) -> Tensor[]
+  self: mm_mat1_backward(grads[i], mat2[i], self[i].sym_sizes(), self[i].sym_strides(), self[i].layout(), 1)
+  mat2: mm_mat2_backward(grads[i], self[i], mat2[i].sym_sizes(), mat2[i].sym_strides(), mat2[i].layout(), 1)

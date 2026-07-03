@@ -10202,19 +10202,6 @@ for shape in [(1,), ()]:
         ):
             Func.apply(b)
 
-    def test_named_tensor_for_complex_views(self):
-        names = ["batch", "height", "width", "complex"]
-        z = torch.ones((2, 1, 2, 2), requires_grad=True)
-        z_named = z.refine_names(*names)
-        z_complex = torch.view_as_complex(z_named.rename(None)).refine_names(
-            *names[:-1]
-        )
-        z_complex.sum().abs().backward()
-        expected = torch.ones_like(z_complex).rename(None)
-        abs_1_1j = abs(1 + 1j)
-        expected.fill_(complex(abs_1_1j / 2, abs_1_1j / 2))
-        self.assertEqual(z.grad, torch.view_as_real(expected))
-
     @unittest.skipIf(
         TEST_WITH_TORCHDYNAMO and sys.version_info >= (3, 14), "Fails in python 3.14.2"
     )
@@ -15615,6 +15602,18 @@ class TestMultithreadAutograd(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "blah"):
             out.backward()
+
+    def test_remove_obj_from_tls(self):
+        # Regression test for deadlock introduced by
+        # https://github.com/pytorch/pytorch/pull/173568.
+        # _remove_obj_from_tls must erase the key from the C++ thread_local
+        # map so that no SafePyObject survives to thread exit (where its
+        # destructor would try to acquire the GIL via __call_tls_dtors,
+        # risking deadlock when another thread holds the GIL).
+        torch._C._stash_obj_in_tls("test_obj", {"dummy": True})
+        self.assertTrue(torch._C._is_key_in_tls("test_obj"))
+        torch._C._remove_obj_from_tls("test_obj")
+        self.assertFalse(torch._C._is_key_in_tls("test_obj"))
 
 
 class TestNestedCheckpoint(TestCase):

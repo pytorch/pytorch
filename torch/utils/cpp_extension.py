@@ -250,7 +250,7 @@ def _join_sycl_home(*paths) -> str:
     only once we need to get any SYCL-specific path.
     """
     if SYCL_HOME is None:
-        raise OSError('SYCL runtime is not dected. Please setup the pytorch '
+        raise OSError('SYCL runtime is not detected. Please setup the pytorch '
                       'prerequisites for Intel GPU following the instruction in '
                       'https://github.com/pytorch/pytorch?tab=readme-ov-file#intel-gpu-support '
                       'or install intel-sycl-rt via pip.')
@@ -714,7 +714,7 @@ def _wrap_sycl_host_flags(cflags):
 
         # Some versions of DPC++ compiler pass paths to SYCL headers as user include paths (`-I`) rather
         # than system paths (`-isystem`). This makes host compiler to report warnings encountered in the
-        # SYCL headers, such as deprecated warnings, even if warmed API is not actually used in the program.
+        # SYCL headers, such as deprecated warnings, even if warned API is not actually used in the program.
         # We expect that this issue will be addressed in the later version of DPC++ compiler. To workaround the
         # issue now we wrap paths to SYCL headers in `/external:I`. Warning free compilation is especially important
         # for Windows build as `/sdl` compilation flag assumes that and we will fail compilation otherwise.
@@ -857,7 +857,7 @@ class BuildExtension(_LazyBuildExt):
             self.compiler.src_extensions += ['.mm']
         # Save the original _compile method for later.
         if self.compiler.compiler_type == 'msvc':
-            self.compiler._cpp_extensions += ['.cu', '.cuh']
+            self.compiler._cpp_extensions += ['.cu', '.cuh', '.hip']
             original_compile = self.compiler.compile
             original_spawn = self.compiler.spawn
         else:
@@ -1543,7 +1543,7 @@ def CUDAExtension(name, sources, *args, **kwargs):
     An exception to this rule is "dynamic parallelism" (nested kernel launches)  which is not used a lot anymore.
     `Relocatable device code` is less optimized so it needs to be used only on object files that need it.
     Using `-dlto` (Device Link Time Optimization) at the device code compilation step and `dlink` step
-    helps reduce the protentional perf degradation of `-rdc`.
+    helps reduce the potential perf degradation of `-rdc`.
     Note that it needs to be used at both steps to be useful.
 
     If you have `rdc` objects you need to have an extra `-dlink` (device linking) step before the CPU symbol linking step.
