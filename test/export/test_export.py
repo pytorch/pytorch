@@ -14517,7 +14517,7 @@ graph():
     @testing.expectedFailureSerDer  # register_constant needs to handle serialization
     def test_opaque_obj(self):
         @dataclass(frozen=True)
-        class MyInput(torch._opaque_base.OpaqueBase):
+        class MyInput(torch._custom_class_base.CustomClassBase):
             int_1: int
             int_2: int
 
@@ -14534,7 +14534,7 @@ graph():
             def forward(self, x, f):
                 return x + f.int_1 + f.int_2
 
-        torch._library.opaque_object.register_opaque_type(MyInput, typ="value")
+        torch._library.opaque_object.register_custom_class(MyInput, typ="constant")
         self.addCleanup(
             lambda name=torch._library.opaque_object.get_opaque_type_name(MyInput): (
                 torch._C._unregister_opaque_type(name),
