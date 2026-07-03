@@ -862,7 +862,14 @@ class ComboKernelTests(TestCase):
         torch._dynamo.reset()
         torch._inductor.metrics.reset()
         out_compiled, code = run_and_get_code(torch.compile(fn), *inps)
-        self.assertEqual(out_eager, out_compiled)
+        if GPU_TYPE == "xpu":
+            # For this shape (64, 1024), XPU eager uses fewer threads (e.g. 32)
+            # with strided access while Triton uses more threads (e.g. 256)
+            # with contiguous access. Due to float32 non-associativity,
+            # different element-to-thread mappings produce slightly different sums.
+            self.assertEqual(out_eager, out_compiled, atol=2e-5, rtol=1e-5)
+        else:
+            self.assertEqual(out_eager, out_compiled)
         combined = " ".join(code)
         self.assertEqual(combined.count("async_compile.triton("), 1)
 
