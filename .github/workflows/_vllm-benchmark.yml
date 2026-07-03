@@ -33,10 +33,10 @@ on:
         type: string
         description: A JSON string for vLLM --compilation-config, applied to all benchmark tests.
         default: ''
-      is_nightly:
+      refresh_hf_cache:
         required: false
         type: boolean
-        description: Whether this is a nightly scheduled run. When true, TRANSFORMERS_OFFLINE is disabled.
+        description: When true, download from HF (online) and refresh the cache; otherwise read the offline cache.
         default: false
 
 jobs:
@@ -215,7 +215,7 @@ jobs:
         shell: bash
         run: |
           OFFLINE=1
-          if [[ "${{ inputs.is_nightly }}" == "true" ]]; then
+          if [[ "${{ inputs.refresh_hf_cache }}" == "true" ]]; then
             OFFLINE=0
           fi
           {
