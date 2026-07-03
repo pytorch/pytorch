@@ -27,8 +27,9 @@ def _bmm_outer_product_impl(
         return bmm_outer_product(a, b)
 
 
-def _is_gpu_tensor(t: torch.Tensor) -> bool:
-    return t.is_cuda or t.is_xpu
+def _is_acc_tensor(t: torch.Tensor) -> bool:
+    acc = torch.accelerator.current_accelerator()
+    return acc is not None and acc.type == t.device.type
 
 
 def _bmm_outer_product_cond(
