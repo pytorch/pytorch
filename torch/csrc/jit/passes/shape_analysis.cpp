@@ -319,7 +319,7 @@ class ShapePropagator : public PropertyPropBase {
     std::stringstream ss;
     ss << "unable to create representative value for: " << type_->str()
        << ". File a bug report";
-    throw std::runtime_error(ss.str());
+    throw std::runtime_error(std::move(ss).str());
   }
 
   void broadcastBinary(

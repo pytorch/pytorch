@@ -22,7 +22,7 @@ import enum
 import functools
 import inspect
 import types
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable
 from typing import Any, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
@@ -59,7 +59,7 @@ from .user_defined import UserDefinedObjectVariable, UserDefinedVariable
 
 
 if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
+    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
 _P = ParamSpec("_P")
 _T = TypeVar("_T")
@@ -103,18 +103,18 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
 
     def is_python_constant(self) -> bool:
         # prevents constant folding of attribute accesses on
-        # opaque classes. this ensures var_getattr is called,
+        # opaque classes. this ensures getattro_impl is called,
         # allowing for proper validation and error handling
         return False
 
-    def hash_impl(self, tx: Any) -> tuple[int, bool]:
+    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # OpaqueObjectClassVariable wraps the CLASS, not an instance.
         # Classes are always hashable in CPython (type.__hash__ = object.__hash__).
         return hash(self.value), False
 
     def nb_or_impl(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         other: "VariableTracker",
         reverse: bool = False,
     ) -> "VariableTracker":
@@ -134,7 +134,9 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.value})"
 
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+    def getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
         obj = None
         try:
             obj = inspect.getattr_static(self.value, name)
@@ -176,8 +178,8 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
 
     def call_function(
         self,
-        tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         # disallow creating reference-type opaque objects in the middle of the
@@ -233,6 +235,7 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
             fake_script_obj,
             (constant_args, constant_kwargs),
             ctor_arg_sources=ctor_arg_sources,
+            tx=tx,
         )
 
 
@@ -253,6 +256,8 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         value: Any,
         ctor_args_kwargs: Any = None,
         ctor_arg_sources: tuple[Source | None, ...] | None = None,
+        *,
+        tx: "InstructionTranslatorBase | None" = None,
         **options: Any,
     ) -> "TorchScriptObjectVariable":
         if isinstance(value, enum.Enum):
@@ -263,9 +268,11 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
             proxy, value, ctor_args_kwargs, ctor_arg_sources=ctor_arg_sources, **options
         )
         if isinstance(proxy, torch.fx.Proxy) and proxy.node.op != "placeholder":
-            from torch._dynamo.symbolic_convert import InstructionTranslator
-
-            tx = InstructionTranslator.current_tx()
+            if tx is None:
+                raise AssertionError(
+                    "tx must be provided to TorchScriptObjectVariable.create "
+                    "when proxy is a real Proxy"
+                )
             tx.output.current_tracer.record_proxyable_vt(out)
         return out
 
@@ -328,10 +335,40 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
 
     __repr__ = __str__
 
+    def richcompare_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: "VariableTracker",
+        op: str,
+    ) -> "VariableTracker":
+        from .constant import ConstantVariable
+        from .object_protocol import object_richcompare
+
+        # Try value-based comparison first. TorchScriptObjectVariable wraps
+        # pybind11 objects (e.g. Placement subclasses) whose C++ operator==
+        # does value comparison. Falling through to object_richcompare would
+        # use identity, returning wrong results (e.g. Shard(0) == Shard(0)
+        # would be False instead of True).
+        try:
+            self_val = self.as_python_constant()
+        except NotImplementedError:
+            return object_richcompare(self, tx, other, op)
+        try:
+            other_val = other.as_python_constant()
+        except NotImplementedError:
+            return ConstantVariable.create(NotImplemented)
+        try:
+            result = getattr(type(self_val), op)(self_val, other_val)
+            return ConstantVariable.create(result)
+        except Exception:
+            return ConstantVariable.create(NotImplemented)
+
     @_raise_hard_error_if_graph_break(
         "Dynamo cannot safely trace script object due to graph break."
     )
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+    def getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
         from torch._higher_order_ops.torchbind import call_torchbind
 
         from .higher_order_ops import TorchHigherOrderOperatorVariable
@@ -350,7 +387,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                         lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
                     )
                 else:
-                    return super().var_getattr(tx, name)
+                    return super().getattro_impl(tx, name)
 
             elif member_type == MemberType.INLINED:
                 value = getattr(real_obj, name)
@@ -363,10 +400,10 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                     return LambdaVariable(
                         lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
                     )
-                return super().var_getattr(tx, name)
+                return super().getattro_impl(tx, name)
 
             elif is_opaque_value_type(real_obj_type):
-                return super().var_getattr(tx, name)
+                return super().getattro_impl(tx, name)
 
             elif name in ("__bool__", "__len__") and not hasattr(real_obj, name):
                 # Special case: __bool__ and __len__ are used for truthiness checks.
@@ -381,7 +418,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                     context=f"value={real_obj}, attr={name}",
                     explanation=f"Member '{name}' is not registered for this opaque object type.",
                     hints=[
-                        f"Register '{name}' with a MemberType in register_opaque_type(members=...).",
+                        f"Register '{name}' with a MemberType in register_custom_class(members=...).",
                     ],
                 )
 
@@ -409,7 +446,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
 
         if self.source is None:
             raise AssertionError(
-                "TorchScriptObjectVariable requires a source for var_getattr"
+                "TorchScriptObjectVariable requires a source for getattro_impl"
             )
         return TorchHigherOrderOperatorVariable.make(
             call_torchbind,
@@ -420,7 +457,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
 
     def mp_subscript_impl(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         key: "VariableTracker",
     ) -> "VariableTracker":
         # Call call_method directly on this class to avoid the __getitem__ →
@@ -428,7 +465,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         return TorchScriptObjectVariable.call_method(self, tx, "__getitem__", [key], {})
 
     # We only support method calls on script objects. Interpreting the bytecodes
-    # should go through var_getattr then call_function instead of call_method.
+    # should go through getattro_impl then call_function instead of call_method.
 
     # However, it's possible for call_method to be used directly e.g. for __setattr__.
     @_raise_hard_error_if_graph_break(
@@ -436,7 +473,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
     )
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: Iterable[Any],
         kwargs: dict[str, Any],
@@ -486,7 +523,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                         ),
                         hints=[
                             f"Register member '{name}' with MemberType.INLINED in "
-                            f"register_opaque_type({real_obj_type}, members=...).",
+                            f"register_custom_class({real_obj_type}, members=...).",
                         ],
                     )
 
@@ -512,7 +549,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                     context=f"value={real_obj}, attr={name}",
                     explanation=f"Member '{name}' is not registered for this opaque object type.",
                     hints=[
-                        f"Register '{name}' with a MemberType in register_opaque_type(members=...).",
+                        f"Register '{name}' with a MemberType in register_custom_class(members=...).",
                     ],
                 )
 
@@ -537,7 +574,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
             return self.value
         return super().as_python_constant()
 
-    def hash_impl(self, tx: Any) -> tuple[int, bool]:
+    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         from ..exc import raise_type_error
 
         real_obj = self.as_python_constant()
@@ -545,13 +582,6 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
             return hash(real_obj), False
         except TypeError:
             raise_type_error(tx, f"unhashable type: '{type(real_obj).__name__}'")
-
-    def is_python_equal(self, other: object) -> bool:
-        if not isinstance(other, VariableTracker):
-            raise AssertionError(f"Expected VariableTracker, got {type(other)}")
-        real_self = self.as_python_constant()
-        real_other = other.as_python_constant()
-        return real_self == real_other
 
     def get_real_value(self) -> Any:
         return self.as_python_constant()

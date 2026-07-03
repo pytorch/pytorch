@@ -20,8 +20,8 @@ import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed._functional_collectives import (
-    all_gather_tensor_autograd,
-    reduce_scatter_tensor_autograd,
+    all_gather_single_autograd,
+    reduce_scatter_single_autograd,
 )
 from torch.distributed._local_tensor import (
     LocalIntNode,
@@ -187,7 +187,7 @@ class Attention(nn.Module):
             self.dropout_p if self.training else 0,
             self.use_attn_mask,
         )
-        output = output.transpose(1, 2).contiguous().view(bsz, seq_len, -1)
+        output = output.transpose(1, 2).reshape(bsz, seq_len, -1)
         return self.resid_dropout(self.wo(output))
 
 
@@ -312,7 +312,7 @@ class ExpertParallel(ParallelStyle):
         self, mod: nn.Module, inputs: tuple, device_mesh: DeviceMesh
     ) -> tuple[torch.Tensor]:
         (x,) = inputs
-        x_gathered = all_gather_tensor_autograd(
+        x_gathered = all_gather_single_autograd(
             x,
             gather_dim=0,
             group=device_mesh.get_group(),
@@ -323,7 +323,7 @@ class ExpertParallel(ParallelStyle):
     def _token_combine(
         self, mod: nn.Module, output: torch.Tensor, device_mesh: DeviceMesh
     ) -> torch.Tensor:
-        result = reduce_scatter_tensor_autograd(
+        result = reduce_scatter_single_autograd(
             output,
             "sum",
             scatter_dim=0,
@@ -381,11 +381,11 @@ class ExpertParallelWithTP(ParallelStyle):
 
         def ep_dispatch(mod, inputs):
             (x,) = inputs
-            x = all_gather_tensor_autograd(x, gather_dim=0, group=ep_mesh.get_group())
+            x = all_gather_single_autograd(x, gather_dim=0, group=ep_mesh.get_group())
             return (torch.ops._c10d_functional.wait_tensor(x),)
 
         def ep_combine(mod, inputs, output):
-            out = reduce_scatter_tensor_autograd(
+            out = reduce_scatter_single_autograd(
                 output, "sum", scatter_dim=0, group=ep_mesh.get_group()
             )
             return torch.ops._c10d_functional.wait_tensor(out)
@@ -1462,6 +1462,107 @@ def validate_sharding_rule_sample(
         full = dt.redistribute(device_mesh, (Replicate(),)).to_local()
         if ref.shape != full.shape or not torch.allclose(
             ref, full, atol=1e-5, rtol=1e-5, equal_nan=True
+        ):
+            return False
+    return True
+
+
+def validate_sharding_rule_sample_backward(
+    op, full_args, full_kwargs, input_placements, device_mesh
+):
+    """Verify backward gradient correctness for a sharding strategy.
+
+    Returns None if the op is not differentiable or lacks backward DTensor
+    support (skip), True if gradients match, False if they differ.
+    """
+    from torch.utils import _pytree as pytree
+
+    full_tensors = [
+        a for a in pytree.tree_leaves(full_args) if isinstance(a, torch.Tensor)
+    ]
+    full_tensors += [
+        a for a in pytree.tree_leaves(full_kwargs) if isinstance(a, torch.Tensor)
+    ]
+
+    if not any(t.is_floating_point() for t in full_tensors):
+        return None
+
+    def _clone_with_grad(tensors):
+        out = []
+        for t in tensors:
+            c = t.detach().clone()
+            if c.is_floating_point():
+                c.requires_grad_(True)
+            out.append(c)
+        return out
+
+    def _replace_tensors(args, kwargs, replacements):
+        idx = 0
+
+        def _replace(a):
+            nonlocal idx
+            if isinstance(a, torch.Tensor):
+                r = replacements[idx]
+                idx += 1
+                return r
+            return a
+
+        return pytree.tree_map(_replace, (args, kwargs))
+
+    def _run_backward(output):
+        out_tensors = [
+            t
+            for t in pytree.tree_leaves(output)
+            if isinstance(t, torch.Tensor) and t.is_floating_point() and t.requires_grad
+        ]
+        if not out_tensors:
+            return False
+        sum(t.sum() for t in out_tensors).backward()
+        return True
+
+    # Reference backward
+    ref_tensors = _clone_with_grad(full_tensors)
+    ref_args, ref_kwargs = _replace_tensors(full_args, full_kwargs, ref_tensors)
+    try:
+        if not _run_backward(op(*ref_args, **ref_kwargs)):
+            return None
+    except RuntimeError:
+        return None
+
+    # DTensor backward
+    assert len(input_placements) == len(full_tensors), (  # noqa: S101
+        f"placement/tensor count mismatch: {len(input_placements)} vs {len(full_tensors)}"
+    )
+    dt_tensors = [
+        distribute_tensor(c, device_mesh, (p,))
+        for c, p in zip(_clone_with_grad(full_tensors), input_placements, strict=True)
+    ]
+    dt_args, dt_kwargs = _replace_tensors(full_args, full_kwargs, dt_tensors)
+    try:
+        if not _run_backward(op(*dt_args, **dt_kwargs)):
+            return None
+    except Exception as e:
+        msg = str(e)
+        if (
+            "does not have a sharding strategy registered" in msg
+            or "got mixed torch.Tensor and DTensor" in msg
+        ):
+            return None
+        raise
+
+    # Compare gradients
+    for ref_t, dt_t in zip(ref_tensors, dt_tensors, strict=True):
+        if not ref_t.is_floating_point() or ref_t.grad is None:
+            continue
+        if dt_t.grad is None:
+            return False
+        dt_grad = (
+            dt_t.grad.full_tensor() if isinstance(dt_t.grad, DTensor) else dt_t.grad
+        )
+        if ref_t.grad.shape != dt_grad.shape:
+            return False
+        if not torch.allclose(
+            ref_t.grad, dt_grad, atol=1e-5, rtol=1.3e-6, equal_nan=True
         ):
             return False
     return True

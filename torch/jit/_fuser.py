@@ -152,7 +152,7 @@ def set_fusion_strategy(strategy: list[tuple[str, int]]):
 
     Behavior - fallback functions & depth:
         When an input doesn't match the format required by the specialized compiled op, it will run
-        a fallback function. Fallback functions are recursively be compiled and specialized based
+        a fallback function. Fallback functions are recursively compiled and specialized based
         on the observed tensor shapes. Since compilation can be slow, the "depth" parameter is provided to
         limit the number of specializations that can be compiled, before giving up on recompiling and
         falling back to a completely un-fused, un-specialized implementation.
@@ -163,7 +163,7 @@ def set_fusion_strategy(strategy: list[tuple[str, int]]):
     dynamic fusion, and any inputs that satisfy none of the 4 options will run an
     unfused implementation.
 
-    NB: in the future, if more as more fusion backends are added there may be more granular
+    NB: in the future, as more and more fusion backends are added there may be more granular
     apis for specific fusers.
     """
     warnings.warn(

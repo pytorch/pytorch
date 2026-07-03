@@ -6,7 +6,12 @@ from unittest import mock
 
 import torch
 from torch._inductor.runtime import triton_heuristics
-from torch._inductor.runtime.hints import TRITON_MAX_BLOCK
+from torch._inductor.runtime.hints import (
+    native_matmul_block_numel,
+    native_matmul_persistent_rblock,
+    TRITON_MAX_BLOCK,
+    TRITON_MAX_TENSOR_NUMEL,
+)
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
@@ -114,6 +119,144 @@ class TestCoordinateDescentTuner(TestCase):
         self.assertFalse(tuner.value_too_large("R0_BLOCK", max_block["R0_"]))
         self.assertTrue(tuner.value_too_large("R0_BLOCK", max_block["R0_"] * 2))
 
+    def test_native_matmul_block_numel_limit(self):
+        tuner = CoordescTuner(is_native_matmul=True)
+
+        valid_config = triton.Config(
+            {"YBLOCK": 128, "XBLOCK": 128, "R0_BLOCK": 64},
+            num_warps=8,
+            num_stages=1,
+        )
+        self.assertTrue(tuner.is_valid_config(valid_config))
+
+        invalid_configs = [
+            {"YBLOCK": 128, "XBLOCK": 256, "R0_BLOCK": 64},
+            {"YBLOCK": 256, "XBLOCK": 128, "R0_BLOCK": 64},
+            {"YBLOCK": 128, "XBLOCK": 128, "R0_BLOCK": 128},
+        ]
+        for kwargs in invalid_configs:
+            self.assertFalse(
+                tuner.is_valid_config(triton.Config(kwargs, num_warps=8, num_stages=1))
+            )
+
+        regular_tuner = CoordescTuner(is_native_matmul=False)
+        self.assertTrue(
+            regular_tuner.is_valid_config(
+                triton.Config(invalid_configs[0], num_warps=8, num_stages=1)
+            )
+        )
+
+    def test_native_matmul_rejects_invalid_neighbours(self):
+        tuner = CoordescTuner(
+            is_native_matmul=True,
+            size_hints={"x": 16384, "y": 2048, "r0_": 2048},
+        )
+        baseline = triton.Config(
+            {"YBLOCK": 128, "XBLOCK": 128, "R0_BLOCK": 64},
+            num_warps=8,
+            num_stages=1,
+        )
+
+        for field in ("XBLOCK", "YBLOCK", "R0_BLOCK"):
+            for cfg in tuner.get_neighbour_configs(baseline, field):
+                self.assertLessEqual(
+                    native_matmul_block_numel(cfg.kwargs),
+                    TRITON_MAX_TENSOR_NUMEL,
+                )
+
+    def test_native_matmul_persistent_uses_rblock_hint_for_limit(self):
+        tuner = CoordescTuner(
+            is_native_matmul=True,
+            size_hints={"x": 16384, "y": 2048, "r0_": 2048},
+        )
+
+        valid_config = triton.Config(
+            {"YBLOCK": 32, "XBLOCK": 16},
+            num_warps=8,
+            num_stages=1,
+        )
+        self.assertTrue(tuner.is_valid_config(valid_config))
+
+        invalid_config = triton.Config(
+            {"YBLOCK": 32, "XBLOCK": 32},
+            num_warps=8,
+            num_stages=1,
+        )
+        self.assertFalse(tuner.is_valid_config(invalid_config))
+
+        neighbours = tuner.get_neighbour_configs(valid_config, "XBLOCK")
+        self.assertNotIn(32, [cfg.kwargs["XBLOCK"] for cfg in neighbours])
+
+    def test_native_matmul_persistent_uses_min_rblock_for_limit(self):
+        size_hints = {"x": 4096, "y": 4096, "r0_": 1}
+        tuner = CoordescTuner(
+            is_native_matmul=True,
+            size_hints=size_hints,
+        )
+        r0_block = native_matmul_persistent_rblock(size_hints["r0_"])
+
+        baseline = triton.Config(
+            {"YBLOCK": 256, "XBLOCK": 256},
+            num_warps=8,
+            num_stages=1,
+        )
+        self.assertEqual(
+            native_matmul_block_numel(baseline.kwargs, r0_block=r0_block),
+            TRITON_MAX_TENSOR_NUMEL,
+        )
+        self.assertTrue(tuner.is_valid_config(baseline))
+
+        invalid_config = triton.Config(
+            {"YBLOCK": 256, "XBLOCK": 512},
+            num_warps=8,
+            num_stages=1,
+        )
+        self.assertFalse(tuner.is_valid_config(invalid_config))
+
+        neighbours = tuner.get_neighbour_configs(baseline, "XBLOCK")
+        self.assertNotIn(512, [cfg.kwargs["XBLOCK"] for cfg in neighbours])
+
+    def test_native_matmul_persistent_uses_meta_rblock_for_limit(self):
+        size_hints = {"x": 4096, "y": 4096, "r0_": 64}
+        effective_rblock = 1024
+        tuner = CoordescTuner(
+            is_native_matmul=True,
+            size_hints=size_hints,
+            inductor_meta={"native_matmul_persistent_rblock": effective_rblock},
+        )
+
+        baseline = triton.Config(
+            {"YBLOCK": 32, "XBLOCK": 32},
+            num_warps=8,
+            num_stages=1,
+        )
+        self.assertEqual(
+            native_matmul_block_numel(baseline.kwargs, r0_block=effective_rblock),
+            TRITON_MAX_TENSOR_NUMEL,
+        )
+        self.assertTrue(tuner.is_valid_config(baseline))
+
+        invalid_config = triton.Config(
+            {"YBLOCK": 64, "XBLOCK": 32},
+            num_warps=8,
+            num_stages=1,
+        )
+        self.assertLessEqual(
+            native_matmul_block_numel(
+                invalid_config.kwargs,
+                r0_block=native_matmul_persistent_rblock(size_hints["r0_"]),
+            ),
+            TRITON_MAX_TENSOR_NUMEL,
+        )
+        self.assertGreater(
+            native_matmul_block_numel(invalid_config.kwargs, r0_block=effective_rblock),
+            TRITON_MAX_TENSOR_NUMEL,
+        )
+        self.assertFalse(tuner.is_valid_config(invalid_config))
+
+        neighbours = tuner.get_neighbour_configs(baseline, "YBLOCK")
+        self.assertNotIn(64, [cfg.kwargs["YBLOCK"] for cfg in neighbours])
+
     def test_combo_tunable_fields_flow_into_tunable_fields(self):
         """``inductor_meta["combo_coordesc_field_order"]`` must be
         prepended to ``tunable_fields`` so combo-kernel per-subkernel
@@ -151,6 +294,22 @@ class TestCoordinateDescentTuner(TestCase):
         self.assertTrue(tuner.value_too_large("XBLOCK_1", 512))
         self.assertFalse(tuner.value_too_large("R0_BLOCK_1", 128))
         self.assertTrue(tuner.value_too_large("R0_BLOCK_1", 256))
+
+    def test_value_limits_from_inductor_meta(self):
+        tuner = CoordescTuner(
+            size_hints={"x": 1024, "r0_": 1024},
+            inductor_meta={
+                "min_xblock": 16,
+                "min_rblock": 64,
+            },
+        )
+
+        self.assertTrue(tuner.value_too_small("XBLOCK", 8))
+        self.assertFalse(tuner.value_too_small("XBLOCK", 16))
+        self.assertTrue(tuner.value_too_small("R0_BLOCK", 32))
+        self.assertFalse(tuner.value_too_small("R0_BLOCK", 64))
+        self.assertEqual(tuner.get_neighbour_values("XBLOCK", 16), [32])
+        self.assertEqual(tuner.get_neighbour_values("R0_BLOCK", 64), [128])
 
     def test_combo_metadata_orders_larger_subkernels_first_for_coordesc(self):
         def make_configs(xblock, yblock):
