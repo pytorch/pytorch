@@ -94,7 +94,7 @@ def check_graph_breaks(
         if expected_graph_breaks is None:
             status = "MISSING:"
             improved.append(model)
-        elif not dynamo_called:
+        elif flaky and not dynamo_called:
             print(f"{model:34}  EAGER_FAILED")
             continue
         elif graph_breaks == expected_graph_breaks:
