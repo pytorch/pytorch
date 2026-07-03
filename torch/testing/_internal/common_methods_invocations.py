@@ -17445,10 +17445,7 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.expectedFailure, 'TestInductorOpInfo', 'test_comprehensive'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
-               # Error: The operator 'aten::_upsample_bilinear2d_aa_backward.grad_input'
-               # is not currently implemented for the MPS device
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager', device_type='mps'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
+               # _upsample_bilineard2d_aa_out_mps only supports floating-point dtypes
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
            )),
     OpInfo(
