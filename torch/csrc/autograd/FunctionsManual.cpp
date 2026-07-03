@@ -344,7 +344,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _cdist_backward_backward(
     // Closed form via matmuls, avoiding the (r1, r2, m) materialization below.
     auto W = (grad_output / cdist).masked_fill(zero, 0);
     Tensor P;
-    
+
     if (need_go || need_cdist) {
       P = ((grad * x1).sum(-1, true) - grad.matmul(x2.mT())) / cdist;
       P = P.masked_fill(zero, 0);
@@ -383,7 +383,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _cdist_backward_backward(
     auto cdist_pow = cdist.pow(p - 1);
     auto W = (grad_output / cdist_pow).masked_fill(zero, 0);
     Tensor P;
-    
+
     if (need_go || need_cdist) {
       auto signpow = (diff.sgn() * adiff.pow(p - 1)).masked_fill(diff_zero, 0);
       auto num = (grad.unsqueeze(-2) * signpow).sum(-1);
@@ -451,7 +451,7 @@ std::tuple<Tensor, Tensor, Tensor> _pdist_backward_backward(
   auto col = idx.select(0, 1);
   auto lin_ab = row * n + col;
   auto lin_ba = col * n + row;
-  
+
   auto scatter_sym = [&](const Tensor& packed) {
     auto full = at::zeros({n * n}, packed.options());
     full.put_(lin_ab, packed);
