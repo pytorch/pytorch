@@ -45,10 +45,12 @@ from torch.utils._traceback import (
     report_compile_source_on_error,
 )
 from torch.utils.checkpoint import (
+    _allowed_determinism_checks_to_fns,
     _infer_device_type,
     checkpoint,
     checkpoint_sequential,
     get_device_states,
+    register_determinism_check,
 )
 from torch.utils.data import DataLoader
 
@@ -1133,6 +1135,73 @@ class TestDeviceLazyInit(TestCase):
 instantiate_device_type_tests(
     TestDeviceLazyInit, globals(), except_for=["cpu"], allow_xpu=True
 )
+
+
+class TestRegisterDeterminismCheck(TestCase):
+    def _register(self, name, metadata_fn):
+        register_determinism_check(name, metadata_fn)
+        self.addCleanup(_allowed_determinism_checks_to_fns.pop, name, None)
+
+    def test_custom_check_is_used_by_checkpoint(self):
+        calls = []
+
+        def metadata_fn(x):
+            calls.append(x.shape)
+            return {"shape": x.shape, "dtype": x.dtype}
+
+        def fn(x):
+            return torch.sigmoid(x.exp())
+
+        self._register("test_shape_dtype", metadata_fn)
+        a = torch.randn(3, requires_grad=True)
+        out = checkpoint(
+            fn, a, use_reentrant=False, determinism_check="test_shape_dtype"
+        )
+        self.assertTrue(len(calls) > 0)
+        out.sum().backward()
+        self.assertEqual(a.grad.shape, a.shape)
+
+    def test_custom_check_detects_mismatch(self):
+        counter = [0]
+
+        def metadata_fn(x):
+            # Returns different metadata on forward vs. recompute
+            counter[0] += 1
+            return counter[0]
+
+        def fn(x):
+            return torch.sigmoid(x.exp())
+
+        self._register("test_always_mismatch", metadata_fn)
+        a = torch.randn(3, requires_grad=True)
+        out = checkpoint(
+            fn, a, use_reentrant=False, determinism_check="test_always_mismatch"
+        )
+        with self.assertRaisesRegex(
+            torch.utils.checkpoint.CheckpointError,
+            "Recomputed values for the following tensors have different",
+        ):
+            out.sum().backward()
+
+    def test_register_existing_name_raises(self):
+        with self.assertRaisesRegex(ValueError, "already registered"):
+            register_determinism_check("default", lambda x: x.shape)
+        self._register("test_dupe", lambda x: x.shape)
+        with self.assertRaisesRegex(ValueError, "already registered"):
+            register_determinism_check("test_dupe", lambda x: x.shape)
+
+    def test_register_non_callable_raises(self):
+        with self.assertRaisesRegex(TypeError, "must be callable"):
+            register_determinism_check("test_non_callable", "not a function")  # type: ignore[arg-type]
+
+    def test_unknown_check_error_lists_registered_names(self):
+        def fn(x):
+            return x.sin()
+
+        self._register("test_listed", lambda x: x.shape)
+        a = torch.randn(3, requires_grad=True)
+        with self.assertRaisesRegex(ValueError, "test_listed"):
+            checkpoint(fn, a, use_reentrant=False, determinism_check="not_a_check")
 
 
 if __name__ == "__main__":
