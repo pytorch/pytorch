@@ -250,6 +250,24 @@ class TestExplainWithBackend(torch._dynamo.test_case.TestCase):
         self.assertEqual(1, explain_output.graph_break_count)
         self.assertEqual(8, explain_output.op_count)
 
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=False)
+    def test_explain_with_backend_terminal_graph_break_not_counted_as_split(self):
+        def fn(x):
+            y = x + 0
+            return torch.bincount(y, minlength=10)
+
+        # The final dynamic-shape operation records a break reason, but it does
+        # not split two compiled graphs.
+        eb = ExplainWithBackend("eager")
+        input_tensor = torch.tensor([0, 1, 1, 2], dtype=torch.int64)
+        optimized_fn = torch.compile(fn, backend=eb)
+        self.assertEqual(fn(input_tensor), optimized_fn(input_tensor))
+
+        explain_output = eb.output()
+        self.assertEqual(1, explain_output.graph_count)
+        self.assertEqual(0, explain_output.graph_break_count)
+        self.assertEqual(1, len(explain_output.break_reasons))
+
 
 class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
     """Test APIs documented by https://pytorch.org/docs/main/torch.compiler_custom_backends.html"""

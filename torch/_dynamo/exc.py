@@ -303,6 +303,7 @@ class Unsupported(TorchDynamoException):
         *,
         case_name: str | None = None,
         real_stack: StackSummary | None = None,
+        record_graph_break: bool = True,
     ) -> None:
         super().__init__(msg)
         if not real_stack:
@@ -314,6 +315,7 @@ class Unsupported(TorchDynamoException):
         self.add_to_stats()
         self.gb_type: str | None = gb_type
         self.logged = False
+        self.record_graph_break = record_graph_break
 
     def remove_from_stats(self) -> None:
         if self.category is None:
@@ -732,6 +734,7 @@ def unimplemented(
     from_exc: Any = _NOTHING,
     log_warning: bool = False,
     skip_frame: bool = False,
+    record_graph_break: bool = True,
 ) -> NoReturn:
     """
     Called within dynamo to cause a graph break.
@@ -754,13 +757,23 @@ def unimplemented(
         if isinstance(from_exc, Unsupported):
             msg = f"{from_exc.msg}\n\n*** While handling this graph break, another graph break occurred: ***\n\n{msg}"
             # noqa: GB_REGISTRY
-            raise Unsupported(msg, gb_type, skip_frame, real_stack=past_real_stack)
+            raise Unsupported(
+                msg,
+                gb_type,
+                skip_frame,
+                real_stack=past_real_stack,
+                record_graph_break=record_graph_break,
+            )
         # noqa: GB_REGISTRY
         raise Unsupported(
-            msg, gb_type, skip_frame, real_stack=past_real_stack
+            msg,
+            gb_type,
+            skip_frame,
+            real_stack=past_real_stack,
+            record_graph_break=record_graph_break,
         ) from from_exc
     # noqa: GB_REGISTRY
-    raise Unsupported(msg, gb_type, skip_frame)
+    raise Unsupported(msg, gb_type, skip_frame, record_graph_break=record_graph_break)
 
 
 # KeyError has special handling for its args

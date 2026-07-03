@@ -2433,6 +2433,18 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         torch._dynamo.testing.standard_test(self, fn=fn2, nargs=1, expected_ops=1)
 
+    def test_torch_assert_preserves_observed_exception_message(self):
+        @torch.compile(backend="eager")
+        def fn(x, msg):
+            torch._assert(x.shape[0] == 0, msg)
+            return x
+
+        x = torch.randn(1)
+        for msg in (None, 3):
+            with self.assertRaises(AssertionError) as cm:
+                fn(x, msg)
+            self.assertTrue(str(cm.exception).startswith(str(msg)))
+
     # When we unspecialize float, we wobble this test by changing
     # the op count since previously we would just specialize and constant
     # fold floats into the graph, whereas when we unspecialize we will have

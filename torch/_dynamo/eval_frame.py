@@ -58,7 +58,7 @@ from torch import _guards
 # see discussion at https://github.com/pytorch/pytorch/issues/120699
 from torch._C._dynamo.eval_frame import (  # noqa: F401
     get_eval_frame_isolate_recompiles_id,
-    reset_code,
+    reset_code as _reset_code,
     set_code_exec_strategy,
     set_eval_frame,
     set_eval_frame_isolate_recompiles_id,
@@ -125,8 +125,12 @@ from .mutation_guard import install_generation_tagging_init
 from .utils import (
     _get_error_on_graph_break,
     _set_error_on_graph_break,
+    cleanup_guarded_eager_fallback_code,
+    cleanup_guarded_eager_fallback_codes_for_code,
+    CleanupManager,
     common_constant_types,
     compile_times,
+    is_guarded_eager_fallback_code,
 )
 
 
@@ -396,6 +400,34 @@ def _reset_guarded_backend_cache() -> None:
         if hasattr(backend, "reset"):
             backend.reset()
     cached_backends.clear()
+
+
+def _active_code_ids() -> set[int]:
+    active_code_ids: set[int] = set()
+    frame = sys._getframe()
+    while frame is not None:
+        active_code_ids.add(id(frame.f_code))
+        frame = frame.f_back
+    return active_code_ids
+
+
+def reset_code(code: types.CodeType) -> None:
+    active_code_ids = _active_code_ids()
+    cleanup_guarded_eager_fallback_codes_for_code(code)
+    # Reset eagerly runs cache-entry cleanups that otherwise depend on code
+    # object finalizers, while avoiding compiled frames currently on the stack.
+    for entry in _debug_get_cache_entry_list(code):
+        if id(entry.code) in active_code_ids:
+            continue
+        if is_guarded_eager_fallback_code(entry.code) or getattr(
+            entry, "trace_annotation", ""
+        ).startswith("Torch-Compiled Eager Fallback"):
+            cleanup_guarded_eager_fallback_code(entry.code)
+        else:
+            CleanupManager.instance.cleanup(entry.code)
+    if is_guarded_eager_fallback_code(code) and id(code) not in active_code_ids:
+        cleanup_guarded_eager_fallback_code(code)
+    _reset_code(code)
 
 
 DONT_WRAP_FILES = {
@@ -1875,7 +1907,9 @@ def explain(f: Callable[..., Any], *extra_args: Any, **extra_kwargs: Any) -> Any
         opt_f(*args, **kwargs)
 
         graph_count = len(graphs)
-        graph_break_count = graph_count - 1
+        # Count recorded graph-break splits. A terminal recorded reason has no
+        # split, while internal unrecorded splits should not affect diagnostics.
+        graph_break_count = min(len(break_reasons), max(graph_count - 1, 0))
         compile_time = compile_times(repr="str")
 
         # TODO(voz): Do we want a decorator for this?

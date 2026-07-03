@@ -32,6 +32,13 @@ def get_field(csv, model_name: str, field: str):
         return None
 
 
+def is_non_rocm_expected_file(expected_filename: str, filename: str) -> bool:
+    expected_filename = os.path.normpath(expected_filename)
+    return os.path.basename(
+        expected_filename
+    ) == filename and "rocm" not in expected_filename.split(os.sep)
+
+
 def check_accuracy(actual_csv, expected_csv, expected_filename):
     failed = []
     improved = []
@@ -60,6 +67,17 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
             }
         )
 
+    scoped_flaky_models = set(flaky_models)
+    if is_non_rocm_expected_file(expected_filename, "inductor_timm_training.csv"):
+        # CUDA AMP TIMM training can fail before Dynamo runs because eager
+        # reference runs disagree on BatchNorm gradients at exact tolerance.
+        # https://github.com/pytorch/pytorch/pull/186003#issuecomment-4607459927
+        scoped_flaky_models.add("mobilenetv2_100")
+    if is_non_rocm_expected_file(expected_filename, "inductor_torchbench_training.csv"):
+        # CUDA AMP TorchBench training can fail before Dynamo runs because eager
+        # reference runs disagree at exact tolerance for these torchvision models.
+        scoped_flaky_models.update({"mnasnet1_0", "mobilenet_v2", "shufflenet_v2_x1_0"})
+
     for model in actual_csv["name"]:
         accuracy = get_field(actual_csv, model, "accuracy")
         expected_accuracy = get_field(expected_csv, model, "accuracy")
@@ -74,7 +92,7 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
             status = "PASS" if expected_accuracy == "pass" else "XFAIL"
             print(f"{model:34}  {status}")
             continue
-        elif model in flaky_models:
+        elif model in scoped_flaky_models:
             if accuracy == "pass":
                 # model passed but marked xfailed
                 status = "PASS_BUT_FLAKY:"

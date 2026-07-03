@@ -2506,11 +2506,17 @@ class SkipFunctionVariable(VariableTracker):
                 from ..trace_rules import get_skip_reason
 
                 reason = get_skip_reason(self.value)
+            # clone_inputs is internal benchmarking/debug plumbing, not a user
+            # graph break, so keep it out of diagnostic counters.
+            record_graph_break = not (
+                module_name == "torch._dynamo.utils" and qualname == "clone_inputs"
+            )
             unimplemented(
                 gb_type="Attempted to call function marked as skipped",
                 context=f"module: {module_name}, qualname: {qualname}, skip reason: {reason}",
                 explanation=explanation,
                 hints=hints,
+                record_graph_break=record_graph_break,
             )
 
     def reconstruct_pycode(self, codegen):

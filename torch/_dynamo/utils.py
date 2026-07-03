@@ -2476,6 +2476,8 @@ class CleanupHook:
     name: str
 
     def __call__(self, *args: Any) -> None:
+        if self.name not in self.scope:
+            return
         # Make sure we're not shutting down
         if CleanupManager is not None:
             CleanupManager.count -= 1
@@ -2494,13 +2496,100 @@ class CleanupManager(ExactWeakKeyDictionary):
     count = 0
     instance: ClassVar[CleanupManager]
 
+    def cleanup(self, key: Any) -> None:
+        self._remove_id(id(key))
+
     def _remove_id(self, idx: int) -> None:
-        for hook in self.values[idx]:
+        hooks = self.values.pop(idx, ())
+        self.refs.pop(idx, None)
+        guarded_fallback_ids = globals().get("guarded_eager_fallback_code_ids")
+        if guarded_fallback_ids is not None:
+            guarded_fallback_ids.discard(idx)
+        guarded_fallback_orig_code_ids = globals().get(
+            "guarded_eager_fallback_code_ids_by_orig_code"
+        )
+        guarded_fallback_orig_id_by_code_id = globals().get(
+            "guarded_eager_fallback_orig_code_id_by_code_id"
+        )
+        if guarded_fallback_orig_id_by_code_id is not None:
+            orig_idx = guarded_fallback_orig_id_by_code_id.pop(idx, None)
+            if orig_idx is not None and guarded_fallback_orig_code_ids is not None:
+                code_ids = guarded_fallback_orig_code_ids.values.get(orig_idx)
+                if code_ids is not None:
+                    code_ids.discard(idx)
+                    if not code_ids:
+                        guarded_fallback_orig_code_ids._remove_id(orig_idx)
+        for hook in hooks:
             hook()
-        super()._remove_id(idx)
+        guarded_fallback_cleanup_hooks = globals().get(
+            "guarded_eager_fallback_cleanup_hooks_by_code_id"
+        )
+        if guarded_fallback_cleanup_hooks is not None:
+            for hook in guarded_fallback_cleanup_hooks.pop(idx, ()):
+                hook()
 
 
 CleanupManager.instance = CleanupManager()
+guarded_eager_fallback_codes = ExactWeakKeyDictionary()
+guarded_eager_fallback_code_ids: set[int] = set()
+guarded_eager_fallback_code_ids_by_orig_code = ExactWeakKeyDictionary()
+guarded_eager_fallback_orig_code_id_by_code_id: dict[int, int] = {}
+guarded_eager_fallback_cleanup_hooks_by_code_id: dict[int, tuple[CleanupHook, ...]] = {}
+
+
+def register_guarded_eager_fallback_code(
+    code: types.CodeType,
+    orig_code: types.CodeType,
+    cleanup_hooks: list[CleanupHook] | None = None,
+) -> None:
+    guarded_eager_fallback_codes[code] = True
+    code_id = id(code)
+    guarded_eager_fallback_code_ids.add(code_id)
+    if cleanup_hooks:
+        guarded_eager_fallback_cleanup_hooks_by_code_id[code_id] = tuple(cleanup_hooks)
+    orig_code_id = id(orig_code)
+    guarded_eager_fallback_orig_code_id_by_code_id[code_id] = orig_code_id
+    code_ids = guarded_eager_fallback_code_ids_by_orig_code.get(orig_code)
+    if code_ids is None:
+        code_ids = set()
+        guarded_eager_fallback_code_ids_by_orig_code[orig_code] = code_ids
+    code_ids.add(code_id)
+
+
+def is_guarded_eager_fallback_code(code: types.CodeType) -> bool:
+    return code in guarded_eager_fallback_codes
+
+
+def cleanup_guarded_eager_fallback_code(code: types.CodeType) -> None:
+    idx = id(code)
+    CleanupManager.instance._remove_id(idx)
+    guarded_eager_fallback_codes._remove_id(idx)
+    guarded_eager_fallback_code_ids.discard(idx)
+    guarded_eager_fallback_orig_code_id_by_code_id.pop(idx, None)
+    guarded_eager_fallback_cleanup_hooks_by_code_id.pop(idx, None)
+
+
+def cleanup_guarded_eager_fallback_codes_for_code(code: types.CodeType) -> None:
+    code_ids = guarded_eager_fallback_code_ids_by_orig_code.get(code)
+    if code_ids is None:
+        return
+    for idx in list(code_ids):
+        CleanupManager.instance._remove_id(idx)
+        guarded_eager_fallback_codes._remove_id(idx)
+        guarded_eager_fallback_code_ids.discard(idx)
+        guarded_eager_fallback_orig_code_id_by_code_id.pop(idx, None)
+        guarded_eager_fallback_cleanup_hooks_by_code_id.pop(idx, None)
+    guarded_eager_fallback_code_ids_by_orig_code._remove_id(id(code))
+
+
+def cleanup_all_guarded_eager_fallback_codes() -> None:
+    for idx in list(guarded_eager_fallback_code_ids):
+        CleanupManager.instance._remove_id(idx)
+        guarded_eager_fallback_codes._remove_id(idx)
+        guarded_eager_fallback_code_ids.discard(idx)
+        guarded_eager_fallback_orig_code_id_by_code_id.pop(idx, None)
+        guarded_eager_fallback_cleanup_hooks_by_code_id.pop(idx, None)
+    guarded_eager_fallback_code_ids_by_orig_code.clear()
 
 
 def clone_tensor(x: torch.Tensor) -> torch.Tensor:

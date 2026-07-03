@@ -28,7 +28,7 @@ import functools
 import logging
 from collections.abc import Callable, Iterable
 from importlib import import_module
-from typing import Any, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 
 import torch
 from functorch.compile import min_cut_rematerialization_partition
@@ -675,8 +675,12 @@ def _explain_graph_detail(
     ops = [node.target for node in gm.graph.nodes if node.op == "call_function"]
     op_count += len(ops)
     ops_per_graph.append(ops)
-    if gm.compile_subgraph_reason.graph_break:  # type: ignore[union-attr]
-        break_reasons.append(gm.compile_subgraph_reason)  # type: ignore[arg-type]
+    compile_subgraph_reason = cast(GraphCompileReason, gm.compile_subgraph_reason)
+    if (
+        compile_subgraph_reason.graph_break
+        and compile_subgraph_reason.record_graph_break
+    ):
+        break_reasons.append(compile_subgraph_reason)
 
     return gm, graphs, op_count, ops_per_graph, break_reasons
 
@@ -725,10 +729,12 @@ class ExplainWithBackend:
 
     def output(self) -> ExplainOutput:
         graph_count = len(self.graphs)
+        # Count recorded graph-break splits. A terminal recorded reason has no
+        # split, while internal unrecorded splits should not affect diagnostics.
         output = ExplainOutput(
             self.graphs,
             graph_count,
-            graph_count - 1,
+            min(len(self.break_reasons), max(graph_count - 1, 0)),
             self.break_reasons,
             self.op_count,
         )
