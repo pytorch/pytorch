@@ -7024,6 +7024,44 @@ for dtype in (torch.int32, torch.int64):
             (torch.randn([4, 12, 2, 64]),),
         )
 
+    @config.patch(fallback_random=True)
+    def test_normal_fallback(self):
+        def fn_scalar():
+            return torch.normal(0.0, 1.0, size=(2, 3), device=self.device)
+
+        mean = torch.ones(10, device=self.device) * 0.1
+        std = torch.ones(10, device=self.device) * 0.5
+
+        self.common(torch.normal, (mean, std))
+        self.common(fn_scalar, ())
+
+    @config.patch(fallback_random=False)
+    def test_normal_no_fallback(self):
+        def fn_scalar():
+            return torch.normal(0.0, 1.0, size=(2, 3), device=self.device)
+
+        mean = torch.ones(10, device=self.device) * 0.1
+        std = torch.ones(10, device=self.device) * 0.5
+
+        compiled = torch.compile(torch.normal, fullgraph=True)
+        res = compiled(mean, std)
+        self.assertEqual(res.shape, (10,))
+        self.assertEqual(res.dtype, torch.float32)
+        self.assertEqual(res.device.type, torch.device(self.device).type)
+
+        compiled_scalar = torch.compile(fn_scalar, fullgraph=True)
+        res_scalar = compiled_scalar()
+        self.assertEqual(res_scalar.shape, (2, 3))
+        self.assertEqual(res_scalar.dtype, torch.float32)
+        self.assertEqual(res_scalar.device.type, torch.device(self.device).type)
+
+        # Confirm non-eager compilation
+        torch.manual_seed(0)
+        eager_out = torch.normal(mean, std)
+        torch.manual_seed(0)
+        compiled_out = compiled(mean, std)
+        self.assertNotEqual(eager_out, compiled_out)
+
     def test_embedding(self):
         m = torch.nn.Sequential(
             torch.nn.Embedding(10, 4, padding_idx=0),
@@ -18746,6 +18784,19 @@ if RUN_GPU or HAS_MPS:
     class GPUTests(TestCase):
         common = check_model_gpu
         device = GPU_TYPE
+
+        @requires_cuda_and_triton
+        def test_signbit_negative_zero_cuda(self):
+            def fn(x):
+                return torch.signbit(x)
+
+            for dtype in (torch.float32, torch.float64):
+                x = torch.tensor(
+                    [[1.0, -0.0, 0.0], [-1.0, -0.0, 2.5]],
+                    device=self.device,
+                    dtype=dtype,
+                )
+                self.common(fn, (x,), check_lowp=False)
 
     copy_tests(CommonTemplate, GPUTests, GPU_TYPE)
 
