@@ -11,7 +11,7 @@ import unittest
 
 import torch
 from torch.profiler._cupti.pm_sampling import (
-    _DEFAULT_WINDOW_NS,
+    _LOOKBACK_WINDOW_NS,
     _SAMPLING_INTERVAL_NS,
     PmSampler,
     supported_metrics,
@@ -50,18 +50,10 @@ def _cupti_version() -> int:
 TEST_CUPTI_V13_3 = TEST_CUPTI_PYTHON and _cupti_version() >= 130300
 
 
-def _pm_sampling_available() -> bool:
-    # Needs CUDA, libcupti >= 13.3, and the cupti.pm_sampling module. Whether the HW can actually
-    # engage (perfmon access) is only known at start(), so tests still skip at runtime when no
-    # session comes up.
-    if not (TEST_CUDA and TEST_CUPTI_V13_3):
-        return False
-    from torch.profiler._cupti.pm_sampling import is_available
-
-    return is_available()
-
-
-TEST_CUPTI_PM_SAMPLING = _pm_sampling_available()
+# Needs CUDA + libcupti >= 13.3 (cupti-python ships with PyTorch). Whether the HW can actually
+# engage (perfmon access) is only known at start(), so tests still skip at runtime when no session
+# comes up.
+TEST_CUPTI_PM_SAMPLING = TEST_CUDA and TEST_CUPTI_V13_3
 
 
 @unittest.skipIf(
@@ -82,30 +74,29 @@ class TestPmSamplingWindowSizing(TestCase):
         torch.cuda.synchronize()
 
     def _collect(self, metrics=_TEST_METRICS) -> tuple[PmSampler, list]:
-        # Real session: the first add_consumer enables PM sampling on the current device via CUPTI,
-        # we drive some GPU work, and poll() decodes the ring into `frames` (raw HW-ns timestamps).
-        frames: list = []
+        # Real session: add_consumer enables PM sampling on the current device via CUPTI, we drive
+        # some GPU work, and poll(handle) returns a frame of the ring's samples (raw HW-ns).
         sampler = PmSampler(torch.cuda.current_device())
-        handle = sampler.add_consumer(list(metrics), frames.append)
-        self.addCleanup(sampler.remove_consumer, handle)
+        handle = sampler.add_consumer(list(metrics))
+        self.addCleanup(handle.detach)
         if sampler._col is None:
             self.skipTest("PM sampling could not start on this GPU")
         self._run_gpu_work()
-        sampler.poll()
-        return sampler, frames
+        frame = handle.poll()
+        return sampler, ([frame] if frame is not None else [])
 
     def test_max_samples_from_process_config(self):
         # max_samples = look-back / interval (process-wide env); accepted by a real
         # configure()/decode() (start sizes the ring from it via get_counter_data_size).
         sampler, _ = self._collect()
-        expected = max(1, _DEFAULT_WINDOW_NS // _SAMPLING_INTERVAL_NS)
+        expected = max(1, _LOOKBACK_WINDOW_NS // _SAMPLING_INTERVAL_NS)
         self.assertEqual(sampler._max_samples, expected)
 
     def test_empty_metrics_rejected(self):
         # A consumer must bring a non-empty metric set; add_consumer rejects an empty one.
         sampler = PmSampler(torch.cuda.current_device())
         with self.assertRaises(ValueError):
-            sampler.add_consumer((), lambda frame: None)
+            sampler.add_consumer(())
         self.assertIsNone(sampler._col)
 
     def test_multipass_metrics_rejected(self):
@@ -113,10 +104,7 @@ class TestPmSamplingWindowSizing(TestCase):
         # needs ~8) is rejected by add_consumer -> ValueError, no session, running state untouched.
         sampler = PmSampler(torch.cuda.current_device())
         with self.assertRaises(ValueError) as cm:
-            sampler.add_consumer(
-                ["sm__throughput.avg.pct_of_peak_sustained_elapsed"],
-                lambda frame: None,
-            )
+            sampler.add_consumer(["sm__throughput.avg.pct_of_peak_sustained_elapsed"])
         self.assertIn("pass", str(cm.exception).lower())
         self.assertIsNone(sampler._col)
 
@@ -133,21 +121,13 @@ class TestPmSamplingWindowSizing(TestCase):
         # once and can be re-initialized on the next session.
         before = PmSampler._active
         sampler = PmSampler(torch.cuda.current_device())
-        handle = sampler.add_consumer(list(_TEST_METRICS), lambda frame: None)
+        handle = sampler.add_consumer(list(_TEST_METRICS))
         if sampler._col is None:
-            sampler.remove_consumer(handle)
+            handle.detach()
             self.skipTest("PM sampling could not start on this GPU")
         self.assertEqual(PmSampler._active, before + 1)
-        sampler.remove_consumer(handle)
+        handle.detach()
         self.assertEqual(PmSampler._active, before)
-
-    def test_suggested_poll_interval_under_ring_span(self):
-        # The recommended poll cadence stays under the ring's fill boundary (drains before it
-        # overflows, dropping samples), so periodic polls never lose data to a wrapped ring.
-        sampler = PmSampler(torch.cuda.current_device())
-        span = sampler._max_samples * sampler._sampling_interval_ns
-        self.assertGreater(sampler.suggested_poll_interval_ns, 0)
-        self.assertLess(sampler.suggested_poll_interval_ns, span)
 
     def test_decoded_frames_have_per_metric_columns(self):
         # Each sampled metric is a value column keyed by its metric name (self-describing frame).
@@ -172,7 +152,7 @@ class TestPmSamplingWindowSizing(TestCase):
         if ts.size == 0:
             self.skipTest("no PM samples produced on this GPU")
         self.assertTrue((np.diff(np.sort(ts)) >= 0).all())  # monotonic HW timestamps
-        self.assertLessEqual(int(ts.max() - ts.min()), _DEFAULT_WINDOW_NS)
+        self.assertLessEqual(int(ts.max() - ts.min()), _LOOKBACK_WINDOW_NS)
 
     def test_select_metrics_by_name(self):
         # A caller passes metric name strings; each selected metric becomes its own frame column.
@@ -205,38 +185,98 @@ class TestPmSamplingWindowSizing(TestCase):
         with self.assertLogs(
             "torch.profiler._cupti.pm_sampling", level="WARNING"
         ) as cm:
-            handle = sampler.add_consumer(
-                ["not__a_real_metric.avg"], lambda frame: None
-            )
-            self.addCleanup(sampler.remove_consumer, handle)
+            handle = sampler.add_consumer(["not__a_real_metric.avg"])
+            self.addCleanup(handle.detach)
         self.assertTrue(any("not reported by this chip" in m for m in cm.output))
 
     def test_multiple_consumers_share_session(self):
         # Two consumers on one device share the single session: it samples the union of their
-        # metrics, and each consumer's frames carry only its own metric columns.
+        # metrics, and each consumer's polled frame carries only its own metric columns.
         a_metrics, b_metrics = [_TEST_METRICS[0]], list(_TEST_METRICS[1:3])
-        a_frames: list = []
-        b_frames: list = []
         sampler = PmSampler(torch.cuda.current_device())
-        a = sampler.add_consumer(a_metrics, a_frames.append)
-        self.addCleanup(sampler.remove_consumer, a)
-        b = sampler.add_consumer(b_metrics, b_frames.append)
-        self.addCleanup(sampler.remove_consumer, b)
+        a = sampler.add_consumer(a_metrics)
+        self.addCleanup(a.detach)
+        b = sampler.add_consumer(b_metrics)
+        self.addCleanup(b.detach)
         if sampler._col is None:
             self.skipTest("PM sampling could not start on this GPU")
         # The session samples the union (dedup, order-preserving).
         self.assertEqual(sampler._metric_names, a_metrics + b_metrics)
         self._run_gpu_work()
-        sampler.poll()
-        if not a_frames or not b_frames:
+        fa = a.poll()
+        fb = b.poll()
+        if fa is None or fb is None:
             self.skipTest("no PM samples produced on this GPU")
-        for f in a_frames:  # only consumer A's metric
-            self.assertIn(a_metrics[0], f)
-            self.assertNotIn(b_metrics[0], f)
-        for f in b_frames:  # only consumer B's metrics
-            for name in b_metrics:
-                self.assertIn(name, f)
-            self.assertNotIn(a_metrics[0], f)
+        self.assertIn(a_metrics[0], fa)  # only consumer A's metric
+        self.assertNotIn(b_metrics[0], fa)
+        for name in b_metrics:  # only consumer B's metrics
+            self.assertIn(name, fb)
+        self.assertNotIn(a_metrics[0], fb)
+
+    def test_metric_union_reconfigure(self):
+        # Adding/removing a consumer with a distinct metric changes the union and rebuilds the
+        # session (a live in-place reconfigure segfaults); sampling must survive each grow/shrink.
+        m0, m1 = [_TEST_METRICS[0]], [_TEST_METRICS[1]]
+        sampler = PmSampler(torch.cuda.current_device())
+        a = sampler.add_consumer(m0)
+        self.addCleanup(a.detach)
+        if sampler._col is None:
+            self.skipTest("PM sampling could not start on this GPU")
+        self.assertEqual(sampler._metric_names, m0)
+        b = sampler.add_consumer(m1)  # union grows -> rebuild
+        self.addCleanup(b.detach)
+        self.assertEqual(sampler._metric_names, m0 + m1)
+        self._run_gpu_work()
+        fa = a.poll()
+        if fa is None:
+            self.skipTest("no PM samples produced on this GPU")
+        self.assertIn(m0[0], fa)  # sampling works after the grow-rebuild
+        b.detach()  # union shrinks -> rebuild
+        self.assertEqual(sampler._metric_names, m0)
+        self._run_gpu_work()
+        fa = a.poll()
+        self.assertTrue(
+            fa is not None and m0[0] in fa
+        )  # works after the shrink-rebuild
+
+    def test_dropped_handle_detaches(self):
+        # Safety net: dropping a handle without detach() still unregisters it -- the sampler holds
+        # only the _Consumer record, not the handle, so the handle is collectable and __del__ fires.
+        import gc
+
+        sampler = PmSampler(torch.cuda.current_device())
+        handle = sampler.add_consumer(list(_TEST_METRICS))
+        if sampler._col is None:
+            handle.detach()
+            self.skipTest("PM sampling could not start on this GPU")
+        self.assertEqual(len(sampler._consumers), 1)
+        handle = None  # drop the only reference
+        gc.collect()
+        self.assertEqual(len(sampler._consumers), 0)  # __del__ detached it
+
+    def test_retention_only_for_lagging_consumer(self):
+        # decode drains, so the sampler retains samples for a consumer that hasn't polled yet, and
+        # keeps nothing for a lone, caught-up consumer (GC'd by the min-cursor watermark).
+        sampler = PmSampler(torch.cuda.current_device())
+        a = sampler.add_consumer(list(_TEST_METRICS[:1]))
+        self.addCleanup(a.detach)
+        if sampler._col is None:
+            self.skipTest("PM sampling could not start on this GPU")
+        # Lone consumer: after it polls, nothing is retained (it consumed everything it drained).
+        self._run_gpu_work()
+        if a.poll() is None:
+            self.skipTest("no PM samples produced on this GPU")
+        self.assertEqual(sampler._retained_ts.size, 0)
+        # Add a second consumer (same metric -> no reconfigure); a poll by A must now retain A's
+        # drained samples for B, which lags -- and B gets them from the buffer (A already drained
+        # the HW ring).
+        b = sampler.add_consumer(list(_TEST_METRICS[:1]))
+        self.addCleanup(b.detach)
+        self._run_gpu_work()
+        a.poll()
+        self.assertGreater(sampler._retained_ts.size, 0)
+        fb = b.poll()
+        self.assertTrue(fb is not None and fb["start_ns"].size > 0)
 
 
 if __name__ == "__main__":
