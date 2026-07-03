@@ -23,14 +23,7 @@ def _bmm_outer_product_impl(
 ) -> torch.Tensor:
     from .triton_kernels import bmm_outer_product
 
-    device = a.device
-    if device.type == "cuda":
-        if device.index == torch.cuda.current_device():
-            return bmm_outer_product(a, b)
-        with torch.cuda.device(device):
-            return bmm_outer_product(a, b)
-    else:
-        # XPU or other device types
+    with torch.accelerator.device_index(a.get_device()):
         return bmm_outer_product(a, b)
 
 
