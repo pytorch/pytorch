@@ -1,11 +1,9 @@
 #include <c10/util/StringUtil.h>
 
+#include <cstdint>
 #include <string>
 
-#ifndef _WIN32
-#include <codecvt>
-#include <locale>
-#else
+#ifdef _WIN32
 #include <c10/util/Unicode.h>
 #endif
 
@@ -43,16 +41,54 @@ static std::ostream& _strFromWide(
 
 #ifndef _WIN32
 
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-declarations")
-// TODO (huydhn) https://en.cppreference.com/w/cpp/header/codecvt has been
-// deprecated in C++17 but there is no alternative yet, so I just ack it
+// Decodes one code point from a UTF-16 sequence (one code unit per wchar_t,
+// matching the old std::codecvt_utf8_utf16 behavior), advancing `it` past the
+// consumed code unit(s) and combining a surrogate pair when present.
+static uint32_t decode_utf16_char(
+    std::wstring::const_iterator& it,
+    std::wstring::const_iterator end) {
+  uint32_t cp = static_cast<char16_t>(*it++);
+  if (cp >= 0xD800 && cp <= 0xDBFF && it != end) {
+    const char16_t low = static_cast<char16_t>(*it);
+    if (low >= 0xDC00 && low <= 0xDFFF) {
+      cp = 0x10000 + ((cp - 0xD800) << 10) + (low - 0xDC00);
+      ++it;
+    }
+  }
+  return cp;
+}
+
+// Appends the UTF-8 encoding of a single code point to `out`.
+static void encode_utf8_char(std::string& out, uint32_t cp) {
+  if (cp < 0x80) {
+    out.push_back(static_cast<char>(cp));
+  } else if (cp < 0x800) {
+    out.push_back(static_cast<char>(0xC0 | (cp >> 6)));
+    out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+  } else if (cp < 0x10000) {
+    out.push_back(static_cast<char>(0xE0 | (cp >> 12)));
+    out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+    out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+  } else {
+    out.push_back(static_cast<char>(0xF0 | (cp >> 18)));
+    out.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F)));
+    out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+    out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+  }
+}
+
 static std::ostream& _strFromWide(
     std::ostream& ss,
     const std::wstring& wString) {
-  std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
-  return _str(ss, converter.to_bytes(wString));
+  std::string result;
+  result.reserve(wString.size());
+  auto it = wString.begin();
+  const auto end = wString.end();
+  while (it != end) {
+    encode_utf8_char(result, decode_utf16_char(it, end));
+  }
+  return _str(ss, result);
 }
-C10_DIAGNOSTIC_POP()
 
 #else // #ifndef _WIN32
 // The WIN32 implementation of wstring_convert leaks memory; see
