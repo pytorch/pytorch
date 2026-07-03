@@ -52,7 +52,7 @@ def torch_nn_relu_override(self: torch.nn.ReLU, x: torch.Tensor) -> torch.Tensor
 def functional_relu_override(x: torch.Tensor, inplace: bool = False) -> torch.Tensor:
     if inplace:
         raise AssertionError(
-            "dont support inplace functional.relu for metatensor analysis"
+            "don't support inplace functional.relu for metatensor analysis"
         )
     return x
 
@@ -69,7 +69,7 @@ def torch_abs_override(
     input: torch.Tensor, *, out: torch.Tensor | None = None
 ) -> torch.Tensor:
     if out is not None:
-        raise AssertionError("Dont support in-place abs for MetaTensor analysis")
+        raise AssertionError("Don't support in-place abs for MetaTensor analysis")
     return input
 
 
@@ -276,7 +276,7 @@ class MetaTracer(torch.fx.Tracer):
 
             # TODO
             if not isinstance(rv, torch.fx.Proxy):
-                raise AssertionError("Dont support composite output yet")
+                raise AssertionError("Don't support composite output yet")
             rv.install_tensor_meta(meta_out)
         except Exception as e:
             warnings.warn(f"Could not compute metadata for {kind} target {target}: {e}")

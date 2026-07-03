@@ -8,7 +8,7 @@ namespace torch::lazy {
 
 // These operators were once widely used in nativefunction impls to perform
 // convenient decompositions (partial lowerings) of aten operators into more
-// primitive opererators. They should not be used for this purpose anymore, but
+// primitive operators. They should not be used for this purpose anymore, but
 // still used in lazy_graph_executor for RNG math in one place.  We could
 // rewrite that.
 NodePtr operator+(const Value& node1, const Value& node2) {

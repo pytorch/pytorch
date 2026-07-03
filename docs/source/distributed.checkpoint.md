@@ -27,6 +27,38 @@ The entrypoints to load and save a checkpoint are the following:
 ```
 
 ```{eval-rst}
+.. currentmodule:: torch.distributed.checkpoint.optimizer
+```
+
+```{eval-rst}
+.. autofunction:: load_sharded_optimizer_state_dict
+```
+
+```{eval-rst}
+.. currentmodule:: torch.distributed.checkpoint.planner_helpers
+```
+
+```{eval-rst}
+.. autofunction:: create_read_items_for_chunk_list
+```
+
+```{eval-rst}
+.. currentmodule:: torch.distributed.checkpoint.default_planner
+```
+
+```{eval-rst}
+.. autofunction:: create_default_global_load_plan
+```
+
+```{eval-rst}
+.. autofunction:: create_default_global_save_plan
+```
+
+```{eval-rst}
+.. autofunction:: create_default_local_save_plan
+```
+
+```{eval-rst}
 .. currentmodule:: torch.distributed.checkpoint.state_dict_saver
 ```
 
@@ -49,7 +81,7 @@ The entrypoints to load and save a checkpoint are the following:
 ```
 
 ```{eval-rst}
-.. autofunction::  save_state_dict
+.. autofunction:: save_state_dict
 ```
 
 ```{eval-rst}
@@ -61,7 +93,7 @@ The entrypoints to load and save a checkpoint are the following:
 ```
 
 ```{eval-rst}
-.. autofunction::  load_state_dict
+.. autofunction:: load_state_dict
 ```
 
 The following module is also useful for additional customization of the staging mechanisms used for asynchronous checkpointing (`torch.distributed.checkpoint.async_save`):

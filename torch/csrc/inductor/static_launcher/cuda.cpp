@@ -10,9 +10,13 @@
 #include <torch/csrc/utils/python_numbers.h>
 #include <filesystem>
 #include <optional>
+#include <utility>
 
 #if defined(USE_ROCM)
 #include <hip/hip_runtime_api.h>
+#include <fstream>
+#include <iterator>
+#include <vector>
 #endif
 
 /**
@@ -102,7 +106,20 @@ CUdeviceptr getPointer(PyObject* obj) {
 
 #define SHARED_MEM_STATIC_MAX 49152 // 48 KB
 
-CUfunction loadKernel(
+#if defined(USE_ROCM)
+std::vector<char> readKernelImage(const std::string& filePath) {
+  std::ifstream file(filePath, std::ios::binary);
+  TORCH_CHECK(file, "Failed to open kernel image: ", filePath);
+
+  auto begin = std::istreambuf_iterator<char>(file);
+  auto end = std::istreambuf_iterator<char>();
+  std::vector<char> image(begin, end);
+  TORCH_CHECK(!image.empty(), "Kernel image is empty: ", filePath);
+  return image;
+}
+#endif
+
+std::pair<CUmodule, CUfunction> loadKernel(
     std::string filePath,
     const std::string& funcName,
     uint32_t sharedMemBytes,
@@ -117,7 +134,10 @@ CUfunction loadKernel(
   CUfunction func = nullptr;
 
 #if defined(USE_ROCM)
-  AT_CUDA_DRIVER_CHECK(hipModuleLoad(&mod, filePath.c_str()));
+  // Unlike cuModuleLoad, hipModuleLoad keeps a file descriptor for the loaded
+  // HSACO. Load from memory to avoid retaining one FD per static launcher.
+  auto image = readKernelImage(filePath);
+  AT_CUDA_DRIVER_CHECK(hipModuleLoadData(&mod, image.data()));
   AT_CUDA_DRIVER_CHECK(hipModuleGetFunction(&func, mod, funcName.c_str()));
   int shared_optin = 0;
   AT_CUDA_DRIVER_CHECK(hipDeviceGetAttribute(
@@ -200,7 +220,7 @@ CUfunction loadKernel(
         shared_optin - shared_static));
 #endif
   }
-  return func;
+  return {mod, func};
 }
 
 inline void launchKernel(
@@ -333,10 +353,12 @@ void parseKernelArgs(
 }
 
 /* Load the CUDA kernel into memory (called during torch.compile), and
-  return a pointer to it (along with nregs and nspills).
+  return pointers to its owning module and function (along with nregs
+  and nspills).  The module must remain loaded while the function may
+  be launched.
   Called in python as:
-  (function, n_regs, n_spills) = load_kernel(cubin_path, func_name,
-  sharedMemBytes)
+  (module, function, n_regs, n_spills) = load_kernel(
+      cubin_path, func_name, sharedMemBytes)
 */
 PyObject* load_kernel(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
@@ -369,8 +391,7 @@ PyObject* load_kernel(PyObject* self, PyObject* args) {
   }
 #endif
 
-  CUfunction func = nullptr;
-  func = loadKernel(filePath, funcName, sharedMemBytes, device);
+  auto [mod, func] = loadKernel(filePath, funcName, sharedMemBytes, device);
 
 #if defined(USE_ROCM)
   AT_CUDA_DRIVER_CHECK(
@@ -386,9 +407,13 @@ PyObject* load_kernel(PyObject* self, PyObject* args) {
 
 #endif
   n_spills /= 4;
-  // Return a tuple of CUFunction, n_regs, n_spills
+  // Return a tuple of CUmodule, CUfunction, n_regs, n_spills.
   return Py_BuildValue(
-      "(Kii)", reinterpret_cast<uint64_t>(func), n_regs, n_spills);
+      "(KKii)",
+      reinterpret_cast<uint64_t>(mod),
+      reinterpret_cast<uint64_t>(func),
+      n_regs,
+      n_spills);
   END_HANDLE_TH_ERRORS
 }
 
@@ -557,7 +582,25 @@ PyObject* launch_kernel(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-std::array<PyMethodDef, 2> StaticCudaLauncherMethods = {
+PyObject* unload_kernel(PyObject* self, PyObject* args) {
+  HANDLE_TH_ERRORS
+  uint64_t mod_ptr = 0;
+  if (!PyArg_ParseTuple(args, "K", &mod_ptr)) {
+    return nullptr;
+  }
+  CUmodule mod = reinterpret_cast<CUmodule>(mod_ptr);
+  if (mod) {
+#if defined(USE_ROCM)
+    AT_CUDA_DRIVER_CHECK(hipModuleUnload(mod));
+#else
+    AT_CUDA_DRIVER_CHECK(nvrtc().cuModuleUnload(mod));
+#endif
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+std::array<PyMethodDef, 3> StaticCudaLauncherMethods = {
     PyMethodDef{
         "_launch_kernel",
         launch_kernel,
@@ -567,7 +610,12 @@ std::array<PyMethodDef, 2> StaticCudaLauncherMethods = {
         "_load_kernel",
         load_kernel,
         METH_VARARGS,
-        "Load CUDA kernel from cubin file"}};
+        "Load CUDA kernel from cubin file"},
+    PyMethodDef{
+        "_unload_kernel",
+        unload_kernel,
+        METH_VARARGS,
+        "Unload CUDA/HIP module loaded by _load_kernel"}};
 
 // Define a minimal type for StaticCudaLauncher.
 // We don't implement __new__ or __init__ because we're using it only as a
@@ -627,7 +675,7 @@ inline CUdeviceptr getPointerFast(PyObject* obj) {
     return THPUtils_unpackUInt64(obj);
 #endif
   }
-  if (obj == Py_None) {
+  if (Py_IsNone(obj)) {
     return 0;
   }
   // Fast type check: inductor-generated tensors are always exact THPVariable
@@ -921,24 +969,14 @@ bool StaticCudaLauncher_init(PyObject* module) {
     }
     Py_DECREF(static_method);
   }
-  Py_INCREF(&StaticCudaLauncherType);
-  if (PyModule_AddObject(
-          module, "_StaticCudaLauncher", (PyObject*)&StaticCudaLauncherType) <
-      0) {
-    Py_DECREF(&StaticCudaLauncherType);
+  if (PyModule_AddType(module, &StaticCudaLauncherType) < 0) {
     return false;
   }
   return true;
 }
 
 bool FastCudaLauncher_init(PyObject* module) {
-  if (PyType_Ready(&FastCudaLauncherType) < 0) {
-    return false;
-  }
-  Py_INCREF(&FastCudaLauncherType);
-  if (PyModule_AddObject(
-          module, "_FastCudaLauncher", (PyObject*)&FastCudaLauncherType) < 0) {
-    Py_DECREF(&FastCudaLauncherType);
+  if (PyModule_AddType(module, &FastCudaLauncherType) < 0) {
     return false;
   }
   return true;
