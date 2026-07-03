@@ -6685,7 +6685,7 @@ if HAS_CUDA_AND_TRITON:
 
             # Enable cudagraph_or_error only for this test to force an error on empty partitions.
             with config.patch("triton.cudagraph_or_error", True):
-                compiled_fn = torch.compile(f)
+                compiled_fn = torch.compile(f, mode="reduce-overhead")
                 with self.assertRaisesRegex(RuntimeError, "skipping cudagraphs as len"):
                     compiled_fn(x)
 
