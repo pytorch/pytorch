@@ -60,6 +60,23 @@ def _setLevel_and_reinit(level: int) -> None:
 logger.setLevel = _setLevel_and_reinit  # type: ignore[method-assign]
 
 
+def _ignore_fresh_unbacked_symbols_for_dtensor_tracing(
+    output_spec: object,
+) -> contextlib.AbstractContextManager[None]:
+    if not _are_we_tracing() or output_spec is None:
+        return contextlib.nullcontext()
+
+    from torch.fx.experimental.symbolic_shapes import (
+        _ignore_fresh_unbacked_symbols_tls_context,
+    )
+
+    # DTensor exposes the global output contract through output_spec. Fresh
+    # local fake symbols created only while redistributing or computing the
+    # per-rank tensor are implementation details and may not appear in the
+    # returned DTensor object.
+    return _ignore_fresh_unbacked_symbols_tls_context()
+
+
 def as_strided_handler(
     op_call: torch._ops.OpOverload,
     args: tuple[object, ...],
@@ -300,11 +317,14 @@ class OpDispatcher:
                 # on args first, which could potentially modify args (i.e. allgather certain arg)
                 if output_sharding.redistribute_schema is None:
                     raise AssertionError
-                self.redistribute_local_args(
-                    op_info,
-                    output_sharding.redistribute_schema,
-                    output_sharding.use_val_from_redistribute_schema,
-                )
+                with _ignore_fresh_unbacked_symbols_for_dtensor_tracing(
+                    output_sharding.output_spec
+                ):
+                    self.redistribute_local_args(
+                        op_info,
+                        output_sharding.redistribute_schema,
+                        output_sharding.use_val_from_redistribute_schema,
+                    )
 
             local_tensor_args = (
                 pytree.tree_unflatten(
@@ -366,9 +386,12 @@ class OpDispatcher:
                         with random._rng_tracker._distribute_region(
                             first_arg._spec, generator=maybe_user_generator
                         ):
-                            local_results = op_call(
-                                *local_tensor_args, **op_info.local_kwargs
-                            )
+                            with _ignore_fresh_unbacked_symbols_for_dtensor_tracing(
+                                output_sharding.output_spec
+                            ):
+                                local_results = op_call(
+                                    *local_tensor_args, **op_info.local_kwargs
+                                )
                     else:
                         # CUDA device without user generator, use HOP for traceability
                         if not isinstance(
@@ -378,16 +401,24 @@ class OpDispatcher:
                         start_offset_incr, end_offset_incr = (
                             random._rng_tracker._compute_rng_offsets(first_arg._spec)
                         )
-                        local_results = run_dtensor_rng_op(
-                            start_offset_incr,
-                            end_offset_incr,
-                            op_call,
-                            *local_tensor_args,
-                            **op_info.local_kwargs,
-                        )
+                        with _ignore_fresh_unbacked_symbols_for_dtensor_tracing(
+                            output_sharding.output_spec
+                        ):
+                            local_results = run_dtensor_rng_op(
+                                start_offset_incr,
+                                end_offset_incr,
+                                op_call,
+                                *local_tensor_args,
+                                **op_info.local_kwargs,
+                            )
                 else:
                     # No rng_tracker, meta tensor, or distribute_region disabled
-                    local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
+                    with _ignore_fresh_unbacked_symbols_for_dtensor_tracing(
+                        output_sharding.output_spec
+                    ):
+                        local_results = op_call(
+                            *local_tensor_args, **op_info.local_kwargs
+                        )
             else:
                 # normal case, run local sharded op computation
                 if (
@@ -396,11 +427,19 @@ class OpDispatcher:
                     and output_sharding.redistribute_schema.op != op_call
                 ):
                     # Op was rewritten (e.g., squeeze.default → squeeze.dims)
-                    local_results = output_sharding.redistribute_schema.op(
-                        *local_tensor_args, **op_info.local_kwargs
-                    )
+                    with _ignore_fresh_unbacked_symbols_for_dtensor_tracing(
+                        output_sharding.output_spec
+                    ):
+                        local_results = output_sharding.redistribute_schema.op(
+                            *local_tensor_args, **op_info.local_kwargs
+                        )
                 else:
-                    local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
+                    with _ignore_fresh_unbacked_symbols_for_dtensor_tracing(
+                        output_sharding.output_spec
+                    ):
+                        local_results = op_call(
+                            *local_tensor_args, **op_info.local_kwargs
+                        )
 
         else:
             # For a non-participating device (happens on rank that does not belong to

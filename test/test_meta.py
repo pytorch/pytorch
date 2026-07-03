@@ -26,6 +26,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     parametrize,
     xfailIfTorchDynamo,
+    skipIfXpu,
 )
 from torch.testing._internal.common_device_type import (
     ops,
@@ -1013,8 +1014,7 @@ class MetaCrossRefDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
             return (None, None, None)
 
         candidate_ols = []
-        for candidate_ol_name in olp.overloads():
-            candidate_ol = getattr(olp, candidate_ol_name)
+        for candidate_ol in olp.op_overloads():
             if any(arg.is_out for arg in candidate_ol._schema.arguments):
                 candidate_ols.append(candidate_ol)
 
@@ -1896,6 +1896,26 @@ class TestMeta(TestCase):
         else:
             self.assertEqual(out_dtype, [in_dtype,])
 
+    @parametrize("dtype", [torch.float64, torch.float32, torch.float16, torch.bfloat16])
+    def test_scaled_dot_product_flash_attention_for_cpu_logsumexp_dtype(self, dtype):
+        B, H, L, E = 2, 4, 8, 16
+
+        def run(device):
+            query = torch.randn(B, H, L, E, device=device, dtype=dtype)
+            key = torch.randn(B, H, L, E, device=device, dtype=dtype)
+            value = torch.randn(B, H, L, E, device=device, dtype=dtype)
+
+            output, logsumexp = torch.ops.aten._scaled_dot_product_flash_attention_for_cpu(
+                query, key, value
+            )
+            return output.dtype, logsumexp.dtype
+
+        cpu_output_dtype, cpu_logsumexp_dtype = run("cpu")
+        meta_output_dtype, meta_logsumexp_dtype = run("meta")
+
+        self.assertEqual(cpu_output_dtype, meta_output_dtype)
+        self.assertEqual(cpu_logsumexp_dtype, meta_logsumexp_dtype)
+
 class TestMetaKernelConv(TestCase):
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_convolution_backward_meta_kernel_channels_last(self):
@@ -1951,6 +1971,17 @@ class TestMetaKernelConv(TestCase):
 
 class TestMetaKernelRegistrations(TestCase):
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_aminmax_out_dtype_mismatch(self):
+        inp = torch.rand(10, 10, device="meta")
+        out_min = torch.empty(10, dtype=torch.float64, device="meta")
+        out_max = torch.empty(10, dtype=torch.float64, device="meta")
+
+        with self.assertRaisesRegex(RuntimeError, "Expected out tensor to have dtype"):
+            torch.ops.aten.aminmax.out(
+                inp, dim=-1, keepdim=False, min=out_min, max=out_max
+            )
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_make_dep_token(self):
         cpu_result = torch.ops.aten._make_dep_token(device=torch.device("cpu"))
         meta_result = torch.ops.aten._make_dep_token(device=torch.device("meta"))
@@ -1985,6 +2016,24 @@ class TestMetaKernelRegistrations(TestCase):
         self.assertEqual(eigvecs.stride(), eigvecs_fake.stride())
         self.assertEqual(eigvecs.shape, eigvecs_fake.shape)
         self.assertEqual(eigvecs.dtype, eigvecs_fake.dtype)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_zero_preserves_input_strides(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        x = torch.randn(5, 4).t()
+        cpu_result = torch.ops.aten.zero.default(x)
+
+        meta_x = torch.empty_strided(x.shape, x.stride(), device="meta")
+        meta_result = torch.ops.aten.zero.default(meta_x)
+        self.assertEqual(cpu_result.shape, meta_result.shape)
+        self.assertEqual(cpu_result.stride(), meta_result.stride())
+
+        with FakeTensorMode() as mode:
+            fake_x = mode.from_tensor(x)
+            fake_result = torch.ops.aten.zero.default(fake_x)
+        self.assertEqual(cpu_result.shape, fake_result.shape)
+        self.assertEqual(cpu_result.stride(), fake_result.stride())
 
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_randint_like_tensor_dtype_kwarg(self):
@@ -2057,6 +2106,7 @@ class TestMetaKernelRegistrations(TestCase):
             )
             self.assertEqual(result, expected)
 
+    @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/181490")
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_padded_dense_to_jagged_total_L_zero(self):
         from torch._subclasses.fake_tensor import FakeTensorMode

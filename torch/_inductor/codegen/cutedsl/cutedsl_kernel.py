@@ -33,7 +33,9 @@ from torch._inductor.utils import OrderedSet
 from torch._inductor.virtualized import V
 
 from ...utils import sympy_index_symbol
+from .aux_scalars import CuteDSLAuxScalarBindings
 from .cutedsl_op_overrides import CuteDSLCSEVariable, CuteDSLOpOverrides
+from .lane_analysis import classify_lane_expr
 
 
 # TODO setting the 'main' kernel w/ this suffix. We have 3 should probably just auto generate this
@@ -42,7 +44,16 @@ MAIN_SUFFIX = "main"
 
 log = logging.getLogger(__name__)
 kernel_code_log = torch._logging.getArtifactLogger(__name__, "kernel_code")
-cutedsl_pexpr = PythonPrinter().doprint
+
+
+class CuteDSLPrinter(PythonPrinter):
+    def _print_ToFloat(self, expr: sympy.Expr) -> str:
+        if len(expr.args) != 1:
+            raise AssertionError("ToFloat expects exactly one argument")
+        return f"cutlass.Float64({self.doprint(expr.args[0])})"
+
+
+cutedsl_pexpr = CuteDSLPrinter().doprint
 
 
 class CuteDSLKernelWrapper:
@@ -68,7 +79,7 @@ class CuteDSLKernelWrapper:
         return self.kernel_fn(*args, stream=stream, **kwargs)
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class CuteDSLVectorLoadConfig:
     vec_size: int
     index: sympy.Symbol
@@ -93,7 +104,7 @@ class CuteDSLVectorLoadConfig:
         return self.dim + ndim if self.dim < 0 else self.dim
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class CuteDSLIndexFragment:
     """Generated index expression metadata for CuteDSL tensor loads.
 
@@ -101,7 +112,8 @@ class CuteDSLIndexFragment:
         code: Python source expression for the index or index fragment.
         is_static_int: True when code is an inline integer index, not a fragment.
         is_lane_uniform: True when every vector lane has the same index.
-        is_contiguous: True when code is lane-contiguous in the vectorized index.
+        is_contiguous: True when code is aligned and contiguous for the full
+            requested vector width.
     """
 
     code: str
@@ -118,7 +130,7 @@ class CuteDSLSubgraphInfo:
     body: IndentedBuffer
     template_mask: str | None = None
     template_out: str | None = None
-    cse: CSE[Any] | None = None
+    cse: CSE[Any, str] | None = None
 
     def __post_init__(self):
         self.only_copy_if_non_none_fields = ("cse",)
@@ -172,6 +184,7 @@ class CuteDSLTemplateKernel(Kernel):
 
         # Track all tensor buffers added during modification processing
         self.collected_tensor_buffers: list[str] = []
+        self.aux_scalar_bindings = CuteDSLAuxScalarBindings()
 
         # Captured IR nodes keyed by buffer name. Used by call_kernel to emit
         # reinterpret_tensor for view captures in the python_argdefs loop.
@@ -202,6 +215,13 @@ class CuteDSLTemplateKernel(Kernel):
 
     def kexpr(self, expr: sympy.Expr) -> str:
         """Convert sympy expression to CuteDSL string representation."""
+        symbol_codes = self.aux_scalar_bindings.symbol_codes_with_renames(
+            self.rename_indexing
+        )
+        if symbol_codes:
+            expr = expr.xreplace(
+                {symbol: sympy.Symbol(code) for symbol, code in symbol_codes.items()}
+            )
         return cutedsl_pexpr(expr)
 
     def create_cse_var(self, *args, **kwargs):
@@ -235,12 +255,19 @@ class CuteDSLTemplateKernel(Kernel):
         from torch._inductor.select_algorithm import PartialRender
 
         """Render the kernel using the template, returning PartialRender object with hooks."""
+        self._template_kwargs = dict(kwargs)
+        self.aux_scalar_bindings = CuteDSLAuxScalarBindings(
+            tuple(kwargs.get("AUX_SCALAR_SYMBOLS", ()))
+        )
+
         # Available {{}} hooks for jinja rendering
         template_env = {
             "def_kernel": self.def_kernel,
             "gen_defines": lambda: self.gen_defines(**kwargs),
             "get_output": self.get_output,
             "get_tensor_buffers": self.get_tensor_buffers,
+            "add_tensor_inputs": self.add_tensor_inputs,
+            "define_aux_scalars": self.define_aux_scalars,
             "unpack_buffers": self.unpack_buffers,
             "modification": self.modification,
             "set_cute_hash": self.set_cute_hash,
@@ -264,10 +291,13 @@ class CuteDSLTemplateKernel(Kernel):
     @contextlib.contextmanager
     def set_subgraph_body(self, body_name: str):
         """Set the active subgraph body for template processing."""
-        assert all(
+        if not all(
             hasattr(self, field.name)
             for field in dataclasses.fields(CuteDSLSubgraphInfo)
-        )
+        ):
+            raise AssertionError(
+                "expected all CuteDSLSubgraphInfo fields to be set on self"
+            )
         old_state = {
             key.name: getattr(self, key.name)
             for key in dataclasses.fields(CuteDSLSubgraphInfo)
@@ -306,9 +336,8 @@ class CuteDSLTemplateKernel(Kernel):
     @contextlib.contextmanager
     def create_subgraph_body(self, body_name: str, *, clear_cse: bool = False):
         """Create a new subgraph body for template processing."""
-        assert body_name not in self.subgraph_bodies, (
-            f"Subgraph body '{body_name}' already exists"
-        )
+        if body_name in self.subgraph_bodies:
+            raise AssertionError(f"Subgraph body '{body_name}' already exists")
         new_cse = self.cse.clone() if clear_cse else None
         self.subgraph_bodies[body_name] = CuteDSLSubgraphInfo(
             body=IndentedBuffer(),
@@ -379,14 +408,16 @@ class CuteDSLTemplateKernel(Kernel):
                 code.splice(renames.getvalue())
             return code.getvalue()
 
-        assert "<DEF_KERNEL>" not in self.render_hooks
+        if "<DEF_KERNEL>" in self.render_hooks:
+            raise AssertionError("<DEF_KERNEL> hook already registered")
         # Placeholder-based rendering: hook will be called when template encounters "<DEF_KERNEL>"
         self.render_hooks["<DEF_KERNEL>"] = hook
         return "<DEF_KERNEL>"
 
     def get_output(self):
         """Get the actual argument name for the output buffer."""
-        assert self.output_node, "Output node must exist to get output buffer name"
+        if not self.output_node:
+            raise AssertionError("Output node must exist to get output buffer name")
         buf_name = self.output_node.get_name()
         output = self.args.output_buffers.get(buf_name, None)
         if output is None:
@@ -406,6 +437,27 @@ class CuteDSLTemplateKernel(Kernel):
     def get_tensor_buffers(self):
         """Get list of tensor buffer names that were collected during modifications."""
         return self.collected_tensor_buffers
+
+    def add_tensor_inputs(self, buffers):
+        """Register extra tensor buffers and return their rendered input names."""
+        buffer_names = []
+        for buffer in buffers:
+            if isinstance(buffer, sympy.Expr):
+                continue
+            remapped_name = self.args.input(buffer.get_name())
+            if remapped_name not in self.collected_tensor_buffers:
+                self.collected_tensor_buffers.append(remapped_name)
+            buffer_names.append(remapped_name)
+        return buffer_names
+
+    def define_aux_scalars(self, symbols):
+        """Return the runtime scalar tuple for captured symbolic scalars."""
+        if tuple(symbols) != self.aux_scalar_bindings.symbols:
+            raise AssertionError(
+                f"Expected aux scalar symbols {self.aux_scalar_bindings.symbols}, "
+                f"got {tuple(symbols)}"
+            )
+        return self.aux_scalar_bindings.tuple_expr(self.rename_indexing, cutedsl_pexpr)
 
     def unpack_buffers(self, buffer_list_name: str, *, indent_width: int = 4):
         """Generate buffer unpacking code via render hook."""
@@ -475,14 +527,20 @@ class CuteDSLTemplateKernel(Kernel):
 
     def _get_subgraph(self, subgraph_number: int):
         """Get subgraph by number for modification processing."""
-        assert isinstance(subgraph_number, int)
-        assert isinstance(self.subgraphs, list)
-        assert subgraph_number < len(self.subgraphs), (
-            f"Invalid subgraph number provided to create_modification, {subgraph_number} must be < {len(self.subgraphs)}"
-        )
-        assert self.body.getvalue() == "", (
-            "Body should be clear before adding a modification"
-        )
+        if not isinstance(subgraph_number, int):
+            raise AssertionError(
+                f"expected subgraph_number to be int, got {type(subgraph_number)}"
+            )
+        if not isinstance(self.subgraphs, list):
+            raise AssertionError(
+                f"expected self.subgraphs to be list, got {type(self.subgraphs)}"
+            )
+        if subgraph_number >= len(self.subgraphs):
+            raise AssertionError(
+                f"Invalid subgraph number provided to create_modification, {subgraph_number} must be < {len(self.subgraphs)}"
+            )
+        if self.body.getvalue() != "":
+            raise AssertionError("Body should be clear before adding a modification")
         return self.subgraphs[subgraph_number]
 
     def modification(
@@ -504,9 +562,10 @@ class CuteDSLTemplateKernel(Kernel):
                 self, subgraph_number, fixed_inputs, mask
             )
             with V.set_kernel_handler(self), V.set_ops_handler(modification_handler):
-                assert isinstance(subgraph, (ComputedBuffer, list)), (
-                    f"Expected ComputedBuffer or List[ComputedBuffer], got {type(subgraph)}"
-                )
+                if not isinstance(subgraph, (ComputedBuffer, list)):
+                    raise AssertionError(
+                        f"Expected ComputedBuffer or List[ComputedBuffer], got {type(subgraph)}"
+                    )
 
                 if isinstance(subgraph, list):
                     raise NotImplementedError(
@@ -521,9 +580,10 @@ class CuteDSLTemplateKernel(Kernel):
                     out = subgraph.data.inner_fn(())
 
             if output_name is not None:
-                assert out is not None, (
-                    f"Expected computation result for named output {output_name}"
-                )
+                if out is None:
+                    raise AssertionError(
+                        f"Expected computation result for named output {output_name}"
+                    )
                 self.body.writeline(f"{output_name} = {out.value}")
             else:
                 # Side-effect only: no output assignment (currently only for scatter operations)
@@ -886,20 +946,16 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         if self.vector_load_config.vec_size <= 1:
             return True, False, None
 
-        lane_contiguity = V.graph.sizevars.analyze_lane_contiguity(
+        lane_info = classify_lane_expr(
             semantic_expr,
             self.vector_load_config.index,
-        )
-        contiguous_width = self._aligned_contiguous_width(
-            semantic_expr,
-            self.vector_load_config.index,
-            lane_contiguity,
-            self.vector_load_config.vec_size,
+            max_width=self.vector_load_config.vec_size,
+            uniform_symbols=self._lane_uniform_symbols(),
         )
         return (
-            self._is_lane_uniform_expr(semantic_expr, self.vector_load_config.index),
-            lane_contiguity.stride == 1 and contiguous_width is not None,
-            contiguous_width,
+            lane_info.is_uniform,
+            lane_info.is_contiguous,
+            lane_info.contiguous_width,
         )
 
     @staticmethod
@@ -932,37 +988,20 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
                 replacements[sympy_index_symbol(var.name)] = var.index_expr
         return V.graph.sizevars.simplify(expr.xreplace(replacements))
 
-    def _is_lane_uniform_expr(
-        self, expr: sympy.Expr, vector_index: sympy.Symbol
-    ) -> bool:
-        """Return true when expr depends only on non-vectorized indices."""
-        allowed_symbols = OrderedSet(
-            sympy_index_symbol(source_expr)
-            for source_expr in self.kernel.cse._cache
-            if isinstance(source_expr, str) and source_expr != vector_index.name
+    def _lane_uniform_symbols(self) -> OrderedSet[sympy.Symbol]:
+        """Return generated CSE source symbols that are uniform across lanes."""
+        vector_index_name = (
+            None
+            if self.vector_load_config is None
+            else self.vector_load_config.index.name
         )
-        return bool(expr.free_symbols and expr.free_symbols <= allowed_symbols)
-
-    @staticmethod
-    def _aligned_contiguous_width(
-        expr: sympy.Expr,
-        vector_index: sympy.Symbol,
-        lane_contiguity,
-        max_width: int,
-    ) -> int | None:
-        """Narrow contiguous width until the first lane is statically aligned."""
-        start_expr = V.graph.sizevars.simplify(
-            expr.xreplace({vector_index: sympy.Integer(0)})
+        return OrderedSet(
+            [
+                sympy_index_symbol(source_expr)
+                for source_expr in self.kernel.cse._cache
+                if isinstance(source_expr, str) and source_expr != vector_index_name
+            ]
         )
-        for width in (max_width, 4, 2):
-            if (
-                width <= max_width
-                and lane_contiguity.is_contiguous_for(width)
-                and V.graph.sizevars.statically_known_multiple_of(start_expr, width)
-                and V.graph.sizevars.statically_known_geq(start_expr, 0)
-            ):
-                return width
-        return None
 
     def indirect_indexing(self, index_var: str, size, check, wrap_neg=True):
         """Convert index variable to symbolic form."""

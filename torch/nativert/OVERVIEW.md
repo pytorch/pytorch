@@ -363,7 +363,7 @@ additions to enable memory planning.
 │    owned buffer offsets                    │ │ │ │   Frame_1    │  │                                                │   │executor.execute(args, frame)    │ │ │ │
 │                                            │ │ │ ├──────────────┤  │                                                │   │...                              │ │ │ │
 │    3. telling the layout planner           │ │ │ │   Frame_N    │◀─┼────return_frame()────────────5─────────────────┴───│frame.layout_manager.deallocate()│ │ │ │
-│    when a tensor have outgrown             │ │ │ └──────────────┘  │                                   ┌───────4────────┴─────────────────────────────────┘ │ │ │
+│    when a tensor has outgrown              │ │ │ └──────────────┘  │                                   ┌───────4────────┴─────────────────────────────────┘ │ │ │
 │                                            │ │ └───────────────────┘                                   │                                                    │ │ │
 │                                            │ │ ┌───────────────────┐                                   │                                                    │ │ │
 │                                            │ │ │                   │                                   │                                                    │ │ │

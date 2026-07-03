@@ -4,6 +4,7 @@
 #include <ATen/core/type_factory.h>
 #include <torch/csrc/jit/frontend/parser_constants.h>
 #include <torch/custom_class.h>
+#include <array>
 #include <string_view>
 
 using torch::jit::valid_single_char_tokens;
@@ -32,7 +33,7 @@ TypeParser::TypeParser(std::vector<std::string>& pythonStrs)
     : start_(0), pythonStrs_(pythonStrs) {}
 
 // For the Python string list parsing, the order of the Python string matters.
-// In bytecode, the order of the type list correspondings to the order of
+// In bytecode, the order of the type list corresponds to the order of
 // instruction. In nested type, the lowest level type will be at the beginning
 // of the type list. It is possible to parse it without worrying about
 // ordering, but it also introduces 1) extra cost to process nested type to
@@ -246,8 +247,8 @@ TypePtr TypeParser::parseCustomType() {
 }
 
 TypePtr TypeParser::parseTorchbindClassType() {
-  static constexpr std::array<const char*, 4> expected_atoms = {
-      "torch", ".", "classes", "."};
+  static constexpr auto expected_atoms =
+      std::to_array<std::string_view>({"torch", ".", "classes", "."});
   for (const auto& atom : expected_atoms) {
     expect(atom);
   }
@@ -263,7 +264,7 @@ TypePtr TypeParser::parseTorchbindClassType() {
   return torch::getCustomClass(customClassName);
 }
 
-void TypeParser::expect(const char* s) {
+void TypeParser::expect(std::string_view s) {
   std::string_view token = cur();
   TORCH_CHECK(
       token == s,
