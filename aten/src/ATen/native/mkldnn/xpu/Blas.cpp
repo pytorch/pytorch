@@ -309,10 +309,11 @@ Tensor& baddbmm_out(
     binary = binary.dim() < 3 ? binary.unsqueeze_(0) : binary;
     bool inplace = binary.is_same(result);
     if (!inplace && is_reduced_float) {
-      // For reduced-precision types, the 3-step post-op chain
-      // (eltwise -> binary_add -> eltwise) rounds intermediates to
-      // bf16/f16, losing precision. Use post_sum which fuses the
-      // addition in oneDNN's f32 accumulator, matching CPU behavior.
+      // Reduced-precision dtypes lose accuracy in the non-inplace path below,
+      // whose 3-step post-op chain (eltwise -> binary_add -> eltwise) rounds
+      // intermediates to bf16/f16. Copy self into result and take the inplace
+      // path instead, which uses post_sum and accumulates in oneDNN's f32
+      // accumulator, matching CPU/CUDA behavior.
       result.copy_(input.expand(result.sizes()));
       inplace = true;
     }
