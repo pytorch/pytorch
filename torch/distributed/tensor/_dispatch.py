@@ -86,13 +86,41 @@ def as_strided_handler(
     if kwargs:
         raise AssertionError
     tensor, size, stride, storage_offset = args
+
+    def _cautious_eq(a: object, b: object) -> bool:
+        """Return True if a==b statically, False otherwise (never guard)."""
+        from torch.fx.experimental.symbolic_shapes import guard_or_false
+        try:
+            return bool(guard_or_false(a == b))
+        except Exception:
+            return False
+
+    def _same_shape(s, t) -> bool:
+        try:
+            if len(s) != len(t):
+                return False
+        except Exception:
+            return False
+        return all(_cautious_eq(x, y) for x, y in zip(s, t))
+
+    # Storage_offset equality (default offset is 0; compare cautiously).
+    offset_matches = True
+    if storage_offset is not None:
+        try:
+            cur_off = tensor.storage_offset()
+        except Exception:
+            offset_matches = False
+        else:
+            offset_matches = _cautious_eq(cur_off, storage_offset)
+
     if (
-        tensor.size() == tuple(size)
-        and tensor.stride() == tuple(stride)
-        and (storage_offset is None or tensor.storage_offset() == storage_offset)
+        _same_shape(tensor.size(), tuple(size))
+        and _same_shape(tensor.stride(), tuple(stride))
+        and offset_matches
     ):
         return torch.ops.aten.alias.default(tensor)
-    raise RuntimeError("as_strided not supported with DTensor")
+
+    return NotImplemented
 
 
 def is_same_size_handler(

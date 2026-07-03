@@ -1516,8 +1516,10 @@ py::object dispatchDTensorOp(
     if (custom_op_handler) {
       auto result = checked_vectorcall(
           custom_op_handler, py_op.ptr(), args.ptr(), kwargs.ptr());
-      stack->clear();
-      return result;
+      if (result.ptr() != Py_NotImplemented) {
+        stack->clear();
+        return result;
+      }
     } else if (PyErr_Occurred()) {
       throw py::error_already_set();
     }

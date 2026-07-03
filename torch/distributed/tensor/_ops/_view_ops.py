@@ -21,6 +21,7 @@ from torch.distributed.tensor._ops.single_dim_strategy import (
     register_single_dim_strategy,
 )
 from torch.distributed.tensor._ops.utils import (
+    expand_to_full_mesh_op_strategy,
     generate_redistribute_costs,
     normalize_dim,
     normalize_dims,
@@ -1516,3 +1517,54 @@ def view_as_complex_single_dim_strategy(op, args_schema, kwargs_schema):
 
 
 register_op_strategy_map(aten.view_as_real.default, torch.view_as_real)
+
+
+@register_op_strategy(aten.as_strided.default, schema_info=RuntimeSchemaInfo(1))
+def as_strided_strategy(op_schema: OpSchema) -> StrategyType:
+    """
+    Sharding strategy for ``aten.as_strided.default``.
+
+    ``as_strided`` creates a view of the underlying storage with the
+    given size/stride/storage_offset.  Because the mapping from input
+    positions to output positions can be arbitrary (permutations,
+    overlapping elements, arbitrary strided access, etc.), we cannot
+    in general propagate sharding placements through it without a full
+    symbolic analysis of the size/stride arguments.
+
+    We use a conservative Replicated-only strategy:
+
+    - The input is redistributed to ``Replicate()`` (Sharded/Partial
+      inputs are allgathered).
+    - ``as_strided`` is applied locally on the full replicated tensor,
+      so the (global) size/stride/storage_offset args match the local
+      tensor.
+    - The output is ``Replicate()``.
+
+    Identity calls (where ``size``/``stride`` match the input's
+    shape/stride) are short-circuited in the eager custom handler and
+    return an alias of the input DTensor preserving its placements.
+    This mirrors ``aten.alias.default`` / ``aten.clone.default`` and
+    keeps existing code (including the ``test_as_strided_identity``
+    unit test) working unchanged.
+
+    This approach matches the previously-closed PR #178755
+    (replicated-only strategy).  Future work can add smarter
+    sharding-propagation rules for cases where as_strided is
+    equivalent to a reshape/slice/transpose the existing DimMap
+    machinery can handle.
+    """
+    args_strategy = op_schema.args_strategy
+    kwargs_strategy = op_schema.kwargs_strategy
+    inputs_strategy = args_strategy + kwargs_strategy
+    # self is the only tensor input; size/stride/storage_offset are
+    # (lists of) SymInts and do not produce OpStrategy entries.
+    if len(inputs_strategy) != 1:
+        raise RuntimeError(
+            "as_strided strategy expects exactly one tensor input (self), "
+            f"but got {len(inputs_strategy)} tensor inputs"
+        )
+    mesh = inputs_strategy[0].mesh
+    single_dim_placement = [[Replicate(), Replicate()]]
+    return expand_to_full_mesh_op_strategy(
+        mesh, op_schema, single_dim_placement, input_index=1
+    )
