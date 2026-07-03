@@ -397,7 +397,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _cdist_backward_backward(
     if (need_x1 || need_x2) {
       auto adpow = adiff.pow(p - 2).masked_fill(diff_zero, 0);
       auto weighted = W.unsqueeze(-1) * adpow;
-      
+
       if (need_x1)
         grad_x1 = (p - 1) * grad * weighted.sum(-2);
       if (need_x2)
@@ -432,6 +432,7 @@ std::tuple<Tensor, Tensor, Tensor> _pdist_backward_backward(
 
   int64_t n = self.size(0);
   Tensor grad_grad_output, grad_self, grad_pdist;
+
   if (n <= 1 || p == 0.0 || self.size(1) == 0) {
     if (need_go)
       grad_grad_output = at::zeros_like(grad_output);
@@ -450,6 +451,7 @@ std::tuple<Tensor, Tensor, Tensor> _pdist_backward_backward(
   auto col = idx.select(0, 1);
   auto lin_ab = row * n + col;
   auto lin_ba = col * n + row;
+  
   auto scatter_sym = [&](const Tensor& packed) {
     auto full = at::zeros({n * n}, packed.options());
     full.put_(lin_ab, packed);
