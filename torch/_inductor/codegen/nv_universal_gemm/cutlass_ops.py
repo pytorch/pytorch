@@ -15,13 +15,23 @@ _proxy_cache: dict[str, ModuleType] = {}
 
 
 def get_operator_api() -> ModuleType:
-    """Return `cutlass.operators`, falling back to legacy `cutlass_api`."""
+    """Return `cutlass.operators`, falling back to legacy `cutlass_api`.
+
+    Any ImportError from the canonical namespace (absent, a missing transitive
+    dependency, or a broken import) falls back to legacy `cutlass_api` when it is
+    importable. This mirrors the ImportError boundary used by is_available(), so
+    a present-but-broken canonical install does not silently disable NVGEMM when
+    a working legacy `cutlass_api` exists. If legacy is also unavailable, the
+    original canonical error is raised so the broken install is not masked by a
+    bare "cutlass_api not found".
+    """
     try:
         return importlib.import_module(_CANONICAL_API)
-    except ModuleNotFoundError as e:
-        if e.name not in ("cutlass", _CANONICAL_API):
-            raise
-    return importlib.import_module(_LEGACY_API)
+    except ImportError as canonical_err:
+        try:
+            return importlib.import_module(_LEGACY_API)
+        except ImportError:
+            raise canonical_err from None
 
 
 def _is_canonical_api(api: ModuleType | None = None) -> bool:
@@ -88,6 +98,13 @@ def _metadata_min_cc(metadata: Any) -> int:
 
 
 def get_arguments_module() -> ModuleType:
+    """Return the arguments module with legacy-style operand properties.
+
+    For the canonical API this adds legacy properties (element_type/shape/stride
+    and scaled-operand aliases) directly onto the real `DenseTensor`/
+    `ScaledOperand` classes in place, so the mutation is process-global rather
+    than confined to the returned proxy. Each property is only added when absent.
+    """
     arguments = _get_submodule("arguments")
     if not _is_canonical_api() or not hasattr(arguments, "ScaledOperand"):
         return arguments
@@ -457,7 +474,12 @@ def get_kernels() -> Any:
 
 
 def ensure_fp4_dtype_registered() -> None:
-    """Patch `cutlass.operators` or legacy `cutlass_api` for FP4."""
+    """Patch `cutlass.operators` or legacy `cutlass_api` for FP4.
+
+    Patches the lookup in place on the real dtype module in addition to the
+    adapter proxy so cutlass-internal callers (not just code going through the
+    proxy) pick up the FP4 mapping, matching the legacy in-place patch.
+    """
     import torch
 
     utils = get_dtype_utils_module()
@@ -466,11 +488,22 @@ def ensure_fp4_dtype_registered() -> None:
     except KeyError:
         import cutlass
 
-        orig = utils.cutlass_type_from_torch_type
+        def make_patched(orig):
+            def patched(dtype):
+                if dtype == torch.float4_e2m1fn_x2:
+                    return cutlass.Float4E2M1FN
+                return orig(dtype)
 
-        def patched(dtype):
-            if dtype == torch.float4_e2m1fn_x2:
-                return cutlass.Float4E2M1FN
-            return orig(dtype)
+            return patched
 
-        _set_module_attr(utils, "cutlass_type_from_torch_type", patched)
+        modules = [utils]
+        real_dtype = getattr(utils, "dtype", None)
+        if (
+            real_dtype is not None
+            and real_dtype is not utils
+            and hasattr(real_dtype, "cutlass_type_from_torch_type")
+        ):
+            modules.append(real_dtype)
+        for module in modules:
+            orig = _get_module_attr(module, "cutlass_type_from_torch_type")
+            _set_module_attr(module, "cutlass_type_from_torch_type", make_patched(orig))

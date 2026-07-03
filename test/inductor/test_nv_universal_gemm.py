@@ -147,6 +147,77 @@ class TestCutlassOperatorsAdapter(TestCase):
         with patch.object(cutlass_ops.importlib, "import_module", fake_import):
             self.assertIs(cutlass_ops.get_arguments_module(), arguments)
 
+    def test_falls_back_when_canonical_import_broken(self):
+        from torch._inductor.codegen.nv_universal_gemm import cutlass_ops
+
+        legacy = types.ModuleType("cutlass_api")
+
+        def fake_import(name):
+            if name == "cutlass.operators":
+                raise _missing_module("networkx")
+            if name == "cutlass_api":
+                return legacy
+            raise _missing_module(name)
+
+        with patch.object(cutlass_ops.importlib, "import_module", fake_import):
+            self.assertIs(cutlass_ops.get_operator_api(), legacy)
+
+    def test_falls_back_when_canonical_raises_bare_import_error(self):
+        from torch._inductor.codegen.nv_universal_gemm import cutlass_ops
+
+        legacy = types.ModuleType("cutlass_api")
+
+        def fake_import(name):
+            if name == "cutlass.operators":
+                raise ImportError("cannot import name 'GemmArguments'")
+            if name == "cutlass_api":
+                return legacy
+            raise _missing_module(name)
+
+        with patch.object(cutlass_ops.importlib, "import_module", fake_import):
+            self.assertIs(cutlass_ops.get_operator_api(), legacy)
+
+    def test_raises_canonical_error_when_both_unavailable(self):
+        from torch._inductor.codegen.nv_universal_gemm import cutlass_ops
+
+        def fake_import(name):
+            if name == "cutlass.operators":
+                raise _missing_module("cutlass")
+            raise _missing_module(name)
+
+        with patch.object(cutlass_ops.importlib, "import_module", fake_import):
+            with self.assertRaises(ModuleNotFoundError) as cm:
+                cutlass_ops.get_operator_api()
+        self.assertEqual(cm.exception.name, "cutlass")
+
+    def test_target_sm_cc(self):
+        from torch._inductor.codegen.nv_universal_gemm import cutlass_ops
+
+        self.assertIsNone(cutlass_ops._target_sm_cc(None))
+        self.assertEqual(cutlass_ops._target_sm_cc(types.SimpleNamespace(cc=90)), 90)
+        self.assertEqual(cutlass_ops._target_sm_cc("sm100"), 100)
+        self.assertIsNone(cutlass_ops._target_sm_cc("blackwell"))
+
+    def test_metadata_min_cc(self):
+        from torch._inductor.codegen.nv_universal_gemm import cutlass_ops
+
+        with_targets = types.SimpleNamespace(
+            supported_targets=[
+                types.SimpleNamespace(cc=100),
+                types.SimpleNamespace(cc=90),
+            ]
+        )
+        self.assertEqual(cutlass_ops._metadata_min_cc(with_targets), 90)
+
+        via_class = types.SimpleNamespace(
+            supported_targets=[],
+            operator_class=types.SimpleNamespace(designed_for_min_cc=80),
+        )
+        self.assertEqual(cutlass_ops._metadata_min_cc(via_class), 80)
+
+        empty = types.SimpleNamespace(supported_targets=None, operator_class=None)
+        self.assertEqual(cutlass_ops._metadata_min_cc(empty), 0)
+
 
 # TODO(nikhilap): Remove Blackwell restriction once `cutlass.operators` or
 # legacy `cutlass_api` include H100 kernels.
