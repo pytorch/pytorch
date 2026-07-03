@@ -4,6 +4,7 @@ import collections
 import re
 import sys
 import time
+import typing
 from io import StringIO
 
 import torch._dynamo.test_case
@@ -30,7 +31,9 @@ class ComptimeTests(torch._dynamo.test_case.TestCase):
             def _(ctx):
                 ctx.print(ctx.get_local("e"), file=FILE)
 
-        Employee = collections.namedtuple("Employee", ["name", "id"])
+        class Employee(typing.NamedTuple):
+            name: object
+            id: object
 
         class mylist(list):
             pass
@@ -56,16 +59,16 @@ class ComptimeTests(torch._dynamo.test_case.TestCase):
         self.assertExpectedInline(
             FILE.getvalue().strip(),
             """\
-FakeTensor(..., size=(s77,))
+Tensor(shape=(s77,), dtype=torch.float32)
 2
-[FakeTensor(..., size=(s77,)), 2]
-(FakeTensor(..., size=(s77,)), 2)
-{'foo': FakeTensor(..., size=(s77,))}
+[Tensor(shape=(s77,), dtype=torch.float32), 2]
+(Tensor(shape=(s77,), dtype=torch.float32), 2)
+{'foo': Tensor(shape=(s77,), dtype=torch.float32)}
 range(1, 3)
 Employee(name='foo', id=2)
 UserDefinedListVariable(mylist)
 set()
-{'a','b'}
+{'a', 'b'}
 s77""",
         )
 
@@ -174,7 +177,7 @@ def forward(self, L_x_ : torch.Tensor):
         self.assertExpectedInline(
             FILE.getvalue(),
             """\
-- FakeTensor(..., size=(2,))
+- Tensor(shape=(2,), dtype=torch.float32)
 """,
         )
 
@@ -200,8 +203,8 @@ def forward(self, L_x_ : torch.Tensor):
         self.assertExpectedInline(
             FILE.getvalue(),
             """\
-x = FakeTensor(..., size=(2,))
-y = FakeTensor(..., size=(2,))
+x = Tensor(shape=(2,), dtype=torch.float32)
+y = Tensor(shape=(2,), dtype=torch.float32)
 """,
         )
 

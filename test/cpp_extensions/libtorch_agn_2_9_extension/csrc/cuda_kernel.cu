@@ -6,6 +6,7 @@
 #include <cuda_runtime.h>
 #endif
 #include <torch/csrc/stable/library.h>
+#include <torch/csrc/stable/accelerator.h>
 #include <torch/csrc/stable/ops.h>
 #include <torch/csrc/stable/tensor.h>
 
@@ -19,7 +20,19 @@ Tensor mv_tensor_accessor_cuda(Tensor m, Tensor v) {
       m.scalar_type() == v.scalar_type(), "m and v must have the same dtype");
   STD_TORCH_CHECK(
       m.device() == v.device(), "m and v must be on the same device");
+  const auto device_index = m.get_device_index();
+  torch::stable::accelerator::DeviceGuard device_guard(device_index);
   Tensor res = new_empty(m, {m.size(0)});
+
+  void* raw_stream = nullptr;
+  TORCH_ERROR_CODE_CHECK(
+      aoti_torch_get_current_cuda_stream(device_index, &raw_stream));
+#ifdef USE_ROCM
+  auto stream = static_cast<hipStream_t>(raw_stream);
+#else
+  auto stream = static_cast<cudaStream_t>(raw_stream);
+#endif
+
   THO_DISPATCH_V2(
       m.scalar_type(),
       "mv_tensor_accessor_cuda",
@@ -37,7 +50,7 @@ Tensor mv_tensor_accessor_cuda(Tensor m, Tensor v) {
             v.sizes().data(),
             v.strides().data());
         mv_tensor_accessor_kernel<Accessor_cuda, scalar_t>
-            <<<1, 1, 0, 0>>>(resa, ma, va);
+            <<<1, 1, 0, stream>>>(resa, ma, va);
       })),
       AT_FLOATING_TYPES);
   return res;
