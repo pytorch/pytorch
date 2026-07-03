@@ -305,9 +305,14 @@ Currently, we support the following tasks with Spin:
 ### Building
 
 To support building and general development, the following commands exist.
+Both `develop` and `install` prefer `uv pip` when available and fall back to
+regular pip. Build configuration comes from the environment as usual, e.g.
+`BUILD_CONFIG spin develop`.
 
 |command||
 |-|-|
+|`develop` / `editable`|editable install (also known as develop or `-e` install)|
+|`install`|non-editable install|
 |`clean`|clean, that is remove files and directories listed in .gitignore before the NOT-CLEAN-FILES marker|
 
 ### Linting

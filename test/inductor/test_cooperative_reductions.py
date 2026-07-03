@@ -51,7 +51,6 @@ class TestVarianceReductionHeuristic(TestCase):
             self.assertIn("tl.sum", source_code)
             self.assertNotIn("welford_reduce", source_code)
 
-    @config.patch("triton.two_pass_variance_l2_fraction", 0.0)
     def test_var_mean_keeps_welford_for_float32_reductions(self):
         self._skip_if_not_cuda()
 
