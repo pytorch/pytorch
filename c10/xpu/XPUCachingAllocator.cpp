@@ -2149,7 +2149,7 @@ class NativeCachingAllocator : public XPUAllocator {
           auto it = ipc_handle_cache.find(handle);
           TORCH_INTERNAL_ASSERT(
               it != ipc_handle_cache.end(),
-              ipc_handle_cache entry not found in deleter.");
+              "ipc_handle_cache entry not found in deleter.");
           auto entry = std::move(it->second);
           ipc_handle_cache.erase(it);
 
