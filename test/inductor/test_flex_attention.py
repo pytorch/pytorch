@@ -2402,6 +2402,41 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         torch.accelerator.empty_cache()
 
     @supported_platform
+    @skip_on_cpu
+    @skip_on_mps
+    @dtypes(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
+    @common_utils.parametrize("compiled", [False, True])
+    def test_unused_captured_score_mod_grad(self, device, dtype, compiled):
+        """Unused captured grad slots should propagate None through backward."""
+        B_local, H_local, S_local, D_local = 1, 4, 16, 64
+        make_input = functools.partial(
+            torch.randn,
+            (B_local, H_local, S_local, D_local),
+            device=device,
+            dtype=dtype,
+            requires_grad=True,
+        )
+        q, k, v = make_input(), make_input(), make_input()
+        unused = torch.zeros(
+            (H_local, 2), device=device, dtype=dtype, requires_grad=True
+        )
+
+        def score_mod(score, b, h, q_idx, kv_idx):
+            _ = unused[h]
+            return score
+
+        attention = torch.compile(flex_attention) if compiled else flex_attention
+        attention(q, k, v, score_mod=score_mod).sum().backward()
+
+        self.assertIsNotNone(q.grad)
+        self.assertIsNotNone(k.grad)
+        self.assertIsNotNone(v.grad)
+        self.assertIsNone(unused.grad)
+        torch._dynamo.reset()
+
+    @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
