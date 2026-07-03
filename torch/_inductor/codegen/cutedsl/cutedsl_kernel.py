@@ -629,10 +629,17 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         # Maps generated CSE names back to their original index expressions so
         # vector-load analysis can reason about the source indexing semantics.
         self._semantic_index_replacements: dict[sympy.Symbol, sympy.Expr] = {}
-        # Symbols whose value passed through a negative-index wrap. The wrap can
-        # remap individual lanes (idx + size for negatives only), so these may
-        # classify as lane-uniform but never as contiguous.
+        # Symbols whose value passed through a negative-index wrap (idx + size
+        # for negative lanes only). Uniform lanes all wrap identically, so
+        # lane-uniformity survives, but a contiguous window straddling 0 jumps
+        # from size-1 back to 0. We can't prove a window avoids 0, so tainted
+        # symbols may classify as lane-uniform but never as contiguous.
         self._wrap_tainted_symbols: OrderedSet[sympy.Symbol] = OrderedSet()
+        # Symbols for computed index values with unrecoverable semantics
+        # (values loaded from captured tensors, ops outside the traced index
+        # algebra -> wed dont know what to do). Their lane behavior is unknown,
+        # so they must never classify as lane-uniform or contiguous.
+        self._opaque_index_symbols: OrderedSet[sympy.Symbol] = OrderedSet()
 
     def _get_input_dtype(self, name: str) -> torch.dtype:
         """Get the dtype for an input from the kernel's named_input_nodes."""
@@ -933,13 +940,6 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
             )
 
         expr = self.kernel.rename_indexing(expr)
-        static_expr = self._static_integer_expr(expr)
-        if static_expr is not None:
-            return CuteDSLIndexFragment(
-                self.kernel.kexpr(self._wrap_static_index(static_expr, dim_size)),
-                is_static_int=True,
-            )
-
         is_lane_uniform, is_contiguous, contiguous_width = self._analyze_index_fragment(
             self._semantic_index_expr(expr),
             wrap_tainted=bool(expr.free_symbols & self._wrap_tainted_symbols),
@@ -964,6 +964,11 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         if self.vector_load_config.vec_size <= 1:
             return True, False, None
 
+        if self._has_unresolved_index_symbols(semantic_expr):
+            # If we dont know the semantics of the index, we cannot determine lane behavior.
+            # So we default to safe/pessimistic behavior: per-lane gather, no uniformity, no contiguity.
+            return False, False, None
+
         lane_info = classify_lane_expr(
             semantic_expr,
             self.vector_load_config.index,
@@ -978,6 +983,28 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
             lane_info.is_uniform,
             lane_info.is_contiguous,
             lane_info.contiguous_width,
+        )
+
+    def _has_unresolved_index_symbols(self, semantic_expr: sympy.Expr) -> bool:
+        """Return whether the expression references opaque computed indices.
+
+        Lane analysis treats unknown non-lane symbols as lane-uniform scalars,
+        which is correct for sizes and fixed inputs but silently broadcasts
+        lane 0's gather when the symbol is actually per-lane runtime data
+        (#188878). Recovered semantics substitute away generated CSE names, so
+        a surviving symbol in the reserved ``tmpN`` namespace means recovery
+        failed and the load must stay a per-lane gather. Covers both
+        explicitly tracked opaque symbols and that reserved-name fallback.
+        """
+        if semantic_expr.free_symbols & self._opaque_index_symbols:
+            return True
+        prefix = self.kernel.cse.name_prefix
+        lane_var = self.vector_load_config.index if self.vector_load_config else None
+        return any(
+            sym is not lane_var
+            and sym.name.startswith(prefix)
+            and sym.name[len(prefix) :].isdigit()
+            for sym in semantic_expr.free_symbols
         )
 
     @staticmethod
@@ -1066,6 +1093,9 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
             and index_var.index_expr is not None
         ):
             self._semantic_index_replacements[symbol] = index_var.index_expr
+        else:
+            # Fall through | we dont know the semantics of this index
+            self._opaque_index_symbols.add(symbol)
         return symbol
 
     # pyrefly: ignore [bad-override]

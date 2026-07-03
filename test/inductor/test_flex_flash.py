@@ -928,6 +928,47 @@ class TestFlexFlash(InductorTestCase):
         flash_vs_triton(q, k, v, score_mod=score_mod)
 
     @xfailIfSM120OrLater
+    def test_vectorized_group_untraceable_index_op(self):
+        """Nonlinear index ops (abs/clamp/min/max) must keep per-lane index
+        semantics under vectorization — whether traced to sympy or treated as
+        opaque, never classified lane-uniform (#188878)."""
+        seq_len = 512
+        tbl = torch.randn(2 * seq_len, device="cuda")
+        head_scale = torch.randn(4, device="cuda")
+
+        index_fns = {
+            "abs": lambda q_idx, kv_idx: (q_idx - kv_idx).abs(),
+            "clamp": lambda q_idx, kv_idx: (q_idx - kv_idx).clamp(0, seq_len - 1),
+            "minimum": lambda q_idx, kv_idx: torch.minimum(q_idx, kv_idx),
+            "maximum": lambda q_idx, kv_idx: torch.maximum(
+                kv_idx - q_idx, torch.zeros_like(kv_idx)
+            ),
+        }
+        for name, index_fn in index_fns.items():
+            with self.subTest(index_fn=name):
+
+                def score_mod(score, _b, h, q_idx, kv_idx):
+                    return score + tbl[index_fn(q_idx, kv_idx)] * head_scale[h]
+
+                q, k, v = create_test_tensors(seq_len=seq_len, device="cuda")
+                flash_vs_triton(q, k, v, score_mod=score_mod)
+
+    @xfailIfSM120OrLater
+    def test_chained_kv_gather(self):
+        """Document-style chained gather: the contiguous inner load promotes
+        vectorization and the outer loaded-value index is opaque; it must stay
+        a per-lane gather (#188878)."""
+        seq_len = 512
+        doc_bias = torch.randn(8, device="cuda")
+        doc_id = torch.arange(seq_len, device="cuda") % 8
+
+        def score_mod(score, _b, _h, _q, kv_idx):
+            return score + doc_bias[doc_id[kv_idx]]
+
+        q, k, v = create_test_tensors(seq_len=seq_len, device="cuda")
+        flash_vs_triton(q, k, v, score_mod=score_mod)
+
+    @xfailIfSM120OrLater
     def test_captured_table_int64_index(self):
         """Widening index casts must not break index-fragment materialization (#188871)."""
         seq_len = 512
