@@ -51,11 +51,7 @@ class SwitchOp(HigherOrderOperator):
         all_branch_outputs: list[tuple[Any, ...] | list[Any]] = []
         mutated_inputs: set[int] = set()
         for branch in branches:
-            gm = (
-                branch
-                if isinstance(branch, torch.fx.GraphModule)
-                else materialize_as_graph(branch, operands)
-            )
+            gm = materialize_as_graph(branch, operands)
             (
                 _,
                 _,
@@ -403,7 +399,21 @@ def _merge_output(xs: tuple[torch.Tensor | int | None, ...], mode: FakeTensorMod
 
 @switch_op.py_functionalize_impl
 def switch_func(ctx, index, branches, inputs):
-    from torch._higher_order_ops.utils import _check_alias_and_mutation
+    from torch._higher_order_ops.auto_functionalize import (
+        can_auto_functionalize,
+        do_auto_functionalize_v2,
+    )
+    from torch._higher_order_ops.utils import _check_alias_and_mutation, HopInstance
+
+    if hasattr(ctx, "mode"):
+        hop_instance = HopInstance.create(switch_op, index, branches, inputs)
+        if can_auto_functionalize(hop_instance):
+            return do_auto_functionalize_v2(
+                ctx.mode,
+                hop_instance,
+                tuple(pytree.tree_flatten((index, branches, inputs))[0]),
+                {},
+            )
 
     unwrapped_inputs = ctx.unwrap_tensors(inputs)
     unwrapped_index = ctx.unwrap_tensors(index)
