@@ -27,7 +27,6 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
     onlyCPU,
-    onlyCUDA,
     onlyNativeDeviceTypesAnd,
     OpDTypes,
     ops,
@@ -3078,12 +3077,12 @@ class TestFakeTensor(TestCase):
     def test_fake_crossref_backward_no_amp(self, device, dtype, op):
         self._test_fake_crossref_helper(device, dtype, op, contextlib.nullcontext)
 
-    @onlyCUDA
+    @onlyAccelerator
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
     @skipOps(fake_backward_xfails | fake_autocast_backward_xfails)
     def test_fake_crossref_backward_amp(self, device, dtype, op):
         self._test_fake_crossref_helper(
-            device, dtype, op, partial(torch.amp.autocast, device_type="cuda")
+            device, dtype, op, partial(torch.amp.autocast, device_type=device)
         )
 
     @ops([op for op in ops_and_refs if op.is_factory_function])
