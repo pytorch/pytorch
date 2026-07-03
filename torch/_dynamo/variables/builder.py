@@ -45,6 +45,7 @@ import sympy
 
 import torch
 from torch import SymInt
+from torch._custom_class_base import CustomClassBase
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.graph_bytecode_inputs import (
     CURRENT_STREAM_INDEX,
@@ -67,7 +68,6 @@ from torch._library.opaque_object import (
     is_opaque_value_type,
     should_hoist,
 )
-from torch._opaque_base import OpaqueBase
 from torch._ops import HigherOrderOperator, OpOverload, OpOverloadPacket
 from torch._subclasses.fake_tensor import (
     FakeTensor,
@@ -4473,11 +4473,11 @@ def _automatic_dynamic(
                     inner_contexts[attr] = _automatic_dynamic(
                         inner_value, tx, inner_source, static_shapes
                     )
-                case OpaqueBase():
+                case CustomClassBase():
                     pass
                 case unexpected:
                     raise AssertionError(
-                        f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
                     )
 
         return SubclassSymbolicContext(
