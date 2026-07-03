@@ -5016,6 +5016,35 @@ class DefaultDictVariable(UserDefinedDictVariable):
         self.call_method(tx, "update", [other], {})
         return self
 
+    def tp_init_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # defaultdict.__init__(self, default_factory=None, *args, **kwargs)
+        # https://github.com/python/cpython/blob/v3.13.3/Modules/_collectionsmodule.c#L2072
+        # Extract default_factory, delegate rest to dict.__init__
+        if len(args) >= 1:
+            if self.is_supported_factory(args[0]):
+                self.default_factory = args[0]
+                tx.output.side_effects.store_attr(
+                    self,
+                    "default_factory",
+                    self.default_factory,
+                )
+                args = list(args[1:])
+            else:
+                # CPython raises TypeError for non-callable first arg
+                raise_observed_exception(
+                    TypeError,
+                    tx,
+                    args=["first argument must be callable or None"],
+                )
+        if self._base_vt is None:
+            raise AssertionError("_base_vt must not be None in __init__")
+        return self._base_vt.call_method(tx, "__init__", args, kwargs)
+
     def call_method(
         self,
         tx: "InstructionTranslatorBase",
@@ -5025,30 +5054,7 @@ class DefaultDictVariable(UserDefinedDictVariable):
     ) -> VariableTracker:
         from .constant import ConstantVariable
 
-        if name == "__init__":
-            # defaultdict.__init__(self, default_factory=None, *args, **kwargs)
-            # https://github.com/python/cpython/blob/v3.13.3/Modules/_collectionsmodule.c#L2072
-            # Extract default_factory, delegate rest to dict.__init__
-            if len(args) >= 1:
-                if self.is_supported_factory(args[0]):
-                    self.default_factory = args[0]
-                    tx.output.side_effects.store_attr(
-                        self,
-                        "default_factory",
-                        self.default_factory,
-                    )
-                    args = list(args[1:])
-                else:
-                    # CPython raises TypeError for non-callable first arg
-                    raise_observed_exception(
-                        TypeError,
-                        tx,
-                        args=["first argument must be callable or None"],
-                    )
-            if self._base_vt is None:
-                raise AssertionError("_base_vt must not be None in __init__")
-            return self._base_vt.call_method(tx, "__init__", args, kwargs)
-        elif name == "__getitem__":
+        if name == "__getitem__":
             if len(args) != 1:
                 raise_args_mismatch(tx, name, "1 args", f"{len(args)} args")
             return self.mp_subscript_impl(tx, args[0])
