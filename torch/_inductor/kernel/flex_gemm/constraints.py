@@ -257,9 +257,12 @@ def validate_local_reduce_output_binding(
 def validate_local_reduce_selected_dim_divisible(
     shape: Sequence[Any], group: int, axis: int
 ) -> None:
-    """Require the selected M/N dimension to have an integral compressed shape."""
+    """Reject selected M/N dimensions known not to have an integral compressed shape."""
     validate_local_reduce_group_axis(group, axis)
-    if not statically_known_multiple(shape[axis - 2], group):
+    selected_dim = shape[axis - 2]
+    if statically_known_multiple(selected_dim, group):
+        return
+    if statically_known(selected_dim % group != 0):
         raise RuntimeError(LOCAL_REDUCE_DIVISIBLE_SHAPE_ERROR)
 
 
@@ -344,21 +347,23 @@ def flex_gemm_local_reduce_config_fields(
     config: Any,
 ) -> tuple[bool, int, int, int, int]:
     """Normalize config objects and keys for local-reduce capability checks."""
-    if isinstance(config, dict):
-        return (
-            config["swap_ab"],
-            config["tile_m"],
-            config["tile_n"],
-            config["cluster_m"],
-            config["cluster_n"],
-        )
-    return (
-        config.swap_ab,
-        config.tile_m,
-        config.tile_n,
-        config.cluster_m,
-        config.cluster_n,
-    )
+    match config:
+        case {
+            "swap_ab": swap_ab,
+            "tile_m": tile_m,
+            "tile_n": tile_n,
+            "cluster_m": cluster_m,
+            "cluster_n": cluster_n,
+        }:
+            return swap_ab, tile_m, tile_n, cluster_m, cluster_n
+        case _:
+            return (
+                config.swap_ab,
+                config.tile_m,
+                config.tile_n,
+                config.cluster_m,
+                config.cluster_n,
+            )
 
 
 def validate_flex_gemm_local_reduce_config(config: Any, group: int, axis: int) -> bool:
@@ -366,30 +371,42 @@ def validate_flex_gemm_local_reduce_config(config: Any, group: int, axis: int) -
     swap_ab, tile_m, tile_n, cluster_m, cluster_n = (
         flex_gemm_local_reduce_config_fields(config)
     )
-    if group <= 0 or axis not in (0, 1) or swap_ab:
+    match axis:
+        case 0:
+            tile = tile_m
+        case 1:
+            tile = tile_n
+        case _:
+            return False
+    if group <= 0 or swap_ab:
         return False
     if tile_n < 128 or tile_n % 64 != 0:
         return False
-    tile = tile_n if axis == 1 else tile_m
     if tile % group != 0:
         return False
-    if group <= 32:
-        return 32 % group == 0 and group < tile
-    return (
-        group % 32 == 0
-        and group <= tile
-        and tile_m == 128
-        and cluster_m == 1
-        and cluster_n == 1
-    )
+    match group:
+        case _ if group <= 32:
+            return 32 % group == 0 and group < tile
+        case _:
+            return (
+                group % 32 == 0
+                and group <= tile
+                and tile_m == 128
+                and cluster_m == 1
+                and cluster_n == 1
+            )
 
 
 def flex_gemm_local_reduce_candidate_groups(config: Any, axis: int) -> tuple[int, ...]:
     """Enumerate group sizes worth checking against the config capability gate."""
-    if axis not in (0, 1):
-        return ()
     _, tile_m, tile_n, _, _ = flex_gemm_local_reduce_config_fields(config)
-    tile = tile_n if axis == 1 else tile_m
+    match axis:
+        case 0:
+            tile = tile_m
+        case 1:
+            tile = tile_n
+        case _:
+            return ()
     return (2, 4, 8, 16, 32, *range(64, tile + 1, 32))
 
 
