@@ -67,6 +67,7 @@ include_patterns = [
     'aten/src/ATen/native/**/Foreach*.*',
     'aten/src/ATen/native/cuda/fused*.*',
     'aten/src/ATen/native/cuda/Fused*.cu',
+    'aten/src/ATen/native/cuda/group_norm_kernel.cu',
     'aten/src/ATen/native/cudnn/*.h',
     'aten/src/ATen/native/cudnn/*.cpp',
     'aten/src/ATen/native/mkldnn/xpu/**/*.h',
@@ -176,10 +177,6 @@ include_patterns = [
     'torch/csrc/**/*.cpp',
     'torch/csrc/jit/serialization/*.h',
     'torch/csrc/jit/serialization/*.cpp',
-    'torch/nativert/*.h',
-    'torch/nativert/*.cpp',
-    'torch/nativert/**/*.h',
-    'torch/nativert/**/*.cpp',
     'torch/headeronly/**/*.h',
 ]
 exclude_patterns = [
@@ -187,7 +184,6 @@ exclude_patterns = [
     # caffe2_pb.h, otherwise we'd have to build protos as part of this CI job.
     # CUDA files are also excluded.
     '**/fb/**',
-    '**/generated/**',
     '**/*pb.h',
     '**/*inl.h',
     'aten/src/ATen/cpu/FlushDenormal.cpp',
@@ -200,6 +196,7 @@ exclude_patterns = [
     'aten/src/ATen/Parallel*.h',
     'c10/xpu/**/*.h',
     'c10/xpu/**/*.cpp',
+    'c10/xpu/XPUMacros.h',
     'c10/benchmark/intrusive_ptr_benchmark.cpp',
     'c10/cuda/CUDAAlgorithm.h',
     'c10/util/complex_math.h',
@@ -214,7 +211,6 @@ exclude_patterns = [
     'c10/test/**/*.h',
     'c10/test/**/*.cpp',
     'third_party/**/*',
-    'torch/csrc/autograd/generated/**',
     'torch/csrc/distributed/**/*.cu',
     'torch/csrc/distributed/c10d/WinSockUtils.hpp',
     'torch/csrc/distributed/c10d/quantization/quantization_gpu.h',
@@ -222,9 +218,52 @@ exclude_patterns = [
     'torch/csrc/inductor/aoti_torch/c/shim.h',
     'torch/csrc/jit/**/*',
     'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
-    'torch/csrc/utils/generated_serialization_types.h',
     'torch/csrc/utils/pythoncapi_compat.h',
     'torch/csrc/inductor/aoti_runtime/sycl_runtime_wrappers.h',
+    # TODO: Temporary suppression to be removed soon
+    # See https://github.com/pytorch/pytorch/issue/178341
+    # Pre-existing violations surfaced when --all-files linting got re-enabled for
+    # clang-tidy
+    'aten/src/ATen/core/IListRef.h',
+    'aten/src/ATen/dlpack.h',
+    'aten/src/ATen/native/mkldnn/xpu/detail/Deconv.cpp',
+    'c10/core/AllocatorConfig.cpp',
+    'c10/core/AutogradState.cpp',
+    'c10/core/CachingDeviceAllocator.h',
+    'c10/core/Device.cpp',
+    'c10/core/DeviceCapability.h',
+    'c10/core/impl/DeviceGuardImplInterface.h',
+    'c10/core/impl/InlineDeviceGuard.h',
+    'c10/core/impl/InlineStreamGuard.h',
+    'c10/core/impl/SizesAndStrides.h',
+    'c10/core/Scalar.h',
+    'c10/core/ScalarType.h',
+    'c10/core/Stream.h',
+    'c10/core/SymInt.h',
+    'c10/core/SymIntArrayRef.h',
+    'c10/cuda/CUDACachingAllocator.cpp',
+    'c10/cuda/CUDACachingAllocator.h',
+    'c10/cuda/CUDAEvent.h',
+    'c10/cuda/PeerToPeerAccess.cpp',
+    'c10/mobile/CPUProfilingAllocator.cpp',
+    'c10/util/accumulate.h',
+    'c10/util/ApproximateClock.cpp',
+    'c10/util/BFloat16-math.h',
+    'c10/util/generic_math.h',
+    'c10/util/IntrusiveList.h',
+    'c10/util/irange.h',
+    'c10/util/llvmMathExtras.h',
+    'c10/util/MathConstants.h',
+    'c10/util/NetworkFlow.cpp',
+    'c10/util/order_preserving_flat_hash_map.h',
+    'c10/util/overflows.h',
+    'c10/util/safe_numerics.h',
+    'c10/util/signal_handler.cpp',
+    'c10/util/StringUtil.cpp',
+    'c10/util/typeid.h',
+    'torch/csrc/distributed/c10d/symm_mem/NVSHMEMSymmetricMemory.cpp',
+    'torch/headeronly/util/bit_cast.h',
+    'torch/headeronly/util/complex.h',
 ]
 init_command = [
     'python3',
@@ -1858,6 +1897,30 @@ include_patterns = [
 command = [
     'python3',
     'tools/linter/adapters/stable_shim_usage_linter.py',
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
+code = 'SYMPY_MINMAX'
+include_patterns = [
+    'torch/_inductor/**/*.py',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=sympy\.(Min|Max)',
+    '--line-allowlist-pattern=isinstance|\.has\(|@allow-raw-sympy-minmax',
+    '--linter-name=SYMPY_MINMAX',
+    '--error-name=raw sympy.Min/Max in Inductor',
+    """--error-description=\
+        Use torch.utils._sympy.functions.Min/Max instead of \
+        sympy.Min/Max in Inductor. The builtin sympy.Min/Max \
+        trigger expensive is-connected simplification. \
+        isinstance/has checks on sympy.Min/Max are allowed. \
+        If you have a legitimate need for the raw sympy version, \
+        add @allow-raw-sympy-minmax to the line.\
+    """,
     '--',
     '@{{PATHSFILE}}'
 ]

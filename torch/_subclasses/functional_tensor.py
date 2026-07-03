@@ -6,7 +6,7 @@ import warnings
 import weakref
 from abc import ABC, abstractmethod
 from contextlib import AbstractContextManager
-from typing import Any, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 from typing_extensions import Self
 
 
@@ -382,7 +382,21 @@ class FunctionalTensor(torch.Tensor):
         *,
         masked_grad: builtins.bool | None = None,
     ) -> torch.Tensor:
-        return self.elem.to_dense()
+        if self.layout == torch.strided:
+            if dtype is None:
+                return self
+            return self.to(dtype=dtype)
+
+        out = self.elem.to_dense(dtype=dtype, masked_grad=masked_grad)
+        if isinstance(out, torch.Tensor) and torch._is_functional_tensor(out):
+            functional_mode = _detect_infra_mode(
+                torch._C._TorchDispatchModeKey.FUNCTIONAL
+            )
+            if functional_mode is None:
+                raise AssertionError("functional_mode must not be None")
+            with functional_mode:
+                return FunctionalTensor(out, functional_mode)
+        return out
 
     @property
     # pyrefly: ignore[bad-override]
@@ -437,8 +451,9 @@ class FunctionalTensorMode(TorchDispatchMode):
                 return _get_dispatch_mode_pre_dispatch(
                     torch._C._TorchDispatchModeKey.FUNCTIONAL
                 )
-            return torch._C._get_dispatch_mode(
-                torch._C._TorchDispatchModeKey.FUNCTIONAL
+            return cast(
+                "FunctionalTensorMode | None",
+                torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FUNCTIONAL),
             )
 
         if _get_prev_mode() is None:
@@ -680,11 +695,21 @@ class FunctionalTensorMode(TorchDispatchMode):
                     continue
                 unwrapped = torch._from_functional_tensor(a.elem)
                 try:
+                    # pyrefly: ignore[missing-attribute]
                     tracker_entry = m.tracer.tensor_tracker[unwrapped]
                 except KeyError:
-                    raise RuntimeError(
-                        f"cannot find {unwrapped} in tensor_tracker"
-                    ) from None
+                    # A tensor constant lifted from a nested HOP subgraph
+                    # (e.g. invoke_subgraph / nested_compile_region) is wrapped
+                    # as a FunctionalTensor during dispatch but is owned by the
+                    # inner subgraph's tracer, not the outer one. Constants do
+                    # not require grad; for any grad-requiring tensor that is
+                    # missing from the tracker, re-raise to preserve visibility
+                    # of genuine bugs.
+                    if unwrapped.requires_grad:
+                        raise RuntimeError(
+                            f"cannot find {unwrapped} in tensor_tracker"
+                        ) from None
+                    continue
                 curr_node = tracker_entry.proxy.node
                 with fx_traceback.set_current_replay_node(curr_node):
                     torch._sync(a)

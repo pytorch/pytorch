@@ -3,6 +3,7 @@
 """Tests for the * and *= operators in PyTorch Dynamo (nb_multiply slot)."""
 
 import operator
+import sys
 
 import torch
 import torch._dynamo.test_case
@@ -164,6 +165,35 @@ class TestNbMultiply(torch._dynamo.test_case.TestCase):
     def test_tuple_mul_int(self):
         self.assertEqual((1, 2) * 3, (1, 2, 1, 2, 1, 2))
         self.assertEqual((1,) * 5, (1, 1, 1, 1, 1))
+
+    @make_dynamo_test
+    def test_tuple_mul_identity(self):
+        empty = ()
+        self.assertEqual(id(empty), id(empty * -3))
+        self.assertEqual(id(empty), id(empty * 0))
+        self.assertEqual(id(empty), id(empty * 3))
+
+        values = (1, 2)
+        self.assertEqual(id(values), id(values * 1))
+        self.assertFalse(id(values) == id(values * 0))
+        self.assertFalse(id(values) == id(values * 2))
+
+    @make_dynamo_test
+    def test_empty_tuple_mul_overflow_raises(self):
+        with self.assertRaisesRegex(
+            OverflowError, "cannot fit 'int' into an index-sized integer"
+        ):
+            () * (sys.maxsize + 1)
+        with self.assertRaisesRegex(
+            OverflowError, "cannot fit 'int' into an index-sized integer"
+        ):
+            () * (-sys.maxsize - 2)
+
+    @make_dynamo_test
+    def test_list_mul_one_returns_new_list(self):
+        values = [1, 2]
+        self.assertEqual(values * 1, values)
+        self.assertFalse(id(values) == id(values * 1))
 
     @make_dynamo_test
     def test_str_mul_int(self):
@@ -511,6 +541,54 @@ class TestNbMultiply(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(f(2, 3), [2, 2, 2])
         self.assertEqual(f(2, True), [2])
+
+    # --- Sequence * SymNode must route through sq_repeat, not nb_multiply ---
+
+    def test_list_mul_symint_iter(self):
+        @torch.compile(backend="eager", fullgraph=True, dynamic=True)
+        def f(t):
+            return list([1, 2] * t.shape[0])
+
+        self.assertEqual(f(torch.randn(3, 4)), [1, 2, 1, 2, 1, 2])
+
+    def test_symint_mul_list_iter(self):
+        @torch.compile(backend="eager", fullgraph=True, dynamic=True)
+        def f(t):
+            return list(t.shape[0] * [1, 2])
+
+        self.assertEqual(f(torch.randn(3, 4)), [1, 2, 1, 2, 1, 2])
+
+    def test_tuple_mul_symint_iter(self):
+        @torch.compile(backend="eager", fullgraph=True, dynamic=True)
+        def f(t):
+            return list((1, 2) * t.shape[0])
+
+        self.assertEqual(f(torch.randn(3, 4)), [1, 2, 1, 2, 1, 2])
+
+    def test_str_mul_symint_iter(self):
+        @torch.compile(backend="eager", fullgraph=True, dynamic=True)
+        def f(t):
+            return list("ab" * t.shape[0])
+
+        self.assertEqual(f(torch.randn(3, 4)), ["a", "b", "a", "b", "a", "b"])
+
+    def test_list_imul_symint_iter(self):
+        @torch.compile(backend="eager", fullgraph=True, dynamic=True)
+        def f(t):
+            xs = [1, 2]
+            xs *= t.shape[0]
+            return list(xs)
+
+        self.assertEqual(f(torch.randn(3, 4)), [1, 2, 1, 2, 1, 2])
+
+    def test_list_mul_symint_sum(self):
+        # Forces iteration via sum() rather than list() to exercise a
+        # different consumer of the resulting sequence VT.
+        @torch.compile(backend="eager", fullgraph=True, dynamic=True)
+        def f(t):
+            return sum([1, 2] * t.shape[0])
+
+        self.assertEqual(f(torch.randn(3, 4)), 9)
 
     # --- Error message accuracy (matches CPython exactly) ---
 

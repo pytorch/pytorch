@@ -379,10 +379,7 @@ Vectorized<int8_t> Vectorized<int8_t>::blend(
     if (count == size()) {                                                    \
       return vld1q_s##bit(reinterpret_cast<const int##bit##_t*>(ptr));        \
     } else {                                                                  \
-      __at_align__ int##bit##_t tmp_values[size()];                           \
-      for (const auto i : c10::irange(size())) {                              \
-        tmp_values[i] = 0;                                                    \
-      }                                                                       \
+      __at_align__ int##bit##_t tmp_values[size()] = {};                      \
       std::memcpy(                                                            \
           tmp_values,                                                         \
           reinterpret_cast<const int##bit##_t*>(ptr),                         \

@@ -1,3 +1,4 @@
+# Owner(s): ["module: ci"]
 name: ossf-scorecard
 on:
   # Only the default branch is supported.
