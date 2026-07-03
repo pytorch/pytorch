@@ -600,7 +600,6 @@ class IRNode:
     _current_origins: ClassVar[OrderedSet[Any]] = OrderedSet()
     _current_stream_idx: ClassVar[int | None] = None
     _current_mempool: ClassVar[tuple[int, int] | None] = None
-    _current_primary_node: ClassVar[torch.fx.Node | None] = None
 
     # NB: These are kinda weird,
     origins: OrderedSet[Any] = dataclasses.field(init=False)
@@ -613,6 +612,9 @@ class IRNode:
     stream_idx: int | None = dataclasses.field(init=False)
     # User-annotated CUDA MemPool from FX node metadata (set during lowering)
     mempool: tuple[int, int] | None = dataclasses.field(init=False)
+    # The FX node that is being lowered when this IRNode is created.
+    # Set from V.current_node; None outside of lowering.
+    lowering_fx_node: torch.fx.Node | None = dataclasses.field(init=False)
 
     @staticmethod
     @contextlib.contextmanager
@@ -649,18 +651,6 @@ class IRNode:
             IRNode._current_mempool = old
 
     @staticmethod
-    @contextlib.contextmanager
-    def current_primary_node(
-        node: torch.fx.Node | None,
-    ) -> Generator[None, None, None]:
-        old = IRNode._current_primary_node
-        IRNode._current_primary_node = node
-        try:
-            yield
-        finally:
-            IRNode._current_primary_node = old
-
-    @staticmethod
     def is_realized_node(node: IRNode) -> bool:
         return isinstance(
             node,
@@ -688,11 +678,16 @@ class IRNode:
         self._post_init_setattr(
             "traceback", traceback.format_stack() if config.debug_ir_traceback else None
         )
-        self._post_init_setattr("origin_node", self._current_primary_node)
+        self._post_init_setattr("origin_node", None)
         # Annotations dict for storing metadata (e.g., KernelTemplateChoice)
         self._post_init_setattr("annotations", {})
         self._post_init_setattr("stream_idx", self._current_stream_idx)
         self._post_init_setattr("mempool", self._current_mempool)
+        current = V.get_current_node()
+        self._post_init_setattr(
+            "lowering_fx_node",
+            current if isinstance(current, torch.fx.Node) else None,
+        )
 
     def get_read_names(self) -> OrderedSet[str]:
         return OrderedSet(dep.name for dep in self.get_reads())
@@ -702,6 +697,9 @@ class IRNode:
 
     def get_origin_node(self) -> torch.fx.Node | None:
         return self.origin_node
+
+    def get_lowering_fx_node(self) -> torch.fx.Node | None:
+        return self.lowering_fx_node
 
     def get_defining_op(self) -> Operation | None:
         return None
