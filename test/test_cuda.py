@@ -825,10 +825,18 @@ print(t.is_pinned())
                 self.assertTrue(default == torch._C._BlasBackend.Cublas)
             else:
                 # ROCm logic is less so, it's cublaslt for some Instinct, cublas for all else
-                gcn_arch = str(
-                    torch.cuda.get_device_properties(0).gcnArchName.split(":", 1)[0]
-                )
-                if gcn_arch in ["gfx90a", "gfx942", "gfx950", "gfx1200", "gfx1201"]:
+                # Mirror CUDAHooks::getHipblasltPreferredArchs in CUDAHooks.cpp
+                ROCM_VERSION = tuple(int(v) for v in torch.version.hip.split(".")[:2])
+                archs = ["gfx90a", "gfx942"]
+                if ROCM_VERSION >= (6, 4):
+                    archs.extend(["gfx1200", "gfx1201"])
+                if ROCM_VERSION >= (7, 0):
+                    archs.append("gfx950")
+                if ROCM_VERSION >= (7, 13):
+                    archs.extend(["gfx1100", "gfx1101", "gfx1151"])
+                gcn_arch_name = torch.cuda.get_device_properties(0).gcnArchName
+                hipblaslt_preferred = any(arch in gcn_arch_name for arch in archs)
+                if hipblaslt_preferred:
                     self.assertTrue(default == torch._C._BlasBackend.Cublaslt)
                 else:
                     self.assertTrue(default == torch._C._BlasBackend.Cublas)
@@ -2591,6 +2599,19 @@ torch.cuda.synchronize()
         g.replay()
 
         self.assertEqual(b.sum().item(), 11000.0)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_graph_scalar_assignment(self):
+        x = torch.zeros(2, 2, device="cuda")
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            x[0, 1] = 5.0
+
+        x.zero_()  # Reset the side-effect of capture execution
+        g.replay()
+        self.assertEqual(x[0, 1].item(), 5.0)
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"

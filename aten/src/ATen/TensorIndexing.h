@@ -397,6 +397,22 @@ inline Tensor scalarToTensor(
   }
 }
 
+inline Tensor asTensor(const Tensor& value, const Tensor& target) {
+  return value;
+}
+inline Tensor asTensor(const Scalar& value, const Tensor& target) {
+  at::AutoDispatchBelowADInplaceOrView guard;
+  at::Device target_device = target.device();
+  // TODO: This qint special case looks very suspicious...
+  if (isQIntType(target.scalar_type())) {
+    return scalarToTensor(value, device(kCPU).dtype(kFloat), at::Device(kCPU));
+  } else if (target_device.is_cuda()) {
+    return scalarToTensor(value, target.options(), at::Device(kCPU));
+  } else {
+    return scalarToTensor(value, target.options(), target_device);
+  }
+}
+
 // To match numpy semantics:
 // As a special case for backwards compatibility,
 // strip away unit dimensions from the left of 'src'
@@ -415,6 +431,9 @@ inline SymIntArrayRef slicePrefix1sSize(const SymIntArrayRef& sizes) {
   return sizes.slice(first_non1_src);
 }
 
+inline void copy_to(const Tensor& dst, const Scalar& src) {
+  dst.fill_(src);
+}
 inline void copy_to(const Tensor& dst, const Tensor& src) {
   // Use TORCH_GUARD_OR_FALSE with sym_eq to avoid data-dependent-expression
   // errors with unbacked symbolic sizes.  When we can't prove equality,
@@ -710,11 +729,15 @@ inline Tensor get_item(
 // torch/csrc/autograd/python_variable_indexing.cpp for "the assigned value is a
 // Tensor" case See NOTE [ Setting `disable_slice_optimization` when calling C++
 // tensor indexing functions from Python ]
+template <typename T>
 inline void set_item(
     const Tensor& self,
     const ArrayRef<TensorIndex>& indices,
-    const Tensor& value,
+    const T& value,
     bool disable_slice_optimization = false) {
+  static_assert(
+      std::is_same_v<T, Tensor> || std::is_same_v<T, Scalar>,
+      "T must be either at::Tensor or at::Scalar");
   at::Device self_device = self.device();
   SymIntArrayRef self_sizes = self.sym_sizes();
 
@@ -766,13 +789,14 @@ inline void set_item(
     return;
   }
 
-  SymIntArrayRef valueSizes = value.sym_sizes();
+  Tensor valueTensor = asTensor(value, self);
+  SymIntArrayRef valueSizes = valueTensor.sym_sizes();
   SymIntArrayRef slicedValueSizes = slicePrefix1sSize(valueSizes);
   Tensor valuesSliced;
   if (!valueSizes.equals(slicedValueSizes)) {
-    valuesSliced = value.view_symint(slicedValueSizes);
+    valuesSliced = valueTensor.view_symint(slicedValueSizes);
   } else {
-    valuesSliced = value;
+    valuesSliced = valueTensor;
   }
   dispatch_index_put_(sliced, std::move(tensorIndices), valuesSliced);
   return;

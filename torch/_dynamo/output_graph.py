@@ -175,7 +175,7 @@ from .variables.builder import (
 from .variables.ctx_manager import ContextWrappingVariable
 from .variables.functions import ClosureConversionError, VariableTracker
 from .variables.lists import BaseListVariable
-from .variables.misc import CellVariable, NullVariable
+from .variables.misc import NullVariable
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
     NumpyNdarrayVariable,
@@ -1967,6 +1967,13 @@ class OutputGraph(OutputGraphCommon):
 
         meta.num_stack = len(stack_values)
 
+        # After the symbolic_cellvars split, symbolic_locals holds only fast
+        # locals; a name here that is also a cell/free var is a colliding fast
+        # local (e.g. an inlined comprehension iteration variable shadowing a
+        # nonlocal). It is skipped here to stay consistent with resume argname
+        # generation in create_call_resume_at.
+        cell_and_freevars = set(tx.cellvars() + tx.freevars())
+
         # NB: Typically (i.e., for graph compile from RETURN_VALUE),
         # symbolic_locals will be empty at this point, as prune_dead_locals
         # will clear out all of symbolic_locals because RETURN_VALUE is the
@@ -1991,11 +1998,10 @@ class OutputGraph(OutputGraphCommon):
                 and tx is self.root_tx
             ):
                 continue
-            # Do not load cell/free vars (handled by codegen_cells). Match on
-            # CellVariable rather than name: a colliding fast local that shares
-            # a cell's name (its cell lives in symbolic_cellvars) must still be
-            # saved as a normal local here.
-            if type.__instancecheck__(CellVariable, v):
+            # Do not load cell/free vars (real cells are handled by
+            # codegen_cells; a colliding fast local sharing a cell's name is
+            # skipped to match resume argname generation).
+            if k in cell_and_freevars:
                 continue
             # Do not load variable if it is NULL.
             if sys.version_info >= (3, 12):
