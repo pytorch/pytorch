@@ -4197,7 +4197,12 @@ if HAS_CUDA_AND_TRITON:
                 "distinct input size. Recording too many CUDAGraphs may lead to "
                 "extra overhead. We have observed 2 distinct sizes. "
                 "Please consider the following options for better performance: "
-                "a) padding inputs to a few fixed number of shapes; or b) set "
+                "a) padding inputs to a few fixed number of shapes, optionally with "
+                "torch._inductor.config.triton.cudagraph_capture_sizes to restrict "
+                "capture to those shapes; b) set "
+                "torch._inductor.config.triton.cudagraph_max_recorded_sizes to cap "
+                "the number of recorded sizes, running novel sizes without "
+                "cudagraphs; or c) set "
                 "torch._inductor.config.triton.cudagraph_skip_dynamic_graphs=True. "
                 "Set torch._inductor.config.triton.cudagraph_dynamic_shape_warn_limit=None "
                 "to silence this warning."
@@ -4239,7 +4244,12 @@ if HAS_CUDA_AND_TRITON:
                 "distinct input size. Recording too many CUDAGraphs may lead to "
                 "extra overhead. We have observed 2 distinct sizes. "
                 "Please consider the following options for better performance: "
-                "a) padding inputs to a few fixed number of shapes; or b) set "
+                "a) padding inputs to a few fixed number of shapes, optionally with "
+                "torch._inductor.config.triton.cudagraph_capture_sizes to restrict "
+                "capture to those shapes; b) set "
+                "torch._inductor.config.triton.cudagraph_max_recorded_sizes to cap "
+                "the number of recorded sizes, running novel sizes without "
+                "cudagraphs; or c) set "
                 "torch._inductor.config.triton.cudagraph_skip_dynamic_graphs=True. "
                 "Set torch._inductor.config.triton.cudagraph_dynamic_shape_warn_limit=None "
                 "to silence this warning."
@@ -4274,7 +4284,12 @@ if HAS_CUDA_AND_TRITON:
                 "distinct input size. Recording too many CUDAGraphs may lead to "
                 "extra overhead. We have observed 2 distinct sizes. "
                 "Please consider the following options for better performance: "
-                "a) padding inputs to a few fixed number of shapes; or b) set "
+                "a) padding inputs to a few fixed number of shapes, optionally with "
+                "torch._inductor.config.triton.cudagraph_capture_sizes to restrict "
+                "capture to those shapes; b) set "
+                "torch._inductor.config.triton.cudagraph_max_recorded_sizes to cap "
+                "the number of recorded sizes, running novel sizes without "
+                "cudagraphs; or c) set "
                 "torch._inductor.config.triton.cudagraph_skip_dynamic_graphs=True. "
                 "Set torch._inductor.config.triton.cudagraph_dynamic_shape_warn_limit=None "
                 "to silence this warning.",
@@ -5920,6 +5935,34 @@ if HAS_CUDA_AND_TRITON:
                         run(i, j, k)
 
             self.assertEqual(self.get_manager().new_graph_id().id, 4)
+
+        @torch._inductor.config.patch("triton.cudagraph_max_recorded_sizes", 3)
+        def test_cudagraph_max_recorded_sizes(self):
+            def f(x):
+                return x + 1
+
+            compiled = torch.compile(f, mode="reduce-overhead")
+
+            def run(shape):
+                x = torch.randn((shape, 5), device="cuda")
+                torch._dynamo.mark_dynamic(x, 0)
+                for _ in range(3):
+                    self.assertEqual(compiled(x), f(x))
+
+            counters.clear()
+            for i in range(2, 10):
+                run(i)
+
+            # first 3 distinct sizes record, later novel sizes run eagerly
+            self.assertEqual(self.get_manager().new_graph_id().id, 3)
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+
+            # previously recorded sizes still replay without new recordings
+            counters.clear()
+            for i in range(2, 5):
+                run(i)
+            self.assertEqual(self.get_manager().new_graph_id().id, 4)
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
 
         @torch._inductor.config.patch("triton.cudagraph_or_error", True)
         def test_cudagraph_or_error(self):

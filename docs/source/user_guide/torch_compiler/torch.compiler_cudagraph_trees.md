@@ -180,11 +180,39 @@ every invocation, re-recording CUDAGraph may not be profitable. Nvidia uses 64 K
 device memory per kernel launch in CUDAGraph, up until CUDA 12.4 and Driver Version 550+.
 This memory cost can be significant with many CUDAGraph re-recordings.
 
-For functions with frequently changing input tensor shapes, we suggest padding input
-tensors to a few fixed tensor shapes to still enjoy benefits from CUDAGraph. In addition,
-setting [torch.\_inductor.config.triton.cudagraph_skip_dynamic_graphs=True](https://github.com/pytorch/pytorch/blob/main/torch/_inductor/config.py#L653)
-allows to skip cudagraphing functions with dynamic shape inputs and only cudagraphing
-functions with static input tensor shapes.
+For functions with frequently changing input tensor shapes (e.g., a training loop that
+pads every batch to its own longest sequence), we suggest padding input tensors to a few
+fixed tensor shapes ("bucketing") to still enjoy benefits from CUDAGraph. For a causal
+language model, this means rounding the sequence length up to a small ladder of bucket
+sizes, padding `input_ids` with the pad token and labels with the loss ignore index
+(e.g., `-100`), so only a handful of CUDAGraphs are recorded and then replayed:
+
+```python
+BUCKETS = (128, 256, 384, 512)
+torch._inductor.config.triton.cudagraph_capture_sizes = BUCKETS
+
+def pad_to_bucket(ids, pad_id, ignore_index=-100):
+    seqlen = ids.size(1)
+    bucket = next(b for b in BUCKETS if b >= seqlen)
+    labels = torch.nn.functional.pad(ids, (0, bucket - seqlen), value=ignore_index)
+    ids = torch.nn.functional.pad(ids, (0, bucket - seqlen), value=pad_id)
+    return ids, labels
+```
+
+Setting [torch.\_inductor.config.triton.cudagraph_capture_sizes](https://github.com/pytorch/pytorch/blob/main/torch/_inductor/config.py)
+restricts CUDAGraph capture to the listed sizes; inputs with other sizes run without
+CUDAGraph instead of triggering a new recording.
+
+Two more config options control dynamic shape behavior without changing inputs:
+
+- [torch.\_inductor.config.triton.cudagraph_max_recorded_sizes](https://github.com/pytorch/pytorch/blob/main/torch/_inductor/config.py)
+  caps the number of distinct sizes recorded per compiled graph. Once the cap is reached,
+  novel sizes run without CUDAGraph while previously recorded sizes keep replaying. This
+  bounds recording overhead and CUDAGraph memory when the set of input shapes is large or
+  unbounded.
+- [torch.\_inductor.config.triton.cudagraph_skip_dynamic_graphs=True](https://github.com/pytorch/pytorch/blob/main/torch/_inductor/config.py)
+  skips cudagraphing functions with dynamic shape inputs entirely and only cudagraphs
+  functions with static input tensor shapes.
 
 ### NCCL Support
 

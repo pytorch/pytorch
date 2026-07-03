@@ -1891,6 +1891,14 @@ class triton:
     # exceeds this limit
     cudagraph_dynamic_shape_warn_limit: int | None = 8
 
+    # Maximum number of distinct dynamic shape sizes for which cudagraphs
+    # are recorded per compiled graph. Once the limit is reached, inputs
+    # with a novel size run without cudagraphs while previously recorded
+    # sizes keep replaying. Bounds recording overhead and graph pool memory
+    # for workloads with many distinct input shapes (e.g. per-batch dynamic
+    # padding). None means unbounded.
+    cudagraph_max_recorded_sizes: int | None = None
+
     # synchronize after cudagraph invocation
     force_cudagraph_sync = False
 

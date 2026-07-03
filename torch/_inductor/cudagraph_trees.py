@@ -425,11 +425,13 @@ def cudagraphify_impl(
     get_ints: Any = operator.itemgetter(*int_key) if int_key else lambda _: None
 
     has_warn = False
+    has_hit_max_recorded_sizes = False
 
     del inputs
 
     def deferred_cudagraphify(inputs: list[InputType]) -> OutputType:
         nonlocal has_warn
+        nonlocal has_hit_max_recorded_sizes
 
         int_key = get_ints(inputs)
 
@@ -439,6 +441,23 @@ def cudagraphify_impl(
         fn = fn_cache.get(int_key)
         if fn is not None:
             return fn(inputs)
+
+        max_recorded_sizes = config.triton.cudagraph_max_recorded_sizes
+        if (
+            int_key is not None
+            and max_recorded_sizes is not None
+            and len(fn_cache) >= max_recorded_sizes
+        ):
+            if not has_hit_max_recorded_sizes:
+                has_hit_max_recorded_sizes = True
+                log_cudagraph_skip_and_bump_counter(
+                    "skipping cudagraph for novel dynamic shape sizes after "
+                    "recording torch._inductor.config.triton.cudagraph_max_recorded_sizes "
+                    f"(={max_recorded_sizes}) distinct sizes; previously recorded "
+                    "sizes keep replaying"
+                )
+            return model(inputs)
+
         compile_id = kwargs.get("compile_id", "")
         if int_key is None:
             log.info(
