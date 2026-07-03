@@ -45,6 +45,7 @@ import threading
 import time
 import traceback
 import types
+import unittest
 import weakref
 from collections import defaultdict, deque
 from typing import Any, cast, NoReturn, TYPE_CHECKING, TypeAlias, TypeVar
@@ -2749,6 +2750,15 @@ class InstructionTranslatorBase(
                 raise AssertionError(
                     "expected isinstance(raised_exception, dynamo_exc) to be true"
                 )  # sanity check
+            # unittest.SkipTest is test-runner control flow, not a real error:
+            # skip the frame and let eager re-raise the actual SkipTest so the
+            # test is reported as skipped rather than a hard graph break. This
+            # matches eager, where the same raise skips the test.
+            if issubclass(curr_exc.python_type(), unittest.SkipTest):
+                raise exc.SkipFrame(
+                    f"Skipping frame: {curr_exc.python_type().__name__} raised "
+                    "at the top level of the compiled function."
+                )
             unimplemented(
                 gb_type="Observed exception",
                 context=f"raised exception {curr_exc.debug_repr()}",
