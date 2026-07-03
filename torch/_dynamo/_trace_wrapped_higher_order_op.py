@@ -78,7 +78,7 @@ def _(
 @zeros_and_scatter.register_vmap  # type: ignore[misc]
 def _(info, indims, shape, indices, value):  # type: ignore[no-untyped-def]
     """The batching rule is special in that it returns a tensor that is not batched"""
-    indices_indims = indims[1] if indims[1] is not None else []
+    indices_indims: list[int | None] = indims[1] if indims[1] is not None else []
     expanded_indices = []
     for idx, idx_indim in zip(indices, indices_indims):
         # The index is not being batched, we should unsqueeze and expand to val
