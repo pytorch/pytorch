@@ -58,22 +58,23 @@ static uint32_t decode_utf16_char(
   return cp;
 }
 
-// Appends the UTF-8 encoding of a single code point to `out`.
+// Appends the UTF-8 encoding of a single code point to `out`. Code points
+// outside the Unicode range are emitted as U+FFFD (replacement character).
 static void encode_utf8_char(std::string& out, uint32_t cp) {
+  if (cp > 0x10FFFF) {
+    cp = 0xFFFD;
+  }
   if (cp < 0x80) {
     out.push_back(static_cast<char>(cp));
-  } else if (cp < 0x800) {
-    out.push_back(static_cast<char>(0xC0 | (cp >> 6)));
-    out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
-  } else if (cp < 0x10000) {
-    out.push_back(static_cast<char>(0xE0 | (cp >> 12)));
-    out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
-    out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
-  } else {
-    out.push_back(static_cast<char>(0xF0 | (cp >> 18)));
-    out.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F)));
-    out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
-    out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+    return;
+  }
+  // Number of continuation bytes; the leading byte has `trailing + 1` high
+  // bits set (0xC0, 0xE0, 0xF0 for 1, 2, 3 continuation bytes).
+  int trailing = cp < 0x800 ? 1 : (cp < 0x10000 ? 2 : 3);
+  const uint32_t lead_mask = (0xFF << (7 - trailing)) & 0xFF;
+  out.push_back(static_cast<char>(lead_mask | (cp >> (6 * trailing))));
+  for (int shift = 6 * (trailing - 1); shift >= 0; shift -= 6) {
+    out.push_back(static_cast<char>(0x80 | ((cp >> shift) & 0x3F)));
   }
 }
 
