@@ -960,7 +960,9 @@ def create_mapping_pre_post_grad_nodes(
     }
 
     if not isinstance(post_to_pre_grad_nodes_json, dict):
-        log.error("Provenance tacking error: post_to_pre_grad_nodes_json is not a dict")
+        log.error(
+            "Provenance tracking error: post_to_pre_grad_nodes_json is not a dict"
+        )
         return empty_return
 
     if not isinstance(pre_grad_graph_id, int):
@@ -976,12 +978,12 @@ def create_mapping_pre_post_grad_nodes(
         def check_format(node: dict[str, Any]) -> bool:
             if not isinstance(node, dict):
                 log.error(
-                    "Provenance tacking error: node provenance in post_to_pre_grad_nodes_json is not a dict"
+                    "Provenance tracking error: node provenance in post_to_pre_grad_nodes_json is not a dict"
                 )
                 return False
             if "graph_id" not in node or "name" not in node or "from_node" not in node:
                 log.error(
-                    "Provenance tacking error: node provenance in post_to_pre_grad_nodes_json has wrong format"
+                    "Provenance tracking error: node provenance in post_to_pre_grad_nodes_json has wrong format"
                 )
                 return False
             return True
@@ -989,7 +991,7 @@ def create_mapping_pre_post_grad_nodes(
         for outer_key, node_array in post_to_pre_grad_nodes_json.items():
             if not isinstance(node_array, list):
                 log.error(
-                    "Provenance tacking error: post_to_pre_grad_nodes_json value is not a list"
+                    "Provenance tracking error: post_to_pre_grad_nodes_json value is not a list"
                 )
                 return empty_return
             for node in node_array:
@@ -1057,7 +1059,7 @@ def create_node_mapping_kernel_to_post_grad(
 
     if not isinstance(triton_kernel_to_post_grad_json, dict):
         log.error(
-            "Provenance tacking error: triton_kernel_to_post_grad_json is not a dict"
+            "Provenance tracking error: triton_kernel_to_post_grad_json is not a dict"
         )
         return empty_return
 
@@ -1067,7 +1069,7 @@ def create_node_mapping_kernel_to_post_grad(
         for outer_key, node_array in triton_kernel_to_post_grad_json.items():
             if not isinstance(node_array, list):
                 log.error(
-                    "Provenance tacking error: triton_kernel_to_post_grad_json value is not a list"
+                    "Provenance tracking error: triton_kernel_to_post_grad_json value is not a list"
                 )
                 return empty_return
             for curr_node in node_array:

@@ -513,9 +513,9 @@ class TracerBase:
 
     @compatibility(is_backward_compatible=True)
     def keys(self, obj: "Proxy") -> "Proxy":
-        """Called when a proxy object is has the keys() method called.
+        """Called when a proxy object has the keys() method called.
         This is what happens when ** is called on a proxy. This should return an
-        iterator it ** is suppose to work in your custom tracer.
+        iterator if ** is supposed to work in your custom tracer.
         """
         return Attribute(obj, "keys")()
 

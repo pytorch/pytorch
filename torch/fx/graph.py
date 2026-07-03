@@ -69,7 +69,7 @@ _legal_ops = dict.fromkeys(
 )
 
 
-# Signature for functions thattransforms the body (`list[str]`) of the
+# Signature for functions that transform the body (`list[str]`) of the
 # generated code
 TransformCodeFunc = Callable[[list[str]], list[str]]
 
