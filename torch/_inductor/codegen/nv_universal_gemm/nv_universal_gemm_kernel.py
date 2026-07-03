@@ -606,6 +606,11 @@ def _nvgemm_precompile(
     if max_active_clusters is None:
         return
 
+    # cutlass_api queries device occupancy while compiling. In async-compile
+    # workers forked from a CUDA-initialized parent, skip precompile.
+    if torch.cuda._is_in_bad_fork():
+        return
+
     device = f"cuda:{device_index}"
     with FakeTensorMode():
         tensors = {}

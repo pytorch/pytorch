@@ -7,11 +7,81 @@
 # and SM100 tile-arg plumbing. Deferred scaled, grouped, local-reduce,
 # blockscaled, and autotune-worker deltas are kept outside this PyTorch PR.
 #
+diff --git a/cute_dsl_utils.py b/cute_dsl_utils.py
+index 2090fb978d1..f54fdf41733 100644
+--- a/cute_dsl_utils.py
++++ b/cute_dsl_utils.py
+@@ -16,7 +16,7 @@ except ImportError:
+ 
+ import cutlass
+ import cutlass.cute as cute
+-from cutlass import Int32, Int64, Float16, BFloat16, Float32
++from cutlass import Uint8, Int32, Int64, Float16, BFloat16, Float32
+ from cutlass.base_dsl.tvm_ffi_builder import spec
+ from cutlass.cutlass_dsl import NumericMeta
+ 
+@@ -54,6 +54,8 @@ _converter_module._convert_single_arg = _patched_convert_single_arg
+ 
+ 
+ torch2cute_dtype_map = {
++    torch.bool: Uint8,
++    torch.uint8: Uint8,
+     torch.float16: Float16,
+     torch.bfloat16: BFloat16,
+     torch.float32: Float32,
 diff --git a/epi_ops.py b/epi_ops.py
 index a02a4e7..9633276 100644
 --- a/epi_ops.py
 +++ b/epi_ops.py
-@@ -456,6 +456,85 @@ class ColVecLoad(VecLoad):
+@@ -292,6 +292,7 @@ class VecLoad(EpiOp):
+     """
+ 
+     dim = None  # 0 for col (M), 1 for row (N)
++    convert_to_acc_dtype = True
+ 
+     def param_fields(self):
+         return [(self.name, object, None)]
+@@ -371,7 +372,12 @@ class VecLoad(EpiOp):
+             tDsV = ctx.tiled_copy_r2s.retile(tDsV)
+         # Pre-allocate register tensor reused across begin_loop calls
+         tDsV_sub = cute.group_modes(tDsV, 3, cute.rank(tDsV))[None, None, None, 0]
+-        tDrV_cvt = cute.make_rmem_tensor(tDsV_sub.layout, gemm.acc_dtype)
++        register_dtype = (
++            gemm.acc_dtype
++            if const_expr(self.convert_to_acc_dtype)
++            else tDsV_sub.element_type
++        )
++        tDrV_cvt = cute.make_rmem_tensor(tDsV_sub.layout, register_dtype)
+         return [tDsV, tDrV_cvt]
+ 
+     @cute.jit
+@@ -388,7 +394,10 @@ class VecLoad(EpiOp):
+             tDsV_cur = cute.group_modes(tDsV, 3, cute.rank(tDsV))[None, None, None, epi_coord]
+             tDrV = cute.make_rmem_tensor(tDsV_cur.layout, tDsV_cur.element_type)
+             cute.autovec_copy(cute.filter_zeros(tDsV_cur), cute.filter_zeros(tDrV))
+-            tDrV_cvt.store(tDrV.load().to(gemm.acc_dtype))
++            if const_expr(self.convert_to_acc_dtype):
++                tDrV_cvt.store(tDrV.load().to(gemm.acc_dtype))
++            else:
++                tDrV_cvt.store(tDrV.load())
+         return tDrV_cvt
+ 
+ 
+@@ -452,7 +461,12 @@ class ColVecLoad(VecLoad):
+             tDsV = ctx.tiled_copy_r2s.retile(tDsV)
+         # Pre-allocate register tensor reused across begin_loop calls
+         tDsV_sub = cute.group_modes(tDsV, 3, cute.rank(tDsV))[None, None, None, 0]
+-        tDrV_cvt = cute.make_rmem_tensor(tDsV_sub.layout, gemm.acc_dtype)
++        register_dtype = (
++            gemm.acc_dtype
++            if const_expr(self.convert_to_acc_dtype)
++            else tDsV_sub.element_type
++        )
++        tDrV_cvt = cute.make_rmem_tensor(tDsV_sub.layout, register_dtype)
+         return [tDsV, tDrV_cvt]
+ 
+ 
+@@ -456,6 +456,93 @@ class ColVecLoad(VecLoad):
          return [tDsV, tDrV_cvt]
 
 
@@ -86,12 +156,20 @@ index a02a4e7..9633276 100644
 +        return tuple(values)
 +
 +
++class CapturedRowVecLoad(RowVecLoad):
++    convert_to_acc_dtype = False
++
++
++class CapturedColVecLoad(ColVecLoad):
++    convert_to_acc_dtype = False
++
++
 +class RowVecTupleLoad(VecTupleLoad):
-+    vec_op_cls = RowVecLoad
++    vec_op_cls = CapturedRowVecLoad
 +
 +
 +class ColVecTupleLoad(VecTupleLoad):
-+    vec_op_cls = ColVecLoad
++    vec_op_cls = CapturedColVecLoad
 +
 +
  class TileStore(EpiOp):
@@ -312,7 +390,7 @@ index f2bf896..ab18e36 100644
          for key in ("mRowVecBroadcast", "mColVecBroadcast"):
              if key in self.concat_layout and key in d:
                  d[key] = layout_utils.concat_to_interleave(d[key], 1)
-@@ -165,10 +196,41 @@ class GemmActMixin(ComposableEpiMixin):
+@@ -165,10 +196,44 @@ class GemmActMixin(ComposableEpiMixin):
          tRS_rD: cute.Tensor,
          tRS_rC: Optional[cute.Tensor] = None,
      ) -> Optional[cute.Tensor]:
@@ -334,16 +412,19 @@ index f2bf896..ab18e36 100644
 +                col_arg_index = 0
 +                tile_arg_index = 0
 +                for arg_kind in params.tensor_epilogue_arg_kinds:
-+                    tRS_rEpilogueAux = cute.make_rmem_tensor_like(tRS_rD, self.acc_dtype)
 +                    if const_expr(arg_kind == 1):
-+                        tRS_rEpilogueAux.store(tRsTileAuxes[tile_arg_index].load().to(self.acc_dtype))
++                        epilogue_aux = tRsTileAuxes[tile_arg_index]
 +                        tile_arg_index += 1
 +                    elif const_expr(arg_kind == 2):
-+                        tRS_rEpilogueAux.store(tDrRowVecs[row_arg_index].load().to(self.acc_dtype))
++                        epilogue_aux = tDrRowVecs[row_arg_index]
 +                        row_arg_index += 1
 +                    else:
-+                        tRS_rEpilogueAux.store(tDrColVecs[col_arg_index].load().to(self.acc_dtype))
++                        epilogue_aux = tDrColVecs[col_arg_index]
 +                        col_arg_index += 1
++                    tRS_rEpilogueAux = cute.make_rmem_tensor_like(
++                        tRS_rD, epilogue_aux.element_type
++                    )
++                    tRS_rEpilogueAux.store(epilogue_aux.load())
 +                    epilogue_aux_values.append(tRS_rEpilogueAux.load())
 +                epilogue_result = params.tensor_epilogue_fn(
 +                    tRS_rEpilogueIn.load(), *tuple(epilogue_aux_values)
