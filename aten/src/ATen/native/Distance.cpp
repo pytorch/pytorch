@@ -2,7 +2,6 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/native/Distance.h>
 #include <c10/util/accumulate.h>
@@ -45,6 +44,15 @@ DEFINE_DISPATCH(pdist_forward_stub);
 DEFINE_DISPATCH(pdist_backward_stub);
 DEFINE_DISPATCH(cdist_stub);
 DEFINE_DISPATCH(cdist_backward_stub);
+
+static inline void cdist_supported_device_check(const Tensor& x1, const Tensor& x2, const char* op) {
+  auto check = [&](DeviceType d, const char* which) {
+    TORCH_CHECK(d == kCPU || d == kCUDA || d == kXPU || d == kMPS || d == kPrivateUse1,
+                op, " only supports CPU, XPU, CUDA, MPS and PrivateUse1 devices, ", which, " got: ", d);
+  };
+  check(x1.device().type(), "X1");
+  check(x2.device().type(), "X2");
+}
 
 Tensor pairwise_distance(const Tensor& x1, const Tensor& x2, double p, double eps, bool keepdim) {
   // Since either x1 or x2 could be broadcasted
@@ -103,8 +111,7 @@ static Tensor cdist_impl(const Tensor& x1, const Tensor& x2, const double p, std
   // See Note [cdist relies on cdist_impl redispatching]
   // Keep this condition in sync with the condition at the Note
   if (!(p == 2 && (mode == 1 || (mode == 0 && (r1 > 25 || r2 > 25))))) {
-    TORCH_CHECK(device1 == kCPU || device1 == kCUDA || device1 == kXPU || device1 == kPrivateUse1, "cdist only supports CPU, XPU, CUDA and PrivateUse1 devices, X1 got: ", device1);
-    TORCH_CHECK(device2 == kCPU || device2 == kCUDA || device2 == kXPU || device2 == kPrivateUse1, "cdist only supports CPU, XPU, CUDA and PrivateUse1 devices, X2 got: ", device2);
+    cdist_supported_device_check(x1, x2, "cdist");
   }
 
   auto dim1 = x1.dim();
@@ -152,9 +159,7 @@ Tensor cdist(const Tensor& x1, const Tensor& x2, const double p, std::optional<i
   TORCH_CHECK(x1.dim() >= 2, "cdist only supports at least 2D tensors, X1 got: ", x1.dim(), "D");
   TORCH_CHECK(x2.dim() >= 2, "cdist only supports at least 2D tensors, X2 got: ", x2.dim(), "D");
   TORCH_CHECK(x1.sym_size(-1) == x2.sym_size(-1), "X1 and X2 must have the same number of columns. X1: ", x1.sym_size(-1), " X2: ", x2.sym_size(-1));
-  auto maybe_outnames = namedinference::compute_cdist_outnames(x1, x2);
   auto result = [&]() {
-    NoNamesGuard guard;
     SymInt r1 = x1.sym_size(-2);
     SymInt r2 = x2.sym_size(-2);
     // Special case for empty input: always call the version with explicit autograd to ensure the graph is properly connected
@@ -172,7 +177,6 @@ Tensor cdist(const Tensor& x1, const Tensor& x2, const double p, std::optional<i
         return at::_cdist_forward(x1, x2, p, compute_mode);
     }
   }();
-  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
   return result;
 }
 
@@ -180,12 +184,9 @@ Tensor _cdist_forward(const Tensor& x1, const Tensor& x2, const double p, std::o
   TORCH_CHECK(x1.dim() >= 2, "cdist only supports at least 2D tensors, X1 got: ", x1.dim(), "D");
   TORCH_CHECK(x2.dim() >= 2, "cdist only supports at least 2D tensors, X2 got: ", x2.dim(), "D");
   TORCH_CHECK(x1.size(-1) == x2.size(-1), "X1 and X2 must have the same number of columns. X1: ", x1.size(-1), " X2: ", x2.size(-1));
-  auto maybe_outnames = namedinference::compute_cdist_outnames(x1, x2);
   auto result = [&]() {
-    NoNamesGuard guard;
     return cdist_impl(x1, x2, p, compute_mode);
   }();
-  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
   return result;
 }
 
@@ -228,14 +229,11 @@ Tensor _cdist_backward(const Tensor& _grad, const Tensor& _x1, const Tensor& _x2
   auto grad = _grad.contiguous();
   int64_t n = x1.size(-2);
   int64_t m = x1.size(-1);
-  auto device1 = x1.device().type();
-  TORCH_CHECK(device1 == kCPU || device1 == kCUDA || device1 == kXPU || device1 == kPrivateUse1, "_cdist_backward only supports CPU, XPU, CUDA and PrivateUse1 devices, X1 got: ", device1);
-  auto device2 = x2.device().type();
-  TORCH_CHECK(device2 == kCPU || device2 == kCUDA || device2 == kXPU || device2 == kPrivateUse1, "_cdist_backward only supports CPU, XPU, CUDA and PrivateUse1 devices, X2 got: ", device2);
+  cdist_supported_device_check(x1, x2, "_cdist_backward");
 
   Tensor grad_x1 =
       at::empty({batch_product, n, m}, x1.options(), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  cdist_backward_stub(device1, grad_x1, grad, x1, x2, p, cdist);
+  cdist_backward_stub(x1.device().type(), grad_x1, grad, x1, x2, p, cdist);
 
   // Use x1.size() here and not the original size of _x1.size() as this gradient is not taking broadcasting into account
   // Broadcasting will be handled automatically by the autograd engine

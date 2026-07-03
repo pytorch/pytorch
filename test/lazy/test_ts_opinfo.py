@@ -255,7 +255,9 @@ class TestLazyOpInfo(TestCase):
             self.assertEqual(type(a), type(b))
             if isinstance(a, torch.Tensor):
                 self.assertTrue(
-                    torch.allclose(clone_to_device(a, test_device), b, atol=1e-4)
+                    torch.allclose(
+                        clone_to_device(a, test_device), b, atol=1e-4, equal_nan=True
+                    )
                 )
 
             if isinstance(a, Sequence):
@@ -301,7 +303,9 @@ class TestLazyOpInfo(TestCase):
             self.assertEqual(type(a), type(b))
             if isinstance(a, torch.Tensor):
                 self.assertTrue(
-                    torch.allclose(clone_to_device(a, test_device), b, atol=1e-4)
+                    torch.allclose(
+                        clone_to_device(a, test_device), b, atol=1e-4, equal_nan=True
+                    )
                 )
 
             if isinstance(a, Sequence):

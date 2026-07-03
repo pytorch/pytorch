@@ -17,6 +17,7 @@ from torch.distributed.tensor import (
     DeviceMesh,
     distribute_tensor,
     DTensor,
+    Partial,
     Replicate,
     Shard,
 )
@@ -29,6 +30,7 @@ from torch.distributed.tensor.parallel import (
 )
 from torch.distributed.tensor.parallel.input_reshard import input_reshard
 from torch.testing._internal.common_device_type import skipXPUIf
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -563,6 +565,304 @@ class DistTensorParallelExampleTest(DTensorTestBase):
                             dist_y = F.cross_entropy(
                                 dist_x, target, reduction=reduction
                             )
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    def test_loss_parallel_multi_dim_mesh(self):
+        """Test loss_parallel with multi-dimensional DeviceMesh (e.g. DP + TP)."""
+        # Create a 2D mesh: (dp=2, tp=2) on 4 GPUs
+        mesh_2d = DeviceMesh(
+            self.device_type,
+            torch.arange(self.world_size).reshape(2, 2),
+            mesh_dim_names=("dp", "tp"),
+        )
+
+        channel_size, channel_dim = 16, 1
+        x = torch.rand(8, channel_size, device=self.device_type, requires_grad=True)
+        target = torch.randint(channel_size, (8,), device=self.device_type)
+        weight = torch.rand(channel_size, device=self.device_type)
+
+        # Input: Shard(0) on dp (batch), Shard(1) on tp (vocab/channel)
+        dist_x = distribute_tensor(x, mesh_2d, [Shard(0), Shard(channel_dim)])
+        # Target: Shard(0) on dp (batch), Replicate on tp
+        dist_target = distribute_tensor(target, mesh_2d, [Shard(0), Replicate()])
+
+        # reduction="sum"
+        y_sum = F.cross_entropy(x, target, reduction="sum")
+        with loss_parallel():
+            dist_y = F.cross_entropy(dist_x, dist_target, reduction="sum")
+            # Loss should be Partial("sum") on dp dim, Replicate on tp dim
+            self.assertEqual(dist_y.placements[0], Partial("sum"))
+            self.assertTrue(dist_y.placements[1].is_replicate())
+            self.assertEqual(dist_y.full_tensor(), y_sum)
+
+            dist_y.sum().backward()
+            y_sum.sum().backward()
+            self.assertEqual(dist_x.grad.full_tensor(), x.grad)
+        x.grad = None
+
+        # reduction="none": per-sample loss, sharded on dp, replicate on tp.
+        y_none = F.cross_entropy(x, target, reduction="none")
+        with loss_parallel():
+            dist_x_none = distribute_tensor(x, mesh_2d, [Shard(0), Shard(channel_dim)])
+            dist_y_none = F.cross_entropy(dist_x_none, dist_target, reduction="none")
+            self.assertTrue(dist_y_none.placements[0].is_shard(0))
+            self.assertTrue(dist_y_none.placements[1].is_replicate())
+            self.assertEqual(dist_y_none.full_tensor(), y_none)
+
+            # Force grad_output to arrive at the backward handler with placements
+            # that do NOT match the forward output (Replicate on dp vs.
+            # Shard(0) on dp): pass an explicit fully-replicated grad_output via
+            # torch.autograd.grad. Without the grad_output.redistribute(...) in
+            # _nll_loss_backward_handler, the local shape of grad_output would be
+            # the full batch (8,), not the per-rank local batch (4,), and the
+            # backward computation would shape-mismatch against x._local_tensor.
+            grad_out = distribute_tensor(
+                torch.ones_like(y_none), mesh_2d, [Replicate(), Replicate()]
+            )
+            (grad_x_none,) = torch.autograd.grad(
+                outputs=dist_y_none, inputs=dist_x_none, grad_outputs=grad_out
+            )
+            y_none.sum().backward()
+            self.assertTrue(grad_x_none.placements[0].is_shard(0))
+            self.assertTrue(grad_x_none.placements[1].is_shard(channel_dim))
+            self.assertEqual(grad_x_none.full_tensor(), x.grad)
+        x.grad = None
+
+        # reduction="none" with weight arg. Exercise the backward redistribute
+        # path by passing an explicit fully-replicated grad_output (weight path
+        # goes through the same backward handler but with weight != None).
+        y_none_w = F.cross_entropy(x, target, weight, reduction="none")
+        with loss_parallel():
+            dist_x_none_w = distribute_tensor(
+                x, mesh_2d, [Shard(0), Shard(channel_dim)]
+            )
+            dist_y_none_w = F.cross_entropy(
+                dist_x_none_w, dist_target, weight, reduction="none"
+            )
+            self.assertTrue(dist_y_none_w.placements[0].is_shard(0))
+            self.assertTrue(dist_y_none_w.placements[1].is_replicate())
+            self.assertEqual(dist_y_none_w.full_tensor(), y_none_w)
+
+            grad_out_w = distribute_tensor(
+                torch.ones_like(y_none_w), mesh_2d, [Replicate(), Replicate()]
+            )
+            (grad_x_none_w,) = torch.autograd.grad(
+                outputs=dist_y_none_w, inputs=dist_x_none_w, grad_outputs=grad_out_w
+            )
+            y_none_w.sum().backward()
+            self.assertTrue(grad_x_none_w.placements[0].is_shard(0))
+            self.assertTrue(grad_x_none_w.placements[1].is_shard(channel_dim))
+            self.assertEqual(grad_x_none_w.full_tensor(), x.grad)
+        x.grad = None
+
+        # reduction="sum" with weight arg on multi-dim mesh
+        y_weighted = F.cross_entropy(x, target, weight, reduction="sum")
+        with loss_parallel():
+            dist_x_w = distribute_tensor(x, mesh_2d, [Shard(0), Shard(channel_dim)])
+            dist_y_w = F.cross_entropy(dist_x_w, dist_target, weight, reduction="sum")
+            self.assertEqual(dist_y_w.placements[0], Partial("sum"))
+            self.assertTrue(dist_y_w.placements[1].is_replicate())
+            self.assertEqual(dist_y_w.full_tensor(), y_weighted)
+
+            dist_y_w.sum().backward()
+            y_weighted.sum().backward()
+            self.assertEqual(dist_x_w.grad.full_tensor(), x.grad)
+
+        # reduction="mean" is not supported on multi-dim mesh
+        with loss_parallel():
+            with self.assertRaisesRegex(NotImplementedError, "one-dimensional"):
+                F.cross_entropy(dist_x, dist_target, reduction="mean")
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    def test_loss_parallel_replicate_non_tp_dim(self):
+        """Non-TP mesh dim = Replicate (not Shard) must also work."""
+        mesh_2d = DeviceMesh(
+            self.device_type,
+            torch.arange(self.world_size).reshape(2, 2),
+            mesh_dim_names=("rep", "tp"),
+        )
+
+        channel_size, channel_dim = 16, 1
+        x = torch.rand(8, channel_size, device=self.device_type, requires_grad=True)
+        target = torch.randint(channel_size, (8,), device=self.device_type)
+
+        # Input: Replicate on the first dim, Shard(channel_dim) on TP
+        dist_x = distribute_tensor(x, mesh_2d, [Replicate(), Shard(channel_dim)])
+        dist_target = distribute_tensor(target, mesh_2d, [Replicate(), Replicate()])
+
+        # reduction="sum": non-TP dim is Replicate, so it stays Replicate
+        # (no Partial rewrite since the corresponding input placement is not Shard).
+        y_sum = F.cross_entropy(x, target, reduction="sum")
+        with loss_parallel():
+            dist_y = F.cross_entropy(dist_x, dist_target, reduction="sum")
+            self.assertTrue(dist_y.placements[0].is_replicate())
+            self.assertTrue(dist_y.placements[1].is_replicate())
+            self.assertEqual(dist_y.full_tensor(), y_sum)
+
+            dist_y.backward()
+            y_sum.backward()
+            self.assertEqual(dist_x.grad.full_tensor(), x.grad)
+        x.grad = None
+        dist_x.grad = None
+
+        # reduction="none": target placements = (Replicate(), Replicate()).
+        y_none = F.cross_entropy(x, target, reduction="none")
+        with loss_parallel():
+            dist_y_none = F.cross_entropy(dist_x, dist_target, reduction="none")
+            self.assertTrue(dist_y_none.placements[0].is_replicate())
+            self.assertTrue(dist_y_none.placements[1].is_replicate())
+            self.assertEqual(dist_y_none.full_tensor(), y_none)
+
+            dist_y_none.sum().backward()
+            y_none.sum().backward()
+            self.assertEqual(dist_x.grad.full_tensor(), x.grad)
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    def test_loss_parallel_tp_not_last_dim(self):
+        """TP mesh dim need not be the last dim: (tp, dp) ordering must also work."""
+        # Create a 2D mesh with TP as the FIRST dim: (tp=2, dp=2)
+        mesh_2d = DeviceMesh(
+            self.device_type,
+            torch.arange(self.world_size).reshape(2, 2),
+            mesh_dim_names=("tp", "dp"),
+        )
+
+        channel_size, channel_dim = 16, 1
+        x = torch.rand(8, channel_size, device=self.device_type, requires_grad=True)
+        target = torch.randint(channel_size, (8,), device=self.device_type)
+
+        # Input: Shard(channel_dim) on tp (first), Shard(0) on dp (second)
+        dist_x = distribute_tensor(x, mesh_2d, [Shard(channel_dim), Shard(0)])
+        # Target: Replicate on tp, Shard(0) on dp
+        dist_target = distribute_tensor(target, mesh_2d, [Replicate(), Shard(0)])
+
+        y_sum = F.cross_entropy(x, target, reduction="sum")
+        with loss_parallel():
+            dist_y = F.cross_entropy(dist_x, dist_target, reduction="sum")
+            # TP is at dim 0 -> Replicate; DP at dim 1 -> Partial("sum")
+            self.assertTrue(dist_y.placements[0].is_replicate())
+            self.assertEqual(dist_y.placements[1], Partial("sum"))
+            self.assertEqual(dist_y.full_tensor(), y_sum)
+
+            dist_y.sum().backward()
+            y_sum.sum().backward()
+            self.assertEqual(dist_x.grad.full_tensor(), x.grad)
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    def test_loss_parallel_3d_input_non_batch_shard(self):
+        """3-D input (batch, class, seq) with the non-TP mesh dim sharding the
+        seq dim (d=2 > channel_dim=1). This exercises the ``d > channel_dim``
+        dim-shift in target/output placements (Shard(2) on input → Shard(1) on
+        the (batch, seq) target) and the ``nll_loss2d_forward/backward`` path.
+        """
+        mesh_2d = DeviceMesh(
+            self.device_type,
+            torch.arange(self.world_size).reshape(2, 2),
+            mesh_dim_names=("cp", "tp"),
+        )
+
+        batch, channel_size, seq = 4, 16, 6
+        channel_dim = 1
+        x = torch.rand(
+            batch, channel_size, seq, device=self.device_type, requires_grad=True
+        )
+        target = torch.randint(channel_size, (batch, seq), device=self.device_type)
+
+        # Input: Shard(seq) on cp (non-TP), Shard(class) on tp.
+        dist_x = distribute_tensor(x, mesh_2d, [Shard(2), Shard(channel_dim)])
+        # Target is (batch, seq); the seq-sharded input dim shifts down to 1.
+        dist_target = distribute_tensor(target, mesh_2d, [Shard(1), Replicate()])
+
+        # reduction="sum"
+        y_sum = F.cross_entropy(x, target, reduction="sum")
+        with loss_parallel():
+            dist_y = F.cross_entropy(dist_x, dist_target, reduction="sum")
+            self.assertEqual(dist_y.placements[0], Partial())
+            self.assertTrue(dist_y.placements[1].is_replicate())
+            self.assertEqual(dist_y.full_tensor(), y_sum)
+
+            dist_y.sum().backward()
+            y_sum.sum().backward()
+            self.assertEqual(dist_x.grad.full_tensor(), x.grad)
+        x.grad = None
+
+        # reduction="none": output shape (batch, seq); target placements
+        # (Shard(1), Replicate()) are inherited directly.
+        y_none = F.cross_entropy(x, target, reduction="none")
+        with loss_parallel():
+            dist_x_none = distribute_tensor(x, mesh_2d, [Shard(2), Shard(channel_dim)])
+            dist_y_none = F.cross_entropy(dist_x_none, dist_target, reduction="none")
+            self.assertTrue(dist_y_none.placements[0].is_shard(1))
+            self.assertTrue(dist_y_none.placements[1].is_replicate())
+            self.assertEqual(dist_y_none.full_tensor(), y_none)
+
+            # Exercise the backward redistribute path with a mismatched
+            # (fully-replicated) grad_output.
+            grad_out = distribute_tensor(
+                torch.ones_like(y_none), mesh_2d, [Replicate(), Replicate()]
+            )
+            (grad_x_none,) = torch.autograd.grad(
+                outputs=dist_y_none, inputs=dist_x_none, grad_outputs=grad_out
+            )
+            y_none.sum().backward()
+            self.assertTrue(grad_x_none.placements[0].is_shard(2))
+            self.assertTrue(grad_x_none.placements[1].is_shard(channel_dim))
+            self.assertEqual(grad_x_none.full_tensor(), x.grad)
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    def test_loss_parallel_invalid_non_tp_placement(self):
+        """Non-TP mesh dim with a placement that is neither Shard nor Replicate is rejected."""
+        mesh_2d = DeviceMesh(
+            self.device_type,
+            torch.arange(self.world_size).reshape(2, 2),
+            mesh_dim_names=("dp", "tp"),
+        )
+
+        channel_size, channel_dim = 16, 1
+        local_x = torch.rand(
+            4, channel_size // 2, device=self.device_type, requires_grad=True
+        )
+        local_target = torch.randint(channel_size, (4,), device=self.device_type)
+
+        # Force a Partial placement on the non-TP (dp) mesh dim via from_local.
+        dist_x = DTensor.from_local(
+            local_x, mesh_2d, [Partial("sum"), Shard(channel_dim)], run_check=False
+        )
+        dist_target = DTensor.from_local(
+            local_target, mesh_2d, [Replicate(), Replicate()], run_check=False
+        )
+
+        with loss_parallel():
+            for reduction in ("sum", "none", "mean"):
+                with self.assertRaisesRegex(ValueError, "Shard or Replicate"):
+                    F.cross_entropy(dist_x, dist_target, reduction=reduction)
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    def test_loss_parallel_plain_tensor_target_rejected_on_multi_dim(self):
+        """On multi-dim mesh with a batch-sharded non-TP dim, a plain torch.Tensor
+        target is ambiguous (full global vs. local slice) and must be rejected.
+        """
+        mesh_2d = DeviceMesh(
+            self.device_type,
+            torch.arange(self.world_size).reshape(2, 2),
+            mesh_dim_names=("dp", "tp"),
+        )
+
+        channel_size, channel_dim = 16, 1
+        x = torch.rand(8, channel_size, device=self.device_type, requires_grad=True)
+        target = torch.randint(channel_size, (8,), device=self.device_type)
+
+        dist_x = distribute_tensor(x, mesh_2d, [Shard(0), Shard(channel_dim)])
+
+        with loss_parallel():
+            with self.assertRaisesRegex(ValueError, "requires a DTensor"):
+                F.cross_entropy(dist_x, target, reduction="sum")
 
 
 instantiate_parametrized_tests(DistTensorParallelExampleTest)

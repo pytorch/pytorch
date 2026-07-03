@@ -34,6 +34,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skipIfRocm,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -273,7 +274,7 @@ class DistMatrixOpsTest(DTensorTestBase):
                     self.assertEqual(
                         bias_placement.reduce_op,
                         output_placement.reduce_op,
-                        f"Bias Partial should have same reduce_op as output Partial. "
+                        lambda msg: f"{msg}\nBias Partial should have same reduce_op as output Partial. "
                         f"Got bias={bias_placement.reduce_op}, output={output_placement.reduce_op}",
                     )
 
@@ -452,6 +453,7 @@ class DistMatrixOpsTest(DTensorTestBase):
         expected_placements = (Replicate(),)
         self.assertEqual(out.placements, expected_placements)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180006")
     @with_comms
     @skip_unless_torch_gpu
     @unittest.skipIf(

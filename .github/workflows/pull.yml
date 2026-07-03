@@ -1,3 +1,4 @@
+# Owner(s): ["module: ci"]
 name: pull
 
 on:
@@ -69,7 +70,7 @@ jobs:
   # ╠══════════════════════════════════════════════════════════════════════╣
 
   linux-jammy-py3_10-gcc11-build:
-    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.10-gcc11 ') || contains(needs.job-filter.outputs.jobs, ' linux-docs ') }}
+    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.10-gcc11 ') }}
     name: linux-jammy-py3.10-gcc11
     uses: ./.github/workflows/_linux-build.yml
     needs:
@@ -79,6 +80,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.10-gcc11
       docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang18
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
@@ -98,7 +100,7 @@ jobs:
           { config: "libtorch_agnostic_targetting", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
           { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
         ]}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.10"
       compiler: gcc11
     secrets: inherit
@@ -117,7 +119,7 @@ jobs:
       docker-image: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.test-matrix }}
       tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.10"
       compiler: gcc11
     secrets: inherit
@@ -135,6 +137,7 @@ jobs:
       runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
       build-environment: linux-jammy-aarch64-py3.10
       docker-image-name: ci-image:pytorch-linux-jammy-aarch64-py3.10-gcc13
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       runner: linux.arm64.m8g.4xlarge
       test-matrix: |
         { include: [
@@ -145,7 +148,7 @@ jobs:
           { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.m8g.4xlarge" },
           { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.m8g.4xlarge" },
         ]}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.10"
       compiler: gcc13
     secrets: inherit
@@ -163,7 +166,7 @@ jobs:
       docker-image: ${{ needs.linux-jammy-aarch64-py3_10-gcc13-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-aarch64-py3_10-gcc13-build.outputs.test-matrix }}
       tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.10"
       compiler: gcc13
     secrets: inherit
@@ -179,6 +182,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.14t-clang18
       docker-image-name: ci-image:pytorch-linux-jammy-py3.14t-clang18
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
@@ -196,7 +200,7 @@ jobs:
           { config: "einops", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
           { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
         ]}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.14t"
       compiler: clang18
     secrets: inherit
@@ -212,32 +216,14 @@ jobs:
       build-environment: linux-jammy-py3.14t-clang18
       docker-image: ${{ needs.linux-jammy-py3_14t-clang18-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_14t-clang18-build.outputs.test-matrix }}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.14t"
       compiler: clang18
     secrets: inherit
 
-  # ╠══════════════════════════════════════════════════════════════════════╣
-  # ║ linux-docs                                                           ║
-  # ╠══════════════════════════════════════════════════════════════════════╣
-
-  linux-docs:
-    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-docs ') }}
-    name: linux-docs
-    uses: ./.github/workflows/_docs.yml
-    needs:
-      - linux-jammy-py3_10-gcc11-build
-      - job-filter
-      - get-label-type
-    with:
-      build-environment: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.build-environment }}
-      docker-image: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.docker-image }}
-      run-doxygen: true
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      python-version: "3.10"
-      compiler: gcc11
-    secrets: inherit
+  # Docs are built and the preview is published by docs-build.yml so the
+  # preview can go up as soon as the docs finish, without waiting for the rest
+  # of this workflow to conclude.
 
   # ╠══════════════════════════════════════════════════════════════════════╣
   # ║ linux-jammy-py3.10-gcc11-no-ops (build only)                         ║
@@ -254,11 +240,12 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.10-gcc11-no-ops
       docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang18
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
         ]}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.10"
       compiler: gcc11
     secrets: inherit
@@ -279,6 +266,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.10-clang18-asan
       docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang18
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
@@ -290,7 +278,7 @@ jobs:
           { config: "default", shard: 7, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
           { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
         ]}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.10"
       compiler: clang18
       # TODO (huydhn): Add this back once other workflow migrates
@@ -311,7 +299,7 @@ jobs:
       docker-image: ${{ needs.linux-jammy-py3_10-clang18-asan-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_10-clang18-asan-build.outputs.test-matrix }}
       tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.10"
       compiler: clang18
       # TODO (huydhn): Add this back once other workflow migrates
@@ -333,6 +321,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.10-clang18
       docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang18
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
@@ -349,7 +338,7 @@ jobs:
           { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
           { config: "onnx", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
         ]}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.10"
       compiler: clang18
     secrets: inherit
@@ -368,7 +357,7 @@ jobs:
       docker-image: ${{ needs.linux-jammy-py3_10-clang18-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_10-clang18-build.outputs.test-matrix }}
       tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.10"
       compiler: clang18
     secrets: inherit
@@ -388,6 +377,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.14-clang18
       docker-image-name: ci-image:pytorch-linux-jammy-py3.14-clang18
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
@@ -403,7 +393,7 @@ jobs:
           { config: "einops", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
           { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
         ]}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.14"
       compiler: clang18
     secrets: inherit
@@ -421,7 +411,7 @@ jobs:
       docker-image: ${{ needs.linux-jammy-py3_14-clang18-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_14-clang18-build.outputs.test-matrix }}
       tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.14"
       compiler: clang18
     secrets: inherit
@@ -441,11 +431,12 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-cuda13.0-cudnn9-py3.10-clang18
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3.10-clang18
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
         ]}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.10"
       compiler: clang18
       cuda-version: "13.0"
@@ -466,12 +457,13 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.10-gcc11-mobile-lightweight-dispatch-build
       docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang18
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       build-generates-artifacts: false
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
         ]}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.10"
       compiler: gcc11
     secrets: inherit
@@ -492,34 +484,30 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-rocm-py3.10
       docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       # TODO (huydhn): Add this back once other workflow migrates
       # sync-tag: rocm-build
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 3, runner: "linux.rocm.gpu.2" },
-          { config: "default", shard: 2, num_shards: 3, runner: "linux.rocm.gpu.2" },
-          { config: "default", shard: 3, num_shards: 3, runner: "linux.rocm.gpu.2" },
-        ]}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.10"
     secrets: inherit
 
   # ╠══════════════════════════════════════════════════════════════════════╣
-  # ║ linux-jammy-xpu-n-py3.10 (build)                                     ║
+  # ║ linux-noble-xpu-n-py3.10 (build)                                     ║
   # ╠══════════════════════════════════════════════════════════════════════╣
 
-  linux-jammy-xpu-n-py3_10-build:
+  linux-noble-xpu-n-py3_10-build:
     if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-xpu-n-py3.10 ') }}
-    name: linux-jammy-xpu-n-py3.10
+    name: linux-noble-xpu-n-py3.10
     uses: ./.github/workflows/_linux-build.yml
     needs:
       - get-label-type
       - job-filter
     with:
       runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
-      runner: linux.c7i.4xlarge
+      runner: linux.c7i.8xlarge
       build-environment: linux-noble-xpu-n-py3.10
       docker-image-name: ci-image:pytorch-linux-noble-xpu-n-py3
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 4, runner: "linux.idc.xpu" },
@@ -527,7 +515,7 @@ jobs:
           { config: "default", shard: 3, num_shards: 4, runner: "linux.idc.xpu" },
           { config: "default", shard: 4, num_shards: 4, runner: "linux.idc.xpu" },
         ]}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.10"
     secrets: inherit
 
@@ -543,11 +531,12 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.13-clang18
       docker-image-name: ci-image:pytorch-linux-jammy-py3.13-clang18
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
           { config: "dynamo_cpython", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
         ]}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.13"
       compiler: clang18
     secrets: inherit
@@ -560,7 +549,7 @@ jobs:
       build-environment: linux-jammy-py3.13-clang18
       docker-image: ${{ needs.dynamo-cpython-build.outputs.docker-image }}
       test-matrix: ${{ needs.dynamo-cpython-build.outputs.test-matrix }}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.13"
       compiler: clang18
     secrets: inherit
