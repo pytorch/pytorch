@@ -886,6 +886,14 @@ partial_fn = functools.partial(fn, scale=2)
         return d
 
     @make_test
+    def test_deque_reinit_resets_maxlen(a, b):
+        # deque.__init__ resets maxlen; re-init with more items than the old
+        # maxlen must not be clamped to the old maxlen.
+        d = collections.deque([a, b], maxlen=2)
+        d.__init__([a, b, a + 1, b + 1])
+        return d, d.maxlen
+
+    @make_test
     def test_slice1(a):
         return a[5]
 
