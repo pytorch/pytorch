@@ -6473,7 +6473,8 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
     def YIELD_VALUE(self, inst: Instruction) -> None:
         top = self.pop()
         self.generated_items.append(top)
-        if inst.argval == 1:
+        prev = self.instructions[self.indexof[inst] - 1].opname
+        if inst.opname == "YIELD_FROM" or prev == "SEND":
             self.frame_state = FrameState.FRAME_SUSPENDED_YIELD_FROM
         else:
             self.frame_state = FrameState.FRAME_SUSPENDED
