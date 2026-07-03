@@ -30,14 +30,14 @@ def distance(a, b, norm):
 
 
 @dataclass(frozen=True)
-class Norm(torch._opaque_base.OpaqueBase):
+class Norm(torch._custom_class_base.CustomClassBase):
     typ: str
 
     def __fx_repr__(self):
         return f"Norm(typ={self.typ!r})", {"Norm": Norm}
 
 
-torch._library.opaque_object.register_opaque_type(Norm, typ="value")
+torch._library.opaque_object.register_custom_class(Norm, typ="constant")
 
 
 @dataclass

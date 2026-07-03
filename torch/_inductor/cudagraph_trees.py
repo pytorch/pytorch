@@ -55,6 +55,7 @@ from typing import Any, cast, TYPE_CHECKING, TypeVar
 
 import torch.fx
 from torch import Tensor
+from torch._custom_class_base import CustomClassBase
 from torch._dynamo.callback import CallbackTrigger
 from torch._dynamo.graph_bytecode_inputs import (
     CURRENT_STREAM_INDEX,
@@ -90,7 +91,6 @@ from torch._inductor.cudagraph_utils import (
     WrappedFunction,
 )
 from torch._library.opaque_object import is_opaque_value
-from torch._opaque_base import OpaqueBase
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.storage import UntypedStorage
 from torch.utils import _pytree as pytree
@@ -177,7 +177,7 @@ def clear_cublass_cache() -> None:
     it will be allocated to the cudagraph private pool and accounted for in the allocator for the duration of the
     program. There is no overhead to this on replay since cudagraphs removes allocation overhead.
     """
-    torch.cuda._clear_cublas_workspaces()
+    torch._C._cuda_clearCublasWorkspaces()
 
 
 @contextlib.contextmanager
@@ -1913,9 +1913,9 @@ class CUDAGraphNode:
         ):
             for i, inp in enumerate(inputs):
                 if not isinstance(inp, torch.Tensor):
-                    if not isinstance(inp, (int, torch.Generator, OpaqueBase)):
+                    if not isinstance(inp, (int, torch.Generator, CustomClassBase)):
                         raise AssertionError(
-                            f"expected int, Generator, or OpaqueBase, got {type(inp)}"
+                            f"expected int, Generator, or CustomClassBase, got {type(inp)}"
                         )
 
                     recording_inputs.append(inp)
