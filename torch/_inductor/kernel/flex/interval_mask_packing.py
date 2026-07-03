@@ -30,6 +30,9 @@ from ...virtualized import NullHandler, V
 from .aux_vectorization import fx_aux_index_to_sympy
 
 
+perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
+
+
 # Fall back to scalar mask lowering before interval expansion makes generated CuTe too large.
 MAX_PACKED_MASK_INTERVALS_FOR_CODE_SIZE = 8
 LANE_UNIFORM_BINARY_OPS: Mapping[object, str] = {
@@ -287,6 +290,19 @@ class PackedMaskAnalyzer:
                 )
             case torch.ops.aten.eq.Tensor | torch.ops.aten.eq.Scalar:
                 return self.equality_to_intervals(node.args[0], node.args[1])
+            case torch.ops.aten.ne.Tensor | torch.ops.aten.ne.Scalar:
+                intervals = self.equality_to_intervals(node.args[0], node.args[1])
+                if intervals is None:
+                    return None
+                return self.complement_intervals(intervals)
+            case torch.ops.aten.logical_not.default | torch.ops.aten.bitwise_not.default:
+                child = node.args[0]
+                if not isinstance(child, torch.fx.Node):
+                    return None
+                intervals = self.node_to_intervals(child)
+                if intervals is None:
+                    return None
+                return self.complement_intervals(intervals)
             case _:
                 return None
 
@@ -349,6 +365,13 @@ class PackedMaskAnalyzer:
         if affine is None:
             return None
         lane_coeff, rest = affine
+        if lane_coeff == 0:
+            # Lane-uniform predicate (e.g. q_idx < seq_lens[b]): keep either all 32
+            # lanes or none. Encode as an upper bound of 32 * (0-or-positive) that the
+            # kernel's keep-mask rendering already clamps to [0, 32].
+            keep = -rest if strict else 1 - rest
+            upper = V.graph.sizevars.simplify(sympy.Integer(32) * keep)
+            return self.interval_if_renderable(sympy.Integer(0), upper)
         if lane_coeff == 1:
             upper = V.graph.sizevars.simplify(-rest if strict else -rest + 1)
             return self.interval_if_renderable(sympy.Integer(0), upper)
@@ -370,6 +393,15 @@ class PackedMaskAnalyzer:
         if affine is None:
             return None
         lane_coeff, rest = affine
+        if lane_coeff == 0:
+            # Lane-uniform equality (e.g. head_type[h] == 0): keep either all 32
+            # lanes or none. Both operands of Min are >= 32 iff rest == 0; the
+            # kernel's keep-mask rendering clamps the bound to [0, 32].
+            scale = sympy.Integer(32)
+            upper = V.graph.sizevars.simplify(
+                Min(scale * (1 - rest), scale * (1 + rest))
+            )
+            return self.interval_if_renderable(sympy.Integer(0), upper)
         if lane_coeff in (1, -1):
             lane_value = -rest if lane_coeff == 1 else rest
             lower = V.graph.sizevars.simplify(lane_value)
@@ -411,6 +443,26 @@ class PackedMaskAnalyzer:
         ):
             return (PackedMaskInterval(lower, upper),)
         return None
+
+    def complement_intervals(self, intervals: IntervalSet) -> MaybeIntervalSet:
+        """Complement a keep-set within the 32-lane window via De Morgan.
+
+        The complement of a union of intervals is the intersection of each
+        interval's two complement pieces, which stays interval-representable.
+        Interval bounds may be symbolic, so this composes existing renderable
+        bounds instead of sorting; merge_intersection caps the blowup.
+        """
+        result: IntervalSet = (PackedMaskInterval.full(),)
+        for interval in intervals:
+            pieces = (
+                PackedMaskInterval(sympy.Integer(0), interval.lower_lane),
+                PackedMaskInterval(interval.upper_lane_exclusive, sympy.Integer(32)),
+            )
+            merged = self.merge_intersection(result, pieces)
+            if merged is None:
+                return None
+            result = merged
+        return result
 
     def merge_intersection(
         self,
@@ -639,6 +691,13 @@ def select_packed_mask_intervals(
     )
     intervals = analyzer.node_to_intervals(output_val)
     if intervals is None:
+        perf_hint_log.info(
+            "flex FLASH: mask_mod could not be lowered to packed 32-lane intervals; "
+            "partial blocks will evaluate the mask per lane, which can be much "
+            "slower. Prefer comparisons of q_idx/kv_idx against lane-uniform bounds "
+            "(e.g. seq_lens[b]) over per-token gathers. mask graph:\n%s",
+            graph,
+        )
         return None
     if len(intervals) == 1 and intervals[0].is_full():
         return None
