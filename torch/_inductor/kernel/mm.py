@@ -829,19 +829,37 @@ def _is_rowwise_scaling(sz: Any, transpose: bool) -> bool:
 def _is_blockwise1xTILESIZE_scaling(
     sz: Any, tensor_sz: Any, tile_size: int, transpose: bool
 ) -> bool:
-    lhs = 1 if transpose else 0
-    rhs = 0 if transpose else 1
+    # Triton kernel always indexes scale with output dim as rows (dim 0)
+    # and contracting-dim blocks as columns (dim 1): [out_size, k_blocks].
+    # - Non-transposed (A, shape [M,K]): out=M at dim 0, K at dim 1
+    # - Transposed (B, shape [K,N]):     out=N at dim 1, K at dim 0
+    # After normalizing to [out, k_blocks]: sz[0]==out, sz[1]==ceil(K/tile)
+    if transpose:
+        out_dim, k_dim = tensor_sz[1], tensor_sz[0]
+    else:
+        out_dim, k_dim = tensor_sz[0], tensor_sz[1]
     return V.graph.sizevars.statically_known_equals(
-        sz[lhs], tensor_sz[lhs]
+        sz[0], out_dim
     ) and V.graph.sizevars.statically_known_equals(
-        sz[rhs], ceildiv(tensor_sz[rhs], tile_size)
+        sz[1], ceildiv(k_dim, tile_size)
     )
 
 
-def _is_blockwise128x128_scaling(sz: Any, tensor_sz: Any) -> bool:
-    return V.graph.sizevars.statically_known_equals(
-        sz[0], ceildiv(tensor_sz[0], 128)
-    ) and V.graph.sizevars.statically_known_equals(sz[1], ceildiv(tensor_sz[1], 128))
+def _is_blockwise128x128_scaling(sz: Any, tensor_sz: Any, transpose: bool = False) -> bool:
+    # Triton expects [out_blocks, k_blocks] (output blocks as rows, K blocks as cols).
+    # cuBLAS produces transposed+padded [k_blocks_padded_to_4, out_blocks] for 128x128.
+    # Accept both; lowering normalizes cuBLAS -> Triton before kernel launch.
+    if transpose:
+        out_blocks = ceildiv(tensor_sz[1], 128)  # N/128
+        k_blocks = ceildiv(tensor_sz[0], 128)    # K/128
+    else:
+        out_blocks = ceildiv(tensor_sz[0], 128)  # M/128
+        k_blocks = ceildiv(tensor_sz[1], 128)    # K/128
+    # Case 1: Triton layout [out_blocks, k_blocks] (with possible padding on k_blocks)
+    triton_ok = V.graph.sizevars.statically_known_equals(sz[0], out_blocks) and                 V.graph.sizevars.statically_known_geq(sz[1], k_blocks)
+    # Case 2: cuBLAS transposed layout [k_blocks_padded, out_blocks]
+    cublas_ok = V.graph.sizevars.statically_known_equals(sz[1], out_blocks) and                 V.graph.sizevars.statically_known_geq(sz[0], k_blocks)
+    return triton_ok or cublas_ok
 
 
 def is_desired_scaling(
@@ -860,7 +878,7 @@ def is_desired_scaling(
                 scale_size, t.get_size(), 128, transpose
             )
         case ScalingType.BlockWise128x128:
-            return _is_blockwise128x128_scaling(scale_size, t.get_size())
+            return _is_blockwise128x128_scaling(scale_size, t.get_size(), transpose)
         case _:
             raise AssertionError(f"Unsupported scaling type {scaling_type}")
 

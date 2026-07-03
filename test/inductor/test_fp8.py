@@ -100,7 +100,14 @@ def _prepare_blockwise_scale(
     # aligned with the data layout.
     if (block_outer, block_inner) == (1, 128):
         out = inverse_scale.t().contiguous().t()
-        return out.t() if transposed else out
+        # cuBLAS blockwise 1x128 expects scale_b (the weight scale) to have
+        # outer-dim-major layout with shape [N, K/128] (outer = weight's
+        # output dim N). The scale describes w's N dimension regardless of
+        # whether w is transposed to w.t() before being passed to scaled_mm,
+        # so transposing again when transposed=True produced a [K/128, N]
+        # view that cuBLAS rejected with "scale_b ... got [transposed]".
+        # Always return out in the outer-major layout.
+        return out
     pad_amount = (-inverse_scale.shape[-1]) % 4
     if pad_amount:
         inverse_scale = torch.nn.functional.pad(
