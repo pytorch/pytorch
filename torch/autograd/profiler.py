@@ -983,6 +983,26 @@ class profile:
 
     export_chrome_trace.__doc__ = EventList.export_chrome_trace.__doc__
 
+    def export_using_protocol(self, path: str, protocol_name: str | None = None):
+        if protocol_name is None or protocol_name == "chrome":
+            self.export_chrome_trace(path)
+            return
+
+        if not kineto_available():
+            log.error("Exporting with a custom protocol requires kineto.")
+        else:
+            kineto_path = f"{protocol_name}://{path}"
+            self.kineto_results.save(kineto_path)
+
+        import torch._inductor.config as inductor_config
+
+        if inductor_config.trace.provenance_tracking_to_timeline:
+            log.error(
+                "Adding stack trace to compiled kernel is not available "
+                "for protocol: %s.",
+                protocol_name,
+            )
+
     def export_stacks(self, path: str, metric: str = "self_cpu_time_total"):
         self._ensure_function_events()
         if self._function_events is None:
