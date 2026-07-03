@@ -814,6 +814,12 @@ jobs:
             export HF_DATASETS_OFFLINE=0
           fi
 
+          # The datasets library writes its arrow build + lock files even in offline
+          # mode and even for local datasets (e.g. torchtitan's c4_test), so keep its
+          # cache off the read-only /mnt/hf_cache mount.
+          export HF_DATASETS_CACHE="${RUNNER_TEMP}/hf_datasets"
+          mkdir -p "${HF_DATASETS_CACHE}"
+
           # shellcheck disable=SC2046
           python3 -m pip install $(echo dist/*.whl)[opt-einsum]
           ${TEST_COMMAND}
