@@ -2033,7 +2033,6 @@ class DimDynamic(Enum):
 class Constraint:
     warn_only: bool
 
-
 @dataclass(frozen=True, slots=True)
 class StrictMinMaxConstraint(Constraint):
     """
@@ -5750,7 +5749,6 @@ class ShapeEnv:
             and isinstance(constraint_dim, StrictMinMaxConstraint)
             and constraint_dim.vr.lower <= 1
         ):
-            do_not_specialize_zero_one = True
             specialize_zero_one = False
         else:
             specialize_zero_one = self.specialize_zero_one
