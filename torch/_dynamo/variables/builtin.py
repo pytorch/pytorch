@@ -95,13 +95,8 @@ from .dicts import (
     DictViewVariable,
 )
 from .hashable import is_hashable
-from .lists import (
-    BaseListVariable,
-    ListVariable,
-    TupleIteratorVariable,
-    TupleVariable,
-)
-from .misc import CellVariable, NullVariable, StringFormatVariable
+from .lists import BaseListVariable, ListVariable, TupleIteratorVariable, TupleVariable
+from .misc import NullVariable, StringFormatVariable
 from .object_protocol import (
     binary_iop,
     binary_op,
@@ -1398,16 +1393,12 @@ class BuiltinVariable(BaseBuiltinVariable):
     @staticmethod
     def _call_frame_locals_snapshot(tx: "InstructionTranslatorBase") -> VariableTracker:
         frame_local_names = set(tx.f_code.co_varnames) | set(tx.cell_and_freevars())
+        cell_and_freevars = set(tx.cell_and_freevars())
         frame_locals = {}
-        # Cells that collide with a fast local live in symbolic_cellvars; their
-        # cell contents take precedence over the (shadowing) fast local.
-        items = list(tx.symbolic_locals.items()) + list(tx.symbolic_cellvars.items())
-        for name, value in items:
+        for name, value in tx.symbolic_locals.items():
             if name not in frame_local_names:
                 continue
-            # Match on CellVariable, not name: a colliding fast local shares a
-            # cell's name but is not itself a cell.
-            if type.__instancecheck__(CellVariable, value):
+            if name in cell_and_freevars:
                 value = tx.output.side_effects.load_cell(value)
             if type.__instancecheck__(NullVariable, value) or isinstance(
                 value, variables.DeletedVariable
