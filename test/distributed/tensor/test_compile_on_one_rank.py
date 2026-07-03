@@ -206,7 +206,7 @@ class TestCompileOnOneRank(DTensorTestBase):
         """`dist.all_reduce(t)` with no `group=` (implicit `dist.group.WORLD`)
         should compile under compile_on_one_rank=True.
 
-        `WorldMetaClassVariable.var_getattr` was routing the WORLD lookup through
+        `WorldMetaClassVariable.getattro_impl` was routing the WORLD lookup through
         `SourcelessBuilder`, dropping the source it had just constructed for the
         guard. The resulting `TorchScriptObjectVariable` had the raw ProcessGroup
         as its `proxy` field and blew up later in `as_proxy()` when the PG was
