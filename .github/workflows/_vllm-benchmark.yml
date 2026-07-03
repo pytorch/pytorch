@@ -42,8 +42,8 @@ on:
 jobs:
   benchmark:
     runs-on: ${{ inputs.runner }}
-    # Heavy models (e.g. int4 27B) can run for hours; raise above the 6h default.
-    timeout-minutes: 480
+    # Heavy models (e.g. int4 27B) can run ~8h+; raise well above the 6h default.
+    timeout-minutes: 600
     permissions:
       id-token: write
       contents: read
