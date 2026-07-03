@@ -24,7 +24,6 @@ from torch.profiler._cupti.observers.base import (
     ObserverAnnotationSettings,
 )
 from torch.profiler._cupti.observers.observation_window import WindowFinalizerMixin
-from torch.profiler._cupti.pm_sampling import is_available as pm_is_available
 from torch.profiler._cupti.records import (
     Api,
     CudaEvent,
@@ -271,7 +270,7 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
             enable_pm_sampling
             and bool(self._pm_metrics)
             and self.available
-            and pm_is_available()
+            and torch.cuda.is_available()
         )
         # Rolling retention: PM sampling is continuous, so samples must survive across windows
         # (unlike _timed_frames, consumed per window) until a window harvests their time range.
