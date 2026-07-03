@@ -4173,25 +4173,10 @@ class TestVmapOperatorsOpInfo(TestCase):
         postprocess_fn=None,
     ):
         def test():
-            # some of the inputs suddenly become valid under vmap and won't throw an error
-            # carving these out to preserve the as much of the coverage still
-            def should_skip_error_input(error_input):
-                skip_error_regexes = {
-                    "only supports a 0-dimensional value tensor, but got tensor with 1 dimension",
-                    "value cannot be converted to type .* without overflow",
-                }
-                return (
-                    op.name in {"masked_fill", "masked_fill_"}
-                    and getattr(op, "variant_test_name", "") == "Tensor"
-                    and error_input.error_regex in skip_error_regexes
-                )
-
             # Error inputs check
             if op.error_inputs_func is not None:
                 error_inputs = op.error_inputs(device)
                 for error_input in error_inputs:
-                    if should_skip_error_input(error_input):
-                        continue
                     sample_input = error_input.sample_input
                     args = (sample_input.input,) + tuple(sample_input.args)
                     kwargs = sample_input.kwargs

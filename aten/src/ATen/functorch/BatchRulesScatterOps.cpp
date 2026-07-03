@@ -1132,6 +1132,11 @@ std::tuple<Tensor, std::optional<int64_t>> masked_fill_tensor_batch_rule(
       rankWithoutBatchDim(value, value_bdim));
 
   auto value_ = moveBatchDimToFront(value, value_bdim);
+  TORCH_CHECK(
+      !(value_.is_complex() && !self_.is_complex()),
+      "value cannot be converted to type ",
+      self_.scalar_type(),
+      " without overflow");
   value_ = value_.to(self_.device(), self_.scalar_type());
   value_ = maybePadToLogicalRank(value_, value_bdim, max_logical_rank);
   return std::make_tuple(at::where(mask_, value_, self_), 0);

@@ -373,6 +373,11 @@ static void masked_fill__Tensor_batch_rule(
   // when value is batched (0-d --> 1-d after batching)
   auto value_ = moveBatchDimToFront(value, value_bdim);
   value_ = maybePadToLogicalRank(value_, value_bdim, max_logical_rank);
+  TORCH_CHECK(
+      !(value_.is_complex() && !self_.is_complex()),
+      "value cannot be converted to type ",
+      self_.scalar_type(),
+      " without overflow");
   value_ = value_.to(
       self_.device(),
       self_.scalar_type(),
