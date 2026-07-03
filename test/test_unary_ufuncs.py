@@ -18,7 +18,6 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
-    onlyOn,
     onlyCPU,
     onlyCUDA,
     onlyNativeDeviceTypes,
@@ -884,7 +883,6 @@ class TestUnaryUfuncs(TestCase):
     # https://github.com/pytorch/pytorch/issues/126474
     @xfailIfTorchDynamo
     @dtypes(torch.double)
-    @onlyOn(["cpu", "cuda"])
     def test_unary_out_op_mem_overlap(self, device, dtype):
         sz = 3
         doubles = torch.randn(2 * sz, dtype=dtype, device=device)
