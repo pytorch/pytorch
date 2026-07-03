@@ -189,7 +189,12 @@ from .variables.misc import (
     UnknownVariable,
 )
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
-from .variables.object_protocol import generic_bool, generic_contains, generic_getiter
+from .variables.object_protocol import (
+    generic_bool,
+    generic_contains,
+    generic_getattr,
+    generic_getiter,
+)
 from .variables.sets import SetVariable
 from .variables.streams import SymbolicStreamState
 from .variables.tensor import supported_comparison_ops, SymNodeVariable, TensorVariable
@@ -1474,8 +1479,14 @@ class InstructionTranslatorBase(
         }
         # Only keep the locals that must remain on the stack.
         reads = livevars_analysis(self.instructions, self.current_instruction)
+        # inspect.signature() renames ".N" to "implicitN" for comprehension
+        # iterator variables because dotted names aren't valid identifiers.
+        # Normalize reads to match symbolic_locals keys.
+        normalized_reads = set()
+        for r in reads:
+            normalized_reads.add(r.replace(".", "implicit") if r.startswith(".") else r)
         self.symbolic_locals = {
-            k: v for k, v in self.symbolic_locals.items() if k in reads
+            k: v for k, v in self.symbolic_locals.items() if k in normalized_reads
         }
 
     def call_function(
@@ -2518,7 +2529,7 @@ class InstructionTranslatorBase(
     def _attach_traceback_to_exception(self, exc: ExceptionVals) -> None:
         # based on CPython's PyTraceBack_Here impl
         frame_summary = self.frame_summary()
-        tb = exc.var_getattr(
+        tb = exc.getattro_impl(
             # pyrefly: ignore [bad-argument-type]
             self,
             "__traceback__",
@@ -2700,7 +2711,7 @@ class InstructionTranslatorBase(
                     "expected self._isinstance_exception(val) to be true"
                 )
             typ = BuiltinVariable(val.exc_type)  # type: ignore[attr-defined, union-attr]
-            tb = val.var_getattr(
+            tb = val.getattro_impl(
                 # pyrefly: ignore[bad-argument-type]
                 self,
                 "__traceback__",
@@ -2719,7 +2730,7 @@ class InstructionTranslatorBase(
                 )
             typ = BuiltinVariable(val.exc_type)  # type: ignore[attr-defined]
 
-            tb = val.var_getattr(self, "__traceback__")
+            tb = val.getattro_impl(self, "__traceback__")
 
         args += [typ, val, tb]
         self.call_function(fn, args, {})
@@ -3162,12 +3173,16 @@ class InstructionTranslatorBase(
         )
 
     def _load_attr(self, attr: Any) -> None:
-        obj = self.pop()
-        result = VariableTracker.build(self, getattr).call_function(
-            self,  # type: ignore[arg-type]
-            [obj, VariableTracker.build(self, attr)],
-            {},
-        )
+        obj = self.pop().realize()
+        try:
+            result = generic_getattr(self, obj, attr)
+        except Unsupported:
+            if not obj.is_python_constant():
+                raise
+            source = AttrSource(obj.source, attr) if obj.source else None
+            result = VariableTracker.build(
+                self, getattr(obj.as_python_constant(), attr), source=source
+            )
         self.push(result)
 
     def LOAD_ATTR(self, inst: Instruction) -> None:
@@ -3201,7 +3216,7 @@ class InstructionTranslatorBase(
 
     def _maybe_sync_dealloc_attr(self, obj: VariableTracker, name: str) -> None:
         # Only check side_effects — a pure dict lookup with no observable
-        # side effects. We intentionally avoid var_getattr here because it
+        # side effects. We intentionally avoid getattro_impl here because it
         # can trigger __getattr__, add graph nodes, or cause graph breaks.
         if self.output.side_effects.has_pending_mutation_of_attr(obj, name):
             attr_var = self.output.side_effects.load_attr(obj, name)
@@ -3333,12 +3348,23 @@ class InstructionTranslatorBase(
         # the current instruction there should be a CALL.
         if is_leaf:
             reads = livevars_analysis(self.instructions, resume_inst)
+            # inspect.signature() renames ".N" to "implicitN" for comprehension
+            # iterator variables. Build a mapping to emit the bytecode name
+            # (.0) in argnames so the resume function's co_varnames matches
+            # the bytecode instructions.
+            implicit_to_bytecode: dict[str, str] = {}
+            for name in self.f_code.co_varnames:
+                if name.startswith("."):
+                    implicit_to_bytecode[name.replace(".", "implicit")] = name
             all_argnames = tuple(
-                k
+                implicit_to_bytecode.get(k, k)
                 for k in self.symbolic_locals
-                if k in reads and k not in self.cell_and_freevars()
+                if implicit_to_bytecode.get(k, k) in reads
+                and k not in self.cell_and_freevars()
             )
-            argnames_null_set = set(meta.locals_null_keys)
+            argnames_null_set = {
+                implicit_to_bytecode.get(k, k) for k in meta.locals_null_keys
+            }
             argnames = tuple(k for k in all_argnames if k not in argnames_null_set)
             argnames_null = tuple(k for k in all_argnames if k in argnames_null_set)
 
@@ -3352,12 +3378,16 @@ class InstructionTranslatorBase(
                     create_dup_top(),
                 ]
             )
+            bytecode_to_implicit = {v: k for k, v in implicit_to_bytecode.items()}
             for arg in argnames:
                 # current stack state: frames, frames[i], *(prev locals), frames[i]
+                locals_key = bytecode_to_implicit.get(arg, arg)
                 cg.extend_output(
                     [
                         create_dup_top(),
-                        cg.create_load_const(meta.num_stack + meta.locals_names[arg]),
+                        cg.create_load_const(
+                            meta.num_stack + meta.locals_names[locals_key]
+                        ),
                         cg.create_binary_subscr(),
                         *create_swap(2),
                     ],

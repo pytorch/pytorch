@@ -429,10 +429,23 @@ class _KinetoProfile:
                 "Profiler must be initialized before exporting chrome trace"
             )
         if self._use_cupti_monitor:
-            if self._monitor_window_id is None or self._cupti_profiler_observer is None:
-                raise AssertionError(
-                    "CUPTI monitor trace window must be closed before exporting"
+            obs = self._cupti_profiler_observer
+            if obs is None or not obs.available or self._monitor_window_id is None:
+                # Nothing to export this cycle: the per-cycle ProfilerObserver didn't register
+                # with the CUPTI monitor (available is False -- the intermittent case), or its
+                # window wasn't opened/closed (window id None). Skip rather than crash -- a
+                # profiler-trace hiccup must not take down a training run -- and clean up below.
+                _warn_once(
+                    "CUPTI monitor observer unavailable; skipping chrome trace export"
                 )
+                # join() tears down the poll thread + monitor registration, which exist only
+                # when the observer registered (available). An unavailable observer never
+                # started either, so just drop the reference and let it be GC'd.
+                if obs is not None and obs.available:
+                    obs.join()
+                self._cupti_profiler_observer = None
+                self._monitor_window_id = None
+                return
             # Capture the profiler's CPU-side trace (cheap, no device sync) and hand it + the
             # output path to the observer. Async: the poller merges + writes `path` once the
             # GPU records arrive; wait_for_exports() blocks for it.
@@ -531,6 +544,7 @@ class _KinetoProfile:
         group_by_input_shape: bool = False,
         group_by_stack_n: int = 0,
         group_by_overload_name: bool = False,
+        include_python_functions: bool = False,
     ):
         """Averages events, grouping them by operator name and (optionally) input shapes, stack
         and overload name.
@@ -546,7 +560,10 @@ class _KinetoProfile:
                 "Profiler must be initialized before getting key averages"
             )
         return self.profiler.key_averages(
-            group_by_input_shape, group_by_stack_n, group_by_overload_name
+            group_by_input_shape,
+            group_by_stack_n,
+            group_by_overload_name,
+            include_python_functions,
         )
 
     def events(self):

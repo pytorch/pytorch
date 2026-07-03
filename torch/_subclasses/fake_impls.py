@@ -1696,6 +1696,20 @@ def multi_device_op_default(
     return run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs)
 
 
+@register_op_impl(aten.shallow_copy_data_.default)
+def _(
+    fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
+) -> FakeTensor:
+    _, new_kwargs = _normalize_function_or_error(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+    source_device = new_kwargs["source"].device
+    with in_kernel_invocation_manager(fake_mode):
+        func(*args, **kwargs)
+    new_kwargs["input"].fake_device = source_device
+    return new_kwargs["input"]
+
+
 # same with multi_device_op_default, but return the input
 @register_op_impl(aten.copy.out)
 @register_op_impl(aten.slice_scatter.out)

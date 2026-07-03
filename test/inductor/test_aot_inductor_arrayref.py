@@ -196,9 +196,17 @@ CPU_TEST_FAILURES = {
     "test_deconv_freezing": fail_minimal_arrayref_interface(is_skip=True),
     "test_cond_share_predicate": fail_stack_allocation(is_skip=True),
     "test_cond_predicate_on_cpu": fail_stack_allocation(is_skip=True),
-    "test_while_loop_with_mixed_device_dynamic_True": fail_stack_allocation(),
+    # Flaky xpass on ROCm CI when left as an expected failure.
+    "test_while_loop_with_mixed_device_dynamic_True": fail_stack_allocation(
+        is_skip=True
+    ),
     "test_while_loop_with_mixed_device_dynamic_False": fail_stack_allocation(),
     "test_while_loop_with_pytree_inputs": fail_stack_allocation(),
+    # ArrayRefTensor outputs do not expose AtenTensorHandle, so this wrapper
+    # variant intentionally skips fallback output metadata assertions.
+    "test_aoti_custom_op_bad_fake_dtype_fails_fast": fail_stack_allocation(
+        is_skip=True
+    ),
     # FIXME: failed with Segfault while exiting the Python runtime
     "test_duplicate_constant_folding": fail_stack_allocation(is_skip=True),
     "test_aot_inductor_consts_cpp_build": fail_stack_allocation(is_skip=True),
@@ -221,8 +229,6 @@ CPU_TEST_FAILURES = {
     # minimal arrayref interface only works with CPU; test crashes.
     # https://github.com/pytorch/pytorch/issues/122983
     "test_multi_device": fail_minimal_arrayref_interface(is_skip=True),
-    # TODO: AssertionError: unsupported Optional type in convert_arg_type: Generator
-    "test_normal_functional": fail_stack_allocation(is_skip=True),
     # the test segfaults
     "test_repeat_output": fail_stack_allocation(is_skip=True),
     # segfault

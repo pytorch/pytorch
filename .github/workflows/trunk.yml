@@ -84,7 +84,7 @@ jobs:
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
         ]}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.10"
       compiler: gcc11
       cuda-version: "13.0"
@@ -115,7 +115,7 @@ jobs:
           { config: "distributed", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu" },
           { config: "pr_time_benchmarks", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.metal.nvidia.gpu" },
         ]}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.10"
       compiler: gcc11
       cuda-version: "13.0"
@@ -136,7 +136,7 @@ jobs:
       docker-image: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-build.outputs.test-matrix }}
       tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.10"
       compiler: gcc11
       cuda-version: "13.0"
@@ -163,7 +163,7 @@ jobs:
           { config: "aoti_cross_compile_for_windows", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-29-113-l4", win_torch_wheel_artifact: "win-vs2022-cuda13.0-py3" },
         ]}
       tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.10"
       compiler: gcc11
       cuda-version: "13.0"
@@ -187,7 +187,7 @@ jobs:
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
         ]}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.10"
       compiler: gcc11
       cuda-version: "13.0"
@@ -292,8 +292,7 @@ jobs:
       - get-label-type
       - job-filter
     with:
-      # Only set the prefix when use-arc is set to true, they go together
-      runner_prefix: ""
+      runner_prefix: "mt-"
       build-environment: linux-jammy-rocm-py3.10-mi350
       docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
@@ -315,7 +314,7 @@ jobs:
           { config: "distributed", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.2" },
           { config: "distributed", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.2" },
         ]}
-      use-arc: false
+      use-arc: true
       python-version: "3.10"
     secrets: inherit
 
@@ -346,7 +345,7 @@ jobs:
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       cuda-arch-list: '8.0'
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.12"
       compiler: gcc11
       cuda-version: "13.0"
@@ -368,7 +367,7 @@ jobs:
         { include: [
           { config: "verify_cachebench", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
         ]}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.10"
       compiler: gcc11
     secrets: inherit
@@ -387,7 +386,7 @@ jobs:
       docker-image: ${{ needs.verify-cachebench-cpu-build.outputs.docker-image }}
       test-matrix: ${{ needs.verify-cachebench-cpu-build.outputs.test-matrix }}
       tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.10"
       compiler: gcc11
     secrets: inherit
@@ -405,19 +404,19 @@ jobs:
       build-environment: linux-jammy-py3.10-gcc11-full-debug-build-only
       docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang18
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.10"
       compiler: gcc11
     secrets: inherit
 
-  linux-jammy-aarch64-py3_10-gcc15-build:
+  linux-jammy-aarch64-py3_10-gcc13-build:
     name: linux-jammy-aarch64-py3.10
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
       build-environment: linux-jammy-aarch64-py3.10
-      docker-image-name: ci-image:pytorch-linux-jammy-aarch64-py3.10-gcc15
+      docker-image-name: ci-image:pytorch-linux-jammy-aarch64-py3.10-gcc13
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       runner: linux.arm64.m7g.4xlarge
       # Periodic AArch64 tests for SVE256 coverage
@@ -429,22 +428,22 @@ jobs:
           { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.m7g.4xlarge" },
           { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.m7g.4xlarge" },
         ]}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.10"
-      compiler: gcc15
+      compiler: gcc13
     secrets: inherit
 
-  linux-jammy-aarch64-py3_10-gcc15-test:
+  linux-jammy-aarch64-py3_10-gcc13-test:
     name: linux-jammy-aarch64-py3.10
     uses: ./.github/workflows/_linux-test.yml
     needs:
-      - linux-jammy-aarch64-py3_10-gcc15-build
+      - linux-jammy-aarch64-py3_10-gcc13-build
       - get-label-type
     with:
-      build-environment: ${{ needs.linux-jammy-aarch64-py3_10-gcc15-build.outputs.build-environment }}
-      docker-image: ${{ needs.linux-jammy-aarch64-py3_10-gcc15-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-aarch64-py3_10-gcc15-build.outputs.test-matrix }}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      build-environment: ${{ needs.linux-jammy-aarch64-py3_10-gcc13-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-jammy-aarch64-py3_10-gcc13-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-aarch64-py3_10-gcc13-build.outputs.test-matrix }}
+      use-arc: true
       python-version: "3.10"
-      compiler: gcc15
+      compiler: gcc13
     secrets: inherit

@@ -624,9 +624,16 @@ class CodeGen:
                 clsname = add_global(cls.__name__, cls)
                 return f"{clsname}.{arg.name}"
             elif isinstance(arg, complex):
-                if arg.real == 0.0 or arg.imag == 0.0:
+                if (
+                    arg.real == 0.0
+                    or arg.imag == 0.0
+                    or not math.isfinite(arg.real)
+                    or not math.isfinite(arg.imag)
+                ):
                     # complex.__repr__ is not a safe source representation for
                     # signed zero components, e.g. eval("(-0-1j)") loses the sign.
+                    # It's also unsafe for nan/inf imaginary parts: repr produces
+                    # "nanj"/"infj" which Python parses as a single identifier.
                     return f"complex({_get_repr(arg.real)}, {_get_repr(arg.imag)})"
                 return blue(repr(arg))
             elif isinstance(arg, torch.Tensor):
@@ -735,6 +742,10 @@ class CodeGen:
                 if stack_trace := node.stack_trace:
                     if parsed_stack_trace := _parse_stack_trace(stack_trace):
                         stack_trace_str = parsed_stack_trace.get_summary_str()
+                        if node.meta.get("autograd_backward", False):
+                            stack_trace_str = (
+                                f"Backward of forward node: {stack_trace_str}"
+                            )
 
                 maybe_recompute_info = ""
                 if hasattr(node, "meta") and node.meta:
