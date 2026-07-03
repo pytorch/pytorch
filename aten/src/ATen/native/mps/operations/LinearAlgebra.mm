@@ -17,6 +17,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ScalarOps.h>
 #include <ATen/ops/_cholesky_solve_helper_native.h>
 #include <ATen/ops/_linalg_eigh.h>
 #include <ATen/ops/_linalg_solve_ex_native.h>
@@ -43,6 +44,7 @@
 #include <ATen/ops/lu_unpack_native.h>
 #include <ATen/ops/matmul.h>
 #include <ATen/ops/mm_native.h>
+#include <ATen/ops/mul.h>
 #include <ATen/ops/orgqr_native.h>
 #include <ATen/ops/real.h>
 #include <ATen/ops/slice.h>
@@ -793,16 +795,14 @@ static Tensor& addbmm_or_baddbmm_out_mps_impl(const Tensor& input,
 
   if (opType == ADDBMM_OP_TYPE) {
     result.resize_as_(input);
+  }
 
-    const int64_t num_batches = batch1.size(0);
-
-    if (num_batches == 0) {
-      result.zero_();
-      return result;
-    }
-  } else if (result.numel() == 0) {
-    // Empty baddbmm output (e.g. a zero-sized batch dim): nothing to compute,
-    // avoid feeding empty buffers to the MPSGraph / Metal kernel paths.
+  // Empty tensors would hit the Placeholder [srcBuf length] > 0 assertion.
+  if (result.numel() == 0) {
+    return result;
+  }
+  if ((opType == ADDBMM_OP_TYPE && batch1.size(0) == 0) || batch1.size(2) == 0) {
+    at::mul_out(result, input, wrapped_scalar_tensor(beta));
     return result;
   }
 
