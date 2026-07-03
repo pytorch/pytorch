@@ -16,7 +16,7 @@ except ImportError:
 
 import cutlass
 import cutlass.cute as cute
-from cutlass import Int32, Int64, Float16, BFloat16, Float32
+from cutlass import Uint8, Int32, Int64, Float16, BFloat16, Float32
 from cutlass.base_dsl.tvm_ffi_builder import spec
 from cutlass.cutlass_dsl import NumericMeta
 
@@ -54,6 +54,8 @@ _converter_module._convert_single_arg = _patched_convert_single_arg
 
 
 torch2cute_dtype_map = {
+    torch.bool: Uint8,
+    torch.uint8: Uint8,
     torch.float16: Float16,
     torch.bfloat16: BFloat16,
     torch.float32: Float32,

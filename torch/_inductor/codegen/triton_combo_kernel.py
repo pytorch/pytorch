@@ -578,13 +578,7 @@ class ComboKernel(Kernel):
                     grid.append(f"{tree.prefix}numel_{num}")
 
             if tree.is_reduction and sub_kernel.persistent_reduction:
-                if isinstance(simplified_tree_numel, (Integer, int)):
-                    val = int(simplified_tree_numel)
-                else:
-                    raise RuntimeError(
-                        "Dynamic shape on reduction dimension is not supported"
-                    )
-                val = next_power_of_2(val)
+                val = TritonKernel._get_persistent_RBLOCK(tree.numel)
                 code.writeline(
                     f"{tree.prefix.upper()}BLOCK_{num}: tl.constexpr = {val}"
                 )
@@ -771,7 +765,9 @@ class ComboKernel(Kernel):
         for arg_num in equal_1_arg_indices(signature):
             triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
 
-        triton_meta["configs"] = [config_of(signature)]
+        triton_meta["configs"] = [
+            config_of(signature, skip_cpp_wrapper_input_tensor_alignment=True)
+        ]
 
         mutated_args = self.get_mutated_args_sub_kernels()
         dispatch = self.dispatch_class
@@ -788,13 +784,11 @@ class ComboKernel(Kernel):
         if not self.per_subkernel_blocks:
             max_persistent_rblock = max(
                 (
-                    next_power_of_2(int(simplified))
+                    TritonKernel._get_persistent_RBLOCK(tree.numel)
                     for sub in self.sub_kernels
                     if sub.persistent_reduction
                     for tree in sub.range_trees
                     if tree.is_reduction
-                    for simplified in [V.graph.sizevars.simplify(tree.numel)]
-                    if isinstance(simplified, (Integer, int))
                 ),
                 default=0,
             )

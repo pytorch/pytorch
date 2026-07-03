@@ -2635,7 +2635,9 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
             model(x, lens)
 
         self.assertEqual(
-            counter.frame_count, 1, f"Expected 1 graph, got {counter.frame_count}"
+            counter.frame_count,
+            1,
+            lambda msg: f"{msg}\nExpected 1 graph, got {counter.frame_count}",
         )
 
     @xfailIfSM120OrLater
@@ -2672,7 +2674,9 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
             run(q, k, v, block_mask)
 
         self.assertEqual(
-            counter.frame_count, 1, f"Expected 1 graph, got {counter.frame_count}"
+            counter.frame_count,
+            1,
+            lambda msg: f"{msg}\nExpected 1 graph, got {counter.frame_count}",
         )
 
     @xfailIfSM120OrLater

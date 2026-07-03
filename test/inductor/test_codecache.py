@@ -650,6 +650,9 @@ class TestFxGraphCache(TestCase):
         with config.patch(
             bundle_triton_into_fx_graph_cache=bundle_triton,
             use_static_triton_launcher=use_static_triton_launcher,
+            # Avoid non-deterministic pad_mm benchmarking changing numerics or
+            # the number of bundled Triton static autotuners across runs.
+            shape_padding=False,
         ):
             compiled_fn = torch.compile(fn, dynamic=dynamic)
 
@@ -2876,7 +2879,7 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
         x = torch.ones(3)
         torch._dynamo.mark_dynamic(x, 0)
         with fresh_cache():
-            # captured graph is lambda s0, x: x * s0
+            # captured graph is lambda x, s0: x * s0
             gm, args, kwargs = self.capture(f)(x)
             if kwargs:
                 raise AssertionError
@@ -2885,13 +2888,14 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
             gm, args, dynamic_shapes="from_graph", aot=is_aot
         )
         x = torch.ones(4)
-        (result,) = compiled_artifact(4, x)
+        (result,) = compiled_artifact(x, 4)
         self.assertEqual(result, x * 4)
 
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @functorch_config.patch({"enable_autograd_cache": True})
     @functorch_config.patch({"autograd_cache_normalize_inputs": True})
+    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=False)
     @parametrize("is_aot", (False, True))
     def test_split_module(self, is_aot):
         class Mod(torch.nn.Module):
@@ -3122,7 +3126,7 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
                 gm, args, dynamic_shapes=dynamic_shapes, aot=is_aot
             )
             y = torch.randn(4)
-            (result,) = compiled_artifact(4, y)
+            (result,) = compiled_artifact(y, 4)
             self.assertEqual(result, y * 4)
             return compiled_artifact
 
@@ -3141,18 +3145,25 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
         torch._dynamo.mark_dynamic(x, 0)
 
         def backend(gm, args, **kwargs):
+            example_inputs = [
+                5 if isinstance(a, (int, torch.SymInt)) else torch.ones(4) for a in args
+            ]
             compiled_artifact = torch._inductor.standalone_compile(
-                gm, [5, torch.ones(4)], dynamic_shapes="from_example_inputs", aot=is_aot
+                gm, example_inputs, dynamic_shapes="from_example_inputs", aot=is_aot
             )
             y = torch.ones(4)
-            (result,) = compiled_artifact(4, y)
+            call_args = [4 if isinstance(a, (int, torch.SymInt)) else y for a in args]
+            (result,) = compiled_artifact(*call_args)
             # 5 was baked in
             self.assertEqual(result, y * 5)
 
             # shape of y was baked in
             with self.assertRaisesRegex(AssertionError, "expected size 5==4"):
                 y = torch.ones(5)
-                (result,) = compiled_artifact(4, y)
+                call_args = [
+                    4 if isinstance(a, (int, torch.SymInt)) else y for a in args
+                ]
+                (result,) = compiled_artifact(*call_args)
 
             return compiled_artifact
 
@@ -3262,7 +3273,7 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
 
-class TestCustomPartitionerFn(CustomPartitionerFn):
+class _TestCustomPartitionerFn(CustomPartitionerFn):
     def __init__(self):
         self._uuid = None
 
@@ -4112,7 +4123,7 @@ class TestFxGraphCacheHashing(TestCase):
         """
         Test that the custom partitioner function's UUID is properly used in the FX graph cache hashing.
         """
-        custom_partitioner_fn = TestCustomPartitionerFn()
+        custom_partitioner_fn = _TestCustomPartitionerFn()
         with config.patch({"custom_partitioner_fn": custom_partitioner_fn}):
             custom_partitioner_fn._uuid = "1"
             details1 = FxGraphHashDetails(None, [], {}, [])
@@ -5081,7 +5092,7 @@ class TestVecISACheckBuild(TestCase):
         self.assertEqual(
             value.split(os.pathsep)[0],
             torch_lib,
-            msg=f"LD_LIBRARY_PATH should be prepended with {torch_lib!r}, got {value!r}",
+            msg=lambda msg: f"{msg}\nLD_LIBRARY_PATH should be prepended with {torch_lib!r}, got {value!r}",
         )
 
 

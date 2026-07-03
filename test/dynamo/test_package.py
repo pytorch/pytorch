@@ -33,6 +33,10 @@ def compute_loss_helper(x):
     return reduce_to_scalar_loss(x)
 
 
+def compiled_region_with_backend_id_for_package_test():
+    return __compiled_fn_0_00000000_0000_0000_0000_000000000000()  # noqa: F821
+
+
 @functorch_config.patch("bundled_autograd_cache", True)
 @torch._dynamo.config.patch({"strict_precompile": True})
 @instantiate_parametrized_tests
@@ -63,6 +67,22 @@ class TestPackage(torch._inductor.test_case.TestCase):
         self.assertEqual(len(debug_info["backends"]), expected_backends)
         torch._dynamo.reset()
         PrecompileContext.clear()
+
+    def test_guarded_code_records_backend_ids_from_bytecode(self):
+        def fn(x):
+            return x + 1
+
+        (backend_id,) = (
+            compiled_region_with_backend_id_for_package_test.__code__.co_names
+        )
+        package = CompilePackage(fn)
+        with package.code_context(fn.__code__):
+            package.add_guarded_code(
+                b"", compiled_region_with_backend_id_for_package_test.__code__
+            )
+
+        cache_entry = package.cache_entry()
+        self.assertEqual(cache_entry.codes[0].backend_ids, [backend_id])
 
     @unittest.expectedFailure  # FUNCTION_MATCH guard not serializable today
     def test_nn_module(self):
@@ -424,6 +444,50 @@ def add(x, y):
             result1 = compiled_fn1(arg1)
             result2 = compiled_fn2(arg2)
             self.assertEqual(expected, [result1, result2])
+        self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
+
+    def test_import_source_unpickle_without_trace(self):
+        # Deserializing an ImportSource happens at torch.compile() time with no
+        # active TracingContext (e.g. precompile warm-load). Reconstructing the
+        # source must not install a guard (which would require a tracing
+        # context), so the round-trip must not raise.
+        import pickle
+
+        from torch._dynamo.source import ImportSource
+
+        source = ImportSource("torch")
+        reloaded = pickle.loads(pickle.dumps(source))
+        self.assertEqual(reloaded, source)
+
+    @parametrize("device", ("cpu", "cuda", "xpu"))
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_automatic_dynamo_import_source_guard(self, device):
+        # Warm-loading a guard state whose serialized sources include an
+        # ImportSource must not raise. `pytree.tree_is_leaf` routes through
+        # `get_pytree_SUPPORTED_NODES_source`, which builds an
+        # `ImportSource("torch")` that ends up in the serialized guard state.
+        if device == "cuda" and not HAS_CUDA_AND_TRITON:
+            raise unittest.SkipTest("Requires CUDA/Triton")
+        if device == "xpu" and not HAS_XPU_AND_TRITON:
+            raise unittest.SkipTest("Requires XPU/Triton")
+
+        def fn(x):
+            if torch.utils._pytree.tree_is_leaf(x):
+                return torch.nn.functional.relu(x) + x.sin()
+            return x
+
+        arg = torch.randn(3, 2, device=device)
+        expected = fn(arg)
+        compiled_fn = torch.compile(fn)
+        self.assertEqual(compiled_fn(arg), expected)
+        total_frames = torch._dynamo.convert_frame.FRAME_COUNTER
+
+        self._save_and_reload(expected_backends=1, expected_dynamo=1)
+
+        compiled_fn = torch.compile(fn)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            result = compiled_fn(arg)
+            self.assertEqual(result, expected)
         self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
     @parametrize("device", ("cpu", "cuda", "xpu"))

@@ -373,8 +373,21 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
   const bool lie_to_cublaslt = false;
 #endif
   if (lie_to_cublaslt) {
-     CuBlasLtMatrixLayout FakeBdesc(abType, k, 2, ldb, opb == CUBLAS_OP_T);
-     CuBlasLtMatrixLayout FakeCdesc(cType, m, 2, ldc);
+     const auto fake_ldb = ldb == 1 ? 2 : ldb;
+     const auto fake_ldc = ldc == 1 ? 2 : ldc;
+     CuBlasLtMatrixLayout FakeBdesc(abType, k, 2, fake_ldb, opb == CUBLAS_OP_T);
+     CuBlasLtMatrixLayout FakeCdesc(cType, m, 2, fake_ldc);
+     if (num_batches > 1) {
+       int num_batches_as_int = static_cast<int>(num_batches);
+       FakeBdesc.setAttribute(
+           CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT, num_batches_as_int);
+       FakeCdesc.setAttribute(
+           CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT, num_batches_as_int);
+       FakeBdesc.setAttribute(
+           CUBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, strideb);
+       FakeCdesc.setAttribute(
+           CUBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, stridec);
+     }
 
      TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
         ltHandle,
@@ -1833,7 +1846,11 @@ void scaled_gemm(
   }
   else if (mat1_scale_dtype == kFloat8_e8m0fnu && mat2_scale_dtype == kFloat8_e8m0fnu) {
   #if ROCM_VERSION >= 70000
-            if (at::detail::getCUDAHooks().isGPUArch({"gfx950"})) {
+            std::vector<std::string> mx_archs{"gfx950"};
+  #if ROCM_VERSION >= 71400
+            mx_archs.push_back("gfx1250");
+  #endif
+            if (at::detail::getCUDAHooks().isGPUArch(mx_archs)) {
                 // TODO: add constraints based on hipblaslt internals
                 TORCH_CHECK((m % 16 == 0) && (n % 16 == 0) && (k % 128 == 0),
                            "M, N must be multiples of 16 and K should be multiple of 128 for MX format. "

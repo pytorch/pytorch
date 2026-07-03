@@ -55,7 +55,7 @@ jobs:
       build-environment: linux-jammy-py3.10-gcc11
       docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang18
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.10"
       compiler: gcc11
     secrets: inherit
@@ -72,7 +72,7 @@ jobs:
       docker-image: ${{ needs.docs-build.outputs.docker-image }}
       push: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.event.ref, 'refs/tags/v') }}
       run-doxygen: true
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.10"
       compiler: gcc11
     secrets:
@@ -135,6 +135,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: update-commit-hash
     strategy:
+      fail-fast: false
       matrix:
         include:
           - repo-name: vision
