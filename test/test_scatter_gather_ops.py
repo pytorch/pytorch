@@ -14,9 +14,9 @@ from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, onlyCPU, onlyCUDA, dtypes, dtypesIfCUDA,
      toleranceOverride, tol,)
 from torch.testing._internal.common_dtype import \
-    (get_all_dtypes,)
+    (all_passthru_types, all_passthru_types_and, get_all_dtypes,)
 
-from torch.testing._internal.common_cuda import CDNA3OrLater, SM90OrLater
+from torch.testing._internal.common_cuda import gfx_arch_supports_opportunistic_fastatomics, SM90OrLater
 
 # Protects against includes accidentally setting the default dtype
 if torch.get_default_dtype() is not torch.float32:
@@ -40,7 +40,8 @@ class TestScatterGather(TestCase):
                     else:
                         idx[tuple(ii)] = torch.randint(dim_size, (elems_per_row,))
 
-    @dtypes(torch.float32, torch.complex64)
+    @dtypes(*all_passthru_types())
+    @dtypesIfCUDA(*all_passthru_types_and(torch.chalf))
     def test_gather(self, device, dtype):
         m, n, o = random.randint(10, 20), random.randint(10, 20), random.randint(10, 20)
         elems_per_row = random.randint(1, 10)
@@ -62,8 +63,13 @@ class TestScatterGather(TestCase):
                     expected[i, j, k] = src[tuple(ii)]
         self.assertEqual(actual, expected, atol=0, rtol=0)
 
-        # Guarded because torch.max isn't defined for complex types
-        if not dtype.is_complex:
+        # Guarded because torch.max isn't defined for complex or barebones
+        # unsigned tensors.
+        max_unsupported = (
+            dtype.is_complex
+            or dtype in (torch.uint16, torch.uint32, torch.uint64)
+        )
+        if not max_unsupported:
             src = make_tensor((3, 4, 5), device=device, dtype=dtype)
             expected, idx = src.max(2, True)
             actual = torch.gather(src, 2, idx)
@@ -74,7 +80,8 @@ class TestScatterGather(TestCase):
     def test_gather_large(self, device, dtype):
         # test larger shapes to check vectorized implementation
         for (m, n, k) in ((4096, 3072, 4096), (4096, 3072, 4100), (4, 4, 16384 * 8192)):
-            torch.cuda.empty_cache()
+            if device != "cpu":
+                torch.accelerator.empty_cache()
             src = make_tensor((m, k), device=device, dtype=dtype)
             alloc0 = torch.empty(src.nelement() * 2, device=device, dtype=dtype)
             discontig = alloc0.view(m, 2 * k)[:, ::2].copy_(src)
@@ -168,15 +175,13 @@ class TestScatterGather(TestCase):
             src = make_tensor(tuple(src_size), device=device, dtype=dtype)
 
         base = make_tensor((m, n, o), device=device, dtype=dtype)
-        if reduction is not None:
-            if fn is torch.Tensor.scatter_reduce_:
-                actual = fn(base.clone(), dim, idx, src, reduce=reduction, include_self=include_self)
-            else:
-                actual = fn(base.clone(), dim, idx, src, reduce=reduction)
-        else:
-            actual = fn(base.clone(), dim, idx, src)
+        # for signed integers, avoid undefined behavior in expected output
+        use_int64_expected = (
+            dtype in (torch.int8, torch.int16, torch.int32)
+            and reduction in {"add", "sum", "multiply", "prod", "mean"}
+        )
+        expected = base.to(torch.int64, copy=True) if use_int64_expected else base.clone()
 
-        expected = base.clone()
         counts = torch.zeros(base.shape, dtype=torch.long, device=device) + include_self
         for i in range(idx_size[0]):
             for j in range(idx_size[1]):
@@ -190,6 +195,8 @@ class TestScatterGather(TestCase):
                         # or 'scatter_reduce_', the former two might have a reduction argument
                         # while the latter two always do
                         value = src if is_scalar else src[i, j, k]
+                        if use_int64_expected:
+                            value = int(value) if is_scalar else value.to(torch.int64)
 
                         if ((not include_self) and counts[tuple(ii)] == 0):
                             expected[tuple(ii)] = value
@@ -209,12 +216,40 @@ class TestScatterGather(TestCase):
 
                         counts[tuple(ii)] += 1
 
+        if use_int64_expected:
+            iinfo = torch.iinfo(dtype)
+            expected_out_of_range = torch.any(
+                (expected < iinfo.min) | (expected > iinfo.max)
+            )
+            if bool(expected_out_of_range.item()):
+                min_observed = expected.min().item()
+                max_observed = expected.max().item()
+                self.skipTest(
+                    f"Skipping {fn.__name__} reference case with {dtype=} and "
+                    f"{reduction=} because it would overflow {dtype}: observed "
+                    f"expected range [{min_observed}, {max_observed}], allowed "
+                    f"[{iinfo.min}, {iinfo.max}]"
+                )
+            else:
+                # note: this cast is not UB because we checked above
+                expected = expected.to(dtype)
+
         if (reduction == "mean"):
             counts.masked_fill_(counts == 0, 1)
             if (dtype.is_floating_point or dtype.is_complex):
                 expected /= counts
             else:
                 expected.div_(counts, rounding_mode="floor")
+
+        # note: only call `fn` once we know expected values in `base`
+        # are safe from signed overflow (UB). Otherwise, test is skipped above
+        if reduction is not None:
+            if fn is torch.Tensor.scatter_reduce_:
+                actual = fn(base.clone(), dim, idx, src, reduce=reduction, include_self=include_self)
+            else:
+                actual = fn(base.clone(), dim, idx, src, reduce=reduction)
+        else:
+            actual = fn(base.clone(), dim, idx, src)
 
         if dtype == torch.float16 or dtype == torch.bfloat16:
             # Some CUDA kernels (e.g. indexing_backward_kernel_stride_1) that are called during
@@ -224,7 +259,7 @@ class TestScatterGather(TestCase):
         else:
             # When we are running opportunistic_fastatomics, we will expect some floating point rounding
             # errors as the order of operation is not guaranteed.
-            if TEST_WITH_ROCM and CDNA3OrLater() \
+            if TEST_WITH_ROCM and gfx_arch_supports_opportunistic_fastatomics() \
                     and not torch.are_deterministic_algorithms_enabled():
                 self.assertEqual(actual, expected, atol=1e-9, rtol=1e-6)
             else:
@@ -303,7 +338,8 @@ class TestScatterGather(TestCase):
         else:
             shapes.append((4, 4, 16384 * 256))
         for (m, n, k) in shapes:
-            torch.cuda.empty_cache()
+            if device != "cpu":
+                torch.accelerator.empty_cache()
             self_tensor = torch.zeros(m, k, device=device, dtype=dtype)
             src = make_tensor((n, k), device=device, dtype=dtype)
             # contiguous + aligned (should hit fast path on dim=0)
@@ -737,7 +773,7 @@ class TestScatterAddOverrideConds(TestCase):
         )
         self.assertEqual(
             self._conds(self_t, idx, src), (case.expected_tma, case.expected_vec),
-            msg=f"{case.name}: expected (TMA={case.expected_tma}, vec={case.expected_vec})",
+            msg=lambda msg: f"{msg}\n{case.name}: expected (TMA={case.expected_tma}, vec={case.expected_vec})",
         )
 
     def test_out_cond_rejects_misaligned_out(self):
@@ -759,7 +795,7 @@ class TestScatterAddOverrideConds(TestCase):
         )
         self.assertNotEqual(
             out_mis.data_ptr() % 16, 0,
-            msg=f"test bug: out should be misaligned, got {out_mis.data_ptr() % 16=}",
+            msg=lambda msg: f"{msg}\ntest bug: out should be misaligned, got {out_mis.data_ptr() % 16=}",
         )
         idx = _expanded_idx(
             torch.randint(0, M_out, (M_src,), device="cuda", dtype=torch.int64),

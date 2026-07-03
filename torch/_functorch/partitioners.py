@@ -15,7 +15,7 @@ import warnings
 from collections import defaultdict, deque
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-from typing import Any, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 
 import torch
 import torch._inductor.inductor_prims
@@ -26,11 +26,16 @@ from torch._dynamo.utils import counters, is_node_meta_valid
 from torch._functorch._activation_checkpointing.ac_logging_utils import (
     create_structured_trace_for_min_cut_info,
 )
+from torch._functorch._aot_autograd.streams import _SYNC_OPS
 from torch._functorch._aot_autograd.utils import is_with_effects
 from torch._inductor import config as inductor_config
 from torch._inductor.custom_graph_pass import (
     CustomKnapsackSolver,
     CustomRuntimeEstimator,
+)
+from torch._inductor.fx_passes.control_dependencies import (
+    control_deps as control_deps_hop,
+    get_subgraph_name,
 )
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.utils import is_builtin
@@ -49,6 +54,7 @@ from torch.fx.experimental.symbolic_shapes import (
     statically_known_true,
 )
 from torch.fx.passes import graph_drawer
+from torch.fx.traceback import _get_memory_budget_annotation
 from torch.utils._ordered_set import OrderedSet
 from torch.utils.checkpoint import CheckpointPolicy
 
@@ -169,6 +175,53 @@ def must_recompute(node: fx.Node) -> bool:
     ]
 
 
+def get_schema_arg_idx(target: object, arg_name: str) -> int | None:
+    """Return the positional schema index for an operator argument name."""
+    if not isinstance(target, torch._ops.OpOverload):
+        return None
+    for idx, arg in enumerate(target._schema.arguments):
+        if arg.name == arg_name:
+            return idx
+    return None
+
+
+def is_nonzero_dropout_sdpa(node: fx.Node) -> bool:
+    """Return True unless SDPA-family dropout is statically known to be disabled."""
+    target = node.target
+    if not isinstance(target, torch._ops.OpOverload):
+        return True
+
+    dropout_arg_idx = get_schema_arg_idx(target, "dropout_p")
+    if dropout_arg_idx is None:
+        return True
+
+    dropout_arg = target._schema.arguments[dropout_arg_idx]
+    if len(node.args) > dropout_arg_idx:
+        dropout_p = node.args[dropout_arg_idx]
+    elif "dropout_p" in node.kwargs:
+        dropout_p = node.kwargs["dropout_p"]
+    elif dropout_arg.default_value is not None:
+        dropout_p = dropout_arg.default_value
+    else:
+        return True
+
+    return not statically_known_true(cast(bool | torch.SymBool, dropout_p == 0.0))
+
+
+def is_rng_op(node: fx.Node) -> bool:
+    """Return True when a node's seeded nondeterminism cannot be statically ruled out."""
+    if not (
+        hasattr(node.target, "tags")
+        and torch.Tag.nondeterministic_seeded in node.target.tags
+    ):
+        return False
+
+    if get_schema_arg_idx(node.target, "dropout_p") is not None:
+        return is_nonzero_dropout_sdpa(node)
+
+    return True
+
+
 def _is_assert_only_symbool(node: fx.Node) -> bool:
     return (
         isinstance(node.meta.get("val"), torch.SymBool)
@@ -188,11 +241,7 @@ def has_recomputable_ops(fx_g: fx.GraphModule) -> bool:
 
 def has_recomputable_rng_ops(fx_g: fx.GraphModule) -> bool:
     for node in fx_g.graph.nodes:
-        if (
-            must_recompute(node)
-            and hasattr(node.target, "tags")
-            and torch.Tag.nondeterministic_seeded in node.target.tags
-        ):
+        if must_recompute(node) and is_rng_op(node):
             return True
     return False
 
@@ -290,6 +339,173 @@ def _find_input_for_invalid_output(
     return None
 
 
+def _control_deps_has_sync_op(node: fx.Node) -> bool:
+    """Check if a control_deps node's subgraph has a sync operation."""
+    sg_node = node.args[1]
+    if not (
+        isinstance(sg_node, fx.Node)
+        and sg_node.op == "get_attr"
+        and isinstance(sg_node.target, str)
+    ):
+        raise AssertionError(f"expected get_attr subgraph node, got {sg_node}")
+    owning_mod = node.graph.owning_module
+    if owning_mod is None:
+        raise AssertionError("expected graph to have an owning_module")
+    sg_mod = getattr(owning_mod, sg_node.target)
+    if not isinstance(sg_mod, fx.GraphModule):
+        raise AssertionError(f"expected GraphModule, got {type(sg_mod)}")
+    return any(
+        n.op == "call_function" and n.target in _SYNC_OPS for n in sg_mod.graph.nodes
+    )
+
+
+def _build_see_through_map(cd_node: fx.Node) -> dict[int, fx.Node]:
+    """Build a mapping from getitem indices to underlying dep nodes.
+
+    For a control_deps(additional_deps, subgraph, *deps), getitem index k
+    (k >= 1) corresponds to deps[k-1] which is args[k+1].
+    """
+    deps = cd_node.args[2:]
+    return {i + 1: dep for i, dep in enumerate(deps) if isinstance(dep, fx.Node)}
+
+
+def _try_clone_subgraph_filtering_deps(
+    original_sg_mod: fx.GraphModule,
+    valid_dep_indices: list[int],
+) -> tuple[fx.Graph, dict[int, int]] | None:
+    """Clone a control_deps subgraph, keeping only valid-dep placeholders.
+
+    Preserves any call_function nodes (the side-effecting operation) as long
+    as all placeholders they reference are in the valid set.  Returns
+    (new_graph, idx_remap) where idx_remap maps old getitem indices to new
+    ones, or None if the operation uses an invalid dep.
+    """
+    orig_phs = original_sg_mod.graph.find_nodes(op="placeholder")
+    valid_dep_set = OrderedSet(valid_dep_indices)
+    dropped_phs = OrderedSet(
+        [ph for i, ph in enumerate(orig_phs) if i not in valid_dep_set]
+    )
+
+    for n in original_sg_mod.graph.nodes:
+        if n.op == "call_function":
+            if any(inp in dropped_phs for inp in n.all_input_nodes):
+                return None
+
+    sg = fx.Graph()
+    sg_env: dict[fx.Node, fx.Node] = {}
+    for n in original_sg_mod.graph.nodes:
+        if n.op == "output" or n in dropped_phs:
+            continue
+        sg_env[n] = sg.node_copy(n, lambda x, _env=sg_env: _env[x])
+
+    orig_out_arg = original_sg_mod.graph.output_node().args[0]
+    if isinstance(orig_out_arg, tuple):
+        sg.output(
+            tuple(
+                sg_env[item] if isinstance(item, fx.Node) else item
+                for item in orig_out_arg
+                if not isinstance(item, fx.Node) or item in sg_env
+            )
+        )
+    elif isinstance(orig_out_arg, fx.Node) and orig_out_arg in sg_env:
+        sg.output(sg_env[orig_out_arg])
+    else:
+        sg.output(orig_out_arg)
+
+    preserved_op = any(n.op == "call_function" for n in sg.nodes)
+    idx_remap: dict[int, int] = {
+        old_i + 1: new_j + 1 for new_j, old_i in enumerate(valid_dep_indices)
+    }
+    if preserved_op:
+        idx_remap[0] = 0
+    return sg, idx_remap
+
+
+def _rebuild_control_deps_for_extract(
+    node: fx.Node,
+    env: dict[fx.Node, Any],
+    new_graph: fx.Graph,
+) -> tuple[fx.Node, dict[int, int]] | None:
+    """Rebuild a control_deps node with only valid deps for graph extraction.
+
+    When a control_deps node mixes valid (forward) and invalid (backward) args,
+    this creates a new control_deps in new_graph with only the valid deps and a
+    matching subgraph.  Returns (new_node, idx_remap) where idx_remap maps old
+    getitem indices to new getitem indices, or None if no valid deps remain.
+
+    additional_deps (args[0]) and deps (args[2:]) are filtered independently --
+    additional_deps are ordering-only constraints and may reference nodes that
+    are not in the deps set.
+    """
+    deps = node.args[2:]
+    valid_dep_indices = [
+        i
+        for i, dep in enumerate(deps)
+        if isinstance(dep, fx.Node) and not isinstance(env.get(dep), InvalidNodeBase)
+    ]
+    if not valid_dep_indices:
+        return None
+
+    # pyrefly: ignore [bad-index]
+    new_deps = tuple(env[deps[i]] for i in valid_dep_indices)
+
+    additional_deps = node.args[0]
+    if not isinstance(additional_deps, (tuple, list)):
+        raise AssertionError(
+            f"expected tuple/list additional_deps, got {type(additional_deps)}"
+        )
+    valid_additional_deps = tuple(
+        env[d]
+        for d in additional_deps
+        if isinstance(d, fx.Node) and not isinstance(env.get(d), InvalidNodeBase)
+    )
+
+    owning_mod = node.graph.owning_module
+    if owning_mod is None:
+        raise AssertionError("expected graph to have an owning_module")
+
+    sg_node = node.args[1]
+    if not (
+        isinstance(sg_node, fx.Node)
+        and sg_node.op == "get_attr"
+        and isinstance(sg_node.target, str)
+    ):
+        raise AssertionError(f"expected get_attr subgraph node, got {sg_node}")
+    original_sg_mod = getattr(owning_mod, sg_node.target)
+    if not isinstance(original_sg_mod, fx.GraphModule):
+        raise AssertionError(f"expected GraphModule, got {type(original_sg_mod)}")
+
+    result = _try_clone_subgraph_filtering_deps(original_sg_mod, valid_dep_indices)
+    if result is not None:
+        sg, idx_remap = result
+    else:
+        sg = fx.Graph()
+        sg_placeholders = [sg.placeholder(f"dep_{i}") for i in range(len(new_deps))]
+        sg.output((None, *sg_placeholders))
+        idx_remap = {
+            old_i + 1: new_j + 1 for new_j, old_i in enumerate(valid_dep_indices)
+        }
+
+    sg_name = get_subgraph_name(owning_mod, "cd_extract")
+    setattr(owning_mod, sg_name, fx.GraphModule(torch.nn.Module(), sg))
+    new_sg_node = new_graph.get_attr(sg_name)
+
+    new_cd = new_graph.create_node(
+        "call_function",
+        control_deps_hop,
+        args=(valid_additional_deps, new_sg_node, *new_deps),
+        name=node.name,
+    )
+    new_cd.meta = node.meta.copy()
+    if "val" in node.meta and isinstance(node.meta["val"], tuple):
+        orig_val = node.meta["val"]
+        new_cd.meta["val"] = (orig_val[0],) + tuple(
+            orig_val[i + 1] for i in valid_dep_indices if i + 1 < len(orig_val)
+        )
+
+    return new_cd, idx_remap
+
+
 def _extract_graph_with_inputs_outputs(
     joint_graph: fx.Graph,
     inputs: list[fx.Node],
@@ -310,6 +526,15 @@ def _extract_graph_with_inputs_outputs(
     """
     new_graph = fx.Graph()
     env: dict[fx.Node, fx.Node] = {}
+    # For control_deps nodes with mixed valid/invalid args, we create a new
+    # control_deps with only the valid deps.  This dict maps the original
+    # control_deps node to a {old_getitem_idx: new_getitem_idx} remapping so
+    # downstream getitem nodes can be rewritten to the correct indices.
+    _control_deps_idx_remap: dict[fx.Node, dict[int, int]] = {}
+    # For forward sync control_deps eliminated during backward extraction,
+    # maps the control_deps node to {getitem_idx: joint_graph_dep_node}.
+    # Getitems resolve directly to env[dep_node], bypassing the control_deps.
+    _control_deps_see_through: dict[fx.Node, dict[int, fx.Node]] = {}
 
     # Add new placeholder nodes in the order specified by the inputs
     for node in inputs:
@@ -345,6 +570,37 @@ def _extract_graph_with_inputs_outputs(
         elif node.op == "placeholder":
             env[node] = InvalidNode  # type: ignore[assignment]
         elif node.op == "call_function":
+            if (
+                node.target is operator.getitem
+                and node.args[0] in _control_deps_see_through
+            ):
+                dep_map = _control_deps_see_through[node.args[0]]
+                idx = node.args[1]
+                if idx in dep_map:
+                    env[node] = env[dep_map[idx]]
+                else:
+                    env[node] = InvalidNode  # type: ignore[assignment]
+                continue
+            if (
+                node.target is operator.getitem
+                and node.args[0] in _control_deps_idx_remap
+            ):
+                idx_map = _control_deps_idx_remap[node.args[0]]
+                idx = node.args[1]
+                if idx in idx_map:
+                    new_idx = idx_map[idx]
+                    new_getitem = new_graph.create_node(
+                        "call_function",
+                        operator.getitem,
+                        args=(env[node.args[0]], new_idx),
+                        name=node.name,
+                    )
+                    new_getitem.meta = node.meta
+                    env[node] = new_getitem
+                else:
+                    env[node] = InvalidNode  # type: ignore[assignment]
+                continue
+
             all_args = pytree.arg_tree_leaves(*node.args, **node.kwargs)
             all_args = [
                 isinstance(env[x], InvalidNodeBase)
@@ -352,6 +608,43 @@ def _extract_graph_with_inputs_outputs(
                 if isinstance(x, fx.Node)
             ]
             if any(all_args):
+                if node.target is control_deps_hop:
+                    # During backward extraction, eliminate forward sync
+                    # control_deps entirely -- their subgraphs reference
+                    # forward-only runtime state (streams/events) that is
+                    # dead at backward time.  Getitems are resolved directly
+                    # to the underlying deps via _control_deps_see_through.
+                    if (
+                        subgraph == "backward"
+                        and not (
+                            _has_tag_is_backward(node)
+                            or _has_tag_must_be_in_backward(node)
+                        )
+                        and _control_deps_has_sync_op(node)
+                    ):
+                        _control_deps_see_through[node] = _build_see_through_map(node)
+                        env[node] = InvalidNode  # type: ignore[assignment]
+                        continue
+                    new_cd_node = _rebuild_control_deps_for_extract(
+                        node, env, new_graph
+                    )
+                    if new_cd_node is not None:
+                        env[node] = new_cd_node[0]
+                        _control_deps_idx_remap[node] = new_cd_node[1]
+                        continue
+                env[node] = InvalidNode  # type: ignore[assignment]
+                continue
+            # During backward extraction, eliminate forward sync control_deps
+            # entirely.  See above for rationale.
+            if (
+                node.target is control_deps_hop
+                and subgraph == "backward"
+                and not (
+                    _has_tag_is_backward(node) or _has_tag_must_be_in_backward(node)
+                )
+                and _control_deps_has_sync_op(node)
+            ):
+                _control_deps_see_through[node] = _build_see_through_map(node)
                 env[node] = InvalidNode  # type: ignore[assignment]
                 continue
             # pyrefly: ignore [unsupported-operation, bad-argument-type]
@@ -1507,6 +1800,19 @@ def _size_of(node: fx.Node) -> int:
             return sum(object_nbytes(n) for n in val.values())
         elif isinstance(val, torch.Tensor):
             return object_nbytes(val)
+        elif isinstance(val, (torch.ScriptObject, FakeScriptObject)):
+            # A (Fake)ScriptObject may hold tensors internally, so we cannot
+            # soundly compute its size here. Only treat it as zero size when the
+            # user has explicitly opted in via this escape hatch.
+            if config.unsafe_treat_script_objects_as_zero_size:
+                return 0
+            raise RuntimeError(
+                f"Cannot compute the size of {type(val)} on node {node}. A "
+                "ScriptObject may hold tensors internally and the partitioner "
+                "has no general way to measure its memory footprint. Set "
+                "torch._functorch.config.unsafe_treat_script_objects_as_zero_size"
+                " = True to assume such objects are zero size (unsound)."
+            )
 
         raise RuntimeError(f"Unknown metadata type {type(val)} on node {node}")
     if node.op == "get_attr" or (
@@ -1538,8 +1844,7 @@ def pointwise_ops() -> list[torch._ops.OpOverloadPacket]:
         if not isinstance(opoverloadpacket, torch._ops.OpOverloadPacket):
             continue
 
-        for overload in opoverloadpacket.overloads():
-            op_overload = getattr(opoverloadpacket, overload)
+        for op_overload in opoverloadpacket.op_overloads():
             if torch.Tag.pointwise in op_overload.tags:
                 # currently aot autograd uses packet not overload
                 ops.append(opoverloadpacket)
@@ -1665,9 +1970,6 @@ def apply_graphsafe_rng_functionalization(
     - We save the forward RNG state
     - We update the backward Generator's state before executing backward
 
-    Before each CUDA Graph replay, replay_prologue updates captured RNG pointers with current states, ensuring backward Generator
-    changes are reflected during replay.
-
     This function modifies both forward and backward computation graphs by:
 
     Creating RNG state placeholders for both passes
@@ -1759,11 +2061,7 @@ def functionalize_rng_ops(
     def get_rng_ops(gmod: fx.GraphModule) -> dict[str, fx.Node]:
         random_nodes: dict[str, fx.Node] = {}
         for node in gmod.graph.nodes:
-            if (
-                node.op == "call_function"
-                and hasattr(node.target, "tags")
-                and torch.Tag.nondeterministic_seeded in node.target.tags
-            ):
+            if node.op == "call_function" and is_rng_op(node):
                 random_nodes[node.name] = node
         return random_nodes
 
@@ -1802,11 +2100,7 @@ def functionalize_rng_ops(
     bw_graph_rng_ops = get_rng_ops(bw_module)
     recomputable_rng_ops_map = {}
     for node in joint_module.graph.nodes:
-        if (
-            must_recompute(node)
-            and hasattr(node.target, "tags")
-            and torch.Tag.nondeterministic_seeded in node.target.tags
-        ):
+        if must_recompute(node) and is_rng_op(node):
             # Skip if the node doesn't exist in both forward and backward graphs.
             # This can happen when the RNG op's output is not needed for gradient
             # computation and gets eliminated by dead code elimination.
@@ -2904,6 +3198,7 @@ def get_default_op_list() -> OpTypes:
     default_recomputable_ops += [
         prims.div,
         prims.convert_element_type,
+        prims.prepare_softmax_online,
         aten.clone,
         aten._to_copy,
         aten.full_like,
@@ -3212,7 +3507,9 @@ def choose_saved_values_set(
         recomputable_banned_nodes, key=_size_of, reverse=True
     )
     if len(all_recomputable_banned_nodes) == 0:
-        return node_info.inputs + must_save_nodes
+        # Nothing left for the knapsack to trade off, so this is the same cut the
+        # knapsack would return with an empty dont_ban.
+        return aggressive_recomputation_saved_values
     memories_banned_nodes = [
         get_normalized_size(_size_of(i)) for i in all_recomputable_banned_nodes
     ]
@@ -3657,7 +3954,28 @@ def classify_nodes(
             required_bw_nodes.add(node)
 
         if node in required_bw_nodes:
-            required_bw_nodes.update(node.users)
+            if node.op == "call_function" and node.target is control_deps_hop:
+                # control_deps mixes forward and backward deps.  Only
+                # propagate required_bw to getitem users that extract a
+                # backward-only dep.  getitem(cd, k) with k>=1 maps to
+                # deps[k-1] (args[k+1]).
+                deps = node.args[2:]
+                for user in node.users:
+                    if (
+                        user.target is operator.getitem
+                        and isinstance(user.args[1], int)
+                        and 1 <= user.args[1] <= len(deps)
+                    ):
+                        dep = deps[user.args[1] - 1]
+                        if isinstance(dep, fx.Node) and dep in required_bw_nodes:
+                            required_bw_nodes.add(user)
+                    else:
+                        # Chained control_deps (e.g. wait/sync cd depends on
+                        # the record's cd via additional_deps) -- taint
+                        # conservatively.
+                        required_bw_nodes.add(user)
+            else:
+                required_bw_nodes.update(node.users)
 
     primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
     fwd_seed_offset_inputs = list(filter(_is_fwd_seed_offset, joint_module.graph.nodes))
@@ -3681,7 +3999,7 @@ def classify_nodes(
     required_fw_nodes: OrderedSet[fx.Node] = OrderedSet(
         name_to_node[node.name]
         for node in forward_only_graph.nodes
-        if node.op != "output"
+        if node.op != "output" and node.name in name_to_node
     )
     unclaimed_nodes: OrderedSet[fx.Node] = OrderedSet(
         node
@@ -3749,7 +4067,30 @@ def min_cut_rematerialization_partition(
 
     #  add the CSE pass
     if config.cse:
-        cse_graph = fx_graph_cse(fx_g)
+        # CSE runs before partitioning, so do not merge a forward-only value
+        # with a value that is also needed by the backward graph. Otherwise the
+        # partitioner may save the merged value as an extra forward output.
+        _, bwd_outputs, _, _ = _extract_fwd_bwd_outputs(
+            joint_module, num_fwd_outputs=num_fwd_outputs
+        )
+        backward_dependencies: OrderedSet[fx.Node] = OrderedSet()
+
+        backward_dependency_stack = [
+            output
+            for output in bwd_outputs
+            if output is not None and output.op != "output"
+        ]
+        while backward_dependency_stack:
+            node = backward_dependency_stack.pop()
+            if node in backward_dependencies:
+                continue
+            backward_dependencies.add(node)
+            backward_dependency_stack.extend(node.all_input_nodes)
+
+        def partition_key(node: fx.Node) -> bool:
+            return node in backward_dependencies
+
+        cse_graph = fx_graph_cse(fx_g, extra_node_key=partition_key)
         joint_module.graph = cse_graph
     joint_graph = joint_module.graph
 
@@ -3791,11 +4132,69 @@ def min_cut_rematerialization_partition(
             for user in node.users:
                 node.dist_from_bw = min(node.dist_from_bw, user.dist_from_bw + 1)
 
+    # memory_budget override resolution, in increasing precedence:
+    #   1. config.activation_memory_budget (global default).
+    #   2. Legacy node.meta["memory_budget"], set by the old
+    #      `MemoryBudgetMode` / `set_memory_budget` allow_in_graph marker. First
+    #      matching node wins (preserves prior behavior); we may want to remove
+    #      this path later.
+    #   3. `torch.autograd.graph.region_activation_memory_budget(...)`, read off
+    #      node.meta["custom"] via `_get_memory_budget_annotation` and propagated
+    #      onto every annotated node via _COPY_META_FIELDS["custom"]; overrides
+    #      the legacy reader.
     memory_budget = config.activation_memory_budget
     for node in joint_graph.nodes:
         if isinstance(node.meta.get("memory_budget", None), float):
             memory_budget = node.meta["memory_budget"]
             break
+
+    # The partitioner applies a single budget per joint graph, so all annotated
+    # nodes must agree and the annotation must cover every forward op; otherwise
+    # the caller mixed budgets or annotated only part of a graph (across a graph
+    # break each graph is resolved independently). Collect both in one pass.
+    region_budgets: OrderedSet[float] = OrderedSet()
+    unannotated_fw_ops: list[fx.Node] = []
+    for node in joint_graph.nodes:
+        budget = _get_memory_budget_annotation(node)
+        if budget is not None:
+            region_budgets.add(budget)
+        elif node.op == "call_function" and node_info.is_required_fw(node):
+            unannotated_fw_ops.append(node)
+
+    # A budget must consistently cover the entire forward, including HOP bodies.
+    # Recurse into nested subgraph modules: collect their budgets (for the
+    # agreement check) and flag any unannotated call_function (for coverage). In
+    # a consistent graph every node in every body carries the budget, so an
+    # unannotated body op means the budget did not cover that HOP.
+    all_budgets: OrderedSet[float] = OrderedSet(region_budgets)
+    for _, sub in joint_module.named_modules():
+        if isinstance(sub, fx.GraphModule) and sub.graph is not joint_graph:
+            for node in sub.graph.nodes:
+                b = _get_memory_budget_annotation(node)
+                if b is not None:
+                    all_budgets.add(b)
+                elif node.op == "call_function":
+                    unannotated_fw_ops.append(node)
+    if len(all_budgets) > 1:
+        raise RuntimeError(
+            f"torch.autograd.graph.region_activation_memory_budget: "
+            f"conflicting budgets within a single joint graph (including nested "
+            f"subgraphs): {sorted(all_budgets)}. Use a graph break to separate "
+            f"regions that need different budgets."
+        )
+
+    if all_budgets:
+        if unannotated_fw_ops:
+            raise RuntimeError(
+                f"torch.autograd.graph.region_activation_memory_budget: must "
+                f"cover the entire forward of a graph (including HOP bodies), but "
+                f"{len(unannotated_fw_ops)} forward op(s) are unannotated. Wrap "
+                f"the whole forward in a single region; use a graph break to scope "
+                f"different budgets to different graphs. Note that a graph break "
+                f"inside the annotated region can also cause unannotated ops here. "
+                f"Unannotated ops: {[n.name for n in unannotated_fw_ops]}."
+            )
+        memory_budget = next(iter(all_budgets))
     saved_values = choose_saved_values_set(
         joint_graph,
         node_info,

@@ -208,10 +208,9 @@ struct C10_XPU_API DeviceProp{
     // experimental device aspects.
     AT_FORALL_XPU_EXP_CL_ASPECT(DEFINE_DEVICE_HAS_ASPECT)
 
-#if SYCL_COMPILER_VERSION >= 20250000
     // experimental device properties.
     AT_FORALL_XPU_EXP_DEVICE_PROPERTIES(DEFINE_EXP_DEVICE_PROP)
-#endif
+
 };
 
 #undef _DEFINE_SYCL_PROP

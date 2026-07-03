@@ -8,15 +8,17 @@ import weakref
 from collections.abc import Callable
 from dataclasses import dataclass
 from types import TracebackType
-from typing import Any, overload, TYPE_CHECKING, TypeVar
+from typing import Any, overload, Protocol, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
 import torch.utils._pytree as pytree
 from torch._opaque_base import OpaqueBase
+from torch._vendor.packaging.version import InvalidVersion, Version
 from torch.compiler import is_compiling
 from torch.utils._contextlib import _DecoratorContextManager
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+from torch.utils._typing_utils import not_none
 
 from .._utils_internal import justknobs_check
 from . import trace_rules, variables
@@ -28,12 +30,21 @@ from .eval_frame import (
     innermost_fn,
     RunOnlyContext,
     skip_code,
+    StanceStr,
 )
 from .external_utils import (
     get_nonrecursive_disable_wrapper,
     wrap_dunder_call_ctx_manager,
 )
-from .utils import _get_error_on_graph_break, _set_error_on_graph_break, is_function
+from .utils import (
+    _get_cudagraph_override,
+    _get_error_on_graph_break,
+    _set_cudagraph_override,
+    _set_error_on_graph_break,
+    allow_lru_cache_wrapper_trace_without_warning,
+    is_function,
+    is_lru_cache_wrapped_function,
+)
 
 
 justknobs_check._dynamo_marked_constant = True  # type: ignore[attr-defined]
@@ -144,7 +155,7 @@ class set_stance(_DecoratorContextManager):
 
     def __init__(
         self,
-        stance: str = "default",
+        stance: StanceStr = "default",
         *,
         skip_guard_eval_unsafe: bool = False,
         force_backend: str | Callable[..., Any] | None = None,
@@ -228,65 +239,7 @@ def nonstrict_trace(traceable_fn: Callable[_P, _R]) -> Callable[_P, _R]:
     """
     Decorator to mark a function as nonstrict-traceable for dynamo.
 
-    A nonstrict-traced function appears as an opaque call in the dynamo graph.
-    Dynamo does not trace into the function body (hence the "nonstrict"), but
-    aot_autograd will trace into it.
-
-    This is similar to ``allow_in_graph`` but with enhanced support for:
-    - User-defined classes as inputs (must be registered with pytree)
-    - ``nn.Module`` as input arguments (parameters and buffers are tracked for autograd)
-    - Global/captured tensors treated as constants (assumed not updated during execution)
-
-    Note:
-        - With ``backend="eager"``, the original Python function runs directly.
-          With ``backend="aot_eager"``, the graph traced by aot_autograd runs.
-          With ``backend="inductor"``, the traced graph is compiled with inductor.
-
-        - Training is supported: you can call ``.backward()`` on outputs and gradients
-          will flow through the nonstrict-traced function.
-
-    Dangerous patterns (may cause silent incorrectness):
-        - Side effects between nonstric_traced fn and compiled region: The function should
-          not depend on variables mutated by other code inside the compiled function, and code
-          after the call should not depend on mutations made by it.
-
-        - Implicit inputs (closures/globals): Tensors captured from enclosing scopes
-          are treated as constants. Gradients will NOT flow back to them. Pass tensors
-          as explicit arguments if gradients are needed.
-
-    Restrictions:
-        - Both inputs and outputs must use pytree-compatible types. User-defined classes
-          must be registered via :func:`torch.utils._pytree.register_pytree_node`,
-          :func:`torch.utils._pytree.register_dataclass`, or
-          :func:`torch.utils._pytree.register_constant`. Tensors, Python primitives (int, float, bool, str),
-          symbolic types (SymInt, SymFloat, SymBool), and built-in containers (list,
-          tuple, dict) are already handled by default.
-        - Primitive values and container structure are specialized per call site:
-          each call site expects the same primitives and structure on every execution.
-
-    Example::
-
-        >>> import torch
-        >>> @torch._dynamo.nonstrict_trace
-        ... def traced_forward(model, x):
-        ...     # It's OK to have dynamo graph break within nonstrict_trace region
-        ...     torch._dynamo.graph_break()
-        ...     return model(x) + x
-        ...
-        >>> class MyModule(torch.nn.Module):
-        ...     def __init__(self):
-        ...         super().__init__()
-        ...         self.inner = torch.nn.Linear(10, 10)
-        ...
-        ...     def forward(self, x):
-        ...         return traced_forward(self.inner, x)
-        ...
-        >>> # Compile and run
-        >>> model = MyModule()
-        >>> opt_model = torch.compile(model, backend="aot_eager", fullgraph=True)
-        >>> out = opt_model(torch.randn(10, 10))
-        >>> out.sum().backward()  # Gradients flow through traced_forward
-
+    See :func:`torch.compiler.nonstrict_trace` for the full documentation.
     """
     if not callable(traceable_fn):
         raise AssertionError("nonstrict_trace expects a callable")
@@ -1451,21 +1404,58 @@ def _patch_einops_symint_compat(einops_mod: Any) -> None:
         setattr(einops_mod, name, make_wrapper(cached, uncached))
 
 
-# One day, Dynamo will support tracing into einops directly (no allow_in_graph needed)
-# Note that PyTorch supports multiple versions of einops, so when that day comes,
-# we still need to be really careful about version matches.
+_EINOPS_DYNAMO_TRACING_MIN_VERSION = Version("0.8.2")
+# Known pure parser/shape helpers in einops 0.8.2. Keep this explicit so
+# unrelated or future lru_cache wrappers continue through the normal warning path.
+_EINOPS_LRU_CACHE_WRAPPER_ALLOWLIST = (
+    (
+        "einops.einops",
+        (
+            "_reconstruct_from_shape",
+            "_prepare_transformation_recipe",
+            "_compactify_pattern_for_einsum",
+        ),
+    ),
+    ("einops.packing", ("analyze_pattern",)),
+)
+
+
+def _einops_supports_dynamo_tracing(einops_mod: Any) -> bool:
+    try:
+        return Version(einops_mod.__version__) >= _EINOPS_DYNAMO_TRACING_MIN_VERSION
+    except InvalidVersion:
+        return False
+
+
+def _allow_lru_cache_trace_without_warning_for_einops() -> None:
+    import importlib
+
+    for module_name, attr_names in _EINOPS_LRU_CACHE_WRAPPER_ALLOWLIST:
+        try:
+            module = importlib.import_module(module_name)
+        except ImportError:
+            continue
+
+        for attr_name in attr_names:
+            obj = getattr(module, attr_name, None)
+            if is_lru_cache_wrapped_function(obj):
+                allow_lru_cache_wrapper_trace_without_warning(obj)
+
+
+# Dynamo can trace through einops 0.8.2+ directly (no allow_in_graph needed).
+# Older versions still need the allow_in_graph registration below.
 def _allow_in_graph_einops() -> None:
     import einops
 
-    # There is a lru_cache logspam issue with einops when allow_in_graph is not
-    # used. Disabling this for now until the lru_cache issue is resolved.
-    # if einops.__version__ >= "0.8.2":
-    #     if hasattr(einops, "einops") and hasattr(einops.einops, "get_backend"):
-    #         # trigger backend registration up front to avoid a later guard failure
-    #         # that would otherwise cause a recompilation
-    #         einops.rearrange(torch.randn(1), "i -> i")
-    #     # einops 0.8.2+ don't need explicit allow_in_graph calls
-    #     return
+    if _einops_supports_dynamo_tracing(einops):
+        if hasattr(einops, "einops") and hasattr(einops.einops, "get_backend"):
+            # trigger backend registration up front to avoid a later guard failure
+            # that would otherwise cause a recompilation
+            einops.rearrange(torch.empty(1), "i -> i")
+        # einops uses lru_cache for pure library-internal recipe helpers. Mark
+        # only those wrappers so general lru_cache warnings are unchanged.
+        _allow_lru_cache_trace_without_warning_for_einops()
+        return
 
     try:
         # requires einops > 0.6.1, torch >= 2.0
@@ -1495,10 +1485,25 @@ def _allow_in_graph_einops() -> None:
 trace_rules.add_module_init_func("einops", _allow_in_graph_einops)
 
 
+class _ConfigPatchProtocol(Protocol):
+    """The config.patch() context manager object wrapped by DynamoConfigPatchProxy."""
+
+    changes: dict[str, Any]
+
+    def __enter__(self) -> None: ...
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None: ...
+
+
 # Proxy class for torch._dynamo.config patching - so dynamo can identify context managers/decorators
 # created by patch_dynamo_config, compared to ones created by a raw torch._dynamo.config.patch.
 class DynamoConfigPatchProxy:
-    def __init__(self, config_patch: Any) -> None:
+    def __init__(self, config_patch: _ConfigPatchProtocol) -> None:
         self.config_patch = config_patch
 
     @property
@@ -1688,11 +1693,19 @@ class CudagraphOverrideContextManager:
     def __init__(self, fwd: bool | None = None, bwd: bool | None = None) -> None:
         self.fwd = fwd
         self.bwd = bwd
+        self.prev_cudagraph_override: list[tuple[bool | None, bool | None] | None] = []
 
     __call__ = wrap_dunder_call_ctx_manager
 
     def __enter__(self) -> None:
-        pass
+        # Set the override at runtime so it follows the dynamic call stack.
+        # Dynamo handles the lexical `with` symbolically and does not run this
+        # __enter__ at trace time; it runs when the generated/resumed bytecode
+        # re-enters the context, before invoking callees that are compiled as
+        # separate frames. OutputGraph seeds its annotation from this value via
+        # _get_cudagraph_override. Mirrors ErrorOnGraphBreakDecoratorContextManager.
+        self.prev_cudagraph_override.append(_get_cudagraph_override())
+        _set_cudagraph_override((self.fwd, self.bwd))
 
     def __exit__(
         self,
@@ -1700,7 +1713,7 @@ class CudagraphOverrideContextManager:
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
-        pass
+        _set_cudagraph_override(self.prev_cudagraph_override.pop())
 
 
 def override_cudagraphs(
@@ -1781,7 +1794,7 @@ def override_optimization_hint(x: Any, val: int) -> None:
         raise TypeError(
             f"override_optimization_hint expects a torch.SymInt or int, got {type(x)}"
         )
-    shape_env = x.node.shape_env
+    shape_env = not_none(x.node.shape_env)
     expr = x.node.expr
     import sympy
 
@@ -1795,7 +1808,7 @@ def override_optimization_hint(x: Any, val: int) -> None:
             f"override_optimization_hint expects an unbacked symbol, "
             f"but {expr} is backed"
         )
-    shape_env.var_to_hint_override[expr] = val
+    shape_env._set_unbacked_var_to_hint_override(x, val)
 
 
 def is_dynamo_disable_recursive(method: Callable[[Any], Any]) -> bool | None:

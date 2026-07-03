@@ -24,11 +24,21 @@ static const size_t kMinLargeAlloc = MB(10); // allocations between 1 and 10 MiB
 static const size_t kRoundLarge = MB(2); // round up large allocations to 2 MiB
 static const size_t kSmallHeap = MB(8); // "small" allocations are packed in 8 MiB heaps
 static const size_t kLargeHeap = MB(32); // "large" allocations may be packed in 32 MiB heaps
-static const size_t kXLargeHeapD =
-    MB(128); // "extra large" allocations on Discrete devices may be packed in 128 MiB heaps
-static const size_t kXLargeHeapU =
-    MB(1024); // "extra large" allocations on Unified devices may be packed in 1 GiB heaps
+static const size_t kXLargeHeap = MB(1024); // "extra large" allocations may be packed in 1 GiB heaps
 static const size_t kMaxScalarAlloc = (sizeof(int64_t)); // largest "scalar" allocation
+
+enum class HeapTier { SMALL, LARGE, XLARGE, OVERSIZE };
+
+inline HeapTier getHeapTier(size_t size, bool has_memory_pressure) {
+  if (size <= kMaxSmallAlloc) {
+    return HeapTier::SMALL;
+  } else if (size < kMinLargeAlloc) {
+    return HeapTier::LARGE;
+  } else if (size < kXLargeHeap / 2 && !has_memory_pressure) {
+    return HeapTier::XLARGE;
+  }
+  return HeapTier::OVERSIZE;
+}
 
 // buffer pools could be customized with a combination of usage flags
 enum UsageFlags : uint32_t {
@@ -100,8 +110,6 @@ struct AllocParams {
   // true if we exceed the low watermark limit. In this case
   // we apply strategies to relieve the pressure before allocation.
   bool has_memory_pressure = false;
-  // true if we're allocating on a unified memory device
-  bool has_unified_memory = true;
 };
 
 struct HeapBlock {
@@ -147,16 +155,20 @@ struct HeapBlock {
     const size_t size = params.size();
     MTLHeapDescriptor* d = [MTLHeapDescriptor new];
     if (d) {
-      const size_t kXLargeHeap = params.has_unified_memory ? kXLargeHeapU : kXLargeHeapD;
-      if (size <= kMaxSmallAlloc) {
-        d.size = kSmallHeap;
-      } else if (size < kMinLargeAlloc) {
-        d.size = kLargeHeap;
-      } else if (size < kXLargeHeap / 2 && !params.has_memory_pressure) {
-        d.size = kXLargeHeap;
-      } else {
-        d.size = kRoundLarge * ((size + kRoundLarge - 1) / kRoundLarge);
-        is_split = false;
+      switch (getHeapTier(size, params.has_memory_pressure)) {
+        case HeapTier::SMALL:
+          d.size = kSmallHeap;
+          break;
+        case HeapTier::LARGE:
+          d.size = kLargeHeap;
+          break;
+        case HeapTier::XLARGE:
+          d.size = kXLargeHeap;
+          break;
+        case HeapTier::OVERSIZE:
+          d.size = kRoundLarge * ((size + kRoundLarge - 1) / kRoundLarge);
+          is_split = false;
+          break;
       }
       d.storageMode = (usage & UsageFlags::SHARED) ? MTLStorageModeShared : MTLStorageModePrivate;
       d.cpuCacheMode = MTLCPUCacheModeDefaultCache;
@@ -324,12 +336,16 @@ class MPSHeapAllocatorImpl {
   }
   // (see m_total_allocated_memory for description)
   size_t getTotalAllocatedMemory() const {
-    return m_total_allocated_memory;
+    return m_total_allocated_memory.current;
   }
   // (see m_current_allocated_memory for description)
   size_t getCurrentAllocatedMemory() const {
-    return m_current_allocated_memory;
+    return m_current_allocated_memory.current;
   }
+  // snapshot of memory stats for the generic torch.accelerator memory APIs
+  c10::CachingDeviceAllocator::DeviceStats getDeviceStats();
+  void resetAccumulatedStats();
+  void resetPeakStats();
   // total GPU memory allocated in the process by Metal driver; including
   // implicit allocations from MPS/MPSGraph frameworks and MPSHeapAllocatorImpl.
   size_t getDriverAllocatedMemory() const {
@@ -357,8 +373,7 @@ class MPSHeapAllocatorImpl {
   constexpr static double default_high_watermark_upper_bound = 2.0;
   // (see m_low_watermark_ratio for description)
   // on unified memory, we could allocate beyond the recommendedMaxWorkingSetSize
-  constexpr static double default_low_watermark_ratio_unified = 1.4;
-  constexpr static double default_low_watermark_ratio_discrete = 1.0;
+  constexpr static double default_low_watermark_ratio = 1.4;
 
   const id<MTLDevice> m_device;
   std::recursive_mutex m_mutex;
@@ -366,10 +381,12 @@ class MPSHeapAllocatorImpl {
   ska::flat_hash_map<const void*, BufferBlock*> m_allocated_buffers;
   // using a container for pools to simplify iterating them
   ska::flat_hash_map<BufferPool::Kind, std::unique_ptr<BufferPool>> m_pools;
-  // total memory allocated by HeapAllocator (including blocks in pools)
-  size_t m_total_allocated_memory = 0;
-  // currently active memory allocations in use (i.e., blocks not in pools)
-  size_t m_current_allocated_memory = 0;
+  // total memory allocated by HeapAllocator (including blocks in pools);
+  // tracked as a Stat to expose current/peak/accumulated reserved bytes
+  c10::CachingAllocator::Stat m_total_allocated_memory;
+  // currently active memory allocations in use (i.e., blocks not in pools);
+  // tracked as a Stat to expose current/peak/accumulated allocated bytes
+  c10::CachingAllocator::Stat m_current_allocated_memory;
   // max buffer size allowed by Metal
   size_t m_max_buffer_size = 0;
   // maximum total size allowed to be allocated

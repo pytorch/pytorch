@@ -99,6 +99,7 @@ def _compile_submod(gm: torch.fx.GraphModule, prefix: str) -> torch.fx.GraphModu
                     fake_inputs,
                     dynamic_shapes="from_tracing_context",
                     aot=True,
+                    donate_graph_module=True,
                 )
             if not isinstance(compiled_fn, AOTCompiledArtifact):
                 raise AssertionError(
@@ -197,7 +198,7 @@ class _RegionScooper:
         for node in gm.graph.find_nodes(op="get_attr"):
             if _needs_inductor_compile(node):
                 # If the get_attr itself is marked for compile, the outer graph will
-                # take care of it. If we dont do that, we end up with nested
+                # take care of it. If we don't do that, we end up with nested
                 # regional inductor compiles that do not work well.
                 continue
             submod = getattr(gm, node.target)
