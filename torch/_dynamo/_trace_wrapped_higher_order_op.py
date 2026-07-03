@@ -56,6 +56,12 @@ def zeros_and_scatter(
     vals: Tensor,
 ) -> Tensor:
     """Custom Op so that we can register a custom lowering for the new_output + scatter in the backwards pass"""
+    if len(indices) == 0:
+        if len(shape) != 0:
+            raise RuntimeError(
+                "zeros_and_scatter with no indices only supports scalar outputs"
+            )
+        return vals.sum().reshape(shape)
     grad = torch.zeros(shape, device=vals.device, dtype=vals.dtype)
     return torch.ops.aten.index_put(grad, indices, vals, accumulate=True)
 
@@ -72,7 +78,7 @@ def _(
 @zeros_and_scatter.register_vmap  # type: ignore[misc]
 def _(info, indims, shape, indices, value):  # type: ignore[no-untyped-def]
     """The batching rule is special in that it returns a tensor that is not batched"""
-    indices_indims = indims[1]
+    indices_indims = indims[1] if indims[1] is not None else []
     expanded_indices = []
     for idx, idx_indim in zip(indices, indices_indims):
         # The index is not being batched, we should unsqueeze and expand to val

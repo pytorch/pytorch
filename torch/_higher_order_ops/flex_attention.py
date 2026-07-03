@@ -724,7 +724,7 @@ def create_fw_bw_graph(
             n: Tensor,
             example_grad: Tensor,
             *other_buffers: tuple[Tensor, ...],
-        ) -> tuple[Tensor, ...]:
+        ) -> list[Tensor | None]:
             def fw_with_masks(
                 *args: tuple[Tensor, ...],
             ) -> tuple[tuple[Tensor], tuple[bool]]:
@@ -743,7 +743,17 @@ def create_fw_bw_graph(
                     "require gradients with respect to score."
                 )
 
-            return grads
+            scalar_captured_grads = [
+                torch.ops.flex_lib.zeros_and_scatter([], [], grad)
+                if (
+                    isinstance(grad, torch.Tensor)
+                    and isinstance(buffer, torch.Tensor)
+                    and buffer.ndim == 0
+                )
+                else grad
+                for grad, buffer in zip(grads[5:], other_buffers)
+            ]
+            return [*grads[:5], *scalar_captured_grads]
 
         joint_graph = make_fx(joint_f)(
             *unwrapped_score_mod_indexes, example_grad, *unwrapped_other_buffers
