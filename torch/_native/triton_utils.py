@@ -48,7 +48,10 @@ def _check_runtime_available() -> tuple[bool, Version | None]:
         available = True
         version = _available_version("triton")
     else:
-        log.warning("triton native DSL ops require: `triton` %s", reason)
+        # info, not warning: see cutedsl_utils._check_runtime_available for
+        # rationale (missing optional deps is the common case; surface via
+        # TORCH_LOGS=+native_dsl when needed).
+        log.info("triton native DSL ops require: `triton` %s", reason)
         available = False
         version = None
     return available, version
@@ -78,7 +81,7 @@ def _version_is_sufficient() -> bool:
     if (major_ok and minor_ok) or check_native_version_skip():
         return True
 
-    log.warning(
+    log.info(
         "triton version %s is not sufficient (>= (%s.%s.*)); "
         "set TORCH_NATIVE_SKIP_VERSION_CHECK=1 to override",
         version,

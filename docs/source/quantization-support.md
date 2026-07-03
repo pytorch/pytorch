@@ -88,6 +88,8 @@ This module contains FX graph mode quantization APIs (prototype).
 
 ```{eval-rst}
 .. currentmodule:: torch.ao.quantization.quantize_fx
+.. autofunction:: attach_preserved_attrs_to_model
+.. autofunction:: convert_to_reference_fx
 ```
 
 ```{eval-rst}
@@ -129,9 +131,7 @@ Quantization to work with this as well.
 
 ```{eval-rst}
 .. currentmodule:: torch.ao.quantization.backend_config
-```
 
-```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -142,6 +142,16 @@ Quantization to work with this as well.
     DTypeConfig
     DTypeWithConstraints
     ObservationType
+
+.. currentmodule:: torch.ao.quantization.backend_config.executorch
+.. autofunction:: get_executorch_backend_config
+
+.. currentmodule:: torch.ao.quantization.backend_config.fbgemm
+.. autofunction:: get_fbgemm_backend_config
+
+.. currentmodule:: torch.ao.quantization.backend_config.onednn
+.. autofunction:: get_onednn_backend_config
+
 ```
 
 ## torch.ao.quantization.backend_config.utils
@@ -402,6 +412,9 @@ to configure quantization settings for individual ops.
 
 ```{eval-rst}
 .. currentmodule:: torch.ao.quantization.qconfig
+.. autofunction:: get_default_qat_qconfig
+.. autofunction:: get_default_qconfig
+.. autofunction:: qconfig_equals
 ```
 
 ```{eval-rst}

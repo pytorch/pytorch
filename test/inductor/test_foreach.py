@@ -988,24 +988,28 @@ class ForeachTests(TestCase):
 
     @requires_gpu
     @torch._inductor.config.patch("combo_kernel_allow_mixed_sizes", 2)
+    @config.patch({"combo_kernel_per_subkernel_blocks": True})
     def test_2d_block_mixed_sizes_with_mask(self):
         """2D blocking with mixed sizes should have mask"""
+        from torch._inductor.utils import run_and_get_code
 
         def fn(a0, a1, a2, b0, b1, b2):
             return torch._foreach_add([a0, a1, a2], [b0, b1, b2])
 
-        self.check_model_gpu(
-            fn,
-            (
-                torch.rand(1024, 2048, device=GPU_TYPE),
-                torch.rand(2048, 2048, device=GPU_TYPE),
-                torch.rand(1024, 2048, device=GPU_TYPE),
-                torch.rand(2048, 1024, device=GPU_TYPE).t(),
-                torch.rand(2048, 2048, device=GPU_TYPE).t(),
-                torch.rand(2048, 1024, device=GPU_TYPE).t(),
-            ),
+        inputs = (
+            torch.rand(1024, 2048, device=GPU_TYPE),
+            torch.rand(2048, 2048, device=GPU_TYPE),
+            torch.rand(1024, 2048, device=GPU_TYPE),
+            torch.rand(2048, 1024, device=GPU_TYPE).t(),
+            torch.rand(2048, 2048, device=GPU_TYPE).t(),
+            torch.rand(2048, 1024, device=GPU_TYPE).t(),
         )
-
+        fn_c = torch.compile(fn)
+        compiled_out, code = run_and_get_code(fn_c, *inputs)
+        code = " ".join(code)
+        self.assertEqual(compiled_out, fn(*inputs))
+        self.assertIn("@triton_heuristics.foreach", code)
+        self.assertNotIn("SequentialFlattenComboKernelGrid", code)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_gpu
@@ -1417,6 +1421,20 @@ class ForeachTests(TestCase):
         _, code = run_and_get_code(fn, self_tensors, tensor1_list, tensor2_list)
         code = " ".join(code)
         self.assertIn("tl.fma", code, "Expected FMA to be used in generated code")
+
+    @requires_gpu
+    def test_foreach_sub(self):
+        def fn(a, b):
+            return torch._foreach_sub(a, b, alpha=2.0)
+
+        torch.manual_seed(42)
+        a = [torch.randn(4, device=GPU_TYPE) for _ in range(3)]
+        b = [torch.randn(4, device=GPU_TYPE) for _ in range(3)]
+
+        eager = fn(a, b)
+        compiled = torch.compile(fn, fullgraph=True)(a, b)
+
+        self.assertEqual(eager, compiled)
 
     @requires_gpu
     def test_foreach_reorder_loops_with_nested_foreach_snodes(self):

@@ -197,7 +197,7 @@ Adafactor.__doc__ = (
             &\hspace{5mm}\textbf{else}                                                           \\
             &\hspace{10mm}G_t           \leftarrow   \nabla_{\theta} f_t (\theta_{t-1})          \\
             &\hspace{5mm}\widehat{\beta}_{2_t} \leftarrow 1 - t^{\tau}                           \\
-            &\hspace{5mm}\rho_t         \leftarrow min(lr, \frac{1}{\sqrt{t}})                   \\
+            &\hspace{5mm}\rho_t         \leftarrow min(\gamma, \frac{1}{\sqrt{t}})               \\
             &\hspace{5mm}\alpha_t       \leftarrow max(\epsilon_2,
                 \text{RMS}(\theta_{t-1}))\rho_t                                                  \\
             &\hspace{5mm}\theta_t       \leftarrow \theta_{t-1} - \gamma \lambda \theta_{t-1}    \\
@@ -265,7 +265,7 @@ Adafactor.__doc__ = (
 
         .. math::
             \begin{aligned}
-                &\hspace{5mm}\rho_t \leftarrow min(lr, \frac{1}{\sqrt{t}})
+                &\hspace{5mm}\rho_t \leftarrow min(\gamma, \frac{1}{\sqrt{t}})
             \end{aligned}
 
         This differs from Noam Shazeer and Mitchell Stern, who use a constant of 0.01 as
@@ -380,7 +380,7 @@ def _single_tensor_adafactor(
         rho_t = min(lr, 1 / (step_float**0.5))
         alpha = max(eps2, param.norm(2).item() / (param.numel() ** 0.5)) * rho_t
 
-        # Perform stepweight decay
+        # Perform step weight decay
         if weight_decay != 0:
             param.mul_(1 - lr * weight_decay)
 
@@ -532,7 +532,7 @@ def _multi_tensor_adafactor(
             for p, r in zip(device_params, rho_ts, strict=True)
         ]
 
-        # Perform stepweight decay
+        # Perform step weight decay
         if weight_decay != 0:
             torch._foreach_mul_(device_params, 1 - lr * weight_decay)
 

@@ -19,6 +19,12 @@ from torch.testing._internal.torchbind_impls import (
 
 requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
 
+# prepacked linear requires XNNPACK support.
+requires_prepacked_linear = unittest.skipIf(
+    not hasattr(torch.ops.prepacked, "linear_clamp_prepack"),
+    "requires XNNPACK (prepacked linear ops)",
+)
+
 
 class TestConverter(TestCase):
     def setUp(self):
@@ -1455,6 +1461,7 @@ class TestConverter(TestCase):
     # and
     # torch.ops.prepacked.linear_clamp_run
     @xfailIfS390X
+    @requires_prepacked_linear
     def test_ts2ep_convert_quantized_model_with_opcontext(self):
         class M(torch.nn.Module):
             def __init__(self, linear_op):
@@ -1478,6 +1485,7 @@ class TestConverter(TestCase):
     # and
     # torch.ops.prepacked.linear_clamp_run
     @xfailIfS390X
+    @requires_prepacked_linear
     def test_ts2ep_convert_quantized_model_with_opcontext_and_constant(self):
         class M(torch.nn.Module):
             def __init__(self, linear_op):

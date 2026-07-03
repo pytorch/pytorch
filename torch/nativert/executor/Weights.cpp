@@ -476,7 +476,7 @@ std::string Weights::toString() const {
     ss << name << ", ";
   }
   ss << ']';
-  return ss.str();
+  return std::move(ss).str();
 }
 
 void Weights::validateAllWeightsLoaded() {
