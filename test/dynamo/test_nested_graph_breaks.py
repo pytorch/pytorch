@@ -1557,6 +1557,32 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         # With suppression, the break propagates to the parent, producing more.
         self.assertGreater(cnts.frame_count, 2)
 
+    def test_complex_nan_constant_across_graph_break(self):
+        """Graph break with complex constants containing nan/inf imaginary parts.
+
+        Regression test: repr(complex(x, nan)) produces "(x+nanj)" which Python
+        parses as a single identifier, not nan*1j. The FX codegen must use the
+        complex() constructor form for non-finite components.
+        """
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(x):
+            vals = [
+                complex(1.0, float("nan")),
+                complex(float("inf"), 2.0),
+                complex(float("nan"), float("nan")),
+            ]
+            total = x
+            for v in vals:
+                torch._dynamo.graph_break()
+                total = total + v
+            return total
+
+        inp = torch.tensor(0.0 + 0j)
+        result = fn(inp)
+        self.assertTrue(result.isnan())
+
     def test_fstring_graph_break_in_custom_str(self):
         """f-string formatting of an object whose __str__ causes a graph break.
 
