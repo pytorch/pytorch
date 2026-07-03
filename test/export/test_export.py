@@ -11114,6 +11114,33 @@ def forward(self, b_a_buffer, x):
         self.assertTrue(torch.allclose(core_aten_ep.module()(*inp), m(*inp)))
         self.assertEqual(id(state_dict), id(ep.state_dict))
 
+    def test_export_decomps_linalg_vector_norm(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.linalg.vector_norm(x, ord=2, dim=1, keepdim=True)
+
+        inp = (torch.randn(2, 3),)
+        m = M()
+        ep = export(m, inp)
+        self.assertTrue(
+            any(
+                node.target == torch.ops.aten.linalg_vector_norm.default
+                for node in ep.graph.nodes
+            )
+        )
+
+        core_aten_ep = ep.run_decompositions()
+        self.assertFalse(
+            any(
+                node.target == torch.ops.aten.linalg_vector_norm.default
+                for node in core_aten_ep.graph.nodes
+            )
+        )
+        FileCheck().check("torch.ops.aten.pow.Tensor_Scalar").check(
+            "torch.ops.aten.sum.dim_IntList"
+        ).run(core_aten_ep.graph_module.code)
+        self.assertEqual(core_aten_ep.module()(*inp), m(*inp))
+
     @unittest.skipIf(IS_FBCODE, "We can't customize decomp in fbcode")
     def test_export_decomp_torture_case_1(self):
         class M(torch.nn.Module):
@@ -14490,7 +14517,7 @@ graph():
     @testing.expectedFailureSerDer  # register_constant needs to handle serialization
     def test_opaque_obj(self):
         @dataclass(frozen=True)
-        class MyInput(torch._opaque_base.OpaqueBase):
+        class MyInput(torch._custom_class_base.CustomClassBase):
             int_1: int
             int_2: int
 
@@ -14507,7 +14534,7 @@ graph():
             def forward(self, x, f):
                 return x + f.int_1 + f.int_2
 
-        torch._library.opaque_object.register_opaque_type(MyInput, typ="value")
+        torch._library.opaque_object.register_custom_class(MyInput, typ="constant")
         self.addCleanup(
             lambda name=torch._library.opaque_object.get_opaque_type_name(MyInput): (
                 torch._C._unregister_opaque_type(name),
