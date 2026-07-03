@@ -13,15 +13,29 @@
 
 namespace at::native {
 
+#ifndef PYTORCH_JIT_COMPILE_SHADERS
+static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
+#else
+#include <ATen/native/mps/RangeFactories_metallib.h>
+#endif
+
 namespace {
+// Mirror the kernel-side layouts in RangeFactories.metal.
+struct RangeVals {
+  float start;
+  float step;
+  float end;
+};
+template <typename I>
+struct RangeIdx {
+  I halfway;
+  I steps;
+  I stride;
+};
+
 struct RangeCachedGraph : public mps::MPSCachedGraph {
   API_AVAILABLE(macosx(12.3))
-  RangeCachedGraph(MPSGraph* mpsGraph,
-                   MPSDataType dataType,
-                   int32_t shapeVal,
-                   bool needsClamp = false,
-                   bool startLessEnd = false)
-      : MPSCachedGraph(mpsGraph) {
+  RangeCachedGraph(MPSGraph* mpsGraph, MPSDataType dataType, int32_t shapeVal) : MPSCachedGraph(mpsGraph) {
     @autoreleasepool {
       auto shapeTensor = [mpsGraph constantWithData:[NSData dataWithBytes:&shapeVal length:sizeof(int32_t)]
                                               shape:@[ @1 ]
@@ -35,17 +49,9 @@ struct RangeCachedGraph : public mps::MPSCachedGraph {
                                                     secondaryTensor:multiplyTensor
                                                                name:nil];
       outputTensor = [mpsGraph additionWithPrimaryTensor:scaledCoords secondaryTensor:startTensor name:nil];
-      if (needsClamp) {
-        endTensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, dataType, @[ @1 ]);
-        outputTensor = [mpsGraph clampWithTensor:outputTensor
-                                  minValueTensor:startLessEnd ? startTensor : endTensor
-                                  maxValueTensor:startLessEnd ? endTensor : startTensor
-                                            name:nil];
-      }
     }
   }
   MPSGraphTensor* startTensor = nil;
-  MPSGraphTensor* endTensor = nil;
   MPSGraphTensor* multiplyTensor = nil;
   MPSGraphTensor* outputTensor = nil;
 };
@@ -194,61 +200,70 @@ Tensor& linspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
   if (result.numel() != steps) {
     result.resize_({steps});
   }
-
   if (steps == 0) {
-    // skip
-  } else if (steps == 1) {
+    return result;
+  }
+  if (steps == 1) {
     result.fill_(start);
+    return result;
+  }
+
+  // Integral outputs truncate the endpoints to the integer type first (matches
+  // CPU/CUDA); float/complex interpolate the real endpoints in float32.
+  RangeVals vals{};
+  if (isIntegralType(result.scalar_type(), /*includeBool=*/false)) {
+    AT_DISPATCH_INTEGRAL_TYPES(result.scalar_type(), "linspace_mps", [&]() {
+      const auto s = static_cast<float>(start.to<scalar_t>());
+      const auto e = static_cast<float>(end.to<scalar_t>());
+      vals = {s, (e - s) / static_cast<float>(steps - 1), e};
+    });
   } else {
-    Tensor r = !mps::needsGather(result) ? result : result.contiguous();
+    const auto s = start.to<float>();
+    const auto e = end.to<float>();
+    vals = {s, (e - s) / static_cast<float>(steps - 1), e};
+  }
+  const auto halfway = steps / 2;
 
-    // Do the MPSGraph computation
-    MPSGraphCache* cache_ = MPSGraphCache::getInstance();
-    MPSStream* stream = getCurrentMPSStream();
+  auto stream = getCurrentMPSStream();
+  auto encoder = stream->commandEncoder();
+  const auto tname = scalarToMetalTypeString(result);
 
-    bool start_less_end = (start.to<double>() <= end.to<double>());
-
-    @autoreleasepool {
-      std::string key = "linspace_out_mps:" + getTensorsStringKey({result}) + ":" + std::to_string(steps) +
-          std::to_string(start_less_end);
-      auto cachedGraph = cache_->LookUpAs<RangeCachedGraph>(key);
-
-      if (!cachedGraph) {
-        cachedGraph = cache_->CreateCachedGraphAs<RangeCachedGraph>(key, ^MPSCachedGraph*() {
-          RangeCachedGraph* newCachedGraph = nil;
-
-          @autoreleasepool {
-            MPSGraph* mpsGraph = make_mps_graph();
-            newCachedGraph = new RangeCachedGraph(mpsGraph, MPSDataTypeFloat32, steps, true, start_less_end);
-
-            if (getMPSDataType(result) != MPSDataTypeFloat32) {
-              newCachedGraph->outputTensor = [mpsGraph castTensor:newCachedGraph->outputTensor
-                                                           toType:getMPSDataType(result)
-                                                             name:@"output"];
-            }
-          }
-          return newCachedGraph;
-        });
+  if (result.is_contiguous() || result.dim() == 1) {
+    // Fast path: contiguous (stride 1) or a 1-D strided view writes in place at
+    // index*stride, no scatter. Narrow the index math to int32 when it fits.
+    const auto stride = result.is_contiguous() ? 1 : result.stride(0);
+    const auto abs_stride = stride < 0 ? -stride : stride;
+    const auto use32 = std::max<int64_t>(steps, (steps - 1) * abs_stride) <= std::numeric_limits<int32_t>::max();
+    auto pso = lib.getPipelineStateForFunc("linspace_" + tname + (use32 ? "_i32" : "_i64"));
+    dispatch_sync(stream->queue(), ^() {
+      @autoreleasepool {
+        [encoder setComputePipelineState:pso];
+        if (use32) {
+          RangeIdx<int32_t> idx{int32_t(halfway), int32_t(steps), int32_t(stride)};
+          mtl_setArgs(encoder, result, vals, idx);
+        } else {
+          RangeIdx<int64_t> idx{halfway, steps, stride};
+          mtl_setArgs(encoder, result, vals, idx);
+        }
+        mtl_dispatch1DJob(encoder, pso, static_cast<NSUInteger>(steps));
       }
-
-      NSMutableDictionary* feeds = [[NSMutableDictionary new] autorelease];
-      auto multiply = (end.to<double>() - start.to<double>()) / ((double)steps - 1.0f);
-      Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, r);
-
-      // Create dictionary of inputs and outputs
-      MPSScalar startScalar = getMPSScalar(start, ScalarType::Float);
-      feeds[cachedGraph->startTensor] = getMPSGraphTensorFromScalar(stream, startScalar);
-      MPSScalar endScalar = getMPSScalar(end, ScalarType::Float);
-      feeds[cachedGraph->endTensor] = getMPSGraphTensorFromScalar(stream, endScalar);
-      MPSScalar multiplyScalar = getMPSScalar(multiply, ScalarType::Float);
-      feeds[cachedGraph->multiplyTensor] = getMPSGraphTensorFromScalar(stream, multiplyScalar);
-
-      runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
-    }
-
-    if (!result.is_contiguous()) {
-      result.copy_(r);
-    }
+    });
+  } else {
+    // Multi-dim non-contiguous out=: scatter to each element's strided offset.
+    auto pso = lib.getPipelineStateForFunc("linspace_strided_" + tname);
+    const auto ndim = static_cast<int>(result.dim());
+    const auto sizes = result.sizes();
+    const auto strides = result.strides();
+    RangeIdx<int64_t> idx{halfway, steps, 1};
+    dispatch_sync(stream->queue(), ^() {
+      @autoreleasepool {
+        [encoder setComputePipelineState:pso];
+        mtl_setArgs(encoder, result, vals, idx, ndim);
+        [encoder setBytes:sizes.data() length:ndim * sizeof(int64_t) atIndex:4];
+        [encoder setBytes:strides.data() length:ndim * sizeof(int64_t) atIndex:5];
+        mtl_dispatch1DJob(encoder, pso, static_cast<NSUInteger>(steps));
+      }
+    });
   }
   return result;
 }
