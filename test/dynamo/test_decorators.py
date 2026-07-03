@@ -508,7 +508,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
         self.assertEqual(ref, res)
 
     def test_nonstrict_trace_pre_existing_register_constant_type_guard(self):
-        class State(torch._opaque_base.OpaqueBase):
+        class State(torch._custom_class_base.CustomClassBase):
             def __init__(self, n):
                 self.n = n
 
@@ -531,7 +531,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
         # Assume `State` is implemented in C, and the author didn't bother to
         # provide a pytree decomposition for it, and its instances are safe to
         # treat as a constant by `torch.compile`.
-        torch._library.opaque_object.register_opaque_type(State, typ="value")
+        torch._library.opaque_object.register_custom_class(State, typ="constant")
 
         @torch._dynamo.nonstrict_trace
         def trace_me(x, s):
@@ -810,7 +810,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
             )
 
     def test_nonstrict_newly_constructed_trace_register_constant_type_error(self):
-        class State(torch._opaque_base.OpaqueBase):
+        class State(torch._custom_class_base.CustomClassBase):
             def __init__(self, n):
                 self.n = n
 
@@ -827,7 +827,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
         # Assume `State` is implemented in C, and the author didn't bother to
         # provide a pytree decomposition for it, and its instances are safe to
         # treat as a constant by `torch.compile`.
-        torch._library.opaque_object.register_opaque_type(State, typ="reference")
+        torch._library.opaque_object.register_custom_class(State, typ="symbolic")
 
         @torch._dynamo.nonstrict_trace
         def trace_me(x, s):
