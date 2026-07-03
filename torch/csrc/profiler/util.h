@@ -3,6 +3,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <list>
+#include <memory>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -137,7 +139,7 @@ uint64_t TORCH_API computeFlops(
 std::string shapeToStr(const std::vector<int64_t>& shape);
 
 template <typename T>
-class TORCH_API GlobalStateManager {
+class GlobalStateManager {
  public:
   static GlobalStateManager& singleton() {
     /* library-local */ static GlobalStateManager singleton_;
@@ -145,26 +147,34 @@ class TORCH_API GlobalStateManager {
   }
 
   static void push(std::shared_ptr<T>&& state) {
-    if (singleton().state_) {
+    auto& self = singleton();
+    std::lock_guard<std::mutex> guard(self.mutex_);
+    if (self.state_) {
       LOG(WARNING) << "GlobalStatePtr already exists!";
     } else {
-      singleton().state_ = std::move(state);
+      self.state_ = std::move(state);
     }
   }
 
-  static auto* get() {
-    return singleton().state_.get();
+  static std::shared_ptr<T> get() {
+    auto& self = singleton();
+    std::lock_guard<std::mutex> guard(self.mutex_);
+    return self.state_;
   }
 
   static std::shared_ptr<T> pop() {
-    auto out = singleton().state_;
-    singleton().state_.reset();
-    return out;
+    auto& self = singleton();
+    std::lock_guard<std::mutex> guard(self.mutex_);
+    return std::move(self.state_);
   }
 
  private:
   GlobalStateManager() = default;
 
+  // Guards state_ so a worker thread copying the pointer in get() (which keeps
+  // the state alive for the duration of an in-flight callback) cannot race the
+  // thread that tears the profiler down and resets state_ in pop().
+  std::mutex mutex_;
   std::shared_ptr<T> state_;
 };
 

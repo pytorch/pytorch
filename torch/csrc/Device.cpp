@@ -115,9 +115,7 @@ static Py_ssize_t THPDevice_hash(THPDevice* self) {
 static PyObject* THPDevice_rc(PyObject* a, PyObject* b, int op) {
   HANDLE_TH_ERRORS
   if (!THPDevice_Check(a) || !THPDevice_Check(b)) {
-    // Py_RETURN_NOTIMPLEMENTED not in python 2.
-    Py_INCREF(Py_NotImplemented);
-    return Py_NotImplemented;
+    Py_RETURN_NOTIMPLEMENTED;
   }
   THPDevice* da = reinterpret_cast<THPDevice*>(a);
   THPDevice* db = reinterpret_cast<THPDevice*>(b);
@@ -182,8 +180,7 @@ static PyObject* THPDevice_enter(PyObject* self, PyObject* noargs) {
       std::make_shared<c10::SafePyObject>(
           mode.release().ptr(), getPyInterpreter()));
   // So that with torch.device('cuda') as dev: works
-  Py_INCREF(self);
-  return self;
+  return Py_NewRef(self);
   END_HANDLE_TH_ERRORS
 }
 
@@ -286,13 +283,8 @@ PyTypeObject THPDeviceType = {
 };
 
 void THPDevice_init(PyObject* module) {
-  if (PyType_Ready(&THPDeviceType) < 0) {
-    throw python_error();
-  }
-  Py_INCREF(&THPDeviceType);
   THPUpperModuleOfDevice = module;
-  if (PyModule_AddObject(
-          module, "device", reinterpret_cast<PyObject*>(&THPDeviceType)) != 0) {
+  if (PyModule_AddType(module, &THPDeviceType) < 0) {
     throw python_error();
   }
 }
