@@ -716,8 +716,6 @@ if torch.backends.mps.is_available():
         }
 
         ON_MPS_XFAILLIST: dict[str, list | None] = {
-            # Exception: Caused by `torch.arange(-8.001, -4.0, dtype=torch.uint8, device="mps")`
-            "arange": [torch.uint8],
             # Failure due to precision issue for fp16
             # on both cpu and mps there are test cases that might produce inf result
             # 'nn.functional.pairwise_distance': [torch.float16],
