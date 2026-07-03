@@ -13,7 +13,6 @@ from torch._inductor.output_code import (
 )
 
 from .compile_fx import _CompileFxKwargs, _InProcessFxCompile, FxCompile
-from .output_code import complex_memory_overlap  # noqa: F401
 
 
 # When async compile works with cache, remove the disabling below
@@ -62,7 +61,8 @@ class ProgressiveCompilationState:
         Returns a tuple of (optimized_output_code, should_clear_compilation_state).
         """
         future = self.progression_futures[stage_index]
-        assert future is not None
+        if future is None:
+            raise AssertionError("expected future to be not None")
         optimized_output_code = self.callback(future.result())
 
         if pcd := self.post_compile_data:
@@ -118,12 +118,14 @@ class _AsyncOutputCode(OutputCode):
 
         else:
             _AsyncFxCompile._stat_compiled_runs += 1
-            assert self._output_code is not None
+            if self._output_code is None:
+                raise AssertionError("expected self._output_code to be not None")
             return self._output_code.__call__(*args)
 
     # Takes and returns the args (converted to the "right" boxed mode)
     def _switch_to_compiled_fn(self, args: tuple[Any, ...]) -> tuple[Any, ...]:
-        assert self._future is not None
+        if self._future is None:
+            raise AssertionError("expected self._future to be not None")
 
         # TODO: If the future ended in an exception do we want to continue
         # running eager or hit the exception now?
@@ -164,7 +166,8 @@ class _AsyncOutputCode(OutputCode):
                 example_inputs, constants, graph_kwargs
             )
         else:
-            assert self._output_code is not None
+            if self._output_code is None:
+                raise AssertionError("expected self._output_code to be not None")
             self._output_code.post_compile(example_inputs, constants, graph_kwargs)
 
 
@@ -275,7 +278,8 @@ class _ProgressiveOutputCode(OutputCode):
             output_code = self._optimized_output_code
         else:
             _ProgressiveFxCompile._stat_fast_runs += 1
-            assert self._fast_output_code is not None
+            if self._fast_output_code is None:
+                raise AssertionError("expected self._fast_output_code to be not None")
             output_code = self._fast_output_code
 
         boxed_call = getattr(output_code, "_boxed_call", False)
@@ -297,7 +301,8 @@ class _ProgressiveOutputCode(OutputCode):
         self._switch_to_progression_stage(stage_index)
 
     def _switch_to_progression_stage(self, stage_index: int) -> None:
-        assert self._compilation_state is not None
+        if self._compilation_state is None:
+            raise AssertionError("expected self._compilation_state to be not None")
         optimized_output_code, should_clear_state = (
             self._compilation_state.switch_to_progression_stage(stage_index)
         )
@@ -316,10 +321,12 @@ class _ProgressiveOutputCode(OutputCode):
         constants: CompiledFxGraphConstants,
         graph_kwargs: _CompileFxKwargs,
     ) -> None:
-        assert self._fast_output_code is not None
+        if self._fast_output_code is None:
+            raise AssertionError("expected self._fast_output_code to be not None")
         self._fast_output_code.post_compile(example_inputs, constants, graph_kwargs)
 
-        assert self._compilation_state is not None
+        if self._compilation_state is None:
+            raise AssertionError("expected self._compilation_state to be not None")
         # Store for later when optimized version is ready
         self._compilation_state.post_compile_data = _PostCompileData(
             example_inputs, constants, graph_kwargs

@@ -70,6 +70,7 @@ from tools.testing.target_determination.heuristics.utils import get_pr_number
 from tools.testing.test_run import TestRun
 from tools.testing.test_selections import (
     calculate_shards,
+    get_job_base_name,
     get_test_case_configs,
     NUM_PROCS,
     ShardedTest,
@@ -199,6 +200,7 @@ ROCM_BLOCKLIST = [
     "test_cuda_nvml_based_avail",
     "test_jit_cuda_fuser",
     "distributed/pipelining/test_dtensor_pp_integration",
+    "inductor/test_cpu_repro",  # excessive runtimes compared to CUDA
 ]
 
 # Add architecture-specific blocklist entries
@@ -363,6 +365,10 @@ CORE_TEST_LIST = [
 
 # if a test file takes longer than 5 min, we add it to TARGET_DET_LIST
 SLOW_TEST_THRESHOLD = 300
+
+DYNAMO_WRAPPED_TIMEOUT_MULTIPLIER_OVERRIDE: dict[str, int] = {
+    "test_nn": 6,
+}
 
 DISTRIBUTED_TESTS_CONFIG = {}
 
@@ -624,12 +630,17 @@ def run_test(
         and not is_cpp_test
         and "-n" not in command
     )
+    timeout_multiplier = (
+        DYNAMO_WRAPPED_TIMEOUT_MULTIPLIER_OVERRIDE.get(test_file, 3)
+        if options.dynamo
+        else 3
+    )
     timeout = (
         None
         if not options.enable_timeout
         else THRESHOLD * 6
         if IS_SLOW
-        else THRESHOLD * 3
+        else THRESHOLD * timeout_multiplier
         if should_retry
         and isinstance(test_module, ShardedTest)
         and test_module.time is not None
@@ -1732,6 +1743,7 @@ def get_selected_tests(options) -> list[str]:
             "nn/test_pooling",
             "test_view_ops",
             "test_nn",
+            "distributions/test_distributions",
             "inductor/test_mps_basic",
             "inductor/test_torchinductor",
             "inductor/test_aot_inductor",
@@ -1795,12 +1807,18 @@ def get_selected_tests(options) -> list[str]:
             ]
         )
 
-    if sys.version_info[:2] < (3, 13) or sys.version_info[:2] >= (3, 14):
-        # Skip tests for older Python versions as they may use syntax or features
-        # not supported in those versions
-        options.exclude.extend(
-            [test for test in selected_tests if test.startswith("dynamo/cpython/3_13/")]
-        )
+    # Only include cpython tests which match the current python version
+    current_cpython_prefix = (
+        f"cpython/v{sys.version_info.major}_{sys.version_info.minor}/"
+    )
+    options.exclude.extend(
+        [
+            test
+            for test in selected_tests
+            if test.startswith("cpython/")
+            and not test.startswith(current_cpython_prefix)
+        ]
+    )
 
     selected_tests = exclude_tests(options.exclude, selected_tests)
 
@@ -1915,7 +1933,7 @@ def load_test_times_from_file(file: str) -> dict[str, Any]:
         # If job name isn't available, use build environment as a backup
         job_name = build_env
     else:
-        job_name = job_name.split(" / test (")[0]
+        job_name = get_job_base_name(job_name)
     test_config = os.environ.get("TEST_CONFIG")
     print_to_stderr(f"JOB_NAME={raw_job_name}")
     print_to_stderr(f"BUILD_ENVIRONMENT={build_env}")

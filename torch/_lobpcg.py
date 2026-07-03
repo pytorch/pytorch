@@ -309,7 +309,7 @@ class LOBPCGAutogradFunction(torch.autograd.Function):
         # lobpcg.backward has some limitations. Checks for unsupported input
         if A.is_sparse or (B is not None and B.is_sparse and ctx.needs_input_grad[2]):
             raise ValueError(
-                "lobpcg.backward does not support sparse input yet."
+                "lobpcg.backward does not support sparse input yet. "
                 "Note that lobpcg.forward does though."
             )
         if (
@@ -318,7 +318,7 @@ class LOBPCGAutogradFunction(torch.autograd.Function):
             and B.dtype in (torch.complex64, torch.complex128)
         ):
             raise ValueError(
-                "lobpcg.backward does not support complex input yet."
+                "lobpcg.backward does not support complex input yet. "
                 "Note that lobpcg.forward does though."
             )
         if B is not None:
@@ -557,8 +557,8 @@ def lobpcg(
     else:
         if A.requires_grad or (B is not None and B.requires_grad):
             raise RuntimeError(
-                "Script and require grads is not supported atm."
-                "If you just want to do the forward, use .detach()"
+                "Script and require grads is not supported atm. "
+                "If you just want to do the forward, use .detach() "
                 "on A and B before calling into lobpcg"
             )
 
@@ -618,7 +618,7 @@ def _lobpcg(
 
     if m < 3 * n:
         raise ValueError(
-            f"LPBPCG algorithm is not applicable when the number of A rows (={m})"
+            f"LOBPCG algorithm is not applicable when the number of A rows (={m})"
             f" is smaller than 3 x the number of requested eigenpairs (={n})"
         )
 
@@ -735,7 +735,7 @@ class LOBPCG:
         self.bvars: dict[str, bool] = {"_": False}
 
     def __str__(self):
-        lines = ["LOPBCG:"]
+        lines = ["LOBPCG:"]
         lines += [f"  iparams={self.iparams}"]
         lines += [f"  fparams={self.fparams}"]
         lines += [f"  bparams={self.bparams}"]
@@ -947,7 +947,7 @@ class LOBPCG:
         C = (S^TBS) C E` to a standard eigenvalue problem :math: `(Ri^T
         S^TAS Ri) Z = Z E` where `C = Ri Z`.
 
-        .. note:: In the original Rayleight-Ritz procedure in
+        .. note:: In the original Rayleigh-Ritz procedure in
           [DuerschEtal2018], the problem is formulated as follows::
 
             SAS = S^T A S
@@ -960,7 +960,7 @@ class LOBPCG:
 
           To reduce the number of matrix products (denoted by empty
           space between matrices), here we introduce element-wise
-          products (denoted by symbol `*`) so that the Rayleight-Ritz
+          products (denoted by symbol `*`) so that the Rayleigh-Ritz
           procedure becomes::
 
             SAS = S^T A S
@@ -1002,7 +1002,7 @@ class LOBPCG:
         .. note:: When `drop` is `False` then `svqb` is based on the
                   Algorithm 4 from [DuerschPhD2015] that is a slight
                   modification of the corresponding algorithm
-                  introduced in [StathopolousWu2002].
+                  introduced in [StathopoulosWu2002].
 
         Args:
 
@@ -1072,7 +1072,7 @@ class LOBPCG:
                   `_get_ortho` is based on the Algorithm 3 from
                   [DuerschPhD2015] that is a slight modification of
                   the corresponding algorithm introduced in
-                  [StathopolousWu2002]. Otherwise, the method
+                  [StathopoulosWu2002]. Otherwise, the method
                   implements Algorithm 6 from [DuerschPhD2015]
 
         .. note:: If all U columns are B-collinear to V then the
