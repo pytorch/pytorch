@@ -16,7 +16,7 @@ from torch.testing._internal.common_device_type import \
 from torch.testing._internal.common_dtype import \
     (all_passthru_types, all_passthru_types_and, get_all_dtypes,)
 
-from torch.testing._internal.common_cuda import CDNA3OrLater, SM90OrLater
+from torch.testing._internal.common_cuda import gfx_arch_supports_opportunistic_fastatomics, SM90OrLater
 
 # Protects against includes accidentally setting the default dtype
 if torch.get_default_dtype() is not torch.float32:
@@ -259,7 +259,7 @@ class TestScatterGather(TestCase):
         else:
             # When we are running opportunistic_fastatomics, we will expect some floating point rounding
             # errors as the order of operation is not guaranteed.
-            if TEST_WITH_ROCM and CDNA3OrLater() \
+            if TEST_WITH_ROCM and gfx_arch_supports_opportunistic_fastatomics() \
                     and not torch.are_deterministic_algorithms_enabled():
                 self.assertEqual(actual, expected, atol=1e-9, rtol=1e-6)
             else:
@@ -773,7 +773,7 @@ class TestScatterAddOverrideConds(TestCase):
         )
         self.assertEqual(
             self._conds(self_t, idx, src), (case.expected_tma, case.expected_vec),
-            msg=f"{case.name}: expected (TMA={case.expected_tma}, vec={case.expected_vec})",
+            msg=lambda msg: f"{msg}\n{case.name}: expected (TMA={case.expected_tma}, vec={case.expected_vec})",
         )
 
     def test_out_cond_rejects_misaligned_out(self):
@@ -795,7 +795,7 @@ class TestScatterAddOverrideConds(TestCase):
         )
         self.assertNotEqual(
             out_mis.data_ptr() % 16, 0,
-            msg=f"test bug: out should be misaligned, got {out_mis.data_ptr() % 16=}",
+            msg=lambda msg: f"{msg}\ntest bug: out should be misaligned, got {out_mis.data_ptr() % 16=}",
         )
         idx = _expanded_idx(
             torch.randint(0, M_out, (M_src,), device="cuda", dtype=torch.int64),

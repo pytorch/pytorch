@@ -16,6 +16,7 @@
 #include <ATen/cuda/tunable/TunableGemm.h>
 #include <ATen/native/Resize.h>
 #include <c10/util/MaybeOwned.h>
+#include <c10/util/StringUtil.h>
 #include <ATen/native/GroupedMMUtils.h>
 #include <ATen/native/cuda/RowwiseScaledMM.h>
 #include <ATen/native/cuda/ScaledGroupMM.h>
@@ -77,7 +78,10 @@ bool _scaled_mm_allowed_device(bool sm90_only=false, bool sm100_only=false) {
         "gfx1200", "gfx1201",
 #endif
 #if ROCM_VERSION >= 60500
-        "gfx950"
+        "gfx950",
+#endif
+#if ROCM_VERSION >= 71400
+        "gfx1250",
 #endif
     };
     return at::detail::getCUDAHooks().isGPUArch(archs);
@@ -96,6 +100,19 @@ bool _scaled_mm_allowed_device(bool sm90_only=false, bool sm100_only=false) {
 bool _scaled_mm_is_fnuz() {
     return at::detail::getCUDAHooks().isGPUArch({"gfx942"});
 }
+
+#if ROCM_VERSION >= 70000
+static void check_blockwise_e8m0fnu_arch_supported() {
+  std::vector<std::string> mx_archs{"gfx950"};
+#if ROCM_VERSION >= 71400
+  mx_archs.push_back("gfx1250");
+#endif
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      at::detail::getCUDAHooks().isGPUArch(mx_archs),
+      "Block-wise scaling for Float8_e8m0fnu is only supported on ",
+      c10::Join(",", mx_archs));
+}
+#endif
 #endif
 
 /*
@@ -591,7 +608,10 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
     if ((dprops->major < 9 || CUBLAS_VERSION < 120900 || cublasLtGetVersion() < 120900)
         // cuBLAS only supports tiled 1D factor layout for 1D block scaling, no 2D block scales
         ||  (dprops->major >= 10 && (!scale_a.sizes().empty() || !scale_b.sizes().empty()))) {
-      TORCH_CHECK_VALUE(out.dtype() == kBFloat16 || out.dtype() == kHalf, "Only bf16 and fp16 high precision output types are supported for row-wise scaling.");
+      TORCH_CHECK_VALUE(
+          out.dtype() == kBFloat16 || out.dtype() == kHalf ||
+              out.dtype() == kFloat,
+          "Only bf16, fp16, and fp32 high precision output types are supported for row-wise scaling.");
       return _scaled_rowwise_rowwise(
           mat1,
           mat2,
@@ -620,9 +640,8 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   }
   else if (scaling_choice_a == ScalingType::BlockWise1x32 && scaling_choice_b == ScalingType::BlockWise1x32) {
 #ifdef USE_ROCM
-    #if ROCM_VERSION >= 70000
-    TORCH_CHECK_NOT_IMPLEMENTED(at::detail::getCUDAHooks().isGPUArch({"gfx950"}),
-                "Block-wise scaling for Float8_e8m0fnu is only supported on gfx950");
+#if ROCM_VERSION >= 70000
+    check_blockwise_e8m0fnu_arch_supported();
 
     int packed_factor = 1;
     if (mat1.scalar_type() == ScalarType::Float4_e2m1fn_x2) {
@@ -739,7 +758,10 @@ _scaled_rowwise_rowwise(
   if (((dprops->major < 9 || CUBLAS_VERSION < 120900 || cublasLtGetVersion() < 120900)
       // cuBLAS only supports tiled 1D factor layout for 1D block scaling, no 2D block scales
       ||  (dprops->major >= 10 && (!scale_a.sizes().empty() || !scale_b.sizes().empty())))) {
-    TORCH_CHECK_VALUE(out.dtype() == kBFloat16 || out.dtype() == kHalf, "Only bf16 and fp16 high precision output types are supported for row-wise scaling.");
+    TORCH_CHECK_VALUE(
+        out.dtype() == kBFloat16 || out.dtype() == kHalf ||
+            out.dtype() == kFloat,
+        "Only bf16, fp16, and fp32 high precision output types are supported for row-wise scaling.");
     at::cuda::detail::f8f8bf16_rowwise(
         mat_a,
         mat_b,
@@ -1063,8 +1085,7 @@ _scaled_mxfp8_mxfp8(
 
 #ifdef USE_ROCM
 #if ROCM_VERSION >= 70000
-  TORCH_CHECK_NOT_IMPLEMENTED(at::detail::getCUDAHooks().isGPUArch({"gfx950"}),
-              "Block-wise scaling for Float8_e8m0fnu is only supported on gfx950");
+  check_blockwise_e8m0fnu_arch_supported();
 
   TORCH_CHECK_VALUE(mat_a.size(0) % 32 == 0 && mat_a.size(1) % 32 == 0 &&
               mat_b.size(0) % 32 == 0 && mat_b.size(1) % 32 == 0,
@@ -1150,8 +1171,7 @@ _scaled_mxfp4_mxfp4(
   auto scaling_choice_b = ScalingType::BlockWise1x32;
 
 #if ROCM_VERSION >= 70000
-  TORCH_CHECK_NOT_IMPLEMENTED(at::detail::getCUDAHooks().isGPUArch({"gfx950"}),
-              "Block-wise scaling for Float8_e8m0fnu is only supported on gfx950");
+  check_blockwise_e8m0fnu_arch_supported();
 
   TORCH_CHECK_VALUE(mat_a.size(0) % 32 == 0 && mat_a.size(1) % 32 == 0 &&
               mat_b.size(0) % 32 == 0 && mat_b.size(1) % 32 == 0,

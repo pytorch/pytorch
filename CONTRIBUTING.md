@@ -269,7 +269,6 @@ dependencies as well as the nightly binaries into the repo directory.
   * [cpp](test/cpp) - C++ unit tests for PyTorch C++ frontend.
     * [api](test/cpp/api) - [README](test/cpp/api/README.md)
     * [jit](test/cpp/jit) - [README](test/cpp/jit/README.md)
-    * [tensorexpr](test/cpp/tensorexpr) - [README](test/cpp/tensorexpr/README.md)
   * [expect](test/expect) - Automatically generated "expect" files
     which are used to compare against expected output.
   * [onnx](test/onnx) - Tests for ONNX export functionality,
@@ -306,9 +305,14 @@ Currently, we support the following tasks with Spin:
 ### Building
 
 To support building and general development, the following commands exist.
+Both `develop` and `install` prefer `uv pip` when available and fall back to
+regular pip. Build configuration comes from the environment as usual, e.g.
+`BUILD_CONFIG spin develop`.
 
 |command||
 |-|-|
+|`develop` / `editable`|editable install (also known as develop or `-e` install)|
+|`install`|non-editable install|
 |`clean`|clean, that is remove files and directories listed in .gitignore before the NOT-CLEAN-FILES marker|
 
 ### Linting

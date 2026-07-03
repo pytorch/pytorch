@@ -10,7 +10,7 @@ import traceback
 import types
 import unittest
 from copy import deepcopy
-from functools import partial
+from functools import partial, update_wrapper
 from typing import NamedTuple
 from unittest.mock import patch
 
@@ -21,7 +21,7 @@ import torch.nn.functional as F
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.eval_frame import unsupported
 from torch._dynamo.mutation_guard import GenerationTracker
-from torch._dynamo.testing import expectedFailureDynamic, same
+from torch._dynamo.testing import same
 from torch._dynamo.utils import ifdynstaticdefault
 from torch._dynamo.variables.torch_function import TensorWithTFOverrideVariable
 from torch.nn.modules.lazy import LazyModuleMixin
@@ -1511,8 +1511,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.op_count, 1)
         self.assertTrue(torch._dynamo.testing.same(out1, out2))
 
-    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
-    @expectedFailureDynamic
     def test_lazy_module1(self):
         input_shape = (16, 3, 6, 7, 8)
 
@@ -1581,8 +1579,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         )
         self.assertEqual(cnt.frame_count, 1, "No guards should have triggered.")
 
-    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
-    @expectedFailureDynamic
     def test_lazy_module2(self):
         # Test FX graph 'call_module' works well if argument is lazy module
         m = LazyMLP()
@@ -1594,8 +1590,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         ref = m(x)
         self.assertTrue(torch.allclose(ref, res))
 
-    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
-    @expectedFailureDynamic
     def test_lazy_module4(self):
         m = LazyMLP()
         x = torch.rand([10, 10])
@@ -1612,8 +1606,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         except RuntimeError:
             self.assertIn("must have same reduction dim", traceback.format_exc())
 
-    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
-    @expectedFailureDynamic
     def test_lazy_module5(self):
         # Test lazy module works well with list/tuple input
         m = LazyModuleWithListInput()
@@ -1623,8 +1615,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         ref = m(x)
         self.assertTrue(torch.allclose(ref, res))
 
-    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
-    @expectedFailureDynamic
     def test_lazy_module6(self):
         # Test new lazy submodule in lazy module's initialize_parameters
         m = LazyModuleWithLazySubmodule()
@@ -1634,8 +1624,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         ref = m(x)
         self.assertTrue(torch.allclose(ref, res))
 
-    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
-    @expectedFailureDynamic
     def test_lazy_module7(self):
         # Test lazy module works well with namedtuple/dict input
         m = LazyModuleWithNamedTupleInput()
@@ -1691,8 +1679,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         with self.assertRaises(AttributeError):
             exp_res = opt_m(x, y)
 
-    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
-    @expectedFailureDynamic
     def test_lazy_module_speculation_log_divergence(self):
         class ModWithOneLazyLinear(torch.nn.Module):
             def __init__(self) -> None:
@@ -1729,6 +1715,22 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         expect_res = mod(x)
         self.assertTrue(torch.allclose(expect_res, actual_res))
         self.assertEqual(cnt.frame_count, 1)
+
+    def test_lazy_module_symbolic_shapes(self):
+        # Regression test: lazy module initialization must handle symbolic
+        # shapes from dynamic inputs without hitting "SymIntArrayRef expected
+        # to contain only concrete integers".
+        m = torch.nn.LazyBatchNorm1d()
+
+        @torch.compile(backend="eager", dynamic=True)
+        def fn(x):
+            return m(x)
+
+        x = torch.randn(16, 3, 6)
+        result = fn(x)
+        self.assertEqual(result.shape, x.shape)
+        self.assertIsInstance(m, torch.nn.BatchNorm1d)
+        self.assertEqual(m.num_features, 3)
 
     def test_call_fn_with_non_const_inputs_safe(self):
         class ModuleSpecialFwd(torch.nn.Module):
@@ -1816,7 +1818,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
 
 
 class NNModuleTestsDevice(torch._dynamo.test_case.TestCase):
-    @expectedFailureDynamic
     @skipIfHpu
     def test_lazy_module3(self, device):
         m = LazyMLP()
@@ -2341,6 +2342,50 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
                 ):
                     torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(8))
 
+    def test_partial_monkeypatched_forward_no_recompile(self):
+        class Hook:
+            def pre_forward(self, module, *args, **kwargs):
+                return args, kwargs
+
+            def post_forward(self, module, output):
+                return output
+
+        def add_hook_to_module(module):
+            old_forward = module.forward
+            module._old_forward = old_forward
+            module._hf_hook = Hook()
+
+            def new_forward(module, *args, **kwargs):
+                args, kwargs = module._hf_hook.pre_forward(module, *args, **kwargs)
+                output = module._old_forward(*args, **kwargs)
+                return module._hf_hook.post_forward(module, output)
+
+            module.forward = update_wrapper(partial(new_forward, module), old_forward)
+
+        class Layer(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.q_proj = torch.nn.Linear(4, 4)
+                add_hook_to_module(self.q_proj)
+
+            def forward(self, x):
+                return self.q_proj(x)
+
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("eager")
+
+        @torch.compile(backend=cnt)
+        def run(layer, x):
+            return layer(x)
+
+        x = torch.randn(2, 4)
+        layers = [Layer() for _ in range(4)]
+
+        self.assertTrue(same(layers[0](x), run(layers[0], x)))
+        with patch.object(torch._dynamo.config, "error_on_recompile", True):
+            for layer in layers[1:]:
+                self.assertTrue(same(layer(x), run(layer, x)))
+        self.assertEqual(cnt.frame_count, 1)
+
     @patch.object(torch._dynamo.config, "skip_nnmodule_hook_guards", False)
     def test_hooks_outer(self):
         class TestModule(torch.nn.Module):
@@ -2453,6 +2498,33 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         m._forward_hooks[handle.id] = new_forward_hook
         self.assertEqual(compiled_func(inp), outer_func(inp))
         self.assertEqual(compiled_func(inp).item(), 16)
+
+    def test_forward_hook_handle_attr_in_hasattr(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.encoder = torch.nn.Linear(8, 4)
+                self.decoder = torch.nn.Linear(4, 8)
+
+            def forward(self, x):
+                if not hasattr(self, "_forward_hook"):
+                    self._forward_hook = self.register_forward_hook(
+                        lambda module, inputs, output: output + 1
+                    )
+                return self.decoder(self.encoder(x))
+
+        model = TestModule().eval()
+        x = torch.randn(2, 8)
+
+        with torch.no_grad():
+            model(x)
+            expected = model(x)
+
+        compiled_model = torch.compile(model, backend="eager", fullgraph=True)
+        with torch.no_grad():
+            actual = compiled_model(x)
+
+        self.assertEqual(actual, expected)
 
     def _forward_hook_test_helper(self, model):
         forward_handles = {}

@@ -593,6 +593,7 @@ class TestOperators(TestCase):
                 xfail("nn.functional.scaled_dot_product_attention"),
                 xfail("torch.ops.aten._flash_attention_forward"),
                 xfail("torch.ops.aten._efficient_attention_forward"),
+                xfail("torch.ops.aten._scaled_dot_product_flash_attention_for_cpu"),
                 xfail(
                     "nn.functional.rrelu"
                 ),  # in-place test errors out with no formula implemented
@@ -640,6 +641,11 @@ class TestOperators(TestCase):
             tol1("nn.functional.conv2d", {torch.float32: tol(atol=4e-05, rtol=5e-05)}),
             tol1("svd_lowrank", {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
             tol1("pca_lowrank", {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
+            tol1(
+                "nn.functional.linear_cross_entropy",
+                {torch.float32: tol(atol=2e-05, rtol=3e-06)},
+                device_type="cuda",
+            ),
             tol1(
                 "nn.functional.multi_head_attention_forward",
                 {torch.float32: tol(atol=6e-05, rtol=2e-05)},
@@ -1513,6 +1519,9 @@ class TestOperators(TestCase):
                     "index_fill"
                 ),  # aten::_unique hit the vmap fallback which is currently disabled
                 xfail("native_group_norm"),
+                xfail(
+                    "torch.ops.aten._scaled_dot_product_flash_attention_for_cpu"
+                ),  # aten::_scaled_dot_product_flash_attention_for_cpu hit the vmap fallback which is currently disabled
             }
         ),
     )
@@ -1735,6 +1744,9 @@ class TestOperators(TestCase):
                 skip("nn.functional.scaled_dot_product_attention"),
                 xfail("torch.ops.aten._efficient_attention_forward"),  # outputs ints
                 xfail(
+                    "torch.ops.aten._scaled_dot_product_flash_attention_for_cpu"
+                ),  # forward-AD not implemented
+                xfail(
                     "nn.functional.multi_margin_loss", ""
                 ),  # NYI: forward AD with multi_margin_loss
                 skip(
@@ -1919,6 +1931,7 @@ class TestOperators(TestCase):
                 xfail("nn.functional.dropout"),  # calls random op
                 xfail("nn.functional.scaled_dot_product_attention"),  # randomness
                 xfail("torch.ops.aten._efficient_attention_forward"),  # outputs ints
+                xfail("torch.ops.aten._scaled_dot_product_flash_attention_for_cpu"),
                 xfail("nn.functional.multi_head_attention_forward"),  # randomness
                 xfail(
                     "nn.functional.embedding_bag"

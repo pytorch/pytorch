@@ -272,6 +272,25 @@ class DecoratorTests(PytreeRegisteringTestCase):
         res = opt_fn(x, y)
         self.assertEqual(ref, res)
 
+    def test_nonstrict_trace_from_torch_compiler(self):
+        @torch.compiler.nonstrict_trace
+        def trace_me(x, y, z):
+            torch._dynamo.graph_break()
+            return x * y + z
+
+        def fn(x, y):
+            t0 = x + 1
+            t1 = trace_me(x, y, t0)
+            t2 = t1 + y
+            return t0 * t2
+
+        x, y = torch.randn(10), torch.randn(10)
+        opt_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+
+        ref = fn(x, y)
+        res = opt_fn(x, y)
+        self.assertEqual(ref, res)
+
     def test_nonstrict_trace_pre_existing_dict(self):
         @torch._dynamo.nonstrict_trace
         def trace_me(x, d):
@@ -2499,6 +2518,168 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
             "allow_in_graph",
         ):
             compiled(torch.randn(4))
+
+    def test_override_cudagraphs_annotation_nested_graph_break(self):
+        # override_cudagraphs must propagate its annotation onto every compiled
+        # subgraph even when the graph break happens inside a nested callee
+        # that is compiled as a separate frame (it cannot be inlined). This is a
+        # device-independent check on gm.meta, so it does not require CUDA.
+        annotations = []
+
+        def backend(gm, example_inputs):
+            annotations.append(gm.meta.get("cudagraph_annotation"))
+            return gm.forward
+
+        def callee(x):
+            y = x + 1
+            torch._dynamo.graph_break()
+            return y * 2
+
+        def ctx_mgr(x):
+            with torch._dynamo.override_cudagraphs(fwd=True, bwd=False):
+                return callee(x)
+
+        torch._dynamo.reset()
+        torch.compile(ctx_mgr, backend=backend)(torch.randn(4))
+        # Both segments of the callee (before and after the break) carry it.
+        self.assertEqual(len(annotations), 2)
+        for ann in annotations:
+            self.assertIsNotNone(ann)
+            self.assertEqual((ann.fwd, ann.bwd), (True, False))
+
+    def test_override_cudagraphs_annotation_decorator_graph_break(self):
+        # Decorator form: a decorated function whose body contains a graph break
+        # is split into multiple compiled segments. Every segment must carry the
+        # annotation, even though the decorator's `with` lives in the wrapper
+        # frame and the body is compiled as a separate frame. Device-independent
+        # check on gm.meta, so it does not require CUDA.
+        annotations = []
+
+        def backend(gm, example_inputs):
+            annotations.append(gm.meta.get("cudagraph_annotation"))
+            return gm.forward
+
+        @torch._dynamo.override_cudagraphs(fwd=True, bwd=False)
+        def inner(x):
+            y = x + 1
+            torch._dynamo.graph_break()
+            return y * 2
+
+        def model(x):
+            return inner(x)
+
+        torch._dynamo.reset()
+        torch.compile(model, backend=backend)(torch.randn(4))
+        self.assertEqual(len(annotations), 2)
+        for ann in annotations:
+            self.assertIsNotNone(ann)
+            self.assertEqual((ann.fwd, ann.bwd), (True, False))
+
+    def test_override_cudagraphs_annotation_disable_graph_break(self):
+        # The disable case (fwd=False) flows through the same separate-frame
+        # seeding path and must also propagate across a graph break in a
+        # separately-compiled callee. Device-independent check on gm.meta.
+        annotations = []
+
+        def backend(gm, example_inputs):
+            annotations.append(gm.meta.get("cudagraph_annotation"))
+            return gm.forward
+
+        def callee(x):
+            y = x + 1
+            torch._dynamo.graph_break()
+            return y * 2
+
+        def model(x):
+            with torch._dynamo.override_cudagraphs(fwd=False, bwd=False):
+                return callee(x)
+
+        torch._dynamo.reset()
+        torch.compile(model, backend=backend)(torch.randn(4))
+        self.assertEqual(len(annotations), 2)
+        for ann in annotations:
+            self.assertIsNotNone(ann)
+            self.assertEqual((ann.fwd, ann.bwd), (False, False))
+
+    def test_override_cudagraphs_annotation_nested_overrides_graph_break(self):
+        # Nested overrides: the innermost (most recently entered) override wins
+        # while active, and on exit the runtime stack restores the outer one so
+        # a later separately-compiled callee sees it. Each callee graph-breaks,
+        # so it is compiled as a separate frame seeded from the runtime
+        # top-of-stack override. inner_callee and outer_callee are distinct code
+        # objects (reusing one callee would be a sticky cache hit and would not
+        # recompile under the restored override). Device-independent.
+        annotations = []
+
+        def backend(gm, example_inputs):
+            annotations.append(gm.meta.get("cudagraph_annotation"))
+            return gm.forward
+
+        def inner_callee(x):
+            y = x + 1
+            torch._dynamo.graph_break()
+            return y * 2
+
+        def outer_callee(x):
+            y = x + 1
+            torch._dynamo.graph_break()
+            return y * 2
+
+        def model(x):
+            with torch._dynamo.override_cudagraphs(fwd=True, bwd=False):
+                with torch._dynamo.override_cudagraphs(fwd=False, bwd=True):
+                    z = inner_callee(x)
+                # Inner override popped here; outer (True, False) is restored.
+                return outer_callee(z)
+
+        torch._dynamo.reset()
+        torch.compile(model, backend=backend)(torch.randn(4))
+        for ann in annotations:
+            self.assertIsNotNone(ann)
+        vals = [(ann.fwd, ann.bwd) for ann in annotations]
+        # Every segment carries one of the two overrides, never None or a
+        # partial/leaked value (segment counts depend on nested_graph_breaks).
+        self.assertTrue(all(v in {(False, True), (True, False)} for v in vals))
+        # Inner override wins while active (inner_callee's segments).
+        self.assertIn((False, True), vals)
+        # After the inner `with` exits, __exit__ restores the outer override so
+        # outer_callee sees it. Absent if __exit__ fails to pop/restore.
+        self.assertIn((True, False), vals)
+
+    def test_override_cudagraphs_annotation_not_guarded_first_compile_wins(self):
+        # We intentionally do NOT guard on the dynamo global cudagraph override
+        # state. The annotation is therefore sticky per code object: the first
+        # compile wins, and toggling the override on a later call does NOT
+        # recompile. This pins that intentional behavior; if a guard is added
+        # later this test will flip (the second call would recompile).
+        annotations = []
+
+        def backend(gm, example_inputs):
+            annotations.append(gm.meta.get("cudagraph_annotation"))
+            return gm.forward
+
+        @torch.compile(backend=backend)
+        def callee(x):
+            y = x + 1
+            torch._dynamo.graph_break()
+            return y * 2
+
+        torch._dynamo.reset()
+        # First reach callee from inside an override; its two segments compile
+        # with the override annotation baked in.
+        with torch._dynamo.override_cudagraphs(fwd=True, bwd=True):
+            callee(torch.randn(4))
+        self.assertEqual(len(annotations), 2)
+        for ann in annotations:
+            self.assertIsNotNone(ann)
+            self.assertEqual((ann.fwd, ann.bwd), (True, True))
+
+        annotations.clear()
+        # Reach the same callee with no active override. Because the override
+        # state is not guarded, callee is not recompiled: the backend is not
+        # invoked again and the first-compile annotation sticks.
+        callee(torch.randn(4))
+        self.assertEqual(annotations, [])
 
 
 instantiate_parametrized_tests(DecoratorTests)
