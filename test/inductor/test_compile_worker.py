@@ -348,6 +348,143 @@ class TestSubprocessEnv(TestCase):
                 else:
                     os.environ[key] = value
 
+    def test_nvgemm_precompile_sends_full_cache_env(self):
+        from torch._inductor.async_compile import AsyncCompile
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+            _worker_nvgemm_autotuning_precompile,
+        )
+
+        class FakeFuture:
+            def result(self):
+                return None, 0
+
+        class FakePool:
+            def __init__(self):
+                self.calls = []
+
+            def submit(self, fn, *args):
+                self.calls.append((fn, args))
+                return FakeFuture()
+
+        env_keys = [
+            "TORCHINDUCTOR_CACHE_DIR",
+            "TRITON_CACHE_DIR",
+            "TORCHINDUCTOR_CUTLASS_DIR",
+        ]
+        old_env = {key: os.environ.get(key) for key in env_keys}
+        pool = FakePool()
+
+        try:
+            os.environ["TORCHINDUCTOR_CACHE_DIR"] = "/tmp/current-inductor-cache"
+            os.environ.pop("TRITON_CACHE_DIR", None)
+            os.environ.pop("TORCHINDUCTOR_CUTLASS_DIR", None)
+
+            with patch.object(AsyncCompile, "process_pool", return_value=pool):
+                AsyncCompile().nvgemm_precompile(
+                    "kernel",
+                    "GEMM",
+                    "accumulator",
+                    (),
+                    None,
+                    types.SimpleNamespace(
+                        max_active_clusters=None, device_capability=(9, 0)
+                    ),
+                )
+
+            self.assertEqual(len(pool.calls), 1)
+            fn, args = pool.calls[0]
+            self.assertIs(fn, _worker_nvgemm_autotuning_precompile)
+            self.assertEqual(
+                args[5],
+                {
+                    "TORCHINDUCTOR_CACHE_DIR": "/tmp/current-inductor-cache",
+                    "TRITON_CACHE_DIR": None,
+                    "TORCHINDUCTOR_CUTLASS_DIR": None,
+                },
+            )
+        finally:
+            for key, value in old_env.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+    def test_worker_nvgemm_precompile_clears_cache_env(self):
+        import torch
+        import torch._inductor.runtime.compile_tasks as compile_tasks
+        from torch._inductor.codegen.nv_universal_gemm import (
+            nv_universal_gemm_kernel as nvgemm_kernel,
+        )
+
+        old_env = {
+            "TORCHINDUCTOR_CACHE_DIR": os.environ.get("TORCHINDUCTOR_CACHE_DIR"),
+            "TRITON_CACHE_DIR": os.environ.get("TRITON_CACHE_DIR"),
+            "TORCHINDUCTOR_CUTLASS_DIR": os.environ.get("TORCHINDUCTOR_CUTLASS_DIR"),
+        }
+        old_last_applied_cache_env = compile_tasks._last_applied_cache_env
+        meta = types.SimpleNamespace(
+            sizes=(1, 1), strides=(1, 1), device="cpu", dtype=torch.float32
+        )
+        cuda_ctx = types.SimpleNamespace(
+            max_active_clusters=None, device_capability=(9, 0)
+        )
+
+        try:
+            compile_tasks._last_applied_cache_env = None
+            with (
+                tempfile.TemporaryDirectory() as cache_dir,
+                patch.object(
+                    nvgemm_kernel,
+                    "_compile_nvgemm",
+                    return_value=(object(), None, None, False),
+                ),
+                patch("torch._inductor.utils._ensure_fp4_dtype_registered"),
+                patch.object(
+                    nvgemm_kernel, "_patch_max_active_clusters", return_value=[]
+                ),
+            ):
+                triton_cache_dir = os.path.join(cache_dir, "triton")
+                nvgemm_kernel._worker_nvgemm_autotuning_precompile(
+                    "kernel",
+                    "GEMM",
+                    "accumulator",
+                    (meta, meta),
+                    meta,
+                    {
+                        "TORCHINDUCTOR_CACHE_DIR": cache_dir,
+                        "TRITON_CACHE_DIR": triton_cache_dir,
+                        "TORCHINDUCTOR_CUTLASS_DIR": None,
+                    },
+                    cuda_ctx,
+                )
+                self.assertEqual(os.environ["TORCHINDUCTOR_CACHE_DIR"], cache_dir)
+                self.assertEqual(os.environ["TRITON_CACHE_DIR"], triton_cache_dir)
+                self.assertNotIn("TORCHINDUCTOR_CUTLASS_DIR", os.environ)
+
+                nvgemm_kernel._worker_nvgemm_autotuning_precompile(
+                    "kernel",
+                    "GEMM",
+                    "accumulator",
+                    (meta, meta),
+                    meta,
+                    {
+                        "TORCHINDUCTOR_CACHE_DIR": None,
+                        "TRITON_CACHE_DIR": None,
+                        "TORCHINDUCTOR_CUTLASS_DIR": None,
+                    },
+                    cuda_ctx,
+                )
+                self.assertNotIn("TORCHINDUCTOR_CACHE_DIR", os.environ)
+                self.assertNotIn("TRITON_CACHE_DIR", os.environ)
+                self.assertNotIn("TORCHINDUCTOR_CUTLASS_DIR", os.environ)
+        finally:
+            compile_tasks._last_applied_cache_env = old_last_applied_cache_env
+            for key, value in old_env.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
     def test_worker_compile_triton_clears_libdevice_path(self):
         try:
             from triton import knobs
