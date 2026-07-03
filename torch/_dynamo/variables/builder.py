@@ -45,6 +45,7 @@ import sympy
 
 import torch
 from torch import SymInt
+from torch._custom_class_base import CustomClassBase
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.graph_bytecode_inputs import (
     CURRENT_STREAM_INDEX,
@@ -67,7 +68,6 @@ from torch._library.opaque_object import (
     is_opaque_value_type,
     should_hoist,
 )
-from torch._opaque_base import OpaqueBase
 from torch._ops import HigherOrderOperator, OpOverload, OpOverloadPacket
 from torch._subclasses.fake_tensor import (
     FakeTensor,
@@ -189,6 +189,7 @@ from ..utils import (
     odict_values,
     proxy_args_kwargs,
     range_iterator,
+    set_base_iter,
     set_example_value,
     tensor_always_has_static_shape,
     tuple_iterator,
@@ -244,6 +245,7 @@ from .iter import CountIteratorVariable, ItertoolsVariable
 from .lazy import LazyConstantVariable, LazyVariableTracker
 from .lists import (
     BaseListVariable,
+    DequeVariable,
     ListIteratorVariable,
     ListVariable,
     RangeVariable,
@@ -294,6 +296,7 @@ from .tensor import (
     NumpyNdarrayVariable,
     supported_const_comparison_op_values,
     SymNodeVariable,
+    TensorSpecializedProps,
     TensorSubclassVariable,
     TensorVariable,
     UnspecializedPythonVariable,
@@ -320,6 +323,7 @@ from .user_defined import (
     SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
     UserDefinedConstantVariable,
+    UserDefinedDequeVariable,
     UserDefinedDictVariable,
     UserDefinedExceptionClassVariable,
     UserDefinedListVariable,
@@ -1265,7 +1269,7 @@ class VariableBuilder:
             # on the Python hash and it is not related to object ordering inside
             # the set object. The order being incorrect at runtime will lead to
             # a recompilation.
-            L = list(value)
+            L = list(value) if istype(value, OrderedSet) else list(set_base_iter(value))
             items = [
                 LazyVariableTracker.create(
                     v,
@@ -1952,7 +1956,7 @@ class VariableBuilder:
             # tracing, but in dynamo we handle it as a regular object so that
             # trace_rules-based graph breaks (e.g. initial_seed, manual_seed)
             # work gracefully — allowing dynamo to compile code before and
-            # after the generator call. TorchScriptObjectVariable's var_getattr
+            # after the generator call. TorchScriptObjectVariable's getattro_impl
             # and call_method are decorated with @_raise_hard_error_if_graph_break,
             # which turns any graph break into a hard error that falls back to
             # eager for the entire function. Generator methods intentionally
@@ -2166,11 +2170,39 @@ class VariableBuilder:
             )
             result = UserDefinedListVariable(value, list_vt=list_vt, source=self.source)
             return self.tx.output.side_effects.track_object_existing(value, result)
+        elif isinstance(value, collections.deque):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
+            # maxlen is baked into the DequeVariable as a constant, so guard on
+            # it to recompile if a same-typed deque with a different maxlen
+            # appears.
+            install_guard(
+                AttrSource(self.source, "maxlen").make_guard(GuardBuilder.EQUALS_MATCH)
+            )
+
+            output = [
+                LazyVariableTracker.create(
+                    collections.deque.__getitem__(value, i),
+                    source=GetItemSource(self.get_source(), i),
+                    tx=self.tx,
+                )
+                for i in range(collections.deque.__len__(value))
+            ]
+            deque_vt = DequeVariable(
+                output,  # type: ignore[arg-type]
+                maxlen=ConstantVariable.create(value.maxlen),
+                source=self.source,
+                mutation_type=ValueMutationExisting(),
+            )
+            result = UserDefinedDequeVariable(
+                value, deque_vt=deque_vt, source=self.source
+            )
+            return self.tx.output.side_effects.track_object_existing(value, result)
         elif isinstance(value, (set, frozenset)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
 
-            L = list(dict.fromkeys(value))
+            L = list(set_base_iter(value))
             output = [
                 LazyVariableTracker.create(
                     list.__getitem__(L, i),
@@ -4146,7 +4178,7 @@ def get_specialized_props(
     tx: "InstructionTranslatorBase",
     example_value: Any,
     subclass_type: type | None,
-) -> dict[str, Any]:
+) -> TensorSpecializedProps:
     specialized_props = target_cls.specialize(example_value)
     # TODO: not sure about this fake mode test
     if (
@@ -4441,11 +4473,11 @@ def _automatic_dynamic(
                     inner_contexts[attr] = _automatic_dynamic(
                         inner_value, tx, inner_source, static_shapes
                     )
-                case OpaqueBase():
+                case CustomClassBase():
                     pass
                 case unexpected:
                     raise AssertionError(
-                        f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
                     )
 
         return SubclassSymbolicContext(
@@ -5013,7 +5045,7 @@ class SourcelessBuilder:
                 cls_obj_vt = SourcelessBuilder.create(tx, value.__self__)
                 try:
                     # pyrefly: ignore[bad-argument-type]
-                    return cls_obj_vt.var_getattr(tx, value.__func__.__name__)
+                    return cls_obj_vt.getattro_impl(tx, value.__func__.__name__)
                 except NotImplementedError:
                     pass  # failthrough to unimplemented branch
             else:

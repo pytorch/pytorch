@@ -131,6 +131,7 @@ from .lists import (
 from .misc import (
     AutogradFunctionContextVariable,
     AutogradFunctionVariable,
+    CallMethodVariable,
     CellVariable,
     DeletedVariable,
     ExceptionVariable,
@@ -191,6 +192,7 @@ from .user_defined import (
     StructSequenceVariable,
     UserDefinedClassVariable,
     UserDefinedConstantVariable,
+    UserDefinedDequeVariable,
     UserDefinedDictVariable,
     UserDefinedExceptionClassVariable,
     UserDefinedExceptionObjectVariable,
@@ -209,6 +211,7 @@ __all__ = [
     "BackwardHookVariable",
     "BaseBuiltinVariable",
     "BaseListVariable",
+    "CallMethodVariable",
     "BuiltinVariable",
     "CatchWarningsCtxManagerVariable",
     "CellVariable",

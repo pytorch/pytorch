@@ -257,7 +257,8 @@ def _cuda_fatbin_command(
     fatbinary: str | None,
     current_arch: str | None = None,
 ) -> list[str]:
-    current_arch = current_arch or cuda_compile_utils._nvcc_arch_as_compile_option()
+    if not current_arch:
+        current_arch = cuda_compile_utils._nvcc_arch_as_compile_option_or_raise()
     gencode_options = cuda_compile_utils._cuda_multi_arch_gencode_options(current_arch)
     if (
         fatbinary is not None
@@ -4190,8 +4191,19 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
             size_t result_len = PyList_GET_SIZE(pyvec);
             result.reserve(result_len);
             for (size_t i = 0; i < result_len; i++) {{
+                PyObject* item = PyList_GET_ITEM(pyvec, i);
+                if (item == Py_None) {{
+                    result.push_back(nullptr);
+                    continue;
+                }}
                 // AtenTensorHandle is essentially a pointer
-                void* elem = PyCapsule_GetPointer(PyList_GET_ITEM(pyvec, i), NULL);
+                void* elem = PyCapsule_GetPointer(item, NULL);
+                if (elem == nullptr && PyErr_Occurred()) {{
+                    PyErr_Clear();
+                    throw std::runtime_error(
+                        "expected input handle to be a PyCapsule or None"
+                    );
+                }}
                 result.push_back(reinterpret_cast<AtenTensorHandle>(elem));
             }}
             return result;
