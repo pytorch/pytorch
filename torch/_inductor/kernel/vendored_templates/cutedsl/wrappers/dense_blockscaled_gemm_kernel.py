@@ -6,21 +6,39 @@ import itertools
 import logging
 from collections.abc import Callable, Generator  # noqa: TC003
 
-import cutlass_api
-from cutlass_api.arguments import GemmArguments  # noqa: TC002
-from cutlass_api.artifact import CompiledArtifact
-from cutlass_api.library import ScaleMode, ScaleSwizzleMode
-from cutlass_api.metadata import (
-    DenseTensorAttributes,
-    GemmOperandsMetadata,
-    KernelMetadata,
-    ScaledTensorAttributes,
-    Sm100DesignMetadata,
+from torch._inductor.codegen.nv_universal_gemm.cutlass_ops import (
+    get_arguments_module,
+    get_artifact_module,
+    get_library_module,
+    get_metadata_module,
+    get_provider_submodule,
+    get_status_module,
+    get_utils_module,
 )
-from cutlass_api.providers.cutedsl.kernel import CuteDslKernel
-from cutlass_api.providers.cutedsl.utils import get_max_active_clusters
-from cutlass_api.status import Status
-from cutlass_api.utils import strides_to_layout_string, to_cuda_stream, tuple_to_string
+
+
+arguments = get_arguments_module()
+GemmArguments = arguments.GemmArguments
+CompiledArtifact = get_artifact_module().CompiledArtifact
+library = get_library_module()
+ScaleMode = library.ScaleMode
+ScaleSwizzleMode = library.ScaleSwizzleMode
+metadata = get_metadata_module()
+DenseTensorAttributes = metadata.DenseTensorAttributes
+GemmOperandsMetadata = metadata.GemmOperandsMetadata
+KernelMetadata = metadata.KernelMetadata
+ScaledTensorAttributes = metadata.ScaledTensorAttributes
+Sm100DesignMetadata = metadata.Sm100DesignMetadata
+cutedsl_provider = get_provider_submodule("cutedsl")
+CuteDslKernel = get_provider_submodule("cutedsl.kernel").CuteDslKernel
+get_max_active_clusters = get_provider_submodule(
+    "cutedsl.utils"
+).get_max_active_clusters
+Status = get_status_module().Status
+utils = get_utils_module()
+strides_to_layout_string = utils.strides_to_layout_string
+to_cuda_stream = utils.to_cuda_stream
+tuple_to_string = utils.tuple_to_string
 
 
 log = logging.getLogger(__name__)
@@ -126,7 +144,7 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslKernel):
     def get_workspace_size(self, args: GemmArguments) -> int:
         return 0
 
-    def _supports(self, args: GemmArguments) -> Status:
+    def _supports(self, args: GemmArguments, target_sm: object = None) -> Status:
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_utils import (
             cutlass_dtype_to_torch,
         )
@@ -458,6 +476,4 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslKernel):
 
 # Only register if kernel implementation is available
 if BlockScaledGemmKernelImpl is not None:
-    cutlass_api.providers.cutedsl.CuTeDSLProvider.register(
-        VendoredDenseBlockScaledGemmKernel
-    )
+    cutedsl_provider.CuTeDSLProvider.register(VendoredDenseBlockScaledGemmKernel)

@@ -13,6 +13,9 @@ from sympy import I, Max, Min, Symbol, sympify
 import torch
 from torch._dynamo.testing import AotEagerAndRecordGraphs
 from torch._dynamo.utils import detect_fake_mode
+from torch._inductor.codegen.nv_universal_gemm.cutlass_ops import (
+    is_available as is_nv_universal_gemm_operator_available,
+)
 from torch._inductor.compile_fx import _get_subgraph_names
 from torch._inductor.fx_utils import (
     _is_fake_tensor_same,
@@ -384,22 +387,25 @@ class TestFP4Support(TestCase):
     """Tests for FP4 (float4_e2m1fn_x2) infrastructure support."""
 
     @unittest.skipIf(
-        not torch.cuda.is_available()
-        or importlib.util.find_spec("cutlass_api") is None,
-        "requires CUDA and cutlass_api",
+        not torch.cuda.is_available() or not is_nv_universal_gemm_operator_available(),
+        "requires CUDA and CUTLASS operator API "
+        "(`cutlass.operators` or legacy `cutlass_api`)",
     )
     def test_ensure_fp4_dtype_registered(self):
-        """_ensure_fp4_dtype_registered should patch cutlass_api for FP4."""
+        """Patch `cutlass.operators` or legacy `cutlass_api` for FP4."""
+        from torch._inductor.codegen.nv_universal_gemm.cutlass_ops import (
+            get_dtype_utils_module,
+        )
         from torch._inductor.utils import _ensure_fp4_dtype_registered
 
         _ensure_fp4_dtype_registered()
         import cutlass
-        import cutlass_api.utils
 
-        result = cutlass_api.utils.cutlass_type_from_torch_type(torch.float4_e2m1fn_x2)
+        utils = get_dtype_utils_module()
+        result = utils.cutlass_type_from_torch_type(torch.float4_e2m1fn_x2)
         self.assertEqual(result, cutlass.Float4E2M1FN)
 
-        result_fp32 = cutlass_api.utils.cutlass_type_from_torch_type(torch.float32)
+        result_fp32 = utils.cutlass_type_from_torch_type(torch.float32)
         self.assertEqual(result_fp32, cutlass.Float32)
 
     def test_rand_strided_fp4(self):

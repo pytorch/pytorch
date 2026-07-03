@@ -589,10 +589,13 @@ class NVUniversalGemmScheduling(BaseScheduling):
 
                 k = get_kernel_by_name(kernel_name)
                 if k is not None and hasattr(k, "impl"):
-                    from cutlass_api.providers.cutedsl.utils import (
-                        get_max_active_clusters,
+                    from torch._inductor.codegen.nv_universal_gemm.cutlass_ops import (
+                        get_provider_submodule,
                     )
 
+                    get_max_active_clusters = get_provider_submodule(
+                        "cutedsl.utils"
+                    ).get_max_active_clusters
                     max_active_clusters = get_max_active_clusters(
                         k.impl.cluster_shape_mn
                     )

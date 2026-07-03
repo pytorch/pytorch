@@ -2350,42 +2350,27 @@ def ensure_cute_available() -> bool:
 
 @functools.lru_cache(maxsize=1)
 def ensure_nv_universal_gemm_available() -> bool:
-    """Check if NVIDIA Universal GEMM (cutlass_api) is importable; cache the result for reuse.
+    """Check if the NVGEMM operator API is importable; cache the result.
 
-    Call ensure_nv_universal_gemm_available.cache_clear() after installing cutlass_api
-    in the same interpreter to retry the import.
+    This accepts public `cutlass.operators` or legacy `cutlass_api`. Call
+    ensure_nv_universal_gemm_available.cache_clear() after installing either
+    operator package in the same interpreter to retry the import.
     """
-    try:
-        available = importlib.util.find_spec("cutlass_api") is not None
-    except ImportError:
-        return False
-    if available:
+    from torch._inductor.codegen.nv_universal_gemm.cutlass_ops import is_available
+
+    if is_available():
         _ensure_fp4_dtype_registered()
-    return available
+        return True
+    return False
 
 
 def _ensure_fp4_dtype_registered():
-    """Patch cutlass_api to handle torch.float4_e2m1fn_x2 -> cutlass.Float4E2M1FN.
+    """Patch `cutlass.operators` or legacy `cutlass_api` for FP4."""
+    from torch._inductor.codegen.nv_universal_gemm.cutlass_ops import (
+        ensure_fp4_dtype_registered,
+    )
 
-    NOTE: cutlass_api doesn't natively map this dtype. We patch the lookup function
-    in-place so all callers (including TensorWrapper) pick up the change.
-    Remove once cutlass_api adds native FP4 support.
-    """
-    import cutlass_api.utils
-
-    try:
-        cutlass_api.utils.cutlass_type_from_torch_type(torch.float4_e2m1fn_x2)
-    except (KeyError, AttributeError):
-        import cutlass
-
-        _orig = cutlass_api.utils.cutlass_type_from_torch_type
-
-        def _patched(dtype):
-            if dtype == torch.float4_e2m1fn_x2:
-                return cutlass.Float4E2M1FN
-            return _orig(dtype)
-
-        cutlass_api.utils.cutlass_type_from_torch_type = _patched
+    ensure_fp4_dtype_registered()
 
 
 @functools.lru_cache(maxsize=1)
@@ -2517,7 +2502,7 @@ def use_nv_universal_gemm_template(
 
     Required conditions:
         1. NVGEMM backend is enabled
-        2. cutlass_api is available
+        2. CUTLASS operator API (`cutlass.operators` or legacy `cutlass_api`) is available
         3. We are on a NVIDIA GPU
         4. Max autotune or max autotune gemm is enabled
         5. Not in AOT Inductor mode (requires runtime JIT compilation)
@@ -2526,7 +2511,8 @@ def use_nv_universal_gemm_template(
 
     Note:
         - Shape and stride constraints are handled internally by
-          cutlass_api.get_kernels() which filters incompatible kernels.
+          the adapter loads kernels from `cutlass.operators` or legacy
+          `cutlass_api` and filters incompatible kernels.
         - GroupedGemm currently only supports TN layout (column-major B).
           Any other layout will act as a noop and fall back to ATen.
         - Dynamic shapes are supported as long as they have hints
@@ -2554,7 +2540,8 @@ def use_nv_universal_gemm_template(
     if not (config.max_autotune or config.max_autotune_gemm):
         return False
 
-    # cutlass_api can't handle unbacked symbols because it needs to evaluate
+    # The CUTLASS operator API (`cutlass.operators` or legacy `cutlass_api`)
+    # can't handle unbacked symbols because it needs to evaluate
     # shape constraints (e.g., stride divisibility by 8, N/K divisibility by 16).
     # Unbacked symbols have no hint values, causing GuardOnDataDependentSymNode errors.
     dims_to_check = [m, n, k]
@@ -2563,7 +2550,8 @@ def use_nv_universal_gemm_template(
     if any(has_free_unbacked_symbols(dim) for dim in dims_to_check):
         return False
 
-    # Base pointer must be 16-byte aligned. cutlass_api can't check this at
+    # Base pointer must be 16-byte aligned. The CUTLASS operator API
+    # (`cutlass.operators` or legacy `cutlass_api`) can't check this at
     # compile time because it only sees FakeTensors without real data pointers.
     tensors_to_check = [mat_a, mat_b]
     if offs is not None:

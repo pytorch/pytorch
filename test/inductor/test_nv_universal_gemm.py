@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 
+import types
 import unittest
 from unittest import mock
 from unittest.mock import MagicMock, patch
@@ -92,10 +93,66 @@ def _nvgemm_config(**overrides):
     return cfg
 
 
-# TODO(nikhilap): Remove Blackwell restriction once cutlass_api includes H100 kernels
+def _missing_module(name):
+    err = ModuleNotFoundError(f"No module named {name!r}")
+    err.name = name
+    return err
+
+
+class TestCutlassOperatorsAdapter(TestCase):
+    def test_prefers_cutlass_operators(self):
+        from torch._inductor.codegen.nv_universal_gemm import cutlass_ops
+
+        operators = types.ModuleType("cutlass.operators")
+        legacy = types.ModuleType("cutlass_api")
+
+        def fake_import(name):
+            if name == "cutlass.operators":
+                return operators
+            if name == "cutlass_api":
+                return legacy
+            raise _missing_module(name)
+
+        with patch.object(cutlass_ops.importlib, "import_module", fake_import):
+            self.assertIs(cutlass_ops.get_operator_api(), operators)
+
+    def test_falls_back_to_cutlass_api(self):
+        from torch._inductor.codegen.nv_universal_gemm import cutlass_ops
+
+        legacy = types.ModuleType("cutlass_api")
+
+        def fake_import(name):
+            if name == "cutlass.operators":
+                raise _missing_module(name)
+            if name == "cutlass_api":
+                return legacy
+            raise _missing_module(name)
+
+        with patch.object(cutlass_ops.importlib, "import_module", fake_import):
+            self.assertIs(cutlass_ops.get_operator_api(), legacy)
+
+    def test_submodule_uses_selected_api(self):
+        from torch._inductor.codegen.nv_universal_gemm import cutlass_ops
+
+        operators = types.ModuleType("cutlass.operators")
+        arguments = types.ModuleType("cutlass.operators.arguments")
+
+        def fake_import(name):
+            if name == "cutlass.operators":
+                return operators
+            if name == "cutlass.operators.arguments":
+                return arguments
+            raise _missing_module(name)
+
+        with patch.object(cutlass_ops.importlib, "import_module", fake_import):
+            self.assertIs(cutlass_ops.get_arguments_module(), arguments)
+
+
+# TODO(nikhilap): Remove Blackwell restriction once `cutlass.operators` or
+# legacy `cutlass_api` include H100 kernels.
 @unittest.skipIf(
     not (ensure_nv_universal_gemm_available() and is_datacenter_blackwell_arch()),
-    "NVIDIA Universal GEMM (cutlass_api) library not available or not on Blackwell",
+    "NVIDIA Universal GEMM operator API not available or not on Blackwell",
 )
 @instantiate_parametrized_tests
 class TestNVUniversalGemm(TestCase):
@@ -140,7 +197,8 @@ class TestNVUniversalGemm(TestCase):
     def test_unaligned_base_pointer_rejected(self):
         """Test that matmul with unaligned base pointer is rejected.
 
-        cutlass_api requires 16-byte aligned base pointers. Since alignment
+        The CUTLASS operator API (`cutlass.operators` or legacy `cutlass_api`)
+        requires 16-byte aligned base pointers. Since alignment
         can't be checked at compile time (FakeTensors don't have real pointers),
         Inductor must guard against unaligned buffers.
         """
@@ -195,7 +253,8 @@ class TestNVUniversalGemm(TestCase):
     def test_workspace_allocation(self):
         """Test that workspace allocation works correctly.
 
-        Since no current CUTLASS kernels require a workspace, we mock the
+        Since no current `cutlass.operators` or legacy `cutlass_api` kernels
+        require a workspace, we mock the
         kernel.get_workspace_size method to return a non-zero value.
         """
         m, n, k = 512, 512, 512
@@ -211,13 +270,15 @@ class TestNVUniversalGemm(TestCase):
 
         torch._dynamo.reset()
 
-        import cutlass_api
+        from torch._inductor.codegen.nv_universal_gemm.cutlass_ops import (
+            get_operator_api,
+        )
 
         def patched_get_workspace_size(self, args):
             return 1024
 
         with patch.object(
-            cutlass_api.Kernel,
+            get_operator_api().Kernel,
             "get_workspace_size",
             patched_get_workspace_size,
         ):
@@ -601,7 +662,8 @@ class TestNVUniversalGemmHeuristics(TestCase):
         and is_datacenter_blackwell_arch()
         and ensure_nvmatmul_heuristics_available()
     ),
-    "Requires cutlass_api, nvMatmulHeuristics, and Blackwell GPU",
+    "Requires CUTLASS operator API (`cutlass.operators` or legacy "
+    "`cutlass_api`), nvMatmulHeuristics, and Blackwell GPU",
 )
 class TestNVUniversalGemmHeuristicsIntegration(TestCase):
     """Integration tests for nvMatmulHeuristics with real library calls."""
@@ -663,7 +725,7 @@ class TestNVUniversalGemmHeuristicsIntegration(TestCase):
 
 @unittest.skipIf(
     not (ensure_nv_universal_gemm_available() and is_datacenter_blackwell_arch()),
-    "NVIDIA Universal GEMM (cutlass_api) library not available or not on Blackwell",
+    "NVIDIA Universal GEMM operator API not available or not on Blackwell",
 )
 class TestNVUniversalGemmDynamicShapes(TestCase):
     """Test cases for NVIDIA Universal GEMM with dynamic shapes."""
@@ -726,7 +788,7 @@ class TestNVUniversalGemmDynamicShapes(TestCase):
 
 @unittest.skipIf(
     not (ensure_nv_universal_gemm_available() and is_datacenter_blackwell_arch()),
-    "NVIDIA Universal GEMM (cutlass_api) library not available or not on Blackwell",
+    "NVIDIA Universal GEMM operator API not available or not on Blackwell",
 )
 @instantiate_parametrized_tests
 class TestNVUniversalGemmEpilogueFusion(TestCase):
@@ -913,16 +975,19 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         if efc_kernel is None:
             self.skipTest("No matching EFC kernel found in cache")
 
-        import cutlass_api
-        from cutlass_api.artifact import CompiledArtifact
+        from torch._inductor.codegen.nv_universal_gemm.cutlass_ops import (
+            get_arguments_module,
+            get_artifact_module,
+        )
+
+        CompiledArtifact = get_artifact_module().CompiledArtifact
+        GemmArguments = get_arguments_module().GemmArguments
 
         a = torch.randn(self.M, self.K, device="cuda", dtype=torch.bfloat16)
         b = torch.randn(self.K, self.N, device="cuda", dtype=torch.bfloat16)
         out = torch.empty(self.M, self.N, device="cuda", dtype=torch.bfloat16)
 
-        args = cutlass_api.arguments.GemmArguments(
-            a, b, out, accumulator_type=torch.float32
-        )
+        args = GemmArguments(a, b, out, accumulator_type=torch.float32)
         artifact = efc_kernel.compile(args)
 
         # Unwrap, serialize, reload, rewrap
@@ -943,9 +1008,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
         # Run with reloaded artifact and verify correctness
         out2 = torch.empty(self.M, self.N, device="cuda", dtype=torch.bfloat16)
-        args2 = cutlass_api.arguments.GemmArguments(
-            a, b, out2, accumulator_type=torch.float32
-        )
+        args2 = GemmArguments(a, b, out2, accumulator_type=torch.float32)
         efc_kernel.run(
             args2,
             reloaded_artifact,
@@ -969,10 +1032,11 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         catch the regression we intercept _benchmark_nvgemm_module to record
         every (ms, path) it returns and assert at least one finite-ms result —
         i.e., at least one EFC choice with workspace did get benchmarked."""
-        import cutlass_api
-
         from torch._inductor.codegen.cuda_combined_scheduling import (
             CUDACombinedScheduling,
+        )
+        from torch._inductor.codegen.nv_universal_gemm.cutlass_ops import (
+            get_operator_api,
         )
 
         a = torch.randn(self.M, self.K, device="cuda", dtype=torch.bfloat16)
@@ -992,7 +1056,9 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         torch._dynamo.reset()
         with (
             patch.object(
-                cutlass_api.Kernel, "get_workspace_size", lambda self, args: 4096
+                get_operator_api().Kernel,
+                "get_workspace_size",
+                lambda self, args: 4096,
             ),
             mock.patch.object(
                 CUDACombinedScheduling, "_benchmark_nvgemm_module", capturing_bench
