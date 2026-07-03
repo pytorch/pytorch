@@ -1137,6 +1137,9 @@ std::tuple<Tensor, std::optional<int64_t>> masked_fill_tensor_batch_rule(
       "value cannot be converted to type ",
       self_.scalar_type(),
       " without overflow");
+  TORCH_CHECK(
+      value_.device() == self_.device() || value_.device().is_cpu(),
+      "masked_fill: Expected inputs to be on same device");
   value_ = value_.to(self_.device(), self_.scalar_type());
   value_ = maybePadToLogicalRank(value_, value_bdim, max_logical_rank);
   return std::make_tuple(at::where(mask_, value_, self_), 0);

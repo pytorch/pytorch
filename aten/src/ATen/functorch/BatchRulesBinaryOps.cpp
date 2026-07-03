@@ -378,6 +378,9 @@ static void masked_fill__Tensor_batch_rule(
       "value cannot be converted to type ",
       self_.scalar_type(),
       " without overflow");
+  TORCH_CHECK(
+      value_.device() == self_.device() || value_.device().is_cpu(),
+      "masked_fill_: Expected inputs to be on same device");
   value_ = value_.to(
       self_.device(),
       self_.scalar_type(),
