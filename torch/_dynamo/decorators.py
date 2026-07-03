@@ -193,6 +193,29 @@ def assume_constant_result(fn):  # type: ignore[no-untyped-def]
     return fn
 
 
+def assume_constant_result_guarded(fn):  # type: ignore[no-untyped-def]
+    """
+    Like :func:`assume_constant_result`, run ``fn`` once at compile time and bake
+    its result into the graph as a constant, but install value/structural guards
+    derived from the arguments instead of relying on pre-existing specialization.
+
+    Plain ``assume_constant_result`` guards user-defined object arguments only by
+    ``ID_MATCH`` (object identity) and adds no guard for other argument types. That
+    means a freshly-allocated argument (e.g. a new dataclass every call) forces a
+    recompile every step, while a mutated-in-place object is not detected at all.
+
+    This variant instead walks each argument's structure and guards every simple
+    field by value (``EQUALS_MATCH``), so a fresh dataclass whose fields are simple
+    types only triggers a recompile when a field value actually changes. Supported
+    argument types are ``int``/``float``/``bool``/``str``/``None``/``tuple``/
+    ``enum``/``torch.dtype`` and shallow dataclasses/dicts/objects whose relevant
+    attributes are those simple types. Opaque arguments with no guardable structure
+    fall back to ``ID_MATCH``.
+    """
+    fn._dynamo_marked_constant_guarded = True  # type: ignore[attr-defined]
+    return fn
+
+
 def allow_in_graph(fn):  # type: ignore[no-untyped-def]
     """
     Tells the compiler frontend (Dynamo) to skip symbolic introspection of the function

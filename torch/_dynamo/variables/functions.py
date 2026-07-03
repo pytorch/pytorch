@@ -69,6 +69,7 @@ from ..source import (
     ClosureSource,
     ConstantSource,
     DefaultsSource,
+    DictGetItemSource,
     GetItemSource,
     ImportSource,
     SkipGuardSource,
@@ -561,6 +562,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     _nonvar_fields = {
         "fn",
         "is_constant",
+        "is_constant_guarded",
         *BaseUserFunctionVariable._nonvar_fields,
     }
 
@@ -585,7 +587,14 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
-        if getattr(fn, "_dynamo_marked_constant", False):
+        # `is_constant_guarded` selects the guarded constant-invocation path, which
+        # installs value/structural guards derived from the arguments (see
+        # `invoke_and_store_as_constant_guarded`) rather than the identity-only
+        # guarding of the plain `assume_constant_result` path.
+        self.is_constant_guarded = getattr(
+            fn, "_dynamo_marked_constant_guarded", False
+        )
+        if getattr(fn, "_dynamo_marked_constant", False) or self.is_constant_guarded:
             # This method should be treated as a constant for the purposes of compilation
             self.is_constant = True
         else:
@@ -855,6 +864,10 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             )
 
         if self.is_constant:
+            if self.is_constant_guarded:
+                return invoke_and_store_as_constant_guarded(
+                    tx, self.fn, self.get_name(), args, kwargs
+                )
             return invoke_and_store_as_constant(
                 tx, self.fn, self.get_name(), args, kwargs
             )
@@ -1852,6 +1865,121 @@ def invoke_and_store_as_constant(
                     "Ensure all arguments passed to the function can be converted to constants",
                 ],
             )
+
+    args = [convert(x) for x in args]
+    kwargs = {k: convert(v) for k, v in kwargs.items()}
+    res = fn(*args, **kwargs)
+    return tx.output.register_attr_or_module(
+        res,
+        name,
+        source=ConstantSource(name),
+    )
+
+
+# Simple, directly value-guardable leaf types for the guarded constant path.
+_GUARDABLE_CONSTANT_LEAF_TYPES = (int, float, bool, str, torch.dtype)
+
+
+def _install_constant_arg_guards(source: Source, value: Any, name: str) -> None:
+    """
+    Walk `value`'s structure and install value/structural guards rooted at `source`
+    so the baked constant is invalidated when a relevant field value changes.
+
+    Scalars are guarded by value (EQUALS_MATCH). Tuples/dicts guard their
+    length/keys and recurse. Dataclasses/plain objects guard their type and recurse
+    into fields. Anything without guardable structure falls back to ID_MATCH.
+    """
+    import dataclasses
+    import enum
+
+    if value is None or isinstance(value, _GUARDABLE_CONSTANT_LEAF_TYPES):
+        install_guard(source.make_guard(GuardBuilder.EQUALS_MATCH))
+        return
+    if isinstance(value, enum.Enum):
+        install_guard(source.make_guard(GuardBuilder.EQUALS_MATCH))
+        return
+    if isinstance(value, tuple):
+        install_guard(source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
+        for i, item in enumerate(value):
+            _install_constant_arg_guards(GetItemSource(source, i), item, name)
+        return
+    if isinstance(value, dict):
+        install_guard(source.make_guard(GuardBuilder.DICT_KEYS_MATCH))
+        for k, v in value.items():
+            _install_constant_arg_guards(DictGetItemSource(source, k), v, name)
+        return
+    if not isinstance(value, type) and dataclasses.is_dataclass(value):
+        install_guard(source.make_guard(GuardBuilder.TYPE_MATCH))
+        for field in dataclasses.fields(value):
+            _install_constant_arg_guards(
+                AttrSource(source, field.name), getattr(value, field.name), name
+            )
+        return
+    obj_dict = getattr(value, "__dict__", None)
+    if obj_dict is not None and not isinstance(value, type):
+        install_guard(source.make_guard(GuardBuilder.TYPE_MATCH))
+        for attr_name, attr_val in list(obj_dict.items()):
+            _install_constant_arg_guards(
+                AttrSource(source, attr_name), attr_val, name
+            )
+        return
+    # Opaque value with no guardable structure: guard on identity.
+    install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+
+
+def invoke_and_store_as_constant_guarded(
+    tx: "InstructionTranslatorBase",
+    fn: Callable[..., Any],
+    name: str,
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> VariableTracker:
+    """
+    Like `invoke_and_store_as_constant`, but derive value/structural guards from
+    each argument's structure (see `_install_constant_arg_guards`) instead of
+    guarding user-defined objects by identity only. This lets a freshly-allocated
+    argument (e.g. a new dataclass every call) be treated as a constant that is
+    only invalidated when a field value actually changes.
+    """
+
+    def convert(x: VariableTracker) -> Any:
+        if x.is_tensor():
+            return cast("TensorVariable", x).get_real_value()
+        if x.source is None:
+            # No provenance to guard on: behave like the plain constant path.
+            try:
+                return x.as_python_constant()
+            except AsPythonConstantNotImplementedError:
+                unimplemented(
+                    gb_type="assume_constant_result_guarded argument conversion failed",
+                    context=f"function {name}, variable type {type(x).__name__}",
+                    explanation=f"Cannot convert sourceless argument of type {type(x).__name__} "
+                    f"to a Python constant for function {name} marked with "
+                    f"torch._dynamo.assume_constant_result_guarded.",
+                    hints=[
+                        "Pass this argument from outside the torch.compile region so it has a source",
+                        "Ensure all arguments can be converted to constants",
+                    ],
+                )
+        if isinstance(x, UserDefinedObjectVariable):
+            value = x.value
+        else:
+            try:
+                value = x.as_python_constant()
+            except AsPythonConstantNotImplementedError:
+                unimplemented(
+                    gb_type="assume_constant_result_guarded argument conversion failed",
+                    context=f"function {name}, variable type {type(x).__name__}",
+                    explanation=f"Cannot convert argument of type {type(x).__name__} to a Python "
+                    f"constant for function {name} marked with "
+                    f"torch._dynamo.assume_constant_result_guarded.",
+                    hints=[
+                        "Use torch._dynamo.assume_constant_result instead",
+                        "Ensure all arguments can be converted to constants",
+                    ],
+                )
+        _install_constant_arg_guards(x.source, value, name)
+        return value
 
     args = [convert(x) for x in args]
     kwargs = {k: convert(v) for k, v in kwargs.items()}
