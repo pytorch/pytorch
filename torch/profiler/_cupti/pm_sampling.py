@@ -20,10 +20,20 @@ import threading
 from typing import Any, TYPE_CHECKING
 
 import numpy as np
+from cupti import (  # pyrefly: ignore[missing-import]
+    cupti as _cupti,
+    pm_sampling as _pm_sampling,
+    profiler_host as _profiler_host,
+)
+from cupti.pm_sampling import (  # pyrefly: ignore[missing-import]
+    metrics_to_c_array as _metrics_to_c_array,
+)
+
+import torch
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
+    from collections.abc import Iterable
     from typing_extensions import Self
 
 
@@ -39,126 +49,117 @@ _SAMPLING_INTERVAL_NS = int(
 # at the interval. Kept modest because the host counter-data image is ~18 KiB/sample (see
 # _counter_data_size), so a decode of window/interval samples allocates that many.
 # TORCH_CUPTI_PM_SAMPLING_LOOKBACK_MS, default 10 s.
-_DEFAULT_WINDOW_NS = int(
+_LOOKBACK_WINDOW_NS = int(
     float(os.environ.get("TORCH_CUPTI_PM_SAMPLING_LOOKBACK_MS", 10_000)) * 1_000_000
 )
-# Periodic poll fires this long before the ring's fill boundary -- a fixed (not proportional) safety
-# margin for scheduling jitter, so a large window can poll close to the boundary while a small one
-# still keeps a proportional floor (see suggested_poll_interval_ns).
-_POLL_SAFETY_BUFFER_NS = 500_000_000  # 500 ms
-
-
-def is_available() -> bool:
-    try:
-        import cupti.pm_sampling  # noqa: F401  # pyrefly: ignore[missing-import]
-    except Exception:
-        return False
-    return True
 
 
 def _counter_data_size(
     pm_sampling_object: int, metrics: list[str], max_samples: int
 ) -> int:
-    from cupti import cupti as c  # pyrefly: ignore[missing-import]
-    from cupti.pm_sampling import metrics_to_c_array  # pyrefly: ignore[missing-import]
-
-    _, metric_names_ptr = metrics_to_c_array(metrics)
-    p = c.PmSampling_GetCounterDataSize_Params()
-    p.struct_size = c.PM_SAMPLING_GET_COUNTER_DATA_SIZE_PARAMS_STRUCT_SIZE
+    _, metric_names_ptr = _metrics_to_c_array(metrics)
+    p = _cupti.PmSampling_GetCounterDataSize_Params()
+    p.struct_size = _cupti.PM_SAMPLING_GET_COUNTER_DATA_SIZE_PARAMS_STRUCT_SIZE
     p.p_pm_sampling_object = pm_sampling_object
     p.p_metric_names = metric_names_ptr
     p.num_metrics = len(metrics)
     p.max_samples = max_samples
-    c.pm_sampling_get_counter_data_size(p.ptr)
+    _cupti.pm_sampling_get_counter_data_size(p.ptr)
     return p.counter_data_size
 
 
 @functools.cache
 def _device_chip_name(device: int) -> str:
-    from cupti import cupti as c  # pyrefly: ignore[missing-import]
-
-    p = c.Device_GetChipName_Params()
-    p.struct_size = c.DEVICE_GET_CHIP_NAME_PARAMS_STRUCT_SIZE
+    p = _cupti.Device_GetChipName_Params()
+    p.struct_size = _cupti.DEVICE_GET_CHIP_NAME_PARAMS_STRUCT_SIZE
     p.device_index = device
-    c.device_get_chip_name(p.ptr)
+    _cupti.device_get_chip_name(p.ptr)
     return p.p_chip_name
 
 
 def _pm_sampling_disable(pm_sampling_object: int) -> None:
-    from cupti import cupti as c  # pyrefly: ignore[missing-import]
-
-    p = c.PmSampling_Disable_Params()
-    p.struct_size = c.PM_SAMPLING_DISABLE_PARAMS_STRUCT_SIZE
+    p = _cupti.PmSampling_Disable_Params()
+    p.struct_size = _cupti.PM_SAMPLING_DISABLE_PARAMS_STRUCT_SIZE
     p.p_pm_sampling_object = pm_sampling_object
-    c.pm_sampling_disable(p.ptr)
+    _cupti.pm_sampling_disable(p.ptr)
 
 
 def _profiler_deinitialize() -> None:
-    from cupti import cupti as c  # pyrefly: ignore[missing-import]
-
-    p = c.Profiler_DeInitialize_Params()
-    p.struct_size = c.PROFILER_DEINITIALIZE_PARAMS_STRUCT_SIZE
-    c.profiler_deinitialize(p.ptr)
+    p = _cupti.Profiler_DeInitialize_Params()
+    p.struct_size = _cupti.PROFILER_DEINITIALIZE_PARAMS_STRUCT_SIZE
+    _cupti.profiler_deinitialize(p.ptr)
 
 
 @functools.cache
 def supported_metrics(*, with_sub_metrics: bool = False) -> frozenset[str]:
-    if not is_available():
-        return frozenset()
     try:
-        from cupti import profiler_host as ph  # pyrefly: ignore[missing-import]
-        from cupti.cupti import (  # pyrefly: ignore[missing-import]
-            MetricType,
-            ProfilerType,
-        )
-    except Exception:
-        return frozenset()
-    try:
-        import torch
-
         chip_name = _device_chip_name(torch.cuda.current_device())
+        host = _profiler_host.ProfilerHost(chip_name, _cupti.ProfilerType.PM_SAMPLING)
+        host.initialize()
     except Exception as e:
-        logger.warning("PM sampling could not resolve the chip name: %s", e)
+        logger.warning("PM sampling could not initialize the profiler host: %s", e)
         return frozenset()
-    # PM_SAMPLING is the relevant type; fall back to RANGE_PROFILER (same base-metric DB) if its
-    # host cannot initialize without a single-pass set name on this CUPTI version.
-    for profiler_type in (ProfilerType.PM_SAMPLING, ProfilerType.RANGE_PROFILER):
-        try:
-            host = ph.ProfilerHost(chip_name, profiler_type)
-            host.initialize()
-        except Exception:
-            continue
-        try:
-            names: set[str] = set()
-            for mt in (MetricType.COUNTER, MetricType.RATIO, MetricType.THROUGHPUT):
-                for base in host.get_base_metrics(mt):
-                    names.update(
-                        host.get_sub_metrics(base, mt) if with_sub_metrics else (base,)
-                    )
-            return frozenset(names)
-        except Exception as e:
-            logger.warning("PM sampling metric enumeration failed: %s", e)
-            return frozenset()
-        finally:
-            host.deinitialize()
-    logger.warning(
-        "PM sampling profiler host could not initialize for chip %s", chip_name
-    )
-    return frozenset()
+    try:
+        names: set[str] = set()
+        for mt in (
+            _cupti.MetricType.COUNTER,
+            _cupti.MetricType.RATIO,
+            _cupti.MetricType.THROUGHPUT,
+        ):
+            for base in host.get_base_metrics(mt):
+                names.update(
+                    host.get_sub_metrics(base, mt) if with_sub_metrics else (base,)
+                )
+        return frozenset(names)
+    except Exception as e:
+        logger.warning("PM sampling metric enumeration failed: %s", e)
+        return frozenset()
+    finally:
+        host.deinitialize()
 
 
 class _Consumer:
-    """A registered PM-sampling consumer: the metric names it wants and the sink its frames go to.
-    Returned by :meth:`PmSampler.add_consumer` as the opaque handle for
-    :meth:`PmSampler.remove_consumer`."""
+    """Internal per-consumer state held by the sampler: the metrics it wants and its cursor (the last
+    start_ns returned to it). The caller gets a :class:`_Handle`, not this."""
 
-    __slots__ = ("metrics", "sink")
+    __slots__ = ("metrics", "cursor")
 
-    def __init__(
-        self, metrics: list[str], sink: Callable[[dict[str, Any]], None]
-    ) -> None:
+    def __init__(self, metrics: list[str]) -> None:
         self.metrics = metrics
-        self.sink = sink
+        self.cursor = -1  # last start_ns returned; -1 = nothing yet
+
+
+class _Handle:
+    """The caller's handle to a registered consumer: :meth:`poll` for its samples, :meth:`detach` to
+    unregister. Dropping the handle also detaches (a GC safety net), but prefer :meth:`detach` for
+    deterministic teardown -- detaching the last consumer releases the GPU-clock lock and the CUPTI
+    session. The sampler references only the :class:`_Consumer` record, not the handle, so a dropped
+    handle is collectable and its :meth:`__del__` fires."""
+
+    __slots__ = ("_sampler", "_consumer")
+
+    def __init__(self, sampler: PmSampler, consumer: _Consumer) -> None:
+        self._sampler = sampler
+        self._consumer = consumer
+
+    def poll(self) -> dict[str, Any] | None:
+        """Drain the HW ring and return this consumer's samples newer than its cursor, sliced to its
+        metrics, as a frame (``start_ns`` / ``device_id`` / one column per metric) -- or None if
+        none. Poll on your own cadence, but before the KEEP_LATEST ring fills (span = max_samples *
+        interval) and drops the oldest; samples another consumer hasn't polled stay retained until it
+        does."""
+        return self._sampler._poll_consumer(self._consumer)
+
+    def detach(self) -> None:
+        """Unregister; the session disables once the last consumer detaches. :meth:`poll` first for a
+        final frame -- detaching returns nothing."""
+        self._sampler._detach(self._consumer)
+
+    def __del__(self) -> None:
+        try:
+            self.detach()
+        except Exception:
+            pass
 
 
 class PmSampler:
@@ -169,19 +170,21 @@ class PmSampler:
     (:attr:`_active`) and deinitializes once, when the last is torn down -- keeping concurrent
     sampling on multiple devices safe.
 
-    Consumers register with :meth:`add_consumer` (the metrics they want + a sink) and unregister
-    with :meth:`remove_consumer`. The session samples the *union* of all consumers' metrics and
-    hands each consumer a frame sliced to just its own metrics. Frames carry RAW CUPTI-clock-ns
-    timestamps in ``start_ns`` -- converting to trace/epoch time is the consumer's job, so the
-    sampler has no clock dependency."""
+    :meth:`add_consumer` (the metrics wanted) returns a handle; poll the handle for its samples and
+    detach it -- or just drop it -- to unregister. The session samples the *union* of all consumers'
+    metrics. Delivery is pull-based: ``handle.poll()`` drains the HW ring and returns the samples
+    newer than the handle's
+    cursor, sliced to its own metrics. decode drains, so a sample another consumer has not yet polled
+    is retained (bounded to the look-back window) and GC'd once every consumer has passed it -- a
+    lone, caught-up consumer keeps no copy. Frames carry RAW CUPTI-clock-ns timestamps in
+    ``start_ns`` -- converting to trace/epoch time is the consumer's job, so the sampler has no clock
+    dependency."""
 
     _instances: dict[int, PmSampler] = {}
     _instances_lock = threading.Lock()
     _active = 0
 
     def __new__(cls, device: int | None = None) -> Self:
-        import torch
-
         if device is None:
             device = torch.cuda.current_device()
         with cls._instances_lock:
@@ -195,33 +198,37 @@ class PmSampler:
     def _init(self, device: int) -> None:
         self._device = device
         self._sampling_interval_ns = _SAMPLING_INTERVAL_NS
-        self._max_samples = max(1, _DEFAULT_WINDOW_NS // _SAMPLING_INTERVAL_NS)
+        self._max_samples = max(1, _LOOKBACK_WINDOW_NS // _SAMPLING_INTERVAL_NS)
         self._consumers: list[_Consumer] = []
         self._metric_names: list[str] = []
         self._col: Any = None
+        # Samples drained from the HW ring but not yet consumed by every consumer (columnar, in the
+        # union metric order). Held only while a consumer lags; GC'd by the min-cursor watermark.
+        self._retained_ts = np.empty(0, dtype=np.int64)
+        self._retained_vals = np.empty((0, 0), dtype=np.float64)
         self._lock = threading.RLock()
 
-    def add_consumer(
-        self, metrics: Iterable[str], sink: Callable[[dict[str, Any]], None]
-    ) -> _Consumer:
+    def add_consumer(self, metrics: Iterable[str]) -> _Handle:
+        """Register a consumer for ``metrics`` and return its handle (``handle.poll()`` /
+        ``handle.detach()``; dropping the handle also detaches). Raises ValueError if ``metrics`` is
+        empty or the resulting union can't be collected in one PM pass."""
         metrics = list(metrics)
         if not metrics:
             raise ValueError("PM sampling requires a non-empty metric set")
-        consumer = _Consumer(metrics, sink)
+        consumer = _Consumer(metrics)
         with self._lock:
             self._check_single_pass(self._union_of([*self._consumers, consumer]))
-            self._drain()
             self._consumers.append(consumer)
             self._reconfigure()
-        return consumer
+        return _Handle(self, consumer)
 
-    def remove_consumer(self, consumer: _Consumer) -> None:
+    def _detach(self, consumer: _Consumer) -> None:
         with self._lock:
             if consumer not in self._consumers:
                 return
-            self._drain()  # deliver in-flight samples to the leaver before it goes
             self._consumers.remove(consumer)
             self._reconfigure()
+            self._gc()  # the leaver no longer pins the GC watermark
 
     @staticmethod
     def _union_of(consumers: list[_Consumer]) -> list[str]:
@@ -239,39 +246,42 @@ class PmSampler:
         if not desired:
             self._teardown()
         elif desired != self._metric_names:
+            # Rebuild, not in-place reconfigure -- a live stop/configure/start segfaults on decode.
             self._teardown()
             self._metric_names = desired
             self._start()
 
-    @property
-    def suggested_poll_interval_ns(self) -> int:
-        """Recommended cadence for periodic :meth:`poll`. decode drains the ring (each sample once),
-        so total decode cost is independent of poll frequency -- the only hard constraint is polling
-        before the KEEP_LATEST ring fills (its span = max_samples * interval), after which it drops
-        the oldest samples. Poll a fixed buffer before that boundary (jitter is ~absolute, so a large
-        window can poll close to the boundary), but never later than half the span -- otherwise a
-        small window, where the fixed buffer would leave almost no time, would poll too tight. The
-        final drain at teardown catches the tail."""
-        span = self._max_samples * self._sampling_interval_ns
-        return max(self._sampling_interval_ns, span // 2, span - _POLL_SAFETY_BUFFER_NS)
-
-    def poll(self) -> None:
+    def _poll_consumer(self, consumer: _Consumer) -> dict[str, Any] | None:
+        # Implements _Handle.poll(): drain the HW ring, build `consumer`'s frame from the retained
+        # samples newer than its cursor (sliced to its metrics) and advance its cursor, then GC.
+        # Returns None if sampling is off, `consumer` isn't registered, or it has nothing new.
         with self._lock:
-            if self._col is None:
-                return
-            try:
-                self._drain()
-            except Exception:
-                logger.exception("PM sampling poll decode error")
+            if self._col is None or consumer not in self._consumers:
+                return None
+            self._pull_hw()
+            frame: dict[str, Any] | None = None
+            ts = self._retained_ts
+            mask = ts > consumer.cursor if ts.size else None
+            if mask is not None and mask.any():
+                dts = ts[mask]
+                dvals = self._retained_vals[mask]
+                col_index = {m: j for j, m in enumerate(self._metric_names)}
+                frame = {
+                    "start_ns": dts,
+                    "device_id": np.full(len(dts), self._device, dtype=np.int64),
+                }
+                for m in consumer.metrics:
+                    frame[m] = dvals[:, col_index[m]]
+                consumer.cursor = int(dts.max())
+            self._gc()
+            return frame
 
     def _start(self) -> None:
-        if self._col is not None or not is_available() or not self._metric_names:
+        if self._col is not None or not self._metric_names:
             return
-        from cupti import pm_sampling as pm  # pyrefly: ignore[missing-import]
-
         self._warn_unsupported()
         try:
-            col = pm.Collector(device_index=self._device)
+            col = _pm_sampling.Collector(device_index=self._device)
             col.enable()
         except Exception as e:
             logger.warning("PM sampling could not start: %s", e)
@@ -286,8 +296,8 @@ class PmSampler:
                     col._pm_sampling_object, self._metric_names, self._max_samples
                 ),
                 sampling_interval=self._sampling_interval_ns,
-                trigger_mode=pm.TriggerMode.GPU_TIME_INTERVAL,
-                hw_buffer_append_mode=pm.HardwareBuffer_AppendMode.KEEP_LATEST,
+                trigger_mode=_pm_sampling.TriggerMode.GPU_TIME_INTERVAL,
+                hw_buffer_append_mode=_pm_sampling.HardwareBuffer_AppendMode.KEEP_LATEST,
             )
             col.start()
         except Exception as e:
@@ -297,6 +307,8 @@ class PmSampler:
     def _teardown(self) -> None:
         col, self._col = self._col, None
         self._metric_names = []
+        self._retained_ts = np.empty(0, dtype=np.int64)
+        self._retained_vals = np.empty((0, 0), dtype=np.float64)
         if col is None:
             return
         try:
@@ -334,15 +346,14 @@ class PmSampler:
 
     def _check_single_pass(self, metrics: list[str]) -> None:
         try:
-            from cupti import profiler_host as ph  # pyrefly: ignore[missing-import]
-            from cupti.cupti import ProfilerType  # pyrefly: ignore[missing-import]
-
-            host = ph.ProfilerHost(
-                _device_chip_name(self._device), ProfilerType.PM_SAMPLING
+            host = _profiler_host.ProfilerHost(
+                _device_chip_name(self._device), _cupti.ProfilerType.PM_SAMPLING
             )
             host.initialize()
             try:
-                passes = ph.get_num_of_passes(host.create_config_image(metrics=metrics))
+                passes = _profiler_host.get_num_of_passes(
+                    host.create_config_image(metrics=metrics)
+                )
             finally:
                 host.deinitialize()
         except Exception:
@@ -354,7 +365,7 @@ class PmSampler:
                 f"supported_metrics())."
             )
 
-    def _drain(self) -> None:
+    def _pull_hw(self) -> None:
         col = self._col
         if col is None:
             return
@@ -381,21 +392,37 @@ class PmSampler:
         for i, s in enumerate(cd):
             ts[i] = s.start_timestamp
             vals[i] = s.metric_values
-        # the first sample of a session has an unset
-        # interval-start -- 0, or a stale small value from a different clock domain (observed
-        # ~7.5e13 vs the real ~1.78e18). Real samples all fall within the look-back of the newest,
-        # so keep only ts in (max - look-back, max]; this also drops any stale pre-wrap remnant.
+        # Drop an unset interval-start (0) or a stale small value from a
+        # different clock domain (observed ~7.5e13 vs the real ~1.78e18).
+        # Real samples fall within the look-back of the newest.
         keep = ts > 0
         if keep.any():
-            keep &= ts >= int(ts[keep].max()) - _DEFAULT_WINDOW_NS
+            keep &= ts >= int(ts[keep].max()) - _LOOKBACK_WINDOW_NS
         if not keep.any():
             return
         ts = ts[keep]
         vals = vals[keep]
-        device_col = np.full(len(ts), self._device, dtype=np.int64)
-        col_index = {m: j for j, m in enumerate(self._metric_names)}
-        for consumer in self._consumers:
-            frame: dict[str, Any] = {"start_ns": ts, "device_id": device_col}
-            for m in consumer.metrics:
-                frame[m] = vals[:, col_index[m]]
-            consumer.sink(frame)
+        if self._retained_ts.size:
+            self._retained_ts = np.concatenate([self._retained_ts, ts])
+            self._retained_vals = np.concatenate([self._retained_vals, vals])
+        else:
+            self._retained_ts = ts
+            self._retained_vals = vals
+
+    def _gc(self) -> None:
+        # Drop retained samples every consumer has passed (<= the min cursor) or that have aged past
+        # the look-back window (so a consumer that stops polling can't pin the buffer). A lone,
+        # caught-up consumer leaves nothing retained. Caller holds _lock.
+        ts = self._retained_ts
+        if not ts.size:
+            return
+        newest = int(ts.max())
+        watermark = max(
+            min((c.cursor for c in self._consumers), default=newest),
+            newest - _LOOKBACK_WINDOW_NS,
+        )
+        keep = ts > watermark
+        if keep.all():
+            return
+        self._retained_ts = ts[keep]
+        self._retained_vals = self._retained_vals[keep]
