@@ -45,6 +45,7 @@ import sympy
 
 import torch
 from torch import SymInt
+from torch._custom_class_base import CustomClassBase
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.graph_bytecode_inputs import (
     CURRENT_STREAM_INDEX,
@@ -67,7 +68,6 @@ from torch._library.opaque_object import (
     is_opaque_value_type,
     should_hoist,
 )
-from torch._opaque_base import OpaqueBase
 from torch._ops import HigherOrderOperator, OpOverload, OpOverloadPacket
 from torch._subclasses.fake_tensor import (
     FakeTensor,
@@ -1956,7 +1956,7 @@ class VariableBuilder:
             # tracing, but in dynamo we handle it as a regular object so that
             # trace_rules-based graph breaks (e.g. initial_seed, manual_seed)
             # work gracefully — allowing dynamo to compile code before and
-            # after the generator call. TorchScriptObjectVariable's var_getattr
+            # after the generator call. TorchScriptObjectVariable's getattro_impl
             # and call_method are decorated with @_raise_hard_error_if_graph_break,
             # which turns any graph break into a hard error that falls back to
             # eager for the entire function. Generator methods intentionally
@@ -4473,11 +4473,11 @@ def _automatic_dynamic(
                     inner_contexts[attr] = _automatic_dynamic(
                         inner_value, tx, inner_source, static_shapes
                     )
-                case OpaqueBase():
+                case CustomClassBase():
                     pass
                 case unexpected:
                     raise AssertionError(
-                        f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
                     )
 
         return SubclassSymbolicContext(
@@ -5045,7 +5045,7 @@ class SourcelessBuilder:
                 cls_obj_vt = SourcelessBuilder.create(tx, value.__self__)
                 try:
                     # pyrefly: ignore[bad-argument-type]
-                    return cls_obj_vt.var_getattr(tx, value.__func__.__name__)
+                    return cls_obj_vt.getattro_impl(tx, value.__func__.__name__)
                 except NotImplementedError:
                     pass  # failthrough to unimplemented branch
             else:
