@@ -46,6 +46,7 @@ class TestCppWrapperHipify(TestCase):
 
         self.assertIn("hipModuleLaunchKernel", header)
         self.assertIn("bool launch_pdl = false", header)
+        self.assertIn("PDL launch is not supported on HIP", header)
         self.assertNotIn("CUlaunchAttribute", header)
         self.assertNotIn("CUlaunchConfig", header)
         self.assertNotIn("cuLaunchKernelEx", header)
