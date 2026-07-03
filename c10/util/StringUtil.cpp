@@ -1,6 +1,7 @@
 #include <c10/util/StringUtil.h>
 
 #include <cstdint>
+#include <stdexcept>
 #include <string>
 
 #ifdef _WIN32
@@ -41,25 +42,37 @@ static std::ostream& _strFromWide(
 
 #ifndef _WIN32
 
-// Decodes one code point from a UTF-16 sequence (one code unit per wchar_t,
-// matching the old std::codecvt_utf8_utf16 behavior), advancing `it` past the
-// consumed code unit(s) and combining a surrogate pair when present.
+// Decodes one code point from a UTF-16 sequence, advancing `it` past the
+// consumed code unit(s) and combining a surrogate pair when present. Each
+// wchar_t is treated as a single UTF-16 code unit: on platforms where wchar_t
+// is 32-bit, values above 0xFFFF are truncated to 16 bits, matching the old
+// std::codecvt_utf8_utf16 behavior this replaced. An unpaired surrogate is
+// malformed UTF-16 and throws, as the old codecvt path did.
 static uint32_t decode_utf16_char(
     std::wstring::const_iterator& it,
     std::wstring::const_iterator end) {
-  uint32_t cp = static_cast<char16_t>(*it++);
-  if (cp >= 0xD800 && cp <= 0xDBFF && it != end) {
-    const char16_t low = static_cast<char16_t>(*it);
-    if (low >= 0xDC00 && low <= 0xDFFF) {
-      cp = 0x10000 + ((cp - 0xD800) << 10) + (low - 0xDC00);
-      ++it;
-    }
+  const char16_t high = static_cast<char16_t>(*it++);
+  if (high < 0xD800 || high > 0xDFFF) {
+    return high;
   }
-  return cp;
+  if (high > 0xDBFF) {
+    throw std::range_error("invalid UTF-16: unpaired low surrogate");
+  }
+  if (it == end) {
+    throw std::range_error("invalid UTF-16: truncated surrogate pair");
+  }
+  const char16_t low = static_cast<char16_t>(*it++);
+  if (low < 0xDC00 || low > 0xDFFF) {
+    throw std::range_error("invalid UTF-16: unpaired high surrogate");
+  }
+  return 0x10000 + ((static_cast<uint32_t>(high) - 0xD800) << 10) +
+      (static_cast<uint32_t>(low) - 0xDC00);
 }
 
-// Appends the UTF-8 encoding of a single code point to `out`. Code points
-// outside the Unicode range are emitted as U+FFFD (replacement character).
+// Appends the UTF-8 encoding of a single code point to `out`. decode_utf16_char
+// truncates each code unit to 16 bits and caps surrogate pairs at U+10FFFF, so
+// cp can never exceed U+10FFFF here; the clamp below is purely defensive and in
+// practice never fires.
 static void encode_utf8_char(std::string& out, uint32_t cp) {
   if (cp > 0x10FFFF) {
     cp = 0xFFFD;
