@@ -834,6 +834,8 @@ print(t.is_pinned())
                     archs.append("gfx950")
                 if ROCM_VERSION >= (7, 13):
                     archs.extend(["gfx1100", "gfx1101", "gfx1151"])
+                if ROCM_VERSION >= (7, 14):
+                    archs.append("gfx1250")
                 gcn_arch_name = torch.cuda.get_device_properties(0).gcnArchName
                 hipblaslt_preferred = any(arch in gcn_arch_name for arch in archs)
                 if hipblaslt_preferred:
@@ -923,7 +925,7 @@ print(t.is_pinned())
             gcn_arch = str(
                 torch.cuda.get_device_properties(0).gcnArchName.split(":", 1)[0]
             )
-            if "gfx94" in gcn_arch or "gfx95" in gcn_arch:
+            if gcn_arch in ["gfx942", "gfx950", "gfx1250"]:
                 default_workspace_size = 1024 * 128 * 1024  # :1024:128
         else:
             default_workspace_size = (
@@ -934,7 +936,7 @@ print(t.is_pinned())
                 default_workspace_size = 4096 * 8 * 1024
 
         def check_workspace_size(inp):
-            torch.cuda._clear_cublas_workspaces()
+            torch._C._cuda_clearCublasWorkspaces()
             start = torch.cuda.memory_stats()["active_bytes.all.allocated"]
             with torch.no_grad():
                 torch.matmul(inp, inp)
@@ -959,7 +961,7 @@ print(t.is_pinned())
         torch._C._cuda_resetCublasWorkspaceSize()
         self.assertLess(abs(check_workspace_size(a) - default_workspace_size), 524288)
 
-        torch.cuda._clear_cublas_workspaces()
+        torch._C._cuda_clearCublasWorkspaces()
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled for async")
     @unittest.skipIf(IS_FBCODE, "not enabled by default on fbcode")
@@ -1069,7 +1071,7 @@ print(t.is_pinned())
         torch.backends.cuda.preferred_blas_library("cublas")
 
         original_size = torch.backends.cuda.cublas_workspace_size()
-        torch.cuda._clear_cublas_workspaces()
+        torch._C._cuda_clearCublasWorkspaces()
 
         # Trigger initial allocation with matmul
         a = torch.randn(7, 7, device="cuda", requires_grad=False)
@@ -1411,8 +1413,8 @@ print(t.is_pinned())
         # out-of-range device_index must not OOB-index the static stream pool.
         num_devices = torch.cuda.device_count()
         for di in (-2, -8, num_devices, num_devices + 16, 128):
-            s = torch.cuda.Stream(stream_id=3, device_index=di, device_type=1)
-            with self.assertRaisesRegex(RuntimeError, "Device index value"):
+            with self.assertRaisesRegex(RuntimeError, "Device index (must be|value)"):
+                s = torch.cuda.Stream(stream_id=3, device_index=di, device_type=1)
                 _ = s.cuda_stream
 
     def test_stream_event_repr(self):
@@ -3402,9 +3404,7 @@ exit(2)
             # TODO: reenable multinomial tests if/when the implementation is capturable.
             # ("multinomial", (input.clone(), size, True), {}),
             # ("multinomial", (input.clone(), size // 2, False), {}),
-            # TODO: reenable normal test, where std is a device
-            # tensor, when graph test failures are fixed
-            # ("normal", (input.clone() + 1, input.clone()), {}),
+            ("normal", (input.clone() + 1, input.clone()), {}),
             ("normal", (input.clone() + 1, 1.0), {}),
             ("poisson", (input.clone(),), {}),
             ("rand", (size,), {"device": "cuda", "dtype": torch.float}),
@@ -5669,7 +5669,7 @@ class TestCudaAllocator(TestCase):
     def test_memory_plots_free_segment_stack(self):
         for context in ["alloc", "all", "state"]:
             try:
-                torch.cuda._clear_cublas_workspaces()
+                torch._C._cuda_clearCublasWorkspaces()
                 torch.cuda.memory.empty_cache()
                 torch.cuda.memory._record_memory_history(context=context)
                 x = torch.rand(3, 4, device="cuda")
@@ -5688,7 +5688,7 @@ class TestCudaAllocator(TestCase):
     def test_memory_plots_metadata(self):
         for context in ["alloc", "all", "state"]:
             try:
-                torch.cuda._clear_cublas_workspaces()
+                torch._C._cuda_clearCublasWorkspaces()
                 torch.cuda.memory.empty_cache()
                 torch.cuda.memory._set_memory_metadata("metadata test")
                 torch.cuda.memory._record_memory_history(context=context)
@@ -5708,7 +5708,7 @@ class TestCudaAllocator(TestCase):
     )
     def test_memory_snapshot_script(self):
         try:
-            torch.cuda._clear_cublas_workspaces()
+            torch._C._cuda_clearCublasWorkspaces()
             torch.cuda.memory.empty_cache()
             torch.cuda.memory._record_memory_history("state", stacks="python")
 
@@ -9867,9 +9867,13 @@ class TestCompileKernel(TestCase):
 
         # Test error handling with more than supported shared memory size
         if torch.version.hip:
-            max_smem = (
-                65536 if get_device_properties().gcnArchName != "gfx950" else 160 * 1024
-            )
+            gcn_arch = get_device_properties().gcnArchName.split(":", 1)[0]
+            if gcn_arch == "gfx1250":
+                max_smem = 320 * 1024
+            elif gcn_arch == "gfx950":
+                max_smem = 160 * 1024
+            else:
+                max_smem = 65536
         else:
             max_smem = get_device_properties().shared_memory_per_block_optin
         excessive_shared_mem = max_smem * 2
