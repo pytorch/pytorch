@@ -64,13 +64,18 @@ class SwitchOp(HigherOrderOperator):
             mutated_inputs |= set(branch_mutated_inputs)
 
         # Merge outputs to detect int -> SymInt change
+        from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
         fake_mode = detect_fake_mode(operands)
         if fake_mode is None or fake_mode.shape_env is None:
             fake_mode = FakeTensorMode(shape_env=ShapeEnv())
-        # pyrefly: ignore [missing-attribute]
-        with fake_mode, fake_mode.shape_env.ignore_fresh_unbacked_symbols():
+        # disable_proxy_modes_tracing prevents SymInt arithmetic in _merge_output
+        with (
+            fake_mode,
+            fake_mode.shape_env.ignore_fresh_unbacked_symbols(),  # pyrefly: ignore [missing-attribute]
+            disable_proxy_modes_tracing(),
+        ):
             merged_outputs = [
                 _merge_output(branch_outs, fake_mode)
                 for branch_outs in zip(*all_branch_outputs)
