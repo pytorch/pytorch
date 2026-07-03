@@ -123,6 +123,26 @@ class CuteDSLIndexFragment:
     contiguous_width: int | None = None
 
 
+@dataclasses.dataclass(frozen=True)
+class IndexSymbolInfo:
+    """What lane analysis may assume about a generated index symbol.
+
+    expr: Recovered semantic index expression, or None when the value's
+        semantics are unknown (loaded from a captured tensor, or produced by
+        ops outside the traced index algebra). Unknown semantics force a
+        per-lane gather: assuming lane-uniform would broadcast lane 0's load
+        across the vectorized group (#188878).
+    contiguous_ok: False when the value passed through a negative-index wrap
+        (idx + size for negative lanes only). Uniform lanes all wrap
+        identically, so lane-uniformity survives, but a contiguous window
+        straddling 0 jumps from size-1 back to 0 and we can't prove a window
+        avoids 0.
+    """
+
+    expr: sympy.Expr | None
+    contiguous_ok: bool = True
+
+
 @dataclasses.dataclass
 class CuteDSLSubgraphInfo:
     """Minimal subgraph info for CuteDSL kernels."""
@@ -626,20 +646,9 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         self.mask = mask
         # Track tensor buffers that get added during modification processing
         self.tensor_buffers: list[str] = []
-        # Maps generated CSE names back to their original index expressions so
-        # vector-load analysis can reason about the source indexing semantics.
-        self._semantic_index_replacements: dict[sympy.Symbol, sympy.Expr] = {}
-        # Symbols whose value passed through a negative-index wrap (idx + size
-        # for negative lanes only). Uniform lanes all wrap identically, so
-        # lane-uniformity survives, but a contiguous window straddling 0 jumps
-        # from size-1 back to 0. We can't prove a window avoids 0, so tainted
-        # symbols may classify as lane-uniform but never as contiguous.
-        self._wrap_tainted_symbols: OrderedSet[sympy.Symbol] = OrderedSet()
-        # Symbols for computed index values with unrecoverable semantics
-        # (values loaded from captured tensors, ops outside the traced index
-        # algebra -> wed dont know what to do). Their lane behavior is unknown,
-        # so they must never classify as lane-uniform or contiguous.
-        self._opaque_index_symbols: OrderedSet[sympy.Symbol] = OrderedSet()
+        # Maps generated CSE names to their semantic provenance so vector-load
+        # analysis can reason about the source indexing semantics.
+        self._index_symbol_info: dict[sympy.Symbol, IndexSymbolInfo] = {}
 
     def _get_input_dtype(self, name: str) -> torch.dtype:
         """Get the dtype for an input from the kernel's named_input_nodes."""
@@ -941,8 +950,7 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
 
         expr = self.kernel.rename_indexing(expr)
         is_lane_uniform, is_contiguous, contiguous_width = self._analyze_index_fragment(
-            self._semantic_index_expr(expr),
-            wrap_tainted=bool(expr.free_symbols & self._wrap_tainted_symbols),
+            expr
         )
         result = self.kernel.cse.newvar(dtype=torch_dtype)
         self.kernel.body.writeline(
@@ -957,16 +965,26 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         )
 
     def _analyze_index_fragment(
-        self, semantic_expr: sympy.Expr, wrap_tainted: bool = False
+        self, expr: sympy.Expr
     ) -> tuple[bool, bool, int | None]:
         if self.vector_load_config is None:
             return False, False, None
         if self.vector_load_config.vec_size <= 1:
             return True, False, None
 
+        contiguous_ok = True
+        for sym in expr.free_symbols:
+            info = self._index_symbol_info.get(sym)
+            if info is not None:
+                if info.expr is None:
+                    # If we dont know the semantics of the index, we cannot determine lane behavior.
+                    # So we default to safe/pessimistic behavior: per-lane gather, no uniformity, no contiguity.
+                    return False, False, None
+                contiguous_ok &= info.contiguous_ok
+
+        semantic_expr = self._semantic_index_expr(expr)
         if self._has_unresolved_index_symbols(semantic_expr):
-            # If we dont know the semantics of the index, we cannot determine lane behavior.
-            # So we default to safe/pessimistic behavior: per-lane gather, no uniformity, no contiguity.
+            # ditto -> we dont know so choose safe/pessimistic behavior
             return False, False, None
 
         lane_info = classify_lane_expr(
@@ -975,14 +993,10 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
             max_width=self.vector_load_config.vec_size,
             uniform_symbols=self._lane_uniform_symbols(),
         )
-        if wrap_tainted:
-            # The wrap remaps negative lanes individually, so contiguity of the
-            # pre-wrap expression does not survive; uniformity does.
-            return lane_info.is_uniform, False, None
         return (
             lane_info.is_uniform,
-            lane_info.is_contiguous,
-            lane_info.contiguous_width,
+            lane_info.is_contiguous and contiguous_ok,
+            lane_info.contiguous_width if contiguous_ok else None,
         )
 
     def _has_unresolved_index_symbols(self, semantic_expr: sympy.Expr) -> bool:
@@ -993,11 +1007,8 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         lane 0's gather when the symbol is actually per-lane runtime data
         (#188878). Recovered semantics substitute away generated CSE names, so
         a surviving symbol in the reserved ``tmpN`` namespace means recovery
-        failed and the load must stay a per-lane gather. Covers both
-        explicitly tracked opaque symbols and that reserved-name fallback.
+        failed and the load must stay a per-lane gather.
         """
-        if semantic_expr.free_symbols & self._opaque_index_symbols:
-            return True
         prefix = self.kernel.cse.name_prefix
         lane_var = self.vector_load_config.index if self.vector_load_config else None
         return any(
@@ -1029,9 +1040,11 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
 
     def _semantic_index_expr(self, expr: sympy.Expr) -> sympy.Expr:
         """Recover the original index meaning from generated CSE names."""
-        replacements: dict[sympy.Symbol, sympy.Expr] = dict(
-            self._semantic_index_replacements
-        )
+        replacements: dict[sympy.Symbol, sympy.Expr] = {
+            symbol: info.expr
+            for symbol, info in self._index_symbol_info.items()
+            if info.expr is not None
+        }
         for var in self.kernel.cse._cache.values():
             if isinstance(var, CuteDSLCSEVariable) and var.index_expr is not None:
                 replacements[sympy_index_symbol(var.name)] = var.index_expr
@@ -1077,10 +1090,11 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
             )
             symbol = sympy_index_symbol(str(wrapped))
             # Preserve the pre-wrap semantics so lane analysis sees the true
-            # lane structure instead of an unknown (default lane-uniform)
-            # symbol, which broadcast lane 0's gather to the whole group.
-            self._semantic_index_replacements[symbol] = index_var.index_expr
-            self._wrap_tainted_symbols.add(symbol)
+            # lane structure; the wrap remaps negative lanes individually, so
+            # contiguity of the pre-wrap expression does not survive it.
+            self._index_symbol_info[symbol] = IndexSymbolInfo(
+                index_var.index_expr, contiguous_ok=False
+            )
             return symbol
         source_name = None
         for expr, var in self.kernel.cse._cache.items():
@@ -1088,14 +1102,10 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
                 source_name = expr if isinstance(expr, str) else None
                 break
         symbol = sympy_index_symbol(source_name or str(index_var))
-        if (
-            isinstance(index_var, CuteDSLCSEVariable)
-            and index_var.index_expr is not None
-        ):
-            self._semantic_index_replacements[symbol] = index_var.index_expr
-        else:
-            # Fall through | we dont know the semantics of this index
-            self._opaque_index_symbols.add(symbol)
+        index_expr = (
+            index_var.index_expr if isinstance(index_var, CuteDSLCSEVariable) else None
+        )
+        self._index_symbol_info[symbol] = IndexSymbolInfo(index_expr)
         return symbol
 
     # pyrefly: ignore [bad-override]
