@@ -2341,50 +2341,54 @@ class TritonHostSideTMATestCUDA(BlockDescriptorTestBase):
 
 test_torchinductor.copy_tests(CommonTemplate, TritonHostSideTMATestCUDA, GPU_TYPE)
 
-# The (9, True) meta-test checks that _run_and_compare raises on wrong block
-# pointer counts. Host-side TMA disables this count check, so skip it.
-TritonHostSideTMATestCUDA.test_expected_num_block_pointers_expected_num_block_pointers_9_raises_True_cuda = unittest.skip(
-    "block pointer count check is disabled for host-side TMA"
-)(
-    TritonHostSideTMATestCUDA.test_expected_num_block_pointers_expected_num_block_pointers_9_raises_True_cuda
-)
-
-# Known TMA API limitations: these cases also fail for device-side TMA (they
-# carry @xfail_if_use_tensor_descriptor). For host-side TMA they either produce
-# different (still-correct) codegen that breaks the device-specific code asserts,
-# or hit the same descriptor constraints (e.g. the 16-byte last-dim minimum in
-# test_reduction_padded_output_tiling).
-_HOST_TMA_EXPECTED_FAILURES = [
-    "test_boundary_check_block_multiple_False_ynumel_exceed_ygrid_size_False_include_z_True_cuda",
-    "test_boundary_check_block_multiple_True_ynumel_exceed_ygrid_size_True_include_z_False_cuda",
-    "test_pointwise_broadcast_nonzero_strides_prefer_nd_tiling_False_cuda",
-    "test_pointwise_broadcast_nonzero_strides_prefer_nd_tiling_True_cuda",
-    "test_pointwise_index_order_cuda",
-    "test_reduction_padded_output_tiling_cuda",
-]
-for _name in _HOST_TMA_EXPECTED_FAILURES:
-    setattr(
-        TritonHostSideTMATestCUDA,
-        _name,
-        unittest.expectedFailure(getattr(TritonHostSideTMATestCUDA, _name)),
+# The copy_tests above generates GPU_TYPE-suffixed methods; the skip/xfail
+# markers below reference the CUDA variants by name, so only apply them when
+# running on CUDA (the class itself is skipped on other backends).
+if GPU_TYPE == "cuda":
+    # The (9, True) meta-test checks that _run_and_compare raises on wrong block
+    # pointer counts. Host-side TMA disables this count check, so skip it.
+    TritonHostSideTMATestCUDA.test_expected_num_block_pointers_expected_num_block_pointers_9_raises_True_cuda = unittest.skip(
+        "block pointer count check is disabled for host-side TMA"
+    )(
+        TritonHostSideTMATestCUDA.test_expected_num_block_pointers_expected_num_block_pointers_9_raises_True_cuda
     )
 
-# Dynamic shapes are not yet supported for host-side TMA (the launcher cannot
-# resolve symbolic block/shape dims). Tracked as a follow-up.
-TritonHostSideTMATestCUDA.test_dynamic_shapes_pointwise_nd_tiling_False_num_block_pointers_1_cuda = unittest.expectedFailure(
-    TritonHostSideTMATestCUDA.test_dynamic_shapes_pointwise_nd_tiling_False_num_block_pointers_1_cuda
-)
+    # Known TMA API limitations: these cases also fail for device-side TMA (they
+    # carry @xfail_if_use_tensor_descriptor). For host-side TMA they either produce
+    # different (still-correct) codegen that breaks the device-specific code asserts,
+    # or hit the same descriptor constraints (e.g. the 16-byte last-dim minimum in
+    # test_reduction_padded_output_tiling).
+    _HOST_TMA_EXPECTED_FAILURES = [
+        "test_boundary_check_block_multiple_False_ynumel_exceed_ygrid_size_False_include_z_True_cuda",
+        "test_boundary_check_block_multiple_True_ynumel_exceed_ygrid_size_True_include_z_False_cuda",
+        "test_pointwise_broadcast_nonzero_strides_prefer_nd_tiling_False_cuda",
+        "test_pointwise_broadcast_nonzero_strides_prefer_nd_tiling_True_cuda",
+        "test_pointwise_index_order_cuda",
+        "test_reduction_padded_output_tiling_cuda",
+    ]
+    for _name in _HOST_TMA_EXPECTED_FAILURES:
+        setattr(
+            TritonHostSideTMATestCUDA,
+            _name,
+            unittest.expectedFailure(getattr(TritonHostSideTMATestCUDA, _name)),
+        )
 
-# Unlike the cases above (which also fail device-side), this one passes for
-# device-side TMA and non-TMA. Its im2col output store is emitted as a host-side
-# TMA tensordesc store, so the generated code has no tl.make_block_ptr and the
-# base block_descriptor_constructor_str assert does not hold. Numerics still
-# match (the _run_and_compare check passes before the code-string assert).
-TritonHostSideTMATestCUDA.test_ensure_integral_dims_and_strides_cuda = (
-    unittest.expectedFailure(
-        TritonHostSideTMATestCUDA.test_ensure_integral_dims_and_strides_cuda
+    # Dynamic shapes are not yet supported for host-side TMA (the launcher cannot
+    # resolve symbolic block/shape dims). Tracked as a follow-up.
+    TritonHostSideTMATestCUDA.test_dynamic_shapes_pointwise_nd_tiling_False_num_block_pointers_1_cuda = unittest.expectedFailure(
+        TritonHostSideTMATestCUDA.test_dynamic_shapes_pointwise_nd_tiling_False_num_block_pointers_1_cuda
     )
-)
+
+    # Unlike the cases above (which also fail device-side), this one passes for
+    # device-side TMA and non-TMA. Its im2col output store is emitted as a host-side
+    # TMA tensordesc store, so the generated code has no tl.make_block_ptr and the
+    # base block_descriptor_constructor_str assert does not hold. Numerics still
+    # match (the _run_and_compare check passes before the code-string assert).
+    TritonHostSideTMATestCUDA.test_ensure_integral_dims_and_strides_cuda = (
+        unittest.expectedFailure(
+            TritonHostSideTMATestCUDA.test_ensure_integral_dims_and_strides_cuda
+        )
+    )
 
 
 class HostTMAHelperTest(InductorTestCase):
