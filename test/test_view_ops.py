@@ -12,6 +12,7 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfMPS,
     instantiate_device_type_tests,
+    onlyCPU,
     skipLazy,
     skipMeta,
     skipXLA,
@@ -2126,6 +2127,7 @@ class TestOldViewOps(TestCase):
             self.assertEqual(x.view(6).shape, [6])
 
     @skipIfTorchDynamo("conj bit not implemented in TensorVariable yet")
+    @onlyCPU
     def test_conj_neg_view_numpy_error(self, device):
         self.assertRaisesRegex(
             RuntimeError,
@@ -2152,7 +2154,9 @@ class TestOldViewOps(TestCase):
         crow_indices = (0, 1, 2)
         col_indices = (1, 0)
         values = (1, 2)
-        t = torch.sparse_csr_tensor(crow_indices, col_indices, values, size=(2, 2))
+        t = torch.sparse_csr_tensor(
+            crow_indices, col_indices, values, size=(2, 2), device=device
+        )
         # This is the test. If crow_indices is not a view op it'll
         # trigger an internal assert due to use count greater than 1
         # in debug build.
