@@ -50,9 +50,6 @@ jobs:
   set-parameters:
     if: ${{ !github.event.pull_request.head.repo.fork && github.repository_owner == 'pytorch' }}
     runs-on: mt-l-x86iamx-8-16
-    # OSDC ARC forbids container-less jobs; the actions-runner image is a
-    # lightweight base (its uid matches the runner hook, so no workspace-perm fix
-    # is needed — unlike the CI-image build job).
     container:
       image: ghcr.io/actions/actions-runner:latest
     outputs:
@@ -97,9 +94,6 @@ jobs:
           ref: ${{ inputs.pytorch_commit || inputs.pytorch_branch }}
           show-progress: false
 
-      # The vLLM ci-image is prebuilt by docker-builds.yml; construct its ECR path
-      # inline from the .ci/docker tree hash. calculate-docker-image needs a docker
-      # daemon, which OSDC runners don't have.
       - name: Compute docker image
         id: calculate-docker-image
         working-directory: pytorch/pytorch
