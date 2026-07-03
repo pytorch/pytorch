@@ -124,7 +124,10 @@ class TestShapeOps(TestCase):
         scale, zero_point = 0.1, 5
         for dtype in (torch.quint4x2, torch.quint2x4):
             qt = torch.quantize_per_tensor(
-                torch.randn(16, 16, device=device), scale=scale, zero_point=zero_point, dtype=dtype
+                torch.randn(16, 16, device=device),
+                scale=scale,
+                zero_point=zero_point,
+                dtype=dtype,
             )
             torch.flip(qt, dims=(0,))
 
