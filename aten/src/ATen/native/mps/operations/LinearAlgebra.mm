@@ -310,13 +310,13 @@ bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output)
   static bool always_use_metal = c10::utils::has_env("PYTORCH_MPS_PREFER_METAL");
   constexpr auto max_stride_size = 32768;
   constexpr auto max_complex_inner_size = 2048;
-  static bool is_macos_14_4_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_4_PLUS);
+  static bool is_macos_14_4_or_newer = is_macos_at_least(MacOSVersion::MACOS_14_4);
   if (always_use_metal || c10::isIntegralType(self.scalar_type(), true)) {
     return true;
   }
   // MPSGraph mis-writes a non-contiguous output before macOS 26; the metal
   // kernels honor the output strides.
-  static const bool is_macos_26_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_26_0_PLUS);
+  static const bool is_macos_26_0_or_newer = is_macos_at_least(MacOSVersion::MACOS_26_0);
   if (!output.is_contiguous() && !is_macos_26_0_or_newer) {
     return true;
   }
@@ -426,6 +426,7 @@ static void linalg_lu_factor_ex_out_mps_impl(const Tensor& A,
 
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
+      mpsStream->endKernelCoalescing();
       id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
       auto filter = [[[MPSMatrixDecompositionLU alloc] initWithDevice:device rows:aRows columns:aCols] autorelease];
 
@@ -571,6 +572,7 @@ static void linalg_solve_out_mps_impl(const Tensor& A,
 
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
+      mpsStream->endKernelCoalescing();
       id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
 
       auto lu_decomp = [[[MPSMatrixDecompositionLU alloc] initWithDevice:device rows:aRows columns:aCols] autorelease];
@@ -689,7 +691,7 @@ static void linalg_inv_ex_out_mps_impl(const Tensor& A, bool check_errors, const
 
 static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& output) {
   using namespace mps;
-  static const bool is_macOS_15_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
+  static const bool is_macOS_15_0_or_newer = is_macos_at_least(MacOSVersion::MACOS_15_0);
 
   using CachedGraph = MPSBinaryCachedGraph;
   TORCH_CHECK(self.dim() == 2 && other.dim() == 2, "tensors must be 2-D");
@@ -731,7 +733,7 @@ static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& 
     // inputs on macOS < 26.4 (only every 16th row is computed). Contiguify such tensors
     // by disabling the strided API so they go through the gather/clone path first.
     // See https://github.com/pytorch/pytorch/issues/180201
-    static const bool is_macOS_26_4_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_26_4_PLUS);
+    static const bool is_macOS_26_4_or_newer = is_macos_at_least(MacOSVersion::MACOS_26_4);
     auto hasZeroStride = [](const Tensor& t) {
       return std::ranges::any_of(t.strides(), [](auto s) { return s == 0; });
     };
@@ -798,6 +800,10 @@ static Tensor& addbmm_or_baddbmm_out_mps_impl(const Tensor& input,
       result.zero_();
       return result;
     }
+  } else if (result.numel() == 0) {
+    // Empty baddbmm output (e.g. a zero-sized batch dim): nothing to compute,
+    // avoid feeding empty buffers to the MPSGraph / Metal kernel paths.
+    return result;
   }
 
   // Use Metal kernels for integer and complex types
@@ -991,7 +997,7 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
 }
 
 static Tensor& tiled_bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tensor& result) {
-  if (is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS)) {
+  if (is_macos_at_least(MacOSVersion::MACOS_15_0)) {
     using namespace mps;
 
     id<MTLBuffer> aBuffer = getMTLBufferStorage(batch1);
@@ -1000,11 +1006,11 @@ static Tensor& tiled_bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2
 
     MPSStream* mpsStream = getCurrentMPSStream();
     id<MTLDevice> device = MPSDevice::getInstance()->device();
-    id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
 
     dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
       @autoreleasepool {
         mpsStream->endKernelCoalescing();
+        id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
 
         uint64_t originalBatchSize = batch1.sizes().size() > 2 ? batch1.size(0) : 1;
         uint64_t aRows = batch1.size(-2);
@@ -1146,12 +1152,12 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
 
   // MPSGraph mis-writes a non-contiguous output before macOS 26; the metal
   // kernel honors the output strides.
-  static const bool is_macos_26_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_26_0_PLUS);
+  static const bool is_macos_26_0_or_newer = is_macos_at_least(MacOSVersion::MACOS_26_0);
   if (!result.is_contiguous() && !is_macos_26_0_or_newer) {
     return do_metal_bmm(batch1, batch2, result);
   }
 
-  static const bool is_macOS_15_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
+  static const bool is_macOS_15_0_or_newer = is_macos_at_least(MacOSVersion::MACOS_15_0);
   MPSShape* shape = nil;
   bool doTranspose = false;
 
@@ -1357,6 +1363,45 @@ static void unpack_pivots_stub_impl(TensorIterator& iter, const int64_t dim_size
   });
 }
 
+static void cholesky_panel_impl(const Tensor& out, const Tensor& info_, int64_t N, int64_t B, bool upper) {
+  auto stream = getCurrentMPSStream();
+
+  constexpr auto NB = 96;
+  auto diagPanelPSO = lib.getPipelineStateForFunc(upper ? "factorDiagonalPanelU" : "factorDiagonalPanelL");
+  auto trsmPSO = lib.getPipelineStateForFunc(upper ? "applyPanelTRSMU" : "applyPanelTRSML");
+  const auto big = N - NB >= 1024;
+  const auto BM = big ? 64 : 32;
+  constexpr auto BN = 64;
+  const auto NSG = big ? 4 : 2;
+  auto syrkPSO =
+      lib.getPipelineStateForFunc(fmt::format("applySYRKTrailing{}_{}_{}_{}", upper ? "U" : "L", BM, BN, NSG));
+
+  auto numPanels = (N + NB - 1) / NB;
+
+  @autoreleasepool {
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      auto computeEncoder = stream->commandEncoder();
+      mtl_setArgs(computeEncoder, out, info_, N, NB);
+      for (auto k = 0; k < numPanels; k++) {
+        mtl_setArgs<4>(computeEncoder, k);
+        [computeEncoder setComputePipelineState:diagPanelPSO];
+        [computeEncoder dispatchThreadgroups:MTLSizeMake(B, 1, 1) threadsPerThreadgroup:MTLSizeMake(96, 1, 1)];
+
+        auto T = N - (k + 1) * NB;
+        if (T > 0) {
+          [computeEncoder setComputePipelineState:trsmPSO];
+          [computeEncoder dispatchThreadgroups:MTLSizeMake(B, (T + 31) / 32, 1)
+                         threadsPerThreadgroup:MTLSizeMake(128, 1, 1)];
+
+          [computeEncoder setComputePipelineState:syrkPSO];
+          [computeEncoder dispatchThreadgroups:MTLSizeMake((T + BN - 1) / BN, (T + BM - 1) / BM, B)
+                         threadsPerThreadgroup:MTLSizeMake(NSG * 32, 1, 1)];
+        }
+      }
+    });
+  }
+}
+
 static void cholesky_stub_impl(const Tensor& out, const Tensor& info, bool upper) {
   auto input_sizes = out.sizes();
 
@@ -1366,6 +1411,12 @@ static void cholesky_stub_impl(const Tensor& out, const Tensor& info, bool upper
 
   auto stream = getCurrentMPSStream();
   auto device = MPSDevice::getInstance()->device();
+  auto info_ = info.dim() >= 2 ? info.view({B}) : info;
+  auto info_sizes = info.sizes();
+  if (is_macos_at_least(MacOSVersion::MACOS_26_2)) {
+    return cholesky_panel_impl(out, info_, N, B, upper);
+  }
+  info_.fill_(0);
 
   auto factorDiagonalPSO = lib.getPipelineStateForFunc(upper ? "factorDiagonalBlockU" : "factorDiagonalBlockL");
   auto applyTRSMPSO = lib.getPipelineStateForFunc(upper ? "applyTRSMU" : "applyTRSML");
@@ -1373,10 +1424,6 @@ static void cholesky_stub_impl(const Tensor& out, const Tensor& info, bool upper
 
   int64_t NB = std::min<int64_t>(32, N);
   int64_t numBlocks = (N + NB - 1) / NB;
-
-  auto info_ = info.dim() >= 2 ? info.view({B}) : info;
-  auto info_sizes = info.sizes();
-  info_.fill_(0);
 
   MTLSize threadGroupSize = MTLSizeMake(32, 8, 1);
 
