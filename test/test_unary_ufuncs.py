@@ -804,7 +804,6 @@ class TestUnaryUfuncs(TestCase):
                     with self.assertRaises(AttributeError):
                         torch_inplace_method = getattr(torch.Tensor, fn_name + "_")
 
-    @onlyCUDA
     @dtypes(torch.complex64)
     @parametrize("eps", [1e-3])
     def test_tan_complex_matches_numpy(self, device, dtype, eps):
@@ -837,7 +836,6 @@ class TestUnaryUfuncs(TestCase):
         z = torch.complex(real, imag).to(dtype)
         self.compare_with_numpy(torch.tan, np.tan, z)
 
-    @onlyCUDA
     @dtypes(torch.complex64)
     def test_tanh_complex_matches_numpy(self, device, dtype):
         # Focused accuracy check for complex tanh against NumPy reference
