@@ -1561,9 +1561,7 @@ class TestFullyShardPostForwardMeshDedup(FSDPTestMultiThread):
         mlp1 = MLP(8)
         mlp2 = MLP(8)
         mesh = init_device_mesh(device_type.type, (self.world_size,))
-        fully_shard(
-            [mlp1, mlp2], mesh=mesh, reshard_after_forward=self.world_size
-        )
+        fully_shard([mlp1, mlp2], mesh=mesh, reshard_after_forward=self.world_size)
 
 
 if __name__ == "__main__":
