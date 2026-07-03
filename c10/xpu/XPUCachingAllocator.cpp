@@ -2136,7 +2136,7 @@ class NativeCachingAllocator : public XPUAllocator {
       auto devptr = iter->second.wp.lock();
       TORCH_INTERNAL_ASSERT(
           devptr,
-          "ipc_handle_cache entry found but shared_ptr already expired");
+          "ipc_handle_cache entry found but shared_ptr already expired.");
       return devptr;
     }
     c10::DeviceIndex curr_device = c10::xpu::current_device();
@@ -2147,7 +2147,9 @@ class NativeCachingAllocator : public XPUAllocator {
           std::unique_lock<std::mutex> deleter_lock(ipc_mutex);
 
           auto it = ipc_handle_cache.find(handle);
-          TORCH_INTERNAL_ASSERT(it != ipc_handle_cache.end());
+          TORCH_INTERNAL_ASSERT(
+              it != ipc_handle_cache.end(),
+              ipc_handle_cache entry not found in deleter.");
           auto entry = std::move(it->second);
           ipc_handle_cache.erase(it);
 
@@ -2341,3 +2343,4 @@ MempoolId_t MemPool::graph_pool_handle(bool is_user_created) {
 }
 
 } // namespace c10::xpu
+ 
