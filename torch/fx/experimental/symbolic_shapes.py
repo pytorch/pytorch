@@ -4880,18 +4880,14 @@ class ShapeEnv:
            the per-symbol cache (cache-only; no minting yet).
         2. If every free symbol got replaced, return the resulting (possibly
            derived) expression as-is.
-        3. Otherwise mint ONE fresh local unbacked symbol for the whole
-           foreign expression, attach the caller's ``source`` to it, register
-           its value range / hint from the foreign env, and cache
-           ``(foreign_env, foreign_expr) -> new_symbol`` so a future call
-           with the same expression reuses the symbol.
-
-        Note: this loses fine-grained relationships when a derived expression
-        is minted before its base symbols are seen individually (e.g. minting
-        a symbol for ``u0 + u1`` before any tensor dim carries ``u0`` or
-        ``u1`` alone; later occurrences of those bare symbols cannot share
-        with the minted derived symbol).  This is consistent with the
-        pre-refactor behavior."""
+        3. Otherwise, for each unresolved foreign free symbol that is itself
+           a base unbacked sympy.Symbol in the source env, mint a fresh local
+           unbacked symbol and cache it one-to-one (pre-seeding).  Then
+           re-run substitution and return the derived structural expression
+           if all free symbols now resolve.
+        4. Fall back to minting ONE fresh local unbacked symbol for the whole
+           foreign expression (preserves pre-fix behavior for edge cases
+           involving backed or otherwise unclassifiable symbols)."""
         src_shape_env = value.node.shape_env
         if src_shape_env is self:
             # SymInt already belongs to this ShapeEnv; nothing to transfer.
@@ -4920,19 +4916,85 @@ class ShapeEnv:
                 if isinstance(new_expr, sympy.Symbol):
                     self._constrain_range_for_size(new_expr)
                 else:
-                    # Derived expr (e.g. u0+u1): constrain the whole sum to be
-                    # a valid size via a deferred runtime assert, not each
-                    # individual base symbol.
+                    # Derived expr (e.g. u0+u1): mark every base unbacked
+                    # symbol as size-like (non-negative) so components are
+                    # properly ranged, then constrain the whole sum via a
+                    # deferred runtime assert.
+                    for s in new_expr.free_symbols:
+                        if isinstance(s, sympy.Symbol) and self.is_unbacked_symint(s):
+                            self._constrain_range_for_size(s)
                     torch._check(
                         self.create_symintnode(new_expr, hint=None, source=source) >= 0
                     )
             return new_expr
 
-        # Step 3: at least one symbol could not be resolved.  Mint one fresh
-        # symbol for the whole foreign expression and cache by expression.
-        # TODO we can do better here: we lose all structural info about the
-        # foreign expression (e.g. that it was u0 + u1) by collapsing it to a
-        # single opaque local symbol.
+        # Step 3: some free foreign symbols are not yet in the cache.
+        # Before minting an opaque symbol for the whole expression, seed the
+        # cache with fresh local unbacked symbols for every unresolved leaf
+        # (sympy.Symbol) foreign free symbol.  This preserves algebraic
+        # structure: a composite like u0+u1 encountered before u0/u1 will
+        # resolve to local_u0 + local_u1 instead of a single opaque symbol.
+        from torch._dynamo.source import EphemeralSource
+
+        hint_sources = (
+            src_shape_env.backed_var_to_val.keys()
+            | src_shape_env.var_to_hint_override.keys()
+        )
+        unresolved = [
+            s for s in expr.free_symbols
+            if isinstance(s, sympy.Symbol)
+            and (id(src_shape_env), s) not in self.foreign_unbacked_symbol_cache
+            and src_shape_env.is_unbacked_symint(s)
+        ]
+        # Sort for determinism (free_symbols is a set).
+        unresolved.sort(key=lambda s: s.name)
+        for fsym in unresolved:
+            f_key = (id(src_shape_env), fsym)
+            if f_key in self.foreign_unbacked_symbol_cache:
+                continue
+            leaf_source = EphemeralSource(f"foreign_leaf:{fsym.name}")
+            with self.ignore_fresh_unbacked_symbols():
+                leaf_symint = self.create_unbacked_symint(leaf_source)
+            leaf_cached = leaf_symint.node.expr
+            self.foreign_unbacked_symbol_cache[f_key] = leaf_cached
+            leaf_opt_hint = (
+                src_shape_env.optimization_hint(fsym)
+                if not fsym.free_symbols - hint_sources
+                else None
+            )
+            self._register_unbacked_symbol_as_input(
+                leaf_cached,
+                source=leaf_source,
+                value_range=src_shape_env.bound_sympy(fsym),
+                optimization_hint=leaf_opt_hint,
+            )
+            if is_size:
+                self._constrain_range_for_size(leaf_cached)
+
+        # Re-run substitution after seeding leaves.
+        cache_map2 = {
+            sym: self.foreign_unbacked_symbol_cache[(id(src_shape_env), sym)]
+            for sym in expr.free_symbols
+            if (id(src_shape_env), sym) in self.foreign_unbacked_symbol_cache
+        }
+        new_expr2 = expr.xreplace(cache_map2) if cache_map2 else expr
+        if not (new_expr2.free_symbols - set(cache_map2.values())):
+            if is_size:
+                if isinstance(new_expr2, sympy.Symbol):
+                    self._constrain_range_for_size(new_expr2)
+                else:
+                    for s in new_expr2.free_symbols:
+                        if isinstance(s, sympy.Symbol) and self.is_unbacked_symint(s):
+                            self._constrain_range_for_size(s)
+                    torch._check(
+                        self.create_symintnode(new_expr2, hint=None, source=source) >= 0
+                    )
+            return new_expr2
+
+        # Step 4: still could not resolve every free symbol (e.g. expr
+        # contains a foreign symbol we don't know how to classify).  Mint one
+        # fresh opaque local symbol for the whole foreign expression as a
+        # fallback, preserving pre-fix behavior for edge cases.
         expr_key = (id(src_shape_env), expr)
         cached = self.foreign_unbacked_symbol_cache.get(expr_key)
         if cached is None:
