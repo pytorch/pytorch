@@ -2402,6 +2402,41 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         torch.accelerator.empty_cache()
 
     @supported_platform
+    @skip_on_cpu
+    @skip_on_mps
+    @dtypes(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
+    @common_utils.parametrize("compiled", [False, True])
+    def test_unused_captured_score_mod_grad(self, device, dtype, compiled):
+        """Unused captured grad slots should propagate None through backward."""
+        B_local, H_local, S_local, D_local = 1, 4, 16, 64
+        make_input = functools.partial(
+            torch.randn,
+            (B_local, H_local, S_local, D_local),
+            device=device,
+            dtype=dtype,
+            requires_grad=True,
+        )
+        q, k, v = make_input(), make_input(), make_input()
+        unused = torch.zeros(
+            (H_local, 2), device=device, dtype=dtype, requires_grad=True
+        )
+
+        def score_mod(score, b, h, q_idx, kv_idx):
+            _ = unused[h]
+            return score
+
+        attention = torch.compile(flex_attention) if compiled else flex_attention
+        attention(q, k, v, score_mod=score_mod).sum().backward()
+
+        self.assertIsNotNone(q.grad)
+        self.assertIsNotNone(k.grad)
+        self.assertIsNotNone(v.grad)
+        self.assertIsNone(unused.grad)
+        torch._dynamo.reset()
+
+    @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
@@ -7119,6 +7154,22 @@ class TestBlockMask(InductorTestCase):
         self.assertEqual(block_mask.sparsity(), 29.1015625)
         self.assertTrue(block_mask.sparsity() < block_mask[0].sparsity())
         self.assertTrue(block_mask[0].sparsity() > block_mask[1].sparsity())
+
+    @supported_platform
+    def test_block_mask_sparsity_with_partial_block(self, device):
+        document_id = torch.zeros(100, dtype=torch.int, device=device)
+        document_id[10:20] = 1
+        for i in range(20, 100, 20):
+            document_id[i : i + 20] = i // 20 + 1
+
+        def document_causal_mask(b, h, q_idx, kv_idx):
+            causal_mask = q_idx >= kv_idx
+            document_mask = document_id[q_idx] == document_id[kv_idx]
+            return causal_mask & document_mask
+
+        block_mask = create_block_mask(document_causal_mask, 1, 1, 100, 100, device)
+        self.assertEqual(block_mask.sparsity(), 0.0)
+        self.assertTrue("sparsity=0.00%" in str(block_mask))
 
     @supported_platform
     def test_adjust_block_mask_ignores_entries_past_num_blocks(self, device):
