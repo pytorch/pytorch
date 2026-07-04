@@ -190,20 +190,6 @@ class Sync:
     RETURN_VALUE = Field(9)
 
 
-class Environment:
-    """CUpti_ActivityEnvironment (ENVIRONMENT) -- periodically sampled power/clock/thermal/
-    cooling data. The metric values live in a single 20-byte union (DATA) whose meaning is
-    selected by ENVIRONMENT_KIND (SPEED=1 / TEMPERATURE=2 / POWER=3 / COOLING=4); the decoder
-    keeps the union's first 8 bytes (the primary metric pair, e.g. power+powerLimit or
-    smClock+memoryClock) and the consumer splits it by ENVIRONMENT_KIND."""
-
-    KIND = Field(0)
-    DEVICE_ID = Field(1)
-    TIMESTAMP = Field(2)
-    ENVIRONMENT_KIND = Field(3)
-    DATA = Field(4)  # 20-byte union; decode keeps the first 8 bytes
-
-
 def _catalog(cls: type) -> tuple[Field, ...]:
     """The Fields declared on a per-kind catalog class, in declaration order."""
     return tuple(v for v in vars(cls).values() if isinstance(v, Field))
@@ -221,7 +207,6 @@ FIELDS: dict[int, tuple[Field, ...]] = {
     ActivityKind.OVERHEAD: _catalog(Overhead),
     ActivityKind.CUDA_EVENT: _catalog(CudaEvent),
     ActivityKind.SYNCHRONIZATION: _catalog(Sync),
-    ActivityKind.ENVIRONMENT: _catalog(Environment),
 }
 
 # kind -> frozenset of supported field ids; source of truth for validating observer

@@ -314,14 +314,6 @@ class _CuptiMonitorModule:
     def current_external_id() -> int: ...
     @staticmethod
     def metadata_put_external(blob: str, external_id: int = 0) -> None: ...
-    @staticmethod
-    def encode_pftrace(
-        tracks: list[tuple[int, int, bool, int, int, str]],
-        name_table: list[str],
-        groups: list[tuple],
-        render: tuple | None = None,
-        counters: tuple | None = None,
-    ) -> bytes: ...
 
 _cupti_monitor: _CuptiMonitorModule
 
