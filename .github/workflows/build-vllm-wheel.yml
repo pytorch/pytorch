@@ -104,7 +104,7 @@ jobs:
           # the target platform, so pip resolves the correct manylinux wheels.
           # No docker run/exec: OSDC ARC has no host docker daemon.
           mkdir -p "${RUNNER_TEMP}/artifacts/"
-          uv pip install pip
+          uv pip install pip==25.3
           python -m pip download \
             --pre torch torchvision torchaudio \
             --index-url "https://download.pytorch.org/whl/nightly/${BUILD_DEVICE}" \
