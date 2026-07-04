@@ -292,9 +292,9 @@ class PackedMaskAnalyzer:
                 return self.equality_to_intervals(node.args[0], node.args[1])
             case torch.ops.aten.ne.Tensor | torch.ops.aten.ne.Scalar:
                 intervals = self.equality_to_intervals(node.args[0], node.args[1])
-                if intervals is None:
-                    return None
-                return self.complement_intervals(intervals)
+                return (
+                    None if intervals is None else self.complement_intervals(intervals)
+                )
             case (
                 torch.ops.aten.logical_not.default | torch.ops.aten.bitwise_not.default
             ):
@@ -302,9 +302,9 @@ class PackedMaskAnalyzer:
                 if not isinstance(child, torch.fx.Node):
                     return None
                 intervals = self.node_to_intervals(child)
-                if intervals is None:
-                    return None
-                return self.complement_intervals(intervals)
+                return (
+                    None if intervals is None else self.complement_intervals(intervals)
+                )
             case _:
                 return None
 
