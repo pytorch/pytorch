@@ -2919,7 +2919,7 @@ class TestMetaKernelRegistrations(TestCase):
         self.assertEqual(diff_b2.shape, expected_bias_shape)
 
 
-instantiate_device_type_tests(TestMeta, globals())
+instantiate_device_type_tests(TestMeta, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestMetaCudaRef, globals(), only_for="cuda")
 
 
