@@ -47,9 +47,9 @@ struct vectypes<int> {
 
 template <>
 struct vectypes<long> {
-  using type4 = short4;
-  using type3 = short3;
-  using type2 = short2;
+  using type4 = long4;
+  using type3 = long3;
+  using type2 = long2;
 };
 
 template <typename T>

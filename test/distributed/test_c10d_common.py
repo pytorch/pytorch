@@ -205,6 +205,121 @@ class TimeoutTest(TestCase):
             threads = []
 
 
+class BackendEntryPointTest(TestCase):
+    def setUp(self):
+        super().setUp()
+        self._plugins = dist.Backend._plugins.copy()
+        self._backend_list = dist.Backend.backend_list.copy()
+        self._backend_capability = copy.deepcopy(dist.Backend.backend_capability)
+        self._backend_type_map = dist.Backend.backend_type_map.copy()
+        self._default_device_backend_map = (
+            dist.Backend.default_device_backend_map.copy()
+        )
+        self._custom_backend_attrs = {
+            "ENTRYPOINT_TEST": hasattr(dist.Backend, "ENTRYPOINT_TEST"),
+        }
+
+    def tearDown(self):
+        dist.Backend._plugins = self._plugins
+        dist.Backend.backend_list = self._backend_list
+        dist.Backend.backend_capability = self._backend_capability
+        dist.Backend.backend_type_map = self._backend_type_map
+        dist.Backend.default_device_backend_map = self._default_device_backend_map
+        for attr, existed in self._custom_backend_attrs.items():
+            if not existed and hasattr(dist.Backend, attr):
+                delattr(dist.Backend, attr)
+        super().tearDown()
+
+    def test_backend_entrypoint_loads_on_availability_check(self):
+        load_count = 0
+
+        def create_backend(store, rank, world_size, timeout):
+            raise AssertionError("backend factory should not run in this test")
+
+        class EntryPoint:
+            name = "entrypoint_test"
+
+            def load(self):
+                nonlocal load_count
+                load_count += 1
+
+                def register():
+                    dist.Backend.register_backend(
+                        "entrypoint_test",
+                        create_backend,
+                        devices=["cpu"],
+                    )
+
+                return register
+
+        with unittest.mock.patch(
+            "importlib.metadata.entry_points", return_value=[EntryPoint()]
+        ):
+            self.assertTrue(dist.is_backend_available("entrypoint_test"))
+
+        self.assertEqual(load_count, 1)
+        self.assertIn("ENTRYPOINT_TEST", dist.Backend._plugins)
+        backend_config = dist.BackendConfig("entrypoint_test")
+        self.assertEqual(str(backend_config), "cpu:entrypoint_test")
+        self.assertIs(
+            dist.Backend._plugins["ENTRYPOINT_TEST"].creator_fn, create_backend
+        )
+
+    def test_backend_entrypoint_loads_for_backend_config(self):
+        load_count = 0
+
+        def create_backend(store, rank, world_size, timeout):
+            raise AssertionError("backend factory should not run in this test")
+
+        class EntryPoint:
+            name = "entrypoint_test"
+
+            def load(self):
+                nonlocal load_count
+                load_count += 1
+
+                def register():
+                    dist.Backend.register_backend(
+                        "entrypoint_test",
+                        create_backend,
+                        devices=["cpu"],
+                    )
+
+                return register
+
+        with unittest.mock.patch(
+            "importlib.metadata.entry_points", return_value=[EntryPoint()]
+        ):
+            backend_config = dist.BackendConfig("entrypoint_test")
+
+        self.assertEqual(load_count, 1)
+        self.assertEqual(str(backend_config), "cpu:entrypoint_test")
+        self.assertIs(
+            dist.Backend._plugins["ENTRYPOINT_TEST"].creator_fn, create_backend
+        )
+
+    def test_backend_config_device_form_registers_per_pair(self):
+        # The "device:backend" form must look up each backend individually, not
+        # the whole comma-separated string (which can never match a backend and
+        # would waste an entry-point scan on every BackendConfig construction).
+        looked_up = []
+        original = dist.Backend._ensure_backend_registered.__func__
+
+        def spy(cls, name):
+            looked_up.append(name)
+            return original(cls, name)
+
+        with unittest.mock.patch.object(
+            dist.Backend, "_ensure_backend_registered", classmethod(spy)
+        ):
+            backend_config = dist.BackendConfig("cpu:gloo,cuda:nccl")
+
+        self.assertNotIn("cpu:gloo,cuda:nccl", looked_up)
+        self.assertIn("gloo", looked_up)
+        self.assertIn("nccl", looked_up)
+        self.assertEqual(str(backend_config), "cpu:gloo,cuda:nccl")
+
+
 class Net(nn.Module):
     def __init__(self) -> None:
         super().__init__()
@@ -1472,7 +1587,7 @@ class AbstractLargeCommTest:
         self.assertEqual(
             ranks_in,
             dist.get_process_group_ranks(new_pg),
-            f"expecting {ranks_in} but got {dist.get_process_group_ranks(new_pg)}",
+            lambda msg: f"{msg}\nexpecting {ranks_in} but got {dist.get_process_group_ranks(new_pg)}",
         )
 
     def _test_new_group_local_sync_sanity_check(self, backend):
@@ -1627,7 +1742,7 @@ class CommTest(AbstractCommTest, MultiProcessTestCase):
             self.assertEqual(
                 set_debug_mode,
                 mapping[mode],
-                f"Expected {mode} to map to {mapping[mode]} but got {set_debug_mode}",
+                lambda msg: f"{msg}\nExpected {mode} to map to {mapping[mode]} but got {set_debug_mode}",
             )
 
         for mode in invalid_debug_modes:
@@ -1653,6 +1768,9 @@ class DummyProcessGroup(dist.ProcessGroup):
         self.group_size = args[1]
         self._aborted = False
         self._shutdown = False
+        # Records the name of every collective dispatched into this PG, so a
+        # test can assert a given collective routed through the trampoline.
+        self.collectives_called = set()
 
     def rank(self):
         return self.global_rank
@@ -1675,9 +1793,6 @@ class DummyProcessGroup(dist.ProcessGroup):
     def eager_connect_single_device(self, device=None):
         self._bound_device_id = device
 
-    def _set_sequence_number_for_group(self):
-        pass
-
     def _get_backend(self, device):
         return self
 
@@ -1691,6 +1806,7 @@ class DummyProcessGroup(dist.ProcessGroup):
         return "Dummy"
 
     def allgather(self, output_tensor_lists, input_tensor_list, opts=None):
+        self.collectives_called.add("allgather")
         for output_tensor_list, input_tensor in zip(
             output_tensor_lists, input_tensor_list
         ):
@@ -1700,6 +1816,7 @@ class DummyProcessGroup(dist.ProcessGroup):
         return DummyWork()
 
     def allreduce(self, tensor_list, opts=None):
+        self.collectives_called.add("allreduce")
         for tensor in tensor_list:
             tensor.add_(2)
 
@@ -1725,16 +1842,71 @@ class DummyProcessGroup(dist.ProcessGroup):
         return DummyWork()
 
     def broadcast(self, tensor_list, opts=None):
+        self.collectives_called.add("broadcast")
         for tensor in tensor_list:
             tensor.add_(1)
 
         return DummyWork()
 
     def reduce_scatter(self, output_tensor_list, input_tensor_lists, opts=None):
+        self.collectives_called.add("reduce_scatter")
         for output_tensor, input_tensor_list in zip(
             output_tensor_list, input_tensor_lists
         ):
             output_tensor.copy_(input_tensor_list[self.rank()])
+
+        return DummyWork()
+
+    def all_gather_single(self, output_tensor, input_tensor, opts=None):
+        self.collectives_called.add("all_gather_single")
+        for chunk in output_tensor.chunk(self.size()):
+            chunk.copy_(input_tensor)
+
+        return DummyWork()
+
+    def reduce_scatter_single(self, output_tensor, input_tensor, opts=None):
+        self.collectives_called.add("reduce_scatter_single")
+        output_tensor.copy_(input_tensor.chunk(self.size())[self.rank()])
+
+        return DummyWork()
+
+    def reduce(self, tensor_list, opts=None):
+        self.collectives_called.add("reduce")
+        for tensor in tensor_list:
+            tensor.add_(3)
+
+        return DummyWork()
+
+    def gather(self, output_tensor_lists, input_tensor_list, opts=None):
+        self.collectives_called.add("gather")
+        for output_tensor_list, input_tensor in zip(
+            output_tensor_lists, input_tensor_list
+        ):
+            for output_tensor in output_tensor_list:
+                output_tensor.copy_(input_tensor)
+
+        return DummyWork()
+
+    def scatter(self, output_tensor_list, input_tensor_lists, opts=None):
+        self.collectives_called.add("scatter")
+        for output_tensor, input_tensor_list in zip(
+            output_tensor_list, input_tensor_lists
+        ):
+            output_tensor.copy_(input_tensor_list[self.rank()])
+
+        return DummyWork()
+
+    def alltoall(self, output_tensor_list, input_tensor_list, opts=None):
+        self.collectives_called.add("alltoall")
+        for output_tensor, input_tensor in zip(output_tensor_list, input_tensor_list):
+            output_tensor.copy_(input_tensor)
+
+        return DummyWork()
+
+    def recvAnysource(self, tensor_list, tag):
+        self.collectives_called.add("recvAnysource")
+        for tensor in tensor_list:
+            tensor.add_(4)
 
         return DummyWork()
 
@@ -1788,6 +1960,28 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
         # with self.assertRaises(RuntimeError):
         # _canonicalize_group_rank(dpg, group_rank=123, return_global=True)
 
+    def test_get_backend_impl(self):
+        dist.Backend.register_backend(
+            "dummy", PythonProcessGroupExtensionTest.create_dummy
+        )
+
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = "6789"
+        dist.init_process_group("dummy", rank=self.rank, world_size=self.world_size)
+
+        backend = dist.get_backend_impl()
+        self.assertIsInstance(backend, DummyProcessGroup)
+        pg = c10d._get_default_group()
+        self.assertIs(pg.get_backend(torch.device("cpu")), backend)
+        self.assertIs(dist.get_backend_impl(device=torch.device("cpu")), backend)
+
+        group_name = c10d._get_process_group_name(pg)
+        self.assertEqual(
+            dist.get_backend_impl(str(group_name)).getBackendName(), "Dummy"
+        )
+
+        dist.destroy_process_group()
+
     def test_canonicalize_helper(self):
         dist.Backend.register_backend(
             "dummy", PythonProcessGroupExtensionTest.create_dummy
@@ -1840,6 +2034,9 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
         dist.Backend.register_backend(
             "dummy", PythonProcessGroupExtensionTest.create_dummy
         )
+        dummy_backend_config = (
+            f"cpu:dummy,{device_type}:dummy" if device_type != "cpu" else "cpu:dummy"
+        )
 
         # Ensure backend config can be created with the following arguments
         backend_config_strings_and_expected_values = [
@@ -1847,9 +2044,9 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
             (dist.Backend.NCCL, "cuda:nccl"),
             (dist.Backend.MPI, "cpu:mpi,cuda:mpi"),
             (dist.Backend.UCC, "cpu:ucc,cuda:ucc"),
-            (dist.Backend.DUMMY, "cpu:dummy,cuda:dummy"),
-            ("DUMMY", "cpu:dummy,cuda:dummy"),
-            ("dummy", "cpu:dummy,cuda:dummy"),
+            (dist.Backend.DUMMY, dummy_backend_config),
+            ("DUMMY", dummy_backend_config),
+            ("dummy", dummy_backend_config),
             ("cpu:dummy,cuda:dummy", "cpu:dummy,cuda:dummy"),
             ("cpu:dummy,cuda:nccl", "cpu:dummy,cuda:nccl"),
             ("cpu:gloo,cuda:dummy", "cpu:gloo,cuda:dummy"),
@@ -1859,9 +2056,9 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
         if TEST_XPU:
             # Override backend_config_strings_and_expected_values for Intel GPU.
             backend_config_strings_and_expected_values[4:10] = [
-                (dist.Backend.DUMMY, "cpu:dummy,cuda:dummy,xpu:dummy"),
-                ("DUMMY", "cpu:dummy,cuda:dummy,xpu:dummy"),
-                ("dummy", "cpu:dummy,cuda:dummy,xpu:dummy"),
+                (dist.Backend.DUMMY, dummy_backend_config),
+                ("DUMMY", dummy_backend_config),
+                ("dummy", dummy_backend_config),
                 ("cpu:dummy,xpu:dummy", "cpu:dummy,xpu:dummy"),
                 ("cpu:dummy,xpu:xccl", "cpu:dummy,xpu:xccl"),
                 ("cpu:gloo,xpu:dummy", "cpu:gloo,xpu:dummy"),
@@ -1889,33 +2086,51 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
     def test_parse_backend_string(self):
         from torch.distributed.distributed_c10d import _parse_backend_string
 
-        # Simple form maps to device(s) where the backend is the registered default.
-        self.assertEqual(_parse_backend_string("nccl"), {"cuda": "nccl"})
-        self.assertEqual(_parse_backend_string("NCCL"), {"cuda": "nccl"})
-        # gloo is the default for both cpu and mps in default_device_backend_map.
-        self.assertEqual(_parse_backend_string("gloo"), {"cpu": "gloo", "mps": "gloo"})
+        all_devices = {"cpu", "cuda", "xpu", "mps"}
 
-        # Merged form returns exactly what was named, no synthesized defaults.
+        # Simple form maps to device(s) where the backend is the registered default.
         self.assertEqual(
-            _parse_backend_string("cpu:gloo,cuda:nccl"),
+            _parse_backend_string("nccl", available_devices=all_devices),
+            {"cuda": "nccl"},
+        )
+        self.assertEqual(
+            _parse_backend_string("NCCL", available_devices=all_devices),
+            {"cuda": "nccl"},
+        )
+        # gloo is the default for both cpu and mps in default_device_backend_map.
+        self.assertEqual(
+            _parse_backend_string("gloo", available_devices=all_devices),
+            {"cpu": "gloo", "mps": "gloo"},
+        )
+
+        # Merged form returns exactly what was named, filtered by available_devices.
+        self.assertEqual(
+            _parse_backend_string("cpu:gloo,cuda:nccl", available_devices=all_devices),
             {"cpu": "gloo", "cuda": "nccl"},
         )
         self.assertEqual(
-            _parse_backend_string("CPU:GLOO , CUDA:NCCL"),
+            _parse_backend_string(
+                "CPU:GLOO , CUDA:NCCL", available_devices=all_devices
+            ),
             {"cpu": "gloo", "cuda": "nccl"},
         )
         # Unknown device types in merged form are accepted (no validation here).
-        self.assertEqual(_parse_backend_string("xpu:nccl"), {"xpu": "nccl"})
+        self.assertEqual(
+            _parse_backend_string("xpu:nccl", available_devices=all_devices),
+            {"xpu": "nccl"},
+        )
 
         # Errors.
         with self.assertRaisesRegex(ValueError, "Unknown backend"):
-            _parse_backend_string("definitely_not_a_backend")
+            _parse_backend_string(
+                "definitely_not_a_backend", available_devices=all_devices
+            )
         with self.assertRaisesRegex(ValueError, "Invalid device:backend pairing"):
-            _parse_backend_string("cpu:gloo:extra")
+            _parse_backend_string("cpu:gloo:extra", available_devices=all_devices)
         with self.assertRaisesRegex(ValueError, "Invalid device:backend pairing"):
-            _parse_backend_string("cpu:gloo,bare")
+            _parse_backend_string("cpu:gloo,bare", available_devices=all_devices)
         with self.assertRaisesRegex(ValueError, "Duplicate device type"):
-            _parse_backend_string("cpu:gloo,cpu:dummy")
+            _parse_backend_string("cpu:gloo,cpu:dummy", available_devices=all_devices)
 
     def test_init_process_group_with_multiple_backends(self):
         dist.Backend.register_backend(
@@ -2062,19 +2277,22 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
 
         new_group_called = False
         new_group_ranks = None
+        new_group_backend = None
 
         class _DelegatingPG(DummyProcessGroup):
             def new_group(
                 self,
                 ranks,
                 timeout=None,
+                backend=None,
                 pg_options=None,
                 group_name=None,
                 group_desc=None,
             ):
-                nonlocal new_group_called, new_group_ranks
+                nonlocal new_group_called, new_group_ranks, new_group_backend
                 new_group_called = True
                 new_group_ranks = list(ranks)
+                new_group_backend = backend
                 my_rank = self.rank()
                 if my_rank not in ranks:
                     return None
@@ -2098,6 +2316,7 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
             sub_pg = dist.new_group(ranks=[0])
             self.assertTrue(new_group_called)
             self.assertEqual(new_group_ranks, [0])
+            self.assertEqual(new_group_backend, "delegating")
 
             if self.rank == 0:
                 self.assertIsNotNone(sub_pg)
@@ -2109,6 +2328,54 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
                     sub_pg is None
                     or sub_pg == dist.distributed_c10d.GroupMember.NON_GROUP_MEMBER
                 )
+        finally:
+            dist.destroy_process_group()
+
+    def test_new_group_delegates_to_pg_explicit_backend(self):
+        """dist.new_group forwards an explicit multi-backend string to the
+        delegated default_pg.new_group."""
+
+        new_group_called = False
+        new_group_backend = None
+
+        class _DelegatingPG(DummyProcessGroup):
+            def new_group(
+                self,
+                ranks,
+                timeout=None,
+                backend=None,
+                pg_options=None,
+                group_name=None,
+                group_desc=None,
+            ):
+                nonlocal new_group_called, new_group_backend
+                new_group_called = True
+                new_group_backend = backend
+                my_rank = self.rank()
+                if my_rank not in ranks:
+                    return None
+                return DummyProcessGroup(ranks.index(my_rank), len(ranks))
+
+        dist.Backend.register_backend(
+            "delegating",
+            lambda *args, **kwargs: _DelegatingPG(
+                args[0].group_rank, args[0].group_size
+            ),
+            extended_api=True,
+            devices=["cpu", "cuda"],
+        )
+
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = "6789"
+        dist.init_process_group(
+            "delegating", rank=self.rank, world_size=self.world_size
+        )
+
+        try:
+            backend = "cpu:delegating,cuda:delegating"
+            dist.new_group(ranks=[0], backend=backend)
+            self.assertTrue(new_group_called)
+            self.assertEqual(new_group_backend, backend)
         finally:
             dist.destroy_process_group()
 

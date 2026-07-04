@@ -13,6 +13,8 @@ export TERM=vt100
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 # shellcheck source=./common-build.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
+# shellcheck source=./torch_trace.sh
+source "$(dirname "${BASH_SOURCE[0]}")/torch_trace.sh"
 
 # Only change workspace permissions if passwordless sudo is available
 # (e.g. ROCm and s390x CI jobs lack it, and changing permissions
@@ -418,8 +420,11 @@ test_python() {
 
 test_python_smoke() {
   # Smoke tests for H100/B200
+  install_nvmath
   time python test/run_test.py --include inductor/test_flex_attention -k test_tma_with_customer_kernel_options $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include test_matmul_cuda test_scaled_matmul_cuda inductor/test_fp8 inductor/test_max_autotune inductor/test_cutedsl_grouped_mm $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include test_foreach -k TestForeachMM $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include test_linalg -k polar $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
 }
 
@@ -435,6 +440,7 @@ test_python_smoke_b200() {
       nn/attention/test_fa4 \
       nn/attention/test_open_registry \
       inductor/test_flex_flash \
+      inductor/test_flex_gemm \
       inductor/test_torchinductor \
       inductor/test_async_compile \
       inductor/test_nv_universal_gemm \
@@ -448,7 +454,7 @@ test_python_smoke_b200() {
 
 test_python_smoke_xpu() {
   # Smoke tests for XPU client
-  time python test/run_test.py --include test_transformers $PYTHON_TEST_EXTRA_OPTION
+  time python test/run_test.py --include test_transformers test_xpu $PYTHON_TEST_EXTRA_OPTION
   # Temporary disable sycl-tla backend test for XPU since it's not stable yet. We will re-enable it once the stability is improved.
   # time test_xpu_sycl_tla_backend
   assert_git_not_dirty
@@ -665,12 +671,7 @@ test_inductor_aoti_cpp() {
     # We need to hipify before building again
     python3 tools/amd_build/build_amd.py
   fi
-  if [[ "$BUILD_ENVIRONMENT" == *sm86* ]]; then
-    # TODO: Replace me completely, as one should not use conda libstdc++, nor need special path to TORCH_LIB
-    TEST_ENVS=(CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="/opt/conda/envs/py_3.10/lib:${TORCH_LIB_DIR}:${LD_LIBRARY_PATH}")
-  else
-    TEST_ENVS=(CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}")
-  fi
+  TEST_ENVS=(CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}")
 
   /usr/bin/env "${TEST_ENVS[@]}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_shim cpp/test_aoti_inference cpp/test_vec_half_AVX2 -dist=loadfile
 }
@@ -1054,12 +1055,16 @@ test_single_dynamo_benchmark() {
       "${DYNAMO_BENCHMARK_FLAGS[@]}" \
       "$@" "${partition_flags[@]}" \
       --output "$TEST_REPORTS_DIR/${name}_${suite}.csv"
+    local validation_status=0
     python benchmarks/dynamo/check_accuracy.py \
       --actual "$TEST_REPORTS_DIR/${name}_$suite.csv" \
-      --expected "benchmarks/dynamo/ci_expected_accuracy/${MAYBE_ROCM}${TEST_CONFIG}_${name}.csv"
+      --expected "benchmarks/dynamo/ci_expected_accuracy/${MAYBE_ROCM}${TEST_CONFIG}_${name}.csv" \
+      || validation_status=$?
     python benchmarks/dynamo/check_graph_breaks.py \
       --actual "$TEST_REPORTS_DIR/${name}_$suite.csv" \
-      --expected "benchmarks/dynamo/ci_expected_accuracy/${MAYBE_ROCM}${TEST_CONFIG}_${name}.csv"
+      --expected "benchmarks/dynamo/ci_expected_accuracy/${MAYBE_ROCM}${TEST_CONFIG}_${name}.csv" \
+      || validation_status=$?
+    return "$validation_status"
   fi
 }
 
@@ -1089,55 +1094,6 @@ test_inductor_pallas() {
 test_inductor_triton_cpu() {
   python test/run_test.py --include inductor/test_triton_cpu_backend.py inductor/test_torchinductor_strided_blocks.py --verbose
   assert_git_not_dirty
-}
-
-setup_torch_trace() {
-  if [[ "${ENABLE_TORCH_TRACE:-0}" != "1" ]]; then
-    return
-  fi
-  local trace_dir="${RUNNER_TEMP:-/tmp}/torch_traces"
-  mkdir -p "$trace_dir"
-  export TORCH_TRACE="$trace_dir"
-  echo "TORCH_TRACE enabled: writing structured trace logs to $trace_dir"
-}
-
-collect_tlparse_output() {
-  if [[ "${ENABLE_TORCH_TRACE:-0}" != "1" ]]; then
-    return
-  fi
-  local trace_dir="${RUNNER_TEMP:-/tmp}/torch_traces"
-  local test_reports_dir
-  test_reports_dir=$(pwd)/test/test-reports
-
-  if [[ ! -d "$trace_dir" ]] || [[ -z "$(ls -A "$trace_dir" 2>/dev/null)" ]]; then
-    echo "No torch trace files found in $trace_dir, skipping tlparse"
-    return
-  fi
-
-  echo "Collecting torch trace output from $trace_dir"
-
-  # Always preserve raw trace logs (gzipped) for downstream analysis
-  mkdir -p "$test_reports_dir/tlparse_output"
-  for f in "$trace_dir"/*.log; do
-    [ -f "$f" ] || continue
-    gzip -c "$f" > "$test_reports_dir/tlparse_output/$(basename "$f").gz"
-  done
-  echo "Raw trace logs saved to $test_reports_dir/tlparse_output/"
-
-  # Try to generate HTML report via tlparse (best-effort)
-  if ! command -v tlparse &>/dev/null; then
-    pip install tlparse 2>/dev/null || {
-      echo "Warning: failed to install tlparse, skipping HTML generation"
-      return
-    }
-  fi
-
-  for f in "$trace_dir"/*.log; do
-    [ -f "$f" ] || continue
-    tlparse -o "$test_reports_dir/tlparse_output/" --no-browser --overwrite "$f" 2>&1 || {
-      echo "Warning: tlparse failed on $(basename "$f")"
-    }
-  done
 }
 
 test_dynamo_benchmark() {
@@ -1554,6 +1510,9 @@ test_libtorch_profiler() {
 
   # Tests for torch/csrc/profiler/collection.cpp.
   python test/run_test.py --cpp --verbose -i cpp/test_profiler_collection
+
+  # Tests for torch/csrc/profiler/util.h GlobalStateManager.
+  python test/run_test.py --cpp --verbose -i cpp/test_global_state_manager
 }
 
 test_libtorch_api() {
@@ -1583,6 +1542,10 @@ test_libtorch_api() {
 test_xpu_bin(){
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
+
+  # Build binaries carry absolute RPATHs that don't exist on the test runner;
+  # point LD_LIBRARY_PATH at the installed torch libs so the linker finds them.
+  export LD_LIBRARY_PATH="${TORCH_LIB_DIR}:${LD_LIBRARY_PATH}"
 
   for xpu_case in "${BUILD_BIN_DIR}"/*{xpu,sycl}*; do
     if [[ "$xpu_case" != *"*"* && "$xpu_case" != *.so && "$xpu_case" != *.a ]]; then
@@ -2229,6 +2192,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   echo "no-op at the moment"
 elif [[ "$TEST_CONFIG" == distributed ]]; then
   install_torchcomms
+  install_spmd_types
   test_distributed
   # Only run RPC C++ tests on the first shard
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
@@ -2410,6 +2374,7 @@ elif [[ "${TEST_CONFIG}" == smoke_b200 ]]; then
 elif [[ "${TEST_CONFIG}" == smoke_xpu ]]; then
   test_python_smoke_xpu
 elif [[ "${TEST_CONFIG}" == dtensor ]]; then
+  install_spmd_types
   test_dtensor
 elif [[ "${TEST_CONFIG}" == h100_distributed ]]; then
   install_torchcomms
