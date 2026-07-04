@@ -22,7 +22,11 @@ TORCH_LIBRARY(c10d, m) {
   m.def(
       "broadcast_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int root_rank, int root_tensor, bool async_op=True, int timeout=-1) -> (Tensor[], __torch__.torch.classes.c10d.Work)");
   m.def(
+      "_broadcast_oop_(Tensor output_tensor, Tensor input_tensor, __torch__.torch.classes.c10d.ProcessGroup process_group, int root_rank, int root_tensor, bool async_op=True, int timeout=-1) -> (Tensor, __torch__.torch.classes.c10d.Work)");
+  m.def(
       "allreduce_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, __torch__.torch.classes.c10d.ReduceOp reduce_op, Tensor? sparse_indices, bool async_op=True, int timeout=-1) -> (Tensor[], __torch__.torch.classes.c10d.Work)");
+  m.def(
+      "_allreduce_oop_(Tensor output_tensor, Tensor input_tensor, __torch__.torch.classes.c10d.ProcessGroup process_group, __torch__.torch.classes.c10d.ReduceOp reduce_op, bool async_op=True, int timeout=-1) -> (Tensor, __torch__.torch.classes.c10d.Work)");
   m.def(
       "allreduce_coalesced_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, __torch__.torch.classes.c10d.ReduceOp reduce_op, bool async_op=True, int timeout=-1) -> __torch__.torch.classes.c10d.Work");
   m.def(
@@ -165,6 +169,32 @@ IMPL_BROADCAST(CPU)
 IMPL_BROADCAST(CUDA)
 IMPL_BROADCAST(PrivateUse1)
 
+#define IMPL__BROADCAST_OOP(DEV)                                         \
+  std::tuple<at::Tensor, c10::intrusive_ptr<Work>> _broadcast_oop_##DEV( \
+      at::Tensor& output_tensor,                                          \
+      at::Tensor& input_tensor,                                           \
+      const c10::intrusive_ptr<ProcessGroup>& process_group,              \
+      int64_t root_rank,                                                  \
+      int64_t root_tensor,                                                \
+      bool asyncOp,                                                       \
+      int64_t timeout) {                                                  \
+    auto work = process_group->getBackend(c10::DeviceType::DEV)           \
+                    ->_broadcast_oop(                                    \
+                        output_tensor,                                    \
+                        input_tensor,                                     \
+                        BroadcastOptions{                                 \
+                            root_rank,                                    \
+                            root_tensor,                                  \
+                            std::chrono::milliseconds(timeout),           \
+                            asyncOp});                                    \
+    return std::tuple<at::Tensor, c10::intrusive_ptr<Work>>(              \
+        output_tensor, work);                                             \
+  }
+
+IMPL__BROADCAST_OOP(CPU)
+IMPL__BROADCAST_OOP(CUDA)
+IMPL__BROADCAST_OOP(PrivateUse1)
+
 // Return input tensors as output tensors to make inplace allreduce look like
 // a functional API, so that make_fx can correctly build the dependencies in
 // the graph later.
@@ -192,6 +222,30 @@ IMPL_BROADCAST(PrivateUse1)
 IMPL_ALLREDUCE(CPU)
 IMPL_ALLREDUCE(CUDA)
 IMPL_ALLREDUCE(PrivateUse1)
+
+#define IMPL__ALLREDUCE_OOP(DEV)                                         \
+  std::tuple<at::Tensor, c10::intrusive_ptr<Work>> _allreduce_oop_##DEV( \
+      at::Tensor& output_tensor,                                          \
+      at::Tensor& input_tensor,                                           \
+      const c10::intrusive_ptr<ProcessGroup>& process_group,              \
+      const c10::intrusive_ptr<ReduceOp>& reduce_op,                      \
+      bool asyncOp,                                                       \
+      int64_t timeout) {                                                  \
+    auto work = process_group->getBackend(c10::DeviceType::DEV)           \
+                    ->_allreduce_oop(                                    \
+                        output_tensor,                                    \
+                        input_tensor,                                     \
+                        AllreduceOptions{                                 \
+                            *reduce_op.get(),                             \
+                            std::chrono::milliseconds(timeout),           \
+                            asyncOp});                                    \
+    return std::tuple<at::Tensor, c10::intrusive_ptr<Work>>(              \
+        output_tensor, work);                                             \
+  }
+
+IMPL__ALLREDUCE_OOP(CPU)
+IMPL__ALLREDUCE_OOP(CUDA)
+IMPL__ALLREDUCE_OOP(PrivateUse1)
 
 #define IMPL_ALLREDUCE_COALESCED(DEV)                             \
   c10::intrusive_ptr<Work> allreduce_coalesced_##DEV(             \
@@ -548,7 +602,9 @@ REGISTER_C10D_OP(recv_)
 REGISTER_C10D_OP(recv_any_source_)
 REGISTER_C10D_OP(reduce_)
 REGISTER_C10D_OP(broadcast_)
+REGISTER_C10D_OP(_broadcast_oop_)
 REGISTER_C10D_OP(allreduce_)
+REGISTER_C10D_OP(_allreduce_oop_)
 REGISTER_C10D_OP(allreduce_coalesced_)
 REGISTER_C10D_OP(allgather_)
 REGISTER_C10D_OP(_allgather_base_)

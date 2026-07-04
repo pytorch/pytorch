@@ -824,6 +824,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 #endif
   }
 
+  bool supportsOutOfPlaceCollectives() const override {
+    return true;
+  }
+
   void setTimeout(std::chrono::milliseconds timeout) override {
     options_->timeout = timeout;
   }
@@ -846,7 +850,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   c10::intrusive_ptr<Work> _broadcast_oop(
       at::Tensor& outputTensors,
       at::Tensor& inputTensors,
-      const BroadcastOptions& opts = BroadcastOptions());
+      const BroadcastOptions& opts = BroadcastOptions()) override;
 
   c10::intrusive_ptr<Work> allreduce_sparse(
       std::vector<at::Tensor>& tensors,
@@ -854,6 +858,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   c10::intrusive_ptr<Work> allreduce(
       std::vector<at::Tensor>& tensors,
+      const AllreduceOptions& opts = AllreduceOptions()) override;
+
+  c10::intrusive_ptr<Work> _allreduce_oop(
+      at::Tensor& outputTensor,
+      at::Tensor& inputTensor,
       const AllreduceOptions& opts = AllreduceOptions()) override;
 
   c10::intrusive_ptr<Work> allreduce_coalesced(

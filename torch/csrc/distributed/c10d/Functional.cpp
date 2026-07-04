@@ -94,6 +94,25 @@ at::Tensor all_reduce(
         " does not support complex tensors");
   }
   auto input_real = input.is_complex() ? at::view_as_real(input) : input;
+  auto group = c10d::resolve_process_group(group_name);
+  auto backend = group->getBackend(input_real.device().type());
+  if (backend->supportsOutOfPlaceCollectives()) {
+    // Avoid the redundant device-to-device copy that clone() + in-place
+    // allreduce would otherwise incur: NCCL's allreduce already supports
+    // distinct send/recv buffers, so we can write the result straight into a
+    // freshly allocated output tensor.
+    auto input_contig = input_real.contiguous();
+    auto output = at::empty(
+        input_contig.sizes(),
+        at::TensorOptions()
+            .dtype(input_contig.dtype())
+            .device(input_contig.device()));
+    c10d::AllreduceOptions opts;
+    opts.reduceOp = to_reduce_op(reduce_op);
+    auto work = group->_allreduce_oop(output, input_contig, opts);
+    c10d::register_work(output, work);
+    return input.is_complex() ? at::view_as_complex(output) : output;
+  }
   auto output = input_real.clone(at::MemoryFormat::Contiguous);
   auto output_ret =
       all_reduce_(output, std::move(reduce_op), std::move(group_name));
@@ -318,6 +337,25 @@ at::Tensor broadcast(
     const at::Tensor& input,
     int64_t src,
     std::string group_name) {
+  auto input_real = input.is_complex() ? at::view_as_real(input) : input;
+  auto group = c10d::resolve_process_group(group_name);
+  auto backend = group->getBackend(input_real.device().type());
+  if (backend->supportsOutOfPlaceCollectives()) {
+    // Avoid the redundant device-to-device copy that clone() + in-place
+    // broadcast would otherwise incur; see all_reduce() above for the same
+    // rationale.
+    auto input_contig = input_real.contiguous();
+    auto output = at::empty(
+        input_contig.sizes(),
+        at::TensorOptions()
+            .dtype(input_contig.dtype())
+            .device(input_contig.device()));
+    c10d::BroadcastOptions opts;
+    opts.rootRank = src;
+    auto work = group->_broadcast_oop(output, input_contig, opts);
+    c10d::register_work(output, work);
+    return input.is_complex() ? at::view_as_complex(output) : output;
+  }
   auto output = input.clone(at::MemoryFormat::Contiguous);
   return broadcast_(output, src, std::move(group_name));
 }

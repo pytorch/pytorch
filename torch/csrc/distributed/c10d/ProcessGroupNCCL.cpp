@@ -4525,6 +4525,70 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
   return allreduce_impl(tensor, "nccl:all_reduce", opts);
 }
 
+// _allreduce_oop adds an out-of-place allreduce in PGNCCL: output_tensor
+// receives the reduction of input_tensor without requiring the caller to
+// alias their storage, avoiding the extra copy that in-place allreduce
+// forces on callers that want a fresh output tensor.
+c10::intrusive_ptr<Work> ProcessGroupNCCL::_allreduce_oop(
+    at::Tensor& output_tensor,
+    at::Tensor& input_tensor,
+    const AllreduceOptions& opts) {
+  check_gpu_single_tensor(input_tensor);
+  check_gpu_single_tensor(output_tensor);
+
+  if (input_tensor.numel() != output_tensor.numel()) {
+    C10_THROW_ERROR(
+        ValueError,
+        "Tensor input and output of _allreduce_oop must have the same number of elements ");
+  }
+  TORCH_CHECK(
+      !isUnsupportedFloat8(input_tensor.scalar_type()),
+      "Unsupported Float8 type for NCCL reduction");
+
+  RECORD_PARAM_COMMS_DATA(
+      std::make_tuple(
+          static_cast<int64_t>(seqCollective_) + 1,
+          false), // seq + 1 to match collective
+      std::make_tuple(pg_uid_, pg_desc_), // PG name tuple
+      input_tensor, // inputTensors
+      output_tensor, // outputTensors
+      rank_, // rank
+      "_allreduce_oop", // collective name
+      input_tensor.numel(), // inNelems
+      output_tensor.numel(), // outNelems
+      output_tensor.scalar_type(), // dType
+      std::vector<int64_t>(), // inSplitSizes
+      std::vector<int64_t>(), // outSplitSizes
+      globalRankStart_, // globalRankStart_
+      globalRankStride_, // globalRankStride_
+      this->getSize()); // worldSize
+
+  // avoidRecordStreams_ note: collective() will stash input_tensor and
+  // output_tensor.
+  return collective(
+      input_tensor,
+      output_tensor,
+      [&](at::Tensor& input,
+          at::Tensor& output,
+          ncclComm_t comm,
+          at::cuda::CUDAStream& stream) {
+        auto ncclDataType = getNcclDataType(input.scalar_type());
+        auto ncclReduceOp =
+            getNcclReduceOp(opts.reduceOp, input, ncclDataType, comm);
+        return ncclAllReduce(
+            input.data_ptr(),
+            output.data_ptr(),
+            input.numel(),
+            ncclDataType,
+            ncclReduceOp,
+            comm,
+            stream.stream());
+      },
+      OpType::ALLREDUCE,
+      opts.asyncOp,
+      "nccl:_allreduce_oop");
+}
+
 c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_coalesced(
     std::vector<at::Tensor>& tensors,
     const AllreduceCoalescedOptions& opts) {

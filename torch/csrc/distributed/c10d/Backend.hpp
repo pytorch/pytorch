@@ -85,6 +85,13 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     return false;
   }
 
+  // Returns true if the backend can execute allreduce/broadcast with a
+  // distinct output tensor (via _allreduce_oop/_broadcast_oop) instead of
+  // requiring the caller to alias input and output storage.
+  virtual bool supportsOutOfPlaceCollectives() const {
+    return false;
+  }
+
   // Shrink the backend by excluding specified ranks. Backends that support
   // communicator shrinking should override this and return a new backend
   // instance representing the shrunken group. Backends may use opts_override
@@ -144,12 +151,38 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         c10::str("Backend ", getBackendName(), " does not support broadcast"));
   }
 
+  // Out-of-place broadcast: outputBuffer receives the root's inputBuffer
+  // without requiring them to alias the same storage. Only supported when
+  // supportsOutOfPlaceCollectives() is true.
+  virtual c10::intrusive_ptr<Work> _broadcast_oop(
+      at::Tensor& /* outputBuffer */,
+      at::Tensor& /* inputBuffer */,
+      const BroadcastOptions& /* opts */ = BroadcastOptions()) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ", getBackendName(), " does not support _broadcast_oop"));
+  }
+
   virtual c10::intrusive_ptr<Work> allreduce(
       std::vector<at::Tensor>& /* tensors */,
       const AllreduceOptions& /* opts */ = AllreduceOptions()) {
     TORCH_CHECK(
         false,
         c10::str("Backend ", getBackendName(), " does not support allreduce"));
+  }
+
+  // Out-of-place allreduce: outputBuffer receives the reduction of
+  // inputBuffer across all ranks without requiring them to alias the same
+  // storage. Only supported when supportsOutOfPlaceCollectives() is true.
+  virtual c10::intrusive_ptr<Work> _allreduce_oop(
+      at::Tensor& /* outputBuffer */,
+      at::Tensor& /* inputBuffer */,
+      const AllreduceOptions& /* opts */ = AllreduceOptions()) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ", getBackendName(), " does not support _allreduce_oop"));
   }
 
   virtual c10::intrusive_ptr<Work> allreduce_sparse(

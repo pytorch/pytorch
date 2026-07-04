@@ -210,6 +210,7 @@ COLLECTIVES = {
     "_reduce_oop",
     "all_gather",
     "all_reduce",
+    "_allreduce_oop",
     "_all_gather_base",
     "all_gather_into_tensor_coalesced",
     "reduce_scatter",
