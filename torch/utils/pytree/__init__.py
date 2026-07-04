@@ -17,7 +17,7 @@ collection support for PyTorch APIs.
 import os as _os
 import sys as _sys
 from types import ModuleType as _ModuleType
-from typing import Any as _Any, TYPE_CHECKING as _TYPE_CHECKING
+from typing import Any as _Any, TYPE_CHECKING as _TYPE_CHECKING, TypeAlias as _TypeAlias
 
 import torch.utils._pytree as python
 from torch.utils._pytree import (  # these type aliases are identical in both implementations
@@ -60,21 +60,27 @@ __all__ = [
 ]
 
 
+def _getenv_bool(name: str, *, default: bool = False) -> bool:
+    """Read a boolean-like environment variable, raising a clear error on invalid values."""
+    value = _os.getenv(name)
+    if value is None:  # not set
+        return default
+    if not value:  # empty
+        return False
+    normalized = value.strip().lower()
+    if normalized in ("1", "true", "t", "yes", "y", "on", "enable", "enabled"):
+        return True
+    if normalized in ("0", "false", "f", "no", "n", "off", "disable", "disabled"):
+        return False
+    raise ValueError(
+        f"Invalid value {value!r} for boolean environment variable `{name}`. "
+        f"Expected one of: 1/0, true/false, yes/no, on/off, enable(d)/disable(d)."
+    )
+
+
 # NB: Once this variable is read from the environment, the underlying pytree
 #     implementation is frozen. It cannot be swapped to another at runtime.
-PYTORCH_USE_CXX_PYTREE: bool = _os.getenv(
-    "PYTORCH_USE_CXX_PYTREE", "false"
-).lower() not in {
-    "",
-    "0",
-    "false",
-    "f",
-    "no",
-    "n",
-    "off",
-    "disable",
-    "disabled",
-}
+PYTORCH_USE_CXX_PYTREE: bool = _getenv_bool("PYTORCH_USE_CXX_PYTREE", default=False)
 
 
 def _import_cxx_pytree_and_store() -> _ModuleType:
@@ -198,6 +204,9 @@ else:
         tree_unflatten,
         treespec_pprint,
     )
+
+
+TreeSpec: _TypeAlias = PyTreeSpec  # type alias for backward compatibility
 
 
 def register_pytree_node(
