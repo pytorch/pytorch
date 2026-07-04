@@ -93,6 +93,7 @@ jobs:
       - uses: pytorch/test-infra/.github/actions/setup-uv@main
         with:
           python-version: ${{ matrix.python-version }}
+          activate-environment: "true"
 
       - name: Get latest PyTorch nightly
         shell: bash
@@ -131,10 +132,6 @@ jobs:
           name: vllm-wheel-${{ matrix.device }}-${{ matrix.platform }}-${{ matrix.python-version }}
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/externals/vllm/wheels/*.whl
-
-      - name: Teardown Linux
-        uses: pytorch/test-infra/.github/actions/teardown-linux@main
-        if: always()
 
   # Copied from build-triton-wheel workflow (mostly)
   upload-wheel:
