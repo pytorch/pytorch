@@ -2437,6 +2437,67 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         torch._dynamo.reset()
 
     @supported_platform
+    @skip_on_cpu
+    @skip_on_xpu
+    @dtypes(torch.float16)
+    @dtypesIfCUDA(torch.float16)
+    @common_utils.parametrize("detach_temp", [False, True])
+    @expected_not_implemented_on_mps
+    def test_captured_0d_scalar_grad(self, device, dtype, detach_temp):
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.temp = nn.Parameter(
+                    torch.tensor(0.7, device=device, dtype=torch.float32)
+                )
+
+            def forward(self, q, k, v):
+                temp = self.temp
+
+                def score_mod(score, b, h, q_idx, kv_idx):
+                    if detach_temp:
+                        return score + temp.detach()
+                    return score * temp + temp
+
+                return flex_attention(q, k, v, score_mod=score_mod)
+
+        torch.manual_seed(123)
+        shape = (1, 2, 16, 16)
+        q = torch.randn(shape, device=device, dtype=dtype, requires_grad=True)
+        k = torch.randn(shape, device=device, dtype=dtype, requires_grad=True)
+        v = torch.randn(shape, device=device, dtype=dtype, requires_grad=True)
+        grad = torch.randn(shape, device=device, dtype=dtype)
+        q2 = q.detach().clone().requires_grad_()
+        k2 = k.detach().clone().requires_grad_()
+        v2 = v.detach().clone().requires_grad_()
+        m1 = M()
+        m2 = M()
+        m2.load_state_dict(m1.state_dict())
+
+        out1 = m1(q, k, v)
+        out1.backward(grad)
+        out2 = torch.compile(m2)(q2, k2, v2)
+        out2.backward(grad)
+        if device == "cuda":
+            torch.cuda.synchronize()
+
+        pairs = [
+            (out1, out2),
+            (q.grad, q2.grad),
+            (k.grad, k2.grad),
+            (v.grad, v2.grad),
+        ]
+        if detach_temp:
+            self.assertIsNone(m1.temp.grad)
+            self.assertIsNone(m2.temp.grad)
+        else:
+            self.assertIsNotNone(m1.temp.grad)
+            self.assertIsNotNone(m2.temp.grad)
+            pairs.append((m1.temp.grad, m2.temp.grad))
+        for a, b in pairs:
+            self.assertEqual(a, b, atol=1e-2, rtol=1e-2)
+
+    @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
