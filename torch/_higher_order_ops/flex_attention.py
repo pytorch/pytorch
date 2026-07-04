@@ -652,6 +652,7 @@ def create_fw_bw_graph(
 
     # All of these imports need to be here in order to avoid circular dependencies
     from torch._dispatch.python import suspend_functionalization
+    from torch._dynamo._trace_wrapped_higher_order_op import mod_index
     from torch._functorch.aot_autograd import AOTConfig, create_joint
     from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
     from torch._subclasses.functional_tensor import disable_functional_mode
@@ -728,7 +729,17 @@ def create_fw_bw_graph(
             def fw_with_masks(
                 *args: tuple[Tensor, ...],
             ) -> tuple[tuple[Tensor], tuple[bool]]:
-                fw_out = score_mod(*args)
+                captured_args = [
+                    mod_index(buffer, [])
+                    if (
+                        isinstance(buffer, torch.Tensor)
+                        and buffer.requires_grad
+                        and buffer.ndim == 0
+                    )
+                    else buffer
+                    for buffer in args[5:]
+                ]
+                fw_out = score_mod(*args[:5], *captured_args)
                 out_requires_grad = fw_out.requires_grad
                 return ((fw_out,), (out_requires_grad,))
 
@@ -743,17 +754,7 @@ def create_fw_bw_graph(
                     "require gradients with respect to score."
                 )
 
-            scalar_captured_grads = [
-                torch.ops.flex_lib.zeros_and_scatter([], [], grad)
-                if (
-                    isinstance(grad, torch.Tensor)
-                    and isinstance(buffer, torch.Tensor)
-                    and buffer.ndim == 0
-                )
-                else grad
-                for grad, buffer in zip(grads[5:], other_buffers)
-            ]
-            return [*grads[:5], *scalar_captured_grads]
+            return grads
 
         joint_graph = make_fx(joint_f)(
             *unwrapped_score_mod_indexes, example_grad, *unwrapped_other_buffers

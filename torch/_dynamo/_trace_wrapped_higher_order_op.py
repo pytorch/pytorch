@@ -56,12 +56,12 @@ def zeros_and_scatter(
     vals: Tensor,
 ) -> Tensor:
     """Custom Op so that we can register a custom lowering for the new_output + scatter in the backwards pass"""
-    if len(indices) == 0:
-        if len(shape) != 0:
+    if not indices:
+        if shape:
             raise RuntimeError(
                 "zeros_and_scatter with no indices only supports scalar outputs"
             )
-        return vals.sum().reshape(shape)
+        return vals.sum()
     grad = torch.zeros(shape, device=vals.device, dtype=vals.dtype)
     return torch.ops.aten.index_put(grad, indices, vals, accumulate=True)
 
@@ -106,6 +106,10 @@ class ModIndex(torch.autograd.Function):
     @staticmethod
     # pyrefly: ignore [bad-override]
     def forward(x: Tensor, indices: list[Tensor]) -> Tensor:
+        if not indices:
+            if x.ndim != 0:
+                raise RuntimeError("mod_index with no indices only supports scalar tensors")
+            return x.view(())
         return torch.ops.aten.index(x, indices)
 
     @staticmethod
