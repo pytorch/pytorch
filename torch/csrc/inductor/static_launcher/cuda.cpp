@@ -98,9 +98,8 @@ CUdeviceptr getPointer(PyObject* obj) {
   AT_CUDA_DRIVER_CHECK(hipPointerGetAttribute(
       &dev_ptr, HIP_POINTER_ATTRIBUTE_DEVICE_POINTER, data_ptr));
 #else
-  AT_CUDA_DRIVER_CHECK(
-      nvrtc().cuPointerGetAttribute(
-          &dev_ptr, CU_POINTER_ATTRIBUTE_DEVICE_POINTER, data_ptr));
+  AT_CUDA_DRIVER_CHECK(nvrtc().cuPointerGetAttribute(
+      &dev_ptr, CU_POINTER_ATTRIBUTE_DEVICE_POINTER, data_ptr));
 #endif
 
   return dev_ptr;
@@ -183,11 +182,10 @@ std::pair<CUmodule, CUfunction> loadKernel(
   AT_CUDA_DRIVER_CHECK(
       nvrtc().cuModuleGetFunction(&func, mod, funcName.c_str()));
   int shared_optin = 0;
-  AT_CUDA_DRIVER_CHECK(
-      nvrtc().cuDeviceGetAttribute(
-          &shared_optin,
-          CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN,
-          device));
+  AT_CUDA_DRIVER_CHECK(nvrtc().cuDeviceGetAttribute(
+      &shared_optin,
+      CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN,
+      device));
 
 #endif
 
@@ -244,19 +242,16 @@ std::pair<CUmodule, CUfunction> loadKernel(
     AT_CUDA_DRIVER_CHECK(
         nvrtc().cuFuncSetCacheConfig(func, CU_FUNC_CACHE_PREFER_SHARED));
     int shared_total = 0, shared_static = 0;
-    AT_CUDA_DRIVER_CHECK(
-        nvrtc().cuDeviceGetAttribute(
-            &shared_total,
-            CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_MULTIPROCESSOR,
-            device));
-    AT_CUDA_DRIVER_CHECK(
-        nvrtc().cuFuncGetAttribute(
-            &shared_static, CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, func));
-    AT_CUDA_DRIVER_CHECK(
-        nvrtc().cuFuncSetAttribute(
-            func,
-            CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
-            shared_optin - shared_static));
+    AT_CUDA_DRIVER_CHECK(nvrtc().cuDeviceGetAttribute(
+        &shared_total,
+        CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_MULTIPROCESSOR,
+        device));
+    AT_CUDA_DRIVER_CHECK(nvrtc().cuFuncGetAttribute(
+        &shared_static, CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, func));
+    AT_CUDA_DRIVER_CHECK(nvrtc().cuFuncSetAttribute(
+        func,
+        CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
+        shared_optin - shared_static));
 #endif
   }
   return {mod, func};
@@ -294,19 +289,18 @@ inline void launchKernel(
       nullptr));
 
 #else
-  AT_CUDA_DRIVER_CHECK(
-      nvrtc().cuLaunchKernel(
-          func,
-          gridX,
-          gridY,
-          gridZ,
-          32 * numWarps, // blockDim.x
-          1, // blockDim.y
-          1, // blockDim.z
-          sharedMemBytes,
-          stream,
-          args,
-          nullptr));
+  AT_CUDA_DRIVER_CHECK(nvrtc().cuLaunchKernel(
+      func,
+      gridX,
+      gridY,
+      gridZ,
+      32 * numWarps, // blockDim.x
+      1, // blockDim.y
+      1, // blockDim.z
+      sharedMemBytes,
+      stream,
+      args,
+      nullptr));
 #endif
 }
 
@@ -452,9 +446,8 @@ PyObject* load_kernel(PyObject* self, PyObject* args) {
 #else
   AT_CUDA_DRIVER_CHECK(
       nvrtc().cuFuncGetAttribute(&n_regs, CU_FUNC_ATTRIBUTE_NUM_REGS, func));
-  AT_CUDA_DRIVER_CHECK(
-      nvrtc().cuFuncGetAttribute(
-          &n_spills, CU_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES, func));
+  AT_CUDA_DRIVER_CHECK(nvrtc().cuFuncGetAttribute(
+      &n_spills, CU_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES, func));
 
 #endif
   n_spills /= 4;
