@@ -18,6 +18,7 @@ from torch._higher_order_ops.utils import (
     first_slice_copy_with_grad,
     materialize_as_graph,
     reenter_make_fx,
+    register_fake,
     save_values_for_backward,
     saved_values,
     split_into_chunks,
@@ -25,7 +26,6 @@ from torch._higher_order_ops.utils import (
     validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
@@ -212,9 +212,13 @@ def associative_scan(
             raise ValueError(
                 f"Combine_mode must either 'pointwise' or 'generic', but got {cm}"
             )
-        if cm == "pointwise" and not all(l.device.type in ("cuda", "xpu") for l in lxs):
+        privateuse1_backend = torch._C._get_privateuse1_backend_name()
+        if cm == "pointwise" and not all(
+            l.device.type in ("cuda", "xpu", privateuse1_backend) for l in lxs
+        ):
             raise ValueError(
-                "For combine_mode='pointwise', all input tensors need to be on CUDA or XPU"
+                "For combine_mode='pointwise', all input tensors need to be on "
+                "CUDA, XPU, or a PrivateUse1 backend"
             )
 
         # Checks for xs
@@ -858,10 +862,9 @@ def associative_scan_proxy_mode(mode, combine_fn, xs, additional_inputs):
     )
 
 
-@associative_scan_op.py_impl(FakeTensorMode)
-def assoiciative_scan_fake_tensor_mode(mode, combine_fn, xs, additional_inputs):
-    with mode:
-        return tuple(x.clone() for x in xs)
+@register_fake(associative_scan_op, skip_cache=True)
+def assoiciative_scan_fake_tensor_mode(combine_fn, xs, additional_inputs):
+    return tuple(x.clone() for x in xs)
 
 
 @associative_scan_op.py_functionalize_impl

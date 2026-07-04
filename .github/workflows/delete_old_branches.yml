@@ -1,3 +1,4 @@
+# Owner(s): ["module: ci"]
 # A workflow that deletes branches of closed PRs
 
 name: Delete old branches
