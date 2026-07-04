@@ -3346,6 +3346,7 @@ if TYPE_CHECKING:
         _inductor as _inductor,
         _subclasses as _subclasses,
         onnx as onnx,
+        pytree as pytree,
     )
 
 else:
@@ -3355,6 +3356,7 @@ else:
         "_export",
         # ONNX must be imported after _dynamo, _ops, _subclasses, fx, func and jit
         "onnx",
+        "pytree",
     }
 
     def __getattr__(name: str) -> _Any:
