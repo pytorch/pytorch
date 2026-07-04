@@ -459,6 +459,14 @@ void initCuptiMonitorBindings(py::module& m) {
                 py::len(sc) > 7 && !sc[7].is_none() ? u64(sc[7]) : nullptr;
             stages.n = static_cast<size_t>(py::len(sc[0]));
             stages.extra = extras_from(r[3]);
+            // r[6] (optional): const_extra = [(key, value), ...] string args.
+            if (py::len(r) > 6 && !r[6].is_none()) {
+              for (const auto& e : r[6].cast<py::list>()) {
+                auto t = e.cast<py::tuple>();
+                stages.const_extra.push_back(
+                    {t[0].cast<std::string>(), t[1].cast<std::string>()});
+              }
+            }
             if (!r[4].is_none()) {
               auto lc = r[4].cast<py::tuple>();
               stages.grid_x = i64(lc[0]);
@@ -483,8 +491,9 @@ void initCuptiMonitorBindings(py::module& m) {
         }
 
         // counters: None, or (specs, gpu_id_col, ts_col, counter_id_col,
-        // value_col) where specs = [(counter_id, name), ...] ->
-        // GpuCounterEvents.
+        // value_col[, compute_group_ids]) where specs = [(counter_id, name),
+        // ...] -> GpuCounterEvents; compute_group_ids (optional) = counter_ids
+        // placed in the COMPUTE group for the GPU Compute panel.
         PftraceGpuCounter gpu_counters{};
         if (!counters.is_none()) {
           auto c = counters.cast<py::tuple>();
@@ -498,6 +507,16 @@ void initCuptiMonitorBindings(py::module& m) {
           gpu_counters.counter_id = i32(c[3]);
           gpu_counters.value = f64(c[4]);
           gpu_counters.n = static_cast<size_t>(py::len(c[2]));
+          if (py::len(c) > 5 && !c[5].is_none()) {
+            for (const auto& g : c[5].cast<py::list>()) {
+              gpu_counters.compute_group.push_back(g.cast<uint32_t>());
+            }
+          }
+          if (py::len(c) > 6 && !c[6].is_none()) {
+            for (const auto& g : c[6].cast<py::list>()) {
+              gpu_counters.int_value_ids.push_back(g.cast<uint32_t>());
+            }
+          }
         }
 
         std::string out;

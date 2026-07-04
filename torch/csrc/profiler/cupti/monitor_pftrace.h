@@ -98,6 +98,15 @@ struct PftraceRenderExtra {
   bool skip_zero;
 };
 
+// A constant string extra_data (name=key, value=value) emitted on every
+// GpuRenderStageEvent. For trace-wide string args the viewer's GPU Compute
+// panel reads off the slice (arch / process_id / process_name) -- extra_data
+// values are strings, which the numeric PftraceRenderExtra above can't carry.
+struct PftraceConstExtra {
+  std::string key;
+  std::string value;
+};
+
 // One ComputeKernelLaunch.args column. The arg name is interned
 // (InternedComputeArgName, field 1001 on InternedData) and referenced by
 // name_iid -- this is what the viewer's "Launch Statistics" panel reads (see
@@ -149,6 +158,7 @@ struct PftraceRenderStages {
   const uint64_t* name_iid; // nullable; -> EventName, the timeline slice label
   std::vector<PftraceComputeArg> launch_args; // -> ComputeKernelLaunch.args
   std::vector<PftraceRenderExtra> extra; // -> GpuRenderStageEvent.extra_data
+  std::vector<PftraceConstExtra> const_extra; // trace-wide string extra_data
   std::vector<PftraceComputeName> compute_kernels; // -> InternedData field 1000
   std::vector<PftraceComputeName>
       compute_arg_names; // -> InternedData field 1001
@@ -189,6 +199,13 @@ struct PftraceGpuCounter {
   const int32_t* counter_id;
   const double* value;
   size_t n;
+  // counter_ids placed in the COMPUTE GpuCounterGroup (group_id=6) on the
+  // descriptor -- the GPU Compute panel only joins counters in this group to
+  // kernels (e.g. gpc__cycles_elapsed -> Cycles).
+  std::vector<uint32_t> compute_group;
+  // counter_ids emitted as GpuCounter.int_value (rounded) rather than
+  // double_value -- integer counts like gpc__cycles_elapsed.
+  std::vector<uint32_t> int_value_ids;
 };
 
 // tracks -> TrackDescriptor packets; name_table -> one interned EventName table

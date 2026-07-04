@@ -7,7 +7,9 @@
 #include <zlib.h>
 
 #include <array>
+#include <cmath>
 #include <map>
+#include <set>
 
 namespace torch::profiler::impl {
 
@@ -154,6 +156,15 @@ std::string cuptiMonitorEncodePftrace(
         auto* sp = cd->add_specs();
         sp->set_counter_id(spec.first);
         sp->set_name(spec.second);
+      }
+      // COMPUTE group: the GPU Compute panel joins only group_id=6 counters to
+      // kernels (Cycles / SM Frequency from gpc__cycles_elapsed).
+      if (!counters.compute_group.empty()) {
+        auto* grp = cd->add_counter_groups();
+        grp->set_group_id(pbz::GpuCounterDescriptor::COMPUTE);
+        for (uint32_t cid : counters.compute_group) {
+          grp->add_counter_ids(cid);
+        }
       }
     }
     uint64_t iid = 1;
@@ -318,6 +329,13 @@ std::string cuptiMonitorEncodePftrace(
       ed->set_name(e.key);
       ed->set_value(std::to_string(e.vals[i]));
     }
+    // Trace-wide string args (arch / process_id / process_name) the GPU Compute
+    // panel reads per-slice; emitted on every event with a constant value.
+    for (const auto& ce : stages.const_extra) {
+      auto* ed = gse->add_extra_data();
+      ed->set_name(ce.key);
+      ed->set_value(ce.value);
+    }
   }
 
   // GPU counters (power / temperature / clocks from sampled environment
@@ -325,6 +343,8 @@ std::string cuptiMonitorEncodePftrace(
   // InternedGpuCounterDescriptor (interned above) by counter_descriptor_iid.
   // The viewer renders these under "GPU / Counters / <gpu>", a sibling of the
   // render-stage "GPU / Hardware Queues".
+  const std::set<uint32_t> int_ids(
+      counters.int_value_ids.begin(), counters.int_value_ids.end());
   for (size_t i = 0; i < counters.n; ++i) {
     auto* pkt = trace->add_packet();
     pkt->set_timestamp(static_cast<uint64_t>(counters.ts[i]));
@@ -335,8 +355,13 @@ std::string cuptiMonitorEncodePftrace(
     auto* gce = pkt->set_gpu_counter_event();
     gce->set_counter_descriptor_iid(gpu_counter_iid[counters.gpu_id[i]]);
     auto* c = gce->add_counters();
-    c->set_counter_id(static_cast<uint32_t>(counters.counter_id[i]));
-    c->set_double_value(counters.value[i]);
+    auto cid = static_cast<uint32_t>(counters.counter_id[i]);
+    c->set_counter_id(cid);
+    if (int_ids.count(cid)) {
+      c->set_int_value(static_cast<int64_t>(std::llround(counters.value[i])));
+    } else {
+      c->set_double_value(counters.value[i]);
+    }
   }
 
   return gzipCompress(trace.SerializeAsString());
