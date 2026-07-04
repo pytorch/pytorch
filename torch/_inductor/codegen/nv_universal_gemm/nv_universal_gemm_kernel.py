@@ -27,7 +27,6 @@ from torch._inductor.codegen.nv_universal_gemm.cutlass_ops import (
     get_arguments_module,
     get_artifact_module,
     get_provider_submodule,
-    get_utils_module,
     provider_module_names,
 )
 from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_utils import (
@@ -429,7 +428,9 @@ def _init_efc_jit(kernel, epilogue_args):
     be rewrapped without recompiling the CuTe DSL kernel.
     """
     EFC = get_provider_submodule("cutedsl.evt.common_efc").EFC
-    TensorWrapper = get_utils_module().TensorWrapper
+    TensorWrapper = get_provider_submodule(
+        "cutedsl.gemm.sm100_static_persistent_efc"
+    ).TensorWrapper
 
     efc = kernel.impl.efc
     params = [
@@ -451,15 +452,22 @@ def _rewrap_efc_compiled_obj(compiled_fn, kernel, epilogue_args=None):
     """
     if not hasattr(kernel, "impl") or not hasattr(kernel.impl, "efc"):
         return compiled_fn
+
+    efc_module = get_provider_submodule("cutedsl.gemm.sm100_static_persistent_efc")
+    # The legacy `cutlass_api` disk-cache rewrap depends on KernelOperand and a
+    # packed-argument JIT entry point. Canonical `cutlass.operators` has no
+    # KernelOperand and its EFC compiled function takes tensors directly, so the
+    # legacy closure does not apply; signal recompile instead of reloading.
+    if not hasattr(efc_module, "KernelOperand"):
+        return None
+    KernelOperand = efc_module.KernelOperand
+    TensorWrapper = efc_module.TensorWrapper
+
     if not hasattr(kernel.impl.efc, "jit"):
         if epilogue_args is not None:
             _init_efc_jit(kernel, epilogue_args)
         else:
             return None
-
-    efc_module = get_provider_submodule("cutedsl.gemm.sm100_static_persistent_efc")
-    KernelOperand = efc_module.KernelOperand
-    TensorWrapper = efc_module.TensorWrapper
 
     def wrapped_launch(a_tensor, b_tensor, stream, *supplemental_args):
         runtime_args = [
@@ -799,7 +807,9 @@ class NVUniversalGemmKernel(Kernel):
             code.writeline("ScaleMode = _cutlass_library.ScaleMode")
             code.writeline("ScaleSwizzleMode = _cutlass_library.ScaleSwizzleMode")
         if has_epilogue:
-            code.writeline("EpilogueArguments = get_arguments_module().EpilogueArguments")
+            code.writeline(
+                "EpilogueArguments = get_arguments_module().EpilogueArguments"
+            )
         code.writeline("")
 
         # -- Epilogue function definition (must be module-level for CUTLASS) --

@@ -1023,6 +1023,9 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         unwraps the inner JIT function for serialization and rewraps it on
         reload. This test compiles an EFC kernel, round-trips through disk
         cache, and verifies the reloaded artifact produces correct results."""
+        from torch._inductor.codegen.nv_universal_gemm.cutlass_ops import (
+            get_provider_submodule,
+        )
         from torch._inductor.codegen.nv_universal_gemm.kernel_cache import (
             _get_kernel_cache,
         )
@@ -1031,6 +1034,14 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             _unwrap_efc_compiled_obj,
         )
         from torch._inductor.runtime.cutedsl_cache import disk_cache_get, disk_cache_set
+
+        if not hasattr(
+            get_provider_submodule("cutedsl.gemm.sm100_static_persistent_efc"),
+            "KernelOperand",
+        ):
+            self.skipTest(
+                "EFC disk-cache rewrap is only supported with legacy cutlass_api"
+            )
 
         cache = _get_kernel_cache()
         efc_kernel = None
@@ -1109,6 +1120,11 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         from torch._inductor.codegen.nv_universal_gemm.cutlass_ops import (
             get_operator_api,
         )
+
+        if not hasattr(get_operator_api(), "Kernel"):
+            self.skipTest(
+                "workspace patch target `Kernel` is only exposed by legacy cutlass_api"
+            )
 
         a = torch.randn(self.M, self.K, device="cuda", dtype=torch.bfloat16)
         b = torch.randn(self.K, self.N, device="cuda", dtype=torch.bfloat16)
