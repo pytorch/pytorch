@@ -3554,6 +3554,7 @@ MOD_INLINELIST = [
     "torch.utils._python_dispatch",
     "torch.utils._pytree",
     "torch.utils.hooks",
+    "torch.utils.pytree",
 ]
 if sorted(set(MOD_INLINELIST)) != MOD_INLINELIST:
     raise AssertionError("MOD_INLINELIST must be sorted with no duplicates")

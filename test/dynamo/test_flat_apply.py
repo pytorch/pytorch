@@ -192,7 +192,7 @@ class GraphModule(torch.nn.Module):
         l_y_ = L_y_
 
         trace_point_tensor_callable : torch._higher_order_ops.invoke_leaf_function._LeafCallable = self.trace_point_tensor_callable
-        trace_point_tensor_input_spec : torch.utils._pytree.TreeSpec = self.trace_point_tensor_input_spec
+        trace_point_tensor_input_spec : torch.utils.pytree.python.PyTreeSpec = self.trace_point_tensor_input_spec
 
         add: "f32[10]" = l_x_ + l_y_
 
@@ -268,7 +268,7 @@ class GraphModule(torch.nn.Module):
 
         # code: y, z_result1, z_result2 = gn(i.count, i.values)
         gn_callable : torch._higher_order_ops.invoke_leaf_function._LeafCallable = self.gn_callable
-        gn_input_spec : torch.utils._pytree.TreeSpec = self.gn_input_spec
+        gn_input_spec : torch.utils.pytree.python.PyTreeSpec = self.gn_input_spec
         flat_apply_capture = torch__dynamo_variables_torch_flat_apply_capture(gn_callable, gn_input_spec, 5, l_i_values);  gn_callable = gn_input_spec = None
         getitem: "f32[4, 4]" = flat_apply_capture[0]
         getitem_1: "f32[4, 4]" = flat_apply_capture[1]
@@ -321,7 +321,7 @@ class GraphModule(torch.nn.Module):
 
         # code: y, z_result1, z_result2 = gn(i)
         gn_callable : torch._higher_order_ops.invoke_leaf_function._LeafCallable = self.gn_callable
-        gn_input_spec : torch.utils._pytree.TreeSpec = self.gn_input_spec
+        gn_input_spec : torch.utils.pytree.python.PyTreeSpec = self.gn_input_spec
         flat_apply_capture = torch__dynamo_variables_torch_flat_apply_capture(gn_callable, gn_input_spec, 5, l_i_values);  gn_callable = gn_input_spec = None
         getitem: "f32[4, 4]" = flat_apply_capture[0]
         getitem_1: "f32[4, 4]" = flat_apply_capture[1]
@@ -403,7 +403,7 @@ class GraphModule(torch.nn.Module):
 
         # code: y, z = gn(i.count, i.values)
         gn_callable : torch._higher_order_ops.invoke_leaf_function._LeafCallable = self.gn_callable
-        gn_input_spec : torch.utils._pytree.TreeSpec = self.gn_input_spec
+        gn_input_spec : torch.utils.pytree.python.PyTreeSpec = self.gn_input_spec
         flat_apply_capture = torch__dynamo_variables_torch_flat_apply_capture(gn_callable, gn_input_spec, 5, l_i_values);  gn_callable = gn_input_spec = None
         getitem: "f32[4, 4]" = flat_apply_capture[0]
         getitem_1: "f32[4, 4]" = flat_apply_capture[1]
