@@ -49,7 +49,7 @@
         mat_w = tl.load(w_ptrs, mask=mask_w, other=0.0)
 
         # (M,K) @ (K,N) = (M,N)
-        acc += tl.dot(mat_dy, mat_w, allow_tf32=ALLOW_TF32)
+        acc += tl.dot(mat_dy, mat_w, allow_tf32=ALLOW_TF32, out_dtype=tl.float32)
 {%- endmacro %}
 
 {{def_kernel("dY", "W")}}

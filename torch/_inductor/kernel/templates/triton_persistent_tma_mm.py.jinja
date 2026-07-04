@@ -102,12 +102,14 @@
                     b if B_ROW_MAJOR else b.T,
                     acc,
                     allow_tf32=ALLOW_TF32,
+                    out_dtype=ACC_TYPE,
                     )
             else:
                 acc += tl.dot(
                     a if A_ROW_MAJOR else a.T,
                     b if B_ROW_MAJOR else b.T,
                     allow_tf32=ALLOW_TF32,
+                out_dtype=ACC_TYPE,
                 )
 
         # rematerialize rm and rn to save registers

@@ -65,6 +65,7 @@
                 a if A_ROW_MAJOR else a.T,
                 b if B_ROW_MAJOR else b.T,
                 allow_tf32=ALLOW_TF32,
+                out_dtype=ACC_TYPE,
             )
 
         tile_id_c += NUM_SMS

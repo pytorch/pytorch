@@ -44,7 +44,7 @@
         )
         matrix_dy = tl.load(dy_ptrs, mask=mask_dy, other=0.0)
 
-        acc += tl.dot(matrix_x, matrix_dy, allow_tf32=ALLOW_TF32)
+        acc += tl.dot(matrix_x, matrix_dy, allow_tf32=ALLOW_TF32, out_dtype=tl.float32)
 {%- endmacro %}
 
 {{def_kernel("X", "dY")}}

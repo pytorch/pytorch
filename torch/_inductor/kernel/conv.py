@@ -110,7 +110,7 @@ LOOP_BODY_2D = """
         )
         mask_w = (idx_x_c[:, None] < GROUP_IN_C) & (idx_y_c[None, :] < GROUP_OUT_C)
         matrix_w = tl.load(w_ptrs, mask=mask_w, other=0.0)
-        acc += tl.dot(matrix_x, matrix_w, allow_tf32=ALLOW_TF32)
+        acc += tl.dot(matrix_x, matrix_w, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
 """
 
 """
@@ -239,7 +239,7 @@ LOOP_BODY_3D = """
         )
         mask_w = (idx_x_c[:, None] < GROUP_IN_C) & (idx_y_c[None, :] < GROUP_OUT_C)
         matrix_w = tl.load(w_ptrs, mask=mask_w, other=0.0)
-        acc += tl.dot(matrix_x, matrix_w, allow_tf32=ALLOW_TF32)
+        acc += tl.dot(matrix_x, matrix_w, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
 """
 
 conv3d_template = TritonTemplate(
@@ -681,7 +681,7 @@ def convolution(
                     # TODO(jansel): try unroll for bigger kernels once fixed:
                     #               https://github.com/triton-lang/triton/issues/1254
                     UNROLL=unroll,
-                    ALLOW_TF32=torch.backends.cudnn.fp32_precision == "tf32",
+                    ALLOW_TF32=x.get_dtype() == torch.float32 and torch.backends.cudnn.fp32_precision == "tf32",
                     num_stages=cfg.num_stages,
                     num_warps=num_warps,
                     **cfg.kwargs,
@@ -704,7 +704,7 @@ def convolution(
                     # TODO(jansel): try unroll for bigger kernels once fixed:
                     #               https://github.com/triton-lang/triton/issues/1254
                     UNROLL=unroll,
-                    ALLOW_TF32=torch.backends.cudnn.fp32_precision == "tf32",
+                    ALLOW_TF32=x.get_dtype() == torch.float32 and torch.backends.cudnn.fp32_precision == "tf32",
                     num_stages=cfg.num_stages,
                     num_warps=num_warps,
                     **cfg.kwargs,
@@ -739,7 +739,7 @@ def convolution(
                 DILATION_H=dilation[0],
                 DILATION_W=dilation[1],
                 GROUPS=groups,
-                ALLOW_TF32=torch.backends.cudnn.fp32_precision == "tf32",
+                ALLOW_TF32=x.get_dtype() == torch.float32 and torch.backends.cudnn.fp32_precision == "tf32",
                 num_stages=cfg.num_stages,
                 num_warps=cfg.num_warps,
                 **cfg.kwargs,
@@ -1127,7 +1127,7 @@ def convolution_backward_lowering(
                         DILATION_H=dilation[0],
                         DILATION_W=dilation[1],
                         GROUPS=groups,
-                        ALLOW_TF32=torch.backends.cudnn.allow_tf32,
+                        ALLOW_TF32=input.get_dtype() == torch.float32 and torch.backends.cudnn.allow_tf32,
                         num_stages=cfg.num_stages,
                         num_warps=cfg.num_warps,
                         **cfg.kwargs,
@@ -1183,7 +1183,7 @@ def convolution_backward_lowering(
                         DILATION_H=dilation[0],
                         DILATION_W=dilation[1],
                         GROUPS=groups,
-                        ALLOW_TF32=torch.backends.cudnn.allow_tf32,
+                        ALLOW_TF32=input.get_dtype() == torch.float32 and torch.backends.cudnn.allow_tf32,
                         num_stages=cfg.num_stages,
                         num_warps=cfg.num_warps,
                         **cfg.kwargs,

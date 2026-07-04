@@ -2146,11 +2146,18 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         elif device_type == "cuda":
             # allow_tf32 alignment heuristics based on reverse engineering
             # H100 CUDA 12.8 behavior
+            # TF32 only applies to float32 matmuls; for bf16/fp16 inputs keep it off
+            # to avoid reduced-precision wgmma miscompiles on Hopper with Triton 3.8
+            # SLP vectorizer (gh-188492).
+            inp_dtype = kernel_inputs.mat1mat2()[0].get_dtype()
+            is_fp32_input = inp_dtype == torch.float32
             size_threshold = V.graph.sizevars.statically_known_true(
                 sympy.And(sympy.Ge(m, 16), sympy.Ge(Min(n, k), 512))
             )
             allow_tf32 = (
-                torch.backends.cuda.matmul.fp32_precision == "tf32" and size_threshold
+                is_fp32_input
+                and torch.backends.cuda.matmul.fp32_precision == "tf32"
+                and size_threshold
             )
         else:
             allow_tf32 = False
