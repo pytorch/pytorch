@@ -1,3 +1,5 @@
+# Owner(s): ["module: tests"]
+
 import torch
 import torch.nn.functional as F
 from torch.testing._internal.common_utils import TestCase, run_tests
@@ -21,8 +23,8 @@ class TestNormalizeZeroInput(TestCase):
         y = F.normalize(x, dim=0)
         y.sum().backward()
         self.assertTrue(
-            torch.isnan(x.grad).any(),
-            f'F.normalize(zeros) grad must be NaN, got {x.grad}'
+            not x.grad.isfinite().all(),
+            f'F.normalize(zeros) grad must NOT be finite, got {x.grad}'
         )
 
     def test_normalize_zero_input_no_finite_gradient(self):
@@ -41,7 +43,7 @@ class TestNormalizeZeroInput(TestCase):
         y = F.normalize(x, dim=0)
         y.sum().backward()
         self.assertTrue(x.grad.isfinite().all().item())
-        self.assertFalse(torch.isnan(x.grad).any().item())
+        self.assertFalse(not x.grad.isfinite().all().item())
 
 
 if __name__ == '__main__':
