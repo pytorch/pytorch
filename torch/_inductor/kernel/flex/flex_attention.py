@@ -25,6 +25,8 @@ from ...select_algorithm import (
 )
 from ...utils import can_use_tma
 from .common import (
+    _flex_kernel_options_example,
+    _flex_kernel_tuning_options,
     build_subgraph_buffer,
     create_indices_fake,
     create_num_blocks_fake_generator,
@@ -32,6 +34,7 @@ from .common import (
     freeze_irnodes,
     get_fwd_subgraph_outputs,
     infer_dense_strides,
+    is_tensor_ir_node,
     load_flex_template,
     maybe_realize,
     realize_captures_for_cutedsl,
@@ -45,7 +48,7 @@ from .flex_flash_attention import (
     _use_flex_flash_attention_backward,
     create_flex_flash_attention_backward_kernel,
     create_flex_flash_attention_kernel,
-    has_unsupported_captured_scalars,
+    has_unsupported_cpu_scalar_tensor_captures,
     is_trivial_mask_graph,
     is_trivial_score_graph,
 )
@@ -70,6 +73,46 @@ def _sanitize_kernel_options_for_triton(
     sanitized = dict(kernel_options)
     backend = cast(_Backend, sanitized.pop("BACKEND", "AUTO"))
     return sanitized, backend
+
+
+def raise_flex_kernel_options_error(
+    kernel_name: str,
+    kernel_options: dict[str, Any],
+    option_names: Sequence[str],
+    sparse_q_block_size: int,
+    sparse_kv_block_size: int,
+) -> None:
+    option_values = ", ".join(f"{name}={kernel_options[name]}" for name in option_names)
+    raise ValueError(
+        f"Invalid FlexAttention {kernel_name} kernel options: Q and KV block sizes "
+        f"must be divisible by the selected tile sizes. Got "
+        f"SPARSE_Q_BLOCK_SIZE={sparse_q_block_size}, "
+        f"SPARSE_KV_BLOCK_SIZE={sparse_kv_block_size}, and {option_values}. "
+        f"Pass compatible values with kernel_options. Available {kernel_name} "
+        f"tuning options are {_flex_kernel_tuning_options(kernel_name)}. For example: "
+        f"{_flex_kernel_options_example(kernel_name)}. If you did not pin "
+        f"these options, and the default choice errors, compiling with "
+        f"mode='max-autotune-no-cudagraphs' can also fix this by trying more "
+        f"FlexAttention configs."
+    )
+
+
+def _check_flash_supported_scalar_captures(
+    score_mod_other_buffers,
+    mask_mod_other_buffers,
+    *,
+    backward: bool = False,
+) -> None:
+    if has_unsupported_cpu_scalar_tensor_captures(
+        score_mod_other_buffers, mask_mod_other_buffers
+    ):
+        direction = " backward" if backward else ""
+        raise RuntimeError(
+            f"BACKEND='FLASH' but flash attention{direction} cannot be used: "
+            "NYI: score_mod or mask_mod captures a 0-dim CPU tensor scalar. "
+            "Workarounds: use BACKEND='TRITON' or pass the value as a tensor "
+            "on device instead of capturing a CPU scalar tensor."
+        )
 
 
 @SymbolicGridFn
@@ -184,19 +227,12 @@ def flex_attention(
 
     kernel_options, backend = _sanitize_kernel_options_for_triton(kernel_options)
 
-    # Early check for FLASH backend: detect unsupported captured scalars before
-    # building subgraph buffers (which can trigger unbacked_bindings errors)
+    # Early check for FLASH backend: reject scalar captures that cannot be
+    # represented by flash-attn aux_scalars before building subgraph buffers.
     if backend == "FLASH":
-        if has_unsupported_captured_scalars(
+        _check_flash_supported_scalar_captures(
             score_mod_other_buffers, mask_mod_other_buffers
-        ):
-            raise RuntimeError(
-                "BACKEND='FLASH' but flash attention cannot be used: "
-                "NYI: score_mod or mask_mod captures a dynamic scalar (SymInt/SymFloat). "
-                "The FLASH backend cannot inline symbolic values into the CuteDSL template. "
-                "Workarounds: use BACKEND='TRITON', compile with dynamic=False, or pass the "
-                "value as a tensor on device instead of capturing a Python scalar."
-            )
+        )
 
     if backend == "FLASH":
         score_mod_other_buffers = realize_captures_for_cutedsl(score_mod_other_buffers)
@@ -329,15 +365,14 @@ def flex_attention(
 
     Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
-    assert V.graph.sizevars.evaluate_expr(sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)), (
-        f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
-    )
-    assert V.graph.sizevars.evaluate_expr(sympy.Gt(seq_len_q, 0)), (
-        "Query length must be greater than 0"
-    )
-    assert V.graph.sizevars.evaluate_expr(sympy.Gt(seq_len_kv, 0)), (
-        "Key length must be greater than 0"
-    )
+    if not V.graph.sizevars.evaluate_expr(sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)):
+        raise AssertionError(
+            f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
+        )
+    if not V.graph.sizevars.evaluate_expr(sympy.Gt(seq_len_q, 0)):
+        raise AssertionError("Query length must be greater than 0")
+    if not V.graph.sizevars.evaluate_expr(sympy.Gt(seq_len_kv, 0)):
+        raise AssertionError("Key length must be greater than 0")
 
     B = Bq
 
@@ -401,7 +436,7 @@ def flex_attention(
     dtype = query.get_dtype()
     head_dim = V.graph.sizevars.guard_int(query.get_size()[-1])
     configs: list[FlexConfig] = V.choices.get_flex_attention_fwd_configs(
-        head_dim, dtype, query.get_device().type
+        head_dim, seq_len_q, dtype, query.get_device().type
     )
 
     # Mark SPARSE_KV_BLOCK_SIZE & SPARSE_Q_BLOCK_SIZE as static shapes and add guards.
@@ -414,6 +449,7 @@ def flex_attention(
     original_kernel_options = kernel_options.copy()
     # Default config for warp specialization
     num_consumer_groups, num_buffers_warp_spec = 0, 0
+    invalid_block_options: dict[str, Any] | None = None
 
     for conf in configs:
         cur_kernel_options = original_kernel_options.copy()
@@ -452,11 +488,14 @@ def flex_attention(
             or cur_kernel_options["SPARSE_Q_BLOCK_SIZE"] % cur_kernel_options["BLOCK_M"]
             != 0
         ):
+            invalid_block_options = cur_kernel_options
             if len(configs) == 1:
-                raise ValueError(
-                    f"Q and KV block size must be divisible by BLOCK_M and BLOCK_N. We "
-                    f"got Q_BLOCK_SIZE={cur_kernel_options['SPARSE_Q_BLOCK_SIZE']} and "
-                    f"KV_BLOCK_SIZE={cur_kernel_options['SPARSE_KV_BLOCK_SIZE']}."
+                raise_flex_kernel_options_error(
+                    "forward",
+                    cur_kernel_options,
+                    ("BLOCK_M", "BLOCK_N"),
+                    SPARSE_Q_BLOCK_SIZE,
+                    SPARSE_KV_BLOCK_SIZE,
                 )
             continue
 
@@ -492,6 +531,39 @@ def flex_attention(
         )
         if error is not None and len(configs) == 1:
             raise error
+
+    # Let the active choices handler append any backend-specific flex-attention
+    # template choices (e.g. TLX on Blackwell in fbcode). No-op by default.
+    choices = V.choices.append_flex_attention_choices(
+        choices,
+        configs,
+        [
+            query,
+            key,
+            value,
+            logsumexp,
+            max_scores,
+            kv_num_blocks,
+            kv_indices,
+            full_kv_num_blocks,
+            full_kv_indices,
+        ],
+        [subgraph_buffer, mask_graph_buffer],
+        layout,
+        original_kernel_options,
+        SPARSE_Q_BLOCK_SIZE,
+        SPARSE_KV_BLOCK_SIZE,
+    )
+
+    if not choices and invalid_block_options is not None:
+        raise_flex_kernel_options_error(
+            "forward",
+            invalid_block_options,
+            ("BLOCK_M", "BLOCK_N"),
+            SPARSE_Q_BLOCK_SIZE,
+            SPARSE_KV_BLOCK_SIZE,
+        )
+
     inputs_for_autotuning = (
         [
             query,
@@ -517,9 +589,9 @@ def flex_attention(
     out, _ = autotune_select_algorithm(
         "flex_attention",
         choices,
-        # Need to filter out symbols since there is an invariant
-        # that all input_nodes are of type IRNode
-        [x for x in inputs_for_autotuning if isinstance(x, torch._inductor.ir.IRNode)],
+        # Autotuning materializes benchmark tensors. Scalar shape captures stay
+        # in subgraph_inps below for dependency tracking and codegen.
+        [x for x in inputs_for_autotuning if is_tensor_ir_node(x)],
         layout,
         input_gen_fns=input_gen_fns,
     )
@@ -610,10 +682,10 @@ def process_joint_outputs(
     Returns:
         JointOutputResult containing processed buffers and gradients
     """
-    assert isinstance(all_joint_outputs, list)
-    assert all_joint_outputs[0] is not None, (
-        "joint_subgraph_buffer is None - this is a bug!"
-    )
+    if not isinstance(all_joint_outputs, list):
+        raise AssertionError(f"Expected list, got {type(all_joint_outputs)}")
+    if all_joint_outputs[0] is None:
+        raise AssertionError("joint_subgraph_buffer is None - this is a bug!")
 
     joint_buffer = all_joint_outputs[0]
     other_grads = all_joint_outputs[num_placeholders - 1 :]
@@ -625,8 +697,10 @@ def process_joint_outputs(
     def get_out(buf):
         if buf is None:
             return None
-        assert isinstance(buf, ComputedBuffer)
-        assert buf.name is not None
+        if not isinstance(buf, ComputedBuffer):
+            raise AssertionError(f"Expected ComputedBuffer, got {type(buf)}")
+        if buf.name is None:
+            raise AssertionError("ComputedBuffer name must not be None")
         return TensorBox.create(V.graph.get_buffer(buf.name))
 
     grads_out = [get_out(x) for x in other_grads]
@@ -730,12 +804,16 @@ def flex_attention_backward(*args, **kwargs):
     Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
 
-    assert V.graph.sizevars.evaluate_expr(sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)), (
-        f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
-    )
+    if not V.graph.sizevars.evaluate_expr(sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)):
+        raise AssertionError(
+            f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
+        )
 
     kernel_options, backend = _sanitize_kernel_options_for_triton(kernel_options)
     if backend == "FLASH":
+        _check_flash_supported_scalar_captures(
+            score_mod_other_buffers, mask_mod_other_buffers, backward=True
+        )
         score_mod_other_buffers = realize_captures_for_cutedsl(score_mod_other_buffers)
         mask_mod_other_buffers = realize_captures_for_cutedsl(mask_mod_other_buffers)
 
@@ -853,6 +931,7 @@ def flex_attention_backward(*args, **kwargs):
             else joint_outputs.grad_input,
             score_mod_other_buffers=list(score_mod_other_buffers),
             mask_graph_buffer=mask_graph_buffer if needs_block_mask else None,
+            mask_mod_other_buffers=list(mask_mod_other_buffers),
             q_num_blocks=q_num_blocks if needs_block_mask else None,
             q_indices=q_indices if needs_block_mask else None,
             full_q_num_blocks=full_q_num_blocks if needs_block_mask else None,
@@ -939,18 +1018,11 @@ def flex_attention_backward(*args, **kwargs):
 
     # Default config for warp specialization
     num_consumer_groups, num_buffers_warp_spec = 0, 0
+    invalid_block_options: dict[str, Any] | None = None
 
     original_kernel_options = kernel_options.copy()
 
     for conf in configs:
-        if (
-            SPARSE_KV_BLOCK_SIZE % conf.block_n1 != 0
-            or SPARSE_Q_BLOCK_SIZE % conf.block_m1 != 0
-            or SPARSE_KV_BLOCK_SIZE % conf.block_n2 != 0
-            or SPARSE_Q_BLOCK_SIZE % conf.block_m2 != 0
-        ):
-            continue
-
         # Performance tuning
         # Triton heuristics
         cur_kernel_options = original_kernel_options.copy()
@@ -984,6 +1056,30 @@ def flex_attention_backward(*args, **kwargs):
         # Blocksparse options
         cur_kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
         cur_kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
+
+        if (
+            cur_kernel_options["SPARSE_KV_BLOCK_SIZE"] % cur_kernel_options["BLOCK_N1"]
+            != 0
+            or cur_kernel_options["SPARSE_Q_BLOCK_SIZE"]
+            % cur_kernel_options["BLOCK_M1"]
+            != 0
+            or cur_kernel_options["SPARSE_KV_BLOCK_SIZE"]
+            % cur_kernel_options["BLOCK_N2"]
+            != 0
+            or cur_kernel_options["SPARSE_Q_BLOCK_SIZE"]
+            % cur_kernel_options["BLOCK_M2"]
+            != 0
+        ):
+            invalid_block_options = cur_kernel_options
+            if len(configs) == 1:
+                raise_flex_kernel_options_error(
+                    "backward",
+                    cur_kernel_options,
+                    ("BLOCK_M1", "BLOCK_N1", "BLOCK_M2", "BLOCK_N2"),
+                    SPARSE_Q_BLOCK_SIZE,
+                    SPARSE_KV_BLOCK_SIZE,
+                )
+            continue
 
         # ROCm specific kernargs
         for attrib in ["kpack", "matrix_instr_nonkdim", "waves_per_eu"]:
@@ -1025,6 +1121,19 @@ def flex_attention_backward(*args, **kwargs):
             call_sizes=query.get_size() + key.get_size()[1:3],
             **cur_kernel_options,
         )
+
+    if not choices and invalid_block_options is not None:
+        raise_flex_kernel_options_error(
+            "backward",
+            invalid_block_options,
+            ("BLOCK_M1", "BLOCK_N1", "BLOCK_M2", "BLOCK_N2"),
+            SPARSE_Q_BLOCK_SIZE,
+            SPARSE_KV_BLOCK_SIZE,
+        )
+
+    score_mod_other_buffers = maybe_realize(score_mod_other_buffers)
+    mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
+
     inputs_for_autotuning = (
         [
             query,
@@ -1062,7 +1171,9 @@ def flex_attention_backward(*args, **kwargs):
     broadcasted_grad_key, _ = autotune_select_algorithm(
         "flex_attention_backward",
         choices,
-        [x for x in inputs_for_autotuning if isinstance(x, torch._inductor.ir.IRNode)],
+        # Autotuning materializes benchmark tensors. Scalar shape captures stay
+        # in subgraph_inps below for dependency tracking and codegen.
+        [x for x in inputs_for_autotuning if is_tensor_ir_node(x)],
         layout_broadcasted_k,
         input_gen_fns=input_gen_fns,
     )  # [Bq, Hkv, seq_len_kv, k_head_dim]
@@ -1079,11 +1190,12 @@ def flex_attention_backward(*args, **kwargs):
         grad_key = broadcasted_grad_key
         grad_value = broadcasted_grad_value
     else:
-        assert V.graph.sizevars.evaluate_expr(sympy.Gt(Bq, 1) & sympy.Eq(Bkv, 1)), (
-            f"Bq and Bkv must broadcastable. "
-            f"Got Bq={V.graph.sizevars.evaluate_expr(Bq)} "
-            f"and Bkv={V.graph.sizevars.evaluate_expr(Bkv)}"
-        )
+        if not V.graph.sizevars.evaluate_expr(sympy.Gt(Bq, 1) & sympy.Eq(Bkv, 1)):
+            raise AssertionError(
+                f"Bq and Bkv must broadcastable. "
+                f"Got Bq={V.graph.sizevars.evaluate_expr(Bq)} "
+                f"and Bkv={V.graph.sizevars.evaluate_expr(Bkv)}"
+            )
         grad_key = lowerings[aten.sum](broadcasted_grad_key, axis=0, keepdims=True)
         grad_value = lowerings[aten.sum](broadcasted_grad_value, axis=0, keepdims=True)
 

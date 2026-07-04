@@ -123,7 +123,6 @@ class TestPublicBindings(TestCase):
             "FutureType",
             "Generator",
             "GeneratorType",
-            "GreenContext",
             "get_autocast_cpu_dtype",
             "get_autocast_dtype",
             "get_autocast_ipu_dtype",
@@ -413,13 +412,16 @@ class TestPublicBindings(TestCase):
         errors = []
         for mod, exc in failures:
             # Prefixes for modules whose top-level imports pull in optional
-            # runtime deps (cutlass, cuda-python, triton) that aren't
-            # available in CPU-only CI. Registrations are no-ops when the
+            # runtime deps (cutlass, cuda-python, triton, cupti-python) that
+            # aren't available in CPU-only CI. Registrations are no-ops when the
             # runtime is missing, so it's safe to skip them here.
             cuda_dep_prefixes = (
+                "torch._native.ops.foreach_mm.",
+                "torch._native.ops.polar.",
                 "torch._native.ops.scatter_add.",
                 "torch._native.ops.topk.",
                 "torch._vendor.quack",
+                "torch.profiler._cupti.",
             )
             if (
                 mod in private_allowlist

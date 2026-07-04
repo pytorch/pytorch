@@ -316,22 +316,14 @@ pre_grad_custom_pass: torch._inductor.custom_graph_pass.CustomGraphPassType = No
 # WARNING: Inductor scheduler IR is at prototype stage and subject to change,
 # hence custom IR passes built on top of it might break in the future.
 _pre_fusion_custom_pass: (
-    Callable[
-        [list["torch._inductor.scheduler.BaseSchedulerNode"]],
-        list["torch._inductor.scheduler.BaseSchedulerNode"],
-    ]
-    | None
+    torch._inductor.custom_graph_pass.CustomSchedulerPassCallable | None
 ) = None
 
 # Registers a custom pass to be run right after fusion in Inductor scheduler.
 # WARNING: Inductor scheduler IR is at prototype stage and subject to change,
 # hence custom IR passes built on top of it might break in the future.
 _post_fusion_custom_pass: (
-    Callable[
-        [list["torch._inductor.scheduler.BaseSchedulerNode"]],
-        list["torch._inductor.scheduler.BaseSchedulerNode"],
-    ]
-    | None
+    torch._inductor.custom_graph_pass.CustomSchedulerPassCallable | None
 ) = None
 
 # Deprecated
@@ -354,6 +346,7 @@ batch_fusion = True
 # batch fusion options:
 # batch_linear
 # batch_linear_lhs
+# cat_linear
 # batch_layernorm
 # batch_tanh
 # batch_relu
@@ -367,7 +360,12 @@ batch_fusion = True
 # merge_splits_pass
 # mutate_cat_pass
 # split_cat_pass
-pre_grad_fusion_options: dict[str, dict[str, Any]] = {}
+pre_grad_fusion_options: dict[str, dict[str, Any]] = {
+    "batch_linear_lhs": {
+        "devices": ("xpu",),
+        "min_fuse_set_size": 2,
+    },
+}
 
 # Post grad fusion and options, set to empty dict to disable fusion.
 # Call `torch._inductor.fx_passes.group_batch_fusion.list_group_batch_fusions(False)` to see available fusions.
@@ -375,6 +373,14 @@ post_grad_fusion_options: dict[str, dict[str, Any]] = {}
 
 # enable reordering pass for improving memory locality
 reorder_for_locality = True
+
+# Also run reorder_for_locality (a semantics-preserving pass; see
+# reorder_for_locality in fx_passes/post_grad.py for the cases it guards) on
+# training graphs, not just inference. Default off. Gated by reorder_for_locality
+# above: enabling this while that is False does nothing.
+reorder_for_locality_in_training = (
+    os.environ.get("TORCHINDUCTOR_REORDER_LOCALITY_TRAINING", "0") == "1"
+)
 
 # Scale down Rn_BLOCK for better occupancy
 dynamic_scale_rblock = os.environ.get("TORCHINDUCTOR_DYNAMIC_SCALE_RBLOCK", "1") == "1"
@@ -630,7 +636,7 @@ max_autotune_gemm_backends = os.environ.get(
 
 # Configures the maximum number of NVIDIA Universal GEMM (NVGEMM) configs to profile
 # in max_autotune. By default it's 5, to keep compile time reasonable.
-# Set to None (or env var "none"/"all") to tune all configs.
+# Set to 0, None, or env var "none"/"all" to tune all configs.
 def _nvgemm_max_profiling_configs_default() -> int | None:
     env_val = os.environ.get("TORCHINDUCTOR_NVGEMM_MAX_PROFILING_CONFIGS", "5")
     if env_val.lower() in ("none", "all"):
@@ -867,13 +873,21 @@ warn_mix_layout = os.environ.get("TORCHINDUCTOR_WARN_MIX_LAYOUT") == "1"
 # For fanouts, rematerialization can lead to exponential blowup. So, have
 # smaller threshold
 realize_reads_threshold = 4
-realize_opcount_threshold = 30
+_realize_opcount_threshold_default = 30
+realize_opcount_threshold: int | None = None
+realize_opusers_threshold = 5
+# CPU kernels tolerate larger fused pointwise bodies than GPU kernels, and
+# materializing moderate CPU expressions can add expensive full-buffer traffic.
+realize_cpu_opcount_threshold = 50
 
 # Threshold to prevent excessive accumulation of ops in one buffer during lowering
-realize_acc_reads_threshold = 8
+_realize_acc_reads_threshold_default = 8
+realize_acc_reads_threshold: int | None = None
+realize_cpu_acc_reads_threshold = 12
 realize_acc_reads_size_threshold: int | None = (
     None  # TODO(xuanzh): harden this to make it non optional
 )
+
 
 # Defer early realization of cheap output nodes (0 buffer reads, small opcount)
 # to prevent cascade materialization in fullgraph compilation.
@@ -1116,11 +1130,12 @@ def decide_worker_start_method() -> str:
         start_method = os.environ["TORCHINDUCTOR_WORKER_START"]
     else:
         start_method = "subprocess"
-    assert start_method in (
+    if start_method not in (
         "subprocess",
         "fork",
         "spawn",
-    ), f"Invalid start method: {start_method}"
+    ):
+        raise AssertionError(f"Invalid start method: {start_method}")
     return start_method
 
 
@@ -1192,6 +1207,15 @@ class _collective:
 
 class aten_distributed_optimizations:
     """Configuration for distributed optimization passes on ATen FX graphs."""
+
+    # Move collectives earlier and waits later in the inductor schedule
+    # to overlap communication with compute.
+    #
+    # Guarantees:
+    #   - No collective reordering (preserves NCCL stream ordering)
+    #   - No memory regression (each move verified individually)
+    #   - Predictable (no runtime estimation, no heuristics)
+    enable_simple_overlap: bool = True
 
     # Enable overlap scheduling pass
     enable_overlap_scheduling: bool = False
@@ -1319,6 +1343,10 @@ class aten_distributed_optimizations:
     # With the empirical profiles this should be 1.0; kept for manual tuning.
     pre_bucketing_fsdp_collectives_saturation_calibration_multiplier: float = 1.0
 
+    # Decompose collective patterns when mathematically equivalent local
+    # computation exists. See torch/_inductor/fx_passes/decomp_comms.py.
+    allow_comms_decompositions: bool = False
+
 
 def parallel_compile_enabled_internally() -> bool:
     """
@@ -1359,7 +1387,8 @@ def decide_compile_threads() -> int:
         log.info("compile_threads set to 1 in fbcode")
     else:
         cpu_count = torch._utils.cpu_count()
-        assert cpu_count
+        if not cpu_count:
+            raise AssertionError(f"expected nonzero cpu_count, got {cpu_count}")
         compile_threads = min(32, cpu_count)
         log.info("compile_threads set to %d", compile_threads)
 
@@ -1406,6 +1435,16 @@ strict_static_cuda_launcher: bool = (
 # Alias of strict_static_cuda_launcher, used by both CUDA/XPU.
 strict_static_triton_launcher: bool = Config(
     alias="torch._inductor.config.strict_static_cuda_launcher"
+)
+
+# Retain raw cubin bytes on statically-launchable Triton kernels when caching
+# them, instead of dropping them and relying on the per-kernel cubin files left
+# in the local Triton cache dir. Makes a cached CachingAutotuner portable across
+# machines (e.g. a remote cache restored on a cold container), where
+# reload_cubin_path can rehydrate from the retained bytes instead of forcing a
+# recompile. Trades cache size for portability.
+keep_static_cubin_raw: bool = (
+    os.environ.get("TORCHINDUCTOR_KEEP_STATIC_CUBIN_RAW", "0") == "1"
 )
 
 # Use _FastCudaLauncher (vectorcall C extension) instead of
@@ -1688,6 +1727,12 @@ class cpp:
         os.environ.get("TORCHINDUCTOR_CPP_ENABLE_KERNEL_PROFILE", "0") == "1"
     )
 
+    # Allow emitting KernelContextGuard metadata alongside kernel profiling.
+    # This switch only works when enable_kernel_profile is set to 1.
+    enable_kernel_context_guard = (
+        os.environ.get("TORCHINDUCTOR_CPP_ENABLE_KERNEL_CONTEXT_GUARD", "0") == "1"
+    )
+
     # enable weight prepacking to get a better performance; may lead to large memory footprint
     weight_prepack = os.environ.get("TORCHINDUCTOR_CPP_WEIGHT_PREPACK", "1") == "1"
 
@@ -1822,6 +1867,15 @@ class triton:
 
     # Emit objgraph backref dumps for leaked cudagraph pool tensors
     cudagraph_trees_objgraph = False
+
+    # Which live cudagraph tree storages to clone before starting a new
+    # generation. None keeps the existing stale-output error behavior.
+    # "user_visible" clones live user-visible output storages out of
+    # the graph pool. Backward graph outputs are not selected for cloning.
+    # This mode can add overhead because live outputs that cross generations
+    # are explicitly copied and stop using cached TensorImpl outputs. Users
+    # can leave this unset and manually clone/copy those outputs instead.
+    cudagraph_trees_generation_cloning: Literal["user_visible"] | None = None
 
     # Enable cudagraph support for mutated inputs from prior cudagraph pool
     cudagraph_support_input_mutation = not is_fbcode()
@@ -1987,6 +2041,13 @@ class triton:
 
     # used for debugging cooperative reduction codegen, always generate cooperative_reductions
     force_cooperative_reductions = False
+
+    # Lower/upper bounds between two-step variance and Welford variance for
+    # non-split CUDA Triton half/bfloat16 reductions. Mid-sized reductions use
+    # two-step for throughput; smaller reductions keep the old heuristic because
+    # training gradients are more sensitive to the different accumulation order.
+    use_two_step_variance_min_numel = 1024
+    use_two_step_variance_threshold = 32768
 
     # 0: disable
     # 1/True: enable, use tuning to pick between different subkernels
@@ -2311,9 +2372,11 @@ class aot_inductor:
     # Embed generated kernel binary files into model.so
     embed_kernel_binary: bool | None = None
 
-    # Generate kernel files that support multiple archs
-    # For CUDA, this means generating fatbin files for kernels, and the fatbin files
-    # contains PTX and SASS for the current architecture.
+    # Generate kernel files that support multiple archs.
+    # For CUDA, this means generating fatbin files for kernels. The fatbin files
+    # contain PTX for the compile target architecture (config.cuda.arch, or the
+    # current GPU when unset), plus SASS for the compile target and compatible
+    # TORCH_CUDA_ARCH_LIST architectures.
     # For XPU, this means generating SPIR-V files for kernels, and the SPIR-V files
     # will be compiled to target different XPU architectures at runtime.
     emit_multi_arch_kernel: bool | None = None
@@ -2522,10 +2585,6 @@ class cuda(cutlass):
     # Whether to keep intermediate files dring compilation.
     enable_ptxas_info = False
 
-    # Configures the maximum number of NVIDIA Universal GEMM (NVGEMM) configs to profile in max_autotune.
-    # By default it's 5, to keep compile time to a reasonable level.
-    nvgemm_max_profiling_configs: int | None = 5
-
 
 @inherit_fields_from(cutlass)
 class xpu(cutlass):
@@ -2634,7 +2693,7 @@ class rocm:
     # Side-effect: when this is True, choices._need_to_fix_layout() returns True
     # so flexible layouts are disabled. Origami's grid/workgroup mappings depend
     # on exact strides and would mis-compile under flexible layouts.
-    origami: bool = os.environ.get("TORCHINDUCTOR_ORIGAMI") == "1"
+    origami: bool = os.environ.get("TORCHINDUCTOR_ORIGAMI") in (None, "1")
 
     # Number of top configs origami selects per GEMM. Read once from
     # TORCHINDUCTOR_ORIGAMI_TOPK; defaults to 6 (sweet spot between compile
@@ -2790,6 +2849,18 @@ class trace:
 
     log_autotuning_results = os.environ.get("LOG_AUTOTUNE_RESULTS", "0") == "1"
 
+    # Add Inductor kernel stack traces back into exported PyTorch profiler timelines.
+    provenance_tracking_to_timeline = (
+        os.environ.get("TORCH_COMPILE_DEBUG_EXTEND", "0") == "1"
+    )
+
+    # Maximum number of trace events to process in profiler timeline post-processing.
+    # If the trace exceeds this limit, provenance tracking will be skipped to avoid OOM.
+    # Set to 0 to disable this protection.
+    provenance_tracking_max_events: int = int(
+        os.environ.get("TORCH_COMPILE_DEBUG_MAX_EVENTS", "500000")
+    )
+
     # Save mapping info from inductor generated kernel to post_grad/pre_grad fx nodes
     # Levels:
     #   0 - disabled (default)
@@ -2803,6 +2874,12 @@ class trace:
             "INDUCTOR_PROVENANCE", os.environ.get("TORCH_COMPILE_DEBUG", "0")
         )
     )
+
+
+def effective_provenance_tracking_level() -> int:
+    if trace.provenance_tracking_to_timeline:
+        return max(trace.provenance_tracking_level, 1)
+    return trace.provenance_tracking_level
 
 
 _save_config_ignore: list[str] = [

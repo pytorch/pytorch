@@ -48,9 +48,13 @@ class AuxLoadVecInfo:
     def __post_init__(self) -> None:
         """Validate that only contiguous loads carry a vector width."""
         if self.kind is LoadKind.CONTIGUOUS:
-            assert self.vec_size is not None
+            if self.vec_size is None:
+                raise AssertionError("CONTIGUOUS load requires a vec_size")
         else:
-            assert self.vec_size is None
+            if self.vec_size is not None:
+                raise AssertionError(
+                    f"non-CONTIGUOUS load must not carry vec_size, got {self.vec_size}"
+                )
 
     @classmethod
     def gather(cls) -> "AuxLoadVecInfo":
@@ -161,9 +165,9 @@ def select_score_mod_vec_size(
 ) -> int | None:
     """Select score_mod vector width for captured aux loads.
 
-    Wider score_mod.__vec_size__ values remain legal when score_mod has no
-    captured tensors. For captured tensors, direct vector loads are capped to
-    the SM100 CuTe score_mod aux-load path's supported width of 8.
+    A return value of None means there are no captured tensor loads constraining
+    score_mod.__vec_size__. For captured tensors, direct vector loads are capped
+    to the SM100 CuTe score_mod aux-load path's supported width of 8.
     """
     if not has_score_mod or not has_aux_tensors:
         return None
@@ -251,7 +255,8 @@ def select_aux_mod_vec_size(
                 pass
             case LoadKind.CONTIGUOUS:
                 contiguous_vec_size = aux_load_vec_info.vec_size
-                assert contiguous_vec_size is not None
+                if contiguous_vec_size is None:
+                    raise AssertionError("CONTIGUOUS load must have a vec_size")
                 selected_vec_size = min(selected_vec_size, contiguous_vec_size)
                 found_vectorizable_load = True
 
@@ -293,7 +298,10 @@ def direct_aux_load_vec_size_and_kind(
     """
     if not isinstance(indices, (list, tuple)) or not indices:
         return AuxLoadVecInfo.gather()
-    assert max_vec_size >= 2 and max_vec_size.bit_count() == 1
+    if not (max_vec_size >= 2 and max_vec_size.bit_count() == 1):
+        raise AssertionError(
+            f"max_vec_size must be a power of two >= 2, got {max_vec_size}"
+        )
 
     _, kv_idx, index_symbols = make_fx_index_symbols(
         q_idx_node, kv_idx_node, non_lane_index_nodes

@@ -45,6 +45,31 @@ class GenericCtxMgr:
 
 
 class ErrorMessagesTest(LoggingTestCase):
+    def test_inplace_view_on_graph_input_hint(self):
+        def fn(x):
+            x.transpose_(1, 2)
+            return x
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.randn(2, 3, 4)
+            ),
+            """\
+Unsupported function call (delayed)
+  Explanation: Dynamo determined that a graph break should occur when calling `L['x'].transpose_`. Reason: Getting an inplace view on a graph input is not supported
+  Hint: Avoid mutating a graph input's tensor metadata with in-place view ops. If the mutation is only needed inside the compiled region, replace the in-place call with an out-of-place view, for example `x = x.transpose(1, 2)` instead of `x.transpose_(1, 2)`.
+  Hint: If you need to mutate the input tensor's metadata, move the in-place view call outside `torch.compile`.
+
+  Developer debug context: source: AttrSource(base=LocalSource(local_name='x', is_input=True, dynamism=None, is_derefed_cell_contents=False), member='transpose_')
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0148.html
+
+from user code:
+   File "test_error_messages.py", line N, in fn
+    x.transpose_(1, 2)""",
+        )
+
     def test_dynamic_shape_operator_no_meta_kernel(self):
         def fn():
             return torch.linalg.lstsq(torch.rand(10, 10), torch.rand(10, 10))
@@ -107,8 +132,9 @@ from user code:
             lambda: torch.compile(fn, backend="eager", fullgraph=True)(lst),
             """\
 sort with non-constant keys
-  Explanation: Cannot perform sort with non-constant key. First non-constant key type: <class 'torch.Tensor'>. Most notably, we cannot sort with Tensor or SymInt keys, but we can sort ints.
+  Explanation: Cannot perform sort whose key comparison is not a compile-time constant. Key type: <class 'torch.Tensor'>. Most notably, we cannot sort with Tensor or SymInt keys, but we can sort ints.
   Hint: Use something else as the key.
+  Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
 
   Developer debug context: LazyVariableTracker(realized: TensorVariable())
 
@@ -177,14 +203,14 @@ from user code:
                 zip(range(5), range(10))
             ),
             """\
-Unsupported function call
-  Explanation: Dynamo does not know how to trace the function `UserDefinedObjectVariable(zip)`
-  Hint: Avoid calling `UserDefinedObjectVariable(zip)` in your code.
-  Hint: Please report an issue to PyTorch.
+Observed exception
+  Explanation: Dynamo found no exception handler at the top-level compiled function when encountering an exception. Exception will propagate outside the compiled region.
+  Hint: Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance("force_eager")`.
+  Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
 
-  Developer debug context: call_function UserDefinedObjectVariable(zip) [] {}
+  Developer debug context: raised exception TypeError("'zip' object is not callable")
 
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0147.html
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0088.html
 
 from user code:
    File "test_error_messages.py", line N, in fn
@@ -2543,12 +2569,12 @@ User code traceback:
         self.assertEqual(
             len(full_messages),
             1,
-            f"Expected 1 full graph break message, got {len(full_messages)}",
+            lambda msg: f"{msg}\nExpected 1 full graph break message, got {len(full_messages)}",
         )
         self.assertEqual(
             len(suppressed_messages),
             2,
-            f"Expected 2 suppressed messages, got {len(suppressed_messages)}",
+            lambda msg: f"{msg}\nExpected 2 suppressed messages, got {len(suppressed_messages)}",
         )
 
         self.assertExpectedInline(
@@ -2633,7 +2659,7 @@ Call to `torch._dynamo.graph_break()`
         self.assertEqual(
             len(records),
             2,
-            f"Expected 2 graph break messages (one per call site), got {len(records)}",
+            lambda msg: f"{msg}\nExpected 2 graph break messages (one per call site), got {len(records)}",
         )
 
         self.assertExpectedInline(

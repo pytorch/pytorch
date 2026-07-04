@@ -46,8 +46,10 @@ nn/qat/ @jerryzh168
 
 # Distributed
 # c10d backend APIs
+/torch/csrc/distributed/c10d @d4l3k @fduwjj @kapilsh
 /torch/csrc/distributed/c10d/Backend.* @kwen2501
 /torch/csrc/distributed/c10d/Ops.* @kwen2501
+/torch/distributed/distributed_c10d.py @d4l3k @fduwjj @kapilsh
 # FSDP, DDP
 /torch/distributed/_composable/fsdp/ @weifengpy
 /torch/distributed/_composable/replicate.py @weifengpy
@@ -95,11 +97,11 @@ nn/qat/ @jerryzh168
 
 # torch.linalg
 # docs
-/torch/linalg/ @lezcano @IvanYashchuk @nikitaved
+/torch/linalg/ @lezcano @nikitaved
 # code
-/aten/src/ATen/native/**/*LinearAlgebra* @lezcano @nikitaved @IvanYashchuk
+/aten/src/ATen/native/**/*LinearAlgebra* @lezcano @nikitaved
 # tests
-/test/test_linalg.py @lezcano @nikitaved @IvanYashchuk
+/test/test_linalg.py @lezcano @nikitaved
 
 # OpInfo-related files
 /torch/testing/_internal/common_methods_invocations.py @mruberry

@@ -160,6 +160,20 @@ def _is_tensor_constructor(func: OpOverload) -> bool:
     )
 
 
+@functools.cache
+def _has_device_arg(func: OpOverload) -> bool:
+    device_type = torch._C.DeviceObjType.get()
+    optional_device_type = torch._C.OptionalType(device_type)
+    return any(
+        arg.name == "device"
+        and (
+            arg.type.isSubtypeOf(device_type)
+            or arg.type.isSubtypeOf(optional_device_type)
+        )
+        for arg in func._schema.arguments
+    )
+
+
 def register_op_impl(
     run_impl_check: Callable[[OpOverload], bool]
     | OpOverload
@@ -217,9 +231,6 @@ def constructors(
     _, new_kwargs = _normalize_function_or_error(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
-    if "names" in kwargs:
-        # REASON: "torch.compile doesn't support named tensors"
-        raise UnsupportedOperatorException(func)
 
     if func in _like_tensor_constructors:
         default_device = new_kwargs["input"].device
@@ -229,14 +240,20 @@ def constructors(
         # cpu is default device if none is specified
         default_device = torch.device("cpu")
         args = ()
-    out_device = new_kwargs.pop("device", None)
+    has_device_arg = _has_device_arg(func)
+    out_device = new_kwargs.pop("device", None) if has_device_arg else None
     out_device = out_device if out_device is not None else default_device
-    new_kwargs["device"] = torch.device("meta")
+    if has_device_arg:
+        new_kwargs["device"] = torch.device("meta")
     # _like constructors have fake tensor inputs (maybe this causes the non-like
     # to fail? hmmm)
     with in_kernel_invocation_manager(fake_mode):
         r = func(*args, **new_kwargs)
-    return FakeTensor(fake_mode, r, out_device)
+    if r.device.type == "meta":
+        return fake_mode.fake_tensor_converter.from_meta_and_device(
+            fake_mode, r, out_device
+        )
+    return fake_mode.fake_tensor_converter.from_real_tensor(fake_mode, r)
 
 
 @register_op_impl(aten.is_pinned.default)
@@ -346,7 +363,7 @@ def workaround_stride_incorrect_op(
     raise UnsupportedOperatorException(func)
 
 
-# Dont default to default device handling,
+# Don't default to default device handling,
 # since the device of `the_template` is ignored
 @register_op_impl(aten.resize_as_.default)
 def resize_as_(
@@ -526,6 +543,32 @@ def _spdiags(
     )
 
 
+@register_op_impl(aten._to_dense.default)
+def _to_dense(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    self: FakeTensor,
+    dtype: torch.dtype | None = None,
+    masked_grad: bool | None = None,
+) -> FakeTensor:
+    if self.layout is torch.sparse_coo:
+        if dtype is not None:
+            raise RuntimeError("dtype argument is not supported by sparse_to_dense")
+        with in_kernel_invocation_manager(fake_mode):
+            out = torch.empty(
+                tuple(self.shape),
+                dtype=self.dtype,
+                device="meta",
+            )
+        return FakeTensor(fake_mode, out, self.fake_device)
+
+    with in_kernel_invocation_manager(fake_mode):
+        out = func(self, dtype=dtype, masked_grad=masked_grad)
+    return fake_mode.fake_tensor_converter.from_meta_and_device(
+        fake_mode, out, self.fake_device
+    )
+
+
 # index.Tensor data-dependent in only some conditions
 @register_op_impl(
     lambda func: torch.Tag.dynamic_output_shape in func.tags
@@ -630,6 +673,20 @@ def unique2(
     return_counts: bool = False,
 ) -> tuple[FakeTensor, FakeTensor, FakeTensor]:
     return _unique(fake_mode, func, arg, None, sorted, return_inverse, return_counts)
+
+
+@register_op_impl(aten._unique.default)
+def unique(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    arg: FakeTensor,
+    sorted: bool = True,
+    return_inverse: bool = False,
+) -> tuple[FakeTensor, FakeTensor]:
+    uniques, inverse, _counts = _unique(
+        fake_mode, func, arg, None, sorted, return_inverse, False
+    )
+    return uniques, inverse
 
 
 @register_op_impl(aten.select.int)
@@ -943,6 +1000,7 @@ def try_duck_specialization_first(a: torch.Tensor, shape) -> bool:
     buckets: dict[int, dict[sympy.Expr, torch.SymInt]] = defaultdict(dict)
     for s in list(a_syms) + list(target_syms):
         # setdefault keeps the *first* SymInt seen for each (hint, expr).
+        # pyrefly: ignore [bad-index]
         buckets[s.node.hint].setdefault(s.node.expr, s)
 
     candidates: list[tuple[torch.SymInt, torch.SymInt]] = []
@@ -1358,7 +1416,7 @@ def slice_forward(
     new_size: IntLikeType | None = None
     if start_index is not None and end_index is not None:
         if guard_or_false(end_index >= start_index):
-            new_size = (end_index - start_index + step - 1) // step
+            new_size = (end_index - start_index + step - 1) // step  # type: ignore[bad-assignment]
         elif guard_or_false(start_index >= end_index):
             new_size = 0
         else:
@@ -1366,7 +1424,7 @@ def slice_forward(
             # ordering (e.g., when they involve Min/Max). Compute the size via
             # max(end - start, 0) to avoid creating an unbacked symint.
             diff = torch.sym_max(end_index - start_index, 0)
-            new_size = (diff + step - 1) // step
+            new_size = (diff + step - 1) // step  # type: ignore[assignment]
 
     # create unbacked if case unknown
     if new_size is None:
@@ -1572,7 +1630,7 @@ def foreach_run_and_map_input_device(
     return out_fake
 
 
-# Dont default to default device handling,
+# Don't default to default device handling,
 # Since op can take in non-zero sized cpu
 # index tensors with cuda self
 @register_op_impl(aten.index.Tensor)
@@ -1604,6 +1662,28 @@ def embedding_bag(
         return meta_embedding_bag(*args, **kwargs)
 
 
+@register_op_impl(aten.embedding.default)
+def embedding(
+    fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
+) -> Any:
+    from torch._meta_registrations import embedding as meta_embedding
+
+    _, new_kwargs = _normalize_function_or_error(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+    weight = new_kwargs["weight"]
+    indices = new_kwargs["indices"]
+    if (
+        weight.device != indices.device
+        and weight.device.type != "meta"
+        and indices.device.type != "meta"
+    ):
+        return NotImplemented
+
+    with fake_mode:
+        return typing_cast(FakeTensor, meta_embedding(*args, **kwargs))
+
+
 # takes in multiple-devices, don't default to default device handling
 @register_op_impl(aten._unsafe_index_put.default)
 @register_op_impl(aten.copy.default)
@@ -1614,6 +1694,20 @@ def multi_device_op_default(
     fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
 ) -> FakeTensor:
     return run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs)
+
+
+@register_op_impl(aten.shallow_copy_data_.default)
+def _(
+    fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
+) -> FakeTensor:
+    _, new_kwargs = _normalize_function_or_error(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+    source_device = new_kwargs["source"].device
+    with in_kernel_invocation_manager(fake_mode):
+        func(*args, **kwargs)
+    new_kwargs["input"].fake_device = source_device
+    return new_kwargs["input"]
 
 
 # same with multi_device_op_default, but return the input
@@ -1684,7 +1778,14 @@ def nyi(fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any) 
         raise AssertionError(f"NYI: {func}")
 
 
-@register_op_impl([aten.convolution.default, aten.convolution_backward.default])
+@register_op_impl(
+    [
+        aten.convolution.default,
+        aten._convolution.default,
+        aten._convolution.deprecated,
+        aten.convolution_backward.default,
+    ]
+)
 def conv(
     fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
 ) -> FakeTensor | tuple[FakeTensor | None, FakeTensor | None, FakeTensor | None]:
@@ -1696,7 +1797,12 @@ def conv(
     # Internal passes such as Inductor freezing may run fake propagation over
     # folded convs that do not need to match eager's public input checks.
     if (
-        func is aten.convolution.default
+        func
+        in (
+            aten.convolution.default,
+            aten._convolution.default,
+            aten._convolution.deprecated,
+        )
         and input_.dtype != weight.dtype
         and not input_.is_mkldnn
         and not fake_mode.allow_non_fake_inputs
@@ -1721,6 +1827,13 @@ def conv(
         if not all_hinted:
             # TODO: We can make this a little more faithful with best effort
             # channels last detection (but only if it's statically obvious!)
+            mem_fmt = None
+        elif input_.dim() == k - 1:
+            # Unbatched input: eager routes directly to the slow dilated
+            # backward kernels, which produce contiguous gradients and bypass
+            # the channels-last backend-memory-format selection. Mirror that
+            # here; _select_conv_backend would also reject the missing batch
+            # dim.
             mem_fmt = None
         else:
             # convolution has "bias" but not "bias_sizes"; convolution_backward
@@ -1767,7 +1880,11 @@ def conv(
     with in_kernel_invocation_manager(fake_mode):
         out = func(**new_kwargs)
 
-        if func is aten.convolution.default:
+        if func in (
+            aten.convolution.default,
+            aten._convolution.default,
+            aten._convolution.deprecated,
+        ):
             return convert(out, mem_fmt)  # type: ignore[return]
         else:
             return (
@@ -1798,7 +1915,13 @@ def bincount(
 
     _constrain_range_for_size(new_size)
     torch._check(new_size >= minlength)
-    return inputs.new_empty(new_size)  # type: ignore[return]
+
+    if weights is None:
+        return inputs.new_empty(new_size, dtype=torch.long)  # type: ignore[return]
+    elif weights.dtype == torch.float32:
+        return inputs.new_empty(new_size, dtype=torch.float32)  # type: ignore[return]
+    else:
+        return inputs.new_empty(new_size, dtype=torch.float64)  # type: ignore[return]
 
 
 @register_op_impl(torch.ops.aten._pack_padded_sequence.default)

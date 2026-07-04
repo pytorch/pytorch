@@ -1,6 +1,6 @@
 #pragma once
 #ifdef _WIN32
-#include <windows.h>
+#include <torch/headeronly/util/win32-headers.h>
 #include <functional> // std::function
 #ifdef USE_MMAP_SELF
 #include <errno.h>
@@ -172,7 +172,12 @@ int open(char* pathname, int flags) {
   }
 
   if (flags & O_APPEND) {
-    lseek(fd, 0, SEEK_END);
+    if (_lseeki64(fd, 0, SEEK_END) == -1) {
+      int saved_errno = errno;
+      _close(fd);
+      errno = saved_errno;
+      return -1;
+    }
   }
 
   return fd;
@@ -268,11 +273,16 @@ int munmap(void* addr, size_t length) {
 
 #include <fcntl.h>
 
+#include <algorithm>
+#include <atomic>
+#include <cctype>
 #include <chrono>
 #include <cstdlib>
+#include <iostream>
 #include <optional>
 #include <regex>
 #include <stdexcept>
+#include <string>
 #include <thread>
 #include <unordered_map>
 #include <utility>
@@ -313,11 +323,257 @@ extern uint8_t _binary_constants_bin_end[];
 #define AOTI_CONST_ALIGNMENT 64
 #endif
 
+namespace torch::aot_inductor {
+inline void setUsePinnedAsyncConstantsCopy(bool enabled);
+inline bool usePinnedAsyncConstantsCopy();
+inline void setPinnedAsyncConstantsCopyStageBufferBytes(size_t bytes);
+inline size_t pinnedAsyncConstantsCopyStageBufferBytes();
+} // namespace torch::aot_inductor
+
+// S646785: env-gated logging for the AOTI constant-load pipeline. Emits when
+// the AOTI_LOG_LOADING env var is set so [AOTI_LOAD] markers are greppable in
+// trainer logs without rebuilding.
+#define AOTI_LOG_LOADING(msg)                                                  \
+  do {                                                                         \
+    static const bool _aoti_log_ = std::getenv("AOTI_LOG_LOADING") != nullptr; \
+    if (_aoti_log_) {                                                          \
+      std::cerr << "[AOTI_LOAD] " << msg << std::endl;                         \
+    }                                                                          \
+  } while (0)
+
 namespace {
 
 using RAIIDataPtr = std::unique_ptr<void, std::function<void(void*)>>;
+// PinnedStagingPool (below) owns pinned host blocks via this RAII type from
+// the surrounding torch::aot_inductor namespace. Bring it in by name so the
+// anonymous-namespace class body can use it unqualified.
+using torch::aot_inductor::RAIIAtenTensorHandle;
 
 #ifdef USE_CUDA
+
+// RAII ping-pong pinned staging pool for non-blocking H2D copies of AOTI
+// constants without triggering CUDA/HIP's device-wide implicit sync.
+//
+// Synchronous cudaMemcpy(H2D) from pageable host memory (the .so-embedded
+// constants region, mmap'd by dlopen) performs a device-wide implicit
+// synchronize per the CUDA/HIP spec, stalling concurrent inference streams.
+//
+// We avoid that by staging pageable -> pinned (CPU memcpy) and issuing
+// cudaMemcpyAsync(pinned -> device) on a dedicated non-blocking stream.
+// Two pinned staging buffers ping-pong via cudaEvents so CPU fill of one
+// buffer overlaps GPU H2D from the other.
+//
+// Pinned host buffers are allocated via the stable C ABI
+// aoti_torch_empty_strided_pinned, which routes through ATen's cached
+// pinned host allocator (at::getPinnedMemoryAllocator). That allocator
+// keeps freed blocks in a process-wide pool, so back-to-back model loads
+// reuse buffers instead of paying cudaHostAlloc/cudaFreeHost per call.
+//
+// Total host-locked memory is bounded at 2 * AOTI_COPY_STAGE_BUFFER_BYTES
+// (default 2 * 64 MiB = 128 MiB) independent of model size.
+class PinnedStagingPool {
+ public:
+  static constexpr size_t kDefaultBufferBytes = 64ULL * 1024 * 1024;
+
+  // Returns nullptr on pinned-host alloc / stream / event creation failure
+  // so callers can fall back to the synchronous copy path.
+  static std::unique_ptr<PinnedStagingPool> tryCreate(size_t buffer_bytes) {
+    std::unique_ptr<PinnedStagingPool> pool(new PinnedStagingPool());
+    pool->buffer_bytes_ = buffer_bytes;
+    cudaError_t rc =
+        cudaStreamCreateWithFlags(&pool->stream_, cudaStreamNonBlocking);
+    if (rc != cudaSuccess) {
+      (void)cudaGetLastError();
+      AOTI_LOG_LOADING(
+          "PinnedStagingPool: cudaStreamCreateWithFlags failed rc="
+          << rc << " (" << cudaGetErrorString(rc)
+          << "); falling back to sync copy");
+      return nullptr;
+    }
+    const int64_t sizes = static_cast<int64_t>(buffer_bytes);
+    const int64_t strides = 1;
+    for (int i = 0; i < 2; ++i) {
+      rc = cudaEventCreateWithFlags(&pool->events_[i], cudaEventDisableTiming);
+      if (rc != cudaSuccess) {
+        (void)cudaGetLastError();
+        AOTI_LOG_LOADING(
+            "PinnedStagingPool: cudaEventCreateWithFlags failed rc="
+            << rc << "; falling back to sync copy");
+        return nullptr;
+      }
+      AtenTensorHandle handle = nullptr;
+      AOTITorchError trc = aoti_torch_empty_strided_pinned(
+          /*ndim=*/1,
+          &sizes,
+          &strides,
+          aoti_torch_dtype_uint8(),
+          aoti_torch_device_type_cpu(),
+          /*device_index=*/0,
+          &handle);
+      if (trc != AOTI_TORCH_SUCCESS || handle == nullptr) {
+        AOTI_LOG_LOADING(
+            "PinnedStagingPool: aoti_torch_empty_strided_pinned("
+            << buffer_bytes << ") failed trc=" << trc
+            << "; falling back to sync copy");
+        return nullptr;
+      }
+      pool->stage_tensors_[i] = RAIIAtenTensorHandle(handle);
+      trc = aoti_torch_get_data_ptr(
+          pool->stage_tensors_[i].get(), &pool->stage_[i]);
+      if (trc != AOTI_TORCH_SUCCESS || pool->stage_[i] == nullptr) {
+        AOTI_LOG_LOADING(
+            "PinnedStagingPool: aoti_torch_get_data_ptr failed trc="
+            << trc << "; falling back to sync copy");
+        return nullptr;
+      }
+    }
+    AOTI_LOG_LOADING(
+        "PinnedStagingPool: allocated 2x"
+        << (buffer_bytes / (1024 * 1024))
+        << " MiB pinned staging buffers via cached pinned host allocator");
+    return pool;
+  }
+
+  // Chunked copy of a host source range through the ping-pong pinned
+  // buffers. Multiple back-to-back calls keep the H2D stream filled.
+  // Caller-owned dst must remain valid until the destructor synchronizes.
+  void copyH2DViaStage(void* dst, const void* src, size_t total) {
+    const auto* src_bytes = static_cast<const uint8_t*>(src);
+    auto* dst_bytes = static_cast<uint8_t*>(dst);
+    size_t offset = 0;
+    while (offset < total) {
+      const size_t chunk = std::min(buffer_bytes_, total - offset);
+      // Wait for GPU to release this staging buffer.
+      AOTI_RUNTIME_CUDA_CHECK(cudaEventSynchronize(events_[buf_]));
+      memcpy(stage_[buf_], src_bytes + offset, chunk);
+      AOTI_RUNTIME_CUDA_CHECK(cudaMemcpyAsync(
+          dst_bytes + offset,
+          stage_[buf_],
+          chunk,
+          cudaMemcpyHostToDevice,
+          stream_));
+      AOTI_RUNTIME_CUDA_CHECK(cudaEventRecord(events_[buf_], stream_));
+      buf_ ^= 1;
+      offset += chunk;
+    }
+  }
+
+  cudaStream_t stream() const {
+    return stream_;
+  }
+
+  // Synchronize the H2D stream and surface any error from a previously issued
+  // async copy (cudaMemcpyAsync failures are reported lazily at the sync).
+  // Call before destroying the pool so a failed load is not silently swallowed
+  // by the no-throw destructor and passed downstream as a populated buffer.
+  void finish() {
+    if (stream_ != nullptr) {
+      AOTI_RUNTIME_CUDA_CHECK(cudaStreamSynchronize(stream_));
+    }
+  }
+
+  ~PinnedStagingPool() {
+    // Best-effort cleanup: never throw from a destructor, but log rc on
+    // failure so leaks are visible in production. Sync the stream FIRST so
+    // no in-flight async H2D is still reading from the pinned buffers when
+    // their RAIIAtenTensorHandle members run (which return the blocks to
+    // ATen's cached pinned host allocator pool). Members are destroyed after
+    // this body returns, in reverse declaration order; stage_tensors_ is
+    // last-declared so it runs first among members.
+    if (stream_ != nullptr) {
+      cudaError_t rc = cudaStreamSynchronize(stream_);
+      if (rc != cudaSuccess) {
+        AOTI_LOG_LOADING(
+            "~PinnedStagingPool: cudaStreamSynchronize failed rc="
+            << rc << " (" << cudaGetErrorString(rc) << ")");
+      }
+    }
+    for (int i = 0; i < 2; ++i) {
+      if (events_[i] != nullptr) {
+        cudaError_t rc = cudaEventDestroy(events_[i]);
+        if (rc != cudaSuccess) {
+          AOTI_LOG_LOADING(
+              "~PinnedStagingPool: cudaEventDestroy buf="
+              << i << " failed rc=" << rc << " (" << cudaGetErrorString(rc)
+              << ")");
+        }
+      }
+    }
+    if (stream_ != nullptr) {
+      cudaError_t rc = cudaStreamDestroy(stream_);
+      if (rc != cudaSuccess) {
+        AOTI_LOG_LOADING(
+            "~PinnedStagingPool: cudaStreamDestroy failed rc="
+            << rc << " (" << cudaGetErrorString(rc) << ")");
+      }
+    }
+    // Clear any error left by best-effort cleanup.
+    (void)cudaGetLastError();
+  }
+
+  PinnedStagingPool(const PinnedStagingPool&) = delete;
+  PinnedStagingPool& operator=(const PinnedStagingPool&) = delete;
+
+ private:
+  PinnedStagingPool() = default;
+
+  cudaStream_t stream_{nullptr};
+  cudaEvent_t events_[2]{nullptr, nullptr};
+  // Cached borrowed pointers into stage_tensors_[i] to avoid a shim call
+  // per chunk in the hot path.
+  void* stage_[2]{nullptr, nullptr};
+  size_t buffer_bytes_{0};
+  int buf_{0};
+  // Owns the pinned host allocations via ATen's cached pinned host
+  // allocator. Declared last so it is destroyed first among members
+  // (after the destructor body has synchronized the stream).
+  RAIIAtenTensorHandle stage_tensors_[2]{};
+};
+
+inline bool envFlagIsEnabled(const char* env) {
+  if (env == nullptr || env[0] == '\0') {
+    return false;
+  }
+  std::string value(env);
+  std::transform(
+      value.begin(), value.end(), value.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+      });
+  return value != "0" && value != "false";
+}
+
+// Returns a PinnedStagingPool when pinned async constant copies are enabled
+// and host pinning succeeds. Returns nullptr otherwise so callers fall back to
+// the synchronous copy path. Per-buffer size comes from
+// AOTI_COPY_STAGE_BUFFER_BYTES (default 64 MiB).
+inline std::unique_ptr<PinnedStagingPool> tryMakeConstantsStagingPool() {
+  if (!torch::aot_inductor::usePinnedAsyncConstantsCopy()) {
+    return nullptr;
+  }
+  const size_t explicit_buffer_bytes =
+      torch::aot_inductor::pinnedAsyncConstantsCopyStageBufferBytes();
+  if (explicit_buffer_bytes > 0) {
+    return PinnedStagingPool::tryCreate(explicit_buffer_bytes);
+  }
+  // Resolve the env var once into a cached value, not the raw getenv pointer.
+  // Per POSIX that pointer may be invalidated by setenv/putenv/unsetenv.
+  static const size_t env_buffer_bytes = [] {
+    const char* env = std::getenv("AOTI_COPY_STAGE_BUFFER_BYTES");
+    size_t bytes = PinnedStagingPool::kDefaultBufferBytes;
+    if (env != nullptr && env[0] != '\0') {
+      try {
+        auto parsed = std::stoull(env);
+        if (parsed > 0) {
+          bytes = static_cast<size_t>(parsed);
+        }
+      } catch (...) {
+        // Ignore parse errors; use default.
+      }
+    }
+    return bytes;
+  }();
+  return PinnedStagingPool::tryCreate(env_buffer_bytes);
+}
 
 // NOLINTNEXTLINE(clang-diagnostic-unneeded-internal-declaration)
 RAIIDataPtr RAII_gpuMalloc(size_t num_bytes) {
@@ -384,6 +640,50 @@ RAIIDataPtr RAII_cpuMalloc(size_t num_bytes) {
 } // anonymous namespace
 
 namespace torch::aot_inductor {
+
+inline std::atomic<int>& pinnedAsyncConstantsCopySetting() {
+  // -1: use env fallback, 0: disabled, 1: enabled.
+  static std::atomic<int> setting{-1};
+  return setting;
+}
+
+inline void setUsePinnedAsyncConstantsCopy(bool enabled) {
+  pinnedAsyncConstantsCopySetting().store(
+      enabled ? 1 : 0, std::memory_order_relaxed);
+}
+
+inline bool usePinnedAsyncConstantsCopy() {
+  const int setting =
+      pinnedAsyncConstantsCopySetting().load(std::memory_order_relaxed);
+  if (setting != -1) {
+    return setting == 1;
+  }
+#ifdef USE_CUDA
+  static const bool enabled_from_env = [] {
+    const char* env = std::getenv("AOTI_COPY_USE_PINNED_ASYNC");
+    return envFlagIsEnabled(env);
+  }();
+  return enabled_from_env;
+#else
+  return false;
+#endif
+}
+
+inline std::atomic<size_t>& pinnedAsyncConstantsCopyStageBufferBytesSetting() {
+  // 0: use env/default fallback. Nonzero values are bytes per staging buffer.
+  static std::atomic<size_t> bytes{0};
+  return bytes;
+}
+
+inline void setPinnedAsyncConstantsCopyStageBufferBytes(size_t bytes) {
+  pinnedAsyncConstantsCopyStageBufferBytesSetting().store(
+      bytes, std::memory_order_relaxed);
+}
+
+inline size_t pinnedAsyncConstantsCopyStageBufferBytes() {
+  return pinnedAsyncConstantsCopyStageBufferBytesSetting().load(
+      std::memory_order_relaxed);
+}
 
 using ConstantMap =
     std::unordered_map<std::string, MaybeOwningAtenTensorHandle>;
@@ -694,6 +994,19 @@ class AOTInductorModelBase {
     size_t main_blob_idx = 0;
     size_t aux_cpu_blob_idx = 0;
 
+#ifdef USE_CUDA
+    // Opt-in pinned async staging pool for the constant H2D copies below.
+    // nullptr (default / on allocation failure) keeps the throttled
+    // synchronous path.
+    auto staging_pool = tryMakeConstantsStagingPool();
+    PinnedStagingPool* pool_raw = staging_pool.get();
+#endif
+
+    auto _copy_start = std::chrono::steady_clock::now();
+    AOTI_LOG_LOADING(
+        "load_constants: starting H2D copy of " << num_constants
+                                                << " constants");
+
     for (size_t i = 0; i < num_constants; i++) {
       bool from_folded = this->constant_from_folded(i);
       if (from_folded) {
@@ -725,7 +1038,12 @@ class AOTInductorModelBase {
               constants_internal_offset[main_blob_idx],
               bytes_read,
               data_size,
-              /* skip_copy = */ false);
+              /* skip_copy = */ false
+#ifdef USE_CUDA
+              ,
+              pool_raw
+#endif
+          );
         } else {
           auto* aux_cpu_constants_ptr =
               static_cast<uint8_t*>(aux_cpu_constant_blob_.get());
@@ -776,6 +1094,20 @@ class AOTInductorModelBase {
           opaque_metadata_size));
       constants_map_->emplace(std::move(name), tensor_handle);
     }
+#ifdef USE_CUDA
+    // Synchronize the staging stream (surfacing any async copy error) and
+    // release the pinned buffers before the loaded constants are observed by
+    // callers.
+    if (staging_pool != nullptr) {
+      staging_pool->finish();
+    }
+    staging_pool.reset();
+#endif
+    auto _copy_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - _copy_start)
+                        .count();
+    AOTI_LOG_LOADING(
+        "load_constants: H2D copy completed in " << _copy_ms << " ms");
     if (constants_map_) {
       this->update_constants_array_from_map();
     }
@@ -805,7 +1137,12 @@ class AOTInductorModelBase {
       size_t constant_offset,
       size_t bytes_read,
       size_t data_size,
-      bool skip_copy) {
+      bool skip_copy
+#ifdef USE_CUDA
+      ,
+      PinnedStagingPool* staging_pool = nullptr
+#endif
+  ) {
     auto* constants_ptr = static_cast<uint8_t*>(constant_blob_.get());
     uint8_t* internal_ptr = constants_ptr + constant_offset;
     // TODO: Handle shared storage case.
@@ -817,11 +1154,19 @@ class AOTInductorModelBase {
           ->memcpy(internal_ptr, _get_constants_start() + bytes_read, data_size)
           .wait();
 #elif USE_CUDA
-      aoti_cuda_memcpy_throttled(
-          internal_ptr,
-          _get_constants_start() + bytes_read,
-          data_size,
-          cudaMemcpyHostToDevice);
+      // Prefer the pinned async staging path when the caller supplied a pool
+      // (AOTI_COPY_USE_PINNED_ASYNC). Otherwise fall back to the throttled
+      // synchronous copy (master default).
+      if (staging_pool != nullptr) {
+        staging_pool->copyH2DViaStage(
+            internal_ptr, _get_constants_start() + bytes_read, data_size);
+      } else {
+        aoti_cuda_memcpy_throttled(
+            internal_ptr,
+            _get_constants_start() + bytes_read,
+            data_size,
+            cudaMemcpyHostToDevice);
+      }
 #elif USE_MPS
       aoti_torch_mps_memcpy(
           constants_ptr,
@@ -1084,11 +1429,21 @@ class AOTInductorModelBase {
         dladdr(__func__, &dl_info), "Can't find shared library name");
     int fd = open(dl_info.dli_fname, O_RDONLY);
     AOTI_RUNTIME_CHECK(fd >= 0, "Shared library file cannot be opened");
-    auto fsize = lseek(fd, 0, SEEK_END);
+#ifdef _WIN32
+    auto seek_result = _lseeki64(fd, 0, SEEK_END);
+#else
+    auto seek_result = lseek(fd, 0, SEEK_END);
+#endif
+    AOTI_RUNTIME_CHECK(
+        seek_result >= 0, "Failed to seek to end of shared library file");
     auto weights_size =
         reinterpret_cast<const uint64_t*>(_binary_constants_bin_start)[0];
     auto magic_number =
         reinterpret_cast<const uint64_t*>(_binary_constants_bin_start)[1];
+    uint64_t fsize = static_cast<uint64_t>(seek_result);
+    AOTI_RUNTIME_CHECK(
+        fsize >= weights_size,
+        "Shared library file is smaller than embedded weights size");
     auto weights_offset = fsize - weights_size;
     AOTI_RUNTIME_CHECK(
         (weights_offset & 0x3fff) == 0,

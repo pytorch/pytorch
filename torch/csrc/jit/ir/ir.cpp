@@ -34,7 +34,7 @@ std::string getNodesModuleHierarchy(const Node& n) {
     if (opt_module_info.has_value()) {
       const auto& module_instance_info = opt_module_info.value();
       if (!module_hierarchy.empty()) {
-        module_hierarchy.append(".");
+        module_hierarchy.push_back('.');
       }
       module_hierarchy.append(utils::get_module_info(module_instance_info));
     } else {
@@ -886,7 +886,7 @@ Value* Value::setDebugName(const std::string& name) {
       ss.imbue(c_locale);
 #endif
       ss << name_base << '.' << suffix++;
-      replacement_name = ss.str();
+      replacement_name = std::move(ss).str();
     } while (names.count(replacement_name) > 0);
 
     names_suffixes[name_base] = suffix;
