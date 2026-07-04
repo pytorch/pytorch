@@ -771,6 +771,58 @@ def _gpu_user_annotation_events(
     return gpu_user_events
 
 
+# GPU counter specs over the environment union's first 8 bytes (data, u64): (name,
+# environment_kind, value-from-data). POWER/SPEED pack two u32s (low | high<<32); TEMPERATURE/
+# COOLING are a single u32. powerLimit (the constant high half of POWER) is omitted. Descriptor
+# ids are assigned locally (by position) and mapped to global ids in _merge_counters; the viewer
+# groups the counters per gpu_id under "GPU / Counters".
+_ENV_COUNTERS = (
+    ("Power (W)", 3, lambda d: (d & 0xFFFFFFFF).astype(np.float64) / 1000.0),
+    ("Temperature (C)", 2, lambda d: d.astype(np.float64)),
+    ("SM Clock (MHz)", 1, lambda d: (d & 0xFFFFFFFF).astype(np.float64)),
+    ("Memory Clock (MHz)", 1, lambda d: (d >> np.uint64(32)).astype(np.float64)),
+    ("Fan Speed (%)", 4, lambda d: d.astype(np.float64)),
+)
+
+
+def _build_gpu_counters(env: dict | None, active_devices: set):
+    """Build the GpuCounterEvent payload from the sampled environment column:
+    (specs, gpu_id[], ts[], counter_id[], value[]) or None. specs = [(counter_id, name), ...];
+    the viewer renders these under "GPU / Counters / <gpu>" (sibling of Hardware Queues), keyed
+    by gpu_id. Restricted to devices that ran GPU work so idle GPUs show no counters."""
+    if not env or not len(env.get("start_ns", ())):
+        return None
+    ek = np.asarray(env["environment_kind"])
+    data = np.asarray(env["data"], dtype=np.uint64)
+    ts = np.ascontiguousarray(env["start_ns"], dtype=np.int64)
+    dev = np.asarray(env["device_id"], dtype=np.int64)
+    base = (
+        np.isin(dev, list(active_devices))
+        if active_devices
+        else np.ones(len(dev), dtype=bool)
+    )
+    specs, gpu_l, ts_l, cid_l, val_l = [], [], [], [], []
+    for name, kind_val, value_of in _ENV_COUNTERS:
+        m = base & (ek == kind_val)
+        if not m.any():
+            continue
+        cid = len(specs)  # local id; _merge_counters assigns the global id
+        specs.append((cid, name))
+        gpu_l.append(dev[m])
+        ts_l.append(ts[m])
+        cid_l.append(np.full(int(m.sum()), cid, dtype=np.int32))
+        val_l.append(value_of(data[m]))
+    if not specs:
+        return None
+    return (
+        specs,
+        np.concatenate(gpu_l).astype(np.int32),
+        np.concatenate(ts_l).astype(np.int64),
+        np.concatenate(cid_l).astype(np.int32),
+        np.concatenate(val_l).astype(np.float64),
+    )
+
+
 # PM counter descriptor ids: local (0-based, by metric order); _merge_counters maps them onto the
 # global monotonic id sequence, alongside the env and cycle counters.
 
@@ -834,6 +886,67 @@ def _build_pm_counters(pm: dict | None, active_devices: set):
         np.concatenate(ts_l).astype(np.int64),
         np.concatenate(cid_l).astype(np.int32),
         np.concatenate(val_l).astype(np.float64),
+    )
+
+
+# Per-kernel derived "Cycles" counter for the GPU Compute panel. It is *elapsed* cycles =
+# duration * clock -- pure scalar math from the kernel's duration + the device SM clock, no perf
+# counters (so it is a friendly display name, not the raw gpc__cycles_elapsed metric). SM
+# Frequency is intentionally not emitted: it is the same value as the always-on "SM Clock (MHz)"
+# environment counter. Local descriptor id 0 -- _merge_counters assigns the global id.
+_CYCLE_COUNTER = (0, "Cycles (Current Kernel)")
+
+
+def _device_clocks_hz(env: dict | None) -> dict[int, float]:
+    """Median SM clock (Hz) per device from the sampled ENVIRONMENT SPEED records
+    (environment_kind==1; smClock is the low u32 of the union, in MHz)."""
+    if not env or not len(env.get("start_ns", ())):
+        return {}
+    ek = np.asarray(env["environment_kind"])
+    m = ek == 1
+    if not m.any():
+        return {}
+    sm_mhz = (
+        np.asarray(env["data"], dtype=np.uint64)[m] & np.uint64(0xFFFFFFFF)
+    ).astype(np.float64)
+    dev = np.asarray(env["device_id"], dtype=np.int64)[m]
+    return {int(d): float(np.median(sm_mhz[dev == d])) * 1e6 for d in np.unique(dev)}
+
+
+def _build_cycle_counters(kernel: dict | None, env: dict | None, active_devices: set):
+    """Per-kernel Cycles (gpc__cycles_elapsed = duration * clock) for the GPU Compute panel,
+    derived as scalar math from each kernel's duration (activity record) and the device SM clock
+    (env counter). One sample per kernel at its start, so every kernel gets an exact value (no
+    sampling sparseness); placed in the COMPUTE group so the panel's kernel<->counter time-window
+    join finds it, and emitted as an int (a cycle count). Returns the 5-tuple plus a 6th
+    compute_group and 7th int_value_ids."""
+    if not kernel or not len(kernel.get("start_ns", ())):
+        return None
+    clocks = _device_clocks_hz(env)
+    if not clocks:
+        return None
+    cid = _CYCLE_COUNTER[0]
+    ts = np.ascontiguousarray(kernel["start_ns"], dtype=np.int64)
+    end = np.asarray(kernel["end_ns"], dtype=np.int64)
+    dev = np.asarray(kernel["device_id"], dtype=np.int64)
+    clk = np.array([clocks.get(int(d), 0.0) for d in dev], dtype=np.float64)
+    base = (clk > 0) & (
+        np.isin(dev, list(active_devices))
+        if active_devices
+        else np.ones(len(dev), dtype=bool)
+    )
+    if not base.any():
+        return None
+    devb = dev[base].astype(np.int32)
+    cycles = (np.maximum(end - ts, 0).astype(np.float64)[base] / 1e9) * clk[base]
+    return (
+        [_CYCLE_COUNTER],
+        devb,
+        ts[base].astype(np.int64),
+        np.full(len(devb), cid, np.int32),
+        cycles,
+        [cid],  # compute_group
+        [cid],  # int_value_ids
     )
 
 
@@ -1003,14 +1116,18 @@ def merge_trace_window_into_chrome_trace(
 
     events.extend(trace_events)
 
-    # GPU counters (PM utilization) as chrome "C" events on the device pid -- the JSON
-    # counterpart of the .pftrace GPU counter tracks.
+    # GPU counters (env power/temp/clocks, PM utilization, per-kernel cycles) as chrome "C" events
+    # on the device pid -- the JSON counterpart of the .pftrace GPU counter tracks.
     columns = cast("dict[str, dict[str, Any]]", trace_window.get("columns", {}))
     active_devices = _active_devices(columns)
     events.extend(
         _build_chrome_counters(
             _merge_counters(
+                _build_gpu_counters(columns.get("environment"), active_devices),
                 _build_pm_counters(columns.get("pm_sampling"), active_devices),
+                _build_cycle_counters(
+                    columns.get("kernel"), columns.get("environment"), active_devices
+                ),
             ),
             base_ns,
         )

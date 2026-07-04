@@ -446,6 +446,35 @@ class TestCuptiRecords(TestCase):
             )
         )
 
+    def test_chrome_counter_events(self):
+        # GPU counters render as chrome "C" (counter) events in a dedicated per-device
+        # "GPU N Counters" process row, separate from the GPU kernel work. No CUDA.
+        import numpy as np
+
+        from torch.profiler._cupti.monitor_trace import (
+            _build_chrome_counters,
+            _gpu_counter_process,
+            _merge_counters,
+        )
+
+        name = "Power (W)"
+        n = 4
+        part = (
+            [(1, name)],
+            np.zeros(n, dtype=np.int32),  # device (gpu) id
+            np.arange(1000, 1000 + n * 100, 100, dtype=np.int64),  # start_ns
+            np.ones(n, dtype=np.int32),  # counter_id per sample
+            np.linspace(80.0, 95.0, n),  # values
+        )
+        events = _build_chrome_counters(_merge_counters(part), base_ns=0)
+        counters = [e for e in events if e["ph"] == "C"]
+        self.assertEqual(len(counters), n)
+        e = counters[0]
+        self.assertEqual(e["pid"], _gpu_counter_process(0))  # "GPU 0 Counters"
+        self.assertEqual(e["name"], name)
+        self.assertEqual(e["ts"], 1.0)  # (1000 - base_ns) / 1000
+        self.assertEqual(e["args"], {"": 80.0})
+
     def test_metadata_store_explicit_id(self):
         # put_external(blob, external_id): an explicit non-zero id targets a specific
         # collective rather than the current pushed one -- the seam for a backend to
