@@ -108,7 +108,9 @@ class ModIndex(torch.autograd.Function):
     def forward(x: Tensor, indices: list[Tensor]) -> Tensor:
         if not indices:
             if x.ndim != 0:
-                raise RuntimeError("mod_index with no indices only supports scalar tensors")
+                raise RuntimeError(
+                    "mod_index with no indices only supports scalar tensors"
+                )
             return x
         return torch.ops.aten.index(x, indices)
 
