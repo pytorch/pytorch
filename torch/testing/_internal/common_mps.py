@@ -621,11 +621,7 @@ if torch.backends.mps.is_available():
             "nn.functional.conv3d": [torch.int64],
             "nn.functional.conv_transpose1d": [torch.int64],
             "nn.functional.conv_transpose2d": [torch.int64, torch.bfloat16],
-            "nn.functional.conv_transpose3d": [
-                torch.int64,
-                torch.bfloat16,
-                torch.float16,
-            ],
+            "nn.functional.conv_transpose3d": [torch.int64],
             # Unsupported dtypes
             # GEMM on MPS is not supported for integral types
             "nn.functional.linear": [
@@ -718,6 +714,9 @@ if torch.backends.mps.is_available():
         ON_MPS_XFAILLIST: dict[str, list | None] = {
             # Exception: Caused by `torch.arange(-8.001, -4.0, dtype=torch.uint8, device="mps")`
             "arange": [torch.uint8],
+            # fp16/bf16 accumulation order drifts past the fixed tolerance;
+            # remove once the drift-based fallback from #183743 lands.
+            "nn.functional.conv_transpose3d": [torch.float16, torch.bfloat16],
             # Failure due to precision issue for fp16
             # on both cpu and mps there are test cases that might produce inf result
             # 'nn.functional.pairwise_distance': [torch.float16],
