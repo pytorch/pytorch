@@ -11,8 +11,15 @@ endif
 CUDA_VERSION_SHORT       ?= 12.1
 CUDA_VERSION             ?= 12.1.1
 CUDNN_VERSION            ?= 9
+ROCM_VERSION             ?=
+ROCM_VERSION_SHORT       ?=
 BASE_RUNTIME              = ubuntu:24.04
 BASE_DEVEL                = ubuntu:24.04
+# ROCm base images
+ifneq ("$(ROCM_VERSION)","")
+BASE_RUNTIME              = rocm/dev-ubuntu-24.04:$(ROCM_VERSION)-complete
+BASE_DEVEL                = rocm/dev-ubuntu-24.04:$(ROCM_VERSION)-complete
+endif
 CMAKE_VARS               ?=
 
 # The conda channel to use to install cudatoolkit
@@ -41,7 +48,8 @@ BUILD_ARGS                = --build-arg BASE_IMAGE=$(BASE_IMAGE) \
 							--build-arg INSTALL_CHANNEL=$(INSTALL_CHANNEL) \
 							--build-arg TRITON_VERSION=$(TRITON_VERSION) \
 							--build-arg BUILD_TYPE=$(BUILD_TYPE) \
-							--build-arg CMAKE_VARS="$(CMAKE_VARS)"
+							--build-arg CMAKE_VARS="$(CMAKE_VARS)" \
+							--build-arg ROCM_VERSION=$(ROCM_VERSION)
 EXTRA_DOCKER_BUILD_FLAGS ?=
 
 BUILD                    ?= build
@@ -118,6 +126,24 @@ runtime-push: BASE_IMAGE := $(BASE_RUNTIME)
 runtime-push: DOCKER_TAG := $(PYTORCH_VERSION)-cuda$(CUDA_VERSION_SHORT)-cudnn$(CUDNN_VERSION)-runtime
 runtime-push:
 	$(DOCKER_PUSH)
+
+endif
+
+ifneq ("$(ROCM_VERSION)","")
+
+.PHONY: runtime-image
+runtime-image: BASE_IMAGE := $(BASE_RUNTIME)
+runtime-image: BUILD_TYPE := official
+runtime-image: DOCKER_TAG := $(PYTORCH_VERSION)-rocm$(ROCM_VERSION_SHORT)-runtime
+runtime-image:
+        $(DOCKER_BUILD)
+
+.PHONY: devel-image
+devel-image: BASE_IMAGE := $(BASE_DEVEL)
+devel-image: BUILD_TYPE := dev
+devel-image: DOCKER_TAG := $(PYTORCH_VERSION)-rocm$(ROCM_VERSION_SHORT)-devel
+devel-image:
+        $(DOCKER_BUILD)
 
 endif
 

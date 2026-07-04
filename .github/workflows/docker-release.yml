@@ -82,6 +82,8 @@ jobs:
       CUDA_VERSION: ${{ matrix.cuda_full_version }}
       CUDA_VERSION_SHORT: ${{ matrix.cuda }}
       CUDNN_VERSION: ${{ matrix.cudnn_version }}
+      ROCM_VERSION: ${{ matrix.rocm_full_version }}
+      ROCM_VERSION_SHORT: ${{ matrix.rocm }}
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
