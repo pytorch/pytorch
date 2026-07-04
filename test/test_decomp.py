@@ -1208,7 +1208,7 @@ def forward(self, scores_1, mask_1, value_1):
         torch.testing.assert_close(ref, res, check_dtype=True)
 
 
-instantiate_device_type_tests(TestDecomp, globals())
+instantiate_device_type_tests(TestDecomp, globals(), allow_xpu=True)
 
 
 class DecompOneOffTests(TestCase):
