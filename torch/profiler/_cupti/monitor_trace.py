@@ -1448,6 +1448,27 @@ def _window_to_pftrace(
                 gpu_track_uuids.add(int(ids[j]))
         return ids[inv]
 
+    def api_uuids(pid_arr, tid_arr):
+        # CUDA runtime/driver API calls render on a sibling "(CUDA API)" thread lane per CPU
+        # thread: a distinct synthetic tid (real tid + a high offset) so Perfetto does not merge
+        # it into the kineto cpu_op thread. The two come from different clock domains, so their
+        # slices overlap, which the TrackEvent begin/end stack (strict per-track nesting) cannot
+        # represent -- separate lanes keep each source's slices exact.
+        key = (pid_arr.astype(np.int64) << np.int64(32)) | (
+            tid_arr.astype(np.int64) & 0xFFFFFFFF
+        )
+        uniq, inv = np.unique(key, return_inverse=True)
+        ids = np.empty(len(uniq), dtype=np.uint64)
+        for j, k in enumerate(uniq.tolist()):
+            pid = int(k >> 32)
+            tid = int(k & 0xFFFFFFFF)
+            if tid >= 0x80000000:  # sign-extend the packed int32 tid
+                tid -= 0x100000000
+            ids[j] = track_for(
+                pid, tid + 0x40000000, f"process {pid}", f"thread {tid} (CUDA API)"
+            )
+        return ids[inv]
+
     def int_anno(key, col, skip_zero=False, present=None):
         # present: optional per-slice uint8 mask (emit the int only where set).
         return (
@@ -1620,9 +1641,7 @@ def _window_to_pftrace(
             dtype=np.int64,
             count=len(keep),
         )
-        uu = gpu_uuids(
-            c["process_id"][keep], tid, "process {}", "thread {}", is_gpu=False
-        )
+        uu = api_uuids(c["process_id"][keep], tid)
         names = [names_u[i] for i in inv[keep].tolist()]
         gpu_corr = np.where(corr_u[inv[keep]], corr, 0)
         ints = [int_anno("cbid", c["cbid"][keep]), int_anno("correlation", corr)]
