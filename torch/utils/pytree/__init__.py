@@ -243,6 +243,10 @@ def register_pytree_node(
     )
 
 
+if _TYPE_CHECKING:
+    TreeSpec: _TypeAlias = PyTreeSpec
+
+
 def __getattr__(name: str) -> _Any:
     if name == "cxx":
         return _import_cxx_pytree_and_store()  # lazy import
