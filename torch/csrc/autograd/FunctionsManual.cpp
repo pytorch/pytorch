@@ -447,16 +447,11 @@ std::tuple<Tensor, Tensor, Tensor> _pdist_backward_backward(
   }
 
   auto idx = at::triu_indices(n, n, 1, self.options().dtype(at::kLong));
-  auto row = idx.select(0, 0);
-  auto col = idx.select(0, 1);
-  auto lin_ab = row * n + col;
-  auto lin_ba = col * n + row;
+  torch::List<std::optional<Tensor>> ij({idx.select(0, 0), idx.select(0, 1)});
 
   auto scatter_sym = [&](const Tensor& packed) {
-    auto full = at::zeros({n * n}, packed.options());
-    full.put_(lin_ab, packed);
-    full.put_(lin_ba, packed);
-    return full.view({n, n});
+    auto upper = at::zeros({n, n}, packed.options()).index_put(ij, packed);
+    return upper + upper.mT();
   };
 
   auto [P, gx1, gx2, Cd] = _cdist_backward_backward(
@@ -469,11 +464,11 @@ std::tuple<Tensor, Tensor, Tensor> _pdist_backward_backward(
       {need_go, need_self, need_self, need_pdist});
 
   if (need_go)
-    grad_grad_output = (P + P.mT()).reshape({n * n}).take(lin_ab);
+    grad_grad_output = (P + P.mT()).index(ij);
   if (need_self)
     grad_self = gx1 + gx2;
   if (need_pdist)
-    grad_pdist = (Cd + Cd.mT()).reshape({n * n}).take(lin_ab);
+    grad_pdist = (Cd + Cd.mT()).index(ij);
   return std::make_tuple(
       std::move(grad_grad_output), std::move(grad_self), std::move(grad_pdist));
 }
