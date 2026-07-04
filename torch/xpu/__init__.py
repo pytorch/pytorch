@@ -150,7 +150,7 @@ def _enum_zes_device_infos(visible_mask: list[int]) -> int:
     """
     try:
         import pyzes  # type: ignore[import]
-    except ImportError:
+    except Exception:
         return -1
 
     global _cached_zes_device_infos
@@ -317,17 +317,18 @@ def is_initialized():
 
 
 def _lazy_call(callable, **kwargs) -> None:
-    if is_initialized():
-        callable()
-    else:
-        global _lazy_seed_tracker
-        if kwargs.get("seed_all", False):
-            _lazy_seed_tracker.queue_seed_all(callable, traceback.format_stack())
-        elif kwargs.get("seed", False):
-            _lazy_seed_tracker.queue_seed(callable, traceback.format_stack())
+    with _initialization_lock:
+        if is_initialized():
+            callable()
         else:
-            # Don't store the actual traceback to avoid memory cycle
-            _queued_calls.append((callable, traceback.format_stack()))
+            global _lazy_seed_tracker
+            if kwargs.get("seed_all", False):
+                _lazy_seed_tracker.queue_seed_all(callable, traceback.format_stack())
+            elif kwargs.get("seed", False):
+                _lazy_seed_tracker.queue_seed(callable, traceback.format_stack())
+            else:
+                # Don't store the actual traceback to avoid memory cycle
+                _queued_calls.append((callable, traceback.format_stack()))
 
 
 def init() -> None:
@@ -767,6 +768,31 @@ def _get_rng_state_offset(device: int | str | torch.device = "xpu") -> int:
     return default_generator.get_offset()
 
 
+def _import_pyzes():
+    """Return the imported pyzes module; raise ImportError if missing, RuntimeError if the GPU driver is unavailable."""
+    try:
+        import pyzes  # type: ignore[import]
+    except ImportError:
+        raise ImportError(
+            "pyzes is required; install it with 'pip install pyzes'."
+        ) from None
+    except Exception as err:
+        raise RuntimeError(
+            "Failed to import pyzes. Ensure the GPU driver is installed with Level Zero Sysman support."
+        ) from err
+    return pyzes
+
+
+def _get_pyzes_version() -> tuple[int, ...]:
+    """
+    Return the version of the pyzes package as a tuple of integers (major, minor, patch).
+    Always ensure that the pyzes package is installed before calling this function.
+    """
+    from importlib.metadata import version
+
+    return tuple(map(int, version("pyzes").split(".")))
+
+
 def _zes_check(rc: int, msg: str) -> None:
     """Raise RuntimeError if the Level Zero Sysman call failed (rc != ZE_RESULT_SUCCESS)."""
     import pyzes  # type: ignore[import]
@@ -800,12 +826,7 @@ def _get_zes_temperature_handle(device: Device = None) -> c_void_p:
             current device, given by :func:`~torch.xpu.current_device`,
             if ``None`` (default).
     """
-    try:
-        import pyzes  # type: ignore[import]
-    except ImportError:
-        raise ImportError(
-            "pyzes is required; install it with 'pip install pyzes'"
-        ) from None
+    pyzes = _import_pyzes()
 
     device = _get_device_index(device, optional=True)
     _zes_ensure_device_infos(device)
@@ -897,12 +918,7 @@ def _get_zes_frequency_handle(device: Device = None) -> c_void_p:
             current device, given by :func:`~torch.xpu.current_device`,
             if ``None`` (default).
     """
-    try:
-        import pyzes  # type: ignore[import]
-    except ImportError:
-        raise ImportError(
-            "pyzes is required; install it with 'pip install pyzes'"
-        ) from None
+    pyzes = _import_pyzes()
 
     device = _get_device_index(device, optional=True)
     _zes_ensure_device_infos(device)
@@ -912,6 +928,7 @@ def _get_zes_frequency_handle(device: Device = None) -> c_void_p:
         return info.frequency_handle
 
     device_handle = info.device_handle
+    subdevice_id = info.subdevice_id
 
     # Enumerate all frequency domains under this device handle.
     freq_count = c_uint32(0)
@@ -929,10 +946,32 @@ def _get_zes_frequency_handle(device: Device = None) -> c_void_p:
         "Can't get Level Zero Sysman frequency domain handles.",
     )
 
-    # TODO: pyzes lacks zesFrequencyGetProperties, so we cannot filter by
-    # subdevice or domain type. We assume index 0 (ZES_FREQ_DOMAIN_GPU)
-    # is the GPU frequency domain.
-    frequency_handle = freq_handles[0]
+    if _get_pyzes_version() < (0, 1, 2):
+        frequency_handle = freq_handles[0]
+        info.frequency_handle = frequency_handle
+        return frequency_handle
+
+    frequency_handle = None
+    for freq_handle in freq_handles:
+        freq_props = pyzes.zes_freq_properties_t()
+        freq_props.stype = pyzes.ZES_STRUCTURE_TYPE_FREQ_PROPERTIES
+        _zes_check(
+            pyzes.zesFrequencyGetProperties(freq_handle, byref(freq_props)),
+            "Can't get Level Zero Sysman frequency properties.",
+        )
+        if freq_props.type != pyzes.ZES_FREQ_DOMAIN_GPU:
+            continue
+        if subdevice_id is not None:
+            if freq_props.onSubdevice and freq_props.subdeviceId == subdevice_id:
+                frequency_handle = freq_handle
+                break
+        else:
+            if not freq_props.onSubdevice:
+                frequency_handle = freq_handle
+                break
+
+    if frequency_handle is None:
+        raise RuntimeError("No Level Zero Sysman GPU frequency handle found.")
     info.frequency_handle = frequency_handle
     return frequency_handle
 
@@ -968,12 +1007,7 @@ def _get_zes_power_handle(device: Device = None) -> c_void_p:
             current device, given by :func:`~torch.xpu.current_device`,
             if ``None`` (default).
     """
-    try:
-        import pyzes  # type: ignore[import]
-    except ImportError:
-        raise ImportError(
-            "pyzes is required; install it with 'pip install pyzes'"
-        ) from None
+    pyzes = _import_pyzes()
 
     device = _get_device_index(device, optional=True)
     _zes_ensure_device_infos(device)
@@ -1064,12 +1098,7 @@ def _get_zes_engine_handle(device: Device = None) -> c_void_p:
             current device, given by :func:`~torch.xpu.current_device`,
             if ``None`` (default).
     """
-    try:
-        import pyzes  # type: ignore[import]
-    except ImportError:
-        raise ImportError(
-            "pyzes is required; install it with 'pip install pyzes'"
-        ) from None
+    pyzes = _import_pyzes()
 
     device = _get_device_index(device, optional=True)
     _zes_ensure_device_infos(device)
@@ -1183,12 +1212,7 @@ def _zes_get_memory_handle(device: Device = None) -> c_void_p:
             current device, given by :func:`~torch.xpu.current_device`,
             if ``None`` (default).
     """
-    try:
-        import pyzes  # type: ignore[import]
-    except ImportError:
-        raise ImportError(
-            "pyzes is required; install it with 'pip install pyzes'"
-        ) from None
+    pyzes = _import_pyzes()
 
     device = _get_device_index(device, optional=True)
     _zes_ensure_device_infos(device)
@@ -1329,6 +1353,7 @@ from .memory import (
     change_current_allocator,
     empty_cache,
     get_per_process_memory_fraction,
+    list_gpu_processes,
     max_memory_allocated,
     max_memory_reserved,
     mem_get_info,
@@ -1393,6 +1418,7 @@ __all__ = [
     "is_current_stream_capturing",
     "is_initialized",
     "is_tf32_supported",
+    "list_gpu_processes",
     "make_graphed_callables",
     "manual_seed",
     "manual_seed_all",

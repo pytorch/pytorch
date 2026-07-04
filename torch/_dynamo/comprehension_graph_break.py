@@ -383,7 +383,7 @@ def _handle_comprehension_graph_break(
         if stack_pops_null_mask[i]:
             cg.extend_output(cg.pop_null())
         else:
-            cg.extend_output([create_instruction("LIST_APPEND", arg=1)])
+            cg.extend_output(cg.create_list_append())
     cg.extend_output([create_instruction("POP_TOP")])
 
     # Stack: cells, [frame_values], *(non-popped items)
@@ -486,7 +486,7 @@ def _handle_comprehension_graph_break(
                     ]
                 )
             else:
-                cg.extend_output([create_instruction("LIST_APPEND", arg=1)])
+                cg.extend_output(cg.create_list_append())
             # Stack: ..., comp_tuple, fv0
         cg.extend_output(
             [
@@ -522,7 +522,7 @@ def _handle_comprehension_graph_break(
             cg.extend_output(
                 [
                     *create_swap(2),
-                    create_instruction("LIST_APPEND", arg=1),
+                    *cg.create_list_append(),
                     create_instruction("POP_TOP"),
                 ]
             )

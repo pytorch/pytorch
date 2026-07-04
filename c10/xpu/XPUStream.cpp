@@ -362,18 +362,17 @@ std::ostream& operator<<(std::ostream& stream, const XPUStream& s) {
  * Note [Synchronize Streams on Device]
  *
  * syncStreamsOnDevice waits for all work previously submitted to the SYCL
- * queues we manage on `device`. Two paths exist:
+ * queues we manage on `device`. It walks every reserved queue in each priority
+ * pool and calls `wait()` on it; only queues we own are drained, SYCL queues
+ * created outside our pools are unaffected.
  *
- *  1. Fast path (SYCL >= 2026.0 and device exposes `ext_oneapi_device_wait`):
- *     delegate to `device_synchronize`, which issues a single
- *     `ext_oneapi_wait_and_throw()` -- a true device-wide wait.
- *  2. Legacy path (otherwise): walk every reserved queue in each priority
- *     pool and `wait()` on it. This only drains queues we own; SYCL queues
- *     outside our pools are unaffected.
+ * A true device-wide wait via `ext_oneapi_wait_and_throw()` (available with
+ * SYCL >= 2026.0 on devices exposing `ext_oneapi_device_wait`) would be more
+ * efficient, but it does not currently interoperate with XPUGraph. We will
+ * switch to that path once the XPUGraph interaction is resolved.
  */
 
-// Note: The stream pools are lazily initialized on the legacy path; the fast
-// path bypasses our pools entirely.
+// Note: The stream pools are lazily initialized on first call.
 void syncStreamsOnDevice(DeviceIndex device) {
   if (device == -1) {
     device = c10::xpu::current_device();
@@ -396,18 +395,7 @@ void syncStreamsOnDevice(DeviceIndex device) {
     }
   };
 
-#if SYCL_COMPILER_VERSION < 20260000
   legacy_sync();
-#else
-  // TODO: drop the legacy fallback once a driver supporting
-  // `ext_oneapi_device_wait` is widely deployed across all supported platforms.
-  if (c10::xpu::get_raw_device(device).has(
-          sycl::aspect::ext_oneapi_device_wait)) {
-    c10::xpu::device_synchronize(device);
-  } else {
-    legacy_sync();
-  }
-#endif
 }
 
 } // namespace c10::xpu
