@@ -139,9 +139,7 @@ class TestIntervalMaskPacking(InductorTestCase):
             case "batch_dependent":
                 output = graph.call_function(torch.ops.aten.ge.Tensor, (b, kv_idx))
             case "row_bounded_causal":
-                row_bound = graph.call_function(
-                    torch.ops.aten.lt.Scalar, (q_idx, 100)
-                )
+                row_bound = graph.call_function(torch.ops.aten.lt.Scalar, (q_idx, 100))
                 output = graph.call_function(
                     torch.ops.aten.bitwise_and.Tensor, (causal, row_bound)
                 )
@@ -150,9 +148,7 @@ class TestIntervalMaskPacking(InductorTestCase):
                     torch.ops.aten.logical_not.default, (causal,)
                 )
             case "ne_diagonal":
-                output = graph.call_function(
-                    torch.ops.aten.ne.Tensor, (kv_idx, q_idx)
-                )
+                output = graph.call_function(torch.ops.aten.ne.Tensor, (kv_idx, q_idx))
             case "lane_uniform_eq":
                 output = graph.call_function(torch.ops.aten.eq.Scalar, (q_idx, 16))
             case _:

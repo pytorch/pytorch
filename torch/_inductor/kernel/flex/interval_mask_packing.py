@@ -295,7 +295,9 @@ class PackedMaskAnalyzer:
                 if intervals is None:
                     return None
                 return self.complement_intervals(intervals)
-            case torch.ops.aten.logical_not.default | torch.ops.aten.bitwise_not.default:
+            case (
+                torch.ops.aten.logical_not.default | torch.ops.aten.bitwise_not.default
+            ):
                 child = node.args[0]
                 if not isinstance(child, torch.fx.Node):
                     return None
