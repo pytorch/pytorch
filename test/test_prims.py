@@ -436,7 +436,7 @@ class TestRefs(TestCase):
 
 
 
-instantiate_device_type_tests(TestRefs, globals())
+instantiate_device_type_tests(TestRefs, globals(), allow_xpu=True)
 
 
 class TestDecomp(TestCase):
@@ -482,7 +482,7 @@ class TestDecomp(TestCase):
         self.assertEqual(res, expected)
 
 
-instantiate_device_type_tests(TestDecomp, globals())
+instantiate_device_type_tests(TestDecomp, globals(), allow_xpu=True)
 
 
 if __name__ == "__main__":

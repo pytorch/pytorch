@@ -627,7 +627,7 @@ class TestDefaultBackend(torch._dynamo.test_case.TestCase):
         self.assertEqual(len(eager_and_record.graphs), 0)
 
 
-instantiate_device_type_tests(TestOptimizations, globals())
+instantiate_device_type_tests(TestOptimizations, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

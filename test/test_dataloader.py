@@ -3966,7 +3966,7 @@ class TestOutOfOrderDataLoader(TestCase):
         self.assertEqual(expected_data, data)
 
 
-instantiate_device_type_tests(TestDataLoaderDeviceType, globals())
+instantiate_device_type_tests(TestDataLoaderDeviceType, globals(), allow_xpu=True)
 
 
 if __name__ == "__main__":
