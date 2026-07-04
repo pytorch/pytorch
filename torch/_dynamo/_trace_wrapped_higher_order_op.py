@@ -109,7 +109,7 @@ class ModIndex(torch.autograd.Function):
         if not indices:
             if x.ndim != 0:
                 raise RuntimeError("mod_index with no indices only supports scalar tensors")
-            return x.view(())
+            return x
         return torch.ops.aten.index(x, indices)
 
     @staticmethod

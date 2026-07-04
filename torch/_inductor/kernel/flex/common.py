@@ -99,8 +99,8 @@ def zeros_and_scatter_lowering(shape: list[int], indices, values):
     device = grad.get_device()
     if device is None:
         raise AssertionError("device must not be None")
-    if len(indices) == 0:
-        if len(shape) != 0:
+    if not indices:
+        if shape:
             raise AssertionError(
                 "zeros_and_scatter with no indices only supports scalar outputs"
             )

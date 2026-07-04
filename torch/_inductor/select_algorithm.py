@@ -516,7 +516,7 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
         ):
             return f"tl.broadcast_to(tl.reshape({index_str}, []), {shape})"
         if not index_shape and len(index.free_symbols) == 0:
-            return f"tl.full({shape}, {index_str}, tl.int64)"
+            return f"tl.full({shape}, {index_str}, INDEX_DTYPE)"
         return f"tl.broadcast_to({index_str}, {shape})"
 
 
