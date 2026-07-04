@@ -126,6 +126,7 @@ if torch.backends.mps.is_available():
             "masked_fill",
             "masked_scatter",
             "masked_select",
+            "matrix_exp",
             "meshgridlist_of_tensors",
             "meshgridvariadic_tensors",
             "movedim",
@@ -371,7 +372,6 @@ if torch.backends.mps.is_available():
             "linalg.ldl_solve": None,
             "linalg.matrix_sqrth": None,
             "linalg.polar": None,
-            "matrix_exp": None,
             "max_pool2d_with_indices_backward": [
                 torch.int8,
                 torch.int16,

@@ -11292,6 +11292,33 @@ class TestLinalgMPS(TestCaseMPS):
         self.assertEqual(mps.rank.cpu(), cpu.rank)
         self.assertEqual(mps.singular_values.cpu(), cpu.singular_values)
 
+    @dtypes(torch.float32, torch.complex64, torch.float16, torch.bfloat16)
+    @parametrize("out", ["none", "zeros", "ones"])
+    @parametrize("m, n, data, noncontig", [
+        (1, 3, (2, 2), False),
+        (2, 6, (256, 256), False),
+        (3, 4, (7, 7, 7), False),
+        (6, 5, (512, 512), False),
+        (5, 3, (128, 128), True),
+    ])
+    def test_compute_linear_combination(self, device, dtype, m, n, data, noncontig, out):
+        torch.manual_seed(0)
+        coeff_dtype = torch.float32 if dtype.is_complex else dtype  # coeffs are real
+        tol = {torch.float16: (2e-2, 2e-2), torch.bfloat16: (5e-2, 5e-2)}.get(dtype, (1e-4, 1e-4))
+        coeffs = torch.rand(m, n, dtype=coeff_dtype)
+        x = torch.randn(n, *data, 2, dtype=dtype)[..., 1] if noncontig else torch.randn(n, *data, dtype=dtype)
+        xm, cm = x.to(device), coeffs.to(device)
+        if out == "none":
+            expected = torch._compute_linear_combination(x, coeffs)
+            actual = torch._compute_linear_combination(xm, cm)
+        else:
+            init = torch.zeros if out == "zeros" else torch.ones
+            expected = init(m, *data, dtype=dtype)
+            actual = init(m, *data, device=device, dtype=dtype)
+            torch._compute_linear_combination(x, coeffs, out=expected)
+            torch._compute_linear_combination(xm, cm, out=actual)
+        self.assertEqual(actual.cpu(), expected, atol=tol[0], rtol=tol[1])
+
     def test_matrix_rank(self, device="mps", dtype=torch.float32):
         matrix_rank = torch.linalg.matrix_rank
 
@@ -15037,6 +15064,10 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.conv_transpose3d',
         'matmul', '__rmatmul__',
         'linalg.multi_dot',
+        # matrix_exp is Taylor + scale-and-square, i.e. repeated matmuls, so MPS
+        # and CPU diverge by ~1e-5 like the rest of this list; complex64 outputs
+        # of magnitude e^||A|| also need rtol rather than a tight atol.
+        'matrix_exp',
         'addbmm',
         # Accumulates sigmoid + log + weighted sum rounding; CPU and MPS
         # end up within ~3e-5 of fp64 but differ from each other by more
