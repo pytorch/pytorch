@@ -361,31 +361,67 @@ class PackedMaskAnalyzer:
         *,
         strict: bool,
     ) -> MaybeIntervalSet:
-        """Convert a lane-affine comparison into one packed keep interval."""
+        """Convert ``lhs_expr < rhs_expr`` or ``lhs_expr <= rhs_expr`` to an interval.
+
+        The caller normalizes ``>`` and ``>=`` by swapping operands, so this method
+        only has to lower ``lhs_expr - rhs_expr < 0`` when ``strict`` is true and
+        ``lhs_expr - rhs_expr <= 0`` otherwise. The difference decomposes as
+        ``lane_coeff * mask_lane + rest``, and each unit coefficient maps to a mask
+        shape:
+
+        - ``1``: kv on the small side, e.g. ``kv_idx < q_idx`` (causal-style) ->
+          prefix interval ``[0, upper)``.
+        - ``-1``: kv on the large side, e.g. ``start[b] <= kv_idx`` (window or
+          document starts) -> suffix interval ``[lower, 32)``.
+        - ``0``: no kv dependence, e.g. ``q_idx < seq_lens[b]`` (padding or other
+          row/batch/head bounds) -> the whole window is kept or dropped. Truth is
+          encoded as the upper bound ``32 * keep`` with ``keep`` positive iff the
+          predicate holds; keep-mask rendering clamps bounds to ``[0, 32]``, so any
+          positive multiple of 32 keeps all lanes and any non-positive value keeps
+          none.
+
+        Other coefficients (e.g. ``2 * kv_idx < q_idx``, dilated/strided patterns)
+        describe non-interval lane sets and fall back to per-lane evaluation.
+        """
         diff = V.graph.sizevars.simplify(lhs_expr - rhs_expr)
         affine = decompose_affine_lane_expr(diff, self.lane_symbol)
         if affine is None:
             return None
         lane_coeff, rest = affine
-        if lane_coeff == 0:
-            # Lane-uniform predicate (e.g. q_idx < seq_lens[b]): keep either all 32
-            # lanes or none. Encode as an upper bound of 32 * (0-or-positive) that the
-            # kernel's keep-mask rendering already clamps to [0, 32].
-            keep = -rest if strict else 1 - rest
-            upper = V.graph.sizevars.simplify(sympy.Integer(32) * keep)
-            return self.interval_if_renderable(sympy.Integer(0), upper)
-        if lane_coeff == 1:
-            upper = V.graph.sizevars.simplify(-rest if strict else -rest + 1)
-            return self.interval_if_renderable(sympy.Integer(0), upper)
-        if lane_coeff == -1:
-            lower = V.graph.sizevars.simplify(rest + 1 if strict else rest)
-            return self.interval_if_renderable(lower, sympy.Integer(32))
-        return None
+        match lane_coeff:
+            case 0:
+                keep = -rest if strict else 1 - rest
+                upper = V.graph.sizevars.simplify(sympy.Integer(32) * keep)
+                return self.interval_if_renderable(sympy.Integer(0), upper)
+            case 1:
+                upper = V.graph.sizevars.simplify(-rest if strict else -rest + 1)
+                return self.interval_if_renderable(sympy.Integer(0), upper)
+            case -1:
+                lower = V.graph.sizevars.simplify(rest + 1 if strict else rest)
+                return self.interval_if_renderable(lower, sympy.Integer(32))
+            case _:
+                return None
 
     def lane_equality_to_intervals(
         self, lhs_expr: sympy.Expr, rhs_expr: sympy.Expr
     ) -> MaybeIntervalSet:
-        """Convert a lane-affine equality into singleton keep intervals."""
+        """Convert ``lhs_expr == rhs_expr`` to packed keep intervals.
+
+        Matching ``FloorDiv`` expressions can describe a contiguous block, e.g.
+        ``q_idx // B == kv_idx // B``, and are handled before the generic
+        lane-affine path. Otherwise the difference decomposes as
+        ``lane_coeff * mask_lane + rest``:
+
+        - ``1`` or ``-1``: exactly one lane can satisfy the equality, e.g.
+          ``kv_idx == q_idx + c`` -> singleton interval ``[v, v + 1)``.
+        - ``0``: no kv dependence, e.g. ``head_type[h] == 0`` -> the whole window
+          is kept or dropped. ``Min(32 * (1 - rest), 32 * (1 + rest))`` is >= 32
+          iff ``rest == 0`` and non-positive otherwise, reusing the clamped
+          all-or-none upper-bound encoding from the comparison case.
+
+        Other coefficients are rejected rather than emitting strided or
+        divisibility-dependent masks.
+        """
         if isinstance(lhs_expr, FloorDiv) and isinstance(rhs_expr, FloorDiv):
             intervals = self._floor_div_equality_to_intervals(lhs_expr, rhs_expr)
             if intervals is not None:
@@ -395,21 +431,20 @@ class PackedMaskAnalyzer:
         if affine is None:
             return None
         lane_coeff, rest = affine
-        if lane_coeff == 0:
-            # Lane-uniform equality (e.g. head_type[h] == 0): keep either all 32
-            # lanes or none. Both operands of Min are >= 32 iff rest == 0; the
-            # kernel's keep-mask rendering clamps the bound to [0, 32].
-            scale = sympy.Integer(32)
-            upper = V.graph.sizevars.simplify(
-                Min(scale * (1 - rest), scale * (1 + rest))
-            )
-            return self.interval_if_renderable(sympy.Integer(0), upper)
-        if lane_coeff in (1, -1):
-            lane_value = -rest if lane_coeff == 1 else rest
-            lower = V.graph.sizevars.simplify(lane_value)
-            upper = V.graph.sizevars.simplify(lane_value + 1)
-            return self.interval_if_renderable(lower, upper)
-        return None
+        match lane_coeff:
+            case 0:
+                scale = sympy.Integer(32)
+                upper = V.graph.sizevars.simplify(
+                    Min(scale * (1 - rest), scale * (1 + rest))
+                )
+                return self.interval_if_renderable(sympy.Integer(0), upper)
+            case 1 | -1:
+                lane_value = -rest if lane_coeff == 1 else rest
+                lower = V.graph.sizevars.simplify(lane_value)
+                upper = V.graph.sizevars.simplify(lane_value + 1)
+                return self.interval_if_renderable(lower, upper)
+            case _:
+                return None
 
     def _floor_div_equality_to_intervals(
         self, lhs_expr: FloorDiv, rhs_expr: FloorDiv
