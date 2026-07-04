@@ -231,7 +231,7 @@ class CppThreadTest(TestCase):
 
 
 instantiate_device_type_tests(
-    CppThreadTest, globals(), except_for=("cpu", "privateuse1")
+    CppThreadTest, globals(), except_for=("cpu", "privateuse1"), allow_xpu=True
 )
 
 if __name__ == "__main__":
