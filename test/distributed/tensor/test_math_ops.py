@@ -131,6 +131,29 @@ class DistMathOpsTest(DTensorTestBase):
         self.assertEqual(dt_dim1.placements, (Shard(0),))
 
     @with_comms
+    def test_prims_amax_amin(self):
+        device_mesh = self.build_device_mesh()
+        tensor = torch.randn(12, 8, 8, device=self.device_type)
+        dtensor = distribute_tensor(tensor, device_mesh, [Shard(0)])
+
+        for op in (torch.ops.prims.amax.default, torch.ops.prims.amin.default):
+            # Reducing a sharded dim produces a partial max/min that is resolved
+            # when materializing the full tensor.
+            dt_dim0 = op(dtensor, [0])
+            self.assertEqual(dt_dim0.full_tensor(), op(tensor, [0]))
+            self.assertTrue(dt_dim0.placements[0].is_partial())
+
+            # Reducing a non-sharded dim preserves the input sharding.
+            dt_dim1 = op(dtensor, [1])
+            self.assertEqual(dt_dim1.full_tensor(), op(tensor, [1]))
+            self.assertEqual(dt_dim1.placements, (Shard(0),))
+
+            full_dims = list(range(tensor.ndim))
+            dt_full = op(dtensor, full_dims)
+            self.assertEqual(dt_full.full_tensor(), op(tensor, full_dims))
+            self.assertTrue(dt_full.placements[0].is_partial())
+
+    @with_comms
     @skip_unless_torch_gpu
     def test_mean(self):
         self.linear_op_reductions("mean")
@@ -243,7 +266,7 @@ class DistMathOpsTest(DTensorTestBase):
                     y.backward()
                 with comm_mode:
                     dist_y = loss_fn(dist_x, dist_target, reduction=reduction)
-                    if shard_dim == channel_dim:
+                    if shard_dim == channel_dim or reduction == "mean":
                         self.assertEqual(comm_mode.get_total_counts(), 1)
                         self.assertEqual(
                             comm_mode.get_comm_counts()[funcol.all_gather_into_tensor],
@@ -277,6 +300,45 @@ class DistMathOpsTest(DTensorTestBase):
                         )
                         self.assertEqual(dist_x.grad.full_tensor(), x.grad)
                     x.grad.zero_()
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_nll_loss_weighted_mean_with_even_target_counts(self):
+        if self.world_size < 2:
+            self.skipTest("requires at least 2 ranks")
+
+        device_mesh = self.build_device_mesh()
+        samples_per_rank = 2
+        batch = self.world_size * samples_per_rank
+        x = torch.zeros(batch, 2, device=self.device_type)
+        target = torch.empty(batch, device=self.device_type, dtype=torch.long)
+
+        for rank in range(self.world_size):
+            start = rank * samples_per_rank
+            cls = rank % 2
+            loss = 2.0 if cls == 0 else 4.0
+            target[start : start + samples_per_rank] = cls
+            x[start : start + samples_per_rank, cls] = -loss
+
+        weight = torch.tensor([1.0, 10.0], device=self.device_type)
+        dist_x = distribute_tensor(x, device_mesh, [Shard(0)])
+        dist_target = distribute_tensor(target, device_mesh, [Replicate()])
+        dist_weight = distribute_tensor(weight, device_mesh, [Replicate()])
+
+        y = torch.nn.functional.nll_loss(
+            x,
+            target,
+            weight=weight,
+            reduction="mean",
+        )
+        dist_y = torch.nn.functional.nll_loss(
+            dist_x,
+            dist_target,
+            weight=dist_weight,
+            reduction="mean",
+        )
+        self.assertTrue(dist_y.placements[0].is_replicate())
+        self.assertEqual(dist_y.to_local(), y)
 
     @with_comms
     def test_shard_math_ops(self):
@@ -446,7 +508,7 @@ class DistMathOpsTest(DTensorTestBase):
             self.assertEqual(
                 sum(comm_mode.comm_module_counts["Global"]["forward"].values()),
                 expected_fwd_comm,
-                f"comm count={comm_mode.get_total_counts()}, norm_type={norm_type.__name__}, "
+                lambda msg: f"{msg}\ncomm count={comm_mode.get_total_counts()}, norm_type={norm_type.__name__}, "
                 f"shard_dim={shard_dim}, norm_shape={normalized_shape}, elem_affine={elementwise_affine}",
             )
 
@@ -460,7 +522,7 @@ class DistMathOpsTest(DTensorTestBase):
             self.assertEqual(
                 sum(comm_mode.comm_module_counts["Global"]["backward"].values()),
                 expected_bwd_comm,
-                f"comm count={comm_mode.get_total_counts()}, norm_type={norm_type.__name__}, "
+                lambda msg: f"{msg}\ncomm count={comm_mode.get_total_counts()}, norm_type={norm_type.__name__}, "
                 f"shard_dim={shard_dim}, norm_shape={normalized_shape}, elem_affine={elementwise_affine}",
             )
 
@@ -720,7 +782,7 @@ class DistMathOpsTest(DTensorTestBase):
             self.assertEqual(
                 dist_x.grad.full_tensor(),
                 x.grad,
-                msg=f"topk_dim={topk_dim}, shard_dim={shard_dim}",
+                msg=lambda msg: f"{msg}\ntopk_dim={topk_dim}, shard_dim={shard_dim}",
             )
             x.grad.zero_()
 
@@ -794,6 +856,26 @@ class DistMathOpsTest(DTensorTestBase):
 
         for o, so in zip(out, sharded_out):
             self.assertEqual(so.full_tensor(), o)
+
+    @with_comms
+    def test_foreach_max_sharded(self):
+        device_mesh = self.build_device_mesh()
+
+        torch.manual_seed(42)
+        tensors = [
+            torch.randn(12, 8, device=self.device_type),
+            torch.randn(8, 8, device=self.device_type),
+        ]
+        sharded_tensors = [
+            distribute_tensor(tensor, device_mesh, [Shard(0)]) for tensor in tensors
+        ]
+
+        expected = torch._foreach_max(tensors)
+        actual = torch._foreach_max(sharded_tensors)
+
+        for expected_max, actual_max in zip(expected, actual):
+            self.assertEqual(actual_max.placements, (Partial("max"),))
+            self.assertEqual(actual_max.full_tensor(), expected_max)
 
     @with_comms
     def test_foreach_norm_partial(self):
@@ -1532,8 +1614,8 @@ class DistMathOpsTest(DTensorTestBase):
         # Expected backward all-reduce counts per reduction mode:
         # - "sum": 0 (total_weight unused in backward)
         # - "none": 0 (total_weight unused in backward)
-        # - "mean": 1 (total_weight needed to normalize gradients)
-        expected_backward_allreduce = {"sum": 0, "none": 0, "mean": 1}
+        # - "mean": 0 (forward forces distribution of mean to Replicate)
+        expected_backward_allreduce = {"sum": 0, "none": 0, "mean": 0}
 
         for reduction, expected_allreduce_count in expected_backward_allreduce.items():
             x = torch.rand(8, channel_size, device=self.device_type, requires_grad=True)
@@ -1556,7 +1638,7 @@ class DistMathOpsTest(DTensorTestBase):
             self.assertEqual(
                 allreduce_count,
                 expected_allreduce_count,
-                f"reduction='{reduction}': expected {expected_allreduce_count} "
+                lambda msg: f"{msg}\nreduction='{reduction}': expected {expected_allreduce_count} "
                 f"backward all-reduce(s), got {allreduce_count}. "
                 f"Full comm counts: {pformat(dict(comm_mode.get_comm_counts()))}",
             )
@@ -1709,7 +1791,7 @@ class DistMathOpsTest(DTensorTestBase):
                     self.assertEqual(
                         comm_mode.get_total_counts(),
                         0,
-                        f"Unexpected communication for "
+                        lambda msg: f"{msg}\nUnexpected communication for "
                         f"{kwargs['mode']} with {placements}",
                     )
 
@@ -1826,6 +1908,12 @@ class DistMathOpsTest(DTensorTestBase):
         result = F.group_norm(dt_inp, num_groups, dt_weight, dt_bias)
         self.assertEqual(result.full_tensor(), expected)
         self.assertTrue(result.placements[0].is_shard(0))
+
+        # group_norm with weight=None, bias=None (affine=False)
+        expected_no_affine = F.group_norm(inp, num_groups)
+        result_no_affine = F.group_norm(dt_inp, num_groups)
+        self.assertEqual(result_no_affine.full_tensor(), expected_no_affine)
+        self.assertTrue(result_no_affine.placements[0].is_shard(0))
 
 
 DistMathOpsTestWithLocalTensor = create_local_tensor_test_class(

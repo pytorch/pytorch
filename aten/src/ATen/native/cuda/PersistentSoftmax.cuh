@@ -44,7 +44,7 @@ __device__ __forceinline__ void warp_reduce(acc_t* sum) {
 }
 
 // The softmax_warp_* methods perform softmax forward and backward propagation on samples spanning the fast dimension.
-// Each sample contains element_count scalar elements. element_count can be any integer value <= 1024.
+// Each sample contains element_count scalar elements. Forward supports values up to 2048; backward supports values up to 1024.
 // The template arguments have the following meaning:
 // One "WARP" works on one "BATCH". One "BATCH" contains "WARP_BATCH" samples.
 // WARP_BATCH is equal to 1 when element_count is large, and > 1 when element_count is small.

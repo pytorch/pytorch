@@ -100,7 +100,7 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm(
   Tensor rstd = at::empty({N, group}, X.options().dtype(dtype));
   GroupNormKernel(
       X.device().type(), X, gamma, beta, N, C, HxW, group, eps, Y, mean, rstd);
-  return std::make_tuple(Y, mean, rstd);
+  return std::make_tuple(std::move(Y), std::move(mean), std::move(rstd));
 }
 
 std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
@@ -172,7 +172,7 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
       dX,
       dgamma,
       dbeta);
-  return std::make_tuple(dX, dgamma, dbeta);
+  return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
 }
 
 Tensor group_norm(

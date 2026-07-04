@@ -2,6 +2,7 @@
 
 import contextlib
 import dataclasses
+import operator
 import sys
 
 import torch
@@ -151,6 +152,127 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(ref, res)
+
+    def test_vars_too_many_args_type_error(self):
+        def fn(x):
+            return x + 1, vars(1, 2)
+
+        opt_fn = torch.compile(fn, backend="eager")
+        with self.assertRaisesRegex(
+            TypeError, "vars expected at most 1 argument, got 2"
+        ):
+            opt_fn(torch.ones(1))
+
+    def test_vars_keyword_args_type_error(self):
+        def fn(x):
+            try:
+                vars(obj=x)
+                raise RuntimeError("Should not be raised")
+            except TypeError:
+                return x.sin()
+
+        x = torch.randn(4)
+        ref = fn(x)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_range_too_many_args_type_error(self):
+        def fn(x):
+            return x + 1, range(1, 2, 3, 4, 5, 6)
+
+        opt_fn = torch.compile(fn, backend="eager")
+        with self.assertRaisesRegex(
+            TypeError, "range expected at most 3 arguments, got 6"
+        ):
+            opt_fn(torch.ones(1))
+
+    def test_builtin_arg_count_type_errors(self):
+        def check(fn):
+            x = torch.randn(4)
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(fn(x), opt_fn(x))
+
+        def len_no_args(x):
+            try:
+                len()
+                raise RuntimeError("Should not be raised")
+            except TypeError:
+                return x.sin()
+
+        def len_too_many_args(x):
+            try:
+                len(x, x)
+                raise RuntimeError("Should not be raised")
+            except TypeError:
+                return x.sin()
+
+        def getitem_too_few_args(x):
+            try:
+                operator.getitem(x)
+                raise RuntimeError("Should not be raised")
+            except TypeError:
+                return x.sin()
+
+        def getitem_no_args(x):
+            try:
+                operator.getitem()
+                raise RuntimeError("Should not be raised")
+            except TypeError:
+                return x.sin()
+
+        def getitem_too_many_args(x):
+            try:
+                operator.getitem(x, 0, 1)
+                raise RuntimeError("Should not be raised")
+            except TypeError:
+                return x.sin()
+
+        def getitem_keyword_args(x):
+            try:
+                operator.getitem(a=x, b=0)
+                raise RuntimeError("Should not be raised")
+            except TypeError:
+                return x.sin()
+
+        def next_no_args(x):
+            try:
+                next()
+                raise RuntimeError("Should not be raised")
+            except TypeError:
+                return x.sin()
+
+        def next_too_many_args(x):
+            try:
+                next(iter([x]), x, x)
+                raise RuntimeError("Should not be raised")
+            except TypeError:
+                return x.sin()
+
+        def range_no_args(x):
+            try:
+                range()
+                raise RuntimeError("Should not be raised")
+            except TypeError:
+                return x.sin()
+
+        def range_too_many_args(x):
+            try:
+                range(1, 2, 3, 4, 5, 6)
+                raise RuntimeError("Should not be raised")
+            except TypeError:
+                return x.sin()
+
+        check(len_no_args)
+        check(len_too_many_args)
+        check(getitem_no_args)
+        check(getitem_too_few_args)
+        check(getitem_too_many_args)
+        check(getitem_keyword_args)
+        check(next_no_args)
+        check(next_too_many_args)
+        check(range_no_args)
+        check(range_too_many_args)
 
     def test_user_class_as_tensor_method_arg(self):
         class MyClass:
