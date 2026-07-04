@@ -14083,6 +14083,7 @@ class TestAutogradDeviceType(TestCase):
         self.assertEqual(model.a.grad.device, torch.device("cpu"))
         self.assertEqual(model.b.grad.device, torch.device("cpu"))
 
+    @skipIfTorchDynamo("compiled autograd + gradgradcheck undefined-grad mode")
     @dtypes(torch.double)
     def test_cdist_gradgrad(self, device, dtype):
         # Second-order (double) backward for cdist / _cdist_backward. p < 1 is
@@ -14113,6 +14114,7 @@ class TestAutogradDeviceType(TestCase):
                         self.assertTrue(gradcheck(fn, (x1, x2)))
                         self.assertTrue(gradgradcheck(fn, (x1, x2)))
 
+    @skipIfTorchDynamo("compiled autograd + gradgradcheck undefined-grad mode")
     @dtypes(torch.double)
     def test_pdist_gradgrad(self, device, dtype):
         make = partial(make_tensor, device=device, dtype=dtype, requires_grad=True)
