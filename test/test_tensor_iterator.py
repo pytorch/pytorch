@@ -378,7 +378,7 @@ class TestTensorIterator(TestCase):
         self.assertEqual(it.numel, 3)
 
 
-instantiate_device_type_tests(TestTensorIterator, globals())
+instantiate_device_type_tests(TestTensorIterator, globals(), allow_xpu=True)
 
 
 if __name__ == "__main__":

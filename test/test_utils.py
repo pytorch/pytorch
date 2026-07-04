@@ -957,7 +957,7 @@ class TestDeviceUtils(TestCase):
             self.assertTrue(tree_all_only(torch.Tensor, is_meta_device, r))
 
 
-instantiate_device_type_tests(TestDeviceUtils, globals())
+instantiate_device_type_tests(TestDeviceUtils, globals(), allow_xpu=True)
 
 
 class TestCppExtensionUtils(TestCase):
