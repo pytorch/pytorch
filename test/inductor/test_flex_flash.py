@@ -11,6 +11,7 @@ import torch
 import torch._inductor.kernel.flex.flex_flash_attention as flex_flash_attention_module
 from torch._dynamo.testing import CompileCounterWithBackend, EagerAndRecordGraphs
 from torch._inductor.kernel.flex.flex_flash_attention import (
+    _flash_attention_unavailable_message,
     _hierarchical_indexer_cute,
     ensure_flash_available,
     HierarchicalIndex,
@@ -32,7 +33,6 @@ from torch.testing._internal.common_cuda import (
     SM90OrLater,
     xfailIfSM120OrLater,
     xfailIfSM12X,
-    xfailIfSM90,
 )
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -96,6 +96,7 @@ def force_flex_flash_score_mod_vec_size(vec_size: int):
         has_mask_aux_tensors=False,
         mask_mod_graph_module=None,
         mask_mod_other_buffers=(),
+        aux_scalar_symbols=(),
     ):
         if has_score_mod and has_aux_tensors:
             return [
@@ -121,6 +122,7 @@ def use_explicit_flex_flash_mask_mod_vec_size(vec_size: int | None):
         has_mask_aux_tensors=False,
         mask_mod_graph_module=None,
         mask_mod_other_buffers=(),
+        aux_scalar_symbols=(),
     ):
         if has_mask_mod:
             return [
@@ -907,10 +909,6 @@ GQA_MQA_BLOCK_MASK_CASES = [
 class TestFlexFlash(InductorTestCase):
     # `FlashAttentionForwardSm120` does not have `apply_score_mod`.
     @xfailIfSM120OrLater
-    @decorateIf(
-        unittest.expectedFailure,
-        lambda params: params["case"].requires_grad and IS_SM90,
-    )
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("case", SCORE_MOD_CASES, name_fn=score_case_name)
     def test_flash_attention_score_mod_cases(self, device, dtype, case):
@@ -2469,14 +2467,12 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
             self._flash_triton_dynamic(q, k, v)
 
     @xfailIfSM120OrLater
-    @xfailIfSM90
     def test_dynamic_backward(self):
         """Test backward with dynamic sequence lengths."""
         self._run_dynamic_test(seq_lens=[128, 256, 512], requires_grad=True)
 
     # 'FlashAttentionForwardSm120' object has no attribute 'apply_score_mod'
     @xfailIfSM120OrLater
-    @xfailIfSM90
     def test_dynamic_backward_with_score_mod(self):
         """Test backward with score_mod and dynamic sequence lengths."""
 
@@ -2553,8 +2549,8 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
             self._flash_triton_dynamic(q, k, v)
 
     def test_captured_float_fails_with_dynamic(self):
-        """Test that captured Python float fails with dynamic=True."""
-        val = 2.0  # Captured float
+        """Test that captured Python float still fails as a CPU scalar tensor."""
+        val = 2.0
 
         def score_mod(score, _b, _h, _q, _k):
             return score * val
@@ -2562,29 +2558,22 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
         compiled_fn = torch.compile(flex_attention, dynamic=True)
         q, k, v = create_test_tensors(seq_len=256, device="cuda", dtype=torch.float16)
 
-        with self.assertRaisesRegex(
-            RuntimeError, r"captures a dynamic scalar \(SymInt/SymFloat\)"
-        ):
+        with self.assertRaisesRegex(RuntimeError, r"captures a 0-dim CPU tensor"):
             compiled_fn(
                 q, k, v, score_mod=score_mod, kernel_options={"BACKEND": "FLASH"}
             )
 
-    def test_captured_int_fails_with_dynamic(self):
-        """Captured Python int should fail with dynamic=True."""
-        val = 2  # Captured int
+    @xfailIfSM120OrLater
+    def test_captured_int_works_with_dynamic(self):
+        """Captured Python int should work with dynamic=True."""
+        val = 2
 
         def score_mod(score, _b, _h, _q, _k):
             return score * val
 
-        compiled_fn = torch.compile(flex_attention, dynamic=True)
         q, k, v = create_test_tensors(seq_len=256, device="cuda", dtype=torch.float16)
 
-        with self.assertRaisesRegex(
-            RuntimeError, r"captures a dynamic scalar \(SymInt/SymFloat\)"
-        ):
-            compiled_fn(
-                q, k, v, score_mod=score_mod, kernel_options={"BACKEND": "FLASH"}
-            )
+        flash_vs_triton(q, k, v, score_mod=score_mod, dynamic=True)
 
     @xfailIfSM120OrLater
     def test_captured_float_works_with_static(self):
@@ -2646,7 +2635,9 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
             model(x, lens)
 
         self.assertEqual(
-            counter.frame_count, 1, f"Expected 1 graph, got {counter.frame_count}"
+            counter.frame_count,
+            1,
+            lambda msg: f"{msg}\nExpected 1 graph, got {counter.frame_count}",
         )
 
     @xfailIfSM120OrLater
@@ -2683,7 +2674,9 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
             run(q, k, v, block_mask)
 
         self.assertEqual(
-            counter.frame_count, 1, f"Expected 1 graph, got {counter.frame_count}"
+            counter.frame_count,
+            1,
+            lambda msg: f"{msg}\nExpected 1 graph, got {counter.frame_count}",
         )
 
     @xfailIfSM120OrLater
@@ -2714,7 +2707,6 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
         self.assertEqual(out.shape, q.shape)
 
     @xfailIfSM120OrLater
-    @xfailIfSM90
     def test_dynamic_captured_buffer_varying_heads(self):
         """Dynamic head_count with captured tensor buffer under FLASH/TRITON parity."""
         torch._dynamo.reset()
@@ -2775,8 +2767,197 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
 
         self.assertEqual(len(backend.graphs), 1, "Expected a single dynamic graph")
 
+    def _dynamic_multiple_scalar_closures_fn(self):
+        def fn(q, k, v):
+            batch = q.size(0)
+            seq_len = q.size(2)
+
+            def score_mod(score, _b, _h, q_idx, kv_idx):
+                return score + batch + seq_len + q_idx - kv_idx
+
+            return flex_attention(
+                q,
+                k,
+                v,
+                score_mod=score_mod,
+                kernel_options={"BACKEND": "FLASH"},
+            )
+
+        return fn
+
+    def test_dynamic_multiple_scalar_closures_in_score_mod_codegen(self):
+        if SM120OrLater:
+            self.skipTest("score_mod is not supported on SM120")
+
+        fn = self._dynamic_multiple_scalar_closures_fn()
+        q, k, v = create_test_tensors(seq_len=128, device="cuda", dtype=torch.float16)
+        expected = fn(q, k, v)
+        actual, code = run_and_get_code(
+            torch.compile(fn, dynamic=True, fullgraph=True), q, k, v
+        )
+
+        self.assertEqual(actual, expected, atol=3e-2, rtol=3e-2)
+        src = "\n".join(code)
+        self.assertRegex(
+            src,
+            r"aux_scalars = \(cutlass\.Int64\([^)]+\), cutlass\.Int64\([^)]+\)\)",
+        )
+        self.assertIn("aux_scalars[0]", src)
+        self.assertIn("aux_scalars[1]", src)
+
+    @xfailIfSM120OrLater
+    @decorateIf(
+        unittest.expectedFailure,
+        lambda params: IS_SM90,
+    )
+    def test_dynamic_multiple_scalar_closures_with_max_autotune(self):
+        fn = self._dynamic_multiple_scalar_closures_fn()
+        q, k, v = create_test_tensors(seq_len=128, device="cuda", dtype=torch.float16)
+        expected = fn(q, k, v)
+        actual = torch.compile(
+            fn,
+            dynamic=True,
+            fullgraph=True,
+            mode="max-autotune-no-cudagraphs",
+        )(q, k, v)
+
+        self.assertEqual(actual, expected, atol=3e-2, rtol=3e-2)
+
+    def _offset_block_mask(self, offset, q_len=128, kv_len=128):
+        def mask_mod(_b, _h, q_idx, kv_idx):
+            return kv_idx <= q_idx + offset
+
+        return _create_block_mask_for_device(
+            mask_mod, 2, None, q_len, kv_len, device="cuda"
+        )
+
+    def test_dynamic_scalar_closure_in_mask_mod(self):
+        major, _ = torch.cuda.get_device_capability()
+        if SM120OrLater:
+            self.skipTest("block sparse mask_mod is not supported on SM120")
+        if major < 9:
+            self.skipTest("block sparse backward only supported on SM90+")
+
+        flash_counter = CompileCounterWithBackend("inductor")
+        triton_counter = CompileCounterWithBackend("inductor")
+
+        flash = torch.compile(
+            lambda q, k, v, block_mask: flex_attention(
+                q,
+                k,
+                v,
+                block_mask=block_mask,
+                kernel_options={"BACKEND": "FLASH"},
+            ),
+            dynamic=True,
+            fullgraph=True,
+            backend=flash_counter,
+        )
+        triton = torch.compile(
+            lambda q, k, v, block_mask: flex_attention(
+                q,
+                k,
+                v,
+                block_mask=block_mask,
+                kernel_options={"BACKEND": "TRITON"},
+            ),
+            dynamic=True,
+            fullgraph=True,
+            backend=triton_counter,
+        )
+
+        for offset in [0, 1, 5]:
+            torch.manual_seed(1234)
+            q = torch.randn(
+                (2, 4, 1, 64),
+                device="cuda",
+                dtype=torch.float16,
+                requires_grad=True,
+            )
+            k = torch.randn(
+                (2, 4, 128, 64),
+                device="cuda",
+                dtype=torch.float16,
+                requires_grad=True,
+            )
+            v = torch.randn(
+                (2, 4, 128, 64),
+                device="cuda",
+                dtype=torch.float16,
+                requires_grad=True,
+            )
+            q_ref, k_ref, v_ref = [
+                x.detach().clone().requires_grad_() for x in (q, k, v)
+            ]
+            block_mask = self._offset_block_mask(offset, q_len=1, kv_len=128)
+
+            with torch.no_grad():
+                out_ref = flex_attention(
+                    q.float(), k.float(), v.float(), block_mask=block_mask
+                ).to(q.dtype)
+            out_flash = flash(q, k, v, block_mask)
+            out_triton = triton(q_ref, k_ref, v_ref, block_mask)
+            self.assertEqual(out_flash, out_ref, atol=3e-2, rtol=3e-2)
+            self.assertEqual(out_flash, out_triton, atol=3e-2, rtol=3e-2)
+
+            grad = torch.randn_like(out_flash)
+            grads_flash = torch.autograd.grad(out_flash, (q, k, v), grad)
+            grads_triton = torch.autograd.grad(out_triton, (q_ref, k_ref, v_ref), grad)
+            for actual, expected in zip(grads_flash, grads_triton):
+                self.assertEqual(actual, expected, atol=3e-2, rtol=3e-2)
+
+        self.assertEqual(flash_counter.frame_count, 1, "Expected one FLASH graph")
+        self.assertEqual(triton_counter.frame_count, 1, "Expected one TRITON graph")
+
+    def _compare_flash_triton_backward(self, score_mod_factory):
+        def run(q, k, v, backend):
+            batch = q.size(0)
+            return flex_attention(
+                q,
+                k,
+                v,
+                score_mod=score_mod_factory(batch),
+                kernel_options={"BACKEND": backend},
+            )
+
+        flash = torch.compile(lambda q, k, v: run(q, k, v, "FLASH"), dynamic=True)
+        triton = torch.compile(lambda q, k, v: run(q, k, v, "TRITON"), dynamic=True)
+
+        q, k, v = create_test_tensors(
+            seq_len=128, device="cuda", dtype=torch.float16, requires_grad=True
+        )
+        q_ref, k_ref, v_ref = [x.detach().clone().requires_grad_() for x in (q, k, v)]
+        out_flash = flash(q, k, v)
+        out_triton = triton(q_ref, k_ref, v_ref)
+        self.assertEqual(out_flash, out_triton, atol=3e-2, rtol=3e-2)
+
+        grad = torch.randn_like(out_flash)
+        grads_flash = torch.autograd.grad(out_flash, (q, k, v), grad)
+        grads_triton = torch.autograd.grad(out_triton, (q_ref, k_ref, v_ref), grad)
+        for actual, expected in zip(grads_flash, grads_triton):
+            self.assertEqual(actual, expected, atol=3e-2, rtol=3e-2)
+
+    @xfailIfSM120OrLater
+    def test_dynamic_symbol_closure_in_score_mod_backward(self):
+        """Captured SymInt in score_mod should propagate through FLASH backward."""
+        self._compare_flash_triton_backward(
+            lambda batch: lambda score, _b, _h, _q, _kv: score * (batch + 1)
+        )
+
+    @xfailIfSM120OrLater
+    def test_dynamic_symfloat_closure_in_score_mod_backward(self):
+        """SymFloat expressions in score_mod should lower inside FLASH backward."""
+        self._compare_flash_triton_backward(
+            lambda batch: lambda score, _b, _h, _q, _kv: score * ((batch + 1) / 2.0)
+        )
+
 
 class TestHierarchicalIndex(InductorTestCase):
+    def test_flash_attention_unavailable_message_has_install_link(self):
+        message = _flash_attention_unavailable_message()
+        self.assertIn("pip install --pre flash-attn-4", message)
+        self.assertIn("https://pypi.org/project/flash-attn-4/", message)
+
     def test_hierarchical_index_preserves_args(self):
         from sympy import Symbol
 

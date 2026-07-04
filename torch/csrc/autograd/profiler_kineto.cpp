@@ -1,3 +1,4 @@
+#include <fmt/format.h>
 #include <cstring>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <torch/csrc/autograd/profiler_kineto.h>
@@ -5,9 +6,11 @@
 #include <c10/macros/Export.h>
 #include <c10/util/ApproximateClock.h>
 #include <c10/util/Exception.h>
+#include <c10/util/ScopeExit.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
 #include <c10/util/overloaded.h>
+#include <fmt/format.h>
 #include <torch/csrc/profiler/api.h>
 #include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/containers.h>
@@ -20,6 +23,10 @@
 #include <torch/csrc/profiler/standalone/privateuse1_observer.h>
 #include <torch/csrc/profiler/util.h>
 
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <mutex>
 #include <stdexcept>
 #include <utility>
 
@@ -97,6 +104,15 @@ inline bool isExternalTracerState(ProfilerState state) {
       state == ProfilerState::PRIVATEUSE1;
 }
 
+inline bool hasRequestedDeviceActivity(
+    const std::set<torch::profiler::impl::ActivityType>& activities) {
+  return activities.contains(ActivityType::CUDA) ||
+      activities.contains(ActivityType::XPU) ||
+      activities.contains(ActivityType::MTIA) ||
+      activities.contains(ActivityType::HPU) ||
+      activities.contains(ActivityType::PrivateUse1);
+}
+
 struct OpArgData {
   bool hasData;
   std::vector<shape> shapes;
@@ -110,7 +126,7 @@ auto parseArgData(
     const std::vector<op_input_t>& input_shapes,
     const std::vector<op_input_t>& concreteInputs) {
   if (input_shapes.empty()) {
-    return OpArgData{false, {}, {}, {}, {}, {}};
+    return OpArgData{.hasData = false};
   }
 
   std::vector<shape> shapes(input_shapes.size());
@@ -169,12 +185,12 @@ auto parseArgData(
   }
 
   return OpArgData{
-      true,
-      shapes,
-      dtypes,
-      concrete_inputs_list,
-      shapesForKinetoEvent,
-      strides};
+      .hasData = true,
+      .shapes = shapes,
+      .dtypes = dtypes,
+      .concreteInputs = concrete_inputs_list,
+      .shapesForKinetoEvent = shapesForKinetoEvent,
+      .strides = strides};
 }
 
 struct MetadataBase {
@@ -195,14 +211,18 @@ struct MetadataBase {
     }
   }
 
-  void addMetadata(const std::string& key, const std::string& value) {
+  void addMetadata(
+      const std::string& key,
+      const std::string& value,
+      bool quote = false) {
     if (kinetoActivity_ && !value.empty() && value != "\"\"") {
       torch::profiler::impl::kineto::addMetadata(
           // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
           const_cast<torch::profiler::impl::kineto::activity_t*>(
               kinetoActivity_),
           key,
-          value);
+          value,
+          quote);
     }
   }
 
@@ -235,6 +255,12 @@ struct AddTensorboardFields : public MetadataBase {
         parent = parent->parent_.lock();
       }
       this->addMetadata("Python parent id", parent_id.value_or("null"));
+      if (i.caller_.line_no_ > 0) {
+        this->addMetadata(
+            "CallFrom",
+            fmt::format("{}:{}", i.caller_.filename_.str(), i.caller_.line_no_),
+            /*quote=*/true);
+      }
     });
   }
 
@@ -297,10 +323,8 @@ struct AddGenericMetadata : public MetadataBase {
       if (!isValidType && val.isList()) {
         // Check if it's a list of strings
         auto list = val.toListRef();
-        isStringList =
-            std::all_of(list.begin(), list.end(), [](const c10::IValue& item) {
-              return item.isString();
-            });
+        isStringList = std::ranges::all_of(
+            list, [](const c10::IValue& item) { return item.isString(); });
       }
 
       if (!isValidType && !isStringList) {
@@ -436,8 +460,16 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
         recordQueue(config, std::move(activities)) {}
   ~KinetoThreadLocalState() override = default;
 
-  static KinetoThreadLocalState* get(bool global) {
-    auto* state = ProfilerStateBase::get(/*global=*/global);
+  static std::shared_ptr<KinetoThreadLocalState> getGlobal() {
+    std::shared_ptr<ProfilerStateBase> state = ProfilerStateBase::getGlobal();
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        state == nullptr ||
+        state->profilerType() == ActiveProfilerType::KINETO);
+    return std::static_pointer_cast<KinetoThreadLocalState>(std::move(state));
+  }
+
+  static KinetoThreadLocalState* getTLS() {
+    ProfilerStateBase* state = ProfilerStateBase::getTLS();
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         state == nullptr ||
         state->profilerType() == ActiveProfilerType::KINETO);
@@ -570,32 +602,185 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
   post_process_t eventPostProcessCb;
 };
 
-template <bool use_global_state_ptr = false>
-std::unique_ptr<at::ObserverContext> onFunctionEnter(
+// Coordinates one global RecordFunction callback session (KINETO_ONDEMAND, or
+// KINETO with profile_all_threads) against teardown. Those callbacks fire on
+// every thread and touch the profiler state while disableProfiler() finalizes
+// and frees it on another thread.
+//
+// While the session is active, each callback invocation brackets only its own
+// short critical section - getGlobal() plus the RecordQueue access - with
+// enter()/exit(). Teardown calls drain(), which closes the session to new
+// callbacks and blocks until the in-flight count reaches zero, so finalize
+// never races a live critical section.
+//
+// The enter()/isActive() re-check is a handshake: a callback that joined before
+// teardown is always waited for, while one arriving after bails without
+// touching the state.
+//
+// Bracketing only the critical section (not the op body) is what keeps drain()
+// from deadlocking against the GIL, but it lets an op enter under one session
+// and exit after that session is torn down (its RecordQueue and event freed). A
+// per-session generation (see generation()), stamped on each callback's
+// ObserverContext, closes that gap: onFunctionExitGlobal drops a straddling
+// exit on generation mismatch instead of dereferencing the freed event.
+//
+// The drain counter is not a std::latch: a std::latch fixes its count at
+// construction, cannot be incremented afterward, and is single-use. Here the
+// number of in-flight callbacks is unknown up front, grows dynamically as ops
+// dispatch, and the session must be re-armed for every enable/disable cycle,
+// none of which std::latch supports. The counter stays lock-free on the per-op
+// hot path; the mutex/cv are touched only on the teardown handoff.
+//
+// Because we coordinate across threads that can call it at any arbitrary time,
+// this object must have static lifetime.
+class GlobalCallbackSession {
+ public:
+  GlobalCallbackSession() = default;
+  ~GlobalCallbackSession() = default;
+
+  // Single, static instance only: neither copyable nor movable.
+  GlobalCallbackSession(const GlobalCallbackSession&) = delete;
+  GlobalCallbackSession& operator=(const GlobalCallbackSession&) = delete;
+  GlobalCallbackSession(GlobalCallbackSession&&) = delete;
+  GlobalCallbackSession& operator=(GlobalCallbackSession&&) = delete;
+
+  // Open the session (at enableProfiler time) so callbacks begin participating.
+  // On a true enable a fresh RecordQueue was just installed, so bump the
+  // session generation first: callbacks in the new session stamp the new value
+  // and a straddling exit from the prior session detects the mismatch. The
+  // mid-session dynamic collection toggle re-arms the same RecordQueue and
+  // passes false; bumping there would wrongly drop end-events for ops that
+  // straddle the toggle.
+  void activate(bool new_session) {
+    if (new_session) {
+      generation_.fetch_add(1);
+    }
+    active_.store(true);
+  }
+
+  // Session generation, stamped into each callback's ObserverContext at enter
+  // and re-checked at exit. A mismatch means the stamping session was torn down
+  // (its RecordQueue and event freed), so the exit drops itself.
+  uint64_t generation() const {
+    return generation_.load();
+  }
+
+  // Whether the session is open; that is, teardown has not begun.
+  bool isActive() const {
+    return active_.load();
+  }
+
+  // Register an in-flight callback, paired with exit(). Callers must re-check
+  // isActive() after enter() to close the race with a concurrent drain().
+  void enter() {
+    in_flight_.fetch_add(1);
+  }
+
+  // Deregister an in-flight callback. When this is the last one and the session
+  // has been closed (drain() in progress), wake the waiting teardown thread.
+  // During normal profiling this is a single lock-free decrement.
+  void exit() {
+    if (in_flight_.fetch_sub(1) == 1 && !active_.load()) {
+      std::lock_guard<std::mutex> lock(mutex_);
+      cv_.notify_all();
+    }
+  }
+
+  // Close the session to new callbacks and block until all in-flight ones have
+  // exited; returns true once drained (also returns true if the session was
+  // never opened; it remained purely thread-local profiling). Closing is fused
+  // with the wait, so the session cannot be closed without waiting out
+  // in-flight callbacks.
+  //
+  // Returns false if the drain does not complete within kDrainTimeout. A normal
+  // drain takes microseconds (the in-flight window is just a callback's
+  // getGlobal() + RecordQueue critical section, never an op body), so a
+  // multi-second wait means a callback's thread was killed or wedged inside
+  // that critical section. The caller must then leave the state installed:
+  // freeing it under a live callback would reintroduce the use-after-free this
+  // session guards against.
+  bool drain() {
+    if (!active_.exchange(false)) {
+      return true;
+    }
+    std::unique_lock<std::mutex> lock(mutex_);
+    return cv_.wait_for(
+        lock, kDrainTimeout, [this] { return in_flight_.load() == 0; });
+  }
+
+ private:
+  // Backstop so disableProfiler() can never hang on a wedged or dead callback
+  // thread. Far longer than any real drain, which completes in microseconds.
+  static constexpr std::chrono::seconds kDrainTimeout{30};
+
+  std::atomic<bool> active_{false};
+  std::atomic<int64_t> in_flight_{0};
+  std::atomic<uint64_t> generation_{0};
+  std::mutex mutex_;
+  std::condition_variable cv_; // guarded by mutex_
+};
+
+GlobalCallbackSession global_callback_session;
+
+std::unique_ptr<at::ObserverContext> onFunctionEnterGlobal(
     const at::RecordFunction& fn) {
-  auto state_ptr = KinetoThreadLocalState::get(use_global_state_ptr);
+  // Fast bail once teardown has begun, before taking an in-flight ref, so the
+  // drain in disableProfiler() always converges.
+  if (!global_callback_session.isActive()) {
+    return nullptr;
+  }
+
+  global_callback_session.enter();
+
+  // Release the ref when this function returns (success or early bail), so the
+  // in-flight window is just this enter's getGlobal() + begin_op() critical
+  // section.
+  auto in_flight_guard =
+      c10::make_scope_exit([] { global_callback_session.exit(); });
+
+  // Re-check after the increment. This is the handshake that makes teardown
+  // safe: if disableProfiler() cleared active concurrently, its drain is
+  // guaranteed to observe our increment and wait if and only if we still
+  // observe active true here.
+  if (!global_callback_session.isActive()) {
+    return nullptr;
+  }
+
+  std::shared_ptr<KinetoThreadLocalState> state_ptr =
+      KinetoThreadLocalState::getGlobal();
+  if (!state_ptr) {
+    return nullptr;
+  }
+  auto ctx = state_ptr->recordQueue.getSubqueue()->begin_op(fn);
+  if (ctx) {
+    // Stamp the current session so a straddling exit (begin_op here, exit after
+    // this session is torn down) drops itself on mismatch instead of writing
+    // through a freed event_.
+    ctx->session_generation_ = global_callback_session.generation();
+  }
+  return ctx;
+}
+
+std::unique_ptr<at::ObserverContext> onFunctionEnterTLS(
+    const at::RecordFunction& fn) {
+  KinetoThreadLocalState* state_ptr = KinetoThreadLocalState::getTLS();
   if (!state_ptr) {
     return nullptr;
   }
   return state_ptr->recordQueue.getSubqueue()->begin_op(fn);
 }
 
-// @lint-ignore CLANGTIDY clang-diagnostic-unused-parameter
-template <bool use_global_state_ptr = false>
-void onFunctionExit(
+void onFunctionExitImpl(
+    KinetoThreadLocalState& state,
     const at::RecordFunction& fn,
     at::ObserverContext* ctx_ptr) {
-  auto state_ptr = KinetoThreadLocalState::get(use_global_state_ptr);
-  if (!state_ptr) {
-    return;
-  }
-  const auto& config = state_ptr->config();
+  const auto& config = state.config();
   auto* kineto_ctx_ptr =
       static_cast<torch::profiler::impl::KinetoObserverContext*>(ctx_ptr);
   TORCH_INTERNAL_ASSERT(kineto_ctx_ptr != nullptr);
   kineto_ctx_ptr->event_->end_time_ = c10::getApproximateTime();
   if (!config.experimental_config.performance_events.empty()) {
-    state_ptr->recordQueue.getSubqueue()->disable_perf_profiler(
+    state.recordQueue.getSubqueue()->disable_perf_profiler(
         *kineto_ctx_ptr->event_->counters_);
   }
   kineto_ctx_ptr->event_->basic_fields_.end_tid_ =
@@ -624,35 +809,121 @@ void onFunctionExit(
     torch::profiler::impl::privateuse1Stubs()->record(
         nullptr, &fallback->device_event_end_, nullptr);
   }
+}
 
-  if (!config.experimental_config.disable_external_correlation) {
-    if (fn.scope() == at::RecordScope::USER_SCOPE) {
-      torch::profiler::impl::kineto::popUserCorrelationId();
-    } else {
-      torch::profiler::impl::kineto::popCorrelationId();
-    }
+// Pop the external correlation id that begin_op pushed for this op, if any.
+// Must run on every onFunctionExit path, including the teardown and
+// stale-session early exits that skip event finalization: the correlation stack
+// lives in the device profiling backend (per thread) and is not reset across
+// profiler sessions, so a skipped pop leaks. Safe on those paths because it
+// touches only that stack, never the possibly-freed event_.
+void maybePopCorrelationId(
+    const at::RecordFunction& fn,
+    at::ObserverContext* ctx_ptr) {
+  auto* kineto_ctx =
+      static_cast<torch::profiler::impl::KinetoObserverContext*>(ctx_ptr);
+  if (kineto_ctx == nullptr || !kineto_ctx->pushed_correlation_id_) {
+    return;
+  }
+  if (fn.scope() == at::RecordScope::USER_SCOPE) {
+    torch::profiler::impl::kineto::popUserCorrelationId();
+  } else {
+    torch::profiler::impl::kineto::popCorrelationId();
   }
 }
 
-template <bool use_global_callback = false>
-void pushProfilingCallbacks(const std::unordered_set<at::RecordScope>& scopes) {
-  auto registration_state_ptr =
-      KinetoThreadLocalState::get(use_global_callback);
-  TORCH_INTERNAL_ASSERT(registration_state_ptr, "Expected profiler state set");
+void onFunctionExitGlobal(
+    const at::RecordFunction& fn,
+    at::ObserverContext* ctx_ptr) {
+  if (ctx_ptr == nullptr) {
+    // Enter bailed (teardown in progress, or no state): no ref was taken and
+    // there is nothing to finalize.
+    return;
+  }
+
+  // Balance the correlation id pushed at begin_op on every path below,
+  // including the teardown and stale-session early exits that skip event
+  // finalization.
+  auto correlation_guard =
+      c10::make_scope_exit([&] { maybePopCorrelationId(fn, ctx_ptr); });
+
+  // Take this exit's own in-flight ref, paired here because
+  // onFunctionEnterGlobal no longer hands one off. It covers only this exit's
+  // getGlobal() + RecordQueue write, never the op body, so the drain cannot
+  // block on it.
+  global_callback_session.enter();
+  auto in_flight_guard =
+      c10::make_scope_exit([] { global_callback_session.exit(); });
+
+  // Re-check after the increment, mirroring onFunctionEnterGlobal: if teardown
+  // began concurrently the queue may already be finalized/freed, so skip the
+  // write (the event keeps its start and gets no end).
+  if (!global_callback_session.isActive()) {
+    return;
+  }
+
+  std::shared_ptr<KinetoThreadLocalState> state_ptr =
+      KinetoThreadLocalState::getGlobal();
+  if (!state_ptr) {
+    return;
+  }
+
+  // If the session generations don't match, that means this op entered under an
+  // earlier session that has since been torn down, freeing its RecordQueue and
+  // event_. In that case, we don't need to do any exit cleanup.
+  auto* kineto_ctx =
+      static_cast<torch::profiler::impl::KinetoObserverContext*>(ctx_ptr);
+  if (kineto_ctx->session_generation_ != global_callback_session.generation()) {
+    return;
+  }
+
+  onFunctionExitImpl(*state_ptr, fn, ctx_ptr);
+}
+
+void onFunctionExitTLS(
+    const at::RecordFunction& fn,
+    at::ObserverContext* ctx_ptr) {
+  // Balance the correlation id pushed at begin_op even when the TLS state is
+  // gone by exit (early return below), for the same reason as
+  // onFunctionExitGlobal.
+  auto correlation_guard =
+      c10::make_scope_exit([&] { maybePopCorrelationId(fn, ctx_ptr); });
+  KinetoThreadLocalState* state_ptr = KinetoThreadLocalState::getTLS();
+  if (!state_ptr) {
+    return;
+  }
+  onFunctionExitImpl(*state_ptr, fn, ctx_ptr);
+}
+
+void pushGlobalProfilingCallbacks(
+    const std::unordered_set<at::RecordScope>& scopes,
+    bool new_session) {
+  std::shared_ptr<KinetoThreadLocalState> state_ptr =
+      KinetoThreadLocalState::getGlobal();
+  TORCH_INTERNAL_ASSERT(state_ptr, "Expected profiler state set");
   auto recordFunctionCallback =
-      at::RecordFunctionCallback(
-          onFunctionEnter<use_global_callback>,
-          onFunctionExit<use_global_callback>)
-          .needsInputs(registration_state_ptr->config().report_input_shapes)
+      at::RecordFunctionCallback(onFunctionEnterGlobal, onFunctionExitGlobal)
+          .needsInputs(state_ptr->config().report_input_shapes)
           .scopes(scopes);
 
-  if constexpr (use_global_callback) {
-    registration_state_ptr->setCallbackHandle(
-        at::addGlobalCallback(recordFunctionCallback));
-  } else {
-    registration_state_ptr->setCallbackHandle(
-        at::addThreadLocalCallback(recordFunctionCallback));
-  }
+  // Arm the drain gate before the global callback and fire on any thread. If
+  // this a new profiling session, also bump the session generation.
+  // disableProfiler() relies on this to know it must drain in-flight callbacks.
+  global_callback_session.activate(new_session);
+
+  state_ptr->setCallbackHandle(at::addGlobalCallback(recordFunctionCallback));
+}
+
+void pushTLSProfilingCallbacks(
+    const std::unordered_set<at::RecordScope>& scopes) {
+  KinetoThreadLocalState* state_ptr = KinetoThreadLocalState::getTLS();
+  TORCH_INTERNAL_ASSERT(state_ptr, "Expected profiler state set");
+  auto recordFunctionCallback =
+      at::RecordFunctionCallback(onFunctionEnterTLS, onFunctionExitTLS)
+          .needsInputs(state_ptr->config().report_input_shapes)
+          .scopes(scopes);
+  state_ptr->setCallbackHandle(
+      at::addThreadLocalCallback(recordFunctionCallback));
 }
 
 struct ProfilerStateInfo {
@@ -671,10 +942,10 @@ void reportBackendEventToActiveKinetoProfiler(
     const std::string& event_name,
     const std::string& backend_name) {
   TORCH_INTERNAL_ASSERT(
-      KinetoThreadLocalState::get(/*global=*/true) == nullptr,
+      KinetoThreadLocalState::getGlobal() == nullptr,
       "On-demand profiling does not support post processing callback");
 
-  auto state_ptr = KinetoThreadLocalState::get(/*global=*/false);
+  KinetoThreadLocalState* state_ptr = KinetoThreadLocalState::getTLS();
   if (!state_ptr) {
     return;
   }
@@ -718,9 +989,7 @@ void prepareProfiler(
       isKinetoCompatibleState(config.state),
       "Supported only in Kineto profiler");
   torch::profiler::impl::kineto::prepareTrace(
-      /*cpuOnly=*/!(
-          at::hasCUDA() || at::hasXPU() || at::hasMTIA() ||
-          c10::get_privateuse1_backend() != "privateuseone"),
+      /*cpuOnly=*/!hasRequestedDeviceActivity(activities),
       activities,
       config.experimental_config,
       config.trace_id,
@@ -755,15 +1024,24 @@ void prepareProfiler(
 }
 
 static void toggleTorchOpCollectionDynamic(bool enable) {
-  auto state_ptr = ProfilerStateBase::get();
-  if (state_ptr) {
-    const auto& config = state_ptr->config();
+  std::shared_ptr<ProfilerStateBase> global_state =
+      ProfilerStateBase::getGlobal();
+  if (global_state) {
     if (enable) {
       auto scopes = profiler_state_info_ptr->scopes;
-      config.global() ? pushProfilingCallbacks</*global=*/true>(scopes)
-                      : pushProfilingCallbacks</*global=*/false>(scopes);
+      // Mid-session re-arm on the same RecordQueue: do not bump the generation.
+      pushGlobalProfilingCallbacks(scopes, /*new_session=*/false);
     } else {
-      state_ptr->removeCallback();
+      global_state->removeCallback();
+    }
+  } else {
+    ProfilerStateBase* tls_state = ProfilerStateBase::getTLS();
+    TORCH_CHECK(tls_state);
+    if (enable) {
+      auto scopes = profiler_state_info_ptr->scopes;
+      pushTLSProfilingCallbacks(scopes);
+    } else {
+      tls_state->removeCallback();
     }
   }
 }
@@ -776,15 +1054,21 @@ static void toggleTorchOpCollectionDynamic(bool enable) {
 #define UNUSED __attribute__((unused))
 #endif
 static UNUSED void togglePythonCollectionDynamic(bool enable) {
-  auto state_ptr = ProfilerStateBase::get();
-  if (state_ptr) {
-    auto global = state_ptr->config().global();
-    KinetoThreadLocalState* kineto_thread_local_state_ptr =
-        KinetoThreadLocalState::get(global);
+  std::shared_ptr<KinetoThreadLocalState> global_state =
+      KinetoThreadLocalState::getGlobal();
+  if (global_state) {
     if (enable) {
-      kineto_thread_local_state_ptr->resumePython();
+      global_state->resumePython();
     } else {
-      kineto_thread_local_state_ptr->pausePython();
+      global_state->pausePython();
+    }
+  } else {
+    KinetoThreadLocalState* tls_state = KinetoThreadLocalState::getTLS();
+    TORCH_CHECK(tls_state);
+    if (enable) {
+      tls_state->resumePython();
+    } else {
+      tls_state->pausePython();
     }
   }
 }
@@ -801,15 +1085,15 @@ static void toggleCPUCollectionDynamic(bool enable) {
 void toggleCollectionDynamic(
     const bool enable,
     const std::set<torch::profiler::impl::ActivityType>& activities) {
-  if (activities.count(torch::autograd::profiler::ActivityType::CPU) > 0 &&
-      (activities.count(torch::autograd::profiler::ActivityType::CUDA) == 0 ||
-       activities.count(torch::autograd::profiler::ActivityType::XPU) == 0)) {
+  if (activities.contains(torch::autograd::profiler::ActivityType::CPU) &&
+      (!activities.contains(torch::autograd::profiler::ActivityType::CUDA) ||
+       !activities.contains(torch::autograd::profiler::ActivityType::XPU))) {
     LOG(WARNING)
         << "Toggling CPU activity with GPU activity on may result in traces with GPU events on arbitrary tracks";
   } else if (
-      (activities.count(torch::autograd::profiler::ActivityType::CUDA) > 0 ||
-       activities.count(torch::autograd::profiler::ActivityType::XPU) > 0) &&
-      activities.count(torch::autograd::profiler::ActivityType::CPU) == 0) {
+      (activities.contains(torch::autograd::profiler::ActivityType::CUDA) ||
+       activities.contains(torch::autograd::profiler::ActivityType::XPU)) &&
+      !activities.contains(torch::autograd::profiler::ActivityType::CPU)) {
     LOG(WARNING)
         << "Toggling GPU activity with CPU activity on may result in traces with incorrect correlation between CPU and GPU events";
   }
@@ -840,12 +1124,18 @@ void enableProfilerWithEventPostProcess(
       config.state != ProfilerState::ITT,
       "ITT does not support post processing callback.");
   TORCH_INTERNAL_ASSERT(
-      KinetoThreadLocalState::get(/*global=*/true) == nullptr,
+      KinetoThreadLocalState::getGlobal() == nullptr,
       "On-demand profiling does not support post processing callback");
 
   enableProfiler(config, activities, scopes);
-  auto state_ptr = KinetoThreadLocalState::get(config.global());
-  state_ptr->setEventPostProcessingCallback(std::move(cb));
+  if (config.pushGlobalCallbacks()) {
+    std::shared_ptr<KinetoThreadLocalState> state_ptr =
+        KinetoThreadLocalState::getGlobal();
+    state_ptr->setEventPostProcessingCallback(std::move(cb));
+  } else {
+    KinetoThreadLocalState* state_ptr = KinetoThreadLocalState::getTLS();
+    state_ptr->setEventPostProcessingCallback(std::move(cb));
+  }
 }
 
 void enableProfiler(
@@ -853,8 +1143,11 @@ void enableProfiler(
     const std::set<torch::profiler::impl::ActivityType>& activities,
     const std::unordered_set<at::RecordScope>& scopes) {
   const auto has_cpu = activities.count(ActivityType::CPU);
+  bool already_enabled = config.pushGlobalCallbacks()
+      ? KinetoThreadLocalState::getGlobal() != nullptr
+      : KinetoThreadLocalState::getTLS() != nullptr;
   TORCH_CHECK(
-      KinetoThreadLocalState::get(/*global=*/config.global()) == nullptr,
+      !already_enabled,
       "Profiler is already enabled",
       (config.global() ? "." : " on this thread."));
 
@@ -887,8 +1180,8 @@ void enableProfiler(
 
   if (has_cpu) {
     config.pushGlobalCallbacks()
-        ? pushProfilingCallbacks</*global=*/true>(scopes)
-        : pushProfilingCallbacks</*global=*/false>(scopes);
+        ? pushGlobalProfilingCallbacks(scopes, /*new_session=*/true)
+        : pushTLSProfilingCallbacks(scopes);
   }
 
   if (!config.global()) {
@@ -911,11 +1204,11 @@ void enableProfilerInChildThread() {
   auto state_info_ptr = profiler_state_info_ptr;
   TORCH_CHECK(state_info_ptr, "Profiler is not enabled in main thread.");
   TORCH_CHECK(
-      KinetoThreadLocalState::get(/*global=*/false) == nullptr,
+      KinetoThreadLocalState::getTLS() == nullptr,
       "Profiler is already enabled in this thread.");
 
   KinetoThreadLocalState::push(state_info_ptr->state_ptr);
-  pushProfilingCallbacks</*global=*/false>(state_info_ptr->scopes);
+  pushTLSProfilingCallbacks(state_info_ptr->scopes);
 }
 
 void disableProfilerInChildThread() {
@@ -929,6 +1222,30 @@ void disableProfilerInChildThread() {
 std::unique_ptr<ProfilerResult> disableProfiler() {
   // releasing to inform child threads to stop profiling
   profiler_state_info_ptr = nullptr;
+
+  // If global callbacks were installed (KINETO_ONDEMAND, or KINETO with
+  // profile_all_threads), they may be running on other threads right now. Wait
+  // for in-flight ones to finish before popping and finalizing the state, else
+  // a worker thread can mutate the record queue while finalizeTrace() reads
+  // and frees it.
+  if (!global_callback_session.drain()) {
+    // The drain timed out: an in-flight global callback is wedged or dead, so
+    // we cannot finalize (reading the queue would race the live callback and
+    // reintroduce the use-after-free). We still pop the state and remove the
+    // global callback so a later enableProfiler() is not rejected as "already
+    // enabled". Safe with callbacks in flight: the shared_ptr keepalive keeps
+    // the state alive for one still using it, and removeCallback() is versioned
+    // (running invocations use per-thread snapshots). The session trace is
+    // lost.
+    LOG(ERROR)
+        << "disableProfiler timed out draining in-flight global RecordFunction "
+           "callbacks; abandoning this trace. A callback thread is likely "
+           "wedged or was killed mid-callback.";
+    if (auto state_ptr = ProfilerStateBase::pop()) {
+      state_ptr->removeCallback();
+    }
+    return std::make_unique<ProfilerResult>();
+  }
 
   auto state_ptr = ProfilerStateBase::pop();
   if (!state_ptr) {
@@ -1375,8 +1692,8 @@ const std::vector<const libkineto::ITraceActivity*>* ProfilerResult::
 
 namespace profiler::impl {
 void _reportVulkanEventToProfiler(vulkan_id_t id) {
-  auto state_ptr = ::torch::autograd::profiler::KinetoThreadLocalState::get(
-      /*global=*/false);
+  ::torch::autograd::profiler::KinetoThreadLocalState* state_ptr =
+      ::torch::autograd::profiler::KinetoThreadLocalState::getTLS();
   if (state_ptr) {
     state_ptr->reportVulkanEventToProfiler(id);
   }

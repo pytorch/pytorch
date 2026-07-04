@@ -592,6 +592,7 @@ class InputObserverInfo:
         torch._check(
             len(flat_inputs) == len(flat_dynamic_shapes),
             (
+                # pyrefly: ignore [bad-argument-type]
                 f"Length mismatch len(flat_inputs)={len(flat_inputs)}, "
                 f"len(flat_dynamic_shapes)={len(flat_dynamic_shapes)}"
             ),
