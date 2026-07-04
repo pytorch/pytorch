@@ -206,9 +206,6 @@ else:
     )
 
 
-TreeSpec: _TypeAlias = PyTreeSpec  # type alias for backward compatibility
-
-
 def register_pytree_node(
     cls: type[_Any],
     /,
@@ -248,7 +245,7 @@ def register_pytree_node(
 
 def __getattr__(name: str) -> _Any:
     if name == "cxx":
-        # Lazy import
-        return _import_cxx_pytree_and_store()
-
+        return _import_cxx_pytree_and_store()  # lazy import
+    if name == "TreeSpec":
+        return PyTreeSpec  # type alias for backward compatibility
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
