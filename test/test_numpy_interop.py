@@ -706,7 +706,7 @@ class TestNumPyInterop(TestCase):
         self.assertEqual(y, f(x))
 
 
-instantiate_device_type_tests(TestNumPyInterop, globals())
+instantiate_device_type_tests(TestNumPyInterop, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()

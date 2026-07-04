@@ -3162,12 +3162,12 @@ class TestForwardADWithScalars(TestCase):
 instantiate_device_type_tests(
     TestCommon, globals(), allow_xpu=True, allow_mps=MACOS_VERSION >= 15.0
 )
-instantiate_device_type_tests(TestCompositeCompliance, globals())
+instantiate_device_type_tests(TestCompositeCompliance, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestMathBits, globals())
 instantiate_device_type_tests(TestRefsOpsInfo, globals(), only_for="cpu")
 instantiate_device_type_tests(TestFakeTensor, globals())
 instantiate_device_type_tests(TestTags, globals(), only_for="cpu")
-instantiate_device_type_tests(TestForwardADWithScalars, globals())
+instantiate_device_type_tests(TestForwardADWithScalars, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     TestCase._default_dtype_check_enabled = True

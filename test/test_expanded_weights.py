@@ -1159,8 +1159,10 @@ def clone_if_tensor(t):
         return t
 
 
-instantiate_device_type_tests(TestExpandedWeightHelperFunction, globals())
+instantiate_device_type_tests(
+    TestExpandedWeightHelperFunction, globals(), allow_xpu=True
+)
 instantiate_device_type_tests(TestExpandedWeightFunctional, globals())
-instantiate_device_type_tests(TestExpandedWeightModule, globals())
+instantiate_device_type_tests(TestExpandedWeightModule, globals(), allow_xpu=True)
 if __name__ == "__main__":
     run_tests()

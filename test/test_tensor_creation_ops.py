@@ -4555,10 +4555,10 @@ class TestAsArray(TestCase):
 
 instantiate_device_type_tests(TestTensorCreation, globals())
 instantiate_device_type_tests(TestRandomTensorCreation, globals())
-instantiate_device_type_tests(TestLikeTensorCreation, globals())
+instantiate_device_type_tests(TestLikeTensorCreation, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestBufferProtocol, globals(), only_for="cpu")
 instantiate_device_type_tests(TestFromBlob, globals(), only_for="cpu")
-instantiate_device_type_tests(TestAsArray, globals())
+instantiate_device_type_tests(TestAsArray, globals(), allow_xpu=True)
 
 if __name__ == '__main__':
     TestCase._default_dtype_check_enabled = True
