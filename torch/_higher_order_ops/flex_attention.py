@@ -652,6 +652,7 @@ def create_fw_bw_graph(
 
     # All of these imports need to be here in order to avoid circular dependencies
     from torch._dispatch.python import suspend_functionalization
+    from torch._dynamo._trace_wrapped_higher_order_op import mod_index
     from torch._functorch.aot_autograd import AOTConfig, create_joint
     from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
     from torch._subclasses.functional_tensor import disable_functional_mode
@@ -724,11 +725,21 @@ def create_fw_bw_graph(
             n: Tensor,
             example_grad: Tensor,
             *other_buffers: tuple[Tensor, ...],
-        ) -> tuple[Tensor, ...]:
+        ) -> list[Tensor | None]:
             def fw_with_masks(
                 *args: tuple[Tensor, ...],
             ) -> tuple[tuple[Tensor], tuple[bool]]:
-                fw_out = score_mod(*args)
+                captured_args = [
+                    mod_index(buffer, [])
+                    if (
+                        isinstance(buffer, torch.Tensor)
+                        and buffer.requires_grad
+                        and buffer.ndim == 0
+                    )
+                    else buffer
+                    for buffer in args[5:]
+                ]
+                fw_out = score_mod(*args[:5], *captured_args)
                 out_requires_grad = fw_out.requires_grad
                 return ((fw_out,), (out_requires_grad,))
 
