@@ -5953,7 +5953,9 @@ if HAS_CUDA_AND_TRITON:
             for i in range(2, 10):
                 run(i)
 
-            # first 3 distinct sizes record, later novel sizes run eagerly
+            # first 3 distinct sizes record, later novel sizes run eagerly.
+            # note new_graph_id() advances the counter, so the second check
+            # below expects 4 even though no new graphs were recorded
             self.assertEqual(self.get_manager().new_graph_id().id, 3)
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 

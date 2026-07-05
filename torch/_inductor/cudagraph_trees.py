@@ -418,7 +418,9 @@ def cudagraphify_impl(
     *args: Any,
     **kwargs: Any,
 ) -> ModelType:
-    fn_cache: dict[tuple[int, ...], Callable[..., Any]] = {}
+    # keyed on the concrete symint input values: a tuple of ints, a bare int
+    # (single symint input), or None when the graph has no symint inputs
+    fn_cache: dict[tuple[int, ...] | int | None, Callable[..., Any]] = {}
 
     # Detect int inputs: we need to index on these
     int_key = [i for i, v in enumerate(inputs) if isinstance(v, int)]

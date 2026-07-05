@@ -199,6 +199,10 @@ def pad_to_bucket(ids, pad_id, ignore_index=-100):
     return ids, labels
 ```
 
+The bucket ladder must cover the maximum sequence length (`next` raises
+`StopIteration` otherwise); either truncate longer sequences or add a bucket
+for the model's maximum length.
+
 Setting [torch.\_inductor.config.triton.cudagraph_capture_sizes](https://github.com/pytorch/pytorch/blob/main/torch/_inductor/config.py)
 restricts CUDAGraph capture to the listed sizes; inputs with other sizes run without
 CUDAGraph instead of triggering a new recording.
