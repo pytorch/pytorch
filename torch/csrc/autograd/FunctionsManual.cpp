@@ -449,18 +449,18 @@ std::tuple<Tensor, Tensor, Tensor> _pdist_backward_backward(
   auto idx = at::triu_indices(n, n, 1, self.options().dtype(at::kLong));
   torch::List<std::optional<Tensor>> ij({idx.select(0, 0), idx.select(0, 1)});
 
-  auto scatter_sym = [&](const Tensor& packed) {
-    auto upper = at::zeros({n, n}, packed.options()).index_put(ij, packed);
+  auto to_symmetric = [&](const Tensor& packed) {
+    auto upper = packed.new_zeros({n, n}).index_put(ij, packed);
     return upper + upper.mT();
   };
 
   auto [P, gx1, gx2, Cd] = _cdist_backward_backward(
       grad,
-      scatter_sym(grad_output),
+      to_symmetric(grad_output),
       self,
       self,
       p,
-      scatter_sym(pdist),
+      to_symmetric(pdist),
       {need_go, need_self, need_self, need_pdist});
 
   if (need_go)
