@@ -369,6 +369,8 @@ if torch.backends.mps.is_available():
             "linalg.ldl_factor": None,
             "linalg.ldl_factor_ex": None,
             "linalg.ldl_solve": None,
+            "linalg.matrix_sqrth": None,
+            "linalg.polar": None,
             "matrix_exp": None,
             "max_pool2d_with_indices_backward": [
                 torch.int8,
@@ -450,7 +452,6 @@ if torch.backends.mps.is_available():
             "nn.functional.adaptive_max_pool3d": None,
             "nn.functional.interpolatearea": None,
             "nn.functional.interpolatebicubic": [torch.uint8],
-            "nn.functional.ctc_loss": None,
             "nn.functional.local_response_norm": [
                 torch.int8,
                 torch.int16,
@@ -861,6 +862,9 @@ if torch.backends.mps.is_available():
             "linalg.householder_product": None,
             "linalg.lstsq": [torch.float32],
             "linalg.lstsqgrad_oriented": [torch.float32],
+            # No MPS kernel for linalg_polar.out; the grad test still runs the
+            # forward leg, which raises NotImplementedError on MPS.
+            "linalg.polar": None,
             "unique_consecutive": [torch.float16, torch.float32],
             "scalar_tensor": [torch.float16, torch.float32],
             "masked.scatter": [torch.float16, torch.float32],

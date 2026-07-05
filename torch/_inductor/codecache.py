@@ -257,7 +257,8 @@ def _cuda_fatbin_command(
     fatbinary: str | None,
     current_arch: str | None = None,
 ) -> list[str]:
-    current_arch = current_arch or cuda_compile_utils._nvcc_arch_as_compile_option()
+    if not current_arch:
+        current_arch = cuda_compile_utils._nvcc_arch_as_compile_option_or_raise()
     gencode_options = cuda_compile_utils._cuda_multi_arch_gencode_options(current_arch)
     if (
         fatbinary is not None
@@ -4164,6 +4165,17 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
     def cache_clear() -> None:
         CppWrapperCodeCache.cache.clear()
 
+    @classmethod
+    def load_pybinding(cls, *args: Any, **kwargs: Any) -> Any:
+        # The cpp_wrapper host glue is compiled synchronously here (in the JIT
+        # torch.compile path this runs while importing the generated wrapper
+        # module, and in AOTI it runs during the autotune pass). Time it under a
+        # dedicated key so the host C++ cold-compile cost is attributed to
+        # cpp_wrapper instead of being hidden inside the generic
+        # PyCodeCache.load_by_key_path timer.
+        with dynamo_timed("cpp_wrapper_compile", log_pt2_compile_event=True):
+            return super().load_pybinding(*args, **kwargs)
+
     cpp_compile_command_flags = {
         "include_pytorch": True,
         "shared": True,
@@ -4179,8 +4191,19 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
             size_t result_len = PyList_GET_SIZE(pyvec);
             result.reserve(result_len);
             for (size_t i = 0; i < result_len; i++) {{
+                PyObject* item = PyList_GET_ITEM(pyvec, i);
+                if (item == Py_None) {{
+                    result.push_back(nullptr);
+                    continue;
+                }}
                 // AtenTensorHandle is essentially a pointer
-                void* elem = PyCapsule_GetPointer(PyList_GET_ITEM(pyvec, i), NULL);
+                void* elem = PyCapsule_GetPointer(item, NULL);
+                if (elem == nullptr && PyErr_Occurred()) {{
+                    PyErr_Clear();
+                    throw std::runtime_error(
+                        "expected input handle to be a PyCapsule or None"
+                    );
+                }}
                 result.push_back(reinterpret_cast<AtenTensorHandle>(elem));
             }}
             return result;

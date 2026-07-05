@@ -1873,9 +1873,15 @@ def forward(self, arg0_1):
         for label, joint_gm in [("public", joint_public), ("private", joint_private)]:
             buf_input = torch.zeros(())
             (exported_out,) = joint_gm(buf_input, x)
-            self.assertEqual(exported_out, eager_out, msg=f"{label}: output mismatch")
             self.assertEqual(
-                buf_input, eager_buf, msg=f"{label}: buffer mutation mismatch"
+                exported_out,
+                eager_out,
+                msg=lambda msg: f"{msg}\n{label}: output mismatch",
+            )
+            self.assertEqual(
+                buf_input,
+                eager_buf,
+                msg=lambda msg: f"{msg}\n{label}: buffer mutation mismatch",
             )
 
 

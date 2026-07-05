@@ -106,6 +106,8 @@ static void logaddexp_mps_kernel(TensorIteratorBase& iter) {
 }
 
 static void logaddexp2_mps_kernel(TensorIteratorBase& iter) {
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      c10::isFloatingType(iter.common_dtype()), "\"logaddexp2_mps\" not implemented for '", iter.common_dtype(), "'");
   lib.exec_binary_kernel(iter, "logaddexp2");
 }
 
@@ -277,10 +279,12 @@ static void fmod_mps_kernel(TensorIteratorBase& iter) {
 }
 
 static void igamma_mps_kernel(TensorIteratorBase& iter) {
+  TORCH_CHECK_TYPE(isFloatingType(iter.common_dtype()), "igamma_mps not implemented for ", iter.common_dtype());
   lib.exec_binary_kernel(iter, "igamma");
 }
 
 static void igammac_mps_kernel(TensorIteratorBase& iter) {
+  TORCH_CHECK_TYPE(isFloatingType(iter.common_dtype()), "igammac_mps not implemented for ", iter.common_dtype());
   lib.exec_binary_kernel(iter, "igammac");
 }
 
