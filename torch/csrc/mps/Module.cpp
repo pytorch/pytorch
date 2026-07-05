@@ -130,9 +130,7 @@ static PyObject* MPSModule_maxBufferLength(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* MPSModule_setMemoryBudget(
-    PyObject* _unused,
-    PyObject* args) {
+static PyObject* MPSModule_setMemoryBudget(PyObject* _unused, PyObject* args) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       THPUtils_checkLong(args), "invalid argument to setMemoryBudget()");

@@ -129,10 +129,8 @@ void MPSHeapAllocatorImpl::setMemoryBudget(size_t budget_bytes) {
   high_ratio = std::min(high_ratio, default_high_watermark_upper_bound);
 
   // preserve the current low/high ratio; fall back to platform default if high was unlimited
-  const double current_high =
-      (m_high_watermark_ratio == 0.0) ? default_high_watermark_ratio : m_high_watermark_ratio;
-  const double current_low =
-      (m_low_watermark_ratio == 0.0) ? default_low_watermark_ratio : m_low_watermark_ratio;
+  const double current_high = (m_high_watermark_ratio == 0.0) ? default_high_watermark_ratio : m_high_watermark_ratio;
+  const double current_low = (m_low_watermark_ratio == 0.0) ? default_low_watermark_ratio : m_low_watermark_ratio;
   const double low_ratio = std::min(high_ratio * (current_low / current_high), high_ratio);
 
   setHighWatermarkRatio(high_ratio);

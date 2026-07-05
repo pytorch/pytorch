@@ -17685,7 +17685,7 @@ class TestMemoryBudget(TestCaseMPS):
         a = torch.randn(64, 64, device="mps")
         b = torch.randn(64, 64, device="mps")
         result = (a @ b).cpu()
-        ref    = a.cpu() @ b.cpu()
+        ref = a.cpu() @ b.cpu()
         self.assertEqual(result, ref, atol=1e-4, rtol=1e-4)
 
     def test_ops_correct_after_budget_reset(self):
@@ -17693,7 +17693,7 @@ class TestMemoryBudget(TestCaseMPS):
         torch.mps.set_memory_budget(0)
         a = torch.randn(32, 32, device="mps")
         result = torch.relu(a).cpu()
-        ref    = torch.relu(a.cpu())
+        ref = torch.relu(a.cpu())
         self.assertEqual(result, ref)
 
     def test_get_budget_initial_is_zero(self):
