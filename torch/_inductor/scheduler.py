@@ -4714,6 +4714,13 @@ class Scheduler:
                     )
                 for alt_name in buf.get_mutations():
                     alt_name = rename(alt_name)
+                    is_ordering_only = getattr(buf, "ordering_only", False)
+                    if is_ordering_only:
+                        add_user(alt_name, node, is_weak=True)
+                        node.add_fake_dep(
+                            WeakDep(alt_name, mutating_buf=buf.get_name(), is_fake=True)
+                        )
+                        continue
                     # this node must run after the prior writer
                     add_user(alt_name, node)
                     node.add_fake_dep(StarDep(alt_name, mode=node_mode))
@@ -9529,11 +9536,12 @@ class Scheduler:
 
         parent_wrapper_code = V.graph.wrapper_code
         graph_partition_id = next(self._graph_partition_counter)
+        graph_name = parent_wrapper_code.get_partition_name(graph_partition_id)
 
         with V.graph.set_current_wrapper_code():
             V.graph.init_wrapper_code(
                 is_subgraph=True,
-                subgraph_name=f"partition_{graph_partition_id}",
+                subgraph_name=graph_name,
                 parent_wrapper_code=parent_wrapper_code,
                 partition_signatures=signature,
             )
@@ -9563,7 +9571,6 @@ class Scheduler:
             V.graph.wrapper_code.partition_signatures = signature
             V.graph.wrapper_code.write_prefix()
 
-            graph_name = V.graph.name
             partition_code, _ = V.graph.wrapper_code.generate(V.graph.is_inference)
 
         V.graph.wrapper_code.define_subgraph_launcher_fn(graph_name, partition_code)

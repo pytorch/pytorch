@@ -511,13 +511,13 @@ Found from :
                 self.assertEqual(
                     logger.getEffectiveLevel(),
                     logging.INFO,
-                    msg=f"expected {logger_qname} is INFO, got {logging.getLevelName(logger.getEffectiveLevel())}",
+                    msg=lambda msg: f"{msg}\nexpected {logger_qname} is INFO, got {logging.getLevelName(logger.getEffectiveLevel())}",
                 )
             else:
                 self.assertEqual(
                     logger.getEffectiveLevel(),
                     logging.DEBUG,
-                    msg=f"expected {logger_qname} is DEBUG, got {logging.getLevelName(logger.getEffectiveLevel())}",
+                    msg=lambda msg: f"{msg}\nexpected {logger_qname} is DEBUG, got {logging.getLevelName(logger.getEffectiveLevel())}",
                 )
 
     @make_logging_test(graph_breaks=True)

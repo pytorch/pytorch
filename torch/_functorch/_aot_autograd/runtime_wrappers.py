@@ -14,6 +14,7 @@ import itertools
 import pprint
 import typing
 import warnings
+import weakref
 from collections.abc import Callable, Generator, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
@@ -23,8 +24,10 @@ from typing import Any
 import torch
 import torch.fx as fx
 from torch import Tensor
+from torch._custom_class_base import CustomClassBase
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.callback import callback_handler, CallbackTrigger
+from torch._dynamo.graph_bytecode_inputs import index_to_external_object_weakref
 from torch._dynamo.utils import CompileEventLogger, dynamo_timed, get_metrics_context
 from torch._guards import (
     compile_context,
@@ -37,7 +40,6 @@ from torch._guards import (
 from torch._library.opaque_object import is_opaque_type
 from torch._library.utils import is_builtin
 from torch._logging import getArtifactLogger
-from torch._opaque_base import OpaqueBase
 from torch._ops import OpOverload
 from torch._prims_common import CUDARngStateHelper
 from torch._subclasses import FakeTensor
@@ -100,6 +102,15 @@ from .utils import (
     strict_zip,
     without_output_descs,
 )
+
+
+def _snapshot_external_objects(ctx: Any) -> None:
+    """Snapshot the external object registry onto ctx for backward restore."""
+    ctx._external_objects = {
+        k: ref()
+        for k, ref in index_to_external_object_weakref.items()
+        if ref() is not None
+    }
 
 
 def _unwrap_tensor_subclasses_no_symints(
@@ -2664,7 +2675,7 @@ class _AutogradSavedState:
             self.metadata.opaque_objects_saved_for_backwards_slice
         ]
         if not all(
-            is_opaque_type(type(obj)) or isinstance(obj, OpaqueBase)
+            is_opaque_type(type(obj)) or isinstance(obj, CustomClassBase)
             for obj in opaque_object_outs
         ):
             raise AssertionError(
@@ -2745,6 +2756,8 @@ class _AutogradForwardEpilogue:
         ]
         ctx.mark_non_differentiable(*fw_outs_not_requiring_grad)
         ctx._materialize_non_diff_grads = False
+        _snapshot_external_objects(ctx)
+
         return tuple(raw_returns)
 
 
@@ -3473,6 +3486,8 @@ class _AOTDispatchAutogradFunctionFactory:
                         )
             ctx.mark_non_differentiable(*fw_outs_not_requiring_grad)
             ctx._materialize_non_diff_grads = False
+            _snapshot_external_objects(ctx)
+
             return tuple(raw_returns)
 
         forward_epilogue.finalize = _codegen_finalize  # type: ignore[method-assign]
@@ -3586,6 +3601,9 @@ class _AOTDispatchAutogradFunctionFactory:
                             "donated buffer."
                         ),
                     )
+
+                for idx, obj in getattr(ctx, "_external_objects", {}).items():
+                    index_to_external_object_weakref[idx] = weakref.ref(obj)
 
                 return call_func_at_runtime_with_args(
                     compiled_bw,
