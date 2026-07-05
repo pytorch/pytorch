@@ -1471,20 +1471,34 @@ class VariableBuilder:
             )
         elif (
             isinstance(value, types.MethodType)
-            and value.__name__ in ("shuffle", "sample")
+            and value.__name__ in ("shuffle", "sample", "seed")
             and isinstance(value.__self__, random.Random)
             and RandomVariable.is_supported_random_obj(value.__self__)
         ):
-            # Module-level random.shuffle/random.sample are methods bound to the
-            # module-global random.Random instance. The scalar-returning helpers
-            # (random.random/randint/randrange/uniform) already have a dedicated
-            # RandomValueSource path in UserDefinedObjectVariable; shuffle/sample
-            # return sequences instead, so route them through RandomVariable to
-            # model the RNG state rather than skipping into the random module.
+            # Module-level random.shuffle/random.sample/random.seed are methods
+            # bound to the module-global random.Random instance. The
+            # scalar-returning helpers (random.random/randint/randrange/uniform)
+            # already have a dedicated RandomValueSource path in
+            # UserDefinedObjectVariable; these return sequences or mutate the RNG
+            # state instead, so route them through RandomVariable to model the
+            # RNG state rather than skipping into the random module.
             random_self = value.__self__
             obj_source = self.source and AttrSource(self.source, "__self__")
             obj_vt = VariableTracker.build(self.tx, random_self, obj_source)
             return GetAttrVariable(obj_vt, value.__name__, py_type=type(value))
+        elif (
+            isinstance(value, types.BuiltinMethodType)
+            and isinstance(value.__self__, random.Random)
+            and RandomVariable.is_supported_random_obj(value.__self__)
+            and value in UserDefinedObjectVariable._supported_random_functions()
+        ):
+            # Module-level random.random is a C builtin method bound to the
+            # module-global random.Random instance (unlike randint/randrange/
+            # uniform, which are Python-level methods). Route it through
+            # UserDefinedObjectVariable so its call_random_fn / RandomValueSource
+            # path models the RNG value instead of skipping into the C builtin.
+            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            return UserDefinedObjectVariable(value, source=self.source)
         elif isinstance(value, torch._C._ImperativeEngine):
             self.install_guards(GuardBuilder.ID_MATCH)
             return AutogradEngineVariable(value, source=self.source)
