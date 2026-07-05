@@ -145,12 +145,19 @@ def get_source_partitions(
                 if user not in nodes:
                     output_nodes.add(node)
 
+        # Sort nodes by their position in the graph for deterministic ordering.
+        # Sets are non-deterministic across runs due to hash randomization.
+        node_positions = {node: i for i, node in enumerate(graph.nodes)}
+
+        def sort_key(n: Node) -> int:
+            return node_positions.get(n, len(node_positions))
+
         return SourcePartition(
             nodes,
             module_type,
-            list(input_nodes),
-            list(output_nodes),
-            list(params),  # type: ignore[arg-type]
+            sorted(input_nodes, key=sort_key),
+            sorted(output_nodes, key=sort_key),
+            sorted(params, key=sort_key),  # type: ignore[arg-type]
         )
 
     ret: dict[type[Any], list[SourcePartition]] = {}
