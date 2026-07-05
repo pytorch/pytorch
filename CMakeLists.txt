@@ -262,6 +262,13 @@ endif()
 # CUDA is incompatible with TSAN
 cmake_dependent_option(USE_CUDA "Use CUDA" ON "NOT USE_TSAN" OFF)
 
+# If USE_XPU is already defined in cache, it means user explicitly set it
+if(DEFINED CACHE{USE_XPU})
+  set(_USE_XPU_EXPLICITLY_SET TRUE)
+else()
+  set(_USE_XPU_EXPLICITLY_SET FALSE)
+endif()
+
 option(USE_XPU "Use XPU" ON)
 option(USE_MTIA "Use MTIA" OFF)
 cmake_dependent_option(
