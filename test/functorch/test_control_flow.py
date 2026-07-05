@@ -23,6 +23,7 @@ from torch._higher_order_ops.cudagraph_conditional_nodes import (
 from torch._higher_order_ops.map import _fake_map
 from torch._higher_order_ops.scan import _fake_scan, scan
 from torch._higher_order_ops.schema import HopSchemaGenerator
+from torch._higher_order_ops.switch import switch
 from torch._higher_order_ops.while_loop import while_loop
 from torch._subclasses.functional_tensor import (
     CppFunctionalizeAPI,
@@ -1436,6 +1437,508 @@ def forward(self, pred_1, x_1):
         cond_outputs, cond_inputs = self._test_cond_autograd(
             cond_fct, pred_fn, true_fn, false_fn, operands
         )
+
+    def test_switch_basic(self):
+        x = torch.tensor([0, 1, 2])
+        branches = (
+            lambda inp_x: torch.zeros_like(inp_x),
+            lambda inp_x: torch.ones_like(inp_x),
+            lambda inp_x: 2 * torch.ones_like(inp_x),
+        )
+
+        # integer indices (including clamped out-of-range)
+        result = switch(-1, branches, (x,))
+        self.assertEqual(result, torch.zeros_like(x))
+
+        result = switch(0, branches, (x,))
+        self.assertEqual(result, torch.zeros_like(x))
+
+        result = switch(1, branches, (x,))
+        self.assertEqual(result, torch.ones_like(x))
+
+        result = switch(2, branches, (x,))
+        self.assertEqual(result, 2 * torch.ones_like(x))
+
+        result = switch(3, branches, (x,))
+        self.assertEqual(result, 2 * torch.ones_like(x))
+
+        # tensor indices
+        result = switch(torch.tensor([-1]), branches, (x,))
+        self.assertEqual(result, torch.zeros_like(x))
+
+        result = switch(torch.tensor([0]), branches, (x,))
+        self.assertEqual(result, torch.zeros_like(x))
+
+        result = switch(torch.tensor([1]), branches, (x,))
+        self.assertEqual(result, torch.ones_like(x))
+
+        result = switch(torch.tensor([2]), branches, (x,))
+        self.assertEqual(result, 2 * torch.ones_like(x))
+
+        result = switch(torch.tensor([3]), branches, (x,))
+        self.assertEqual(result, 2 * torch.ones_like(x))
+
+    def test_switch_zero_args(self):
+        branches = (
+            lambda: torch.zeros(3),
+            lambda: torch.ones(3),
+            lambda: 2.0 * torch.ones(3),
+        )
+
+        for i in range(3):
+            self.assertEqual(switch(i, branches, []), branches[i]())
+
+    def test_switch_multiple_args(self):
+        x = torch.ones(3)
+        y = torch.tensor([1.0, 2.0, 3.0])
+        branches = (
+            lambda inp_x, inp_y: inp_x + inp_y,
+            lambda inp_x, inp_y: inp_x * inp_y,
+            lambda inp_x, inp_y: inp_x - 0.5 * inp_y,
+        )
+
+        for i in range(3):
+            self.assertEqual(switch(i, branches, (x, y)), branches[i](x, y))
+
+    def test_switch_invalid_index(self):
+        x = torch.ones(3)
+        branches = (torch.sin, torch.cos)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected index to be"):
+            switch([0, 1], branches, (x,))
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Expected index to be int or single-element tensor"
+        ):
+            switch(torch.tensor([0, 1]), branches, (x,))
+
+    def test_switch_zero_branch(self):
+        x = torch.ones(3)
+
+        # Empty-branch rejection happens unconditionally at the top of
+        # torch.switch, matching jax.lax.switch — both int and tensor
+        # indices surface the same RuntimeError.
+        idx = 0
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Expected branches to be a non-empty tuple or list of callables",
+        ):
+            switch(idx, [], (x,))
+
+    def test_switch_single_branch_shortcut(self):
+        # A single-branch switch degenerates to a plain call regardless of
+        # index value (matches jax.lax.switch). The index is ignored since
+        # it clamps to 0.
+        def only_branch(inp_x):
+            return inp_x.sin()
+
+        x = torch.randn(4)
+        self.assertEqual(switch(0, (only_branch,), (x,)), x.sin())
+        self.assertEqual(switch(5, (only_branch,), (x,)), x.sin())
+        self.assertEqual(switch(torch.tensor([0]), (only_branch,), (x,)), x.sin())
+        self.assertEqual(switch(torch.tensor([7]), (only_branch,), (x,)), x.sin())
+
+    def test_switch_different_output_shapes(self):
+        x = (torch.pi / 2) * torch.ones(2)
+        branches = (torch.sin, torch.sum)
+
+        result = switch(0, branches, (x,))
+        self.assertEqual(result, torch.ones_like(x))
+
+        result = switch(1, branches, (x,))
+        self.assertEqual(result.item(), torch.pi)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    def test_switch_gpu(self):
+        def branch0(inp_x):
+            return inp_x.sin()
+
+        def branch1(inp_x):
+            return inp_x.cos()
+
+        x = torch.randn(4, device="cuda")
+        index = torch.tensor(1, device="cuda")
+        result = switch(index, (branch0, branch1), (x,))
+        self.assertEqual(result, torch.cos(x))
+
+    def test_switch_no_trace(self):
+        # Smoke-test eager execution with 2 branches (cond is a special case of switch).
+        def branch0(inp_x):
+            return inp_x.cos()
+
+        def branch1(inp_x):
+            return inp_x.sin()
+
+        x = torch.randn(4)
+        self.assertEqual(switch(0, (branch0, branch1), (x,)), x.cos())
+        self.assertEqual(switch(1, (branch0, branch1), (x,)), x.sin())
+        # tensor index
+        self.assertEqual(switch(torch.tensor([0]), (branch0, branch1), (x,)), x.cos())
+        self.assertEqual(switch(torch.tensor([1]), (branch0, branch1), (x,)), x.sin())
+
+    def test_switch_cond_equivalence(self):
+        # switch(int(pred), [false_fn, true_fn], ops) must equal cond(pred, true_fn, false_fn, ops).
+        def true_fn(inp_x):
+            return inp_x.sin()
+
+        def false_fn(inp_x):
+            return inp_x.cos()
+
+        x = torch.randn(4)
+        for pred_val in [True, False]:
+            pred = torch.tensor(pred_val)
+            cond_result = cond(pred, true_fn, false_fn, (x,))
+            idx = torch.tensor([1 if pred_val else 0])
+            switch_result = switch(idx, (false_fn, true_fn), (x,))
+            self.assertEqual(cond_result, switch_result)
+
+    def test_switch_functionalized(self):
+        def branch0(inp_x):
+            y = inp_x.sin()
+            y.add_(4)
+            return y.sum()
+
+        def branch1(inp_x):
+            return inp_x.cos().sum()
+
+        def branch2(inp_x):
+            return inp_x.abs().sum()
+
+        def f(idx, inp_x):
+            return switch(idx, (branch0, branch1, branch2), (inp_x,))
+
+        x = torch.ones(4, 5)
+        functional_f = torch.func.functionalize(f)
+        for i in range(3):
+            idx = torch.tensor([i])
+            self.assertEqual(functional_f(idx, x), f(idx, x))
+
+    def test_switch_functionalized_input_mutation(self):
+        def branch_mutating(inp_x):
+            view_x = inp_x.view(inp_x.shape)
+            view_x.add_(1)
+            return view_x.sin().sum()
+
+        def branch_clean(inp_x):
+            return inp_x.cos().sum()
+
+        def f(idx, inp_x):
+            return switch(idx, (branch_mutating, branch_clean), (inp_x,))
+
+        x = torch.ones(4, 5)
+        # Tensor index -> tracing mode -> mutation check fires in switch_func.
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.TorchRuntimeError,
+            "switch_branch0",
+        ):
+            make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(
+                torch.tensor([0]), x
+            )
+
+    def test_switch_with_tensor_closure(self):
+        a = torch.ones(2, 3)
+        b = torch.ones(2, 3) + 1
+        c = torch.ones(2, 3) * 2
+
+        def branch0(inp_x):
+            return inp_x + a
+
+        def branch1(inp_x):
+            return inp_x + b
+
+        def branch2(inp_x):
+            return inp_x + c
+
+        def foo(idx, inp_x):
+            return switch(idx, (branch0, branch1, branch2), (inp_x,))
+
+        inp = torch.randn(2, 3)
+        for i, closure_val in enumerate((a, b, c)):
+            idx = torch.tensor([i])
+            self.assertEqual(foo(idx, inp), inp + closure_val)
+
+        # Closed-over tensors must be lifted as extra inputs in the traced
+        # graph. This exercises _merge_graph_inputs, which unions
+        # free variables across all branches into a shared placeholder
+        # signature.
+        gm = make_fx(foo)(torch.tensor([0]), inp)
+        self.assertEqual(gm(torch.tensor([0]), inp), inp + a)
+        # After mutating the closure, the traced graph should reflect the new value.
+        a.add_(-1)
+        self.assertEqual(gm(torch.tensor([0]), inp), inp + a)
+
+    def test_switch_branch_returns_none(self):
+        # None is allowed as a branch output leaf when every branch returns
+        # None in that position. cond._merge_output already handles None;
+        # the dynamo-side gate was over-rejecting it, now fixed.
+        def branch0(inp_x):
+            return inp_x.sin(), None
+
+        def branch1(inp_x):
+            return inp_x.cos(), None
+
+        def f(idx, inp_x):
+            return switch(idx, (branch0, branch1), (inp_x,))
+
+        x = torch.randn(4)
+        for i, fn in enumerate((branch0, branch1)):
+            idx = torch.tensor([i])
+            t, n = f(idx, x)
+            self.assertEqual(t, fn(x)[0])
+            self.assertIsNone(n)
+
+    def test_switch_three_branches_divergent_int_leaves(self):
+        def branch0(inp_x):
+            return inp_x.sin(), 0
+
+        def branch1(inp_x):
+            return inp_x.cos(), 1
+
+        def branch2(inp_x):
+            return inp_x.abs(), 2
+
+        def f(idx, inp_x):
+            return switch(idx, (branch0, branch1, branch2), (inp_x,))
+
+        x = torch.randn(4)
+        graph = make_fx(f, tracing_mode="symbolic")(torch.tensor([0]), x)
+        for i, fn in enumerate((branch0, branch1, branch2)):
+            t, n = graph(torch.tensor([i]), x)
+            self.assertEqual(t, fn(x)[0])
+            self.assertEqual(n, fn(x)[1])
+
+        def branch0_eq(inp_x):
+            return inp_x.sin(), 7
+
+        def branch1_eq(inp_x):
+            return inp_x.cos(), 7
+
+        def branch2_eq(inp_x):
+            return inp_x.abs(), 7
+
+        def g(idx, inp_x):
+            return switch(idx, (branch0_eq, branch1_eq, branch2_eq), (inp_x,))
+
+        graph_eq = make_fx(g, tracing_mode="symbolic")(torch.tensor([0]), x)
+        for i, fn in enumerate((branch0_eq, branch1_eq, branch2_eq)):
+            t, n = graph_eq(torch.tensor([i]), x)
+            self.assertEqual(t, fn(x)[0])
+            self.assertEqual(n, 7)
+
+    def test_switch_branch_returns_float_rejected(self):
+        # Python float leaves are blocked by the shared HOP output gate.
+        # Captures the current behavior so a future relaxation of
+        # validate_subgraph_output_types must update this test.
+        def branch0(inp_x):
+            return inp_x.sin(), 3.14
+
+        def branch1(inp_x):
+            return inp_x.cos(), 3.14
+
+        def f(idx, inp_x):
+            return switch(idx, (branch0, branch1), (inp_x,))
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "HigherOrderOperator body's output must consist of tensors",
+        ):
+            f(torch.tensor([0]), torch.randn(4))
+
+    def test_switch_mismatched_output_arity(self):
+        # Branch 0 returns one tensor, branch 1 returns a tuple of two
+        # tensors — different number of outputs.
+        def branch0(inp_x):
+            return inp_x.sin()
+
+        def branch1(inp_x):
+            return inp_x.cos(), inp_x.abs()
+
+        def f(idx, inp_x):
+            return switch(idx, (branch0, branch1), (inp_x,))
+
+        with self.assertRaisesRegex(
+            (RuntimeError, torch._dynamo.exc.TorchRuntimeError),
+            r"(differing branch outputs|Unmatched output spec from torch\.switch branches)",
+        ):
+            f(torch.tensor([0]), torch.randn(4))
+
+    def test_switch_mismatched_output_structure(self):
+        # Branch 0 returns a tuple; branch 1 returns a dict. Two tensor
+        # leaves each, but the tree specs disagree.
+        def branch0(inp_x):
+            return (inp_x.sin(), inp_x.cos())
+
+        def branch1(inp_x):
+            return {"a": inp_x.sin(), "b": inp_x.cos()}
+
+        def f(idx, inp_x):
+            return switch(idx, (branch0, branch1), (inp_x,))
+
+        with self.assertRaisesRegex(
+            (RuntimeError, torch._dynamo.exc.TorchRuntimeError),
+            r"(differing branch outputs|Unmatched output spec from torch\.switch branches)",
+        ):
+            f(torch.tensor([0]), torch.randn(4))
+
+    def test_switch_mismatched_output_structure_three_branches(self):
+        # Three-branch mismatch: branches 0 and 1 agree on a single-tensor
+        # return; branch 2 diverges by returning a two-tensor tuple.
+        def branch0(inp_x):
+            return inp_x.sin()
+
+        def branch1(inp_x):
+            return inp_x.cos()
+
+        def branch2(inp_x):
+            return inp_x.abs(), inp_x.sum()
+
+        def f(idx, inp_x):
+            return switch(idx, (branch0, branch1, branch2), (inp_x,))
+
+        with self.assertRaisesRegex(
+            (RuntimeError, torch._dynamo.exc.TorchRuntimeError),
+            r"(differing branch outputs|Unmatched output spec from torch\.switch branches)",
+        ):
+            f(torch.tensor([0]), torch.randn(4))
+
+    def test_switch_constant_index_specialization(self):
+        # When the index is a Python constant, dynamo specializes to that
+        # specific branch — the switch HOP never enters the graph.
+        # backend="eager" is used because PR 1 has no inductor lowering;
+        # specialization is a dynamo-level concern.
+        def branch0(inp_x):
+            return inp_x.sin()
+
+        def branch1(inp_x):
+            return inp_x.cos()
+
+        def branch2(inp_x):
+            return inp_x.abs()
+
+        branches = (branch0, branch1, branch2)
+
+        # Each compiled wrapper has its index baked in as a literal so
+        # dynamo definitely sees a ConstantVariable (sidestepping any
+        # scalar-argument promotion to SymInt).
+        @torch.compile(backend="eager", fullgraph=True)
+        def f0(inp_x):
+            return switch(0, branches, (inp_x,))
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f1(inp_x):
+            return switch(1, branches, (inp_x,))
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f2(inp_x):
+            return switch(2, branches, (inp_x,))
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f_neg(inp_x):
+            return switch(-5, branches, (inp_x,))
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f_huge(inp_x):
+            return switch(99, branches, (inp_x,))
+
+        x = torch.randn(4)
+        self.assertEqual(f0(x), branch0(x))
+        self.assertEqual(f1(x), branch1(x))
+        self.assertEqual(f2(x), branch2(x))
+        # Clamped negative index picks branch 0.
+        self.assertEqual(f_neg(x), branch0(x))
+        # Clamped above-range index picks branch N-1.
+        self.assertEqual(f_huge(x), branch2(x))
+
+    def test_switch_nn_module_branches(self):
+        # Each branch is a different nn.Module whose parameters are
+        # captured as free variables. Dynamo must lift the parameters of
+        # all branches into the HOP's operand tuple and rewrite every
+        # branch graph's signature to match.
+        linear0 = torch.nn.Linear(4, 3)
+        linear1 = torch.nn.Linear(4, 3)
+
+        def f(idx, inp_x):
+            return switch(idx, (linear0, linear1), (inp_x,))
+
+        x = torch.randn(2, 4)
+        self.assertEqual(f(torch.tensor([0]), x), linear0(x))
+        self.assertEqual(f(torch.tensor([1]), x), linear1(x))
+
+    def test_switch_complex_nn_module_branches(self):
+        # Complex modules: each branch is a different multi-layer MLP with
+        # different hidden dimensions. As long as the final output shape
+        # matches across branches, dynamo captures and lifts all module
+        # parameters correctly.
+        class MLP(torch.nn.Module):
+            def __init__(self, in_dim, hidden, out_dim):
+                super().__init__()
+                self.fc1 = torch.nn.Linear(in_dim, hidden)
+                self.fc2 = torch.nn.Linear(hidden, out_dim)
+
+            def forward(self, inp_x):
+                return self.fc2(torch.relu(self.fc1(inp_x)))
+
+        mlp_small = MLP(4, 8, 2)
+        mlp_large = MLP(4, 16, 2)
+        mlp_tiny = MLP(4, 3, 2)
+
+        def f(idx, inp_x):
+            return switch(idx, (mlp_small, mlp_large, mlp_tiny), (inp_x,))
+
+        x = torch.randn(5, 4)
+        for i, mlp in enumerate((mlp_small, mlp_large, mlp_tiny)):
+            self.assertEqual(f(torch.tensor([i]), x), mlp(x))
+
+    def test_switch_heterogeneous_lifted_args(self):
+        # Branches with different combinations of lifted free variables:
+        # branch0 captures one tensor, branch1 captures two tensors,
+        # branch2 captures an nn.Module. dynamo unions all lifted
+        # freevars across branches and every branch graph receives the
+        # same placeholder signature.
+        bias = torch.ones(3)
+        offset = torch.tensor([0.5, 0.5, 0.5])
+        linear = torch.nn.Linear(4, 3)
+
+        def branch0(inp_x):
+            return torch.nn.functional.linear(inp_x, torch.eye(4, 3).t()) + bias
+
+        def branch1(inp_x):
+            return (
+                torch.nn.functional.linear(inp_x, torch.eye(4, 3).t()) + bias + offset
+            )
+
+        def branch2(inp_x):
+            return linear(inp_x)
+
+        def f(idx, inp_x):
+            return switch(idx, (branch0, branch1, branch2), (inp_x,))
+
+        x = torch.randn(2, 4)
+        self.assertEqual(f(torch.tensor([0]), x), branch0(x))
+        self.assertEqual(f(torch.tensor([1]), x), branch1(x))
+        self.assertEqual(f(torch.tensor([2]), x), branch2(x))
+
+    def test_switch_pytree_operands(self):
+        # Test that switch supports pytree operands (nested dict/list/tuple of tensors)
+        def branch0(inp_x):
+            return inp_x["t"][0] + inp_x["t"][1]["b"] * inp_x["t"][2][0]
+
+        def branch1(inp_x):
+            return inp_x["t"][0] * (inp_x["t"][2][0] / inp_x["t"][1]["b"])
+
+        def branch2(inp_x):
+            return inp_x["t"][0] - inp_x["t"][1]["b"] + inp_x["t"][2][0]
+
+        a = torch.randn(4)
+        b = torch.randn(4)
+        c = torch.randn(4)
+        operands = ({"t": [a, {"b": b}, (c,)]},)
+
+        # Test each branch
+        for idx, fn in enumerate([branch0, branch1, branch2]):
+            result = switch(torch.tensor(idx), [branch0, branch1, branch2], operands)
+            expected = fn(operands[0])
+            self.assertEqual(result, expected)
 
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     def test_map_gpu(self):
@@ -5532,6 +6035,362 @@ class TestControlFlowTraced(TestCase):
         graph = make_fx(f, tracing_mode="symbolic")(x, torch.tensor(False))
         self.assertEqual(graph(x, torch.tensor(True)), f(x, torch.tensor(True)))
 
+    def test_switch_traced_mismatched_output_structure(self):
+        from torch._higher_order_ops.switch import switch_op
+
+        def branch0(inp_x):
+            return (inp_x.sin(), inp_x.cos())
+
+        def branch1(inp_x):
+            return {"a": inp_x.sin(), "b": inp_x.cos()}
+
+        def f(idx, inp_x):
+            return switch_op(idx, (branch0, branch1), (inp_x,))
+
+        x = torch.randn(4)
+        with self.assertRaisesRegex(
+            RuntimeError, "Unmatched output spec from torch.switch branches"
+        ):
+            make_fx(f)(torch.tensor([0]), x)
+
+    def test_switch_traced_not_nested(self):
+        def branch0(inp_x):
+            return inp_x.sin()
+
+        def branch1(inp_x):
+            return inp_x.cos()
+
+        def branch2(inp_x):
+            return inp_x.abs()
+
+        def f(idx, inp_x):
+            return switch(idx, (branch0, branch1, branch2), (inp_x,))
+
+        x = torch.randn(4)
+        graph = make_fx(f)(torch.tensor([0]), x)
+        # The traced graph must dispatch to each branch when fed the
+        # corresponding index at runtime, and each case must match eager.
+        self.assertEqual(graph(torch.tensor([0]), x), branch0(x))
+        self.assertEqual(graph(torch.tensor([1]), x), branch1(x))
+        self.assertEqual(graph(torch.tensor([2]), x), branch2(x))
+        # Clamped indices must match the first/last branch.
+        self.assertEqual(graph(torch.tensor([-1]), x), branch0(x))
+        self.assertEqual(graph(torch.tensor([99]), x), branch2(x))
+
+        # And the same under symbolic tracing.
+        graph = make_fx(f, tracing_mode="symbolic")(torch.tensor([0]), x)
+        for i, fn in enumerate((branch0, branch1, branch2)):
+            self.assertEqual(graph(torch.tensor([i]), x), fn(x))
+
+    def test_switch_tracing_all_modes(self):
+        def branch0(inp_x):
+            return inp_x.sin()
+
+        def branch1(inp_x):
+            return inp_x.cos()
+
+        def branch2(inp_x):
+            return inp_x.abs()
+
+        def f(idx, inp_x):
+            return switch(idx, (branch0, branch1, branch2), (inp_x,))
+
+        # Exercise the helper, which round-trips through symbolic / real /
+        # fake and asserts graph(*args) == eager for each.
+        self._check_tracing(f, (torch.tensor([1]), torch.randn(4)))
+
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipIfCrossRef  # Arg order changes with crossref
+    def test_switch_simple_capture_check_graph(self):
+        def f(idx, inp_x):
+            branches = (
+                lambda inp_x: inp_x.sin(),
+                lambda inp_x: inp_x.cos(),
+                lambda inp_x: inp_x.abs(),
+            )
+            return switch(idx, branches, (inp_x,))
+
+        x = torch.randn(4)
+
+        backend = EagerAndRecordGraphs()
+        torch.compile(f, backend=backend)(torch.tensor([1]), x)
+        self.assertEqual(len(backend.graphs), 1)
+        gm = backend.graphs[0]
+
+        # Pin down the outer graph: each branch is installed as a submodule
+        # named switch_branch{i}_0 and the HOP is called with the full list.
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, L_inp_x_ : torch.Tensor, L_idx_ : torch.Tensor):
+    l_inp_x_ = L_inp_x_
+    l_idx_ = L_idx_
+    switch_branch0_0 = self.switch_branch0_0
+    switch_branch1_0 = self.switch_branch1_0
+    switch_branch2_0 = self.switch_branch2_0
+    switch = torch.ops.higher_order.switch(l_idx_, [switch_branch0_0, switch_branch1_0, switch_branch2_0], (l_inp_x_,));  l_idx_ = switch_branch0_0 = switch_branch1_0 = switch_branch2_0 = l_inp_x_ = None
+    getitem = switch[0];  switch = None
+    return (getitem,)""",
+        )
+        # Each branch is a single op applied to the lifted input.
+        self.assertExpectedInline(
+            gm.switch_branch0_0.code.strip(),
+            """\
+def forward(self, l_inp_x_):
+    l_inp_x__1 = l_inp_x_
+    sin = l_inp_x__1.sin();  l_inp_x__1 = None
+    return (sin,)""",
+        )
+        self.assertExpectedInline(
+            gm.switch_branch1_0.code.strip(),
+            """\
+def forward(self, l_inp_x_):
+    l_inp_x__1 = l_inp_x_
+    cos = l_inp_x__1.cos();  l_inp_x__1 = None
+    return (cos,)""",
+        )
+        self.assertExpectedInline(
+            gm.switch_branch2_0.code.strip(),
+            """\
+def forward(self, l_inp_x_):
+    l_inp_x__1 = l_inp_x_
+    abs_1 = l_inp_x__1.abs();  l_inp_x__1 = None
+    return (abs_1,)""",
+        )
+
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipIfCrossRef  # Arg order changes with crossref
+    def test_switch_lifted_args_check_graph(self):
+        # When different branches close over different tensors, dynamo must
+        # union the free variables across branches so every branch graph
+        # shares the same placeholder signature and the HOP receives the
+        # full union as operands. This pins down _merge_graph_inputs.
+        a = torch.ones(2, 3)
+        b = torch.ones(2, 3) + 1
+        c = torch.ones(2, 3) * 2
+
+        def branch0(inp_x):
+            return inp_x + a
+
+        def branch1(inp_x):
+            return inp_x + b
+
+        def branch2(inp_x):
+            return inp_x + c
+
+        def f(idx, inp_x):
+            return switch(idx, (branch0, branch1, branch2), (inp_x,))
+
+        backend = EagerAndRecordGraphs()
+        torch.compile(f, backend=backend)(torch.tensor([1]), torch.randn(2, 3))
+        self.assertEqual(len(backend.graphs), 1)
+        gm = backend.graphs[0]
+
+        # The outer graph lifts all three closure cells and passes the full
+        # union as switch operands (cells first, then the explicit operand x).
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, L_inp_x_ : torch.Tensor, L_idx_ : torch.Tensor, L_branch0_closure_0_cell_contents : torch.Tensor, L_branch1_closure_0_cell_contents : torch.Tensor, L_branch2_closure_0_cell_contents : torch.Tensor):
+    l_inp_x_ = L_inp_x_
+    l_idx_ = L_idx_
+    l_branch0_closure_0_cell_contents = L_branch0_closure_0_cell_contents
+    l_branch1_closure_0_cell_contents = L_branch1_closure_0_cell_contents
+    l_branch2_closure_0_cell_contents = L_branch2_closure_0_cell_contents
+    switch_branch0_0 = self.switch_branch0_0
+    switch_branch1_0 = self.switch_branch1_0
+    switch_branch2_0 = self.switch_branch2_0
+    switch = torch.ops.higher_order.switch(l_idx_, [switch_branch0_0, switch_branch1_0, switch_branch2_0], (l_inp_x_, l_branch0_closure_0_cell_contents, l_branch1_closure_0_cell_contents, l_branch2_closure_0_cell_contents));  l_idx_ = switch_branch0_0 = switch_branch1_0 = switch_branch2_0 = l_inp_x_ = l_branch0_closure_0_cell_contents = l_branch1_closure_0_cell_contents = l_branch2_closure_0_cell_contents = None
+    getitem = switch[0];  switch = None
+    return (getitem,)""",
+        )
+        # Every branch submodule exposes the same placeholder signature —
+        # the union of all closures plus the operand — even though each
+        # branch only reads one of the closure cells.
+        self.assertExpectedInline(
+            gm.switch_branch0_0.code.strip(),
+            """\
+def forward(self, l_inp_x_, l_branch0_closure_0_cell_contents_branch0, l_branch1_closure_0_cell_contents_branch1, l_branch2_closure_0_cell_contents_branch2):
+    l_inp_x__1 = l_inp_x_
+    add = l_inp_x__1 + l_branch0_closure_0_cell_contents_branch0;  l_inp_x__1 = l_branch0_closure_0_cell_contents_branch0 = None
+    return (add,)""",
+        )
+        self.assertExpectedInline(
+            gm.switch_branch1_0.code.strip(),
+            """\
+def forward(self, l_inp_x_, l_branch0_closure_0_cell_contents_branch0, l_branch1_closure_0_cell_contents_branch1, l_branch2_closure_0_cell_contents_branch2):
+    l_inp_x__1 = l_inp_x_
+    add = l_inp_x__1 + l_branch1_closure_0_cell_contents_branch1;  l_inp_x__1 = l_branch1_closure_0_cell_contents_branch1 = None
+    return (add,)""",
+        )
+        self.assertExpectedInline(
+            gm.switch_branch2_0.code.strip(),
+            """\
+def forward(self, l_inp_x_, l_branch0_closure_0_cell_contents_branch0, l_branch1_closure_0_cell_contents_branch1, l_branch2_closure_0_cell_contents_branch2):
+    l_inp_x__1 = l_inp_x_
+    add = l_inp_x__1 + l_branch2_closure_0_cell_contents_branch2;  l_inp_x__1 = l_branch2_closure_0_cell_contents_branch2 = None
+    return (add,)""",
+        )
+
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipIfCrossRef  # Arg order changes with crossref
+    def test_switch_constant_index_specialization_check_graph(self):
+        # When the index is a Python constant, dynamo specializes into the
+        # selected branch and the switch HOP is not emitted at all. The
+        # captured graph contains only the ops of branches[idx].
+        def branch0(inp_x):
+            return inp_x.sin()
+
+        def branch1(inp_x):
+            return inp_x.cos()
+
+        def branch2(inp_x):
+            return inp_x.abs()
+
+        branches = (branch0, branch1, branch2)
+
+        backend = EagerAndRecordGraphs()
+        torch.compile(
+            lambda inp_x: switch(1, branches, (inp_x,)),
+            backend=backend,
+            fullgraph=True,
+        )(torch.randn(4))
+
+        self.assertEqual(len(backend.graphs), 1)
+        gm = backend.graphs[0]
+        # No switch HOP in the graph — only branch1's cos op survives.
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, L_inp_x_ : torch.Tensor):
+    l_inp_x_ = L_inp_x_
+    cos = l_inp_x_.cos();  l_inp_x_ = None
+    return (cos,)""",
+        )
+        # And no branch submodules were installed because the HOP never ran.
+        self.assertEqual(list(dict(gm.named_children()).keys()), [])
+
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipIfCrossRef  # Arg order changes with crossref
+    def test_switch_index_type_specialization_check_graph(self):
+        # Pin down dynamo's specialization behavior by index type.
+        # Python int -> specialize: HOP is not emitted, only branches[idx]'s ops survive.
+        # SymInt or Tensor -> no specialize: HOP is emitted with all branches as submodules.
+        def branch0(inp_x):
+            return inp_x.sin()
+
+        def branch1(inp_x):
+            return inp_x.cos()
+
+        def branch2(inp_x):
+            return inp_x.abs()
+
+        branches = (branch0, branch1, branch2)
+
+        def fn(idx, inp_x):
+            return switch(idx, branches, (inp_x,))
+
+        x = torch.randn(4)
+
+        # 1. Python int: dynamo specializes into branch1; HOP is not emitted.
+        torch._dynamo.reset()
+        backend = EagerAndRecordGraphs()
+        torch.compile(fn, backend=backend, fullgraph=True)(1, x)
+        self.assertEqual(len(backend.graphs), 1)
+        gm = backend.graphs[0]
+        self.assertNotIn("higher_order.switch", gm.code)
+        self.assertEqual(list(dict(gm.named_children()).keys()), [])
+
+        # 2. SymInt: derive the index from a dynamically-shaped tensor's
+        # `.shape` so it is genuinely symbolic at trace time. No specialization;
+        # HOP captures all branches.
+        def fn_symint(idx_carrier, inp_x):
+            idx = idx_carrier.shape[0] - 1
+            return switch(idx, branches, (inp_x,))
+
+        idx_carrier = torch.zeros(2)  # shape[0]-1 == 1 -> branch1 at runtime
+        torch._dynamo.mark_dynamic(idx_carrier, 0)
+
+        torch._dynamo.reset()
+        backend = EagerAndRecordGraphs()
+        torch.compile(fn_symint, backend=backend, fullgraph=True)(idx_carrier, x)
+        self.assertEqual(len(backend.graphs), 1)
+        gm = backend.graphs[0]
+        self.assertIn("higher_order.switch", gm.code)
+        self.assertEqual(
+            sorted(dict(gm.named_children()).keys()),
+            ["switch_branch0_0", "switch_branch1_0", "switch_branch2_0"],
+        )
+
+        # 3. Tensor: no specialization; HOP captures all branches.
+        torch._dynamo.reset()
+        backend = EagerAndRecordGraphs()
+        torch.compile(fn, backend=backend, fullgraph=True)(torch.tensor([1]), x)
+        self.assertEqual(len(backend.graphs), 1)
+        gm = backend.graphs[0]
+        self.assertIn("higher_order.switch", gm.code)
+        self.assertEqual(
+            sorted(dict(gm.named_children()).keys()),
+            ["switch_branch0_0", "switch_branch1_0", "switch_branch2_0"],
+        )
+
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipIfCrossRef  # Arg order changes with crossref
+    def test_switch_nn_module_lifted_check_graph(self):
+        # nn.Module branches: every parameter of every branch's module is
+        # lifted into the HOP operand tuple, and each branch's submodule
+        # signature accepts the full union. Reads of foreign parameters
+        # are present in the signature but unused inside the branch body.
+        linear0 = torch.nn.Linear(4, 3)
+        linear1 = torch.nn.Linear(4, 3)
+
+        backend = EagerAndRecordGraphs()
+        torch.compile(
+            lambda idx, inp_x: switch(idx, (linear0, linear1), (inp_x,)),
+            backend=backend,
+            fullgraph=True,
+        )(torch.tensor([1]), torch.randn(2, 4))
+
+        self.assertEqual(len(backend.graphs), 1)
+        gm = backend.graphs[0]
+
+        # Both modules' weights AND biases are lifted into the HOP operand
+        # tuple, in sorted order of their placeholder names.
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, L_inp_x_ : torch.Tensor, L_idx_ : torch.Tensor, L_linear0_parameters_weight_ : torch.nn.parameter.Parameter, L_linear0_parameters_bias_ : torch.nn.parameter.Parameter, L_linear1_parameters_weight_ : torch.nn.parameter.Parameter, L_linear1_parameters_bias_ : torch.nn.parameter.Parameter):
+    l_inp_x_ = L_inp_x_
+    l_idx_ = L_idx_
+    l_linear0_parameters_weight_ = L_linear0_parameters_weight_
+    l_linear0_parameters_bias_ = L_linear0_parameters_bias_
+    l_linear1_parameters_weight_ = L_linear1_parameters_weight_
+    l_linear1_parameters_bias_ = L_linear1_parameters_bias_
+    switch_branch0_0 = self.switch_branch0_0
+    switch_branch1_0 = self.switch_branch1_0
+    switch = torch.ops.higher_order.switch(l_idx_, [switch_branch0_0, switch_branch1_0], (l_inp_x_, l_linear0_parameters_bias_, l_linear0_parameters_weight_, l_linear1_parameters_bias_, l_linear1_parameters_weight_));  l_idx_ = switch_branch0_0 = switch_branch1_0 = l_inp_x_ = l_linear0_parameters_bias_ = l_linear0_parameters_weight_ = l_linear1_parameters_bias_ = l_linear1_parameters_weight_ = None
+    getitem = switch[0];  switch = None
+    return (getitem,)""",
+        )
+        # Each branch submodule receives the full union but only reads its
+        # own module's parameters.
+        self.assertExpectedInline(
+            gm.switch_branch0_0.code.strip(),
+            """\
+def forward(self, l_inp_x_, l_linear0_parameters_bias__branch0, l_linear0_parameters_weight__branch0, l_linear1_parameters_bias__branch1, l_linear1_parameters_weight__branch1):
+    l_inp_x__1 = l_inp_x_
+    linear = torch._C._nn.linear(l_inp_x__1, l_linear0_parameters_weight__branch0, l_linear0_parameters_bias__branch0);  l_inp_x__1 = l_linear0_parameters_weight__branch0 = l_linear0_parameters_bias__branch0 = None
+    return (linear,)""",
+        )
+        self.assertExpectedInline(
+            gm.switch_branch1_0.code.strip(),
+            """\
+def forward(self, l_inp_x_, l_linear0_parameters_bias__branch0, l_linear0_parameters_weight__branch0, l_linear1_parameters_bias__branch1, l_linear1_parameters_weight__branch1):
+    l_inp_x__1 = l_inp_x_
+    linear = torch._C._nn.linear(l_inp_x__1, l_linear1_parameters_weight__branch1, l_linear1_parameters_bias__branch1);  l_inp_x__1 = l_linear1_parameters_weight__branch1 = l_linear1_parameters_bias__branch1 = None
+    return (linear,)""",
+        )
+
     @torch._dynamo.config.patch(trace_autograd_ops=True)
     @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
     @skipIfCrossRef  # Arg order changes with crossref
@@ -9174,6 +10033,7 @@ class GraphModule(torch.nn.Module):
         while_loop_stack_output = torch.ops.higher_order.while_loop_stack_output(while_loop_cond_graph_0, while_loop_body_graph_0, (primals_1,), (primals_3, primals_2));  while_loop_cond_graph_0 = while_loop_body_graph_0 = None
         getitem: "f32[u2, 3, 3]" = while_loop_stack_output[0];  while_loop_stack_output = None
         select: "f32[3, 3]" = torch.ops.aten.select.int(getitem, 0, -1)
+
         unsqueeze: "f32[1, 3, 3]" = torch.ops.aten.unsqueeze.default(primals_1, 0);  primals_1 = None
         slice_1: "f32[u2 - 1, 3, 3]" = torch.ops.aten.slice.Tensor(getitem, 0, 0, -1);  getitem = None
         cat: "f32[u2, 3, 3]" = torch.ops.aten.cat.default([unsqueeze, slice_1]);  unsqueeze = slice_1 = None
@@ -10218,11 +11078,12 @@ class <lambda>(torch.nn.Module):
         """Stripped-down version of self.check that runs eager + aot_eager
         but NOT inductor.
 
-        scan currently only has Steps 1-3 (gen_schema, py_functionalize_impl,
+        Used by HOP input-mutation tests (scan, map, ...). These HOPs
+        currently only have Steps 1-3 (gen_schema, py_functionalize_impl,
         Dynamo) wired for input mutation. Step 4 (Inductor MutationOutput
         emission) is a follow-up; until then the Inductor arm of the full
-        check() helper trips on the un-tracked mutation. This helper exercises
-        everything that IS in place for scan.
+        check() helper trips on the un-tracked mutation. This helper
+        exercises everything that IS in place.
         """
         args = pytree.tree_map(lambda t: t.to(device=device), args)
 
@@ -10407,6 +11268,124 @@ class <lambda>(torch.nn.Module):
         ):
             scan(combine_fn, init, xs, dim=0)
 
+    @skipIfTorchDynamo()
+    @parametrize("dynamic", [True, False])
+    def test_map_auto_functionalize_xs_mutation(self, dynamic):
+        device = "cpu"
+
+        class M(torch.nn.Module):
+            def forward(self, xs):
+                def body_fn(x):
+                    x.add_(1)
+                    return x * 2 + x.sum()
+
+                return control_flow.map(body_fn, xs)
+
+        xs = torch.arange(20, dtype=torch.float32).reshape(5, 4)
+        fw_gm = self._check_eager_and_aot_eager_only(M, (xs,), device, dynamic)
+        graph_str = fw_gm.print_readable(print_output=False)
+        self.assertIn("auto_functionalized_v2", graph_str)
+        self.assertIn("torch.ops.higher_order.map_impl", graph_str)
+
+    @skipIfTorchDynamo()
+    @parametrize("dynamic", [True, False])
+    def test_map_auto_functionalize_multiple_xs_mutation(self, dynamic):
+        device = "cpu"
+
+        class M(torch.nn.Module):
+            def forward(self, xs1, xs2):
+                def body_fn(xs):
+                    x1, x2 = xs
+                    x1.add_(1)
+                    x2.sub_(1)
+                    return x1 + x2, x1 * x2
+
+                return control_flow.map(body_fn, (xs1, xs2))
+
+        xs1 = torch.arange(20, dtype=torch.float32).reshape(5, 4)
+        xs2 = torch.arange(20, dtype=torch.float32).reshape(5, 4) + 100
+        fw_gm = self._check_eager_and_aot_eager_only(M, (xs1, xs2), device, dynamic)
+        graph_str = fw_gm.print_readable(print_output=False)
+        self.assertIn("auto_functionalized_v2", graph_str)
+
+    def test_map_pos_args_mutation_graph_breaks(self):
+        def body_fn(x, buf):
+            buf.add_(x)  # mutating pos_args is disallowed
+            return x * 2
+
+        xs = torch.arange(20, dtype=torch.float32).reshape(5, 4)
+        buf = torch.zeros(4)
+
+        def fn(xs, buf):
+            return control_flow.map(body_fn, xs, buf)
+
+        torch._dynamo.reset()
+        with torch.no_grad():
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.UncapturedHigherOrderOpError,
+                r"Higher Order Operator: torch\.ops\.higher_order\.map_impl",
+            ):
+                torch.compile(fn, backend="eager", fullgraph=True)(xs, buf)
+
+    def test_map_captured_tensor_mutation_graph_breaks(self):
+        y = torch.ones(4)
+
+        def body_fn(x):
+            y.add_(-1)  # mutating a captured (loop-invariant) tensor is disallowed
+            return x * 2 + y.sum()
+
+        xs = torch.arange(20, dtype=torch.float32).reshape(5, 4)
+
+        def fn(xs):
+            return control_flow.map(body_fn, xs)
+
+        torch._dynamo.reset()
+        with torch.no_grad():
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.UncapturedHigherOrderOpError,
+                r"Higher Order Operator: torch\.ops\.higher_order\.map_impl",
+            ):
+                torch.compile(fn, backend="eager", fullgraph=True)(xs)
+
+    @skipIfTorchDynamo()
+    @parametrize("dynamic", [True, False])
+    def test_map_auto_functionalize_partial_xs_mutation(self, dynamic):
+        device = "cpu"
+
+        class M(torch.nn.Module):
+            def forward(self, xs0, xs1, xs2):
+                def body_fn(xs):
+                    x0, x1, x2 = xs
+                    # Skip x1 to make a non-contiguous mutation set.
+                    x0.add_(1)
+                    x2.add_(1)
+                    return x0 * 2 + x1.sum() + x2.sum()
+
+                return control_flow.map(body_fn, (xs0, xs1, xs2))
+
+        xs0 = torch.zeros(5, 4)
+        xs1 = torch.zeros(5, 4)
+        xs2 = torch.zeros(5, 4)
+        fw_gm = self._check_eager_and_aot_eager_only(
+            M, (xs0, xs1, xs2), device, dynamic
+        )
+        graph_str = fw_gm.print_readable(print_output=False)
+        self.assertIn("auto_functionalized_v2", graph_str)
+
+    def test_map_eager_pos_args_mutation_raises(self):
+        def body_fn(x, buf):
+            buf.add_(x)
+            return x * 2
+
+        xs = torch.arange(20, dtype=torch.float32).reshape(5, 4)
+        buf = torch.zeros(4)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            r"Higher Order Operator: torch\.ops\.higher_order\.map_impl",
+        ):
+            control_flow.map(body_fn, xs, buf)
+
 
 _hop_schema_test_schema_types = [
     "bool",
@@ -10571,6 +11550,131 @@ class TestHopSchema(TestCase):
         self.assertExpectedInline(
             str(schema),
             """cond(SymBool pred, Any true_fn, Any false_fn, Tensor operand0) -> ((Tensor))""",
+        )
+
+    def test_switch_gen_schema_tensor_inputs(self):
+        schema = torch.ops.higher_order.switch.gen_schema(
+            torch.tensor(0),
+            (lambda x: x.sin(), lambda x: x.cos(), lambda x: x.tan()),
+            (torch.randn(3, 4),),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """switch(Tensor index, Any branch0_fn, Any branch1_fn, Any branch2_fn, Tensor operand0) -> ((Tensor))""",
+        )
+
+    def test_switch_gen_schema_symint_inputs(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        with fake_mode, fake_mode.shape_env.ignore_fresh_unbacked_symbols():
+            sym_int = torch.randn(3, 4).nonzero().size(0)
+
+        schema = torch.ops.higher_order.switch.gen_schema(
+            sym_int,
+            (lambda x: x.sin(), lambda x: x.cos()),
+            (torch.randn(3, 4),),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """switch(SymInt index, Any branch0_fn, Any branch1_fn, Tensor operand0) -> ((Tensor))""",
+        )
+
+    def test_switch_gen_schema_multiple_operands(self):
+        schema = torch.ops.higher_order.switch.gen_schema(
+            torch.tensor(1),
+            (lambda x, y: (x + y, x * y), lambda x, y: (x - y, x / y)),
+            (torch.randn(3, 4), torch.randn(3, 4)),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """switch(Tensor index, Any branch0_fn, Any branch1_fn, Tensor operand0, Tensor operand1) -> (Tensor, Tensor)""",
+        )
+
+    def test_switch_gen_schema_with_input_mutation(self):
+        def branch0(x, y):
+            x.add_(1)
+            return x + y
+
+        def branch1(x, y):
+            return x - y
+
+        schema = torch.ops.higher_order.switch.gen_schema(
+            torch.tensor(0),
+            (branch0, branch1),
+            (torch.randn(3, 4), torch.randn(3, 4)),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """switch(Tensor index, Any branch0_fn, Any branch1_fn, Tensor(a3!) operand0, Tensor operand1) -> ((Tensor))""",
+        )
+
+    def test_switch_gen_schema_with_disjoint_branch_mutation(self):
+        def branch0(x, y):
+            x.add_(1)
+            return x + y
+
+        def branch1(x, y):
+            y.sub_(1)
+            return x - y
+
+        schema = torch.ops.higher_order.switch.gen_schema(
+            torch.tensor(0),
+            (branch0, branch1),
+            (torch.randn(3, 4), torch.randn(3, 4)),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """switch(Tensor index, Any branch0_fn, Any branch1_fn, Tensor(a3!) operand0, Tensor(a4!) operand1) -> ((Tensor))""",
+        )
+
+    def test_switch_gen_schema_int_index(self):
+        schema = torch.ops.higher_order.switch.gen_schema(
+            0,
+            (lambda x: x.sin(), lambda x: x.cos()),
+            (torch.randn(3, 4),),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """switch(int index, Any branch0_fn, Any branch1_fn, Tensor operand0) -> ((Tensor))""",
+        )
+
+    def test_switch_gen_schema_differing_int_symint_outputs(self):
+        def branch0(x):
+            return x.sin(), 5
+
+        def branch1(x):
+            return x.cos(), 7
+
+        def branch2(x):
+            return x.tan(), 9
+
+        schema = torch.ops.higher_order.switch.gen_schema(
+            torch.tensor(0),
+            (branch0, branch1, branch2),
+            (torch.randn(3, 4),),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """switch(Tensor index, Any branch0_fn, Any branch1_fn, Any branch2_fn, Tensor operand0) -> (Tensor, SymInt)""",
+        )
+
+    def test_switch_gen_schema_matching_int_int_outputs(self):
+        def branch0(x):
+            return x.sin(), 5
+
+        def branch1(x):
+            return x.cos(), 5
+
+        schema = torch.ops.higher_order.switch.gen_schema(
+            torch.tensor(0),
+            (branch0, branch1),
+            (torch.randn(3, 4),),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """switch(Tensor index, Any branch0_fn, Any branch1_fn, Tensor operand0) -> (Tensor, int)""",
         )
 
     def test_while_loop_gen_schema_tensor_inputs(self):
@@ -10815,67 +11919,37 @@ class TestHopSchema(TestCase):
             """map_impl(Any f, Tensor xs0, Tensor xs1) -> (Tensor, Tensor)""",
         )
 
-    def test_map_gen_schema_with_xs_mutation(self):
+    def test_map_gen_schema_with_mutated_arg_indices_kwarg(self):
         def body_fn(x):
-            x.add_(1)
             return x * 2
 
         schema = torch.ops.higher_order.map_impl.gen_schema(
             body_fn,
             (torch.randn(5, 3, 4),),
             (),
+            "0",
         )
         self.assertExpectedInline(
             str(schema),
             """map_impl(Any f, Tensor(a1!) xs0) -> ((Tensor))""",
         )
 
-    def test_map_gen_schema_with_multiple_xs_mutation(self):
-        def body_fn(x1, x2):
-            x1.add_(1)
-            x2.sub_(1)
-            return x1 + x2, x1 * x2
+    def test_map_gen_schema_multiple_xs_mutation_via_kwarg(self):
+        def body_fn(x0, x1, x2):
+            x0.add_(1)
+            x2.add_(1)
+            return x0 + x1 + x2
 
         schema = torch.ops.higher_order.map_impl.gen_schema(
             body_fn,
-            (torch.randn(5, 3, 4), torch.randn(5, 3, 4)),
+            (torch.randn(5, 3, 4), torch.randn(5, 3, 4), torch.randn(5, 3, 4)),
             (),
+            "0,2",
         )
         self.assertExpectedInline(
             str(schema),
-            """map_impl(Any f, Tensor(a1!) xs0, Tensor(a2!) xs1) -> (Tensor, Tensor)""",
+            """map_impl(Any f, Tensor(a1!) xs0, Tensor xs1, Tensor(a3!) xs2) -> ((Tensor))""",
         )
-
-    def test_map_gen_schema_pos_args_mutation_raises(self):
-        def body_fn(x, buf):
-            buf.add_(x)
-            return x * 2
-
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "For map, f cannot mutate pos_args inputs",
-        ):
-            torch.ops.higher_order.map_impl.gen_schema(
-                body_fn,
-                (torch.randn(5, 3, 4),),
-                (torch.randn(3, 4),),
-            )
-
-    def test_map_gen_schema_xs_and_pos_args_mutation_raises(self):
-        def body_fn(x1, x2, buf):
-            x1.add_(1)
-            buf.sub_(x2)
-            return x1 + x2, x1 * x2
-
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "For map, f cannot mutate pos_args inputs",
-        ):
-            torch.ops.higher_order.map_impl.gen_schema(
-                body_fn,
-                (torch.randn(5, 3, 4), torch.randn(5, 3, 4)),
-                (torch.randn(3, 4),),
-            )
 
 
 class DynamicCondModel(torch.nn.Module):
@@ -10961,7 +12035,7 @@ class TestControlFlowAndRNG(TestCase):
         compiled_func = torch.compile(func, backend="cudagraphs")
         with self.assertRaisesRegex(
             RuntimeError,
-            "RNG op during graph capture but generator is not registered",
+            "RNG within data-dependent conditional nodes is not supported yet",
         ):
             compiled_func(pred, x)
 

@@ -56,7 +56,7 @@ jobs:
         { include: [
           { config: "docs_test", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
         ]}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.10"
       compiler: gcc11
     secrets: inherit
@@ -71,7 +71,7 @@ jobs:
       build-environment: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.docker-image }}
       run-doxygen: true
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       python-version: "3.10"
       compiler: gcc11
