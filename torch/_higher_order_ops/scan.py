@@ -994,7 +994,7 @@ def scan_fake_tensor_mode(
 
 
 @scan_op.py_impl(DispatchKey.Fake)
-def scan_fake_dispatch(combine_fn, init, xs, additional_inputs):
+def scan_cpp_fake_tensor_mode(combine_fn, init, xs, additional_inputs):
     scan_length = xs[0].shape[0]
     carry, outputs = _extract_carry_and_out(
         combine_fn(

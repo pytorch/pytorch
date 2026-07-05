@@ -597,7 +597,7 @@ def while_loop_fake_tensor_mode(
 
 
 @while_loop_op.py_impl(DispatchKey.Fake)
-def while_loop_fake_dispatch(
+def while_loop_cpp_fake_tensor_mode(
     cond_fn, body_fn, carried_inputs, additional_inputs, stack_output=False
 ):
     if stack_output:
@@ -1033,7 +1033,7 @@ while_loop_stack_output_op.py_impl(FakeTensorMode)(
 )
 
 while_loop_stack_output_op.py_impl(DispatchKey.Fake)(
-    functools.partial(while_loop_fake_dispatch, stack_output=True)
+    functools.partial(while_loop_cpp_fake_tensor_mode, stack_output=True)
 )
 
 while_loop_stack_output_op.py_functionalize_impl(

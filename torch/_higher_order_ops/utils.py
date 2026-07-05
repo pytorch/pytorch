@@ -15,7 +15,11 @@ from torch._higher_order_ops.schema import HopSchema
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_opaque_type
 from torch._ops import HigherOrderOperator, OperatorBase, OpOverload
-from torch._subclasses.fake_tensor import FakeTensor, is_fake_tensor, maybe_get_fake_mode
+from torch._subclasses.fake_tensor import (
+    FakeTensor,
+    is_fake_tensor,
+    maybe_get_fake_mode,
+)
 from torch._subclasses.functional_tensor import (
     disable_functional_mode,
     FunctionalTensor,
@@ -1183,7 +1187,7 @@ def register_fake(hop, fn=None, *, skip_cache=False):
         redirect_to_mode(hop, FakeTensorMode)
 
         @hop.py_impl(DispatchKey.Fake)
-        def fake_dispatch(*args, **kwargs):
+        def cpp_fake_tensor_mode(*args, **kwargs):
             return func(*args, **kwargs)
 
         registered_hop_fake_fns[hop] = func

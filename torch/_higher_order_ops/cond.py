@@ -431,13 +431,9 @@ def cond_fake_tensor_mode(mode, pred, true_fn, false_fn, operands):
 
 
 @cond_op.py_impl(DispatchKey.Fake)
-def cond_fake_dispatch(pred, true_fn, false_fn, operands):
+def cond_cpp_fake_tensor_mode(pred, true_fn, false_fn, operands):
     from torch._higher_order_ops.utils import _find_or_create_fake_mode
 
-    # C++ fake tensor mode is active in TLS — ops inside the subgraphs hit
-    # C++ fakeFallback directly. Reuse _merge_output so differing branch output
-    # sizes are merged with unbacked symints (via mode.shape_env), matching the
-    # Python FakeTensorMode impl.
     mode = _find_or_create_fake_mode()
     ignore_fresh_unbacked = contextlib.nullcontext()
     if mode.shape_env:

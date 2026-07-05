@@ -249,8 +249,6 @@ def get_plain_tensors(
     return out
 
 
-
-
 def is_fake_tensor(x: object) -> TypeGuard[Tensor]:
     # True if x is itself a fake tensor: a Python FakeTensor, or a C++ fake -- a
     # plain torch.Tensor carrying DispatchKey::Fake, not an instance of the

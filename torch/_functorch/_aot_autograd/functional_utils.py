@@ -16,7 +16,7 @@ from torch import Tensor
 from torch._C import _functionalization
 from torch._custom_class_base import CustomClassBase
 from torch._logging import getArtifactLogger
-from torch._subclasses.fake_tensor import FakeTensor, is_fake_tensor
+from torch._subclasses.fake_tensor import is_fake_tensor
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq, SymIntEqByExpr

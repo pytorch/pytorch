@@ -116,7 +116,9 @@ class FakeTensorProp(torch.fx.Interpreter):
         # In-place ops like shallow_copy_data_ can mutate fake_device on
         # input FakeTensors during propagation. Save and restore so the
         # caller's inputs are not permanently corrupted.
-        saved_devices = [(a, maybe_get_fake_device(a)) for a in args if is_fake_tensor(a)]
+        saved_devices = [
+            (a, maybe_get_fake_device(a)) for a in args if is_fake_tensor(a)
+        ]
         with self._mode:
             try:
                 return super().run(*args)
