@@ -10,14 +10,23 @@ import time
 import unittest
 
 import torch
-from torch.profiler._cupti.pm_sampling import (
-    _LOOKBACK_WINDOW_NS,
-    _SAMPLING_INTERVAL_NS,
-    PmSampler,
-    supported_metrics,
+from torch.testing._internal.common_cuda import (
+    TEST_CUDA,
+    TEST_CUPTI as TEST_CUPTI_PYTHON,
+    TEST_CUPTI_V13_3,
 )
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_ROCM, TestCase
-from torch.utils._import_utils import _check_module_exists
+from torch.testing._internal.common_utils import run_tests, TestCase
+
+
+# pm_sampling imports the cupti module at load, so only import it when cupti-python is present;
+# every test that uses these is gated on TEST_CUPTI_PM_SAMPLING (which implies TEST_CUPTI_PYTHON).
+if TEST_CUPTI_PYTHON:
+    from torch.profiler._cupti.pm_sampling import (
+        _LOOKBACK_WINDOW_NS,
+        _SAMPLING_INTERVAL_NS,
+        PmSampler,
+        supported_metrics,
+    )
 
 
 # Metrics are per-consumer (PmSampler.add_consumer), with no built-in default, so tests pass an
@@ -28,26 +37,6 @@ _TEST_METRICS = (
     "nvlrx__bytes.avg.pct_of_peak_sustained_elapsed",
     "nvltx__bytes.avg.pct_of_peak_sustained_elapsed",
 )
-
-
-TEST_CUDA = torch.cuda.is_available()
-# cupti-python is pip-installable on ROCm hosts too, but CUPTI itself is a no-op there.
-TEST_CUPTI_PYTHON = _check_module_exists("cupti") and not TEST_WITH_ROCM
-
-
-def _cupti_version() -> int:
-    if not TEST_CUPTI_PYTHON:
-        return 0
-    try:
-        from torch.profiler._cupti.cupti_python import pylibcupti
-
-        return pylibcupti().get_version()
-    except Exception:
-        return 0
-
-
-# PM sampling goes through the CUPTI profiler API; gate it at the same >= 13.3 as the monitor.
-TEST_CUPTI_V13_3 = TEST_CUPTI_PYTHON and _cupti_version() >= 130300
 
 
 # Needs CUDA + libcupti >= 13.3 (cupti-python ships with PyTorch). Whether the HW can actually
