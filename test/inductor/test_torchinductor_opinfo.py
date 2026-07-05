@@ -248,7 +248,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "resize_": {b8, f16, f32, f64, i32, i64},
     "resize_as_": {b8, f16, f32, f64, i32, i64},
     "histc": {f16},
-    "nonzero_static": {b8, f16, f32, f64, i32, i64},
     ("sparse.mm", "reduce"): {f32, f64, f16},
     "sparse.sampled_addmm": {f32, f64},
     "to_sparse": {
