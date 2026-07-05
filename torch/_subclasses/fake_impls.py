@@ -2060,18 +2060,8 @@ def conv(
     _, new_kwargs = _normalize_function_or_error(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
-
-    def expect_fake_tensor(name: str, value: object) -> FakeTensor:
-        if not isinstance(value, FakeTensor):
-            raise AssertionError(
-                "Expected fake convolution tensor arguments to be FakeTensors, "
-                f"but {name} was {type(value).__name__}"
-            )
-        return value
-
-    input_ = expect_fake_tensor("input", new_kwargs["input"])
-    weight = expect_fake_tensor("weight", new_kwargs["weight"])
-    device = input_.fake_device
+    input_ = new_kwargs["input"]
+    weight = new_kwargs["weight"]
     # Internal passes such as Inductor freezing may run fake propagation over
     # folded convs that do not need to match eager's public input checks.
     if (
@@ -2089,15 +2079,7 @@ def conv(
             f"Input type ({input_.dtype}) and weight type "
             f"({weight.dtype}) should be the same"
         )
-    for name, value in new_kwargs.items():
-        if isinstance(value, torch.Tensor):
-            fake_value = expect_fake_tensor(name, value)
-            if fake_value.fake_device != device:
-                raise RuntimeError(
-                    "Expected all tensors to be on the same device, but got "
-                    f"{name} is on {fake_value.fake_device}, different from "
-                    f"other tensors on {device}"
-                )
+    device = input_.fake_device
     # need to re-enable mode so the tensors report fake device
     with fake_mode:
         # if the input is unsqueezed in Convolution.cpp we get segfault
