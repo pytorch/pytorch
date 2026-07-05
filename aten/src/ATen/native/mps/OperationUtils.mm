@@ -857,7 +857,7 @@ id<MTLLibrary> MetalShaderLibrary::compileLibrary(const std::string& src) {
       // Metal-3.2 allows lambdas in shader code
       [options setLanguageVersion:MTLLanguageVersion3_2];
     } else {
-      [options setLanguageVersion:MTLLanguageVersion3_0];
+      [options setLanguageVersion:MTLLanguageVersion3_1];
     }
     if (is_macos_at_least(MacOSVersion::MACOS_15_0)) {
       options.mathMode = fast_math ? MTLMathModeFast : MTLMathModeSafe;
