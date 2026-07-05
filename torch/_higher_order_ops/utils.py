@@ -36,6 +36,17 @@ class UnsupportedAliasMutationException(RuntimeError):
     reason: str
 
 
+def _find_or_create_fake_mode() -> "FakeTensorMode":
+    from torch._subclasses.fake_tensor import FakeTensorMode
+    from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+    fake_mode = detect_fake_mode()
+    if fake_mode is None:
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+
+    return fake_mode
+
+
 def autograd_not_implemented_inner(
     operator: OperatorBase, delayed_error: bool, *args: Any, **kwargs: Any
 ) -> Any:
@@ -1166,9 +1177,14 @@ def register_fake(hop, fn=None, *, skip_cache=False):
         raise AssertionError(f"hop {hop} already registered in registered_hop_fake_fns")
 
     def register(func: F) -> F:
+        from torch._C import DispatchKey
         from torch._subclasses.fake_tensor import FakeTensorMode
 
         redirect_to_mode(hop, FakeTensorMode)
+
+        @hop.py_impl(DispatchKey.Fake)
+        def fake_dispatch(*args, **kwargs):
+            return func(*args, **kwargs)
 
         registered_hop_fake_fns[hop] = func
         if skip_cache:
