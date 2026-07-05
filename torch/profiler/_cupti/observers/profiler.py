@@ -502,8 +502,10 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
                 if keep_mask.any():
                     keep.append((kind_str, _slice_frame(frame, keep_mask)))
             self._timed_frames = keep
-            # PM samples are retained rolling (continuous, shared across windows), not consumed:
-            # slice this window's [start, boundary) range without dropping the buffer.
+            # PM delivery (flush-cadence poll) is async to window finalization, so samples are
+            # buffered until the covering window finalizes: slice this window's [start, boundary)
+            # range out of the retained buffer without consuming it (trimmed to a horizon
+            # elsewhere). Windows tile contiguously, so each sample is emitted by exactly one.
             for frame in self._pm_retained:
                 s = frame["start_ns"]
                 in_mask = (s >= start) & (s < boundary_ns)
