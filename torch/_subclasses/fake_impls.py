@@ -337,7 +337,7 @@ def workaround_stride_incorrect_op(
     # This is a workaround for meta implementations with incorrect strides
 
     def is_symbolic(x: object) -> bool:
-        if isinstance(x, FakeTensor):
+        if isinstance(x, FakeTensor):  # noqa-isinstance-fake: op impl
             return x._has_symbolic_sizes_strides
         if isinstance(x, (torch.SymInt, torch.SymFloat, torch.SymBool)):
             return True
@@ -384,7 +384,7 @@ def _spdiags_static_offsets(offsets: FakeTensorLike) -> list[int] | None:
     constant = getattr(offsets, "constant", None)
     if constant is None:
         constant = getattr(offsets, "real_tensor", None)
-    if isinstance(constant, FakeTensor):
+    if isinstance(constant, FakeTensor):  # noqa-isinstance-fake: op impl
         return None
     if constant is None or constant.device.type != "cpu":
         return None
