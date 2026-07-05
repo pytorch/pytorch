@@ -98,6 +98,154 @@ class _Observer:
         self.callback = callback
 
 
+class _SynchronizedClock:
+    """Maps CUPTI record timestamps to unix-epoch ns on kineto's axis.
+
+    CUPTI stamps records with cuptiGetTimestamp, which is CLOCK_REALTIME -- the very clock
+    kineto's cpu_ops land on (kineto reads the approx clock for cpu_ops and converts it to
+    unix == CLOCK_REALTIME at serialization). So a record's timestamp already IS its unix
+    time: it is passed through unchanged (identity, offset 0). Records and cpu_ops then share
+    the identical realtime clock, so a runtime call's start is its true realtime -- always >=
+    the start of the cpu_op that issued it, with no clock estimate in the loop. calibrate()
+    requires this and verifies it by bracketing one native read between two
+    clock_gettime(CLOCK_REALTIME) reads; a host whose CUPTI clock is something else raises.
+
+    The exception is the timestamp callback: when it engages CUPTI stamps records with the
+    profiler's approx clock instead -- kineto's *source* clock -- so records arrive as approx
+    ticks and are mapped to unix via the same _ApproximateClockToUnixTimeConverter kineto uses
+    (a single-slope line -- median rate over 1001 samples -- so two evaluations recover its
+    slope exactly; recovered once so the hot path never calls the converter per record). That
+    path lifts the CLOCK_REALTIME requirement and is the ONLY one that touches the converter.
+
+    calibrate() reads the native clock through an injected callable, so the conversion math
+    runs (and is tested) without a live CUPTI session.
+    """
+
+    def __init__(self) -> None:
+        self._callback_active = False
+        self._native_is_realtime = False
+        self._native_now: Callable[[], int] = lambda: 0
+        # Session-start anchor. 0 until calibrated -> conversion is identity.
+        self._native_ns = 0
+        self._unix_ns = 0
+        self._approx_ns = 0
+        self._scale = 1.0
+
+    def calibrate(
+        self,
+        *,
+        callback_active: bool,
+        native_now: Callable[[], int],
+        converter: Any = None,
+    ) -> None:
+        self._callback_active = callback_active
+        self._native_now = native_now
+        # cuptiGetTimestamp is CLOCK_REALTIME iff it lands inside a clock_gettime bracket.
+        rt_lo = time.clock_gettime_ns(time.CLOCK_REALTIME)
+        cupti_now = native_now()
+        rt_hi = time.clock_gettime_ns(time.CLOCK_REALTIME)
+        self._native_is_realtime = cupti_now != 0 and rt_lo <= cupti_now <= rt_hi
+        if callback_active:
+            # Records are approx-clock ticks. Build the converter first (it only maps approx
+            # reads taken after construction), then bracket the native read -- needed for PM
+            # frames, which stay on the native clock -- between two approx reads and pair at
+            # the midpoint; recover the converter's slope for vectorized column conversion.
+            if converter is None:
+                converter = _PY_PROFILER._ApproximateClockToUnixTimeConverter()
+            approx_before = _PY_PROFILER._get_approximate_time()
+            self._native_ns = (
+                time.clock_gettime_ns(time.CLOCK_REALTIME)
+                if self._native_is_realtime
+                else native_now()
+            )
+            approx_after = _PY_PROFILER._get_approximate_time()
+            self._approx_ns = (approx_before + approx_after) // 2
+            self._unix_ns = converter.to_unix_ns(self._approx_ns)
+            span = 10**12
+            self._scale = (
+                converter.to_unix_ns(self._approx_ns + span) - self._unix_ns
+            ) / span
+        else:
+            if not self._native_is_realtime:
+                raise RuntimeError(
+                    "cupti_monitor requires cuptiGetTimestamp to be CLOCK_REALTIME so "
+                    "record timestamps share kineto's unix clock; this host reports a "
+                    "different clock source, unsupported until the CUPTI timestamp "
+                    "callback is available"
+                )
+            # cuptiGetTimestamp == CLOCK_REALTIME == unix: records already carry unix time,
+            # so pass them through (identity). No approx clock or converter needed.
+            self._native_ns = time.clock_gettime_ns(time.CLOCK_REALTIME)
+            self._approx_ns = 0
+            self._unix_ns = self._native_ns
+            self._scale = 1.0
+
+    def convert(self, value: int) -> int:
+        # Record clock -> unix. Identity until calibrated (and for the 0 sentinel).
+        if value == 0 or self._native_ns == 0:
+            return value
+        if self._callback_active:
+            return self._unix_ns + int((value - self._approx_ns) * self._scale)
+        return value - self._native_ns + self._unix_ns
+
+    def convert_array(self, values: np.ndarray) -> np.ndarray:
+        # Vectorized convert over a whole record column; 0 (and uncalibrated) maps to itself.
+        out = values.astype(np.int64)
+        if self._native_ns == 0:
+            return out
+        if self._callback_active:
+            # Approx-clock ticks; scale to unix ns. Keep the delta in float (small magnitude)
+            # and add the unix anchor as int64 -- adding at the ~1e18 unix magnitude in
+            # float64 would lose ~us of precision.
+            delta = ((out - self._approx_ns).astype(np.float64) * self._scale).astype(
+                np.int64
+            )
+            return np.where(out == 0, out, self._unix_ns + delta)
+        offset = self._unix_ns - self._native_ns
+        return np.where(out == 0, out, out + offset)
+
+    def convert_native(self, value: int) -> int:
+        # Native cuptiGetTimestamp clock -> unix. Used for PM-sampling frames, which stay on
+        # the native clock even when the record timestamp callback is active.
+        if value == 0 or self._native_ns == 0:
+            return value
+        return value - self._native_ns + self._unix_ns
+
+    def convert_native_array(self, values: np.ndarray) -> np.ndarray:
+        out = values.astype(np.int64)
+        if self._native_ns == 0:
+            return out
+        offset = self._unix_ns - self._native_ns
+        return np.where(out == 0, out, out + offset)
+
+    def now_native_ns(self) -> int:
+        # Current record-clock value: the approx clock when the callback is active, else the
+        # native cuptiGetTimestamp clock (read cheaply via clock_gettime when it is realtime).
+        # 0 before calibration.
+        if self._native_ns == 0:
+            return 0
+        if self._callback_active:
+            return _PY_PROFILER._get_approximate_time()
+        if self._native_is_realtime:
+            return time.clock_gettime_ns(time.CLOCK_REALTIME)
+        return self._native_now()
+
+    def now_unix_ns(self) -> int:
+        return self.convert(self.now_native_ns())
+
+    def reset(self) -> None:
+        self._native_ns = 0
+        self._native_now = lambda: 0
+
+    @property
+    def unix_anchor_ns(self) -> int:
+        return self._unix_ns
+
+    @property
+    def approx_anchor_ns(self) -> int:
+        return self._approx_ns
+
+
 class CuptiMonitor:
     def __init__(
         self,
@@ -190,13 +338,17 @@ class CuptiMonitor:
         self._id_chains: dict[int, tuple[int, ...]] = {}
         self._chains_gc_pending: list[int] = []
         self._chains_gc_ready: list[int] = []
-        self._session_start_unix_ns = 0
-        self._session_start_approx_ns = 0
-        # CUPTI native record clock (cuptiGetTimestamp_v2) at session start, paired
-        # with _session_start_unix_ns so decoded record timestamps (native clock) can
-        # be aligned to unix-epoch ns. 0 until started (convert_time is then identity).
-        self._session_start_native_ns = 0
-        self._session_start_calibrated_unix_ns = 0
+        # Record-timestamp -> unix conversion lives in the clock; the monitor delegates
+        # convert_time / now_native_ns to it and calibrates it in start(). Records normally
+        # arrive on the native (realtime) clock; the approx-clock timestamp callback is opt-in
+        # via TORCH_CUPTI_TRY_REGISTER_APPROX_TIMESTAMP_CALLBACK (current libcupti rejects it,
+        # and it needs sole-subscriber mode).
+        self._timestamp_callback_enabled = (
+            os.environ.get("TORCH_CUPTI_TRY_REGISTER_APPROX_TIMESTAMP_CALLBACK", "0")
+            == "1"
+        )
+        self._clock = _SynchronizedClock()
+        self._timestamp_callback_active = False
 
         # Snapshot of the native pool size taken before stop() frees it, so
         # stats() stays meaningful after the monitor has been stopped.
@@ -222,7 +374,11 @@ class CuptiMonitor:
         # CUPTI attached -- e.g. Kineto -- can make cuptiSubscribe_v2 fail with
         # CUPTI_ERROR_MULTIPLE_SUBSCRIBERS; run such consumers with TEARDOWN_CUPTI=1
         # so they release CUPTI on teardown rather than us finalizing global state.)
-        self._subscriber = self._cupti.subscribe()
+        # Subscribe solo only when the timestamp callback is opted in: CUPTI honors it only
+        # while multiple subscribers are NOT allowed. Otherwise allow coexistence (default).
+        self._subscriber = self._cupti.subscribe(
+            allow_multiple=not self._timestamp_callback_enabled
+        )
         self._cupti.arm_user_defined_records(
             self._subscriber, request_addr, complete_addr
         )
@@ -234,18 +390,14 @@ class CuptiMonitor:
         _cupti_monitor_native.reset_buffers()
         _cupti_monitor_native.configure_buffers(self.buffer_size)
         self.register_callbacks()
-        # The approximate-clock timestamp callback is incompatible with the
-        # user-defined-record subscriber (cuptiActivityRegisterTimestampCallback ->
-        # CUPTI_ERROR_NOT_COMPATIBLE), so decoded record timestamps stay in CUPTI's
-        # native clock (cuptiGetTimestamp_v2). Pair that native clock with unix-epoch
-        # here -- both are real-time nanosecond clocks, so a single offset aligns
-        # record timestamps to unix (durations are a delta, unaffected). Read the two
-        # back-to-back to minimize skew.
-        self._session_start_unix_ns = time.time_ns()
-        self._session_start_native_ns = self.now_native_ns()
-        self._session_start_approx_ns = _PY_PROFILER._get_approximate_time()
-        self._session_start_calibrated_unix_ns = self._convert_time(
-            self._session_start_native_ns
+        # Put activity records on kineto's unix timeline via the clock (see _SynchronizedClock):
+        # normally cuptiGetTimestamp == CLOCK_REALTIME == unix and records pass through, unless
+        # the timestamp callback stamps them on the approx clock. calibrate() reads the native
+        # clock through this callable, which is valid for the life of the subscription.
+        self._timestamp_callback_active = self._try_register_timestamp_callback()
+        self._clock.calibrate(
+            callback_active=self._timestamp_callback_active,
+            native_now=lambda: self._cupti.get_timestamp(cast(int, self._subscriber)),
         )
         self._flush_stop.clear()
         # Hand the native decode worker the subscriber + cuptiActivityGetNextRecord_v2
@@ -307,6 +459,10 @@ class CuptiMonitor:
         self.flush(sync=True)
         _cupti_monitor_native.stop_decoder()
         self._drain_and_dispatch()
+        # Clear the timestamp callback (restore CUPTI's default timer) before unsubscribe.
+        if self._timestamp_callback_active:
+            self._cupti.unregister_timestamp_callback()
+            self._timestamp_callback_active = False
         # Disable everything we enabled, then tear down the subscription.
         self._disable(self._enabled.keys())
         self._enabled = {}
@@ -329,7 +485,7 @@ class CuptiMonitor:
         self._started = False
         self._final_allocated_buffers = _cupti_monitor_native.allocated_buffers()
         _cupti_monitor_native.reset_buffers()
-        self._session_start_native_ns = 0
+        self._clock.reset()
 
     def flush(self, *, sync: bool = False, timeout_s: float = 5.0) -> None:
         """Flush CUPTI's activity buffers to the processing worker.
@@ -441,44 +597,49 @@ class CuptiMonitor:
         except Exception:
             return None
 
-    def _convert_time(self, value: int) -> int:
-        # Decoded record START/END are in CUPTI's native clock (cuptiGetTimestamp_v2).
-        # Align to unix-epoch ns via the session-start native/unix pair: both are
-        # real-time ns clocks, so the offset is constant. Identity until started.
-        if value == 0 or self._session_start_native_ns == 0:
-            return value
-        return value - self._session_start_native_ns + self._session_start_unix_ns
-
     def convert_time(self, value: int) -> int:
-        """Convert a CUPTI-clock timestamp to unix-epoch ns (public passthrough,
-        used by observers). Identity until the monitor is started and the clock
-        converter is calibrated."""
-        return self._convert_time(value)
+        """Convert a record-clock timestamp to unix-epoch ns (passthrough for observers)."""
+        return self._clock.convert(value)
 
     def convert_time_array(self, values: np.ndarray) -> np.ndarray:
-        """Vectorized :meth:`convert_time`: the conversion is a constant offset (both
-        clocks are real-time ns), so apply it to a whole column at once. Preserves the
-        scalar contract that 0 (and the uncalibrated case) maps to itself."""
-        out = values.astype(np.int64)
-        if self._session_start_native_ns == 0:
-            return out
-        offset = self._session_start_unix_ns - self._session_start_native_ns
-        return np.where(out == 0, out, out + offset)
+        """Vectorized :meth:`convert_time` over a whole record column."""
+        return self._clock.convert_array(values)
+
+    def _convert_native_time_array(self, values: np.ndarray) -> np.ndarray:
+        """Native cuptiGetTimestamp clock -> unix for PM-sampling frame columns (on the
+        native clock in both callback and fallback modes)."""
+        return self._clock.convert_native_array(values)
 
     def now_unix_ns(self) -> int:
-        """Current time on the same unix-epoch clock as decoded record timestamps --
-        CUPTI's native clock run through convert_time."""
-        return self._convert_time(self.now_native_ns())
+        """Current time on the record clock, converted to unix-epoch ns."""
+        return self._clock.now_unix_ns()
 
     def now_native_ns(self) -> int:
-        """Current value of CUPTI's native record clock (cuptiGetTimestamp_v2) -- the
-        SAME, unconverted timebase as the START/END in decoded records. Use this (not
-        now_unix_ns) to stamp a window boundary that is compared against raw record
-        timestamps. Returns 0 when no subscriber is active. The subscriber-aware _v2
-        timestamp is required: plain cuptiGetTimestamp is CUPTI_ERROR_NOT_COMPATIBLE
-        while the UDR subscriber is active."""
-        sub = self._subscriber
-        return self._cupti.get_timestamp(sub) if sub is not None else 0
+        """Current value of the record clock -- the unconverted timebase of decoded record
+        START/END. Use this (not now_unix_ns) to stamp a window boundary compared against raw
+        record timestamps. Returns 0 before the session is calibrated."""
+        return self._clock.now_native_ns()
+
+    def _try_register_timestamp_callback(self) -> bool:
+        """Best-effort: hand CUPTI the profiler's approx-clock timestamp callback so it
+        stamps activity records on kineto's exact timebase directly. Opt-in via
+        TORCH_CUPTI_TRY_REGISTER_APPROX_TIMESTAMP_CALLBACK (and only as the sole subscriber);
+        returns False -- leaving records on the CLOCK_REALTIME pass-through -- when disabled or
+        when CUPTI rejects it (current libcupti returns CUPTI_ERROR_NOT_COMPATIBLE under the
+        user-defined-record path)."""
+        if not self._timestamp_callback_enabled:
+            return False
+        addr = _cupti_monitor_native.approximate_time_callback_address()
+        rc = self._cupti.register_timestamp_callback(addr)
+        if rc == cupti_python.CUPTI_SUCCESS:
+            logger.info("CUPTI monitor: approx-clock timestamp callback engaged")
+            return True
+        logger.warning(
+            "CUPTI monitor: timestamp callback rejected (%s); using the cuptiGetTimestamp "
+            "(CLOCK_REALTIME) pass-through",
+            self._cupti._result_string(rc),
+        )
+        return False
 
     # --- observer registry (this monitor is the multiplexer) ---------------
 
@@ -789,9 +950,8 @@ class CuptiMonitor:
             "cuda_version": _cuda_version_string(),
             "hes_enabled": is_hes_enabled(),
             "timestamp_mode": "approximate_clock",
-            "session_start_unix_ns": self._session_start_unix_ns,
-            "session_start_approx_ns": self._session_start_approx_ns,
-            "session_start_calibrated_unix_ns": self._session_start_calibrated_unix_ns,
+            "session_start_unix_ns": self._clock.unix_anchor_ns,
+            "session_start_approx_ns": self._clock.approx_anchor_ns,
             "buffer_size": self.buffer_size,
             "flush_period_ns": int(self.flush_period_s * 1e9),
             "libcupti": cupti_python.LIBCUPTI_SONAME,
