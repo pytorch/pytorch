@@ -1535,7 +1535,7 @@ Args:
     x (Tensor): tensor, flattened by default, but this behavior can be
         controlled using :attr:`dim`.  (Note: the keyword argument
         `input` can also be used as an alias for `x`.)
-    ord (int, float, inf, -inf, 'fro', 'nuc', optional): order of norm. Default: `2`
+    ord (int, float, inf, -inf, optional): order of norm. Default: `2`
     dim (int, Tuple[int], optional): dimensions over which to compute
         the norm. See above for the behavior when :attr:`dim`\ `= None`.
         Default: `None`
@@ -2211,6 +2211,53 @@ Example::
     >>> torch.linalg.matrix_exp(A) # matrix_exp(A) = [[cos(pi/3), sin(pi/3)], [-sin(pi/3), cos(pi/3)]]
     tensor([[ 0.5000,  0.8660],
             [-0.8660,  0.5000]])
+""",
+)
+
+
+matrix_sqrth = _add_docstr(
+    _linalg.linalg_matrix_sqrth,
+    r"""
+linalg.matrix_sqrth(A) -> Tensor
+
+Computes the principal square root of a symmetric (resp. Hermitian) positive-definite matrix.
+
+Letting :math:`\mathbb{K}` be :math:`\mathbb{R}` or :math:`\mathbb{C}`,
+for a symmetric (resp. Hermitian) positive-definite matrix :math:`A \in \mathbb{K}^{n \times n}`,
+this function returns the unique symmetric (resp. Hermitian) positive-definite matrix
+:math:`X \in \mathbb{K}^{n \times n}` such that
+
+.. math::
+    XX = A.
+
+Supports input of float, double, cfloat and cdouble dtypes.
+Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
+the output has the same batch dimensions.
+
+.. note:: Only the lower triangular part of :attr:`A` is used in the computation, and
+          :attr:`A` is assumed to be symmetric (resp. Hermitian). See :func:`torch.linalg.eigh`.
+
+.. seealso::
+
+        :func:`torch.linalg.cholesky` computes a different factorization of a symmetric
+        (resp. Hermitian) positive-definite matrix.
+
+Args:
+    A (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions
+                consisting of symmetric (resp. Hermitian) positive-definite matrices.
+
+Examples::
+
+    >>> A = torch.tensor([[2., 0.], [0., 9.]])
+    >>> torch.linalg.matrix_sqrth(A)
+    tensor([[1.4142, 0.0000],
+            [0.0000, 3.0000]])
+
+    >>> A = torch.randn(2, 3, 3)
+    >>> A = A @ A.mT + 3 * torch.eye(3)  # batch of symmetric positive-definite matrices
+    >>> X = torch.linalg.matrix_sqrth(A)
+    >>> torch.allclose(X @ X, A, atol=1e-5)
+    True
 """,
 )
 
@@ -2920,6 +2967,75 @@ Examples::
     tensor(1.6099e-06)
     >>> torch.dist(Q.mT @ Q, torch.eye(4))
     tensor(6.2158e-07)
+""",
+)
+
+polar = _add_docstr(
+    _linalg.linalg_polar,
+    r"""
+linalg.polar(A, *, out=None) -> (Tensor, Tensor)
+
+Computes the polar decomposition of a matrix.
+
+Letting :math:`\mathbb{K}` be :math:`\mathbb{R}` or :math:`\mathbb{C}`,
+the **polar decomposition** of a matrix
+:math:`A \in \mathbb{K}^{m \times n}` with `m >= n` is defined as
+
+.. math::
+
+    A = UH\mathrlap{\qquad U \in \mathbb{K}^{m \times n}, H \in \mathbb{K}^{n \times n}}
+
+where :math:`U` has orthonormal columns (it is orthogonal in the real case and
+unitary in the complex case) and :math:`H` is symmetric positive-semidefinite in
+the real case and Hermitian positive-semidefinite in the complex case.
+
+The orthogonal factor :math:`U` is the closest matrix with orthonormal columns to
+:math:`A` in the Frobenius norm, which makes the polar decomposition a useful tool
+for orthogonalization.
+
+.. note::
+    :func:`torch.linalg.polar` computes the polar decomposition of a matrix, like
+    SciPy's `scipy.linalg.polar <https://docs.scipy.org/doc/scipy/reference/generated/scipy.linalg.polar.html>`_.
+    It is not related to :func:`torch.polar`, which constructs a complex tensor
+    from absolute values and angles like C++'s `std::polar`.
+
+Supports input of float, double, cfloat and cdouble dtypes.
+Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
+the output has the same batch dimensions.
+
+On CUDA, this is computed with the QR-based Dynamically Weighted Halley (QDWH)
+algorithm via cuSOLVER when `nvmath-python <https://pypi.org/project/nvmath-python/>`_
+is installed and the cuSOLVER runtime is >= 12.2 (CUDA 13.2, which introduces
+the required ``cusolverDnXpolar`` routine); otherwise (and on CPU) it falls back
+to an SVD-based computation.
+
+.. note::
+    This function is not differentiable. Calling it on a tensor that requires
+    grad and backpropagating raises an error; an autograd formula may be added
+    in a future release.
+"""
+    + rf"""
+.. warning:: {common_notes["experimental_warning"]}
+"""
+    + r"""
+Args:
+    A (Tensor): tensor of shape `(*, m, n)` with `m >= n`, where `*` is zero or
+                more batch dimensions.
+
+Keyword args:
+    out (tuple, optional): output tuple of two tensors. Ignored if `None`. Default: `None`.
+
+Returns:
+    A named tuple `(U, H)`.
+
+Examples::
+
+    >>> A = torch.randn(4, 3)
+    >>> U, H = torch.linalg.polar(A)
+    >>> torch.dist(U @ H, A)
+    tensor(7.1512e-07)
+    >>> torch.dist(U.mT @ U, torch.eye(3))
+    tensor(4.8995e-07)
 """,
 )
 
