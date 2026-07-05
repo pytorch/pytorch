@@ -30,6 +30,8 @@ from .optimizer import (
 
 __all__ = ["Adam", "adam"]
 
+_FP16_MIN_SUBNORMAL = 2**-24
+
 
 class Adam(Optimizer):
     def __init__(
@@ -524,11 +526,12 @@ def _single_tensor_adam(
                 denom = denom + eps
                 param.addcdiv_(exp_avg_for_update * step_size_neg, denom)
             elif is_float16:
-                # float16 cannot represent the default eps before it is scaled
-                # by the step size, so keep the denominator math in fp32.
-                denom = denom.float()
+                # float16 cannot represent the default eps. Keep the denominator
+                # nonzero without materializing fp32 buffers.
                 denom.div_(bias_correction2_sqrt)
                 denom.add_(eps)
+                if eps > 0:
+                    denom.clamp_min_(_FP16_MIN_SUBNORMAL)
                 denom.div_(step_size_neg)
                 param.addcdiv_(exp_avg, denom)
             else:
@@ -776,12 +779,12 @@ def _multi_tensor_adam(
             else:
                 exp_avg_sq_sqrt = torch._foreach_sqrt(device_exp_avg_sqs)
 
-            if device_params[0].dtype is torch.float16:
-                # Match the single-tensor path: preserve eps in fp32 for
-                # float16 before folding in the capturable step size.
-                exp_avg_sq_sqrt = [t.float() for t in exp_avg_sq_sqrt]
             torch._foreach_div_(exp_avg_sq_sqrt, bias_correction2_sqrt)
             torch._foreach_add_(exp_avg_sq_sqrt, eps)
+            if device_params[0].dtype is torch.float16 and eps > 0:
+                # float16 cannot represent the default eps. Keep the denominator
+                # nonzero without materializing fp32 buffers.
+                torch._foreach_clamp_min_(exp_avg_sq_sqrt, _FP16_MIN_SUBNORMAL)
             torch._foreach_div_(exp_avg_sq_sqrt, step_size)
 
             # at this point, exp_avg_sq_sqrt = - (1 - beta^t) * [sqrt(exp_avg_sq / (1 - beta2^t)) + eps] / lr
