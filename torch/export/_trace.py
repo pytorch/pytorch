@@ -125,7 +125,11 @@ from .exported_program import (
     ModuleCallEntry,
     ModuleCallSignature,
 )
-from .graph_signature import _convert_to_export_graph_signature, ExportGraphSignature
+from .graph_signature import (
+    _convert_to_export_graph_signature,
+    ExportGraphSignature,
+    TensorArgument,
+)
 
 
 log = logging.getLogger(__name__)
@@ -564,9 +568,18 @@ def _preserve_requires_grad_pass(
             f"input_specs length {len(sig.input_specs)} does not match placeholders length {len(placeholders)}"
         )
     user_input_to_arg = {}
-    for flat_arg_index, user_input in enumerate(sig.user_inputs):
-        if isinstance(user_input, str) and flat_arg_index < len(flat_fake_args):
-            user_input_to_arg[user_input] = flat_fake_args[flat_arg_index]
+    flat_arg_index = 0
+    for spec in sig.input_specs:
+        if spec.kind != InputKind.USER_INPUT:
+            continue
+        if flat_arg_index >= len(flat_fake_args):
+            break
+        fake_arg = flat_fake_args[flat_arg_index]
+        flat_arg_index += 1
+        # sig.user_inputs contains ConstantArgument values, not just placeholder
+        # names, so derive tensor input names directly from the specs.
+        if isinstance(spec.arg, TensorArgument):
+            user_input_to_arg[spec.arg.name] = fake_arg
 
     for node, spec in zip(placeholders, sig.input_specs):
         if spec.kind in (

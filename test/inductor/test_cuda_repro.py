@@ -1736,6 +1736,22 @@ class CudaReproTests(TestCase):
         actual = opt_fn(x)
         self.assertEqual(expected, actual)
 
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @torch._inductor.config.patch(emulate_precision_casts=True)
+    def test_emulate_precision_casts_promoted_lowp_cuda(self):
+        def fn(x):
+            y = x.to(torch.float16)
+            return y + x
+
+        x = torch.tensor([70000.0], device=device_type)
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+
+        expected = fn(x)
+        actual, (code,) = run_and_get_code(opt_fn, x)
+
+        self.assertEqual(expected, actual)
+        self.assertIn(".to(tl.float16)", code)
+
     @torch._inductor.config.patch(emulate_precision_casts=True)
     def test_emulate_precision_casts_norm_rounding(self):
         torch.manual_seed(0)
