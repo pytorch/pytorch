@@ -21,7 +21,7 @@ from torch._dynamo.exc import UserErrorType
 from torch._dynamo.source import GetItemSource
 from torch._dynamo.utils import dynamo_timed, get_metrics_context
 from torch._export.utils import _compiling_state_context
-from torch._guards import detect_fake_mode, TracingContext
+from torch._guards import detect_fake_mode, Source, TracingContext
 from torch.export.dynamic_shapes import _RelaxedConstraint, Constraint
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
@@ -259,8 +259,8 @@ class DynamoGraphTransformer(torch.fx.Transformer):
         flat_args_dynamic_dims: list[set[int]],
         graph_input_order: dict[int, int],
         graph_output_map: dict[int, OutputReturnInfo],
-        fake_mode: Any | None = None,
-        graph_inputs: dict[int, Any] | None = None,
+        fake_mode: FakeTensorMode | None = None,
+        graph_inputs: dict[int, Source | None] | None = None,
     ) -> None:
         super().__init__(module)
 
@@ -753,10 +753,8 @@ class _DynamoBytecodeCodeGen(torch.fx.graph.CodeGen):
     def __init__(
         self,
         orig_arg_names: list[str],
-        # pyrefly: ignore [implicit-any]
-        dynamo_bytecode_flatten: Callable,
-        # pyrefly: ignore [implicit-any]
-        dynamo_bytecode_unflatten: Callable,
+        dynamo_bytecode_flatten: DynamoBytecodeFlatten,
+        dynamo_bytecode_unflatten: DynamoBytecodeUnflatten,
     ) -> None:
         super().__init__()
         self.orig_arg_names = orig_arg_names
@@ -783,6 +781,8 @@ class _DynamoBytecodeCodeGen(torch.fx.graph.CodeGen):
         return results
 
     def process_outputs(self, outputs: Any) -> Any:
+        if self._inputs is None:
+            raise AssertionError("process_outputs called before process_inputs")
         results = self.dynamo_bytecode_unflatten(outputs, self._inputs)
         if self.wrap_tuple:
             results = (results,)
