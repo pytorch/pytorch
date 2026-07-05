@@ -354,6 +354,12 @@ if torch.backends.mps.is_available():
             "fft.hfft2": [torch.complex64],
         }
 
+        MACOS_BEFORE_15_0_XFAILLIST = {
+            # matrix_exp chains complex matmuls; MPSGraph complex matmul is
+            # numerically unreliable before macOS 15 (NaN/inf via scale-square).
+            "matrix_exp": [torch.complex64],
+        }
+
         # Those ops are not expected to work
         UNIMPLEMENTED_XFAILLIST: dict[str, list | None] = {
             # Failures due to lack of op implementation on MPS backend
@@ -836,6 +842,19 @@ if torch.backends.mps.is_available():
                     DecorateInfo(
                         unittest.expectedFailure,
                         dtypes=MACOS_BEFORE_14_4_XFAILLIST[key],
+                    ),
+                )
+
+            if (
+                key in MACOS_BEFORE_15_0_XFAILLIST
+                and key not in xfail_exclusion
+                and (MACOS_VERSION < 15.0)
+            ):
+                addDecorator(
+                    op,
+                    DecorateInfo(
+                        unittest.expectedFailure,
+                        dtypes=MACOS_BEFORE_15_0_XFAILLIST[key],
                     ),
                 )
 
