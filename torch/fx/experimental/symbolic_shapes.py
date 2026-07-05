@@ -5747,7 +5747,8 @@ class ShapeEnv:
         if do_not_specialize_zero_one or (
             dynamic_dim in (DimDynamic.DYNAMIC, DimDynamic.UNBACKED)
             and isinstance(constraint_dim, StrictMinMaxConstraint)
-            and constraint_dim.vr.lower <= 1
+            and isinstance(constraint_dim.vr.lower, (int, sympy.Integer))
+            and 0 <= constraint_dim.vr.lower <= 1
         ):
             specialize_zero_one = False
         else:

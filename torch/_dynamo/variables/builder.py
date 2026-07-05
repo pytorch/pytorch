@@ -4553,7 +4553,7 @@ def _automatic_dynamic(
         dim: int, constraint_range: "StrictMinMaxConstraint", name: str
     ) -> None:
         if dim in dim2constraint:
-            from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
+            
 
             old_constraint_range, old_name = dim2constraint[dim]
             new_constraint_range = StrictMinMaxConstraint(
