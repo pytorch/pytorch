@@ -1347,11 +1347,13 @@ class CachingAutotuner(KernelInterface):
             return float("inf")
 
         device_interface = self.get_device_interface()
-        stream = device_interface.get_raw_stream(device_interface.current_device())
 
         cpu_copies = self.copy_args_to_cpu_if_needed(*args, **kwargs)
 
         def kernel_call():
+            # Resolve the raw stream at call time rather than at closure-creation
+            # time so that CUDA graph capture on a different stream works correctly.
+            stream = device_interface.get_raw_stream(device_interface.current_device())
             cloned_args, cloned_kwargs = self.maybe_clone_args(
                 cpu_copies, *args, **kwargs
             )
@@ -2524,6 +2526,15 @@ class CachingAutotuner(KernelInterface):
                 val = getattr(launcher, attr, None)
                 if val is not None:
                     setattr(new_launcher, attr, val)
+            # _FastCudaLauncher bakes kernel.function (a raw CUfunction pointer)
+            # into a C object and never re-reads it, and replacing the "runner"
+            # global drops this launcher's only reference to the owning static
+            # kernel. Without an explicit reference the kernel can be collected or
+            # closed while this launcher is still cached and callable; its
+            # close()/__del__ then unloads the module and leaves the baked pointer
+            # dangling, producing a CUDA "misaligned address" error on the next
+            # launch. Keep the owner alive for as long as the fast launcher is.
+            new_launcher._static_kernel_owner = kernel  # type: ignore[attr-defined]
             return new_launcher
         except (AttributeError, TypeError, KeyError, ValueError):
             # Expected failures - silent fallback is OK.
