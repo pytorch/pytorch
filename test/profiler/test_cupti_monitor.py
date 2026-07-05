@@ -30,40 +30,19 @@ from torch.profiler import (
     supported_activities,
 )
 from torch.profiler._cupti.observers.observation_window import WindowFinalizerMixin
-from torch.testing._internal.common_cuda import SM100OrLater
+from torch.testing._internal.common_cuda import (
+    SM100OrLater,
+    TEST_CUDA,
+    TEST_CUPTI as TEST_CUPTI_PYTHON,
+    TEST_CUPTI_V13_3,
+)
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     run_tests,
     skipIfTorchDynamo,
     TemporaryFileName,
-    TEST_WITH_ROCM,
     TestCase,
 )
-from torch.utils._import_utils import _check_module_exists
-
-
-TEST_CUDA = torch.cuda.is_available()
-# cupti-python is pip-installable on ROCm hosts too, but CUPTI itself is a no-op
-# there, so gate the monitor tests off ROCm as well.
-TEST_CUPTI_PYTHON = _check_module_exists("cupti") and not TEST_WITH_ROCM
-
-
-def _cupti_version() -> int:
-    if not TEST_CUPTI_PYTHON:
-        return 0
-    try:
-        from torch.profiler._cupti.cupti_python import pylibcupti
-
-        return pylibcupti().get_version()
-    except Exception:
-        return 0
-
-
-# The CUPTI monitor needs libcupti >= 13.3: it uses the v2 user-defined-record API
-# (>= 13.2) AND decodes against pBufferCompleteInfo->ppRecordLayouts (CUPTI's own
-# per-kind record layout), which 13.2 leaves null. So a single >= 13.3 gate covers
-# the whole monitor (it implies v2).
-TEST_CUPTI_V13_3 = TEST_CUPTI_PYTHON and _cupti_version() >= 130300
 
 
 def setUpModule():
