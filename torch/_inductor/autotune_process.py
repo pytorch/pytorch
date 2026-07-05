@@ -687,7 +687,6 @@ class TritonBenchmarkRequest(BenchmarkRequest):
         kpack: int = 0,  # ROCm specific gemm parameter
         workspace_size: int | None = None,  # size of workspace buffer in bytes
         workspace_zero_fill: bool = False,  # whether to zero-fill workspace
-        input_param_names: tuple[str, ...] | None = None,
     ) -> None:
         super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)
         self.module_path = module_path
@@ -701,7 +700,6 @@ class TritonBenchmarkRequest(BenchmarkRequest):
         self.kpack = kpack
         self.workspace_size = workspace_size
         self.workspace_zero_fill = workspace_zero_fill
-        self.input_param_names = input_param_names
         self._benchmark_module: Any | None = None
 
     @override
@@ -720,36 +718,7 @@ class TritonBenchmarkRequest(BenchmarkRequest):
             self.module_path,
         )
 
-        kernel = getattr(mod, self.kernel_name)
-        run_method = kernel.run
-
-        # Template input deduplication can reduce the kernel's parameter
-        # count below len(input_tensors) when a cached candidate compiled
-        # with aliased inputs is benchmarked for a graph with distinct
-        # inputs.  Match by param name to keep the right tensors.
-        triton_meta = getattr(kernel, "triton_meta", None)
-        if triton_meta is not None:
-            sig = triton_meta.get("signature", {})
-            kernel_input_names = [
-                k
-                for k, v in sig.items()
-                if v.startswith("*")
-                and not k.startswith(("out_ptr", "in_out_ptr", "ws_ptr"))
-            ]
-            if len(input_tensors) > len(kernel_input_names):
-                if self.input_param_names is not None:
-                    name_to_idx = {
-                        n: i for i, n in enumerate(self.input_param_names)
-                    }
-                    keep = [name_to_idx[k] for k in kernel_input_names]
-                else:
-                    keep = list(range(len(kernel_input_names)))
-                autotuning_log.debug(
-                    "Trimming input_tensors from %d to %d for %s",
-                    len(input_tensors), len(keep), self.kernel_name,
-                )
-                input_tensors = tuple(input_tensors[i] for i in keep)
-
+        run_method = getattr(mod, self.kernel_name).run
         extra_args = list(self.extra_args)
 
         # Recreate workspace tensor if needed (for TMA templates)

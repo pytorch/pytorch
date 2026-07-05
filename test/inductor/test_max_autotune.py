@@ -24,7 +24,7 @@ from torch._dynamo import reset
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.exc import BackendCompilerFailed
 from torch._dynamo.testing import rand_strided, reset_rng_state
-from torch._dynamo.utils import counters, same
+from torch._dynamo.utils import counters, identity, same
 from torch._inductor import config
 from torch._inductor.autotune_process import (
     _TestBenchmarkRequest,
@@ -32,7 +32,6 @@ from torch._inductor.autotune_process import (
     AutotuneProcessPool,
     ExternKernelBenchmarkRequest,
     get_visible_devices_env_var,
-    TensorMeta,
     TritonBenchmarkRequest,
     TuningProcess,
     TuningProcessPool,
@@ -68,6 +67,7 @@ from torch._inductor.select_algorithm import (
     clear_feedback_savers,
     clear_preprocessing_fns,
     ExternKernelCaller,
+    GeneratedCodeCache,
     NoValidChoicesError,
     TritonTemplate,
     TritonTemplateCaller,
@@ -2424,6 +2424,7 @@ class TestMaxAutotune(TestCase):
                         'input_nodes':[
                             "[[10,22],[22,1],torch.float32,device(type='cuda',index=0),0]",
                             "[[22,30],[30,1],torch.float32,device(type='cuda',index=0),0]"],
+                        'input_aliasing':(0,1),
                         'num_stages':1,'num_warps':2,'prefix_args':0,'suffix_args':0,'call_sizes':[10,30],
                         'layout':"[[10,30],[30,1],torch.float32,device(type='cuda',index=0),0]",
                         'num_consumer_groups':0,'num_buffers_warp_spec':0,'epilogue_fn_hash':'identity','tma_store':False,
@@ -2466,6 +2467,7 @@ class TestMaxAutotune(TestCase):
                     'input_nodes':[
                         "[[s77,s27],[s27,1],torch.float32,device(type='cuda',index=0),0]",
                         "[[s27,s94],[s94,1],torch.float32,device(type='cuda',index=0),0]"],
+                    'input_aliasing':(0,1),
                     'num_stages':1,'num_warps':2,'prefix_args':0,'suffix_args':0,'call_sizes':[s77,s94],
                     'layout':"[[s77,s94],[s94,1],torch.float32,device(type='cuda',index=0),0]",'num_consumer_groups':0,
                     'num_buffers_warp_spec':0,'epilogue_fn_hash':'identity','tma_store':False,
@@ -2633,6 +2635,90 @@ class TestMaxAutotune(TestCase):
             self.assertEqual(compile_results, eager_results, atol=0.05, rtol=0.05)
             self.assertEqual(hits(), 4)
             self.assertEqual(misses(), 4)
+
+    def test_generated_code_cache_key_input_aliasing(self):
+        """make_key must distinguish aliased inputs, e.g. mm(x, x), from
+        distinct inputs with identical layouts, and stay name-insensitive."""
+
+        def make_layout():
+            return FixedLayout(torch.device("cpu"), torch.float32, [8, 8], [8, 1])
+
+        a = Buffer(name="buf_a", layout=make_layout())
+        b = Buffer(name="buf_b", layout=make_layout())
+
+        def key(*input_nodes):
+            return GeneratedCodeCache().make_key(
+                input_nodes=input_nodes,
+                num_stages=1,
+                num_warps=4,
+                call_sizes=[8, 8],
+                prefix_args=0,
+                suffix_args=0,
+                epilogue_fn=identity,
+                epilogue_fn_hash=None,
+                tma_store=False,
+                tma_load_for_template_epilogue=False,
+                transpose_discontiguous_tensor_descriptors_override=None,
+                subgraphs=None,
+                workspace_arg=None,
+                layout=make_layout(),
+                num_consumer_groups=0,
+                num_buffers_warp_spec=0,
+                kwargs={},
+            )
+
+        # Identical layouts but different aliasing must not collide.
+        self.assertNotEqual(key(a, a), key(a, b))
+        # The aliasing pattern is insensitive to buffer names.
+        self.assertEqual(key(a, a), key(b, b))
+        self.assertEqual(key(a, b), key(b, a))
+        self.assertIn("'input_aliasing': (0, 1)", key(a, b))
+
+    @unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @config.patch(
+        {
+            "test_configs.max_mm_configs": 4,
+            "max_autotune_gemm_backends": "TRITON",
+        }
+    )
+    def test_bmm_template_cache_aliased_then_distinct_inputs(self):
+        """Cached template code generated for aliased bmm operands must not
+        be reused for distinct operands with identical layouts.
+
+        The first compilation caches bmm kernels whose operands alias one
+        buffer (codegen collapses them into a single kernel argument). The
+        second compilation autotunes bmm nodes with distinct operands of the
+        same layouts; before the aliasing-aware cache key those hit the
+        one-argument cached kernels and crashed during benchmarking.
+        See https://github.com/pytorch/pytorch/issues/188069.
+        """
+
+        def update(grad, m0, m1, beta):
+            outer0 = torch.einsum("...ab,...Ab->...aA", grad, grad)
+            m0.lerp_(outer0, 1 - beta)
+            outer1 = torch.einsum("...ab,...aB->...bB", grad, grad)
+            m1.lerp_(outer1, 1 - beta)
+
+        def project(grad, q0, q1):
+            return torch.einsum("...ab,...aA,...bB->...AB", grad, q0, q1)
+
+        B, N = 2, 128
+        with fresh_cache():
+            grad = torch.randn(B, N, N, device=GPU_TYPE)
+            m0 = torch.randn(B, N, N, device=GPU_TYPE)
+            m1 = torch.randn(B, N, N, device=GPU_TYPE)
+            q0 = torch.randn(B, N, N, device=GPU_TYPE)
+            q1 = torch.randn(B, N, N, device=GPU_TYPE)
+
+            compile_kwargs = {
+                "fullgraph": True,
+                "dynamic": False,
+                "mode": "max-autotune-no-cudagraphs",
+            }
+            torch.compile(update, **compile_kwargs)(grad, m0, m1, 0.999)
+            result = torch.compile(project, **compile_kwargs)(grad, q0, q1)
+
+            self.assertEqual(result, project(grad, q0, q1), atol=1e-2, rtol=1e-2)
 
     @fresh_cache()
     @unittest.skipIf(
@@ -3496,114 +3582,6 @@ class TestMaxAutotune(TestCase):
         # No truncation casts should exist since there are no fused epilogue ops
         self.assertNotIn("acc.to(tl.float16)", code[0])
         self.assertNotIn("acc.to(tl.bfloat16)", code[0])
-
-    @unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
-    def test_bmm_input_dedup_no_stream_overflow(self):
-        """Autotuning bmm after a self-referential bmm must not crash.
-
-        The first compilation produces template kernels where both operands
-        alias the same buffer (input deduplication).  The second compilation's
-        autotuning must handle the reduced parameter count without overflowing
-        positional args into the stream keyword.
-        """
-        dev = GPU_TYPE
-        B, N = 2, 128
-
-        grad = torch.randn(B, N, N, device=dev)
-        m0 = torch.randn(B, N, N, device=dev)
-        m1 = torch.randn(B, N, N, device=dev)
-        q0 = torch.randn(B, N, N, device=dev)
-        q1 = torch.randn(B, N, N, device=dev)
-
-        @torch.compile(fullgraph=True, dynamic=False, mode="max-autotune-no-cudagraphs")
-        def update(grad, m0, m1, beta):
-            outer0 = torch.einsum("...ab,...Ab->...aA", grad, grad)
-            m0.lerp_(outer0, 1 - beta)
-            outer1 = torch.einsum("...ab,...aB->...bB", grad, grad)
-            m1.lerp_(outer1, 1 - beta)
-
-        @torch.compile(fullgraph=True, dynamic=False, mode="max-autotune-no-cudagraphs")
-        def project(grad, q0, q1):
-            return torch.einsum("...ab,...aA,...bB->...AB", grad, q0, q1)
-
-        update(grad, m0, m1, 0.999)
-        result = project(grad.float(), q0.float(), q1.float())
-        expected = torch.einsum("...ab,...aA,...bB->...AB", grad.float(), q0.float(), q1.float())
-        torch.testing.assert_close(result, expected)
-
-    @unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
-    def test_nontail_input_dedup_trimming(self):
-        """Non-tail deduplication must keep trailing tensors, not truncate.
-
-        Simulates a 4-input template (A, B, C, D) where B (index 1) was
-        deduplicated to A. The kernel signature has 3 input pointers:
-        arg_A, arg_C, arg_D. A naive tail-truncation would drop D (index 3)
-        instead of B (index 1). The name_to_idx logic must keep [0, 2, 3].
-        """
-        dev = GPU_TYPE
-        t_A = torch.randn(4, 4, device=dev)
-        t_B = torch.randn(4, 4, device=dev)
-        t_C = torch.randn(4, 4, device=dev)
-        t_D = torch.randn(4, 4, device=dev)
-        out = torch.empty(4, 4, device=dev)
-
-        class FakeKernelSelf:
-            with_bandwidth_info = False
-
-        def fake_run(*args, **kwargs):
-            pass
-
-        fake_run.__self__ = FakeKernelSelf()
-
-        class FakeKernel:
-            run = fake_run
-            triton_meta = {
-                "signature": {
-                    "arg_A": "*fp32",
-                    "arg_C": "*fp32",
-                    "arg_D": "*fp32",
-                    "out_ptr0": "*fp32",
-                    "ks0": "i32",
-                    "ks1": "i32",
-                },
-            }
-
-        class FakeModule:
-            triton_mm_plus_mm = FakeKernel()
-
-        input_meta = [
-            TensorMeta(device=t.device, dtype=t.dtype, sizes=t.shape,
-                       strides=t.stride(), offset=0)
-            for t in [t_A, t_B, t_C, t_D]
-        ]
-        output_meta = TensorMeta(
-            device=out.device, dtype=out.dtype, sizes=out.shape,
-            strides=out.stride(), offset=0,
-        )
-
-        req = TritonBenchmarkRequest(
-            kernel_name="triton_mm_plus_mm",
-            input_tensor_meta=input_meta,
-            output_tensor_meta=output_meta,
-            extra_args=[1, 1, 1],
-            module_path="/dev/null",
-            module_cache_key="fake_key",
-            num_stages=1,
-            num_warps=4,
-            input_param_names=("arg_A", "arg_B", "arg_C", "arg_D"),
-        )
-
-        with patch(
-            "torch._inductor.autotune_process.PyCodeCache.load_by_key_path",
-            return_value=FakeModule(),
-        ):
-            fn = req.make_run_fn(t_A, t_B, t_C, t_D, out=out)
-
-        kept = fn.args[:3]
-        self.assertEqual(len(kept), 3)
-        self.assertIs(kept[0], t_A)
-        self.assertIs(kept[1], t_C)
-        self.assertIs(kept[2], t_D)
 
 
 @instantiate_parametrized_tests
