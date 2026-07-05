@@ -14111,9 +14111,16 @@ class TestAutogradDeviceType(TestCase):
 
                     with self.subTest(p=p, shapes=(s1, s2), mode=mode):
                         self.assertTrue(gradcheck(fn, (x1, x2)))
-                        self.assertTrue(gradgradcheck(fn, (x1, x2)))
+                        # Compiled autograd cannot reproduce eager's undefined-grad
+                        # accumulation. Check with eager compilation.
+                        self.assertTrue(
+                            gradgradcheck(
+                                fn,
+                                (x1, x2),
+                                check_undefined_grad=not TEST_WITH_TORCHDYNAMO,
+                            )
+                        )
 
-    @skipIfTorchDynamo("compiled autograd + gradgradcheck undefined-grad mode")
     @dtypes(torch.double)
     def test_pdist_gradgrad(self, device, dtype):
         make = partial(make_tensor, device=device, dtype=dtype, requires_grad=True)
@@ -14126,7 +14133,12 @@ class TestAutogradDeviceType(TestCase):
 
                 with self.subTest(p=p, shape=shape):
                     self.assertTrue(gradcheck(fn, (x,)))
-                    self.assertTrue(gradgradcheck(fn, (x,)))
+                    # See test_cdist_gradgrad: undefined-grad mode is eager-only.
+                    self.assertTrue(
+                        gradgradcheck(
+                            fn, (x,), check_undefined_grad=not TEST_WITH_TORCHDYNAMO
+                        )
+                    )
 
     @dtypes(torch.double)
     def test_cdist_gradgrad_small_p(self, device, dtype):
