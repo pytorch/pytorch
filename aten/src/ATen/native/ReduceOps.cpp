@@ -711,9 +711,7 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     // To account for this, we need to do an intersection with mask,
     // which is true in the range [z1, z2)
     const auto first_zero_index = std::get<1>(mask.max(dim, /*keepdim*/ true));
-    const auto first_zero_mask = at::zeros_like(mask)
-                                  .scatter(dim, first_zero_index, /*value*/ true)
-                                  .logical_and(mask);
+    const auto first_zero_mask = mask.logical_and(is_zero);
 
     // select everything between the first zero and the second zero (z1, z2)
     mask &= ~first_zero_mask;
