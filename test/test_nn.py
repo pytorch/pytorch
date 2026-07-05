@@ -6890,6 +6890,29 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaisesRegex(RuntimeError, r"calculated shape of the array of sliding blocks as"):
             fold(torch.randn(1, 12, 12))
 
+        # Near-INT64_MAX padding/stride must be rejected instead of overflowing
+        # the sliding-window index math and reading out of bounds.
+        # See https://github.com/pytorch/pytorch/issues/188959
+        with self.assertRaisesRegex(RuntimeError, r"overflows in the sliding-window size computation"):
+            F.fold(
+                torch.zeros(1, 1, 1),
+                output_size=(100, 100),
+                kernel_size=(1, 1),
+                dilation=(100, 100),
+                padding=(2**63 - 2, 2**63 - 2),
+                stride=(2**63 - 1, 2**63 - 1),
+            )
+
+        # Padding large enough that the per-dimension block counts fit in int64
+        # but their product does not.
+        with self.assertRaisesRegex(RuntimeError, r"number of sliding blocks .* overflows int64"):
+            F.fold(
+                torch.zeros(1, 1, 1),
+                output_size=(100, 100),
+                kernel_size=(1, 1),
+                padding=(2**40, 2**40),
+            )
+
     def test_softmin(self):
         x = torch.randn(2, 16)
         self.assertEqual(F.softmin(x, 1), F.softmax(-x, 1))

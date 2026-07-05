@@ -13,9 +13,30 @@ inline int64_t sliding_window_count(
     int64_t dilation,
     int64_t kernel,
     int64_t stride) {
-  return div_rtn<int64_t>(
-             input_size + 2 * pad - (dilation * (kernel - 1) + 1), stride) +
-      1;
+  // Compute (input_size + 2 * pad - (dilation * (kernel - 1) + 1)) / stride + 1
+  // with overflow checks. Near-INT64_MAX pad/dilation/kernel values would
+  // otherwise silently wrap and yield a bogus (but shape-check-passing) block
+  // count, leading to out-of-bounds accesses in the im2col/col2im kernels.
+  int64_t kernel_extent = 0;
+  int64_t two_pad = 0;
+  int64_t padded_size = 0;
+  TORCH_CHECK(
+      !c10::mul_overflows(dilation, kernel - 1, &kernel_extent) &&
+          !c10::add_overflows(
+              kernel_extent, static_cast<int64_t>(1), &kernel_extent) &&
+          !c10::mul_overflows(pad, static_cast<int64_t>(2), &two_pad) &&
+          !c10::add_overflows(input_size, two_pad, &padded_size),
+      "The combination of input_size=",
+      input_size,
+      ", pad=",
+      pad,
+      ", dilation=",
+      dilation,
+      ", and kernel=",
+      kernel,
+      " overflows in the sliding-window size computation");
+  // padded_size >= 0 and kernel_extent >= 1, so this subtraction cannot overflow.
+  return div_rtn<int64_t>(padded_size - kernel_extent, stride) + 1;
 }
 
 inline void col2im_shape_check(
@@ -94,7 +115,18 @@ inline void col2im_shape_check(
   int64_t n_blocks_width = sliding_window_count(
       output_width, pad_width, dilation_width, kernel_width, stride_width);
 
-  if (input_length != (n_blocks_height * n_blocks_width)) {
+  int64_t n_blocks = 0;
+  TORCH_CHECK(
+      !c10::mul_overflows(n_blocks_height, n_blocks_width, &n_blocks),
+      "Given output_size=(", output_height, ", ", output_width, "), ",
+      "kernel_size=(", kernel_height, ", ", kernel_width, "), ",
+      "dilation=(", dilation_height, ", ", dilation_width, "), ",
+      "padding=(", pad_height, ", ", pad_width, "), ",
+      "stride=(", stride_height, ", ", stride_width, "), ",
+      "the number of sliding blocks (", n_blocks_height, " * ", n_blocks_width,
+      ") overflows int64.");
+
+  if (input_length != n_blocks) {
     TORCH_CHECK(false,
         "Given output_size=(",
         output_height,
@@ -122,7 +154,7 @@ inline void col2im_shape_check(
         " * ",
         n_blocks_width,
         " = ",
-        (n_blocks_height * n_blocks_width),
+        n_blocks,
         ", but got input.size(2)=",
         input_length,
         ".");
