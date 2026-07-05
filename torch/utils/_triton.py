@@ -55,13 +55,16 @@ def get_triton_version(fallback: tuple[int, int] = (0, 0)) -> tuple[int, int]:
 
 
 @functools.cache
-def _device_supports_tma() -> bool:
+def _device_supports_tensor_descriptor() -> bool:
     import torch
 
     return (
-        torch.cuda.is_available()
-        and torch.cuda.get_device_capability() >= (9, 0)
-        and not torch.version.hip
+        (
+            torch.cuda.is_available()
+            and torch.cuda.get_device_capability() >= (9, 0)
+            and not torch.version.hip
+        )
+        or has_triton_cpu_backend()
     )
 
 
@@ -78,7 +81,7 @@ def has_triton_cpu_backend() -> bool:
 @functools.cache
 def has_triton_experimental_host_tma() -> bool:
     if has_triton_package():
-        if _device_supports_tma():
+        if _device_supports_tensor_descriptor():
             try:
                 from triton.tools.experimental_descriptor import (  # noqa: F401
                     create_1d_tma_descriptor,
@@ -100,7 +103,7 @@ def has_triton_experimental_host_tma() -> bool:
 @functools.cache
 def has_triton_tensor_descriptor_host_tma() -> bool:
     if has_triton_package():
-        if _device_supports_tma():
+        if _device_supports_tensor_descriptor():
             try:
                 from triton.tools.tensor_descriptor import (  # noqa: F401
                     TensorDescriptor,
