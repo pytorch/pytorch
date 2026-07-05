@@ -90,7 +90,9 @@ class TestFullyShardDTensor(FSDPTest):
             ref_model.named_parameters(), model.named_parameters(), strict=True
         ):
             p2_full = p2.full_tensor() if isinstance(p2, DTensor) else p2
-            self.assertEqual(p1, p2_full, msg=f"Param mismatch: {n1} vs {n2}")
+            self.assertEqual(
+                p1, p2_full, msg=lambda msg: f"{msg}\nParam mismatch: {n1} vs {n2}"
+            )
 
     @skip_if_lt_x_gpu(2)
     def test_dtensor_train_parity(self):

@@ -94,7 +94,6 @@
 #include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
 
-#include <c10/util/AlignOf.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/ConstexprCrc.h>

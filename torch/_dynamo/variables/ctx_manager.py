@@ -75,7 +75,9 @@ class ContextWrappingVariable(VariableTracker):
         self.target_values = target_values
         self.initial_values = initial_values
 
-    def richcompare_impl(self, tx, other, op):
+    def richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
         from .object_protocol import object_richcompare
 
         return object_richcompare(self, tx, other, op)
@@ -216,6 +218,26 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
         return True
 
 
+class RecordFunctionVariable(GenericContextWrappingVariable):
+    def __init__(self, cm_obj: torch.profiler.record_function, **kwargs: Any) -> None:
+        super().__init__(cm_obj, **kwargs)
+        args = [variables.ConstantVariable.create(cm_obj.name)]
+        record_kwargs = {}
+        if cm_obj.args:
+            record_kwargs["args"] = variables.ConstantVariable.create(cm_obj.args)
+        self.record_fn = variables.torch.ProfilerRecordFunctionContextVariable.create(
+            func=type(self.cm_obj), record_args=args, record_kwargs=record_kwargs
+        )
+
+    def enter(self, tx):
+        tx.active_generic_context_managers.append(self)
+        return self.record_fn.enter(tx)
+
+    def exit(self, tx, *args):
+        tx.active_generic_context_managers.pop()
+        return self.record_fn.exit(tx, *args)
+
+
 class RepararametrizeModuleContextVariable(GenericContextWrappingVariable):
     def __init__(self, ctx_manager_vt: ContextWrappingVariable, mod: Any) -> None:
         self.cm_vt = ctx_manager_vt
@@ -228,8 +250,10 @@ class RepararametrizeModuleContextVariable(GenericContextWrappingVariable):
         with torch._dynamo.variables.higher_order_ops.dynamo_allow_side_effects_in_hop(
             tx
         ):
-            self.old_parameters_var = self.mod.var_getattr(tx, "_parameters").realize()
-            self.old_buffer_var = self.mod.var_getattr(tx, "_buffers").realize()
+            self.old_parameters_var = self.mod.getattro_impl(
+                tx, "_parameters"
+            ).realize()
+            self.old_buffer_var = self.mod.getattro_impl(tx, "_buffers").realize()
             tx.output.side_effects.ignore_mutations_on(self.old_parameters_var)
             tx.output.side_effects.ignore_mutations_on(self.old_buffer_var)
             return self.cm_vt.enter(tx)
@@ -1215,15 +1239,15 @@ class ProfilerRecordFunctionContextVariable(ContextWrappingVariable):
             name = (
                 record_args[0].as_python_constant()
                 if record_args
-                else kwargs.get(
+                else record_kwargs.get(
                     "name", variables.ConstantVariable.create("unknown")
                 ).as_python_constant()
             )
             record_args_const = None
             if len(record_args) > 1:
                 record_args_const = record_args[1].as_python_constant()
-            elif "args" in kwargs:
-                record_args_const = kwargs["args"].as_python_constant()
+            elif "args" in record_kwargs:
+                record_args_const = record_kwargs["args"].as_python_constant()
             target_values = [name, record_args_const]
         else:
             warning_once(log, "Profiler record function %s will be ignored", func)
@@ -1315,7 +1339,7 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
     ) -> "PreserveVersionContextVariable":
         if tensors.is_tensor():
             versions = variables.TupleVariable(
-                [x.var_getattr(tx, "_version") for x in [tensors]]
+                [x.getattro_impl(tx, "_version") for x in [tensors]]
             )
             tensors_tuple = variables.TupleVariable([tensors])
         else:
@@ -1324,7 +1348,7 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
                     f"tensors must be a TupleVariable, got {type(tensors)}"
                 )
             versions = variables.TupleVariable(
-                [x.var_getattr(tx, "_version") for x in tensors.items]
+                [x.getattro_impl(tx, "_version") for x in tensors.items]
             )
             tensors_tuple = tensors
         return PreserveVersionContextVariable(tensors_tuple, versions)
@@ -1742,7 +1766,9 @@ class WithEnterFunctionVariable(VariableTracker):
         super().__init__(**kwargs)
         self.ctx = ctx
 
-    def richcompare_impl(self, tx, other, op):
+    def richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
         from .object_protocol import object_richcompare
 
         return object_richcompare(self, tx, other, op)
@@ -1794,7 +1820,9 @@ class WithExitFunctionVariable(VariableTracker):
         *VariableTracker._nonvar_fields,
     }
 
-    def richcompare_impl(self, tx, other, op):
+    def richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
         from .object_protocol import object_richcompare
 
         return object_richcompare(self, tx, other, op)

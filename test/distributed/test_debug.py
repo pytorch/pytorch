@@ -479,5 +479,166 @@ class TestHandlerPartialDumps(TestCase):
             self.assertIn("1/2 workers responded", content)
 
 
+class TestTorchCommsHealthCheckHandler(TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        from torch.distributed.debug._debug_handlers import TorchCommsHealthCheckHandler
+
+        self.handler = TorchCommsHealthCheckHandler()
+
+    def test_routes(self) -> None:
+        routes = self.handler.routes()
+        self.assertEqual(len(routes), 1)
+        self.assertEqual(routes[0].path, "/torchcomms_health_check")
+
+    def test_nav_links(self) -> None:
+        links = self.handler.nav_links()
+        self.assertEqual(len(links), 1)
+        self.assertEqual(links[0].path, "/torchcomms_health_check")
+        self.assertEqual(links[0].label, "TorchComms Health")
+
+    def test_templates(self) -> None:
+        templates = self.handler.templates()
+        self.assertIn("torchcomms_health_check.html", templates)
+        self.assertIn("Health Status", templates["torchcomms_health_check.html"])
+
+    def test_dump_filename(self) -> None:
+        self.assertEqual(self.handler.dump_filename(), "torchcomms_health_check")
+
+    # -- _any_unhealthy tests --
+
+    def test_any_unhealthy_all_healthy(self) -> None:
+        from torch.distributed.debug._debug_handlers import TorchCommsHealthCheckHandler
+
+        resps = [
+            Response(200, '{"healthy": true}'),
+            Response(200, '{"healthy": true}'),
+        ]
+        self.assertFalse(TorchCommsHealthCheckHandler._any_unhealthy(resps))
+
+    def test_any_unhealthy_one_unhealthy(self) -> None:
+        from torch.distributed.debug._debug_handlers import TorchCommsHealthCheckHandler
+
+        resps = [
+            Response(200, '{"healthy": true}'),
+            Response(200, '{"healthy": false}'),
+        ]
+        self.assertTrue(TorchCommsHealthCheckHandler._any_unhealthy(resps))
+
+    def test_any_unhealthy_non_200_ignored(self) -> None:
+        """Non-200 responses (unreachable ranks) must not trigger a dump.
+
+        Only ranks that are reachable and positively report unhealthy should
+        cause an FR dump.  Treating connection failures as unhealthy would
+        cause expensive dumps whenever a single rank is temporarily unreachable.
+        """
+        from torch.distributed.debug._debug_handlers import TorchCommsHealthCheckHandler
+
+        resps = [Response(503, "unavailable")]
+        self.assertFalse(TorchCommsHealthCheckHandler._any_unhealthy(resps))
+
+    def test_any_unhealthy_bad_json_ignored(self) -> None:
+        from torch.distributed.debug._debug_handlers import TorchCommsHealthCheckHandler
+
+        resps = [Response(200, "not json")]
+        self.assertFalse(TorchCommsHealthCheckHandler._any_unhealthy(resps))
+
+    def test_any_unhealthy_missing_key_defaults_healthy(self) -> None:
+        from torch.distributed.debug._debug_handlers import TorchCommsHealthCheckHandler
+
+        resps = [Response(200, '{"uptime": 42}')]
+        self.assertFalse(TorchCommsHealthCheckHandler._any_unhealthy(resps))
+
+    def test_any_unhealthy_empty_list(self) -> None:
+        from torch.distributed.debug._debug_handlers import TorchCommsHealthCheckHandler
+
+        self.assertFalse(TorchCommsHealthCheckHandler._any_unhealthy([]))
+
+    # -- dump() tests --
+
+    @patch("torch.distributed.debug._debug_handlers.fetch_all")
+    @patch("torch.distributed.debug._debug_handlers.format_fetch_summary")
+    def test_dump_all_healthy(self, mock_summary, mock_fetch_all) -> None:
+        addrs = ["http://h0:1", "http://h1:1"]  # @lint-ignore
+        resps = [
+            Response(200, '{"healthy": true}'),
+            Response(200, '{"healthy": true}'),
+        ]
+        mock_fetch_all.return_value = (addrs, resps)
+        mock_summary.return_value = None
+
+        result = self.handler.dump()
+        self.assertIsNotNone(result)
+        self.assertIn("Rank 0", result)
+        self.assertIn("Rank 1", result)
+        self.assertNotIn("Unhealthy", result)
+        mock_fetch_all.assert_called_once()
+
+    @patch("torch.distributed.debug._debug_handlers.fetch_all")
+    @patch("torch.distributed.debug._debug_handlers.format_fetch_summary")
+    def test_dump_partial_failure(self, mock_summary, mock_fetch_all) -> None:
+        addrs = ["http://h0:1", "http://h1:1"]  # @lint-ignore
+        resps = [
+            Response(200, '{"healthy": true}'),
+            Response(503, "Worker unavailable"),
+        ]
+        mock_fetch_all.return_value = (addrs, resps)
+        mock_summary.return_value = "PARTIAL DATA: 1/2 workers responded"
+
+        result = self.handler.dump()
+        self.assertIn("PARTIAL DATA", result)
+        self.assertIn("Error: 503", result)
+        # no unhealthy rank (503 is not parsed as json), so no FR dump
+        self.assertNotIn("Unhealthy", result)
+
+    @patch("torch.distributed.debug._debug_handlers.fetch_all")
+    @patch("torch.distributed.debug._debug_handlers.format_fetch_summary")
+    def test_dump_unhealthy_triggers_fr_dump(
+        self, mock_summary, mock_fetch_all
+    ) -> None:
+        health_addrs = ["http://h0:1", "http://h1:1"]  # @lint-ignore
+        health_resps = [
+            Response(200, '{"healthy": true}'),
+            Response(200, '{"healthy": false}'),
+        ]
+        dump_addrs = ["http://h0:1", "http://h1:1"]  # @lint-ignore
+        dump_resps = [
+            Response(200, "fr_trace_rank0"),
+            Response(200, "fr_trace_rank1"),
+        ]
+        mock_fetch_all.side_effect = [
+            (health_addrs, health_resps),
+            (dump_addrs, dump_resps),
+        ]
+        mock_summary.return_value = None
+
+        result = self.handler.dump()
+        self.assertIn("Unhealthy rank detected, triggering FR dump", result)
+        self.assertIn("fr_trace_rank0", result)
+        self.assertIn("fr_trace_rank1", result)
+        self.assertEqual(mock_fetch_all.call_count, 2)
+        # second call should be for torchcomms_fr_dump_file
+        self.assertEqual(
+            mock_fetch_all.call_args_list[1][0][0], "torchcomms_fr_dump_file"
+        )
+
+    @patch("torch.distributed.debug._debug_handlers.fetch_all")
+    @patch("torch.distributed.debug._debug_handlers.format_fetch_summary")
+    def test_dump_fr_dump_partial_failure(self, mock_summary, mock_fetch_all) -> None:
+        health_addrs = ["http://h0:1"]  # @lint-ignore
+        health_resps = [Response(200, '{"healthy": false}')]
+        dump_addrs = ["http://h0:1"]  # @lint-ignore
+        dump_resps = [Response(503, "dump failed")]
+        mock_fetch_all.side_effect = [
+            (health_addrs, health_resps),
+            (dump_addrs, dump_resps),
+        ]
+        mock_summary.return_value = None
+
+        result = self.handler.dump()
+        self.assertIn("Unhealthy rank detected", result)
+        self.assertIn("Error: 503", result)
+
+
 if __name__ == "__main__":
     run_tests()

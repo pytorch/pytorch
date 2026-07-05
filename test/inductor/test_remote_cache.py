@@ -35,7 +35,7 @@ class NoopBackend(RemoteCacheBackend):
 
 
 @dataclass
-class TestSample:
+class _TestSample:
     fail: str = None
 
 
@@ -44,7 +44,7 @@ class FakeCache(RemoteCache):
         super().__init__(FailingBackend(), RemoteCachePassthroughSerde())
 
     def _create_sample(self):
-        return TestSample()
+        return _TestSample()
 
     def _log_sample(self, sample):
         self.sample = sample

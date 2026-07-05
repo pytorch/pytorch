@@ -1105,12 +1105,6 @@ class ExactWeakKeyDictionary:
 def istype(obj: object, allowed_types: type[T]) -> TypeIs[T]: ...
 
 
-@overload
-def istype(
-    obj: object, allowed_types: tuple[type[list[T]], type[tuple[T, ...]]]
-) -> TypeIs[T]: ...
-
-
 # This can be simplified once TypeVarTuple objects can be expanded into TypeIs.
 @overload
 def istype(
@@ -1295,12 +1289,41 @@ def is_numpy_float_type(value: Any) -> bool:
     )
 
 
+_unpack_fast_types_cache: tuple[type, ...] | None = None
+
+
+def _unpack_fast_types() -> tuple[type, ...]:
+    # Builtin iterables whose elements we can get directly via
+    # unpack_var_sequence, skipping the generic iter/getiter/iternext protocol
+    # (a bottleneck for large iterables). Built lazily since `variables` is a
+    # circular import at module load.
+    global _unpack_fast_types_cache
+    if _unpack_fast_types_cache is None:
+        from . import variables
+
+        _unpack_fast_types_cache = (
+            variables.ConstDictVariable,
+            variables.DictViewVariable,
+            variables.MappingProxyVariable,
+            variables.DequeVariable,
+            variables.ListVariable,
+            variables.ListIteratorVariable,
+            variables.RangeVariable,
+            variables.SetVariable,
+            variables.TensorVariable,
+            variables.TupleVariable,
+        )
+    return _unpack_fast_types_cache
+
+
 def unpack_iterable(
     tx: InstructionTranslatorBase, iterable: VariableTracker
 ) -> list[VariableTracker]:
-    items: list[VariableTracker] = []
-    unpack_and_apply_fn(tx, iterable, items.append)
-    return items
+    if isinstance(iterable, _unpack_fast_types()):
+        # unpack_var_sequence returns a fresh list, so hand it back directly:
+        # no generator, no per-element callback, single allocation.
+        return iterable.unpack_var_sequence(tx)
+    return list(lazily_unpack(tx, iterable))
 
 
 def unpack_and_apply_fn(
@@ -1308,33 +1331,25 @@ def unpack_and_apply_fn(
     iterable: VariableTracker,
     apply_fn,
 ) -> None:
-    from . import variables
+    for item in lazily_unpack(tx, iterable):
+        apply_fn(item)
+
+
+def lazily_unpack(
+    tx: InstructionTranslatorBase,
+    iterable: VariableTracker,
+):
     from .exc import handle_observed_exception, ObservedUserStopIteration
     from .variables.object_protocol import generic_getiter, generic_iternext
 
-    if isinstance(
-        iterable,
-        (
-            variables.ConstDictVariable,
-            variables.DictViewVariable,
-            variables.DequeVariable,
-            variables.ListVariable,
-            variables.ListIteratorVariable,
-            variables.SetVariable,
-            variables.TupleVariable,
-        ),
-    ):
-        # avoid going through the generic iter/getiter/iternext protocol for
-        # common builtin iterables, since it can be a bottleneck for large
-        # iterables (e.g. unpacking a list of 1000 items)
-        [apply_fn(item) for item in iterable.unpack_var_sequence(tx)]  # type: ignore[bad-argument-type]
+    if isinstance(iterable, _unpack_fast_types()):
+        yield from iterable.unpack_var_sequence(tx)
         return
 
     iterator = generic_getiter(tx, iterable)  # type: ignore[bad-argument-type]
     while True:
         try:
-            item = generic_iternext(tx, iterator)  # type: ignore[bad-argument-type]
-            apply_fn(item)
+            yield generic_iternext(tx, iterator)  # type: ignore[bad-argument-type]
         except ObservedUserStopIteration:
             handle_observed_exception(tx)
             break
@@ -1358,6 +1373,21 @@ def is_lru_cache_wrapped_function(
     return isinstance(value, functools._lru_cache_wrapper) and is_function(
         inspect.getattr_static(value, "__wrapped__")
     )
+
+
+_lru_cache_wrappers_allowed_to_trace_without_warning: weakref.WeakSet[
+    functools._lru_cache_wrapper[Any]
+] = weakref.WeakSet()
+
+
+def allow_lru_cache_wrapper_trace_without_warning(
+    value: functools._lru_cache_wrapper[Any],
+) -> None:
+    _lru_cache_wrappers_allowed_to_trace_without_warning.add(value)
+
+
+def is_lru_cache_wrapper_trace_without_warning_allowed(value: Any) -> bool:
+    return value in _lru_cache_wrappers_allowed_to_trace_without_warning
 
 
 _FuncTypes: TypeAlias = (
@@ -2203,21 +2233,32 @@ class ChromiumEventLogger:
             if metadata:
                 CompileEventLogger.add_record_function_data(event_name, **metadata)
 
-    def reset(self) -> None:
-        # We this on every compile in case a compile crashes or restarts and we haven't
-        # cleared the stack.
+    def _reset_to_state(
+        self,
+        stack_depth: int,
+        pt2_compile_substack_depth: int,
+        event_data_keys: set[str],
+        record_function_keys: set[str],
+    ) -> None:
         stack = self.get_stack()
+        del stack[stack_depth:]
         substack = self.get_pt2_compile_substack()
-        stack.clear()
-        substack.clear()
+        del substack[pt2_compile_substack_depth:]
         event_data = self.get_event_data()
-        event_data.clear()
+        for event_name in list(event_data):
+            if event_name not in event_data_keys:
+                del event_data[event_name]
         # Clean up any lingering record functions (shouldn't happen in normal operation)
         record_functions = self.get_record_functions()
-        if record_functions:
-            for rf in record_functions.values():
+        for event_name, rf in list(record_functions.items()):
+            if event_name not in record_function_keys:
                 rf.__exit__(None, None, None)
-            record_functions.clear()
+                del record_functions[event_name]
+
+    def reset(self) -> None:
+        # We do this on every compile in case a compile crashes or restarts and
+        # we haven't cleared the stack.
+        self._reset_to_state(0, 0, set(), set())
 
     def log_event_end(
         self,
@@ -2398,6 +2439,14 @@ def chromium_event_timed(
     instead. Use this context manager only if you want to avoid dynamo_timed.
     """
     chromium_event_log = get_chromium_event_logger()
+    reset_state: tuple[int, int, set[str], set[str]] | None = None
+    if reset_event_log_on_exit:
+        reset_state = (
+            len(chromium_event_log.get_stack()),
+            len(chromium_event_log.get_pt2_compile_substack()),
+            set(chromium_event_log.get_event_data()),
+            set(chromium_event_log.get_record_functions()),
+        )
     chromium_start_time = time.time_ns()
     chromium_event_log.log_event_start(
         event_name,
@@ -2415,8 +2464,8 @@ def chromium_event_timed(
             chromium_start_time,
             log_pt2_compile_event,
         )
-        if reset_event_log_on_exit:
-            chromium_event_log.reset()
+        if reset_state is not None:
+            chromium_event_log._reset_to_state(*reset_state)
 
 
 @dataclasses.dataclass
@@ -2498,8 +2547,17 @@ def clone_input(x: torch.Tensor, *, dtype: torch.dtype | None = None) -> torch.T
         # this func fails on fake tensors in __torch_dispatch__
         return x
 
+    def is_pinned_cpu_tensor(x: torch.Tensor) -> bool:
+        return (
+            x.device.type == "cpu"
+            and not is_traceable_wrapper_subclass(x)
+            and x.is_pinned()
+        )
+
     def torch_clone(x: torch.Tensor) -> torch.Tensor:
         y = torch.clone(x)
+        if is_pinned_cpu_tensor(x):
+            y = y.pin_memory()
         if x.is_leaf:
             y.requires_grad_(x.requires_grad)
         if x.is_leaf and x.grad is not None:
@@ -2546,7 +2604,10 @@ def clone_input(x: torch.Tensor, *, dtype: torch.dtype | None = None) -> torch.T
             result = torch.empty_quantized((needed_size + 32,), x)
         else:
             result = torch.empty(
-                needed_size + 32, dtype=dtype or x.dtype, device=x.device
+                needed_size + 32,
+                dtype=dtype or x.dtype,
+                device=x.device,
+                pin_memory=is_pinned_cpu_tensor(x),
             )
         cache_line_offset = (
             (x.data_ptr() - result.data_ptr()) % 32
@@ -3025,6 +3086,10 @@ tuple_methods = {method for method in tuple.__dict__.values() if callable(method
 list_methods = {method for method in list.__dict__.values() if callable(method)}
 list_getitem = list.__getitem__
 
+deque_methods = {
+    method for method in collections.deque.__dict__.values() if callable(method)
+}
+
 str_methods = {method for method in str.__dict__.values() if callable(method)}
 
 # EnumType is the metaclass for Enum classes
@@ -3147,9 +3212,21 @@ def dict_keys_getitem(d: dict[Any, Any], n: int) -> Any:
     return next(itertools.islice(dict.keys(d), n, n + 1))
 
 
+def set_base_iter(s: Iterable[T]) -> Iterator[T]:
+    if isinstance(s, set):
+        return set.__iter__(s)
+    if isinstance(s, frozenset):
+        return frozenset.__iter__(s)
+    return iter(s)
+
+
 def set_getitem(s: set[T], n: int) -> T:
-    # Set ordering might not be stable
-    return list(s)[n]
+    # Set ordering might not be stable. For set/frozenset subclasses, use the
+    # base iterator so guard reconstruction observes the internal set contents.
+    try:
+        return next(itertools.islice(set_base_iter(s), n, n + 1))
+    except StopIteration:
+        raise IndexError("set index out of range") from None
 
 
 def enum_repr(value: Any, local: bool) -> str:
@@ -3208,7 +3285,7 @@ def raise_args_mismatch(
     name: str,
     expect: str = "",
     actual: str = "",
-) -> None:
+) -> NoReturn:
     from torch._dynamo.exc import raise_observed_exception
 
     msg_str = (
@@ -3225,45 +3302,41 @@ def raise_args_mismatch(
 
 
 def iter_contains(
-    items: Iterable[Any],
-    search: Any,
+    items: Iterable[VariableTracker],
+    search: VariableTracker,
     tx: InstructionTranslatorBase,
-    check_tensor_identity: bool = False,
-) -> Any:
+) -> VariableTracker:
     from .variables import ConstantVariable
+    from .variables.object_protocol import generic_richcompare_bool
 
-    if search.is_python_constant():
+    items = list(items)
+    # CPython's list_contains/set_contains use PyObject_RichCompareBool(item,
+    # search, Py_EQ) with an identity shortcut. The constant fast path is only
+    # valid when every element is a constant too; a non-constant element earlier
+    # in the sequence has an __eq__ that must be honored in order (it may match,
+    # or raise), so fall through to the per-element richcompare loop otherwise.
+    if search.is_python_constant() and all(x.is_python_constant() for x in items):
+        search_val = search.as_python_constant()
         found_const = any(
-            x.is_python_constant()
-            and x.as_python_constant() == search.as_python_constant()
+            x.as_python_constant() is search_val or x.as_python_constant() == search_val
             for x in items
         )
         return ConstantVariable.create(found_const)
-
-    must_check_tensor_id = False
-    if check_tensor_identity and search.is_tensor():
-        must_check_tensor_id = True
-        # Match of Tensor means match of FakeTensor
-        search = _get_fake_tensor(search)
-
     found: VariableTracker | None = None
     for x in items:
-        if must_check_tensor_id:
-            if x.is_tensor():
-                if search is _get_fake_tensor(x):  # Object equivalence
-                    return ConstantVariable.create(True)
+        check = generic_richcompare_bool(tx, x, search, "__eq__")
+        if check.is_constant_match(True):
+            return check
+        if check.is_constant_match(False):
+            continue
+        if found is None:
+            found = check
         else:
             from torch._dynamo.variables.builder import SourcelessBuilder
 
-            check = SourcelessBuilder.create(tx, operator.eq).call_function(
-                tx, [x, search], {}
+            found = SourcelessBuilder.create(tx, operator.or_).call_function(
+                tx, [check, found], {}
             )
-            if found is None:
-                found = check
-            else:
-                found = SourcelessBuilder.create(tx, operator.or_).call_function(
-                    tx, [check, found], {}
-                )
     if found is None:
         found = ConstantVariable.create(False)
     return found
@@ -3707,6 +3780,9 @@ def same(
             ignore_non_fp=ignore_non_fp,
             log_error=log_error,
             use_larger_multiplier_for_smaller_tensor=use_larger_multiplier_for_smaller_tensor,
+            force_max_multiplier=force_max_multiplier,
+            use_iou_for_bool=use_iou_for_bool,
+            iou_threshold=iou_threshold,
         )
     elif type(ref).__name__ in (
         "MaskedLMOutput",
@@ -3736,6 +3812,9 @@ def same(
                 ignore_non_fp=ignore_non_fp,
                 log_error=log_error,
                 use_larger_multiplier_for_smaller_tensor=use_larger_multiplier_for_smaller_tensor,
+                force_max_multiplier=force_max_multiplier,
+                use_iou_for_bool=use_iou_for_bool,
+                iou_threshold=iou_threshold,
             )
             for key in ref.__dict__
         )
@@ -4084,6 +4163,19 @@ def _get_fake_value_impl(
                 str(cause),
                 case_name="constrain_as_size_example",
             ) from cause
+        elif isinstance(
+            cause, torch._subclasses.fake_tensor.FakeTensorDeviceMismatchError
+        ):
+            _wrap_graph_break_with_torch_runtime_err(
+                lambda: unimplemented(
+                    gb_type="Tensor device mismatch",
+                    context=f"{op} {node.target}",
+                    explanation=str(cause),
+                    hints=["Move inputs, parameters, and buffers to the same device."],
+                    from_exc=cause,
+                )
+            )
+            raise AssertionError("should not be reachable") from None
         elif isinstance(cause, ValueRangeError):
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, e.args[0]) from e
         elif isinstance(cause, TypeError) and "argument" in str(cause):
@@ -5123,7 +5215,12 @@ def get_instruction_source_311(code: types.CodeType, inst: Instruction) -> str:
     )
 
 
-def get_static_address_type(t: Any) -> Any:
+# The two flavors of mark_static_address: "guarded" recompiles when the data_ptr
+# changes, "unguarded" re-records cudagraphs instead. Set in decorators.py.
+StaticInputType = Literal["guarded", "unguarded"]
+
+
+def get_static_address_type(t: Any) -> StaticInputType | None:
     if isinstance(t, torch.Tensor):
         return getattr(t, "_dynamo_static_input_type", None)
 
@@ -5573,7 +5670,14 @@ def set_feature_use(feature: str, usage: bool) -> None:
         get_metrics_context().set_key_value("feature_usage", feature, usage)
 
 
-_ddp_optimization_mode: tuple[str, ...] = (
+OptimizeDDPMode = Literal[
+    "ddp_optimizer",
+    "python_reducer",
+    "python_reducer_without_compiled_forward",
+    "no_optimization",
+]
+
+_ddp_optimization_mode: tuple[OptimizeDDPMode, ...] = (
     "ddp_optimizer",
     "python_reducer",  # experimental mode
     "python_reducer_without_compiled_forward",
@@ -5581,7 +5685,7 @@ _ddp_optimization_mode: tuple[str, ...] = (
 )
 
 
-def get_optimize_ddp_mode() -> str:
+def get_optimize_ddp_mode() -> OptimizeDDPMode:
     optimize_ddp = config.optimize_ddp
     if isinstance(optimize_ddp, bool):
         mode = "ddp_optimizer" if optimize_ddp else "no_optimization"
@@ -5594,7 +5698,7 @@ def get_optimize_ddp_mode() -> str:
 
     if mode not in _ddp_optimization_mode:
         raise AssertionError(f"Invalid dynamo config optimize_ddp value {mode=}")
-    return mode
+    return cast("OptimizeDDPMode", mode)
 
 
 @contextmanager
@@ -5675,6 +5779,28 @@ def record_pregraph_bytecode_exit(cm: AbstractContextManager[None]) -> None:
     cm.__exit__(None, None, None)
 
 
+# Active `torch._dynamo.override_cudagraphs` override, set/restored at RUNTIME by
+# CudagraphOverrideContextManager.__enter__/__exit__ (mirrors _error_on_graph_break
+# above). This lets the override follow the dynamic call stack: a callee that
+# cannot be inlined (e.g. it contains a graph break) is compiled as a separate
+# frame and would otherwise not inherit the override, which lives lexically in a
+# caller's `with` block / decorator. OutputGraph seeds its cudagraph_annotation
+# from this value. None means no override is active; otherwise it is the
+# (fwd, bwd) pair. NOTE: we intentionally do not guard on this, so the override
+# is sticky per code object (first compile wins) for functions reached both
+# inside and outside it.
+_cudagraph_override: tuple[bool | None, bool | None] | None = None
+
+
+def _get_cudagraph_override() -> tuple[bool | None, bool | None] | None:
+    return _cudagraph_override
+
+
+def _set_cudagraph_override(value: tuple[bool | None, bool | None] | None) -> None:
+    global _cudagraph_override
+    _cudagraph_override = value
+
+
 # Returns a set of code objects present traced in the current TracingContext, or None
 # if there is no current TracingContext.
 def get_traced_code() -> list[CodeType] | None:
@@ -5716,6 +5842,10 @@ def _make_inlined(
         from torch._dynamo.variables.functions import UserFunctionVariable
 
         with _force_inline():
-            return UserFunctionVariable(f).call_function(tx, args, kwargs)  # type: ignore[arg-type]
+            return tx.inline_user_function_return(
+                UserFunctionVariable(f),
+                list(args),
+                dict(kwargs),
+            )
 
     return inline_call
