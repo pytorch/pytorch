@@ -4,8 +4,9 @@ import os
 
 import run_test
 
-from torch.testing._internal.common_utils import run_tests, TestCase
 from tools.testing.modulefinder_determinator import test_impact_of_file
+
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class DummyOptions:
