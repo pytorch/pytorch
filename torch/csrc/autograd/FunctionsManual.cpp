@@ -7440,14 +7440,14 @@ static Tensor embed_index_domain_grad(
     return at::zeros_symint(src_sizes, grad_at_index.options());
   }
   const auto src_rank = static_cast<int64_t>(src_sizes.size());
-  std::vector<c10::SymInt> domain_sizes;
+  at::SymDimVector domain_sizes;
   domain_sizes.reserve(src_rank);
   for (const auto d : c10::irange(src_rank)) {
     domain_sizes.push_back(
         d < index.dim() ? index.sym_size(d) : c10::SymInt(1));
   }
   // pad lists (before, after) pairs from the last dim backwards
-  std::vector<c10::SymInt> pad;
+  at::SymDimVector pad;
   pad.reserve(2 * src_rank);
   for (auto d = src_rank - 1; d >= 0; --d) {
     pad.emplace_back(0);
