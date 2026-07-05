@@ -72,6 +72,7 @@ from .wrapper import (
     ReuseLine,
     ScatterFallbackLine,
     SubgraphPythonWrapperCodegen,
+    SwitchLine,
     SymbolicCallArg,
     SymbolicCallArgLine,
     UnbackedSymbolDefsLine,
@@ -164,6 +165,15 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         """
         self.writeline(ConditionalLine(self, conditional))
         for subgraph in (conditional.true_subgraph, conditional.false_subgraph):
+            self.codegen_subgraph_common(subgraph)
+
+    def codegen_switch(self, switch: ir.Switch) -> None:
+        """
+        Switch codegen normally emits a number of different wrapper lines.
+        Instead, FX conversion uses a dedicated line for the whole switch node.
+        """
+        self.writeline(SwitchLine(self, switch))
+        for subgraph in switch.branches:
             self.codegen_subgraph_common(subgraph)
 
     def define_subgraph_launcher_fn(
@@ -746,6 +756,30 @@ class FxConverter:
         fx_node = self.gm.graph.call_function(
             torch.ops.higher_order.cond,
             args=(predicate, true_subgm, false_subgm, operands),
+        )
+        self._record_allocation(ir_node, fx_node)
+
+    def _generate_switch(self, line: WrapperLine) -> None:
+        if not isinstance(line, SwitchLine):
+            raise AssertionError(f"expected SwitchLine, got {type(line)}")
+
+        ir_node = line.node
+        if ir_node.branches is None:
+            raise AssertionError("ir_node.branches must not be None")
+        branch_subgms = [self._get_subgm_attr(branch) for branch in ir_node.branches]
+
+        def generate_buffer(node: ir.IRNode | None) -> torch.fx.Node | None:
+            if node is None:
+                raise AssertionError("node must not be None")
+            return self._generate_buffer(node)
+
+        index = generate_buffer(ir_node.index)
+        if ir_node.operands is None:
+            raise AssertionError("ir_node.operands must not be None")
+        operands = tuple(generate_buffer(arg) for arg in ir_node.operands)
+        fx_node = self.gm.graph.call_function(
+            torch.ops.higher_order.switch,
+            args=(index, branch_subgms, operands),
         )
         self._record_allocation(ir_node, fx_node)
 
