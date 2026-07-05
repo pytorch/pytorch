@@ -2472,6 +2472,9 @@ class CommonTemplate:
             check_lowp=False,
         )
 
+    # Triton CPU generates a split scan that uses tl.debug_barrier, which is
+    # not yet implemented in Triton CPU.
+    @xfail_if_triton_cpu
     def test_consecutive_split_cumsum(self):
         def fn(a, b):
             a = a.view(-1)
