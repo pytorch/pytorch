@@ -13,6 +13,7 @@ from typing import Any, cast, TYPE_CHECKING, TypeGuard
 
 import torch
 import torch.utils._pytree as pytree
+from torch._custom_class_base import CustomClassBase
 from torch._dynamo.source import (
     AttrSource,
     GetItemSource,
@@ -26,7 +27,6 @@ from torch._export.utils import _fakify_params_buffers
 from torch._guards import Source
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_opaque_value
-from torch._opaque_base import OpaqueBase
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.export import Constraint
 from torch.export.dynamic_shapes import (
@@ -286,11 +286,11 @@ def _create_symbolic_context_for_tensor(t, source, t_constraints, sources, mode)
                     inner_contexts[attr] = _create_symbolic_context_for_tensor(
                         inner_value, inner_source, t_constraints, sources, mode
                     )
-                case OpaqueBase():
+                case CustomClassBase():
                     pass
                 case unexpected:
                     raise AssertionError(
-                        f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
                     )
 
         symbolic_context = SubclassSymbolicContext(
@@ -394,11 +394,21 @@ def _tensor_min_max(*args, real_callable, tensor_callable, **kwargs):
     return real_callable(*args, **kwargs)
 
 
+def _tensor_len(obj, *, real_callable):
+    if isinstance(obj, torch.Tensor):
+        return obj.__len__()
+    return real_callable(obj)
+
+
 @contextmanager
 def _override_builtin_ops():
+    original_len = builtins.len
     original_max = builtins.max
     original_min = builtins.min
     original_pow = math.pow
+
+    # pyrefly: ignore [bad-assignment]
+    builtins.len = functools.partial(_tensor_len, real_callable=original_len)
 
     # pyrefly: ignore [bad-assignment]
     builtins.max = functools.partial(
@@ -415,6 +425,7 @@ def _override_builtin_ops():
     try:
         yield
     finally:
+        builtins.len = original_len
         builtins.max = original_max
         builtins.min = original_min
         math.pow = original_pow

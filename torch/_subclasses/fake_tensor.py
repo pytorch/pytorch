@@ -22,10 +22,10 @@ import torch
 import torch._library.utils as library_utils
 from torch import SymBool, SymFloat, SymInt, Tensor
 from torch._C._functorch import is_functorch_wrapped_tensor, is_legacy_batchedtensor
+from torch._custom_class_base import CustomClassBase
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.fake_profile import MissingOpProfile
 from torch._logging import dtrace_structured
-from torch._opaque_base import OpaqueBase
 from torch._prims_common import canonicalize_dim, suggest_memory_format
 from torch._subclasses.meta_utils import (
     assert_eq,
@@ -83,6 +83,7 @@ T = TypeVar("T")
 aten = torch._ops.ops.aten
 
 _MKLDNN_PROPAGATE_OPS = {
+    aten.alias.default,
     aten.clone.default,
     aten.detach.default,
     aten._prelu_kernel.default,
@@ -129,6 +130,12 @@ _MKLDNN_AUXILIARY_TENSOR_OPS = {
 CONSTANT_NUMEL_LIMIT = 1
 
 RECURSION_COUNT = 0
+
+_MKLDNN_DISPATCH_KEY = torch._C._dispatch_key_parse("MkldnnCPU")
+
+
+def _dispatch_keys_has_mkldnn(dispatch_keys: torch.DispatchKeySet | None) -> bool:
+    return dispatch_keys is not None and dispatch_keys.has(_MKLDNN_DISPATCH_KEY)
 
 
 class _FakeTensorConstructorIgnoredState(TypedDict, total=False):
@@ -271,8 +278,8 @@ def disable_fake_tensor_cache(fake_mode: FakeTensorMode) -> Generator[None, None
 def get_plain_tensors(
     subclass: Tensor | TraceableWrapperSubclass,
     *,
-    out: list[Tensor | int | SymInt | OpaqueBase],
-) -> list[Tensor | int | SymInt | OpaqueBase]:
+    out: list[Tensor | int | SymInt | CustomClassBase],
+) -> list[Tensor | int | SymInt | CustomClassBase]:
     # This function is used in Runtime, do not add redundant asserts
     todo = [subclass]
     while todo:
@@ -303,11 +310,11 @@ def is_fake(x: object) -> TypeGuard[Tensor]:
                         got_fake = fake
                     elif got_fake != fake:
                         raise AssertionError("got mixed fake and real tensors!")
-                case OpaqueBase():
+                case CustomClassBase():
                     pass
                 case unexpected:
                     raise AssertionError(
-                        f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
                     )
         return got_fake or False
     elif isinstance(x, FunctionalTensor):
@@ -338,11 +345,11 @@ def maybe_get_fake_mode(t: object) -> FakeTensorMode | None:
                         mode = m
                     elif mode is not m:
                         raise AssertionError("All fake tensor modes must be the same")
-                case OpaqueBase():
+                case CustomClassBase():
                     pass
                 case unexpected:
                     raise AssertionError(
-                        f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
                     )
         return mode
     elif isinstance(t, FunctionalTensor):
@@ -520,6 +527,8 @@ class FakeTensorConverter:
 
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
+            if t.is_mkldnn and not maybe_memo.is_mkldnn:
+                maybe_memo.dispatch_keys = torch._C._dispatch_keys(t)
             return maybe_memo
         # not yet supported in metatensors
         if t.is_quantized:
@@ -565,6 +574,8 @@ class FakeTensorConverter:
         )
         if out is NotImplemented:
             raise UnsupportedFakeTensorException("meta converter nyi")
+        if t.is_mkldnn:
+            out.dispatch_keys = torch._C._dispatch_keys(t)
 
         # Propagate grad_dtype here rather than in meta_converter because
         # meta tensors don't carry autograd metadata.
@@ -1026,6 +1037,32 @@ class FakeTensor(Tensor):
 
     @property
     # pyrefly: ignore [bad-override]
+    def is_mkldnn(self) -> bool:
+        return bool(
+            getattr(self, "_fake_is_mkldnn", False)
+        ) or _dispatch_keys_has_mkldnn(self.dispatch_keys)
+
+    @property
+    # pyrefly: ignore [bad-override]
+    def layout(self) -> torch.layout:
+        if self.is_mkldnn:
+            return torch._mkldnn  # type: ignore[attr-defined]
+        return Tensor.layout.__get__(self, type(self))  # type: ignore[attr-defined]
+
+    def to_dense(
+        self,
+        dtype: torch.dtype | None = None,
+        *,
+        masked_grad: bool | None = None,
+    ) -> Tensor:
+        if self.is_mkldnn:
+            return torch.ops.aten._to_dense.default(
+                self, dtype=dtype, masked_grad=masked_grad
+            )
+        return Tensor.to_dense(self, dtype=dtype, masked_grad=masked_grad)
+
+    @property
+    # pyrefly: ignore [bad-override]
     def device(self) -> torch.device:
         if self.fake_mode.in_kernel_invocation:
             return torch.device("meta")
@@ -1043,23 +1080,6 @@ class FakeTensor(Tensor):
     @fake_device.setter
     def fake_device(self, device: torch.device) -> None:
         self._fake_device = self._normalize_fake_device(device)
-
-    @property
-    # pyrefly: ignore [bad-override]
-    def layout(self) -> torch.layout:
-        if bool(getattr(self, "_fake_is_mkldnn", False)):
-            # pyrefly: ignore [missing-attribute]
-            return torch._mkldnn
-        with torch._C.DisableTorchFunctionSubclass():
-            return super().layout
-
-    @property
-    # pyrefly: ignore [bad-override]
-    def is_mkldnn(self) -> bool:
-        if bool(getattr(self, "_fake_is_mkldnn", False)):
-            return True
-        with torch._C.DisableTorchFunctionSubclass():
-            return super().is_mkldnn
 
     # Note: [Fake Tensor Dispatch Keys]
     # In order to model the behavior of device-specific autocast
@@ -2336,6 +2356,9 @@ class FakeTensorMode(TorchDispatchMode):
         if func in self.lift_fns:
             raise _BypassDispatchCache("lift")
 
+        if func is aten.to_mkldnn.default:
+            raise _BypassDispatchCache("mkldnn tensor")
+
         if func.name() == "inductor::resize_storage_bytes_":
             raise _BypassDispatchCache("inductor::resize_storage_bytes_")
 
@@ -3398,6 +3421,19 @@ class FakeTensorMode(TorchDispatchMode):
             if fast_impl is not None:
                 return maybe_propagate_real_tensors(fast_impl(self, *args, **kwargs))
 
+        if func is torch.ops.aten.to_dense.default:
+            # The registered fake op impl handles the usual path, but symbolic
+            # shapes can still reach generic decomposition below. The native
+            # composite sees a fake MKLDNN tensor's strided meta backing, so
+            # handle this before generic decomposition.
+            dtype = args[1] if len(args) > 1 else kwargs.get("dtype")
+            masked_grad = kwargs.get("masked_grad")
+            op_impl_out = maybe_to_dense_mkldnn(
+                self, args[0], dtype=dtype, masked_grad=masked_grad
+            )
+            if op_impl_out is not NotImplemented:
+                return maybe_propagate_real_tensors(cast(FakeTensor, op_impl_out))
+
         pre_decomposition_impl = get_pre_decomposition_op_impls().get(func)
         if pre_decomposition_impl is not None:
             op_impl_out = pre_decomposition_impl(self, func, *args, **kwargs)
@@ -3652,6 +3688,15 @@ class FakeTensorMode(TorchDispatchMode):
         # Lazily initialized, in case there are no tensor returns
         common_device = None
         has_scalar_only_inputs = False
+        preserve_dispatch_keys = False
+        input_dispatch_keys = None
+        if (
+            (func is aten.alias.default or func is aten.detach.default)
+            and len(flat_args) == 1
+            and isinstance(flat_args[0], FakeTensor)
+        ):
+            input_dispatch_keys = flat_args[0].dispatch_keys
+            preserve_dispatch_keys = input_dispatch_keys is not None
         propagate_mkldnn = _should_propagate_mkldnn(func, flat_args)
         if propagate_mkldnn:
             output_tensors = [
@@ -3678,6 +3723,8 @@ class FakeTensorMode(TorchDispatchMode):
                     e.device == common_device,
                     lambda: f"FakeTensor is wrapped to wrong device, found {e.device}, expected {common_device}",
                 )
+                if preserve_dispatch_keys:
+                    e.dispatch_keys = input_dispatch_keys
                 if propagate_mkldnn:
                     _mark_fake_tensor_mkldnn(e)
                 return cast(T, e)
@@ -3691,6 +3738,8 @@ class FakeTensorMode(TorchDispatchMode):
                     out = converter.from_meta_and_device(
                         self, e, device or common_device
                     )
+                if preserve_dispatch_keys:
+                    out.dispatch_keys = input_dispatch_keys
                 if propagate_mkldnn:
                     _mark_fake_tensor_mkldnn(out)
                 return out
@@ -4100,6 +4149,7 @@ from torch._subclasses.fake_impls import (  # noqa: F401
     get_fast_op_impls,
     get_pre_decomposition_op_impls,
     has_meta,
+    maybe_to_dense_mkldnn,
     op_implementations_checks,
     stride_incorrect_op,
 )

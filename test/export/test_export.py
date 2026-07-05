@@ -577,6 +577,71 @@ class InputModuleWithNestedSubclass(torch.nn.Module):
         return x + a
 
 
+class _LenTensorPytreeCache(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.key_cache: list[torch.Tensor] = []
+        self.value_cache: list[torch.Tensor] = []
+
+    def update(self, key_states: torch.Tensor, value_states: torch.Tensor) -> None:
+        self.key_cache.append(key_states)
+        self.value_cache.append(value_states)
+
+    def get_seq_length(self) -> int:
+        if len(self.key_cache) == 0 or len(self.key_cache[0]) == 0:
+            return 0
+        return self.key_cache[0].shape[-2]
+
+
+def _flatten_len_tensor_pytree_cache(cache):
+    return [cache.key_cache, cache.value_cache], [
+        "key_cache",
+        "value_cache",
+    ]
+
+
+def _flatten_with_keys_len_tensor_pytree_cache(cache):
+    values, context = _flatten_len_tensor_pytree_cache(cache)
+    return [(pytree.MappingKey(k), v) for k, v in zip(context, values)], context
+
+
+def _unflatten_len_tensor_pytree_cache(values, context):
+    cache = _LenTensorPytreeCache()
+    for k, v in zip(context, values):
+        setattr(cache, k, v)
+    return cache
+
+
+def _flatten_spec_len_tensor_pytree_cache(cache, _):
+    return [cache.key_cache, cache.value_cache]
+
+
+class _LenTensorPytreeModule(torch.nn.Module):
+    def forward(self, x, cache):
+        key = torch.cat(cache.key_cache, dim=1)
+        value = torch.cat(cache.value_cache, dim=1)
+        seq_length = cache.get_seq_length()
+        zeros = torch.zeros(
+            (
+                len(cache.key_cache[0]),
+                cache.key_cache[0].shape[1],
+                seq_length,
+                cache.key_cache[0].shape[-1],
+            )
+        )
+        return x + (key + value + zeros).sum(dim=2, keepdim=True)
+
+
+def _make_len_tensor_pytree_inputs(batch, seq_length):
+    x = torch.randn(batch, 8, 7, 1)
+    cache = _LenTensorPytreeCache()
+    cache.update(
+        torch.ones(batch, 8, seq_length, 6),
+        torch.ones(batch, 8, seq_length, 6) * 2,
+    )
+    return x, cache
+
+
 @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestExport(TestCase):
@@ -807,6 +872,40 @@ class TestExport(TestCase):
                 strict=False,
             )
         self.assertNotIn("Expected a value of type 'Optional[int]'", str(cm.exception))
+
+    def test_non_strict_export_len_tensor_pytree_nn_module_input(self):
+        pytree._private_register_pytree_node(
+            _LenTensorPytreeCache,
+            _flatten_len_tensor_pytree_cache,
+            _unflatten_len_tensor_pytree_cache,
+            serialized_type_name="test.export.test_export._LenTensorPytreeCache",
+            flatten_with_keys_fn=_flatten_with_keys_len_tensor_pytree_cache,
+        )
+        torch.fx._pytree.register_pytree_flatten_spec(
+            _LenTensorPytreeCache, _flatten_spec_len_tensor_pytree_cache
+        )
+        try:
+            x, cache = _make_len_tensor_pytree_inputs(3, 5)
+            batch = Dim("batch", min=1, max=1024)
+            seq_length = Dim("seq_length", min=1, max=1024)
+            with torch.serialization.safe_globals([_LenTensorPytreeCache]):
+                ep = export(
+                    _LenTensorPytreeModule(),
+                    (x, cache),
+                    dynamic_shapes=(
+                        {0: batch},
+                        [[{0: batch, 2: seq_length}], [{0: batch, 2: seq_length}]],
+                    ),
+                    strict=False,
+                )
+
+            x2, cache2 = _make_len_tensor_pytree_inputs(4, 6)
+            self.assertEqual(
+                ep.module()(x2, cache2), _LenTensorPytreeModule()(x2, cache2)
+            )
+        finally:
+            pytree._deregister_pytree_node(_LenTensorPytreeCache)
+            torch.fx._pytree._deregister_pytree_flatten_spec(_LenTensorPytreeCache)
 
     @skipIfCrossRef  # CrossRefMode interferes with functorch ops
     @skipIfTorchDynamo("export inside dynamo is not supported")
@@ -2156,9 +2255,15 @@ graph():
 
         f = Basic()
         args = (torch.randn(1, 3),)
-        # strict-mode will error out because foo is registered as parameter
-        # in dynamo (a behavior that's different from eager). We decided to
-        # follow eager behavior.
+        # foo is registered as a parameter in Dynamo, but not in eager.
+        # Follow eager behavior and treat it as a lifted tensor constant.
+        ep = export(f, args, strict=True)
+        gm = ep.module()
+        self.assertEqual(len(ep.graph_signature.lifted_tensor_constants), 1)
+        self.assertEqual(len(ep.graph_signature.parameters), 0)
+        self.assertEqual(len(list(gm.named_parameters())), 0)
+        self.assertEqual(gm(*args), f(*args))
+
         ep = export(f, args, strict=False)
         gm = ep.module()
         self.assertEqual(len(ep.graph_signature.lifted_tensor_constants), 1)
@@ -2176,6 +2281,46 @@ graph():
     %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %lifted_tensor_0), kwargs = {})
     return (add,)""",
         )
+
+    def test_strict_export_unregistered_module_list_parameters(self):
+        class A(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.nn.Parameter(torch.ones(3, 3))
+
+            def forward(self, x):
+                return x + self.a
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.models = [A(), A()]
+
+            def forward(self, x):
+                for m in self.models:
+                    x = m(x)
+                return x
+
+        f = M()
+        args = (torch.ones(3, 3),)
+        ep = export(f, args, strict=True)
+        gm = ep.module()
+
+        self.assertEqual(
+            [spec.kind for spec in ep.graph_signature.input_specs],
+            [
+                InputKind.CONSTANT_TENSOR,
+                InputKind.CONSTANT_TENSOR,
+                InputKind.USER_INPUT,
+            ],
+        )
+        self.assertEqual(len(ep.graph_signature.lifted_tensor_constants), 2)
+        self.assertEqual(len(ep.graph_signature.parameters), 0)
+        self.assertEqual(len(ep.state_dict), 0)
+        self.assertEqual(len(list(gm.named_parameters())), 0)
+        for constant in ep.constants.values():
+            self.assertFalse(isinstance(constant, torch.nn.Parameter))
+        self.assertEqual(gm(*args), f(*args))
 
     def test_int_shape_specialization(self):
         class M(torch.nn.Module):
@@ -11114,6 +11259,33 @@ def forward(self, b_a_buffer, x):
         self.assertTrue(torch.allclose(core_aten_ep.module()(*inp), m(*inp)))
         self.assertEqual(id(state_dict), id(ep.state_dict))
 
+    def test_export_decomps_linalg_vector_norm(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.linalg.vector_norm(x, ord=2, dim=1, keepdim=True)
+
+        inp = (torch.randn(2, 3),)
+        m = M()
+        ep = export(m, inp)
+        self.assertTrue(
+            any(
+                node.target == torch.ops.aten.linalg_vector_norm.default
+                for node in ep.graph.nodes
+            )
+        )
+
+        core_aten_ep = ep.run_decompositions()
+        self.assertFalse(
+            any(
+                node.target == torch.ops.aten.linalg_vector_norm.default
+                for node in core_aten_ep.graph.nodes
+            )
+        )
+        FileCheck().check("torch.ops.aten.pow.Tensor_Scalar").check(
+            "torch.ops.aten.sum.dim_IntList"
+        ).run(core_aten_ep.graph_module.code)
+        self.assertEqual(core_aten_ep.module()(*inp), m(*inp))
+
     @unittest.skipIf(IS_FBCODE, "We can't customize decomp in fbcode")
     def test_export_decomp_torture_case_1(self):
         class M(torch.nn.Module):
@@ -14490,7 +14662,7 @@ graph():
     @testing.expectedFailureSerDer  # register_constant needs to handle serialization
     def test_opaque_obj(self):
         @dataclass(frozen=True)
-        class MyInput(torch._opaque_base.OpaqueBase):
+        class MyInput(torch._custom_class_base.CustomClassBase):
             int_1: int
             int_2: int
 
@@ -14507,7 +14679,7 @@ graph():
             def forward(self, x, f):
                 return x + f.int_1 + f.int_2
 
-        torch._library.opaque_object.register_opaque_type(MyInput, typ="value")
+        torch._library.opaque_object.register_custom_class(MyInput, typ="constant")
         self.addCleanup(
             lambda name=torch._library.opaque_object.get_opaque_type_name(MyInput): (
                 torch._C._unregister_opaque_type(name),
