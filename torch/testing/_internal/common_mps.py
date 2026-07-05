@@ -971,6 +971,14 @@ if torch.backends.mps.is_available():
             "nn.functional.conv3d": [torch.float32],
         }
 
+        MACOS_BEFORE_15_0_XFAILLIST_GRAD = {
+            # matrix_exp backward exponentiates a 2n x 2n augmented matrix, so it
+            # leans even harder on MPSGraph matmul than the forward; before macOS
+            # 15 that matmul is unreliable enough to make the fp32 grad diverge
+            # wildly from CPU (the forward leg still matches, hence grad-only).
+            "matrix_exp": [torch.float32],
+        }
+
         def addDecorator(op: OpInfo, d: DecorateInfo) -> None:
             op.decorators = op.decorators + (d,)
 
@@ -980,6 +988,15 @@ if torch.backends.mps.is_available():
                 addDecorator(
                     op,
                     DecorateInfo(unittest.expectedFailure, dtypes=XFAILLIST_GRAD[key]),
+                )
+
+            if key in MACOS_BEFORE_15_0_XFAILLIST_GRAD and MACOS_VERSION < 15.0:
+                addDecorator(
+                    op,
+                    DecorateInfo(
+                        unittest.expectedFailure,
+                        dtypes=MACOS_BEFORE_15_0_XFAILLIST_GRAD[key],
+                    ),
                 )
 
             if key in SKIPLIST_GRAD:
