@@ -2723,7 +2723,9 @@ def calc_conv_nd_return_shape(
     from torch.fx.experimental.symbolic_shapes import sym_and, sym_or
 
     device = (
-        input_tensor.fake_device if is_fake_tensor(input_tensor) else input_tensor.device
+        input_tensor.fake_device
+        if is_fake_tensor(input_tensor)
+        else input_tensor.device
     )
 
     # ROCm reports device.type as "cuda"; keep the existing NVIDIA CUDA behavior
