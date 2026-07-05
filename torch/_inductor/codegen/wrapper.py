@@ -551,6 +551,19 @@ class ConditionalLine(WrapperLine):
 
 
 @dataclasses.dataclass
+class SwitchLine(WrapperLine):
+    wrapper: PythonWrapperCodegen
+    node: ir.Switch
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        raise NotImplementedError("Only supports FX codegen")
+
+    @staticmethod
+    def codegen_fx(converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_switch
+
+
+@dataclasses.dataclass
 class CommentLine(WrapperLine):
     line: LineContext
 
@@ -4572,6 +4585,37 @@ class PythonWrapperCodegen(CodeGen):
         else:
             self.codegen_subgraph(conditional.false_subgraph, outer_inputs, name)
         self.writeline(ExitSubgraphLine(self))
+
+    def codegen_switch(self, switch) -> None:
+        name = switch.get_name()
+
+        outer_inputs = [buf.codegen_reference() for buf in switch.operands]
+
+        index = switch.index.codegen_reference()
+        if not isinstance(switch.index, ir.ShapeAsConstantBuffer):
+            # move the Tensor index to host
+            index = f"int({index}.item())"
+
+        self.writeline(f"{name} = [None] * {len(switch.outputs)}")
+        num_branches = len(switch.branches)
+        for b_idx, branch in enumerate(switch.branches):
+            if b_idx == 0:
+                keyword = "if"
+                condition = f" {index} == 0"
+            elif b_idx < num_branches - 1:
+                keyword = "elif"
+                condition = f" {index} == {b_idx}"
+            else:
+                keyword = "else"
+                condition = ""
+            self.writeline(f"{keyword}{condition}:")
+            self.writeline(EnterSubgraphLine(self, branch.graph))
+            if V.graph.aot_mode:
+                outer_outputs = [f"{name}[{i}]" for i in range(len(switch.outputs))]
+                self.codegen_subgraph_by_inlining(branch, outer_inputs, outer_outputs)
+            else:
+                self.codegen_subgraph(branch, outer_inputs, name)
+            self.writeline(ExitSubgraphLine(self))
 
     def codegen_while_loop(self, while_loop, stack_output):
         """while_loop is codegened as a host side while_loop"""

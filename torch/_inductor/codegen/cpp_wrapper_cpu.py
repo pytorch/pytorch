@@ -313,6 +313,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.used_cached_layouts: OrderedSet[str] = OrderedSet()
         self.used_cached_memory_formats: OrderedSet[str] = OrderedSet()
         self.used_cond_predicate: OrderedSet[str] = OrderedSet()
+        self.used_switch_index: OrderedSet[str] = OrderedSet()
         self.cached_output_id = count()
         self.scalar_to_tensor_id = count()
         self.custom_op_wrapper_loaded = False
@@ -342,6 +343,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             dict(self.codegen_int_array_var_cache),
             OrderedSet(self.kernel_numel_expr),
             OrderedSet(self.used_cond_predicate),
+            OrderedSet(self.used_switch_index),
         )
         subgraph_state = [
             (
@@ -363,6 +365,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 self.codegen_int_array_var_cache,
                 self.kernel_numel_expr,
                 self.used_cond_predicate,
+                self.used_switch_index,
             ) = wrapper_state
             for graph, removed_buffers, inplaced_to_remove in subgraph_state:
                 graph.removed_buffers = removed_buffers
@@ -2870,6 +2873,72 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.set_writeline(aot_code, aot_code.writeline_aot),
         ):
             codegen_original_conditional()
+
+        self.writeline(DualWrapperCodeLine(jit_code, aot_code))
+
+    def codegen_switch(self, switch):
+        """Emit ABI-compatible C++ for a higher-order switch."""
+        outer_inputs = [f"{buf.codegen_reference()}" for buf in switch.operands]
+        outer_outputs = []
+        for out in switch.outputs:
+            # in ABI-compatible mode, ir.MultiOutput is not codegened,
+            # hence pre-declare output variables directly and separately
+            self.writeline(f"RAIIAtenTensorHandle {out.get_name()};")
+            outer_outputs.append(out.get_name())
+
+        if not isinstance(switch.index, ir.ShapeAsConstantBuffer):
+            # use the ABI shim to extract a C++ int64_t from the scalar index Tensor
+            index_var = f"{switch.index.get_name()}_scalar"
+            if index_var not in self.used_switch_index:
+                self.codegen_tensor_item(
+                    torch.int64,
+                    switch.index.codegen_reference(),
+                    index_var,
+                )
+                self.used_switch_index.add(index_var)
+        else:
+            # the index is not a Tensor: SymInt or Python int
+            index_var = switch.index.codegen_reference()
+
+        def codegen_original_switch() -> None:
+            for b_idx, branch in enumerate(switch.branches):
+                if b_idx == 0:
+                    self.writeline(f"if ({index_var} == 0) {{")
+                elif b_idx < len(switch.branches) - 1:
+                    self.writeline(f"}} else if ({index_var} == {b_idx}) {{")
+                else:
+                    self.writeline("} else {")
+                with self._preserve_device_guard_state():
+                    self.writeline(EnterSubgraphLine(self, branch.graph))
+                    self.codegen_subgraph(branch, outer_inputs, outer_outputs)
+                    self.writeline(ExitSubgraphLine(self))
+            self.writeline("}")
+
+        if not V.graph.is_dual_wrapper_mode:
+            return codegen_original_switch()
+
+        graphs = tuple(branch.graph for branch in switch.branches)
+        jit_code = IndentedBuffer(initial_indent=self.wrapper_call._indent)
+        with (
+            self._preserve_codegen_state(graphs),
+            self._target_buf("wrapper_call", jit_code),
+            self.set_writeline(jit_code, jit_code.writeline_jit),
+        ):
+            # JIT pass: visit each branch once for lazy kernel autotune
+            for branch in switch.branches:
+                self.writeline("{")
+                with self._preserve_device_guard_state():
+                    self.writeline(EnterSubgraphLine(self, branch.graph))
+                    self.codegen_subgraph(branch, outer_inputs, outer_outputs)
+                    self.writeline(ExitSubgraphLine(self))
+                self.writeline("}")
+
+        aot_code = AotOnlyBuffer(initial_indent=self.wrapper_call._indent)
+        with (
+            self._target_buf("wrapper_call", aot_code),
+            self.set_writeline(aot_code, aot_code.writeline_aot),
+        ):
+            codegen_original_switch()
 
         self.writeline(DualWrapperCodeLine(jit_code, aot_code))
 
