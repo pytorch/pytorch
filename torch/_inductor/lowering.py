@@ -2978,27 +2978,20 @@ make_fallback(aten.rrelu_with_noise_functional)
 
 @register_lowering(aten.log_sigmoid_forward.default, type_promotion_kind=None)
 def log_sigmoid_forward(self):
-    # For float32 x >= ~87.3, exp(-x) is a subnormal (~6e-39).  Triton kernels run
-    # with FTZ enabled (disable_ftz: False in triton_meta).  libdevice inlines
-    # log1pf as a polynomial of fma.rn.ftz.f32 instructions; for subnormal input
-    # exp(-x), the final fma that would return ~exp(-x) (subnormal) is FTZ-flushed
-    # to 0, making the result 0 instead of the correct negative subnormal and
-    # flipping signbit (gh-188541).  The native CUDA ATen kernel avoids this.
-    # FTZ applies only to float32 PTX instructions; float64 subnormals are
-    # preserved by CUDA hardware regardless of the FTZ kernel flag, and float16
-    # logsigmoid outputs at large x already underflow to zero in float16 precision
-    # (min float16 subnormal ~6e-8 >> exp(-88) ~6e-39), so only float32 needs the
-    # fallback.
-    if self.get_device().type == "cuda" and self.get_dtype() == torch.float32:
-        return pytree.tree_map(
-            TensorBox.create,
-            ir.FallbackKernel.create(aten.log_sigmoid_forward.default, self),
-        )
-    # CPU and other non-CUDA backends: the standard-library log1p correctly
-    # handles subnormal inputs; apply the decomposition inline for fusion.
     zero = full([], 0.0, dtype=self.get_dtype(), device=self.get_device())
     min_ = minimum(zero, self)
     z = exp(neg(abs(self)))
+    if self.get_device().type == "cuda" and self.get_dtype() == torch.float32:
+        # For float32 x >= ~87.3, exp(-x) is a subnormal (~6e-39).  Triton kernels
+        # run with FTZ enabled (disable_ftz: False in triton_meta); libdevice inlines
+        # log1pf as a polynomial of fma.rn.ftz.f32 instructions and the final fma
+        # flushes the subnormal result to 0 (gh-188541).  At those magnitudes
+        # log1p(z) ~= z exactly in float32, so -exp(-x) is the correct answer.
+        # CUDA backward ignores the buffer, so return an empty placeholder.
+        threshold = full([], 87.3, dtype=self.get_dtype(), device=self.get_device())
+        result = where(gt(self, threshold), neg(exp(neg(self))), sub(min_, log1p(z)))
+        buffer = full([0], 0.0, dtype=self.get_dtype(), device=self.get_device())
+        return [result, buffer]
     # Match upstream buffer semantics: XPU has a native backward kernel and
     # doesn't need the intermediate z; CPU and others save it for backward.
     if self.get_device().type == "xpu":
