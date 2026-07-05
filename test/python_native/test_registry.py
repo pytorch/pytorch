@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock, patch
 
 import torch
+import torch._dynamo.trace_rules as trace_rules
 import torch._native.registry as registry_module
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
@@ -507,6 +508,43 @@ class TestRegistryRuntime(TestCase):
             fn(torch.tensor([2.0, 3.0])),
             (True, True),
         )
+
+    def test_dynamo_graph_breaks_after_lazy_clone_function_changes_cow_state(self):
+        fn_id = id(torch._lazy_clone)
+        prior_trace_rule_state = (
+            fn_id in trace_rules._allowed_callable_ids,
+            fn_id in trace_rules._disallowed_callable_ids,
+            fn_id in trace_rules._nonstrict_trace_callable_ids,
+        )
+        if fn_id in trace_rules._disallowed_callable_ids:
+            trace_rules._disallowed_callable_ids.remove(fn_id)
+        trace_rules._allowed_callable_ids.add(fn_id)
+        try:
+            torch._dynamo.reset()
+
+            @torch.compile(backend="eager")
+            def fn(a):
+                clone = torch._lazy_clone(a)
+                return torch._C._is_cow_tensor(a), torch._C._is_cow_tensor(clone)
+
+            self.assertEqual(
+                fn(torch.tensor([2.0, 3.0])),
+                (True, True),
+            )
+        finally:
+            if fn_id in trace_rules._allowed_callable_ids:
+                trace_rules._allowed_callable_ids.remove(fn_id)
+            if fn_id in trace_rules._disallowed_callable_ids:
+                trace_rules._disallowed_callable_ids.remove(fn_id)
+            if fn_id in trace_rules._nonstrict_trace_callable_ids:
+                trace_rules._nonstrict_trace_callable_ids.remove(fn_id)
+            if prior_trace_rule_state[0]:
+                trace_rules._allowed_callable_ids.add(fn_id)
+            if prior_trace_rule_state[1]:
+                trace_rules._disallowed_callable_ids.add(fn_id)
+            if prior_trace_rule_state[2]:
+                trace_rules._nonstrict_trace_callable_ids.add(fn_id)
+            torch._dynamo.reset()
 
     def test_dynamo_graph_breaks_after_lazy_clone_view_changes_cow_state(self):
         @torch.compile(backend="eager")

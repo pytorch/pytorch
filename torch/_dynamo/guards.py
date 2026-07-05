@@ -199,6 +199,9 @@ from .utils import (
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    GuardCheckGetMetadataFn = Callable[[Guard, Any], Any]
+    GuardCheckEvalFn = Callable[[Any, Any], bool]
+
 
 guard_manager_testing_hook_fn: Callable[[Any, Any, Any], Any] | None = None
 _COUNT_ITERATOR_TYPE = type(itertools.count())
@@ -298,11 +301,18 @@ class GuardManagerWrapper:
     the check_nopybind from C++.
     """
 
-    def __init__(self, root: RootGuardManager | None = None) -> None:
+    def __init__(
+        self,
+        root: RootGuardManager | None = None,
+        local_state: Any | None = None,
+    ) -> None:
         if root is None:
             self.root = RootGuardManager()
         else:
             self.root = root
+
+        if local_state is not None:
+            self.root.set_local_state(local_state)
 
         self.diff_guard_root: RootGuardManager | None = None
         self.closure_vars: dict[str, Any] | None = None
@@ -805,6 +815,7 @@ def _get_closure_vars() -> dict[str, object]:
             "___namedtuple_fields": lambda x: x._fields,
             "___get_torch_function_mode_stack_at": get_torch_function_mode_stack_at,
             "___get_current_stream": get_current_stream,
+            "___cow_tensor_matches": _cow_tensor_matches,
             "__math_isnan": math.isnan,
             "__numpy_isnan": None if np is None else np.isnan,
             "inf": float("inf"),
@@ -1081,8 +1092,8 @@ class GuardCheckSpec(NamedTuple):
         time using a fresh value and the previously saved metadata.
     """
 
-    get_metadata_fn: Any
-    eval_fn: Any
+    get_metadata_fn: GuardCheckGetMetadataFn
+    eval_fn: GuardCheckEvalFn
 
 
 SKIP_GUARD = object()
@@ -1200,9 +1211,17 @@ def _constant_subclass_base_value(value: Any) -> Any:
     raise TypeError(f"Not a constant subclass: {type(value)}")
 
 
+def _guard_create_fn_keyword(guard: Guard, name: str) -> Any:
+    """Read a keyword bound into a guard's create_fn functools.partial."""
+    create_fn = guard.create_fn
+    if not isinstance(create_fn, functools.partial):
+        raise TypeError(f"Guard create_fn is not a functools.partial: {create_fn}")
+    return create_fn.keywords[name]
+
+
 def register_guard_check_spec(
-    get_metadata_fn,
-    eval_fn,
+    get_metadata_fn: GuardCheckGetMetadataFn,
+    eval_fn: GuardCheckEvalFn,
 ):
     """Attach a GuardCheckSpec to a guard method for auto-dispatch."""
     handler = GuardCheckSpec(get_metadata_fn=get_metadata_fn, eval_fn=eval_fn)
@@ -2165,8 +2184,8 @@ class GuardBuilder(GuardBuilderBase):
 
     @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: (
-            guard.create_fn.keywords["attr"],
-            hasattr(value, guard.create_fn.keywords["attr"]),
+            _guard_create_fn_keyword(guard, "attr"),
+            hasattr(value, _guard_create_fn_keyword(guard, "attr")),
         ),
         eval_fn=lambda value, metadata: hasattr(value, metadata[0]) == metadata[1],
     )
@@ -2227,11 +2246,11 @@ class GuardBuilder(GuardBuilderBase):
         self.already_added_code_parts.add(code)
 
     @register_guard_check_spec(
-        get_metadata_fn=lambda guard, value: guard.create_fn.keywords["attr"],
+        get_metadata_fn=lambda guard, value: _guard_create_fn_keyword(guard, "attr"),
         eval_fn=lambda value, metadata: metadata not in value.__dict__,
     )
     def NOT_PRESENT_IN_GENERIC_DICT(
-        self, guard: Guard, attr: Any | None = None
+        self, guard: Guard, attr: str | None = None
     ) -> None:
         if attr is None:
             raise AssertionError(
@@ -2346,7 +2365,7 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     @register_guard_check_spec(
-        get_metadata_fn=lambda guard, value: guard.create_fn.keywords["key"],
+        get_metadata_fn=lambda guard, value: _guard_create_fn_keyword(guard, "key"),
         eval_fn=lambda value, metadata: metadata in value,
     )
     def DICT_CONTAINS(self, guard: Guard, key: str) -> None:
@@ -2366,7 +2385,7 @@ class GuardBuilder(GuardBuilderBase):
         self.already_added_code_parts.add(code)
 
     @register_guard_check_spec(
-        get_metadata_fn=lambda guard, value: guard.create_fn.keywords["key"],
+        get_metadata_fn=lambda guard, value: _guard_create_fn_keyword(guard, "key"),
         eval_fn=lambda value, metadata: metadata not in value,
     )
     def DICT_NOT_CONTAINS(self, guard: Guard, key: str) -> None:
@@ -2386,7 +2405,7 @@ class GuardBuilder(GuardBuilderBase):
         self.already_added_code_parts.add(code)
 
     @register_guard_check_spec(
-        get_metadata_fn=lambda guard, value: guard.create_fn.keywords["key"],
+        get_metadata_fn=lambda guard, value: _guard_create_fn_keyword(guard, "key"),
         eval_fn=lambda value, metadata: metadata in value,
     )
     def SET_CONTAINS(self, guard: Guard, key: Any) -> None:
@@ -2408,7 +2427,7 @@ class GuardBuilder(GuardBuilderBase):
         self.already_added_code_parts.add(code)
 
     @register_guard_check_spec(
-        get_metadata_fn=lambda guard, value: guard.create_fn.keywords["key"],
+        get_metadata_fn=lambda guard, value: _guard_create_fn_keyword(guard, "key"),
         eval_fn=lambda value, metadata: metadata not in value,
     )
     def SET_NOT_CONTAINS(self, guard: Guard, key: Any) -> None:
@@ -2463,7 +2482,7 @@ class GuardBuilder(GuardBuilderBase):
         def guard_fn(x: Any) -> bool:
             return _cow_tensor_matches(x, expected)
 
-        code = f"torch._C._is_cow_tensor({self.arg_ref(guard)}) == {expected!r}"
+        code = f"___cow_tensor_matches({self.arg_ref(guard)}, {expected!r})"
         self._set_guard_export_info(guard, [code])
         self.get_guard_manager(guard).add_lambda_guard(
             guard_fn,
@@ -3967,6 +3986,7 @@ class ShapeCodeParts:
 class GuardsState:
     output_graph: OutputGraphGuardsState
     shape_code_parts: ShapeCodeParts | None
+    local_state: Any | None = None
 
 
 class _Missing:
@@ -4463,6 +4483,7 @@ class CheckFunctionManager:
         runtime_global_scope: dict[str, Any] | None = None,
         save_guards: bool = False,
         strict_error: bool = False,
+        guard_build_local_state: Any | None = None,
     ) -> None:
         guards = output_graph.guards if output_graph else None
         self._weakrefs: dict[int, ReferenceType[object]] = {}
@@ -4486,6 +4507,7 @@ class CheckFunctionManager:
         self.additional_used_local_vars: OrderedSet[str] = OrderedSet()
         self.additional_used_global_vars: OrderedSet[str] = OrderedSet()
         self.runtime_global_scope = runtime_global_scope
+        self.guard_build_local_state = guard_build_local_state
         self.global_state: torch._C._dynamo.guards.GlobalStateGuard | None = None
         self.torch_function_mode_stack_check_fn: Callable[[], bool] | None = None
 
@@ -4804,6 +4826,7 @@ class CheckFunctionManager:
         guards_state = GuardsState(
             output_graph=output_graph_guards_state,
             shape_code_parts=self.shape_code_parts,
+            local_state=self.guard_manager.root.get_local_state(),
         )
 
         return pickle_guards_state(guards_state, builder)
@@ -4818,7 +4841,7 @@ class CheckFunctionManager:
         guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
         | None = None,
     ) -> tuple[GuardBuilder, GuardManagerWrapper]:
-        guard_manager = GuardManagerWrapper()
+        guard_manager = GuardManagerWrapper(local_state=self.guard_build_local_state)
         guard_manager.diff_guard_sources = existing_diff_guard_sources
 
         w_builder = None
@@ -5305,8 +5328,7 @@ def get_guard_fail_reason_helper(
     guard_manager: GuardManagerWrapper,
     f_locals: dict[str, object],
     compile_id: CompileId | None,
-    # pyrefly: ignore [implicit-any]
-    backend: Callable | None,
+    backend: Callable[..., object] | None,
 ) -> str:
     """
     Return the reason why `guard_manager` failed.
@@ -5419,8 +5441,7 @@ def get_guard_fail_reason(
     code: types.CodeType,
     f_locals: dict[str, object],
     compile_id: CompileId,
-    # pyrefly: ignore [implicit-any]
-    backend: Callable,
+    backend: Callable[..., object],
     skip_logging: bool = False,
 ) -> str:
     if isinstance(guard_manager, DeletedGuardManagerWrapper):
@@ -5448,8 +5469,7 @@ def get_guard_fail_reason(
 def get_and_maybe_log_recompilation_reasons(
     cache_entries: list[CacheEntry],
     frame: DynamoFrameType,
-    # pyrefly: ignore [implicit-any]
-    backend: Callable,
+    backend: Callable[..., object],
     skip_logging: bool = False,
 ) -> list[str]:
     """
