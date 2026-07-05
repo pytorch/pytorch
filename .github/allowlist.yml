@@ -36,9 +36,13 @@
 #   - org4/downstream-repo4: @oncall1,oncall2
 
 L1:
-  - Ascend/pytorch
   - riseproject-dev/pytorch-ci
+  - NVIDIA-dev/pytorch-oot-internal
+  - NVIDIA/pytorch-windows-ci
 
 L2:
   # Canonical test repo for CRCR.
   - pytorch/crcr-test
+  - TorchedHat/pytorch-redhat-ci
+  - Ascend/pytorch
+  - torch-spyre/torch-spyre

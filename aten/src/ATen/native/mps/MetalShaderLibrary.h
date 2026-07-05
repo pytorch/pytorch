@@ -8,12 +8,14 @@ typedef id<MTLLibrary> MTLLibrary_t;
 typedef id<MTLFunction> MTLFunction_t;
 typedef id<MTLComputePipelineState> MTLComputePipelineState_t;
 typedef id<MTLComputeCommandEncoder> MTLComputeCommandEncoder_t;
+typedef id<MTLBuffer> MTLBuffer_t;
 #else
 typedef void MTLCompileOptions;
 typedef void* MTLLibrary_t;
 typedef void* MTLFunction_t;
 typedef void* MTLComputePipelineState_t;
 typedef void* MTLComputeCommandEncoder_t;
+typedef void* MTLBuffer_t;
 #endif
 
 #include <c10/core/Scalar.h>
@@ -154,7 +156,25 @@ class MetalShaderLibrary {
       TensorIteratorBase& iter,
       const std::string& name,
       const std::optional<c10::Scalar> alpha = std::nullopt,
-      const std::optional<c10::ScalarType> scalar_arg_type = std::nullopt);
+      const std::optional<c10::ScalarType> scalar_arg_type = std::nullopt,
+      const std::optional<uint32_t> ilp_threshold = std::nullopt);
+  // Raw cross-dtype copy variant for call sites that don't have a
+  // TensorIterator -- e.g. when the destination is a Metal-wrapped CPU buffer
+  // (newBufferWithBytesNoCopy) from a copy_from_mps_ path. Always takes the
+  // castout fallback (cross-dtype is the use case); contiguity is implied. The
+  // kernel name must be one of the registered cast-capable unary ops
+  // (copy_identity, copy_conj, copy_neg, copy_conj_neg). offsets are in bytes;
+  // numel is the element count to process.
+  void exec_unary_kernel_raw(
+      const std::string& name,
+      MTLBuffer_t src_buf,
+      uint32_t src_offs_bytes,
+      c10::ScalarType src_dtype,
+      MTLBuffer_t dst_buf,
+      uint32_t dst_offs_bytes,
+      c10::ScalarType dst_dtype,
+      uint32_t numel,
+      const std::optional<uint32_t> ilp_threshold = std::nullopt);
   // `ilp_threshold` lets callers tune when the dense ILP variant kicks in
   // (numel >= threshold). When unspecified, the default is the same 256K
   // crossover used by the unary path, but only for floating-point output;

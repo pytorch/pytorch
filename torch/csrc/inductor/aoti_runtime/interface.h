@@ -326,9 +326,19 @@ AOTI_API AOTIRuntimeError AOTInductorModelContainerGetOutputName(
 //
 // constant_map_handle is an opaque type to satisfy the C ABI.  It should be a
 // std::unordered_map<std::string, at::Tensor*>*.
+//
+// DEPRECATED: V1 API; see AOTInductorModelCreateV2.
 AOTI_API AOTIRuntimeError AOTInductorModelCreate(
     AOTInductorModelHandle* model_handle,
     AOTInductorConstantMapHandle constant_map_handle);
+
+// C-ABI-safe variant of AOTInductorModelCreate.
+// Pass `pairs == nullptr` (or `num_pairs == 0`) to load constants from the
+// embedded blob instead of an externally provided map.
+AOTI_API AOTIRuntimeError AOTInductorModelCreateV2(
+    AOTInductorModelHandle* model_handle,
+    const AOTInductorConstantMapEntry* pairs,
+    size_t num_pairs);
 
 // Run an AOTInductorModel (see AOTInductorModelCreate for when one should use
 // this function versus AOTInductorModelContainerRun).
@@ -374,6 +384,16 @@ AOTI_API AOTIRuntimeError AOTInductorModelContainerGetCallSpec(
     AOTInductorModelContainerHandle container_handle,
     const char** in_spec,
     const char** out_spec);
+
+// Enables or disables pinned async H2D copies for constant loading and updates.
+// Call before creating a model/container to affect embedded constant loading.
+AOTI_API AOTIRuntimeError
+AOTInductorSetUsePinnedAsyncConstantsCopy(bool enabled);
+
+// Sets bytes per pinned async staging buffer. Pass 0 to use
+// AOTI_COPY_STAGE_BUFFER_BYTES or the runtime default.
+AOTI_API AOTIRuntimeError
+AOTInductorSetPinnedAsyncConstantsCopyStageBufferBytes(size_t bytes);
 
 // Retrieves the error message from the last failed AOTI runtime call on the
 // current thread. The returned pointer is valid until the next AOTI runtime

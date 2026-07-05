@@ -43,7 +43,8 @@ class Timer:
             with self.lock:
                 if self.exit:
                     return
-                assert self.last_called is not None
+                if self.last_called is None:
+                    raise AssertionError("last_called must be set before timer check")
                 if self.last_called + self.duration >= monotonic():
                     continue
                 self.last_called = None

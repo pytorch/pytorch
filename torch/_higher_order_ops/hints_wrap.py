@@ -5,10 +5,10 @@ from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
     autograd_not_implemented,
     reenter_make_fx,
+    register_fake,
     unique_graph_id,
 )
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 
 
@@ -79,11 +79,10 @@ hints_wrapper.py_autograd_impl(
 )
 
 
-@hints_wrapper.py_impl(FakeTensorMode)
-def hints_wrapper_fake_tensor_mode(mode, body_func, args, kwargs, hints):
+@register_fake(hints_wrapper, skip_cache=True)
+def hints_wrapper_fake_tensor_mode(body_func, args, kwargs, hints):
     flat_args = pytree.tree_leaves(args)
-    with mode:
-        return body_func(*flat_args, **kwargs)
+    return body_func(*flat_args, **kwargs)
 
 
 @hints_wrapper.py_functionalize_impl
