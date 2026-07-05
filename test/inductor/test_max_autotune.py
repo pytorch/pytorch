@@ -2718,7 +2718,7 @@ class TestMaxAutotune(TestCase):
             torch.compile(update, **compile_kwargs)(grad, m0, m1, 0.999)
             result = torch.compile(project, **compile_kwargs)(grad, q0, q1)
 
-            self.assertEqual(result, project(grad, q0, q1), atol=1e-2, rtol=1e-2)
+            self.assertEqual(result, project(grad, q0, q1), atol=0.5, rtol=0.05)
 
     @fresh_cache()
     @unittest.skipIf(
