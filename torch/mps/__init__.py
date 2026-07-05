@@ -156,7 +156,9 @@ def set_memory_budget(budget: int) -> None:
         2147483648
     """
     if not isinstance(budget, int):
-        raise TypeError(f"Invalid type for budget argument, must be `int`, got {type(budget)}")
+        raise TypeError(
+            f"Invalid type for budget argument, must be `int`, got {type(budget)}"
+        )
     if budget < 0:
         raise ValueError(f"Invalid budget value: {budget}. Must be >= 0")
     torch._C._mps_setMemoryBudget(budget)
