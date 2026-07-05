@@ -3290,7 +3290,7 @@ def raise_args_mismatch(
     name: str,
     expect: str = "",
     actual: str = "",
-) -> None:
+) -> NoReturn:
     from torch._dynamo.exc import raise_observed_exception
 
     msg_str = (
