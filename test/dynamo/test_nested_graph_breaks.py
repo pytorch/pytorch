@@ -1606,6 +1606,65 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         inp = torch.randn(3)
         self.assertEqual(fn(inp), inp + 1)
 
+    def test_exhausted_generator_across_graph_break(self):
+        """Reconstruct an exhausted generator after a graph break.
+
+        Regression test: LocalGeneratorObjectVariable.reconstruct() crashed
+        with AttributeError on 'remaining_items' when the generator was
+        exhausted, because the field was only set inside a conditional.
+        The generator must be fully consumed (exhausted) and still in locals
+        when a graph break occurs inside a nested inlined function -- the NGB
+        stack reconstruction includes outer locals, so the exhausted generator
+        gets reconstruct()'d.
+        """
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def my_generator(n):
+            for i in range(n):  # noqa: UP028
+                yield i
+
+        def inner(x, val):
+            torch._dynamo.graph_break()
+            return x + val
+
+        @torch.compile(backend=cnts)
+        def fn(x):
+            gen = my_generator(3)
+            total = 0
+            for val in gen:
+                total += val
+            result = inner(x, total)
+            # Reference gen after the graph break to keep it live in locals
+            # during NGB stack reconstruction.
+            type(gen)
+            return result
+
+        inp = torch.tensor(10.0)
+        result = fn(inp)
+        self.assertEqual(result, inp + 3)
+
+    def test_generator_star_unpack_with_graph_break(self):
+        """Generator unpacked as *args must survive two-pass codegen.
+
+        reconstruct() is called twice during compile_subgraph (pass1 for use
+        counting, pass2 for actual codegen). The remaining items from the
+        generator must be cached so the second call doesn't see an empty
+        generator. CALL_FUNCTION_EX with *generator + **kwargs triggers a
+        graph break, putting the unconsumed generator on the stack.
+        """
+
+        def my_generator(n):
+            for i in range(n):
+                yield i + 1
+
+        @torch.compile(backend="eager")
+        def fn():
+            shape = my_generator(2)
+            return torch.randn(*shape, requires_grad=True)
+
+        result = fn()
+        self.assertEqual(result.shape, torch.Size([1, 2]))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
