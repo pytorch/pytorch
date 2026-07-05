@@ -1092,7 +1092,7 @@ test_inductor_pallas() {
 }
 
 test_inductor_triton_cpu() {
-  python test/run_test.py --include inductor/test_triton_cpu_backend.py inductor/test_torchinductor_strided_blocks.py --verbose
+  python test/run_test.py --include inductor/test_triton_cpu_backend.py inductor/test_torchinductor_strided_blocks.py --verbose --keep-going
   assert_git_not_dirty
 }
 
