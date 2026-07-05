@@ -1646,7 +1646,14 @@ class TestLinalg(TestCase):
         # check invalid norm type
         a = torch.ones(3, 3, dtype=dtype, device=device)
         for p in ['wrong_norm', 5]:
-            with self.assertRaisesRegex(RuntimeError, f"linalg.cond got an invalid norm type: {p}"):
+            with self.assertRaisesRegex(ValueError, f"linalg.cond got an invalid norm type: {p}"):
+                torch.linalg.cond(a, p)
+
+        # a complex scalar is not a valid order of norm
+        # https://github.com/pytorch/pytorch/issues/137466
+        a = torch.ones(3, 3, dtype=dtype, device=device)
+        for p in [1j, 2 + 2j]:
+            with self.assertRaisesRegex(ValueError, "Expected a non-complex scalar as the order of norm"):
                 torch.linalg.cond(a, p)
 
     # This test calls torch.linalg.norm and numpy.linalg.norm with illegal arguments
@@ -3291,6 +3298,7 @@ class TestLinalg(TestCase):
         for params in [(1, 0), (2, 0), (2, 1), (4, 0), (4, 2), (10, 2)]:
             run_test_singular_input(*params)
 
+    @skipIfRocm(msg="Skipping test for ROCm due to HipBlas error.")
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Test fails for float64 on GPU (P100, V100) on Meta infra")
     @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
@@ -9990,8 +9998,7 @@ class TestLinalgCudaOnly(TestCase):
             results_filename = torch.cuda.tunable.get_filename()
             validators = torch.cuda.tunable.get_validators()
             with open(results_filename, "w") as file:
-                for key, value in validators:
-                    file.write(f"Validator,{key},{value}\n")
+                file.writelines(f"Validator,{key},{value}\n" for key, value in validators)
                 file.write(
                     "GemmTunableOp_Half_NN,nn_96_128_256_ld_96_256_96,"
                     "Gemm_Cublaslt_id_999999_tile_999999_stages_999999_"
