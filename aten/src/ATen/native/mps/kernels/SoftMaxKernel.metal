@@ -63,8 +63,13 @@ static inline void store_vec4(device bfloat* p, float4 v) {
 
 // Forward single-row: values cached in registers (1 read, 1 write).
 // Reads from input using stride_a, writes to output contiguously.
+//
+// IS_LOG templates softmax vs log_softmax: log_softmax writes
+// (x - row_max - log(sum_exp)) instead of exp(x - row_max) / sum_exp, sharing
+// the same online max/sum reduction. An all-(-inf) row has total_sum == 0, so
+// for log_softmax log(0) == -inf gives -inf (matching CPU) rather than NaN.
 
-template <typename T, int N_READS = 4>
+template <typename T, bool IS_LOG = false, int N_READS = 4>
 kernel void softmax_forward_single_row(
     device const T* input [[buffer(0)]],
     device T* output [[buffer(1)]],
@@ -120,45 +125,60 @@ kernel void softmax_forward_single_row(
   threadgroup float shared[simdgroup_size];
   float row_max = c10::metal::threadgroup_max(shared, local_max, tid, tptg);
 
+  // shifted[i] = vals[i] - row_max (needed raw by log_softmax); exp_vals[i] is
+  // its exponential, summed either way to form sum_exp.
+  float shifted[N_READS];
   float local_sum = 0.0f;
 #pragma unroll
   for (int i = 0; i < N_READS; i++) {
-    vals[i] = metal::precise::exp(vals[i] - row_max);
+    shifted[i] = vals[i] - row_max;
+    vals[i] = metal::precise::exp(shifted[i]);
     local_sum += vals[i];
   }
 
   threadgroup_barrier(mem_flags::mem_threadgroup);
   float total_sum = c10::metal::threadgroup_sum(shared, local_sum, tid, tptg);
-  float inv_sum = 1.0f / total_sum;
+  // log_softmax: out = shifted - log(sum_exp). An all-(-inf) row has sum 0, so
+  // log(0) = -inf yields -inf (matches CPU), not NaN.
+  float inv_sum = IS_LOG ? metal::precise::log(total_sum) : (1.0f / total_sum);
 
   if (base + N_READS <= axis_size) {
     if (sb == 1) {
 #pragma unroll
       for (int c = 0; c < N_VEC; c++) {
-        float4 result = float4(
-                            vals[c * 4 + 0],
-                            vals[c * 4 + 1],
-                            vals[c * 4 + 2],
-                            vals[c * 4 + 3]) *
-            inv_sum;
+        float4 result = IS_LOG ? (float4(
+                                      shifted[c * 4 + 0],
+                                      shifted[c * 4 + 1],
+                                      shifted[c * 4 + 2],
+                                      shifted[c * 4 + 3]) -
+                                  inv_sum)
+                               : (float4(
+                                      vals[c * 4 + 0],
+                                      vals[c * 4 + 1],
+                                      vals[c * 4 + 2],
+                                      vals[c * 4 + 3]) *
+                                  inv_sum);
         store_vec4(out + base + c * 4, result);
       }
     } else {
 #pragma unroll
       for (int i = 0; i < N_READS; i++)
-        out[(base + i) * sb] = static_cast<T>(vals[i] * inv_sum);
+        out[(base + i) * sb] = static_cast<T>(
+            IS_LOG ? (shifted[i] - inv_sum) : (vals[i] * inv_sum));
     }
   } else {
     for (int i = 0; i < N_READS; i++) {
       if (base + i < axis_size)
-        out[(base + i) * sb] = static_cast<T>(vals[i] * inv_sum);
+        out[(base + i) * sb] = static_cast<T>(
+            IS_LOG ? (shifted[i] - inv_sum) : (vals[i] * inv_sum));
     }
   }
 }
 
 // Forward looped: online softmax fuses max+sum into one pass over memory.
+// IS_LOG selects log_softmax (write x - row_max - log(sum_exp)).
 
-template <typename T>
+template <typename T, bool IS_LOG = false>
 kernel void softmax_forward_looped(
     device const T* input [[buffer(0)]],
     device T* output [[buffer(1)]],
@@ -244,20 +264,25 @@ kernel void softmax_forward_looped(
   threadgroup_barrier(mem_flags::mem_threadgroup);
 
   float row_max = tg_result[0];
-  float inv_sum = 1.0f / tg_result[1];
+  // log_softmax: subtract log(sum_exp); softmax: multiply by 1/sum_exp.
+  float norm =
+      IS_LOG ? metal::precise::log(tg_result[1]) : (1.0f / tg_result[1]);
 
   for (uint r = 0; r < axis_size; r += lsize * N_READS) {
     uint base = r + tid * N_READS;
     if (base + N_READS <= axis_size) {
       float4 v;
       if (contiguous) {
-        v = metal::precise::exp(load_vec4(x + base) - row_max) * inv_sum;
+        float4 sh = load_vec4(x + base) - row_max;
+        v = IS_LOG ? (sh - norm) : (metal::precise::exp(sh) * norm);
       } else {
-        v = float4(
-            metal::precise::exp(float(x[base * sa]) - row_max) * inv_sum,
-            metal::precise::exp(float(x[(base + 1) * sa]) - row_max) * inv_sum,
-            metal::precise::exp(float(x[(base + 2) * sa]) - row_max) * inv_sum,
-            metal::precise::exp(float(x[(base + 3) * sa]) - row_max) * inv_sum);
+        float4 sh = float4(
+                        float(x[base * sa]),
+                        float(x[(base + 1) * sa]),
+                        float(x[(base + 2) * sa]),
+                        float(x[(base + 3) * sa])) -
+            row_max;
+        v = IS_LOG ? (sh - norm) : (metal::precise::exp(sh) * norm);
       }
       if (sb == 1) {
         store_vec4(out + base, v);
@@ -269,8 +294,9 @@ kernel void softmax_forward_looped(
     } else {
       for (uint i = base; i < min(base + uint(N_READS), axis_size); i++) {
         float val = contiguous ? float(x[i]) : float(x[i * sa]);
-        out[i * sb] =
-            static_cast<T>(metal::precise::exp(val - row_max) * inv_sum);
+        float sh = val - row_max;
+        out[i * sb] = static_cast<T>(
+            IS_LOG ? (sh - norm) : (metal::precise::exp(sh) * norm));
       }
     }
   }
@@ -371,7 +397,9 @@ kernel void softmax_forward_2pass_reduce(
   }
 }
 
-template <typename T>
+// IS_LOG selects log_softmax for the write phase. The reduce phase (max, sum)
+// is identical for both and is shared (not templated on IS_LOG).
+template <typename T, bool IS_LOG = false>
 kernel void softmax_forward_2pass_write(
     device const T* input [[buffer(0)]],
     device T* output [[buffer(1)]],
@@ -403,7 +431,8 @@ kernel void softmax_forward_2pass_write(
         : 0.0f;
     global_max = new_max;
   }
-  float inv_sum = 1.0f / global_sum;
+  // log_softmax: subtract log(sum_exp); softmax: multiply by 1/sum_exp.
+  float norm = IS_LOG ? metal::precise::log(global_sum) : (1.0f / global_sum);
 
   uint elems_per_chunk = (axis_size + num_chunks - 1) / num_chunks;
   uint start = chunk_id * elems_per_chunk;
@@ -414,16 +443,16 @@ kernel void softmax_forward_2pass_write(
     if (base + N_READS <= end) {
       float4 v;
       if (contiguous) {
-        v = metal::precise::exp(load_vec4(x + base) - global_max) * inv_sum;
+        float4 sh = load_vec4(x + base) - global_max;
+        v = IS_LOG ? (sh - norm) : (metal::precise::exp(sh) * norm);
       } else {
-        v = float4(
-            metal::precise::exp(float(x[base * sa]) - global_max) * inv_sum,
-            metal::precise::exp(float(x[(base + 1) * sa]) - global_max) *
-                inv_sum,
-            metal::precise::exp(float(x[(base + 2) * sa]) - global_max) *
-                inv_sum,
-            metal::precise::exp(float(x[(base + 3) * sa]) - global_max) *
-                inv_sum);
+        float4 sh = float4(
+                        float(x[base * sa]),
+                        float(x[(base + 1) * sa]),
+                        float(x[(base + 2) * sa]),
+                        float(x[(base + 3) * sa])) -
+            global_max;
+        v = IS_LOG ? (sh - norm) : (metal::precise::exp(sh) * norm);
       }
       if (sb == 1) {
         store_vec4(out + base, v);
@@ -435,18 +464,23 @@ kernel void softmax_forward_2pass_write(
     } else {
       for (uint i = base; i < min(base + uint(N_READS), end); i++) {
         float val = contiguous ? float(x[i]) : float(x[i * sa]);
-        out[i * sb] =
-            static_cast<T>(metal::precise::exp(val - global_max) * inv_sum);
+        float sh = val - global_max;
+        out[i * sb] = static_cast<T>(
+            IS_LOG ? (sh - norm) : (metal::precise::exp(sh) * norm));
       }
     }
   }
 }
 
-// Backward: grad_input = output * (grad_output - sum(grad_output * output))
+// Backward (softmax): grad_input = output * (grad_output - sum(grad_output *
+// output)) Backward (log_softmax): grad_input = grad_output - exp(output) *
+// sum(grad_output)
+//   - here `output` is the log_softmax result, so exp(output) is the softmax.
+//   - the threadgroup reduction is sum(grad_output) (not the dot product).
 // stride_a = grad_output strides, stride_b = output strides
 // Writes grad_input contiguously.
 
-template <typename T, int N_READS = 4>
+template <typename T, bool IS_LOG = false, int N_READS = 4>
 kernel void softmax_backward_single_row(
     device const T* grad_output [[buffer(0)]],
     device const T* output [[buffer(1)]],
@@ -474,6 +508,7 @@ kernel void softmax_backward_single_row(
   bool contiguous = (sa == 1) && (sb == 1);
   float dy_vals[N_READS];
   float y_vals[N_READS];
+  // softmax: reduce sum(dy*y); log_softmax: reduce sum(dy).
   float local_dot = 0.0f;
   if (base + N_READS <= axis_size) {
     if (contiguous) {
@@ -489,14 +524,15 @@ kernel void softmax_backward_single_row(
         y_vals[c * 4 + 1] = y_v.y;
         y_vals[c * 4 + 2] = y_v.z;
         y_vals[c * 4 + 3] = y_v.w;
-        local_dot += dot(dy_v, y_v);
+        local_dot +=
+            IS_LOG ? (dy_v.x + dy_v.y + dy_v.z + dy_v.w) : dot(dy_v, y_v);
       }
     } else {
 #pragma unroll
       for (int i = 0; i < N_READS; i++) {
         dy_vals[i] = float(dy[(base + i) * sa]);
         y_vals[i] = float(y[(base + i) * sb]);
-        local_dot += dy_vals[i] * y_vals[i];
+        local_dot += IS_LOG ? dy_vals[i] : (dy_vals[i] * y_vals[i]);
       }
     }
   } else {
@@ -505,7 +541,7 @@ kernel void softmax_backward_single_row(
         dy_vals[i] =
             contiguous ? float(dy[base + i]) : float(dy[(base + i) * sa]);
         y_vals[i] = contiguous ? float(y[base + i]) : float(y[(base + i) * sb]);
-        local_dot += dy_vals[i] * y_vals[i];
+        local_dot += IS_LOG ? dy_vals[i] : (dy_vals[i] * y_vals[i]);
       }
     }
   }
@@ -517,37 +553,41 @@ kernel void softmax_backward_single_row(
     if (sc == 1) {
 #pragma unroll
       for (int c = 0; c < N_VEC; c++) {
-        float4 result = float4(
-                            y_vals[c * 4 + 0],
-                            y_vals[c * 4 + 1],
-                            y_vals[c * 4 + 2],
-                            y_vals[c * 4 + 3]) *
-            (float4(
-                 dy_vals[c * 4 + 0],
-                 dy_vals[c * 4 + 1],
-                 dy_vals[c * 4 + 2],
-                 dy_vals[c * 4 + 3]) -
-             dot_sum);
+        float4 dyv = float4(
+            dy_vals[c * 4 + 0],
+            dy_vals[c * 4 + 1],
+            dy_vals[c * 4 + 2],
+            dy_vals[c * 4 + 3]);
+        float4 yv = float4(
+            y_vals[c * 4 + 0],
+            y_vals[c * 4 + 1],
+            y_vals[c * 4 + 2],
+            y_vals[c * 4 + 3]);
+        float4 result = IS_LOG ? (dyv - metal::precise::exp(yv) * dot_sum)
+                               : (yv * (dyv - dot_sum));
         store_vec4(dx + base + c * 4, result);
       }
     } else {
 #pragma unroll
       for (int i = 0; i < N_READS; i++)
-        dx[(base + i) * sc] =
-            static_cast<T>(y_vals[i] * (dy_vals[i] - dot_sum));
+        dx[(base + i) * sc] = static_cast<T>(
+            IS_LOG ? (dy_vals[i] - metal::precise::exp(y_vals[i]) * dot_sum)
+                   : (y_vals[i] * (dy_vals[i] - dot_sum)));
     }
   } else {
     for (int i = 0; i < N_READS; i++) {
       if (base + i < axis_size)
-        dx[(base + i) * sc] =
-            static_cast<T>(y_vals[i] * (dy_vals[i] - dot_sum));
+        dx[(base + i) * sc] = static_cast<T>(
+            IS_LOG ? (dy_vals[i] - metal::precise::exp(y_vals[i]) * dot_sum)
+                   : (y_vals[i] * (dy_vals[i] - dot_sum)));
     }
   }
 }
 
 // Backward looped: vectorized dot product with strided or contiguous access.
+// IS_LOG selects log_softmax (reduce sum(dy), write dy - exp(out)*sum).
 
-template <typename T>
+template <typename T, bool IS_LOG = false>
 kernel void softmax_backward_looped(
     device const T* grad_output [[buffer(0)]],
     device const T* output [[buffer(1)]],
@@ -573,24 +613,32 @@ kernel void softmax_backward_looped(
     uint base = r + tid * N_READS;
     if (base + N_READS <= axis_size) {
       if (contiguous) {
-        local_dot += dot(load_vec4(dy + base), load_vec4(y + base));
+        float4 dy_v = load_vec4(dy + base);
+        local_dot += IS_LOG ? (dy_v.x + dy_v.y + dy_v.z + dy_v.w)
+                            : dot(dy_v, load_vec4(y + base));
       } else {
         float4 dy_v = float4(
             dy[base * sa],
             dy[(base + 1) * sa],
             dy[(base + 2) * sa],
             dy[(base + 3) * sa]);
-        float4 y_v = float4(
-            y[base * sb],
-            y[(base + 1) * sb],
-            y[(base + 2) * sb],
-            y[(base + 3) * sb]);
-        local_dot += dot(dy_v, y_v);
+        if (IS_LOG) {
+          local_dot += dy_v.x + dy_v.y + dy_v.z + dy_v.w;
+        } else {
+          float4 y_v = float4(
+              y[base * sb],
+              y[(base + 1) * sb],
+              y[(base + 2) * sb],
+              y[(base + 3) * sb]);
+          local_dot += dot(dy_v, y_v);
+        }
       }
     } else {
-      for (uint i = base; i < min(base + uint(N_READS), axis_size); i++)
-        local_dot += (contiguous ? float(dy[i]) : float(dy[i * sa])) *
-            (contiguous ? float(y[i]) : float(y[i * sb]));
+      for (uint i = base; i < min(base + uint(N_READS), axis_size); i++) {
+        float dyi = contiguous ? float(dy[i]) : float(dy[i * sa]);
+        local_dot +=
+            IS_LOG ? dyi : dyi * (contiguous ? float(y[i]) : float(y[i * sb]));
+      }
     }
   }
 
@@ -617,7 +665,8 @@ kernel void softmax_backward_looped(
             dy[(base + 2) * sa],
             dy[(base + 3) * sa]);
       }
-      float4 result = y_v * (dy_v - dot_sum);
+      float4 result = IS_LOG ? (dy_v - metal::precise::exp(y_v) * dot_sum)
+                             : (y_v * (dy_v - dot_sum));
       if (sc == 1) {
         store_vec4(dx + base, result);
       } else {
@@ -629,7 +678,9 @@ kernel void softmax_backward_looped(
       for (uint i = base; i < min(base + uint(N_READS), axis_size); i++) {
         float yi = contiguous ? float(y[i]) : float(y[i * sb]);
         float dyi = contiguous ? float(dy[i]) : float(dy[i * sa]);
-        dx[i * sc] = static_cast<T>(yi * (dyi - dot_sum));
+        dx[i * sc] = static_cast<T>(
+            IS_LOG ? (dyi - metal::precise::exp(yi) * dot_sum)
+                   : (yi * (dyi - dot_sum)));
       }
     }
   }
@@ -640,7 +691,7 @@ kernel void softmax_backward_looped(
 // Phase 2: each threadgroup sums partial dots, then computes grad_input for its
 // chunk.
 
-template <typename T>
+template <typename T, bool IS_LOG = false>
 kernel void softmax_backward_2pass_dot(
     device const T* grad_output [[buffer(0)]],
     device const T* output [[buffer(1)]],
@@ -666,29 +717,38 @@ kernel void softmax_backward_2pass_dot(
   uint start = chunk_id * elems_per_chunk;
   uint end = min(start + elems_per_chunk, axis_size);
 
+  // softmax: partial sum(dy*y); log_softmax: partial sum(dy).
   float local_dot = 0.0f;
   for (uint r = start; r < end; r += lsize * N_READS) {
     uint base = r + tid * N_READS;
     if (base + N_READS <= end) {
       if (contiguous) {
-        local_dot += dot(load_vec4(dy + base), load_vec4(y + base));
+        float4 dy_v = load_vec4(dy + base);
+        local_dot += IS_LOG ? (dy_v.x + dy_v.y + dy_v.z + dy_v.w)
+                            : dot(dy_v, load_vec4(y + base));
       } else {
         float4 dy_v = float4(
             dy[base * sa],
             dy[(base + 1) * sa],
             dy[(base + 2) * sa],
             dy[(base + 3) * sa]);
-        float4 y_v = float4(
-            y[base * sb],
-            y[(base + 1) * sb],
-            y[(base + 2) * sb],
-            y[(base + 3) * sb]);
-        local_dot += dot(dy_v, y_v);
+        if (IS_LOG) {
+          local_dot += dy_v.x + dy_v.y + dy_v.z + dy_v.w;
+        } else {
+          float4 y_v = float4(
+              y[base * sb],
+              y[(base + 1) * sb],
+              y[(base + 2) * sb],
+              y[(base + 3) * sb]);
+          local_dot += dot(dy_v, y_v);
+        }
       }
     } else {
-      for (uint i = base; i < min(base + uint(N_READS), end); i++)
-        local_dot += (contiguous ? float(dy[i]) : float(dy[i * sa])) *
-            (contiguous ? float(y[i]) : float(y[i * sb]));
+      for (uint i = base; i < min(base + uint(N_READS), end); i++) {
+        float dyi = contiguous ? float(dy[i]) : float(dy[i * sa]);
+        local_dot +=
+            IS_LOG ? dyi : dyi * (contiguous ? float(y[i]) : float(y[i * sb]));
+      }
     }
   }
 
@@ -698,7 +758,7 @@ kernel void softmax_backward_2pass_dot(
     partial_sums[row_id * num_chunks + chunk_id] = d;
 }
 
-template <typename T>
+template <typename T, bool IS_LOG = false>
 kernel void softmax_backward_2pass_grad(
     device const T* grad_output [[buffer(0)]],
     device const T* output [[buffer(1)]],
@@ -748,7 +808,8 @@ kernel void softmax_backward_2pass_grad(
             dy[(base + 2) * sa],
             dy[(base + 3) * sa]);
       }
-      float4 result = y_v * (dy_v - dot_sum);
+      float4 result = IS_LOG ? (dy_v - metal::precise::exp(y_v) * dot_sum)
+                             : (y_v * (dy_v - dot_sum));
       if (sc == 1) {
         store_vec4(dx + base, result);
       } else {
@@ -760,24 +821,20 @@ kernel void softmax_backward_2pass_grad(
       for (uint i = base; i < min(base + uint(N_READS), end); i++) {
         float yi = contiguous ? float(y[i]) : float(y[i * sb]);
         float dyi = contiguous ? float(dy[i]) : float(dy[i * sa]);
-        dx[i * sc] = static_cast<T>(yi * (dyi - dot_sum));
+        dx[i * sc] = static_cast<T>(
+            IS_LOG ? (dyi - metal::precise::exp(yi) * dot_sum)
+                   : (yi * (dyi - dot_sum)));
       }
     }
   }
 }
-
-// Log-softmax forward 2-pass: for low-occupancy (outer_size < 4, large axis)
-// Phase 1: each threadgroup computes (chunk_max, chunk_sum) via online
-// algorithm Phase 2: combine partials, compute shift = max + log(sum), write
-// output = x - shift Log-softmax backward: grad_input = grad_output -
-// exp(output) * sum(grad_output)
 
 // Tiled forward/backward kernels for non-last-dim softmax.
 // Each thread computes softmax for all axis elements at one inner position.
 // Adjacent threads access adjacent memory - coalesced reads and writes.
 // Uses num_chunks to store the number of inner tiles.
 
-template <typename T>
+template <typename T, bool IS_LOG = false>
 kernel void softmax_forward_tiled(
     device const T* input [[buffer(0)]],
     device T* output [[buffer(1)]],
@@ -810,16 +867,18 @@ kernel void softmax_forward_tiled(
         : 0.0f;
     local_max = new_max;
   }
-  float inv_sum = 1.0f / local_sum;
+  // log_softmax: subtract log(sum_exp); softmax: multiply by 1/sum_exp.
+  float norm = IS_LOG ? metal::precise::log(local_sum) : (1.0f / local_sum);
 
   for (uint b = 0; b < axis_size; b++) {
     float val = float(input[base_a + ulong(b) * sa]);
+    float sh = val - local_max;
     output[base_b + ulong(b) * sb] =
-        static_cast<T>(metal::precise::exp(val - local_max) * inv_sum);
+        static_cast<T>(IS_LOG ? (sh - norm) : (metal::precise::exp(sh) * norm));
   }
 }
 
-template <typename T>
+template <typename T, bool IS_LOG = false>
 kernel void softmax_backward_tiled(
     device const T* grad_output [[buffer(0)]],
     device const T* output [[buffer(1)]],
@@ -845,6 +904,7 @@ kernel void softmax_backward_tiled(
   ulong base_b = ulong(batch_idx) * axis_size * sb + inner_pos;
   ulong base_c = ulong(batch_idx) * axis_size * sc + inner_pos;
 
+  // softmax: dot_sum = sum(dy*y); log_softmax: dot_sum = sum(dy).
   float dot_sum = 0.0f;
   if (axis_size <= kTileAxisCap) {
     float dy_cache[kTileAxisCap];
@@ -852,19 +912,23 @@ kernel void softmax_backward_tiled(
     for (uint b = 0; b < axis_size; b++) {
       dy_cache[b] = float(grad_output[base_a + ulong(b) * sa]);
       y_cache[b] = float(output[base_b + ulong(b) * sb]);
-      dot_sum += dy_cache[b] * y_cache[b];
+      dot_sum += IS_LOG ? dy_cache[b] : (dy_cache[b] * y_cache[b]);
     }
     for (uint b = 0; b < axis_size; b++)
-      grad_input[base_c + ulong(b) * sc] =
-          static_cast<T>(y_cache[b] * (dy_cache[b] - dot_sum));
+      grad_input[base_c + ulong(b) * sc] = static_cast<T>(
+          IS_LOG ? (dy_cache[b] - metal::precise::exp(y_cache[b]) * dot_sum)
+                 : (y_cache[b] * (dy_cache[b] - dot_sum)));
   } else {
-    for (uint b = 0; b < axis_size; b++)
-      dot_sum += float(grad_output[base_a + ulong(b) * sa]) *
-          float(output[base_b + ulong(b) * sb]);
+    for (uint b = 0; b < axis_size; b++) {
+      float dyi = float(grad_output[base_a + ulong(b) * sa]);
+      dot_sum += IS_LOG ? dyi : (dyi * float(output[base_b + ulong(b) * sb]));
+    }
     for (uint b = 0; b < axis_size; b++) {
       float dyi = float(grad_output[base_a + ulong(b) * sa]);
       float yi = float(output[base_b + ulong(b) * sb]);
-      grad_input[base_c + ulong(b) * sc] = static_cast<T>(yi * (dyi - dot_sum));
+      grad_input[base_c + ulong(b) * sc] = static_cast<T>(
+          IS_LOG ? (dyi - metal::precise::exp(yi) * dot_sum)
+                 : (yi * (dyi - dot_sum)));
     }
   }
 }
@@ -891,7 +955,7 @@ kernel void softmax_backward_tiled(
 //   col_global = tg_id * cols_per_tg + col
 //   params.num_chunks = cols_per_tg
 
-template <typename T>
+template <typename T, bool IS_LOG = false>
 kernel void softmax_forward_blocked(
     device const T* input [[buffer(0)]],
     device T* output [[buffer(1)]],
@@ -950,19 +1014,21 @@ kernel void softmax_forward_blocked(
   }
 
   float row_max = mx[col];
-  float inv_sum = 1.0f / sm[col];
+  // log_softmax: subtract log(sum_exp); softmax: multiply by 1/sum_exp.
+  float norm = IS_LOG ? metal::precise::log(sm[col]) : (1.0f / sm[col]);
 
   if (active) {
     ulong col_base_b = ulong(batch_idx) * axis_size * sb + ulong(col_global);
     for (uint b = axis_tid; b < axis_size; b += num_axis_threads) {
       float val = float(input[col_base_a + ulong(b) * sa]);
-      output[col_base_b + ulong(b) * sb] =
-          static_cast<T>(metal::precise::exp(val - row_max) * inv_sum);
+      float sh = val - row_max;
+      output[col_base_b + ulong(b) * sb] = static_cast<T>(
+          IS_LOG ? (sh - norm) : (metal::precise::exp(sh) * norm));
     }
   }
 }
 
-template <typename T>
+template <typename T, bool IS_LOG = false>
 kernel void softmax_backward_blocked(
     device const T* grad_output [[buffer(0)]],
     device const T* output [[buffer(1)]],
@@ -988,11 +1054,13 @@ kernel void softmax_backward_blocked(
 
   ulong col_base_a = ulong(batch_idx) * axis_size * sa + ulong(col_global);
   ulong col_base_b = ulong(batch_idx) * axis_size * sb + ulong(col_global);
+  // softmax: sum(dy*y); log_softmax: sum(dy).
   float local_dot = 0.0f;
   if (active) {
     for (uint b = axis_tid; b < axis_size; b += num_axis_threads) {
-      local_dot += float(grad_output[col_base_a + ulong(b) * sa]) *
-          float(output[col_base_b + ulong(b) * sb]);
+      float dyi = float(grad_output[col_base_a + ulong(b) * sa]);
+      local_dot +=
+          IS_LOG ? dyi : (dyi * float(output[col_base_b + ulong(b) * sb]));
     }
   }
 
@@ -1010,8 +1078,9 @@ kernel void softmax_backward_blocked(
     for (uint b = axis_tid; b < axis_size; b += num_axis_threads) {
       float dyi = float(grad_output[col_base_a + ulong(b) * sa]);
       float yi = float(output[col_base_b + ulong(b) * sb]);
-      grad_input[col_base_c + ulong(b) * sc] =
-          static_cast<T>(yi * (dyi - dot_sum));
+      grad_input[col_base_c + ulong(b) * sc] = static_cast<T>(
+          IS_LOG ? (dyi - metal::precise::exp(yi) * dot_sum)
+                 : (yi * (dyi - dot_sum)));
     }
   }
 }
@@ -1100,7 +1169,7 @@ kernel void softmax_forward_blocked2_reduce(
   }
 }
 
-template <typename T>
+template <typename T, bool IS_LOG = false>
 kernel void softmax_forward_blocked2_write(
     device const T* input [[buffer(0)]],
     device T* output [[buffer(1)]],
@@ -1142,7 +1211,8 @@ kernel void softmax_forward_blocked2_write(
       global_max = nm;
     }
   }
-  float inv_sum = 1.0f / global_sum;
+  // log_softmax: subtract log(sum_exp); softmax: multiply by 1/sum_exp.
+  float norm = IS_LOG ? metal::precise::log(global_sum) : (1.0f / global_sum);
 
   uint elems_per_chunk = (axis_size + num_axis_chunks - 1) / num_axis_chunks;
   uint start = axis_chunk * elems_per_chunk;
@@ -1153,13 +1223,14 @@ kernel void softmax_forward_blocked2_write(
     ulong col_base_b = ulong(batch_idx) * axis_size * sb + ulong(col_global);
     for (uint b = start + axis_tid; b < end; b += num_axis_threads) {
       float val = float(input[col_base_a + ulong(b) * sa]);
-      output[col_base_b + ulong(b) * sb] =
-          static_cast<T>(metal::precise::exp(val - global_max) * inv_sum);
+      float sh = val - global_max;
+      output[col_base_b + ulong(b) * sb] = static_cast<T>(
+          IS_LOG ? (sh - norm) : (metal::precise::exp(sh) * norm));
     }
   }
 }
 
-template <typename T>
+template <typename T, bool IS_LOG = false>
 kernel void softmax_backward_blocked2_dot(
     device const T* grad_output [[buffer(0)]],
     device const T* output [[buffer(1)]],
@@ -1192,11 +1263,13 @@ kernel void softmax_backward_blocked2_dot(
 
   ulong col_base_a = ulong(batch_idx) * axis_size * sa + ulong(col_global);
   ulong col_base_b = ulong(batch_idx) * axis_size * sb + ulong(col_global);
+  // softmax: sum(dy*y); log_softmax: sum(dy).
   float local_dot = 0.0f;
   if (active) {
     for (uint b = start + axis_tid; b < end; b += num_axis_threads) {
-      local_dot += float(grad_output[col_base_a + ulong(b) * sa]) *
-          float(output[col_base_b + ulong(b) * sb]);
+      float dyi = float(grad_output[col_base_a + ulong(b) * sa]);
+      local_dot +=
+          IS_LOG ? dyi : (dyi * float(output[col_base_b + ulong(b) * sb]));
     }
   }
 
@@ -1215,7 +1288,7 @@ kernel void softmax_backward_blocked2_dot(
   }
 }
 
-template <typename T>
+template <typename T, bool IS_LOG = false>
 kernel void softmax_backward_blocked2_grad(
     device const T* grad_output [[buffer(0)]],
     device const T* output [[buffer(1)]],
@@ -1261,8 +1334,9 @@ kernel void softmax_backward_blocked2_grad(
     for (uint b = start + axis_tid; b < end; b += num_axis_threads) {
       float dyi = float(grad_output[col_base_a + ulong(b) * sa]);
       float yi = float(output[col_base_b + ulong(b) * sb]);
-      grad_input[col_base_c + ulong(b) * sc] =
-          static_cast<T>(yi * (dyi - dot_sum));
+      grad_input[col_base_c + ulong(b) * sc] = static_cast<T>(
+          IS_LOG ? (dyi - metal::precise::exp(yi) * dot_sum)
+                 : (yi * (dyi - dot_sum)));
     }
   }
 }
@@ -1273,7 +1347,7 @@ kernel void softmax_backward_blocked2_grad(
 // Multiple axis_tid threads share one inner_pos; reduced in shared memory.
 // num_chunks stores num_axis_threads for the reduction.
 
-template <typename T>
+template <typename T, bool IS_LOG = false>
 kernel void softmax_forward_coalesced(
     device const T* input [[buffer(0)]],
     device T* output [[buffer(1)]],
@@ -1324,17 +1398,20 @@ kernel void softmax_forward_coalesced(
   }
 
   float fmax_val = mx[inner_pos];
-  float finv = 1.0f / sm[inner_pos];
+  // log_softmax: subtract log(sum_exp); softmax: multiply by 1/sum_exp.
+  float fnorm =
+      IS_LOG ? metal::precise::log(sm[inner_pos]) : (1.0f / sm[inner_pos]);
 
   ulong base_b = ulong(batch_idx) * axis_size * sb;
   for (uint off = tid; off < total; off += lsize) {
     float val = float(input[base_a + ulong(off)]);
-    output[base_b + ulong(off)] =
-        static_cast<T>(metal::precise::exp(val - fmax_val) * finv);
+    float sh = val - fmax_val;
+    output[base_b + ulong(off)] = static_cast<T>(
+        IS_LOG ? (sh - fnorm) : (metal::precise::exp(sh) * fnorm));
   }
 }
 
-template <typename T>
+template <typename T, bool IS_LOG = false>
 kernel void softmax_backward_coalesced(
     device const T* grad_output [[buffer(0)]],
     device const T* output [[buffer(1)]],
@@ -1356,10 +1433,11 @@ kernel void softmax_backward_coalesced(
   ulong base_b = ulong(batch_idx) * axis_size * sb;
   uint total = axis_size * sa;
 
+  // softmax: sum(dy*y); log_softmax: sum(dy).
   float local_dot = 0.0f;
   for (uint off = tid; off < total; off += lsize) {
-    local_dot += float(grad_output[base_a + ulong(off)]) *
-        float(output[base_b + ulong(off)]);
+    float dyi = float(grad_output[base_a + ulong(off)]);
+    local_dot += IS_LOG ? dyi : (dyi * float(output[base_b + ulong(off)]));
   }
 
   smem[tid] = local_dot;
@@ -1377,115 +1455,144 @@ kernel void softmax_backward_coalesced(
   for (uint off = tid; off < total; off += lsize) {
     float dyi = float(grad_output[base_a + ulong(off)]);
     float yi = float(output[base_b + ulong(off)]);
-    grad_input[base_c + ulong(off)] = static_cast<T>(yi * (dyi - dot_sum));
+    grad_input[base_c + ulong(off)] = static_cast<T>(
+        IS_LOG ? (dyi - metal::precise::exp(yi) * dot_sum)
+               : (yi * (dyi - dot_sum)));
   }
 }
 
 // Template instantiations
 
-#define instantiate_softmax_forward_single_row(DTYPE)                     \
-  template [[host_name("softmax_forward_single_row_" #DTYPE)]] [[kernel]] \
-  void softmax_forward_single_row<DTYPE, 4>(                              \
-      device const DTYPE* input [[buffer(0)]],                            \
-      device DTYPE* output [[buffer(1)]],                                 \
-      constant SoftmaxParams& params [[buffer(2)]],                       \
-      uint tg_id [[threadgroup_position_in_grid]],                        \
-      uint tid [[thread_position_in_threadgroup]],                        \
-      uint tptg [[threads_per_threadgroup]],                              \
-      uint simd_lane_id [[thread_index_in_simdgroup]],                    \
+// Each kernel family is instantiated twice: ISLOG=false -> "softmax_*",
+// ISLOG=true -> "logsoftmax_*". The dispatch picks the name prefix.
+#define instantiate_softmax_forward_single_row_op(OP, ISLOG, DTYPE)    \
+  template [[host_name(#OP "_forward_single_row_" #DTYPE)]] [[kernel]] \
+  void softmax_forward_single_row<DTYPE, ISLOG, 4>(                    \
+      device const DTYPE* input [[buffer(0)]],                         \
+      device DTYPE* output [[buffer(1)]],                              \
+      constant SoftmaxParams& params [[buffer(2)]],                    \
+      uint tg_id [[threadgroup_position_in_grid]],                     \
+      uint tid [[thread_position_in_threadgroup]],                     \
+      uint tptg [[threads_per_threadgroup]],                           \
+      uint simd_lane_id [[thread_index_in_simdgroup]],                 \
       uint simdgroup_id [[simdgroup_index_in_threadgroup]]);
+#define instantiate_softmax_forward_single_row(DTYPE)              \
+  instantiate_softmax_forward_single_row_op(softmax, false, DTYPE) \
+      instantiate_softmax_forward_single_row_op(logsoftmax, true, DTYPE)
 
 // 8-wide single-row variant for half-precision last-dim rows.
-#define instantiate_softmax_forward_single_row8(DTYPE)                     \
-  template [[host_name("softmax_forward_single_row8_" #DTYPE)]] [[kernel]] \
-  void softmax_forward_single_row<DTYPE, 8>(                               \
-      device const DTYPE* input [[buffer(0)]],                             \
-      device DTYPE* output [[buffer(1)]],                                  \
-      constant SoftmaxParams& params [[buffer(2)]],                        \
-      uint tg_id [[threadgroup_position_in_grid]],                         \
-      uint tid [[thread_position_in_threadgroup]],                         \
-      uint tptg [[threads_per_threadgroup]],                               \
-      uint simd_lane_id [[thread_index_in_simdgroup]],                     \
+#define instantiate_softmax_forward_single_row8_op(OP, ISLOG, DTYPE)    \
+  template [[host_name(#OP "_forward_single_row8_" #DTYPE)]] [[kernel]] \
+  void softmax_forward_single_row<DTYPE, ISLOG, 8>(                     \
+      device const DTYPE* input [[buffer(0)]],                          \
+      device DTYPE* output [[buffer(1)]],                               \
+      constant SoftmaxParams& params [[buffer(2)]],                     \
+      uint tg_id [[threadgroup_position_in_grid]],                      \
+      uint tid [[thread_position_in_threadgroup]],                      \
+      uint tptg [[threads_per_threadgroup]],                            \
+      uint simd_lane_id [[thread_index_in_simdgroup]],                  \
       uint simdgroup_id [[simdgroup_index_in_threadgroup]]);
+#define instantiate_softmax_forward_single_row8(DTYPE)              \
+  instantiate_softmax_forward_single_row8_op(softmax, false, DTYPE) \
+      instantiate_softmax_forward_single_row8_op(logsoftmax, true, DTYPE)
 
-#define instantiate_softmax_forward_looped(DTYPE)                          \
-  template [[host_name("softmax_forward_looped_" #DTYPE)]] [[kernel]] void \
-  softmax_forward_looped<DTYPE>(                                           \
-      device const DTYPE* input [[buffer(0)]],                             \
-      device DTYPE* output [[buffer(1)]],                                  \
-      constant SoftmaxParams& params [[buffer(2)]],                        \
-      uint tg_id [[threadgroup_position_in_grid]],                         \
-      uint tid [[thread_position_in_threadgroup]],                         \
-      uint lsize [[threads_per_threadgroup]],                              \
-      uint simd_lane_id [[thread_index_in_simdgroup]],                     \
+#define instantiate_softmax_forward_looped_op(OP, ISLOG, DTYPE)         \
+  template [[host_name(#OP "_forward_looped_" #DTYPE)]] [[kernel]] void \
+  softmax_forward_looped<DTYPE, ISLOG>(                                 \
+      device const DTYPE* input [[buffer(0)]],                          \
+      device DTYPE* output [[buffer(1)]],                               \
+      constant SoftmaxParams& params [[buffer(2)]],                     \
+      uint tg_id [[threadgroup_position_in_grid]],                      \
+      uint tid [[thread_position_in_threadgroup]],                      \
+      uint lsize [[threads_per_threadgroup]],                           \
+      uint simd_lane_id [[thread_index_in_simdgroup]],                  \
       uint simdgroup_id [[simdgroup_index_in_threadgroup]]);
+#define instantiate_softmax_forward_looped(DTYPE)              \
+  instantiate_softmax_forward_looped_op(softmax, false, DTYPE) \
+      instantiate_softmax_forward_looped_op(logsoftmax, true, DTYPE)
 
-#define instantiate_softmax_backward_single_row(DTYPE)                     \
-  template [[host_name("softmax_backward_single_row_" #DTYPE)]] [[kernel]] \
-  void softmax_backward_single_row<DTYPE, 4>(                              \
-      device const DTYPE* grad_output [[buffer(0)]],                       \
-      device const DTYPE* output [[buffer(1)]],                            \
-      device DTYPE* grad_input [[buffer(2)]],                              \
-      constant SoftmaxParams& params [[buffer(3)]],                        \
-      uint tg_id [[threadgroup_position_in_grid]],                         \
-      uint tid [[thread_position_in_threadgroup]],                         \
-      uint tptg [[threads_per_threadgroup]],                               \
-      uint simd_lane_id [[thread_index_in_simdgroup]],                     \
+#define instantiate_softmax_backward_single_row_op(OP, ISLOG, DTYPE)    \
+  template [[host_name(#OP "_backward_single_row_" #DTYPE)]] [[kernel]] \
+  void softmax_backward_single_row<DTYPE, ISLOG, 4>(                    \
+      device const DTYPE* grad_output [[buffer(0)]],                    \
+      device const DTYPE* output [[buffer(1)]],                         \
+      device DTYPE* grad_input [[buffer(2)]],                           \
+      constant SoftmaxParams& params [[buffer(3)]],                     \
+      uint tg_id [[threadgroup_position_in_grid]],                      \
+      uint tid [[thread_position_in_threadgroup]],                      \
+      uint tptg [[threads_per_threadgroup]],                            \
+      uint simd_lane_id [[thread_index_in_simdgroup]],                  \
       uint simdgroup_id [[simdgroup_index_in_threadgroup]]);
+#define instantiate_softmax_backward_single_row(DTYPE)              \
+  instantiate_softmax_backward_single_row_op(softmax, false, DTYPE) \
+      instantiate_softmax_backward_single_row_op(logsoftmax, true, DTYPE)
 
 // 8-wide single-row backward variant for half-precision last-dim rows.
-#define instantiate_softmax_backward_single_row8(DTYPE)                     \
-  template [[host_name("softmax_backward_single_row8_" #DTYPE)]] [[kernel]] \
-  void softmax_backward_single_row<DTYPE, 8>(                               \
-      device const DTYPE* grad_output [[buffer(0)]],                        \
-      device const DTYPE* output [[buffer(1)]],                             \
-      device DTYPE* grad_input [[buffer(2)]],                               \
-      constant SoftmaxParams& params [[buffer(3)]],                         \
-      uint tg_id [[threadgroup_position_in_grid]],                          \
-      uint tid [[thread_position_in_threadgroup]],                          \
-      uint tptg [[threads_per_threadgroup]],                                \
-      uint simd_lane_id [[thread_index_in_simdgroup]],                      \
+#define instantiate_softmax_backward_single_row8_op(OP, ISLOG, DTYPE)    \
+  template [[host_name(#OP "_backward_single_row8_" #DTYPE)]] [[kernel]] \
+  void softmax_backward_single_row<DTYPE, ISLOG, 8>(                     \
+      device const DTYPE* grad_output [[buffer(0)]],                     \
+      device const DTYPE* output [[buffer(1)]],                          \
+      device DTYPE* grad_input [[buffer(2)]],                            \
+      constant SoftmaxParams& params [[buffer(3)]],                      \
+      uint tg_id [[threadgroup_position_in_grid]],                       \
+      uint tid [[thread_position_in_threadgroup]],                       \
+      uint tptg [[threads_per_threadgroup]],                             \
+      uint simd_lane_id [[thread_index_in_simdgroup]],                   \
       uint simdgroup_id [[simdgroup_index_in_threadgroup]]);
+#define instantiate_softmax_backward_single_row8(DTYPE)              \
+  instantiate_softmax_backward_single_row8_op(softmax, false, DTYPE) \
+      instantiate_softmax_backward_single_row8_op(logsoftmax, true, DTYPE)
 
-#define instantiate_softmax_backward_looped(DTYPE)                          \
-  template [[host_name("softmax_backward_looped_" #DTYPE)]] [[kernel]] void \
-  softmax_backward_looped<DTYPE>(                                           \
+#define instantiate_softmax_backward_looped_op(OP, ISLOG, DTYPE)         \
+  template [[host_name(#OP "_backward_looped_" #DTYPE)]] [[kernel]] void \
+  softmax_backward_looped<DTYPE, ISLOG>(                                 \
+      device const DTYPE* grad_output [[buffer(0)]],                     \
+      device const DTYPE* output [[buffer(1)]],                          \
+      device DTYPE* grad_input [[buffer(2)]],                            \
+      constant SoftmaxParams& params [[buffer(3)]],                      \
+      uint tg_id [[threadgroup_position_in_grid]],                       \
+      uint tid [[thread_position_in_threadgroup]],                       \
+      uint lsize [[threads_per_threadgroup]],                            \
+      uint simd_lane_id [[thread_index_in_simdgroup]],                   \
+      uint simdgroup_id [[simdgroup_index_in_threadgroup]]);
+#define instantiate_softmax_backward_looped(DTYPE)              \
+  instantiate_softmax_backward_looped_op(softmax, false, DTYPE) \
+      instantiate_softmax_backward_looped_op(logsoftmax, true, DTYPE)
+
+#define instantiate_softmax_backward_2pass_dot_op(OP, ISLOG, DTYPE)         \
+  template [[host_name(#OP "_backward_2pass_dot_" #DTYPE)]] [[kernel]] void \
+  softmax_backward_2pass_dot<DTYPE, ISLOG>(                                 \
       device const DTYPE* grad_output [[buffer(0)]],                        \
       device const DTYPE* output [[buffer(1)]],                             \
-      device DTYPE* grad_input [[buffer(2)]],                               \
+      device float* partial_sums [[buffer(2)]],                             \
       constant SoftmaxParams& params [[buffer(3)]],                         \
       uint tg_id [[threadgroup_position_in_grid]],                          \
       uint tid [[thread_position_in_threadgroup]],                          \
       uint lsize [[threads_per_threadgroup]],                               \
       uint simd_lane_id [[thread_index_in_simdgroup]],                      \
       uint simdgroup_id [[simdgroup_index_in_threadgroup]]);
+#define instantiate_softmax_backward_2pass_dot(DTYPE)              \
+  instantiate_softmax_backward_2pass_dot_op(softmax, false, DTYPE) \
+      instantiate_softmax_backward_2pass_dot_op(logsoftmax, true, DTYPE)
 
-#define instantiate_softmax_backward_2pass_dot(DTYPE)                          \
-  template [[host_name("softmax_backward_2pass_dot_" #DTYPE)]] [[kernel]] void \
-  softmax_backward_2pass_dot<DTYPE>(                                           \
-      device const DTYPE* grad_output [[buffer(0)]],                           \
-      device const DTYPE* output [[buffer(1)]],                                \
-      device float* partial_sums [[buffer(2)]],                                \
-      constant SoftmaxParams& params [[buffer(3)]],                            \
-      uint tg_id [[threadgroup_position_in_grid]],                             \
-      uint tid [[thread_position_in_threadgroup]],                             \
-      uint lsize [[threads_per_threadgroup]],                                  \
-      uint simd_lane_id [[thread_index_in_simdgroup]],                         \
-      uint simdgroup_id [[simdgroup_index_in_threadgroup]]);
+#define instantiate_softmax_backward_2pass_grad_op(OP, ISLOG, DTYPE)         \
+  template [[host_name(#OP "_backward_2pass_grad_" #DTYPE)]] [[kernel]] void \
+  softmax_backward_2pass_grad<DTYPE, ISLOG>(                                 \
+      device const DTYPE* grad_output [[buffer(0)]],                         \
+      device const DTYPE* output [[buffer(1)]],                              \
+      device DTYPE* grad_input [[buffer(2)]],                                \
+      device const float* partial_sums [[buffer(3)]],                        \
+      constant SoftmaxParams& params [[buffer(4)]],                          \
+      uint tg_id [[threadgroup_position_in_grid]],                           \
+      uint tid [[thread_position_in_threadgroup]],                           \
+      uint lsize [[threads_per_threadgroup]]);
+#define instantiate_softmax_backward_2pass_grad(DTYPE)              \
+  instantiate_softmax_backward_2pass_grad_op(softmax, false, DTYPE) \
+      instantiate_softmax_backward_2pass_grad_op(logsoftmax, true, DTYPE)
 
-#define instantiate_softmax_backward_2pass_grad(DTYPE)                     \
-  template                                                                 \
-      [[host_name("softmax_backward_2pass_grad_" #DTYPE)]] [[kernel]] void \
-      softmax_backward_2pass_grad<DTYPE>(                                  \
-          device const DTYPE* grad_output [[buffer(0)]],                   \
-          device const DTYPE* output [[buffer(1)]],                        \
-          device DTYPE* grad_input [[buffer(2)]],                          \
-          device const float* partial_sums [[buffer(3)]],                  \
-          constant SoftmaxParams& params [[buffer(4)]],                    \
-          uint tg_id [[threadgroup_position_in_grid]],                     \
-          uint tid [[thread_position_in_threadgroup]],                     \
-          uint lsize [[threads_per_threadgroup]]);
-
+// The 2pass forward reduce phase (max, sum) is identical for softmax and
+// log_softmax, so it is instantiated once under the "softmax_" name and reused.
 #define instantiate_softmax_forward_2pass_reduce(DTYPE)                     \
   template                                                                  \
       [[host_name("softmax_forward_2pass_reduce_" #DTYPE)]] [[kernel]] void \
@@ -1499,74 +1606,93 @@ kernel void softmax_backward_coalesced(
           uint simd_lane_id [[thread_index_in_simdgroup]],                  \
           uint simdgroup_id [[simdgroup_index_in_threadgroup]]);
 
-#define instantiate_softmax_forward_2pass_write(DTYPE)                     \
-  template                                                                 \
-      [[host_name("softmax_forward_2pass_write_" #DTYPE)]] [[kernel]] void \
-      softmax_forward_2pass_write<DTYPE>(                                  \
-          device const DTYPE* input [[buffer(0)]],                         \
-          device DTYPE* output [[buffer(1)]],                              \
-          device const float* partials [[buffer(2)]],                      \
-          constant SoftmaxParams& params [[buffer(3)]],                    \
-          uint tg_id [[threadgroup_position_in_grid]],                     \
-          uint tid [[thread_position_in_threadgroup]],                     \
-          uint lsize [[threads_per_threadgroup]]);
-
-#define instantiate_softmax_forward_coalesced(DTYPE)                          \
-  template [[host_name("softmax_forward_coalesced_" #DTYPE)]] [[kernel]] void \
-  softmax_forward_coalesced<DTYPE>(                                           \
-      device const DTYPE* input [[buffer(0)]],                                \
-      device DTYPE* output [[buffer(1)]],                                     \
-      constant SoftmaxParams& params [[buffer(2)]],                           \
-      uint tg_id [[threadgroup_position_in_grid]],                            \
-      uint tid [[thread_position_in_threadgroup]],                            \
-      uint lsize [[threads_per_threadgroup]],                                 \
-      threadgroup float* smem [[threadgroup(0)]]);
-
-#define instantiate_softmax_backward_coalesced(DTYPE)                          \
-  template [[host_name("softmax_backward_coalesced_" #DTYPE)]] [[kernel]] void \
-  softmax_backward_coalesced<DTYPE>(                                           \
-      device const DTYPE* grad_output [[buffer(0)]],                           \
-      device const DTYPE* output [[buffer(1)]],                                \
-      device DTYPE* grad_input [[buffer(2)]],                                  \
-      constant SoftmaxParams& params [[buffer(3)]],                            \
-      uint tg_id [[threadgroup_position_in_grid]],                             \
-      uint tid [[thread_position_in_threadgroup]],                             \
-      uint lsize [[threads_per_threadgroup]],                                  \
-      threadgroup float* smem [[threadgroup(0)]]);
-
-#define instantiate_softmax_forward_tiled(DTYPE)                          \
-  template [[host_name("softmax_forward_tiled_" #DTYPE)]] [[kernel]] void \
-  softmax_forward_tiled<DTYPE>(                                           \
-      device const DTYPE* input [[buffer(0)]],                            \
-      device DTYPE* output [[buffer(1)]],                                 \
-      constant SoftmaxParams& params [[buffer(2)]],                       \
-      uint tg_id [[threadgroup_position_in_grid]],                        \
-      uint tid [[thread_position_in_threadgroup]],                        \
+#define instantiate_softmax_forward_2pass_write_op(OP, ISLOG, DTYPE)         \
+  template [[host_name(#OP "_forward_2pass_write_" #DTYPE)]] [[kernel]] void \
+  softmax_forward_2pass_write<DTYPE, ISLOG>(                                 \
+      device const DTYPE* input [[buffer(0)]],                               \
+      device DTYPE* output [[buffer(1)]],                                    \
+      device const float* partials [[buffer(2)]],                            \
+      constant SoftmaxParams& params [[buffer(3)]],                          \
+      uint tg_id [[threadgroup_position_in_grid]],                           \
+      uint tid [[thread_position_in_threadgroup]],                           \
       uint lsize [[threads_per_threadgroup]]);
+#define instantiate_softmax_forward_2pass_write(DTYPE)              \
+  instantiate_softmax_forward_2pass_write_op(softmax, false, DTYPE) \
+      instantiate_softmax_forward_2pass_write_op(logsoftmax, true, DTYPE)
 
-#define instantiate_softmax_forward_blocked(DTYPE)                          \
-  template [[host_name("softmax_forward_blocked_" #DTYPE)]] [[kernel]] void \
-  softmax_forward_blocked<DTYPE>(                                           \
-      device const DTYPE* input [[buffer(0)]],                              \
-      device DTYPE* output [[buffer(1)]],                                   \
-      constant SoftmaxParams& params [[buffer(2)]],                         \
+#define instantiate_softmax_forward_coalesced_op(OP, ISLOG, DTYPE)         \
+  template [[host_name(#OP "_forward_coalesced_" #DTYPE)]] [[kernel]] void \
+  softmax_forward_coalesced<DTYPE, ISLOG>(                                 \
+      device const DTYPE* input [[buffer(0)]],                             \
+      device DTYPE* output [[buffer(1)]],                                  \
+      constant SoftmaxParams& params [[buffer(2)]],                        \
+      uint tg_id [[threadgroup_position_in_grid]],                         \
+      uint tid [[thread_position_in_threadgroup]],                         \
+      uint lsize [[threads_per_threadgroup]],                              \
+      threadgroup float* smem [[threadgroup(0)]]);
+#define instantiate_softmax_forward_coalesced(DTYPE)              \
+  instantiate_softmax_forward_coalesced_op(softmax, false, DTYPE) \
+      instantiate_softmax_forward_coalesced_op(logsoftmax, true, DTYPE)
+
+#define instantiate_softmax_backward_coalesced_op(OP, ISLOG, DTYPE)         \
+  template [[host_name(#OP "_backward_coalesced_" #DTYPE)]] [[kernel]] void \
+  softmax_backward_coalesced<DTYPE, ISLOG>(                                 \
+      device const DTYPE* grad_output [[buffer(0)]],                        \
+      device const DTYPE* output [[buffer(1)]],                             \
+      device DTYPE* grad_input [[buffer(2)]],                               \
+      constant SoftmaxParams& params [[buffer(3)]],                         \
       uint tg_id [[threadgroup_position_in_grid]],                          \
       uint tid [[thread_position_in_threadgroup]],                          \
       uint lsize [[threads_per_threadgroup]],                               \
       threadgroup float* smem [[threadgroup(0)]]);
+#define instantiate_softmax_backward_coalesced(DTYPE)              \
+  instantiate_softmax_backward_coalesced_op(softmax, false, DTYPE) \
+      instantiate_softmax_backward_coalesced_op(logsoftmax, true, DTYPE)
 
-#define instantiate_softmax_backward_blocked(DTYPE)                          \
-  template [[host_name("softmax_backward_blocked_" #DTYPE)]] [[kernel]] void \
-  softmax_backward_blocked<DTYPE>(                                           \
-      device const DTYPE* grad_output [[buffer(0)]],                         \
-      device const DTYPE* output [[buffer(1)]],                              \
-      device DTYPE* grad_input [[buffer(2)]],                                \
-      constant SoftmaxParams& params [[buffer(3)]],                          \
-      uint tg_id [[threadgroup_position_in_grid]],                           \
-      uint tid [[thread_position_in_threadgroup]],                           \
-      uint lsize [[threads_per_threadgroup]],                                \
+#define instantiate_softmax_forward_tiled_op(OP, ISLOG, DTYPE)         \
+  template [[host_name(#OP "_forward_tiled_" #DTYPE)]] [[kernel]] void \
+  softmax_forward_tiled<DTYPE, ISLOG>(                                 \
+      device const DTYPE* input [[buffer(0)]],                         \
+      device DTYPE* output [[buffer(1)]],                              \
+      constant SoftmaxParams& params [[buffer(2)]],                    \
+      uint tg_id [[threadgroup_position_in_grid]],                     \
+      uint tid [[thread_position_in_threadgroup]],                     \
+      uint lsize [[threads_per_threadgroup]]);
+#define instantiate_softmax_forward_tiled(DTYPE)              \
+  instantiate_softmax_forward_tiled_op(softmax, false, DTYPE) \
+      instantiate_softmax_forward_tiled_op(logsoftmax, true, DTYPE)
+
+#define instantiate_softmax_forward_blocked_op(OP, ISLOG, DTYPE)         \
+  template [[host_name(#OP "_forward_blocked_" #DTYPE)]] [[kernel]] void \
+  softmax_forward_blocked<DTYPE, ISLOG>(                                 \
+      device const DTYPE* input [[buffer(0)]],                           \
+      device DTYPE* output [[buffer(1)]],                                \
+      constant SoftmaxParams& params [[buffer(2)]],                      \
+      uint tg_id [[threadgroup_position_in_grid]],                       \
+      uint tid [[thread_position_in_threadgroup]],                       \
+      uint lsize [[threads_per_threadgroup]],                            \
       threadgroup float* smem [[threadgroup(0)]]);
+#define instantiate_softmax_forward_blocked(DTYPE)              \
+  instantiate_softmax_forward_blocked_op(softmax, false, DTYPE) \
+      instantiate_softmax_forward_blocked_op(logsoftmax, true, DTYPE)
 
+#define instantiate_softmax_backward_blocked_op(OP, ISLOG, DTYPE)         \
+  template [[host_name(#OP "_backward_blocked_" #DTYPE)]] [[kernel]] void \
+  softmax_backward_blocked<DTYPE, ISLOG>(                                 \
+      device const DTYPE* grad_output [[buffer(0)]],                      \
+      device const DTYPE* output [[buffer(1)]],                           \
+      device DTYPE* grad_input [[buffer(2)]],                             \
+      constant SoftmaxParams& params [[buffer(3)]],                       \
+      uint tg_id [[threadgroup_position_in_grid]],                        \
+      uint tid [[thread_position_in_threadgroup]],                        \
+      uint lsize [[threads_per_threadgroup]],                             \
+      threadgroup float* smem [[threadgroup(0)]]);
+#define instantiate_softmax_backward_blocked(DTYPE)              \
+  instantiate_softmax_backward_blocked_op(softmax, false, DTYPE) \
+      instantiate_softmax_backward_blocked_op(logsoftmax, true, DTYPE)
+
+// The blocked2 forward reduce phase (max, sum) is identical for softmax and
+// log_softmax, so it is instantiated once under the "softmax_" name and reused.
 #define instantiate_softmax_forward_blocked2_reduce(DTYPE)                     \
   template                                                                     \
       [[host_name("softmax_forward_blocked2_reduce_" #DTYPE)]] [[kernel]] void \
@@ -1579,54 +1705,65 @@ kernel void softmax_backward_coalesced(
           uint lsize [[threads_per_threadgroup]],                              \
           threadgroup float* smem [[threadgroup(0)]]);
 
-#define instantiate_softmax_forward_blocked2_write(DTYPE)                     \
-  template                                                                    \
-      [[host_name("softmax_forward_blocked2_write_" #DTYPE)]] [[kernel]] void \
-      softmax_forward_blocked2_write<DTYPE>(                                  \
-          device const DTYPE* input [[buffer(0)]],                            \
-          device DTYPE* output [[buffer(1)]],                                 \
-          device const float* partials [[buffer(2)]],                         \
-          constant SoftmaxParams& params [[buffer(3)]],                       \
-          uint tg_id [[threadgroup_position_in_grid]],                        \
-          uint tid [[thread_position_in_threadgroup]],                        \
+#define instantiate_softmax_forward_blocked2_write_op(OP, ISLOG, DTYPE)    \
+  template                                                                 \
+      [[host_name(#OP "_forward_blocked2_write_" #DTYPE)]] [[kernel]] void \
+      softmax_forward_blocked2_write<DTYPE, ISLOG>(                        \
+          device const DTYPE* input [[buffer(0)]],                         \
+          device DTYPE* output [[buffer(1)]],                              \
+          device const float* partials [[buffer(2)]],                      \
+          constant SoftmaxParams& params [[buffer(3)]],                    \
+          uint tg_id [[threadgroup_position_in_grid]],                     \
+          uint tid [[thread_position_in_threadgroup]],                     \
           uint lsize [[threads_per_threadgroup]]);
+#define instantiate_softmax_forward_blocked2_write(DTYPE)              \
+  instantiate_softmax_forward_blocked2_write_op(softmax, false, DTYPE) \
+      instantiate_softmax_forward_blocked2_write_op(logsoftmax, true, DTYPE)
 
-#define instantiate_softmax_backward_blocked2_dot(DTYPE)                     \
-  template                                                                   \
-      [[host_name("softmax_backward_blocked2_dot_" #DTYPE)]] [[kernel]] void \
-      softmax_backward_blocked2_dot<DTYPE>(                                  \
-          device const DTYPE* grad_output [[buffer(0)]],                     \
-          device const DTYPE* output [[buffer(1)]],                          \
-          device float* partials [[buffer(2)]],                              \
-          constant SoftmaxParams& params [[buffer(3)]],                      \
-          uint tg_id [[threadgroup_position_in_grid]],                       \
-          uint tid [[thread_position_in_threadgroup]],                       \
-          uint lsize [[threads_per_threadgroup]],                            \
-          threadgroup float* smem [[threadgroup(0)]]);
+#define instantiate_softmax_backward_blocked2_dot_op(OP, ISLOG, DTYPE)         \
+  template [[host_name(#OP "_backward_blocked2_dot_" #DTYPE)]] [[kernel]] void \
+  softmax_backward_blocked2_dot<DTYPE, ISLOG>(                                 \
+      device const DTYPE* grad_output [[buffer(0)]],                           \
+      device const DTYPE* output [[buffer(1)]],                                \
+      device float* partials [[buffer(2)]],                                    \
+      constant SoftmaxParams& params [[buffer(3)]],                            \
+      uint tg_id [[threadgroup_position_in_grid]],                             \
+      uint tid [[thread_position_in_threadgroup]],                             \
+      uint lsize [[threads_per_threadgroup]],                                  \
+      threadgroup float* smem [[threadgroup(0)]]);
+#define instantiate_softmax_backward_blocked2_dot(DTYPE)              \
+  instantiate_softmax_backward_blocked2_dot_op(softmax, false, DTYPE) \
+      instantiate_softmax_backward_blocked2_dot_op(logsoftmax, true, DTYPE)
 
-#define instantiate_softmax_backward_blocked2_grad(DTYPE)                     \
-  template                                                                    \
-      [[host_name("softmax_backward_blocked2_grad_" #DTYPE)]] [[kernel]] void \
-      softmax_backward_blocked2_grad<DTYPE>(                                  \
-          device const DTYPE* grad_output [[buffer(0)]],                      \
-          device const DTYPE* output [[buffer(1)]],                           \
-          device DTYPE* grad_input [[buffer(2)]],                             \
-          device const float* partials [[buffer(3)]],                         \
-          constant SoftmaxParams& params [[buffer(4)]],                       \
-          uint tg_id [[threadgroup_position_in_grid]],                        \
-          uint tid [[thread_position_in_threadgroup]],                        \
+#define instantiate_softmax_backward_blocked2_grad_op(OP, ISLOG, DTYPE)    \
+  template                                                                 \
+      [[host_name(#OP "_backward_blocked2_grad_" #DTYPE)]] [[kernel]] void \
+      softmax_backward_blocked2_grad<DTYPE, ISLOG>(                        \
+          device const DTYPE* grad_output [[buffer(0)]],                   \
+          device const DTYPE* output [[buffer(1)]],                        \
+          device DTYPE* grad_input [[buffer(2)]],                          \
+          device const float* partials [[buffer(3)]],                      \
+          constant SoftmaxParams& params [[buffer(4)]],                    \
+          uint tg_id [[threadgroup_position_in_grid]],                     \
+          uint tid [[thread_position_in_threadgroup]],                     \
           uint lsize [[threads_per_threadgroup]]);
+#define instantiate_softmax_backward_blocked2_grad(DTYPE)              \
+  instantiate_softmax_backward_blocked2_grad_op(softmax, false, DTYPE) \
+      instantiate_softmax_backward_blocked2_grad_op(logsoftmax, true, DTYPE)
 
-#define instantiate_softmax_backward_tiled(DTYPE)                          \
-  template [[host_name("softmax_backward_tiled_" #DTYPE)]] [[kernel]] void \
-  softmax_backward_tiled<DTYPE>(                                           \
-      device const DTYPE* grad_output [[buffer(0)]],                       \
-      device const DTYPE* output [[buffer(1)]],                            \
-      device DTYPE* grad_input [[buffer(2)]],                              \
-      constant SoftmaxParams& params [[buffer(3)]],                        \
-      uint tg_id [[threadgroup_position_in_grid]],                         \
-      uint tid [[thread_position_in_threadgroup]],                         \
+#define instantiate_softmax_backward_tiled_op(OP, ISLOG, DTYPE)         \
+  template [[host_name(#OP "_backward_tiled_" #DTYPE)]] [[kernel]] void \
+  softmax_backward_tiled<DTYPE, ISLOG>(                                 \
+      device const DTYPE* grad_output [[buffer(0)]],                    \
+      device const DTYPE* output [[buffer(1)]],                         \
+      device DTYPE* grad_input [[buffer(2)]],                           \
+      constant SoftmaxParams& params [[buffer(3)]],                     \
+      uint tg_id [[threadgroup_position_in_grid]],                      \
+      uint tid [[thread_position_in_threadgroup]],                      \
       uint lsize [[threads_per_threadgroup]]);
+#define instantiate_softmax_backward_tiled(DTYPE)              \
+  instantiate_softmax_backward_tiled_op(softmax, false, DTYPE) \
+      instantiate_softmax_backward_tiled_op(logsoftmax, true, DTYPE)
 
 #define instantiate_softmax(DTYPE)                                                  \
   instantiate_softmax_forward_single_row(                                           \

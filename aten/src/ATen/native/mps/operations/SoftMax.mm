@@ -13,6 +13,8 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_log_softmax_backward_data_native.h>
+#include <ATen/ops/_log_softmax_native.h>
 #include <ATen/ops/_softmax_backward_data_native.h>
 #include <ATen/ops/_softmax_native.h>
 #endif
@@ -286,16 +288,89 @@ static void softmax_backward_mps_out_graph(const Tensor& grad,
   }
 }
 
+// Legacy MPSGraph log_softmax fallback (gated). Mirrors the math the previous
+// log_softmax_mps_out used; retained only for the rank > 16 case the Metal
+// kernels do not cover. out = (x - max) - log(sum(exp(x - max))).
+static void log_softmax_mps_out_graph(const Tensor& input, int64_t dim_, const Tensor& output) {
+  using CachedGraph = MPSUnaryCachedGraph;
+  MPSStream* stream = getCurrentMPSStream();
+
+  @autoreleasepool {
+    std::string key = "log_softmax_mps_out" + getTensorsStringKey({input}) + ":" + std::to_string(dim_);
+    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input);
+
+      MPSGraphTensor* maximumsTensor = [mpsGraph reductionMaximumWithTensor:inputTensor axis:dim_ name:nil];
+      MPSGraphTensor* inputTensorSubMax = [mpsGraph subtractionWithPrimaryTensor:inputTensor
+                                                                 secondaryTensor:maximumsTensor
+                                                                            name:nil];
+      MPSGraphTensor* exponentTensor = [mpsGraph exponentWithTensor:inputTensorSubMax name:nil];
+      MPSGraphTensor* exponentTensorReduced = [mpsGraph reductionSumWithTensor:exponentTensor axis:dim_ name:nil];
+      MPSGraphTensor* logSumExpTensor = [mpsGraph logarithmWithTensor:exponentTensorReduced name:nil];
+      MPSGraphTensor* outputTensor = [mpsGraph subtractionWithPrimaryTensor:inputTensorSubMax
+                                                            secondaryTensor:logSumExpTensor
+                                                                       name:nil];
+
+      newCachedGraph->inputTensor_ = inputTensor;
+      newCachedGraph->outputTensor_ = outputTensor;
+    });
+
+    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, input);
+    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
+    auto feeds = dictionaryFromPlaceholders(selfPlaceholder);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
+  }
+}
+
+// Legacy MPSGraph log_softmax backward fallback (gated; rank > 16 only).
+// grad_input = grad_output - exp(output) * sum(grad_output).
+static void log_softmax_backward_mps_out_graph(const Tensor& grad_output,
+                                               const Tensor& output,
+                                               int64_t dim_,
+                                               const Tensor& grad_input) {
+  using CachedGraph = MPSUnaryGradCachedGraph;
+  MPSStream* stream = getCurrentMPSStream();
+
+  @autoreleasepool {
+    std::string key = "log_softmax_backward_mps_out:" + getMPSTypeString(grad_output) + ":" + std::to_string(dim_);
+    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      MPSGraphTensor* gradOutputTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(grad_output));
+      MPSGraphTensor* outputTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(output));
+
+      MPSGraphTensor* expTensor = [mpsGraph exponentWithTensor:outputTensor name:nil];
+      MPSGraphTensor* sumTensor = [mpsGraph reductionSumWithTensor:gradOutputTensor axis:dim_ name:nil];
+      MPSGraphTensor* multiplicationTensor = [mpsGraph multiplicationWithPrimaryTensor:expTensor
+                                                                       secondaryTensor:sumTensor
+                                                                                  name:nil];
+      MPSGraphTensor* resultTensor = [mpsGraph subtractionWithPrimaryTensor:gradOutputTensor
+                                                            secondaryTensor:multiplicationTensor
+                                                                       name:nil];
+
+      newCachedGraph->gradOutputTensor_ = gradOutputTensor;
+      newCachedGraph->outputTensor_ = outputTensor;
+      newCachedGraph->gradInputTensor_ = resultTensor;
+    });
+
+    Placeholder gradPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, grad_output);
+    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
+    Placeholder resultPlaceholder = Placeholder(cachedGraph->gradInputTensor_, grad_input);
+    auto feeds = dictionaryFromPlaceholders(gradPlaceholder, outputPlaceholder);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, resultPlaceholder);
+  }
+}
+
 } // namespace mps
 
-TORCH_IMPL_FUNC(softmax_mps_out)
-(const Tensor& input_, const int64_t dim, const bool half_to_float, const Tensor& output) {
-  TORCH_CHECK(!half_to_float, "softmax with half to float conversion is not supported on MPS");
-  TORCH_CHECK(c10::isFloatingType(input_.scalar_type()), "softmax only supported for floating types");
-
-  if (input_.numel() == 0) {
-    return;
-  }
+// Shared metal-launch implementation for softmax (is_log == false) and
+// log_softmax (is_log == true). The kernel families are identical except for
+// the final normalization (1/sum_exp vs subtract log(sum_exp)) and, for
+// backward, the reduction (sum(dy*y) vs sum(dy)) plus the exp(out) factor; all
+// of that is selected inside the kernels by an IS_LOG template bool, so here we
+// only switch the kernel-name prefix ("softmax" vs "logsoftmax"). The rank > 16
+// case routes to the gated MPSGraph fallback (softmax_*/log_softmax_* graph).
+static void softmax_out_impl(const Tensor& input_, const int64_t dim, const Tensor& output, bool is_log) {
+  using namespace mps;
+  const std::string op = is_log ? "logsoftmax" : "softmax";
 
   Tensor input;
   Tensor output_ = output;
@@ -312,11 +387,13 @@ TORCH_IMPL_FUNC(softmax_mps_out)
   TORCH_CHECK(dim_ >= 0 && dim_ < input.dim(), "Softmax:dim must be non-negative and less than input dimensions");
 
   if (!mps::canUseMetalSoftmax(input)) {
-    mps::softmax_mps_out_graph(input, dim_, output_);
+    if (is_log)
+      mps::log_softmax_mps_out_graph(input, dim_, output_);
+    else
+      mps::softmax_mps_out_graph(input, dim_, output_);
     return;
   }
 
-  using namespace mps;
   int64_t axis_size = input.size(dim_);
   int64_t outer_size = input.numel() / axis_size;
   auto params = makeForwardParams(input, output_, dim_);
@@ -345,7 +422,7 @@ TORCH_IMPL_FUNC(softmax_mps_out)
       @autoreleasepool {
         dispatch_sync_with_rethrow(stream->queue(), ^() {
           auto metalType = mps::scalarToMetalTypeString(input);
-          auto kernel = mps::lib.getPipelineStateForFunc("softmax_forward_tiled_" + metalType);
+          auto kernel = mps::lib.getPipelineStateForFunc((op + "_forward_tiled_") + metalType);
           id<MTLComputeCommandEncoder> encoder = stream->commandEncoder();
           [encoder setComputePipelineState:kernel];
           mps::mtl_setArgs(encoder, input, output_, params);
@@ -397,7 +474,7 @@ TORCH_IMPL_FUNC(softmax_mps_out)
 
             [encoder memoryBarrierWithScope:MTLBarrierScopeBuffers];
 
-            auto write_kernel = mps::lib.getPipelineStateForFunc("softmax_forward_blocked2_write_" + metalType);
+            auto write_kernel = mps::lib.getPipelineStateForFunc((op + "_forward_blocked2_write_") + metalType);
             [encoder setComputePipelineState:write_kernel];
             mps::mtl_setArgs(encoder, input, output_, blk_partials, params);
             [encoder dispatchThreadgroups:numGroups threadsPerThreadgroup:threadsPerGroup];
@@ -410,7 +487,7 @@ TORCH_IMPL_FUNC(softmax_mps_out)
       @autoreleasepool {
         dispatch_sync_with_rethrow(stream->queue(), ^() {
           auto metalType = mps::scalarToMetalTypeString(input);
-          auto kernel = mps::lib.getPipelineStateForFunc("softmax_forward_blocked_" + metalType);
+          auto kernel = mps::lib.getPipelineStateForFunc((op + "_forward_blocked_") + metalType);
           id<MTLComputeCommandEncoder> encoder = stream->commandEncoder();
           [encoder setComputePipelineState:kernel];
           mps::mtl_setArgs(encoder, input, output_, params);
@@ -443,7 +520,7 @@ TORCH_IMPL_FUNC(softmax_mps_out)
       @autoreleasepool {
         dispatch_sync_with_rethrow(stream->queue(), ^() {
           auto metalType = mps::scalarToMetalTypeString(input);
-          auto kernel = mps::lib.getPipelineStateForFunc("softmax_forward_coalesced_" + metalType);
+          auto kernel = mps::lib.getPipelineStateForFunc((op + "_forward_coalesced_") + metalType);
           id<MTLComputeCommandEncoder> encoder = stream->commandEncoder();
           [encoder setComputePipelineState:kernel];
           mps::mtl_setArgs(encoder, input, output_, params);
@@ -498,7 +575,7 @@ TORCH_IMPL_FUNC(softmax_mps_out)
 
         [encoder memoryBarrierWithScope:MTLBarrierScopeBuffers];
 
-        auto write_kernel = mps::lib.getPipelineStateForFunc("softmax_forward_2pass_write_" + metalType);
+        auto write_kernel = mps::lib.getPipelineStateForFunc((op + "_forward_2pass_write_") + metalType);
         [encoder setComputePipelineState:write_kernel];
         mps::mtl_setArgs(encoder, input, output_, fwd_partials, params);
         [encoder dispatchThreadgroups:numGroups threadsPerThreadgroup:threadsPerGroup];
@@ -507,13 +584,13 @@ TORCH_IMPL_FUNC(softmax_mps_out)
         MTLSize srGroup = threadsPerGroup;
         if (axis_size <= 1024 * N_READS) {
           if (wide8_eligible) {
-            kernel = mps::lib.getPipelineStateForFunc("softmax_forward_single_row8_" + metalType);
+            kernel = mps::lib.getPipelineStateForFunc((op + "_forward_single_row8_") + metalType);
             srGroup = MTLSizeMake(tg_size8, 1, 1);
           } else {
-            kernel = mps::lib.getPipelineStateForFunc("softmax_forward_single_row_" + metalType);
+            kernel = mps::lib.getPipelineStateForFunc((op + "_forward_single_row_") + metalType);
           }
         } else {
-          kernel = mps::lib.getPipelineStateForFunc("softmax_forward_looped_" + metalType);
+          kernel = mps::lib.getPipelineStateForFunc((op + "_forward_looped_") + metalType);
         }
 
         [encoder setComputePipelineState:kernel];
@@ -525,11 +602,45 @@ TORCH_IMPL_FUNC(softmax_mps_out)
   }
 }
 
-TORCH_IMPL_FUNC(softmax_backward_mps_out)
-(const Tensor& grad_, const Tensor& output_, int64_t dim, ScalarType input_dtype, const Tensor& grad_input) {
-  if (output_.numel() == 0) {
+TORCH_IMPL_FUNC(softmax_mps_out)
+(const Tensor& input_, const int64_t dim, const bool half_to_float, const Tensor& output) {
+  TORCH_CHECK(!half_to_float, "softmax with half to float conversion is not supported on MPS");
+  TORCH_CHECK(c10::isFloatingType(input_.scalar_type()), "softmax only supported for floating types");
+  if (input_.numel() == 0) {
     return;
   }
+  softmax_out_impl(input_, dim, output, /*is_log=*/false);
+}
+
+TORCH_IMPL_FUNC(log_softmax_mps_out)
+(const Tensor& input_, const int64_t dim, const bool half_to_float, const Tensor& output) {
+  // Preserve the exact BC error strings the previous MPSGraph path raised.
+  TORCH_CHECK_NOT_IMPLEMENTED(input_.scalar_type() != kLong, "MPS doesn't know how to do exponent_i64");
+  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(input_.scalar_type()),
+                              "log_softmax for complex is not supported for MPS");
+  TORCH_CHECK_NOT_IMPLEMENTED(input_.scalar_type() != kBool, "log_softmax for bool is not supported for MPS");
+  // The Metal kernels are instantiated only for float/half/bfloat; any other
+  // (e.g. integer) dtype would miss its specialization and fail with an opaque
+  // pipeline-creation error, so reject non-floating types cleanly. The kLong
+  // check above keeps that type's legacy BC message and runs first.
+  TORCH_CHECK(c10::isFloatingType(input_.scalar_type()), "log_softmax only supported for floating types");
+  TORCH_CHECK(!half_to_float, "log_softmax with half to float conversion is not supported on MPS");
+  if (input_.numel() == 0) {
+    return;
+  }
+  softmax_out_impl(input_, dim, output, /*is_log=*/true);
+}
+
+// Shared metal-launch backward for softmax (is_log == false) and log_softmax
+// (is_log == true); the IS_LOG kernel template selects the math, this only
+// switches the kernel-name prefix and the MPSGraph fallback target.
+static void softmax_backward_out_impl(const Tensor& grad_,
+                                      const Tensor& output_,
+                                      int64_t dim,
+                                      const Tensor& grad_input,
+                                      bool is_log) {
+  using namespace mps;
+  const std::string op = is_log ? "logsoftmax" : "softmax";
 
   Tensor grad;
   if (grad_.dim() == 0) {
@@ -560,11 +671,13 @@ TORCH_IMPL_FUNC(softmax_backward_mps_out)
   bool bwd_dtypes_match =
       grad.scalar_type() == output.scalar_type() && grad_input_.scalar_type() == output.scalar_type();
   if (!(bwd_dtypes_match && mps::canUseMetalSoftmax(output) && mps::canUseMetalSoftmax(grad))) {
-    mps::softmax_backward_mps_out_graph(grad, output, dim_, grad_input_);
+    if (is_log)
+      mps::log_softmax_backward_mps_out_graph(grad, output, dim_, grad_input_);
+    else
+      mps::softmax_backward_mps_out_graph(grad, output, dim_, grad_input_);
     return;
   }
 
-  using namespace mps;
   int64_t axis_size = output.size(dim_);
   int64_t outer_size = output.numel() / axis_size;
 
@@ -604,7 +717,7 @@ TORCH_IMPL_FUNC(softmax_backward_mps_out)
       @autoreleasepool {
         dispatch_sync_with_rethrow(stream->queue(), ^() {
           auto metalType = mps::scalarToMetalTypeString(output);
-          auto kernel = mps::lib.getPipelineStateForFunc("softmax_backward_tiled_" + metalType);
+          auto kernel = mps::lib.getPipelineStateForFunc((op + "_backward_tiled_") + metalType);
           id<MTLComputeCommandEncoder> encoder = stream->commandEncoder();
           [encoder setComputePipelineState:kernel];
           mps::mtl_setArgs(encoder, grad, output, grad_input_, params);
@@ -644,7 +757,7 @@ TORCH_IMPL_FUNC(softmax_backward_mps_out)
             MTLSize threadsPerGroup = MTLSizeMake(blk_tg_size, 1, 1);
             MTLSize numGroups = MTLSizeMake(num_col_tiles * outer_before * num_axis_chunks, 1, 1);
 
-            auto dot_kernel = mps::lib.getPipelineStateForFunc("softmax_backward_blocked2_dot_" + metalType);
+            auto dot_kernel = mps::lib.getPipelineStateForFunc((op + "_backward_blocked2_dot_") + metalType);
             [encoder setComputePipelineState:dot_kernel];
             mps::mtl_setArgs(encoder, grad, output, blk_partials, params);
             [encoder setThreadgroupMemoryLength:blk_tg_size * sizeof(float) atIndex:0];
@@ -652,7 +765,7 @@ TORCH_IMPL_FUNC(softmax_backward_mps_out)
 
             [encoder memoryBarrierWithScope:MTLBarrierScopeBuffers];
 
-            auto grad_kernel = mps::lib.getPipelineStateForFunc("softmax_backward_blocked2_grad_" + metalType);
+            auto grad_kernel = mps::lib.getPipelineStateForFunc((op + "_backward_blocked2_grad_") + metalType);
             [encoder setComputePipelineState:grad_kernel];
             mps::mtl_setArgs(encoder, grad, output, grad_input_, blk_partials, params);
             [encoder dispatchThreadgroups:numGroups threadsPerThreadgroup:threadsPerGroup];
@@ -665,7 +778,7 @@ TORCH_IMPL_FUNC(softmax_backward_mps_out)
       @autoreleasepool {
         dispatch_sync_with_rethrow(stream->queue(), ^() {
           auto metalType = mps::scalarToMetalTypeString(output);
-          auto kernel = mps::lib.getPipelineStateForFunc("softmax_backward_blocked_" + metalType);
+          auto kernel = mps::lib.getPipelineStateForFunc((op + "_backward_blocked_") + metalType);
           id<MTLComputeCommandEncoder> encoder = stream->commandEncoder();
           [encoder setComputePipelineState:kernel];
           mps::mtl_setArgs(encoder, grad, output, grad_input_, params);
@@ -697,7 +810,7 @@ TORCH_IMPL_FUNC(softmax_backward_mps_out)
       @autoreleasepool {
         dispatch_sync_with_rethrow(stream->queue(), ^() {
           auto metalType = mps::scalarToMetalTypeString(output);
-          auto kernel = mps::lib.getPipelineStateForFunc("softmax_backward_coalesced_" + metalType);
+          auto kernel = mps::lib.getPipelineStateForFunc((op + "_backward_coalesced_") + metalType);
           id<MTLComputeCommandEncoder> encoder = stream->commandEncoder();
           [encoder setComputePipelineState:kernel];
           mps::mtl_setArgs(encoder, grad, output, grad_input_, params);
@@ -732,7 +845,7 @@ TORCH_IMPL_FUNC(softmax_backward_mps_out)
       MTLSize threadsPerGroup = MTLSizeMake(tg_size, 1, 1);
 
       if (use_two_pass) {
-        auto dot_kernel = mps::lib.getPipelineStateForFunc("softmax_backward_2pass_dot_" + metalType);
+        auto dot_kernel = mps::lib.getPipelineStateForFunc((op + "_backward_2pass_dot_") + metalType);
         [encoder setComputePipelineState:dot_kernel];
         mps::mtl_setArgs(encoder, grad, output, partial_sums, params);
         MTLSize numGroups = MTLSizeMake(static_cast<NSUInteger>(params.num_chunks) * outer_size, 1, 1);
@@ -740,7 +853,7 @@ TORCH_IMPL_FUNC(softmax_backward_mps_out)
 
         [encoder memoryBarrierWithScope:MTLBarrierScopeBuffers];
 
-        auto grad_kernel = mps::lib.getPipelineStateForFunc("softmax_backward_2pass_grad_" + metalType);
+        auto grad_kernel = mps::lib.getPipelineStateForFunc((op + "_backward_2pass_grad_") + metalType);
         [encoder setComputePipelineState:grad_kernel];
         mps::mtl_setArgs(encoder, grad, output, grad_input_, partial_sums, params);
         [encoder dispatchThreadgroups:numGroups threadsPerThreadgroup:threadsPerGroup];
@@ -749,13 +862,13 @@ TORCH_IMPL_FUNC(softmax_backward_mps_out)
         MTLSize srGroup = threadsPerGroup;
         if (axis_size <= 1024 * N_READS) {
           if (wide8_eligible) {
-            kernel = mps::lib.getPipelineStateForFunc("softmax_backward_single_row8_" + metalType);
+            kernel = mps::lib.getPipelineStateForFunc((op + "_backward_single_row8_") + metalType);
             srGroup = MTLSizeMake(tg_size8, 1, 1);
           } else {
-            kernel = mps::lib.getPipelineStateForFunc("softmax_backward_single_row_" + metalType);
+            kernel = mps::lib.getPipelineStateForFunc((op + "_backward_single_row_") + metalType);
           }
         } else {
-          kernel = mps::lib.getPipelineStateForFunc("softmax_backward_looped_" + metalType);
+          kernel = mps::lib.getPipelineStateForFunc((op + "_backward_looped_") + metalType);
         }
 
         [encoder setComputePipelineState:kernel];
@@ -765,6 +878,27 @@ TORCH_IMPL_FUNC(softmax_backward_mps_out)
       }
     });
   }
+}
+
+TORCH_IMPL_FUNC(softmax_backward_mps_out)
+(const Tensor& grad_, const Tensor& output_, int64_t dim, ScalarType input_dtype, const Tensor& grad_input) {
+  if (output_.numel() == 0) {
+    return;
+  }
+  softmax_backward_out_impl(grad_, output_, dim, grad_input, /*is_log=*/false);
+}
+
+TORCH_IMPL_FUNC(log_softmax_backward_mps_out)
+(const Tensor& grad_output, const Tensor& output, int64_t dim, ScalarType input_dtype, const Tensor& out) {
+  // Preserve the exact BC error strings the previous MPSGraph path raised.
+  TORCH_CHECK_NOT_IMPLEMENTED(grad_output.scalar_type() != kLong, "MPS doesn't know how to do exponent_i64");
+  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(grad_output.scalar_type()),
+                              "log_softmax for complex is not supported for MPS");
+  TORCH_CHECK_NOT_IMPLEMENTED(grad_output.scalar_type() != kBool, "log_softmax for bool is not supported for MPS");
+  if (output.numel() == 0) {
+    return;
+  }
+  softmax_backward_out_impl(grad_output, output, dim, out, /*is_log=*/true);
 }
 
 } // namespace at::native
