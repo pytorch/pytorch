@@ -2496,6 +2496,9 @@ class CommonTemplate:
 
             self.common(fn, (a, b), rtol=1e-4, atol=1e-5, check_lowp=False)
 
+    # Triton CPU split scan lowering uses tl.debug_barrier, which is not yet
+    # implemented in the Triton CPU version pinned in CI.
+    @xfail_if_triton_cpu
     @config.patch(max_autotune_pointwise=True)
     def test_split_cumsum_index(self):
         # Split scan uses a workspace that needs to be zeroed before use.
@@ -2511,6 +2514,9 @@ class CommonTemplate:
         data = make_tensor((2**16,), dtype=torch.float32, device=self.device)
         self.common(fn, (lengths, data))
 
+    # Triton CPU split scan lowering uses tl.debug_barrier, which is not yet
+    # implemented in the Triton CPU version pinned in CI.
+    @xfail_if_triton_cpu
     def test_split_cumprod(self):
         def fn(a):
             return torch.cumprod(a, -1)
@@ -10898,6 +10904,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             self.assertEqual(fn(x[0:]), x[16:][:16])
             self.assertEqual(fn(x[128:]), x[128 + 16 :][:16])
 
+    # Requires a Triton CPU fix for scalar tl.device_assert conditions.
+    @xfail_if_triton_cpu
     def test_index_float_zero(self):
         def fn(arg0, arg1, arg2):
             t1 = torch.tanh(arg0)
