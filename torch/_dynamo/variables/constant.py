@@ -869,10 +869,6 @@ CONSTANT_VARIABLE_FALSE = ConstantVariable(False)
 class FakeValueKind(enum.Enum):
     ID = "id"
     HASH = "hash"
-    # Result of arithmetic on a fake id/hash (e.g. ``id(x) & 0x7fffffff``).
-    # Still compile-time-only; kept distinct so a raw id never compares equal
-    # to a derived value under the same-kind fast path.
-    DERIVED = "derived"
 
 
 class FakeIdVariable(VariableTracker):
@@ -942,7 +938,7 @@ class FakeIdVariable(VariableTracker):
     # Arithmetic on a fake id/hash (e.g. ``id(self) & 0x7fffffff`` inside a
     # custom __hash__) stays compile-time-only: CPython computes int op int,
     # but the operand is a fake address so the result must not be baked into
-    # the graph. We mirror int's nb_* slots and return a DERIVED FakeIdVariable.
+    # the graph. We mirror int's nb_* slots and return another fake int.
     def _operand_int(self, other: VariableTracker) -> int | None:
         if isinstance(other, FakeIdVariable):
             return other.value
@@ -967,7 +963,7 @@ class FakeIdVariable(VariableTracker):
             result = op(lhs, rhs)
         except (TypeError, ValueError, OverflowError, ZeroDivisionError) as e:
             raise_observed_exception(type(e), tx, args=list(e.args))
-        return FakeIdVariable(result, kind=FakeValueKind.DERIVED)
+        return FakeIdVariable(result)
 
     def nb_add_impl(self, tx, other, reverse=False):  # type: ignore[no-untyped-def]
         return self._nb_binary_impl(tx, other, operator.add, reverse)
@@ -1000,16 +996,16 @@ class FakeIdVariable(VariableTracker):
         return self._nb_binary_impl(tx, other, operator.rshift, reverse)
 
     def nb_negative_impl(self, tx):  # type: ignore[no-untyped-def]
-        return FakeIdVariable(-self.value, kind=FakeValueKind.DERIVED)
+        return FakeIdVariable(-self.value)
 
     def nb_positive_impl(self, tx):  # type: ignore[no-untyped-def]
-        return FakeIdVariable(+self.value, kind=FakeValueKind.DERIVED)
+        return FakeIdVariable(+self.value)
 
     def nb_absolute_impl(self, tx):  # type: ignore[no-untyped-def]
-        return FakeIdVariable(abs(self.value), kind=FakeValueKind.DERIVED)
+        return FakeIdVariable(abs(self.value))
 
     def nb_invert_impl(self, tx):  # type: ignore[no-untyped-def]
-        return FakeIdVariable(~self.value, kind=FakeValueKind.DERIVED)
+        return FakeIdVariable(~self.value)
 
     def nb_int_impl(self, tx):  # type: ignore[no-untyped-def]
         return FakeIdVariable(int(self.value), kind=self.kind)

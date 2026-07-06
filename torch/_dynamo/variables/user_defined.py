@@ -77,7 +77,9 @@ from ..utils import (
     base_exception_methods,
     check_constant_args,
     cmp_name_to_op_mapping,
+    deque_iterator,
     deque_methods,
+    deque_rev_iterator,
     dict_methods,
     exception_methods,
     frozenset_methods,
@@ -1217,14 +1219,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 items, maxlen=maxlen, mutation_type=ValueMutationNew()
             )
         elif self.value in (
-            variables.lists.DequeIteratorVariable._cpython_type,
-            variables.lists.DequeReverseIteratorVariable._cpython_type,
+            deque_iterator,
+            deque_rev_iterator,
         ):
             # _deque_iterator(deque[, index]) / _deque_reverse_iterator(deque[, index])
             # ref: dequeiter_new in Modules/_collectionsmodule.c
-            is_reverse = (
-                self.value is variables.lists.DequeReverseIteratorVariable._cpython_type
-            )
             name = self.value.__name__
             if kwargs or not 1 <= len(args) <= 2:
                 raise_args_mismatch(tx, name)
@@ -1236,7 +1235,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                     f"not {deque_arg.python_type_name()}",
                 )
             index = args[1].as_python_constant() if len(args) == 2 else 0
-            if is_reverse:
+            if self.value is deque_rev_iterator:
                 cls = variables.lists.DequeReverseIteratorVariable
                 snapshot = list(reversed(deque_arg.items))
             else:

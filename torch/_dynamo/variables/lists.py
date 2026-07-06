@@ -1375,6 +1375,23 @@ class ListVariable(CommonListMethodsVariable):
         raise_type_error(tx, f"unhashable type: '{self.python_type_name()}'")
 
 
+_deque_state_mutating_methods = frozenset(
+    {
+        "append",
+        "appendleft",
+        "extend",
+        "extendleft",
+        "pop",
+        "popleft",
+        "insert",
+        "remove",
+        "clear",
+        "rotate",
+    }
+)
+
+
+# TODO(dynamo-team): Split deque from CommonListMethodsVariable / ListVariable
 class DequeVariable(CommonListMethodsVariable):
     # deque_spec: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L1866
     # tp_hash = PyObject_HashNotImplemented (unhashable)
@@ -1384,30 +1401,6 @@ class DequeVariable(CommonListMethodsVariable):
         "state",
         *CommonListMethodsVariable._nonvar_fields,
     }
-
-    # Method names that bump the deque's mutation state counter (CPython bumps
-    # deque->state on every structural change so its iterators can detect
-    # mutation during iteration). Only __delitem__ (sq_ass_item_impl delete
-    # path) and __init__ (tp_init_impl) bump state directly; deque_reverse and
-    # the setitem path deliberately do NOT bump in CPython, so they are absent
-    # here. extend/extendleft bump only when an item is actually appended.
-    # NOTE: if deque `*=` (sq_inplace_repeat) is ever implemented it must bump
-    # state too (CPython deque_inplace_repeat bumps); currently moot (it
-    # graph-breaks).
-    _state_mutating_methods = frozenset(
-        {
-            "append",
-            "appendleft",
-            "extend",
-            "extendleft",
-            "pop",
-            "popleft",
-            "insert",
-            "remove",
-            "clear",
-            "rotate",
-        }
-    )
 
     def richcompare_impl(
         self,
@@ -1625,9 +1618,6 @@ class DequeVariable(CommonListMethodsVariable):
         else:
             slice_within_maxlen = None
 
-        # Snapshot length before mutation so extend/extendleft only bump the
-        # deque state counter when an item is actually appended (CPython bumps
-        # state per appended item, so an empty extend is a no-op).
         pre_len = len(self.items)
 
         if name == "extendleft" and self.is_mutable() and len(args) > 0:
@@ -1692,7 +1682,7 @@ class DequeVariable(CommonListMethodsVariable):
             and len(self.items) > maxlen
         ):
             self.items[:] = self.items[slice_within_maxlen]
-        if name in self._state_mutating_methods and self.is_mutable():
+        if name in _deque_state_mutating_methods and self.is_mutable():
             # extend/extendleft with an empty iterable append nothing -> no bump.
             if name not in ("extend", "extendleft") or extend_appended:
                 self.state += 1
@@ -2345,10 +2335,6 @@ class TupleIteratorVariable(ListIteratorVariable):
 
 
 class DequeIteratorVariable(ListIteratorVariable):
-    # _collections._deque_iterator: iterates over a snapshot of the deque taken
-    # at iter() time and raises RuntimeError if the source deque is structurally
-    # mutated during iteration (CPython dequeiter_next compares deque->state).
-    # ref: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L2100-L2140
     _cpython_type = type(iter(collections.deque()))
 
     _nonvar_fields = {
@@ -2378,22 +2364,11 @@ class DequeIteratorVariable(ListIteratorVariable):
         self._check_mutation(tx)
         return super().tp_iternext_impl(tx)
 
-    def unpack_var_sequence(
-        self, tx: "InstructionTranslatorBase"
-    ) -> list[VariableTracker]:
-        self._check_mutation(tx)
-        return super().unpack_var_sequence(tx)
-
     def python_type(self) -> type:
-        cpython_type = self._cpython_type
-        if not isinstance(cpython_type, type):
-            raise AssertionError(f"expected a single type, got {cpython_type}")
-        return cpython_type
+        return type(iter(collections.deque()))
 
 
 class DequeReverseIteratorVariable(DequeIteratorVariable):
-    # _collections._deque_reverse_iterator: same state-based mutation detection
-    # as the forward iterator, over a reversed snapshot.
     _cpython_type = type(reversed(collections.deque()))
 
 
