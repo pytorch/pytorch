@@ -262,7 +262,7 @@ def preferred_linalg_library(
     * :func:`torch.linalg.lu_solve`
     * :func:`torch.linalg.qr`
     * :func:`torch.linalg.eigh`
-    * :func:`torch.linalg.eighvals`
+    * :func:`torch.linalg.eigvals`
     * :func:`torch.linalg.svd`
     * :func:`torch.linalg.svdvals`
     """
