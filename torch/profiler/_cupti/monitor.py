@@ -4,7 +4,6 @@ from __future__ import annotations
 import ctypes
 import json
 import logging
-import os
 import threading
 import time
 from collections.abc import Callable, Iterable, Mapping
@@ -102,8 +101,8 @@ class CuptiMonitor:
     def __init__(
         self,
         *,
-        buffer_size: int | None = None,
-        flush_period_s: float | None = None,
+        buffer_size: int = _DEFAULT_BUFFER_SIZE,
+        flush_period_s: float = _DEFAULT_FLUSH_PERIOD_S,
     ) -> None:
         # The monitor is the engine and the multiplexer: it owns the single CUPTI
         # subscription + buffer pool + native decode worker, which demuxes each
@@ -115,17 +114,11 @@ class CuptiMonitor:
         # selection, decoded columnar against a record layout computed from the
         # field-size spec (no captured layout needed). This requires libcupti >= 13.2.
         #
-        # Per-buffer pool size (bytes). An explicit arg wins; otherwise it comes from
-        # TORCH_CUPTI_MONITOR_BUFFER_SIZE (default 4 MiB). Bigger buffers complete less
-        # often (fewer worker wakeups, lower overhead) at the cost of more pinned host
-        # memory and coarser delivery.
-        if buffer_size is None:
-            buffer_size = int(
-                os.environ.get("TORCH_CUPTI_MONITOR_BUFFER_SIZE", _DEFAULT_BUFFER_SIZE)
-            )
+        # Per-buffer pool size (bytes), default 4 MiB. Bigger buffers complete less often
+        # (fewer worker wakeups, lower overhead) at the cost of more pinned host memory and
+        # coarser delivery.
         self.buffer_size = buffer_size
-        # Background-drain flush period (seconds). An explicit arg wins; otherwise it
-        # comes from TORCH_CUPTI_MONITOR_FLUSH_PERIOD_S (default 1.0). Sign-encoded:
+        # Background-drain flush period (seconds), default 1.0. Sign-encoded:
         #   > 0  -> background flush thread drains every flush_period_s.
         #    0   -> background flush thread drains continuously (no wait between flushes).
         #   < 0  -> NO background flush thread; the caller must drive flush() itself
@@ -139,12 +132,6 @@ class CuptiMonitor:
         #           only reads buffers CUPTI already handed over), and that this still
         #           avoids the corruption is what confirms it. Driving flush() only from
         #           the quiescent foreground avoids the race.
-        if flush_period_s is None:
-            flush_period_s = float(
-                os.environ.get(
-                    "TORCH_CUPTI_MONITOR_FLUSH_PERIOD_S", _DEFAULT_FLUSH_PERIOD_S
-                )
-            )
         self.flush_period_s = flush_period_s
         self._cupti = cupti_python.pylibcupti()
         # The CUPTI subscriber handle.
