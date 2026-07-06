@@ -24497,7 +24497,7 @@ python_ref_db = [
             # AssertionError: Tensor-likes are not equal!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='mps',
-                dtypes=(torch.uint8, torch.int8, torch.int64, torch.int32, torch.int16, torch.bool)),
+                dtypes=(torch.uint8, torch.int8, torch.int64, torch.int32, torch.int16)),
             # ValueError: value argument of type <class 'float'> cannot be safely cast to type <class 'int'>!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps',
@@ -24558,7 +24558,7 @@ python_ref_db = [
             # AssertionError: Tensor-likes are not equal!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='mps',
-                dtypes=(torch.bool, torch.int16, torch.int32, torch.int64, torch.int8, torch.uint8)
+                dtypes=(torch.int16, torch.int32, torch.int64, torch.int8, torch.uint8)
             ),
         ),
     ),
