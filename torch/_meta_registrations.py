@@ -421,11 +421,20 @@ def meta_fft_r2c(self, dim, normalization, onesided):
     if onesided:
         out_sizes[last_dim] = last_dim_halfsize
 
+    # Determine output dtype based on input dtype and device
+    # bfloat16 FFT always produces complex64 output (not bcomplex32):
+    # - On CUDA: cuFFT CUDA_C_16BF is upcast to ComplexFloat (see SpectralOps.cpp line 376-379)
+    # - On ROCm/XPU: bfloat16 is promoted to float32 before FFT, yielding complex64
+    # See promote_type_fft() and _fft_r2c_cufft() in aten/src/ATen/native/SpectralOps.cpp
+    output_dtype = self.dtype
+    if output_dtype == torch.bfloat16 and (device_hint(self) in ("cuda", "xpu")):
+        output_dtype = torch.float32
+
     if device_hint(self) == "cuda" or device_hint(self) == "xpu":
         # _fft_r2c_cufft in aten/src/ATen/native/cuda/SpectralOps.cpp
         # _fft_r2c_xpu in torch-xpu-ops/src/ATen/native/xpu/SpectralOps.cpp
         output = self.new_empty(
-            out_sizes, dtype=utils.corresponding_complex_dtype(self.dtype)
+            out_sizes, dtype=utils.corresponding_complex_dtype(output_dtype)
         )
 
         working_tensor = self
@@ -437,7 +446,7 @@ def meta_fft_r2c(self, dim, normalization, onesided):
             _exec_fft(output, working_tensor, target_sizes, [last_dim], forward=True)
             if len(dim) > 1:
                 working_tensor = self.new_empty(
-                    out_sizes, dtype=utils.corresponding_complex_dtype(self.dtype)
+                    out_sizes, dtype=utils.corresponding_complex_dtype(output_dtype)
                 )
 
             # Then any remaining C2C transforms
@@ -466,13 +475,13 @@ def meta_fft_r2c(self, dim, normalization, onesided):
         # _fft_r2c_mkl in aten/src/ATen/native/mkl/SpectralOps.cpp
         sorted_dims = _sort_dims(self, dim, exclude_last=True)
         output = self.new_empty(
-            out_sizes, dtype=utils.corresponding_complex_dtype(self.dtype)
+            out_sizes, dtype=utils.corresponding_complex_dtype(output_dtype)
         )
         return _exec_fft(output, self, out_sizes, sorted_dims, forward=True)
 
     else:
         return self.new_empty(
-            out_sizes, dtype=utils.corresponding_complex_dtype(self.dtype)
+            out_sizes, dtype=utils.corresponding_complex_dtype(output_dtype)
         )
 
 
