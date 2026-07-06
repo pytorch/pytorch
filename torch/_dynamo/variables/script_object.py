@@ -1,7 +1,7 @@
 """
 This module implements variable tracking for TorchScript objects during Dynamo tracing.
 
-The TorchScriptObjectVariable class provides specialized handling for TorchScript
+The CustomClassObjectVariable class provides specialized handling for TorchScript
 objects with strong safety guarantees by:
 - Enforcing method-call-only access to prevent unsafe attribute manipulation
 - Converting graph breaks into hard errors via _raise_hard_error_if_graph_break
@@ -81,7 +81,7 @@ def _raise_hard_error_if_graph_break(
     return deco
 
 
-class OpaqueObjectClassVariable(UserDefinedVariable):
+class CustomClassVariable(UserDefinedVariable):
     """
     A variable that represents an opaque object class (not instance).
     Since UserDefinedClassVariable has some special handling for side effects,
@@ -93,7 +93,7 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
         if isinstance(value, type) and issubclass(value, enum.Enum):
             raise AssertionError(
                 f"Enum class {value} should use UserDefinedClassVariable, "
-                "not OpaqueObjectClassVariable"
+                "not CustomClassVariable"
             )
         super().__init__(**kwargs)
         self.value = value
@@ -108,7 +108,7 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
         return False
 
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
-        # OpaqueObjectClassVariable wraps the CLASS, not an instance.
+        # CustomClassVariable wraps the CLASS, not an instance.
         # Classes are always hashable in CPython (type.__hash__ = object.__hash__).
         return hash(self.value), False
 
@@ -230,7 +230,7 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
                 tx.output.fake_mode, opaque_obj
             )
 
-        return TorchScriptObjectVariable.create(
+        return CustomClassObjectVariable.create(
             opaque_obj,
             fake_script_obj,
             (constant_args, constant_kwargs),
@@ -239,8 +239,8 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
         )
 
 
-class TorchScriptObjectVariable(UserDefinedObjectVariable):
-    _fake_script_object_cache: dict[int, "TorchScriptObjectVariable"] = {}
+class CustomClassObjectVariable(UserDefinedObjectVariable):
+    _fake_script_object_cache: dict[int, "CustomClassObjectVariable"] = {}
 
     @classmethod
     def is_matching_cls(cls, user_cls: type) -> bool:
@@ -259,18 +259,18 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         *,
         tx: "InstructionTranslatorBase | None" = None,
         **options: Any,
-    ) -> "TorchScriptObjectVariable":
+    ) -> "CustomClassObjectVariable":
         if isinstance(value, enum.Enum):
             raise AssertionError(
-                f"Enum {type(value)} should use UserDefinedObjectVariable, not TorchScriptObjectVariable"
+                f"Enum {type(value)} should use UserDefinedObjectVariable, not CustomClassObjectVariable"
             )
-        out = TorchScriptObjectVariable(
+        out = CustomClassObjectVariable(
             proxy, value, ctor_args_kwargs, ctor_arg_sources=ctor_arg_sources, **options
         )
         if isinstance(proxy, torch.fx.Proxy) and proxy.node.op != "placeholder":
             if tx is None:
                 raise AssertionError(
-                    "tx must be provided to TorchScriptObjectVariable.create "
+                    "tx must be provided to CustomClassObjectVariable.create "
                     "when proxy is a real Proxy"
                 )
             tx.output.current_tracer.record_proxyable_vt(out)
@@ -344,7 +344,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         from .constant import ConstantVariable
         from .object_protocol import object_richcompare
 
-        # Try value-based comparison first. TorchScriptObjectVariable wraps
+        # Try value-based comparison first. CustomClassObjectVariable wraps
         # pybind11 objects (e.g. Placement subclasses) whose C++ operator==
         # does value comparison. Falling through to object_richcompare would
         # use identity, returning wrong results (e.g. Shard(0) == Shard(0)
@@ -446,7 +446,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
 
         if self.source is None:
             raise AssertionError(
-                "TorchScriptObjectVariable requires a source for getattro_impl"
+                "CustomClassObjectVariable requires a source for getattro_impl"
             )
         return TorchHigherOrderOperatorVariable.make(
             call_torchbind,
@@ -462,7 +462,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
     ) -> "VariableTracker":
         # Call call_method directly on this class to avoid the __getitem__ →
         # mp_subscript_impl loop in VariableTracker.call_method.
-        return TorchScriptObjectVariable.call_method(self, tx, "__getitem__", [key], {})
+        return CustomClassObjectVariable.call_method(self, tx, "__getitem__", [key], {})
 
     # We only support method calls on script objects. Interpreting the bytecodes
     # should go through getattro_impl then call_function instead of call_method.
