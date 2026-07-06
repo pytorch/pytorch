@@ -328,13 +328,13 @@ Block::Block(
     int device_idx,
     size_t block_size,
     size_t buffer_size,
-    size_t signal_pad_offset,
+    size_t buffer_offset,
     const std::optional<std::string>& group_name)
     : alloc_ref(std::move(alloc_ref)),
       device_idx(device_idx),
       block_size(block_size),
       buffer_size(buffer_size),
-      signal_pad_offset(signal_pad_offset),
+      buffer_offset(buffer_offset),
       default_group_name(std::move(group_name)) {}
 
 namespace {
@@ -346,8 +346,12 @@ void* CUDASymmetricMemoryAllocator::alloc(
     size_t size,
     int device_idx,
     const std::optional<std::string>& group_name) {
-  size_t signal_pad_offset = at::round_up(size, 16UL);
-  size_t block_size = signal_pad_offset + get_signal_pad_size();
+  // Layout: signal pad first at [0, signal_pad_size), then the data buffer at
+  // buffer_offset = signal_pad_size. The signal pad size is already 16-aligned,
+  // so the data buffer is aligned without extra padding; round up the data
+  // size instead.
+  size_t buffer_offset = get_signal_pad_size();
+  size_t block_size = buffer_offset + at::round_up(size, 16UL);
   c10::cuda::CUDAGuard guard(device_idx);
   device_idx = static_cast<int>(guard.current_device().index());
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
@@ -401,25 +405,38 @@ void* CUDASymmetricMemoryAllocator::alloc(
   TORCH_CHECK(
       false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
 #endif
-  void* ptr = nullptr;
-  map_block(&ptr, handle, block_size, device_idx);
+  void* alloc_base = nullptr;
+  map_block(&alloc_base, handle, block_size, device_idx);
 
-  AT_CUDA_CHECK(cudaMemset(ptr, 0, block_size));
+  // Zero the signal pad (at the front, [0, buffer_offset)) to initialize it for
+  // the CAS-based barrier() protocol; the data buffer that follows does not need
+  // zeroing. This matches the NCCL/NVSHMEM backends, which also only clear the
+  // signal pad. Memsetting the whole (granularity-rounded) block instead fails
+  // with "invalid argument" on some devices (e.g. B200 / CUDA 13).
+  AT_CUDA_CHECK(cudaMemset(alloc_base, 0, buffer_offset));
 
-  auto alloc_ref =
-      c10::make_intrusive<AllocationRef>(ptr, handle, block_size, device_idx);
+  // Hand back the data buffer pointer, not alloc_base; the signal pad stays
+  // hidden in front. Returning the data ptr (rather than the alloc ptr) is safe
+  // for free(): the whole block is owned by the AllocationRef held in the Block,
+  // so free() only needs the data ptr to find and drop the Block; the block
+  // (and thus alloc_base) is released internally by ~AllocationRef.
+  void* buffer_ptr = static_cast<char*>(alloc_base) + buffer_offset;
+
+  auto alloc_ref = c10::make_intrusive<AllocationRef>(
+      alloc_base, handle, block_size, device_idx);
   auto block = c10::make_intrusive<Block>(
       std::move(alloc_ref),
       device_idx,
       block_size,
       size,
-      signal_pad_offset,
+      buffer_offset,
       group_name);
   {
     std::unique_lock lock(mutex_);
-    ptr_to_block_.emplace(ptr, std::move(block));
+    // Key by the data pointer we return (that's what free()/rendezvous see).
+    ptr_to_block_.emplace(buffer_ptr, std::move(block));
   }
-  return ptr;
+  return buffer_ptr;
 }
 
 void CUDASymmetricMemoryAllocator::free(void* ptr) {
@@ -441,7 +458,7 @@ struct RendezvousRequest {
   int pid;
   size_t block_size;
   size_t buffer_size;
-  size_t signal_pad_offset;
+  size_t buffer_offset;
   bool has_multicast_support;
   int clique_id;
   char hostname[HOST_NAME_MAX + 1];
@@ -487,7 +504,7 @@ void validate_rendezvous_requests(
   for (int r = 1; r < world_size; ++r) {
     TORCH_CHECK(reqs[r].block_size == reqs[0].block_size);
     TORCH_CHECK(reqs[r].buffer_size == reqs[0].buffer_size);
-    TORCH_CHECK(reqs[r].signal_pad_offset == reqs[0].signal_pad_offset);
+    TORCH_CHECK(reqs[r].buffer_offset == reqs[0].buffer_offset);
   }
 }
 
@@ -657,7 +674,6 @@ check_all:
 namespace {
 template <bool use_fabric_handle>
 c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
-    void* ptr,
     c10::intrusive_ptr<Block> block,
     const std::string& group_name) {
 #if defined(USE_ROCM)
@@ -713,7 +729,7 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
       .pid = getpid(),
       .block_size = block->block_size,
       .buffer_size = block->buffer_size,
-      .signal_pad_offset = block->signal_pad_offset,
+      .buffer_offset = block->buffer_offset,
       .has_multicast_support = device_has_multicast_support(block->device_idx),
       .clique_id = at::cuda::get_fabric_clique_id(block->device_idx)};
 
@@ -747,12 +763,21 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
   std::vector<HandleType> handles(world_size);
   std::vector<void*> buffers(world_size, nullptr);
   std::vector<void*> signal_pads(world_size, nullptr);
+  // Mapped base (== signal pad base) per rank; kept separately so AllocationRef
+  // gets an explicit base to unmap rather than relying on signal_pads[r].
+  std::vector<void*> bases(world_size, nullptr);
 
   for (int r = 0; r < world_size; ++r) {
     if (r == rank) {
+      // Derive both pointers from the allocation base (not the rendezvous
+      // ptr, which may be an interior MemPool pointer): this pai is shared by
+      // every handle on the allocation, and per-handle offsets are applied
+      // separately.
       handles[r] = block->alloc_ref->handle;
-      buffers[r] = ptr;
-      signal_pads[r] = (void*)((uintptr_t)ptr + block->signal_pad_offset);
+      bases[r] = block->alloc_ref->ptr;
+      signal_pads[r] = block->alloc_ref->ptr;
+      buffers[r] =
+          (void*)((uintptr_t)block->alloc_ref->ptr + block->buffer_offset);
       continue;
     }
     // This api imports a GPU memory allocation that was previously exported as
@@ -788,8 +813,13 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
     TORCH_CHECK(
         false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
 #endif
-    map_block(&buffers[r], handles[r], block->block_size, block->device_idx);
-    signal_pads[r] = (void*)((uintptr_t)buffers[r] + block->signal_pad_offset);
+    // map_block returns the mapped base (== signal pad base); the data buffer
+    // follows at buffer_offset.
+    void* base = nullptr;
+    map_block(&base, handles[r], block->block_size, block->device_idx);
+    bases[r] = base;
+    signal_pads[r] = base;
+    buffers[r] = (void*)((uintptr_t)base + block->buffer_offset);
     if constexpr (!use_fabric_handle) {
       close(imported_handles[r]);
     }
@@ -822,16 +852,23 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
       alloc_refs.emplace_back(block->alloc_ref);
       continue;
     }
+    // bases[r] is peer r's mapped base, i.e. the address AllocationRef unmaps.
     alloc_refs.push_back(c10::make_intrusive<AllocationRef>(
-        buffers[r], handles[r], block->block_size, block->device_idx));
+        bases[r], handles[r], block->block_size, block->device_idx));
   }
+
+  // The multicast mapping mirrors the block layout, so the data buffer lives at
+  // buffer_offset within it; get_multicast_ptr() adds the per-handle offset.
+  void* mc_buffer_addr = mc_addr != nullptr
+      ? (void*)((uintptr_t)mc_addr + block->buffer_offset)
+      : nullptr;
 
   auto pai = c10::make_intrusive<CUDAPeerAllocInfo>(
       std::move(alloc_refs),
       std::move(buffers),
       std::move(signal_pads),
       mc_handle,
-      mc_addr,
+      mc_buffer_addr,
       block->buffer_size,
       block->device_idx,
       rank,
@@ -883,8 +920,8 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
     bool use_fabric =
         handle_type_ == Expandable_Segments_Handle_Type::FABRIC_HANDLE;
     // PeerAllocInfo captures this block's rendezvous info
-    auto pai = use_fabric ? make_peer_alloc_info<true>(ptr, block, group_name_)
-                          : make_peer_alloc_info<false>(ptr, block, group_name_);
+    auto pai = use_fabric ? make_peer_alloc_info<true>(block, group_name_)
+                          : make_peer_alloc_info<false>(block, group_name_);
     // Cache it with the group name
     it = block->symm_mems.emplace(group_name_, pai).first;
   }
@@ -927,10 +964,12 @@ c10::intrusive_ptr<Block> CUDASymmetricMemoryAllocator::find_block_covering(void
                                 auto& block = pair.second;
                                 auto& allocation = block->alloc_ref;
                                 auto ptr_int = reinterpret_cast<uintptr_t>(ptr);
-                                auto base_ptr = reinterpret_cast<uintptr_t>(allocation->ptr);
+                                // The data buffer starts buffer_offset bytes
+                                // into the allocation (past the signal pad).
+                                auto data_base = reinterpret_cast<uintptr_t>(allocation->ptr) + block->buffer_offset;
                                 // Modify offset so that it is returned
-                                offset = ptr_int - base_ptr;
-                                return ptr_int >= base_ptr && offset < block->buffer_size; });
+                                offset = ptr_int - data_base;
+                                return ptr_int >= data_base && offset < block->buffer_size; });
 
   if (alloc_it == ptr_to_block_.end()) {
     return nullptr;
