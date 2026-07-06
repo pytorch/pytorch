@@ -2260,6 +2260,118 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @parametrize(
+        "case",
+        (
+            ("multi_chunk_large_group", 256, 128),
+            ("tile_n_group", 256, 256),
+        ),
+        name_fn=lambda case: case[0],
+    )
+    def test_mm_coda_rmsnorm_rewrite_e2e(self, case):
+        _, n, group = case
+        m, k, p = 64, 32, 48
+        eps = 1e-5
+
+        def fn(a, b1, gamma, b2):
+            def first_epilogue(acc):
+                x = acc.float().view(m, -1, group)
+                h2 = (acc.float() * gamma).to(torch.bfloat16)
+                partial_mean_square = x.square().mean(-1)
+                return h2, partial_mean_square
+
+            h2, partial_mean_square = flex_gemm(
+                torch.mm,
+                (a, b1),
+                first_epilogue,
+                kernel_options={"backend": "QUACK"},
+            )
+            rstd = (partial_mean_square.mean(-1, keepdim=True) + eps).rsqrt()
+
+            def second_epilogue(acc):
+                return acc.float() * rstd
+
+            return flex_gemm(
+                torch.mm,
+                (h2, b2),
+                second_epilogue,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = self.makeTensor(m, k)
+        b1 = self.makeTensor(k, n)
+        gamma = self.makeTensor(1, n)
+        b2 = self.makeTensor(n, p)
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b1, gamma, b2
+        )
+
+        acc1 = a @ b1
+        h2 = (acc1.float() * gamma).to(torch.bfloat16)
+        partial_mean_square = acc1.float().view(m, -1, group).square().mean(-1)
+        rstd = (partial_mean_square.mean(-1, keepdim=True) + eps).rsqrt()
+        expected = (h2 @ b2).float() * rstd
+
+        torch.testing.assert_close(actual, expected, atol=1e-2, rtol=1e-2)
+        self.assertEqual(code.count("flex_gemm_epilogue("), 2)
+        self.assertIn("local_reduce=FlexGemmRuntimeLocalReducePlan", code)
+        self.assertIn(
+            f"FlexGemmLocalReduceSpec(kind='compressed_aux', group={group}, axis=1)",
+            code,
+        )
+        self.assertIn("combine_fn=", code)
+        self.assertIn("epilogue_arg_kinds=('row',)", code)
+        self.assertIn("epilogue_arg_kinds=('col',)", code)
+        self.assertNotIn("local_reduce_feeds_main=True", code)
+        self.assertNotIn("local_reduce_op", code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_coda_rmsnorm_rewrite_rejects_group_above_config_limit(self):
+        m, k, n, p = 64, 32, 512, 48
+        group = 512
+        eps = 1e-5
+
+        def fn(a, b1, gamma, b2):
+            def first_epilogue(acc):
+                x = acc.float().view(m, -1, group)
+                h2 = (acc.float() * gamma).to(torch.bfloat16)
+                return h2, x.square().mean(-1)
+
+            h2, partial_mean_square = flex_gemm(
+                torch.mm,
+                (a, b1),
+                first_epilogue,
+                kernel_options={"backend": "QUACK"},
+            )
+            rstd = (partial_mean_square.mean(-1, keepdim=True) + eps).rsqrt()
+
+            def second_epilogue(acc):
+                return acc.float() * rstd
+
+            return flex_gemm(
+                torch.mm,
+                (h2, b2),
+                second_epilogue,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = self.makeTensor(m, k)
+        b1 = self.makeTensor(k, n)
+        gamma = self.makeTensor(1, n)
+        b2 = self.makeTensor(n, p)
+
+        with self.assertRaisesRegex(
+            Exception,
+            "requested group=512, max supported group=256 for axis=1",
+        ):
+            torch.compile(fn, backend="inductor", fullgraph=True)(a, b1, gamma, b2)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_mm_tuple_aux_supports_distinct_output_dtypes(self):
         def epilogue_fn(acc):
             return acc.relu(), acc.float().square() + 2.0

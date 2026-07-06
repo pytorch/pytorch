@@ -9,3 +9,4 @@
 0004-flex-gemm-device-capacity-override.patch
 0005-flex-gemm-tuple-aux-output.patch
 0006-flex-gemm-local-reduce-aux-output.patch
+0007-flex-gemm-large-n-local-reduce.patch
