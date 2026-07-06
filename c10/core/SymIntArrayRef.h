@@ -16,6 +16,9 @@ using SymIntArrayRef = ArrayRef<SymInt>;
 inline bool symIntArrayRefElementIsHeapAllocated(
     c10::SymIntArrayRef ar,
     size_t index) {
+#ifdef C10_MOBILE
+  return false;
+#else
   // SymIntArrayRef can be a view over IntArrayRef storage through
   // fromIntArrayRefSlow. In that case the bytes use SymInt's inline
   // representation, but no SymInt objects are alive, so validation must inspect
@@ -27,6 +30,7 @@ inline bool symIntArrayRefElementIsHeapAllocated(
       reinterpret_cast<const char*>(ar.data()) + index * sizeof(raw_data),
       sizeof(raw_data));
   return !SymInt::check_range(raw_data);
+#endif
 }
 
 [[noreturn]] inline void reportSymIntArrayRefToIntArrayRefError(
