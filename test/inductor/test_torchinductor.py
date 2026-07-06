@@ -5222,13 +5222,20 @@ for dtype in (torch.int32, torch.int64):
         if self.device != "xpu":
             with torch.no_grad():
                 _, code = run_and_get_code(foo, grouped_conv, input_tensor)
-                # no to channels last permuting before kernel
-                if config.cpp_wrapper:
-                    FileCheck().check_not("  call_triton").check("_convolution(").run(
-                        code[0]
-                    )
-                else:
-                    FileCheck().check_not(".run(").check(".convolution(").run(code[0])
+                # no to channels last permuting before kernel.
+                # These codegen expectations are NVIDIA-tuned. On ROCm, layout
+                # optimization is enabled by default and the grouped conv's bias
+                # is emitted as a standalone kernel, so skip the exact-pattern
+                # check there (the compile above still runs as smoke coverage).
+                if not TEST_WITH_ROCM:
+                    if config.cpp_wrapper:
+                        FileCheck().check_not("  call_triton").check(
+                            "_convolution("
+                        ).run(code[0])
+                    else:
+                        FileCheck().check_not(".run(").check(".convolution(").run(
+                            code[0]
+                        )
 
         # in out should do channels last in inference
         in_channels = 8

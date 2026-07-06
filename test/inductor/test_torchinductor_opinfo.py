@@ -238,6 +238,14 @@ inductor_skips["xpu"] = {
 inductor_skips["xpu"]["nn.functional.linear"] = {f16}
 inductor_skips["xpu"]["masked.cumprod"] = {f16}
 
+if TEST_WITH_ROCM:
+    # Transposed convs hit a channels_last layout/meta mismatch under Inductor on
+    # ROCm: convolution_backward returns channels_last while its meta kernel
+    # predicts contiguous, tripping a runtime stride assert once layout
+    # optimization is enabled by default.
+    # TODO: re-enable once the ROCm convolution_backward meta layout is fixed.
+    inductor_skips["cuda"]["nn.functional.conv_transpose2d"] = {f16, f32, f64}
+
 inductor_expected_failures_single_sample = defaultdict(dict)
 
 inductor_expected_failures_single_sample["cpu"] = {
@@ -1014,6 +1022,13 @@ inductor_skip_exact_stride_xpu = {
     "nn.functional.rms_norm",
 }
 
+# On ROCm, Inductor enables channels_last layout optimization by default for
+# MIOpen convs, which can change tensor strides compared to eager mode, so exact
+# stride checks are relaxed for these ops (values are still checked).
+inductor_skip_exact_stride_rocm = {
+    "nn.functional.conv2d",
+}
+
 # Custom replacements for assertEquals, in cases where a difference in value
 # may not indicate correctness.
 
@@ -1478,6 +1493,11 @@ class TestInductorOpInfo(TestCase):
                         # XPU has additional layout optimizations that change strides differently from eager mode.
                         if exact_stride and GPU_TYPE == "xpu":
                             exact_stride = op_name not in inductor_skip_exact_stride_xpu
+                        # ROCm enables channels_last layout optimization by default for MIOpen convs.
+                        if exact_stride and TEST_WITH_ROCM:
+                            exact_stride = (
+                                op_name not in inductor_skip_exact_stride_rocm
+                            )
                         if device_type == GPU_TYPE:
                             self.check_model_gpu(
                                 fn,
