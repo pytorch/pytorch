@@ -267,7 +267,12 @@ def switch_op_dense(index, branches, operands):
     if mode is not None:
         raise AssertionError("Mode should never be enabled for CPU/CUDA key")
     idx: int = int(index.item()) if isinstance(index, torch.Tensor) else int(index)
-    # index has already been clamped to [0, len(branches) - 1] by torch.switch.
+    # torch.switch is the only supported entry point and clamps index into range;
+    # a direct HOP invocation with an out-of-range index is a caller error.
+    if not 0 <= idx < len(branches):
+        raise AssertionError(
+            f"switch index {idx} out of range for {len(branches)} branches"
+        )
     return branches[idx](*operands)
 
 

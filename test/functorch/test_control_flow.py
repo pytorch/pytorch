@@ -1849,6 +1849,36 @@ def forward(self, pred_1, x_1):
         # Clamped above-range index picks branch N-1.
         self.assertEqual(f_huge(x), branch2(x))
 
+    def test_switch_symint_index_clamped(self):
+        def branch0(inp_x):
+            return inp_x.sin()
+
+        def branch1(inp_x):
+            return inp_x.cos()
+
+        def branch2(inp_x):
+            return inp_x.abs()
+
+        branches = (branch0, branch1, branch2)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(idx_carrier, inp_x):
+            idx = idx_carrier.shape[0] - 5
+            return switch(idx, branches, (inp_x,))
+
+        x = torch.randn(4)
+
+        # shape[0] - 5 is negative -> clamps to branch0.
+        idx_carrier = torch.zeros(2)
+        torch._dynamo.mark_dynamic(idx_carrier, 0)
+        self.assertEqual(f(idx_carrier, x), branch0(x))
+
+        # shape[0] - 5 == 3 (above range) -> clamps to branch2.
+        torch._dynamo.reset()
+        idx_carrier = torch.zeros(8)
+        torch._dynamo.mark_dynamic(idx_carrier, 0)
+        self.assertEqual(f(idx_carrier, x), branch2(x))
+
     def test_switch_nn_module_branches(self):
         # Each branch is a different nn.Module whose parameters are
         # captured as free variables. Dynamo must lift the parameters of
