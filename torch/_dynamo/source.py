@@ -1094,6 +1094,32 @@ class GlobalStateSource(Source):
 
 
 @dataclass_with_cached_hash(frozen=True)
+class EnvVarSource(Source):
+    """Ambient source for a process environment variable read (``os.getenv``,
+    ``os.environ.get``, subscript or ``in`` on ``os.environ``). ``value`` is
+    the variable's value observed at trace time (None if unset), which is
+    baked into the graph as a constant and guarded by
+    ``GuardBuilder.ENV_MATCH`` so that a change to the variable at runtime
+    triggers a recompile. Carrying the traced value here (instead of
+    re-reading os.environ when guards are built) keeps the guard in sync with
+    the graph even if the environment mutates during backend compilation, and
+    keeps it correct across guard serialization. The name uses ``__import__``
+    so it stays eval-able in scopes that don't have ``os`` imported (e.g.
+    guard export)."""
+
+    key: str = ""
+    value: str | None = None
+
+    @functools.cached_property
+    def _name_template(self) -> str:
+        return f"__import__('os').environ.get({self.key!r})"
+
+    @property
+    def guard_source(self) -> GuardSource:
+        return GuardSource.GLOBAL
+
+
+@dataclass_with_cached_hash(frozen=True)
 class ImportSource(Source):
     """Points to an imported module - used instead of GlobalSource
     in case the user has overridden the module name in their local namespace"""
