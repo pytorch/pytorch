@@ -204,14 +204,10 @@ def _worker_nvgemm_autotuning_precompile(
     so CuTeDSL compilation is process-isolated (no thread-safety issues).
     Returns (None, elapsed_us) for compatibility with the precompile callback.
     """
+    import os
     import time
 
-    # Share the persistent-worker env/cache handling used by PyCodeCache workers.
-    from torch._inductor.runtime.compile_tasks import (
-        _apply_subprocess_env_and_clear_caches,
-    )
-
-    _apply_subprocess_env_and_clear_caches(extra_env)
+    os.environ.update(extra_env)
 
     start_ns = time.time_ns()
 
