@@ -1386,6 +1386,7 @@ def _is_torch_function_enabled() -> _bool: ...  # THPModule_isEnabledTorchFuncti
 def _is_torch_function_all_disabled() -> (
     _bool
 ): ...  # THPModule_isAllDisabledTorchFunction
+def _peek_should_skip_torch_function() -> _bool: ...  # THPModule_peek_should_skip_torch_function
 def _has_torch_function(
     args: Iterable[Any],
 ) -> _bool: ...  # THPModule_has_torch_function
