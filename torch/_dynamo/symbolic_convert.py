@@ -1258,6 +1258,7 @@ class BytecodeDispatchTableMeta(type):
 
 def pyexception_class_check(val: VariableTracker) -> TypeIs[ExceptionTypes]:
     # Mirror's CPython PyExceptionClass_Check
+    # https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Include/pyerrors.h#L60-L62
     return isinstance(
         val, (variables.BuiltinVariable, UserDefinedExceptionClassVariable)
     )
@@ -1265,6 +1266,7 @@ def pyexception_class_check(val: VariableTracker) -> TypeIs[ExceptionTypes]:
 
 def pyexception_instance_check(val: VariableTracker) -> TypeIs[ExceptionVals]:
     # Mirror's CPython PyExceptionInstance_Check
+    # https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Include/pyerrors.h#L64-L65
     return isinstance(
         val, (variables.ExceptionVariable, UserDefinedExceptionObjectVariable)
     )
@@ -2681,12 +2683,12 @@ class InstructionTranslatorBase(
 
         # bare raise
         if val is None:
-            # reraise
-            val = self.exn_vt_stack.get_topmost_exception()
-            if val is None:
+            # reraise the exception on top of the exception stack
+            if not len(self.exn_vt_stack):
                 exc.raise_observed_exception(
                     RuntimeError, self, args=["No active exception to reraise"]
                 )
+            val = self.exn_vt_stack.get_topmost_exception()
             self.exn_vt_stack.set_raised_exception(val)
             self._raise_observed_exception(val)
 
@@ -2732,18 +2734,8 @@ class InstructionTranslatorBase(
 
     def RAISE_VARARGS(self, inst: Instruction) -> None:
         if inst.arg == 0:
-            if not len(self.exn_vt_stack):
-                exc.raise_observed_exception(
-                    RuntimeError, self, args=["No active exception to reraise"]
-                )
-
-            # re-raise the previous exception. Here CPython refers to the exception
-            # on top of the exception stack
-            if not len(self.exn_vt_stack):
-                raise AssertionError("expected len(self.exn_vt_stack) to be true")
-            val = self.exn_vt_stack.get_topmost_exception()
-            if not pyexception_instance_check(val):
-                raise AssertionError(val)
+            # bare raise; do_raise reraises the exception on top of the stack,
+            # or reports "No active exception to reraise" if the stack is empty
             self.do_raise(None, None)
         elif inst.arg == 1:
             # raise TOS
@@ -2774,7 +2766,7 @@ class InstructionTranslatorBase(
         #   set f_lasti of the current frame.
 
         if sys.version_info >= (3, 11):
-            # RERAISE is currently supported in a narrow case of `raise ... from None`
+            # Re-raise the exception on top of the stack.
             val = self.pop()
             if not pyexception_instance_check(val):
                 raise AssertionError(
