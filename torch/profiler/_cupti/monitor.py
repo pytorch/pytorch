@@ -246,6 +246,7 @@ class CuptiMonitor:
         *,
         buffer_size: int | None = None,
         flush_period_s: float | None = None,
+        use_approx_timestamps: bool = False,
     ) -> None:
         # The monitor is the engine and the multiplexer: it owns the single CUPTI
         # subscription + buffer pool + native decode worker, which demuxes each
@@ -334,13 +335,10 @@ class CuptiMonitor:
         self._chains_gc_ready: list[int] = []
         # Record-timestamp -> unix conversion lives in the clock; the monitor delegates
         # convert_time / now_record_ns to it and calibrates it in start(). Records normally
-        # arrive on the native (realtime) clock; the approx-clock timestamp callback is opt-in
-        # via TORCH_CUPTI_TRY_REGISTER_APPROX_TIMESTAMP_CALLBACK (current libcupti rejects it,
-        # and it needs sole-subscriber mode).
-        self._timestamp_callback_enabled = (
-            os.environ.get("TORCH_CUPTI_TRY_REGISTER_APPROX_TIMESTAMP_CALLBACK", "0")
-            == "1"
-        )
+        # arrive on the native (realtime) clock; pass use_approx_timestamps=True to try to put
+        # them directly on the approx clock via CUPTI's timestamp callback (opt-in,
+        # sole-subscriber only, and current libcupti rejects it).
+        self._timestamp_callback_enabled = use_approx_timestamps
         self._clock = _SynchronizedClock()
         self._timestamp_callback_active = False
 
@@ -616,10 +614,10 @@ class CuptiMonitor:
 
     def _try_register_timestamp_callback(self) -> bool:
         """Best-effort: hand CUPTI the profiler's approx-clock timestamp callback so it
-        stamps activity records on kineto's exact timebase directly. Opt-in via
-        TORCH_CUPTI_TRY_REGISTER_APPROX_TIMESTAMP_CALLBACK (and only as the sole subscriber);
-        returns False -- leaving records on the CLOCK_REALTIME pass-through -- when disabled or
-        when CUPTI rejects it (current libcupti returns CUPTI_ERROR_NOT_COMPATIBLE under the
+        stamps activity records on kineto's exact timebase directly. Opt-in via the
+        use_approx_timestamps monitor arg (and only as the sole subscriber); returns False --
+        leaving records on the CLOCK_REALTIME pass-through -- when disabled or when CUPTI
+        rejects it (current libcupti returns CUPTI_ERROR_NOT_COMPATIBLE under the
         user-defined-record path)."""
         if not self._timestamp_callback_enabled:
             return False
