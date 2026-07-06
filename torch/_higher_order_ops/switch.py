@@ -97,7 +97,7 @@ def wrap_branch_fn_flat(*args, branch_fn, spec_operands):
 
 @exposed_in("torch")
 def switch(
-    index: int | torch.Tensor,
+    index: int | torch.SymInt | torch.Tensor,
     branches: tuple[Callable, ...] | list[Callable],
     operands: tuple | list = (),
 ) -> Any:
@@ -179,8 +179,17 @@ def switch(
     )
 
     # Early shortcut: single-branch switch degenerates to a plain call
-    if len(wrapped_branches) == 1:
+    num_branches = len(wrapped_branches)
+    if num_branches == 1:
         return wrapped_branches[0](*leaves_operands)
+
+    # Clamp out-of-range indices to [0, len(branches) - 1]
+    if isinstance(index, torch.Tensor):
+        index = index.clamp(0, num_branches - 1)
+    elif isinstance(index, torch.SymInt):
+        index = torch.sym_max(0, torch.sym_min(index, num_branches - 1))
+    elif isinstance(index, int):
+        index = min(max(0, index), num_branches - 1)
 
     # Constant index shortcut for eager mode.
     if not torch.compiler.is_dynamo_compiling() and isinstance(index, int):
@@ -194,9 +203,7 @@ def switch(
                 stacklevel=2,
             )
 
-        # Clamp out-of-range indices rather than raising for consistency with compiled behavior.
-        clamped_index = min(max(0, index), len(wrapped_branches) - 1)
-        return wrapped_branches[clamped_index](*leaves_operands)
+        return wrapped_branches[index](*leaves_operands)
 
     # Use _maybe_compile_and_run_fn pattern from scan/associative_scan
     def run_switch(index, wrapped_branches, leaves_operands):
@@ -260,9 +267,8 @@ def switch_op_dense(index, branches, operands):
     if mode is not None:
         raise AssertionError("Mode should never be enabled for CPU/CUDA key")
     idx: int = int(index.item()) if isinstance(index, torch.Tensor) else int(index)
-    # Clamp out-of-range indices rather than raising for consistency with compiled behavior.
-    clamped_idx = min(max(0, idx), len(branches) - 1)
-    return branches[clamped_idx](*operands)
+    # index has already been clamped to [0, len(branches) - 1] by torch.switch.
+    return branches[idx](*operands)
 
 
 @switch_op.py_autograd_impl
