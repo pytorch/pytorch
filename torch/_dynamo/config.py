@@ -357,6 +357,19 @@ skip_no_tensor_aliasing_guards_on_parameters = True
 # the dictionary tag is same across invocation calls.
 skip_tensor_guards_with_matching_dict_tags = True
 
+# Skips guards on func.__defaults__ if the element to be guarded is a constant
+skip_guards_on_constant_func_defaults = True
+
+# Speedup guard execution of nested nn modules by recursively checking for dict
+# tags to avoid full guard execution.
+use_recursive_dict_tags_for_guards = (
+    os.environ.get("TORCHDYNAMO_USE_RECURSIVE_DICT_TAGS_FOR_GUARDS", "0") == "1"
+)
+
+# Maximum number of objects for which we check dict pointers tags. This is
+# useful for regional compilation.
+max_saved_pointers_for_recursive_dict_tags_check = 256
+
 # If True, raises exception if TorchDynamo is called with a context manager
 raise_on_ctx_manager_usage = True
 
