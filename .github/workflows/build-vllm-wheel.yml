@@ -112,9 +112,11 @@ jobs:
 
       - name: Build vLLM wheel
         shell: bash
+        # No SCCACHE_BUCKET/REGION: the compile runs on the remote buildkitd,
+        # which has no AWS creds, so sccache-to-S3 can't authenticate. Omitting
+        # them makes lumen set USE_SCCACHE=0, taking the Dockerfile's ccache path
+        # whose `--mount=type=cache` persists on buildkitd across builds.
         env:
-          SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
-          SCCACHE_REGION: us-east-1
           CUDA_VERSION: ${{ matrix.device == 'cu130' && '13.0' || '13.2' }}
           TORCH_CUDA_ARCH_LIST: '8.0;8.9;9.0;10.0;12.0'
           # Use the manylinux builder as the base; remote buildkit pulls it from
@@ -129,8 +131,9 @@ jobs:
           # `docker buildx build --output type=local`, which runs on the remote
           # buildkit builder set up above.
           (cd .ci/lumen_cli && uv pip install -e .)
-          MAX_JOBS="$(nproc --ignore=10)"
-          export MAX_JOBS
+          # Don't derive MAX_JOBS from nproc here: this orchestrator pod is tiny
+          # (nproc --ignore=10 -> 1). The build runs on the remote buildkitd, so
+          # let lumen apply its default (64).
           python3 -m cli.run build external vllm
 
       - name: Prepare vLLM wheel
