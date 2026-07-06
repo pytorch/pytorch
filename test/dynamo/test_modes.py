@@ -138,6 +138,23 @@ class TorchDispatchModeTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(eager_res, compiled_res)
         self.assertEqual(cnt.frame_count, 0)
 
+    def test_get_current_dispatch_mode_stack_no_graph_break(self):
+        from torch.utils._python_dispatch import _get_current_dispatch_mode_stack
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x):
+            stack = _get_current_dispatch_mode_stack()
+            return x + len(stack)
+
+        x = torch.ones(2, 2)
+        result = fn(x)
+        # Stack is empty during tracing, so len([]) == 0 and result == ones(2,2)
+        self.assertEqual(result, torch.ones(2, 2))
+        # fullgraph=True would have raised if a graph break occurred
+        self.assertEqual(cnt.frame_count, 1)
+
 
 class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
     @classmethod
@@ -791,6 +808,16 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         with torch.device("cpu"):
             torch.compile(mod, fullgraph=True)(x)
 
+    def test_tensor_unflatten_with_default_device(self):
+        def fn(x):
+            return x.unflatten(0, (2, 2))
+
+        x = torch.randn(4)
+        with torch.device("cpu"):
+            self.assertEqual(
+                torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x)
+            )
+
     @unittest.skipIf(not HAS_GPU, "requires GPU and Triton")
     @skipIfXpu(msg="XPU does not support flex attention")
     def test_hop(self):
@@ -929,6 +956,70 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
 
 
 class InvokeSubgraphBackendTests(torch._dynamo.test_case.TestCase):
+    @torch._dynamo.config.patch(
+        trace_autograd_ops=True,
+        inline_single_use_invoke_subgraph=False,
+    )
+    def test_eager_backend_traced_backward_with_compile_region(self):
+        import copy
+
+        from torch._higher_order_ops.invoke_subgraph import mark_compile_region
+
+        @mark_compile_region
+        def block_fwd(x, w1, b1, w2, b2):
+            h = torch.nn.functional.relu(torch.nn.functional.linear(x, w1, b1))
+            return x + torch.nn.functional.linear(h, w2, b2)
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.blocks = torch.nn.ModuleList(
+                    [
+                        torch.nn.Sequential(
+                            torch.nn.Linear(4, 8),
+                            torch.nn.Linear(8, 4),
+                        )
+                        for _ in range(2)
+                    ]
+                )
+
+            def forward(self, x):
+                for blk in self.blocks:
+                    fc1, fc2 = blk[0], blk[1]
+                    x = block_fwd(x, fc1.weight, fc1.bias, fc2.weight, fc2.bias)
+                return x
+
+        torch.manual_seed(0)
+        model = Model()
+        ref_model = copy.deepcopy(model)
+        x = torch.randn(4, 4)
+
+        def run_step(m, inp):
+            loss = m(inp).sum()
+            loss.backward()
+            return loss.detach()
+
+        ref_loss = run_step(ref_model, x.clone())
+
+        def train_step(inp):
+            return run_step(model, inp)
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(train_step, backend=backend, fullgraph=True)
+        loss = compiled(x.clone())
+
+        self.assertEqual(loss, ref_loss)
+        self.assertEqual(len(backend.graphs), 1)
+        invoke_subgraph_nodes = [
+            node
+            for node in backend.graphs[0].graph.nodes
+            if node.op == "call_function"
+            and node.target == torch.ops.higher_order.invoke_subgraph
+        ]
+        self.assertEqual(len(invoke_subgraph_nodes), 2)
+        for param, ref_param in zip(model.parameters(), ref_model.parameters()):
+            self.assertEqual(param.grad, ref_param.grad)
+
     @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
     def test_make_fx_over_compiled_function(self):
         """Test that make_fx can trace over torch.compile'd functions using invoke_subgraph backend.
@@ -1326,8 +1417,8 @@ class outer_fn(torch.nn.Module):
     class repeated_subgraph0(torch.nn.Module):
         def forward(self, arg0_1: "f32[3, 3]", arg1_1: "f32[3, 3]"):
             add: "f32[3, 3]" = torch.ops.aten.add.Tensor(arg0_1, arg1_1)
-            sub: "f32[3, 3]" = torch.ops.aten.sub.Tensor(arg0_1, arg1_1)
-            mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
+            mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg0_1, arg1_1)
+            sub: "f32[3, 3]" = torch.ops.aten.sub.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
             return (add, sub, mul)
 """,
         )
@@ -1442,7 +1533,7 @@ class outer_fn(torch.nn.Module):
         self.assertEqual(
             compile_counter.frame_count,
             1,
-            f"Expected 1 compilation, got {compile_counter.frame_count}",
+            lambda msg: f"{msg}\nExpected 1 compilation, got {compile_counter.frame_count}",
         )
 
     @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
@@ -1538,7 +1629,7 @@ class outer_fn(torch.nn.Module):
         self.assertEqual(
             compile_counter.frame_count,
             1,
-            f"Expected 1 compilation, got {compile_counter.frame_count}",
+            lambda msg: f"{msg}\nExpected 1 compilation, got {compile_counter.frame_count}",
         )
 
     @unittest.skipIf(not HAS_GPU, "requires GPU and Triton")

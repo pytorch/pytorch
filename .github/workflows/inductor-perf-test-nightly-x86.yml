@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: pt2"]
 name: inductor-perf-nightly-x86
 
 on:
@@ -80,9 +81,10 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner_prefix: "mt-"
       build-environment: linux-jammy-py3.10-gcc11-build
       docker-image-name: ci-image:pytorch-linux-jammy-py3-gcc11-inductor-benchmarks
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
           { config: "inductor_huggingface_perf_cpu_x86", shard: 1, num_shards: 3, runner: "linux.24xl.spr-metal" },
@@ -100,6 +102,9 @@ jobs:
         ]}
       selected-test-configs: ${{ inputs.benchmark_configs }}
       build-additional-packages: "vision audio torchao"
+      use-arc: true
+      python-version: "3.10"
+      compiler: gcc11
     secrets: inherit
 
   inductor-test-nightly-freezing:
@@ -117,6 +122,9 @@ jobs:
       disable-monitor: false
       monitor-log-interval: 15
       monitor-data-collect-interval: 4
+      use-arc: true
+      python-version: "3.10"
+      compiler: gcc11
     secrets: inherit
 
   inductor-test:
@@ -134,4 +142,7 @@ jobs:
       disable-monitor: false
       monitor-log-interval: 15
       monitor-data-collect-interval: 4
+      use-arc: true
+      python-version: "3.10"
+      compiler: gcc11
     secrets: inherit
