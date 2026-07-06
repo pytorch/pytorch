@@ -1,7 +1,7 @@
 """
 Update committed CSV files used as reference points by dynamo/inductor CI.
 
-Saves graph breaks and recompile counts as reference columns.
+Saves graph breaks, recompile counts, and eager-fallback counts as reference columns.
 
 Hardcodes a list of job names and artifacts per job, but builds the lookup
 by querying github sha and finding associated github actions workflow ID and CI jobs,
@@ -189,6 +189,10 @@ def download_single_artifact(suite, shard, url_candidates):
                         df["graph_breaks"] = df["graph_breaks"].fillna(0).astype(int)
                         if "recompiles" in df.columns:
                             df["recompiles"] = df["recompiles"].fillna(0).astype(int)
+                        if "fallback_to_eager" in df.columns:
+                            df["fallback_to_eager"] = (
+                                df["fallback_to_eager"].fillna(0).astype(int)
+                            )
                         result[(suite, phase)] = df
                         found = True
                         break
@@ -251,6 +255,8 @@ def write_filtered_csvs(root_path, dataframes):
         columns = ["name", "accuracy", "graph_breaks"]
         if "recompiles" in df.columns:
             columns.append("recompiles")
+        if "fallback_to_eager" in df.columns:
+            columns.append("fallback_to_eager")
         df.to_csv(out_fn, index=False, columns=columns)
         apply_lints(out_fn)
 
