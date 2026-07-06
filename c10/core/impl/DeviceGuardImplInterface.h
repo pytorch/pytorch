@@ -163,8 +163,7 @@ struct C10_API DeviceGuardImplInterface {
   }
 
   /**
-   * Return the range of priority **supported by PyTorch**, the range is [low,
-   * high].
+   * Return the range of priority **supported by PyTorch**.
    */
   virtual std::tuple<int, int> getStreamPriorityRange() const {
     return std::make_tuple(0, 0);
