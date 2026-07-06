@@ -6,6 +6,7 @@ import warnings
 from typing import Any, cast, TYPE_CHECKING
 
 import torch
+import torch.compiler.config
 import torch.distributed as dist
 import torch.distributed.distributed_c10d as c10d
 from torch._utils import _maybe_view_chunk_cat
@@ -240,25 +241,8 @@ def all_gather_single_autograd(
 
     See all_gather_single for more details on usage.
     """
-    group = _resolve_group(group, tag)
-    group_size = c10d._get_group_size_by_name(group)
-
-    tensor = torch.ops._c10d_functional_autograd.all_gather_into_tensor(
-        self, group_size, _group_or_group_name(group)
-    )
-    res = _FromTorchTensor.apply(tensor)
-    if gather_dim != 0:
-        # Check if _maybe_view_chunk_cat can use the view optimization.
-        # If not, it will use torch.cat which needs the data anyway, so
-        # wait early to avoid AsyncCollectiveTensor dispatch overhead.
-        if isinstance(res, AsyncCollectiveTensor):
-            shape = list(res.shape)
-            numel_between = math.prod(shape[1:gather_dim]) if gather_dim > 1 else 1
-            can_use_view = shape[0] == group_size and numel_between == 1
-            if not can_use_view:
-                res = res.wait()
-        res = _maybe_view_chunk_cat(res, group_size, gather_dim)
-    return res
+    # The base all_gather_single now has autograd support, so we can just call it
+    return all_gather_single(self, gather_dim, group, tag)
 
 
 def reduce_scatter_single(
@@ -321,25 +305,8 @@ def reduce_scatter_single_autograd(
 
     See reduce_scatter_single for more details on usage.
     """
-
-    group = _resolve_group(group, tag)
-    group_size = c10d._get_group_size_by_name(group)
-
-    if self.size(scatter_dim) % group_size != 0:
-        raise AssertionError(
-            f"input dimension 0 ({self.size(0)} must be a multiple of group_size {group_size}"
-        )
-    if scatter_dim != 0:
-        self = _chunk_or_narrow_cat(self, group_size, narrow_dim=scatter_dim, cat_dim=0)
-
-    tensor = torch.ops._c10d_functional_autograd.reduce_scatter_tensor(
-        self,
-        reduceOp.lower(),
-        group_size,
-        _group_or_group_name(group),
-    )
-    res = _FromTorchTensor.apply(tensor)
-    return res
+    # The base reduce_scatter_single now has autograd support, so we can just call it
+    return reduce_scatter_single(self, reduceOp, scatter_dim, group, tag)
 
 
 # The deprecated *_tensor aliases warn only outside compile: the
@@ -633,36 +600,8 @@ def all_to_all_single_autograd(
     """
     Same as all_to_all_single but supports autograd.
     """
-    if output_split_sizes is not None:
-        if not all(
-            isinstance(size, (int, torch.SymInt)) for size in output_split_sizes
-        ):
-            raise AssertionError(
-                f"All output_split_sizes must be int or SymInt, got {output_split_sizes}"
-            )
-    if input_split_sizes is not None:
-        if not all(isinstance(size, (int, torch.SymInt)) for size in input_split_sizes):
-            raise AssertionError(
-                f"All input_split_sizes must be int or SymInt, got {input_split_sizes}"
-            )
-
-    group = _resolve_group(group, tag)
-    group_size = c10d._get_group_size_by_name(group)
-    if output_split_sizes is None or input_split_sizes is None:
-        if not (output_split_sizes is None and input_split_sizes is None):
-            raise AssertionError(
-                "output_split_sizes and input_split_sizes must either be "
-                "specified together or both set to None"
-            )
-        output_split_sizes = [self.shape[0] // group_size] * group_size
-        input_split_sizes = output_split_sizes
-    tensor = torch.ops._c10d_functional_autograd.all_to_all_single(  # type: ignore[attr-defined]
-        self,
-        output_split_sizes,
-        input_split_sizes,
-        _group_or_group_name(group),
-    )
-    return _FromTorchTensor.apply(tensor)
+    # The base all_to_all_single now has autograd support, so we can just call it
+    return all_to_all_single(self, output_split_sizes, input_split_sizes, group, tag)
 
 
 # ============================================================================
@@ -901,6 +840,26 @@ def all_to_all_single_setup_context(ctx, inputs, output):
 
 torch.library.register_autograd(
     "_c10d_functional::all_to_all_single",
+    all_to_all_single_backward,
+    setup_context=all_to_all_single_setup_context,
+)
+
+# Backward compatibility: register autograd for _c10d_functional_autograd ops
+# These ops redirect to _c10d_functional but need their own autograd registration
+torch.library.register_autograd(
+    "_c10d_functional_autograd::all_gather_into_tensor",
+    all_gather_into_tensor_backward,
+    setup_context=all_gather_into_tensor_setup_context,
+)
+
+torch.library.register_autograd(
+    "_c10d_functional_autograd::reduce_scatter_tensor",
+    reduce_scatter_tensor_backward,
+    setup_context=reduce_scatter_tensor_setup_context,
+)
+
+torch.library.register_autograd(
+    "_c10d_functional_autograd::all_to_all_single",
     all_to_all_single_backward,
     setup_context=all_to_all_single_setup_context,
 )
@@ -1200,7 +1159,7 @@ class AsyncCollectiveTensor(torch.Tensor):
         # we don't wrap the result as it doesn't need to be waited on.
         out = func(*unwrapped_args, **unwrapped_kwargs)
 
-        # View ops dont require a sync, so we should re-wrap the outputs.
+        # View ops don't require a sync, so we should re-wrap the outputs.
         if is_view_op:
             out = tree_map_only(torch.Tensor, wrap, out)
 
@@ -1317,7 +1276,7 @@ def _resolve_group(
             raise AssertionError(
                 "Only 1D mesh is supported, pass in (DeviceMesh, int) together if mesh > 1D"
             )
-        if dist.config.compile_on_one_rank:
+        if torch.compiler.config.compile_on_one_rank:
             return torch.ops._dtensor.mesh_get_process_group(group, 0)
         return group._dim_group_names[0]
     elif isinstance(group, tuple):
@@ -1328,7 +1287,7 @@ def _resolve_group(
         ):
             dmesh = group[0]
             dim = group[1]
-            if dist.config.compile_on_one_rank:
+            if torch.compiler.config.compile_on_one_rank:
                 return torch.ops._dtensor.mesh_get_process_group(dmesh, dim)
             return dmesh._dim_group_names[dim]
         else:
@@ -1362,24 +1321,6 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> c10d.GroupName:
         return c10d.GroupName(group)
     else:
         return group.group_name
-
-
-class _FromTorchTensor(torch.autograd.Function):
-    """
-    _FromTorchTensor allows autograd to propagate from a normal Tensor to an
-    AsyncCollectiveTensor.
-    """
-
-    @staticmethod
-    def forward(  # type: ignore[override]
-        ctx,  # pyre-ignore[2]: Parameter must be annotated.
-        input: torch.Tensor,
-    ) -> torch.Tensor:
-        return _maybe_wrap_tensor(input)
-
-    @staticmethod
-    def backward(ctx, grad_output: torch.Tensor) -> torch.Tensor:  # type: ignore[override]
-        return grad_output
 
 
 @torch.library.custom_op(
@@ -1671,6 +1612,18 @@ lib_impl.impl("all_to_all_single", _all_to_all_single_meta, "Meta")
 lib_impl.impl("broadcast", _broadcast_meta, "Meta")
 lib_impl.impl("broadcast_", _broadcast__meta, "Meta")
 
+# Backward compatibility: register Meta impls for _c10d_functional_autograd ops
+# These ops redirect to _c10d_functional but need their own Meta registration so
+# torch.compile / FakeTensor mode can dispatch them.
+lib_impl_autograd = torch.library.Library("_c10d_functional_autograd", "IMPL")
+lib_impl_autograd.impl(
+    "all_gather_into_tensor", _all_gather_into_tensor_native_meta, "Meta"
+)
+lib_impl_autograd.impl(
+    "reduce_scatter_tensor", _reduce_scatter_tensor_native_meta, "Meta"
+)
+lib_impl_autograd.impl("all_to_all_single", _all_to_all_single_meta, "Meta")
+
 # Mark these ops as side effectful so that DCE does not remove communication
 # whose result tensors are ignored by user code.
 torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensor.default)  # type: ignore[has-type]
@@ -1861,7 +1814,7 @@ def all_gather_inplace(
 
 def isend_inplace(
     tensor: torch.Tensor,
-    dst: int,
+    dst: int | None = None,
     tag: int = 0,
     group: dist.ProcessGroup | None = None,
     group_dst: int = -1,
@@ -1875,12 +1828,14 @@ def isend_inplace(
             raise ValueError(
                 "Cannot specify both 'dst' and 'group_dst' args as per eager impl"
             )
-        global_dst = c10d.get_global_rank(group, group_dst)
+        local_dst = group_dst
+    elif dst is not None:
+        local_dst = c10d.get_group_rank(group, dst)
     else:
-        global_dst = dst
+        raise ValueError("Must specify either 'dst' or 'group_dst'")
 
     group_name = _resolve_group_name(group)
-    tensor = torch.ops._c10d_functional.isend(tensor, global_dst, tag, group_name)
+    tensor = torch.ops._c10d_functional.isend(tensor, local_dst, tag, group_name)
     if _are_we_tracing():
         return tensor
     return _maybe_wrap_tensor(tensor)
@@ -1888,7 +1843,7 @@ def isend_inplace(
 
 def irecv_inplace(
     tensor: torch.Tensor,
-    src: int,
+    src: int | None = None,
     tag: int = 0,
     group: dist.ProcessGroup | None = None,
     group_src: int = -1,
@@ -1902,11 +1857,13 @@ def irecv_inplace(
             raise ValueError(
                 "Cannot specify both 'src' and 'group_src' args as per eager impl"
             )
-        global_src = c10d.get_global_rank(group, group_src)
+        local_src = group_src
+    elif src is not None:
+        local_src = c10d.get_group_rank(group, src)
     else:
-        global_src = src
+        raise ValueError("Must specify either 'src' or 'group_src'")
     group_name = _resolve_group_name(group)
-    tensor = torch.ops._c10d_functional.irecv(tensor, global_src, tag, group_name)
+    tensor = torch.ops._c10d_functional.irecv(tensor, local_src, tag, group_name)
     return _maybe_wrap_tensor(tensor)
 
 
@@ -1939,7 +1896,7 @@ def _group_or_group_name(
 ) -> dist.ProcessGroup | c10d.GroupName:
     if isinstance(group, str):
         return group
-    elif dist.config.compile_on_one_rank:
+    elif torch.compiler.config.compile_on_one_rank:
         return group
     else:
         return group.group_name

@@ -227,7 +227,7 @@ std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
       std::string op_name = op.at(0).toStringRef();
       std::string op_overload_name = op.at(1).toStringRef();
       if (!op_overload_name.empty()) {
-        op_name.append(".");
+        op_name.push_back('.');
         op_name.append(op_overload_name);
       }
 

@@ -11,14 +11,21 @@ import torch._dynamo.test_case
 import torch.distributed._functional_collectives as _functional_collectives
 import torch.fx as fx
 from torch._C import FileCheck
-from torch._dynamo.utils import counters, same
+from torch._dynamo.utils import counters, detect_fake_mode, same
+from torch._functorch._aot_autograd.utils import make_boxed_func
+from torch._inductor import compile_fx
+from torch._inductor.compile_fx import _recursive_post_grad_passes
+from torch._inductor.fx_utils import get_fake
 from torch._inductor.utils import run_and_get_code, run_and_get_triton_code
+from torch._inductor.virtualized import V
+from torch.nn.attention.flex_attention import flex_attention
 from torch.testing._internal.common_distributed import (
     _dynamo_dist_per_rank_init,
     at_least_x_gpu,
     DynamoDistributedMultiProcTestCase,
     requires_accelerator_dist_backend,
 )
+from torch.utils import _pytree as pytree
 
 
 aten = torch.ops.aten
@@ -450,6 +457,78 @@ graph():
                 correct = func(inputs)
                 self.assertTrue(same(out, correct))
                 self.assertEqual(counters["inductor"]["overlap_scheduling_exposed"], 0)
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_overlap_scheduling_flex_attention_backward(self):
+        def func(q, k, v, bias):
+            ar = _functional_collectives.all_reduce(bias, "sum", "0")
+
+            def score_mod(score, b, h, q_idx, kv_idx):
+                return score + ar[q_idx, kv_idx]
+
+            return flex_attention(q, k, v, score_mod=score_mod).sum()
+
+        patches = {
+            **get_patches(),
+            "aten_distributed_optimizations.enable_overlap_scheduling": True,
+            "aten_distributed_optimizations.insert_overlap_deps": True,
+            "aten_distributed_optimizations.pre_bucketing_fsdp_collectives": False,
+        }
+        compiled_graphs = []
+
+        def materialize_output(gm):
+            output = gm.graph.output_node().args[0]
+            fake_output = pytree.tree_map(lambda x: get_fake(x, gm), output)
+
+            def materialize(x):
+                if isinstance(x, torch.Tensor):
+                    return torch.zeros(tuple(x.shape), device=x.device, dtype=x.dtype)
+                return x
+
+            return pytree.tree_map(materialize, fake_output)
+
+        def compile_fx_inner(gm, example_inputs, *args, **kwargs):
+            fake_mode = detect_fake_mode(example_inputs)
+            if fake_mode is None:
+                raise AssertionError("expected fake mode from example inputs")
+            with V.set_fake_mode(fake_mode):
+                _recursive_post_grad_passes(
+                    gm, is_inference=kwargs.get("is_inference", False)
+                )
+            compiled_graphs.append(gm)
+            output = materialize_output(gm)
+            return make_boxed_func(lambda *args: output)
+
+        backend = functools.partial(
+            compile_fx.compile_fx, inner_compile=compile_fx_inner
+        )
+
+        with _dynamo_dist_per_rank_init(
+            self.rank,
+            self.world_size,
+            self.backend(device_type),
+            fake_pg=not at_least_x_gpu(2),
+        ):
+            q = torch.randn(1, 1, 128, 16, device=device_type, requires_grad=True)
+            k = torch.randn(1, 1, 128, 16, device=device_type, requires_grad=True)
+            v = torch.randn(1, 1, 128, 16, device=device_type, requires_grad=True)
+            bias = torch.randn(128, 128, device=device_type, requires_grad=True)
+
+            with torch._inductor.config.patch(patches):
+                loss = torch.compile(func, backend=backend, fullgraph=True)(
+                    q, k, v, bias
+                )
+                loss.backward()
+
+            self.assertEqual(len(compiled_graphs), 2)
+            self.assertTrue(
+                any("flex_attention_backward" in gm.code for gm in compiled_graphs)
+            )
+            self.assertTrue(any("control_deps" in gm.code for gm in compiled_graphs))
+            self.assertIsNotNone(q.grad)
+            self.assertIsNotNone(k.grad)
+            self.assertIsNotNone(v.grad)
+            self.assertIsNotNone(bias.grad)
 
     @torch._inductor.config.patch(get_patches())
     def test_custom_estimator_for_non_compute_nodes(self):
@@ -1862,6 +1941,274 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(
+        {"aten_distributed_optimizations.bucket_mode": "custom_ops"}
+    )
+    def test_manual_bucketing_ag_convert_inputs_before_consumers(self):
+        module_path_key = "module_path"
+
+        def module_stack_fn(node):
+            module_stack = node.meta.get("custom", {}).get(module_path_key, "")
+            return [(module_stack, torch.nn.Module)]
+
+        def func(a, b, *, ranks):
+            with torch.fx.traceback.annotate({module_path_key: "mod"}):
+                ag1 = _functional_collectives.all_gather_tensor(
+                    a.to(torch.bfloat16), 0, ranks
+                )
+            use_ag1 = ag1.float().sum()
+            late = b + 1.0
+            with torch.fx.traceback.annotate({module_path_key: "mod"}):
+                ag2 = _functional_collectives.all_gather_tensor(
+                    late.to(torch.bfloat16), 0, ranks
+                )
+            return use_ag1 + ag2.float().sum()
+
+        with _dynamo_dist_per_rank_init(
+            self.rank,
+            self.world_size,
+            self.backend(device_type),
+            fake_pg=not at_least_x_gpu(2),
+        ):
+            a = torch.ones(8, 8, dtype=torch.float, device=device_type)
+            b = torch.ones(8, 8, dtype=torch.float, device=device_type) * 2
+            ranks = list(range(self.world_size))
+
+            compiled = torch.compile(functools.partial(func, ranks=ranks))
+            out, aten_graph = run_and_get_manual_aten_graph(
+                compiled,
+                [["mod"]],
+                a,
+                b,
+                custom_module_stack_fn=module_stack_fn,
+            )
+
+            FileCheck().check("_pre_bucket_all_gather").check("wait_tensor").run(
+                str(aten_graph)
+            )
+            self.assertTrue(same(out, func(a, b, ranks=ranks)))
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch(
+        {"aten_distributed_optimizations.bucket_mode": "custom_ops"}
+    )
+    def test_manual_bucketing_ag_late_input_repairs_wait_consumer(self):
+        from torch._inductor.fx_passes.overlap_manual_scheduling import (
+            ManualOverlapPreservingBucketer,
+        )
+        from torch._inductor.fx_passes.overlap_scheduling import CollectiveInfo
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.utils._ordered_set import OrderedSet
+
+        def set_val(node, val):
+            node.meta["val"] = val
+            return node
+
+        with _dynamo_dist_per_rank_init(
+            self.rank,
+            self.world_size,
+            self.backend(device_type),
+            fake_pg=not at_least_x_gpu(2),
+        ):
+            with FakeTensorMode():
+                a_val = torch.empty(8, 8, device=device_type)
+                b_val = torch.empty(8, 8, device=device_type)
+                ag1_val = torch.empty(self.world_size * 8, 8, device=device_type)
+                late_val = torch.empty(8, 8, device=device_type)
+                convert_val = torch.empty(
+                    8, 8, device=device_type, dtype=torch.bfloat16
+                )
+                ag2_val = torch.empty(
+                    self.world_size * 8,
+                    8,
+                    device=device_type,
+                    dtype=torch.bfloat16,
+                )
+                use_ag1_val = torch.empty_like(ag1_val)
+                use_ag1_2_val = torch.empty_like(ag1_val)
+
+            graph = fx.Graph()
+            a = set_val(graph.placeholder("a"), a_val)
+            b = set_val(graph.placeholder("b"), b_val)
+            ag1 = set_val(
+                graph.call_function(
+                    torch.ops._c10d_functional.all_gather_into_tensor.default,
+                    args=(a, self.world_size, "0"),
+                ),
+                ag1_val,
+            )
+            wait1 = set_val(
+                graph.call_function(
+                    torch.ops._c10d_functional.wait_tensor.default,
+                    args=(ag1,),
+                ),
+                ag1_val,
+            )
+            use_ag1 = set_val(
+                graph.call_function(torch.ops.aten.neg.default, args=(wait1,)),
+                use_ag1_val,
+            )
+            use_ag1_2 = set_val(
+                graph.call_function(torch.ops.aten.relu.default, args=(use_ag1,)),
+                use_ag1_2_val,
+            )
+            late = set_val(
+                graph.call_function(torch.ops.aten.add.Tensor, args=(b, 1.0)),
+                late_val,
+            )
+            convert = set_val(
+                graph.call_function(
+                    torch.ops.prims.convert_element_type.default,
+                    args=(late, torch.bfloat16),
+                ),
+                convert_val,
+            )
+            ag2 = set_val(
+                graph.call_function(
+                    torch.ops._c10d_functional.all_gather_into_tensor.default,
+                    args=(convert, self.world_size, "0"),
+                ),
+                ag2_val,
+            )
+            wait2 = set_val(
+                graph.call_function(
+                    torch.ops._c10d_functional.wait_tensor.default,
+                    args=(ag2,),
+                ),
+                ag2_val,
+            )
+            graph.output((use_ag1_2, wait2))
+            gm = fx.GraphModule(torch.nn.Module(), graph)
+            gm.graph.lint()
+
+            bucketer = ManualOverlapPreservingBucketer(
+                gm.graph,
+                {
+                    ag1: CollectiveInfo(ag1, wait1, 0, 0, 0),
+                    ag2: CollectiveInfo(ag2, wait2, 0, 0, 0),
+                },
+                OrderedSet(gm.graph.nodes),
+                bucket_mode="custom_ops",
+            )
+            bucketer._bucket_group([ag1, ag2])
+            gm.graph.lint()
+
+            (
+                FileCheck()
+                .check("add")
+                .check("_pre_bucket_all_gather")
+                .check("wait_tensor")
+                .check("neg")
+                .check("relu")
+                .run(str(gm.graph))
+            )
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch(
+        {"aten_distributed_optimizations.bucket_mode": "custom_ops"}
+    )
+    def test_manual_bucket_insertion_uses_graph_order(self):
+        def func(a, b, *, ranks):
+            ag1 = _functional_collectives.all_gather_tensor(a, 0, ranks)
+            ag2 = _functional_collectives.all_gather_tensor(b, 0, ranks)
+            return ag1[:8, :8].sum() + ag2[:8, :8].sum()
+
+        def reverse_bucket_order(graph, out_li):
+            gm = graph.owning_module
+            from torch._inductor.fx_passes.overlap_manual_scheduling import (
+                ManualOverlapScheduler,
+            )
+
+            scheduler = ManualOverlapScheduler(
+                gm,
+                module_bucket_plans=[],
+                insert_overlap_deps=False,
+            )
+            ag_nodes = [
+                n
+                for n in scheduler.nodes
+                if n.name in ("all_gather_into_tensor", "all_gather_into_tensor_1")
+            ]
+            self.assertEqual(len(ag_nodes), 2)
+            scheduler.bucketer._bucket_group(list(reversed(ag_nodes)))
+            scheduler.graph.lint()
+            out_li.append(scheduler.graph)
+
+        with _dynamo_dist_per_rank_init(
+            self.rank,
+            self.world_size,
+            self.backend(device_type),
+            fake_pg=not at_least_x_gpu(2),
+        ):
+            a = torch.ones(8, 8, dtype=torch.float, device=device_type)
+            b = torch.ones(8, 8, dtype=torch.float, device=device_type) * 2
+            ranks = list(range(self.world_size))
+
+            li = []
+            apply = functools.partial(reverse_bucket_order, out_li=li)
+            with torch._inductor.config.patch(post_grad_custom_post_pass=apply):
+                compiled = torch.compile(functools.partial(func, ranks=ranks))
+                out = compiled(a, b)
+
+            FileCheck().check("_pre_bucket_all_gather").check("wait_tensor").run(
+                str(li[0])
+            )
+            self.assertTrue(same(out, func(a, b, ranks=ranks)))
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch(
+        {"aten_distributed_optimizations.bucket_mode": "custom_ops"}
+    )
+    def test_manual_reduce_scatter_bucket_wait_stays_after_inputs(self):
+        def func(a, b):
+            rs1 = _functional_collectives.reduce_scatter_tensor(a, "sum", 0, "0")
+            b = b + 1
+            rs2 = _functional_collectives.reduce_scatter_tensor(b, "sum", 0, "0")
+            return rs1, rs2
+
+        def bucket_reduce_scatters(graph, out_li):
+            gm = graph.owning_module
+            from torch._inductor.fx_passes.overlap_manual_scheduling import (
+                ManualOverlapScheduler,
+            )
+
+            scheduler = ManualOverlapScheduler(
+                gm,
+                module_bucket_plans=[],
+                insert_overlap_deps=False,
+            )
+            rs_nodes = list(
+                scheduler.graph.find_nodes(
+                    op="call_function",
+                    target=torch.ops._c10d_functional.reduce_scatter_tensor.default,
+                )
+            )
+            self.assertEqual(len(rs_nodes), 2)
+            scheduler.bucketer._bucket_group(rs_nodes)
+            scheduler.graph.lint()
+            out_li.append(scheduler.graph)
+
+        with _dynamo_dist_per_rank_init(
+            self.rank,
+            self.world_size,
+            self.backend(device_type),
+            fake_pg=not at_least_x_gpu(2),
+        ):
+            a = torch.ones(8, 8, dtype=torch.float, device=device_type)
+            b = torch.ones(8, 8, dtype=torch.float, device=device_type) * 2
+
+            li = []
+            apply = functools.partial(bucket_reduce_scatters, out_li=li)
+            with torch._inductor.config.patch(post_grad_custom_post_pass=apply):
+                compiled = torch.compile(func)
+                out = compiled(a, b)
+
+            FileCheck().check("add").check("_pre_bucket_reduce_scatter").check(
+                "wait_tensor"
+            ).run(str(li[0]))
+            self.assertTrue(same(out, func(a, b)))
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch(
         {"aten_distributed_optimizations.bucket_mode": "default"}
     )
     def test_manual_bucketing_ag_with_intermediate_deps(self):
@@ -1965,6 +2312,70 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
             )
 
             correct = func(a, b, c)
+            self.assertTrue(same(out, correct))
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch(
+        {"aten_distributed_optimizations.bucket_mode": "custom_ops"}
+    )
+    def test_manual_bucketing_ag_forward_and_backward(self):
+        """Simulate reshard-after-forward: forward all-gathers and backward
+        all-gathers for the same modules. Verifies graph stays topologically valid after
+        bucketing and overlap reordering with _move_overlap_nodes."""
+        module_path_key = "module_path"
+
+        def module_stack_fn(node):
+            module_stack = node.meta.get("custom", {}).get(module_path_key, "")
+            return [(module_stack, torch.nn.Module)]
+
+        def func(a, b, c, d, *, ranks):
+            # Forward all-gathers (mod1 then mod2)
+            with torch.fx.traceback.annotate({module_path_key: "mod1"}):
+                fwd_ag1 = _functional_collectives.all_gather_tensor(a, 0, ranks)
+            with torch.fx.traceback.annotate({module_path_key: "mod2"}):
+                fwd_ag2 = _functional_collectives.all_gather_tensor(b, 0, ranks)
+
+            # Forward compute
+            mm1 = torch.matmul(fwd_ag1[:8, :8], fwd_ag2[:8, :8])
+
+            # Backward all-gathers (mod2 then mod1, reverse order)
+            with torch.fx.traceback.annotate({module_path_key: "mod2"}):
+                bwd_ag2 = _functional_collectives.all_gather_tensor(c, 0, ranks)
+            with torch.fx.traceback.annotate({module_path_key: "mod1"}):
+                bwd_ag1 = _functional_collectives.all_gather_tensor(d, 0, ranks)
+
+            # Backward compute
+            mm2 = torch.matmul(bwd_ag2[:8, :8], bwd_ag1[:8, :8])
+
+            return mm1.sum() + mm2.sum()
+
+        with _dynamo_dist_per_rank_init(
+            self.rank,
+            self.world_size,
+            self.backend(device_type),
+            fake_pg=not at_least_x_gpu(2),
+        ):
+            a = torch.ones(8, 8, dtype=torch.float, device=device_type)
+            b = torch.ones(8, 8, dtype=torch.float, device=device_type) * 2
+            c = torch.ones(8, 8, dtype=torch.float, device=device_type) * 3
+            d = torch.ones(8, 8, dtype=torch.float, device=device_type) * 4
+            ranks = list(range(self.world_size))
+
+            func_c = functools.partial(func, ranks=ranks)
+            compiled = torch.compile(func_c)
+            out, aten_graph = run_and_get_manual_aten_graph(
+                compiled,
+                [["mod1", "mod2"]],
+                a,
+                b,
+                c,
+                d,
+                custom_module_stack_fn=module_stack_fn,
+            )
+
+            aten_graph.lint()
+
+            correct = func(a, b, c, d, ranks=ranks)
             self.assertTrue(same(out, correct))
 
 

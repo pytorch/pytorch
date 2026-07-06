@@ -355,6 +355,23 @@ TORCH_META_FUNC2(norm, ScalarOpt_dim_dtype)
 
 TORCH_META_FUNC(aminmax)
 (const Tensor& self, std::optional<int64_t> dim_opt, bool keepdim) {
+  const auto& min = maybe_get_output(0);
+  const auto& max = maybe_get_output(1);
+  TORCH_CHECK(
+      !min.defined() || self.dtype() == min.dtype(),
+      "Expected out tensor to have dtype ",
+      self.dtype(),
+      ", but got ",
+      min.dtype(),
+      " instead");
+  TORCH_CHECK(
+      !max.defined() || self.dtype() == max.dtype(),
+      "Expected out tensor to have dtype ",
+      self.dtype(),
+      ", but got ",
+      max.dtype(),
+      " instead");
+
   DimVector shape;
   if (dim_opt.has_value()) {
     auto dim = maybe_wrap_dim(dim_opt.value(), self.ndimension());
@@ -832,6 +849,8 @@ std::tuple<Tensor&, Tensor&> cummax_out(const Tensor& self, int64_t dim, Tensor&
   check_scalar_type_device_layout_equal(indices, at::empty({0}, self.options().dtype(at::kLong)));
   if (self.dim() == 0) {
     at::native::zero_numel_check_dims(self, dim, "cummax()");
+  } else {
+    dim = maybe_wrap_dim(dim, self.dim());
   }
 
   {
@@ -841,7 +860,6 @@ std::tuple<Tensor&, Tensor&> cummax_out(const Tensor& self, int64_t dim, Tensor&
       values.fill_(self);
       indices.fill_(0);
     } else if(self.numel() != 0) {
-      dim = maybe_wrap_dim(dim, self.dim());
       at::_cummax_helper(self, values, indices, dim);
     }
   }
@@ -868,6 +886,8 @@ std::tuple<Tensor&, Tensor&> cummin_out(const Tensor& self, int64_t dim, Tensor&
   check_scalar_type_device_layout_equal(indices, at::empty({0}, self.options().dtype(at::kLong)));
   if (self.dim() == 0) {
     at::native::zero_numel_check_dims(self, dim, "cummin()");
+  } else {
+    dim = maybe_wrap_dim(dim, self.dim());
   }
 
   {
@@ -877,7 +897,6 @@ std::tuple<Tensor&, Tensor&> cummin_out(const Tensor& self, int64_t dim, Tensor&
       values.fill_(self);
       indices.fill_(0);
     } else if(self.numel() != 0) {
-      dim = maybe_wrap_dim(dim, self.dim());
       at::_cummin_helper(self, values, indices, dim);
     }
   }
