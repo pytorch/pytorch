@@ -416,8 +416,8 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
         dt = DateHash(2024, 1, 1)
         self._assert_hash_equals(dt)
 
-    def test_hash_allow_c_hash_api(self):
-        """allow_c_hash registers a C extension type's hash as safe."""
+    def test_hash_allow_c_slot_api(self):
+        """allow_c_slot registers a C extension type's hash as safe."""
         import sqlite3
 
         from torch._dynamo.exc import Unsupported
@@ -437,7 +437,7 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.reset()
 
         # After registration: no graph break
-        torch._dynamo.allow_c_hash(sqlite3.Row)
+        torch._dynamo.allow_c_slot(sqlite3.Row)
         self._assert_hash_equals(row)
 
     def test_hash_non_constant_getattr_graph_breaks(self):
@@ -641,7 +641,7 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
 
     def test_hash_opaque_value_type(self):
         """OpaqueObjectClassVariable: hash of registered opaque value type."""
-        from torch._library.opaque_object import register_opaque_type
+        from torch._library.opaque_object import register_custom_class
 
         class _HashTestOpaque:
             def __init__(self, x):
@@ -656,7 +656,7 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
             def __fx_repr__(self):
                 return (f"_HashTestOpaque({self.x})", {})
 
-        register_opaque_type(_HashTestOpaque, typ="value")
+        register_custom_class(_HashTestOpaque, typ="constant")
         self._assert_hash_equals(_HashTestOpaque(42))
 
     # --- Dunder __hash__ and consistency ---

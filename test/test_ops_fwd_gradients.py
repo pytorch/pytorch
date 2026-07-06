@@ -14,7 +14,6 @@ from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
     IS_MACOS,
     run_tests,
-    skipIfRocm,
     skipIfTorchInductor,
     TestCase,
     TestGradients,
@@ -80,8 +79,6 @@ class TestFwdGradients(TestGradients):
             with self.assertRaisesRegex(NotImplementedError, err_msg, msg=hint_msg):
                 call_grad_test_helper()
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/164235")
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/164194")
     @_gradcheck_ops(op_db)
     @skipif(
         platform.machine() == "s390x",

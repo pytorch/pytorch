@@ -1164,14 +1164,15 @@ class SequentialLR(LRScheduler):
         # "Undo" the step performed by other schedulers
         self.recursive_undo()
 
-        # Perform the initial step for only the first scheduler
-        self._schedulers[0]._initial_step()
+        # Perform the initial step for only the scheduler meant to run at step 0.
+        idx = bisect_right(self._milestones, 0)
+        self._schedulers[idx]._initial_step()
 
-        self._last_lr = schedulers[0].get_last_lr()
+        self._last_lr = schedulers[idx].get_last_lr()
 
     def recursive_undo(self, sched=None) -> None:
         """
-        Recursively undo any step performed by the initialisation of
+        Recursively undo any step performed by the initialization of
         schedulers.
         """
         scheds = self if sched is None else sched

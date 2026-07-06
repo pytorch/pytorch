@@ -152,11 +152,6 @@ struct TORCH_API Node : c10::intrusive_ptr_target {
   /// Evaluates the function on the given inputs and returns the result of the
   /// function call.
   variable_list operator()(variable_list&& inputs) {
-    // In the first iteration of named tensors, autograd ignores names and
-    // operates on unnamed tensors. In the long term, autograd should
-    // probably operate with names.
-    at::NoNamesGuard no_names_guard;
-
 #ifdef USE_ROCM
     // Keep track of backward pass for rocblas.
     at::ROCmBackwardPassGuard in_backward;
