@@ -539,12 +539,7 @@ graph():
 
         inputs = (torch.arange(10), torch.tensor(2))
 
-        # See https://github.com/pytorch/pytorch/issues/154574
-        # # Without transforming the unbacked int expression, we can't export.
-        # with self.assertRaisesRegex(
-        #     RuntimeError, escape("Could not guard on data-dependent expression")
-        # ):
-        #     export(Module(identity), inputs, strict=True)
+        export(Module(identity), inputs, strict=True)
 
         # It works if we transform the whole unbacked int expression into
         # an unbacked int.
@@ -582,6 +577,71 @@ class InputModuleWithNestedSubclass(torch.nn.Module):
         return x + a
 
 
+class _LenTensorPytreeCache(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.key_cache: list[torch.Tensor] = []
+        self.value_cache: list[torch.Tensor] = []
+
+    def update(self, key_states: torch.Tensor, value_states: torch.Tensor) -> None:
+        self.key_cache.append(key_states)
+        self.value_cache.append(value_states)
+
+    def get_seq_length(self) -> int:
+        if len(self.key_cache) == 0 or len(self.key_cache[0]) == 0:
+            return 0
+        return self.key_cache[0].shape[-2]
+
+
+def _flatten_len_tensor_pytree_cache(cache):
+    return [cache.key_cache, cache.value_cache], [
+        "key_cache",
+        "value_cache",
+    ]
+
+
+def _flatten_with_keys_len_tensor_pytree_cache(cache):
+    values, context = _flatten_len_tensor_pytree_cache(cache)
+    return [(pytree.MappingKey(k), v) for k, v in zip(context, values)], context
+
+
+def _unflatten_len_tensor_pytree_cache(values, context):
+    cache = _LenTensorPytreeCache()
+    for k, v in zip(context, values):
+        setattr(cache, k, v)
+    return cache
+
+
+def _flatten_spec_len_tensor_pytree_cache(cache, _):
+    return [cache.key_cache, cache.value_cache]
+
+
+class _LenTensorPytreeModule(torch.nn.Module):
+    def forward(self, x, cache):
+        key = torch.cat(cache.key_cache, dim=1)
+        value = torch.cat(cache.value_cache, dim=1)
+        seq_length = cache.get_seq_length()
+        zeros = torch.zeros(
+            (
+                len(cache.key_cache[0]),
+                cache.key_cache[0].shape[1],
+                seq_length,
+                cache.key_cache[0].shape[-1],
+            )
+        )
+        return x + (key + value + zeros).sum(dim=2, keepdim=True)
+
+
+def _make_len_tensor_pytree_inputs(batch, seq_length):
+    x = torch.randn(batch, 8, 7, 1)
+    cache = _LenTensorPytreeCache()
+    cache.update(
+        torch.ones(batch, 8, seq_length, 6),
+        torch.ones(batch, 8, seq_length, 6) * 2,
+    )
+    return x, cache
+
+
 @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestExport(TestCase):
@@ -594,6 +654,27 @@ class TestExport(TestCase):
         # self.assertEqual(
         #     exported_program.module()(*args, **reversed_kwargs), f(*args, **reversed_kwargs)
         # )
+
+    def test_guards_fn_recovers_from_unparse_recursion_error(self):
+        # Regression test: guards-fn codegen pretty-prints each guard for the
+        # assert error message via ast.unparse(ast.parse(...)), which recurses
+        # once per AST node. A deeply-nested guard (e.g. a sum over thousands of
+        # symbolic sizes) overflowed the recursion limit there, crashing export
+        # even though the pretty-printing is cosmetic and the executed guard
+        # does not depend on it. Codegen must fall back to the raw guard string
+        # instead of propagating the error.
+        #
+        # We inject the overflow via a mocked ast.unparse rather than building a
+        # genuinely deep expression: the test target is ASAN-instrumented, where
+        # deep ast.parse/compile recursion can abort the process before the
+        # pure-Python RecursionError is reached.
+        from torch.export._unlift import _convert_guards_code_to_fn
+
+        guard = "args[0] == 0"
+        with patch("ast.unparse", side_effect=RecursionError):
+            guards_fn = _convert_guards_code_to_fn([guard], [])
+
+        self.assertIsNotNone(guards_fn)
 
     def _check_dynamic_shapes_specs_and_shapes(
         self,
@@ -791,6 +872,40 @@ class TestExport(TestCase):
                 strict=False,
             )
         self.assertNotIn("Expected a value of type 'Optional[int]'", str(cm.exception))
+
+    def test_non_strict_export_len_tensor_pytree_nn_module_input(self):
+        pytree._private_register_pytree_node(
+            _LenTensorPytreeCache,
+            _flatten_len_tensor_pytree_cache,
+            _unflatten_len_tensor_pytree_cache,
+            serialized_type_name="test.export.test_export._LenTensorPytreeCache",
+            flatten_with_keys_fn=_flatten_with_keys_len_tensor_pytree_cache,
+        )
+        torch.fx._pytree.register_pytree_flatten_spec(
+            _LenTensorPytreeCache, _flatten_spec_len_tensor_pytree_cache
+        )
+        try:
+            x, cache = _make_len_tensor_pytree_inputs(3, 5)
+            batch = Dim("batch", min=1, max=1024)
+            seq_length = Dim("seq_length", min=1, max=1024)
+            with torch.serialization.safe_globals([_LenTensorPytreeCache]):
+                ep = export(
+                    _LenTensorPytreeModule(),
+                    (x, cache),
+                    dynamic_shapes=(
+                        {0: batch},
+                        [[{0: batch, 2: seq_length}], [{0: batch, 2: seq_length}]],
+                    ),
+                    strict=False,
+                )
+
+            x2, cache2 = _make_len_tensor_pytree_inputs(4, 6)
+            self.assertEqual(
+                ep.module()(x2, cache2), _LenTensorPytreeModule()(x2, cache2)
+            )
+        finally:
+            pytree._deregister_pytree_node(_LenTensorPytreeCache)
+            torch.fx._pytree._deregister_pytree_flatten_spec(_LenTensorPytreeCache)
 
     @skipIfCrossRef  # CrossRefMode interferes with functorch ops
     @skipIfTorchDynamo("export inside dynamo is not supported")
@@ -1315,7 +1430,8 @@ def forward(self, x):
     _remove_batch_dim_1 = torch._functorch.predispatch._remove_batch_dim(_remove_batch_dim, 3, 128, 0);  _remove_batch_dim = None
     _vmap_decrement_nesting_1 = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting_1 = None
     _remove_batch_dim_2 = torch._functorch.predispatch._remove_batch_dim(_remove_batch_dim_1, 2, 1, 0)
-    expand = torch.ops.aten.expand.default(_remove_batch_dim_1, [1, 128, 128]);  _remove_batch_dim_1 = expand = None
+    unsqueeze = torch.ops.aten.unsqueeze.default(_remove_batch_dim_1, 0);  _remove_batch_dim_1 = None
+    expand = torch.ops.aten.expand.default(unsqueeze, [1, 128, 128]);  unsqueeze = expand = None
     _vmap_decrement_nesting_2 = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting_2 = None
     _remove_batch_dim_3 = torch._functorch.predispatch._remove_batch_dim(_remove_batch_dim_2, 1, 2, 0);  _remove_batch_dim_2 = None
     _vmap_decrement_nesting_3 = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting_3 = None
@@ -1357,13 +1473,13 @@ def forward(self, x):
     _add_batch_dim_7 = torch._functorch.predispatch._add_batch_dim(_add_batch_dim_5, 0, 2);  _add_batch_dim_5 = None
     new_zeros = torch.ops.aten.new_zeros.default(_add_batch_dim_7, [1, 2], dtype = torch.int32, pin_memory = False)
     arange_4 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='cpu'), pin_memory = False)
-    unsqueeze = torch.ops.aten.unsqueeze.default(arange_4, -1);  arange_4 = None
+    unsqueeze_1 = torch.ops.aten.unsqueeze.default(arange_4, -1);  arange_4 = None
     arange_5 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='cpu'), pin_memory = False)
-    unsqueeze_1 = torch.ops.aten.unsqueeze.default(_add_batch_dim_6, -1);  _add_batch_dim_6 = None
-    lt_1 = torch.ops.aten.lt.Tensor(arange_5, unsqueeze_1);  arange_5 = unsqueeze_1 = None
+    unsqueeze_2 = torch.ops.aten.unsqueeze.default(_add_batch_dim_6, -1);  _add_batch_dim_6 = None
+    lt_1 = torch.ops.aten.lt.Tensor(arange_5, unsqueeze_2);  arange_5 = unsqueeze_2 = None
     where = torch.ops.aten.where.ScalarOther(lt_1, _add_batch_dim_7, 1);  lt_1 = _add_batch_dim_7 = None
     new_ones = torch.ops.aten.new_ones.default(new_zeros, [], pin_memory = False)
-    index_put_ = torch.ops.aten.index_put_.default(new_zeros, [unsqueeze, where], new_ones);  new_zeros = unsqueeze = where = new_ones = None
+    index_put_ = torch.ops.aten.index_put_.default(new_zeros, [unsqueeze_1, where], new_ones);  new_zeros = unsqueeze_1 = where = new_ones = None
     slice_1 = torch.ops.aten.slice.Tensor(index_put_, 1, 0, 1);  index_put_ = None
     _remove_batch_dim_4 = torch._functorch.predispatch._remove_batch_dim(slice_1, 2, 1, 0);  slice_1 = None
     _vmap_decrement_nesting_4 = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting_4 = None
@@ -1388,13 +1504,13 @@ def forward(self, x):
     _add_batch_dim_11 = torch._functorch.predispatch._add_batch_dim(_add_batch_dim_9, 0, 2);  _add_batch_dim_9 = None
     new_zeros_1 = torch.ops.aten.new_zeros.default(_add_batch_dim_11, [1, 2], dtype = torch.int32, pin_memory = False)
     arange_6 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='cpu'), pin_memory = False)
-    unsqueeze_2 = torch.ops.aten.unsqueeze.default(arange_6, -1);  arange_6 = None
+    unsqueeze_3 = torch.ops.aten.unsqueeze.default(arange_6, -1);  arange_6 = None
     arange_7 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='cpu'), pin_memory = False)
-    unsqueeze_3 = torch.ops.aten.unsqueeze.default(_add_batch_dim_10, -1);  _add_batch_dim_10 = None
-    lt_2 = torch.ops.aten.lt.Tensor(arange_7, unsqueeze_3);  arange_7 = unsqueeze_3 = None
+    unsqueeze_4 = torch.ops.aten.unsqueeze.default(_add_batch_dim_10, -1);  _add_batch_dim_10 = None
+    lt_2 = torch.ops.aten.lt.Tensor(arange_7, unsqueeze_4);  arange_7 = unsqueeze_4 = None
     where_1 = torch.ops.aten.where.ScalarOther(lt_2, _add_batch_dim_11, 1);  lt_2 = _add_batch_dim_11 = None
     new_ones_1 = torch.ops.aten.new_ones.default(new_zeros_1, [], pin_memory = False)
-    index_put__1 = torch.ops.aten.index_put_.default(new_zeros_1, [unsqueeze_2, where_1], new_ones_1);  new_zeros_1 = unsqueeze_2 = where_1 = new_ones_1 = None
+    index_put__1 = torch.ops.aten.index_put_.default(new_zeros_1, [unsqueeze_3, where_1], new_ones_1);  new_zeros_1 = unsqueeze_3 = where_1 = new_ones_1 = None
     slice_2 = torch.ops.aten.slice.Tensor(index_put__1, 1, 0, 1);  index_put__1 = None
     _remove_batch_dim_6 = torch._functorch.predispatch._remove_batch_dim(slice_2, 2, 1, 0);  slice_2 = None
     _vmap_decrement_nesting_6 = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting_6 = None
@@ -1472,6 +1588,23 @@ graph():
 
         inp = torch.randint(0, 8, (5,), dtype=torch.int64)
         self.assertTrue(torch.allclose(ep.module()(inp), M()(inp)))
+
+    def test_export_allows_aten_hardtanh_with_inverted_bounds(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aten.hardtanh(x, min_val=2, max_val=0)
+
+        model = M()
+        x = torch.randn(3)
+        ep = export(model, (x,), strict=True)
+        self.assertEqual(ep.module()(x), model(x))
+        self.assertTrue(
+            any(
+                node.op == "call_function"
+                and node.target == torch.ops.aten.hardtanh.default
+                for node in ep.graph_module.graph.nodes
+            )
+        )
 
     def test_symint_output(self):
         class Foo(torch.nn.Module):
@@ -2122,9 +2255,15 @@ graph():
 
         f = Basic()
         args = (torch.randn(1, 3),)
-        # strict-mode will error out because foo is registered as parameter
-        # in dynamo (a behavior that's different from eager). We decided to
-        # follow eager behavior.
+        # foo is registered as a parameter in Dynamo, but not in eager.
+        # Follow eager behavior and treat it as a lifted tensor constant.
+        ep = export(f, args, strict=True)
+        gm = ep.module()
+        self.assertEqual(len(ep.graph_signature.lifted_tensor_constants), 1)
+        self.assertEqual(len(ep.graph_signature.parameters), 0)
+        self.assertEqual(len(list(gm.named_parameters())), 0)
+        self.assertEqual(gm(*args), f(*args))
+
         ep = export(f, args, strict=False)
         gm = ep.module()
         self.assertEqual(len(ep.graph_signature.lifted_tensor_constants), 1)
@@ -2142,6 +2281,46 @@ graph():
     %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %lifted_tensor_0), kwargs = {})
     return (add,)""",
         )
+
+    def test_strict_export_unregistered_module_list_parameters(self):
+        class A(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.nn.Parameter(torch.ones(3, 3))
+
+            def forward(self, x):
+                return x + self.a
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.models = [A(), A()]
+
+            def forward(self, x):
+                for m in self.models:
+                    x = m(x)
+                return x
+
+        f = M()
+        args = (torch.ones(3, 3),)
+        ep = export(f, args, strict=True)
+        gm = ep.module()
+
+        self.assertEqual(
+            [spec.kind for spec in ep.graph_signature.input_specs],
+            [
+                InputKind.CONSTANT_TENSOR,
+                InputKind.CONSTANT_TENSOR,
+                InputKind.USER_INPUT,
+            ],
+        )
+        self.assertEqual(len(ep.graph_signature.lifted_tensor_constants), 2)
+        self.assertEqual(len(ep.graph_signature.parameters), 0)
+        self.assertEqual(len(ep.state_dict), 0)
+        self.assertEqual(len(list(gm.named_parameters())), 0)
+        for constant in ep.constants.values():
+            self.assertFalse(isinstance(constant, torch.nn.Parameter))
+        self.assertEqual(gm(*args), f(*args))
 
     def test_int_shape_specialization(self):
         class M(torch.nn.Module):
@@ -2547,6 +2726,26 @@ graph():
         self.assertEqual(exp_out, ep_decomposed.module()(x, y, out_copy2))
         # For non-functional graph module, out_copy is not mutated
         self.assertEqual(out_copy2, out_copy3)
+
+    @requires_cuda_and_triton
+    def test_export_raw_triton_kernel_non_strict_error(self):
+        from torch.testing._internal.triton_utils import add_kernel
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                out = torch.empty_like(x)
+                add_kernel[(1,)](x, y, out, x.numel(), BLOCK_SIZE=16)
+                return out
+
+        args = (
+            torch.randn(3, device="cuda"),
+            torch.randn(3, device="cuda"),
+        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Raw Triton kernel calls are not supported by non-strict torch.export",
+        ):
+            export(M(), args, strict=False)
 
     def test_masked_select_dynamic(self):
         class M(torch.nn.Module):
@@ -7247,12 +7446,8 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         y2 = torch.arange(9).reshape((3, 3))
         with self.assertRaisesRegex(
             AssertionError,
-            (
-                escape("Guard failed: max(x.size()[1], y.size()[1]) == x.size()[1]")
-                if is_retracebility_test(self._testMethodName)
-                else escape(
-                    "Guard failed: max(1, x.size()[1], y.size()[1]) == x.size()[1]"
-                )
+            escape(
+                "Guard failed: torch.sym_max(1, torch.sym_max(x.size()[1], y.size()[1])) == x.size()[1]"
             ),
         ):
             # TODO: this should not error?
@@ -11064,6 +11259,33 @@ def forward(self, b_a_buffer, x):
         self.assertTrue(torch.allclose(core_aten_ep.module()(*inp), m(*inp)))
         self.assertEqual(id(state_dict), id(ep.state_dict))
 
+    def test_export_decomps_linalg_vector_norm(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.linalg.vector_norm(x, ord=2, dim=1, keepdim=True)
+
+        inp = (torch.randn(2, 3),)
+        m = M()
+        ep = export(m, inp)
+        self.assertTrue(
+            any(
+                node.target == torch.ops.aten.linalg_vector_norm.default
+                for node in ep.graph.nodes
+            )
+        )
+
+        core_aten_ep = ep.run_decompositions()
+        self.assertFalse(
+            any(
+                node.target == torch.ops.aten.linalg_vector_norm.default
+                for node in core_aten_ep.graph.nodes
+            )
+        )
+        FileCheck().check("torch.ops.aten.pow.Tensor_Scalar").check(
+            "torch.ops.aten.sum.dim_IntList"
+        ).run(core_aten_ep.graph_module.code)
+        self.assertEqual(core_aten_ep.module()(*inp), m(*inp))
+
     @unittest.skipIf(IS_FBCODE, "We can't customize decomp in fbcode")
     def test_export_decomp_torture_case_1(self):
         class M(torch.nn.Module):
@@ -14440,7 +14662,7 @@ graph():
     @testing.expectedFailureSerDer  # register_constant needs to handle serialization
     def test_opaque_obj(self):
         @dataclass(frozen=True)
-        class MyInput(torch._opaque_base.OpaqueBase):
+        class MyInput(torch._custom_class_base.CustomClassBase):
             int_1: int
             int_2: int
 
@@ -14457,7 +14679,7 @@ graph():
             def forward(self, x, f):
                 return x + f.int_1 + f.int_2
 
-        torch._library.opaque_object.register_opaque_type(MyInput, typ="value")
+        torch._library.opaque_object.register_custom_class(MyInput, typ="constant")
         self.addCleanup(
             lambda name=torch._library.opaque_object.get_opaque_type_name(MyInput): (
                 torch._C._unregister_opaque_type(name),
@@ -19131,6 +19353,22 @@ def forward(self, x, y):
             ignore_empty_lines=True,
         )
 
+    def test_scalar_tensor_index(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, x, y):
+                return x[y]
+
+        x = torch.randn((3, 4))
+        for dtype in (torch.int8, torch.int16, torch.int32, torch.int64):
+            with self.subTest(dtype=dtype):
+                y = torch.tensor(1, dtype=dtype)
+                traced = export(MyModel(), (x, y))
+                y2 = torch.tensor(2, dtype=dtype)
+                self.assertEqual(
+                    traced.module()(x, y2),
+                    MyModel()(x, y2),
+                )
+
     def test_is_fx_tracing(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
@@ -19206,6 +19444,20 @@ def forward(self, x, y):
             export_result = exported.module()(boundaries)
             self.assertEqual(eager_result, export_result)
             self.assertEqual(export_result.dtype, expected_dtype)
+
+    def test_constant_pad_nd_run_decompositions(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/167068
+        # constant_pad_nd's ref decomposition must be fully functional so that
+        # run_decompositions (used by ONNX dynamo export) doesn't trip
+        # assert_functional_graph.
+        class Pad(torch.nn.Module):
+            def forward(self, x):
+                return F.pad(x, (0, 0, 0, 240, 0, 0))
+
+        ep = export(Pad(), (torch.randn(1, 16, 64),), strict=False)
+        decomposed = ep.run_decompositions(decomposition_table)
+        result = decomposed.module()(torch.randn(1, 16, 64))
+        self.assertEqual(result.shape, (1, 256, 64))
 
 
 if __name__ == "__main__":
