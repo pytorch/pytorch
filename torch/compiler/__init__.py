@@ -312,12 +312,18 @@ def assume_constant_result(fn=None, *, specialize_args=False):
 
     Args:
         fn: The function to be marked as having a constant result.
-        specialize_args: If True, guard the baked constant on the values of the
-            arguments (constants and containers of them, enums, pytree-registered
-            constant classes, dicts with literal keys, and dataclasses of those)
-            instead of object identity, so it is recomputed when a value changes
-            and a fresh but equal argument does not force a recompile; anything
-            not value-guardable is a graph break.
+        specialize_args: By default the cached result is keyed on the identity
+            of the arguments, so passing a newly constructed but equal argument
+            (e.g. a fresh dataclass built every iteration) recompiles on every
+            call, and mutating an argument in place goes unnoticed. With
+            ``specialize_args=True`` the result is keyed on the argument
+            *values* instead: equal values reuse the cached constant, changed
+            values recompute it. Arguments must be built from value-comparable
+            pieces - constants, tuples/lists/sets/dicts of constants, enums,
+            dataclasses of these, or classes registered with
+            :func:`torch.utils._pytree.register_constant`. Passing anything
+            else (an arbitrary object, a tensor inside a container) triggers a
+            graph break rather than risking a stale result.
 
     .. warning::
         `assume_constant_result` can, if invalid, cause safety and soundness issues, :func:`torch.compile`
