@@ -466,6 +466,22 @@
   - Lint
   - pull
 
+- name: Control flow operators
+  patterns:
+  - torch/_higher_order_ops/cond.py
+  - torch/_higher_order_ops/while_loop.py
+  - torch/_higher_order_ops/scan.py
+  - torch/_higher_order_ops/associative_scan.py
+  - torch/_higher_order_ops/switch.py
+  - torch/_dynamo/variables/higher_order_ops.py
+  - docs/source/higher_order_ops/**
+  approved_by:
+  - bohnstingl
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
 - name: Dynamo
   patterns:
   - torch/_dynamo/**
