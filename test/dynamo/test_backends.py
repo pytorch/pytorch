@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import sys
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -162,6 +163,16 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
         self._check_backend_works("tvm", device)
         self._check_backend_works("tvm", device, options={"scheduler": None})
         self._check_backend_works("tvm", device, options={"opt_level": 0})
+
+    def test_tvm_scheduler_backends(self, device):
+        from torch._dynamo.backends.tvm import tvm_auto_scheduler, tvm_meta_schedule
+
+        gm = torch.fx.symbolic_trace(lambda x: x + 1)
+        for backend in (tvm_meta_schedule, tvm_auto_scheduler):
+            # blocking the tvm import keeps this fast and deterministic;
+            # reaching ImportError proves the partial's kwargs are valid
+            with patch.dict(sys.modules, {"tvm": None}):
+                self.assertRaises(ImportError, backend, gm, [torch.randn(2)])
 
     @onlyHPU
     def test_intel_gaudi_backend(self, device):
