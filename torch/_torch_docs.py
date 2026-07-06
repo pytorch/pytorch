@@ -607,8 +607,10 @@ Args:
     mat1 (Tensor): the first matrix to be matrix multiplied
     mat2 (Tensor): the second matrix to be matrix multiplied
     out_dtype (dtype): the dtype of the output tensor.
-        Supported only on CUDA and for torch.float32 given
-        torch.float16/torch.bfloat16 input dtypes.
+        On CUDA and XPU, only ``torch.float32`` is supported given
+        ``torch.float16``/``torch.bfloat16`` input dtypes. Other backends
+        (including out-of-tree accelerators) may support additional
+        input/output dtype combinations.
 
 Keyword args:
     beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
@@ -1422,8 +1424,10 @@ Args:
     batch1 (Tensor): the first batch of matrices to be multiplied
     batch2 (Tensor): the second batch of matrices to be multiplied
     out_dtype (dtype): the dtype of the output tensor.
-        Supported only on CUDA and for torch.float32 given
-        torch.float16/torch.bfloat16 input dtypes.
+        On CUDA and XPU, only ``torch.float32`` is supported given
+        ``torch.float16``/``torch.bfloat16`` input dtypes. Other backends
+        (including out-of-tree accelerators) may support additional
+        input/output dtype combinations.
 
 Keyword args:
     beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
@@ -1603,8 +1607,10 @@ Args:
     input (Tensor): the first batch of matrices to be multiplied
     mat2 (Tensor): the second batch of matrices to be multiplied
     out_dtype (dtype): the dtype of the output tensor.
-        Supported only on CUDA and for torch.float32 given
-        torch.float16/torch.bfloat16 input dtypes.
+        On CUDA and XPU, only ``torch.float32`` is supported given
+        ``torch.float16``/``torch.bfloat16`` input dtypes. Other backends
+        (including out-of-tree accelerators) may support additional
+        input/output dtype combinations.
 
 Keyword Args:
     {out}
@@ -7519,8 +7525,10 @@ Args:
     input (Tensor): the first matrix to be matrix multiplied
     mat2 (Tensor): the second matrix to be matrix multiplied
     out_dtype (dtype): the dtype of the output tensor.
-        Supported only on CUDA and for torch.float32 given
-        torch.float16/torch.bfloat16 input dtypes.
+        On CUDA and XPU, only ``torch.float32`` is supported given
+        ``torch.float16``/``torch.bfloat16`` input dtypes. Other backends
+        (including out-of-tree accelerators) may support additional
+        input/output dtype combinations.
 
 Keyword args:
     {out}
@@ -8397,7 +8405,8 @@ Example::
     >>> torch.normal(mean=torch.arange(1., 6.))
     tensor([ 1.1552,  2.6148,  2.6535,  5.8318,  4.2361])
 
-.. function:: normal(mean, std, size, *, out=None) -> Tensor
+.. function:: normal(mean, std, size, *, generator=None, out=None, dtype=None, \
+    layout=torch.strided, device=None, requires_grad=False, pin_memory=False) -> Tensor
    :noindex:
 
 Similar to the function above, but the means and standard deviations are shared
@@ -8409,13 +8418,19 @@ Args:
     size (int...): a sequence of integers defining the shape of the output tensor.
 
 Keyword args:
+    {generator}
     {out}
+    {dtype}
+    {layout}
+    {device}
+    {requires_grad}
+    {pin_memory}
 
 Example::
 
     >>> torch.normal(2, 3, size=(1, 4))
     tensor([[-1.3987, -1.9544,  3.6048,  0.7909]])
-""".format(**common_args),
+""".format(**factory_common_args),
 )
 
 add_docstr(
