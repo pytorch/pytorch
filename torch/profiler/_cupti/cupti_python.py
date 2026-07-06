@@ -324,18 +324,6 @@ class _PyLibCupti:
         self._check(self._lib.cuptiGetVersion(ctypes.byref(version)), "cuptiGetVersion")
         return version.value
 
-    def get_next_record_fn_address(self) -> int:
-        """Raw address of ``cuptiActivityGetNextRecord_v2`` (the v2 record
-        iterator), for the native decode worker to call directly -- so the native
-        module needs no libcupti link, and every consumer shares the one libcupti
-        loaded here. Returns 0 if the symbol is absent (libcupti < 13.2)."""
-        if not hasattr(self._lib, "cuptiActivityGetNextRecord_v2"):
-            return 0
-        return (
-            ctypes.cast(self._lib.cuptiActivityGetNextRecord_v2, ctypes.c_void_p).value
-            or 0
-        )
-
     def get_timestamp(self, sub_handle: int) -> int:
         """CUPTI's normalized nanosecond clock for a subscriber -- the same timebase
         as activity record START/END timestamps, so a value captured here is directly
@@ -359,13 +347,6 @@ class _PyLibCupti:
         then never re-delivered) and racing it against concurrent host activity is the
         flush race that corrupts the HES heap and freezes the decode worker."""
         self._check(self._lib.cuptiActivityFlushAll(0), "cuptiActivityFlushAll")
-
-    def activity_flush_all_address(self) -> int:
-        """Address of ``cuptiActivityFlushAll`` so the native monitor can drive the
-        periodic plain flush from its own thread without holding the GIL (the native
-        flusher calls it as ``fn(0)`` -- completed buffers only, never forced). Same
-        address-passing pattern as :meth:`get_next_record_fn_address`."""
-        return ctypes.cast(self._lib.cuptiActivityFlushAll, ctypes.c_void_p).value or 0
 
     def activity_get_num_dropped_records(self, ctx: int, stream_id: int) -> int:
         dropped = ctypes.c_size_t()

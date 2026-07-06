@@ -458,7 +458,12 @@ class TestCuptiMonitorCUDA(TestCase):
 
         lock = threading.Lock()
         columns: list = []
-        monitor = CuptiMonitor()
+        # Fully caller-driven (both periods < 0): no background self-flush and no
+        # background drain, so the explicit flush(sync=True) below is the sole,
+        # deterministic flush + drain -- nothing races it to consume the decoded columns.
+        monitor = CuptiMonitor(
+            background_flush_period_s=-1, background_drain_period_s=-1
+        )
 
         def on_columns(cols):
             if kind in cols:
@@ -625,7 +630,7 @@ class TestCuptiMonitorCUDA(TestCase):
                     len(next(iter(c.values()))) if c else 0
                 )
 
-        m = CuptiMonitor(buffer_size=1024, flush_period_s=0.02)
+        m = CuptiMonitor(buffer_size=1024, background_flush_period_s=0.02)
         want = {
             ActivityKind.CONCURRENT_KERNEL: {
                 Kernel.START,

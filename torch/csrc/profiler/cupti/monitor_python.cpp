@@ -94,31 +94,28 @@ void initCuptiMonitorBindings(py::module& m) {
       "reset_buffers", []() { CuptiMonitorBuffers::get().reset(); });
 
   // Native decode worker (GIL-free): pulls completed buffers, iterates records
-  // with cuptiActivityGetNextRecord_v2 (address passed from Python, which owns
-  // the libcupti handle + subscriber), and accumulates per-(kind, field)
-  // columns.
+  // with cuptiActivityGetNextRecord_v2 (called directly; resolved at runtime to
+  // the nvidia-cuda-cupti wheel's libcupti), and accumulates per-(kind, field)
+  // columns. The subscriber handle is passed from Python, which owns it.
   using torch::profiler::impl::CuptiMonitorDecoder;
   cupti_monitor.def(
       "configure_decoder",
       [](uintptr_t subscriber,
-         uintptr_t get_next_record_fn,
          uint32_t fence_kind,
          int fence_end_field,
-         uintptr_t flush_fn,
+         bool self_flush,
          uint64_t flush_period_ns) {
         CuptiMonitorDecoder::get().configure(
             subscriber,
-            get_next_record_fn,
             fence_kind,
             fence_end_field,
-            flush_fn,
+            self_flush,
             flush_period_ns);
       },
       py::arg("subscriber"),
-      py::arg("get_next_record_fn"),
       py::arg("fence_kind") = 0,
       py::arg("fence_end_field") = -1,
-      py::arg("flush_fn") = 0,
+      py::arg("self_flush") = false,
       py::arg("flush_period_ns") = 0);
   // Drop noisy runtime/driver records by cbid in the decoder. filters: {kind:
   // (keep_mode, [cbids])} -- keep_mode True keeps only those cbids (driver

@@ -389,6 +389,48 @@ add_custom_target(
   DEPENDS ${TORCH_GENERATED_CODE}
   )
 
+# Generate torch/profiler/_cupti/_cupti_field_ids.py (the CUPTI CUpti_Activity*FieldIds
+# enums) from the CUPTI ABI header shipped by nvidia-cuda-cupti. The header is located
+# at configure time so the rule re-runs when it changes; codegen is skipped when no
+# header is present (the torch.profiler._cupti consumer needs CUPTI at runtime anyway).
+if(USE_CUDA AND BUILD_PYTHON)
+  execute_process(
+    COMMAND "${Python_EXECUTABLE}" -c
+      "from tools.setup_helpers.cupti import find_cupti_header as f; p = f(); print(p or '', end='')"
+    WORKING_DIRECTORY "${TORCH_ROOT}"
+    OUTPUT_VARIABLE CUPTI_ACTIVITY_HEADER)
+  if(CUPTI_ACTIVITY_HEADER)
+    # Locate libclang.so for the clang python bindings the codegen parses with --
+    # near the compiler, then common system lib dirs (only versioned sonames exist).
+    get_filename_component(_cc_prefix "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    get_filename_component(_cc_prefix "${_cc_prefix}" DIRECTORY)
+    file(GLOB _libclang_candidates
+      "${_cc_prefix}/lib/libclang.so*" "${_cc_prefix}/lib64/libclang.so*"
+      "/usr/lib64/libclang.so*" "/usr/lib/*-linux-gnu/libclang*.so*"
+      "/usr/lib/llvm-*/lib/libclang.so*")
+    set(_libclang_arg "")
+    if(_libclang_candidates)
+      list(SORT _libclang_candidates COMPARE NATURAL)
+      list(GET _libclang_candidates -1 _libclang_so)
+      set(_libclang_arg --libclang "${_libclang_so}")
+    endif()
+    set(CUPTI_FIELD_IDS_PY "${TORCH_SRC_DIR}/profiler/_cupti/_cupti_field_ids.py")
+    add_custom_command(
+      COMMENT "Generating CUPTI field-id module from ${CUPTI_ACTIVITY_HEADER}"
+      OUTPUT "${CUPTI_FIELD_IDS_PY}"
+      COMMAND "${Python_EXECUTABLE}" tools/gen_cupti_field_ids.py
+        --output "${CUPTI_FIELD_IDS_PY}" --header "${CUPTI_ACTIVITY_HEADER}"
+        ${_libclang_arg}
+      DEPENDS
+        "${TORCH_ROOT}/tools/gen_cupti_field_ids.py"
+        "${CUPTI_ACTIVITY_HEADER}"
+      WORKING_DIRECTORY "${TORCH_ROOT}")
+    add_custom_target(generate-cupti-field-ids ALL DEPENDS "${CUPTI_FIELD_IDS_PY}")
+  else()
+    message(STATUS "CUPTI header not found; skipping CUPTI field-id codegen")
+  endif()
+endif()
+
 set(TORCH_SRCS ${GENERATED_CXX_TORCH})
 list(APPEND TORCH_SRCS ${GENERATED_H_TORCH})
 list(APPEND LIBTORCH_CMAKE_SRCS "")
