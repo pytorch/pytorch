@@ -487,6 +487,10 @@ class TestStatelessRNGDistribution(TestCase):
 
 
 class TestStatelessRNGCompile(TestCase):
+    def setUp(self):
+        super().setUp()
+        torch._dynamo.reset()
+
     def test_split_fullgraph(self, device):
         key = random.key(42, device=device)
 
@@ -582,6 +586,24 @@ class TestStatelessRNGCompile(TestCase):
 
         self.assertEqual(result, gen(key, shape))
         self.assertLess(extra, 1.5 * out_bytes)  # no extra full-size clone
+
+    @onlyAccelerator
+    @dtypes(torch.float32, torch.bfloat16, torch.float16)
+    @parametrize("shape", [(1000,), (64, 64), (3, 5, 7)])  # incl. 3D, non-mult-of-4
+    @parametrize("bounds", [(0.0, 1.0), (-1.0, 5.0)])
+    def test_uniform_lowering_bit_identical(self, device, dtype, shape, bounds):
+        # The Inductor lowering for uniform must be bit-identical to eager.
+        if torch.device(device).type == "cuda" and not HAS_TRITON:
+            self.skipTest("CUDA inductor codegen requires triton")
+        low, high = bounds
+        key = random.key(2024, device=device)
+
+        @torch.compile(fullgraph=True)
+        def f(k):
+            return random.uniform(k, shape, low=low, high=high, dtype=dtype)
+
+        expected = random.uniform(key, shape, low=low, high=high, dtype=dtype)
+        self.assertEqual(f(key), expected, atol=0, rtol=0)  # bit-exact
 
 
 instantiate_device_type_tests(TestStatelessRNGKey, globals(), only_for=("cuda",))
