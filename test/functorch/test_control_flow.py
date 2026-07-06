@@ -1849,6 +1849,7 @@ def forward(self, pred_1, x_1):
         # Clamped above-range index picks branch N-1.
         self.assertEqual(f_huge(x), branch2(x))
 
+    @skipIfTorchDynamo("mark_dynamic cannot be traced under dynamo_wrapped")
     def test_switch_symint_index_clamped(self):
         def branch0(inp_x):
             return inp_x.sin()
