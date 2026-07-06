@@ -6,6 +6,7 @@ import contextlib
 import ctypes
 import pickle
 import sys
+import threading
 import warnings
 from inspect import signature
 from typing import Any, Literal, TYPE_CHECKING
@@ -1347,48 +1348,37 @@ def use_mem_pool(pool: MemPool, device: "Device" = None):
         the given pool. If a new thread is spawned inside the context manager
         (e.g. by calling backward) the allocations in that thread will not
         route to the given pool.
+
+    .. note::
+        When used during :class:`~torch.cuda.CUDAGraph` capture, the graph
+        retains the pool until the graph is reset or destroyed.
     """
     device_index = (
         torch.cuda.current_device() if device is None else _get_device_index(device)
     )
     _cuda_beginAllocateCurrentThreadToPool(device_index, pool.id)
     try:
+        if torch.cuda.is_current_stream_capturing():
+            graph = torch.cuda.CUDAGraph.get_currently_capturing_graph()
+            graph._retain_pool(pool)
         yield
     finally:
         _cuda_endAllocateToPool(device_index, pool.id)
         _cuda_releasePool(device_index, pool.id)
 
 
-@contextlib.contextmanager
-def _use_uvm(device: "Device" = None):
-    r"""A context manager that routes CUDA allocations through ``cudaMallocManaged`` (UVM).
+# Process-lifetime singleton: the UVM pluggable allocator + the ctypes closures
+# behind it, lazily built (lock-guarded) by _make_uvm_allocator and reused.
+_UVM_ALLOCATOR = None
+_UVM_ALLOCATOR_LOCK = threading.Lock()
 
-    All tensors allocated inside this context use CUDA Unified Virtual Memory,
-    which allows oversubscribing GPU device memory by transparently paging to
-    system RAM on demand. Numerics are identical to regular device allocations;
-    only performance is affected due to page migration overhead.
 
-    Args:
-        device (torch.device or int, optional): selected device. Uses the
-            current device, given by :func:`~torch.cuda.current_device`,
-            if :attr:`device` is ``None`` (default).
+def _make_uvm_allocator():
+    r"""Build the UVM ``CUDAPluggableAllocator`` and the ctypes closures behind it.
 
-    Example::
-
-        >>> # xdoctest: +SKIP(reason="requires CUDA and cuda-python")
-        >>> with torch.cuda._use_uvm():
-        ...     x = torch.randn(1024, 1024, device="cuda")
-        ...     y = x @ x.T  # computed on GPU, pages in/out as needed
-
-    .. note::
-        Only the current thread's allocations are routed to managed memory.
-        Allocations in threads spawned inside this context (e.g. by backward)
-        will use the default allocator. Use
-        ``torch.autograd.set_multithreading_enabled(False)`` to force backward
-        onto the calling thread so that backward allocations also use UVM.
-
-    .. note::
-        Requires the ``cuda-python`` package (``cuda.bindings``).
+    Returns ``(c_alloc, c_free, allocator)``. UVM alloc/free are stateless (device
+    is passed per call), so one allocator serves all calls and devices. Raises
+    ``ImportError`` if ``cuda-python`` is unavailable.
     """
     import logging
     import traceback
@@ -1436,12 +1426,33 @@ def _use_uvm(device: "Device" = None):
                 _advise_uses_struct = False
         return _runtime.cudaMemAdvise(ptr, size, advice, device_id)
 
+    _uvm_advise_supported_cache: dict[tuple[int, int], bool] = {}
+
+    def _device_supports_uvm_advise(device_id, _runtime=_rt):
+        cache_key = (device_id, id(_runtime))
+        if cache_key in _uvm_advise_supported_cache:
+            return _uvm_advise_supported_cache[cache_key]
+        attr = getattr(
+            _runtime.cudaDeviceAttr, "cudaDevAttrConcurrentManagedAccess", None
+        )
+        if attr is None:
+            supported = False
+        else:
+            result = _runtime.cudaDeviceGetAttribute(attr, device_id)
+            err = result if not isinstance(result, tuple) else result[0]
+            if err != _runtime.cudaError_t.cudaSuccess:
+                supported = False
+            else:
+                supported = bool(result[1])
+        _uvm_advise_supported_cache[cache_key] = supported
+        return supported
+
     def _uvm_alloc(size, device, stream, _runtime=_rt):
         try:
             err, ptr = _runtime.cudaMallocManaged(size, _runtime.cudaMemAttachGlobal)
             _check(err, f"cudaMallocManaged({size})")
             ptr = int(ptr)
-            if device >= 0:
+            if device >= 0 and _device_supports_uvm_advise(device, _runtime):
                 _check(
                     _mem_advise(
                         ptr,
@@ -1492,9 +1503,52 @@ def _use_uvm(device: "Device" = None):
     c_free = _FREE_FN(_uvm_free)
     alloc_ptr = ctypes.cast(c_alloc, ctypes.c_void_p).value
     free_ptr = ctypes.cast(c_free, ctypes.c_void_p).value
-
     # pyrefly: ignore[bad-argument-type]
     allocator = torch._C._cuda_customAllocator(alloc_ptr, free_ptr)
+    return c_alloc, c_free, allocator
+
+
+@contextlib.contextmanager
+def _use_uvm(device: "Device" = None):
+    r"""A context manager that routes CUDA allocations through ``cudaMallocManaged`` (UVM).
+
+    All tensors allocated inside this context use CUDA Unified Virtual Memory,
+    which allows oversubscribing GPU device memory by transparently paging to
+    system RAM on demand. Numerics are identical to regular device allocations;
+    only performance is affected due to page migration overhead.
+
+    Args:
+        device (torch.device or int, optional): selected device. Uses the
+            current device, given by :func:`~torch.cuda.current_device`,
+            if :attr:`device` is ``None`` (default).
+
+    Example::
+
+        >>> # xdoctest: +SKIP(reason="requires CUDA and cuda-python")
+        >>> with torch.cuda._use_uvm():
+        ...     x = torch.randn(1024, 1024, device="cuda")
+        ...     y = x @ x.T  # computed on GPU, pages in/out as needed
+
+    .. note::
+        Only the current thread's allocations are routed to managed memory.
+        Allocations in threads spawned inside this context (e.g. by backward)
+        will use the default allocator. Use
+        ``torch.autograd.set_multithreading_enabled(False)`` to force backward
+        onto the calling thread so that backward allocations also use UVM.
+
+    .. note::
+        Requires the ``cuda-python`` package (``cuda.bindings``).
+    """
+    # A tensor's block can stay cached in the PrivatePool after _use_uvm() returns
+    # and be freed later by a global empty_cache(); per-call ctypes closures would
+    # be GC'd by then, dangling the free callback. Build once and reuse instead.
+    global _UVM_ALLOCATOR
+    if _UVM_ALLOCATOR is None:
+        with _UVM_ALLOCATOR_LOCK:
+            if _UVM_ALLOCATOR is None:
+                _UVM_ALLOCATOR = _make_uvm_allocator()
+    allocator = _UVM_ALLOCATOR[2]
+
     pool = MemPool(allocator=allocator)
     with use_mem_pool(pool, device=device):
         yield pool

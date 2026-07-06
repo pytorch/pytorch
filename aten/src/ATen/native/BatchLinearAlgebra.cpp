@@ -86,6 +86,9 @@
 #include <ATen/ops/linalg_lu_solve.h>
 #include <ATen/ops/linalg_lu_solve_meta.h>
 #include <ATen/ops/linalg_lu_solve_native.h>
+#include <ATen/ops/linalg_polar.h>
+#include <ATen/ops/linalg_polar_meta.h>
+#include <ATen/ops/linalg_polar_native.h>
 #include <ATen/ops/linalg_qr.h>
 #include <ATen/ops/linalg_qr_meta.h>
 #include <ATen/ops/linalg_qr_native.h>
@@ -729,6 +732,33 @@ TORCH_META_FUNC(linalg_qr)(const Tensor& A,
   set_output_strided(1, R_shape, R_strides, A.options());
 }
 
+TORCH_META_FUNC(linalg_polar)(const Tensor& A) {
+  at::native::checkIsMatrix(A, "linalg.polar");
+  at::native::checkFloatingOrComplex(A, "linalg.polar");
+
+  // Use a symbolic comparison for the shape check so a dynamic (exported /
+  // compiled) row dimension is not specialized to a constant here. Output
+  // allocation below uses the concrete sizes, matching linalg_qr / _linalg_svd.
+  const auto sym_m = A.sym_size(-2);
+  const auto sym_n = A.sym_size(-1);
+  TORCH_SYM_CHECK(
+      sym_m.sym_ge(sym_n),
+      "linalg.polar: input must have at least as many rows as columns, but got ",
+      sym_m, " by ", sym_n, " matrices");
+
+  auto A_shape = A.sizes().vec();
+  const auto n = A_shape.cend()[-1];
+
+  // U has the same shape as A; H is the (n x n) symmetric/Hermitian factor.
+  // Both are row-major contiguous: the SVD-based kernel and the CUDA override
+  // both materialize contiguous outputs, so the meta must promise the same
+  // layout (otherwise compiled/exported graphs would assume the wrong strides).
+  set_output_contiguous(0, A_shape, A.options());
+
+  auto H_shape = std::move(A_shape);
+  H_shape.end()[-2] = n;
+  set_output_contiguous(1, H_shape, A.options());
+}
 
 TORCH_META_FUNC(_linalg_svd)(const Tensor& A,
                              bool full_matrices,
@@ -780,6 +810,18 @@ TORCH_META_FUNC(lu_unpack)(const Tensor& LU, const Tensor& pivots, bool unpack_d
   const auto m = sizes.cend()[-2];
   const auto n = sizes.cend()[-1];
   const auto k = std::min(m, n);
+
+  if (unpack_pivots) {
+    // pivots is produced by lu_factor and must have shape (*LU.shape[:-2], min(m, n)).
+    // Without this check, a mismatched pivots tensor leads to out-of-bounds reads in
+    // the unpack_pivots kernel.
+    auto expected_pivots_sizes = LU.sizes().vec();
+    expected_pivots_sizes.pop_back();
+    expected_pivots_sizes.back() = k;
+    TORCH_CHECK_VALUE(pivots.sizes() == IntArrayRef(expected_pivots_sizes),
+        "Expected LU_pivots to have shape ", IntArrayRef(expected_pivots_sizes),
+        " but got ", pivots.sizes(), " instead.");
+  }
 
   // P.shape[-2:] == (m, m) (or size zero if pivot == False)
   sizes.end()[-1] = m;
@@ -2440,6 +2482,24 @@ TORCH_IMPL_FUNC(linalg_qr_out)(const Tensor& A,
     // Next perform ORGQR for Q using the result from GEQRF
     orgqr_stub(A.device().type(), const_cast<Tensor&>(Q), tau);
   }
+}
+
+TORCH_IMPL_FUNC(linalg_polar_out)(const Tensor& A,
+                                  const Tensor& U,
+                                  const Tensor& H) {
+  // Polar decomposition A = U @ H via the (reduced) SVD A = Up diag(S) Vh:
+  //   U = Up @ Vh           (orthonormal columns)
+  //   H = Vh^H diag(S) Vh   (symmetric/Hermitian positive-semidefinite)
+  // This is the portable backend kernel. On CUDA a Python native-op override
+  // (cuSOLVER QDWH/Xpolar via nvmath-python) intercepts the functional op for
+  // supported inputs and only falls through to here when unavailable, so this
+  // path also serves as the CUDA fallback and the CPU/compile/out= path.
+  auto [Up, S, Vh] = at::linalg_svd(A, /*full_matrices=*/false);
+  auto Hsym = Vh.mH().matmul(S.unsqueeze(-1) * Vh);
+  // Symmetrize/Hermitianize to remove round-off asymmetry.
+  Hsym = 0.5 * (Hsym + Hsym.mH());
+  U.copy_(Up.matmul(Vh));
+  H.copy_(Hsym);
 }
 
 

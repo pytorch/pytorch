@@ -1165,7 +1165,7 @@ static void registerCudaDeviceProperties(PyObject* module) {
                << ", pci_domain_id=" << prop.pciDomainID
                << ", L2_cache_size=" << prop.l2CacheSize / (1024ull * 1024)
                << "MB)";
-        return std::move(stream).str();
+        return stream.str();
       });
 
   m.def(
@@ -1851,6 +1851,29 @@ PyObject* THCPModule_cuda_tunableop_get_max_tuning_iterations(
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THCPModule_cuda_tunableop_set_cublaslt_requested_algo_count(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      THPUtils_checkLong(arg),
+      "cuda_tunableop_set_cublaslt_requested_algo_count expects an int, but got ",
+      THPUtils_typename(arg));
+  auto count = static_cast<int>(THPUtils_unpackLong(arg));
+  at::cuda::tunable::getTuningContext()->SetCublasLtRequestedAlgoCount(count);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THCPModule_cuda_tunableop_get_cublaslt_requested_algo_count(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  return THPUtils_packInt32(
+      at::cuda::tunable::getTuningContext()->GetCublasLtRequestedAlgoCount());
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THCPModule_cuda_tunableop_set_filename(
     PyObject* _unused,
     PyObject* args) {
@@ -2345,6 +2368,14 @@ static struct PyMethodDef _THCPModule_methods[] = {
      nullptr},
     {"_cuda_tunableop_get_max_tuning_iterations",
      THCPModule_cuda_tunableop_get_max_tuning_iterations,
+     METH_NOARGS,
+     nullptr},
+    {"_cuda_tunableop_set_cublaslt_requested_algo_count",
+     THCPModule_cuda_tunableop_set_cublaslt_requested_algo_count,
+     METH_O,
+     nullptr},
+    {"_cuda_tunableop_get_cublaslt_requested_algo_count",
+     THCPModule_cuda_tunableop_get_cublaslt_requested_algo_count,
      METH_NOARGS,
      nullptr},
     {"_cuda_tunableop_set_filename",

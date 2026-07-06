@@ -1197,7 +1197,7 @@ def _set_backcompat_keepdim_warn(
     arg: _bool,
 ) -> None: ...  # THPModule_setBackcompatKeepdimWarn
 def _get_backcompat_keepdim_warn() -> _bool: ...  # THPModule_getBackcompatKeepdimWarn
-def get_num_thread() -> _int: ...  # THPModule_getNumThreads
+def get_num_threads() -> _int: ...  # THPModule_getNumThreads
 def set_num_threads(nthreads: _int) -> None: ...  # THPModule_setNumThreads
 def get_num_interop_threads() -> _int: ...  # THPModule_getNumInteropThreads
 def set_num_interop_threads(
@@ -1341,17 +1341,20 @@ def _to_dlpack(
     data: Tensor,
     dl_device: tuple[IntEnum, _int] | None = None,
     copy: _bool | None = None,
+    read_only: _bool = False,
 ) -> Any: ...  # THPModule_toDLPack
 def _to_dlpack_versioned(
     data: Tensor,
     dl_device: tuple[IntEnum, _int] | None = None,
     copy: _bool | None = None,
+    read_only: _bool = False,
 ) -> Any: ...  # THPModule_toDLPackVersioned
 def _from_dlpack(data: Any) -> Tensor: ...  # THPModule_fromDLPack
 def _torchDeviceToDLDevice(
     device: torch.device,
 ) -> tuple[_int, _int]: ...  # THPModule_torchDeviceToDLDevice
 def _dlpack_exchange_api() -> object: ...  # THPModule_DLPackExchangeAPI
+def _const_dlpack_exchange_api() -> object: ...  # THPModule_ConstDLPackExchangeAPI
 def _get_cpp_backtrace(
     frames_to_skip: _int,
     maximum_number_of_frames: _int,
@@ -2493,13 +2496,16 @@ class _CUDAGraph:
         capture_error_mode: str = "global",
     ) -> None: ...
     def capture_end(self) -> None: ...
+    def capture_end_pre(self) -> None: ...
+    def capture_end_post(self) -> None: ...
     def instantiate(self) -> None: ...
     def register_generator_state(self, Generator) -> None: ...
     def replay(self) -> None: ...
     def reset(self) -> None: ...
     def pool(self) -> _POOL_HANDLE: ...
+    def pools(self) -> list[_POOL_HANDLE]: ...
+    def _retain_pool(self, pool: _POOL_HANDLE) -> None: ...
     def enable_debug_mode(self) -> None: ...
-    def debug_dump(self, debug_path: str) -> None: ...
     def raw_cuda_graph(self) -> _int: ...
     def raw_cuda_graph_exec(self) -> _int: ...
     @staticmethod
@@ -3035,17 +3041,3 @@ class _StaticCudaLauncher:
 
 # Defined in torch/csrc/inductor/static_launcher/xpu.cpp
 class _StaticXpuLauncher(_StaticCudaLauncher): ...
-
-# Defined in torch/csrc/cuda/GreenContext.cpp
-class GreenContext:
-    @staticmethod
-    def create(
-        num_sms: _int,
-        device_id: _int,
-    ) -> GreenContext: ...
-    def set_context(
-        self,
-    ) -> None: ...
-    def pop_context(
-        self,
-    ) -> None: ...

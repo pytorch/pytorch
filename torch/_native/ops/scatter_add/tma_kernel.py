@@ -59,7 +59,7 @@ import cutlass.pipeline as pipeline
 from cutlass import BFloat16, const_expr, Float16, Float32, Int32, Int64
 
 import torch
-from torch._vendor.quack.cache import jit_cache
+from torch._native.instrumentation import instrumented_cutedsl_cache
 
 from ._ptx import cvta_smem, make_bulk_reduce_add
 
@@ -341,7 +341,10 @@ def _chunk_elems_for(torch_dtype: torch.dtype, N: int) -> int:
     return chunk_bytes // elem_bytes
 
 
-@jit_cache
+@instrumented_cutedsl_cache(
+    "aten::scatter_add",
+    key_fn=lambda torch_dtype, N, contig: f"tma {torch_dtype} N={N} contig={contig}",
+)
 def _compile_tma_scatter(torch_dtype: torch.dtype, N: int, contig: bool):
     dtype = _TORCH_TO_CUTE[torch_dtype]
     elem_bytes = dtype.width // 8

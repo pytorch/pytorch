@@ -642,6 +642,35 @@ def fmax(self: torch.Tensor, other: torch.Tensor) -> torch.Tensor:
     return torch.where(torch.isnan(other) | (other < self), self, other)
 
 
+@register_decomposition(prims.normal)
+def normal(
+    shape: list[int | torch.SymInt],
+    *,
+    mean: torch.types.Number,
+    std: torch.types.Number,
+    dtype: torch.dtype,
+    device: torch.device,
+    requires_grad: bool,
+    generator: torch.Generator | None = None,
+) -> torch.Tensor:
+    if generator is None:
+        normal_samples = torch.randn(
+            shape,
+            dtype=dtype,
+            device=device,
+            requires_grad=requires_grad,
+        )
+    else:
+        normal_samples = torch.randn(
+            shape,
+            generator=generator,
+            dtype=dtype,
+            device=device,
+            requires_grad=requires_grad,
+        )
+    return std * normal_samples + mean
+
+
 @register_decomposition(aten.amax)
 def amax(
     self: torch.Tensor,
@@ -909,12 +938,75 @@ def _foreach_lerp_scalar(
     end_tensors: list[torch.Tensor],
     weight: torch.types.Number,
 ) -> list[torch.Tensor]:
-    return aten._foreach_add.List(
-        start_tensors,
-        aten._foreach_mul.Scalar(
-            aten._foreach_sub.List(end_tensors, start_tensors), weight
-        ),
+    def opmath_dtype(t: torch.Tensor) -> torch.dtype:
+        if t.dtype in (torch.float16, torch.bfloat16):
+            return torch.float32
+        return t.dtype
+
+    def cast_weight(dtype: torch.dtype) -> float | complex:
+        if isinstance(weight, complex) and not dtype.is_complex:
+            if weight.imag != 0:
+                return torch.tensor(weight, dtype=dtype).item()
+            return torch.tensor(weight.real, dtype=dtype).item()
+        return torch.tensor(weight, dtype=dtype).item()
+
+    def use_high_formula(dtype: torch.dtype) -> bool:
+        casted_weight = cast_weight(dtype)
+        if isinstance(casted_weight, complex):
+            return (
+                casted_weight.real * casted_weight.real
+                + casted_weight.imag * casted_weight.imag
+                >= 0.25
+            )
+        return casted_weight >= 0.5 or casted_weight <= -0.5
+
+    def scalar_tensor(
+        dtype: torch.dtype, device: torch.device, high_weight: bool
+    ) -> torch.Tensor:
+        if isinstance(weight, complex) and not dtype.is_complex:
+            if weight.imag != 0:
+                weight_tensor = torch.tensor(weight, dtype=dtype, device=device)
+                if high_weight:
+                    return -(1.0 - weight_tensor)
+                return weight_tensor
+            weight_tensor = torch.tensor(weight.real, dtype=dtype, device=device)
+            if high_weight:
+                return -(1.0 - weight_tensor)
+            return weight_tensor
+        weight_tensor = torch.tensor(weight, dtype=dtype, device=device)
+        if high_weight:
+            return -(1.0 - weight_tensor)
+        return weight_tensor
+
+    dtype = start_tensors[0].dtype
+    device = start_tensors[0].device
+    compute_dtype = opmath_dtype(start_tensors[0])
+    use_foreach = dtype not in (torch.float16, torch.bfloat16) and all(
+        t.dtype == dtype and t.device == device for t in start_tensors
     )
+    if use_foreach:
+        high_weight = use_high_formula(compute_dtype)
+        bases = end_tensors if high_weight else start_tensors
+        diff = aten._foreach_sub.List(end_tensors, start_tensors)
+        scalar = scalar_tensor(dtype, device, high_weight)
+        return aten._foreach_addcmul.Scalar(bases, [scalar] * len(diff), diff)
+
+    return [
+        torch.addcmul(
+            (end if high_weight else t).to(compute_dtype),
+            scalar_tensor(compute_dtype, t.device, high_weight),
+            end.to(compute_dtype) - t.to(compute_dtype),
+        ).to(t.dtype)
+        for t, end, compute_dtype, high_weight in (
+            (
+                t,
+                end,
+                opmath_dtype(t),
+                use_high_formula(opmath_dtype(t)),
+            )
+            for t, end in zip(start_tensors, end_tensors)
+        )
+    ]
 
 
 @register_decomposition(aten._foreach_lerp.ScalarList)
