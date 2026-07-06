@@ -35,7 +35,7 @@ jobs:
   # (CUDA_STABLE) so the build/test environment tracks it without hardcoding.
   get-cuda-version:
     name: get-cuda-version
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: github.repository_owner == 'pytorch'
     outputs:
       stable-cuda: ${{ steps.get.outputs.stable-cuda }}
