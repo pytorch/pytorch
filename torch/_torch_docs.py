@@ -5600,7 +5600,7 @@ allocated during inference mode. A view tensor is an inference
 tensor if and only if the tensor it is a view of is an inference tensor.
 
 For details on inference mode please see
-`Inference Mode <https://pytorch.org/cppdocs/notes/inference_mode.html>`_.
+`Inference Mode <https://docs.pytorch.org/docs/2.9/notes/autograd.html#inference-mode>`_.
 
 Args:
     {input}
