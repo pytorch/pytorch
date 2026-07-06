@@ -63,9 +63,9 @@ from torch._guards import TracingContext
 from torch._higher_order_ops.flat_apply import flat_apply
 from torch._higher_order_ops.torchbind import call_torchbind
 from torch._library.opaque_object import (
+    is_custom_class,
     is_opaque_constant_type,
     is_opaque_symbolic_type,
-    is_opaque_type,
     should_hoist,
 )
 from torch._ops import HigherOrderOperator, OpOverload, OpOverloadPacket
@@ -1956,7 +1956,7 @@ class VariableBuilder:
                     source=self.source,
                 )
 
-            if is_opaque_type(value):
+            if is_custom_class(value):
                 return CustomClassVariable(
                     value,
                     source=self.source,
@@ -4142,7 +4142,7 @@ def handle_traced_output(
             example_value,
             tx=tx,
         )
-    elif is_opaque_type(type(example_value)):
+    elif is_custom_class(type(example_value)):
         # This is for handling opaque objects in custom ops
         if is_opaque_constant_type(type(example_value)):
             return CustomClassObjectVariable.create(

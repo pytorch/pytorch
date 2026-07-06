@@ -32,9 +32,9 @@ from torch._guards import Source
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import (
     get_member_type,
+    is_custom_class,
     is_opaque_constant_type,
     is_opaque_symbolic_type,
-    is_opaque_type,
     MemberType,
     should_hoist,
 )
@@ -246,7 +246,7 @@ class CustomClassObjectVariable(UserDefinedObjectVariable):
     def is_matching_cls(cls, user_cls: type) -> bool:
         return (
             issubclass(user_cls, torch.ScriptObject)
-            or is_opaque_type(user_cls)
+            or is_custom_class(user_cls)
             or issubclass(user_cls, FakeScriptObject)
         )
 
@@ -375,7 +375,7 @@ class CustomClassObjectVariable(UserDefinedObjectVariable):
 
         real_obj = self.as_python_constant()
         real_obj_type = type(real_obj)
-        if is_opaque_type(real_obj_type):
+        if is_custom_class(real_obj_type):
             member_type = get_member_type(real_obj_type, name)
 
             if member_type == MemberType.USE_REAL:
@@ -482,7 +482,7 @@ class CustomClassObjectVariable(UserDefinedObjectVariable):
 
         real_obj = self.as_python_constant()
         real_obj_type = type(real_obj)
-        if is_opaque_type(real_obj_type):
+        if is_custom_class(real_obj_type):
             member_type = get_member_type(real_obj_type, name)
 
             if member_type == MemberType.USE_REAL:

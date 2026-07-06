@@ -10,8 +10,8 @@ from torch.utils._exposed_in import exposed_in
 
 from .opaque_object import (
     _resolve_opaque_type_info,
+    is_custom_class,
     is_opaque_symbolic_type,
-    is_opaque_type,
 )
 
 
@@ -161,7 +161,7 @@ def infer_schema(
 
         schema_type = None
         if annotation_type not in SUPPORTED_PARAM_TYPES:
-            if is_opaque_type(annotation_type):
+            if is_custom_class(annotation_type):
                 schema_type = _resolve_opaque_type_info(annotation_type).class_name  # type: ignore[union-attr]
             elif annotation_type == torch._C.ScriptObject:
                 error_fn(

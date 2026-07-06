@@ -61,12 +61,12 @@ from .rendezvous import register_rendezvous_handler, rendezvous  # noqa: F401
 
 def _register_process_group_opaque_type() -> None:
     from torch._library.opaque_object import (
-        is_opaque_type,
+        is_custom_class,
         MemberType,
         register_custom_class,
     )
 
-    if is_opaque_type(ProcessGroup):
+    if is_custom_class(ProcessGroup):
         return
 
     register_custom_class(

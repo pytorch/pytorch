@@ -29,7 +29,7 @@ from torch._higher_order_ops.utils import (
     saved_values,
 )
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_type
+from torch._library.opaque_object import is_custom_class
 from torch._ops import HigherOrderOperator
 from torch._subclasses.functional_tensor import disable_functional_mode
 from torch.fx.experimental.proxy_tensor import (
@@ -246,7 +246,7 @@ class InvokeSubgraphHOP(HigherOrderOperator):
             isinstance(
                 o, (torch.Tensor, int, torch.SymInt, torch.Generator, FakeScriptObject)
             )
-            or is_opaque_type(type(o))
+            or is_custom_class(type(o))
             for o in operands
             if o is not None
         ):

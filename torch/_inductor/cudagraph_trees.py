@@ -90,7 +90,7 @@ from torch._inductor.cudagraph_utils import (
     PlaceholderInfo,
     WrappedFunction,
 )
-from torch._library.opaque_object import is_opaque_value
+from torch._library.opaque_object import is_custom_class_obj
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.storage import UntypedStorage
 from torch.utils import _pytree as pytree
@@ -1014,7 +1014,7 @@ class CUDAGraphNode:
         # That is why tensor_static_input_idxs and
         # non_managed_static_input_idxs filter them out below.
         opaque_input_idxs = OrderedSet(
-            i for i, inp in enumerate(inputs) if is_opaque_value(inp)
+            i for i, inp in enumerate(inputs) if is_custom_class_obj(inp)
         )
         static_input_idxs = OrderedSet(wrapped_function.static_input_idxs)
         cudagraph_managed_idxs = OrderedSet(self.cudagraph_managed_idxs)

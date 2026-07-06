@@ -13,7 +13,7 @@ from torch._dispatch.python import suspend_functionalization
 from torch._guards import detect_fake_mode
 from torch._higher_order_ops.schema import HopSchema
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_type
+from torch._library.opaque_object import is_custom_class
 from torch._ops import HigherOrderOperator, OperatorBase, OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._subclasses.functional_tensor import (
@@ -795,7 +795,7 @@ def _stack_pytree(pytrees):
 def save_values_for_backward(ctx, args):
     if not all(
         isinstance(arg, (torch.Tensor, torch.SymInt, int, type(None), FakeScriptObject))
-        or is_opaque_type(type(arg))
+        or is_custom_class(type(arg))
         for arg in args
     ):
         raise AssertionError(f"Invalid arg types in {args}")

@@ -72,7 +72,7 @@ from torch._functorch.aot_autograd import (
 )
 from torch._guards import detect_fake_mode, tracing, TracingContext
 from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
-from torch._library.opaque_object import is_opaque_type
+from torch._library.opaque_object import is_custom_class
 from torch._logging import dtrace_structured
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._utils_internal import compile_time_strobelight_meta, log_export_usage
@@ -1720,7 +1720,7 @@ def _strict_export(
                     raise AssertionError(
                         "Cannot find dynamo_fake_mode. This could be due to the exported graph module have no placeholders."
                     )
-                if is_opaque_type(type(attr)):
+                if is_custom_class(type(attr)):
                     node.meta["val"] = maybe_to_fake_obj(dynamo_fake_mode, attr)
                 else:
                     node.meta["val"] = dynamo_fake_mode.from_tensor(
