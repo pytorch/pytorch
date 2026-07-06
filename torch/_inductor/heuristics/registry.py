@@ -261,7 +261,8 @@ def override_template_heuristics(
     _CACHE.clear()
     try:
         for template_name, op_name in template_op_pairs:
-            assert op_name is not None
+            if op_name is None:
+                raise AssertionError("op_name must not be None")
             key: tuple[str | None, ...] = (template_name, device_type, op_name)
             if key in _REGISTRY:
                 original_entries[key] = _REGISTRY[key]

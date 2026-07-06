@@ -228,6 +228,14 @@ def pad_tensor(
             return tensor
     elif not _are_we_tracing() and guard_or_false(pad_size == 0):
         return tensor
+    if _are_we_tracing():
+        from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
+
+        if has_free_unbacked_symbols(tensor):
+            pad_shape: list[IntLikeType] = list(tensor.shape)
+            pad_shape[pad_dim] = pad_size
+            return torch.cat([tensor, tensor.new_zeros(pad_shape)], dim=pad_dim)
+
     pad = [0, 0] * (tensor.ndim - pad_dim)
     pad[-1] = pad_size  # pyrefly: ignore[unsupported-operation]
     return torch.nn.functional.pad(tensor, pad)

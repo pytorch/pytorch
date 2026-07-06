@@ -221,7 +221,7 @@ ExecutionKernels KernelFactory::initializeNodeKernels(
       ss << op << ": " << count << ", \n";
     }
     LOG(WARNING) << "Following ops are missing static dispatched kernels: \n"
-                 << ss.str();
+                 << std::move(ss).str();
   }
 
   return {

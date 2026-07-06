@@ -1,5 +1,7 @@
 import hashlib
+import importlib.util
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -402,12 +404,15 @@ def lint(ctx, *, lintrunner_args, apply_patches, **kwargs):
         lintrunner_args=lintrunner_args,
         return_json_output=write_json_output,
     )
+    # Slow linters default to changed files only so a bare `spin lint` stays
+    # fast locally, but must honor an explicit --all-files (e.g. trunk CI) so
+    # they continuously check the whole tree rather than just the merge-base diff.
     lint_found_changed, json_output_changed = _run_lintrunner(
         changed_files_linters,
         take=take,
         skip=skip,
         apply_patches=apply_patches,
-        all_files=False,
+        all_files=has_all_files,
         lintrunner_args=lintrunner_args,
         return_json_output=write_json_output,
     )
@@ -459,6 +464,100 @@ def regenerate_github_workflows():
     """Regenerate GitHub workflows from templates."""
     cmd = [sys.executable, "scripts/generate_ci_workflows.py"]
     spin.util.run(cmd, cwd="./.github")
+
+
+#: Canary imports for the docs build environment. If any of these are missing
+#: in the active env, the `make` invocation in spin docs would fail deep inside
+#: a Sphinx extension or a figure-generation script with an unhelpful traceback.
+#: Listing them up-front lets us surface a single actionable hint instead.
+_DOCS_DEP_CANARIES = ("sphinx", "matplotlib")
+
+
+@click.command(context_settings={"ignore_unknown_options": True})
+@click.argument("make_args", nargs=-1, type=click.UNPROCESSED)
+def docs(make_args):
+    """Build documentation.
+
+    Wraps `make` in `docs/`. With no arguments runs `make html`. Pass any
+    Make target or argument through, e.g.
+
+    \b
+        spin docs                     # html (default)
+        spin docs doctest             # run doctests
+        spin docs coverage            # API coverage report
+        spin docs html-stable         # release-style build
+        spin docs serve               # local http server on build/html
+        spin docs html O="-D katex_prerender=0"  # no Node.js needed
+
+    Requires the docs build dependencies (`docs/requirements.txt`) to be
+    installed in the active environment. The default build also prerenders
+    math with KaTeX, which needs Node.js (`node`) on PATH; pass
+    `O="-D katex_prerender=0"` to render math in the browser instead. (Use
+    `O=` rather than `SPHINXOPTS=` so the Makefile's default options are kept.)
+    """
+    missing = [
+        name for name in _DOCS_DEP_CANARIES if importlib.util.find_spec(name) is None
+    ]
+    if missing:
+        raise click.ClickException(
+            f"Docs build dependencies missing: {', '.join(missing)}.\n"
+            f"Install them with:\n\n"
+            f"    pip install -r docs/requirements.txt"
+        )
+
+    # docs/source/conf.py sets katex_prerender=True, so sphinxcontrib-katex
+    # spawns a Node.js server to prerender math. Missing node otherwise fails
+    # deep in the Sphinx run with a bare "No such file or directory: 'node'".
+    # Only a warning: node is unnecessary when the user disables prerender.
+    prerender_disabled = any("katex_prerender=0" in arg for arg in make_args)
+    if not prerender_disabled and shutil.which("node") is None:
+        click.echo(
+            "Warning: `node` not found on PATH. The docs build prerenders math "
+            "with KaTeX (katex_prerender=True), which needs Node.js. Either "
+            "install nodejs, or skip prerender with:\n\n"
+            '    spin docs html O="-D katex_prerender=0"\n',
+            err=True,
+        )
+    cmd = ["make", *(make_args or ("html",))]
+    spin.util.run(cmd, cwd="docs")
+
+
+def _pip_install_cmd(editable):
+    """Build the pip install command, preferring uv when available."""
+    if shutil.which("uv"):
+        cmd = ["uv", "pip", "install"]
+    else:
+        cmd = [sys.executable, "-m", "pip", "install"]
+    if editable:
+        cmd += ["-e"]
+    return cmd + [".", "-v", "--no-build-isolation"]
+
+
+@click.command()
+def develop():
+    """Build PyTorch (editable install).
+
+    Runs an editable pip install using uv when available, falling back to
+    regular pip.  Build configuration comes from the environment, e.g.
+    `BUILD_CONFIG spin develop`.
+    """
+    spin.util.run(_pip_install_cmd(editable=True))
+
+
+# Alias so `spin editable` also works.
+editable = click.command(name="editable")(develop.callback)
+editable.help = develop.help
+
+
+@click.command()
+def install():
+    """Install PyTorch (non-editable).
+
+    Runs a regular pip install using uv when available, falling back to
+    regular pip.  Build configuration comes from the environment, e.g.
+    `BUILD_CONFIG spin install`.
+    """
+    spin.util.run(_pip_install_cmd(editable=False))
 
 
 PYREFLY_LINTER_SCRIPT = CWD / "tools" / "linter" / "adapters" / "pyrefly_linter.py"

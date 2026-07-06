@@ -32,7 +32,7 @@
     if (status != ZE_RESULT_SUCCESS) {                                    \
       std::stringstream ss;                                               \
       ss << "L0 runtime error: " << std::hex << std::uppercase << status; \
-      throw std::runtime_error(ss.str());                                 \
+      throw std::runtime_error(std::move(ss).str());                      \
     }                                                                     \
   }
 
@@ -96,9 +96,9 @@ syclDevicePtr_t getPointer(
           static_cast<int>(res)));
 
   TORCH_CHECK(
-      prop.type == ZE_MEMORY_TYPE_DEVICE,
+      prop.type != ZE_MEMORY_TYPE_UNKNOWN,
       fmt::format(
-          "Pointer argument doesn't reference XPU device memory at {}-th argument, err={}",
+          "Pointer argument references unknown type of memory at {}-th argument, err={}",
           idx,
           static_cast<int>(res)));
 
