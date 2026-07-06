@@ -9,20 +9,18 @@ from typing import Any, TypeAlias
 import torch
 import torch._vendor.quack.gemm_config as quack_gemm_config
 from torch._inductor.kernel.flex_gemm.constraints import (
-    FlexGemmLocalReduceConsumerKind,
-    FlexGemmLocalReduceSpec,
+    FlexGemmLocalReduceCallbacks,
+    FlexGemmLocalReduceGeometry,
     LOCAL_REDUCE_CALLBACKS_REQUIRED_ERROR,
     LOCAL_REDUCE_COMBINE_KEY_SUFFIX,
     local_reduce_compressed_shape,
     LOCAL_REDUCE_FINALIZE_KEY_SUFFIX,
-    LOCAL_REDUCE_RUNTIME_FEED_MAIN_OUT_ERROR,
     LOCAL_REDUCE_RUNTIME_OUT_ERROR,
     LOCAL_REDUCE_SWAP_AB_ERROR,
     validate_local_reduce_feed_main_capability,
     validate_local_reduce_no_aux_out_composition,
     validate_local_reduce_no_c_alpha_beta,
     validate_local_reduce_out_shape,
-    validate_local_reduce_output_binding,
     validate_local_reduce_runtime_dense_mm,
     validate_local_reduce_selected_dim_divisible,
 )
@@ -196,43 +194,31 @@ def normalize_c(
 
 @dataclasses.dataclass(frozen=True)
 class FlexGemmRuntimeLocalReducePlan:
-    """Runtime local-reduce consumer contract derived from generated code."""
+    """Runtime plan for one local reduction and its output/feed-main consumers."""
 
-    spec: FlexGemmLocalReduceSpec
+    geometry: FlexGemmLocalReduceGeometry
     out: torch.Tensor | None = None
-    combine_fn: Any = None
-    combine_key: str | None = None
-    finalize_fn: Any = None
-    finalize_key: str | None = None
+    callbacks: FlexGemmLocalReduceCallbacks | None = None
+    feeds_main: bool = False
 
     def __post_init__(self) -> None:
-        """Reject invalid consumer/output combinations at construction."""
-        validate_local_reduce_output_binding(
-            self.kind,
-            self.out is not None,
-            compressed_missing_error=LOCAL_REDUCE_RUNTIME_OUT_ERROR,
-            feed_main_unexpected_error=LOCAL_REDUCE_RUNTIME_FEED_MAIN_OUT_ERROR,
-        )
-
-    @property
-    def kind(self) -> FlexGemmLocalReduceConsumerKind:
-        return self.spec.kind
+        """Reject plans without the output/callback state required by their consumer."""
+        if self.out is None and not self.feeds_main:
+            raise RuntimeError(LOCAL_REDUCE_RUNTIME_OUT_ERROR)
+        if self.feeds_main:
+            if self.callbacks is None:
+                raise RuntimeError(LOCAL_REDUCE_CALLBACKS_REQUIRED_ERROR)
+            validate_local_reduce_feed_main_capability(self.axis, self.group)
+        elif self.geometry.needs_physical_callbacks and self.callbacks is None:
+            raise RuntimeError(LOCAL_REDUCE_CALLBACKS_REQUIRED_ERROR)
 
     @property
     def group(self) -> int:
-        return self.spec.group
+        return self.geometry.group
 
     @property
     def axis(self) -> int:
-        return self.spec.axis
-
-    @property
-    def feeds_main(self) -> bool:
-        return self.spec.feeds_main
-
-    @property
-    def needs_physical_callbacks(self) -> bool:
-        return self.spec.needs_physical_callbacks
+        return self.geometry.axis
 
 
 def validate_runtime_local_reduce(
@@ -252,11 +238,9 @@ def validate_runtime_local_reduce(
     validate_local_reduce_no_c_alpha_beta(effective_C, alpha, beta)
     if plan.feeds_main:
         validate_local_reduce_no_aux_out_composition(aux_outs or None)
-        validate_local_reduce_feed_main_capability(plan.axis, plan.group)
-        return
     local_reduce_out = plan.out
     if local_reduce_out is None:
-        raise RuntimeError(LOCAL_REDUCE_RUNTIME_OUT_ERROR)
+        return
     check_matrix("local_reduce_out", local_reduce_out)
     check_matrix_row_major_layout("local_reduce_out", local_reduce_out)
     expected_local_reduce_shape = local_reduce_compressed_shape(
@@ -265,54 +249,58 @@ def validate_runtime_local_reduce(
     validate_local_reduce_out_shape(local_reduce_out.shape, expected_local_reduce_shape)
 
 
+def local_reduce_callback_key(callback: Any, fallback_key: str) -> str:
+    """Use a generated callback cache key when present, otherwise its caller key."""
+    cache_key = getattr(callback, "__cache_key__", None)
+    if cache_key is None:
+        return fallback_key
+    key = cache_key() if callable(cache_key) else cache_key
+    if not isinstance(key, str):
+        raise RuntimeError("local-reduce callback __cache_key__ must return a string")
+    return key
+
+
 def register_runtime_local_reduce_callbacks(
     local_reduce: FlexGemmRuntimeLocalReducePlan | None,
     epilogue_key: str,
-) -> FlexGemmRuntimeLocalReducePlan | None:
-    """Register generated physical callbacks and return a keyed runtime plan."""
-    if local_reduce is None or not local_reduce.needs_physical_callbacks:
-        return local_reduce
-    if local_reduce.combine_fn is None or local_reduce.finalize_fn is None:
-        raise RuntimeError(LOCAL_REDUCE_CALLBACKS_REQUIRED_ERROR)
-    local_reduce_combine_key = (
-        local_reduce.combine_key
-        if local_reduce.combine_key is not None
-        else f"{epilogue_key}{LOCAL_REDUCE_COMBINE_KEY_SUFFIX}"
+) -> tuple[str | None, str | None]:
+    """Register generated physical callbacks and return QuACK registry keys."""
+    if local_reduce is None or local_reduce.callbacks is None:
+        return None, None
+    callbacks = local_reduce.callbacks
+    local_reduce_combine_key = local_reduce_callback_key(
+        callbacks.combine_fn, f"{epilogue_key}{LOCAL_REDUCE_COMBINE_KEY_SUFFIX}"
     )
-    local_reduce_finalize_key = (
-        local_reduce.finalize_key
-        if local_reduce.finalize_key is not None
-        else f"{epilogue_key}{LOCAL_REDUCE_FINALIZE_KEY_SUFFIX}"
+    local_reduce_finalize_key = local_reduce_callback_key(
+        callbacks.finalize_fn, f"{epilogue_key}{LOCAL_REDUCE_FINALIZE_KEY_SUFFIX}"
     )
     from torch._vendor.quack.gemm_act import register_local_reduce_fns
 
     register_local_reduce_fns(
         local_reduce_combine_key,
-        local_reduce.combine_fn,
+        callbacks.combine_fn,
         local_reduce_finalize_key,
-        local_reduce.finalize_fn,
+        callbacks.finalize_fn,
     )
-    return dataclasses.replace(
-        local_reduce,
-        combine_key=local_reduce_combine_key,
-        finalize_key=local_reduce_finalize_key,
-    )
+    return local_reduce_combine_key, local_reduce_finalize_key
 
 
 def local_reduce_gemm_act_kwargs(
     local_reduce: FlexGemmRuntimeLocalReducePlan | None,
     local_reduce_out: torch.Tensor | None,
+    callback_keys: tuple[str | None, str | None],
 ) -> dict[str, Any]:
-    """Map a tagged runtime plan onto QuACK's public local-reduce kwargs."""
+    """Map a concrete runtime plan onto QuACK's public local-reduce kwargs."""
     if local_reduce is None:
         return {}
+    local_reduce_combine_key, local_reduce_finalize_key = callback_keys
     return {
         "tensor_epilogue_returns_local_reduce": local_reduce_out is not None,
         "local_reduce_out": local_reduce_out,
         "local_reduce_group": local_reduce.group,
         "local_reduce_axis": local_reduce.axis,
-        "local_reduce_combine_key": local_reduce.combine_key,
-        "local_reduce_finalize_key": local_reduce.finalize_key,
+        "local_reduce_combine_key": local_reduce_combine_key,
+        "local_reduce_finalize_key": local_reduce_finalize_key,
     }
 
 
@@ -323,6 +311,7 @@ def dispatch_gemm_act(
     out: torch.Tensor,
     aux_outs: tuple[torch.Tensor, ...],
     local_reduce: FlexGemmRuntimeLocalReducePlan | None,
+    local_reduce_callback_keys: tuple[str | None, str | None],
     epilogue_key: str,
     epilogue_arg_kinds: tuple[str, ...],
     row_args: tuple[torch.Tensor, ...],
@@ -383,7 +372,7 @@ def dispatch_gemm_act(
     quack_d = quack_out if returns_aux else None
     quack_postact = quack_aux_outs if returns_aux else quack_out
     local_reduce_kwargs = local_reduce_gemm_act_kwargs(
-        local_reduce, quack_local_reduce_out
+        local_reduce, quack_local_reduce_out, local_reduce_callback_keys
     )
 
     gemm_act_dispatch(
@@ -541,7 +530,7 @@ def gemm_epilogue(
     from torch._vendor.quack.gemm_act import register_tensor_epilogue_fn
 
     register_tensor_epilogue_fn(epilogue_key, epilogue_fn)
-    local_reduce = register_runtime_local_reduce_callbacks(
+    local_reduce_callback_keys = register_runtime_local_reduce_callbacks(
         local_reduce,
         epilogue_key,
     )
@@ -568,6 +557,7 @@ def gemm_epilogue(
             out,
             aux_outs,
             local_reduce,
+            local_reduce_callback_keys,
             epilogue_key,
             inferred_arg_kinds,
             row_args,
