@@ -169,6 +169,16 @@ class TestCuptiRecords(TestCase):
             # An explicit arg overrides the env var.
             self.assertEqual(CuptiMonitor(buffer_size=2048).buffer_size, 2048)
 
+    def test_monitor_use_approx_timestamps_arg(self):
+        # The approx-clock timestamp callback is a constructor setting (no env var):
+        # off by default, on when use_approx_timestamps=True. No CUDA -- config only.
+        from torch.profiler._cupti.monitor import CuptiMonitor
+
+        self.assertFalse(CuptiMonitor()._timestamp_callback_enabled)
+        self.assertTrue(
+            CuptiMonitor(use_approx_timestamps=True)._timestamp_callback_enabled
+        )
+
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     def test_monitor_external_correlation_not_started(self):
         # External-correlation push/pop are no-ops until the monitor is started (no
