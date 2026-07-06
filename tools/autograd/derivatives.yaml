@@ -2093,6 +2093,11 @@
   self: multilabel_margin_loss_backward(grad, self, target, reduction, is_target)
   target: non_differentiable
 
+- name: _fused_cross_entropy_loss_2d_forward(Tensor self, Tensor target, Tensor? weight=None, int ignore_index=-100, float label_smoothing=0.0) -> (Tensor loss, Tensor lse, Tensor weight_per_row)
+  self: _fused_cross_entropy_loss_2d_backward(grad, self, target, weight, lse, ignore_index, label_smoothing)
+  target: non_differentiable
+  weight: non_differentiable
+
 - name: nll_loss_forward(Tensor self, Tensor target, Tensor? weight, int reduction, SymInt ignore_index) -> (Tensor output, Tensor total_weight)
   self: nll_loss_backward_symint(grad, self, target, weight, reduction, ignore_index, total_weight)
   target: non_differentiable

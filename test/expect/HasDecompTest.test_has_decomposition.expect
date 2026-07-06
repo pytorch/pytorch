@@ -379,6 +379,8 @@ aten::_fused_adamw.tensor_lr
 aten::_fused_adamw.tensor_lr_out
 aten::_fused_adamw_
 aten::_fused_adamw_.tensor_lr
+aten::_fused_cross_entropy_loss_2d_backward
+aten::_fused_cross_entropy_loss_2d_forward
 aten::_fused_moving_avg_obs_fq_helper
 aten::_fused_moving_avg_obs_fq_helper.out
 aten::_fused_moving_avg_obs_fq_helper_functional
