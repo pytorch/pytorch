@@ -344,6 +344,17 @@ def get_fill_order(
     """
     Convert strides to fill order (argsort)
     """
+    if shape_env is None:
+        # Recover a shape_env from any symbolic stride so that unbacked
+        # comparisons route through argsort_sym (which resolves
+        # data-dependent comparisons via optimization hints) instead of the
+        # plain argsort path, whose sorted() would guard and raise
+        # GuardOnDataDependentSymNode. Callers that already pass a shape_env
+        # are unaffected.
+        for s in seq:
+            if isinstance(s, torch.SymInt):
+                shape_env = s.node.shape_env
+                break
     if shape_env is None or all(isinstance(s, (int, sympy.Integer)) for s in seq):
         sorted_idx: Sequence[int] = argsort(seq)
     else:
