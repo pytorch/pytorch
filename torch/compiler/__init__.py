@@ -312,15 +312,17 @@ def assume_constant_result(fn=None, *, specialize_args=False):
 
     Args:
         fn: The function to be marked as having a constant result.
-        specialize_args: Set to True when ``fn`` returns the same result for
-            equal arguments, not only for the very same argument objects. The
-            cached result is then reused whenever the arguments compare equal,
-            and recomputed when they change. Equality is supported for basic
-            types and their containers, dataclasses of those, and opaque
-            objects whose class defines ``__eq__`` and is registered with
-            ``torch.utils._pytree.register_constant`` (see its docstring);
-            anything else triggers a graph break. Default: ``False`` (the
-            cached result is keyed on argument identity).
+        specialize_args: If ``specialize_args=False`` (the default), the result
+            is assumed not to depend on the argument values: it is computed
+            once and baked into the graph, and the arguments can be anything.
+            If ``specialize_args=True``, the result is assumed to depend on
+            the arguments, but to be the same whenever they are equal: the
+            baked result is reused for equal arguments and recomputed when
+            they change. Arguments are limited to what ``torch.compile`` can
+            compare by value - basic types and their containers, dataclasses
+            of those, and classes registered with
+            ``torch.utils._pytree.register_constant``; anything else triggers
+            a graph break.
 
     .. warning::
         `assume_constant_result` can, if invalid, cause safety and soundness issues, :func:`torch.compile`
