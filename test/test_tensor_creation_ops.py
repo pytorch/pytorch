@@ -3481,8 +3481,9 @@ class TestRandomTensorCreation(TestCase):
             with self.assertRaisesRegex(RuntimeError, r'normal expects std >= 0.0, but found std'):
                 torch.normal(input, -1, (10,))
 
-            with self.assertRaisesRegex(RuntimeError, r'normal expects all elements of std >= 0.0'):
-                torch.normal(input, std)
+            if not std.is_cuda:  # on GPU this error is raised asynchronously
+                with self.assertRaisesRegex(RuntimeError, r'normal expects all elements of std >= 0.0'):
+                    torch.normal(input, std)
 
     # https://github.com/pytorch/pytorch/issues/126834
     @xfailIfTorchDynamo

@@ -6,6 +6,7 @@ import torch
 from torch.utils._ordered_set import OrderedSet
 
 from ..ir import GraphPartitionSignature
+from ..runtime.hints import TritonMeta
 from ..virtualized import V
 from .cpp_wrapper_cpu import CppWrapperCpu
 from .cpp_wrapper_gpu import CppWrapperGpu
@@ -41,7 +42,7 @@ class CppWrapperMps(CppWrapperGpu):
         arg_types: tuple[Any, ...] | None = None,
         raw_keys: tuple[Any, ...] | None = None,
         raw_args: tuple[Any, ...] | None = None,
-        triton_meta: dict[str, Any] | None = None,
+        triton_meta: TritonMeta | None = None,
         inductor_meta: dict[str, Any] | None = None,
         graph_name: str = "",
         original_fxnode_name: str | None = None,
