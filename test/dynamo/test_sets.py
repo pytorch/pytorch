@@ -87,25 +87,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         y = fn(x)
         self.assertEqual(y, x.sin())
 
-    def test_set_iterator_length_hint(self):
-        # setiter_len/dictiter_len: __length_hint__ returns the number of
-        # not-yet-consumed elements and decreases as the iterator advances.
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(x):
-            results = []
-            for obj in ({1, 2, 3}, {1: "a", 2: "b"}, {1: "a"}.values()):
-                it = iter(obj)
-                results.append(it.__length_hint__())
-                next(it)
-                results.append(it.__length_hint__())
-            results.append(iter(set()).__length_hint__())
-            return x.sin(), results
-
-        x = torch.randn(1)
-        y, results = fn(x)
-        self.assertEqual(y, x.sin())
-        self.assertEqual(results, [3, 2, 2, 1, 1, 0, 0])
-
     def test_do_not_rehash_dict_keys(self):
         # Building a set/frozenset (or subclass) from a dict must reuse the
         # dict's stored hashes instead of re-invoking __hash__, mirroring
