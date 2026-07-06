@@ -4,6 +4,7 @@ import functools
 import itertools
 import logging
 import operator
+import os
 from collections import Counter, defaultdict
 from collections.abc import Callable, Sequence
 from typing import Any, TypeVar
@@ -2027,6 +2028,10 @@ def addmm(match, mat1, mat2, *, inp):
 
 def _is_addcdiv_fma_eligible(match: Match) -> bool:
     """Guards for the addcdiv FMA re-fusion pass."""
+    # Set PYTORCH_DISABLE_ROCM_FMA=1 to skip this pass (restores pre-PR behavior).
+    if torch.version.hip and os.environ.get("PYTORCH_DISABLE_ROCM_FMA", "0") != "0":
+        return False
+
     # aten.addcdiv requires floating-point self; check inp, not output, because
     # aten.div promotes integers to float so the output is float even for int inp.
     inp_val = match.kwargs["inp"].meta.get("val")
@@ -2034,8 +2039,17 @@ def _is_addcdiv_fma_eligible(match: Match) -> bool:
         return False
     # tl.fma / div_rn are Triton GPU-only
     out_val = match.output_node().meta.get("val")
-    if not (isinstance(out_val, torch.Tensor) and out_val.device.type in ("cuda", "xpu")):
+    if not (
+        isinstance(out_val, torch.Tensor) and out_val.device.type in ("cuda", "xpu")
+    ):
         return False
+    # aten.addcdiv requires all tensor args to be floating-point; integer
+    # constants and SymInts can appear as t1/t2 in decomposed graphs.
+    for key in ("t1", "t2"):
+        node = match.kwargs.get(key)
+        val = node.meta.get("val") if isinstance(node, torch.fx.Node) else node
+        if not (isinstance(val, torch.Tensor) and val.dtype.is_floating_point):
+            return False
     # aten.addcdiv requires a scalar value, not a tensor
     return not isinstance(match.kwargs.get("value"), torch.fx.Node)
 
@@ -2063,7 +2077,9 @@ def _fuse_addcdiv_to_fma(match: Match, inp, t1, t2, value) -> None:
     aten.addcdiv node lets that lowering fire (tl.fma + triton.language.div_rn).
     """
 
-    def repl(inp: torch.Tensor, t1: torch.Tensor, t2: torch.Tensor, value) -> torch.Tensor:
+    def repl(
+        inp: torch.Tensor, t1: torch.Tensor, t2: torch.Tensor, value
+    ) -> torch.Tensor:
         return torch.ops.aten.addcdiv(inp, t1, t2, value=value)
 
     counters["inductor"]["addcdiv_fma_fused"] += 1
