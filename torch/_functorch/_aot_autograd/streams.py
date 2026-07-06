@@ -29,6 +29,7 @@ Graph: TypeAlias = torch.fx.Graph
 _SYNC_OPS = (
     torch.ops.streams.record_event.default,
     torch.ops.streams.wait_event.default,
+    torch.ops.streams.wait_stream.default,
     torch.ops.streams.synchronize_event.default,
     torch.ops.streams.synchronize_device.default,
     torch.ops.streams.synchronize_stream.default,
@@ -362,6 +363,62 @@ def populate_fw_metadata_with_stream_indices(
     fw_metadata.mutated_inp_stream_indices = stream_indices
 
 
+def _expand_dict_returning_deps(
+    deps: list[Node],
+    visited: set[Node],
+    graph: torch.fx.Graph,
+    sync_node: Node,
+) -> list[Node]:
+    """Expand triton_kernel_wrapper_functional dict deps into per-key getitems.
+
+    ``triton_kernel_wrapper_functional`` returns a flat ``dict[str, Tensor]``.
+    If such a node is threaded through ``control_deps`` as a pass-through
+    value, ``decompose_triton_kernel_wrapper_functional`` later replaces it
+    with a raw Python dict, corrupting every user that expected an FX Node.
+
+    To avoid this, we insert ``operator.getitem`` nodes *before* the sync for
+    each after-sync getitem user, so that only tensor-valued nodes are passed
+    through ``control_deps``.  The dict node may still appear in
+    ``additional_deps`` (ordering-only) which is safe since that tuple is
+    never decomposed.
+    """
+    expanded: list[Node] = []
+    for dep in deps:
+        if not (
+            dep.op == "call_function"
+            and dep.target is torch.ops.higher_order.triton_kernel_wrapper_functional
+        ):
+            expanded.append(dep)
+            continue
+
+        after_sync_getitems = [
+            user
+            for user in dep.users
+            if user not in visited
+            and user.op == "call_function"
+            and user.target is operator.getitem
+        ]
+        if not after_sync_getitems:
+            expanded.append(dep)
+            continue
+
+        with graph.inserting_before(sync_node):
+            for old_gi in after_sync_getitems:
+                key = old_gi.args[1]
+                new_gi = graph.call_function(operator.getitem, args=(dep, key))
+                new_gi.meta.update(old_gi.meta)
+                if isinstance(new_gi.meta.get("val"), dict):
+                    raise AssertionError(
+                        f"nested dict in triton kernel output for key {key}"
+                    )
+                visited.add(new_gi)
+                expanded.append(new_gi)
+                old_gi.replace_all_uses_with(new_gi)
+                graph.erase_node(old_gi)
+
+    return expanded
+
+
 def _wrap_sync_node(
     gm: torch.fx.GraphModule,
     sync_node: Node,
@@ -391,6 +448,15 @@ def _wrap_sync_node(
         if any(user not in visited for user in dep.users)
     ]
 
+    # Expand dict-returning nodes (triton_kernel_wrapper_functional) into
+    # individual getitem outputs.  Passing a dict-valued node through
+    # control_deps breaks post-grad passes: reinplace + decomposition replace
+    # the dict node with a Python dict, corrupting any user that expected an
+    # FX Node.  Unwrapping here ensures only tensor-valued nodes flow through.
+    deps_with_uses_after_sync = _expand_dict_returning_deps(
+        deps_with_uses_after_sync, visited, graph, sync_node
+    )
+
     # Create subgraph that executes sync and passes through only used dependencies
     subgraph_module = _create_subgraph_for_node(
         graph, sync_node, deps_with_uses_after_sync
@@ -411,6 +477,11 @@ def _wrap_sync_node(
             ),
             kwargs={},
         )
+
+    # Propagate partitioner_tag so the partitioner can distinguish
+    # forward vs backward sync control_deps during graph extraction.
+    if "partitioner_tag" in sync_node.meta:
+        control_deps_node.meta["partitioner_tag"] = sync_node.meta["partitioner_tag"]
 
     # Mark newly created nodes as visited so subsequent syncs don't
     # misclassify them as "after the sync" during replacement.
@@ -455,6 +526,44 @@ def _wrap_sync_node(
     return control_deps_node, list(replacements.values())
 
 
+def _collect_wait_stream_forward_deps(graph: torch.fx.Graph) -> dict[Node, list[Node]]:
+    """
+    Pre-pass: for each wait_stream(waiting, waited_on) node, find tensor inputs
+    of subsequent compute nodes on the waiting stream that are defined before
+    the wait_stream. These must be threaded through the control_deps so that
+    the waiting-stream work is ordered after the wait_stream operation.
+    """
+    result: dict[Node, list[Node]] = {}
+    nodes_before: set[Node] = set()
+    for node in graph.nodes:
+        if (
+            node.op == "call_function"
+            and node.target is torch.ops.streams.wait_stream.default
+        ):
+            waiting_stream: int = node.args[0]  # type: ignore[assignment]
+            extra_deps: set[Node] = set()
+            forward_node = node.next
+            while forward_node.op != "root":
+                if (
+                    forward_node.op == "call_function"
+                    and forward_node.target not in _SYNC_OPS
+                    and (get_stream(forward_node) or 0) == waiting_stream
+                ):
+
+                    def _collect(n: torch.fx.Node) -> torch.fx.Node:
+                        if n in nodes_before and "val" in n.meta:
+                            extra_deps.add(n)
+                        return n
+
+                    map_arg(forward_node.args, _collect)
+                    map_arg(forward_node.kwargs, _collect)
+                forward_node = forward_node.next
+            if extra_deps:
+                result[node] = list(extra_deps)
+        nodes_before.add(node)
+    return result
+
+
 def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
     """
     Single-pass wrap of all sync nodes in control_deps.
@@ -467,6 +576,11 @@ def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
     graph = gm.graph
     if len(graph.nodes) == 0:
         raise RuntimeError("Expected a non-empty graph")
+
+    # Pre-pass: find inputs of waiting-stream nodes that need to be threaded
+    # through wait_stream's control_deps for forward ordering.
+    wait_stream_forward_deps = _collect_wait_stream_forward_deps(graph)
+
     stream_to_nodes: dict[int | None, list[Node]] = {}
     # Maps event_index -> control_deps node that wrapped its record_event,
     # so the corresponding wait_event/synchronize_event can depend on the record.
@@ -503,6 +617,40 @@ def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
                         found_sync = True
                         _wrap_sync_node(gm, node, all_stream_deps, visited)
                     stream_to_nodes.clear()
+                    while (
+                        getattr(next_node, "_erased", False) and next_node.op != "root"
+                    ):
+                        next_node = next_node.next
+                    node = next_node
+                    continue
+
+                # wait_stream(waiting, waited_on) creates a dependency on
+                # the waited_on stream: all prior work there must complete
+                # before the waiting stream proceeds.
+                if node.target is torch.ops.streams.wait_stream.default:
+                    waited_on_stream: int = node.args[1]  # type: ignore[assignment]
+                    deps_before_sync = list(stream_to_nodes.get(waited_on_stream, ()))
+                    if None in stream_to_nodes and waited_on_stream is not None:
+                        deps_before_sync.extend(stream_to_nodes[None])
+                    # Also include inputs of subsequent waiting-stream nodes
+                    # so they get threaded through control_deps, creating a
+                    # forward ordering constraint (waiting-stream work must
+                    # come after wait_stream).
+                    existing_ids = {id(d) for d in deps_before_sync}
+                    for dep in wait_stream_forward_deps.get(node, ()):
+                        if id(dep) not in existing_ids:
+                            deps_before_sync.append(dep)
+                            existing_ids.add(id(dep))
+                    if deps_before_sync:
+                        found_sync = True
+                        _wrap_sync_node(gm, node, deps_before_sync, visited)
+                    stream_to_nodes[waited_on_stream] = []
+                    if None in stream_to_nodes:
+                        stream_to_nodes[None] = []
+                    while (
+                        getattr(next_node, "_erased", False) and next_node.op != "root"
+                    ):
+                        next_node = next_node.next
                     node = next_node
                     continue
 
@@ -533,34 +681,25 @@ def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
                     if None in stream_to_nodes and sync_stream is not None:
                         deps_before_sync.extend(stream_to_nodes[None])
 
-                # For wait_event and synchronize_event, add a cross-event
-                # dependency on the matching record_event's control_deps node
-                # so they cannot be reordered before the record.
-                if (
-                    node.target
-                    in (
-                        torch.ops.streams.wait_event.default,
-                        torch.ops.streams.synchronize_event.default,
-                    )
-                    and event_index in event_to_ctrl
+                # For wait_event and synchronize_event, depend on the matching
+                # record_event's control_deps node (ordering) and thread its
+                # passthrough getitems through (data edge), so consumers of
+                # recorded values are rewired through the wait/synchronize
+                # and the scheduler sees the dependency.
+                if node.target in (
+                    torch.ops.streams.wait_event.default,
+                    torch.ops.streams.synchronize_event.default,
                 ):
-                    deps_before_sync = [
-                        event_to_ctrl[event_index],
-                        *deps_before_sync,
-                    ]
-
-                # For synchronize_event, also include the getitem nodes
-                # threaded through record_event's control_deps. This ensures
-                # subsequent ops that depend on recorded values get rewired
-                # through synchronize_event.
-                if (
-                    node.target is torch.ops.streams.synchronize_event.default
-                    and event_index in event_to_passthrough
-                ):
-                    deps_before_sync = [
-                        *deps_before_sync,
-                        *event_to_passthrough[event_index],
-                    ]
+                    if event_index in event_to_ctrl:
+                        deps_before_sync = [
+                            event_to_ctrl[event_index],
+                            *deps_before_sync,
+                        ]
+                    if event_index in event_to_passthrough:
+                        deps_before_sync = [
+                            *deps_before_sync,
+                            *event_to_passthrough[event_index],
+                        ]
 
                 if deps_before_sync:
                     found_sync = True
@@ -590,6 +729,11 @@ def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
                 stream = get_stream(node)
                 stream_to_nodes.setdefault(stream, []).append(node)
 
+        # _wrap_sync_node may erase nodes after the sync (e.g.
+        # _expand_dict_returning_deps erases getitems).  Skip erased nodes
+        # so we don't re-process a dead node into stream_to_nodes.
+        while getattr(next_node, "_erased", False) and next_node.op != "root":
+            next_node = next_node.next
         node = next_node
 
     if found_sync:

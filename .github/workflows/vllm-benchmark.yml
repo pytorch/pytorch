@@ -32,6 +32,12 @@ on:
         required: true
         type: string
         default: h100,b200
+      refresh_hf_cache:
+        description: |
+          Download models from HF (online) and sync the shared HF cache back to S3, instead of reading the offline cache. Scheduled runs always refresh.
+        required: false
+        type: boolean
+        default: false
   schedule:
     # Run daily at 5:15 AM PST
     - cron: '15 13 * * *'
@@ -127,5 +133,5 @@ jobs:
       pytorch_commit: ${{ inputs.pytorch_commit }}
       models: ${{ matrix.models }}
       compilation_config: ${{ inputs.compilation_config }}
-      is_nightly: ${{ github.event_name == 'schedule' }}
+      refresh_hf_cache: ${{ inputs.refresh_hf_cache || false }}
     secrets: inherit
