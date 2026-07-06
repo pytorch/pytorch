@@ -75,24 +75,30 @@ def check_graph_breaks(
         expected_recompiles = get_field(expected_csv, model, "recompiles")
         flaky = model in flaky_models
 
+        # recompiles is only compared when the expected CSV carries the column
+        # and the actual results provide it (backward compatible with older
+        # artifacts that predate the recompiles column).
+        compare_recompiles = expected_recompiles is not None and recompiles is not None
+        if dynamo_called and expected_recompiles is not None and recompiles is None:
+            print(
+                f"WARNING: {model} is missing the 'recompiles' column in the "
+                "actual results; skipping recompile comparison."
+            )
+
         # Semantics: a model FAILs if *either* metric regresses (more graph
-        # breaks or more recompiles than expected), and is reported as IMPROVED
-        # if *either* metric drops while neither regresses. recompiles is only
-        # considered when the expected CSV carries the column (backward compat).
+        # breaks or more recompiles than expected) and is reported as IMPROVED
+        # if *either* metric drops while neither regresses. Comparing recompiles
+        # independently of graph breaks lets CI catch a recompile regression even
+        # when the graph break count is unchanged (see
+        # https://github.com/pytorch/pytorch/issues/113040).
         if expected_graph_breaks is None:
             status = "MISSING:"
             improved.append(model)
         elif not dynamo_called:
             print(f"{model:34}  EAGER_FAILED")
             continue
-        elif graph_breaks == expected_graph_breaks:
-            status = "PASS_BUT_FLAKY" if flaky else "PASS"
-            print(f"{model:34}  {status}")
-            continue
         elif graph_breaks > expected_graph_breaks or (
-            expected_recompiles is not None
-            and recompiles is not None
-            and recompiles > expected_recompiles
+            compare_recompiles and recompiles > expected_recompiles
         ):
             if flaky:
                 status = "FAIL_BUT_FLAKY:"
@@ -100,9 +106,7 @@ def check_graph_breaks(
                 status = "FAIL:"
                 failed.append(model)
         elif graph_breaks < expected_graph_breaks or (
-            expected_recompiles is not None
-            and recompiles is not None
-            and recompiles < expected_recompiles
+            compare_recompiles and recompiles < expected_recompiles
         ):
             if flaky:
                 status = "IMPROVED_BUT_FLAKY:"
@@ -110,14 +114,6 @@ def check_graph_breaks(
                 status = "IMPROVED:"
                 improved.append(model)
         else:
-            # Reachable only when the expected CSV has a recompiles column but
-            # the actual CSV does not (recompiles is None). Treat as PASS so old
-            # artifacts don't break CI, but warn so the missing data is visible.
-            if expected_recompiles is not None and recompiles is None:
-                print(
-                    f"WARNING: {model} is missing the 'recompiles' column in "
-                    "the actual results; skipping recompile comparison."
-                )
             status = "PASS_BUT_FLAKY" if flaky else "PASS"
             print(f"{model:34}  {status}")
             continue
