@@ -1,5 +1,6 @@
 #include <torch/csrc/distributed/rpc/py_rref.h>
 
+#include <torch/csrc/Exceptions.h>
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/distributed/autograd/autograd.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rref_backward_req.h>
@@ -139,13 +140,16 @@ PyRRef::PyRRef(const py::object& value, const py::object& type_hint)
         return rref;
       }()) {}
 
-// NOLINTNEXTLINE(bugprone-exception-escape)
 PyRRef::~PyRRef() {
   if (type_.has_value()) {
-    pybind11::gil_scoped_acquire ag;
-    (*type_).dec_ref();
+    torch::detail::SafeGilScopedAcquire ag;
+    if (ag.acquired()) {
+      (*type_).dec_ref();
+    }
     // explicitly setting PyObject* to nullptr to prevent py::object's dtor to
-    // decref on the PyObject again.
+    // decref on the PyObject again. If the GIL could not be acquired above,
+    // this deliberately leaks the reference rather than touching the
+    // refcount without the GIL held.
     // See Note [Destructing py::object] in python_ivalue.h
     (*type_).ptr() = nullptr;
   }

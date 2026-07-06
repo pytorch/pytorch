@@ -1,16 +1,20 @@
 #include <torch/csrc/distributed/c10d/python_comm_hook.h>
 
+#include <torch/csrc/Exceptions.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 
 namespace c10d {
 
-// NOLINTNEXTLINE(bugprone-exception-escape)
 PythonCommHook::~PythonCommHook() {
-  py::gil_scoped_acquire ag;
-  state_.dec_ref();
-  hook_.dec_ref();
+  torch::detail::SafeGilScopedAcquire ag;
+  if (ag.acquired()) {
+    state_.dec_ref();
+    hook_.dec_ref();
+  }
   // Explicitly set state_ and hook_ to nullptr to prevent py::object's dtor
-  // to decref on the PyObject again.
+  // to decref on the PyObject again. If the GIL could not be acquired
+  // above, this deliberately leaks the references rather than touching
+  // the refcount without the GIL held.
   // See Note [Destructing py::object] in python_ivalue.h
   state_.ptr() = nullptr;
   hook_.ptr() = nullptr;
