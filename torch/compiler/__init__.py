@@ -320,9 +320,11 @@ def assume_constant_result(fn=None, *, specialize_args=False):
             baked result is reused for equal arguments and recomputed when
             they change. Arguments are limited to what ``torch.compile`` can
             compare by value - basic types and their containers, dataclasses
-            of those, and classes registered with
-            ``torch.utils._pytree.register_constant``; anything else triggers
-            a graph break.
+            of those, and classes registered as constants via
+            ``torch.utils._pytree.register_constant`` or
+            ``torch._library.opaque_object.register_custom_class`` with
+            ``typ="constant"`` (both compare via the class's ``__eq__``);
+            anything else triggers a graph break.
 
     .. warning::
         `assume_constant_result` can, if invalid, cause safety and soundness issues, :func:`torch.compile`

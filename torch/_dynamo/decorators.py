@@ -204,9 +204,11 @@ def assume_constant_result(fn=None, *, specialize_args=False):  # type: ignore[n
     constants and containers of them (anything ``ConstantVariable.is_literal``
     accepts, e.g. ``int``/``float``/``bool``/``str``/``bytes``/``None``/
     ``torch.dtype``/``torch.device`` and tuples/lists/sets of those), enums,
-    classes registered with :func:`torch.utils._pytree.register_constant`
-    (guarded via their ``__eq__``), dicts with literal keys, and dataclasses
-    whose fields are recursively supported. Anything else - including arbitrary
+    classes registered as constants via
+    :func:`torch.utils._pytree.register_constant` or
+    ``torch._library.opaque_object.register_custom_class`` with
+    ``typ="constant"`` (guarded via their ``__eq__``), dicts with literal
+    keys, and dataclasses whose fields are recursively supported. Anything else - including arbitrary
     objects and tensors nested inside supported containers - triggers a graph
     break rather than silently falling back to identity guarding.
     """
