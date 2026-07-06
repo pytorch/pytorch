@@ -363,7 +363,7 @@ def gemm_epilogue(
         if out is None
         else out
     )
-    from torch._inductor.template_heuristics.flex_gemm import (
+    from torch._inductor.heuristics.template.flex_gemm import (
         candidate_gemm_configs_for_device,
     )
     from torch._vendor.quack.cache import cache_dir_override
