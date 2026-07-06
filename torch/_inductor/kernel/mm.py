@@ -88,7 +88,7 @@ mm_template = TritonTemplate(
     grid=mm_grid,
     source=load_kernel_template("triton_mm")
     if (torch.version.hip is None) or triton_version >= "3.3.0"
-    # FIXME: To get around rocm failures like https://github.com/pytorch/pytorch/actions/runs/13123783322/job/36617154943
+    # FIXME: To get around rocm failures.
     # The only difference between the two templates is M >= BLOCK_M and N >= BLOCK_N checking.
     # See more details in https://github.com/pytorch/pytorch/pull/146293
     else load_kernel_template("triton_mm_rocm"),
