@@ -431,6 +431,14 @@ static bool conv3d_prefer_im2col(const Tensor& input,
   }
   const int64_t kD = weight.size(2), kH = weight.size(3), kW = weight.size(4);
   const int64_t K = weight.size(1) * kD * kH * kW; // reduction length
+  // int32-overflow planes belong to the long-indexed direct kernel, and the
+  // rows x K col tensor must stay within MPSGraph's INT_MAX element limit.
+  constexpr int64_t i32max = std::numeric_limits<int32_t>::max();
+  const int64_t rows = output.size(0) * output.size(2) * output.size(3) * output.size(4);
+  if (input.size(1) * input.size(3) * input.size(4) > i32max ||
+      output.size(1) * output.size(3) * output.size(4) > i32max || rows > i32max / std::max<int64_t>(K, 1)) {
+    return false;
+  }
   const bool patch_embed =
       padding[0] == 0 && padding[1] == 0 && padding[2] == 0 && stride[0] == kD && stride[1] == kH && stride[2] == kW;
   if (patch_embed) {
