@@ -45,11 +45,11 @@ from .functional_utils import (
     from_fun,
     has_data_mutation,
     has_metadata_mutation,
-    maybe_get_output_view_meta_sequence,
     MetadataKey,
     to_fun,
     ViewMetaSequence,
     was_inductor_storage_resized,
+    was_shallow_copy_data,
 )
 from .schemas import (
     InputAliasInfo,
@@ -280,6 +280,7 @@ def run_functionalized_fw_and_collect_metadata(
                     mutates_metadata=mutates_metadata,
                     mutations_hidden_from_autograd=mutations_hidden_from_autograd,
                     mutates_storage_metadata=mutates_storage_metadata,
+                    mutation_is_shallow_copy_data=was_shallow_copy_data(f_arg),
                     mutations_under_no_grad_or_inference_mode=mutations_under_no_grad_or_inference_mode,
                     mutation_inductor_storage_resize=mutation_inductor_storage_resize,
                     requires_grad=requires_grad,
@@ -648,36 +649,32 @@ from a multi-output view call"
             # The FunctionalTensor will be saved if one of the 2 conditions below
             # is true:
             view_meta_sequence = None
-            if output_type in (
-                OutputType.alias_of_intermediate,
-                OutputType.alias_of_intermediate_save_as_output,
-                OutputType.alias_of_intermediate_base_is_user_output,
-            ):
+            if (
+                # 1. If the output_type is either of:
+                #    (i) alias_of_intermediate;
+                #    (ii) alias_of_intermediate_save_as_output; or
+                #    (iii) alias_of_intermediate_base_is_user_output.
+                #
                 # No need to worry about in-place view operations here, since
                 # this functionalization step eliminates mutations.
                 #
                 # i.e. we have access to the actual base tensor, before the
                 # in-place operation was applied.
-                # In the primary subclass -> subclass metadata pass, `o` can be
-                # a traceable wrapper subclass here, so recurse into its attrs
-                # instead of requiring a bare FunctionalTensor.
-                if isinstance(o, Tensor):
-                    view_meta_sequence = maybe_get_output_view_meta_sequence(o)
-            elif (
+                output_type
+                in (
+                    OutputType.alias_of_intermediate,
+                    OutputType.alias_of_intermediate_save_as_output,
+                    OutputType.alias_of_intermediate_base_is_user_output,
+                )
+            ) or (
                 # 2. If the output_type is alias_of_input, and no in-place view
-                #    operation was run on the input (base tensor), then we can
-                #    replay dense-tensor views from the saved FunctionalTensor.
+                #    operation was run on the input (base tensor).
                 #
-                #    If metadata mutation did happen, the runtime explicitly
-                #    reconstructs the inputs before replaying outputs, so the
-                #    fully reconstructed input may no longer be this output's
-                #    original base tensor.
-                #
-                # Metadata is collected both on the primary subclass ->
-                # subclass graph and on a later dense -> dense re-collection;
-                # only the dense pass sees `o` as a bare FunctionalTensor here,
-                # so subclass alias-of-input replay is intentionally out of
-                # scope for this branch.
+                # In this case, we need to check for metadata mutation because
+                # the runtime explicitly reconstructs the inputs, before actually
+                # reconstructing the outputs. Due to in-place view operations, the
+                # fully reconstructed input may not be this output base tensor
+                # anymore.
                 output_type == OutputType.alias_of_input
                 and base_idx is not None
                 and not input_info[base_idx].mutates_metadata

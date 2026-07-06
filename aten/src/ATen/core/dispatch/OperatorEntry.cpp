@@ -585,7 +585,7 @@ std::string OperatorEntry::listAllDispatchKeys() const {
     has_kernels = true;
   }
   str << ']';
-  return std::move(str).str();
+  return str.str();
 }
 
 void OperatorEntry::reportSignatureError(const CppSignature& call_signature, const CppSignatureWithDebug& saved_signature) const {
@@ -669,7 +669,7 @@ std::string OperatorEntry::dumpComputedTable() const {
           << kernel_prov.first.debug << " [" << kernel_prov.second << "]\n";
     }
   }
-  return std::move(oss).str();
+  return oss.str();
 }
 
 void OperatorEntry::setReportErrorCallback_(std::unique_ptr<c10::SafePyObject> callback) {
@@ -715,7 +715,7 @@ std::string OperatorEntry::dumpState() const {
       print_kernel(toString(k), it->second, c10::isAliasDispatchKey(k));
     }
   }
-  return std::move(oss).str();
+  return oss.str();
 }
 
 }

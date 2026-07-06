@@ -1169,16 +1169,23 @@ class FxConverter:
             constant_args_idx,
         ) = tracing_triton_hopifier_singleton.store_non_graphable_args(call_kwargs)
 
+        hop_kwargs: dict[str, Any] = {
+            "kernel_idx": kernel.wrapped.kernel_idx,
+            "constant_args_idx": constant_args_idx,
+            "grid": wrapper_grid,
+            "tma_descriptor_metadata": {},
+            "kwargs": call_kwargs,
+        }
+        if backend_options:
+            # Keep the FXIR HOP call shape unchanged for normal Inductor
+            # kernels. Some downstream HOP py_impls have fixed keyword-only
+            # signatures and only need launch_kwargs when there are real
+            # Triton backend options to preserve.
+            hop_kwargs["launch_kwargs"] = tuple(backend_options)
+
         triton_node = self.gm.graph.call_function(
             triton_kernel_wrapper_mutation,
-            kwargs={
-                "kernel_idx": kernel.wrapped.kernel_idx,
-                "constant_args_idx": constant_args_idx,
-                "grid": wrapper_grid,
-                "tma_descriptor_metadata": {},
-                "kwargs": call_kwargs,
-                "launch_kwargs": tuple(backend_options),
-            },
+            kwargs=hop_kwargs,
         )
         if extra_options:
             triton_node.meta["extra_options"] = extra_options

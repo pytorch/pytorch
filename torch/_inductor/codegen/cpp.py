@@ -3204,6 +3204,8 @@ class CppVecKernel(CppKernel):
                 n_idx = self._get_num_vectors(torch.int64)
                 cdtype = DTYPE_TO_CPP[dtype]
                 index = ops.index_expr(index, torch.int64).value
+                if isinstance(index, CppCSEVariable) and not index.is_vec:
+                    index = self.broadcast(index)
                 if not (isinstance(index, CppCSEVariable) and index.is_vec):
                     raise AssertionError(
                         "expected isinstance(index, CppCSEVariable) and index.is_vec"
