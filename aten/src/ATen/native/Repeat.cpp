@@ -43,10 +43,11 @@ Tensor repeat_interleave_cpu(
     const Tensor& repeat,
     std::optional<int64_t> output_size) {
   Tensor output;
-  AT_DISPATCH_INDEX_TYPES(repeat.scalar_type(), "repeat_interleave_cpu", [&]() {
-    output = repeat_interleave_common<index_t, compute_cpu<index_t>>(
-        repeat, output_size);
-  });
+  AT_DISPATCH_INTEGRAL_TYPES(
+      repeat.scalar_type(), "repeat_interleave_cpu", [&]() {
+        output = repeat_interleave_common<scalar_t, compute_cpu<scalar_t>>(
+            repeat, output_size);
+      });
 
   return output;
 }
@@ -86,8 +87,13 @@ Tensor repeat_interleave_symint(
     TORCH_CHECK(false, "repeats must be 0-dim or 1-dim tensor");
   }
 
-  auto ret = input.index_select(
-      dim.value(), at::repeat_interleave_symint(repeats_, std::move(output_size)));
+  Tensor repeat_indices =
+      at::repeat_interleave_symint(repeats_, std::move(output_size));
+  if (repeat_indices.scalar_type() != at::kLong &&
+      repeat_indices.scalar_type() != at::kInt) {
+    repeat_indices = repeat_indices.to(at::kLong);
+  }
+  auto ret = input.index_select(dim.value(), repeat_indices);
   // Restore conj and neg bits
   if (conj) {
     ret = ret.conj();
