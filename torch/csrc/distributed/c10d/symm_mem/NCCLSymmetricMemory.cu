@@ -36,23 +36,23 @@ namespace symmetric_memory {
 static StoreExchange storeExchange = StoreExchange("NCCLAllocation");
 
 struct NCCLAllocation {
-  // Combined ncclMemAlloc region. Layout:
-  //   [0, buffer_size)                                          - user data buffer
-  //   [round_up(buffer_size, 16), round_up(buffer_size, 16) + signal_pad_size)
-  //                                                             - signal pad
-  // Total allocation size is round_up(buffer_size, 16) + signal_pad_size.
-  // User-visible, granularity-aligned buffer base. For the expandable path
-  // this is `alloc_base` rounded up to the allocation granularity; for the
-  // ncclMemAlloc path it equals `alloc_base`.
-  void* ptr;
-  // Raw allocation base. For the expandable path this is the pointer returned
-  // by raw_alloc (which must be the argument to raw_delete); otherwise it is
-  // the ncclMemAlloc pointer.
+  // Combined region. Layout (signal pad first):
+  //   [0, buffer_offset)                            - signal pad
+  //   [buffer_offset, buffer_offset + buffer_size)  - user data buffer
+  // buffer_offset equals the signal pad size (already 16-aligned). alloc_base is
+  // the granularity-aligned region base (== signal pad base); alloc() hands back
+  // `alloc_base + buffer_offset` (the data buffer). On the non-expandable path
+  // alloc_base is the ncclMemAlloc pointer; on the expandable path it is
+  // raw_alloc_base rounded up to the allocation granularity.
   void* alloc_base;
-  // Size of the user-visible data buffer in bytes, as requested by the
-  // caller of `alloc()`.
+  // Raw allocation base for the expandable path: the pointer returned by
+  // raw_alloc that must be passed to raw_delete. Equals alloc_base otherwise.
+  void* raw_alloc_base;
+  // Size of the user-visible data buffer in bytes, as requested by alloc().
   size_t buffer_size;
-  size_t signal_pad_size;
+  // Byte offset from alloc_base to the start of the user buffer; the signal pad
+  // occupies [0, buffer_offset).
+  size_t buffer_offset;
   int device_idx;
   bool use_expandable_segments_;
   std::mutex mutex;
@@ -61,16 +61,16 @@ struct NCCLAllocation {
       peer_alloc_infos_;
 
   NCCLAllocation(
-      void* ptr,
       void* alloc_base,
+      void* raw_alloc_base,
       size_t buffer_size,
-      size_t signal_pad_size,
+      size_t buffer_offset,
       int device_idx,
       bool use_expandable_segments)
-      : ptr(ptr),
-        alloc_base(alloc_base),
+      : alloc_base(alloc_base),
+        raw_alloc_base(raw_alloc_base),
         buffer_size(buffer_size),
-        signal_pad_size(signal_pad_size),
+        buffer_offset(buffer_offset),
         device_idx(device_idx),
         use_expandable_segments_(use_expandable_segments) {}
 
@@ -80,14 +80,13 @@ struct NCCLAllocation {
       return;
     }
     c10::cuda::CUDAGuard guard(device_idx);
-    // Single free for the combined buffer + signal pad region. If we allocated
-    // via expandable segments, free via raw_delete; otherwise free via
-    // ncclMemFree.
+    // Single free for the combined signal pad + buffer region. Expandable
+    // allocations came from raw_alloc, so free via raw_delete; otherwise free
+    // the ncclMemAlloc region via ncclMemFree.
     if (use_expandable_segments_) {
-      // Free the raw allocation, not the aligned buffer base.
-      c10::cuda::CUDACachingAllocator::raw_delete(alloc_base);
+      c10::cuda::CUDACachingAllocator::raw_delete(raw_alloc_base);
     } else {
-      ncclResult_t res = ncclMemFree(ptr);
+      ncclResult_t res = ncclMemFree(alloc_base);
       if (res != ncclSuccess) {
         LOG(WARNING) << "ncclMemFree failed in NCCLAllocation dtor: "
                      << ncclGetErrorString(res);
@@ -127,8 +126,11 @@ using NCCLSymmMemKeysByAlloc =
 
 bool pointer_in_allocation(void* ptr, const NCCLAllocation& allocation) {
   auto ptr_int = reinterpret_cast<uintptr_t>(ptr);
-  auto base_ptr = reinterpret_cast<uintptr_t>(allocation.ptr);
-  return ptr_int >= base_ptr && ptr_int < base_ptr + allocation.buffer_size;
+  // The data buffer starts `buffer_offset` bytes into the allocation (past the
+  // signal pad); only data-region pointers belong to this allocation.
+  auto buffer_ptr = reinterpret_cast<uintptr_t>(allocation.alloc_base) +
+      allocation.buffer_offset;
+  return ptr_int >= buffer_ptr && ptr_int < buffer_ptr + allocation.buffer_size;
 }
 
 NCCLAllocMap::iterator find_allocation_covering_linear(
@@ -152,14 +154,12 @@ NCCLAllocMap::iterator find_allocation_covering(
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
   auto driver_api = c10::cuda::DriverAPI::get();
   CUdeviceptr base_ptr = 0;
-  // Recover the CUDA allocation base for interior pointers before falling
-  // back to the linear scan below when the direct lookup cannot help.
-  auto status = driver_api->cuMemGetAddressRange_(
-      &base_ptr,
-      nullptr,
-      reinterpret_cast<CUdeviceptr>(ptr));
-  if (status == CUDA_SUCCESS) {
-    alloc_it = allocations.find(reinterpret_cast<void*>(base_ptr));
+  if (driver_api->cuMemGetAddressRange_(
+          &base_ptr, nullptr, reinterpret_cast<CUdeviceptr>(ptr)) ==
+      CUDA_SUCCESS) {
+    auto buffer_ptr = reinterpret_cast<void*>(
+        static_cast<uintptr_t>(base_ptr) + get_signal_pad_size());
+    alloc_it = allocations.find(buffer_ptr);
     if (alloc_it != allocations.end()) {
       return alloc_it;
     }
@@ -176,24 +176,23 @@ NCCLAllocMap::iterator find_allocation_covering(
 #if NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 0)
 #ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
 // Fill both peer pointer arrays in a single kernel launch. For each peer,
-// the buffer pointer comes from NCCL and the signal pad pointer is derived
-// as `buffer + round_up(buffer_size, 16)`, mirroring the host-side layout.
+// NCCL returns the window base (== signal pad base); the data buffer pointer
+// is derived as `base + buffer_offset`, mirroring the host-side layout.
 static __global__ void build_ptr_dev(
   ncclWindow_t  handle,
-  size_t  buffer_size,    // user buffer size; the kernel rounds it up to 16
+  size_t  buffer_offset,  // data buffer offset; signal pad occupies [0, buffer_offset)
   void**  buffers,        // out: peer buffer pointers
   void**  signal_pads,    // out: peer signal pad pointers
   int  world_size)
 {
-  const size_t aligned_buffer_size = (buffer_size + 15UL) & ~15UL;
   int tid = blockIdx.x * blockDim.x + threadIdx.x;
   int stride = blockDim.x * gridDim.x;
   for (int peer = tid; peer < world_size; peer += stride) {
       void* buf = ncclGetLsaPointer(handle, 0, peer);
-      buffers[peer] = buf;
-      signal_pads[peer] = buf == nullptr
+      signal_pads[peer] = buf;
+      buffers[peer] = buf == nullptr
           ? nullptr
-          : static_cast<char*>(buf) + aligned_buffer_size;
+          : static_cast<char*>(buf) + buffer_offset;
   }
 }
 #endif // NCCL_HAS_SYMMEM_DEVICE_SUPPORT
@@ -205,6 +204,7 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
       NCCLAllocation* allocation,
       std::string group_name)
       : buffer_size_(allocation->buffer_size),
+        buffer_offset_(allocation->buffer_offset),
         device_idx_(allocation->device_idx),
         group_name_(std::move(group_name))
   {
@@ -229,26 +229,24 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
         "been eagerly initialized by filling `device_id` in the "
         "`init_process_group` call.");
 
-    // Register a single window over the combined buffer + signal pad region.
-    // Layout inside the registration:
-    //   [0, aligned_buffer_size)            - user data buffer
-    //   [aligned_buffer_size, total_size)   - signal pad
+    // Register a single window over the combined signal pad + buffer region.
+    // Layout inside the registration (signal pad first):
+    //   [0, signal_pad_size)                          - signal pad
+    //   [buffer_offset_, buffer_offset_ + buffer)     - user data buffer
     // The single registration sidesteps NCCL's window-alignment requirement
-    // for the signal-pad sub-region: only the base pointer (returned by
+    // for the data sub-region: only the base pointer (returned by
     // ncclMemAlloc, already granularity-aligned) is registered.
     const size_t aligned_buffer_size = at::round_up(buffer_size_, 16UL);
-    const size_t signal_pad_size = allocation->signal_pad_size;
-    const size_t total_size = aligned_buffer_size + signal_pad_size;
+    const size_t total_size = buffer_offset_ + aligned_buffer_size;
     C10D_NCCL_CHECK(
-      ncclCommWindowRegister(comm_, allocation->ptr, total_size, &combined_win_, NCCL_WIN_COLL_SYMMETRIC),
+      ncclCommWindowRegister(comm_, allocation->alloc_base, total_size, &combined_win_, NCCL_WIN_COLL_SYMMETRIC),
       c10::str(
           "Failed to window register segment with ptr ",
-          allocation->ptr,
+          allocation->alloc_base,
           ", size ",
           total_size,
           " on rank ",
           rank_));
-    signal_pad_ptr_ = static_cast<char*>(allocation->ptr) + aligned_buffer_size;
 
 #ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
     // (Host comm is already published into NCCLDevCommManager by the
@@ -270,7 +268,7 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
     int threads = std::min(128, world_size_);
     auto stream = at::cuda::getCurrentCUDAStream();
     build_ptr_dev<<<1, threads, 0, stream>>>(
-        combined_win_, buffer_size_, buffers_dev_, signal_pads_dev_, world_size_);
+        combined_win_, buffer_offset_, buffers_dev_, signal_pads_dev_, world_size_);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
     C10_CUDA_CHECK(cudaStreamSynchronize(stream));
     C10_CUDA_CHECK(cudaMemcpy(
@@ -285,28 +283,27 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
       cudaMemcpyDeviceToHost));
 #else
   // Starting from NCCL 2.29, we can use host-side APIs to get peer pointers.
+  // ncclGetPeerDevicePointer returns each peer's window base, which is the
+  // signal pad base (the signal pad is at the front of the window).
   for (int i = 0; i < world_size_; i++) {
     // If peer is not accessible within LSA domain, `ncclGetPeerDevicePointer`
     // returns nullptr.
     C10D_NCCL_CHECK(
-      ncclGetPeerDevicePointer(combined_win_, 0, i, &buffers_[i]),
+      ncclGetPeerDevicePointer(combined_win_, 0, i, &signal_pads_[i]),
       "ncclGetPeerDevicePointer failed");
   }
-  // Copy the peer buffer pointers to the device-side buffers array.
+  // Derive each peer's data buffer pointer from its window base; all ranks
+  // share the same buffer_offset_ so we don't need to ask NCCL separately.
+  for (int i = 0; i < world_size_; i++) {
+    buffers_[i] = signal_pads_[i] == nullptr
+        ? nullptr
+        : static_cast<char*>(signal_pads_[i]) + buffer_offset_;
+  }
   C10_CUDA_CHECK(cudaMemcpy(
     buffers_dev_,  // dst (device)
     buffers_.data(),  // src (host)
     arr_size,
     cudaMemcpyHostToDevice));
-
-  // Derive each peer's signal pad pointer from its buffer pointer; all
-  // ranks share the same aligned_buffer_size so we don't need to ask NCCL
-  // for the signal pad pointers separately.
-  for (int i = 0; i < world_size_; i++) {
-    signal_pads_[i] = buffers_[i] == nullptr
-        ? nullptr
-        : static_cast<char*>(buffers_[i]) + aligned_buffer_size;
-  }
   C10_CUDA_CHECK(cudaMemcpy(
       signal_pads_dev_,  // dst (device)
       signal_pads_.data(),  // src (host)
@@ -318,8 +315,11 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
   void* mc_addr = nullptr;
   // Skip CHECK on purpose to improve fault tolerance since some machine's
   // Fabric Manager may be in bad NVLink Sharp state.
-  if (ncclGetLsaMultimemDevicePointer(combined_win_, 0, &mc_addr) == ncclSuccess) {
-    mc_addr_ = mc_addr;
+  if (ncclGetLsaMultimemDevicePointer(combined_win_, 0, &mc_addr) == ncclSuccess &&
+      mc_addr != nullptr) {
+    // Point at the data buffer within the multicast mapping (data follows the
+    // signal pad).
+    mc_addr_ = static_cast<char*>(mc_addr) + buffer_offset_;
   }
 #endif // NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 0)
 #endif // NCCL_HAS_SYMMEM_DEVICE_SUPPORT
@@ -343,8 +343,6 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
                      << ncclGetErrorString(res);
       }
     }
-    // signal_pad_ptr_ is part of the owning NCCLAllocation's combined
-    // ncclMemAlloc region; freeing the buffer there releases it too.
     if (buffers_dev_ != nullptr) {
       c10::cuda::CUDACachingAllocator::raw_delete(buffers_dev_);
     }
@@ -355,6 +353,9 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
 
  private:
   size_t buffer_size_;
+  // Byte offset from the allocation base to the start of the user buffer; the
+  // signal pad occupies [0, buffer_offset_).
+  size_t buffer_offset_;
   int device_idx_;
   int rank_;
   int world_size_;
@@ -365,8 +366,7 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
   std::string group_name_;
   // Single NCCL window covering both the user data buffer and the signal pad.
   ncclWindow_t combined_win_{nullptr};
-  void* signal_pad_ptr_{nullptr};
-  // Multicast address
+  // Multicast address (data buffer base within the multicast mapping)
   void* mc_addr_{nullptr};
   ncclComm_t comm_{nullptr};
   friend class NCCLSymmetricMemory;
@@ -513,6 +513,12 @@ size_t NCCLSymmetricMemory::get_offset() {
   return offset_;
 }
 
+size_t NCCLSymmetricMemory::get_window_offset() {
+  // The NCCL window starts at the signal pad; this handle's data lives
+  // buffer_offset_ bytes further in, plus its own offset within the buffer.
+  return pai_->buffer_offset_ + offset_;
+}
+
 std::string NCCLSymmetricMemory::get_group_name() {
   return pai_->group_name_;
 }
@@ -529,17 +535,21 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
         "must not be called with a group_name");
 
     c10::cuda::CUDAGuard guard(device_idx);
-    // Allocate buffer + signal pad together in one call. Buffer occupies
-    // [0, size); signal pad starts at round_up(size, 16). A single window is
-    // registered over the whole region at rendezvous time, so only the base
-    // pointer needs to satisfy NCCL's window-alignment requirement.
-    const size_t signal_pad_size = get_signal_pad_size();
-    const size_t total_size = at::round_up(size, 16UL) + signal_pad_size;
+    // Allocate signal pad + buffer together in one call. Layout: signal pad in
+    // [0, buffer_offset), data buffer after it. buffer_offset is the signal pad
+    // size, which is already 16-aligned, so the data buffer is aligned without
+    // extra padding; the data size is rounded up instead. A single window is
+    // registered over the whole region at rendezvous time, so only the region
+    // base (which we keep granularity-aligned) needs to satisfy NCCL's
+    // window-alignment requirement.
+    const size_t buffer_offset = get_signal_pad_size();
+    const size_t aligned_buffer_size = at::round_up(size, 16UL);
+    const size_t total_size = buffer_offset + aligned_buffer_size;
     const bool use_expandable_segments =
         c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
             expandable_segments();
-    void* ptr = nullptr;
     void* alloc_base = nullptr;
+    void* raw_alloc_base = nullptr;
     if (use_expandable_segments) {
       // With expandable_segments we allocate via the caching allocator's
       // expandable-segment path. This is incompatible with symmetric memory's
@@ -562,44 +572,50 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
       // bases are granularity-aligned, not individual sub-allocations, so a
       // block placed after a live allocation is not aligned. NCCL window
       // registration requires the base pointer to be granularity-aligned, so
-      // over-allocate by one granularity and align the buffer base (matching
+      // over-allocate by one granularity and align the region base (matching
       // the guarantee ncclMemAlloc gives on the non-expandable path). The raw
-      // pointer is retained as alloc_base for raw_delete.
+      // pointer is retained as raw_alloc_base for raw_delete.
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
       const size_t gran = get_alloc_granularity(device_idx);
-      alloc_base = c10::cuda::CUDACachingAllocator::raw_alloc(total_size + gran);
-      ptr = reinterpret_cast<void*>(
-          (reinterpret_cast<uintptr_t>(alloc_base) + gran - 1) & ~(gran - 1));
+      raw_alloc_base =
+          c10::cuda::CUDACachingAllocator::raw_alloc(total_size + gran);
+      alloc_base = reinterpret_cast<void*>(
+          (reinterpret_cast<uintptr_t>(raw_alloc_base) + gran - 1) &
+          ~(gran - 1));
 #else
-      alloc_base = c10::cuda::CUDACachingAllocator::raw_alloc(total_size);
-      ptr = alloc_base;
+      raw_alloc_base = c10::cuda::CUDACachingAllocator::raw_alloc(total_size);
+      alloc_base = raw_alloc_base;
 #endif
     } else {
-      C10D_NCCL_CHECK(ncclMemAlloc(&ptr, total_size), "ncclMemAlloc");
-      alloc_base = ptr;
+      C10D_NCCL_CHECK(ncclMemAlloc(&alloc_base, total_size), "ncclMemAlloc");
+      raw_alloc_base = alloc_base;
     }
-    // Zero the signal-pad region. The device-side collective handshake
-    // (sync_remote_blocks) claims each slot with cas(addr, 0, 1), so it
-    // requires the signal pad to start at zero. Under expandable_segments the
-    // caching allocator can recycle a virtual address whose signal-pad location
-    // overlaps a previously freed (larger) buffer's data, which is non-zero;
-    // without this memset the handshake spins forever. ncclMemAlloc memory is
-    // fresh, but zeroing unconditionally keeps both paths correct and is cheap.
-    C10_CUDA_CHECK(cudaMemset(
-        static_cast<char*>(ptr) + at::round_up(size, 16UL), 0, signal_pad_size));
+    // Zero the signal pad (the first buffer_offset bytes at the region base).
+    // The device-side CAS handshake (barrier()/sync_remote_blocks) claims each
+    // slot with cas(addr, 0, 1), so the pad must start at zero. ncclMemAlloc
+    // does not zero memory, and under expandable_segments the caching allocator
+    // can recycle a virtual address whose signal-pad bytes overlap a previously
+    // freed buffer's (non-zero) data; with the pad at the front we zero it
+    // unconditionally, which keeps both paths correct and is cheap.
+    C10_CUDA_CHECK(cudaMemset(alloc_base, 0, buffer_offset));
+    // Hand back the data buffer pointer, not alloc_base; the signal pad stays
+    // hidden in front. free() only needs this data ptr to find and drop the
+    // owning NCCLAllocation, which frees the whole region in its destructor.
+    void* buffer_ptr = static_cast<char*>(alloc_base) + buffer_offset;
     {
       std::lock_guard<std::mutex> lock(mutex_);
+      // Key by the data pointer we return (that's what `free()` receives).
       allocations_.emplace(
-          ptr,
+          buffer_ptr,
           std::make_unique<NCCLAllocation>(
-              ptr,
               alloc_base,
+              raw_alloc_base,
               size,
-              signal_pad_size,
+              buffer_offset,
               device_idx,
               use_expandable_segments));
     }
-    return ptr;
+    return buffer_ptr;
   }
 
   void free(void* ptr) override {
@@ -661,9 +677,11 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     if (!pai) {
       pai = c10::make_intrusive<NCCLPeerAllocInfo>(allocation, *group_name);
     }
-    size_t offset =
-        reinterpret_cast<uintptr_t>(ptr) -
-        reinterpret_cast<uintptr_t>(allocation->ptr);
+    // Offset is relative to the data buffer base (past the signal pad).
+    const uintptr_t buffer_ptr =
+        reinterpret_cast<uintptr_t>(allocation->alloc_base) +
+        allocation->buffer_offset;
+    size_t offset = reinterpret_cast<uintptr_t>(ptr) - buffer_ptr;
     // Create the SymmetricMemory handle.
     auto symm_mem = c10::make_intrusive<NCCLSymmetricMemory>(pai, offset);
     {
@@ -679,8 +697,10 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
         return it->second;
       }
       // There is no more use of `key`; we can move it into the per-allocation
-      // key set to avoid an extra copy.
-      symm_mem_keys_by_alloc_[allocation->ptr].insert(std::move(key));
+      // key set to avoid an extra copy. Key by the data pointer (the value
+      // returned by alloc()), matching the lookup done in free().
+      symm_mem_keys_by_alloc_[reinterpret_cast<void*>(buffer_ptr)].insert(
+          std::move(key));
     }
     return symm_mem;
   }

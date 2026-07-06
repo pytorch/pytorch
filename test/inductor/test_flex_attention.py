@@ -190,21 +190,6 @@ def _is_not_implemented_exc(exc):
     return False
 
 
-@contextmanager
-def expect_not_implemented_if(condition):
-    """Inside the block: if `condition`, expect NotImplementedError; else pass through.
-    Raises if `condition` is True and the block either succeeds or raises a
-    different exception."""
-    try:
-        yield
-    except Exception as exc:
-        if condition and _is_not_implemented_exc(exc):
-            return
-        raise
-    if condition:
-        raise AssertionError("expected NotImplementedError but block succeeded")
-
-
 def expected_not_implemented_on_mps(test_func):
     """On MPS the test must raise NotImplementedError (possibly wrapped by
     Inductor/Dynamo); other exceptions or silent success fail the test."""
@@ -1539,11 +1524,7 @@ class TestFlexAttention(InductorTestCase):
     def test_builtin_score_mods_dynamic(
         self, device, dtype: torch.dtype, score_mask_mod: tuple[Callable, Callable]
     ):
-        # Closures (even over ints) get lifted to "other buffers" by Dynamo as
-        # SymInts, which the MPS path does not support yet.
-        captures = _is_mps_device(device) and bool(score_mask_mod[0].__closure__)
-        with expect_not_implemented_if(captures):
-            self.run_dynamic_test(score_mask_mod, dtype, S=1024, device=device)
+        self.run_dynamic_test(score_mask_mod, dtype, S=1024, device=device)
 
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
@@ -2599,14 +2580,15 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         "score_mod", test_score_mods, name_fn=lambda score_mod: score_mod.__name__
     )
     @skip_on_cpu
-    @expected_not_implemented_on_mps
     def test_return_max(self, device, dtype, score_mod):
+        # MPS has forward-only flex_attention
+        requires_grad = device in DEVICE_SUPPORTS_BACKWARDS
         make_tensor = functools.partial(
             torch.randn,
             (2, 2, 243, 16),
             device=device,
             dtype=dtype,
-            requires_grad=True,
+            requires_grad=requires_grad,
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
 
@@ -2670,21 +2652,22 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             )
 
         # Test gradient computation for both eager and compiled versions
-        test_cases = [
-            ("eager", out_max, "eager mode"),
-            ("compiled", out_compiled, "compiled mode"),
-        ]
+        if requires_grad:
+            test_cases = [
+                ("eager", out_max, "eager mode"),
+                ("compiled", out_compiled, "compiled mode"),
+            ]
 
-        for mode_name, output, description in test_cases:
-            loss = output.sum()
-            grads = torch.autograd.grad(loss, (query, key, value))
+            for mode_name, output, description in test_cases:
+                loss = output.sum()
+                grads = torch.autograd.grad(loss, (query, key, value))
 
-            # Verify gradients are computed for all inputs
-            input_names = ["query", "key", "value"]
-            for grad, input_name in zip(grads, input_names):
-                self.assertIsNotNone(
-                    grad, f"{input_name} should receive gradients in {description}"
-                )
+                # Verify gradients are computed for all inputs
+                input_names = ["query", "key", "value"]
+                for grad, input_name in zip(grads, input_names):
+                    self.assertIsNotNone(
+                        grad, f"{input_name} should receive gradients in {description}"
+                    )
 
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
@@ -2904,7 +2887,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @skip_on_cpu
-    @expected_not_implemented_on_mps  # SymInt captures (dynamic-shape closures)
     def test_mask_mod_handles_symint_addition(self, device):
         dtype = torch.float16
 
@@ -2950,7 +2932,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @skip_on_cpu
-    @expected_not_implemented_on_mps  # SymInt captures (dynamic-shape closures)
     def test_mask_mod_handles_derived_symint_closure(self, device):
         dtype = torch.float16
 
