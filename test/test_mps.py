@@ -2961,6 +2961,34 @@ class TestMPS(TestCaseMPS):
             helper((N, C_in * 2, H * 2, W * 2), (C_out * 2, (C_in * 2) // groups,
                    kH + 2, kW + 2), bias_shape=(C_out * 2), groups=groups)
 
+    @parametrize("batch_size", [1, 2, 16, 32])
+    @parametrize("conv_config", [
+        (8, 16, 8, 256, 1),  # reported case: in/groups=1, channel multiplier 2
+        (8, 8, 8, 256, 1),   # true depthwise (1->1 per group)
+        (1, 1, 1, 256, 1),   # single channel
+        (8, 8, 8, 512, 1),   # tall filter, wrong even at batch 1
+        (8, 8, 8, 256, 3),
+        (8, 8, 8, 3, 256),
+    ])
+    def test_conv2d_filter_dim_ge_256(self, conv_config, batch_size):
+        # Regression: MPSGraph 2D conv miscomputes output once a filter dim reaches 256 (routed to a Metal kernel).
+        in_channels, out_channels, groups, kH, kW = conv_config
+        H = kH if kH >= 256 else kH + 70
+        W = kW if kW >= 256 else kW + 70
+        conv_cpu = nn.Conv2d(in_channels, out_channels, (kH, kW), groups=groups, bias=True)
+        conv_mps = copy.deepcopy(conv_cpu).to("mps")
+        x_cpu = torch.randn(batch_size, in_channels, H, W, requires_grad=True)
+        x_mps = x_cpu.detach().clone().to("mps").requires_grad_()
+        out_cpu = conv_cpu(x_cpu)
+        out_mps = conv_mps(x_mps)
+        self.assertEqual(out_cpu, out_mps, rtol=2.6e-05, atol=2e-04)
+        grad = torch.randn_like(out_cpu)
+        out_cpu.backward(grad)
+        out_mps.backward(grad.to("mps"))
+        self.assertEqual(x_cpu.grad, x_mps.grad, rtol=2.6e-05, atol=2e-04)
+        self.assertEqual(conv_cpu.weight.grad, conv_mps.weight.grad, atol=8e-04, rtol=10.4e-05)
+        self.assertEqual(conv_cpu.bias.grad, conv_mps.bias.grad, atol=8e-04, rtol=10.4e-05)
+
     # Test conv transpose 2d
     def test_conv_transpose2d(self):
         def helper(input_shape, wt_shape,
@@ -15299,6 +15327,11 @@ class TestConsistency(TestCaseMPS):
                 atol = 1e-5
                 rtol = 1e-5
 
+            if (op.name in ["_upsample_bilinear2d_aa", "_upsample_bicubic2d_aa"]
+               and mps_sample.kwargs.get("scale_factors") == [1.7, 0.9]):
+                # Similar to the above, float vs double precision aresults in slight error
+                atol, rtol = 2e-5, 2e-6
+
             if op.name in self.RANDOM_OP_NAMES:
                 self._assert_random_op_match(mps_out, cpu_out)
             elif op.name in ("linalg.svd", "svd"):
@@ -15614,6 +15647,7 @@ class TestConsistency(TestCaseMPS):
     # because 64-bit indexing is supported. But if 64-bit is turned off, the
     # test fails.
     @unittest.skipIf(torch._C._mps_maxBufferLength() < int(8.1 * 1024**3), "Need >8 GB buffer")
+    @serialTest()
     @parametrize("dtype", [torch.float16, torch.bfloat16])
     @parametrize("trigger_32bit_overflow", [False, True])
     def test_group_norm_backward_large_input(self, device, dtype, trigger_32bit_overflow):
