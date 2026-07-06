@@ -131,6 +131,46 @@ class ComboKernelTests(_ComboAutotuneCountMixin, TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, expected)
 
     @requires_gpu_and_triton
+    def test_data_independent_mask_not_combined_for_attention(self):
+        # Data-independent (0-read) producers -- here iota-derived attention
+        # masks -- that feed a memory-bound extern (SDPA attention) must NOT be
+        # combo-fused: fusing hoists them to the front of the graph and they get
+        # evicted from cache before attention reads them. With the guard on they
+        # stay as separate per-consumer kernels; numerics are unchanged either
+        # way. (Producers feeding Triton / compute-bound externs are unaffected.)
+        import torch.nn.functional as F
+
+        def fn(q, k, v):
+            s = q.shape[-2]
+            idx = torch.arange(s, device=q.device)
+            base = idx[:, None] >= idx[None, :]
+            # two distinct 0-read mask producers of the same shape -> combinable
+            m1 = torch.where(base, 0.0, float("-inf")).to(q.dtype)
+            m2 = torch.where(base, 0.0, -1e4).to(q.dtype)
+            o1 = F.scaled_dot_product_attention(q, k, v, attn_mask=m1)
+            o2 = F.scaled_dot_product_attention(q, k, v, attn_mask=m2)
+            return o1 + o2
+
+        inps = [
+            torch.rand(1, 4, 128, 32, device=GPU_TYPE, dtype=torch.float16)
+            for _ in range(3)
+        ]
+        out_eager = fn(*inps)
+
+        # a combo kernel groups >=2 outputs -> its def has an `out_ptr1` arg.
+        combo_re = re.compile(r"def triton_\w+\([^)]*out_ptr1")
+
+        def num_combos(flag):
+            with torch._inductor.config.patch(combo_kernels_skip_data_independent=flag):
+                torch._dynamo.reset()
+                out, code = run_and_get_code(torch.compile(fn), *inps)
+            self.assertEqual(out_eager, out)  # numerics preserved
+            return sum(len(combo_re.findall(c)) for c in code)
+
+        # guard off: the two masks are combined; guard on: they are excluded.
+        self.assertGreater(num_combos(False), num_combos(True))
+
+    @requires_gpu_and_triton
     @parametrize("compile_time_autotune", [False, True])
     def test_reduce_functions(self, compile_time_autotune):
         def test_reduce(a, b, c, d):

@@ -1090,6 +1090,12 @@ combo_kernel_peak_memory_pct_threshold: float | None = 0.05
 # and treat each parallel group as one window.
 combo_kernel_max_distance: int = -1
 
+# Keep data-independent producers (no reads, e.g. iota-derived causal masks) out
+# of combo fusion when they feed a memory-bound extern (e.g. SDPA attention):
+# combo would hoist the mask to the graph front and it gets evicted before the
+# extern reads it. Cheap to recompute per consumer, so no benefit lost.
+combo_kernels_skip_data_independent: bool = True
+
 # constant folding on the joint graph
 joint_graph_constant_folding = True
 

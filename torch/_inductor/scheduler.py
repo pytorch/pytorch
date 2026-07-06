@@ -110,6 +110,43 @@ from .virtualized import V
 
 log = logging.getLogger(__name__)
 fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
+
+# Compute-bound externs (matmul/conv) hide an L2-evicted input behind compute;
+# memory-bound externs (e.g. SDPA attention) do not. Combos feeding the latter
+# are the harmful case. Matched by overload packet, so all overloads (.default,
+# .out, ...) are covered -- scheduler externs are usually .out variants.
+_COMPUTE_BOUND_EXTERN_PACKETS = frozenset(
+    (
+        torch.ops.aten.mm,
+        torch.ops.aten.addmm,
+        torch.ops.aten.bmm,
+        torch.ops.aten.baddbmm,
+        torch.ops.aten.addbmm,
+        torch.ops.aten.matmul,
+        torch.ops.aten.linear,
+        torch.ops.aten.convolution,
+        torch.ops.aten._convolution,
+        torch.ops.aten.conv1d,
+        torch.ops.aten.conv2d,
+        torch.ops.aten.conv3d,
+        torch.ops.aten.convolution_backward,
+    )
+)
+
+
+def _is_memory_bound_extern(node: BaseSchedulerNode) -> bool:
+    """True if ``node`` is an extern kernel sensitive to having its inputs
+    evicted from L2 (e.g. SDPA attention) -- i.e. an extern that is not a
+    compute-bound matmul/convolution."""
+    if not node.is_extern():
+        return False
+    op = getattr(getattr(node, "node", None), "op_overload", None)
+    packet = getattr(op, "overloadpacket", None)
+    if packet is None:
+        return True  # unknown extern: treat as sensitive (conservative)
+    return packet not in _COMPUTE_BOUND_EXTERN_PACKETS
+
+
 loop_ordering_log = torch._logging.getArtifactLogger(__name__, "loop_ordering")
 compute_dependencies_log = torch._logging.getArtifactLogger(
     __name__, "compute_dependencies"
@@ -6368,6 +6405,36 @@ class Scheduler:
         else:
             node_to_idx = {n: i for i, n in enumerate(self.nodes)}
 
+        # Inputs of memory-bound externs (e.g. SDPA attention). A data-independent
+        # (0-read) producer of one -- e.g. a causal mask -- is excluded from combo
+        # below: fusing would hoist it to the graph front and evict it before the
+        # extern reads it. It stays a per-consumer kernel instead.
+        mem_bound_extern_inputs: OrderedSet[str] = OrderedSet()
+        if config.combo_kernels_skip_data_independent:
+            for n in self.nodes:
+                if _is_memory_bound_extern(n):
+                    for dep in n.read_writes.reads:
+                        mem_bound_extern_inputs.add(dep.name)
+
+        def _drop_hoisted_data_independent(
+            window: list[BaseSchedulerNode],
+        ) -> list[BaseSchedulerNode]:
+            if not mem_bound_extern_inputs:
+                return window
+            kept = []
+            for m in window:
+                if len(m.read_writes.reads) == 0 and any(
+                    name in mem_bound_extern_inputs for name in m.get_buffer_names()
+                ):
+                    fusion_log.debug(
+                        "ComboKernels: excluding data-independent %s "
+                        "(feeds memory-bound extern)",
+                        m.get_name(),
+                    )
+                    continue
+                kept.append(m)
+            return kept
+
         def _register_accept(
             combo_node: ForeachKernelSchedulerNode,
             accepted: list[BaseSchedulerNode],
@@ -6404,6 +6471,7 @@ class Scheduler:
             ):
                 if num_ck_nodes is not None and count > num_ck_nodes:
                     break
+                window = _drop_hoisted_data_independent(window)
                 if len(window) < 2 or not self.speedup_by_combo_kernel(window):
                     continue
                 if memory_check:
