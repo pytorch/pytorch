@@ -28,6 +28,7 @@ from ..runtime.hints import (
     TRITON_DEFAULT_BLOCK_SIZES,
     TRITON_DEFAULT_RSPLIT,
     TRITON_DEFAULT_RSPLIT_SIZE,
+    TritonMeta,
 )
 from ..utils import (
     cache_on_self,
@@ -235,7 +236,7 @@ class DeferredTritonCallWrapper:
     kernel_name: str
     kernel_name_to_body: dict[str, str]
     arg_types: list[Any]
-    triton_meta: dict[str, Any] | None = None
+    triton_meta: TritonMeta | None = None
     inductor_meta: dict[str, Any] | None = None
     tma_tensor_args: dict[str, str] = dataclasses.field(default_factory=dict)
 
@@ -1505,7 +1506,7 @@ static inline void ensure_triton_kernel_compiles_started() {{
         arg_types=None,
         raw_keys=None,
         raw_args=None,
-        triton_meta=None,
+        triton_meta: TritonMeta | None = None,
         inductor_meta=None,
         graph_name="",
         original_fxnode_name=None,

@@ -65,23 +65,26 @@ bool MPSDevice::isMacOS13Plus(MacOSVersion version) const {
   static bool _macos_15_1_plus = is_os_version_at_least(15, 1);
   static bool _macos_15_2_plus = is_os_version_at_least(15, 2);
   static bool _macos_26_0_plus = is_os_version_at_least(26, 0);
+  static bool _macos_26_2_plus = is_os_version_at_least(26, 2);
   static bool _macos_26_4_plus = is_os_version_at_least(26, 4);
   static bool _macos_27_0_plus = is_os_version_at_least(27, 0);
 
   switch (version) {
-    case MacOSVersion::MACOS_VER_14_4_PLUS:
+    case MacOSVersion::MACOS_14_4:
       return _macos_14_4_plus;
-    case MacOSVersion::MACOS_VER_15_0_PLUS:
+    case MacOSVersion::MACOS_15_0:
       return _macos_15_0_plus;
-    case MacOSVersion::MACOS_VER_15_1_PLUS:
+    case MacOSVersion::MACOS_15_1:
       return _macos_15_1_plus;
-    case MacOSVersion::MACOS_VER_15_2_PLUS:
+    case MacOSVersion::MACOS_15_2:
       return _macos_15_2_plus;
-    case MacOSVersion::MACOS_VER_26_0_PLUS:
+    case MacOSVersion::MACOS_26_0:
       return _macos_26_0_plus;
-    case MacOSVersion::MACOS_VER_26_4_PLUS:
+    case MacOSVersion::MACOS_26_2:
+      return _macos_26_2_plus;
+    case MacOSVersion::MACOS_26_4:
       return _macos_26_4_plus;
-    case MacOSVersion::MACOS_VER_27_0_PLUS:
+    case MacOSVersion::MACOS_27_0:
       return _macos_27_0_plus;
     default:
       return false;
@@ -122,7 +125,7 @@ bool is_available() {
   return MPSDevice::getInstance()->device() != nil;
 }
 
-bool is_macos_13_or_newer(MacOSVersion version) {
+bool is_macos_at_least(MacOSVersion version) {
   return MPSDevice::getInstance()->isMacOS13Plus(version);
 }
 
