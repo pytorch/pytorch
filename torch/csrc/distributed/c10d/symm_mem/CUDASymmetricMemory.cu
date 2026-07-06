@@ -408,11 +408,18 @@ void* CUDASymmetricMemoryAllocator::alloc(
   void* alloc_base = nullptr;
   map_block(&alloc_base, handle, block_size, device_idx);
 
-  // Zero the whole block; this initializes the signal pad (at the front) for
-  // the CAS-based barrier() protocol.
-  AT_CUDA_CHECK(cudaMemset(alloc_base, 0, block_size));
+  // Zero the signal pad (at the front, [0, buffer_offset)) to initialize it for
+  // the CAS-based barrier() protocol; the data buffer that follows does not need
+  // zeroing. This matches the NCCL/NVSHMEM backends, which also only clear the
+  // signal pad. Memsetting the whole (granularity-rounded) block instead fails
+  // with "invalid argument" on some devices (e.g. B200 / CUDA 13).
+  AT_CUDA_CHECK(cudaMemset(alloc_base, 0, buffer_offset));
 
-  // Hand back the data buffer pointer; the signal pad stays hidden in front.
+  // Hand back the data buffer pointer, not alloc_base; the signal pad stays
+  // hidden in front. Returning the data ptr (rather than the alloc ptr) is safe
+  // for free(): the whole block is owned by the AllocationRef held in the Block,
+  // so free() only needs the data ptr to find and drop the Block; the block
+  // (and thus alloc_base) is released internally by ~AllocationRef.
   void* buffer_ptr = static_cast<char*>(alloc_base) + buffer_offset;
 
   auto alloc_ref = c10::make_intrusive<AllocationRef>(
@@ -756,6 +763,9 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
   std::vector<HandleType> handles(world_size);
   std::vector<void*> buffers(world_size, nullptr);
   std::vector<void*> signal_pads(world_size, nullptr);
+  // Mapped base (== signal pad base) per rank; kept separately so AllocationRef
+  // gets an explicit base to unmap rather than relying on signal_pads[r].
+  std::vector<void*> bases(world_size, nullptr);
 
   for (int r = 0; r < world_size; ++r) {
     if (r == rank) {
@@ -764,6 +774,7 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
       // every handle on the allocation, and per-handle offsets are applied
       // separately.
       handles[r] = block->alloc_ref->handle;
+      bases[r] = block->alloc_ref->ptr;
       signal_pads[r] = block->alloc_ref->ptr;
       buffers[r] =
           (void*)((uintptr_t)block->alloc_ref->ptr + block->buffer_offset);
@@ -806,6 +817,7 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
     // follows at buffer_offset.
     void* base = nullptr;
     map_block(&base, handles[r], block->block_size, block->device_idx);
+    bases[r] = base;
     signal_pads[r] = base;
     buffers[r] = (void*)((uintptr_t)base + block->buffer_offset);
     if constexpr (!use_fabric_handle) {
@@ -840,10 +852,9 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
       alloc_refs.emplace_back(block->alloc_ref);
       continue;
     }
-    // signal_pads[r] holds peer r's mapped base (== signal pad base), which is
-    // the address AllocationRef must unmap.
+    // bases[r] is peer r's mapped base, i.e. the address AllocationRef unmaps.
     alloc_refs.push_back(c10::make_intrusive<AllocationRef>(
-        signal_pads[r], handles[r], block->block_size, block->device_idx));
+        bases[r], handles[r], block->block_size, block->device_idx));
   }
 
   // The multicast mapping mirrors the block layout, so the data buffer lives at

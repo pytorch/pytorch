@@ -404,7 +404,11 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     TORCH_CHECK(alloc_base != nullptr, "nvshmem_malloc failed");
     // Zero the signal pad (at the front) for the signaling protocol.
     AT_CUDA_CHECK(cudaMemset(alloc_base, 0, signal_pad_size));
-    // Hand back the data buffer pointer; the signal pad stays hidden in front.
+    // Hand back the data buffer pointer, not alloc_base; the signal pad stays
+    // hidden in front. Returning the data ptr is safe for free(): the whole
+    // block is owned by the NVSHMEMAllocation keyed below, which nvshmem_free's
+    // alloc_base in its destructor, so free() only needs the data ptr to drop
+    // the allocation entry.
     void* buffer_ptr = static_cast<char*>(alloc_base) + buffer_offset;
     {
       std::lock_guard<std::mutex> lock(mutex_);
