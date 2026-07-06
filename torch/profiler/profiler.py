@@ -856,7 +856,22 @@ def tensorboard_trace_handler(
             file_name = file_name + ".gz"
         file_path = os.path.join(dir_name, file_name)
         if save_protocol is not None:
-            prof.export_using_protocol(file_path, save_protocol)
+            if use_gzip:
+                with tempfile.NamedTemporaryFile(
+                    suffix=ext, dir=dir_name, delete=False
+                ) as fp:
+                    tmp_path = fp.name
+                try:
+                    prof.export_using_protocol(tmp_path, save_protocol)
+                    with (
+                        open(tmp_path, "rb") as fin,
+                        gzip.open(file_path, "wb") as fout,
+                    ):
+                        fout.writelines(fin)
+                finally:
+                    os.unlink(tmp_path)
+            else:
+                prof.export_using_protocol(file_path, save_protocol)
         else:
             prof.export_chrome_trace(file_path, use_python_export=use_python_export)
 

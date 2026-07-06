@@ -984,20 +984,32 @@ class profile:
     export_chrome_trace.__doc__ = EventList.export_chrome_trace.__doc__
 
     def export_using_protocol(self, path: str, protocol_name: str | None = None):
+        """Export trace using a registered Kineto protocol.
+
+        When ``protocol_name`` is ``None`` or ``"chrome"``, this falls back to
+        :meth:`export_chrome_trace`.  Otherwise the path is forwarded to
+        Kineto's save as ``<protocol_name>://<path>``.
+
+        Args:
+            path (str): Path where the trace will be written.
+            protocol_name (str | None): Registered protocol name, or ``None``
+                to use the default chrome trace export.
+        """
         if protocol_name is None or protocol_name == "chrome":
             self.export_chrome_trace(path)
             return
 
         if not kineto_available():
             log.error("Exporting with a custom protocol requires kineto.")
-        else:
-            kineto_path = f"{protocol_name}://{path}"
-            self.kineto_results.save(kineto_path)
+            return
+
+        kineto_path = f"{protocol_name}://{path}"
+        self.kineto_results.save(kineto_path)  # type: ignore[union-attr]
 
         import torch._inductor.config as inductor_config
 
         if inductor_config.trace.provenance_tracking_to_timeline:
-            log.error(
+            log.warning(
                 "Adding stack trace to compiled kernel is not available "
                 "for protocol: %s.",
                 protocol_name,

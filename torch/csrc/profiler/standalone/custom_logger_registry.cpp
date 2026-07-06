@@ -8,6 +8,8 @@
 
 #ifdef USE_KINETO
 
+#include <vector>
+
 #include <c10/util/Exception.h>
 #include <torch/csrc/profiler/standalone/custom_logger_registry.h>
 
@@ -25,27 +27,25 @@ void CustomLoggerRegistry::registerLogger(
     CustomLoggerFactory factory) {
   std::lock_guard<std::mutex> lock(mutex_);
 
-  if (loggers_.count(protocol)) {
+  if (loggers_.contains(protocol)) {
     TORCH_WARN(
-        "Custom logger for protocol '", protocol,
+        "Custom logger for protocol '",
+        protocol,
         "' already registered, overwriting");
   }
 
   loggers_[protocol] = std::move(factory);
 
-  // If Kineto was already initialized, register immediately
   if (kineto_initialized_ && !registered_with_kineto_) {
     registerWithKineto();
   } else if (kineto_initialized_ && registered_with_kineto_) {
-    // Kineto already initialized and we already registered others,
-    // register this new one immediately
     libkineto::registerLoggerFactory(protocol, loggers_[protocol]);
   }
 }
 
 bool CustomLoggerRegistry::hasLogger(const std::string& protocol) const {
   std::lock_guard<std::mutex> lock(mutex_);
-  return loggers_.count(protocol) > 0;
+  return loggers_.contains(protocol);
 }
 
 size_t CustomLoggerRegistry::numLoggers() const {
@@ -59,14 +59,25 @@ bool CustomLoggerRegistry::isRegisteredWithKineto() const {
 }
 
 void CustomLoggerRegistry::registerWithKineto() {
-  // Note: Caller must hold mutex_
   if (loggers_.empty() || registered_with_kineto_) {
     return;
   }
 
-  // Register all logger factories with Kineto
+  std::vector<std::string> failed;
   for (const auto& [protocol, factory] : loggers_) {
-    libkineto::registerLoggerFactory(protocol, factory);
+    try {
+      libkineto::registerLoggerFactory(protocol, factory);
+    } catch (const std::exception& e) {
+      TORCH_WARN(
+          "Failed to register logger for protocol '",
+          protocol,
+          "' with Kineto: ",
+          e.what());
+      failed.push_back(protocol);
+    }
+  }
+  for (const auto& protocol : failed) {
+    loggers_.erase(protocol);
   }
 
   registered_with_kineto_ = true;
@@ -76,7 +87,6 @@ void CustomLoggerRegistry::onKinetoInit() {
   std::lock_guard<std::mutex> lock(mutex_);
   kineto_initialized_ = true;
 
-  // If loggers were registered before Kineto init, register them now
   if (!loggers_.empty() && !registered_with_kineto_) {
     registerWithKineto();
   }

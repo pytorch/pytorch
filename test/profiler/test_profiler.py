@@ -3698,12 +3698,11 @@ class TestExperimentalUtils(TestCase):
         n2 = names(prof2)
         self.assertEqual(n1, n2)
 
-
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_export_csv_protocol(self):
         """Load the CsvLogger extension (registered via CustomLoggerRegistry),
         profile real ops, export through the csv protocol, and verify the
-        output CSV against the column schema used by the mock events."""
+        output CSV against the column schema."""
         import csv
 
         import torch.utils.cpp_extension
@@ -3739,7 +3738,7 @@ class TestExperimentalUtils(TestCase):
             "aten::ones",
             "aten::empty",
             "aten::fill_",
-            "aten::add"
+            "aten::add",
         ]
 
         with TemporaryFileName(suffix=".csv") as csv_path:
@@ -3760,26 +3759,20 @@ class TestExperimentalUtils(TestCase):
 
             self.assertGreater(len(rows), 0)
             activity_names = [row[0] for row in rows]
+            self.assertEqual(len(activity_names), len(expected_names))
             for an, en in zip(activity_names, expected_names):
-                self.assertTrue(
-                    an == en,
-                    f"Expected 'test_csv_export' in activities, got: {activity_names}",
+                self.assertEqual(
+                    an,
+                    en,
+                    f"Expected '{en}' but got '{an}', activities: {activity_names}",
                 )
             for row in rows:
                 self.assertEqual(len(row), len(expected_headers))
-                for field in row[1:]:
+                for val in row[1:]:
                     self.assertTrue(
-                        field.lstrip("-").isdigit(),
-                        f"Expected integer field, got: {field}",
+                        val.lstrip("-").isdigit(),
+                        f"Expected integer field, got: {val}",
                     )
-
-        mock_profile = self.load_mock_profile()
-        mock_events = mock_profile.kineto_results.events()
-        self.assertGreater(len(mock_events), 0)
-        for event in mock_events:
-            self.assertIsInstance(event.name, str)
-            self.assertIsInstance(event._start_us, int)
-            self.assertIsInstance(event._duration_us, int)
 
 
 class TestPrivateUse1ProfilerState(TestCase):
