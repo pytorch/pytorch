@@ -30,11 +30,13 @@ from functools import partial
 from typing import Any, cast, TYPE_CHECKING, TypeAlias
 
 import torch
+from torch._custom_class_base import CustomClassBase
 from torch._dynamo.utils import counters, get_runtime_metrics_context
 from torch._guards import compile_context, CompileContext
 from torch._higher_order_ops.wrap import inductor_compiled_code
 from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
+    cudagraph_trees_clone_live_user_visible_outputs,
     CudagraphCachedInfo,
     CudagraphMetadata,
     get_input_storage_mutation_info,
@@ -51,10 +53,10 @@ from torch._inductor.utils import (
     CUDAGraphWrapperMetadata,
     GraphPartitionMap,
     InputType,
+    is_gpu,
     output_node,
     set_tracing_context_output_strides,
 )
-from torch._opaque_base import OpaqueBase
 from torch.fx._graph_pickler import _node_metadata_key_filter_safe, _ops_filter_safe
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_in_torch_dispatch_mode
@@ -247,6 +249,7 @@ def cudagraph_post_compile(
             raise AssertionError(
                 "stack_traces should not be None in cudagraph_post_compile"
             )
+        user_visible_output_idxs = getattr(cached_info, "user_visible_output_idxs", ())
 
         prepare_cudagraph_post_compile(
             compiled_graph, example_inputs, boxed_forward_device_index
@@ -270,6 +273,7 @@ def cudagraph_post_compile(
             placeholders=placeholders,
             mutated_input_idxs=tuple(compiled_graph.mutated_input_idxs),
             kernel_free_cudagraph=compiled_graph.kernel_free_cudagraph,
+            user_visible_output_idxs=tuple(user_visible_output_idxs),
         )
 
         policy = config.cudagraph_policy
@@ -293,7 +297,7 @@ def cudagraph_post_compile(
         BoxedBool.disable(cudagraphs)
         maybe_handle_backward_generation(compiled_graph, boxed_forward_device_index)
 
-        if "cuda" in compiled_graph.device_types:
+        if any(is_gpu(device) for device in compiled_graph.device_types):
             # prefer better disable_cudagraphs_reason bc stack trace
             # TODO: migrate all disable reasons to stack trace, refactor
             if compiled_graph.disabled_cudagraphs_reason:
@@ -366,6 +370,9 @@ def cudagraph_partition_post_compile(
         static_input_idxs,
         mutated_input_idxs,
         compiled_graph.cudagraph_info.stack_traces,
+        OrderedSet(
+            getattr(compiled_graph.cudagraph_info, "user_visible_output_idxs", ())
+        ),
         tensor_constants,
     )
 
@@ -396,6 +403,7 @@ def cudagraph_partition_post_compile(
             placeholders=partition_metadata.placeholders,
             mutated_input_idxs=tuple(partition_metadata.mutated_input_idxs),
             kernel_free_cudagraph=compiled_graph.kernel_free_cudagraph,
+            user_visible_output_idxs=tuple(partition_metadata.user_visible_output_idxs),
         )
         cudagraphify_fns.append(cudagraphify_fn)
 
@@ -624,7 +632,7 @@ class CompiledFxGraph(OutputCode):
         if cudagraphs:
             # check cudagraph disabling reasons from inductor lowering
             if self.disabled_cudagraphs_reason:
-                if "cuda" in self.device_types:
+                if any(is_gpu(device) for device in self.device_types):
                     log_cudagraph_skip_and_bump_counter(
                         f"skipping cudagraphs due to {self.disabled_cudagraphs_reason}"
                     )
@@ -675,7 +683,7 @@ class CompiledFxGraph(OutputCode):
                                     torch.Tensor,
                                     torch.SymInt,
                                     torch.Generator,
-                                    OpaqueBase,
+                                    CustomClassBase,
                                 ),
                             )
                             for t in example_inputs
@@ -696,10 +704,18 @@ class CompiledFxGraph(OutputCode):
                     (arg.stack_trace if isinstance(arg, torch.fx.node.Node) else None)
                     for arg in output.args[0]  # type: ignore[union-attr]
                 ]
+                user_visible_output_idxs = (
+                    output.meta.get("user_visible_output_idxs", ())
+                    if cudagraph_trees_clone_live_user_visible_outputs()
+                    else ()
+                )
                 cudagraph_fail_reasons = [s for b, s in cudagraph_tests if not b]
                 placeholders = tuple(get_placeholder_info(gm.graph))
                 cudagraph_info = CudagraphCachedInfo(
-                    placeholders, stack_traces, cudagraph_fail_reasons
+                    placeholders,
+                    stack_traces,
+                    tuple(user_visible_output_idxs),
+                    cudagraph_fail_reasons,
                 )
 
         self.cudagraph_info = cudagraph_info
@@ -859,7 +875,7 @@ class CompiledFxGraph(OutputCode):
             # during a previous compilation we're loading from the cache.
             # If so, we need to disable it on this new process too.
             if self.disabled_cudagraphs_reason:
-                if "cuda" in self.device_types:
+                if any(is_gpu(device) for device in self.device_types):
                     log_cudagraph_skip_and_bump_counter(
                         f"skipping cudagraphs due to {self.disabled_cudagraphs_reason}"
                     )
