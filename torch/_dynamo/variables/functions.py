@@ -1149,7 +1149,6 @@ class LocalGeneratorObjectVariable(VariableTracker):
         self.f_globals = f_globals
         self.inline_tracer = inline_tracer
         self.remaining_items: list[VariableTracker] = []
-        inline_tracer.output.track_generator(self)
 
     def get_code(self) -> types.CodeType:
         return self.code
@@ -1205,11 +1204,6 @@ class LocalGeneratorObjectVariable(VariableTracker):
         from .object_protocol import object_richcompare
 
         return object_richcompare(self, tx, other, op)
-
-    def pygen_yf(self) -> VariableTracker | None:
-        if self.inline_tracer.frame_state == FrameState.FRAME_SUSPENDED_YIELD_FROM:
-            return self.inline_tracer.stack[-1]
-        return None
 
     def gen_send_ex2(
         self,
@@ -1394,17 +1388,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
         if self._frame_state_finished():
             return ConstantVariable.create(None)
 
-        err = 0
-        yf = self.pygen_yf()
-        if yf:
-            with tracer.temporarily_set_frame_state(FrameState.FRAME_EXECUTING):
-                try:
-                    yf.call_method(tx, "close", [], {})
-                except ObservedException:
-                    err = 1
-
-        if err == 0:
-            self._setup_exception(tx, VariableTracker.build(tx, GeneratorExit))
+        self._setup_exception(tx, VariableTracker.build(tx, GeneratorExit))
 
         try:
             self.gen_send_ex(tx, ConstantVariable.create(None), True)
@@ -1446,32 +1430,9 @@ class LocalGeneratorObjectVariable(VariableTracker):
         # * If the generator exits without yielding, raise StopIteration
         # * If the generator function does not catch the passed-in exception,
         # or raises a different exception, then that exception propagates to the caller.
-        def throw_here():
-            self._setup_exception(tx, arg)
-            return self.gen_send_ex(tx, ConstantVariable.create(None), True)
 
-        from torch._dynamo.symbolic_convert import pyerr_given_exception_match
-
-        yf = self.pygen_yf()
-        tracer = self.inline_tracer
-
-        if yf:
-            # CPython has an extra flag for handling async generators
-            if pyerr_given_exception_match(arg, GeneratorExit):
-                try:
-                    # CPython uses gen_close_iter here
-                    with tracer.temporarily_set_frame_state(FrameState.FRAME_EXECUTING):
-                        yf.call_method(tx, "close", [], {})
-                except ObservedException:
-                    return throw_here()
-
-            try:
-                with tracer.temporarily_set_frame_state(FrameState.FRAME_EXECUTING):
-                    return yf.call_method(tx, "throw", [arg], {})
-            except ObservedException:
-                return self.gen_send_ex(tx, ConstantVariable.create(None), True)
-
-        return throw_here()
+        self._setup_exception(tx, arg)
+        return self.gen_send_ex(tx, ConstantVariable.create(None), True)
 
     def call_method(
         self,
