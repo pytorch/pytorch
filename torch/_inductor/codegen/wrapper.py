@@ -40,8 +40,9 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.node import _get_qualified_name
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.functions import Max, Min
+from torch.utils._sympy.functions import CleanDiv, Max, Min
 from torch.utils._sympy.singleton_int import SingletonInt
+from torch.utils._sympy.solve import try_solve
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import async_compile, config, debug as inductor_debug, ir
@@ -95,6 +96,14 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 pexpr = PythonPrinter().doprint
+
+
+def _rewrite_symbol_solution_for_int_codegen(expr: sympy.Expr) -> sympy.Expr:
+    expr = sympy.together(sympy.sympify(expr))
+    numerator, denominator = sympy.fraction(expr)
+    if denominator == 1:
+        return numerator
+    return CleanDiv(numerator, denominator)
 
 
 ReuseKey = tuple[torch.device, torch.dtype, str, bool, int]
@@ -805,11 +814,12 @@ class EnterDeviceContextManagerWithStreamInfoLine(EnterDeviceContextManagerLine)
     Attributes:
         num_streams: Number of streams (determined by user annotations on nodes).
         stream_idx_to_user_obj_idx: Maps stream_idx → user_object_index for
-            retrieving user stream objects via get_external_object_by_index.
+            retrieving user stream objects via _get_stream_by_index.
     """
 
     num_streams: int = 1
     stream_idx_to_user_obj_idx: dict[int, int] = dataclasses.field(default_factory=dict)
+    setup_stream_cache: bool = True
 
     def codegen(self, code: IndentedBuffer) -> None:
         """Generate context switching and stream retrieval code."""
@@ -817,14 +827,18 @@ class EnterDeviceContextManagerWithStreamInfoLine(EnterDeviceContextManagerLine)
             super().codegen(code)
         else:
             super().codegen(code)
-            code.writeline(f"{DEFAULT_STREAM} = {V.graph.device_ops.current_stream()}")
+
+            if self.setup_stream_cache:
+                code.writeline(
+                    f"{DEFAULT_STREAM} = {V.graph.device_ops.current_stream()}"
+                )
 
             if self.num_streams > 1:
                 for i in range(1, self.num_streams):
                     user_obj_idx = self.stream_idx_to_user_obj_idx[i]
                     code.writeline(
                         f"{STREAM_NAME_TEMPLATE.format(stream_idx=i)} "
-                        f"= get_external_object_by_index({user_obj_idx})",
+                        f"= _get_stream_by_index({user_obj_idx})",
                     )
 
 
@@ -1312,6 +1326,7 @@ class PythonWrapperCodegen(CodeGen):
 
     def __init__(self):
         super().__init__()
+        self._last_default_stream_device: int | None = None
         self._pending_input_asserts: dict[str, tuple[str, str]] = {}
         self._pending_alignment_copies: OrderedSet[str] = OrderedSet()
         self._names_iter: Iterator[int] = count()
@@ -1890,17 +1905,19 @@ class PythonWrapperCodegen(CodeGen):
             if stream_idx_to_user_obj_idx is None:
                 raise AssertionError("expected stream_idx_to_user_obj_idx to be set")
             import_line = (
-                "from torch._dynamo.graph_bytecode_inputs import "
-                "get_external_object_by_index"
+                "from torch._dynamo.variables.streams import _get_stream_by_index"
             )
             if not self.imports.contains(import_line):
                 self.imports.writeline(import_line)
+            setup_stream_cache = self._last_default_stream_device != device_idx
+            self._last_default_stream_device = device_idx
             self.writeline(
                 EnterDeviceContextManagerWithStreamInfoLine(
                     device_idx,
                     self.last_seen_device_guard_index,
                     num_streams,
                     stream_idx_to_user_obj_idx,
+                    setup_stream_cache=setup_stream_cache,
                 ),
             )
         else:
@@ -2454,9 +2471,11 @@ class PythonWrapperCodegen(CodeGen):
     def codegen_input_symbol_assignment(
         self,
         name: str,
-        value: ir.TensorBox,
+        value: ir.TensorBox | sympy.Expr,
         bound_vars: OrderedSet[sympy.Symbol],
+        deferred_symbol_assignments=None,
     ):
+        """Assign symbolic graph inputs and tensor size/stride symbols to locals."""
         code = self.prefix
 
         @functools.cache
@@ -2473,7 +2492,6 @@ class PythonWrapperCodegen(CodeGen):
             # Deferred runtime asserts and graph input metadata can reference
             # either side of a backed-symbol replacement. Emit aliases so both
             # the pre-replacement and canonical names are defined.
-            from torch.utils._sympy.symbol import symbol_is_type, SymT
 
             def is_backed_symbol(s: sympy.Symbol) -> bool:
                 return not symbol_is_type(s, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT))
@@ -2498,6 +2516,59 @@ class PythonWrapperCodegen(CodeGen):
                     code.writeline(f"{tgt} = {sym}")
                     bound_vars.add(tgt)
 
+        def codegen_symbol(
+            sym_or_exp: sympy.Symbol | sympy.Expr,
+            base_name: str,
+            name_fn: Callable[[str], str],
+            dim: int,
+            deferred_symbol_assignments=None,
+        ) -> bool:
+            if isinstance(sym_or_exp, sympy.Symbol):
+                if sym_or_exp in bound_vars:
+                    return False
+                code.writeline(f"{sym_or_exp} = {name_fn(base_name)}[{dim}]")
+                bound_vars.add(sym_or_exp)
+                maybe_emit_replacement_aliases(sym_or_exp)
+                return True
+            elif isinstance(sym_or_exp, sympy.Expr):
+                undefined_symbols = [
+                    sym for sym in sym_or_exp.free_symbols if sym not in bound_vars
+                ]
+                if len(undefined_symbols) != 1:
+                    # Skip constants and underdetermined expressions; a later
+                    # input may define the remaining symbols directly.
+                    if (
+                        len(undefined_symbols) > 1
+                        and deferred_symbol_assignments is not None
+                    ):
+
+                        def retry(deferred_symbol_assignments):
+                            return codegen_symbol(
+                                sym_or_exp,
+                                base_name,
+                                name_fn,
+                                dim,
+                                deferred_symbol_assignments,
+                            )
+
+                        deferred_symbol_assignments.append(retry)
+                    return False
+
+                free_symbol = undefined_symbols.pop()
+                base_size_or_stride = name_fn(base_name)
+                dim_value = sympy.Symbol(f"{base_size_or_stride}_{dim}", integer=True)
+                solution = try_solve(sympy.Eq(sym_or_exp, dim_value), free_symbol)
+                if solution is None:
+                    return False
+
+                code.writeline(f"{dim_value} = {base_size_or_stride}[{dim}]")
+                expr = _rewrite_symbol_solution_for_int_codegen(solution[1])
+                code.writeline(f"{free_symbol} = {pexpr(expr)}")
+                bound_vars.add(free_symbol)
+                maybe_emit_replacement_aliases(free_symbol)
+                return True
+            return False
+
         if isinstance(value, sympy.Expr):
             if not isinstance(value, sympy.Symbol) or value in bound_vars:
                 return
@@ -2506,14 +2577,9 @@ class PythonWrapperCodegen(CodeGen):
             maybe_emit_replacement_aliases(value)
         elif isinstance(value, ir.TensorBox):
             for dim, size in enumerate(value.get_size()):
-                if isinstance(size, sympy.Symbol) and size not in bound_vars:
-                    code.writeline(f"{size} = {sizeof(name)}[{dim}]")
-                    bound_vars.add(size)
-                    maybe_emit_replacement_aliases(size)
+                codegen_symbol(size, name, sizeof, dim, deferred_symbol_assignments)
             for dim, stride in enumerate(value.get_stride()):
-                if isinstance(stride, sympy.Symbol) and stride not in bound_vars:
-                    code.writeline(f"{stride} = {strideof(name)}[{dim}]")
-                    bound_vars.add(stride)
+                codegen_symbol(stride, name, strideof, dim, deferred_symbol_assignments)
         elif isinstance(
             value, (ir.TorchBindObject, ir.GeneratorState, ir.OpaqueObjectState)
         ):
@@ -2523,6 +2589,16 @@ class PythonWrapperCodegen(CodeGen):
                 pass
             else:
                 raise AssertionError(f"Unknown value type: {type(value)}")
+
+    def _retry_deferred_symbol_assignments(self, deferred_symbol_assignments) -> None:
+        while deferred_symbol_assignments:
+            next_deferred_symbol_assignments = []
+            progress = False
+            for assignment in deferred_symbol_assignments:
+                progress = assignment(next_deferred_symbol_assignments) or progress
+            if not progress:
+                break
+            deferred_symbol_assignments = next_deferred_symbol_assignments
 
     def codegen_inputs(self):
         """Assign all symbolic shapes to locals"""
@@ -2538,8 +2614,12 @@ class PythonWrapperCodegen(CodeGen):
         inputs = [
             (k, v) for k, v in graph_inputs.items() if isinstance(v, sympy.Symbol)
         ] + [(k, v) for k, v in graph_inputs.items() if not isinstance(v, sympy.Symbol)]
+        deferred_symbol_assignments = []
         for name, value in inputs:
-            self.codegen_input_symbol_assignment(name, value, bound_vars)
+            self.codegen_input_symbol_assignment(
+                name, value, bound_vars, deferred_symbol_assignments
+            )
+        self._retry_deferred_symbol_assignments(deferred_symbol_assignments)
 
         def _verify_input_symbol_assignment(
             value: ir.TensorBox,
@@ -4298,8 +4378,13 @@ class PythonWrapperCodegen(CodeGen):
         )
         self.writeline(f"del partition{partition_id}_args")
 
+    def get_partition_name(self, partition_id: int) -> str:
+        return f"partition_{partition_id}"
+
     def set_all_partition_names(self, num_partitions: int):
-        self.all_partition_names = [f"partition_{idx}" for idx in range(num_partitions)]
+        self.all_partition_names = list(
+            map(self.get_partition_name, range(num_partitions))
+        )
 
     def codegen_subgraph_call_with_flattened_outputs(
         self, subgraph, outer_inputs, outer_flattened_outputs
