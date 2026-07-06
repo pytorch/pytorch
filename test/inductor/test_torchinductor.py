@@ -106,6 +106,9 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_X86,
     MACOS_VERSION,
+    MI200_ARCH,
+    MI300_ARCH,
+    MI350_ARCH,
     NAVI_ARCH,
     parametrize,
     serialTest,
@@ -5540,6 +5543,25 @@ for dtype in (torch.int32, torch.int64):
         with config.patch({"triton.use_block_ptr": use_block_ptr}):
             self.common(fn, (torch.randn(1, 3, *[10] * dim),))
 
+    def test_max_unpool2d_channels_last(self):
+        # https://github.com/pytorch/pytorch/issues/187173
+        if self.device != "cpu":
+            raise unittest.SkipTest(
+                "only the native CPU kernel preserves the input memory format"
+            )
+
+        def fn(p, i):
+            return torch.nn.functional.max_unpool2d(p, i, (8, 8))
+
+        x = torch.randn(2, 4, 8, 8, device=self.device).to(
+            memory_format=torch.channels_last
+        )
+        pooled, indices = torch.nn.functional.max_pool2d(x, 2, return_indices=True)
+        expected = fn(pooled, indices)
+        actual = torch.compile(fn)(pooled, indices)
+        self.assertEqual(expected.stride(), actual.stride())
+        self.assertEqual(expected, actual)
+
     def test_max_unpool_empty_output(self):
         class Unpool1d(nn.Module):
             def __init__(self):
@@ -5949,6 +5971,9 @@ for dtype in (torch.int32, torch.int64):
             check_lowp=False,
         )
 
+    # The forced Triton conv-backward autotune below compiles pathologically
+    # slowly on these ROCm arches, timing out CI. Skip until fixed (see #178945).
+    @skipIfRocmArch(NAVI_ARCH + MI350_ARCH + MI300_ARCH + MI200_ARCH)
     @skip_if_cpu
     @config.patch(
         {

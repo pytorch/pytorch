@@ -15327,6 +15327,11 @@ class TestConsistency(TestCaseMPS):
                 atol = 1e-5
                 rtol = 1e-5
 
+            if (op.name in ["_upsample_bilinear2d_aa", "_upsample_bicubic2d_aa"]
+               and mps_sample.kwargs.get("scale_factors") == [1.7, 0.9]):
+                # Similar to the above, float vs double precision aresults in slight error
+                atol, rtol = 2e-5, 2e-6
+
             if op.name in self.RANDOM_OP_NAMES:
                 self._assert_random_op_match(mps_out, cpu_out)
             elif op.name in ("linalg.svd", "svd"):
