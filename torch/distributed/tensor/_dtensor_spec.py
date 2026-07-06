@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, cast, NamedTuple
 
 import torch
+from torch._opaque_base import OpaqueBaseMeta
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
     _is_shard_like,
@@ -73,9 +74,9 @@ class TensorMeta(NamedTuple):
     dtype: torch.dtype
 
 
-# used internally to propagate the placements
+# used internally to propagate the placements.
 @dataclass
-class DTensorSpec:
+class DTensorSpec(metaclass=OpaqueBaseMeta):
     mesh: DeviceMesh
     placements: tuple[Placement, ...]
 
@@ -764,3 +765,37 @@ class DTensorSpec:
             tensor_meta=tensor_meta,
             use_strided_shard_as_shard_order=self.use_strided_shard_as_shard_order,
         )
+
+
+# Register DTensorSpec as an opaque reference type so torch.export can capture it
+# as a graph input when it shows up as a non-tensor argument (e.g. to the DTensor
+# constructor).
+def _register_dtensor_spec_opaque_type() -> None:
+    from torch._library.opaque_object import MemberType, register_opaque_type
+
+    register_opaque_type(
+        DTensorSpec,
+        typ="reference",
+        guard_fn=lambda obj: [
+            obj.mesh,
+            obj.placements,
+            obj.shard_order,
+            obj.tensor_meta,
+        ],
+        members={
+            "mesh": MemberType.USE_REAL,
+            "placements": MemberType.USE_REAL,
+            "tensor_meta": MemberType.USE_REAL,
+            "shard_order": MemberType.USE_REAL,
+            "use_strided_shard_as_shard_order": MemberType.USE_REAL,
+            "device_mesh": MemberType.USE_REAL,
+            "sums": MemberType.USE_REAL,
+            "is_replicated": MemberType.USE_REAL,
+            "is_sharded": MemberType.USE_REAL,
+            "__eq__": MemberType.USE_REAL,
+            "__hash__": MemberType.USE_REAL,
+        },
+    )
+
+
+_register_dtensor_spec_opaque_type()
