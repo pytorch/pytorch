@@ -642,6 +642,35 @@ def fmax(self: torch.Tensor, other: torch.Tensor) -> torch.Tensor:
     return torch.where(torch.isnan(other) | (other < self), self, other)
 
 
+@register_decomposition(prims.normal)
+def normal(
+    shape: list[int | torch.SymInt],
+    *,
+    mean: torch.types.Number,
+    std: torch.types.Number,
+    dtype: torch.dtype,
+    device: torch.device,
+    requires_grad: bool,
+    generator: torch.Generator | None = None,
+) -> torch.Tensor:
+    if generator is None:
+        normal_samples = torch.randn(
+            shape,
+            dtype=dtype,
+            device=device,
+            requires_grad=requires_grad,
+        )
+    else:
+        normal_samples = torch.randn(
+            shape,
+            generator=generator,
+            dtype=dtype,
+            device=device,
+            requires_grad=requires_grad,
+        )
+    return std * normal_samples + mean
+
+
 @register_decomposition(aten.amax)
 def amax(
     self: torch.Tensor,
