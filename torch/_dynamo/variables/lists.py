@@ -1573,6 +1573,21 @@ class DequeVariable(CommonListMethodsVariable):
         else:
             slice_within_maxlen = None
 
+        if name in ("copy", "__copy__"):
+            # deque_copy preserves maxlen: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L890
+            if args or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+            return DequeVariable(
+                list(self.items),
+                maxlen=self.maxlen,
+                mutation_type=ValueMutationNew(),
+            )
+
         if name == "extendleft" and self.is_mutable() and len(args) > 0:
             if kwargs or len(args) != 1:
                 raise_args_mismatch(
