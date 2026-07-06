@@ -4511,13 +4511,6 @@ def cooperative_reduction(
     if inductor_meta.get("no_x_dim"):
         size_hints["x"] = 1
 
-    # Cooperative reductions currently only support a single reduction dimension.
-    assert len(size_hints) == 2, (
-        "Cooperative reductions don't support tiling reduction dims"
-    )
-
-    assert triton_meta is not None
-
     from torch._inductor.heuristics.registry import get_codegen_heuristic
 
     reduction_heuristic = get_codegen_heuristic("reduction", triton_meta["device"].type)
@@ -4547,7 +4540,6 @@ def _persistent_reduction_configs(
     inductor_meta=None,
     triton_meta=None,
 ):
-    assert triton_meta is not None
     from torch._inductor.heuristics.registry import get_codegen_heuristic
 
     reduction_heuristic = get_codegen_heuristic("reduction", triton_meta["device"].type)

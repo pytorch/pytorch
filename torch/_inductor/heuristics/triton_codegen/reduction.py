@@ -345,8 +345,13 @@ class ReductionHeuristic(CodegenConfigHeuristics):
             triton_native_persistent_mm_configs,
         )
 
-        # Deterministic batch invariance: canonicalize the batch-dim hint
-        if inductor_meta and inductor_meta.get("batch_invariant"):
+        inductor_meta = {} if inductor_meta is None else inductor_meta
+        # Under deterministic mode, canonicalize the batch-dim hint so the
+        # candidate-config branching below (e.g. xnumel // 8 < 128) doesn't pick
+        # a different (XBLOCK, num_warps) for bs=N vs bs=N/2. Different picks
+        # change the bf16 reduction order and break batch invariance in
+        # persistent reductions like LayerNorm.
+        if inductor_meta.get("batch_invariant"):
             size_hints = dict(size_hints)
             if "x" in size_hints:
                 size_hints["x"] = max(size_hints["x"], 4096)
@@ -539,14 +544,16 @@ class ReductionHeuristic(CodegenConfigHeuristics):
         from torch._inductor.runtime.hints import TRITON_MAX_RSPLIT
         from torch._inductor.runtime.runtime_utils import last_power_of_2
 
-        assert len(size_hints) == 2, (
-            "Cooperative reductions don't support tiling reduction dims"
-        )
+        # Cooperative reductions currently only support a single reduction dimension.
+        if len(size_hints) != 2:
+            raise AssertionError(
+                "Cooperative reductions don't support tiling reduction dims"
+            )
         xnumel, rnumel = size_hints["x"], size_hints["r0_"]
 
         target = last_power_of_2(triton_meta["device"].multi_processor_count)
         split = max(1, min((rnumel, target // xnumel, TRITON_MAX_RSPLIT)))
-        if inductor_meta.get("persistent_reduction", False):
+        if inductor_meta["persistent_reduction"]:
             configs = self.get_persistent_configs(
                 size_hints={"x": xnumel, "r0_": rnumel // split},
                 reduction_hint=reduction_hint,
