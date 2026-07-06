@@ -2,6 +2,7 @@
 import collections
 import inspect
 import logging
+import os
 import warnings
 import weakref
 from collections.abc import Callable, Iterable, Sequence
@@ -20,6 +21,9 @@ from .effects import EffectType
 device_types_t: TypeAlias = str | Sequence[str] | None  # noqa: PYI042
 tags_t: TypeAlias = _C.Tag | Sequence[_C.Tag] | None  # noqa: PYI042
 log = logging.getLogger(__name__)
+
+
+_FAST_CUSTOM_OPS_ENABLED = os.environ.get("TORCH_ENABLE_FAST_CUSTOM_OPS", "1") == "1"
 
 
 def _normalize_tags(tags: tags_t) -> tuple[_C.Tag, ...]:
@@ -295,6 +299,16 @@ class CustomOpDef:
         self._init_fn = fn
 
         self._backend_fns: dict[str | None, Callable] = {}
+        self._backend_impls: dict[str | None, Callable] = {}
+        self._fast_path: Callable | None = None
+        self._fast_path_hits: int = 0
+        # Tracks the dispatcher's impl_generation counter as of our last known
+        # registration. The fast path compares this against the live counter on
+        # each call; a mismatch means an external override was registered and
+        # the fast path must bail to the C++ dispatcher.
+        self._impl_gen_snapshot: int | None = None
+        self._autograd_impl: Callable | None = None
+        self._adinplaceorview_impl: Callable | None = None
         self._abstract_fn: Callable | None = None
         self._setup_context_fn: Callable | None = None
         self._backward_fn: Callable | None = None
@@ -434,6 +448,8 @@ class CustomOpDef:
                 dtypes: list[str | None] = [device_types]
             else:
                 dtypes = list(device_types)
+            if _FAST_CUSTOM_OPS_ENABLED and self._fast_path is None:
+                self._install_fast_path()
             for device_type in dtypes:
                 if device_type not in self._backend_fns:
 
@@ -491,6 +507,13 @@ class CustomOpDef:
                             backend_impl,
                             _C._dispatch_key_for_device(device_type),
                         )
+                    # Advance snapshot by 1 rather than re-reading the live
+                    # counter: re-reading would absorb external overrides that
+                    # happened between our registrations and mask the mismatch.
+                    if self._fast_path is not None:
+                        self._impl_gen_snapshot += 1
+
+                    self._backend_impls[device_type] = backend_impl
 
                 # Wrap function to choose between the default implementation or the device-specific
                 # implementation depending on if the kernel is disabled.
@@ -787,6 +810,7 @@ class CustomOpDef:
 
     def _register_autograd_dispatcher_impl(self) -> None:
         autograd_impl = autograd.make_autograd_impl(self._opoverload, self)
+        self._autograd_impl = autograd_impl
         self._lib.impl(self._name, autograd_impl, "Autograd", with_keyset=True)
 
     def _register_adinplaceorview_dispatcher_impl(self) -> None:
@@ -827,6 +851,8 @@ class CustomOpDef:
             # redispatch directly past ADInplaceOrView to the backend.
             return op.redispatch(keyset & after_ADInplaceOrView_keyset, *args, **kwargs)
 
+        self._adinplaceorview_impl = adinplaceorview_impl
+
         with warnings.catch_warnings():
             warnings.filterwarnings(
                 "ignore",
@@ -839,6 +865,111 @@ class CustomOpDef:
                 "ADInplaceOrView",
                 with_keyset=True,
             )
+
+    def _install_fast_path(self):
+        """Install a Python fast path that bypasses the C++ dispatcher for
+        common eager-mode calls. The fast path requires all of the following:
+        - All args are plain ``torch.Tensor`` (no subclasses).
+        - No ``TorchFunctionMode`` is active.
+        - No autocast is active.
+        - Device is not ``"meta"`` and the kernel is not disabled.
+        - The resolved keyset contains only keys from the normal eager set:
+          an autograd key, ADInplaceOrView, and a dense backend key.
+          (Falls back to slow path under inference_mode, Functionalize, Vmap, etc.)
+        - The schema has no tensor-list args and is not a view op.
+        When any condition fails, the call falls through to the C++ dispatcher.
+
+        Dispatch chain (all in Python, no C++ dispatcher hops):
+        autograd_impl -> [adinplaceorview_impl ->] backend_dispatch
+        Connected via TLS-based redispatch interception in OpOverload.redispatch."""
+        if self._fast_path is not None:
+            raise AssertionError("fast path already installed")
+        schema = self._opoverload._schema
+        if schema._is_view_op():
+            return
+
+        has_tensorlist = any(
+            utils.is_tensorlist_like_type(a.type)
+            for a in (*schema.arguments, *schema.returns)
+        )
+        if has_tensorlist:
+            return
+
+        op = self._opoverload
+        autograd_impl = self._autograd_impl
+        adinplaceorview_impl = self._adinplaceorview_impl
+        disabled_kernel = self._disabled_kernel
+        backend_impls = self._backend_impls
+        is_mutable = schema.is_mutable
+        opdef = self
+        chain_cache: dict[str | None, tuple] = {}
+
+        def _build_chain(backend_impl):
+            def backend_dispatch(keyset, *args, **kwargs):
+                return backend_impl(*args, **kwargs)
+
+            if is_mutable:
+                return (autograd_impl, adinplaceorview_impl, backend_dispatch)
+            return (autograd_impl, backend_dispatch)
+
+        def _check_fast_path(args, kwargs):
+            # Dynamo needs the real dispatcher graph;
+            # kwargs / no-positional-arg calls need schema-level handling
+            if torch.compiler.is_compiling() or not args or kwargs:
+                return None
+
+            # Returns (device_type, keyset_raw) or None; rejects subclasses,
+            # modes, autocast, multi-device, nested/sparse/quantized,
+            # AND checks generation counter for external kernel overrides
+            check = _C._custom_op_fast_path_check(  # pyrefly: ignore[missing-attribute]
+                args, op_handle, opdef._impl_gen_snapshot
+            )
+            if check is None:
+                return None
+
+            device_type, keyset_raw = check
+
+            # meta tensors and disabled kernels need C++ fallback logic
+            if device_type == "meta" or device_type in disabled_kernel:
+                return None
+            # No registered kernel for this device
+            backend_impl = backend_impls.get(device_type) or backend_impls.get(None)
+            if backend_impl is None:
+                return None
+            return (device_type, keyset_raw, backend_impl)
+
+        overload = self._opoverload
+        overload._orig_op = overload._op  # pyrefly: ignore[missing-attribute]
+
+        op_handle = self._opoverload._handle
+        self._impl_gen_snapshot = op_handle.impl_generation()
+
+        def fast_op(*args, **kwargs):
+            info = _check_fast_path(args, kwargs)
+            if info is not None:
+                device_type, keyset_raw, backend_impl = info
+                chain = chain_cache.get(device_type)
+                if chain is None:
+                    chain = _build_chain(backend_impl)
+                    chain_cache[device_type] = chain
+
+                opdef._fast_path_hits += 1
+                keyset = _C.DispatchKeySet.from_raw_repr(keyset_raw)
+                prev = _ops._set_fast_redispatch(op, chain)
+                try:
+                    return op.redispatch(keyset, *args)
+                finally:
+                    _ops._unset_fast_redispatch(prev)
+
+            # _check_fast_path returned None: normal bail (subclass, autocast,
+            # etc.) or generation mismatch. If generation mismatched, the C++
+            # check will keep returning None on every subsequent call anyway.
+            return overload._orig_op(  # pyrefly: ignore[missing-attribute]
+                *args, **kwargs
+            )
+
+        overload._op = fast_op
+        self._fast_path = fast_op
 
     def _register_backend_select_dispatcher(self, device_arg_index: int):
         """
@@ -1032,6 +1163,8 @@ class CustomOpDef:
 
         if need_register:
             self._lib.impl(self._name, kernel, autocast_key, with_keyset=True)
+            if self._fast_path is not None:
+                self._impl_gen_snapshot += 1
 
         return kernel
 

@@ -231,6 +231,7 @@ OperatorEntry::AnnotatedKernelContainerIterator OperatorEntry::registerKernel(
   } else {
     updateDispatchTableFull_(dispatcher);
   }
+  ++impl_generation_;
   return inserted;
 }
 
@@ -254,6 +255,7 @@ void OperatorEntry::deregisterKernel_(
     kernels_.erase(found);
   }
   updateDispatchTable_(dispatcher, dk);
+  ++impl_generation_;
 }
 
 void OperatorEntry::updateFallback(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key) {

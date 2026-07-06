@@ -517,6 +517,10 @@ class TORCH_API OperatorHandle {
     return false;
   }
 
+  size_t implGeneration() const {
+    return operatorDef_->op.implGeneration();
+  }
+
   template <class FuncType>
   TypedOperatorHandle<FuncType> typed() const {
     // NB: This assert is not 100% sound: you can retrieve a typed() operator
