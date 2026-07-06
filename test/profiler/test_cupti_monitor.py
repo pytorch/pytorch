@@ -153,21 +153,21 @@ class TestCuptiRecords(TestCase):
         self.assertEqual(fields[memcpy], all_memcpy)
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
-    def test_monitor_buffer_size_from_env(self):
-        # The per-buffer pool size is user-configurable: an explicit buffer_size
-        # arg wins, otherwise TORCH_CUPTI_MONITOR_BUFFER_SIZE is honored, else the
-        # 4 MiB default. No CUDA -- this only reads the constructor config.
-        import unittest.mock
+    def test_monitor_buffer_size_and_flush_period_config(self):
+        # buffer_size and flush_period_s are constructor settings (no env var): the
+        # defaults otherwise. No CUDA -- this only reads the constructor config.
+        from torch.profiler._cupti.monitor import (
+            _DEFAULT_BUFFER_SIZE,
+            _DEFAULT_FLUSH_PERIOD_S,
+            CuptiMonitor,
+        )
 
-        from torch.profiler._cupti.monitor import _DEFAULT_BUFFER_SIZE, CuptiMonitor
-
-        self.assertEqual(CuptiMonitor().buffer_size, _DEFAULT_BUFFER_SIZE)
-        with unittest.mock.patch.dict(
-            "os.environ", {"TORCH_CUPTI_MONITOR_BUFFER_SIZE": "1048576"}
-        ):
-            self.assertEqual(CuptiMonitor().buffer_size, 1048576)
-            # An explicit arg overrides the env var.
-            self.assertEqual(CuptiMonitor(buffer_size=2048).buffer_size, 2048)
+        m = CuptiMonitor()
+        self.assertEqual(m.buffer_size, _DEFAULT_BUFFER_SIZE)
+        self.assertEqual(m.flush_period_s, _DEFAULT_FLUSH_PERIOD_S)
+        m = CuptiMonitor(buffer_size=2048, flush_period_s=-1.0)
+        self.assertEqual(m.buffer_size, 2048)
+        self.assertEqual(m.flush_period_s, -1.0)
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     def test_monitor_external_correlation_not_started(self):
