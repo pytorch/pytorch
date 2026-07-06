@@ -14,13 +14,10 @@ from torch._inductor.codegen.cutedsl.cutedsl_template import (
     CuteDSLTemplateCaller,
 )
 from torch._inductor.kernel.flex_gemm.constraints import (
-    FlexGemmLocalReduceConsumerKind,
-    FlexGemmLocalReduceSpec,
+    FlexGemmLocalReduceGeometry,
     LOCAL_REDUCE_COMBINE_FN_SUFFIX,
     LOCAL_REDUCE_FINALIZE_FN_SUFFIX,
-    LOCAL_REDUCE_TEMPLATE_FEED_MAIN_OUT_INDEX_ERROR,
     LOCAL_REDUCE_TEMPLATE_OUT_INDEX_ERROR,
-    validate_local_reduce_output_binding,
 )
 from torch._inductor.kernel.flex_gemm.runtime import inductor_quack_cache_dir
 from torch._inductor.select_algorithm import PartialRender
@@ -32,19 +29,11 @@ log = logging.getLogger(__name__)
 
 @dataclasses.dataclass(frozen=True)
 class FlexGemmEpilogueLocalReduceConfig:
-    """Template-time local-reduce consumer contract."""
+    """Template-time local-reduce metadata for output and/or feed-main consumers."""
 
-    spec: FlexGemmLocalReduceSpec
+    geometry: FlexGemmLocalReduceGeometry
     out_index: int | None = None
-
-    def __post_init__(self) -> None:
-        """Reject invalid consumer/index combinations at construction."""
-        validate_local_reduce_output_binding(
-            self.kind,
-            self.out_index is not None,
-            compressed_missing_error=LOCAL_REDUCE_TEMPLATE_OUT_INDEX_ERROR,
-            feed_main_unexpected_error=LOCAL_REDUCE_TEMPLATE_FEED_MAIN_OUT_INDEX_ERROR,
-        )
+    feeds_main: bool = False
 
     @classmethod
     def from_output_plan(
@@ -53,23 +42,31 @@ class FlexGemmEpilogueLocalReduceConfig:
         """Translate lowering's output-consumer plan into template metadata."""
         if local_reduce is None:
             return None
-        return cls(local_reduce.spec, out_index=out_index)
-
-    @property
-    def kind(self) -> FlexGemmLocalReduceConsumerKind:
-        return self.spec.kind
+        if local_reduce.store_node is None:
+            if out_index is not None:
+                raise RuntimeError("feed-main local reductions cannot have out_index")
+            if not local_reduce.feeds_main:
+                raise RuntimeError(LOCAL_REDUCE_TEMPLATE_OUT_INDEX_ERROR)
+            return FlexGemmEpilogueLocalReduceConfig(
+                local_reduce.geometry, feeds_main=True
+            )
+        if out_index is None:
+            raise RuntimeError(LOCAL_REDUCE_TEMPLATE_OUT_INDEX_ERROR)
+        return FlexGemmEpilogueLocalReduceConfig(
+            local_reduce.geometry, out_index, local_reduce.feeds_main
+        )
 
     @property
     def group(self) -> int:
-        return self.spec.group
+        return self.geometry.group
 
     @property
     def axis(self) -> int:
-        return self.spec.axis
+        return self.geometry.axis
 
     @property
     def needs_physical_callbacks(self) -> bool:
-        return self.spec.needs_physical_callbacks
+        return self.geometry.needs_physical_callbacks
 
 
 @dataclasses.dataclass(frozen=True)
@@ -87,7 +84,7 @@ class FlexGemmEpilogueConfig:
         epilogue_arg_indices: Template input indices for read-only epilogue captures.
         epilogue_arg_kinds: Broadcast kind for each captured epilogue tensor.
         aux_out_indices: Template input indices for same-shape aux outputs.
-        local_reduce: Tagged local-reduce consumer rendered into runtime kwargs.
+        local_reduce: Concrete local-reduce consumer rendered into runtime kwargs.
     """
 
     epilogue_name: str
@@ -155,7 +152,10 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
         code.splice(
             """
             import torch
-            from torch._inductor.kernel.flex_gemm.constraints import FlexGemmLocalReduceSpec
+            from torch._inductor.kernel.flex_gemm.constraints import (
+                FlexGemmLocalReduceCallbacks,
+                FlexGemmLocalReduceGeometry,
+            )
             from torch._inductor.kernel.flex_gemm.runtime import (
                 FlexGemmRuntimeLocalReducePlan,
                 gemm_epilogue as flex_gemm_epilogue,
@@ -227,6 +227,24 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
             f"{out_dtype}"
         )
 
+    def _local_reduce_callbacks(self, epilogue_name: str) -> str:
+        """Render generated physical reducer callbacks for runtime registration."""
+        combine_name = f"{epilogue_name}{LOCAL_REDUCE_COMBINE_FN_SUFFIX}"
+        finalize_name = f"{epilogue_name}{LOCAL_REDUCE_FINALIZE_FN_SUFFIX}"
+        return (
+            "FlexGemmLocalReduceCallbacks("
+            f"combine_fn={combine_name}, finalize_fn={finalize_name})"
+        )
+
+    def _local_reduce_geometry(
+        self, local_reduce: FlexGemmEpilogueLocalReduceConfig
+    ) -> str:
+        """Render the shared grouped M/N local-reduce geometry."""
+        return (
+            "FlexGemmLocalReduceGeometry("
+            f"group={local_reduce.group!r}, axis={local_reduce.axis!r})"
+        )
+
     def _local_reduce_kwargs(
         self,
         input_args: list[str],
@@ -234,20 +252,14 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
         epilogue_name: str,
     ) -> str:
         """Render one structural local-reduce plan for runtime dispatch."""
-        plan = (
-            "FlexGemmRuntimeLocalReducePlan("
-            f"FlexGemmLocalReduceSpec(kind={local_reduce.kind!r}, "
-            f"group={local_reduce.group!r}, axis={local_reduce.axis!r})"
-        )
+        geometry = self._local_reduce_geometry(local_reduce)
+        plan = f"FlexGemmRuntimeLocalReducePlan({geometry}"
         if local_reduce.out_index is not None:
             plan += f", out={input_args[local_reduce.out_index]}"
-        if local_reduce.needs_physical_callbacks:
-            combine_name = f"{epilogue_name}{LOCAL_REDUCE_COMBINE_FN_SUFFIX}"
-            finalize_name = f"{epilogue_name}{LOCAL_REDUCE_FINALIZE_FN_SUFFIX}"
-            plan += (
-                f", combine_fn={combine_name}, combine_key={combine_name!r}, "
-                f"finalize_fn={finalize_name}, finalize_key={finalize_name!r}"
-            )
+        if local_reduce.feeds_main:
+            plan += ", feeds_main=True"
+        if local_reduce.feeds_main or local_reduce.needs_physical_callbacks:
+            plan += f", callbacks={self._local_reduce_callbacks(epilogue_name)}"
         return f", local_reduce={plan})"
 
     def _epilogue_kwargs(
