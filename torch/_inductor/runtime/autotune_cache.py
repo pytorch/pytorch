@@ -42,7 +42,7 @@ from torch.compiler._cache import (
     CacheArtifactFactory,
     CacheArtifactRecorder,
 )
-from torch.utils._triton import has_triton
+from torch.utils._triton import has_initialized_accelerator, has_triton
 
 from ..cache_key import AUTOTUNE_CACHE_KEY_STRATEGY
 from ..remote_cache import (
@@ -66,7 +66,7 @@ def inductor_meta_from_config() -> _InductorMetaTy:
     from torch._inductor import config
 
     backend_hash = None
-    if has_triton():
+    if has_initialized_accelerator() and has_triton():
         try:
             backend_hash = torch.utils._triton.triton_hash_with_backend()
         except RuntimeError:
