@@ -155,7 +155,7 @@ the structure of the code.
 
 ### ProcessGroup
 
-- [ProcessGroup.hpp](https://github.com/pytorch/pytorch/blob/v1.7.0/torch/lib/c10d/ProcessGroup.hpp):
+- [ProcessGroup.hpp](https://github.com/pytorch/pytorch/blob/main/torch/lib/c10d/ProcessGroup.hpp):
   contains the abstract API of all process group implementations. The `c10d`
   library provides 3 implementations out of the box, namely,
   `ProcessGroupGloo`, `ProcessGroupNCCL`, and `ProcessGroupMPI`.
@@ -164,12 +164,12 @@ the structure of the code.
   and `ProcessGroup::allreduce()` to sum gradients.
 
 
-- [Store.hpp](https://github.com/pytorch/pytorch/blob/v1.7.0/torch/lib/c10d/Store.hpp):
+- [Store.hpp](https://github.com/pytorch/pytorch/blob/main/torch/lib/c10d/Store.hpp):
   assists the rendezvous service for process group instances to find each other.
 
 ### DistributedDataParallel
 
-- [distributed.py](https://github.com/pytorch/pytorch/blob/v1.7.0/torch/nn/parallel/distributed.py):
+- [distributed.py](https://github.com/pytorch/pytorch/blob/main/torch/nn/parallel/distributed.py):
   is the Python entry point for DDP. It implements the initialization steps and
   the `forward` function for the `nn.parallel.DistributedDataParallel`
   module which call into C++ libraries. Its `_sync_param` function performs
@@ -178,12 +178,12 @@ the structure of the code.
   all other processes. The inter-process parameter synchronization happens in
   `Reducer.cpp`.
 
-- [comm.h](https://github.com/pytorch/pytorch/blob/v1.7.0/torch/csrc/distributed/c10d/comm.h):
+- [comm.h](https://github.com/pytorch/pytorch/blob/main/torch/csrc/distributed/c10d/comm.h):
   implements the coalesced broadcast helper function which is invoked to
   broadcast model states during initialization and synchronize model buffers
   before the forward pass.
 
-- [reducer.h](https://github.com/pytorch/pytorch/blob/v1.7.0/torch/csrc/distributed/c10d/reducer.h):
+- [reducer.h](https://github.com/pytorch/pytorch/blob/main/torch/csrc/distributed/c10d/reducer.h):
   provides the core implementation for gradient synchronization in the backward
   pass. It has three entry point functions:
 

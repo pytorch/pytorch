@@ -168,6 +168,9 @@ memory is reduced by up to 2/3 of the total grad memory:
 ```{code-block} python
 :dedent: 4
 
+    import torch
+    from torch.autograd import Function
+
     class QKVProjection(Function):
         """Projects input x into Q, K, V: q = x @ w_q, k = x @ w_k, v = x @ w_v."""
         boxed_grads_call = True
@@ -215,6 +218,9 @@ additional comments:
 
 ```{code-block} python
 :dedent: 4
+
+    import torch
+    from torch.autograd import Function
 
     # Inherit from Function
     class LinearFunction(Function):
@@ -280,6 +286,9 @@ non-Tensor arguments:
 ```{code-block} python
 :dedent: 4
 
+    import torch
+    from torch.autograd import Function
+
     class MulConstant(Function):
         @staticmethod
         def forward(tensor, constant):
@@ -303,6 +312,9 @@ And here, we optimize the above example by calling set_materialize_grads(False):
 
 ```{code-block} python
 :dedent: 4
+
+    import torch
+    from torch.autograd import Function
 
     class MulConstant(Function):
         @staticmethod
@@ -334,6 +346,9 @@ the remaining gradients:
 
 ```{code-block} python
 :dedent: 4
+
+    import torch
+    from torch.autograd import Function
 
     class TwoMatmuls(Function):
         clear_saved_tensors_on_access = True

@@ -20,6 +20,8 @@ occur.  Consider the following training loop (abridged from
 [source](https://discuss.pytorch.org/t/high-memory-usage-while-training/162)):
 
 ```python
+import torch
+
 total_loss = 0
 for i in range(10000):
     optimizer.zero_grad()
@@ -108,7 +110,7 @@ except RuntimeError: # Out of memory
 But find that when you do run out of memory, your recovery code can't allocate
 either. That's because the python exception object holds a reference to the
 stack frame where the error was raised. Which prevents the original tensor
-objects from being freed. The solution is to move you OOM recovery code outside
+objects from being freed. The solution is to move your OOM recovery code outside
 of the `except` clause.
 
 ```python
