@@ -208,9 +208,13 @@ def assume_constant_result(fn=None, *, specialize_args=False):  # type: ignore[n
     :func:`torch.utils._pytree.register_constant` or
     ``torch._library.opaque_object.register_custom_class`` with
     ``typ="constant"`` (guarded via their ``__eq__``), dicts with literal
-    keys, and dataclasses whose fields are recursively supported. Anything else - including arbitrary
-    objects and tensors nested inside supported containers - triggers a graph
-    break rather than silently falling back to identity guarding.
+    keys, and dataclasses whose fields are recursively supported. Anything
+    else - arbitrary objects, tensors nested inside supported containers, or
+    arguments mutated inside the compiled region before the call - triggers a
+    graph break rather than silently falling back to identity guarding. Top
+    level tensor arguments are the one exception to value guarding: as in the
+    default mode, they are passed to ``fn`` as real values with no guard, so a
+    change in tensor data does not invalidate the baked result.
     """
     if fn is None:
         return functools.partial(
