@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <concepts>
 #include <cstdlib>
 #include <limits>
 #include <map>
@@ -829,12 +830,9 @@ inline void inductor_cpu_throw_if_integer_div_error(std::atomic<int>& err) {
   }
 }
 
-template <typename T, typename U>
+template <std::integral T, std::integral U>
 inline std::common_type_t<T, U> floor_divide_integral(T a, U b) {
   using C = std::common_type_t<T, U>;
-  static_assert(
-      std::is_integral_v<C>,
-      "floor_divide_integral expects integral scalar operands");
   const C a_c = static_cast<C>(a);
   const C b_c = static_cast<C>(b);
   if (C10_UNLIKELY_OR_CONST(b_c == 0)) {
@@ -845,13 +843,10 @@ inline std::common_type_t<T, U> floor_divide_integral(T a, U b) {
 }
 
 #if INDUCTOR_USE_VECTOR_TYPES()
-template <typename T>
+template <std::integral T>
 inline at::vec::Vectorized<T> floor_divide_integral(
     const at::vec::Vectorized<T>& a,
     const at::vec::Vectorized<T>& b) {
-  static_assert(
-      std::is_integral_v<T>,
-      "floor_divide_integral expects integral underlying type");
   using Vec = at::vec::Vectorized<T>;
   constexpr int kLen = Vec::size();
   alignas(alignof(Vec)) T out_buf[kLen];
@@ -864,13 +859,10 @@ inline at::vec::Vectorized<T> floor_divide_integral(
   return Vec::loadu(out_buf);
 }
 
-template <typename T, int N>
+template <std::integral T, int N>
 inline at::vec::VectorizedN<T, N> floor_divide_integral(
     const at::vec::VectorizedN<T, N>& a,
     const at::vec::VectorizedN<T, N>& b) {
-  static_assert(
-      std::is_integral_v<T>,
-      "floor_divide_integral expects integral underlying type");
   at::vec::VectorizedN<T, N> out;
   for (int i = 0; i < N; ++i) {
     out[i] = floor_divide_integral(a[i], b[i]);
@@ -879,13 +871,9 @@ inline at::vec::VectorizedN<T, N> floor_divide_integral(
 }
 #endif
 
-template <typename T, typename U>
+template <std::integral T, std::integral U>
 inline std::common_type_t<T, U> mod(T a, U b) {
   using C = std::common_type_t<T, U>;
-  static_assert(
-      std::is_integral_v<C>,
-      "inductor template mod(T a, U b) is only for integral types; use the float/double specializations "
-      "for floating-point operands.");
   if (C10_UNLIKELY_OR_CONST(b == 0)) {
     inductor_cpu_note_integer_div_by_zero();
     return C(0);
@@ -906,10 +894,8 @@ inline double mod(double a, double b) {
   return std::fmod(a, b);
 }
 
-template <typename T>
+template <std::integral T>
 inline T remainder_integral(T a, T b) {
-  static_assert(
-      std::is_integral_v<T>, "remainder_integral expects integral scalar T");
   if (C10_UNLIKELY_OR_CONST(b == 0)) {
     inductor_cpu_note_integer_div_by_zero();
     return T(0);
@@ -925,13 +911,10 @@ inline T remainder_integral(T a, T b) {
 }
 
 #if INDUCTOR_USE_VECTOR_TYPES()
-template <typename T>
+template <std::integral T>
 inline at::vec::Vectorized<T> remainder_integral(
     const at::vec::Vectorized<T>& a,
     const at::vec::Vectorized<T>& b) {
-  static_assert(
-      std::is_integral_v<T>,
-      "remainder_integral expects integral underlying type");
   // Some Vectorized<T> (e.g. Vectorized8<int8_t>) deletes operator[];
   // use store/load like
   using Vec = at::vec::Vectorized<T>;
@@ -946,13 +929,10 @@ inline at::vec::Vectorized<T> remainder_integral(
   return Vec::loadu(out_buf);
 }
 
-template <typename T, int N>
+template <std::integral T, int N>
 inline at::vec::VectorizedN<T, N> remainder_integral(
     const at::vec::VectorizedN<T, N>& a,
     const at::vec::VectorizedN<T, N>& b) {
-  static_assert(
-      std::is_integral_v<T>,
-      "remainder_integral expects integral underlying type");
   at::vec::VectorizedN<T, N> out;
   for (int i = 0; i < N; ++i) {
     out[i] = remainder_integral(a[i], b[i]);
