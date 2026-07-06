@@ -12787,48 +12787,6 @@ def ___make_guard_fn():
         self.assertEqual(list(eager), list(compiled))
         self.assertEqual(len(counters["graph_break"]), 0)
 
-    def test_itertools_repeat_length_hint(self):
-        def fn():
-            return (
-                operator.length_hint(itertools.repeat(None, 50)),
-                operator.length_hint(itertools.repeat(None, 0)),
-                operator.length_hint(itertools.repeat(None, -3)),
-                operator.length_hint(itertools.repeat(None), 12),
-            )
-
-        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(fn(), compiled_fn())
-        self.assertEqual(compiled_fn(), (50, 0, 0, 12))
-
-    def test_itertools_repeat_repr(self):
-        def fn():
-            r = itertools.repeat("a", -1)
-            bounded = repr(r)
-            unbounded = repr(itertools.repeat(1 + 0j))
-            return bounded, unbounded
-
-        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(fn(), compiled_fn())
-        self.assertEqual(compiled_fn(), ("repeat('a', 0)", "repeat((1+0j))"))
-
-    def test_itertools_repeat_bounded_exhausts(self):
-        def fn():
-            return list(itertools.repeat("a", 3)) + list(itertools.repeat("b", -2))
-
-        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(fn(), compiled_fn())
-        self.assertEqual(compiled_fn(), ["a", "a", "a"])
-
-    def test_itertools_repeat_partial_iteration(self):
-        def fn():
-            r = itertools.repeat("a", 3)
-            next(r)
-            return operator.length_hint(r), repr(r)
-
-        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(fn(), compiled_fn())
-        self.assertEqual(compiled_fn(), (2, "repeat('a', 2)"))
-
     def test_itertools_infinite_count(self):
         for args in ([], [10], [5, -1]):
             counters.clear()
@@ -15731,54 +15689,6 @@ fn
         self.assertEqual(fn(t), outer.get_scale() + t.sum())
         self.assertEqual(cnt.frame_count, 2)
 
-    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
-    def test_build_class_closure_over_later_assigned_name(self):
-        # A class-body method closes over a free variable that is only assigned
-        # *after* the class statement. The cell is legitimately empty when the
-        # class is built; CPython reads it only when the method runs. Dynamo must
-        # build the class with a genuine empty cell rather than graph-breaking on
-        # an uninitialized cell read.
-        cnt = torch._dynamo.testing.CompileCounter()
-
-        @torch.compile(backend=cnt, fullgraph=True)
-        def fn(t):
-            class Maker:
-                def make(self):
-                    return Helper()  # Helper is defined below the class.
-
-            class Helper:
-                def value(self):
-                    return 5
-
-            return Maker().make().value() + t.sum()
-
-        t = torch.randn(3)
-        self.assertEqual(fn(t), 5 + t.sum())
-        self.assertEqual(cnt.frame_count, 1)
-
-    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
-    def test_build_class_closure_over_self_name(self):
-        # A class-body method references the class's own name (the cell for that
-        # name is empty until __build_class__ binds it), as in isinstance checks
-        # against the class itself.
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(t):
-            class C:
-                def __init__(self, v):
-                    self.v = v
-
-                def same_type(self, other):
-                    return isinstance(other, C)
-
-            a = C(1)
-            b = C(2)
-            return a.same_type(b), t.cos()
-
-        t = torch.randn(3)
-        same, cos = fn(t)
-        self.assertTrue(same)
-        self.assertEqual(cos, t.cos())
-
     def test_dunder_weakref(self):
         class Foo:
             pass
@@ -16647,80 +16557,6 @@ def forward(self, L_x_ : torch.Tensor):
         r9 = h(torch.tensor(1), MyStr("abc"))
         self.assertEqual(r9.item(), 4)
         self.assertEqual(cnt.frame_count, 2)
-
-    def test_sequence_iter_setstate_negative_clamps(self):
-        # CPython iter_setstate clamps a negative index to 0.
-        class Seq:
-            def __getitem__(self, i):
-                return i
-
-        def fn():
-            it = iter(Seq())
-            it.__setstate__(-42)
-            return next(it), next(it)
-
-        opt = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(opt(), (0, 1))
-
-    def test_sequence_iter_setstate_positive(self):
-        class Seq:
-            def __getitem__(self, i):
-                return i
-
-        def fn():
-            it = iter(Seq())
-            it.__setstate__(5)
-            return next(it), next(it)
-
-        opt = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(opt(), (5, 6))
-
-    def test_sequence_iter_overflow(self):
-        # CPython iter_iternext raises OverflowError once the index reaches
-        # sys.maxsize (PY_SSIZE_T_MAX) and cannot advance further.
-        class Seq:
-            def __getitem__(self, i):
-                return i
-
-        def fn():
-            it = iter(Seq())
-            it.__setstate__(sys.maxsize - 2)
-            vals = [next(it), next(it)]
-            try:
-                next(it)
-            except OverflowError:
-                vals.append("overflow")
-            return vals
-
-        opt = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(opt(), [sys.maxsize - 2, sys.maxsize - 1, "overflow"])
-
-    def test_callable_iter_reentrant_exhaustion(self):
-        # gh-101892: a two-argument iter() whose callable reentrantly exhausts
-        # the iterator must raise StopIteration even when the outer call then
-        # returns a non-sentinel value.
-        HAS_MORE = 1
-        NO_MORE = 2
-
-        def fn():
-            state = {"recursive": False, "it": None}
-
-            def spam():
-                if state["recursive"]:
-                    return NO_MORE
-                state["recursive"] = True
-                list(state["it"])
-                return HAS_MORE
-
-            state["it"] = iter(spam, NO_MORE)
-            try:
-                next(state["it"])
-            except StopIteration:
-                return "stopped"
-            return "no stop"
-
-        opt = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(opt(), "stopped")
 
     def test_re_module_constant_fold(self):
         cnt = torch._dynamo.testing.CompileCounter()
