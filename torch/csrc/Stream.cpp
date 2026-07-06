@@ -527,7 +527,7 @@ static const std::initializer_list<PyMethodDef> THPStream_methods = {
      castPyCFunctionWithKeywords(THPStream_record_event),
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
-    {"get_priority_range",
+    {"priority_range",
      THPStream_get_priority_range,
      METH_NOARGS | METH_STATIC,
      nullptr},
