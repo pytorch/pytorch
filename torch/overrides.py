@@ -1818,7 +1818,7 @@ has_torch_function = _add_docstr(
     Arguments
     ---------
     relevant_args : iterable
-        Iterable or arguments to check for __torch_function__ methods.
+        Iterable of arguments to check for __torch_function__ methods.
     Returns
     -------
     bool

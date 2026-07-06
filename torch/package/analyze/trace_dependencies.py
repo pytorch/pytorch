@@ -15,7 +15,7 @@ def trace_dependencies(
     Args:
         callable: The callable to execute and trace.
         inputs: The input to use during tracing. The modules used by 'callable' when invoked by each set of inputs
-            are union-ed to determine all modules used by the callable for the purpooses of packaging.
+            are union-ed to determine all modules used by the callable for the purposes of packaging.
 
     Returns: A list of the names of all modules used during callable execution.
     """
