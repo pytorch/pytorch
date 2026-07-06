@@ -1081,8 +1081,6 @@ def break_graph_if_unsupported(
     ) -> Callable[[InstructionTranslatorBase, Instruction], None]:
         @functools.wraps(inner_fn)
         def wrapper(self: InstructionTranslatorBase, inst: Instruction) -> None:
-            if not self.should_compile_partial_graph():
-                return inner_fn(self, inst)
             prev_push = self.current_instruction_push
             self.current_instruction_push = push
             speculation = self.speculate()
