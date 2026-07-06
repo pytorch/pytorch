@@ -56,8 +56,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    # OSDC ARC has no host docker daemon; run in the gh actions image and build via
-    # the remote buildkit builder (same pattern as docker-builds.yml).
+    # No host docker daemon on OSDC ARC; build via remote buildkit (like docker-builds.yml).
     container:
       image: ghcr.io/actions/actions-runner:latest
     env:
@@ -79,9 +78,7 @@ jobs:
 
       - name: Set up Docker Buildx (remote, no bootstrap)
         shell: bash
-        # NOT docker/setup-buildx-action (its --bootstrap connect times out on a
-        # cold/burst start). --use makes this the default builder so the vLLM
-        # `docker buildx build --output type=local` runs on the remote buildkitd.
+        # Avoid docker/setup-buildx-action: its --bootstrap connect times out on cold start.
         run: |
           set -ex
           docker buildx create \
@@ -100,9 +97,7 @@ jobs:
         run: |
           set -eux
 
-          # Keep PyTorch nightly wheels for the vLLM build. The runner arch matches
-          # the target platform, so pip resolves the correct manylinux wheels.
-          # No docker run/exec: OSDC ARC has no host docker daemon.
+          # Runner arch matches the target platform, so pip resolves the right manylinux wheels.
           mkdir -p "${RUNNER_TEMP}/artifacts/"
           uv pip install pip==25.3
           python -m pip download \
@@ -112,43 +107,28 @@ jobs:
 
       - name: Build vLLM wheel
         shell: bash
-        # No SCCACHE_BUCKET/REGION: the compile runs on the remote buildkitd,
-        # which has no AWS creds, so sccache-to-S3 can't authenticate. Omitting
-        # them makes lumen set USE_SCCACHE=0, taking the Dockerfile's ccache path
-        # whose `--mount=type=cache` persists on buildkitd across builds.
+        # No SCCACHE_*: buildkitd has no AWS creds, so lumen sets USE_SCCACHE=0 and the
+        # Dockerfile uses its ccache path (cache mount persists on buildkitd).
         env:
           CUDA_VERSION: ${{ matrix.device == 'cu130' && '13.0' || '13.2' }}
           TORCH_CUDA_ARCH_LIST: '8.0;8.9;9.0;10.0;12.0'
-          # vLLM sets cmake jobs = max(1, MAX_JOBS // NVCC_THREADS), and each nvcc
-          # spawns NVCC_THREADS threads (up to one per arch). The x86 buildkitd
-          # handles 64/8 (8 jobs). The arm64 buildkitd is memory-constrained and
-          # OOMs at that level, so run many single-thread jobs: 16/1 = 16 jobs but
-          # only 16 concurrent single-arch compiles (well under the ~40 that OOM'd).
+          # vLLM cmake jobs = max(1, MAX_JOBS // NVCC_THREADS). arm64 buildkitd OOMs
+          # at 64/8; 16/1 runs 16 single-arch compiles to stay under it.
           MAX_JOBS: ${{ contains(matrix.platform, 'aarch64') && '16' || '64' }}
           NVCC_THREADS: ${{ contains(matrix.platform, 'aarch64') && '1' || '8' }}
-          # Use the manylinux builder as the base; remote buildkit pulls it from
-          # the registry (no local docker daemon needed).
           BASE_IMAGE: ${{ matrix.manylinux-image }}
           TORCH_WHEELS_PATH: ${{ runner.temp }}/artifacts
           OUTPUT_DIR: ${{ runner.temp }}/artifacts/externals/vllm
         run: |
           set -eux
-          # Call lumen directly rather than the build-external-packages action,
-          # which runs `docker images` (needs a local daemon). lumen builds with
-          # `docker buildx build --output type=local`, which runs on the remote
-          # buildkit builder set up above.
+          # Call lumen directly: build-external-packages runs `docker images` (needs a local daemon).
           (cd .ci/lumen_cli && uv pip install -e .)
-          # MAX_JOBS is set per-platform in this step's env (the build runs on the
-          # remote buildkitd, not this tiny orchestrator pod).
           python3 -m cli.run build external vllm
 
       - name: Prepare vLLM wheel
         shell: bash
-        # Original ran this inside the manylinux container via docker exec (cwd
-        # /artifacts, with PYTHON_EXECUTABLE + auditwheel/wheel/unzip present).
-        # OSDC ARC has no host docker daemon, so run it directly on the pod: cd to
-        # the artifacts dir (where torch-* and externals/vllm/wheels live), point
-        # PYTHON_EXECUTABLE at the uv venv, and install the repackaging tools.
+        # Originally ran in the manylinux container via docker exec; no docker daemon
+        # on the pod, so run it directly from the artifacts dir with the repackaging tools.
         working-directory: ${{ runner.temp }}/artifacts
         env:
           PYTHON_EXECUTABLE: python
