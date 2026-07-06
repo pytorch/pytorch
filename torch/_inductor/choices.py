@@ -159,10 +159,14 @@ class InductorChoices:
     # Flex attention configs
     # TODO(coconutruben): break out flexattention/decode configs into the new retrieval mechanism
     def get_flex_attention_fwd_configs(
-        self, head_dim: int, dtype: torch.dtype, device_type: str | None = "cuda"
+        self,
+        head_dim: int,
+        seq_len: sympy.Expr,
+        dtype: torch.dtype,
+        device_type: str | None = "cuda",
     ) -> list[Any]:
         flex_heuristics = self.get_config_heuristics(device_type)
-        return flex_heuristics.get_flex_attn_fwd_configs(head_dim, dtype)
+        return flex_heuristics.get_flex_attn_fwd_configs(head_dim, seq_len, dtype)
 
     def get_flex_attention_bwd_configs(
         self, head_dim: int, dtype: torch.dtype, device_type: str | None = "cuda"
@@ -175,6 +179,24 @@ class InductorChoices:
     ) -> list[Any]:
         flex_heuristics = self.get_config_heuristics(device_type)
         return flex_heuristics.get_flex_decode_configs(head_dim, dtype)
+
+    def append_flex_attention_choices(
+        self,
+        choices: list[Any],
+        configs: list[Any],
+        input_nodes: list[Any],
+        subgraphs: list[Any],
+        layout: Any,
+        kernel_options: dict[str, Any],
+        sparse_q_block_size: int,
+        sparse_kv_block_size: int,
+    ) -> list[Any]:
+        """Append backend-specific flex-attention template choices.
+
+        Default is a no-op. Subclasses may override to inject additional
+        autotuning candidates (e.g. TLX templates in fbcode).
+        """
+        return choices
 
     def _logging_context(self) -> dict[str, Any]:
         """Extra fields for the per-shape log row. Subclasses may override."""
@@ -231,7 +253,8 @@ class InductorChoices:
         """
         # Extract device_type from kernel_inputs
         device_type = kernel_inputs.device_type
-        assert device_type is not None, "get_ktc requires a valid device type"
+        if device_type is None:
+            raise AssertionError("get_ktc requires a valid device type")
         # Extract template_name from the template object
         template_name = template.uid
 
@@ -274,8 +297,15 @@ class InductorChoices:
 
         # Origami requires fixed layouts (grid/workgroup mappings depend on exact
         # strides). Gate on IS_ROCM so a stray TORCHINDUCTOR_ORIGAMI=1 on CUDA
-        # doesn't disable flexible layouts unnecessarily.
-        if _origami_enabled() and IS_ROCM:
+        # doesn't disable flexible layouts unnecessarily. Also gate on max-autotune:
+        # origami only contributes Triton GEMM configs under autotuning, so with it
+        # off there is nothing that needs fixed strides and flexible layouts should
+        # be preserved (matches non-origami behavior).
+        if (
+            _origami_enabled()
+            and IS_ROCM
+            and (config.max_autotune or config.max_autotune_gemm)
+        ):
             return True
         # Since the following backends are not using get_mm_configs yet through the singular call,
         if not (config.max_autotune or config.max_autotune_gemm):
@@ -480,7 +510,7 @@ class InductorChoices:
         so we will do the reduction in two phases."""
         props = DeviceProperties.create(device)
         num_sm = props.multi_processor_count
-        warp_size = props.warp_size if props.warp_size is not None else 32
+        warp_size = props.warp_size_or_default
         max_threads_per_sm = (
             props.max_threads_per_multi_processor
             if props.max_threads_per_multi_processor is not None

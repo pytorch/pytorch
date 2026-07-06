@@ -319,7 +319,6 @@ class CommonTemplate:
             config_patches={"triton.prefer_nd_tiling": prefer_nd_tiling},
         )
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/161095")
     def test_broadcast_with_singleton_dims(self):
         # This tests the case when the input / output contains both zero strides
         # and singleton dimensions. In this case the broadcasting dimensions
@@ -374,7 +373,7 @@ class CommonTemplate:
         input_reader = InputReader()
         load_args(input_reader)
         args = input_reader.args
-        if self.device == "xpu":
+        if self.device == "xpu" or torch.version.hip is not None:
             atol = 1e-7
             rtol = 1e-5
         else:
@@ -1446,14 +1445,15 @@ class CommonTemplate:
             [2, 3, 5, 5], dtype=torch.float16, requires_grad=True, device=self.device
         )
         args = [2, 1, 0, 1]
-        self._run_and_compare(
+        _, code = self._run_and_compare(
             model,
             data,
             *args,
-            expected_num_triton_kernels=2,
-            expected_num_block_pointers=4,
+            expected_num_triton_kernels=1,
+            expected_num_block_pointers=None,
             compile_kwargs={"fullgraph": True},
         )
+        self.assertIn(self.block_descriptor_constructor_str, "\n".join(code))
 
     # Integration test to test block analysis with index expressions using
     # negative strides.
@@ -1695,14 +1695,43 @@ class TritonTensorDescriptorTestCUDA(BlockDescriptorTestBase):
         actual = torch.compile(f)(x)
         self.assertEqual(actual, expected)
 
+    def test_persistent_reduction_store_small_rblock_skips_tma(self):
+        """
+        When a persistent reduction has rnumel < 16/element_size, the fixed
+        R0_BLOCK cannot satisfy TMA's 16-byte minimum.  The store must fall
+        back to scalar indexing instead of emitting an invalid descriptor.
+        """
+
+        def fn(x, running_mean, running_var, weight, bias):
+            return torch.nn.functional.batch_norm(
+                x, running_mean, running_var, weight, bias, training=True
+            )
+
+        # Input (2, 1): reduction over batch dim of size 2.
+        # R0_BLOCK = next_power_of_2(2) = 2, so 2 * 4 bytes = 8 < 16.
+        x = torch.randn(2, 1, device=GPU_TYPE)
+        weight = torch.randn(1, device=GPU_TYPE)
+        bias = torch.randn(1, device=GPU_TYPE)
+        running_mean = torch.randn(1, device=GPU_TYPE)
+        running_var = torch.randn(1, device=GPU_TYPE).abs()
+
+        result, (code,) = run_and_get_code(
+            torch.compile(fn), x, running_mean, running_var, weight, bias
+        )
+        expected = fn(x, running_mean, running_var, weight, bias)
+        self.assertEqual(result, expected)
+        # The store must fall back to scalar indexing, not TMA.
+        self.assertIn("tl.store", code)
+        self.assertNotIn("make_tensor_descriptor", code)
+
     def test_bool_dtype_skips_tma(self):
         """
-        torch.bool maps to Triton tl.int1 which has no CUtensorMapDataType
-        entry, so it should skip TMA.
+        torch.bool buffers map to Triton tl.int1 which has no
+        CUtensorMapDataType entry, so they should skip TMA.
         """
 
         def fn(a):
-            return torch.cumsum(a, -1)
+            return torch.logical_not(a)
 
         inp = torch.zeros(16, dtype=torch.bool, device=GPU_TYPE)
         self._run_and_compare(fn, inp, expected_num_block_pointers=0)

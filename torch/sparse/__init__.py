@@ -453,7 +453,7 @@ Specifying a positive offset::
 class check_sparse_tensor_invariants:
     """A tool to control checking sparse tensor invariants.
 
-    The following options exists to manage sparsr tensor invariants
+    The following options exists to manage sparse tensor invariants
     checking in sparse tensor construction:
 
     1. Using a context manager:

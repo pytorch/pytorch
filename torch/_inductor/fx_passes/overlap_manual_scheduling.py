@@ -4,13 +4,13 @@ import heapq
 from collections import Counter, defaultdict
 from typing import Any, TYPE_CHECKING
 
-import torch  # noqa: TC001
-import torch.fx as fx  # noqa: TC001
-from torch._dynamo.graph_deduplication import _stable_topological_sort
+import torch
+import torch.fx as fx
 from torch._inductor.fx_passes.bucketing import (
     _get_collective_node_from_wait,
     _schedulable_wait_node,
     BucketMode,
+    has_mergeable_all_gather_convert_dtype,
     is_all_gather_into_tensor as is_all_gather,
     is_fsdp_all_gather,
     is_fsdp_reduce_scatter,
@@ -41,6 +41,154 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _collect_nodes_must_be_after(node: fx.Node) -> list[fx.Node]:
+    """BFS forward collecting node and its transitive users with no external inputs."""
+    result: list[fx.Node] = [node]
+    result_set: OrderedSet[fx.Node] = OrderedSet([node])
+    i = 0
+    while i < len(result):
+        for user in result[i].users:
+            if user not in result_set and all(
+                inp in result_set for inp in user.all_input_nodes
+            ):
+                result_set.add(user)
+                result.append(user)
+        i += 1
+    return result
+
+
+def _collect_nodes_must_be_before(
+    node: fx.Node, node_positions: dict[fx.Node, int]
+) -> list[fx.Node]:
+    """BFS backward collecting node and its non-placeholder dependencies, topo-sorted."""
+    visited: OrderedSet[fx.Node] = OrderedSet()
+    queue = [node]
+    while queue:
+        cur = queue.pop()
+        if cur in visited or cur.op == "placeholder":
+            continue
+        visited.add(cur)
+        queue.extend(cur.all_input_nodes)
+    return sorted(visited, key=lambda n: node_positions[n])
+
+
+def _bucket_trace_inputs(
+    coll_node: fx.Node, node_in: object, group_name_arg: int
+) -> list[fx.Node]:
+    if not isinstance(node_in, fx.Node):
+        raise AssertionError(f"expected node input to be a Node, got {type(node_in)}")
+    inputs = [node_in]
+
+    group_name = coll_node.args[group_name_arg]
+    if isinstance(group_name, fx.Node):
+        inputs.append(group_name)
+    return inputs
+
+
+def _all_gather_bucket_trace_inputs(coll_node: fx.Node) -> list[fx.Node]:
+    node_in: object = coll_node.args[0]
+    # The dtype conversion is erased by the all-gather bucket trace, so anchor
+    # insertion on the tensor that remains as a graph input to the bucket.
+    if has_mergeable_all_gather_convert_dtype(coll_node):
+        if not isinstance(node_in, fx.Node):
+            raise AssertionError(
+                f"expected node input to be a Node, got {type(node_in)}"
+            )
+        node_in = node_in.args[0]
+    return _bucket_trace_inputs(coll_node, node_in, group_name_arg=2)
+
+
+def _reduce_scatter_bucket_trace_inputs(coll_node: fx.Node) -> list[fx.Node]:
+    return _bucket_trace_inputs(coll_node, coll_node.args[0], group_name_arg=3)
+
+
+def _move_wait_users_after_latest_inputs(
+    graph: fx.Graph,
+    replacements: dict[fx.Node, fx.Node],
+    replaced_users: dict[fx.Node, list[fx.Node]],
+) -> None:
+    node_positions = {n: i for i, n in enumerate(graph.nodes)}
+    initial_users: OrderedSet[fx.Node] = OrderedSet()
+    for old_out, new_out in replacements.items():
+        if new_out not in node_positions:
+            continue
+        for user in replaced_users.get(old_out, []):
+            if (
+                user in node_positions
+                and user.op != "output"
+                and node_positions[user] < node_positions[new_out]
+            ):
+                initial_users.add(user)
+
+    pending = sorted(initial_users, key=lambda n: node_positions[n])
+    queued = OrderedSet(pending)
+    while pending:
+        node = pending.pop(0)
+        queued.discard(node)
+
+        node_positions = {n: i for i, n in enumerate(graph.nodes)}
+        if node not in node_positions:
+            continue
+
+        input_nodes = [inp for inp in node.all_input_nodes if inp in node_positions]
+        if not input_nodes:
+            continue
+
+        latest_input = max(input_nodes, key=lambda n: node_positions[n])
+        if node_positions[node] >= node_positions[latest_input]:
+            continue
+
+        # Replacing old waits can leave existing consumers before the new bucket
+        # outputs. Pull each affected consumer after its latest input.
+        latest_input.append(node)
+        node_positions = {n: i for i, n in enumerate(graph.nodes)}
+        for user in node.users:
+            if user in node_positions and user.op != "output" and user not in queued:
+                queued.add(user)
+                pending.append(user)
+
+
+def _move_overlap_nodes(
+    graph: fx.Graph,
+    overlap_deps: dict[fx.Node, OrderedSet[fx.Node]],
+    bucketed_node_types: dict[fx.Node, str],
+) -> None:
+    if not overlap_deps:
+        return
+
+    rs_defer: dict[fx.Node, list[fx.Node]] = defaultdict(list)
+    ag_prefetch: dict[fx.Node, list[fx.Node]] = defaultdict(list)
+
+    for target, sources in overlap_deps.items():
+        for source in sources:
+            source_type = bucketed_node_types.get(source, "")
+            if source_type.startswith("bucketed_reduce_scatter"):
+                rs_defer[target].append(source)
+            elif source_type.startswith("bucketed_all_gather"):
+                ag_prefetch[target].append(source)
+
+    node_positions = {n: i for i, n in enumerate(graph.nodes)}
+
+    for rs_wait, rs_starts in rs_defer.items():
+        latest_rs_start = max(rs_starts, key=lambda n: node_positions[n])
+        node_insert_after = latest_rs_start
+        for node in _collect_nodes_must_be_after(rs_wait):
+            node_insert_after.append(node)
+            node_insert_after = node
+
+    # Recompute positions after RS moves
+    node_positions = {n: i for i, n in enumerate(graph.nodes)}
+
+    for ag_wait, ag_prefetch_starts in ag_prefetch.items():
+        ag_wait_pos = node_positions[ag_wait]
+        sorted_starts = sorted(ag_prefetch_starts, key=lambda n: node_positions[n])
+        for ag_start in sorted_starts:
+            if node_positions[ag_start] < ag_wait_pos:
+                continue
+            for node in _collect_nodes_must_be_before(ag_start, node_positions):
+                ag_wait.prepend(node)
+
+
 class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
     """
     Buckets collective operations based on user specifications.
@@ -60,38 +208,51 @@ class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
         self.bucketed_node_types: dict[fx.Node, str] = {}
 
     def _bucket_group(self, coll_nodes: list[fx.Node]) -> None:
-        assert len(coll_nodes) > 0, "bucketed coll_nodes should have nonzero node"
+        if len(coll_nodes) <= 0:
+            raise AssertionError("bucketed coll_nodes should have nonzero node")
 
+        # Graph order changes after each bucket, so positions must be fresh.
+        node_positions = {n: i for i, n in enumerate(self.graph.nodes)}
         waits = [self.collective_info[n].wait_node for n in coll_nodes]
-        first_wait = min(waits, key=lambda w: self.node_idx[w])
-        first = min(coll_nodes, key=lambda n: self.node_idx[n])
-        last = max(coll_nodes, key=lambda n: self.node_idx[n])
+        first_wait = min(waits, key=lambda w: node_positions[w])
+        first = min(coll_nodes, key=lambda n: node_positions[n])
+        replaced_users = {wait: list(wait.users) for wait in waits}
 
         if is_all_gather(first):
-            # AG: insert early (right after first AG) to start prefetch ASAP.
-            # Move wait+consumers to the earliest original wait position.
-            new_nodes, replacements = merge_all_gather_bucket(
-                self.graph,
-                coll_nodes,
-                wait_insertion_point=first_wait,
-                insert_before=first.next,
-                mode=self.bucket_mode,
-            )
+            bucket_trace_inputs = _all_gather_bucket_trace_inputs
+            merge_bucket = merge_all_gather_bucket
+            node_type = "bucketed_all_gather"
         elif is_reduce_scatter(first):
-            # RS: pre_bucket_reduce_scatter needs all individual RS inputs,
-            # which are only available after the last RS fires.  Insert
-            # after the last coll_node (by graph position) and leave the
-            # wait in place -- it naturally follows the bucketed RS.
-            new_nodes, replacements = merge_reduce_scatter_bucket(
-                self.graph,
-                coll_nodes,
-                insert_before=last.next,
-                mode=self.bucket_mode,
-            )
+            bucket_trace_inputs = _reduce_scatter_bucket_trace_inputs
+            merge_bucket = merge_reduce_scatter_bucket
+            node_type = "bucketed_reduce_scatter"
         else:
             raise ValueError(
                 "bucket non all_gather/reduce_scatter node is not supported"
             )
+
+        # coll_nodes order is used for tensor packing and may differ from
+        # graph order. Insert the bucketed collective after its latest input.
+        bucket_inputs = [inp for n in coll_nodes for inp in bucket_trace_inputs(n)]
+        anchor = max([first, *bucket_inputs], key=lambda n: node_positions[n])
+        next_node = anchor.next
+        coll_node_set = OrderedSet(coll_nodes)
+        while next_node in coll_node_set:
+            next_node = next_node.next
+        # Use the earliest old wait unless it precedes the bucket insertion
+        # point; otherwise keep wait/output nodes with the traced bucket.
+        wait_insertion_point = max(
+            (first_wait, next_node), key=lambda n: node_positions[n]
+        )
+
+        new_nodes, replacements = merge_bucket(
+            self.graph,
+            coll_nodes,
+            wait_insertion_point=wait_insertion_point,
+            insert_before=next_node,
+            mode=self.bucket_mode,
+        )
+        _move_wait_users_after_latest_inputs(self.graph, replacements, replaced_users)
 
         logger.debug(f"bucketing nodes: {coll_nodes} into {new_nodes}")  # noqa: G004
 
@@ -101,9 +262,10 @@ class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
             for n in new_nodes
             if (start := _get_collective_node_from_wait(n)) is not None
         }
-        assert len(wait_to_start) >= 1, (
-            f"Expected at least one new wait, got none in {new_nodes}"
-        )
+        if len(wait_to_start) < 1:
+            raise AssertionError(
+                f"Expected at least one new wait, got none in {new_nodes}"
+            )
         new_waits = list(wait_to_start)
         new_start: fx.Node = wait_to_start[new_waits[0]]
         # Use last wait as the canonical wait for scheduling (same node when len == 1)
@@ -112,9 +274,6 @@ class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
         # Track bucketed node types on this bucketer instance so it doesn't leak
         # when the same graph is processed by multiple ManualOverlapScheduler
         # invocations (e.g. separate forward and backward passes).
-        node_type = (
-            "bucketed_all_gather" if is_all_gather(first) else "bucketed_reduce_scatter"
-        )
         wait_set = OrderedSet(new_waits)
         for n in new_nodes:
             if n in wait_set:
@@ -319,7 +478,7 @@ class ManualOverlapScheduler(OverlapScheduler):
                 for ag in picked_ag:
                     overlap_deps[last_compute].add(ag)
 
-        _stable_topological_sort(self.graph, overlap_deps)
+        _move_overlap_nodes(self.graph, overlap_deps, self.bucketer.bucketed_node_types)
         self.graph.lint()
 
         if self.insert_overlap_deps:
@@ -341,8 +500,10 @@ class ManualOverlapScheduler(OverlapScheduler):
 
     def _schedule(self, node: fx.Node) -> None:
         """Schedule a node."""
-        assert node not in self.scheduled
-        assert all(n in self.scheduled for n in node.all_input_nodes)
+        if node in self.scheduled:
+            raise AssertionError(f"node already scheduled: {node}")
+        if not all(n in self.scheduled for n in node.all_input_nodes):
+            raise AssertionError(f"all input nodes must be scheduled before {node}")
         self.scheduled.add(node)
         for user in node.users:
             self.in_degree[user] -= 1
@@ -365,11 +526,12 @@ class ManualOverlapScheduler(OverlapScheduler):
             node for sublist in self.nodes_in_subgraph for node in sublist
         ]
         unique_subgraph_nodes = list(OrderedSet(all_subgraph_nodes))
-        assert len(all_subgraph_nodes) <= len(unique_subgraph_nodes), (
-            f"Overlapping FX nodes detected across subgraphs in `module_bucket_plans`. "
-            f"Expected disjoint node sets but found "
-            f"{len(all_subgraph_nodes) - len(unique_subgraph_nodes)} duplicated node(s)."
-        )
+        if len(all_subgraph_nodes) > len(unique_subgraph_nodes):
+            raise AssertionError(
+                f"Overlapping FX nodes detected across subgraphs in `module_bucket_plans`. "
+                f"Expected disjoint node sets but found "
+                f"{len(all_subgraph_nodes) - len(unique_subgraph_nodes)} duplicated node(s)."
+            )
 
 
 def manual_overlap_bucketing(
