@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <c10/macros/Macros.h>
+#include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 
 namespace c10d::nccl_extension {
 
@@ -10,6 +11,13 @@ TORCH_API bool is_nccl_symmem_available();
 TORCH_API void nccl_put(at::Tensor& tensor, const int64_t peer);
 
 TORCH_API void nccl_get(at::Tensor& tensor, const int64_t peer);
+
+TORCH_API void nccl_get_out(
+    at::Tensor& dst,
+    const c10::intrusive_ptr<c10d::symmetric_memory::SymmetricMemory>& hdl,
+    int64_t offset,
+    int64_t size,
+    int64_t peer);
 
 TORCH_API void nccl_wait_for_signal(at::Tensor& sigpad, int64_t signal);
 

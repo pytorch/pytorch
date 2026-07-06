@@ -308,24 +308,22 @@ class TestInputAttrTracking(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(compile_result, eager_result)
         self.assertEqual(counter.frame_count, 1)
-        self.assertEqual(counter.op_count, 6)
+        self.assertEqual(counter.op_count, 5)
         self.assertExpectedInline(
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_y_: "f32[2, 2]", L_x_: "f32[2, 2]"):
-        l_y_ = L_y_
+    def forward(self, L_x_: "f32[2, 2]", L_y_: "f32[2, 2]"):
         l_x_ = L_x_
+        l_y_ = L_y_
 
         _get_data_attr: "f32[2, 2]" = torch._C._autograd._get_data_attr(l_y_)
 
         _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
 
-        set_: "f32[2, 2]" = torch_Tensor_set_(l_x_, _get_data_attr);  _get_data_attr = None
+        shallow_copy_data_: "f32[2, 2]" = torch.ops.aten.shallow_copy_data_(l_x_, _get_data_attr);  _get_data_attr = shallow_copy_data_ = None
 
         _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
-
-        _lower_version_count_by_1 = torch__dynamo_variables_builtin__lower_version_count_by_1(set_);  set_ = _lower_version_count_by_1 = None
 
         mul: "f32[2, 2]" = l_x_ * l_y_;  l_x_ = l_y_ = None
         return (mul,)

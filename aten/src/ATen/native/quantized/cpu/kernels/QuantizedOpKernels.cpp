@@ -907,7 +907,7 @@ void qhardsigmoid_kernel(const Tensor& qx, Tensor& qy) {
         iter,
         [&](scalar_t qx) -> scalar_t {
           auto x = at::native::dequantize_val(scale, zero_point, qx);
-          const auto y = std::min(std::max(x + 3.0f, 0.0f), 6.0f) / 6.0f;
+          const auto y = std::clamp(x + 3.0f, 0.0f, 6.0f) / 6.0f;
           return at::native::quantize_val<scalar_t>(
               output_scale, output_zero_point, y);
         },
@@ -1106,7 +1106,7 @@ void qhardswish_kernel(const Tensor& qx, Tensor& qy) {
         [&](scalar_t value) -> scalar_t {
           const auto x =
               at::native::dequantize_val(i_scale, i_zero_point, value);
-          const auto y = x * std::min(std::max(x + 3.0f, 0.0f), 6.0f) / 6.0f;
+          const auto y = x * std::clamp(x + 3.0f, 0.0f, 6.0f) / 6.0f;
           return at::native::quantize_val<scalar_t>(o_scale, o_zero_point, y);
         },
         [&](qVec value) -> qVec {
@@ -4235,7 +4235,7 @@ void quantize_tensor_per_channel_float_qparams_cpu(
         check_tensor_memory_format(rtensor, qtensor);
         const float* rdata = rtensor.const_data_ptr<float>();
         auto qdata = reinterpret_cast<underlying_t*>(qtensor.data_ptr<scalar_t>());
-        const auto elem_per_byte = CHAR_BIT / bit_width;
+        const auto elem_per_byte = bit_width < CHAR_BIT ? CHAR_BIT / bit_width : 1;
         int qvalue = 0;
         if (axis == 1 && (rtensor.is_contiguous(MemoryFormat::ChannelsLast) ||
             rtensor.is_contiguous(MemoryFormat::ChannelsLast3d))) {
@@ -4297,7 +4297,7 @@ void quantize_tensor_per_tensor_affine_sub_byte_cpu(
       const float* const rdata = rtensor.const_data_ptr<float>();
       auto qdata = reinterpret_cast<underlying_t*>(qtensor.data_ptr<scalar_t>());
       auto numel = rtensor.numel();
-      const auto elem_per_byte = CHAR_BIT / bit_width;
+      const auto elem_per_byte = bit_width < CHAR_BIT ? CHAR_BIT / bit_width : 1;
       for (const auto i : c10::irange(numel)) {
         float inv_scale = scale == 0 ? 1.0f : 1.0f / scale;
         int64_t qvalue = lrintf(std::nearbyint(rdata[i] * inv_scale) + zero_point);
@@ -4327,7 +4327,7 @@ void dequantize_tensor_per_tensor_affine_sub_byte_cpu(
       auto rdata = rtensor.data_ptr<float>();
       const underlying_t* qdata = reinterpret_cast<const underlying_t*>(qtensor.const_data_ptr<scalar_t>());
       auto numel = rtensor.numel();
-      const auto elem_per_byte = CHAR_BIT / bit_width;
+      const auto elem_per_byte = bit_width < CHAR_BIT ? CHAR_BIT / bit_width : 1;
 
       for (const auto i : c10::irange(numel)) {
         underlying_t qvalue = qdata[i / elem_per_byte];
