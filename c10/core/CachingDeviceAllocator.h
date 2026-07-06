@@ -108,6 +108,18 @@ struct SegmentInfo {
   std::shared_ptr<GatheredContext> context_when_allocated;
 };
 
+// Flat segment info for the host caching allocator. Unlike the device
+// allocator, the host allocator never splits segments into sub-blocks,
+// so there is no need for a separate BlockInfo.
+struct HostSegmentInfo {
+  size_t address = 0;
+  size_t size = 0;
+  bool allocated = false;
+  bool active = false;
+  MempoolId_t owner_private_pool_id = {0, 0};
+  std::shared_ptr<GatheredContext> context_when_allocated;
+};
+
 union trace_time_ {
   time_t t_;
   approx_time_t approx_t_;
