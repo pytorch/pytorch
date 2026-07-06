@@ -16,7 +16,57 @@ load(
 XNN_COMMON_PREPROCESSOR_FLAGS = [
     "-DXNN_PRIVATE=",
     "-DXNN_INTERNAL=",
-    "-DXNN_LOG_LEVEL=0"
+    "-DXNN_LOG_LEVEL=0",
+] + select({
+    "DEFAULT": ["-Werror=implicit-fallthrough"],
+    "ovr_config//os:windows": [],
+})
+
+# Zip kernels are patched back in internally.
+ZIP_SCALAR_SRCS = [
+    "XNNPACK/src/x8-zip/x8-zip-x2-scalar.c",
+    "XNNPACK/src/x8-zip/x8-zip-x3-scalar.c",
+    "XNNPACK/src/x8-zip/x8-zip-x4-scalar.c",
+    "XNNPACK/src/x8-zip/x8-zip-xm-scalar.c",
+    "XNNPACK/src/x32-zip/x32-zip-x2-scalar.c",
+    "XNNPACK/src/x32-zip/x32-zip-x3-scalar.c",
+    "XNNPACK/src/x32-zip/x32-zip-x4-scalar.c",
+    "XNNPACK/src/x32-zip/x32-zip-xm-scalar.c",
+]
+
+ZIP_NEON_SRCS = [
+    "XNNPACK/src/x8-zip/x8-zip-x2-neon.c",
+    "XNNPACK/src/x8-zip/x8-zip-x3-neon.c",
+    "XNNPACK/src/x8-zip/x8-zip-x4-neon.c",
+    "XNNPACK/src/x8-zip/x8-zip-xm-neon.c",
+    "XNNPACK/src/x32-zip/x32-zip-x2-neon.c",
+    "XNNPACK/src/x32-zip/x32-zip-x3-neon.c",
+    "XNNPACK/src/x32-zip/x32-zip-x4-neon.c",
+    "XNNPACK/src/x32-zip/x32-zip-xm-neon.c",
+]
+
+ZIP_SSE2_SRCS = [
+    "XNNPACK/src/x8-zip/x8-zip-x2-sse2.c",
+    "XNNPACK/src/x8-zip/x8-zip-x3-sse2.c",
+    "XNNPACK/src/x8-zip/x8-zip-x4-sse2.c",
+    "XNNPACK/src/x8-zip/x8-zip-xm-sse2.c",
+    "XNNPACK/src/x32-zip/x32-zip-x2-sse2.c",
+    "XNNPACK/src/x32-zip/x32-zip-x3-sse2.c",
+    "XNNPACK/src/x32-zip/x32-zip-x4-sse2.c",
+    "XNNPACK/src/x32-zip/x32-zip-xm-sse2.c",
+]
+
+AMD64_ASM_COMPILER_FLAGS = [
+    "-mf16c",
+    "-mfma",
+    "-mavx512f",
+    "-mavx512cd",
+    "-mavx512bw",
+    "-mavx512dq",
+    "-mavx512vl",
+    "-mavx512vnni",
+    "-mgfni",
+    "-mavx512bf16",
 ]
 
 # This defines XNNPACK targets for both fbsource BUCK and OSS BUCK
@@ -98,6 +148,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             third_party("FP16"),
             third_party("FXdiv"),
             third_party("clog"),
+            third_party("pthreadpool"),
         ],
     )
 
@@ -144,6 +195,42 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS,
         windows_compiler_flags_override = WINDOWS_FLAGS,
+        deps = XNN_COMMON_MICROKERNEL_EXPORTED_DEPS,
+    )
+
+    fb_xplat_cxx_library(
+        name = "ukernels_zip",
+        srcs = select({
+            "DEFAULT": ZIP_SCALAR_SRCS,
+            "ovr_config//cpu:arm32": ZIP_NEON_SRCS + ZIP_SCALAR_SRCS,
+            "ovr_config//cpu:arm64": ZIP_NEON_SRCS,
+            "ovr_config//cpu:x86_32": ZIP_SSE2_SRCS,
+            "ovr_config//cpu:x86_64": ZIP_SSE2_SRCS,
+            "ovr_config//runtime:wasm-emscripten": ZIP_SCALAR_SRCS,
+        }),
+        headers = get_xnnpack_headers(),
+        header_namespace = "",
+        apple_sdks = (IOS, MACOSX),
+        compiler_flags = [
+            "-O2",
+        ] + select({
+            "DEFAULT": [],
+            "ovr_config//cpu:arm32": [
+                "-marm",
+                "-march=armv7-a",
+                "-mfpu=neon",
+            ],
+            "ovr_config//cpu:x86_32": ["-msse2"],
+            "ovr_config//cpu:x86_64": ["-msse2"],
+        }) + WASM_EMSCRIPTEN_COMPILER_FLAGS,
+        labels = labels,
+        fbandroid_link_whole = True,
+        preferred_linkage = "static",
+        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        visibility = ["PUBLIC"],
+        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + ["-msse2"],
+        windows_compiler_flags_override = WINDOWS_FLAGS + ["-msse2"],
+        windows_srcs = ZIP_SSE2_SRCS,
         deps = XNN_COMMON_MICROKERNEL_EXPORTED_DEPS,
     )
 
@@ -741,8 +828,8 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         preferred_linkage = "static",
         preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
         visibility = ["PUBLIC"],
-        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + ["-mf16c"],
-        windows_compiler_flags_override = WINDOWS_FLAGS + ["-mf16c"],
+        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + ["-mf16c", "-DXNN_ENABLE_F16C=1"],
+        windows_compiler_flags_override = WINDOWS_FLAGS + ["-mf16c", "-DXNN_ENABLE_F16C=1"],
         deps = XNN_COMMON_MICROKERNEL_EXPORTED_DEPS,
     )
 
@@ -769,8 +856,8 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         preferred_linkage = "static",
         preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
         visibility = ["PUBLIC"],
-        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + ["-mf16c"],
-        windows_compiler_flags_override = WINDOWS_FLAGS + ["-mf16c"],
+        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + ["-mf16c", "-DXNN_ENABLE_F16C=1"],
+        windows_compiler_flags_override = WINDOWS_FLAGS + ["-mf16c", "-DXNN_ENABLE_F16C=1"],
         windows_srcs = prod_srcs_for_arch_wrapper("f16c"),
         deps = XNN_COMMON_MICROKERNEL_EXPORTED_DEPS,
     )
@@ -1652,8 +1739,8 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "ovr_config//cpu:arm32": prod_srcs_for_arch_wrapper("aarch32"),
         }),
         headers = subdir_glob([
-            ("XNNPACK/src", "xnnpack/assembly.h"),
-            ("XNNPACK/src", "**/*.S"),
+            ("XNNPACK", "src/xnnpack/assembly.h"),
+            ("XNNPACK", "src/**/*.S"),
         ]),
         header_namespace = "",
         apple_sdks = (IOS, MACOSX),
@@ -1685,8 +1772,8 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "ovr_config//cpu:arm64": prod_srcs_for_arch_wrapper("aarch64"),
         }),
         headers = subdir_glob([
-            ("XNNPACK/src", "xnnpack/assembly.h"),
-            ("XNNPACK/src", "**/*.S"),
+            ("XNNPACK", "src/xnnpack/assembly.h"),
+            ("XNNPACK", "src/**/*.S"),
         ]),
         header_namespace = "",
         apple_sdks = (IOS, MACOSX),
@@ -1705,6 +1792,87 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS,
         windows_compiler_flags_override = WINDOWS_FLAGS,
+        deps = XNN_COMMON_MICROKERNEL_EXPORTED_DEPS,
+    )
+
+    fb_xplat_cxx_library(
+        name = "ukernels_amd64",
+        srcs = select({
+            "DEFAULT": [],
+            "ovr_config//cpu:x86_64": prod_srcs_for_arch_wrapper("amd64"),
+            "ovr_config//runtime:fbcode": prod_srcs_for_arch_wrapper("amd64"),
+        }),
+        headers = subdir_glob([
+            ("XNNPACK", "src/xnnpack/assembly.h"),
+            ("XNNPACK", "src/**/*.S"),
+        ]),
+        header_namespace = "",
+        apple_sdks = (IOS, MACOSX),
+        compiler_flags = [
+            "-O2",
+        ] + select({
+            "DEFAULT": [],
+            "ovr_config//cpu:x86_64": AMD64_ASM_COMPILER_FLAGS,
+            "ovr_config//runtime:fbcode": AMD64_ASM_COMPILER_FLAGS,
+        }),
+        labels = labels,
+        fbandroid_link_whole = True,
+        preferred_linkage = "static",
+        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        visibility = ["PUBLIC"],
+        deps = XNN_COMMON_MICROKERNEL_EXPORTED_DEPS,
+    )
+
+    fb_xplat_cxx_library(
+        name = "ukernels_sse2fma",
+        srcs = select({
+            "DEFAULT": [],
+            "ovr_config//cpu:x86_32": prod_srcs_for_arch_wrapper("sse2fma"),
+            "ovr_config//cpu:x86_64": prod_srcs_for_arch_wrapper("sse2fma"),
+            "ovr_config//runtime:fbcode": prod_srcs_for_arch_wrapper("sse2fma"),
+        }),
+        headers = get_xnnpack_headers(),
+        header_namespace = "",
+        apple_sdks = (IOS, MACOSX),
+        compiler_flags = [
+            "-O2",
+        ] + select({
+            "DEFAULT": [],
+            "ovr_config//cpu:x86_32": ["-msse2"],
+            "ovr_config//cpu:x86_64": ["-msse2"],
+            "ovr_config//runtime:fbcode": ["-msse2"],
+        }),
+        labels = labels,
+        fbandroid_link_whole = True,
+        preferred_linkage = "static",
+        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        visibility = ["PUBLIC"],
+        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + ["-msse2"],
+        windows_compiler_flags_override = WINDOWS_FLAGS + ["-msse2"],
+        windows_srcs = prod_srcs_for_arch_wrapper("sse2fma"),
+        deps = XNN_COMMON_MICROKERNEL_EXPORTED_DEPS,
+    )
+
+    fb_xplat_cxx_library(
+        name = "ukernels_sse2fma_ovr_win32",
+        headers = get_xnnpack_headers(),
+        header_namespace = "",
+        apple_sdks = (IOS, MACOSX),
+        compiler_flags = [
+            "-O2",
+        ] + select({
+            "DEFAULT": [],
+            "ovr_config//cpu:x86_32": ["-msse2"],
+            "ovr_config//cpu:x86_64": ["-msse2"],
+        }),
+        labels = labels,
+        fbandroid_link_whole = True,
+        preferred_linkage = "static",
+        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        visibility = ["PUBLIC"],
+        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + ["-msse2"],
+        windows_compiler_flags_override = WINDOWS_FLAGS + ["-msse2"],
+        windows_srcs = prod_srcs_for_arch_wrapper("sse2fma"),
         deps = XNN_COMMON_MICROKERNEL_EXPORTED_DEPS,
     )
 
@@ -1741,6 +1909,8 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         preferred_linkage = "static",
         visibility = ["PUBLIC"],
         deps = [
+            ":ukernels_amd64",
+            ":ukernels_sse2fma",
             ":ukernels_avx",
             ":ukernels_avx2",
             ":ukernels_avx512",
@@ -1775,14 +1945,12 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             ":ukernels_sse41_ovr_win32",
             ":ukernels_sse_ovr_win32",
             ":ukernels_ssse3_ovr_win32",
+            ":ukernels_sse2fma_ovr_win32",
             ":ukernels_avx512vbmi",
             # ":ukernels_avx512vnni_ovr_win32", # Build crashes on Windows Clang 17.0.3, re-enable when fixed (T199959765)
             # ":ukernels_avx512vnnigfni_ovr_win32",
             # ":ukernels_avxvnni_ovr_win32" Excluding avxvnni microkernels because they fail on older compilers
         ],
-        exported_preprocessor_flags = [
-            "-DXNN_ENABLE_AVX512VNNIGFNI=0"
-        ]
     )
 
     fb_xplat_cxx_library(
@@ -1862,6 +2030,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         deps = [
             ":tables",
             ":prod_ukernels",
+            ":ukernels_zip",
             third_party("cpuinfo"),
             third_party("pthreadpool"),
         ],
@@ -1894,17 +2063,64 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-DXNN_ENABLE_CPUINFO",
             "-DXNN_ENABLE_ARM_I8MM=1",
             "-DXNN_ENABLE_ARM_FP16_VECTOR=1",
-            "-DXNN_ENABLE_AVXVNNI=0",
             "-DXNN_ENABLE_ARM_SME=0",
             "-DXNN_ENABLE_ARM_SME2=0",
+            # The hardware-config / gemm-config dispatch code now references every
+            # XNN_ENABLE_<ISA> macro as a C expression (not just #ifdef), so each
+            # must be defined to 0/1. Values mirror the x86 ukernels linked via
+            # :x86_and_x86_64_lib (enabled = 1, the rest = 0).
+            "-DXNN_ENABLE_SSE=1",
+            "-DXNN_ENABLE_SSE2=1",
+            "-DXNN_ENABLE_SSSE3=1",
+            "-DXNN_ENABLE_SSE41=1",
+            "-DXNN_ENABLE_AVX=1",
+            "-DXNN_ENABLE_F16C=1",
+            "-DXNN_ENABLE_FMA3=1",
+            "-DXNN_ENABLE_AVX2=1",
+            "-DXNN_ENABLE_AVX512F=1",
+            "-DXNN_ENABLE_AVX512SKX=1",
+            "-DXNN_ENABLE_AVX512VBMI=1",
+            "-DXNN_ENABLE_AVX512AMX=0",
+            "-DXNN_ENABLE_AVX256SKX=0",
+            "-DXNN_ENABLE_AVX256VNNI=0",
+            "-DXNN_ENABLE_AVX256VNNIGFNI=0",
+            "-DXNN_ENABLE_AVX512FP16=0",
+            "-DXNN_ENABLE_AVX512BF16=0",
+            "-DXNN_ENABLE_AVXVNNI=0",
+            "-DXNN_ENABLE_AVXVNNIINT8=0",
+        ] + (select({
+            "DEFAULT": [
+                "-DXNN_ENABLE_AVX512VNNI=1",
+                "-DXNN_ENABLE_AVX512VNNIGFNI=0",
+            ],
+            # Windows curated lib excludes the avx512vnni/gfni ukernels (T199959765).
+            "ovr_config//os:windows": [
+                "-DXNN_ENABLE_AVX512VNNI=0",
+                "-DXNN_ENABLE_AVX512VNNIGFNI=0",
+            ],
+        }) if XNNPACK_WINDOWS_AVX512F_ENABLED else [
+            "-DXNN_ENABLE_AVX512VNNI=1",
+            "-DXNN_ENABLE_AVX512VNNIGFNI=1",
+        ]),
+        exported_preprocessor_flags = [
+            # XNNPACK dropped the JIT code-cache argument from its xnn_create_*
+            # operator APIs. Signal consumers (e.g. ATen) to use the new
+            # signature; OSS builds against older XNNPACK leave this undefined
+            # and keep passing the code-cache argument.
+            "-DXNNPACK_NO_CODE_CACHE",
         ],
         srcs = XNNPACK_SRCS + LOGGING_SRCS + OPERATOR_SRCS + [
             "XNNPACK/src/init.c",
             "XNNPACK/src/configs/hardware-config.c",
+            "XNNPACK/src/xnnpack/init-once.c",
             "XNNPACK/src/microkernel-utils.c",
+            "XNNPACK/src/operator-delete.c",
             "XNNPACK/src/operator-run.c",
+            "XNNPACK/src/operators/fingerprint_cache.c",
+            "XNNPACK/src/operators/fingerprint_id.c",
+            "XNNPACK/src/xnnpack/fingerprint_check.c",
             "XNNPACK/src/reference/packing.cc",
-            "XNNPACK/src/packw.c",
+            "XNNPACK/src/pack-lh.cc",
             "XNNPACK/src/cache.c",
             "XNNPACK/src/indirection.c",
             "XNNPACK/src/operator-utils.c",
