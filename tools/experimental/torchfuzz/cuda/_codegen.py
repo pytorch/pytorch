@@ -552,6 +552,46 @@ class ReduceOverheadFuzzTemplate(DefaultFuzzTemplate):
         return code_lines
 
 
+class ReduceOverheadStreamsFuzzTemplate(ReduceOverheadFuzzTemplate):
+    """reduce-overhead with the body partitioned across CUDA streams.
+
+    Combines the multi-step reduce-overhead check with StreamFuzzTemplate's
+    fork/join stream partitioning, so a captured cudagraph spans work on
+    several streams with wait_stream/event synchronization.
+    """
+
+    def wrap_body(
+        self, generated_code_lines: list[str], graph: OperationGraph
+    ) -> list[str]:
+        return StreamFuzzTemplate.wrap_body_with_streams(generated_code_lines, graph)
+
+
+class ReduceOverheadMemPoolFuzzTemplate(ReduceOverheadFuzzTemplate):
+    """reduce-overhead with intermediates allocated from a registered MemPool.
+
+    Registers a ``torch.cuda.MemPool`` with cudagraph_trees and wraps the
+    program body in ``torch.cuda.use_mem_pool`` so captured-region allocations
+    come from that managed pool. Exercises the multi-pool capture/checkpoint
+    paths (public justification: NCCL userbuffer pools).
+    """
+
+    def flags_codegen(self):
+        return super().flags_codegen() + [
+            "from torch._inductor.cudagraph_trees import register_external",
+            "_FUZZ_POOL = torch.cuda.MemPool()",
+            "register_external(_FUZZ_POOL)",
+        ]
+
+    def wrap_body(
+        self, generated_code_lines: list[str], graph: OperationGraph
+    ) -> list[str]:
+        if not generated_code_lines:
+            return generated_code_lines
+        wrapped = ["    with torch.cuda.use_mem_pool(_FUZZ_POOL):"]
+        wrapped.extend("    " + line for line in generated_code_lines)
+        return wrapped
+
+
 class DTensorFuzzPlacementsTemplate(DTensorFuzzTemplate):
     """DTensor template with randomized placements (Replicate, Shard, Partial).
 
