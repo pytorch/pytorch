@@ -117,9 +117,9 @@ jobs:
           SCCACHE_REGION: us-east-1
           CUDA_VERSION: ${{ matrix.device == 'cu130' && '13.0' || '13.2' }}
           TORCH_CUDA_ARCH_LIST: '8.0;8.9;9.0;10.0;12.0'
-          # Remote buildkit has no local docker daemon: pull the base from the
-          # registry instead of requiring a local base image.
-          USE_LOCAL_BASE_IMAGE: '0'
+          # Use the manylinux builder as the base; remote buildkit pulls it from
+          # the registry (no local docker daemon needed).
+          BASE_IMAGE: ${{ matrix.manylinux-image }}
           TORCH_WHEELS_PATH: ${{ runner.temp }}/artifacts
           OUTPUT_DIR: ${{ runner.temp }}/artifacts/externals/vllm
         run: |

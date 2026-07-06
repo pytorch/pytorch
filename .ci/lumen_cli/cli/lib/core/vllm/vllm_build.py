@@ -102,13 +102,6 @@ class VllmBuildParameters:
                 "TORCH_WHEELS_PATH is not provided, but USE_TORCH_WHEEL is set to 1",
             ),
             (
-                self.use_local_base_image,
-                True,
-                "base_image",
-                local_image_exists,
-                f"BASE_IMAGE {self.base_image} does not found, but USE_LOCAL_BASE_IMAGE is set to 1",
-            ),
-            (
                 self.use_local_dockerfile,
                 True,
                 "dockerfile_path",
