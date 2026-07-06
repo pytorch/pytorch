@@ -92,6 +92,12 @@ class VirtualGuardImpl final : public DeviceGuardImplInterface {
   bool isStreamCapturing(const Stream& stream) const override {
     return impl_->isStreamCapturing(stream);
   }
+  int getStreamPriority(const Stream& stream) const override {
+    return impl_->getStreamPriority(stream);
+  }
+  std::tuple<int, int> getStreamPriorityRange() const override {
+    return impl_->getStreamPriorityRange();
+  }
 
   void recordDataPtrOnStream(const c10::DataPtr& data_ptr, const Stream& stream)
       const override {

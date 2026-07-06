@@ -145,6 +145,25 @@ static PyObject* THPStream_get_native_handle(THPStream* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPStream_get_priority(THPStream* self, void* unused) {
+  HANDLE_TH_ERRORS
+  auto stream = c10::Stream::unpack3(
+      self->stream_id,
+      static_cast<c10::DeviceIndex>(self->device_index),
+      static_cast<c10::DeviceType>(self->device_type));
+  return PyLong_FromLong(stream.priority());
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPStream_get_priority_range(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  auto [low, high] = c10::Stream::priority_range();
+  return Py_BuildValue("(ii)", low, high);
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPStream_query(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   auto self = reinterpret_cast<THPStream*>(_self);
@@ -486,6 +505,11 @@ static const std::initializer_list<PyGetSetDef> THPStream_properties = {
      nullptr,
      nullptr,
      nullptr},
+    {"priority",
+     reinterpret_cast<getter>(THPStream_get_priority),
+     nullptr,
+     nullptr,
+     nullptr},
     {nullptr}};
 
 static const std::initializer_list<PyMethodDef> THPStream_methods = {
@@ -497,6 +521,10 @@ static const std::initializer_list<PyMethodDef> THPStream_methods = {
     {"record_event",
      castPyCFunctionWithKeywords(THPStream_record_event),
      METH_VARARGS | METH_KEYWORDS,
+     nullptr},
+    {"get_priority_range",
+     THPStream_get_priority_range,
+     METH_NOARGS | METH_STATIC,
      nullptr},
     {"__eq__", reinterpret_cast<PyCFunction>(THPStream_eq), METH_O, nullptr},
     {"__enter__", THPStream_enter, METH_NOARGS, nullptr},
