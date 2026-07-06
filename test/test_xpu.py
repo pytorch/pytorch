@@ -3044,6 +3044,60 @@ class TestCachingHostAllocatorXpuGraph(TestCase):
 
 @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
 @torch.testing._internal.common_utils.markDynamoStrictTest
+class TestXpuNativeMath(TestCase):
+    """Test SYCL native fast math functions in NumericUtils.h on XPU."""
+
+    def test_cauchy_sanity(self):
+        """cauchy_() exercises at::tan -> sycl::native::tan via TransformationHelper."""
+        for dtype in [torch.float32, torch.float16, torch.bfloat16]:
+            x = torch.empty(10000, device="xpu", dtype=dtype)
+            x.cauchy_(median=0.0, sigma=1.0)
+            # Cauchy can produce large values but should mostly be finite
+            finite_ratio = torch.isfinite(x).float().mean().item()
+            self.assertTrue(
+                finite_ratio > 0.99,
+                f"cauchy_ produced too many non-finite for {dtype}",
+            )
+
+    def test_log_normal_sanity(self):
+        """log_normal_() exercises at::exp -> sycl::native::exp via TransformationHelper."""
+        for dtype in [torch.float32, torch.float16, torch.bfloat16]:
+            x = torch.empty(10000, device="xpu", dtype=dtype)
+            x.log_normal_(mean=0.0, std=1.0)
+            self.assertTrue(
+                (x > 0).all(),
+                f"log_normal_ produced non-positive for {dtype}",
+            )
+            if dtype == torch.float32:
+                self.assertTrue(
+                    torch.isfinite(x).all(),
+                    f"log_normal_ produced non-finite for {dtype}",
+                )
+
+    def test_cauchy_accuracy(self):
+        """Verify cauchy_() median is correct (exercises sycl::native::tan precision)."""
+        torch.manual_seed(42)
+        x = torch.empty(100000, device="xpu", dtype=torch.float32)
+        x.cauchy_(median=5.0, sigma=1.0)
+        # Median of Cauchy(median=5, sigma=1) should be 5.0
+        self.assertTrue(abs(x.median().item() - 5.0) < 0.1)
+
+    def test_log_normal_accuracy(self):
+        """Verify log_normal_() statistics (exercises sycl::native::exp precision)."""
+        import math
+
+        torch.manual_seed(42)
+        x = torch.empty(100000, device="xpu", dtype=torch.float32)
+        x.log_normal_(mean=0.0, std=0.5)
+        # Median of LogNormal(0, 0.5) = exp(0) = 1.0
+        self.assertTrue(abs(x.median().item() - 1.0) < 0.05)
+        # Mean of LogNormal(mu, sigma) = exp(mu + sigma^2/2) = exp(0.125) ≈ 1.133
+        expected_mean = math.exp(0.0 + 0.5**2 / 2)
+        self.assertTrue(abs(x.mean().item() - expected_mean) < 0.05)
+
+
+@unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestXpuOptims(TestCase):
     @optims(
         [optim for optim in optim_db if optim.has_capturable_arg],
