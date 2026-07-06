@@ -3848,6 +3848,36 @@ def _update_combo_kernel_kwargs(
         kwargs[suffixed_key if suffixed_key in signature_keys else key] = value
 
 
+def _combo_coordesc_meta(
+    combo_meta: dict[str, Any], block_config: dict[str, int]
+) -> tuple[list[str], dict[str, int]]:
+    """Suffixed per-subkernel block fields (XBLOCK_0, XBLOCK_1, ...) and their
+    max sizes so coordinate descent can tune a compile-time stitched combo's
+    blocks. Heaviest sub-kernels first, matching the runtime per-subkernel
+    builder (largest dominates runtime, gets tuned while the budget is freshest).
+    """
+    order = sorted(
+        range(combo_meta["num_kernels"]),
+        key=lambda i: -functools.reduce(
+            operator.mul, combo_meta[f"size_hints_{i}"].values()
+        ),
+    )
+    field_order: list[str] = []
+    field_limits: dict[str, int] = {}
+    for i in order:
+        size_hints_i = combo_meta[f"size_hints_{i}"]
+        for key in block_config:
+            if key.rsplit("_", 1)[-1] != str(i):
+                continue
+            field_order.append(key)
+            prefix = key.rsplit("_", 1)[0].removesuffix("BLOCK").lower()
+            if prefix in size_hints_i:
+                field_limits[key] = min(
+                    TRITON_MAX_BLOCK[prefix.upper()], size_hints_i[prefix]
+                )
+    return field_order, field_limits
+
+
 def _handle_combo_kernel_per_subkernel_blocks(
     size_hints: dict[str, int],
     inductor_meta: dict[str, Any],
@@ -3889,6 +3919,11 @@ def _handle_combo_kernel_per_subkernel_blocks(
         # blocks into the body, so its config carries only backend kwargs (no block args).
         if launch_candidates:
             block_config = combo_meta.get("default_config") or {}
+            # Blocks are args here (not baked), so coordinate descent can refine
+            # the per-subkernel block sizes on top of the compile-time winners.
+            field_order, field_limits = _combo_coordesc_meta(combo_meta, block_config)
+            inductor_meta["combo_coordesc_field_order"] = field_order
+            inductor_meta["combo_coordesc_field_limits"] = field_limits
             return [
                 triton.Config({**block_config, **kwargs}, num_warps=nw, num_stages=ns)
                 for kwargs, nw, ns in launch_candidates

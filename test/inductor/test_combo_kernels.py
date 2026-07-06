@@ -2343,20 +2343,9 @@ class ComboKernelTestsMaxAutotune(_ComboAutotuneCountMixin, TestCase):
 
         self.assertEqual(out_eager, out_compiled)
 
-        if compile_time_autotune:
-            # Per-subkernel blocks are tuned at compile time, so the runtime combo
-            # coordinate-descent path -- the only source of suffixed XBLOCK_i steps --
-            # never runs.
-            combo_try_logs = [
-                msg for msg in cm.output if "Try config" in msg and "XBLOCK_" in msg
-            ]
-            self.assertEqual(
-                len(combo_try_logs),
-                0,
-                f"compile-time autotune should bypass runtime combo coordesc: {combo_try_logs}",
-            )
-            return
-
+        # Compile-time autotune passes per-subkernel blocks as args, so runtime
+        # coordinate descent still refines the suffixed XBLOCK_i fields (same as
+        # the runtime per-subkernel path).
         baseline_log = next(
             msg for msg in cm.output if "Baseline Config" in msg and "XBLOCK_" in msg
         )
