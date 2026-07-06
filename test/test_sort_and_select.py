@@ -15,6 +15,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
+    onlyCPU,
 )
 from torch.testing._internal.common_dtype import (
     all_types,
@@ -31,41 +32,13 @@ from torch.testing._internal.common_utils import (
 )
 
 
-def _test_sort_discontiguous(device, dtype, test_case, device_type):
-    # on CUDA 2048 vs >2048 have different code path for the dim being sorted
-    sizes = (5, 7, 2049)
-    for shape in permutations(sizes):
-        for perm in permutations((0, 1, 2)):
-            for dim in range(3):
-                t = torch.randn(shape, device=device, dtype=dtype).permute(perm)
-                r1 = t.sort(dim=dim)
-                r2 = t.contiguous().sort(dim=dim)
-                test_case.assertEqual(r1, r2)
-                n = t.size(dim)
-
-                # assert ordered
-                test_case.assertTrue(
-                    (
-                        r1.values.narrow(dim, 1, n - 1)
-                        >= r1.values.narrow(dim, 0, n - 1)
-                    ).all()
-                )
-
-                # assert that different segments does not mix, which can easily happen
-                # if the stride is not handled correctly
-                test_case.assertTrue(
-                    (t.unsqueeze(-1).transpose(dim, -1) == r1.values.unsqueeze(-1))
-                    .any(dim=dim)
-                    .any(dim=-1)
-                    .all()
-                )
-
-                # assert stride is preserved
-                if device_type == "cuda":
-                    # FIXME: this behavior should be true for all cases, not
-                    # just the one specified in if condition
-                    test_case.assertEqual(r1.values.stride(), t.stride())
-                    test_case.assertEqual(r1.indices.stride(), t.stride())
+class TestSortAndSelectCPU(TestCase):
+    def test_complex_unsupported_cpu(self, device):
+        x = torch.tensor([3.0 + 2j, 4.0 + 3j], device=device)
+        with self.assertRaisesRegex(
+            RuntimeError, " Sort does not support complex dtypes on CPU"
+        ):
+            torch.sort(input=x)
 
 
 class TestSortAndSelect(TestCase):
@@ -75,27 +48,6 @@ class TestSortAndSelect(TestCase):
         x = torch.ones(10)
         y = x.sort(stable=None).values
         self.assertTrue(torch.all(y == torch.ones(10)).item())
-
-    def test_complex_unsupported_cpu(self):
-        x = torch.tensor([3.0 + 2j, 4.0 + 3j])
-        with self.assertRaisesRegex(
-            RuntimeError, " Sort does not support complex dtypes on CPU"
-        ):
-            torch.sort(input=x)
-
-    @slowTest  # this test is slow on CPU, but not on CUDA
-    def test_sort_discontiguous_slow(self):
-        _test_sort_discontiguous("cpu", torch.float32, self, "cpu")
-
-    @slowTest
-    def test_sort_1d_parallel(self):
-        for dtype in integral_types():
-            low = 0 if dtype == torch.uint8 else -128
-            tensor = torch.randint(
-                low=low, high=127, size=(100000,), device="cpu", dtype=dtype
-            )
-            vals, _ = torch.sort(tensor, stable=True)
-            self.assertEqual(True, torch.all(vals[:-1] <= vals[1:]))
 
     def test_topk_quantized_scalar_input(self):
         # Calling topk on a quantized scalar input used to segfault,
@@ -303,6 +255,66 @@ class TestSortAndSelectDevice(TestCase):
         self.assertEqual(indices.stride(), (1,))
         # Check: 'tensor'  indexed by 'indices' is equal to 'values'
         self.assertEqual(tensor[indices], values)
+
+    def _test_sort_discontiguous(self, device, dtype):
+        # on CUDA 2048 vs >2048 have different code path for the dim being sorted
+        sizes = (5, 7, 2049)
+        for shape in permutations(sizes):
+            for perm in permutations((0, 1, 2)):
+                for dim in range(3):
+                    t = torch.randn(shape, device=device, dtype=dtype).permute(perm)
+                    r1 = t.sort(dim=dim)
+                    r2 = t.contiguous().sort(dim=dim)
+                    self.assertEqual(r1, r2)
+                    n = t.size(dim)
+
+                    # assert ordered
+                    self.assertTrue(
+                        (
+                            r1.values.narrow(dim, 1, n - 1)
+                            >= r1.values.narrow(dim, 0, n - 1)
+                        ).all()
+                    )
+
+                    # assert that different segments does not mix, which can easily happen
+                    # if the stride is not handled correctly
+                    self.assertTrue(
+                        (t.unsqueeze(-1).transpose(dim, -1) == r1.values.unsqueeze(-1))
+                        .any(dim=dim)
+                        .any(dim=-1)
+                        .all()
+                    )
+
+                    # assert stride is preserved
+                    if self.device_type == "cuda":
+                        # FIXME: this behavior should be true for all cases, not
+                        # just the one specified in if condition
+                        self.assertEqual(r1.values.stride(), t.stride())
+                        self.assertEqual(r1.indices.stride(), t.stride())
+
+    @onlyAccelerator
+    @dtypes(torch.float32)
+    def test_sort_discontiguous(self, device, dtype):
+        self._test_sort_discontiguous(device, dtype)
+
+    # TODO: consolidate with test_sort_discontiguous once slowTest supports
+    # device/accelerator-level granularity.
+    @slowTest  # this test is slow on CPU, but not on CUDA
+    @onlyCPU
+    @dtypes(torch.float32)
+    def test_sort_discontiguous_slow(self, device, dtype):
+        self._test_sort_discontiguous(device, dtype)
+
+    @slowTest  # this test is slow on CPU
+    @onlyCPU
+    @dtypes(*integral_types())
+    def test_sort_1d_parallel(self, device, dtype):
+        low = 0 if dtype == torch.uint8 else -128
+        tensor = torch.randint(
+            low=low, high=127, size=(100000,), device=device, dtype=dtype
+        )
+        vals, _ = torch.sort(tensor, stable=True)
+        self.assertEqual(True, torch.all(vals[:-1] <= vals[1:]))
 
     @dtypes(torch.float32)
     def test_sort_1d_output_discontiguous(self, device, dtype):
@@ -1345,9 +1357,6 @@ class TestSortAndSelectDevice(TestCase):
 
 
 class TestSortAndSelectCUDA(TestCase):
-    def test_sort_discontiguous(self, device):
-        _test_sort_discontiguous(device, torch.float32, self, device)
-
     def test_topk_noncontiguous_gpu(self, device):
         # test different topk paths on cuda
         single_block_t = torch.randn(20, device=device)[::2]
@@ -1450,6 +1459,7 @@ class TestSortAndSelectCUDA(TestCase):
             )
 
 
+instantiate_device_type_tests(TestSortAndSelectCPU, globals(), only_for="cpu")
 instantiate_device_type_tests(TestSortAndSelectDevice, globals())
 instantiate_device_type_tests(TestSortAndSelectCUDA, globals(), only_for="cuda")
 
