@@ -344,9 +344,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         "dict_vt",
     }
 
-    # Lazily-created view of the instance __dict__, backed by the side effects
-    # table. Only meaningful for VTs whose represented type has an instance
-    # dict (see has_instance_dict); None otherwise.
+    # Lazily-created view of the instance __dict__, backed by the side effects table
     dict_vt: variables.DunderDictVariable | None = None
 
     def clone(self, **kwargs: Any) -> VariableTracker:
