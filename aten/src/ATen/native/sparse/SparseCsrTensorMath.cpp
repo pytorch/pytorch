@@ -1404,7 +1404,7 @@ std::tuple<Tensor, Tensor> _sparse_mm_reduce_impl_sparse_csr_cpu(
 
   int64_t nnz = self._nnz();
   if (nnz == 0) {
-    return std::make_tuple(out, arg_out);
+    return std::make_tuple(std::move(out), std::move(arg_out));
   }
 
   // only need to calculate the out args

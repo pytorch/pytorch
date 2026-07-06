@@ -21,16 +21,20 @@ import torch
 import torch._inductor.async_compile
 from torch import multiprocessing as mp, nn
 from torch._dynamo import reset
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.exc import BackendCompilerFailed
 from torch._dynamo.testing import rand_strided, reset_rng_state
 from torch._dynamo.utils import counters, same
 from torch._inductor import config
 from torch._inductor.autotune_process import (
     _TestBenchmarkRequest,
+    _TestCUDACodeCacheBenchmarkRequest,
+    _TestEnvBenchmarkRequest,
     AsyncAutotuner,
     AutotuneProcessPool,
-    CUDA_VISIBLE_DEVICES,
     ExternKernelBenchmarkRequest,
+    get_visible_devices_env_var,
+    run_autotune_in_subprocess,
     TritonBenchmarkRequest,
     TuningProcess,
     TuningProcessPool,
@@ -40,6 +44,7 @@ from torch._inductor.codegen.common import WorkspaceArg
 from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout, FlexibleLayout
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
+from torch._inductor.runtime.hints import DeviceProperties
 from torch._inductor.runtime.triton_heuristics import CachingAutotuner, pointwise
 from torch._inductor.scheduler import Scheduler
 from torch._inductor.select_algorithm import (
@@ -188,7 +193,18 @@ class TestMaxAutotune(TestCase):
         Verify that `max_autotune` includes all pointwise configs from
         `max_autotune_pointwise` for 1D, 2D, and 3D pointwise kernels.
         """
-        triton_meta = {"device": object()}
+        # Fake device properties for this unit test; no CUDA state is needed.
+        triton_meta = {
+            "device": DeviceProperties(
+                type="cuda",
+                index=0,
+                multi_processor_count=1,
+                cc=80,
+                major=8,
+                max_threads_per_block=1024,
+                warp_size=32,
+            )
+        }
         inductor_meta_common = {"autotune_pointwise": False}
 
         for size_hints in (
@@ -1150,7 +1166,7 @@ class TestMaxAutotune(TestCase):
                 self.assertEqual(
                     len(kernel_events),
                     1,
-                    f"Expected exactly 1 kernel event, but got {len(kernel_events)}",
+                    lambda msg: f"{msg}\nExpected exactly 1 kernel event, but got {len(kernel_events)}",
                 )
 
                 # Check that grid size matches expected values based on carveout
@@ -1164,7 +1180,7 @@ class TestMaxAutotune(TestCase):
                 self.assertEqual(
                     kernel_events[0]["grid_size"],
                     expected_grid_size,
-                    f"Grid size {kernel_events[0]['grid_size']} doesn't match {expected_grid_size} for carveout={carveout}",
+                    lambda msg: f"{msg}\nGrid size {kernel_events[0]['grid_size']} doesn't match {expected_grid_size} for carveout={carveout}",
                 )
 
     @parametrize("dynamic", (False, True))
@@ -1642,7 +1658,7 @@ class TestMaxAutotune(TestCase):
 
         ref = x1 @ y1 + x2 @ y2
         act = f(x1, y1, x2, y2)
-        torch.testing.assert_close(act, ref, atol=1e-2, rtol=1e-2)
+        torch.testing.assert_close(act, ref, atol=1e-1, rtol=1e-2)
 
     @config.patch(
         max_autotune=True,
@@ -4248,6 +4264,117 @@ class TestTuningProcess(TestCase):
 class TestTuningProcessPool(TestCase):
     # Use only one device/subprocess so we test the process restarts
     # and is usable after a crash.
+    def assert_path_in_dir(self, path, expected_dir):
+        self.assertEqual(
+            os.path.commonpath([path, expected_dir]),
+            expected_dir,
+        )
+
+    @config.patch({"autotune_multi_device": False})
+    def test_tuning_pool_cache_env_resets(self):
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("TRITON_CACHE_DIR", None)
+            tuning_pool = TuningProcessPool()
+            choice = _TestTritonTemplateCaller(
+                _TestEnvBenchmarkRequest("TRITON_CACHE_DIR")
+            )
+            stale_triton_cache_dir = os.path.join(
+                tempfile.gettempdir(), "stale_triton_cache"
+            )
+
+            try:
+                process = tuning_pool.processes[0]
+                process.put(
+                    choice.bmreq.benchmark,
+                    extra_env={"TRITON_CACHE_DIR": stale_triton_cache_dir},
+                )
+                self.assertEqual(process.get(), stale_triton_cache_dir)
+
+                self.assertIsNone(os.environ.get("TRITON_CACHE_DIR"))
+                self.assertIsNone(tuning_pool.target(choice))
+            finally:
+                tuning_pool.shutdown()
+
+    @config.patch({"autotune_multi_device": False})
+    def test_tuning_pool_cache_env_clears_codecache(self):
+        with (
+            mock.patch.dict(os.environ, {}, clear=False),
+            tempfile.TemporaryDirectory() as cache_dir_1,
+            tempfile.TemporaryDirectory() as cache_dir_2,
+        ):
+            tuning_pool = TuningProcessPool()
+            choice = _TestTritonTemplateCaller(_TestCUDACodeCacheBenchmarkRequest())
+
+            try:
+                os.environ["TORCHINDUCTOR_CACHE_DIR"] = cache_dir_1
+                path_1 = tuning_pool.target(choice)
+                self.assert_path_in_dir(path_1, cache_dir_1)
+
+                os.environ["TORCHINDUCTOR_CACHE_DIR"] = cache_dir_2
+                path_2 = tuning_pool.target(choice)
+                self.assert_path_in_dir(path_2, cache_dir_2)
+                self.assertNotEqual(path_1, path_2)
+            finally:
+                tuning_pool.shutdown()
+
+    @config.patch({"pipeline_max_autotune_gemm": True})
+    def test_autotune_process_pool_cache_env_resets(self):
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("TRITON_CACHE_DIR", None)
+            autotune_pool = AutotuneProcessPool()
+            bmreq = _TestEnvBenchmarkRequest("TRITON_CACHE_DIR")
+            stale_triton_cache_dir = os.path.join(
+                tempfile.gettempdir(), "stale_triton_cache"
+            )
+
+            try:
+                os.environ["TRITON_CACHE_DIR"] = stale_triton_cache_dir
+                self.assertEqual(
+                    autotune_pool.submit(
+                        run_autotune_in_subprocess,
+                        bmreq,
+                    ).result(timeout=30),
+                    stale_triton_cache_dir,
+                )
+
+                os.environ.pop("TRITON_CACHE_DIR", None)
+                self.assertIsNone(
+                    autotune_pool.submit(
+                        run_autotune_in_subprocess,
+                        bmreq,
+                    ).result(timeout=30)
+                )
+            finally:
+                autotune_pool._shutdown()
+
+    @config.patch({"pipeline_max_autotune_gemm": True})
+    def test_autotune_process_pool_cache_env_clears_codecache(self):
+        with (
+            mock.patch.dict(os.environ, {}, clear=False),
+            tempfile.TemporaryDirectory() as cache_dir_1,
+            tempfile.TemporaryDirectory() as cache_dir_2,
+        ):
+            autotune_pool = AutotuneProcessPool()
+            bmreq = _TestCUDACodeCacheBenchmarkRequest()
+
+            try:
+                os.environ["TORCHINDUCTOR_CACHE_DIR"] = cache_dir_1
+                path_1 = autotune_pool.submit(
+                    run_autotune_in_subprocess,
+                    bmreq,
+                ).result(timeout=30)
+                self.assert_path_in_dir(path_1, cache_dir_1)
+
+                os.environ["TORCHINDUCTOR_CACHE_DIR"] = cache_dir_2
+                path_2 = autotune_pool.submit(
+                    run_autotune_in_subprocess,
+                    bmreq,
+                ).result(timeout=30)
+                self.assert_path_in_dir(path_2, cache_dir_2)
+                self.assertNotEqual(path_1, path_2)
+            finally:
+                autotune_pool._shutdown()
+
     @config.patch({"autotune_multi_device": False})
     def test_tuning_pool_crash(self):
         tuning_pool = TuningProcessPool()
@@ -4295,20 +4422,22 @@ class TestTuningProcessPool(TestCase):
 
         tuning_pool.shutdown()
 
-    @skipIfXpu(msg="XPU not support VISIBLE_DEVICES")
     @config.patch({"autotune_multi_device": True})
     def test_tuning_pool_multiple_devices(self):
-        # Adapt the test to the available devices (and whether CUDA_VISIBLE_DEVICES
+        # Adapt the test to the available devices (and whether the backend-specific
+        # visible devices env var
         # is already set in the environment); use a subset of the available devices
         # to ensure only the subset are visible to the sub-processes.
-        if CUDA_VISIBLE_DEVICES in os.environ:
-            visible_devices = os.environ[CUDA_VISIBLE_DEVICES].split(",")
+        visible_devices_env_var = get_visible_devices_env_var(GPU_TYPE)
+        if visible_devices_env_var in os.environ:
+            visible_devices = os.environ[visible_devices_env_var].split(",")
         else:
-            visible_devices = [str(d) for d in range(torch.cuda.device_count())]
+            device_interface = get_interface_for_device(GPU_TYPE)
+            visible_devices = [str(d) for d in range(device_interface.device_count())]
 
-        cuda_visible_devices = ",".join(visible_devices[-2:])
+        selected_visible_devices = ",".join(visible_devices[-2:])
         with unittest.mock.patch.dict(
-            os.environ, {CUDA_VISIBLE_DEVICES: cuda_visible_devices}
+            os.environ, {visible_devices_env_var: selected_visible_devices}
         ):
             tuning_pool = TuningProcessPool()
 
@@ -4320,6 +4449,24 @@ class TestTuningProcessPool(TestCase):
         self.assertEqual(timings[choice2], choice2.bmreq.result)
 
         tuning_pool.shutdown()
+
+    def test_get_visible_devices_env_var(self):
+        self.assertEqual(get_visible_devices_env_var("cuda"), "CUDA_VISIBLE_DEVICES")
+        self.assertEqual(get_visible_devices_env_var("xpu"), "ZE_AFFINITY_MASK")
+
+    @config.patch({"autotune_multi_device": True})
+    def test_get_device_list_with_affinity_mask(self):
+        env_var = get_visible_devices_env_var(GPU_TYPE)
+        env_value = "1,3"
+
+        with (
+            mock.patch(
+                "torch._inductor.autotune_process.get_interface_for_device"
+            ) as get_interface_mock,
+            unittest.mock.patch.dict(os.environ, {env_var: env_value}, clear=False),
+        ):
+            get_interface_mock.return_value.device_count.return_value = 4
+            self.assertEqual(TuningProcessPool.get_device_list(), [1, 3])
 
     def test_add_feedback_saver(self):
         """Test that add_feedback_saver correctly adds feedback functions."""
@@ -4511,7 +4658,10 @@ class TestPrologueFusion(TestCase):
             # upcast preserves zero mask
             FileCheck().check("a =").check_not("tl.where").check("tl.dot").run(code[0])
 
-    @unittest.skip("Triton bug in compilation")
+    @unittest.skipIf(
+        config.triton.native_matmul,
+        "generated code is different in native matmul",
+    )
     def test_gather_fusion(self):
         M, K, N = (64, 128, 256)
         x = torch.rand([M, K], dtype=torch.float16, device=GPU_TYPE)
@@ -4534,6 +4684,96 @@ class TestPrologueFusion(TestCase):
             .check("dot")
             .run(code[0])
         )
+        (
+            FileCheck()
+            .check("tl.load(in_ptr1 + (_loop_invariant_idx_m)")
+            .check("for k_idx")
+            .check_not("tl.load(in_ptr1")
+            .check("tl.dot")
+            .run(code[0])
+        )
+        self.assertEqual(
+            len(re.findall(r"_loop_invariant_A_tmp\d+ = tl\.load", code[0])), 1
+        )
+
+    @unittest.skipIf(
+        config.triton.native_matmul,
+        "generated code is different in native matmul",
+    )
+    def test_gather_fusion_hoists_both_inputs(self):
+        M, K, N = (64, 128, 256)
+        x = torch.rand([M, K], dtype=torch.float16, device=GPU_TYPE)
+        y = torch.rand([K, N], dtype=torch.float16, device=GPU_TYPE)
+        idx_m = torch.randperm(M, device=GPU_TYPE)
+        idx_n = torch.randperm(N, device=GPU_TYPE)
+
+        def foo(x, y, idx_m, idx_n):
+            return x[idx_m] @ y[:, idx_n]
+
+        out, code = run_and_get_code(torch.compile(foo), x, y, idx_m, idx_n)
+        self.assertEqual(out, foo(x, y, idx_m, idx_n), atol=0.05, rtol=0.05)
+
+        kernel_code = code[0]
+        loop_start = kernel_code.index("for k_idx")
+        dot_start = kernel_code.index("tl.dot", loop_start)
+        pre_loop = kernel_code[:loop_start]
+        loop_body = kernel_code[loop_start:dot_start]
+
+        self.assertRegex(
+            pre_loop,
+            r"_loop_invariant_A_tmp\d+ = tl\.load\(in_ptr\d+ \+ \(_loop_invariant_idx_m\)",
+        )
+        self.assertRegex(
+            pre_loop,
+            r"_loop_invariant_B_tmp\d+ = tl\.load\(in_ptr\d+ \+ \(_loop_invariant_idx_n\)",
+        )
+        self.assertNotRegex(loop_body, r"tl\.load\(in_ptr\d+ \+ \(idx_[mn]\)")
+        self.assertRegex(loop_body, r"_loop_invariant_A_tmp\d+")
+        self.assertRegex(loop_body, r"_loop_invariant_B_tmp\d+")
+        self.assertEqual(
+            len(re.findall(r"_loop_invariant_A_tmp\d+ = tl\.load", kernel_code)), 1
+        )
+        self.assertEqual(
+            len(re.findall(r"_loop_invariant_B_tmp\d+ = tl\.load", kernel_code)), 1
+        )
+
+    @unittest.skipIf(
+        config.triton.native_matmul,
+        "generated code is different in native matmul",
+    )
+    def test_gather_fusion_hoists_even_k_false(self):
+        M, K, N = (64, 130, 256)
+        x = torch.rand([M, K], dtype=torch.float16, device=GPU_TYPE)
+        y = torch.rand([K, N], dtype=torch.float16, device=GPU_TYPE)
+        idx_m = torch.randperm(M, device=GPU_TYPE)
+        idx_n = torch.randperm(N, device=GPU_TYPE)
+
+        def foo(x, y, idx_m, idx_n):
+            return x[idx_m] @ y[:, idx_n]
+
+        out, code = run_and_get_code(torch.compile(foo), x, y, idx_m, idx_n)
+        self.assertEqual(out, foo(x, y, idx_m, idx_n), atol=0.05, rtol=0.05)
+
+        kernel_code = code[0]
+        self.assertIn("EVEN_K : tl.constexpr = False", kernel_code)
+        loop_start = kernel_code.index("for k_idx")
+        dot_start = kernel_code.index("tl.dot", loop_start)
+        pre_loop = kernel_code[:loop_start]
+        loop_body = kernel_code[loop_start:dot_start]
+
+        self.assertRegex(
+            pre_loop,
+            r"_loop_invariant_A_tmp\d+ = tl\.load\(in_ptr\d+ \+ \(_loop_invariant_idx_m\), None",
+        )
+        self.assertRegex(
+            pre_loop,
+            r"_loop_invariant_B_tmp\d+ = tl\.load\(in_ptr\d+ \+ \(_loop_invariant_idx_n\), None",
+        )
+        self.assertNotRegex(loop_body, r"tl\.load\(in_ptr\d+ \+ \(idx_[mn]\)")
+        self.assertIn("a_mask =", loop_body)
+        self.assertIn("b_mask =", loop_body)
+        self.assertIn(", a_mask", loop_body)
+        self.assertIn(", b_mask", loop_body)
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FP8,

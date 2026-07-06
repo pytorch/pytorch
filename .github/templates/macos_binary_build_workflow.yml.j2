@@ -74,6 +74,10 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          # Full fetch on tag pushes so the release tag is visible to
+          # `git describe --tags --exact`; nightlies stay shallow for speed.
+          fetch-depth: ${{ github.ref_type != 'tag' && 1 || 0 }}
+          fetch-tags: ${{ github.ref_type == 'tag' }}
           submodules: recursive
           show-progress: false
       - name: Clean PyTorch checkout
@@ -82,7 +86,7 @@ jobs:
           git clean -fxd
       - name: Install libomp
         run: |
-          "${PYTORCH_ROOT}/.ci/wheel/install_libomp.sh"
+          "${PYTORCH_ROOT}/.ci/macwheel/install_libomp.sh"
       - name: Install uv
         uses: pytorch/test-infra/.github/actions/setup-uv@main
         with:
@@ -97,10 +101,9 @@ jobs:
         run: uv python install $DESIRED_PYTHONS
       - name: Build all wheels
         run: |
-          "${PYTORCH_ROOT}/.ci/wheel/build_all_macos_wheels.sh"
-      - name: Delocate all wheels
-        run: |
-          "${PYTORCH_ROOT}/.ci/wheel/delocate_wheels.sh"
+          # Per-Python build now delocates inline (repair_wheel.py); no
+          # separate delocation step.
+          "${PYTORCH_ROOT}/.ci/macwheel/build_all_macos_wheels.sh"
       # Upload phase: each wheel becomes its own artifact (one call per name).
 {%- for config in build_configs %}
       - name: Upload !{{ config["build_name"] }}
