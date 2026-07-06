@@ -827,6 +827,19 @@ def compile_fx_inner(
             stack.enter_context(
                 config.patch(get_cpp_wrapper_config(log_cudagraph_skip=False))
             )
+        # Host-side TMA only selects the descriptor flavor; it needs the TMA path
+        # itself enabled. Warn (don't silently no-op) if it's set without its
+        # prerequisites.
+        if config.triton.enable_host_side_tma and not (
+            config.triton.use_tensor_descriptor and config.assume_aligned_inputs
+        ):
+            warnings.warn(
+                "config.triton.enable_host_side_tma has no effect unless both "
+                "config.triton.use_tensor_descriptor and "
+                "config.assume_aligned_inputs are also enabled; host-side TMA "
+                "will be skipped.",
+                stacklevel=2,
+            )
         stack.enter_context(torch.utils._python_dispatch._disable_current_modes())
         stack.enter_context(_use_lazy_graph_module(dynamo_config.use_lazy_graph_module))
         stack.enter_context(
