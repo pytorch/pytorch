@@ -151,7 +151,7 @@ static PyObject* THPStream_get_priority(THPStream* self, void* unused) {
       self->stream_id,
       static_cast<c10::DeviceIndex>(self->device_index),
       static_cast<c10::DeviceType>(self->device_type));
-  return PyLong_FromLong(stream.priority());
+  return THPUtils_packInt32(stream.priority());
   END_HANDLE_TH_ERRORS
 }
 
