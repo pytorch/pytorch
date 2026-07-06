@@ -521,6 +521,37 @@ class StreamFuzzTemplate(DefaultFuzzTemplate):
         return new_lines
 
 
+class ReduceOverheadFuzzTemplate(DefaultFuzzTemplate):
+    """Template that exercises cudagraph_trees via mode="reduce-overhead".
+
+    Reuses DefaultFuzzTemplate's operator set but swaps in a check that runs the
+    compiled program for several steps (warmup -> record -> replay) with a
+    backward pass, comparing every step's output to an eager reference. This
+    drives the cudagraph record/replay/checkpoint machinery rather than a single
+    compiled call.
+    """
+
+    def __init__(self):
+        super().__init__()
+        from torchfuzz.cuda._checks import EagerVsReduceOverheadCheck
+
+        self.check = EagerVsReduceOverheadCheck()
+
+    def args_codegen(self, arg_operations, constant_operations=None):
+        """Mark float args requires_grad so the backward tree is exercised."""
+        code_lines = super().args_codegen(arg_operations, constant_operations)
+        if arg_operations:
+            for i, (node_id, spec) in enumerate(arg_operations):
+                if isinstance(spec, TensorSpec) and spec.dtype in [
+                    torch.float32,
+                    torch.float64,
+                    torch.float16,
+                    torch.bfloat16,
+                ]:
+                    code_lines.append(f"arg_{i} = arg_{i}.requires_grad_(True)")
+        return code_lines
+
+
 class DTensorFuzzPlacementsTemplate(DTensorFuzzTemplate):
     """DTensor template with randomized placements (Replicate, Shard, Partial).
 
