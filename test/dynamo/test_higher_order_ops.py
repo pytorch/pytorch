@@ -508,7 +508,7 @@ class GraphModule(torch.nn.Module):
             y2 = t[0] + 0.2
             yield (x2, y2, (x2, y2))
 
-        arg_count = ifdynstaticdefault(3, 4)
+        arg_count = ifdynstaticdefault(3, 6)
         self._test_wrap_simple(f, my_args_generator((x, y, (x, y))), arg_count)
 
     def test_wrap_pytree_args_not_const_symint_tensor(self):

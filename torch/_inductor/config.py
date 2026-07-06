@@ -346,6 +346,7 @@ batch_fusion = True
 # batch fusion options:
 # batch_linear
 # batch_linear_lhs
+# cat_linear
 # batch_layernorm
 # batch_tanh
 # batch_relu
@@ -545,6 +546,15 @@ inductor_default_autotune_warmup = int(
 )
 inductor_default_autotune_rep = int(
     os.getenv("TORCHINDUCTOR_DEFAULT_AUTOTUNE_REP", 100)
+)
+
+# When enabled, the autotuner captures each candidate kernel in a CUDA graph
+# and benchmarks graph replay instead of eager kernel launches. This eliminates
+# host-side dispatch overhead from timing measurements, giving results that are
+# representative of CUDA graph replay execution. Useful when the compiled output
+# will run under external CUDA graph capture. Only applies with max_autotune.
+autotune_cudagraph_benchmarking: bool = (
+    os.environ.get("TORCHINDUCTOR_AUTOTUNE_CUDAGRAPH_BENCHMARKING") == "1"
 )
 
 

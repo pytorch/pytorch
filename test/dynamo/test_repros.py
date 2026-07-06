@@ -1228,6 +1228,28 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(out_ref, out_test)
         self.assertEqual(y_ref, y_test)
 
+    # https://github.com/pytorch/pytorch/issues/164555
+    def test_out_overload_channels_last(self):
+        def fn():
+            x = torch.ones(2, 2, 2, 3, dtype=torch.bfloat16).to(
+                memory_format=torch.channels_last
+            )
+            out = torch.empty_like(x)
+
+            torch.add(x, x, out=out)
+            return out
+
+        eager_out = fn()
+        for backend in ("eager", "aot_eager"):
+            compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
+            compiled_out = compiled_fn()
+
+            self.assertEqual(eager_out, compiled_out)
+            self.assertEqual(eager_out.stride(), compiled_out.stride())
+            self.assertTrue(
+                compiled_out.is_contiguous(memory_format=torch.channels_last)
+            )
+
     # https://github.com/pytorch/pytorch/issues/168381
     def test_index_select_contiguous_with_compile(self):
         def fn(x):
