@@ -33,29 +33,44 @@ on:
         type: string
         description: A JSON string for vLLM --compilation-config, applied to all benchmark tests.
         default: ''
-      is_nightly:
+      refresh_hf_cache:
         required: false
         type: boolean
-        description: Whether this is a nightly scheduled run. When true, TRANSFORMERS_OFFLINE is disabled.
+        description: When true, download from HF (online) and refresh the cache; otherwise read the offline cache.
         default: false
 
 jobs:
   benchmark:
     runs-on: ${{ inputs.runner }}
+    # Heavy models (e.g. int4 27B) can run ~8h+; raise well above the 6h default.
+    timeout-minutes: 600
     permissions:
       id-token: write
       contents: read
     container:
       image: ${{ inputs.docker_image }}
-      options: --gpus all --ipc=host --tty
-      volumes:
-        - /mnt/hf_cache:/mnt/hf_cache
+      # OSDC runners (h100 and OSDC b200) get /mnt/hf_cache injected by the runner
+      # hook — a bind mount here would break the hook's mount check. Only non-OSDC
+      # DGX (linux.dgx.*) has no injection, so bind-mount its writable host cache dir
+      # via -v. Discriminate on 'dgx', not 'b200' (OSDC b200 behaves like h100). Set
+      # on options (a scalar) not volumes (a sequence) so the expression is valid YAML.
+      options: ${{ contains(inputs.runner, 'dgx') && '--gpus all --ipc=host --tty -v /mnt/hf_cache:/mnt/hf_cache' || '--gpus all --ipc=host --tty' }}
     steps:
       - name: Install system dependencies
         run: |
           set -eux
           sudo apt-get update
           sudo apt-get install -y git unzip
+
+      # OSDC runner pods reuse the workspace across jobs, leaving root-owned
+      # content that actions/checkout can't delete (uid mismatch: GH hook 1001 vs
+      # CI image 1000). Same fix as setup-linux's "Fix workspace permissions".
+      - name: Fix workspace permissions
+        if: ${{ !contains(inputs.runner, 'dgx') }}
+        shell: bash
+        run: |
+          sudo chmod -R 777 "$GITHUB_WORKSPACE"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Checkout PyTorch
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -80,16 +95,15 @@ jobs:
           show-progress: false
 
       - name: Authenticate with AWS
-        if: ${{ always() && contains(inputs.runner, 'b200') }}
         uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
         with:
-          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_upload-benchmark-results
-          # The max duration enforced by the server side
+          role-to-assume: arn:aws:iam::308535385114:role/arc
           role-duration-seconds: 18000
           aws-region: us-east-1
 
       - name: Download build artifacts
-        uses: ./.github/actions/download-build-artifacts
+        # Full repo path, not ./ — local actions don't resolve on the OSDC ARC runner.
+        uses: pytorch/pytorch/.github/actions/download-build-artifacts@main
         with:
           name: ${{ inputs.build_environment }}
           s3-bucket: gha-artifacts
@@ -199,20 +213,57 @@ jobs:
           find .buildkite/performance-benchmarks/tests -type f -exec cat {} \;
           popd
 
+      - name: Resolve HF cache mode
+        shell: bash
+        run: |
+          OFFLINE=1
+          if [[ "${{ inputs.refresh_hf_cache }}" == "true" ]]; then
+            OFFLINE=0
+          fi
+          {
+            echo "TRANSFORMERS_OFFLINE=${OFFLINE}"
+            echo "HF_DATASETS_OFFLINE=${OFFLINE}"
+          } >> "${GITHUB_ENV}"
+
       - name: Run vLLM benchmark
+        id: run-benchmark
         working-directory: vllm-project/vllm
         env:
-          FLASHINFER_WORKSPACE_BASE: /mnt/hf_cache
           HF_TOKEN: ${{ secrets.VLLM_TEST_HUGGING_FACE_TOKEN }}
-          HF_HOME: /mnt/hf_cache
-          # Nightly runs download from HF to periodically refresh the local cache
-          TRANSFORMERS_OFFLINE: ${{ inputs.is_nightly && '0' || '1' }}
-          # vLLM-related environment variables
           ENGINE_VERSION: v1
           SAVE_TO_PYTORCH_BENCHMARK_FORMAT: 1
         shell: bash
         run: |
           set -eux
+
+          # HF model cache: offline reads /mnt/hf_cache in place (read-only on OSDC,
+          # writable host dir on B200); online (nightly) downloads into a writable dir.
+          if [[ "${TRANSFORMERS_OFFLINE}" == "1" && -d /mnt/hf_cache ]]; then
+            export HF_HOME=/mnt/hf_cache
+          elif [[ -w /mnt/hf_cache ]]; then
+            export HF_HOME=/mnt/hf_cache
+          else
+            export HF_HOME="${RUNNER_TEMP}/hf_cache"
+            mkdir -p "${HF_HOME}"
+            export TRANSFORMERS_OFFLINE=0
+            export HF_DATASETS_OFFLINE=0
+          fi
+
+          # FlashInfer JIT-compiles into its workspace, so it always needs a writable
+          # dir (never the read-only OSDC mount). B200: compile in place on the host
+          # mount. OSDC: compile in a local dir warmed from the cached kernels, which
+          # the refresh step syncs back to S3 on nightly. A cold cache just recompiles.
+          if [[ -w /mnt/hf_cache ]]; then
+            export FLASHINFER_WORKSPACE_BASE=/mnt/hf_cache/flashinfer
+            mkdir -p "${FLASHINFER_WORKSPACE_BASE}"
+          else
+            export FLASHINFER_WORKSPACE_BASE="${RUNNER_TEMP}/hf_cache/flashinfer"
+            mkdir -p "${FLASHINFER_WORKSPACE_BASE}"
+            if [[ -d /mnt/hf_cache/flashinfer ]]; then
+              cp -a /mnt/hf_cache/flashinfer/. "${FLASHINFER_WORKSPACE_BASE}/" 2>/dev/null || true
+            fi
+          fi
+
           bash .buildkite/performance-benchmarks/scripts/run-performance-benchmarks.sh
 
       - name: Check the benchmark results
@@ -242,3 +293,39 @@ jobs:
           dry-run: false
           github-token: ${{ secrets.GITHUB_TOKEN }}
           if-no-files-found: error
+
+      - name: Authenticate to refresh the HF cache in S3
+        if: always() && steps.run-benchmark.conclusion && env.TRANSFORMERS_OFFLINE == '0'
+        continue-on-error: true
+        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_hf-cache-write
+          aws-region: us-east-1
+
+      - name: Refresh the HF cache in S3
+        if: always() && steps.run-benchmark.conclusion && env.TRANSFORMERS_OFFLINE == '0'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -x
+          HF_CACHE="${RUNNER_TEMP}/hf_cache"
+          if [[ -z "${HF_CACHE_S3_BUCKET:-}" || -z "${HF_CACHE_S3_REGION:-}" ]]; then
+            echo "HF_CACHE_S3_BUCKET/REGION unset (not an hf-cache runner) - skipping sync"
+            exit 0
+          fi
+          # The benchmark image may not ship the AWS CLI, so fall back to a
+          # throwaway venv when it's absent.
+          AWS=aws
+          if ! command -v aws >/dev/null 2>&1; then
+            python3 -m venv /tmp/awscli-venv
+            /tmp/awscli-venv/bin/pip install --quiet awscli==1.45.39
+            AWS=/tmp/awscli-venv/bin/aws
+          fi
+          for sub in hub flashinfer; do
+            if [[ -d "${HF_CACHE}/${sub}" ]]; then
+              "${AWS}" s3 sync "${HF_CACHE}/${sub}" "s3://${HF_CACHE_S3_BUCKET}/${sub}" \
+                --region "${HF_CACHE_S3_REGION}" --no-progress
+            else
+              echo "No ${HF_CACHE}/${sub} to sync - skipping"
+            fi
+          done

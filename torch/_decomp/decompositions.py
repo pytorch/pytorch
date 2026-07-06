@@ -5704,13 +5704,16 @@ def multi_margin_loss(
             weight.ndim == 1 and weight.numel() == dim,  # type: ignore[union-attr]
             lambda: f"inconsistent weight size, expected {dim} but got {weight.shape}",  # type: ignore[union-attr]
         )
+    # Keep 1D target for weight indexing
+    target_1d = target
     target = target.unsqueeze(1)
     u = torch.gather(input, dim=1, index=target)
     z = margin - u + input
     z = z.clamp_min(0)
     z = z if p == 1 else z * z
     if weight is not None:
-        z = z * weight[target]
+        # Use 1D indexing to avoid issues with advanced indexing in inductor
+        z = z * weight[target_1d].unsqueeze(1)
     idx = torch.arange(dim, device=input.device)
     z = torch.where(idx != target, z, 0)
     if reduction == Reduction.MEAN.value:
