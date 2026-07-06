@@ -74,12 +74,10 @@ ENV UV_INDEX_STRATEGY="unsafe-best-match"
 # Use copy mode to avoid hardlink failures with Docker cache mounts
 ENV UV_LINK_MODE=copy
 
-# The pytorch CI base image provides Python as an activated venv (VIRTUAL_ENV +
-# PATH), which is the interpreter `python3 setup.py` and `uv pip freeze` use.
-# `uv pip install --system` deliberately bypasses that venv and targets the
-# separate /usr system python, so torch would land where the build can't see it.
-# Omit --system here so installs land in the active venv. The vllm-base stage
-# below creates and activates its own /opt/venv and is handled separately.
+# The manylinux base exposes cp312 on PATH but no activated venv, so uv pip has
+# no venv to install into. UV_SYSTEM_PYTHON targets that cp312 system python
+# (the interpreter python3/setup.py use via PATH).
+ENV UV_SYSTEM_PYTHON=1
 
 WORKDIR /workspace
 
@@ -226,10 +224,10 @@ RUN if command -v apt-get >/dev/null; then \
     && ln -s /opt/venv/bin/pip /usr/bin/pip \
     && python3 --version && python3 -m pip --version
 
-# The pytorch CI FINAL_BASE_IMAGE already provides an activated venv (with pip)
-# on PATH, which shadows the bare /opt/venv created above. As in the base stage,
-# omit --system below so installs land in that active venv - the same interpreter
-# python3 and the pip freeze checks use.
+# The manylinux FINAL_BASE_IMAGE has no activated venv (cp312 on PATH shadows the
+# bare /opt/venv created above). As in the base stage, target the cp312 system
+# python via UV_SYSTEM_PYTHON.
+ENV UV_SYSTEM_PYTHON=1
 
 # Get the torch versions, and whls used in previous stage
 COPY --from=base /workspace/torch_build_versions.txt ./torch_build_versions.txt
