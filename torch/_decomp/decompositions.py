@@ -3190,9 +3190,20 @@ def _max_unpoolnd(
                 f"spatial dimensions, but got output_size[{i}]={size}"
             ),
         )
+
+    # The native CPU kernel preserves the input's memory format
+    # (aten/src/ATen/native/MaxUnpooling.cpp uses suggest_memory_format),
+    # while the CUDA kernel and the 3d kernels always return contiguous output.
+    def _restride(t: TensorLike) -> TensorLike:
+        if dim == 2 and self.device.type == "cpu":
+            return t.contiguous(memory_format=utils.suggest_memory_format(self))
+        return t
+
     output_shape = list(self.shape[:-dim]) + list(output_size)
     if any(s == 0 for s in output_shape):
-        return self.new_zeros(output_shape)
+        # The native CPU kernel still applies the memory format to the empty
+        # output (resize_ runs before the numel()==0 guard); mirror it here.
+        return _restride(self.new_zeros(output_shape))
     nc = reduce(operator.mul, self.shape[:-dim])
     hw = reduce(operator.mul, output_size)
     indices_nc_shape = [1] * self.ndim
@@ -3205,6 +3216,7 @@ def _max_unpoolnd(
     result = aten._unsafe_index_put(
         output.reshape(-1), [indices_flat], self.reshape(-1), accumulate=False
     ).view(output.shape)
+    return _restride(result)
 
     # Match the CPU max_unpool2d layout behavior: the native 4D path resizes
     # the output with self.suggest_memory_format(), preserving channels-last.
