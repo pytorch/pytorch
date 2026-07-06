@@ -3464,8 +3464,8 @@ class TestReductions(TestCase):
         self.assertEqual(res1, res2.to(dtype=dtype))
 
 
-
     @onlyCPU
+    @dtypes(torch.int32, torch.int64)
     def test_nansum_int_out_dtype_matches_inductor(self, device, dtype):
         # Eager/inductor parity for #183318.
         out_dtype = dtype
