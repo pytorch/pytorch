@@ -103,14 +103,23 @@ void initCuptiMonitorBindings(py::module& m) {
       [](uintptr_t subscriber,
          uintptr_t get_next_record_fn,
          uint32_t fence_kind,
-         int fence_end_field) {
+         int fence_end_field,
+         uintptr_t flush_fn,
+         uint64_t flush_period_ns) {
         CuptiMonitorDecoder::get().configure(
-            subscriber, get_next_record_fn, fence_kind, fence_end_field);
+            subscriber,
+            get_next_record_fn,
+            fence_kind,
+            fence_end_field,
+            flush_fn,
+            flush_period_ns);
       },
       py::arg("subscriber"),
       py::arg("get_next_record_fn"),
       py::arg("fence_kind") = 0,
-      py::arg("fence_end_field") = -1);
+      py::arg("fence_end_field") = -1,
+      py::arg("flush_fn") = 0,
+      py::arg("flush_period_ns") = 0);
   // Drop noisy runtime/driver records by cbid in the decoder. filters: {kind:
   // (keep_mode, [cbids])} -- keep_mode True keeps only those cbids (driver
   // allowlist), False drops them (runtime blocklist). cbid_field_id is the cbid

@@ -360,6 +360,13 @@ class _PyLibCupti:
         flush race that corrupts the HES heap and freezes the decode worker."""
         self._check(self._lib.cuptiActivityFlushAll(0), "cuptiActivityFlushAll")
 
+    def activity_flush_all_address(self) -> int:
+        """Address of ``cuptiActivityFlushAll`` so the native monitor can drive the
+        periodic plain flush from its own thread without holding the GIL (the native
+        flusher calls it as ``fn(0)`` -- completed buffers only, never forced). Same
+        address-passing pattern as :meth:`get_next_record_fn_address`."""
+        return ctypes.cast(self._lib.cuptiActivityFlushAll, ctypes.c_void_p).value or 0
+
     def activity_get_num_dropped_records(self, ctx: int, stream_id: int) -> int:
         dropped = ctypes.c_size_t()
         rc = self._lib.cuptiActivityGetNumDroppedRecords(
