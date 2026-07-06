@@ -50,6 +50,93 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
             torch.randn(16, 32),
         )
 
+    @with_comms
+    def test_auto_registered_batch_norm_functional(self):
+        self.assertIn(
+            torch.ops.aten._native_batch_norm_legit_functional.default,
+            DTensor._op_dispatcher.sharding_propagator.op_single_dim_strategy_funcs,
+        )
+        device_mesh = self.build_device_mesh()
+        input = torch.arange(
+            8 * 4 * 3 * 3, device=self.device_type, dtype=torch.float32
+        ).reshape(8, 4, 3, 3)
+        input = input / input.numel()
+        weight = torch.linspace(0.5, 1.1, 4, device=self.device_type)
+        bias = torch.linspace(-0.2, 0.2, 4, device=self.device_type)
+        running_mean = torch.zeros(4, device=self.device_type)
+        running_var = torch.ones(4, device=self.device_type)
+
+        expected = torch.ops.aten._native_batch_norm_legit_functional(
+            input,
+            weight,
+            bias,
+            running_mean,
+            running_var,
+            True,
+            0.1,
+            1e-5,
+        )
+
+        dinput = distribute_tensor(input, device_mesh, [Shard(1)])
+        dweight = distribute_tensor(weight, device_mesh, [Shard(0)])
+        dbias = distribute_tensor(bias, device_mesh, [Shard(0)])
+        drunning_mean = distribute_tensor(running_mean, device_mesh, [Shard(0)])
+        drunning_var = distribute_tensor(running_var, device_mesh, [Shard(0)])
+
+        result = torch.ops.aten._native_batch_norm_legit_functional(
+            dinput,
+            dweight,
+            dbias,
+            drunning_mean,
+            drunning_var,
+            True,
+            0.1,
+            1e-5,
+        )
+
+        self.assertEqual(len(result), 5)
+        expected_placements = (Shard(1), Shard(0), Shard(0), Shard(0), Shard(0))
+        for output, placements in zip(result, expected_placements):
+            self.assertEqual(output.placements, (placements,))
+        for actual, expected_tensor in zip(result, expected):
+            self.assertEqual(actual.full_tensor(), expected_tensor)
+
+    @with_comms
+    def test_auto_registered_explicit_out_variant(self):
+        self.assertNotIn("out", torch.ops.aten.max.dim_max._schema.overload_name)
+        self.assertTrue(
+            any(
+                argument.is_out
+                for argument in torch.ops.aten.max.dim_max._schema.arguments
+            )
+        )
+        self.assertIn(
+            torch.ops.aten.max.dim_max,
+            DTensor._op_dispatcher.sharding_propagator.op_single_dim_strategy_funcs,
+        )
+        device_mesh = self.build_device_mesh()
+        input = torch.arange(
+            8 * 4, device=self.device_type, dtype=torch.float32
+        ).reshape(8, 4)
+        expected_values, expected_indices = torch.max(input, dim=1)
+
+        dinput = distribute_tensor(input, device_mesh, [Shard(0)])
+        dvalues = distribute_tensor(
+            torch.empty_like(expected_values), device_mesh, [Shard(0)]
+        )
+        dindices = distribute_tensor(
+            torch.empty_like(expected_indices), device_mesh, [Shard(0)]
+        )
+
+        result = torch.max(dinput, dim=1, out=(dvalues, dindices))
+
+        self.assertIs(result[0], dvalues)
+        self.assertIs(result[1], dindices)
+        self.assertEqual(dvalues.placements, (Shard(0),))
+        self.assertEqual(dindices.placements, (Shard(0),))
+        self.assertEqual(dvalues.full_tensor(), expected_values)
+        self.assertEqual(dindices.full_tensor(), expected_indices)
+
     def test_detach(self):
         device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
@@ -220,6 +307,25 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
         self.assertTrue(res.placements == tuple(replica_spec))
         self.assertEqual(replicate_out.to_local(), expected_dt.to_local())
 
+    def test_eye_out_sharded_rejected(self):
+        mesh = self.build_device_mesh()
+        input_size = (8, 8)
+
+        for placement in (Shard(0), Shard(1)):
+            local_size = list(input_size)
+            local_size[placement.dim] //= self.world_size
+            local_tensor = torch.empty(*local_size, device=self.device_type)
+            dtensor = DTensor.from_local(
+                local_tensor,
+                mesh,
+                [placement],
+                shape=torch.Size(input_size),
+                stride=(input_size[1], 1),
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "no valid sharding strategy"):
+                torch.eye(input_size[0], input_size[1], out=dtensor)
+
     def test_empty_like(self):
         device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
@@ -293,7 +399,11 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
         if not (dist_tensor.shape == (4, 8)):
             raise AssertionError(f"Expected shape (4, 8), got {dist_tensor.shape}")
 
-        ones_like_dt = torch.ones_like(dist_tensor)
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            ones_like_dt = torch.ones_like(dist_tensor)
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+        self.assertEqual(ones_like_dt.placements, (Replicate(),))
         ones_expected = torch.ones(dist_tensor.shape)
         self.assertEqual(ones_expected, ones_like_dt.full_tensor())
 
@@ -322,7 +432,11 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
         if not (dist_tensor.shape == (4, 8)):
             raise AssertionError(f"Expected shape (4, 8), got {dist_tensor.shape}")
 
-        zeros_like_dt = torch.zeros_like(dist_tensor)
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            zeros_like_dt = torch.zeros_like(dist_tensor)
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+        self.assertEqual(zeros_like_dt.placements, (Replicate(),))
         zeros_expected = torch.zeros(dist_tensor.shape)
         self.assertEqual(zeros_expected, zeros_like_dt.full_tensor())
 
@@ -1344,7 +1458,7 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
     def test_split_on_partial(self):
         self.run_subtests(
             {
-                "reduce_op": ["sum", "avg", "product", "min", "max"],
+                "reduce_op": ["sum", "avg", "min", "max"],
                 "split_size": [2, 3, 4],
                 "split_dim": [0, 1],
             },
@@ -1482,7 +1596,7 @@ class DistBucketizeTest(LocalDTensorTestBase):
                 self.assertEqual(
                     result.placements[0].reduce_op,
                     reduce_op,
-                    f"Expected Partial({reduce_op}) output but got {result.placements[0]}",
+                    lambda msg: f"{msg}\nExpected Partial({reduce_op}) output but got {result.placements[0]}",
                 )
                 expected = torch.bucketize(input_tensor, boundaries)
                 self.assertEqual(result.full_tensor(), expected)

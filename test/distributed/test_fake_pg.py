@@ -2,6 +2,7 @@
 
 import sys
 import unittest
+from datetime import timedelta
 
 import torch
 import torch.distributed as dist
@@ -59,6 +60,21 @@ class TestFakePG(TestCase):
         output = torch.ones(3, 3) * dist.get_rank()
         dist.all_reduce(output)
         self.assertEqual(tuple(output.shape), (3, 3))
+
+    def test_set_timeout(self):
+        # FakeProcessGroup used to inherit Backend's default set_timeout, which
+        # raised "does not support setting timeout". Setting a timeout is a
+        # no-op for a group that does no real communication, but it must not
+        # raise.
+        backend = FakeProcessGroup._create_internal(0, world_size=2)
+        backend.set_timeout(timedelta(seconds=42))
+
+    def test_set_timeout_via_dist(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+        # Forwards through ProcessGroup to the fake backend; must not raise (the
+        # default init path leaves the backend options null).
+        dist.set_timeout(timedelta(seconds=30))
 
     def test_allgather(self):
         dist.init_process_group(backend="fake", rank=1, world_size=2)
@@ -124,7 +140,7 @@ class TestFakePG(TestCase):
         default_pg = dist.distributed_c10d._get_default_group()
 
         def allgather_fn(tensor):
-            return funcol.all_gather_tensor(tensor, 0, default_pg)
+            return funcol.all_gather_single(tensor, 0, default_pg)
 
         gm = make_fx(allgather_fn)(torch.randn(2, 2, device=device_type))
         FileCheck().check("all_gather").check("wait_tensor").run(str(gm.graph))

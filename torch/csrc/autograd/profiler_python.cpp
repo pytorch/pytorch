@@ -375,8 +375,8 @@ void ValueCache::store<CallType::PyCall>(
   if (C10_UNLIKELY(locations.find(key) == locations.end())) {
     locations[key] = {
         key.line_number_,
-        at::StringView(key.filename_),
-        at::StringView(key.name_)};
+        at::StringView(std::string(key.filename_)),
+        at::StringView(std::string(key.name_))};
   }
 }
 

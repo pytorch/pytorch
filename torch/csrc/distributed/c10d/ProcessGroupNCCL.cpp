@@ -58,7 +58,11 @@ inline bool isUnsupportedFloat8(at::ScalarType t) {
   return (
       t == at::ScalarType::Float8_e5m2fnuz ||
       t == at::ScalarType::Float8_e4m3fnuz ||
-      t == at::ScalarType::Float8_e8m0fnu);
+      t == at::ScalarType::Float8_e8m0fnu
+#ifndef NCCL_SUPPORTS_FP8
+      || t == at::ScalarType::Float8_e5m2 || t == at::ScalarType::Float8_e4m3fn
+#endif
+  );
 }
 
 template <typename T, ncclDataType_t dataType>
@@ -934,6 +938,10 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       ValueError,
       at::cuda::getNumGPUs() != 0,
       "ProcessGroupNCCL is only supported with GPUs, no GPUs found!");
+  TORCH_CHECK(
+      !options_->enable_reconfigure,
+      "ProcessGroupNCCL does not support enable_reconfigure "
+      "(reconfigure-based fault tolerance).");
 
   // getNcclVersion needs to get called before launching threads which can
   // potentially call getenv. getNcclVersion internally calls setenv to set some
@@ -1236,9 +1244,6 @@ c10::intrusive_ptr<intra_node_comm::IntraNodeComm> ProcessGroupNCCL::
   }
 }
 
-void ProcessGroupNCCL::setSequenceNumberForGroup() {
-} // NCCL just starts sequence numbers at 0.
-
 uint64_t ProcessGroupNCCL::getSequenceNumberForGroup() {
   return seqCollective_;
 }
@@ -1288,10 +1293,7 @@ void ProcessGroupNCCL::waitForPendingWorks() {
   //      same order and hence no deadlocks.
   while (true) {
     {
-      std::lock(workMetaListMutex_, completedWorkListMutex_);
-      std::lock_guard<std::mutex> lockWork(workMetaListMutex_, std::adopt_lock);
-      std::lock_guard<std::mutex> lockHook(
-          completedWorkListMutex_, std::adopt_lock);
+      std::scoped_lock lock(workMetaListMutex_, completedWorkListMutex_);
 
       if (workMetaList_.empty() && completedWorkList_.empty()) {
         return;
@@ -1870,10 +1872,11 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
         lastTimePollStore = currentTime;
         auto handleError = [&](const std::string& errorMessage) {
           LOG(WARNING)
-              << pg_->logPrefix()
-              << "Failed to check the \"should dump\" flag on TCPStore, "
-              << "(maybe TCPStore server has shut down too early), with error: "
-              << errorMessage;
+              << pg_->logPrefix() << "TCPStore check for dump key \""
+              << kStoreDumpKey
+              << "\" failed (store unavailable, not absent key). Cannot detect "
+              << "remote dump signals. A rank exiting outside NCCL without "
+              << "broadcasting is a separate case. Error: " << errorMessage;
           // We give up for now assuming TCPStore has been torn down.
           return;
         };
@@ -2077,7 +2080,7 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
   // check the return value here.  We mainly use a future so we can exit early
   // if done.
   if (!terminateHeartbeatMonitorThread_.load()) {
-    // Create a error message reported from MonitorThread, so
+    // Create an error message reported from MonitorThread, so
     // we throw exception and make the whole process to be killed.
     // TODO(fduwjj): After having a hang debug wiki, we need to update the wiki
     // url here.
@@ -3981,6 +3984,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
     syncStream(device, ncclEvents_[key], ncclStream);
   }
 
+  // When nested in a coalescing manager, this per-call Work is discarded:
+  // endCoalescing returns the single Work the user tracks/waits and that owns
+  // the stash, so neither record nor enqueue this one. Mirrors collective().
+  bool enqueue =
+      !coalescing_state_ && capture_status == c10::cuda::CaptureStatus::None;
   auto work = initWork(
       device,
       rank_,
@@ -3989,7 +3997,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
       profilingTitle,
       inputs,
       outputs,
-      /*record=*/true);
+      /*record=*/enqueue);
 
   // Store references to outputs to be used by WorkNCCL::result and operator<<.
   work->outputs_ = std::make_shared<std::vector<at::Tensor>>(outputs);
@@ -3998,8 +4006,15 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
   // stream, we don't need to do anything for tensor lifetime management.
   // Otherwise, we need to stage the tensors will `work.wait()`.
   if (asyncOp) {
-    work->stashed_for_allocator_safety_->stash(inputs);
-    work->stashed_for_allocator_safety_->stash(outputs);
+    // Stash onto coalescedTensors_ when nested in a coalescing manager, so the
+    // endCoalescing Work owns it and frees it on wait(); otherwise onto `work`.
+    if (coalescing_state_) {
+      coalescedTensors_.stash(inputs);
+      coalescedTensors_.stash(outputs);
+    } else {
+      work->stashed_for_allocator_safety_->stash(inputs);
+      work->stashed_for_allocator_safety_->stash(outputs);
+    }
   }
 
   // Start event should only be recorded before the ncclGroupStart() (which
@@ -4082,7 +4097,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
   any FR events during cudagraph capture? if so, they won't be safe to poll for
   completion status.
   */
-  if (capture_status == c10::cuda::CaptureStatus::None) {
+  if (enqueue) {
     workEnqueue(work);
   }
   // TODO(whc) if the work isn't enqueued, I don't feel great about returning
@@ -4957,7 +4972,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather_coalesced(
       "ProcessGroupNCCL does not support allgather_coalesced");
 }
 
-c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather_into_tensor_coalesced(
+c10::intrusive_ptr<Work> ProcessGroupNCCL::all_gather_single_coalesced(
     std::vector<at::Tensor>& outputs,
     std::vector<at::Tensor>& inputs,
     const AllgatherOptions& opts) {
@@ -5107,7 +5122,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
   }
 }
 
-c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_scatter_base(
+c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter_single(
     at::Tensor& outputTensor,
     at::Tensor& inputTensor,
     const ReduceScatterOptions& opts) {
@@ -5187,7 +5202,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_scatter_base(
       "nccl:_reduce_scatter_base");
 }
 
-c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter_tensor_coalesced(
+c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter_single_coalesced(
     std::vector<at::Tensor>& outputs,
     std::vector<at::Tensor>& inputs,
     const ReduceScatterOptions& opts) {
@@ -5344,7 +5359,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
   return nullptr;
 }
 
-c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall_base(
+c10::intrusive_ptr<Work> ProcessGroupNCCL::all_to_all_single(
     at::Tensor& outputTensor,
     at::Tensor& inputTensor,
     std::vector<int64_t>& outputSplitSizes,
@@ -5656,7 +5671,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather(
     // if not in the root rank, initialize outputs as empty list
     assertEmptyOutputTensorList(invalidArgument, outputTensors);
     outputs = {};
-    // append a empty tensor to the list, we don't use it but the
+    // append an empty tensor to the list, we don't use it but the
     // `collective` template function requires it to invoke its function
     outputs.emplace_back();
   }
@@ -5732,7 +5747,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
     // with an empty list
     assertEmptyInputTensorList(invalidArgument, inputTensors);
     inputs = {};
-    // append a empty tensor to the list, we don't use it but the
+    // append an empty tensor to the list, we don't use it but the
     // `collective` template function requires it to invoke its function
     inputs.emplace_back();
   }
@@ -5790,7 +5805,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::recvAnysource(
       NotImplementedError, "ProcessGroupNCCL does not support recvAnysource");
 }
 
-c10::intrusive_ptr<Work> ProcessGroupNCCL::_allgather_base(
+c10::intrusive_ptr<Work> ProcessGroupNCCL::all_gather_single(
     at::Tensor& output_tensor,
     at::Tensor& input_tensor,
     const AllgatherOptions& opts) {
@@ -5942,6 +5957,7 @@ at::Tensor ProcessGroupNCCL::allocateTensor(
   return tensor;
 }
 
+#ifdef NCCL_HAS_COMM_SHRINK
 c10::intrusive_ptr<Backend> ProcessGroupNCCL::shrink(
     const std::vector<int64_t>& ranks_to_exclude,
     int shrink_flags,
@@ -6036,6 +6052,21 @@ c10::intrusive_ptr<Backend> ProcessGroupNCCL::shrink(
 
   return c10::static_intrusive_pointer_cast<Backend>(new_pg);
 }
+
+#else // !NCCL_HAS_COMM_SHRINK
+// Backend interface override: raise consistent error when shrink is
+// unsupported.
+c10::intrusive_ptr<Backend> ProcessGroupNCCL::shrink(
+    const std::vector<int64_t>& /*ranks_to_exclude*/,
+    int /*shrink_flags*/,
+    const c10::intrusive_ptr<Backend::Options>& /*opts_override*/) {
+  TORCH_CHECK(
+      false,
+      "ProcessGroupNCCL::shrink requires NCCL version 2.27.0 or later, "
+      "but PyTorch was built with an older version or without NCCL shrink support.");
+}
+
+#endif // NCCL_HAS_COMM_SHRINK
 
 void ProcessGroupNCCL::initializeDeviceStateForComm(
     const at::Device& device,

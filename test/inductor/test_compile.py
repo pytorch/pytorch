@@ -3,14 +3,21 @@ import os
 import shlex
 import subprocess
 import sys
+import tempfile
+import types
 import unittest
 from unittest import mock
 
 import torch
 from torch import _dynamo as dynamo, _inductor as inductor
 from torch._inductor import config
-from torch._inductor.codecache import write
-from torch._inductor.cpp_builder import CppBuilder, CppOptions, CppTorchOptions
+from torch._inductor.codecache import _cuda_fatbin_command, write
+from torch._inductor.cpp_builder import (
+    BuildOptionsBase,
+    CppBuilder,
+    CppOptions,
+    CppTorchOptions,
+)
 from torch._inductor.cpu_vec_isa import invalid_vec_isa
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import gen_gm_and_inputs
@@ -274,6 +281,200 @@ class TestStandaloneInductor(TestCase):
         with config.patch({"cpp.march": ""}):
             arch_flags = self._aot_cpp_arch_flags()
         self.assertEqual(arch_flags, [])
+
+    @mock.patch.dict(
+        os.environ,
+        {"TORCH_CUDA_ARCH_LIST": "7.0;8.0;8.6;9.0+PTX"},
+    )
+    @unittest.skipIf(torch.version.hip is not None, "CUDA-only")
+    def test_aoti_cuda_multi_arch_gencode_options(self):
+        from torch._inductor.codegen.cuda import compile_utils
+
+        with self.assertLogs(
+            "torch._inductor.codegen.cuda.compile_utils", level="WARNING"
+        ) as log_ctx:
+            self.assertEqual(
+                compile_utils._cuda_multi_arch_gencode_options("80"),
+                [
+                    "arch=compute_80,code=sm_80",
+                    "arch=compute_80,code=compute_80",
+                    "arch=compute_86,code=sm_86",
+                    "arch=compute_90,code=sm_90",
+                ],
+            )
+        self.assertIn("Ignoring TORCH_CUDA_ARCH_LIST entry sm_70", log_ctx.output[0])
+
+    @mock.patch.dict(
+        os.environ,
+        {"TORCH_CUDA_ARCH_LIST": "9.0;9.0a;10.0"},
+    )
+    @unittest.skipIf(torch.version.hip is not None, "CUDA-only")
+    def test_aoti_cuda_multi_arch_gencode_options_suffix_arch(self):
+        from torch._inductor.codegen.cuda import compile_utils
+
+        self.assertEqual(
+            compile_utils._cuda_multi_arch_gencode_options("90a"),
+            [
+                "arch=compute_90a,code=sm_90a",
+                "arch=compute_90a,code=compute_90a",
+            ],
+        )
+
+    @mock.patch(
+        "torch._inductor.codegen.cuda.compile_utils._nvcc_arch_as_compile_option",
+        return_value="100a",
+    )
+    @unittest.skipIf(torch.version.hip is not None, "CUDA-only")
+    def test_aoti_cuda_target_arch_preserves_suffix(self, _):
+        from torch._inductor.codegen.cuda import compile_utils
+
+        self.assertEqual(compile_utils._aoti_cuda_target_arch(), "100a")
+        with config.patch({"cuda.arch": "90"}):
+            self.assertEqual(compile_utils._aoti_cuda_target_arch(), "90a")
+        with config.patch({"cuda.arch": "90a"}):
+            self.assertEqual(compile_utils._aoti_cuda_target_arch(), "90a")
+
+    @mock.patch.dict(os.environ, {"TORCH_CUDA_ARCH_LIST": "8.0;8.6"})
+    @mock.patch(
+        "torch._inductor.codegen.cuda.compile_utils._nvcc_arch_as_compile_option",
+        return_value="100a",
+    )
+    @unittest.skipIf(torch.version.hip is not None, "CUDA-only")
+    def test_aoti_cuda_fatbin_command_uses_nvcc_for_extra_archs(self, _):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            raw_cubin = os.path.join(tmp_dir, "kernel.cubin")
+            with open(raw_cubin, "wb"):
+                pass
+            cmd = _cuda_fatbin_command(
+                "kernel.ptx",
+                "kernel.fatbin",
+                raw_cubin,
+                "nvcc",
+                "fatbinary",
+                "80",
+            )
+
+        self.assertEqual(
+            cmd[:5], ["nvcc", "-fatbin", "kernel.ptx", "-o", "kernel.fatbin"]
+        )
+        self.assertIn("arch=compute_80,code=sm_80", cmd)
+        self.assertIn("arch=compute_86,code=sm_86", cmd)
+        self.assertNotIn("arch=compute_100a,code=sm_100a", cmd)
+
+    @mock.patch.dict(os.environ, {"TORCH_CUDA_ARCH_LIST": "7.0;8.0;8.6;9.0"})
+    @mock.patch(
+        "torch._inductor.codegen.cuda.compile_utils._nvcc_arch_as_compile_option",
+        return_value="100a",
+    )
+    @unittest.skipIf(torch.version.hip is not None, "CUDA-only")
+    def test_aoti_cuda_cmake_uses_multi_arch_gencode_flags(self, _):
+        build_option = BuildOptionsBase(compiler="c++")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cmake_path = os.path.join(tmp_dir, "CMakeLists.txt")
+            cpp_builder = CppBuilder(
+                name="test_compile",
+                sources=[],
+                output_dir=tmp_dir,
+                BuildOption=build_option,
+            )
+            with config.patch({"cuda.arch": "80"}):
+                cpp_builder.save_compile_cmd_to_cmake(cmake_path, "cuda")
+            with open(cmake_path) as f:
+                cmake_contents = f.read()
+
+        self.assertNotIn("compute_70", cmake_contents)
+        self.assertNotIn("compute_100a", cmake_contents)
+        self.assertIn("-gencode arch=compute_80,code=sm_80", cmake_contents)
+        self.assertIn("-gencode arch=compute_86,code=sm_86", cmake_contents)
+        self.assertIn("-gencode arch=compute_90,code=sm_90", cmake_contents)
+
+    @unittest.skipIf(torch.version.hip is not None, "CUDA-only")
+    def test_aoti_cuda_save_kernel_recompiles_for_target_arch(self):
+        from torch._inductor.runtime.triton_heuristics import (
+            CachingAutotuner,
+            TritonCompileResult,
+        )
+
+        autotuner = object.__new__(CachingAutotuner)
+        autotuner.inductor_meta = {"kernel_name": "triton_kernel"}
+        autotuner.triton_meta = {}
+        autotuner.device_props = types.SimpleNamespace(type="cuda", cc=100)
+
+        current_binary = types.SimpleNamespace(
+            metadata=types.SimpleNamespace(name="kernel", num_warps=1, shared=0),
+            asm={"cubin": b"current cubin", "ptx": "current ptx"},
+        )
+        target_binary = types.SimpleNamespace(
+            metadata=types.SimpleNamespace(name="kernel", num_warps=1, shared=0),
+            asm={"cubin": b"target cubin", "ptx": "target ptx"},
+        )
+        target_result = object.__new__(TritonCompileResult)
+        target_result.kernel = target_binary
+
+        launcher = types.SimpleNamespace(
+            bin=current_binary,
+            config=types.SimpleNamespace(kwargs={}, num_warps=1, num_stages=1),
+            def_args=[],
+            call_args=[],
+            global_scratch=None,
+            profile_scratch=None,
+        )
+
+        with (
+            config.patch(
+                {
+                    "aot_inductor.emit_multi_arch_kernel": True,
+                    "cuda.arch": "90a",
+                }
+            ),
+            mock.patch.object(
+                CachingAutotuner,
+                "_precompile_config",
+                return_value=target_result,
+            ) as precompile_config,
+            mock.patch(
+                "torch._inductor.codecache.CudaKernelParamCache.set"
+            ) as cache_set,
+        ):
+            autotuner.save_gpu_kernel("stream", launcher)
+
+        precompile_config.assert_called_once_with(launcher.config, cc_override=90)
+        _, params, cubin, bin_type, asm, asm_type = cache_set.call_args.args
+        self.assertEqual(params["cuda_arch"], "90a")
+        self.assertEqual(cubin, b"target cubin")
+        self.assertEqual(bin_type, "cubin")
+        self.assertEqual(asm, "target ptx")
+        self.assertEqual(asm_type, "ptx")
+
+        with (
+            config.patch(
+                {
+                    "aot_inductor.emit_multi_arch_kernel": True,
+                    "cuda.arch": None,
+                }
+            ),
+            mock.patch(
+                "torch._inductor.codegen.cuda.compile_utils._nvcc_arch_as_compile_option",
+                return_value="100a",
+            ),
+            mock.patch.object(
+                CachingAutotuner,
+                "_precompile_config",
+                return_value=target_result,
+            ) as precompile_config,
+            mock.patch(
+                "torch._inductor.codecache.CudaKernelParamCache.set"
+            ) as cache_set,
+        ):
+            autotuner.save_gpu_kernel("stream", launcher)
+
+        precompile_config.assert_not_called()
+        _, params, cubin, bin_type, asm, asm_type = cache_set.call_args.args
+        self.assertEqual(params["cuda_arch"], "100a")
+        self.assertEqual(cubin, b"current cubin")
+        self.assertEqual(bin_type, "cubin")
+        self.assertEqual(asm, "current ptx")
+        self.assertEqual(asm_type, "ptx")
 
 
 if __name__ == "__main__":

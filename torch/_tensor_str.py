@@ -333,14 +333,6 @@ def _tensor_str(self, indent):
     if self.numel() == 0:
         return "[]"
 
-    if self.has_names():
-        # There are two main codepaths (possibly more) that tensor printing goes through:
-        # - tensor data can fit comfortably on screen
-        # - tensor data needs to be summarized
-        # Some of the codepaths don't fully support named tensors, so we send in
-        # an unnamed tensor to the formatting code as a workaround.
-        self = self.rename(None)
-
     summarize = self.numel() > PRINT_OPTS.threshold
 
     if self._is_zerotensor():
@@ -667,9 +659,6 @@ def _str_intern(inp, *, tensor_contents=None):
         suffixes.append(f"grad_fn=<{grad_fn_name}>")
     elif inp.requires_grad:
         suffixes.append("requires_grad=True")
-
-    if self.has_names():
-        suffixes.append(f"names={self.names}")
 
     if tangent is not None:
         suffixes.append(f"tangent={tangent}")
