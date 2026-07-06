@@ -587,6 +587,65 @@ class TestFP8Lowering(TestCase):
         self.assertEqual(expected, actual)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @skipIfRocm(msg="FP8 scaled_mm tensorwise eager path is not supported by hipBLAS")
+    @onlyCUDA
+    @parametrize(
+        "scale_a_shape,scale_b_shape",
+        [
+            ((1,), ()),
+            ((), (1,)),
+            ((1, 1, 1), ()),
+            ((1, 1, 1), (1,)),
+            ((1, 1, 1), (1, 1)),
+        ],
+    )
+    def test_scaled_mm_mixed_tensorwise_scale_ranks(
+        self, scale_a_shape, scale_b_shape, device
+    ):
+        M = N = K = 64
+        x_fp8 = torch.ones(M, K, device=device, dtype=torch.float8_e4m3fn)
+        w_fp8 = torch.ones(N, K, device=device, dtype=torch.float8_e4m3fn)
+        scale_a = torch.ones(scale_a_shape, device=device)
+        scale_b = torch.ones(scale_b_shape, device=device)
+
+        def fn(x_fp8, w_fp8, scale_a, scale_b):
+            return torch._scaled_mm(
+                x_fp8,
+                w_fp8.T,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.float32,
+            )
+
+        expected = fn(x_fp8, w_fp8, scale_a, scale_b)
+        actual = torch.compile(fn, fullgraph=True)(x_fp8, w_fp8, scale_a, scale_b)
+        self.assertEqual(expected, actual, rtol=1e-2, atol=1e-2)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @skipIfRocm(msg="FP8 scaled_mm tensorwise eager path is not supported by hipBLAS")
+    @onlyCUDA
+    def test_scaled_mm_rejects_high_rank_scale_b(self, device):
+        M = N = K = 64
+        x_fp8 = torch.ones(M, K, device=device, dtype=torch.float8_e4m3fn)
+        w_fp8 = torch.ones(N, K, device=device, dtype=torch.float8_e4m3fn)
+        scale_a = torch.ones(1, 1, 1, device=device)
+        scale_b = torch.ones(1, 1, 1, device=device)
+
+        def fn(x_fp8, w_fp8, scale_a, scale_b):
+            return torch._scaled_mm(
+                x_fp8,
+                w_fp8.T,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.float32,
+            )
+
+        with self.assertRaisesRegex(RuntimeError, r"t\(\) expects"):
+            fn(x_fp8, w_fp8, scale_a, scale_b)
+        with self.assertRaisesRegex(RuntimeError, r"t\(\) expects"):
+            torch.compile(fn, fullgraph=True)(x_fp8, w_fp8, scale_a, scale_b)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("dtype", (torch.bfloat16, torch.float32))
     @parametrize("shape", ("16,16,32", "16,32,32", "1024,1024,512"))
     @parametrize("has_bias", (False, True))
@@ -676,7 +735,9 @@ class TestFP8Lowering(TestCase):
             else:
                 self.assertEqual(y_eager, y_compiled, rtol=1e-2, atol=0.05)
 
-    def _test_scaled_mm_preserves_strides_impl(self, device):
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @onlyOn(["cuda", "xpu", "cpu"])
+    def test_scaled_mm_preserves_strides(self, device):
         """Test that scaled_mm preserves stride ordering through a custom pass."""
 
         GPU_TYPE = device
@@ -771,19 +832,6 @@ class TestFP8Lowering(TestCase):
             self.assertIn("scaled_mm", wrapper.lower())
             # The clones should be visible in the generated code
             self.assertIn("clone", wrapper.lower())
-
-    # TODO: collapse this back into one test once fixed on CUDA and XPU.
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
-    def test_scaled_mm_preserves_strides_cpu_actual(self):
-        self._test_scaled_mm_preserves_strides_impl("cpu")
-
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
-    # TODO (eellison): fails with:
-    # "RuntimeError: mat2 must be col_major, got stride (64, 1)".
-    @unittest.expectedFailure
-    @onlyOn(["cuda", "xpu"])
-    def test_scaled_mm_preserves_strides(self, device):
-        self._test_scaled_mm_preserves_strides_impl(device)
 
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
@@ -1491,7 +1539,7 @@ class TestFP8Lowering(TestCase):
                     self.assertEqual(
                         input_values[0][i],
                         input_values[1][i],
-                        msg=f"idx {i} seed {seed}",
+                        msg=lambda msg: f"{msg}\nidx {i} seed {seed}",
                     )
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
@@ -1568,6 +1616,91 @@ class TestFP8Lowering(TestCase):
         self.assertEqual(y_eager.dtype, dtype)
         self.assertEqual(y_compiled.dtype, dtype)
         torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.07)
+
+    @onlyOn(["cuda", "xpu"])
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    def test_scaled_mm_v2_no_swizzle(self, device):
+        """Regression test: _scaled_mm_v2 must not segfault when swizzle is
+        omitted (empty) or explicitly set to NO_SWIZZLE."""
+        from torch.nn.functional import SwizzleType
+
+        m, k, n = 32, 64, 16
+        dtype_float8 = torch.float8_e4m3fn
+        dtype_float8 = _fix_fp8_dtype_for_rocm(dtype_float8, device)
+        a = torch.randn(m, k, device=device, dtype=torch.bfloat16).to(dtype_float8)
+        b = torch.randn(n, k, device=device, dtype=torch.bfloat16).to(dtype_float8).t()
+        scale_a = torch.ones(1, device=device)
+        scale_b = torch.ones(1, device=device)
+
+        # swizzle omitted (None -> empty list in C++)
+        out_no_swizzle = scaled_mm(
+            a,
+            b,
+            scale_a=scale_a,
+            scale_recipe_a=ScalingType.TensorWise,
+            scale_b=scale_b,
+            scale_recipe_b=ScalingType.TensorWise,
+            output_dtype=torch.bfloat16,
+        )
+        self.assertEqual(out_no_swizzle.shape, (m, n))
+
+        # swizzle explicitly NO_SWIZZLE
+        out_explicit = scaled_mm(
+            a,
+            b,
+            scale_a=scale_a,
+            scale_recipe_a=ScalingType.TensorWise,
+            swizzle_a=SwizzleType.NO_SWIZZLE,
+            scale_b=scale_b,
+            scale_recipe_b=ScalingType.TensorWise,
+            swizzle_b=SwizzleType.NO_SWIZZLE,
+            output_dtype=torch.bfloat16,
+        )
+        self.assertEqual(out_no_swizzle, out_explicit)
+
+    @onlyCUDA
+    @skipIfRocm  # ROCm MX gemm requires NO_SWIZZLE; swizzle is NVIDIA-only
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, "Not supported on non B200")
+    def test_scaled_mm_v2_swizzle_compile(self, device):
+        """Swizzled scales (MX recipes on NVIDIA require SWIZZLE_32_4_4) are
+        not supported by any inductor template; the lowering must fall back
+        to the ATen kernel instead of failing compile."""
+        from torch.nn.functional import SwizzleType
+
+        M, K, N = 128, 128, 128
+        BLOCK_SIZE = 32
+        A_ref = torch.eye(M, device=device, dtype=torch.bfloat16)
+        B_ref = torch.eye(N, device=device, dtype=torch.bfloat16)
+        A = A_ref.to(torch.float8_e4m3fn)
+        B = B_ref.to(torch.float8_e4m3fn)
+        A_scale = torch.full(
+            (M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu
+        )
+        B_scale = torch.full(
+            (N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu
+        )
+        A_scale = to_blocked(A_scale)
+        B_scale = to_blocked(B_scale)
+
+        def fn(A, B, A_scale, B_scale):
+            return scaled_mm(
+                A,
+                B.t(),
+                A_scale,
+                ScalingType.BlockWise1x32,
+                B_scale,
+                ScalingType.BlockWise1x32,
+                swizzle_a=SwizzleType.SWIZZLE_32_4_4,
+                swizzle_b=SwizzleType.SWIZZLE_32_4_4,
+                output_dtype=torch.bfloat16,
+            )
+
+        y_eager = fn(A, B, A_scale, B_scale)
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+        y_compiled, (code,) = run_and_get_code(compiled, A, B, A_scale, B_scale)
+        torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.07)
+        # The swizzled path must use the ATen fallback, not a generated kernel
+        FileCheck().check("_scaled_mm_v2").run(code)
 
     @onlyOn(["cuda", "xpu"])
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, "Not supported on non B200")

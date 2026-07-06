@@ -13,8 +13,10 @@ from torch.fx.experimental.dynamic_spec import (
     IntVar,
     ObjectSpec,
     ParamsSpec,
+    SeqSpec,
     ShapesSpec,
     ShapeVar,
+    STATIC,
     TensorSpec,
 )
 from torch.fx.experimental.symbolic_shapes import (
@@ -273,19 +275,19 @@ class TestTensorSpecConstruction(TestCase):
         self.assertIsNone(ts[1])
 
     def test_len(self):
-        ts = TensorSpec([None, None, None])
+        ts = TensorSpec([None, None, STATIC])
         self.assertEqual(len(ts), 3)
 
     def test_iter(self):
         sv = ShapeVar("batch")
-        ts = TensorSpec([sv, None])
+        ts = TensorSpec([sv, STATIC])
         items = list(ts)
         self.assertEqual(len(items), 2)
         self.assertIs(items[0], sv)
         self.assertIsNone(items[1])
 
     def test_index_out_of_range(self):
-        ts = TensorSpec([None, None])
+        ts = TensorSpec([None, STATIC])
         with self.assertRaises(IndexError):
             ts[5]
 
@@ -311,7 +313,7 @@ class TestParamsSpecConstruction(TestCase):
 
     def test_shapes_spec_repr(self):
         sv = ShapeVar("batch")
-        ss = ShapesSpec(params=ParamsSpec({"x": TensorSpec([sv, None])}))
+        ss = ShapesSpec(params=ParamsSpec({"x": TensorSpec([sv, STATIC])}))
         self.assertEqual(
             repr(ss),
             """\
@@ -327,7 +329,7 @@ shapes_spec:
         A = ShapeVar("a")
         B = ShapeVar("b")
         ss = ShapesSpec(
-            params={"x": TensorSpec([A, None]), "y": TensorSpec([B, None])},
+            params={"x": TensorSpec([A, STATIC]), "y": TensorSpec([B, STATIC])},
             assumptions=[A > B, A + B > 10],
         )
         self.assertEqual(
@@ -352,7 +354,7 @@ shapes_spec:
         A = ShapeVar("a")
         B = ShapeVar("b")
         ss = ShapesSpec(
-            params={"x": TensorSpec([A, None])},
+            params={"x": TensorSpec([A, STATIC])},
             assumptions=[A > B, A + B > 10],
         )
         self.assertEqual(
@@ -386,7 +388,7 @@ shapes_spec:
         ps = ParamsSpec(
             {
                 "x": TensorSpec([sv]),
-                "*args": [TensorSpec([sv]), None],
+                "*args": [TensorSpec([sv]), STATIC],
                 "**kwargs": {"foo": IntVar("k")},
             }
         )
@@ -409,7 +411,7 @@ x:
         ps = ParamsSpec(
             {
                 "x": TensorSpec([ShapeVar("batch")]),
-                "*args": [TensorSpec([ShapeVar("a")]), None],
+                "*args": [TensorSpec([ShapeVar("a")]), STATIC],
                 "**kwargs": {"foo": IntVar("k")},
             }
         )
@@ -483,11 +485,11 @@ class TestShapeVarCompile(TestCase):
         compiled = torch.compile(
             fn,
             backend="eager",
-            shapes_spec={"n": 10},
+            dynamic_shapes={"n": 10},
         )
         with self.assertRaisesRegex(
             torch._dynamo.exc.InternalTorchDynamoError,
-            r"shapes_spec declares L\['n'\] as static with value 10, but got 42",
+            r"shapes_spec declared L\['n'\] as static with value 10, but got 42 at trace time",
         ):
             compiled(torch.randn(4), 42)
 
@@ -500,7 +502,7 @@ class TestShapeVarCompile(TestCase):
         compiled = torch.compile(
             fn,
             backend="eager",
-            shapes_spec={"x": TensorSpec([ShapeVar("batch"), 3])},
+            dynamic_shapes={"x": TensorSpec([ShapeVar("batch"), 3])},
         )
         with self.assertRaisesRegex(
             torch._dynamo.exc.InternalTorchDynamoError,
@@ -514,7 +516,7 @@ class TestShapeVarCompile(TestCase):
         fn = torch.compile(
             lambda x: x.sum(0),
             backend=backend,
-            shapes_spec={"x": TensorSpec([ShapeVar("batch"), None])},
+            dynamic_shapes={"x": TensorSpec([ShapeVar("batch"), STATIC])},
         )
         for n in [4, 8, 16, 32]:
             fn(torch.randn(n, 3))
@@ -522,7 +524,7 @@ class TestShapeVarCompile(TestCase):
         self.assertEqual(len(backend.graphs), 1)
         shape = _tensor_placeholder_shape(backend.graphs[0])
         self.assertIsInstance(shape[0], torch.SymInt)
-        self.assertGreater(len(free_unbacked_symbols(shape[0])), 0)
+        self.assertEqual(len(free_unbacked_symbols(shape[0])), 1)
 
     @_fx_experimental_config.patch(no_data_dependent_graph_break=True)
     def test_unbacked_raises_dde_on_branching(self):
@@ -538,7 +540,7 @@ class TestShapeVarCompile(TestCase):
             fn,
             backend="eager",
             fullgraph=True,
-            shapes_spec={"x": TensorSpec([ShapeVar(), None])},
+            dynamic_shapes={"x": TensorSpec([ShapeVar(), STATIC])},
         )
         with self.assertRaises(GuardOnDataDependentSymNode) as cm:
             compiled(torch.randn(10, 3))
@@ -550,6 +552,37 @@ class TestShapeVarCompile(TestCase):
             msg=f"expected unbacked symbol (u-prefix), got {sym!r}",
         )
 
+    def test_non_strict_raw_unbacked_symint_input_raises_dde_on_branching(self):
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        def fn(n):
+            if n > 1:
+                return torch.ones(())
+            return torch.zeros(())
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        n = ShapeEnv().create_unbacked_symint()
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "Could not guard on data-dependent expression",
+        ):
+            with torch.compiler._non_strict_tracing_context():
+                compiled(n)
+
+    def test_raw_unbacked_symint_input_graph_breaks_outside_non_strict(self):
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        def fn(n):
+            return torch.ones((n,))
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        n = ShapeEnv().create_unbacked_symint()
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Attempted to wrap unbacked SymInt",
+        ):
+            compiled(n)
+
     def test_none_entry_is_static(self):
         """A ``None`` entry is implicit static.
         Each distinct shape at dim 1 triggers a recompile."""
@@ -559,7 +592,7 @@ class TestShapeVarCompile(TestCase):
             lambda x: x + 1,
             fullgraph=True,
             backend=backend,
-            shapes_spec={"x": ts},
+            dynamic_shapes={"x": ts},
         )
 
         fn(torch.randn(4, 3))
@@ -582,7 +615,7 @@ class TestShapeVarCompile(TestCase):
         compiled = torch.compile(
             fn,
             backend=backend,
-            shapes_spec={"x": TensorSpec([ShapeVar("batch")])},
+            dynamic_shapes={"x": TensorSpec([ShapeVar("batch")])},
         )
 
         compiled(torch.randn(2), 10)
@@ -607,7 +640,7 @@ class TestShapeVarCompile(TestCase):
         compiled = torch.compile(
             fn,
             backend=backend,
-            shapes_spec={"x": TensorSpec([ShapeVar("batch"), None])},
+            dynamic_shapes={"x": TensorSpec([ShapeVar("batch"), STATIC])},
         )
         x = torch.randn(12, 3)
         compiled(x, torch.randn(4, 3))
@@ -628,12 +661,12 @@ class TestShapeVarCompile(TestCase):
         self.assertIsInstance(y_shape[1], int)
 
     def test_params_spec_shorthand(self):
-        """shapes_spec=ParamsSpec(...) is auto-wrapped into ShapesSpec."""
+        """dynamic_shapes=ParamsSpec(...) is auto-wrapped into ShapesSpec."""
         backend = EagerAndRecordGraphs()
         fn = torch.compile(
             lambda x: x.sum(0),
             backend=backend,
-            shapes_spec=ParamsSpec({"x": TensorSpec([ShapeVar("batch"), None])}),
+            dynamic_shapes=ParamsSpec({"x": TensorSpec([ShapeVar("batch"), STATIC])}),
         )
         for n in [4, 8, 16]:
             fn(torch.randn(n, 3))
@@ -641,13 +674,13 @@ class TestShapeVarCompile(TestCase):
         self.assertEqual(len(backend.graphs), 1)
 
     def test_dict_shorthand(self):
-        """shapes_spec={...} (bare dict) is auto-wrapped into
+        """dynamic_shapes={...} (bare dict) is auto-wrapped into
         ShapesSpec(params=ParamsSpec(dict))."""
         backend = EagerAndRecordGraphs()
         fn = torch.compile(
             lambda x: x.sum(0),
             backend=backend,
-            shapes_spec={"x": TensorSpec([ShapeVar("batch"), None])},
+            dynamic_shapes={"x": TensorSpec([ShapeVar("batch"), STATIC])},
         )
         for n in [4, 8, 16]:
             fn(torch.randn(n, 3))
@@ -656,8 +689,10 @@ class TestShapeVarCompile(TestCase):
     def test_normalize_rejects_bad_type(self):
         """Passing something that's not dict/ParamsSpec/ShapesSpec/None
         should raise TypeError at compile entry."""
-        with self.assertRaisesRegex(TypeError, "shapes_spec must be"):
-            torch.compile(lambda x: x, shapes_spec="not a spec")
+        with self.assertRaisesRegex(
+            TypeError, "dynamic spec expects a dict, ShapesSpec, or ParamsSpec"
+        ):
+            torch.compile(lambda x: x, dynamic_shapes="not a spec")
 
     @_fx_experimental_config.patch(no_data_dependent_graph_break=True)
     def test_min_max_bypasses_dde_on_branching(self):
@@ -674,24 +709,26 @@ class TestShapeVarCompile(TestCase):
             fn,
             backend="eager",
             fullgraph=True,
-            shapes_spec={"x": TensorSpec([ShapeVar("batch", min=10, max=100), None])},
+            dynamic_shapes={
+                "x": TensorSpec([ShapeVar("batch", min=10, max=100), STATIC])
+            },
         )
         # min=10 > 5 → branch resolves statically, no DDE.
         compiled(torch.randn(20, 3))
 
     def test_shapes_spec_with_dynamic_raises(self):
         """Setting both shapes_spec and dynamic should raise ValueError."""
-        ts = TensorSpec([ShapeVar("batch"), None])
+        ts = TensorSpec([ShapeVar("batch"), STATIC])
         for dynamic in (True, False):
             with self.assertRaisesRegex(
                 ValueError,
-                r"`dynamic` and `shapes_spec` cannot both be set",
+                r"`dynamic` and `dynamic_shapes` cannot both be set",
             ):
                 torch.compile(
                     lambda x: x + 1,
                     backend="eager",
                     dynamic=dynamic,
-                    shapes_spec={"x": ts},
+                    dynamic_shapes={"x": ts},
                 )
 
     def test_tensor_dim_optimization_hint_in_shape_env(self):
@@ -700,8 +737,8 @@ class TestShapeVarCompile(TestCase):
         fn = torch.compile(
             lambda x: x.sum(0),
             backend=backend,
-            shapes_spec={
-                "x": TensorSpec([ShapeVar("batch", optimization_hint=32), None])
+            dynamic_shapes={
+                "x": TensorSpec([ShapeVar("batch", optimization_hint=32), STATIC])
             },
         )
         fn(torch.randn(8, 3))
@@ -721,7 +758,7 @@ class TestShapeVarCompile(TestCase):
         compiled = torch.compile(
             fn,
             backend=backend,
-            shapes_spec={"n": IntVar("size", optimization_hint=128)},
+            dynamic_shapes={"n": IntVar("size", optimization_hint=128)},
         )
         compiled(torch.randn(4), 100)
         sym = None
@@ -760,9 +797,9 @@ class TestShapeVarDedup(TestCase):
             fn,
             backend="eager",
             fullgraph=True,
-            shapes_spec={
-                "x": TensorSpec([B, None]),
-                "y": TensorSpec([B, None]),
+            dynamic_shapes={
+                "x": TensorSpec([B, STATIC]),
+                "y": TensorSpec([B, STATIC]),
             },
         )
         out = compiled(torch.randn(8, 3), torch.randn(8, 4))
@@ -782,8 +819,8 @@ class TestShapeVarDedup(TestCase):
             fn,
             backend="eager",
             fullgraph=True,
-            shapes_spec={
-                "x": TensorSpec([B, None]),
+            dynamic_shapes={
+                "x": TensorSpec([B, STATIC]),
                 "n": B,
             },
         )
@@ -803,7 +840,7 @@ class TestShapeVarDedup(TestCase):
             fn,
             backend="eager",
             fullgraph=True,
-            shapes_spec={"a": S, "b": S},
+            dynamic_shapes={"a": S, "b": S},
         )
         self.assertEqual(compiled(4, 4), 8)
 
@@ -845,7 +882,7 @@ class TestShapeVarDedup(TestCase):
             fn,
             backend=grab_env,
             fullgraph=True,
-            shapes_spec={
+            dynamic_shapes={
                 "x": TensorSpec([B, None]),
                 "y": TensorSpec([B, None]),
             },
@@ -884,9 +921,9 @@ class TestShapeVarDedup(TestCase):
             fn,
             backend="eager",
             fullgraph=True,
-            shapes_spec={
-                "x": TensorSpec([A, None]),
-                "y": TensorSpec([B, None]),
+            dynamic_shapes={
+                "x": TensorSpec([A, STATIC]),
+                "y": TensorSpec([B, STATIC]),
             },
         )
         with self.assertRaisesRegex(
@@ -917,9 +954,9 @@ class TestDerivedDimSpec(TestCase):
             fn,
             backend="eager",
             fullgraph=True,
-            shapes_spec={
-                "x": TensorSpec([B, None]),
-                "y": TensorSpec([B * 2, None]),
+            dynamic_shapes={
+                "x": TensorSpec([B, STATIC]),
+                "y": TensorSpec([B * 2, STATIC]),
             },
         )
         # Correct: y.shape[0] = 8 = 2 * x.shape[0]
@@ -938,7 +975,7 @@ class TestDerivedDimSpec(TestCase):
             fn,
             backend="eager",
             fullgraph=True,
-            shapes_spec={
+            dynamic_shapes={
                 "x": TensorSpec([B, None]),
                 "y": TensorSpec([Y, None]),
             },
@@ -966,10 +1003,10 @@ class TestDerivedDimSpec(TestCase):
             fn,
             backend="eager",
             fullgraph=True,
-            shapes_spec={
-                "x": TensorSpec([A, None]),
-                "y": TensorSpec([B, None]),
-                "z": TensorSpec([A * B + 1, None]),
+            dynamic_shapes={
+                "x": TensorSpec([A, STATIC]),
+                "y": TensorSpec([B, STATIC]),
+                "z": TensorSpec([A * B + 1, STATIC]),
             },
         )
         # Correct: z.shape[0] = 3 * 4 + 1 = 13
@@ -988,7 +1025,7 @@ class TestDerivedDimSpec(TestCase):
             fn,
             backend="eager",
             fullgraph=True,
-            shapes_spec={
+            dynamic_shapes={
                 "x": TensorSpec([A, None]),
                 "y": TensorSpec([B, None]),
                 "z": TensorSpec([Z, None]),
@@ -1015,7 +1052,7 @@ class TestDerivedDimSpec(TestCase):
             fn,
             backend="eager",
             fullgraph=True,
-            shapes_spec={"x": TensorSpec([A * B, None])},
+            dynamic_shapes={"x": TensorSpec([A * B, STATIC])},
         )
         with self.assertRaises(torch._dynamo.exc.InternalTorchDynamoError) as cm:
             compiled(torch.randn(4, 3))
@@ -1042,7 +1079,7 @@ class TestDerivedDimSpec(TestCase):
             fn,
             backend="eager",
             fullgraph=True,
-            shapes_spec={"x": TensorSpec([B, None]), "n": B * 2},
+            dynamic_shapes={"x": TensorSpec([B, STATIC]), "n": B * 2},
         )
         # Correct: n = 8 = 2 * x.size()[0]
         out = compiled(torch.randn(4, 3), 8)
@@ -1060,7 +1097,7 @@ class TestDerivedDimSpec(TestCase):
             fn,
             backend="eager",
             fullgraph=True,
-            shapes_spec={"x": TensorSpec([B, None]), "n": N},
+            dynamic_shapes={"x": TensorSpec([B, None]), "n": N},
         )
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
@@ -1080,7 +1117,7 @@ class TestDerivedDimSpec(TestCase):
             r"TensorSpec dim 0: SymInt spec values must originate from spec "
             r"IntVar / ShapeVar; got u0 backed by a different ShapeEnv\.",
         ):
-            TensorSpec([foreign_symint, None])
+            TensorSpec([foreign_symint, STATIC])
 
     def test_misuse_in_python_conditional_raises(self):
         """Using a spec IntVar in a Python bool context raises (don't allow
@@ -1118,10 +1155,10 @@ class TestDerivedDimSpec(TestCase):
             fn,
             backend="eager",
             fullgraph=True,
-            shapes_spec={
-                "z": TensorSpec([A * B, None]),
-                "x": TensorSpec([A, None]),
-                "y": TensorSpec([B, None]),
+            dynamic_shapes={
+                "z": TensorSpec([A * B, STATIC]),
+                "x": TensorSpec([A, STATIC]),
+                "y": TensorSpec([B, STATIC]),
             },
         )
         # Correct: z.shape[0] = 3 * 4 = 12
@@ -1140,7 +1177,7 @@ class TestDerivedDimSpec(TestCase):
             fn,
             backend="eager",
             fullgraph=True,
-            shapes_spec={
+            dynamic_shapes={
                 "z": TensorSpec([Z, None]),
                 "x": TensorSpec([A, None]),
                 "y": TensorSpec([B, None]),
@@ -1171,10 +1208,10 @@ class TestDerivedDimSpec(TestCase):
             fn,
             backend="eager",
             fullgraph=True,
-            shapes_spec={
-                "x": TensorSpec([B, None]),
-                "y": TensorSpec([B * 2, None]),
-                "z": TensorSpec([B * 2, None]),
+            dynamic_shapes={
+                "x": TensorSpec([B, STATIC]),
+                "y": TensorSpec([B * 2, STATIC]),
+                "z": TensorSpec([B * 2, STATIC]),
             },
         )
         # y.shape[0] and z.shape[0] both = 8 (= 2 * x.shape[0])
@@ -1205,10 +1242,10 @@ class TestAssumptionsSpec(TestCase):
             fn,
             backend="eager",
             fullgraph=True,
-            shapes_spec=ShapesSpec(
+            dynamic_shapes=ShapesSpec(
                 params={
-                    "x": TensorSpec([A, None]),
-                    "y": TensorSpec([B, None]),
+                    "x": TensorSpec([A, STATIC]),
+                    "y": TensorSpec([B, STATIC]),
                 },
                 assumptions=[A > B],
             ),
@@ -1229,10 +1266,10 @@ class TestAssumptionsSpec(TestCase):
             fn,
             backend="eager",
             fullgraph=True,
-            shapes_spec=ShapesSpec(
+            dynamic_shapes=ShapesSpec(
                 params={
-                    "x": TensorSpec([A, None]),
-                    "y": TensorSpec([B, None]),
+                    "x": TensorSpec([A, STATIC]),
+                    "y": TensorSpec([B, STATIC]),
                 },
             ),
         )
@@ -1253,8 +1290,8 @@ class TestAssumptionsSpec(TestCase):
             fn,
             backend="eager",
             fullgraph=True,
-            shapes_spec=ShapesSpec(
-                params={"x": TensorSpec([A, None])},
+            dynamic_shapes=ShapesSpec(
+                params={"x": TensorSpec([A, STATIC])},
                 assumptions=[A + B > 0],  # B never bound
             ),
         )
@@ -1284,8 +1321,8 @@ class TestAssumptionsSpec(TestCase):
             fn,
             backend="eager",
             fullgraph=True,
-            shapes_spec=ShapesSpec(
-                params={"x": TensorSpec([C, None])},
+            dynamic_shapes=ShapesSpec(
+                params={"x": TensorSpec([C, STATIC])},
                 assumptions=[A + B > 0, A * 2 == B],
             ),
         )
@@ -1335,7 +1372,7 @@ class TestObjectSpec(TestCase):
 
     def test_dict_construction(self):
         """Fields supplied via the constructor preserve identity and order."""
-        spec = TensorSpec([ShapeVar("h"), None])
+        spec = TensorSpec([ShapeVar("h"), STATIC])
         os = ObjectSpec({"weight": spec, "bias": None})
         self.assertEqual(len(os), 2)
         self.assertIn("weight", os)
@@ -1346,7 +1383,7 @@ class TestObjectSpec(TestCase):
         """Iteration walks fields in insertion order; items() yields pairs."""
         sv_w = ShapeVar("h")
         sv_b = ShapeVar("h")
-        ts_w = TensorSpec([sv_w, None])
+        ts_w = TensorSpec([sv_w, STATIC])
         ts_b = TensorSpec([sv_b])
         os = ObjectSpec({"weight": ts_w, "bias": ts_b})
         self.assertEqual(list(os), ["weight", "bias"])
@@ -1354,7 +1391,7 @@ class TestObjectSpec(TestCase):
 
     def test_recursive_nesting(self):
         """A field's value may itself be an ``ObjectSpec``."""
-        inner_spec = TensorSpec([ShapeVar("h"), None])
+        inner_spec = TensorSpec([ShapeVar("h"), STATIC])
         inner = ObjectSpec({"weight": inner_spec})
         outer = ObjectSpec({"inner": inner})
         self.assertIs(outer._fields["inner"], inner)
@@ -1372,7 +1409,7 @@ object_spec:
 
     def test_repr_with_tensorspec(self):
         """Multi-line leaf repr is indented under its field name."""
-        os = ObjectSpec({"weight": TensorSpec([ShapeVar("batch"), None])})
+        os = ObjectSpec({"weight": TensorSpec([ShapeVar("batch"), STATIC])})
         self.assertEqual(
             repr(os),
             """\
@@ -1400,7 +1437,7 @@ object_spec:
         """``to_jsonable`` recurses into spec children; raw leaves pass through."""
         os = ObjectSpec(
             {
-                "weight": TensorSpec([ShapeVar("h"), None]),
+                "weight": TensorSpec([ShapeVar("h"), STATIC]),
                 "bias": None,
             }
         )
@@ -1435,7 +1472,9 @@ class TestObjectSpecCompile(TestCase):
         compiled = torch.compile(
             fn,
             backend=backend,
-            shapes_spec={"obj": ObjectSpec({"w": TensorSpec([ShapeVar("h"), None])})},
+            dynamic_shapes={
+                "obj": ObjectSpec({"w": TensorSpec([ShapeVar("h"), STATIC])})
+            },
         )
 
         compiled(Container(torch.randn(4, 3)))
@@ -1470,8 +1509,8 @@ class TestObjectSpecCompile(TestCase):
         compiled = torch.compile(
             m,
             backend=backend,
-            shapes_spec={
-                "self": ObjectSpec({"weight": TensorSpec([ShapeVar("h"), None])})
+            dynamic_shapes={
+                "self": ObjectSpec({"weight": TensorSpec([ShapeVar("h"), STATIC])})
             },
         )
 
@@ -1484,6 +1523,87 @@ class TestObjectSpecCompile(TestCase):
         # Captured weight placeholder has a SymInt at dim 0.
         shape = _tensor_placeholder_shape(backend.graphs[-1])
         self.assertIsInstance(shape[0], torch.SymInt)
+
+
+class TestSeqSpec(TestCase):
+    """Construction and integration of SeqSpec."""
+
+    def setUp(self):
+        super().setUp()
+        _reset_uid_counter()
+
+    def test_accepts_tuple(self):
+        B = ShapeVar("b")
+        sp = SeqSpec((TensorSpec([B, 4]), TensorSpec([B, 8])))
+        self.assertEqual(len(sp), 2)
+
+    def test_empty(self):
+        sp = SeqSpec([])
+        self.assertEqual(len(sp), 0)
+        self.assertEqual(sp._entries, [])
+
+    def test_repr(self):
+        sp = SeqSpec([TensorSpec([ShapeVar("a"), 4])])
+        self.assertEqual(
+            repr(sp),
+            """\
+seq_spec:
+  [0]:
+    Tensor:
+      0: ShapeVar(a#0, min=0)
+      1: 4""",
+        )
+
+    def test_to_jsonable(self):
+        sp = SeqSpec([TensorSpec([ShapeVar("a"), 4])])
+        j = sp.to_jsonable()
+        self.assertEqual(j["type"], "SeqSpec")
+        self.assertEqual(len(j["entries"]), 1)
+        self.assertEqual(j["entries"][0]["type"], "TensorSpec")
+
+    def test_compile_list_arg_marks_dynamic(self):
+        """List arg of two tensors with dim 0 dynamic via SeqSpec; no
+        recompile on different dim-0 sizes."""
+        B = ShapeVar("b")
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(xs: list[torch.Tensor]) -> torch.Tensor:
+            return xs[0].sum() + xs[1].sum()
+
+        compiled = torch.compile(
+            fn,
+            backend=cnts,
+            fullgraph=True,
+            dynamic_shapes={"xs": SeqSpec([TensorSpec([B, 3]), TensorSpec([B, 5])])},
+        )
+        compiled([torch.ones(4, 3), torch.ones(4, 5)])
+        compiled([torch.ones(7, 3), torch.ones(7, 5)])  # same dim 0 dyn
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_compile_out_of_range_element_treated_static(self):
+        """Indices beyond the SeqSpec length are unspecified == static."""
+        B = ShapeVar("b")
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(xs: list[torch.Tensor]) -> torch.Tensor:
+            return xs[0].sum() + xs[1].sum()
+
+        compiled = torch.compile(
+            fn,
+            backend=cnts,
+            fullgraph=True,
+            dynamic_shapes={"xs": SeqSpec([TensorSpec([B, 3])])},
+        )
+        compiled([torch.ones(4, 3), torch.ones(4, 3)])
+        self.assertEqual(cnts.frame_count, 1)
+
+        # xs[0] dim 0 changes — covered by ShapeVar B → no recompile.
+        compiled([torch.ones(7, 3), torch.ones(4, 3)])
+        self.assertEqual(cnts.frame_count, 1)
+
+        # xs[1] dim 0 changes — out-of-range entry treated as static → recompile.
+        compiled([torch.ones(4, 3), torch.ones(8, 3)])
+        self.assertEqual(cnts.frame_count, 2)
 
 
 class TestDictSpecCompile(TestCase):
@@ -1502,7 +1622,9 @@ class TestDictSpecCompile(TestCase):
         compiled = torch.compile(
             fn,
             backend=backend,
-            shapes_spec={"cfg": DictSpec({"x": TensorSpec([ShapeVar("h"), None])})},
+            dynamic_shapes={
+                "cfg": DictSpec({"x": TensorSpec([ShapeVar("h"), STATIC])})
+            },
         )
 
         compiled({"x": torch.randn(4, 3)})
@@ -1525,7 +1647,9 @@ class TestDictSpecCompile(TestCase):
         compiled = torch.compile(
             fn,
             backend=backend,
-            shapes_spec={"cfg": DictSpec({"x": TensorSpec([ShapeVar("h"), None])})},
+            dynamic_shapes={
+                "cfg": DictSpec({"x": TensorSpec([ShapeVar("h"), STATIC])})
+            },
         )
 
         x = torch.randn(4, 3)
@@ -1555,7 +1679,7 @@ class TestDictSpecCompile(TestCase):
         compiled = torch.compile(
             fn,
             backend=backend,
-            shapes_spec={"cfg": DictSpec({0: TensorSpec([ShapeVar("h"), None])})},
+            dynamic_shapes={"cfg": DictSpec({0: TensorSpec([ShapeVar("h"), STATIC])})},
         )
 
         compiled({0: torch.randn(4, 3)})
@@ -1565,30 +1689,50 @@ class TestDictSpecCompile(TestCase):
         shape = _tensor_placeholder_shape(backend.graphs[-1])
         self.assertIsInstance(shape[0], torch.SymInt)
 
+    def test_nested_dict_of_list_of_tensors(self):
+        """Nested: ``cfg["xs"][i]`` honors a DictSpec → SeqSpec → TensorSpec
+        chain."""
+        B = ShapeVar("b")
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(cfg):
+            return cfg["xs"][0] + cfg["xs"][1]
+
+        compiled = torch.compile(
+            fn,
+            backend=cnts,
+            fullgraph=True,
+            dynamic_shapes={
+                "cfg": DictSpec(
+                    {"xs": SeqSpec([TensorSpec([B, 3]), TensorSpec([B, 3])])}
+                )
+            },
+        )
+        compiled({"xs": [torch.ones(4, 3), torch.ones(4, 3)]})
+        compiled({"xs": [torch.ones(7, 3), torch.ones(7, 3)]})
+        self.assertEqual(cnts.frame_count, 1)
+
     def test_walk_terminal_container_raises(self):
         """The spec declares ``x`` as a ``DictSpec`` (a container), but the
-        compiled function is called with a plain tensor for ``x``. Because the
-        spec walk terminates on the container instead of a ``TensorSpec`` leaf,
-        compilation must raise ``RuntimeError`` with ``"shapes_spec walk ended
-        on a container"``."""
+        compiled function is called with a plain tensor for ``x``."""
 
         def fn(x):
             return x + 1
 
-        # Spec says ``x`` is a DictSpec, but the user passes a tensor.
-        # The spec walk terminates on the DictSpec container at the
-        # arg root, which is not a leaf.
         compiled = torch.compile(
             fn,
             backend="eager",
-            shapes_spec={"x": DictSpec({"k": TensorSpec([ShapeVar("h"), None])})},
+            dynamic_shapes={"x": DictSpec({"k": TensorSpec([ShapeVar("h"), STATIC])})},
         )
 
-        with self.assertRaisesRegex(
-            (torch._dynamo.exc.InternalTorchDynamoError, RuntimeError),
-            r"shapes_spec walk ended on a container",
-        ):
+        with self.assertRaises(torch._dynamo.exc.InternalTorchDynamoError) as ctx:
             compiled(torch.randn(4, 3))
+        self.assertEqual(
+            str(ctx.exception).split("\n\nfrom user code:")[0],
+            "RuntimeError: shapes_spec walk: while processing source "
+            "'x', at 'x' the spec is DictSpec, but the source has no "
+            "further access past it",
+        )
 
 
 class TestVarargsCompile(TestCase):
@@ -1608,10 +1752,10 @@ class TestVarargsCompile(TestCase):
         compiled = torch.compile(
             f,
             backend=backend,
-            shapes_spec={
-                "x": TensorSpec([ShapeVar("a"), None]),
-                "*args": [TensorSpec([ShapeVar("b"), None])],
-                "**kwargs": {"foo": TensorSpec([ShapeVar("c"), None])},
+            dynamic_shapes={
+                "x": TensorSpec([ShapeVar("a"), STATIC]),
+                "*args": [TensorSpec([ShapeVar("b"), STATIC])],
+                "**kwargs": {"foo": TensorSpec([ShapeVar("c"), STATIC])},
             },
         )
 
@@ -1641,10 +1785,10 @@ class TestVarargsCompile(TestCase):
         compiled = torch.compile(
             f,
             backend=backend,
-            shapes_spec={
+            dynamic_shapes={
                 "*args": [
-                    TensorSpec([ShapeVar("a"), None]),
-                    TensorSpec([ShapeVar("b"), None]),
+                    TensorSpec([ShapeVar("a"), STATIC]),
+                    TensorSpec([ShapeVar("b"), STATIC]),
                 ],
             },
         )
@@ -1672,11 +1816,11 @@ class TestVarargsCompile(TestCase):
         compiled = torch.compile(
             f,
             backend=backend,
-            shapes_spec={
+            dynamic_shapes={
                 # Spec covers only the first 2 *args entries.
                 "*args": [
-                    TensorSpec([ShapeVar("a"), None]),
-                    TensorSpec([ShapeVar("b"), None]),
+                    TensorSpec([ShapeVar("a"), STATIC]),
+                    TensorSpec([ShapeVar("b"), STATIC]),
                 ],
             },
         )
@@ -1706,10 +1850,10 @@ class TestVarargsCompile(TestCase):
         compiled = torch.compile(
             f,
             backend=backend,
-            shapes_spec={
+            dynamic_shapes={
                 "**kwargs": {
-                    "a": TensorSpec([ShapeVar("a"), None]),
-                    "b": TensorSpec([ShapeVar("b"), None]),
+                    "a": TensorSpec([ShapeVar("a"), STATIC]),
+                    "b": TensorSpec([ShapeVar("b"), STATIC]),
                 },
             },
         )
@@ -1728,54 +1872,203 @@ class TestVarargsCompile(TestCase):
 
 
 class TestWalkSpecRaises(TestCase):
-    """Unit-style tests for ``_walk_spec`` raising on type-mismatched
-    access paths (vs. silently returning None)."""
+    """Tests for spec/source type-mismatch errors raised during compilation."""
 
     def setUp(self):
         super().setUp()
         _reset_uid_counter()
 
-    def test_walk_object_spec_with_subscript_raises(self):
-        """``ObjectSpec`` paired with a subscript token must raise."""
-        from torch._dynamo.variables.builder import (
-            _AttrToken,
-            _SubscriptToken,
-            _walk_spec,
+    def test_object_spec_with_dict_input_raises(self):
+        """Spec is ``ObjectSpec``, but the user passes a dict."""
+
+        def fn(cfg):
+            return cfg["x"] + 1
+
+        compiled = torch.compile(
+            fn,
+            backend="eager",
+            dynamic_shapes={
+                "cfg": ObjectSpec({"x": TensorSpec([ShapeVar("h"), STATIC])})
+            },
+        )
+        with self.assertRaises(torch._dynamo.exc.InternalTorchDynamoError) as ctx:
+            compiled({"x": torch.randn(4, 3)})
+        self.assertEqual(
+            str(ctx.exception).split("\n\nfrom user code:")[0],
+            "RuntimeError: shapes_spec walk: while processing source "
+            "\"cfg['x']\", at 'cfg' the spec is ObjectSpec",
         )
 
-        root = ObjectSpec({"x": TensorSpec([ShapeVar("h"), None])})
-        with self.assertRaisesRegex(
-            RuntimeError, r"ObjectSpec.*expects an attribute access"
-        ):
-            _walk_spec(root, [_SubscriptToken("x")])
-        # sanity: the matching ``.x`` (AttrToken) form still resolves.
-        ts = _walk_spec(root, [_AttrToken("x")])
-        self.assertIsInstance(ts, TensorSpec)
+    def test_dict_spec_with_object_input_raises(self):
+        """Spec is ``DictSpec``, but the user passes an object."""
 
-    def test_walk_dict_spec_with_attr_raises(self):
-        """``DictSpec`` paired with an attribute token must raise."""
-        from torch._dynamo.variables.builder import (
-            _AttrToken,
-            _SubscriptToken,
-            _walk_spec,
+        class Container:
+            def __init__(self, x):
+                self.x = x
+
+        def fn(obj):
+            return obj.x + 1
+
+        compiled = torch.compile(
+            fn,
+            backend="eager",
+            dynamic_shapes={
+                "obj": DictSpec({"x": TensorSpec([ShapeVar("h"), STATIC])})
+            },
+        )
+        with self.assertRaises(torch._dynamo.exc.InternalTorchDynamoError) as ctx:
+            compiled(Container(torch.randn(4, 3)))
+        self.assertEqual(
+            str(ctx.exception).split("\n\nfrom user code:")[0],
+            "RuntimeError: shapes_spec walk: while processing source "
+            "'obj.x', at 'obj' the spec is DictSpec",
         )
 
-        root = DictSpec({"x": TensorSpec([ShapeVar("h"), None])})
-        with self.assertRaisesRegex(RuntimeError, r"DictSpec.*expects.*subscript"):
-            _walk_spec(root, [_AttrToken("x")])
-        # sanity: the matching ``["x"]`` (SubscriptToken) form still resolves.
-        ts = _walk_spec(root, [_SubscriptToken("x")])
-        self.assertIsInstance(ts, TensorSpec)
+    def test_seq_spec_with_dict_input_raises(self):
+        """Spec is ``SeqSpec``, but the user passes a dict"""
 
-    def test_walk_leaf_with_remaining_token_raises(self):
-        """A leaf spec with remaining tokens in the path must raise."""
-        from torch._dynamo.variables.builder import _AttrToken, _walk_spec
+        def fn(cfg):
+            return cfg["x"] + 1
 
-        root = TensorSpec([ShapeVar("h"), None])
+        compiled = torch.compile(
+            fn,
+            backend="eager",
+            dynamic_shapes={"cfg": SeqSpec([TensorSpec([ShapeVar("h"), STATIC])])},
+        )
+        with self.assertRaises(torch._dynamo.exc.InternalTorchDynamoError) as ctx:
+            compiled({"x": torch.randn(4, 3)})
+        self.assertEqual(
+            str(ctx.exception).split("\n\nfrom user code:")[0],
+            "RuntimeError: shapes_spec walk: while processing source "
+            "\"cfg['x']\", at 'cfg' the spec is SeqSpec",
+        )
+
+    def test_leaf_spec_with_container_input_raises(self):
+        """Spec is a ``TensorSpec`` leaf, but the user passes a dict."""
+
+        def fn(cfg):
+            return cfg["x"] + 1
+
+        compiled = torch.compile(
+            fn,
+            backend="eager",
+            dynamic_shapes={"cfg": TensorSpec([ShapeVar("h"), STATIC])},
+        )
+        with self.assertRaises(torch._dynamo.exc.InternalTorchDynamoError) as ctx:
+            compiled({"x": torch.randn(4, 3)})
+        self.assertEqual(
+            str(ctx.exception).split("\n\nfrom user code:")[0],
+            "RuntimeError: shapes_spec walk: while processing source "
+            "\"cfg['x']\", at 'cfg' the spec is TensorSpec, but "
+            "the source has further access past it",
+        )
+
+
+class TestDynamicSpecDecoratorCompile(TestCase):
+    """``@dynamic_spec`` auto-applied by ``torch.compile``."""
+
+    def setUp(self):
+        super().setUp()
+        _reset_uid_counter()
+        torch._dynamo.reset()
+
+    def test_dynamic_spec_decorator_dict_form(self):
+        from torch.fx.experimental.dynamic_spec import dynamic_spec
+
+        @dynamic_spec({"x": TensorSpec([ShapeVar("B"), STATIC])})
+        def fn(x):
+            return x.sum(0)
+
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        compiled(torch.randn(8, 3))
+        # Re-invoking at a different batch size must hit the same compiled
+        # graph (dim 0 is unbacked) -- proving the decorator was picked up.
+        compiled(torch.randn(20, 3))
+        self.assertEqual(len(backend.graphs), 1)
+        # Find the tensor placeholder.
+        tensor_phs = [
+            n
+            for n in backend.graphs[0].graph.nodes
+            if n.op == "placeholder"
+            and isinstance(n.meta.get("example_value", n.meta.get("val")), torch.Tensor)
+        ]
+        self.assertEqual(len(tensor_phs), 1)
+        val = tensor_phs[0].meta.get("example_value", tensor_phs[0].meta.get("val"))
+        self.assertEqual(len(free_unbacked_symbols(val.shape[0])), 1)
+
+    def test_dynamic_spec_decorator_on_nn_module_forward(self):
+        """``@dynamic_spec`` on ``forward`` is picked up when
+        ``torch.compile(module)`` is invoked (module path -- the resolver
+        reads from ``module.forward``, not the bound method)."""
+        from torch.fx.experimental.dynamic_spec import dynamic_spec
+
+        class M(torch.nn.Module):
+            @dynamic_spec({"x": TensorSpec([ShapeVar("B"), STATIC])})
+            def forward(self, x):
+                return x.sum(0)
+
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(M(), backend=backend, fullgraph=True)
+        compiled(torch.randn(8, 3))
+        compiled(torch.randn(20, 3))
+        self.assertEqual(len(backend.graphs), 1)
+
+    def test_dynamic_spec_decorator_with_assumptions(self):
+        from torch.fx.experimental.dynamic_spec import dynamic_spec
+
+        B = ShapeVar("batch")
+
+        @dynamic_spec(
+            ShapesSpec(
+                ParamsSpec({"x": TensorSpec([B, STATIC])}),
+                assumptions=[B % 2 == 0],
+            )
+        )
+        def fn(x):
+            # Branching on the assumed relation: without the assumption being
+            # wired into the shape env, this would raise a DDE on the unbacked
+            # symbol. With it, the branch resolves statically at trace time.
+            if x.shape[0] % 2 == 0:
+                return x.sum(0)
+            return x.sum(0) * -1
+
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        compiled(torch.randn(8, 3))
+        compiled(torch.randn(20, 3))
+        self.assertEqual(len(backend.graphs), 1)
+
+    def test_dynamic_spec_decorator_and_explicit_kwarg_raises(self):
+        from torch.fx.experimental.dynamic_spec import dynamic_spec
+
+        @dynamic_spec({"x": TensorSpec([ShapeVar("B"), STATIC])})
+        def fn(x):
+            return x.sum(0)
+
         with self.assertRaisesRegex(
-            RuntimeError, r"leaf spec.*cannot consume further token"
+            ValueError,
+            r"`@dynamic_spec\(\.\.\.\)` is attached.*AND a `dynamic_shapes=`",
         ):
-            _walk_spec(root, [_AttrToken("something")])
+            torch.compile(
+                fn,
+                dynamic_shapes=ParamsSpec({"x": TensorSpec([ShapeVar("Z"), STATIC])}),
+            )(torch.randn(8, 3))
+
+    def test_dynamic_spec_stacked_decorators_raise(self):
+        """Stacking ``@dynamic_spec`` on the same function should raise --
+        silently overwriting the previously attached spec would mask user
+        error."""
+        from torch.fx.experimental.dynamic_spec import dynamic_spec
+
+        with self.assertRaisesRegex(
+            ValueError, r"@dynamic_spec\(\.\.\.\) is already attached"
+        ):
+
+            @dynamic_spec({"x": TensorSpec([ShapeVar("A"), STATIC])})
+            @dynamic_spec({"x": TensorSpec([ShapeVar("B"), STATIC])})
+            def fn(x):
+                return x.sum(0)
 
 
 if __name__ == "__main__":

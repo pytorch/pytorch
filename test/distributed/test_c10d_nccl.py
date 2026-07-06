@@ -609,11 +609,11 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # Note: using all-gather here bc some NCCL/SM version does not support
         # FP8 reduction
         # temporarily skip due to https://github.com/pytorch/pytorch/issues/153479
-        # pg._allgather_base(output, nan_tensor)
+        # pg.all_gather_single(output, nan_tensor)
 
         backend._set_enable_nan_check(True)
         try:
-            pg._allgather_base(output, nan_tensor)
+            pg.all_gather_single(output, nan_tensor)
         except Exception:
             sys.exit(signal.SIGABRT)
 
@@ -986,8 +986,12 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         )
         self._check_nccl_timeout(timedelta(seconds=23))
         pg.allreduce(torch.rand(10).cuda(self.rank))
-        c10d.distributed_c10d._set_pg_timeout(timedelta(seconds=252), pg)
+        c10d.set_timeout(timedelta(seconds=252), pg)
         self._check_nccl_timeout(timedelta(seconds=252))
+        # the deprecated `_set_pg_timeout` alias still works
+        with self.assertWarnsRegex(FutureWarning, "_set_pg_timeout"):
+            c10d.distributed_c10d._set_pg_timeout(timedelta(seconds=99), pg)
+        self._check_nccl_timeout(timedelta(seconds=99))
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
@@ -1267,7 +1271,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
         # Device type not present in parent.
         with self.assertRaisesRegex(ValueError, "is not present in the parent"):
-            c10d.split_group(pg, [[0, 1]], backend="xpu:nccl")
+            c10d.split_group(pg, [[0, 1]], backend="xpu:xccl")
 
         # Filtering out the parent's default backend (cuda) must raise from C++.
         with self.assertRaises(RuntimeError):
@@ -1482,7 +1486,9 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             f"Timeout comparison - original: {original_timeout}, new: {new_timeout}",
         )
         self.assertEqual(
-            original_timeout, new_timeout, f"{test_name}: timeout not preserved"
+            original_timeout,
+            new_timeout,
+            lambda msg: f"{msg}\n{test_name}: timeout not preserved",
         )
 
         log_test_info(
@@ -1492,7 +1498,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         self.assertEqual(
             original_high_priority,
             new_high_priority,
-            f"{test_name}: high_priority_stream not preserved",
+            lambda msg: f"{msg}\n{test_name}: high_priority_stream not preserved",
         )
 
         log_test_validation(
@@ -1782,7 +1788,9 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         self.assertIsNotNone(shrunk_pg, f"{test_name}: shrunk_pg should not be None")
         actual_size = shrunk_pg.size()
         self.assertEqual(
-            actual_size, expected_size, f"{test_name}: group size mismatch"
+            actual_size,
+            expected_size,
+            lambda msg: f"{msg}\n{test_name}: group size mismatch",
         )
 
         new_rank = shrunk_pg.rank()
@@ -1809,7 +1817,9 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         )
 
         self.assertEqual(
-            result, expected_sum, f"{test_name}: collective result mismatch"
+            result,
+            expected_sum,
+            lambda msg: f"{msg}\n{test_name}: collective result mismatch",
         )
         log_test_info(
             self.rank, f"{test_name}: collective passed ({result} == {expected_sum})"
@@ -3657,7 +3667,7 @@ class DistributedDataParallelTest(
         self.assertEqual(
             ddp_model.bucket_bytes_cap_list,
             expected_bucket_bytes_cap_list,
-            f"bucket_bytes_cap_list should be {expected_bucket_bytes_cap_list}",
+            lambda msg: f"{msg}\nbucket_bytes_cap_list should be {expected_bucket_bytes_cap_list}",
         )
 
         # Verify bucket_bytes_cap is set to max value
@@ -3665,7 +3675,7 @@ class DistributedDataParallelTest(
         self.assertEqual(
             ddp_model.bucket_bytes_cap,
             expected_bucket_bytes_cap,
-            f"bucket_bytes_cap should be {expected_bucket_bytes_cap}",
+            lambda msg: f"{msg}\nbucket_bytes_cap should be {expected_bucket_bytes_cap}",
         )
 
     @requires_nccl()
@@ -3730,7 +3740,7 @@ class DistributedDataParallelTest(
         self.assertEqual(
             ddp_model.bucket_bytes_cap,
             expected_bucket_bytes_cap,
-            f"bucket_bytes_cap should be {expected_bucket_bytes_cap}",
+            lambda msg: f"{msg}\nbucket_bytes_cap should be {expected_bucket_bytes_cap}",
         )
 
         # bucket_bytes_cap_list should be empty
@@ -5041,7 +5051,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
             self.assertEqual(
                 missing,
                 set(),
-                f"GPU kernel {ev['name']} missing NCCL metadata: {missing}",
+                lambda msg: f"{msg}\nGPU kernel {ev['name']} missing NCCL metadata: {missing}",
             )
 
 

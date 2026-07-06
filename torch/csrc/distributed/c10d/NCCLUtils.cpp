@@ -270,6 +270,7 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
   return comm;
 }
 
+#ifdef NCCL_HAS_COMM_SHRINK
 std::shared_ptr<NCCLComm> NCCLComm::shrink(
     NCCLComm* source,
     std::vector<int>& ranks_to_exclude,
@@ -326,6 +327,7 @@ std::shared_ptr<NCCLComm> NCCLComm::shrink(
 
   return comm;
 }
+#endif // NCCL_HAS_COMM_SHRINK
 
 void NCCLComm::finalize() {
   LockType lock(mutex_);
@@ -366,6 +368,7 @@ void NCCLComm::abort(std::optional<std::string> commFailureReason) {
     void* handle = it.second.first;
     bool is_window = it.second.second;
     if (is_window) {
+#ifdef NCCL_HAS_COMM_WINDOW_REGISTER
       C10D_NCCL_CHECK(
           ::ncclCommWindowDeregister(ncclComm_, (ncclWindow_t)handle),
           c10::str(
@@ -373,6 +376,7 @@ void NCCLComm::abort(std::optional<std::string> commFailureReason) {
               handle,
               " on ncclComm_ ",
               ncclComm_));
+#endif
     } else {
       C10D_NCCL_CHECK(
           ::ncclCommDeregister(ncclComm_, handle),
@@ -477,6 +481,7 @@ ncclResult_t NCCLComm::registerSegment(
   void* handle = nullptr;
   // Use getNcclComm to make sure comm is ready before calling nccl APIs
   auto comm = getNcclComm();
+#ifdef NCCL_HAS_COMM_WINDOW_REGISTER
   if (window) {
     C10D_NCCL_CHECK(
         ncclCommWindowRegister(
@@ -499,6 +504,17 @@ ncclResult_t NCCLComm::registerSegment(
             " on ncclComm_ ",
             comm));
   }
+#else
+  C10D_NCCL_CHECK(
+      ncclCommRegister(comm, ptr, size, &handle),
+      c10::str(
+          "Failed to register segment with ptr ",
+          ptr,
+          ", size ",
+          size,
+          " on ncclComm_ ",
+          comm));
+#endif
   registeredSegmentHandles_[ptr] = {handle, window};
   return ncclSuccess;
 }
@@ -515,6 +531,7 @@ ncclResult_t NCCLComm::deregisterSegment(void* ptr, bool window /*false*/) {
   void* handle = registeredSegmentHandles_[ptr].first;
   // Use getNcclComm to make sure comm is ready before calling nccl APIs
   auto comm = getNcclComm();
+#ifdef NCCL_HAS_COMM_WINDOW_REGISTER
   if (window) {
     C10D_NCCL_CHECK(
         ncclCommWindowDeregister(comm, (ncclWindow_t)handle),
@@ -536,6 +553,17 @@ ncclResult_t NCCLComm::deregisterSegment(void* ptr, bool window /*false*/) {
             " on ncclComm_ ",
             comm));
   }
+#else
+  C10D_NCCL_CHECK(
+      ncclCommDeregister(comm, handle),
+      c10::str(
+          "Failed to deregister segment handle ",
+          handle,
+          ", with ptr ",
+          ptr,
+          " on ncclComm_ ",
+          comm));
+#endif
   registeredSegmentHandles_.erase(ptr);
   return ncclSuccess;
 }

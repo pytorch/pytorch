@@ -653,12 +653,12 @@ std::string generateKernel(
   // clang-format on
 
   // Instantiates the CUDA or CPU-specific templates
-  env.s("tensorOffsets", tensorOffsets.str());
-  env.s("tensorChecks", tensorChecks.str());
-  env.s("kernelBody", body.str());
-  env.s("kernelBody_vec4", body_vec4.str());
-  env.s("kernelLoad", load.str());
-  env.s("kernelStore", store.str());
+  env.s("tensorOffsets", std::move(tensorOffsets).str());
+  env.s("tensorChecks", std::move(tensorChecks).str());
+  env.s("kernelBody", std::move(body).str());
+  env.s("kernelBody_vec4", std::move(body_vec4).str());
+  env.s("kernelLoad", std::move(load).str());
+  env.s("kernelStore", std::move(store).str());
   env.v("formals", formals);
   env.v("argument_loads", argument_loads);
   std::string code_string;
