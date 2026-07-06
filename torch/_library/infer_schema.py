@@ -10,7 +10,7 @@ from torch.utils._exposed_in import exposed_in
 
 from .opaque_object import (
     _resolve_opaque_type_info,
-    is_opaque_reference_type,
+    is_opaque_symbolic_type,
     is_opaque_type,
 )
 
@@ -383,7 +383,7 @@ def parse_return(annotation, error_fn):
     origin = typing.get_origin(annotation)
     if origin is not tuple:
         if annotation not in SUPPORTED_RETURN_TYPES:
-            if is_opaque_reference_type(annotation):
+            if is_opaque_symbolic_type(annotation):
                 return _resolve_opaque_type_info(annotation).class_name  # type: ignore[union-attr]
             error_fn(
                 f"Return has unsupported type {annotation}. "
@@ -394,7 +394,7 @@ def parse_return(annotation, error_fn):
 
     args = typing.get_args(annotation)
     for arg in args:
-        if arg not in SUPPORTED_RETURN_TYPES and not is_opaque_reference_type(arg):
+        if arg not in SUPPORTED_RETURN_TYPES and not is_opaque_symbolic_type(arg):
             error_fn(
                 f"Return has unsupported type {annotation}. "
                 f"The valid types are: {SUPPORTED_RETURN_TYPES}."

@@ -13,7 +13,7 @@ import torch.utils._pytree as pytree
 from torch import SymInt, Tensor
 from torch._custom_class_base import CustomClassBase
 from torch._library.fake_class_registry import maybe_unwrap_fake_script_object
-from torch._library.opaque_object import is_opaque_reference_type
+from torch._library.opaque_object import is_opaque_symbolic_type
 from torch._subclasses.fake_tensor import get_plain_tensors
 from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq
 from torch.types import IntLikeType
@@ -164,7 +164,7 @@ def create_subclass_metadata(
                 # During tracing, opaques are wrapped in FakeScriptObject;
                 # unwrap to check the real type.
                 real_type = type(maybe_unwrap_fake_script_object(inner_value))
-                if not is_opaque_reference_type(real_type):
+                if not is_opaque_symbolic_type(real_type):
                     raise RuntimeError(
                         f"{real_type.__name__!r} found in tensor attrs of "
                         f"{type(a).__name__}.__tensor_flatten__(). "
