@@ -216,15 +216,15 @@ class SetVariable(VariableTracker):
 
         raise_type_error(tx, f"unhashable type: '{self.python_type_name()}'")
 
-    def var_getattr(self, tx: "InstructionTranslatorBase", name: str):
+    def getattro_impl(self, tx: "InstructionTranslatorBase", name: str):
         if name == "__class__":
             return VariableTracker.build(tx, self.python_type())
-        return super().var_getattr(tx, name)
+        return super().getattro_impl(tx, name)
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> ConstantVariable:
-        return VariableTracker.build(tx, hasattr(set, name))
+        return VariableTracker.build(tx, hasattr(self.python_type(), name))
 
     def install_set_contains_guard(
         self, tx: "InstructionTranslatorBase", args: list[VariableTracker]
@@ -832,7 +832,7 @@ class OrderedSetClassVariable(VariableTracker):
     def as_python_constant(self) -> type[OrderedSet[Any]]:
         return OrderedSet
 
-    def var_getattr(
+    def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         if name == "__new__":
@@ -846,7 +846,7 @@ class OrderedSetClassVariable(VariableTracker):
                 self, name, py_type=type(getattr(OrderedSet, name)), source=attr_source
             )
         else:
-            return super().var_getattr(tx, name)
+            return super().getattro_impl(tx, name)
 
     def call_method(
         self,

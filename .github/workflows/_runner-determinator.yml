@@ -71,7 +71,7 @@ jobs:
   runner-determinator:
     # Don't run on forked repos
     if: github.repository_owner == 'pytorch'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       label-type: ${{ steps.set-condition.outputs.label-type }}
       runner-config: ${{ steps.set-runner-info.outputs.runner-config }}
