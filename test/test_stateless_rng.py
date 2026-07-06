@@ -1,16 +1,15 @@
 # Owner(s): ["module: random"]
 
-import unittest
-
 import torch
 import torch.func._random as random
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
+    onlyAccelerator,
 )
 from torch.testing._internal.common_dtype import floating_types_and
 from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
-from torch.utils._triton import has_triton
+from torch.testing._internal.inductor_utils import HAS_TRITON
 
 
 all_floating_dtypes = floating_types_and(torch.half, torch.bfloat16)
@@ -556,12 +555,14 @@ class TestStatelessRNGCompile(TestCase):
 
         self.assertEqual(f(key), random.uniform(random.fold_in(key, 3), (100,)))
 
-    @unittest.skipUnless(has_triton(), "requires triton for inductor codegen")
+    @onlyAccelerator
     @parametrize("op", ["uniform", "normal"])
     def test_generation_no_extra_clone(self, device, op):
         # Out-of-place uniform()/normal() fully overwrite their output; ensure
         # generation in torch.compile doesn't allocate an extra full-size buffer
         # (i.e. ensure peak ~= output size).
+        if torch.device(device).type == "cuda" and not HAS_TRITON:
+            self.skipTest("CUDA inductor codegen requires triton")
         gen = getattr(random, op)
         key = random.key(42, device=device)
         shape = (2048, 2048)  # 16 MiB fp32; an extra clone would ~double peak
@@ -572,12 +573,12 @@ class TestStatelessRNGCompile(TestCase):
             return gen(key, shape)
 
         f(key)  # compile + warm up the allocator
-        torch.cuda.synchronize()
-        base = torch.cuda.memory_allocated(device)
-        torch.cuda.reset_peak_memory_stats(device)
+        torch.accelerator.synchronize(device)
+        base = torch.accelerator.memory_allocated(device)
+        torch.accelerator.reset_peak_memory_stats(device)
         result = f(key)
-        torch.cuda.synchronize()
-        extra = torch.cuda.max_memory_allocated(device) - base
+        torch.accelerator.synchronize(device)
+        extra = torch.accelerator.max_memory_allocated(device) - base
 
         self.assertEqual(result, gen(key, shape))
         self.assertLess(extra, 1.5 * out_bytes)  # no extra full-size clone
