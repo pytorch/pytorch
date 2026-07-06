@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
-import torch
 from unittest import mock
+
+import torch
 from torch._inductor.codegen.aoti_hipify_utils import maybe_hipify_code_wrapper
 from torch._inductor.codegen.common import get_device_op_overrides
 from torch._inductor.test_case import run_tests, TestCase
