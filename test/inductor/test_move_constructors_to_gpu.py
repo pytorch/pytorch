@@ -2,6 +2,7 @@
 
 import functools
 import unittest
+from unittest import mock
 
 import torch
 from torch._inductor.test_case import run_tests, TestCase
@@ -114,6 +115,20 @@ class TestMoveConstructorsToGpu(TestCase):
 
         inp = torch.rand([100])
         self._check_fn(foo, True, inp)
+
+    def test_cpu_graph_does_not_probe_cuda_available(self):
+        from torch._inductor.fx_passes.post_grad import move_constructors_to_gpu
+
+        def foo(x):
+            return x + 1
+
+        gm = torch.fx.symbolic_trace(foo)
+        for node in gm.graph.nodes:
+            if node.op in ("placeholder", "call_function"):
+                node.meta["val"] = torch.ones(2)
+
+        with mock.patch("torch.cuda.is_available", side_effect=AssertionError):
+            move_constructors_to_gpu(gm.graph)
 
     def test_random_constructor_not_moved(self):
         from torch._inductor import config

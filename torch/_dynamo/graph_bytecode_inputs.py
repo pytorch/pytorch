@@ -39,6 +39,21 @@ def set_external_object_by_index(index: int, value: Any) -> None:
     index_to_external_object_weakref[index] = weakref.ref(value)
 
 
+def reserve_user_object_index(
+    index: int, construct_fn: Callable[[PyCodegen], None]
+) -> None:
+    """Reserve a stable external-object index before the object exists."""
+    global index_to_bytecode_constructor
+    if index in index_to_bytecode_constructor:
+        return
+    if index != len(index_to_bytecode_constructor):
+        raise AssertionError(
+            f"Can only reserve the next external-object index, got {index} "
+            f"with next index {len(index_to_bytecode_constructor)}"
+        )
+    index_to_bytecode_constructor[index] = construct_fn
+
+
 def get_external_object_by_index(index: int) -> Any:
     if index not in index_to_external_object_weakref:
         raise AssertionError("Index not registered in index_to_user_object_weakref")

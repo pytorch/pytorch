@@ -42,6 +42,12 @@ class TestStreams(torch._dynamo.test_case.TestCase):
     def tearDownClass(cls):
         super().tearDownClass()
 
+    def test_device_module_without_is_initialized_is_initialized(self):
+        from torch._dynamo.variables.streams import _device_module_is_initialized
+
+        with patch.object(torch, "get_device_module", return_value=object()):
+            self.assertTrue(_device_module_is_initialized(torch.device("mps")))
+
     @requires_cuda
     def test_stream_weakref(self):
         s = torch.Stream()
@@ -266,6 +272,25 @@ class <lambda>(torch.nn.Module):
         x = torch.zeros(1, device="cuda")
         compiled = torch.compile(fn_cuda_stream, backend="eager", fullgraph=True)
         self.assertEqual(compiled(x), fn_cuda_stream(x))
+
+    @requires_cuda
+    def test_lazy_current_stream_preserves_existing_registry_entries(self):
+        def fn():
+            event = torch.cuda.Event()
+            stream = torch.cuda.current_stream()
+            stream.record_event(event)
+            return stream.cuda_stream
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(), fn())
+
+    @requires_cuda
+    def test_lazy_current_stream_query(self):
+        def fn():
+            return torch.cuda.current_stream().query()
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(), fn())
 
     @unittest.skipIf(not TEST_XPU, "XPU is not available")
     def test_xpu_current_stream_attrs(self):

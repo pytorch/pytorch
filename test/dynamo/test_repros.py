@@ -16,6 +16,7 @@ import itertools
 import logging
 import os
 import random
+import subprocess
 import sys
 import types
 import typing
@@ -9597,10 +9598,287 @@ class CUDAReproTests(torch._dynamo.test_case.TestCase):
             return x + 2
 
         inp = torch.randn(3)
-        self.assertEqual(f(inp), inp + 1)
+        expected = inp + 1 if torch.cuda.is_initialized() else inp + 2
+        self.assertEqual(f(inp), expected)
 
         with mock.patch("torch.cuda.is_initialized", lambda: False):
             self.assertEqual(f(inp), inp + 2)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cpu_compile_does_not_initialize_cuda(self):
+        script = """\
+import torch
+import contextlib
+from unittest import mock
+
+assert torch.cuda.is_available()
+assert not torch.cuda.is_initialized()
+orig_is_available = torch.cuda.is_available
+
+def f(x):
+    return torch.pow(x, 0.1) / 2
+
+for backend in ("eager", "inductor"):
+    torch._dynamo.reset()
+    opt_f = torch.compile(f, backend=backend)
+
+    with torch.device("cpu"):
+        x = torch.ones([3, 32, 32], device="cpu")
+        assert not torch.cuda.is_initialized()
+        maybe_patch = (
+            mock.patch("torch.cuda.is_available", side_effect=AssertionError)
+            if backend == "eager"
+            else contextlib.nullcontext()
+        )
+        with maybe_patch:
+            y = opt_f(x)
+
+    torch.testing.assert_close(y, torch.pow(x, 0.1) / 2)
+    assert not torch.cuda.is_initialized()
+    assert orig_is_available()
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            env={**os.environ, "MKL_SERVICE_FORCE_INTEL": "1"},
+            timeout=60,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            msg=(
+                f"subprocess failed:\nstdout:\n{result.stdout.decode()}\n"
+                f"stderr:\n{result.stderr.decode()}"
+            ),
+        )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_preserve_rng_state_handles_lazy_cuda_init(self):
+        script = """\
+import torch
+from torch._dynamo.utils import preserve_rng_state
+
+assert torch.cuda.is_available()
+assert not torch.cuda.is_initialized()
+
+torch.manual_seed(123)
+queued_calls_len = len(torch.cuda._queued_calls)
+with preserve_rng_state():
+    assert not torch.cuda.is_initialized()
+    torch.rand(4, device="cuda")
+assert torch.cuda.is_initialized()
+assert len(torch.cuda._queued_calls) == queued_calls_len
+
+actual = torch.rand(4, device="cuda")
+torch.cuda.manual_seed_all(123)
+expected = torch.rand(4, device="cuda")
+torch.testing.assert_close(actual, expected)
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            env={**os.environ, "MKL_SERVICE_FORCE_INTEL": "1"},
+            timeout=60,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            msg=(
+                f"subprocess failed:\nstdout:\n{result.stdout.decode()}\n"
+                f"stderr:\n{result.stderr.decode()}"
+            ),
+        )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_preserve_rng_state_restores_lazy_cuda_seed(self):
+        script = """\
+import torch
+from torch._dynamo.utils import preserve_rng_state
+
+assert torch.cuda.is_available()
+assert not torch.cuda.is_initialized()
+
+torch.manual_seed(123)
+with preserve_rng_state():
+    assert not torch.cuda.is_initialized()
+    torch.manual_seed(456)
+assert not torch.cuda.is_initialized()
+
+actual = torch.rand(4, device="cuda")
+torch.cuda.manual_seed_all(123)
+expected = torch.rand(4, device="cuda")
+torch.testing.assert_close(actual, expected)
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            env={**os.environ, "MKL_SERVICE_FORCE_INTEL": "1"},
+            timeout=60,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            msg=(
+                f"subprocess failed:\nstdout:\n{result.stdout.decode()}\n"
+                f"stderr:\n{result.stderr.decode()}"
+            ),
+        )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_preserve_rng_state_under_functorch_grad(self):
+        torch.rand(1, device="cuda")
+
+        def fn(x):
+            with torch._dynamo.utils.preserve_rng_state():
+                return x.sin().sum()
+
+        torch.func.grad(fn)(torch.randn(3, 4))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_preserve_global_state_handles_lazy_cuda_init(self):
+        script = """\
+import torch
+from torch._dynamo.convert_frame import preserve_global_state
+
+assert torch.cuda.is_available()
+assert not torch.cuda.is_initialized()
+
+@preserve_global_state
+def fn():
+    assert not torch.cuda.is_initialized()
+    torch.rand(4, device="cuda")
+
+torch.manual_seed(123)
+fn()
+assert torch.cuda.is_initialized()
+
+actual = torch.rand(4, device="cuda")
+torch.cuda.manual_seed_all(123)
+expected = torch.rand(4, device="cuda")
+torch.testing.assert_close(actual, expected)
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            env={**os.environ, "MKL_SERVICE_FORCE_INTEL": "1"},
+            timeout=60,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            msg=(
+                f"subprocess failed:\nstdout:\n{result.stdout.decode()}\n"
+                f"stderr:\n{result.stderr.decode()}"
+            ),
+        )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_preserve_global_state_restores_lazy_cuda_seed(self):
+        script = """\
+import torch
+from torch._dynamo.convert_frame import preserve_global_state
+
+assert torch.cuda.is_available()
+assert not torch.cuda.is_initialized()
+
+@preserve_global_state
+def fn():
+    assert not torch.cuda.is_initialized()
+    torch.manual_seed(456)
+
+torch.manual_seed(123)
+fn()
+assert not torch.cuda.is_initialized()
+
+actual = torch.rand(4, device="cuda")
+torch.cuda.manual_seed_all(123)
+expected = torch.rand(4, device="cuda")
+torch.testing.assert_close(actual, expected)
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            env={**os.environ, "MKL_SERVICE_FORCE_INTEL": "1"},
+            timeout=60,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            msg=(
+                f"subprocess failed:\nstdout:\n{result.stdout.decode()}\n"
+                f"stderr:\n{result.stderr.decode()}"
+            ),
+        )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_checkpoint_params_handles_lazy_cuda_init(self):
+        script = """\
+import torch
+from torch import nn
+from torch._dynamo.utils import checkpoint_params
+
+assert torch.cuda.is_available()
+assert not torch.cuda.is_initialized()
+
+gm = torch.fx.symbolic_trace(nn.Linear(2, 2))
+torch.manual_seed(123)
+restore = checkpoint_params(gm)
+assert not torch.cuda.is_initialized()
+torch.rand(4, device="cuda")
+assert torch.cuda.is_initialized()
+restore()
+
+actual = torch.rand(4, device="cuda")
+torch.cuda.manual_seed_all(123)
+expected = torch.rand(4, device="cuda")
+torch.testing.assert_close(actual, expected)
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            env={**os.environ, "MKL_SERVICE_FORCE_INTEL": "1"},
+            timeout=60,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            msg=(
+                f"subprocess failed:\nstdout:\n{result.stdout.decode()}\n"
+                f"stderr:\n{result.stderr.decode()}"
+            ),
+        )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_current_stream_initializes_cuda_when_requested(self):
+        script = """\
+import torch
+
+assert torch.cuda.is_available()
+assert not torch.cuda.is_initialized()
+
+def f():
+    return torch.cuda.current_stream().cuda_stream
+
+opt_f = torch.compile(f, backend="eager", fullgraph=True)
+assert not torch.cuda.is_initialized()
+compiled_stream = opt_f()
+assert torch.cuda.is_initialized()
+assert compiled_stream == torch.cuda.current_stream().cuda_stream
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            env={**os.environ, "MKL_SERVICE_FORCE_INTEL": "1"},
+            timeout=60,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            msg=(
+                f"subprocess failed:\nstdout:\n{result.stdout.decode()}\n"
+                f"stderr:\n{result.stderr.decode()}"
+            ),
+        )
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_graph_metadata_does_not_retain_cuda_fake_constants(self):

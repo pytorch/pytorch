@@ -91,6 +91,22 @@ class TestStandaloneInductor(TestCase):
         actual = mod_opt(inp)
         self.assertEqual(actual, correct)
 
+    def test_get_cuda_device_context_cpu_graph_does_not_probe_cuda_available(self):
+        from torch._inductor.compile_fx import get_cuda_device_context
+
+        def fn(x):
+            return x + 1
+
+        gm = symbolic_trace(fn)
+        for node in gm.graph.nodes:
+            if node.op in ("placeholder", "call_function"):
+                node.meta["val"] = torch.ones(2)
+
+        with mock.patch("torch.cuda.is_available", side_effect=AssertionError):
+            ctx = get_cuda_device_context(gm)
+            with ctx:
+                pass
+
     def test_inductor_via_fx_dict_input(self):
         mod = MyModule2().eval()
         inp = {"key": [torch.randn(10), torch.randn(10)]}

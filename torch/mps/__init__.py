@@ -199,6 +199,15 @@ def is_available() -> bool:
     return device_count() > 0
 
 
+def is_initialized() -> bool:
+    r"""Returns True if MPS is initialized.
+
+    MPS does not have lazy initialization state that mirrors CUDA/XPU, so
+    availability is enough for callers that need to avoid lazy-init side effects.
+    """
+    return is_available()
+
+
 def _host_alias_storage(storage: "torch.UntypedStorage") -> "torch.UntypedStorage":
     r"""Returns a CPU :class:`torch.UntypedStorage` that aliases the
     host-visible contents of the MTLBuffer backing ``storage``.
@@ -252,4 +261,5 @@ __all__ = [
     "profiler",
     "recommended_max_memory",
     "is_available",
+    "is_initialized",
 ]

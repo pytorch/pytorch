@@ -53,7 +53,6 @@ from ..pattern_matcher import (
 from ..utils import (
     decode_device,
     get_all_devices,
-    get_gpu_type,
     is_gpu,
     is_pointwise_use,
     OPTIMUS_EXCLUDE_POST_GRAD,
@@ -2271,6 +2270,16 @@ def move_constructors_to_gpu(graph: fx.Graph) -> None:
     """
     Moves intermediary tensors which are constructed on the cpu to gpu when safe
     """
+    gpu_types: OrderedSet[str] = OrderedSet(
+        val.device.type
+        for node in graph.nodes
+        if isinstance((val := node.meta.get("val")), torch.Tensor)
+        and is_gpu(val.device.type)
+    )
+    if not gpu_types:
+        return
+    if len(gpu_types) != 1:
+        return
 
     # cudagraph does not support cpu tensors. In this pass, we update the graph
     # by explicitly moving cpu scalar tensors to gpu when profitable, relying on
@@ -2281,7 +2290,7 @@ def move_constructors_to_gpu(graph: fx.Graph) -> None:
         and torch._inductor.config.graph_partition
     )
     ConstructorMoverPass(
-        get_gpu_type(),
+        next(iter(gpu_types)),
         allow_inputs=allow_inputs_outputs,
         allow_outputs=allow_inputs_outputs,
     )(graph)
