@@ -5023,7 +5023,7 @@ def _grid_sampler_2d(
 
     if _expand_grid:
         # Let's expand grid to [N, C, oH, oW, 2]
-        # This allows to generate a single triton cuda kernel instead of two kernels.
+        # This allows generating a single triton cuda kernel instead of two kernels.
         # Two kernels are due source indices, weights have shape (N, 1, oH, oW), xnumel=N*oH*oW
         # and output has shape (N, C, oH, oW), xnumel=N*C*oH*oW
         # Expanding grid to (N, C, oH, oW, two) unifies xnumel to N*C*oH*oW
@@ -5704,13 +5704,16 @@ def multi_margin_loss(
             weight.ndim == 1 and weight.numel() == dim,  # type: ignore[union-attr]
             lambda: f"inconsistent weight size, expected {dim} but got {weight.shape}",  # type: ignore[union-attr]
         )
+    # Keep 1D target for weight indexing
+    target_1d = target
     target = target.unsqueeze(1)
     u = torch.gather(input, dim=1, index=target)
     z = margin - u + input
     z = z.clamp_min(0)
     z = z if p == 1 else z * z
     if weight is not None:
-        z = z * weight[target]
+        # Use 1D indexing to avoid issues with advanced indexing in inductor
+        z = z * weight[target_1d].unsqueeze(1)
     idx = torch.arange(dim, device=input.device)
     z = torch.where(idx != target, z, 0)
     if reduction == Reduction.MEAN.value:
