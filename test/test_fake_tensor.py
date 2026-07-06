@@ -2322,6 +2322,11 @@ assert not torch.cuda.is_initialized()
             self.assertEqual(fake_inverse.dtype, real_inverse.dtype)
             self.assertEqual(fake_counts.dtype, real_counts.dtype)
 
+    def test_assert_tensor_metadata_with_list(self):
+        with FakeTensorMode():
+            x = torch.empty(10)
+            torch.ops.aten._assert_tensor_metadata.default(x, size=[10], stride=[1])
+
     def test_unique_default_dynamic_output_shape(self):
         x = torch.tensor([2, 1, 4, 2, 2])
         with FakeTensorMode() as mode:
