@@ -382,6 +382,10 @@ inplaceable_ops: dict[Callable[..., Any], InplaceableOp] = {
         0,
         extra_check=should_reinplace_scatter,
     ),
+    # Stateless Philox RNG: reinplace the functionalized clone onto the dead
+    # output buffer, so out-of-place uniform()/normal() don't pay an extra copy.
+    aten._philox_uniform.default: InplaceableOp(aten._philox_uniform_.default, 0),
+    aten._philox_normal.default: InplaceableOp(aten._philox_normal_.default, 0),
 }
 
 try:
