@@ -2086,10 +2086,8 @@ def object_generic_getattr(
     if getattr_result is not None:
         return getattr_result
 
-    # Step 7: Attribute not found -- signal to caller to fall back.
-    raise _UnhandledDescriptorError(
-        f"object_generic_getattr: '{py_type.__name__}' has no attribute '{name}'"
-    )
+    # Step 7: Attribute not found.
+    raise_observed_exception(AttributeError, tx)
 
 
 def generic_getattr(

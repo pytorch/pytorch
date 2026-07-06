@@ -1023,13 +1023,6 @@ class MappingProxyVariable(VariableTracker):
 
         return generic_richcompare(tx, self.dv_dict, other, op)
 
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> ConstantVariable:
-        if self.python_type() is types.MappingProxyType:
-            return VariableTracker.build(tx, name in types.MappingProxyType.__dict__)
-        return super().call_obj_hasattr(tx, name)
-
 
 class NNModuleHooksDictVariable(ConstDictVariable):
     # Special class to avoid adding any guards on the nn module hook ids.
@@ -1092,15 +1085,6 @@ class DictViewVariable(VariableTracker):
         codegen(self.dv_dict)
         codegen.load_method(self.kv)
         codegen.call_method(0)
-
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> ConstantVariable:
-        if self.kv is None:
-            raise AssertionError("kv must not be None for call_obj_hasattr")
-        if name in self.python_type().__dict__:
-            return ConstantVariable.create(True)
-        return ConstantVariable.create(False)
 
     def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
