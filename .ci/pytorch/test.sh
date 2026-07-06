@@ -424,6 +424,7 @@ test_python_smoke() {
   time python test/run_test.py --include inductor/test_flex_attention -k test_tma_with_customer_kernel_options $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include test_matmul_cuda test_scaled_matmul_cuda inductor/test_fp8 inductor/test_max_autotune inductor/test_cutedsl_grouped_mm $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include test_foreach -k TestForeachMM $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include test_linalg -k polar $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
 }
 
@@ -1541,6 +1542,10 @@ test_libtorch_api() {
 test_xpu_bin(){
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
+
+  # Build binaries carry absolute RPATHs that don't exist on the test runner;
+  # point LD_LIBRARY_PATH at the installed torch libs so the linker finds them.
+  export LD_LIBRARY_PATH="${TORCH_LIB_DIR}:${LD_LIBRARY_PATH}"
 
   for xpu_case in "${BUILD_BIN_DIR}"/*{xpu,sycl}*; do
     if [[ "$xpu_case" != *"*"* && "$xpu_case" != *.so && "$xpu_case" != *.a ]]; then
