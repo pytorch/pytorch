@@ -15,7 +15,11 @@ from typing_extensions import ParamSpec, TypeVar
 import torch
 import torch.utils._pytree as pytree
 from torch import _utils_internal
-from torch._C import _dispatch_is_included_in_alias as is_included_in_alias, DispatchKey
+from torch._C import (
+    _dispatch_is_included_in_alias as is_included_in_alias,
+    DispatchKey,
+    DispatchKeySet,
+)
 from torch._functorch.pyfunctorch import dispatch_functorch, TransformType
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -32,6 +36,7 @@ if TYPE_CHECKING:
 
 _T = TypeVar("_T", default=Any)
 _P = ParamSpec("_P", default=...)
+
 
 # Query `hasattr` only once.
 _SET_GLOBAL_FLAGS = hasattr(sys, "getdlopenflags") and hasattr(sys, "setdlopenflags")
@@ -803,7 +808,7 @@ def get_cached_ops():
 
 
 @dataclass
-class _PyObjectDispatcher:
+class _PyObjectDispatcher(Generic[_P, _T]):
     # [NOTE: PyObject Dispatcher aka pyobj_dispatcher]
     #
     # Custom operators whose kernels are implemented in Python currently need
@@ -823,8 +828,8 @@ class _PyObjectDispatcher:
     # kernel, then we directly pass the PyObject args to the Python kernel.
     # if the kernel is a C++ kernel, then we perform a C++ Dispatcher redispatch
     # (which ends up doing the expensive at::Tensor copies).
-    dispatch: Callable[..., Any]
-    redispatch: Callable[..., Any]
+    dispatch: Callable[_P, _T]
+    redispatch: Callable[Concatenate[DispatchKeySet, _P], _T]
 
 
 # Each OpOverload object contains pointer to a specific operator overload, a pointer to the parent `OpOverloadPacket` object.
@@ -845,7 +850,7 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
         self._cpp_dispatch_handle = op
         self._op_dk = op_dk
         self._schema = schema
-        self._pyobj_dispatcher: _PyObjectDispatcher | None = None
+        self._pyobj_dispatcher: _PyObjectDispatcher[_P, _T] | None = None
         self._overloadpacket = overloadpacket
         self._tags = tags
         self._overloadname = (
