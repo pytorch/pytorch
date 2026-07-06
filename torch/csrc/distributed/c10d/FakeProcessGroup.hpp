@@ -396,9 +396,16 @@ class FakeProcessGroup : public Backend {
     return c10::make_intrusive<FakeWork>();
   }
 
-  // Private constructor used by official APIs
+  // Private constructor used by official APIs. options may be null: the Python
+  // creator passes None through when init_process_group is called without
+  // pg_options, and pybind converts that to a null intrusive_ptr (the
+  // _create_internal default only applies when the arg is omitted). Normalize
+  // to a real Options so getBackendOptions() never hands splitGroup a null it
+  // would dereference.
   FakeProcessGroup(int rank, int size, c10::intrusive_ptr<Options> options)
-      : Backend(rank, size), options_(std::move(options)) {
+      : Backend(rank, size),
+        options_(
+            options ? std::move(options) : c10::make_intrusive<Options>()) {
     TORCH_CHECK(
         rank >= 0 && rank < size,
         "Cannot init process group where rank (",
