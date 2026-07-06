@@ -7,9 +7,35 @@ to avoid dispatcher overhead).
 
 from __future__ import annotations
 
+import functools
 import math
 
 import torch
+from torch._native.instrumentation import instrument_cutedsl_compile
+
+
+# quack's rmsnorm compile fns are vendored, so we can't decorate them in
+# place. Wrap them once at the call site instead -- they're @jit_cache so
+# the instrumentation reads their cache_info(). Memoized so the wrapper (and
+# its forwarded cache_info) is stable across calls. N is positional arg 6 in
+# the fwd compile signature and arg 0 in the bwd one.
+@functools.cache
+def _instrumented_rmsnorm_fwd():
+    from torch._vendor.quack.rmsnorm import _compile_rmsnorm_fwd
+
+    return instrument_cutedsl_compile(
+        "aten::_fused_rms_norm", key_fn=lambda *a, **k: f"fwd N={a[6]}"
+    )(_compile_rmsnorm_fwd)
+
+
+@functools.cache
+def _instrumented_rmsnorm_bwd():
+    from torch._vendor.quack.rmsnorm import _compile_rmsnorm_bwd
+
+    return instrument_cutedsl_compile(
+        "aten::_fused_rms_norm_backward",
+        key_fn=lambda *a, **k: f"bwd N={a[0]}",
+    )(_compile_rmsnorm_bwd)
 
 
 # quack imports `cutlass`, which is only installed on CUDA-enabled x86 Linux
@@ -87,9 +113,7 @@ def quack_rmsnorm_fwd(
     out_dtype = _torch2cute(out)
     weight_dtype = _torch2cute(weight)
 
-    from torch._vendor.quack.rmsnorm import _compile_rmsnorm_fwd
-
-    kernel = _compile_rmsnorm_fwd(
+    kernel = _instrumented_rmsnorm_fwd()(
         dtype,
         out_dtype,
         None,
@@ -128,7 +152,6 @@ def quack_rmsnorm_bwd(
     rstd_flat = _flatten_rstd(rstd, M)
 
     dx = torch.empty_like(x)
-    from torch._vendor.quack.rmsnorm import _compile_rmsnorm_bwd
     from torch._vendor.quack.rmsnorm_config import get_sm_count
 
     sm_count = get_sm_count(N, x.device)
@@ -150,7 +173,7 @@ def quack_rmsnorm_bwd(
     dx_dtype = _torch2cute(dx)
     weight_dtype = _torch2cute(weight)
 
-    kernel = _compile_rmsnorm_bwd(
+    kernel = _instrumented_rmsnorm_bwd()(
         N,
         dtype,
         dout_dtype,
