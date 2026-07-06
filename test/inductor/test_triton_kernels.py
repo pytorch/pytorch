@@ -338,7 +338,12 @@ class KernelTests(torch._inductor.test_case.TestCase):
                 self.assertNotIn("del arg0_1", code)
                 self.assertNotIn("del arg1_1", code)
                 self.assertIn(".record_stream(torch.accelerator.current_stream(", code)
+                self.assertIn("_h2d_event_", code)
+                copy_idx = code.index(".copy_(")
+                h2d_sync_idx = code.index("_h2d_event_")
                 launch_idx = code.index("add_kernel_0.run(")
+                self.assertGreater(h2d_sync_idx, copy_idx)
+                self.assertLess(h2d_sync_idx, launch_idx)
                 marker = "torch.ops.prims._data_ptr.default("
                 for line in code.splitlines():
                     if marker in line:

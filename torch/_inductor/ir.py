@@ -8979,6 +8979,27 @@ class DeviceCopy(ExternKernelOut):
             wrapper.codegen_device_copy(args[0], self.codegen_reference(), args[1])
         if isinstance(self.layout, Layout) and self.layout.is_pinned:
             wrapper.sync_d2h_copy(self.get_name())
+        if self.should_sync_h2d_data_ptr_copy():
+            wrapper.sync_h2d_copy(self.get_name())
+
+    def should_sync_h2d_data_ptr_copy(self) -> bool:
+        if not V.graph.data_ptr_keepalive_buffers:
+            return False
+        if not self.constant_args or self.constant_args[0] is not True:
+            return False
+        if not isinstance(self.layout, Layout):
+            return False
+        device = self.layout.device
+        if device is None or not is_gpu(device.type):
+            return False
+        if not is_node_sequence(self.inputs):
+            return False
+        src = self.inputs[0]
+        src_device = src.get_device()
+        if src_device is None or src_device.type != "cpu":
+            return False
+        src_layout = src.maybe_get_layout()
+        return isinstance(src_layout, Layout) and src_layout.is_pinned
 
 
 class DynamicSelectStorageOffset(ExternKernel):

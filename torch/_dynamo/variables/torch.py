@@ -123,8 +123,8 @@ except ModuleNotFoundError:
 
 
 if TYPE_CHECKING:
+    from torch._custom_class_base import CustomClassBase
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
-    from torch._opaque_base import OpaqueBase
     from torch.utils._pytree import TreeSpec
 
 
@@ -132,6 +132,27 @@ V = TypeVar("V")
 T = TypeVar("T")
 
 log = logging.getLogger(__name__)
+
+
+def _is_supported_out_tensor_layout(
+    fake_out: torch.Tensor, *, false_if_dde: bool
+) -> bool:
+    # Functionalization can preserve standard dense memory formats, but not
+    # arbitrary non-contiguous view strides.
+    return (
+        torch._prims_common.is_contiguous(fake_out, false_if_dde=false_if_dde)
+        or torch._prims_common.is_contiguous_for_memory_format(
+            fake_out,
+            memory_format=torch.channels_last,
+            false_if_dde=false_if_dde,
+        )
+        or torch._prims_common.is_contiguous_for_memory_format(
+            fake_out,
+            memory_format=torch.channels_last_3d,
+            false_if_dde=false_if_dde,
+        )
+    )
+
 
 supported_ctx_manager_classes = dict.fromkeys(
     [
@@ -372,7 +393,7 @@ def _collect_all_grad_fns(tensor: torch.Tensor) -> set[torch.autograd.graph.Node
 
     grad_fns: set[torch.autograd.graph.Node] = set()
 
-    plain_tensors: list[torch.SymInt | torch.Tensor | int | OpaqueBase] = []
+    plain_tensors: list[torch.SymInt | torch.Tensor | int | CustomClassBase] = []
     # Get all plain tensors (handles nested subclasses)
     if is_traceable_wrapper_subclass(tensor):
         get_plain_tensors(tensor, out=plain_tensors)
@@ -2419,8 +2440,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 source = CallFunctionNoArgsSource(self.source)
                 install_guard(source.make_guard(GuardBuilder.ID_MATCH))
             # assumes `module` is in the form `torch.xyz`
+            torch_source = ImportSource("torch")
+            install_guard(torch_source.make_guard(GuardBuilder.ID_MATCH))
             new_source = AttrSource(
-                ImportSource("torch"),
+                torch_source,
                 module.__name__.rsplit(".", maxsplit=1)[-1],
             )
             return VariableTracker.build(tx, module, new_source)
@@ -2784,8 +2807,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     tx,
                     f"{fn.__name__} takes exactly one argument ({len(args)} given)",
                 )
+            torch_source = ImportSource("torch")
+            install_guard(torch_source.make_guard(GuardBuilder.ID_MATCH))
             current_device_source = CallFunctionNoArgsSource(
-                AttrSource(AttrSource(ImportSource("torch"), "cuda"), "current_device")
+                AttrSource(AttrSource(torch_source, "cuda"), "current_device")
             )
             install_guard(current_device_source.make_guard(GuardBuilder.EQUALS_MATCH))
             arg = args[0].as_python_constant()
@@ -3451,7 +3476,9 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                                 *graph_break_hints.SUPPORTABLE,
                             ],
                         )
-                    if not torch._prims_common.is_contiguous(fake_out):
+                    if not _is_supported_out_tensor_layout(
+                        fake_out, false_if_dde=False
+                    ):
                         # It's difficult to handle strides correctly in functionalization
                         # when calling an out= op with a non-contiguous out argument
                         unimplemented(
@@ -3486,7 +3513,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                             *graph_break_hints.SUPPORTABLE,
                         ],
                     )
-                if not torch._prims_common.is_contiguous_or_false(fake_out):
+                if not _is_supported_out_tensor_layout(fake_out, false_if_dde=True):
                     # It's difficult to handle strides correctly in functionalization
                     # when calling an out= op with a non-contiguous out argument
                     unimplemented(

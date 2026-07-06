@@ -34,9 +34,9 @@ import torch._numpy as tnp
 import torch.fx
 import torch.random
 from torch import sym_float, sym_int
+from torch._custom_class_base import CustomClassBase
 from torch._dynamo import compiled_autograd
 from torch._library.opaque_object import is_opaque_reference_type
-from torch._opaque_base import OpaqueBase
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental.symbolic_shapes import (
     guard_scalar,
@@ -438,9 +438,9 @@ class TensorVariable(VariableTracker):
             example_value = getattr(fake_val, name)
             if name in attrs:
                 # attrs returned from tensor_flatten are always tensors or opaques
-                if not isinstance(example_value, (torch.Tensor, OpaqueBase)):
+                if not isinstance(example_value, (torch.Tensor, CustomClassBase)):
                     raise AssertionError(
-                        f"Expected Tensor or OpaqueBase, got {type(example_value)}"
+                        f"Expected Tensor or CustomClassBase, got {type(example_value)}"
                     )
                 from .builder import wrap_fx_proxy
 
