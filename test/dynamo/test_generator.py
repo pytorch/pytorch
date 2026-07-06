@@ -912,6 +912,79 @@ class GraphModule(torch.nn.Module):
         ):
             f(1)
 
+    def test_pep479_raise_stopiteration_in_body(self):
+        # PEP 479: a StopIteration that escapes a generator body is converted
+        # to RuntimeError. On 3.12+ the compiler emits CALL_INTRINSIC_1 3 for
+        # this; on earlier versions Dynamo converts at the generator frame
+        # boundary. The branch taken (RuntimeError vs StopIteration) is encoded
+        # in the returned tensor so the eager/compiled results can be compared.
+        def fn(t):
+            def whoo():
+                yield t + 1
+                raise StopIteration("boom")
+
+            g = whoo()
+            next(g)
+            try:
+                next(g)
+            except RuntimeError:
+                return t + 1.0
+            except StopIteration:
+                return t + 2.0
+            return t
+
+        t = torch.randn(2)
+        self.assertEqual(self._compile_check(fn, args=(t,)), t + 1.0)
+
+    @make_dynamo_test
+    def test_pep479_stopiteration_error(self):
+        # Ported from CPython test_generators ExceptionTest.test_stopiteration_error.
+        # Asserts the RuntimeError message, not just the type.
+        def gen():
+            raise StopIteration
+            yield
+
+        with self.assertRaisesRegex(RuntimeError, "raised StopIteration"):
+            next(gen())
+
+    @make_dynamo_test
+    def test_pep479_tutorial_stopiteration(self):
+        # Ported from CPython test_generators ExceptionTest.test_tutorial_stopiteration.
+        def f():
+            yield 1
+            raise StopIteration
+            yield 2  # never reached
+
+        g = f()
+        self.assertEqual(next(g), 1)
+        with self.assertRaisesRegex(RuntimeError, "raised StopIteration"):
+            next(g)
+
+    def test_pep479_stopiteration_from_inner_next(self):
+        # Tutorial PEP 479 case: StopIteration leaking from an inner next()
+        # inside the generator body is also converted to RuntimeError.
+        def fn(t):
+            def inner():
+                yield t + 1
+
+            def whoo():
+                it = inner()
+                while True:
+                    yield next(it)
+
+            g = whoo()
+            next(g)
+            try:
+                next(g)
+            except RuntimeError:
+                return t + 1.0
+            except StopIteration:
+                return t + 2.0
+            return t
+
+        t = torch.randn(2)
+        self.assertEqual(self._compile_check(fn, args=(t,)), t + 1.0)
+
 
 class TestGeneratorSend(GeneratorTestsBase):
     def test_send(self):
