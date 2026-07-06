@@ -814,6 +814,16 @@ jobs:
             export HF_DATASETS_OFFLINE=0
           fi
 
+          # The datasets library writes its arrow build + lock files even in offline
+          # mode and even for local datasets, so it can't use the read-only mount
+          # directly. Use a writable dir warmed from the seeded /mnt/hf_cache/datasets
+          # (so offline Hub datasets resolve); the refresh step syncs it back to S3.
+          export HF_DATASETS_CACHE="${RUNNER_TEMP}/hf_datasets"
+          mkdir -p "${HF_DATASETS_CACHE}"
+          if [[ -d /mnt/hf_cache/datasets ]]; then
+            cp -a /mnt/hf_cache/datasets/. "${HF_DATASETS_CACHE}/" 2>/dev/null || true
+          fi
+
           # shellcheck disable=SC2046
           python3 -m pip install $(echo dist/*.whl)[opt-einsum]
           ${TEST_COMMAND}
@@ -874,13 +884,8 @@ jobs:
         shell: bash
         run: |
           set -x
-          HF_CACHE="${RUNNER_TEMP}/hf_cache"
           if [[ -z "${HF_CACHE_S3_BUCKET:-}" || -z "${HF_CACHE_S3_REGION:-}" ]]; then
             echo "HF_CACHE_S3_BUCKET/REGION unset (not an hf-cache runner) - skipping sync"
-            exit 0
-          fi
-          if [[ ! -d "${HF_CACHE}/hub" ]]; then
-            echo "No ${HF_CACHE}/hub to sync - skipping"
             exit 0
           fi
           # The test image doesn't ship the AWS CLI (awscli is excluded from
@@ -891,5 +896,12 @@ jobs:
             /tmp/awscli-venv/bin/pip install --quiet awscli==1.45.39
             AWS=/tmp/awscli-venv/bin/aws
           fi
-          "${AWS}" s3 sync "${HF_CACHE}/hub" "s3://${HF_CACHE_S3_BUCKET}/hub" \
-            --region "${HF_CACHE_S3_REGION}" --no-progress
+          # Sync model snapshots (hub/) and the datasets build cache (datasets/) to S3.
+          if [[ -d "${RUNNER_TEMP}/hf_cache/hub" ]]; then
+            "${AWS}" s3 sync "${RUNNER_TEMP}/hf_cache/hub" "s3://${HF_CACHE_S3_BUCKET}/hub" \
+              --region "${HF_CACHE_S3_REGION}" --no-progress
+          fi
+          if [[ -d "${RUNNER_TEMP}/hf_datasets" ]]; then
+            "${AWS}" s3 sync "${RUNNER_TEMP}/hf_datasets" "s3://${HF_CACHE_S3_BUCKET}/datasets" \
+              --region "${HF_CACHE_S3_REGION}" --no-progress
+          fi
