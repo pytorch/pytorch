@@ -188,6 +188,91 @@ class TestCppWrapperCustomOps(InductorTestCase):
         )
         self.assertIn("callBoxed", code_str)
 
+    @unittest.skipIf(not HAS_CPU, "requires CPU")
+    @config.patch(implicit_fallbacks=True)
+    def test_optional_output_size_assert_is_null_guarded(self):
+        # A fallback custom op can declare an optional output (Tensor?) that is
+        # absent (None) at runtime. Under cpp_wrapper the C-shim writes a null
+        # AtenTensorHandle for the absent output; an unconditional
+        # assert_size_stride on that slot (its fake kernel returned a tensor)
+        # would dereference the null handle -> SIGSEGV (seen with fbgemm's
+        # block_bucketize_sparse_features_inference). The fix emits the assert
+        # for schema-optional outputs under a runtime null guard.
+        #
+        # Force the op onto the C-shim path (custom_ops_to_c_shims) and inspect
+        # the generated code: the optional output (distinct fake shape 11x13) is
+        # asserted inside `if (buf != nullptr) { ... }`, while the required (8x4)
+        # output keeps an unconditional assert. Codegen runs before the .so is
+        # loaded, so the absent hand-written C-shim symbol does not matter here.
+        import io
+        import logging
+
+        from torch._inductor.codecache import output_code_log
+
+        with torch.library._scoped_library("test_null_guard", "FRAGMENT") as lib:
+            lib.define("f(Tensor x) -> (Tensor, Tensor?)")
+            lib.impl("f", lambda x: (x + 1, None), "CompositeExplicitAutograd")
+            lib.impl(
+                "f",
+                lambda x: (
+                    torch.empty_like(x),
+                    torch.empty(11, 13, dtype=x.dtype, device=x.device),
+                ),
+                "Meta",
+            )
+
+            op = torch.ops.test_null_guard.f.default
+            c_shims = {
+                op: [
+                    "AOTITorchError aoti_torch_cpu_f(AtenTensorHandle x, "
+                    "AtenTensorHandle* r0, AtenTensorHandle* r1)"
+                ]
+            }
+
+            def fn(x):
+                a, b = torch.ops.test_null_guard.f(x)
+                return a + 1, b
+
+            x = torch.randn(8, 4)
+
+            cap = io.StringIO()
+            handler = logging.StreamHandler(cap)
+            output_code_log.addHandler(handler)
+            prev_level = output_code_log.level
+            output_code_log.setLevel(logging.DEBUG)
+            try:
+                with config.patch(
+                    {"debug": True, "aot_inductor.custom_ops_to_c_shims": c_shims}
+                ):
+                    compiled = torch.compile(
+                        fn, fullgraph=True, options={"cpp_wrapper": True}
+                    )
+                    try:
+                        compiled(x)
+                    except Exception:
+                        # No real C-shim symbol is provided, so the generated .so
+                        # fails to load; codegen has already emitted the wrapper.
+                        pass
+            finally:
+                output_code_log.setLevel(prev_level)
+                output_code_log.removeHandler(handler)
+
+        code = cap.getvalue()
+        assert_lines = [ln for ln in code.splitlines() if "assert_size_stride" in ln]
+        self.assertTrue(assert_lines, "expected assert_size_stride in generated code")
+        # Optional Tensor? output (fake shape 11x13) must be null-guarded.
+        optional = [ln for ln in assert_lines if "13" in ln]
+        self.assertTrue(optional, "optional output should still be size-asserted")
+        self.assertTrue(
+            all("nullptr" in ln for ln in optional),
+            f"optional Tensor? output assert must be runtime null-guarded: {optional}",
+        )
+        # Required (non-optional) outputs keep an unconditional assert.
+        self.assertTrue(
+            any("nullptr" not in ln for ln in assert_lines),
+            f"required outputs must keep unconditional asserts: {assert_lines}",
+        )
+
 
 if __name__ == "__main__":
     run_tests(needs="filelock")

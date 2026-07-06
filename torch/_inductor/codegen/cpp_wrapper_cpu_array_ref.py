@@ -120,6 +120,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         size: str,
         stride: str,
         op_name: str,
+        maybe_null: bool = False,
     ) -> None:
         # Inputs/outputs are ArrayRefTensor, not AtenTensorHandle, so
         # assert_size_stride would fail to compile.
