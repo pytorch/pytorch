@@ -51,6 +51,7 @@ jobs:
       use-arc: true
       build-environment: linux-jammy-rocm-py3.10-mi200
       docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3
+      rocm-arch-list: gfx90a
       sync-tag: rocm-build
       test-matrix: |
         { include: [
