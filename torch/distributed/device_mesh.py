@@ -846,18 +846,17 @@ else:
             with torch._dynamo.disable_nested_graph_breaks():
                 root_mesh = self._get_root_mesh()
                 slice_dim_group_name = []
+                dim_names = not_none(self._mesh_dim_names)
                 if len(self._dim_group_names) > 0:
-                    if len(self._dim_group_names) != len(not_none(self._mesh_dim_names)):
+                    if len(self._dim_group_names) != len(dim_names):
                         raise AssertionError(
                             "The number of dim_group_names and mesh_dim_names "
                             "should have the same length if the rank is in the mesh."
                         )
                     for name in submesh_dim_names:
-                        if name in not_none(self._mesh_dim_names):
+                        if name in dim_names:
                             slice_dim_group_name.append(
-                                self._dim_group_names[
-                                    not_none(self._mesh_dim_names).index(name)
-                                ]
+                                self._dim_group_names[dim_names.index(name)]
                             )
                         else:
                             # If device_mesh is not root_mesh, we already throw error in _get_slice_mesh_layout
