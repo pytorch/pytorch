@@ -362,9 +362,9 @@ class HooksTests(torch._dynamo.test_case.TestCase):
             """\
 def forward(self, L_x_ : torch.Tensor):
     l_x_ = L_x_
-    hook_body_0 = self.hook_body_0
     mul = l_x_ * 2;  l_x_ = None
     mul_1 = mul * 3
+    hook_body_0 = self.hook_body_0
     register_hook = torch.ops.higher_order.register_hook(mul, hook_body_0);  mul = hook_body_0 = None
     add = mul_1 + register_hook;  mul_1 = None
     sum_1 = add.sum();  add = None
