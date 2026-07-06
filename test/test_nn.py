@@ -2617,14 +2617,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertRaises(Exception, lambda: lstm(input, (cx, hx)))
 
 
-    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
-    def test_pack_sequence_batch_sizes_throw(self):
-        with self.assertRaisesRegex(ValueError, r"batch_sizes should always be on CPU"):
-            m = nn.LSTM(3, 4, bidirectional=True, num_layers=2).to('cuda')
-            a = torch.rand(5, 3, device='cuda')
-            b = torch.tensor([1, 1, 1, 1, 1], device='cuda')
-            input = nn.utils.rnn.PackedSequence(a, b)
-
     def test_Transformer_cell(self):
         # this is just a smoke test; these modules are implemented through
         # autograd so no Jacobian test is needed
@@ -3879,33 +3871,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         check_weight_norm(nn.LSTM(input_size, hidden_size, num_layers), 'weight_hh_l0')
         check_weight_norm(nn.LSTM(input_size, hidden_size, num_layers, proj_size=3), 'weight_hr_l0')
 
-    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
-    def test_partial_flat_weights(self):
-        input_size = 10
-        hidden_size = 6
-        num_layers = 2
-
-        m = nn.LSTM(input_size, hidden_size, num_layers)
-        inp = torch.randn(3, 2, 10)
-        out_expected = m(inp)
-        # deletes an attribute of original LSTM
-        weight_orig = m.weight_hh_l0
-        del m.weight_hh_l0
-        self.assertFalse(hasattr(m, "weight_hh_l0"))
-        # verifies that moving to CUDA with only some attributes defined
-        # does not throw an error
-        m.cuda()
-        # recompute the weight and make sure that module can be used
-        m.weight_hh_l0 = weight_orig.cuda()
-        inp = inp.cuda()
-        # otherwise, subsequent warnings will be hidden, and further tests rely on them
-        warnings.simplefilter("always")
-        # Relax tolerances: non-contiguous weights cause cuDNN to use different
-        # algorithms, leading to small numerical differences vs CPU computation.
-        # Observed max: atol ~6.4e-5, rtol ~3.1e-3. Using 1.5x margin.
-        # See https://github.com/pytorch/pytorch/issues/163072
-        self.assertEqual(m(inp)[0].cpu(), out_expected[0], atol=1e-4, rtol=5e-3)
-
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     @set_default_dtype(torch.double)
     def test_RNN_dropout(self):
@@ -3965,19 +3930,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
                     with self.assertRaisesRegex(RuntimeError, "Expected sequence length to be larger than 0 in RNN"):
                         rnn(input)
-
-    def test_RNN_input_size_zero(self):
-        for module in (nn.RNN, nn.LSTM, nn.GRU):
-            for device in get_all_device_types():
-                input = torch.zeros((5, 0, 3))
-                rnn = module(input_size=3, hidden_size=4)
-                if device == 'cuda':
-                    rnn.cuda()
-                    input = input.cuda()
-                outs = rnn(input)
-                self.assertEqual(outs[0].shape, torch.Size([5, 0, 4]))
-                # Check that backward does not cause a hard error
-                outs[0].sum().backward()
 
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     def test_RNN_dropout_state(self):
@@ -4234,16 +4186,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
         gradcheck(func, [v])
         gradgradcheck(func, [v])
-
-    def test_PReLU_backward_requires_grad_false(self):
-        devices = ['cpu']
-        devices += ['cuda'] if TEST_CUDA else []
-        for d in devices:
-            m = nn.PReLU().to(d)
-            x = torch.randn(2, 3, 4, 5, device=d, requires_grad=False)
-            y = m(x)
-            y.mean().backward()
-            self.assertEqual(x.grad, None)
 
     def test_bce_loss_always_nonnegative(self):
         target = torch.ones(5)
@@ -4648,16 +4590,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertEqual(cudnn_output, thnn_output)
             self.assertEqual(cudnn_input_grad, thnn_input_grad, atol=1e-3, rtol=0)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    def test_batchnorm_nonaffine_cuda_half_input(self):
-        input = torch.randn(16, 3, 24, 24, dtype=torch.half, device="cuda")
-        m = nn.BatchNorm2d(3, affine=False).cuda().float()  # keep running stats in FP32
-        output = m(input)
-        self.assertEqualTypeString(output, input)
-        m.eval()
-        output = m(input)
-        self.assertEqualTypeString(output, input)
-
     def test_batchnorm_raises_error_if_less_than_one_value_per_channel(self):
         x = torch.rand(10)[None, :, None]
         with self.assertRaises(ValueError):
@@ -4908,18 +4840,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             _train(memory_format, ref_backend, mixed, dtype)
         else:
             _inference(memory_format, ref_backend, mixed, dtype)
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    def test_batchnorm_nhwc_cuda(self):
-        for dtype in (torch.half, torch.float):
-            (N, C, H, W) = 2, 64, 50, 50
-            model = torch.nn.BatchNorm2d(C, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
-            model = model.eval().cuda().to(dtype)
-            inp1 = torch.randn(N, C, H, W, device=torch.device('cuda'), dtype=dtype)
-            inp2 = inp1.contiguous(memory_format=torch.channels_last)
-            out1 = model(inp1)
-            out2 = model(inp2)
-            self.assertTrue(torch.equal(out1, out2))
 
     def test_batchnorm_load_state_dict(self):
         bn = torch.nn.BatchNorm2d(3)
@@ -12104,6 +12024,19 @@ class TestNNDeviceType(NNTestCase):
             with torch.backends.cudnn.flags(enabled=False):
                 self._test_batchnorm_simple_average(device, dtype, torch.float)
 
+    @skipMPS
+    @onlyAccelerator
+    def test_batchnorm_nhwc(self, device):
+        for dtype in (torch.half, torch.float):
+            (N, C, H, W) = 2, 64, 50, 50
+            model = torch.nn.BatchNorm2d(C, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+            model = model.eval().to(device).to(dtype)
+            inp1 = torch.randn(N, C, H, W, device=device, dtype=dtype)
+            inp2 = inp1.contiguous(memory_format=torch.channels_last)
+            out1 = model(inp1)
+            out2 = model(inp2)
+            self.assertTrue(torch.equal(out1, out2))
+
     @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)
     @dtypesIfMPS(torch.float, torch.half, torch.bfloat16)
@@ -15863,6 +15796,67 @@ if __name__ == '__main__':
         self.assertEqual(g2, g3, atol=1e-4, rtol=0)
         self.assertEqual(g1, g2, atol=1e-4, rtol=0)
         self.assertTrue((g1 == g1).all().item())  # check that we don't have NaN
+
+    @skipMPS
+    @onlyAccelerator
+    def test_pack_sequence_batch_sizes_throw(self, device):
+        with self.assertRaisesRegex(ValueError, r"batch_sizes should always be on CPU"):
+            m = nn.LSTM(3, 4, bidirectional=True, num_layers=2).to(device)
+            a = torch.rand(5, 3, device=device)
+            b = torch.tensor([1, 1, 1, 1, 1], device=device)
+            input = nn.utils.rnn.PackedSequence(a, b)
+
+    @skipMPS
+    @onlyAccelerator
+    def test_partial_flat_weights(self, device):
+        input_size = 10
+        hidden_size = 6
+        num_layers = 2
+
+        m = nn.LSTM(input_size, hidden_size, num_layers)
+        inp = torch.randn(3, 2, 10)
+        out_expected = m(inp)
+        weight_orig = m.weight_hh_l0
+        del m.weight_hh_l0
+        self.assertFalse(hasattr(m, "weight_hh_l0"))
+        m.to(device)
+        m.weight_hh_l0 = weight_orig.to(device)
+        inp = inp.to(device)
+        warnings.simplefilter("always")
+        # Relax tolerances: non-contiguous weights cause cuDNN to use different
+        # algorithms, leading to small numerical differences vs CPU computation.
+        # Observed max: atol ~6.4e-5, rtol ~3.1e-3. Using 1.5x margin.
+        # See https://github.com/pytorch/pytorch/issues/163072
+        self.assertEqual(m(inp)[0].cpu(), out_expected[0], atol=1e-4, rtol=5e-3)
+
+    @skipMPS
+    def test_RNN_input_size_zero(self, device):
+        for module in (nn.RNN, nn.LSTM, nn.GRU):
+            input = torch.zeros((5, 0, 3), device=device)
+            rnn = module(input_size=3, hidden_size=4).to(device)
+            outs = rnn(input)
+            self.assertEqual(outs[0].shape, torch.Size([5, 0, 4]))
+            # Check that backward does not cause a hard error
+            outs[0].sum().backward()
+
+    @skipMPS
+    def test_PReLU_backward_requires_grad_false(self, device):
+        m = nn.PReLU().to(device)
+        x = torch.randn(2, 3, 4, 5, device=device, requires_grad=False)
+        y = m(x)
+        y.mean().backward()
+        self.assertEqual(x.grad, None)
+
+    @skipMPS
+    @onlyAccelerator
+    def test_batchnorm_nonaffine_half_input(self, device):
+        input = torch.randn(16, 3, 24, 24, dtype=torch.half, device=device)
+        m = nn.BatchNorm2d(3, affine=False).to(device).float()  # keep running stats in FP32
+        output = m(input)
+        self.assertEqualTypeString(output, input)
+        m.eval()
+        output = m(input)
+        self.assertEqualTypeString(output, input)
 
 
 class TestFunctionalPickle(TestCase):
