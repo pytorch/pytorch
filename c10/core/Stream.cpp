@@ -28,13 +28,13 @@ bool Stream::is_capturing() const {
   return impl.isStreamCapturing(*this);
 }
 
-int priority() const {
+int Stream::priority() const {
   impl::VirtualGuardImpl impl{device_.type()};
   return impl.getStreamPriority(*this);
 }
 
-static std::tuple<int, int> priority_range() {
-  impl::VirtualGuardImpl impl{device_.type()};
+std::tuple<int, int> Stream::priority_range(DeviceType device_type) {
+  impl::VirtualGuardImpl impl{device_type};
   return impl.getStreamPriorityRange();
 }
 

@@ -143,7 +143,7 @@ class C10_API Stream final {
   int priority() const;
 
   // Return the range of priority **supported by PyTorch**.
-  static std::tuple<int, int> priority_range();
+  static std::tuple<int, int> priority_range(DeviceType device_type);
 
   // The purpose of this function is to more conveniently permit binding
   // of Stream to and from Python.  Without packing, I have to setup a whole

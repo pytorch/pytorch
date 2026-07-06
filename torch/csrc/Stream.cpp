@@ -159,7 +159,12 @@ static PyObject* THPStream_get_priority_range(
     PyObject* _unused,
     PyObject* noargs) {
   HANDLE_TH_ERRORS
-  auto [low, high] = c10::Stream::priority_range();
+  const auto device_type = at::getAccelerator(false);
+  TORCH_CHECK(
+      device_type.has_value(),
+      "No accelerator is available, cannot get stream priority range.");
+
+  auto [low, high] = c10::Stream::priority_range(*device_type);
   return Py_BuildValue("(ii)", low, high);
   END_HANDLE_TH_ERRORS
 }
