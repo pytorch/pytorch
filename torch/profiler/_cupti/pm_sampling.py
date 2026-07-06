@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import functools
 import logging
-import os
 import threading
 from typing import Any, TYPE_CHECKING
 
@@ -39,19 +38,15 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Interval + look-back are configured process-wide via env read at import (set them before importing
-# torch); metrics are NOT -- each consumer brings its own via add_consumer(). The HW sampling
-# interval (GPU_TIME_INTERVAL units = ns); TORCH_CUPTI_PM_SAMPLING_INTERVAL_MS, default 1 ms.
-_SAMPLING_INTERVAL_NS = int(
-    float(os.environ.get("TORCH_CUPTI_PM_SAMPLING_INTERVAL_MS", 1)) * 1_000_000
-)
+# Interval + look-back defaults; override process-wide (first-come-first-serve) via
+# PmSampler.configure() -- there is no env var. Metrics are NOT process-wide -- each consumer
+# brings its own via add_consumer(). The HW sampling interval (GPU_TIME_INTERVAL units = ns),
+# default 1 ms.
+_DEFAULT_SAMPLING_INTERVAL_NS = 1_000_000
 # Retained look-back window: the sampler is sized (max_samples + ring) to cover this much wall-clock
 # at the interval. Kept modest because the host counter-data image is ~18 KiB/sample (see
-# _counter_data_size), so a decode of window/interval samples allocates that many.
-# TORCH_CUPTI_PM_SAMPLING_LOOKBACK_MS, default 10 s.
-_LOOKBACK_WINDOW_NS = int(
-    float(os.environ.get("TORCH_CUPTI_PM_SAMPLING_LOOKBACK_MS", 10_000)) * 1_000_000
-)
+# _counter_data_size), so a decode of window/interval samples allocates that many. Default 10 s.
+_DEFAULT_LOOKBACK_WINDOW_NS = 10_000 * 1_000_000
 
 
 def _counter_data_size(
@@ -183,6 +178,46 @@ class PmSampler:
     _instances: dict[int, PmSampler] = {}
     _instances_lock = threading.Lock()
     _active = 0
+    # Process-wide sampling config; each device's singleton snapshots these when first created.
+    # Set via configure() (first-come-first-serve, no env var); defaults otherwise.
+    _sampling_interval_ns: int = _DEFAULT_SAMPLING_INTERVAL_NS
+    _lookback_window_ns: int = _DEFAULT_LOOKBACK_WINDOW_NS
+    _configured: bool = False
+
+    @classmethod
+    def configure(
+        cls,
+        *,
+        sampling_interval_ms: float | None = None,
+        lookback_window_ms: float | None = None,
+    ) -> None:
+        """Set the process-wide PM-sampling interval and look-back window (milliseconds).
+        First-come-first-serve: locked once a call lands OR the first sampler is instantiated
+        (whichever comes first) -- a live per-device session can't be resized -- so a later
+        call is ignored with a warning. Call before the first consumer registers; an unset arg
+        keeps its current value."""
+        with cls._instances_lock:
+            if cls._configured:
+                logger.warning(
+                    "PmSampler.configure() ignored: already configured (first-come-first-serve)"
+                )
+                return
+            if sampling_interval_ms is not None:
+                cls._sampling_interval_ns = int(sampling_interval_ms * 1_000_000)
+            if lookback_window_ms is not None:
+                cls._lookback_window_ns = int(lookback_window_ms * 1_000_000)
+            cls._configured = True
+
+    @classmethod
+    def get_config(cls) -> dict[str, int | bool]:
+        """The process-wide PM-sampling config a new device session will snapshot: the
+        sampling interval and look-back window (nanoseconds), and whether configure() has
+        pinned it (first-come-first-serve)."""
+        return {
+            "sampling_interval_ns": cls._sampling_interval_ns,
+            "lookback_window_ns": cls._lookback_window_ns,
+            "configured": cls._configured,
+        }
 
     def __new__(cls, device: int | None = None) -> Self:
         if device is None:
@@ -197,8 +232,15 @@ class PmSampler:
 
     def _init(self, device: int) -> None:
         self._device = device
-        self._sampling_interval_ns = _SAMPLING_INTERVAL_NS
-        self._max_samples = max(1, _LOOKBACK_WINDOW_NS // _SAMPLING_INTERVAL_NS)
+        # Snapshot the process-wide config at creation and lock it: a live session can't be
+        # resized, so from here configure() is a no-op (first-come-first-serve). Runs under
+        # _instances_lock (held by __new__), the same lock configure() takes.
+        cls = type(self)
+        self._sampling_interval_ns = cls._sampling_interval_ns
+        self._lookback_window_ns = cls._lookback_window_ns
+        cls._configured = True
+        samples = self._lookback_window_ns // self._sampling_interval_ns
+        self._max_samples = max(1, samples)
         self._consumers: list[_Consumer] = []
         self._metric_names: list[str] = []
         self._col: Any = None
@@ -397,7 +439,7 @@ class PmSampler:
         # Real samples fall within the look-back of the newest.
         keep = ts > 0
         if keep.any():
-            keep &= ts >= int(ts[keep].max()) - _LOOKBACK_WINDOW_NS
+            keep &= ts >= int(ts[keep].max()) - self._lookback_window_ns
         if not keep.any():
             return
         ts = ts[keep]
@@ -419,7 +461,7 @@ class PmSampler:
         newest = int(ts.max())
         watermark = max(
             min((c.cursor for c in self._consumers), default=newest),
-            newest - _LOOKBACK_WINDOW_NS,
+            newest - self._lookback_window_ns,
         )
         keep = ts > watermark
         if keep.all():
