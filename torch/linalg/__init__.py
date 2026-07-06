@@ -1535,7 +1535,7 @@ Args:
     x (Tensor): tensor, flattened by default, but this behavior can be
         controlled using :attr:`dim`.  (Note: the keyword argument
         `input` can also be used as an alias for `x`.)
-    ord (int, float, inf, -inf, 'fro', 'nuc', optional): order of norm. Default: `2`
+    ord (int, float, inf, -inf, optional): order of norm. Default: `2`
     dim (int, Tuple[int], optional): dimensions over which to compute
         the norm. See above for the behavior when :attr:`dim`\ `= None`.
         Default: `None`
@@ -2211,6 +2211,53 @@ Example::
     >>> torch.linalg.matrix_exp(A) # matrix_exp(A) = [[cos(pi/3), sin(pi/3)], [-sin(pi/3), cos(pi/3)]]
     tensor([[ 0.5000,  0.8660],
             [-0.8660,  0.5000]])
+""",
+)
+
+
+matrix_sqrth = _add_docstr(
+    _linalg.linalg_matrix_sqrth,
+    r"""
+linalg.matrix_sqrth(A) -> Tensor
+
+Computes the principal square root of a symmetric (resp. Hermitian) positive-definite matrix.
+
+Letting :math:`\mathbb{K}` be :math:`\mathbb{R}` or :math:`\mathbb{C}`,
+for a symmetric (resp. Hermitian) positive-definite matrix :math:`A \in \mathbb{K}^{n \times n}`,
+this function returns the unique symmetric (resp. Hermitian) positive-definite matrix
+:math:`X \in \mathbb{K}^{n \times n}` such that
+
+.. math::
+    XX = A.
+
+Supports input of float, double, cfloat and cdouble dtypes.
+Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
+the output has the same batch dimensions.
+
+.. note:: Only the lower triangular part of :attr:`A` is used in the computation, and
+          :attr:`A` is assumed to be symmetric (resp. Hermitian). See :func:`torch.linalg.eigh`.
+
+.. seealso::
+
+        :func:`torch.linalg.cholesky` computes a different factorization of a symmetric
+        (resp. Hermitian) positive-definite matrix.
+
+Args:
+    A (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions
+                consisting of symmetric (resp. Hermitian) positive-definite matrices.
+
+Examples::
+
+    >>> A = torch.tensor([[2., 0.], [0., 9.]])
+    >>> torch.linalg.matrix_sqrth(A)
+    tensor([[1.4142, 0.0000],
+            [0.0000, 3.0000]])
+
+    >>> A = torch.randn(2, 3, 3)
+    >>> A = A @ A.mT + 3 * torch.eye(3)  # batch of symmetric positive-definite matrices
+    >>> X = torch.linalg.matrix_sqrth(A)
+    >>> torch.allclose(X @ X, A, atol=1e-5)
+    True
 """,
 )
 
