@@ -1577,17 +1577,147 @@ class DecoratorTests(PytreeRegisteringTestCase):
             self.assertEqual(fn(torch.ones(4), sizes), torch.ones(4) * sum(sizes))
         self.assertEqual(cnts.frame_count, 3)
 
-    def test_assume_constant_result_specialize_args_unguardable(self):
+    def test_assume_constant_result_specialize_args_set_and_enum(self):
+        import enum
+
+        class Mode(enum.Enum):
+            FWD = "fwd"
+            BWD = "bwd"
+
         @torch._dynamo.assume_constant_result(specialize_args=True)
-        def select(s):
-            return float(len(s))
+        def select(s, m):
+            return float(len(s)) if m is Mode.FWD else -1.0
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(x, s, m):
+            return x * select(s, m)
+
+        for _ in range(3):
+            fn(torch.ones(4), {1, 2, 3}, Mode.FWD)
+        fn(torch.ones(4), {1, 2}, Mode.FWD)
+        fn(torch.ones(4), {1, 2}, Mode.BWD)
+        self.assertEqual(cnts.frame_count, 3)
+
+    def test_assume_constant_result_specialize_args_unguardable_object(self):
+        class Holder:
+            def __init__(self, t):
+                self.t = t
+
+        @torch._dynamo.assume_constant_result(specialize_args=True)
+        def select(h):
+            return float(h.t.sum())
 
         @torch.compile(backend="eager", fullgraph=True)
-        def fn(x, s):
-            return x * select(s)
+        def fn(x, h):
+            return x * select(h)
+
+        # Arbitrary objects (here: holding a tensor) are not value-guardable and
+        # must not silently pass with a stale baked constant.
+        with self.assertRaisesRegex(Unsupported, "unguardable argument"):
+            fn(torch.ones(4), Holder(torch.ones(4)))
+
+    def test_assume_constant_result_specialize_args_on_method(self):
+        import dataclasses
+
+        @dataclasses.dataclass(frozen=True)
+        class Params:
+            seqlen: int
+            causal: bool
+
+        class Selector:
+            @torch._dynamo.assume_constant_result(specialize_args=True)
+            def select(self, p):
+                return 1.0 if p.causal else 2.0
+
+        selector = Selector()
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(x, p):
+            return x * selector.select(p)
+
+        for _ in range(5):
+            fn(torch.ones(4), Params(128, True))
+        fn(torch.ones(4), Params(256, True))
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_assume_constant_result_specialize_args_cycle(self):
+        class Node:
+            def __init__(self):
+                self.val = 1
+                self.other = None
+
+        n1, n2 = Node(), Node()
+        n1.other = n2
+        n2.other = n1
+
+        @torch._dynamo.assume_constant_result(specialize_args=True)
+        def select(n):
+            return float(n.val)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x, n):
+            return x * select(n)
 
         with self.assertRaisesRegex(Unsupported, "unguardable argument"):
-            fn(torch.ones(4), {1, 2, 3})
+            fn(torch.ones(4), n1)
+
+    def test_assume_constant_result_specialize_args_unset_dataclass_field(self):
+        import dataclasses
+
+        @dataclasses.dataclass
+        class P:
+            x: int
+            y: int = dataclasses.field(init=False)
+
+        @torch._dynamo.assume_constant_result(specialize_args=True)
+        def select(p):
+            return float(p.x)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x, p):
+            return x * select(p)
+
+        with self.assertRaisesRegex(Unsupported, "unguardable argument"):
+            fn(torch.ones(4), P(1))
+
+    def test_assume_constant_result_specialize_args_mutated_in_graph(self):
+        @torch._dynamo.assume_constant_result(specialize_args=True)
+        def select(d):
+            return d["scale"] + d.get("extra", 0.0)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x, d):
+            d["extra"] = 1.0
+            return x * select(d)
+
+        with self.assertRaisesRegex(Unsupported, "mutated in graph"):
+            fn(torch.ones(4), {"scale": 2.0})
+
+    def test_assume_constant_result_specialize_args_device_field(self):
+        import dataclasses
+
+        @dataclasses.dataclass(frozen=True)
+        class Cfg:
+            dev: torch.device
+            data: bytes
+
+        @torch._dynamo.assume_constant_result(specialize_args=True)
+        def select(c):
+            return 1.0 if c.dev.type == "cpu" else 2.0
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(x, c):
+            return x * select(c)
+
+        for _ in range(3):
+            fn(torch.ones(4), Cfg(torch.device("cpu"), b"a"))
+        fn(torch.ones(4), Cfg(torch.device("meta"), b"a"))
+        self.assertEqual(cnts.frame_count, 2)
 
     def test_assume_constant_result_specialize_args_compiler_api(self):
         @torch.compiler.assume_constant_result(specialize_args=True)

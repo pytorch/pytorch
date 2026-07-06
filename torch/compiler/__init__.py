@@ -313,9 +313,11 @@ def assume_constant_result(fn=None, *, specialize_args=False):
     Args:
         fn: The function to be marked as having a constant result.
         specialize_args: If True, guard the baked constant on the values of the
-            arguments (walking dataclass/dict/tuple/list structure) instead of object
-            identity, so it is recomputed when a field value changes and a fresh
-            but equal object does not force a recompile.
+            arguments (constants and containers of them, enums, pytree-registered
+            constant classes, dicts with literal keys, and dataclasses of those)
+            instead of object identity, so it is recomputed when a value changes
+            and a fresh but equal argument does not force a recompile; anything
+            not value-guardable is a graph break.
 
     .. warning::
         `assume_constant_result` can, if invalid, cause safety and soundness issues, :func:`torch.compile`

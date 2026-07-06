@@ -198,13 +198,17 @@ def assume_constant_result(fn=None, *, specialize_args=False):  # type: ignore[n
     a freshly-allocated argument (e.g. a new dataclass every call) forces a
     recompile every step, while a mutated-in-place object is not detected at all.
 
-    With ``specialize_args=True``, each argument's structure is walked instead
-    and every simple field is guarded by value (``EQUALS_MATCH``), so a fresh
-    dataclass whose fields are simple types only triggers a recompile when a
-    field value actually changes. Supported argument types are ``int``/``float``/
-    ``bool``/``str``/``None``/``tuple``/``list``/``enum``/``torch.dtype`` and shallow
-    dataclasses/dicts/objects whose relevant attributes are those simple types.
-    Arguments with no guardable structure trigger a graph break.
+    With ``specialize_args=True``, arguments are guarded by value instead, so a
+    fresh but equal argument (e.g. a new dataclass every call) only triggers a
+    recompile when a value actually changes. Supported argument values are
+    constants and containers of them (anything ``ConstantVariable.is_literal``
+    accepts, e.g. ``int``/``float``/``bool``/``str``/``bytes``/``None``/
+    ``torch.dtype``/``torch.device`` and tuples/lists/sets of those), enums,
+    classes registered with :func:`torch.utils._pytree.register_constant`
+    (guarded via their ``__eq__``), dicts with literal keys, and dataclasses
+    whose fields are recursively supported. Anything else - including arbitrary
+    objects and tensors nested inside supported containers - triggers a graph
+    break rather than silently falling back to identity guarding.
     """
     if fn is None:
         return functools.partial(
