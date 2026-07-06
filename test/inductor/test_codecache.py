@@ -332,7 +332,7 @@ class _CyclicOpaque(torch._custom_class_base.CustomClassBase):
         self.child = None
 
 
-if not torch._library.opaque_object.is_opaque_type(_CyclicOpaque):
+if not torch._library.opaque_object.is_custom_class(_CyclicOpaque):
     torch._library.opaque_object.register_custom_class(_CyclicOpaque, typ="symbolic")
 
 

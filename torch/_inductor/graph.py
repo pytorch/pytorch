@@ -26,9 +26,9 @@ from torch._decomp import get_decompositions
 from torch._dynamo.utils import defake, dynamo_timed
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import (
+    is_custom_class,
     is_opaque_constant_type,
     is_opaque_symbolic_type,
-    is_opaque_type,
 )
 from torch._library.utils import get_layout_constraint_tag
 from torch._logging import LazyString, trace_structured
@@ -1575,7 +1575,7 @@ class GraphLowering(torch.fx.Interpreter):
             self.torchbind_constants[target] = value
             self.constant_reprs[target] = ""
             return TorchBindObject(name=target, value=value)
-        elif is_opaque_type(type(value)):
+        elif is_custom_class(type(value)):
             self.torchbind_constants[target] = value  # type: ignore[arg-type]
             self.constant_reprs[target] = ""
             return TorchBindObject(name=target, value=value)  # type: ignore[arg-type]

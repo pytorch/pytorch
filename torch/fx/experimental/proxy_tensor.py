@@ -44,9 +44,9 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import (
     get_reconstruct_fn,
+    is_custom_class_obj,
     is_opaque_constant_type,
     is_opaque_symbolic_type,
-    is_opaque_value,
     should_hoist,
 )
 from torch._logging import trace_structured
@@ -297,7 +297,7 @@ def set_proxy_slot(
             or not _is_proxy_tensor_update_tensor_tracker_disabled()
         ):
             tracer.tensor_tracker[obj] = proxy
-    elif isinstance(obj, (_AnyScriptObject)) or is_opaque_value(obj):
+    elif isinstance(obj, (_AnyScriptObject)) or is_custom_class_obj(obj):
         if not isinstance(proxy, Proxy):
             raise AssertionError(f"Expected Proxy, got {type(proxy)}")
         # ScriptObject (actual C++ torchbind) uses _WeakHashRef-keyed tracker
@@ -467,7 +467,7 @@ def get_proxy_slot(
     tracker: Any
     if isinstance(obj, Tensor):
         tracker = tracer.tensor_tracker
-    elif isinstance(obj, _AnyScriptObject) or is_opaque_value(obj):
+    elif isinstance(obj, _AnyScriptObject) or is_custom_class_obj(obj):
         if isinstance(obj, torch.ScriptObject):
             tracker = tracer.script_object_tracker
         else:
@@ -719,7 +719,7 @@ def extract_val(val: _ExtractValType, include_real: bool = False) -> _ExtractVal
         return val
     elif isinstance(val, BackwardState):
         return val
-    elif is_opaque_value(val):
+    elif is_custom_class_obj(val):
         return val
     elif isinstance(val, (list, tuple)):
         return val.__class__([extract_val(x) for x in val])
@@ -960,7 +960,7 @@ def track_tensor_tree(
             # NB: eagerly set meta here, so that the numbering is in order
             set_meta(proxy, e)
             set_proxy_slot(e, tracer, thunkify(tracer, lambda: proxy))
-        elif isinstance(e, _AnyScriptObject) or is_opaque_value(e):
+        elif isinstance(e, _AnyScriptObject) or is_custom_class_obj(e):
             if not isinstance(proxy, Proxy):
                 raise AssertionError(f"Expected Proxy, got {type(proxy)}")
             # Non-hoisted opaque value types should be baked as constants
@@ -1129,7 +1129,7 @@ def _fetch_proxies_and_all_constant_flag(
     f_flat_args_kwargs = [
         (
             fetch_object_proxy(tracer, x)
-            if isinstance(x, (Tensor, _AnyScriptObject)) or is_opaque_value(x)
+            if isinstance(x, (Tensor, _AnyScriptObject)) or is_custom_class_obj(x)
             else x
         )
         for x in flat_args_kwargs
@@ -1684,7 +1684,7 @@ class PythonKeyTracer(Tracer):
             return get_proxy_slot(e, self, e, lambda x: x.proxy)  # type: ignore[attr-defined]
         elif isinstance(e, py_sym_types):
             return get_proxy_slot(e, self, e, lambda e: e.force())
-        elif isinstance(e, _AnyScriptObject) or is_opaque_value(e):
+        elif isinstance(e, _AnyScriptObject) or is_custom_class_obj(e):
             return get_proxy_slot(e, self, e)
         else:
             return e
@@ -3080,7 +3080,7 @@ class _MakefxTracer:
                     )
                 # Otherwise: an int not declared in the spec stays static.
 
-            if isinstance(x, torch.ScriptObject) or is_opaque_value(x):
+            if isinstance(x, torch.ScriptObject) or is_custom_class_obj(x):
                 if is_opaque_constant_type(
                     type(x)  # pyrefly: ignore[bad-argument-type]
                 ):
