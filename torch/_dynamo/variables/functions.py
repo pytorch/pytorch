@@ -47,6 +47,7 @@ from weakref import WeakKeyDictionary
 import torch
 from torch._dynamo.exc import get_stack_above_dynamo
 from torch._guards import Source
+from torch._library.opaque_object import is_opaque_value_type
 from torch.utils._pytree import is_constant_class, is_namedtuple_class
 
 from .. import config, graph_break_hints, polyfills, variables
@@ -1839,8 +1840,9 @@ def _unguardable_constant_arg(
         f"{type(value).__name__} passed to function {name} marked with "
         f"torch._dynamo.assume_constant_result(specialize_args=True): {reason}. "
         f"Supported argument values are constants and containers of them "
-        f"(per ConstantVariable.is_literal), enums, pytree-registered constant "
-        f"classes, and dataclasses whose fields are recursively supported.",
+        f"(per ConstantVariable.is_literal), enums, registered constant classes "
+        f"(torch.utils._pytree.register_constant or torch._library opaque "
+        f'typ="constant"), and dataclasses whose fields are recursively supported.',
         hints=[
             "Restructure this argument to use value-guardable types",
             "Register the argument's class with torch.utils._pytree.register_constant "
@@ -1858,8 +1860,8 @@ def _install_constant_arg_guards(
     Install value guards rooted at `source` so the baked constant is invalidated
     when `value` changes. Wholly-literal values (per ConstantVariable.is_literal,
     which covers containers of common constant types), enums, and
-    pytree-registered constant classes get a single EQUALS_MATCH on the whole
-    value. Mixed tuples/lists/dicts guard their length/keys and recurse;
+    constant classes (pytree ``register_constant`` or opaque ``typ="constant"``)
+    get a single EQUALS_MATCH on the whole value. Mixed tuples/lists/dicts guard their length/keys and recurse;
     dataclasses guard their type and recurse into fields. Anything else is a
     graph break: value-based invalidation is the point of specialize_args, so
     there is deliberately no identity fallback.
@@ -1868,6 +1870,7 @@ def _install_constant_arg_guards(
         ConstantVariable.is_literal(value)
         or isinstance(value, enum.Enum)
         or is_constant_class(type(value))
+        or is_opaque_value_type(type(value))
     ):
         install_guard(source.make_guard(GuardBuilder.EQUALS_MATCH))
         return

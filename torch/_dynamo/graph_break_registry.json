@@ -5471,6 +5471,18 @@
     {
       "Gb_type": "assume_constant_result specialize_args unguardable argument",
       "Context": "function {name}, source {source.name}, value type {type(value).__name__}: {reason}",
+      "Explanation": "Cannot install value guards for argument `{source.name}` of type {type(value).__name__} passed to function {name} marked with torch._dynamo.assume_constant_result(specialize_args=True): {reason}. Supported argument values are constants and containers of them (per ConstantVariable.is_literal), enums, registered constant classes (torch.utils._pytree.register_constant or torch._library opaque typ=\"constant\"), and dataclasses whose fields are recursively supported.",
+      "Hints": [
+        "Restructure this argument to use value-guardable types",
+        "Register the argument's class with torch.utils._pytree.register_constant ",
+        "to guard it by equality",
+        "Use plain torch._dynamo.assume_constant_result (without specialize_args) ",
+        "to guard this argument by object identity instead"
+      ]
+    },
+    {
+      "Gb_type": "assume_constant_result specialize_args unguardable argument",
+      "Context": "function {name}, source {source.name}, value type {type(value).__name__}: {reason}",
       "Explanation": "Cannot install value guards for argument `{source.name}` of type {type(value).__name__} passed to function {name} marked with torch._dynamo.assume_constant_result(specialize_args=True): {reason}. Supported argument values are constants and containers of them (per ConstantVariable.is_literal), enums, pytree-registered constant classes, and dataclasses whose fields are recursively supported.",
       "Hints": [
         "Restructure this argument to use value-guardable types",

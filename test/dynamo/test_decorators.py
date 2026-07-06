@@ -1719,6 +1719,51 @@ class DecoratorTests(PytreeRegisteringTestCase):
         fn(torch.ones(4), Cfg(torch.device("meta"), b"a"))
         self.assertEqual(cnts.frame_count, 2)
 
+    def test_assume_constant_result_specialize_args_registered_constants(self):
+        import torch.utils._pytree as pytree
+        from torch._library.opaque_object import register_custom_class
+
+        class PytreeCfg:
+            def __init__(self, algo):
+                self.algo = algo
+
+            def __eq__(self, other):
+                return isinstance(other, PytreeCfg) and self.algo == other.algo
+
+            def __hash__(self):
+                return hash(self.algo)
+
+        class OpaqueCfg:
+            def __init__(self, algo):
+                self.algo = algo
+
+            def __eq__(self, other):
+                return isinstance(other, OpaqueCfg) and self.algo == other.algo
+
+            def __hash__(self):
+                return hash(self.algo)
+
+        pytree.register_constant(PytreeCfg)
+        register_custom_class(OpaqueCfg, typ="constant")
+
+        for cfg_cls in (PytreeCfg, OpaqueCfg):
+            torch._dynamo.reset()
+
+            @torch._dynamo.assume_constant_result(specialize_args=True)
+            def select(cfg):
+                return 1.0 if cfg.algo == "fast" else 2.0
+
+            cnts = torch._dynamo.testing.CompileCounter()
+
+            @torch.compile(backend=cnts, fullgraph=True)
+            def fn(x, cfg):
+                return x * select(cfg)
+
+            for _ in range(3):
+                self.assertEqual(fn(torch.ones(4), cfg_cls("fast")), torch.ones(4))
+            self.assertEqual(fn(torch.ones(4), cfg_cls("slow")), torch.ones(4) * 2)
+            self.assertEqual(cnts.frame_count, 2, msg=cfg_cls.__name__)
+
     def test_assume_constant_result_specialize_args_compiler_api(self):
         @torch.compiler.assume_constant_result(specialize_args=True)
         def select(p):
