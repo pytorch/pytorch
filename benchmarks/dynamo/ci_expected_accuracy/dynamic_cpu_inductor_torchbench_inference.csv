@@ -42,7 +42,7 @@ dcgan,pass,0
 
 
 
-demucs,pass,3
+demucs,pass,5
 
 
 
@@ -86,7 +86,7 @@ doctr_det_predictor,pass,3
 
 
 
-doctr_reco_predictor,pass,1
+doctr_reco_predictor,pass,3
 
 
 
@@ -218,7 +218,7 @@ torch_multimodal_clip,pass,0
 
 
 
-tts_angular,pass,2
+tts_angular,pass,4
 
 
 
