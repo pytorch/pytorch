@@ -85,7 +85,7 @@ class GroupedTensorSSALayout:
 
     @property
     def needs_physical_combine(self) -> bool:
-        return self.axis == 0 or self.group_size > 16
+        return local_reduce_needs_physical_callbacks(self.axis, self.group_size)
 
     @property
     def reduction_profile(self) -> str:
