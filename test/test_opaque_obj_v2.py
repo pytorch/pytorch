@@ -39,8 +39,8 @@ from torch._library.opaque_object import (
     _OPAQUE_TYPES,
     _OPAQUE_TYPES_BY_NAME,
     get_opaque_type_name,
+    is_opaque_constant_type,
     is_opaque_type,
-    is_opaque_value_type,
     MemberType,
     register_custom_class,
 )
@@ -2099,7 +2099,7 @@ def forward(self, arg0_1):
             register_custom_class(TmpClass, typ="constant")
 
             self.assertTrue(is_opaque_type(TmpClass))
-            self.assertTrue(is_opaque_value_type(TmpClass))
+            self.assertTrue(is_opaque_constant_type(TmpClass))
             self.assertIn(TmpClass, _OPAQUE_TYPES)
 
             return get_opaque_type_name(TmpClass)
@@ -3019,10 +3019,10 @@ def forward(self, primals_1, tangents_1):
         2. Attribute access (Color.RED) goes through getattro_impl with static getattr
         3. The opaque object is correctly lifted as a graph input
         """
-        from torch._library.opaque_object import is_opaque_reference_type
+        from torch._library.opaque_object import is_opaque_symbolic_type
 
-        self.assertTrue(is_opaque_reference_type(Color))
-        self.assertTrue(is_opaque_reference_type(type(Color.RED)))
+        self.assertTrue(is_opaque_symbolic_type(Color))
+        self.assertTrue(is_opaque_symbolic_type(type(Color.RED)))
 
         captured = {"graph": None, "example_inputs": None}
 
@@ -3358,7 +3358,7 @@ class GraphModule(torch.nn.Module):
                 )
 
         self.assertTrue(is_opaque_type(ExtendedConfig))
-        self.assertTrue(is_opaque_value_type(ExtendedConfig))
+        self.assertTrue(is_opaque_constant_type(ExtendedConfig))
 
         cfg = ExtendedConfig("square", 2.0)
 

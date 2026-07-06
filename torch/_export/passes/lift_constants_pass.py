@@ -9,7 +9,7 @@ from torch._guards import detect_fake_mode
 from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
 from torch._library.opaque_object import (
     get_opaque_type_name,
-    is_opaque_reference_type,
+    is_opaque_symbolic_type,
     is_opaque_type,
 )
 from torch._subclasses.fake_tensor import unset_fake_temporarily
@@ -271,7 +271,7 @@ def lift_constants_pass(
             # some name and attach it to the module in which it was used.
             if isinstance(
                 constant_val, (torch.ScriptObject, FakeScriptObject)
-            ) or is_opaque_reference_type(type(constant_val)):
+            ) or is_opaque_symbolic_type(type(constant_val)):
                 constant_kind = InputKind.CUSTOM_OBJ
                 constant_fqn = _get_first_fqn(constant_attrs, constant_val)
                 if constant_fqn is not None:

@@ -101,7 +101,7 @@ from torch._guards import (
 )
 from torch._inductor.utils import IndentedBuffer
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import get_opaque_obj_info, is_opaque_value_type
+from torch._library.opaque_object import get_opaque_obj_info, is_opaque_constant_type
 from torch._logging import structured
 from torch._utils_internal import justknobs_check
 from torch.fx.experimental.symbolic_shapes import (
@@ -2772,7 +2772,7 @@ class GuardBuilder(GuardBuilderBase):
         if not (
             isinstance(val, ok_types)
             or pytree.is_constant_class(type(val))
-            or is_opaque_value_type(type(val))
+            or is_opaque_constant_type(type(val))
         ):
             raise AssertionError(f"Unexpected type {type(val)}")
 

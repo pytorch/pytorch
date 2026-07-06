@@ -350,9 +350,9 @@ def is_opaque_type(cls: type[Any] | str) -> bool:
     return torch._C._is_opaque_type_registered(info.class_name)
 
 
-def is_opaque_value_type(cls: type[Any] | str) -> bool:
+def is_opaque_constant_type(cls: type[Any] | str) -> bool:
     """
-    Checks if the given type is an opaque **value** type.
+    Checks if the given type is an opaque **constant** type.
     See Note [Opaque Objects] for more information.
     """
     if not is_opaque_type(cls):
@@ -367,9 +367,16 @@ def is_opaque_value_type(cls: type[Any] | str) -> bool:
     return info.opaque_typ == "constant"
 
 
-def is_opaque_reference_type(cls: Any) -> bool:
+def is_opaque_value_type(cls: type[Any] | str) -> bool:
+    log.warning(
+        "is_opaque_value_type is deprecated, use is_opaque_constant_type instead"
+    )
+    return is_opaque_constant_type(cls)
+
+
+def is_opaque_symbolic_type(cls: Any) -> bool:
     """
-    Checks if the given type is an opaque **reference** type.
+    Checks if the given type is an opaque **symbolic** type.
     See Note [Opaque Objects] for more information.
     """
     if not is_opaque_type(cls):
@@ -382,6 +389,13 @@ def is_opaque_reference_type(cls: Any) -> bool:
     if info is None:
         return False
     return info.opaque_typ == "symbolic"
+
+
+def is_opaque_reference_type(cls: Any) -> bool:
+    log.warning(
+        "is_opaque_reference_type is deprecated, use is_opaque_symbolic_type instead"
+    )
+    return is_opaque_symbolic_type(cls)
 
 
 def get_opaque_obj_repr(obj: Any) -> tuple[str, dict[str, type]]:
