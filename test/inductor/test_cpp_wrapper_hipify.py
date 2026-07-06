@@ -40,8 +40,9 @@ class TestCppWrapperHipify(TestCase):
 
     def test_hipify_aoti_driver_header(self) -> None:
         cuda_codegen = get_device_op_overrides("cuda")
-        with mock.patch.object(torch.version, "hip", "test-hip"), mock.patch.object(
-            torch.cuda, "is_available", return_value=False
+        with (
+            mock.patch.object(torch.version, "hip", "test-hip"),
+            mock.patch.object(torch.cuda, "is_available", return_value=False),
         ):
             header = cuda_codegen.kernel_driver()
 
