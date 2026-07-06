@@ -136,6 +136,7 @@ from .source import (
     DictGetItemSource,
     DictSubclassGetItemSource,
     DynamicScalarSource,
+    EnvVarSource,
     FlattenScriptObjectSource,
     FloatTensorSource,
     FSDPNNModuleSource,
@@ -2590,6 +2591,7 @@ class GuardBuilder(GuardBuilderBase):
     @skip_guard_check_spec
     def ENV_MATCH(self, guard: Guard) -> None:
         source = guard.originating_source
+        assert isinstance(source, EnvVarSource)
         key = source.key
         value = source.value
         code = f"{source.name} == {value!r}"
