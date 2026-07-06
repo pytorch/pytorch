@@ -103,16 +103,12 @@ def rocm_group_gemm_ck_env(value):
 
 @contextlib.contextmanager
 def prefer_cublaslt_grouped_gemm():
-    var = "TORCH_GROUPED_MM_PREFER_CUBLASLT"
-    old = os.environ.get(var, None)
+    old = torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm
     try:
-        os.environ[var] = "1"
+        torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm = True
         yield
     finally:
-        if old is None:
-            os.environ.pop(var, None)
-        else:
-            os.environ[var] = old
+        torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm = old
 
 
 @contextlib.contextmanager

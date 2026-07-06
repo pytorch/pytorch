@@ -19218,10 +19218,16 @@ if RUN_GPU:
                     self.skipTest(
                         "cublaslt grouped gemm on SM 9.0 requires CUDA Toolkit >= 13.3"
                     )
-                os.environ["TORCH_GROUPED_MM_PREFER_CUBLASLT"] = "1"
-            else:
-                os.environ["TORCH_GROUPED_MM_PREFER_CUBLASLT"] = "0"
-            self.addCleanup(os.environ.pop, "TORCH_GROUPED_MM_PREFER_CUBLASLT", None)
+            prev = torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm
+            torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm = (
+                backend == "cublaslt"
+            )
+            self.addCleanup(
+                setattr,
+                torch.backends.cuda.matmul,
+                "prefer_cublaslt_grouped_gemm",
+                prev,
+            )
 
             @torch.compile(fullgraph=True)
             def f(a, b, offs, out_dtype):
