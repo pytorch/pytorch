@@ -13,6 +13,13 @@ import functools
 from torch._C._profiler import gather_traceback, symbolize_tracebacks
 
 logger = logging.getLogger("LoggingTensor")
+# Records are logged with (args, kwargs, rs) as positional %-args on a message
+# that has no % placeholders; only the dedicated LoggingTensorHandler (which
+# reads record.args directly) can render them. If the record propagates to any
+# other handler (e.g. a root/pytest handler at INFO), record.getMessage() does
+# `msg % (args, kwargs, rs)` and raises "not all arguments converted during
+# string formatting". Don't propagate so only our handler ever sees these.
+logger.propagate = False
 
 # How the chain of calls works for LoggingTensor:
 # 1. Call torch.sin
