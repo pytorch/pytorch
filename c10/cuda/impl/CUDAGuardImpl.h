@@ -83,7 +83,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     CUDAStream stream{s};
     return reinterpret_cast<void*>(stream.stream());
   }
-  int getStreamPriority(const Stream& s) const override {
+  int getStreamPriority(const Stream s) const override {
     CUDAStream stream{s};
     return stream.priority();
   }
