@@ -206,7 +206,17 @@ Tensor& linspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
     MPSGraphCache* cache_ = MPSGraphCache::getInstance();
     MPSStream* stream = getCurrentMPSStream();
 
-    bool start_less_end = (start.to<double>() <= end.to<double>());
+    double start_d = start.to<double>();
+    double end_d = end.to<double>();
+    // For integer types, truncate start/end to the output type first
+    if (at::isIntegralType(result.scalar_type(), /*includeBool=*/false)) {
+      AT_DISPATCH_INTEGRAL_TYPES(result.scalar_type(), "linspace_out_mps", [&]() {
+        start_d = static_cast<double>(static_cast<scalar_t>(start_d));
+        end_d = static_cast<double>(static_cast<scalar_t>(end_d));
+      });
+    }
+
+    bool start_less_end = (start_d <= end_d);
 
     @autoreleasepool {
       std::string key = "linspace_out_mps:" + getTensorsStringKey({result}) + ":" + std::to_string(steps) +
@@ -232,15 +242,14 @@ Tensor& linspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
       }
 
       NSMutableDictionary* feeds = [[NSMutableDictionary new] autorelease];
-      auto multiply = (end.to<double>() - start.to<double>()) / ((double)steps - 1.0f);
+      auto multiply = (end_d - start_d) / ((double)steps - 1.0);
       Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, r);
 
-      // Create dictionary of inputs and outputs
-      MPSScalar startScalar = getMPSScalar(start, ScalarType::Float);
+      MPSScalar startScalar = getMPSScalar(Scalar(start_d), ScalarType::Float);
       feeds[cachedGraph->startTensor] = getMPSGraphTensorFromScalar(stream, startScalar);
-      MPSScalar endScalar = getMPSScalar(end, ScalarType::Float);
+      MPSScalar endScalar = getMPSScalar(Scalar(end_d), ScalarType::Float);
       feeds[cachedGraph->endTensor] = getMPSGraphTensorFromScalar(stream, endScalar);
-      MPSScalar multiplyScalar = getMPSScalar(multiply, ScalarType::Float);
+      MPSScalar multiplyScalar = getMPSScalar(Scalar(multiply), ScalarType::Float);
       feeds[cachedGraph->multiplyTensor] = getMPSGraphTensorFromScalar(stream, multiplyScalar);
 
       runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
