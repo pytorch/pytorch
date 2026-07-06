@@ -187,6 +187,30 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         ):
             opt_fn(torch.ones(1))
 
+    def test_raise_non_exception_type_error(self):
+        # PyExceptionClass_Check must reject non-exception builtins: they are
+        # BuiltinVariables but not BaseException subclasses.
+        def fn(x):
+            try:
+                raise int
+            except TypeError as e:
+                return x.sin(), str(e)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_raise_from_non_exception_type_error(self):
+        def fn(x):
+            try:
+                raise ValueError("v") from dict
+            except TypeError as e:
+                return x.sin(), str(e)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
     def test_builtin_arg_count_type_errors(self):
         def check(fn):
             x = torch.randn(4)
