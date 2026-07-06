@@ -9,7 +9,9 @@
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/profiler/collection.h>
+#ifdef USE_CUDA
 #include <torch/csrc/profiler/cupti/monitor_python.h>
+#endif
 #include <torch/csrc/profiler/python/combined_traceback.h>
 #include <torch/csrc/profiler/standalone/execution_trace_observer.h>
 #include <torch/csrc/utils/pybind.h>
@@ -717,7 +719,12 @@ void initPythonBindings(PyObject* module) {
       .def(py::init<>())
       .def("to_unix_ns", &ApproximateClockPyConverter::to_unix_ns);
   m.def("_get_approximate_time", []() { return c10::getApproximateTime(); });
+  // The CUPTI monitor is CUDA-only: its native worker and these bindings are
+  // compiled into torch_python only for CUDA builds, so the _cupti_monitor
+  // submodule is registered only there.
+#ifdef USE_CUDA
   initCuptiMonitorBindings(m);
+#endif
   if (PyModule_AddType(m.ptr(), &THPCapturedTracebackType) < 0) {
     throw python_error();
   }

@@ -142,6 +142,14 @@ if(USE_CUDA)
     include(${TORCH_ROOT}/cmake/public/cuda.cmake)
     append_filelist("libtorch_python_cuda_core_sources" TORCH_PYTHON_SRCS)
 
+    # CUPTI monitor native worker + pybind bindings. CUDA-only (not via the shared
+    # cuda_core_sources filelist, which also feeds ROCM) because they compile against
+    # cupti_activity.h from the nvidia-cuda-cupti wheel, wired below for USE_CUDA only.
+    list(APPEND TORCH_PYTHON_SRCS
+      ${TORCH_SRC_DIR}/csrc/profiler/cupti/monitor_native.cpp
+      ${TORCH_SRC_DIR}/csrc/profiler/cupti/monitor_python.cpp
+    )
+
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_CUDA)
     if(USE_CUDNN)
         list(APPEND TORCH_PYTHON_LINK_LIBRARIES torch::cudnn)
@@ -420,6 +428,28 @@ target_compile_definitions(torch_python PRIVATE ${TORCH_PYTHON_COMPILE_DEFINITIO
 target_compile_options(torch_python PRIVATE ${TORCH_PYTHON_COMPILE_OPTIONS})
 
 target_include_directories(torch_python PUBLIC ${TORCH_PYTHON_INCLUDE_DIRECTORIES})
+
+# The CUPTI monitor's native worker (profiler/cupti/monitor_native.cpp, a python+CUDA
+# source) compiles against the real cupti_activity.h shipped by nvidia-cuda-cupti -- located
+# by tools.setup_helpers.cupti.find_cupti_header (the field-id codegen uses it too). This is
+# a required build input for the monitor: no header means no CUPTI monitor.
+if(USE_CUDA)
+  execute_process(
+    COMMAND "${Python_EXECUTABLE}" -c
+      "from tools.setup_helpers.cupti import find_cupti_header as f; p = f(); print(p or '', end='')"
+    WORKING_DIRECTORY "${TORCH_ROOT}"
+    OUTPUT_VARIABLE CUPTI_ACTIVITY_HEADER_FOR_PY)
+  if(CUPTI_ACTIVITY_HEADER_FOR_PY)
+    get_filename_component(_cupti_include_dir "${CUPTI_ACTIVITY_HEADER_FOR_PY}" DIRECTORY)
+    target_include_directories(torch_python PRIVATE "${_cupti_include_dir}")
+    message(STATUS "CUPTI monitor: compiling against ${CUPTI_ACTIVITY_HEADER_FOR_PY}")
+  else()
+    message(FATAL_ERROR
+      "cupti_activity.h not found: the CUPTI monitor requires the nvidia-cuda-cupti build "
+      "dependency (ships nvidia/cu13/include/cupti_activity.h). Install nvidia-cuda-cupti, or "
+      "set CUPTI_INCLUDE_DIR to a directory containing the header.")
+  endif()
+endif()
 
 if(USE_UCC)
   target_link_libraries(torch_python PRIVATE __caffe2_ucc)
