@@ -1759,6 +1759,13 @@ def get_dynamo_stats():
             "graph_breaks": sum(torch._dynamo.utils.counters["graph_break"].values()),
             # NB: The plus removes zero counts
             "unique_graph_breaks": len(+torch._dynamo.utils.counters["graph_break"]),
+            "recompiles": torch._dynamo.utils.counters["stats"]["recompiles"],
+            # Whole-frame fallbacks to eager: frames dynamo attempted to compile
+            # minus the ones it compiled successfully.
+            "fallback_to_eager": (
+                torch._dynamo.utils.counters["frames"]["total"]
+                - torch._dynamo.utils.counters["frames"]["ok"]
+            ),
             "autograd_captures": torch._dynamo.utils.counters["compiled_autograd"][
                 "captures"
             ],

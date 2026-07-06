@@ -71,32 +71,84 @@ def check_graph_breaks(
 
         graph_breaks = get_field(actual_csv, model, "graph_breaks")
         expected_graph_breaks = get_field(expected_csv, model, "graph_breaks")
+        recompiles = get_field(actual_csv, model, "recompiles")
+        expected_recompiles = get_field(expected_csv, model, "recompiles")
+        fallback_to_eager = get_field(actual_csv, model, "fallback_to_eager")
+        expected_fallback_to_eager = get_field(expected_csv, model, "fallback_to_eager")
         flaky = model in flaky_models
 
+        # recompiles and fallback_to_eager are only compared when the expected
+        # CSV carries the column and the actual results provide it (backward
+        # compatible with older artifacts that predate these columns).
+        compare_recompiles = expected_recompiles is not None and recompiles is not None
+        compare_fallback = (
+            expected_fallback_to_eager is not None and fallback_to_eager is not None
+        )
+        if dynamo_called and expected_recompiles is not None and recompiles is None:
+            print(
+                f"WARNING: {model} is missing the 'recompiles' column in the "
+                "actual results; skipping recompile comparison."
+            )
+        if (
+            dynamo_called
+            and expected_fallback_to_eager is not None
+            and fallback_to_eager is None
+        ):
+            print(
+                f"WARNING: {model} is missing the 'fallback_to_eager' column in "
+                "the actual results; skipping fallback comparison."
+            )
+
+        # Semantics: a model FAILs if *any* tracked metric regresses (more graph
+        # breaks, recompiles, or eager fallbacks than expected) and is reported
+        # as IMPROVED if *any* metric drops while none regress. Comparing
+        # recompiles and eager fallbacks independently of graph breaks lets CI
+        # catch a regression in either even when the graph break count is
+        # unchanged (see https://github.com/pytorch/pytorch/issues/113040).
         if expected_graph_breaks is None:
             status = "MISSING:"
             improved.append(model)
         elif not dynamo_called:
             print(f"{model:34}  EAGER_FAILED")
             continue
-        elif graph_breaks == expected_graph_breaks:
-            status = "PASS_BUT_FLAKY" if flaky else "PASS"
-            print(f"{model:34}  {status}")
-            continue
-        elif graph_breaks > expected_graph_breaks:
+        elif (
+            graph_breaks > expected_graph_breaks
+            or (compare_recompiles and recompiles > expected_recompiles)
+            or (compare_fallback and fallback_to_eager > expected_fallback_to_eager)
+        ):
             if flaky:
                 status = "FAIL_BUT_FLAKY:"
             else:
                 status = "FAIL:"
                 failed.append(model)
-        elif graph_breaks < expected_graph_breaks:
+        elif (
+            graph_breaks < expected_graph_breaks
+            or (compare_recompiles and recompiles < expected_recompiles)
+            or (compare_fallback and fallback_to_eager < expected_fallback_to_eager)
+        ):
             if flaky:
                 status = "IMPROVED_BUT_FLAKY:"
             else:
                 status = "IMPROVED:"
                 improved.append(model)
+        else:
+            status = "PASS_BUT_FLAKY" if flaky else "PASS"
+            print(f"{model:34}  {status}")
+            continue
+        recompiles_str = (
+            f", recompiles={recompiles}, expected_recompiles={expected_recompiles}"
+            if expected_recompiles is not None
+            else ""
+        )
+        fallback_str = (
+            f", fallback_to_eager={fallback_to_eager}, "
+            f"expected_fallback_to_eager={expected_fallback_to_eager}"
+            if expected_fallback_to_eager is not None
+            else ""
+        )
         print(
-            f"{model:34}  {status:19} graph_breaks={graph_breaks}, expected={expected_graph_breaks}"
+            f"{model:34}  {status:19} graph_breaks={graph_breaks}, "
+            f"expected={expected_graph_breaks}{recompiles_str}{fallback_str}"
         )
 
     msg = ""
