@@ -322,22 +322,37 @@ def _get_cuda_dep_paths(path: str, lib_folder: str, lib_name: str) -> list[str]:
     return nvidia_lib_paths + lib_paths
 
 
-def _preload_cuda_lib(lib_folder: str, lib_name: str, required: bool = True) -> None:  # type: ignore[valid-type]
-    """Preloads cuda library if it could not be found otherwise."""
+def _preload_cuda_lib(
+    lib_folder: str,
+    lib_name: str,
+    required: bool = True,
+    mode: int | None = None,
+    load_all: bool = False,
+) -> None:  # type: ignore[valid-type]
+    """Preloads cuda library if it could not be found otherwise.
+
+    ``mode`` is forwarded to ``ctypes.CDLL`` (e.g. ``ctypes.RTLD_GLOBAL``).
+    When ``load_all`` is set, every library matching ``lib_name`` in the first
+    directory that contains a match is loaded (used to preload the full cuDNN
+    set of dispatcher + engine sub-libraries).
+    """
     # Should only be called on Linux if default path resolution have failed
     if platform.system() != "Linux":
         raise AssertionError(f"Should only be called on Linux, got {platform.system()}")
 
-    lib_path = None
+    lib_paths: list[str] = []
     for path in sys.path:
         candidate_lib_paths = _get_cuda_dep_paths(path, lib_folder, lib_name)
         if candidate_lib_paths:
-            lib_path = candidate_lib_paths[0]
+            lib_paths = candidate_lib_paths if load_all else candidate_lib_paths[:1]
             break
-    if not lib_path and required:
+    if not lib_paths and required:
         raise ValueError(f"{lib_name} not found in the system path {sys.path}")
-    if lib_path:
-        ctypes.CDLL(lib_path)
+    for lib_path in lib_paths:
+        if mode is not None:
+            ctypes.CDLL(lib_path, mode=mode)
+        else:
+            ctypes.CDLL(lib_path)
 
 
 def _preload_cuda_deps(err: OSError | None = None, required: bool = True) -> None:
@@ -375,7 +390,26 @@ def _preload_cuda_deps(err: OSError | None = None, required: bool = True) -> Non
     # some of these wheels (e.g. just a cupti wheel alongside a system CUDA)
     # preloads the ones present instead of aborting on the first missing one.
     for lib_folder, lib_name in cuda_libs:
-        _preload_cuda_lib(lib_folder, lib_name, required=required)
+        if lib_folder == "cudnn":
+            # Preload the full bundled cuDNN set (dispatcher + engine sub-libs
+            # that get dlopen'd by soname at runtime) with RTLD_GLOBAL so the
+            # bundled copies win over a system cuDNN on the loader path, see
+            # https://github.com/pytorch/pytorch/issues/188892
+            _preload_cuda_lib(
+                lib_folder,
+                "libcudnn.so.*[0-9]",
+                required=required,
+                mode=ctypes.RTLD_GLOBAL,
+            )
+            _preload_cuda_lib(
+                lib_folder,
+                "libcudnn_*.so.*[0-9]",
+                required=False,
+                mode=ctypes.RTLD_GLOBAL,
+                load_all=True,
+            )
+        else:
+            _preload_cuda_lib(lib_folder, lib_name, required=required)
 
     # libnvToolsExt is Optional Dependency
     _preload_cuda_lib("nvtx", "libnvToolsExt.so.*[0-9]", required=False)
