@@ -6,7 +6,6 @@
 #include <c10/core/ScalarType.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
-#include <ATen/core/NamedTensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/OpMathType.h>
@@ -592,7 +591,10 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
     if ((dprops->major < 9 || CUBLAS_VERSION < 120900 || cublasLtGetVersion() < 120900)
         // cuBLAS only supports tiled 1D factor layout for 1D block scaling, no 2D block scales
         ||  (dprops->major >= 10 && (!scale_a.sizes().empty() || !scale_b.sizes().empty()))) {
-      TORCH_CHECK_VALUE(out.dtype() == kBFloat16 || out.dtype() == kHalf, "Only bf16 and fp16 high precision output types are supported for row-wise scaling.");
+      TORCH_CHECK_VALUE(
+          out.dtype() == kBFloat16 || out.dtype() == kHalf ||
+              out.dtype() == kFloat,
+          "Only bf16, fp16, and fp32 high precision output types are supported for row-wise scaling.");
       return _scaled_rowwise_rowwise(
           mat1,
           mat2,
@@ -663,10 +665,10 @@ _scaled_mm_cuda(const Tensor& mat_a, const Tensor& mat_b,
 
 namespace {
 
-using acceptance_fn = std::function<bool(c10::ScalarType, std::vector<ScalingType>&, ArrayRef<Tensor>&, c10::ScalarType, std::vector<ScalingType>&, ArrayRef<Tensor>&)>;
 using namespace std::placeholders;
+using scaled_blas::ScaleKernelDispatchEntry;
 
-std::array<std::tuple<std::string, acceptance_fn, ScaledGemmImplementation>, 9> scale_kernel_dispatch = {{
+std::array<ScaleKernelDispatchEntry, 9> scale_kernel_dispatch = {{
   { "tensorwise_tensorwise", scaled_blas::check_tensorwise_recipe, ScaledGemmImplementation::TENSORWISE_TENSORWISE },
   { "rowwise_rowwise", scaled_blas::check_rowwise_recipe, ScaledGemmImplementation::ROWWISE_ROWWISE},
   { "block_1x128_128x128", std::bind(scaled_blas::check_deepseek_recipe, ScalingType::BlockWise1x128, ScalingType::BlockWise128x128, _1, _2, _3, _4, _5, _6),
@@ -740,7 +742,10 @@ _scaled_rowwise_rowwise(
   if (((dprops->major < 9 || CUBLAS_VERSION < 120900 || cublasLtGetVersion() < 120900)
       // cuBLAS only supports tiled 1D factor layout for 1D block scaling, no 2D block scales
       ||  (dprops->major >= 10 && (!scale_a.sizes().empty() || !scale_b.sizes().empty())))) {
-    TORCH_CHECK_VALUE(out.dtype() == kBFloat16 || out.dtype() == kHalf, "Only bf16 and fp16 high precision output types are supported for row-wise scaling.");
+    TORCH_CHECK_VALUE(
+        out.dtype() == kBFloat16 || out.dtype() == kHalf ||
+            out.dtype() == kFloat,
+        "Only bf16, fp16, and fp32 high precision output types are supported for row-wise scaling.");
     at::cuda::detail::f8f8bf16_rowwise(
         mat_a,
         mat_b,
@@ -1290,84 +1295,46 @@ void check_swizzle_lengths(ScaledGemmImplementation impl,
 
 };  // anonymous namespace
 
-// V2: Computes matrix multiply + bias while applying scaling to input and output matrices
-// Scales are only applicable when matrices are of Float8 type and assumed to be equal to 1.0 by default.
-// If output matrix type is 16 or 32-bit type, scale_result is not applied.
-// Known limitations:
-//  - Only works if mat1 is row-major and mat2 is column-major
-//  - Only works if matrices sizes are divisible by 32
-//  - If 1-dimensional tensors are used then scale_a should be size = mat1.size(0)
-//    and scale_b should have size = to mat2.size(1)
-//  Arguments:
-//    - `mat1`: the first operand of the matrix multiply, can be type `torch.float8_e4m3fn` or `torch.float8_e5m2`
-//    - `mat2`: the second operand of the matrix multiply, can be type `torch.float8_e4m3fn` or `torch.float8_e5m2`
-//    - `scale_a`: a tensor with the inverse scale of `mat1`, whose shape/strides/dtype depend on the scaling scheme
-//    - `scale_recipe_a`: An integer corresponding to an enum describing the scaling scheme used for `scale_a`
-//    - `swizzle_a`: An integer corresponding to a `SwizzleType` enum describing the swizzling scheme for `scale_a`
-//    - `scale_b`: a tensor with the inverse scale of `mat2`, whose shape/strides/dtype depend on the scaling scheme
-//    - `scale_recipe_b`: An integer corresponding to an enum describing the scaling scheme used for `scale_b`
-//    - `swizzle_b`: An integer corresponding to a `SwizzleType` enum describing the swizzling scheme for `scale_b`
-//    - `bias`: the bias, can be type `torch.float16` or `torch.bfloat16`
-//    - `out_dtype`: the output dtype, can either be a float8 or a higher precision floating point type
-//    - `use_fast_accum`: if true, enables fast float8 accumulation. Backends may ignore this option if not applicable.
-//    - `out`: a reference to the output tensor
-Tensor&
-_scaled_mm_cuda_v2_out(
+// V2: Computes matrix multiply + bias while applying scaling to input and output matrices.
+// Shape inference + output allocation happens in TORCH_META_FUNC(_scaled_mm_v2);
+// this impl handles dtype/recipe/swizzle validation and kernel dispatch.
+TORCH_IMPL_FUNC(_scaled_mm_cuda_v2_out)(
           const Tensor& mat_a, const Tensor& mat_b,
-          ArrayRef<Tensor> scale_a,
+          const at::ITensorListRef& scale_a_list,
           IntArrayRef scale_recipe_a,
           IntArrayRef swizzle_a,
-          ArrayRef<Tensor> scale_b,
+          const at::ITensorListRef& scale_b_list,
           IntArrayRef scale_recipe_b,
           IntArrayRef swizzle_b,
-          const std::optional<Tensor>& bias,
-          const std::optional<c10::ScalarType> out_dtype,
+          at::OptionalTensorRef bias,
+          std::optional<c10::ScalarType> out_dtype,
           IntArrayRef contraction_dim,
           bool use_fast_accum,
-          Tensor& out) {
-  // Check sizes
+          const Tensor& out) {
   bool allowed_device = _scaled_mm_allowed_device();
   TORCH_CHECK_NOT_IMPLEMENTED(allowed_device,
       "torch._scaled_mm is only supported on CUDA devices with compute capability >= 9.0 or 8.9, or ROCm MI300+");
-  TORCH_CHECK_VALUE(mat_a.dim() == 2, "mat_a must be a matrix");
-  TORCH_CHECK_VALUE(mat_b.dim() == 2, "mat_b must be a matrix");
 
-  // If any of M, K, N is 0 - return early (the tensorwise/rowwise float8 gemm kernels
-  // do not support this case).
+  // Materialize the scale lists so the existing acceptance helpers (which
+  // take ArrayRef<Tensor>) work unchanged.
+  std::vector<Tensor> scale_a(scale_a_list.begin(), scale_a_list.end());
+  std::vector<Tensor> scale_b(scale_b_list.begin(), scale_b_list.end());
+  ArrayRef<Tensor> scale_a_ref(scale_a);
+  ArrayRef<Tensor> scale_b_ref(scale_b);
+
+  // If any of M, K, N is 0 - return early (the float8/float4 gemm kernels
+  // do not support this case). The output has already been sized by the
+  // structured-op meta function; we only need to zero-fill when K=0.
   if (mat_a.size(0) == 0 || mat_a.size(1) == 0 || mat_b.size(1) == 0) {
-    // `out` was created with `at::empty`. In the case where we are multiplying
-    // MxK by KxN and K is the zero dim, we need to initialize here to properly
-    // return a tensor of zeros.
-    at::native::resize_output(out, {mat_a.size(0), mat_b.size(1)});
     if (mat_a.size(1) == 0) {
-      out.zero_();
+      const_cast<Tensor&>(out).zero_();
     }
-
-    return out;
-  }
-
-  // Check if the input matrix sizes can be multiplied
-  // - if optional contraction dims are provided, use those
-  //   -- mostly for < 1B formats (i.e. nvfp4x2) where cheap .t() is not available.
-  if (!contraction_dim.empty()) {
-    TORCH_CHECK_VALUE(contraction_dim.size() == 2, "contraction_dim must have exactly 2 elements");
-    auto mat_a_dim = contraction_dim[0];
-    auto mat_b_dim = contraction_dim[1];
-    TORCH_CHECK_VALUE(
-        mat_a.size(mat_a_dim) == mat_b.size(mat_b_dim), "mat_a and mat_b shapes cannot be multiplied (",
-        mat_a.size(0), "x", mat_a.size(1), " and ", mat_b.size(0), "x", mat_b.size(1), ") ",
-        "with contraction dims mat_a: ", mat_a_dim, ", mat_b: ", mat_b_dim);
-  } else {
-    TORCH_CHECK_VALUE(
-        mat_a.size(1) == mat_b.size(0), "mat_a and mat_b shapes cannot be multiplied (",
-        mat_a.size(0), "x", mat_a.size(1), " and ", mat_b.size(0), "x", mat_b.size(1), ")");
+    return;
   }
 
   // Handle fp4 packed-K dimension
   int K_multiplier = (mat_a.scalar_type() == ScalarType::Float4_e2m1fn_x2) ? 2 : 1;
 
-  TORCH_CHECK_VALUE(!bias || bias->numel() == mat_b.sizes()[1], "Bias must be size ", mat_b.sizes()[1],
-       " but got ", bias->numel());
   TORCH_CHECK_VALUE(
       K_multiplier * mat_a.sizes()[1] % 16 == 0,
       "Expected trailing dimension of mat1 to be divisible by 16 ",
@@ -1379,8 +1346,6 @@ _scaled_mm_cuda_v2_out(
   TORCH_CHECK_VALUE(K_multiplier * mat_b.sizes()[0] % 16 == 0 && mat_b.sizes()[1] % 16 == 0, "mat2 shape (", mat_b.sizes()[0], "x",
        mat_b.sizes()[1], ") must be divisible by 16");
 
-  // TODO(slayton): Existing checks, not sure if they should really be here.
-  TORCH_CHECK_VALUE(!out_dtype || *out_dtype == out.scalar_type(), "out_dtype must match output matrix type");
   TORCH_CHECK_VALUE(isFloat8Type(mat_a.scalar_type()) || mat_a.scalar_type() == ScalarType::Float4_e2m1fn_x2,
       "Expected mat_a to be Float8 or Float4_x2 matrix got ", mat_a.scalar_type());
   TORCH_CHECK_VALUE(isFloat8Type(mat_b.scalar_type()) || mat_b.scalar_type() == ScalarType::Float4_e2m1fn_x2,
@@ -1407,7 +1372,7 @@ _scaled_mm_cuda_v2_out(
         "Float8_e4m3fn is only supported for ROCm 6.5 and above");
   }
 #endif
-  if (bias) {
+  if (bias.has_value()) {
     TORCH_CHECK_VALUE(out.scalar_type() != kFloat,
         "Bias is not supported when out_dtype is set to Float32");
 
@@ -1427,7 +1392,7 @@ _scaled_mm_cuda_v2_out(
         " output, but got ", bias->scalar_type());
   }
   {
-    auto bias_ = bias.value_or(Tensor());
+    auto bias_ = bias.has_value() ? *bias : Tensor();
 
     // NOLINTNEXTLINE(*c-array*)
     TensorArg targs[]{{out, "out", 0}, {mat_a, "mat_a", 1}, {mat_b, "mat_b", 2},
@@ -1435,7 +1400,12 @@ _scaled_mm_cuda_v2_out(
     checkAllSameGPU(__func__, targs);
   }
 
-  auto out_dtype_ = out_dtype.value_or(at::ScalarType::BFloat16);
+  std::optional<Tensor> bias_opt = bias.has_value()
+      ? std::optional<Tensor>{*bias}
+      : std::optional<Tensor>{std::nullopt};
+
+  auto out_dtype_ = out.scalar_type();
+  Tensor& out_mut = const_cast<Tensor&>(out);
 
   // Conversion of implicitly-defined enums to explicit
   auto scale_recipe_a_enum = convert_int_to_enum<ScalingType>(scale_recipe_a);
@@ -1447,25 +1417,16 @@ _scaled_mm_cuda_v2_out(
   // Try to do as few steps as possible.
   // NOTE: support is deliberately sparse, can explicitly enumerate all combinations allowed.
   // Do this via a list of defined (name, acceptance, concrete_impl) tuples.
-  bool found_impl = false;
-  ScaledGemmImplementation gemm_impl = ScaledGemmImplementation::NONE;
-
-  for (const auto& fn_entry : scale_kernel_dispatch) {
-    const auto [name, accept_fn, scaled_gemm_impl] = fn_entry;
-    bool ok = accept_fn(mat_a.scalar_type(),
-                        scale_recipe_a_enum,
-                        scale_a,
-                        mat_b.scalar_type(),
-                        scale_recipe_b_enum,
-                        scale_b);
-    if (ok) {
-      gemm_impl = scaled_gemm_impl;
-      found_impl = true;
-      break;
-    }
-  }
+  ScaledGemmImplementation gemm_impl = scaled_blas::find_scaled_gemm_impl(
+      scale_kernel_dispatch,
+      mat_a.scalar_type(),
+      scale_recipe_a_enum,
+      scale_a_ref,
+      mat_b.scalar_type(),
+      scale_recipe_b_enum,
+      scale_b_ref);
   TORCH_CHECK_VALUE(
-    found_impl,
+    gemm_impl != ScaledGemmImplementation::NONE,
     "Invalid scaling configuration.\n"
     "- For TensorWise scaling, a and b should be float8, scales should be float and singletons.\n"
     "- For RowWise scaling, a and b should be float8, scales should be float, scale_a should be (", mat_a.size(0), ", 1) and scale_b should be (1, ", mat_b.size(1), "), and both should be contiguous.\n"
@@ -1477,62 +1438,31 @@ _scaled_mm_cuda_v2_out(
     "mat_b.dtype()=", mat_b.scalar_type(), ", scale_b[0].dtype()=", scale_b[0].scalar_type(), ", scale_b[0].size()=", scale_b[0].sizes(), " and scale_b[0].stride()=", scale_b[0].strides()
   );
 
-  at::native::resize_output(out, {mat_a.size(0), mat_b.size(1)});
-
-  auto bias_ = bias.value_or(Tensor());
-
   check_swizzle_lengths(gemm_impl, swizzle_a_enum, swizzle_b_enum);
 
   // dispatch to appropriate lower-level calls for error checking & execution
   if (gemm_impl == ScaledGemmImplementation::TENSORWISE_TENSORWISE) {
-    return _scaled_tensorwise_tensorwise(mat_a, mat_b, scale_a[0], scale_b[0], bias, out_dtype_, use_fast_accum, out);
+    _scaled_tensorwise_tensorwise(mat_a, mat_b, scale_a[0], scale_b[0], bias_opt, out_dtype_, use_fast_accum, out_mut);
   } else if (gemm_impl == ScaledGemmImplementation::ROWWISE_ROWWISE) {
-    return _scaled_rowwise_rowwise(mat_a, mat_b, scale_a[0], scale_b[0], bias, out_dtype_, use_fast_accum, out);
+    _scaled_rowwise_rowwise(mat_a, mat_b, scale_a[0], scale_b[0], bias_opt, out_dtype_, use_fast_accum, out_mut);
   } else if (gemm_impl == ScaledGemmImplementation::BLOCK_128x128_1x128) {
-    return _scaled_block128x128_block1x128(mat_a, mat_b, scale_a[0], scale_b[0], bias, out_dtype_, use_fast_accum, out);
+    _scaled_block128x128_block1x128(mat_a, mat_b, scale_a[0], scale_b[0], bias_opt, out_dtype_, use_fast_accum, out_mut);
   } else if (gemm_impl == ScaledGemmImplementation::BLOCK_1x128_128x128) {
-    return _scaled_block1x128_block128x128(mat_a, mat_b, scale_a[0], scale_b[0], bias, out_dtype_, use_fast_accum, out);
+    _scaled_block1x128_block128x128(mat_a, mat_b, scale_a[0], scale_b[0], bias_opt, out_dtype_, use_fast_accum, out_mut);
   } else if (gemm_impl == ScaledGemmImplementation::BLOCK_1x128_1x128) {
-    return _scaled_block1x128_block1x128(mat_a, mat_b, scale_a[0], scale_b[0], bias, out_dtype_, use_fast_accum, out);
+    _scaled_block1x128_block1x128(mat_a, mat_b, scale_a[0], scale_b[0], bias_opt, out_dtype_, use_fast_accum, out_mut);
   } else if (gemm_impl == ScaledGemmImplementation::MXFP8_MXFP8) {
-    return _scaled_mxfp8_mxfp8(mat_a, mat_b, scale_a[0], swizzle_a_enum[0], scale_b[0], swizzle_b_enum[0], bias, out_dtype_, out);
+    _scaled_mxfp8_mxfp8(mat_a, mat_b, scale_a[0], swizzle_a_enum[0], scale_b[0], swizzle_b_enum[0], bias_opt, out_dtype_, out_mut);
   } else if (gemm_impl == ScaledGemmImplementation::NVFP4_NVFP4) {
-    return _scaled_nvfp4_nvfp4(mat_a, mat_b, scale_a[0], swizzle_a_enum[0], scale_b[0], swizzle_b_enum[0], bias, out_dtype_, out,
-                               scale_a[1], scale_b[1]);
+    _scaled_nvfp4_nvfp4(mat_a, mat_b, scale_a[0], swizzle_a_enum[0], scale_b[0], swizzle_b_enum[0], bias_opt, out_dtype_, out_mut,
+                        scale_a[1], scale_b[1]);
   } else if (gemm_impl == ScaledGemmImplementation::NVFP4_NVFP4_SINGLE_SCALE) {
-    return _scaled_nvfp4_nvfp4(mat_a, mat_b, scale_a[0], swizzle_a_enum[0], scale_b[0], swizzle_b_enum[0], bias, out_dtype_, out);
+    _scaled_nvfp4_nvfp4(mat_a, mat_b, scale_a[0], swizzle_a_enum[0], scale_b[0], swizzle_b_enum[0], bias_opt, out_dtype_, out_mut);
   } else if (gemm_impl == ScaledGemmImplementation::MXFP4_MXFP4) {
-    return _scaled_mxfp4_mxfp4(mat_a, mat_b, scale_a[0], swizzle_a_enum[0], scale_b[0], swizzle_b_enum[0], bias, out_dtype_, out);
+    _scaled_mxfp4_mxfp4(mat_a, mat_b, scale_a[0], swizzle_a_enum[0], scale_b[0], swizzle_b_enum[0], bias_opt, out_dtype_, out_mut);
   } else {
     TORCH_CHECK_VALUE(false, "Invalid state - found an implementation, but not really");
   }
-}
-
-Tensor
-_scaled_mm_cuda_v2(
-          const Tensor& mat_a, const Tensor& mat_b,
-          ArrayRef<Tensor> scale_a,
-          IntArrayRef scale_recipe_a,
-          IntArrayRef swizzle_a,
-          ArrayRef<Tensor> scale_b,
-          IntArrayRef scale_recipe_b,
-          IntArrayRef swizzle_b,
-          const std::optional<Tensor>& bias,
-          const std::optional<c10::ScalarType> out_dtype,
-          IntArrayRef contraction_dim,
-          bool use_fast_accum) {
-  const auto out_dtype_ = out_dtype.value_or(mat_a.scalar_type());
-  Tensor out = at::empty({0}, mat_a.options().dtype(out_dtype_));
-
-  return _scaled_mm_cuda_v2_out(
-                      mat_a, mat_b,
-                      scale_a, scale_recipe_a, swizzle_a,
-                      scale_b, scale_recipe_b, swizzle_b,
-                      bias,
-                      out_dtype,
-                      contraction_dim,
-                      use_fast_accum,
-                      out);
 }
 
 } // namespace at::native

@@ -5,8 +5,9 @@ from torch._C._distributed_c10d import FakeProcessGroup, FakeStore
 
 
 # FakeStore is a no-op Key-Value store (implemented in C++) for initialization
-# of the fake process group; one can either use FakeStore or HashStore. It is
-# re-exported here for backwards compatibility.
+# of the fake process group; one can either use FakeStore or HashStore. It used
+# to be a Python class defined here, so it is re-exported to keep
+# `from ...fake_pg import FakeStore` working.
 __all__ = ["FakeProcessGroup", "FakeStore"]
 
 

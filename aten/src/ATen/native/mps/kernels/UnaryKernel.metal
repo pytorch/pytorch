@@ -373,10 +373,10 @@ struct log10_functor {
   inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
     // Base 10 complex log = ln(x+yi)/ln(10)
     auto magnitude = ::precise::sqrt(x.x * x.x + x.y * x.y);
-    auto real = ::precise::log(magnitude);
-    auto imag = (x.x == 0 && x.y == 0) ? 0 : ::precise::atan2(x.y, x.x);
-    constexpr float inv_log_base = 1.0f / M_LN10_F;
-    return T(inv_log_base * real, inv_log_base * imag);
+    auto real = ::precise::log10(magnitude);
+    auto imag =
+        (x.x == 0 && x.y == 0) ? 0 : ::precise::atan2(x.y, x.x) * M_LOG10E_F;
+    return T(real, imag);
   }
   inline float operator()(const bool x) {
     return x ? 0 : -INFINITY;
@@ -418,10 +418,10 @@ struct log2_functor {
   inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
     // Base 2 complex log = ln(x+yi)/ln(2)
     auto magnitude = ::precise::sqrt(x.x * x.x + x.y * x.y);
-    auto real = ::precise::log(magnitude);
-    auto imag = (x.x == 0 && x.y == 0) ? 0 : ::precise::atan2(x.y, x.x);
-    constexpr float inv_log_base = 1.0f / M_LN2_F;
-    return T(inv_log_base * real, inv_log_base * imag);
+    auto real = ::precise::log2(magnitude);
+    auto imag =
+        (x.x == 0 && x.y == 0) ? 0 : ::precise::atan2(x.y, x.x) * M_LOG2E_F;
+    return T(real, imag);
   }
   inline float operator()(const bool x) {
     return x ? 0 : -INFINITY;
@@ -664,6 +664,29 @@ REGISTER_UNARY_OP(bitwise_not, short, short);
 REGISTER_UNARY_OP(bitwise_not, char, char);
 REGISTER_UNARY_OP(bitwise_not, uchar, uchar);
 REGISTER_UNARY_OP(bitwise_not, bool, bool);
+
+struct logical_not_functor {
+  template <typename T, enable_if_t<!is_complex_v<T>, bool> = true>
+  inline bool operator()(const T x) {
+    return x == T(0);
+  }
+  template <typename T, enable_if_t<is_complex_v<T>, bool> = true>
+  inline bool operator()(const T x) {
+    return x.x == 0 && x.y == 0;
+  }
+};
+
+REGISTER_UNARY_OP(logical_not, bool, bool);
+REGISTER_UNARY_OP(logical_not, uchar, bool);
+REGISTER_UNARY_OP(logical_not, char, bool);
+REGISTER_UNARY_OP(logical_not, short, bool);
+REGISTER_UNARY_OP(logical_not, int, bool);
+REGISTER_UNARY_OP(logical_not, long, bool);
+REGISTER_UNARY_OP(logical_not, half, bool);
+REGISTER_UNARY_OP(logical_not, float, bool);
+REGISTER_UNARY_OP(logical_not, bfloat, bool);
+REGISTER_UNARY_OP(logical_not, float2, bool);
+REGISTER_UNARY_OP(logical_not, half2, bool);
 
 REGISTER_UNARY_OP(abs, int, int);
 REGISTER_UNARY_OP(abs, long, long);

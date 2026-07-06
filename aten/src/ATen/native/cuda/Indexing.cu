@@ -11,6 +11,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/TensorOperators.h>
+#include <ATen/WrapDimUtils.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/Resize.h>
@@ -759,6 +760,7 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<std::optional<Ten
           kFloat8_e4m3fnuz,
           kFloat8_e5m2fnuz,
           kComplexHalf,
+          kBComplex32,
           kHalf,
           kBool,
           kBFloat16);
@@ -789,6 +791,7 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<std::optional<Ten
             kFloat8_e4m3fnuz,
             kFloat8_e5m2fnuz,
             kComplexHalf,
+            kBComplex32,
             kHalf,
             kBool,
             kBFloat16);
@@ -820,6 +823,7 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<std::optional<Ten
               kFloat8_e4m3fnuz,
               kFloat8_e5m2fnuz,
               kComplexHalf,
+              kBComplex32,
               kHalf,
               kBool,
               kBFloat16);
@@ -850,6 +854,7 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<std::optional<Ten
             kFloat8_e4m3fnuz,
             kFloat8_e5m2fnuz,
             kComplexHalf,
+            kBComplex32,
             kHalf,
             kBool,
             kBFloat16);
@@ -1177,35 +1182,6 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
   const bool indContig = index.is_contiguous();
 
   const int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
-
-#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12080
-  // Fast path: index_add_(0, idx, src) with alpha == 1 is equivalent to
-  // self.scatter_add_(0, idx.view({n, 1, ...}).expand_as(src), src). Delegate
-  // so scatter_add's own TMA/vectorized eligibility check + dispatch is the
-  // single source of truth (see PR #182675). Pattern from
-  // pytorch/pytorch#180430.
-  // Gated on CUDA >= 12.8: pre-12.8 builds compile out the TMA branch in
-  // scatter_add and fall back to its vectorized atomicAdd path, which
-  // regresses skewed/high-contention workloads vs indexFunc{Small,Large}Index
-  // (warp-per-entry scheduling concentrates atomic contention on hot rows).
-  // Older builds therefore stay on the existing indexFunc dispatch.
-  // index_add supports {complex64, complex128, ComplexHalf, Bool} that
-  // scatter_add does not, so exclude those and let them use indexFunc.
-  // The dtype check is ordered FIRST so short-circuit evaluation skips
-  // alpha.equal(1) for complex `self`, where alpha may itself be a
-  // complex Scalar and the equality comparison would be ill-defined.
-  const auto stype = self_.scalar_type();
-  const bool dtype_supported_by_scatter_add =
-      !c10::isComplexType(stype) && stype != at::kBool;
-  if (dtype_supported_by_scatter_add && dim == 0 &&
-      alpha.equal(1) && numIndex > 0 &&
-      index.dim() <= 1 && indContig) {
-    std::vector<int64_t> idx_shape(source_.dim(), 1);
-    idx_shape[0] = static_cast<int64_t>(numIndex);
-    self_.scatter_add_(0, index.view(idx_shape).expand_as(source_), source_);
-    return;
-  }
-#endif
 
 #define SMALL_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM)     \
   indexFuncSmallIndex<TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM>   \
@@ -1725,6 +1701,7 @@ Tensor& index_select_out_cuda(
         AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES),
         AT_EXPAND(AT_FLOAT8_TYPES),
         kComplexHalf,
+        kBComplex32,
         kHalf,
         kBool,
         kBFloat16);
@@ -1751,8 +1728,8 @@ Tensor index_select_quantized_cuda(const Tensor& self, int64_t dim, const Tensor
 namespace {
 
 void masked_fill_kernel(TensorIterator& iter, const Scalar& value) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
-      kBool, kHalf, kBFloat16, kComplexHalf, iter.common_dtype(), "masked_fill_", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND5(
+      kBool, kHalf, kBFloat16, kComplexHalf, kBComplex32, iter.common_dtype(), "masked_fill_", [&]() {
         const auto value_ = value.to<scalar_t>();
         gpu_kernel(
             iter, [value_] GPU_LAMBDA(scalar_t self, bool mask) -> scalar_t {
@@ -1796,7 +1773,6 @@ Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, const Scalar& valu
     mask.device(), " and self on ", self.device());
   TORCH_CHECK(mask.scalar_type() == kBool,
     "masked_fill only supports boolean masks, but got dtype ", mask.scalar_type());
-  auto maybe_outnames = namedinference::broadcast_to_outnames(self, mask, "masked_fill_");
   if (at::has_internal_overlap(self) == MemOverlap::Yes) {
     TORCH_WARN(
       "Use of masked_fill_ on expanded tensors is deprecated. "
@@ -1817,7 +1793,6 @@ Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, const Scalar& valu
       .build();
 
   masked_fill_kernel(iter, value);
-  namedinference::propagate_names_if_nonempty(self, maybe_outnames);
   return self;
 }
 
@@ -1891,12 +1866,12 @@ Tensor index_select_sparse_cuda(const Tensor& self, int64_t dim, const Tensor& i
 
     const auto dim_indices = indices[dim].contiguous();
     const auto idx_nneg_index = at::arange(index_len, nneg_index.options());
-    const auto idx_dim_indices = at::arange(nnz, dim_indices.options());
+    auto idx_dim_indices = at::arange(nnz, dim_indices.options());
 
     Tensor sorted_dim_indices, argsort_dim_indices;
     std::tie(sorted_dim_indices, argsort_dim_indices) = [&]() -> std::tuple<Tensor, Tensor> {
       if (dim == 0 && self.is_coalesced()) {
-        return std::make_tuple(dim_indices, idx_dim_indices);
+        return std::make_tuple(dim_indices, std::move(idx_dim_indices));
       }
       else {
         return dim_indices.sort();
@@ -1941,7 +1916,9 @@ Tensor index_select_sparse_cuda(const Tensor& self, int64_t dim, const Tensor& i
           );
       });
 
-      return std::make_tuple(intrsc_counts_nneg_index, intrsc_first_match_nneg_index);
+      return std::make_tuple(
+          std::move(intrsc_counts_nneg_index),
+          std::move(intrsc_first_match_nneg_index));
     }();
 
     // Unavoidable sync since the shape of the result is not known in advance
@@ -1994,7 +1971,8 @@ Tensor index_select_sparse_cuda(const Tensor& self, int64_t dim, const Tensor& i
           );
       });
 
-      return std::make_tuple(selected_dim_indices, res_dim_indices);
+      return std::make_tuple(
+          std::move(selected_dim_indices), std::move(res_dim_indices));
     }();
 
     return make_output(selected_dim_indices, res_dim_indices);

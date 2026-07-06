@@ -27,7 +27,7 @@ from torch.distributed.distributed_c10d import (
 # modern collectives like _allgather_base_ got rid of the unnecessary list.
 # When in doubt, consult the code that dispatches to the collective on the PG
 # in distributed_c10d.py e.g., work = group.allgather([tensor_list], [tensor],
-# opts) indicates its always a list.
+# opts) indicates it's always a list.
 
 
 def _gcd_list(numbers: Sequence[int]) -> int:

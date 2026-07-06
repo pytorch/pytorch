@@ -6,10 +6,10 @@ namespace c10d {
 
 // A no-op Store for use with the fake process group. The fake backend performs
 // no real communication, so the store is never used for rendezvous and every
-// operation is a stub. Crucially clone() is a real C++ method (not a Python
-// trampoline override), so it stays callable after Python drops its reference
-// to the store -- e.g. when only the process group holds it -- which is what
-// split_group relies on.
+// operation is a stub. It is a pure C++ object so that the pure C++
+// ProcessGroup can hold it directly (e.g. across split_group); a Python-defined
+// store would need extra indirection to stay callable after Python drops its
+// reference.
 class FakeStore : public Store {
  public:
   c10::intrusive_ptr<Store> clone() override {

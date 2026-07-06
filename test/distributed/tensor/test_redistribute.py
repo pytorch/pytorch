@@ -36,6 +36,7 @@ from torch.distributed.tensor._redistribute import (
     _FlattenedTransformInfo,
     _gen_transform_infos,
     _optimize_transform_infos,
+    _redistribute_cost_sort_key,
     _TransformInfo,
     disable_redistribute_transform_optimization,
     redistribute_local_tensor,
@@ -43,6 +44,7 @@ from torch.distributed.tensor._redistribute import (
 )
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _MaskPartial, _StridedShard
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -1533,6 +1535,19 @@ class DistributeWithDeviceOrderTest(DTensorContinuousTestBase):
                             f"{tensor_shape=}, {src_order=}, {dst_order=}, {intermediate_order=}",
                         )
 
+    def test_redistribute_cost_sort_key_uses_unbacked_hint(self):
+        shape_env = ShapeEnv()
+        unbacked = shape_env.create_unbacked_symint()
+        shape_env.var_to_hint_override[unbacked.node.expr] = 8
+
+        lower_cost = 1000000.0 * (unbacked / 87.7) + 7.2
+        higher_cost = 1000000.0 * (2 * unbacked / 87.7) + 7.8
+
+        self.assertLess(
+            _redistribute_cost_sort_key(lower_cost),
+            _redistribute_cost_sort_key(higher_cost),
+        )
+
     def test_redistribute_partial_to_different_partial_not_supported(self):
         # Test that redistributing from one Partial type to another raises an error
         device_mesh = self.build_device_mesh()
@@ -1543,7 +1558,7 @@ class DistributeWithDeviceOrderTest(DTensorContinuousTestBase):
             (Partial("sum"),),
             tensor_meta=TensorMeta(
                 local_tensor.size(),
-                local_tensor.stride,
+                local_tensor.stride(),
                 local_tensor.dtype,
             ),
         )
@@ -1552,7 +1567,7 @@ class DistributeWithDeviceOrderTest(DTensorContinuousTestBase):
             (Partial("avg"),),
             tensor_meta=TensorMeta(
                 local_tensor.size(),
-                local_tensor.stride,
+                local_tensor.stride(),
                 local_tensor.dtype,
             ),
         )
@@ -1649,7 +1664,7 @@ class DistributeWithDeviceOrderTest(DTensorContinuousTestBase):
         self.assertEqual(
             ascending_all_gather_count,
             1,
-            f"ascending order: expected 1 all_gather (with full flattening), got {ascending_all_gather_count}",
+            lambda msg: f"{msg}\nascending order: expected 1 all_gather (with full flattening), got {ascending_all_gather_count}",
         )
 
         # Test case 2: non-ascending order (1, 0, 2) - should NOT use flattened all_gather
@@ -1674,7 +1689,7 @@ class DistributeWithDeviceOrderTest(DTensorContinuousTestBase):
         self.assertEqual(
             non_ascending_all_gather_count,
             3,
-            f"non-ascending order: expected 3 all_gathers (no flattening), got {non_ascending_all_gather_count}",
+            lambda msg: f"{msg}\nnon-ascending order: expected 3 all_gathers (no flattening), got {non_ascending_all_gather_count}",
         )
 
         # Both should produce the same fully replicated tensor
@@ -2053,7 +2068,7 @@ class TransformInfoTest(TestCase):
             self.assertEqual(
                 info._comm_type_key(),
                 expected_key,
-                f"_StridedShard transform {placements} should map to '{expected_key}'",
+                lambda msg: f"{msg}\n_StridedShard transform {placements} should map to '{expected_key}'",
             )
 
 
@@ -2817,7 +2832,7 @@ class MultiDimRedistributeOptimizationTest(DTensorContinuousTestBase):
                     self.assertEqual(
                         actual_count,
                         expected_count,
-                        f"{desc}: expected {expected_count} {op}, got {actual_count}",
+                        lambda msg: f"{msg}\n{desc}: expected {expected_count} {op}, got {actual_count}",
                     )
 
                 # Verify placements
@@ -3096,7 +3111,7 @@ class UnevenFlattenedReduceScatterTest(DTensorContinuousTestBase):
         self.assertEqual(
             local_result.size(0),
             expected_size,
-            f"Rank {rank}: expected size {expected_size}, got {local_result.size(0)}",
+            lambda msg: f"{msg}\nRank {rank}: expected size {expected_size}, got {local_result.size(0)}",
         )
 
         # Check value for non-empty ranks
@@ -3105,7 +3120,7 @@ class UnevenFlattenedReduceScatterTest(DTensorContinuousTestBase):
             self.assertEqual(
                 local_result[0, 0].item(),
                 expected_val,
-                f"Rank {rank}: expected value {expected_val}, got {local_result[0, 0].item()}",
+                lambda msg: f"{msg}\nRank {rank}: expected value {expected_val}, got {local_result[0, 0].item()}",
             )
 
 

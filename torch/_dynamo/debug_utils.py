@@ -34,7 +34,7 @@ import tempfile
 import textwrap
 from collections import Counter
 from importlib import import_module
-from typing import Any, TYPE_CHECKING, TypeVar
+from typing import Any, cast, TYPE_CHECKING, TypeVar
 
 import torch
 import torch._prims_common as utils
@@ -154,7 +154,40 @@ def minifier_dir() -> str:
 MAX_CONSTANT_NUMEL_INLINE = 4
 
 
+class UnsupportedNNModuleError(AssertionError):
+    pass
+
+
 class NNModuleToString:
+    fake_quant_modules = {
+        "torch.ao.quantization.fake_quantize.FakeQuantize",
+        "torch.ao.quantization.fake_quantize.FusedMovingAvgObsFakeQuantize",
+    }
+
+    qat_conv_modules = {
+        "torch.ao.nn.qat.modules.conv.Conv1d",
+        "torch.ao.nn.qat.modules.conv.Conv2d",
+        "torch.ao.nn.qat.modules.conv.Conv3d",
+        "torch.ao.nn.intrinsic.qat.modules.conv_fused.ConvBn1d",
+        "torch.ao.nn.intrinsic.qat.modules.conv_fused.ConvBn2d",
+        "torch.ao.nn.intrinsic.qat.modules.conv_fused.ConvBn3d",
+        "torch.ao.nn.intrinsic.qat.modules.conv_fused.ConvBnReLU1d",
+        "torch.ao.nn.intrinsic.qat.modules.conv_fused.ConvBnReLU2d",
+        "torch.ao.nn.intrinsic.qat.modules.conv_fused.ConvBnReLU3d",
+        "torch.ao.nn.intrinsic.qat.modules.conv_fused.ConvReLU1d",
+        "torch.ao.nn.intrinsic.qat.modules.conv_fused.ConvReLU2d",
+        "torch.ao.nn.intrinsic.qat.modules.conv_fused.ConvReLU3d",
+    }
+
+    qat_linear_modules = {
+        "torch.ao.nn.qat.modules.linear.Linear",
+        "torch.ao.nn.intrinsic.qat.modules.linear_relu.LinearReLU",
+    }
+
+    # x86 currently aliases fbgemm in repr, so emit fbgemm as the canonical
+    # constructor for both until those default qconfigs diverge.
+    default_qat_qconfig_backends = ("fbgemm", "x86", "qnnpack", "onednn")
+
     safe_reprs = [
         torch.nn.Linear,
         torch.nn.Conv1d,
@@ -183,81 +216,242 @@ class NNModuleToString:
     def can_convert_to_string(gm: torch.fx.GraphModule) -> bool:
         cant_convert = set()
         for _, module in gm.named_children():
-            if type(module) not in NNModuleToString.safe_reprs:
+            # Nested GraphModules (e.g. torch.cond / torch.while_loop subgraphs)
+            # are serialized recursively by convert().
+            if isinstance(module, torch.fx.GraphModule):
+                continue
+            if NNModuleToString._module_constructor_string(module) is None:
                 cant_convert.add(module)
 
         if len(cant_convert) > 0:
-            log.warning("We have not tested reprs of some modules - %s", cant_convert)
-        # TODO - Assuming that all modules can be safely repr'd. Check if that assumption is correct.
+            log.warning(
+                "Cannot safely convert some modules to strings - %s", cant_convert
+            )
+            return False
         return True
 
     @staticmethod
-    def convert(gm: torch.fx.GraphModule) -> str:
+    def _module_type_name(module: torch.nn.Module) -> str:
+        return f"{type(module).__module__}.{type(module).__name__}"
+
+    @staticmethod
+    def _type_name(type_: type[object]) -> str:
+        return f"{type_.__module__}.{type_.__name__}"
+
+    @staticmethod
+    def _fake_quant_constructor(module: torch.nn.Module) -> str | None:
+        module_type = NNModuleToString._module_type_name(module)
+        if module_type not in NNModuleToString.fake_quant_modules:
+            return None
+
+        observer = module.activation_post_process  # type: ignore[attr-defined]
+        quant_min = cast(int, module.quant_min)  # type: ignore[attr-defined]
+        quant_max = cast(int, module.quant_max)  # type: ignore[attr-defined]
+        if getattr(observer, "reduce_range", False):
+            quant_min *= 2
+            quant_max = quant_max * 2 + 1
+        args = [
+            f"observer={NNModuleToString._type_name(type(observer))}",
+            f"quant_min={quant_min!r}",
+            f"quant_max={quant_max!r}",
+            f"dtype={module.dtype!r}",  # type: ignore[attr-defined]
+            f"qscheme={module.qscheme!r}",  # type: ignore[attr-defined]
+            f"is_dynamic={module.is_dynamic!r}",  # type: ignore[attr-defined]
+        ]
+        if hasattr(observer, "reduce_range"):
+            args.append(f"reduce_range={observer.reduce_range!r}")
+        if hasattr(observer, "ch_axis"):
+            args.append(f"ch_axis={observer.ch_axis!r}")
+        return f"{module_type}({', '.join(args)})"
+
+    @staticmethod
+    def _qat_qconfig_constructor(module: torch.nn.Module) -> str | None:
+        qconfig = getattr(module, "qconfig", None)
+        for backend in NNModuleToString.default_qat_qconfig_backends:
+            try:
+                default_qconfig = torch.ao.quantization.get_default_qat_qconfig(backend)
+            except AssertionError:
+                continue
+            if repr(qconfig) == repr(default_qconfig):
+                return (
+                    "qconfig=torch.ao.quantization.get_default_qat_qconfig"
+                    f"({backend!r})"
+                )
+        return None
+
+    @staticmethod
+    def _qat_conv_constructor(module: torch.nn.Module) -> str | None:
+        module_type = NNModuleToString._module_type_name(module)
+        if module_type not in NNModuleToString.qat_conv_modules:
+            return None
+        qconfig = NNModuleToString._qat_qconfig_constructor(module)
+        if qconfig is None:
+            return None
+
+        args = [
+            repr(module.in_channels),  # type: ignore[attr-defined]
+            repr(module.out_channels),  # type: ignore[attr-defined]
+            f"kernel_size={module.kernel_size!r}",  # type: ignore[attr-defined]
+            f"stride={module.stride!r}",  # type: ignore[attr-defined]
+            f"padding={module.padding!r}",  # type: ignore[attr-defined]
+            f"dilation={module.dilation!r}",  # type: ignore[attr-defined]
+            f"groups={module.groups!r}",  # type: ignore[attr-defined]
+            f"bias={module.bias is not None}",  # type: ignore[attr-defined]
+            f"padding_mode={module.padding_mode!r}",  # type: ignore[attr-defined]
+        ]
+        bn = getattr(module, "bn", None)
+        if bn is not None:
+            args.extend(
+                [
+                    f"eps={bn.eps!r}",
+                    f"momentum={bn.momentum!r}",
+                    f"freeze_bn={module.freeze_bn!r}",  # type: ignore[attr-defined]
+                ]
+            )
+        args.append(qconfig)
+        return f"{module_type}({', '.join(args)})"
+
+    @staticmethod
+    def _qat_linear_constructor(module: torch.nn.Module) -> str | None:
+        module_type = NNModuleToString._module_type_name(module)
+        if module_type not in NNModuleToString.qat_linear_modules:
+            return None
+        qconfig = NNModuleToString._qat_qconfig_constructor(module)
+        if qconfig is None:
+            return None
+
+        args = [
+            repr(module.in_features),  # type: ignore[attr-defined]
+            repr(module.out_features),  # type: ignore[attr-defined]
+            f"bias={module.bias is not None}",  # type: ignore[attr-defined]
+            qconfig,
+        ]
+        return f"{module_type}({', '.join(args)})"
+
+    @staticmethod
+    def _can_emit_module_constructor(module: torch.nn.Module, module_str: str) -> bool:
+        if type(module) not in NNModuleToString.safe_reprs:
+            return False
+
+        try:
+            compile(f"mod = {module_str}", "<module repr>", "exec")
+        except SyntaxError:
+            return False
+        return True
+
+    @staticmethod
+    def _module_constructor_string(
+        module: torch.nn.Module, *, allow_unsafe_repr: bool = False
+    ) -> str | None:
+        module_str = repr(module)
+        if NNModuleToString._can_emit_module_constructor(module, module_str):
+            return module_str
+        constructor_str = (
+            NNModuleToString._fake_quant_constructor(module)
+            or NNModuleToString._qat_conv_constructor(module)
+            or NNModuleToString._qat_linear_constructor(module)
+        )
+        if constructor_str is not None:
+            return constructor_str
+        if allow_unsafe_repr:
+            return module_str
+        return None
+
+    @staticmethod
+    def convert(gm: torch.fx.GraphModule, *, allow_unsafe_repr: bool = False) -> str:
         from torch.nn.modules.module import _addindent
 
         tab = " " * 4
 
-        model_str = textwrap.dedent(
-            """
-            from torch.nn import *
-            class Repro(torch.nn.Module):
-                def __init__(self) -> None:
-                    super().__init__()
-            """
-        )
+        # Higher-order ops (torch.cond, torch.while_loop, ...) attach their
+        # subgraphs as nested GraphModule children. These have no
+        # constructor-style repr, so serialize each nested GraphModule as its
+        # own top-level class (defined before Repro so it is in scope) and
+        # instantiate it in __init__. Leaf nn.Modules use the constructor-string
+        # path below.
+        subgraph_classes: dict[int, str] = {}
+        subgraph_defs: list[str] = []
 
-        for module_name, module in gm.named_children():
-            module_str = f"{module.__repr__()}"
-            # module should be a core torch.nn.Module, so all parameters
-            # should be on the same device.
-            example_param = next(module.parameters(), None)
-            if example_param is not None and example_param.is_cuda:
-                module_str = f"{module_str}.cuda()"
-            model_str += f"{tab * 2}self.{module_name} = {module_str}\n"
+        def register_subgraph(name_hint: str, sub: torch.fx.GraphModule) -> str:
+            # Reserve the name before recursing so nested/shared subgraphs are
+            # deduplicated by identity and cannot recurse infinitely.
+            if id(sub) in subgraph_classes:
+                return subgraph_classes[id(sub)]
+            class_name = f"{name_hint}_{len(subgraph_classes)}"
+            subgraph_classes[id(sub)] = class_name
+            body = emit_module_body(sub)
+            subgraph_defs.append(f"class {class_name}(torch.nn.Module):\n{body}")
+            return class_name
 
-        for buffer_name, buffer in gm._buffers.items():
-            if buffer is None:
-                continue
-            # Serialize full data for small buffers
-            if buffer.numel() <= MAX_CONSTANT_NUMEL_INLINE:
-                from torch._tensor_str import PRINT_OPTS
-
-                if PRINT_OPTS.threshold < MAX_CONSTANT_NUMEL_INLINE:
-                    raise AssertionError(
-                        f"PRINT_OPTS.threshold ({PRINT_OPTS.threshold}) must be >= "
-                        f"MAX_CONSTANT_NUMEL_INLINE ({MAX_CONSTANT_NUMEL_INLINE})"
-                    )
-                tensor_str = repr(buffer)
-            elif torch.is_floating_point(buffer):
-                tensor_str = f"torch.randn({list(buffer.shape)}, dtype={buffer.dtype})"
-            else:
-                tensor_str = (
-                    f"torch.randint(1, size={list(buffer.shape)}, dtype={buffer.dtype})"
-                )
-            if buffer.is_cuda:
-                tensor_str = f"{tensor_str}.cuda()"
-            model_str += (
-                f"{tab * 2}self.register_buffer('{buffer_name}', {tensor_str})\n"
+        def emit_module_body(module: torch.nn.Module) -> str:
+            model_str = (
+                f"{tab}def __init__(self) -> None:\n{tab * 2}super().__init__()\n"
             )
 
-        for param_name, param in gm._parameters.items():
-            if param is None:
-                continue
-            maybe_device = ""
-            if param.is_cuda:
-                maybe_device = ', device="cuda"'
-            tensor_str = f"torch.nn.Parameter(torch.randn({list(param.shape)}, dtype={param.dtype}{maybe_device}))"
-            model_str += f"{tab * 2}self.{param_name} = {tensor_str}\n"
+            for module_name, child in module.named_children():
+                if isinstance(child, torch.fx.GraphModule):
+                    class_name = register_subgraph(module_name, child)
+                    model_str += f"{tab * 2}self.{module_name} = {class_name}()\n"
+                    continue
+                module_str = NNModuleToString._module_constructor_string(
+                    child, allow_unsafe_repr=allow_unsafe_repr
+                )
+                if module_str is None:
+                    raise UnsupportedNNModuleError(
+                        f"Cannot convert module to string: {child!r}"
+                    )
+                # module should be a core torch.nn.Module, so all parameters
+                # and buffers should be on the same device.
+                example_param = next(child.parameters(), None)
+                example_tensor = (
+                    example_param
+                    if example_param is not None
+                    else next(child.buffers(), None)
+                )
+                if example_tensor is not None and example_tensor.device.type != "cpu":
+                    module_str = f'{module_str}.to("{example_tensor.device}")'
+                model_str += f"{tab * 2}self.{module_name} = {module_str}\n"
 
-        # TODO - Keep this code for now. But, I don't think we will need this.
-        # attrs = dir(gm)
-        # for attr in attrs:
-        #     if "_tensor_constant" in attr:
-        #         val = getattr(gm, attr)
-        #         model_str += f"    {attr} = {val!r}\n"
+            for buffer_name, buffer in module._buffers.items():
+                if buffer is None:
+                    continue
+                # Serialize full data for small buffers
+                if buffer.numel() <= MAX_CONSTANT_NUMEL_INLINE:
+                    from torch._tensor_str import PRINT_OPTS
 
-        model_str += f"{_addindent(gm.code, 4)}\n"
-        return model_str
+                    if PRINT_OPTS.threshold < MAX_CONSTANT_NUMEL_INLINE:
+                        raise AssertionError(
+                            f"PRINT_OPTS.threshold ({PRINT_OPTS.threshold}) must be >= "
+                            f"MAX_CONSTANT_NUMEL_INLINE ({MAX_CONSTANT_NUMEL_INLINE})"
+                        )
+                    tensor_str = repr(buffer)
+                elif torch.is_floating_point(buffer):
+                    tensor_str = (
+                        f"torch.randn({list(buffer.shape)}, dtype={buffer.dtype})"
+                    )
+                else:
+                    tensor_str = f"torch.randint(1, size={list(buffer.shape)}, dtype={buffer.dtype})"
+                if buffer.device.type != "cpu":
+                    tensor_str = f'{tensor_str}.to("{buffer.device}")'
+                model_str += (
+                    f"{tab * 2}self.register_buffer('{buffer_name}', {tensor_str})\n"
+                )
+
+            for param_name, param in module._parameters.items():
+                if param is None:
+                    continue
+                maybe_device = ""
+                if param.device.type != "cpu":
+                    maybe_device = f', device="{param.device}"'
+                tensor_str = f"torch.nn.Parameter(torch.randn({list(param.shape)}, dtype={param.dtype}{maybe_device}))"
+                model_str += f"{tab * 2}self.{param_name} = {tensor_str}\n"
+
+            model_str += f"{_addindent(module.code, len(tab))}\n"
+            return model_str
+
+        repro_class = f"class Repro(torch.nn.Module):\n{emit_module_body(gm)}"
+        # Subgraph classes must be defined before Repro instantiates them.
+        return "\nfrom torch.nn import *\n" + "\n".join(subgraph_defs + [repro_class])
 
 
 @functools.cache  # subprocess is expensive
@@ -274,7 +468,7 @@ def _cuda_system_info_comment() -> str:
             model_str += f"{comment}\n"
         else:
             model_str += "# Not searching for nvcc on ROCM setup\n"
-    except (FileNotFoundError, subprocess.CalledProcessError):
+    except (OSError, subprocess.CalledProcessError):
         model_str += "# nvcc not found\n"
 
     gpu_names = Counter(
