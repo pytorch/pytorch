@@ -15642,6 +15642,7 @@ class TestConsistency(TestCaseMPS):
     # because 64-bit indexing is supported. But if 64-bit is turned off, the
     # test fails.
     @unittest.skipIf(torch._C._mps_maxBufferLength() < int(8.1 * 1024**3), "Need >8 GB buffer")
+    @serialTest()
     @parametrize("dtype", [torch.float16, torch.bfloat16])
     @parametrize("trigger_32bit_overflow", [False, True])
     def test_group_norm_backward_large_input(self, device, dtype, trigger_32bit_overflow):
