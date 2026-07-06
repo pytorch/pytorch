@@ -1110,6 +1110,106 @@ class TestGeneratorSend(GeneratorTestsBase):
             with self.assertRaises(StopIteration):
                 fn(t)
 
+    def test_yield_from_return_value(self):
+        # `yield from` evaluates to the subgenerator's return value, which the
+        # SEND opcode extracts from the StopIteration raised on completion.
+        def subgen(t):
+            yield t.sin()
+            return t.cos()  # noqa: B901
+
+        def outer(t):
+            r = yield from subgen(t)
+            yield r
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            return list(outer(t))
+
+        t = torch.randn(2)
+        self.assertEqual(fn(t), [t.sin(), t.cos()])
+
+    def test_yield_from_return_none(self):
+        # A subgenerator that falls off the end returns None (StopIteration
+        # with no value); `yield from` must evaluate to None.
+        def subgen(t):
+            yield t.sin()
+
+        def outer(t):
+            r = yield from subgen(t)
+            yield r
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            return list(outer(t))
+
+        t = torch.randn(2)
+        out = fn(t)
+        self.assertEqual(out[0], t.sin())
+        self.assertIsNone(out[1])
+
+    def test_send_through_yield_from(self):
+        # Values sent into the delegating generator are forwarded to the
+        # subgenerator: SEND with a non-None value routes through `send`.
+        def subgen():
+            x = yield 10
+            y = yield x + 1
+            return y * 100  # noqa: B901
+
+        def outer():
+            r = yield from subgen()
+            yield r
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            gen = outer()
+            a = gen.send(None)
+            b = gen.send(7)
+            c = gen.send(3)
+            return [a, b, c, t.sin()]
+
+        t = torch.randn(2)
+        out = fn(t)
+        self.assertEqual(out[:3], [10, 8, 300])
+        self.assertEqual(out[3], t.sin())
+
+    def test_nested_yield_from_return_value(self):
+        # Return values propagate through a chain of `yield from` delegations.
+        def leaf(t):
+            yield t.sin()
+            return t.cos()  # noqa: B901
+
+        def mid(t):
+            r = yield from leaf(t)
+            return r + 1  # noqa: B901
+
+        def top(t):
+            r = yield from mid(t)
+            yield r
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            return list(top(t))
+
+        t = torch.randn(2)
+        self.assertEqual(fn(t), [t.sin(), t.cos() + 1])
+
+    def test_yield_from_iterable_return_none(self):
+        # `yield from` over a non-generator iterable yields its items via the
+        # SEND tp_iternext path and evaluates to None.
+        def outer(t):
+            r = yield from [t.sin(), t.cos()]
+            yield r
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            return list(outer(t))
+
+        t = torch.randn(2)
+        out = fn(t)
+        self.assertEqual(out[0], t.sin())
+        self.assertEqual(out[1], t.cos())
+        self.assertIsNone(out[2])
+
 
 class TestGeneratorClose(GeneratorTestsBase):
     def test_close(self):
