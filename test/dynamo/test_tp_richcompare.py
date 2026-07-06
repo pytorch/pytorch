@@ -8,10 +8,10 @@ import torch
 import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch._library.opaque_object import register_opaque_type
+from torch._library.opaque_object import register_custom_class
 
 
-class _OpaqueVal(torch._opaque_base.OpaqueBase):
+class _OpaqueVal(torch._custom_class_base.CustomClassBase):
     def __init__(self, val):
         self.val = val
 
@@ -30,7 +30,7 @@ class _OpaqueVal(torch._opaque_base.OpaqueBase):
         return (f"_OpaqueVal({self.val})", {"_OpaqueVal": _OpaqueVal})
 
 
-register_opaque_type(_OpaqueVal, typ="value", hoist=True)
+register_custom_class(_OpaqueVal, typ="constant", hoist=True)
 
 
 class TpRichcompareTests(torch._dynamo.test_case.TestCase):
