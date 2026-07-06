@@ -3343,7 +3343,6 @@ class CommonTemplate:
         self.common(fn, (torch.randn(4, 4), torch.randn(4, 4)))
 
     @skip_if_halide  # different pow accuracies
-    @xfail_if_triton_cpu
     def test_norm_constant_overflow(self):
         def fn(a):
             return (
@@ -8043,7 +8042,6 @@ for dtype in (torch.int32, torch.int64):
             (torch.randn([16, 16]),),
         )
 
-    @xfail_if_triton_cpu
     def test_pow2(self):
         def fn(x):
             return aten.pow(1000, x), aten.pow(x, 1000)
@@ -9054,7 +9052,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertFalse(torch.signbit(actual_frac.cpu()[0]).item())
         self.assertEqual(actual_recip.cpu()[0].item(), float("inf"))
 
-    @xfail_if_triton_cpu
     def test_fmod(self):
         def fn(a, b):
             return torch.fmod(a, b), torch.fmod(3.0 * a, b) - 2.0
@@ -9062,7 +9059,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         shape = [1, 2, 6, 6]
         self.common(fn, (torch.randn(shape), torch.randn(shape)))
 
-    @xfail_if_triton_cpu
     def test_fmod_zero_dim(self):
         def fn(a, b):
             return (torch.fmod(a, b),)
@@ -14036,7 +14032,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ],
         )
 
-    @xfail_if_triton_cpu
     def test_index_dynamic_shapes(self):
         # Repro from vision_maskrcnn
         def fn(arg0_1):
@@ -16267,6 +16262,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         Currently inductor will skip such bad configs and pick the best one
         from the remaining configs.
         """
+        raise unittest.SkipTest(
+            "test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test"
+        )
 
         @torch.compile
         def fn(x, y):
