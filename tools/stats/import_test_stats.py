@@ -6,6 +6,9 @@ import datetime
 import json
 import os
 import shutil
+
+import boto3  # DEMO: unguarded boto3 import to prove the CI test catches it
+
 from pathlib import Path
 from typing import Any, cast, TYPE_CHECKING
 from urllib.request import urlopen
