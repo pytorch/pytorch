@@ -39,7 +39,10 @@ struct HostBlock {
   std::mutex mutex_;
   size_t size_{0}; // block size in bytes
   void* ptr_{nullptr}; // memory address
-  bool allocated_{false}; // in-use flag
+  // Atomic because get_free_block sets it under the free-list mutex while
+  // getSegments reads it under block->mutex_; all other accesses hold
+  // block->mutex_.  Relaxed ordering suffices: it is an independent flag.
+  std::atomic<bool> allocated_{false}; // in-use flag
   size_t event_count_{0}; // number of related events
   ska::flat_hash_set<S> streams_; // streams on which the block was used
   c10::MempoolId_t owning_pool_{0,0}; // never changes after construction, so we don't need a mutex to guard this
@@ -349,13 +352,8 @@ struct CachingHostAllocatorImpl {
     if (block) {
       block->was_allocated_during_stream_capture_ = current_stream_is_capturing_fast_path();
       if (C10_UNLIKELY(record_history_.load(std::memory_order_relaxed))) {
-        // The block stays in pool.blocks_ while cached, so getSegments can read
-        // context_when_allocated_ concurrently -- but only when recording is
-        // on, since _snapshot() gates getSegments on is_history_enabled().
-        // Hold the block mutex to serialize with that reader (see the comment
-        // in maybe_cache_block).  In the else branch recording is off: no such
-        // reader exists and context is nullptr anyway, so the write is safe
-        // unlocked.
+        // getSegments can read context_when_allocated_ concurrently; hold the
+        // block mutex to write it (see maybe_cache_block).
         std::lock_guard<std::mutex> g(block->mutex_);
         block->context_when_allocated_ = std::move(context);
         record_trace(
@@ -365,7 +363,12 @@ struct CachingHostAllocatorImpl {
             nullptr,
             mempool_id,
             block->context_when_allocated_);
-      } else {
+      } else if (context || block->context_when_allocated_) {
+        // Recording is off so no ALLOC trace, but a stale non-null context can
+        // survive here (maybe_cache_block only resets it while recording) and a
+        // racing getSegments may read it, so lock whenever we actually write.
+        // The guard's unlocked reads are safe: we solely own the block here.
+        std::lock_guard<std::mutex> g(block->mutex_);
         block->context_when_allocated_ = std::move(context);
       }
       return {block->ptr_, reinterpret_cast<void*>(block)};
@@ -406,7 +409,7 @@ struct CachingHostAllocatorImpl {
 
     // Then, create a new block.
     block = new B(roundSize, ptr);
-    block->allocated_ = true;
+    block->allocated_.store(true, std::memory_order_relaxed);
     block->owning_pool_ = mempool_id;
     block->was_allocated_during_stream_capture_ = current_stream_is_capturing_fast_path();
     block->context_when_allocated_ = std::move(context);
@@ -447,7 +450,7 @@ struct CachingHostAllocatorImpl {
     bool allocated_during_capture = false;
     {
       std::lock_guard<std::mutex> g(block->mutex_);
-      block->allocated_ = false;
+      block->allocated_.store(false, std::memory_order_relaxed);
       allocated_during_capture = block->was_allocated_during_stream_capture_;
       if (block->streams_.empty()) {
         TORCH_INTERNAL_ASSERT(block->event_count_ == 0);
@@ -510,7 +513,7 @@ struct CachingHostAllocatorImpl {
     }
     S stream = S(s);
     std::lock_guard<std::mutex> gb(block->mutex_);
-    TORCH_INTERNAL_ASSERT(block->allocated_);
+    TORCH_INTERNAL_ASSERT(block->allocated_.load(std::memory_order_relaxed));
     block->streams_.insert(stream);
     return true;
   }
@@ -694,7 +697,7 @@ struct CachingHostAllocatorImpl {
     if (!pool.free_list_[index].list_.empty()) {
       B* block = pool.free_list_[index].list_.back();
       pool.free_list_[index].list_.pop_back();
-      block->allocated_ = true;
+      block->allocated_.store(true, std::memory_order_relaxed);
       stats_.active_bucket_stats[index].increase(1);
       stats_.active_bytes_bucket_stats[index].increase(size);
       return block;
@@ -780,7 +783,7 @@ struct CachingHostAllocatorImpl {
       bool available = false;
       {
         std::lock_guard<std::mutex> g(block->mutex_);
-        TORCH_INTERNAL_ASSERT(!block->allocated_);
+        TORCH_INTERNAL_ASSERT(!block->allocated_.load(std::memory_order_relaxed));
         block->event_count_--;
         if (block->event_count_ == 0) {
           available = true;
@@ -1137,8 +1140,8 @@ private:
         seg.owner_private_pool_id = block->owning_pool_;
         {
           std::lock_guard<std::mutex> gb(block->mutex_);
-          seg.allocated = block->allocated_;
-          seg.active = block->allocated_ || (block->event_count_ > 0);
+          seg.allocated = block->allocated_.load(std::memory_order_relaxed);
+          seg.active = seg.allocated || (block->event_count_ > 0);
           seg.context_when_allocated = block->context_when_allocated_;
         }
         result.push_back(std::move(seg));
