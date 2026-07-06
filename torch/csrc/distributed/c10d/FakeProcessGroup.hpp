@@ -61,8 +61,8 @@ class FakeProcessGroup : public Backend {
   }
 
   // Create a sub-group from a subset of the parent's ranks. The fake backend
-  // performs no real communication, so unlike NCCL there is no split collective
-  // to join: ranks outside the subgroup simply return nullptr (signalling
+  // performs no real communication, so there is no split collective to join:
+  // ranks outside the subgroup simply return nullptr (signalling
   // non-membership), and members return a fresh FakeProcessGroup whose rank is
   // their position within the sorted subgroup.
   c10::intrusive_ptr<Backend> split(
