@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-import sys
 import unittest
 
 import torch
@@ -8,7 +7,6 @@ import torch._dynamo.test_case
 from torch import nn
 from torch._dynamo.test_case import TestCase
 from torch._dynamo.testing import CompileCounter
-from torch.testing._internal.common_utils import NoTest
 
 
 try:
@@ -58,11 +56,6 @@ class BucketizeMod(torch.nn.Module):
             stride=features.stride(),
             length_per_key=features.length_per_key(),
         )
-
-
-if not HAS_TORCHREC:
-    print("torchrec not available, skipping tests", file=sys.stderr)
-    TestCase = NoTest
 
 
 @unittest.skipIf(not HAS_TORCHREC, "these tests require torchrec")
