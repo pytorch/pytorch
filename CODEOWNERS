@@ -124,11 +124,11 @@ test/functorch/test_vmap.py @zou3519 @chillee @kshitij12345
 torch/fx/proxy.py @zou3519
 
 # HOPs
-torch/_higher_order_ops/*.py @zou3519 @aorenste @bohnstingl
+torch/_higher_order_ops/ @zou3519 @aorenste @bohnstingl
 torch/_dynamo/variables/higher_order_ops.py @zou3519 @aorenste @bohnstingl
 docs/source/higher_order_ops/ @bohnstingl
-test/test_hop_infra.py @zou3519 @aorenste
-torch/testing/_internal/hop_db.py @tugsbayasgalan @zou3519 @ydwu4 @aorenste
+test/test_hop_infra.py @zou3519 @aorenste @bohnstingl
+torch/testing/_internal/hop_db.py @tugsbayasgalan @zou3519 @ydwu4 @aorenste @bohnstingl
 
 # AOTAutograd
 torch/_functorch/_aot_autograd/*.py @bdhirsh @aorenste
@@ -231,7 +231,7 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 
 # FlexAttention
 /torch/nn/attention/flex_attention.py @drisspg
-/torch/_higher_order_ops/flex_attention.py @drisspg
+/torch/_higher_order_ops/flex_attention.py @drisspg @bohnstingl
 /torch/_inductor/kernel/flex/ @drisspg
 /torch/_inductor/codegen/cpp_flex_attention_template.py @drisspg
 /test/inductor/test_flex_attention.py @drisspg
