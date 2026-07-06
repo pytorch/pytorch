@@ -1250,14 +1250,23 @@ class LocalGeneratorObjectVariable(VariableTracker):
             was_executing = tracer.frame_state == FrameState.FRAME_EXECUTING
             tracer.frame_state = FrameState.FRAME_COMPLETED
             if sys.version_info < (3, 12) and was_executing:
-                # Move the StopIteration onto the handling stack so do_raise
-                # chains it as __context__, and pass it as the cause for
-                # __cause__ -- matching CPython's _PyErr_FormatFromCause.
+                # Match CPython's _PyErr_FormatFromCause: set __context__ and
+                # __cause__ directly rather than pushing onto the exception
+                # stack (which must stay balanced -- genobject.c pops the
+                # generator's gi_exc_state before the conversion runs, so the
+                # caller's stack is left unchanged). do_raise sets __cause__;
+                # set __context__ first so set_exception_obj's implicit chaining
+                # leaves it untouched.
                 prev = tracer.exn_vt_stack.get_raised_exception()
-                tracer.exn_vt_stack.move_current_exception_to_stack()
                 rt = VariableTracker.build(tx, RuntimeError).call_function(
                     tx,
                     [VariableTracker.build(tx, "generator raised StopIteration")],
+                    {},
+                )
+                rt.call_method(
+                    tx,
+                    "__setattr__",
+                    [ConstantVariable.create("__context__"), prev],
                     {},
                 )
                 tx.do_raise(rt, prev)
