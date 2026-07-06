@@ -75,11 +75,6 @@ class TensorMeta(NamedTuple):
 
 
 # used internally to propagate the placements.
-# DTensorSpec uses OpaqueBaseMeta so it can be registered as an opaque reference
-# type (see _register_dtensor_spec_opaque_type below), letting torch.export
-# capture it as a graph input when it appears as a non-tensor argument (e.g. to
-# the DTensor constructor). It must remain a pytree leaf, which opaque
-# registration preserves.
 @dataclass
 class DTensorSpec(metaclass=OpaqueBaseMeta):
     mesh: DeviceMesh
@@ -774,12 +769,7 @@ class DTensorSpec(metaclass=OpaqueBaseMeta):
 
 # Register DTensorSpec as an opaque reference type so torch.export can capture it
 # as a graph input when it shows up as a non-tensor argument (e.g. to the DTensor
-# constructor). This is done here, after the class definition, rather than in
-# device_mesh._register_distributed_opaque_types() to avoid a circular import:
-# that function runs while this module is still being imported (via
-# placement_types -> _collective_utils), before DTensorSpec exists. By this point
-# DeviceMesh has already been registered through the same import chain, which
-# satisfies the "register the mesh before the spec that holds it" ordering.
+# constructor).
 def _register_dtensor_spec_opaque_type() -> None:
     from torch._library.opaque_object import MemberType, register_opaque_type
 
