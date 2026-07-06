@@ -1428,7 +1428,7 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(result, (False, True, True))
 
     # =====================================================================
-    # Opaque object comparison (TorchScriptObjectVariable)
+    # Opaque object comparison (CustomClassObjectVariable)
     # =====================================================================
 
     def test_opaque_object_cmp(self):

@@ -3645,7 +3645,7 @@ class TestInvokeSubgraphReuse(TestCase):
         self.assertEqual(count(), 2)
 
     def test_subgraph_reuse_synthetic_source(self):
-        """Reuse must handle TorchScriptObjectVariable with SyntheticLocalSource.
+        """Reuse must handle CustomClassObjectVariable with SyntheticLocalSource.
 
         Hoisted opaque value types get a SyntheticLocalSource that can't be
         resolved via VariableBuilder. On cache hit, stamp_out_subgraph must
