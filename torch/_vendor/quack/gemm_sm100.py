@@ -26,7 +26,7 @@ from cutlass.utils import LayoutEnum
 
 from .pipeline import PipelineTmaUmma, PipelineTmaCpAsyncUmma
 from .tile_scheduler import TileSchedulerOptions
-from .varlen_utils import VarlenArguments, VarlenManager, cu_seqlens_n_arg
+from .varlen_utils import VarlenArguments, VarlenManager
 from .gemm_base import GemmTmaBase, NamedBarrierGemm
 from . import layout_utils
 from . import copy_utils
@@ -521,7 +521,7 @@ class GemmSm100(GemmTmaBase):
         mC: Optional[cute.Tensor],
         epilogue_args: tuple,
         scheduler_args: TileSchedulerOptions,
-        varlen_args,
+        varlen_args: Optional[VarlenArguments],
         stream: cuda.CUstream,
         mSFA: Optional[cute.Tensor] = None,
         mSFB: Optional[cute.Tensor] = None,
@@ -580,9 +580,6 @@ class GemmSm100(GemmTmaBase):
         assert (varlen_args.mAIdx is not None) == self.gather_A
         varlen_m = varlen_args.mCuSeqlensM is not None
         varlen_k = varlen_args.mCuSeqlensK is not None
-        varlen_n = cu_seqlens_n_arg(varlen_args) is not None
-        self.varlen_n = varlen_n
-        assert not (varlen_n and self.blockscaled), "varlen_n blockscaled GEMM is not supported"
 
         # Setup attributes that dependent on gemm inputs
         self._setup_attributes(epilogue_args, varlen_args)
@@ -720,9 +717,7 @@ class GemmSm100(GemmTmaBase):
 
         # Setup TMA store for D and TMA load for C.
         tma_atom_d, tma_tensor_d, tma_atom_c, tma_tensor_c = (
-            self.make_tma_epilogue_atoms_and_tensors(
-                mD, mC, epilogue_args, varlen_m, varlen_n=varlen_n
-            )
+            self.make_tma_epilogue_atoms_and_tensors(mD, mC, epilogue_args, varlen_m)
         )
 
         epilogue_params = self.epi_to_underlying_arguments(epilogue_args)
@@ -738,7 +733,7 @@ class GemmSm100(GemmTmaBase):
             c_smem_layout = cute.slice_(self.epi_c_smem_layout_staged, (None, None, 0))
             self.epi_load_bytes_per_stage += cute.size_in_bytes(self.c_dtype, c_smem_layout)
 
-        TileSchedulerCls = self.get_scheduler_class(varlen_m=varlen_m, varlen_n=varlen_n)
+        TileSchedulerCls = self.get_scheduler_class(varlen_m=varlen_m)
         tile_sched_args = self.get_scheduler_arguments(
             mA, mB, mD, scheduler_args, varlen_args, epilogue_args
         )
@@ -900,8 +895,7 @@ class GemmSm100(GemmTmaBase):
 
         varlen_m = const_expr(varlen_params.cu_seqlens_m is not None)
         varlen_k = const_expr(varlen_params.cu_seqlens_k is not None)
-        varlen_n = const_expr(varlen_params.cu_seqlens_n is not None)
-        assert sum((varlen_m, varlen_k, varlen_n)) <= 1
+        assert not (varlen_m and varlen_k)
         if const_expr(self.gather_A):
             assert varlen_m or varlen_k
         has_D = const_expr(mD_mnl is not None)
@@ -1033,7 +1027,6 @@ class GemmSm100(GemmTmaBase):
                 else varlen_params.mAIdx.shape[0]
             ),
             len_k_static=Int32(cute.size(mA_mkl, mode=[1])),
-            len_n_static=Int32(cute.size(mB_nkl, mode=[0])),
         )
 
         TileSchedulerCls = partial(
@@ -1043,7 +1036,8 @@ class GemmSm100(GemmTmaBase):
         epi_load_barrier = None
         if const_expr(has_epi_load):
             epi_load_barrier = pipeline.NamedBarrier(
-                barrier_id=int(NamedBarrierGemm.EpilogueLoad), num_threads=2 * cute.arch.WARP_SIZE
+                barrier_id=int(NamedBarrierGemm.EpilogueLoad),
+                num_threads=(self.num_ab_load_warps + 1) * cute.arch.WARP_SIZE,
             )
 
         # Cluster wait before tensor memory alloc

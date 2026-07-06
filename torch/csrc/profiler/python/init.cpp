@@ -9,7 +9,7 @@
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/profiler/collection.h>
-#include <torch/csrc/profiler/cupti_monitor_native.h>
+#include <torch/csrc/profiler/cupti/monitor_python.h>
 #include <torch/csrc/profiler/python/combined_traceback.h>
 #include <torch/csrc/profiler/standalone/execution_trace_observer.h>
 #include <torch/csrc/utils/pybind.h>
@@ -139,10 +139,6 @@ namespace torch::profiler {
  */
 
 namespace {
-uint64_t cuptiApproximateTimeCallback() {
-  return c10::getApproximateTime();
-}
-
 class ApproximateClockPyConverter {
  public:
   // NOLINTNEXTLINE(modernize-use-equals-default)
@@ -239,7 +235,8 @@ void RecordFunctionFast_dealloc(PyObject* selfGeneric) {
 
 PyObject* RecordFunctionFast_enter(PyObject* selfGeneric, PyObject* unused) {
   HANDLE_TH_ERRORS
-  if (torch::profiler::impl::ProfilerStateBase::get() != nullptr) {
+  if (torch::profiler::impl::ProfilerStateBase::getGlobal() != nullptr ||
+      torch::profiler::impl::ProfilerStateBase::getTLS() != nullptr) {
     auto self = (RecordFunctionFast*)selfGeneric;
     TORCH_INTERNAL_ASSERT(
         !self->guard,
@@ -333,7 +330,8 @@ PyObject* RecordFunctionFast_enter(PyObject* selfGeneric, PyObject* unused) {
 
 PyObject* RecordFunctionFast_exit(PyObject* selfGeneric, PyObject* unused) {
   HANDLE_TH_ERRORS
-  if (torch::profiler::impl::ProfilerStateBase::get() != nullptr) {
+  if (torch::profiler::impl::ProfilerStateBase::getGlobal() != nullptr ||
+      torch::profiler::impl::ProfilerStateBase::getTLS() != nullptr) {
     auto self = (RecordFunctionFast*)selfGeneric;
     TORCH_INTERNAL_ASSERT(
         self->guard,
@@ -413,11 +411,8 @@ void initPythonBindings(PyObject* module) {
               >(),
           "An experimental config for Kineto features. Please note that"
           "backward compatibility is not guaranteed.\n"
-          "    profiler_metrics : a list of CUPTI profiler metrics used\n"
-          "       to measure GPU performance events.\n"
-          "       If this list contains values Kineto runs in CUPTI profiler mode\n"
-          "    profiler_measure_per_kernel (bool) : whether to profile metrics per kernel\n"
-          "       or for the entire measurement duration.\n"
+          "    profiler_metrics : DEPRECATED and ignored.\n"
+          "    profiler_measure_per_kernel (bool) : DEPRECATED and ignored.\n"
           "    verbose (bool) : whether the trace file has `Call stack` field or not.\n"
           "    performance_events : a list of profiler events to be used for measurement.\n"
           "    enable_cuda_sync_events : for CUDA profiling mode, enable adding CUDA synchronization events\n"
@@ -510,6 +505,12 @@ void initPythonBindings(PyObject* module) {
                 t.size() > 12 ? t[12].cast<bool>() : false,
                 t.size() > 13 ? t[13].cast<bool>() : false);
           }))
+      // profiler_metrics and profiler_measure_per_kernel are deprecated
+      // no-ops, exposed read-only so the Python layer can detect them and warn.
+      .def_readonly("profiler_metrics", &ExperimentalConfig::profiler_metrics)
+      .def_readonly(
+          "profiler_measure_per_kernel",
+          &ExperimentalConfig::profiler_measure_per_kernel)
       .def_readwrite(
           "custom_profiler_config", &ExperimentalConfig::custom_profiler_config)
       .def_readwrite("trace_only", &ExperimentalConfig::trace_only);
@@ -716,105 +717,7 @@ void initPythonBindings(PyObject* module) {
       .def(py::init<>())
       .def("to_unix_ns", &ApproximateClockPyConverter::to_unix_ns);
   m.def("_get_approximate_time", []() { return c10::getApproximateTime(); });
-  m.def("_cupti_approximate_time_callback_address", []() {
-    return reinterpret_cast<uintptr_t>(&cuptiApproximateTimeCallback);
-  });
-
-  // GIL-free CUPTI monitor buffer plumbing. The two callback addresses are
-  // registered with CUPTI on the Python side via ctypes; everything else is
-  // driven from the decode thread.
-  using torch::profiler::impl::CuptiMonitorBuffers;
-  m.def("_cupti_monitor_configure_buffers", [](size_t buffer_size) {
-    CuptiMonitorBuffers::get().configure(buffer_size);
-  });
-  // version selects the CUPTI Activity-API generation: 1 for
-  // cuptiActivityRegisterCallbacks, 2 for the subscriber-scoped
-  // cuptiActivityRegisterCallbacks_v2. Both feed the same native pool/queue.
-  m.def(
-      "_cupti_monitor_buffer_request_callback_address",
-      [](int version) -> uintptr_t {
-        TORCH_CHECK(
-            version == 1 || version == 2,
-            "cupti monitor callback version must be 1 or 2, got ",
-            version);
-        if (version == 1) {
-          return reinterpret_cast<uintptr_t>(
-              &torch::profiler::impl::cuptiMonitorBufferRequested);
-        }
-        return reinterpret_cast<uintptr_t>(
-            &torch::profiler::impl::cuptiMonitorBufferRequestedV2);
-      },
-      py::arg("version") = 1);
-  m.def(
-      "_cupti_monitor_buffer_complete_callback_address",
-      [](int version) -> uintptr_t {
-        TORCH_CHECK(
-            version == 1 || version == 2,
-            "cupti monitor callback version must be 1 or 2, got ",
-            version);
-        if (version == 1) {
-          return reinterpret_cast<uintptr_t>(
-              &torch::profiler::impl::cuptiMonitorBufferCompleted);
-        }
-        return reinterpret_cast<uintptr_t>(
-            &torch::profiler::impl::cuptiMonitorBufferCompletedV2);
-      },
-      py::arg("version") = 1);
-  // Opens a new layout epoch (called by the reconfigure path after flushing the
-  // old config and before enabling the new one) and returns its id.
-  m.def("_cupti_monitor_next_layout_epoch", []() {
-    return CuptiMonitorBuffers::get().next_layout_epoch();
-  });
-  // Returns the v2 user-defined record layout captured for the given epoch (the
-  // layout_epoch field of a completed buffer), as a list of
-  // (kind, record_size, [(field_id, offset, size)]). Empty if that epoch has no
-  // captured layout.
-  m.def("_cupti_monitor_record_layouts", [](uint64_t epoch) {
-    py::list result;
-    for (const auto& layout :
-         CuptiMonitorBuffers::get().record_layouts(epoch)) {
-      py::list fields;
-      for (const auto& field : layout.fields) {
-        fields.append(py::make_tuple(field.field_id, field.offset, field.size));
-      }
-      result.append(
-          py::make_tuple(layout.kind, layout.record_size, std::move(fields)));
-    }
-    return result;
-  });
-  m.def("_cupti_monitor_get_completed", []() -> py::object {
-    std::optional<torch::profiler::impl::CompletedCuptiBuffer> buf;
-    {
-      py::gil_scoped_release release;
-      buf = CuptiMonitorBuffers::get().get_completed();
-    }
-    if (!buf.has_value()) {
-      return py::none();
-    }
-    return py::make_tuple(
-        reinterpret_cast<uintptr_t>(buf->ptr),
-        buf->valid_size,
-        buf->ctx,
-        buf->stream,
-        buf->layout_epoch);
-  });
-  m.def("_cupti_monitor_return_buffer", [](uintptr_t ptr) {
-    // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    CuptiMonitorBuffers::get().return_buffer(reinterpret_cast<uint8_t*>(ptr));
-  });
-  m.def("_cupti_monitor_pending_buffers", []() {
-    return CuptiMonitorBuffers::get().pending_count();
-  });
-  m.def("_cupti_monitor_allocated_buffers", []() {
-    return CuptiMonitorBuffers::get().allocated_count();
-  });
-  m.def("_cupti_monitor_shutdown_buffers", []() {
-    CuptiMonitorBuffers::get().shutdown();
-  });
-  m.def("_cupti_monitor_reset_buffers", []() {
-    CuptiMonitorBuffers::get().reset();
-  });
-
+  initCuptiMonitorBindings(m);
   if (PyModule_AddType(m.ptr(), &THPCapturedTracebackType) < 0) {
     throw python_error();
   }
