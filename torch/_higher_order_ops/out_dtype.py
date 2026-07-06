@@ -3,10 +3,9 @@
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
-from torch._higher_order_ops.utils import autograd_not_implemented
+from torch._higher_order_ops.utils import autograd_not_implemented, register_fake
 from torch._ops import HigherOrderOperator
 from torch._prims_common import elementwise_dtypes, ELEMENTWISE_TYPE_PROMOTION_KIND
-from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     maybe_handle_decomp,
@@ -144,15 +143,13 @@ def out_dtype_proxy(
     return trace_out_dtype(mode, out_dtype, op, output_dtype, *args)
 
 
-@out_dtype.py_impl(FakeTensorMode)
+@register_fake(out_dtype, skip_cache=True)
 def out_dtype_fake_tensor_mode(
-    mode: FakeTensorMode,
     op: torch._ops.OpOverload,
     output_dtype: torch.dtype,
     *args,
 ):
-    with mode:
-        return out_dtype_dense(op, output_dtype, *args)
+    return out_dtype_dense(op, output_dtype, *args)
 
 
 @out_dtype.py_functionalize_impl

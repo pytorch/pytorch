@@ -25,9 +25,9 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
     IS_LINUX,
+    requires_mkl,
     skipIfXpu,
     TEST_ACL,
-    TEST_MKL,
     xfailIfACL,
 )
 from torch.testing._internal.inductor_utils import (
@@ -794,7 +794,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             self.assertEqual(metrics.generated_kernel_count, expected_kernel_count)
 
     @reduced_f32_on_and_off()
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     def test_linear_fp32(self, device="cpu"):
         self.device = device
 
@@ -818,7 +818,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
             self._test_common(mod, (v,), matcher_check_fn)
 
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     def test_linear_input_non_contiguous_3D_wo_bias(self, device="cpu"):
         self.device = device
 
@@ -938,6 +938,44 @@ class TestPatternMatcher(TestPatternMatcherBase):
             self._test_common(mod, (v,), matcher_check_fn, check_autocast=dtype)
             # 1 kernel for "to_lowp", 2 kernels for unary ops
             self.assertEqual(metrics.generated_kernel_count, 3)
+
+    @skipIfXpu
+    def test_linear_add_bias_float_constant(self, device="cpu"):
+        # Regression test: is_linear_add_bias should not crash when
+        # add_node.args[1] is a Python float (e.g., from `1.0 + linear_output`).
+        # See https://github.com/pytorch/pytorch/pull/183514
+        self.device = device
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.adaLN_modulation = torch.nn.Sequential(
+                    torch.nn.SiLU(),
+                    torch.nn.Linear(64, 64, bias=True),
+                )
+
+            def forward(self, c):
+                return 1.0 + self.adaLN_modulation(c)
+
+        dtypes = []
+        if is_mkldnn_bf16_supported(self.device):
+            dtypes.append(torch.bfloat16)
+        if is_mkldnn_fp16_supported(self.device):
+            dtypes.append(torch.float16)
+        for dtype in dtypes:
+            mod = M().eval()
+            v = torch.randn(2, 64)
+
+            def matcher_check_fn():
+                self.assertEqual(
+                    counters["inductor"]["mkldnn_linear_weight_pack_matcher_count"], 1
+                )
+                # The float constant should NOT be folded as bias
+                self.assertEqual(
+                    counters["inductor"]["mkldnn_linear_bias_matcher_count"], 0
+                )
+
+            self._test_common(mod, (v,), matcher_check_fn, check_autocast=dtype)
 
     @reduced_f32_on_and_off()
     def test_linear_binary(self, device="cpu"):
@@ -1437,6 +1475,81 @@ class TestPatternMatcher(TestPatternMatcherBase):
         include_ops = ["mkldnn._convolution_pointwise_.binary"]
         self._test_code_common(mod, (input,), include_ops, [])
 
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    def test_mkldnn_to_dense_input(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x.to_dense() + 1
+
+        x = torch.randn(4, 4).to_mkldnn()
+        mod = Model().eval()
+        expected = mod(x)
+        actual = torch.compile(mod, fullgraph=True, dynamic=True)(x)
+
+        self.assertEqual(actual.layout, torch.strided)
+        self.assertEqual(actual, expected)
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    def test_mkldnn_to_dense_float8_dtype(self):
+        def fn(x):
+            return x.to_dense(torch.float8_e4m3fn)
+
+        x = torch.randn(4, 4).to_mkldnn()
+        expected = fn(x)
+        actual = torch.compile(fn, fullgraph=True, dynamic=True)(x)
+
+        self.assertEqual(actual.layout, torch.strided)
+        self.assertEqual(actual.dtype, torch.float8_e4m3fn)
+        self.assertEqual(actual.float(), expected.float())
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    def test_mkldnn_to_dense_input_backward(self):
+        def fn(x):
+            return (x.to_dense() + 1).sum()
+
+        eager_base = torch.randn(4, 4, requires_grad=True)
+        compiled_base = eager_base.detach().clone().requires_grad_()
+
+        expected = fn(eager_base.to_mkldnn())
+        actual = torch.compile(fn, fullgraph=True, dynamic=True)(
+            compiled_base.to_mkldnn()
+        )
+        self.assertEqual(actual, expected)
+
+        expected.backward()
+        actual.backward()
+        self.assertEqual(compiled_base.grad, eager_base.grad)
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    def test_mkldnn_to_dense_after_detach(self):
+        def fn(x):
+            return x.to_mkldnn().detach().to_dense() + 1
+
+        x = torch.randn(4, 4)
+        expected = fn(x)
+        actual = torch.compile(fn, fullgraph=True, dynamic=True)(x)
+
+        self.assertEqual(actual.layout, torch.strided)
+        self.assertEqual(actual, expected)
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @config.patch({"cpp_wrapper": True})
+    def test_mkldnn_to_dense_cpp_wrapper(self):
+        def fn(x):
+            return x.to_mkldnn().detach().to_dense() + 1
+
+        x = torch.randn(4, 4)
+        expected = fn(x)
+        actual = torch.compile(fn, fullgraph=True, dynamic=True)(x)
+
+        self.assertEqual(actual.layout, torch.strided)
+        self.assertEqual(actual, expected)
+
     def test_reproduce_113440_issue_1(self):
         class Mod(torch.nn.Module):
             def __init__(
@@ -1532,7 +1645,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             om(*example_inputs)
             om(*example_inputs)
 
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     @xfailIfACL
     def test_reproduce_121253_issue_addmm_fusion_check(self):
         class Mod(torch.nn.Module):

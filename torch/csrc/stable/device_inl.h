@@ -7,6 +7,7 @@
 
 #include <torch/csrc/stable/c/shim.h>
 #include <torch/csrc/stable/device_struct.h>
+#include <torch/csrc/stable/macros.h>
 #include <torch/csrc/stable/stableivalue_conversions.h>
 #include <torch/csrc/stable/version.h>
 #include <torch/headeronly/core/DeviceType.h>
@@ -26,7 +27,7 @@ inline Device::Device(const std::string& device_string) {
   uint32_t device_type;
   int32_t device_index;
 
-  TORCH_ERROR_CODE_CHECK(torch_parse_device_string(
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_parse_device_string(
       device_string.c_str(), &device_type, &device_index));
 
   DeviceType dt = torch::stable::detail::to<DeviceType>(

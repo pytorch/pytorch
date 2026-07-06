@@ -25,6 +25,20 @@ class ReductionBase:
     def _set_cluster_n(self):
         self.cluster_n = 1
 
+    def _cap_cluster_n(self, vecsize: int) -> None:
+        """Cap ``cluster_n`` so every peer CTA owns a distinct, non-empty N-tile.
+
+        A clustered launch splits the row across ``cluster_n`` CTAs. If
+        ``threads_per_row * cluster_n`` exceeds the number of vector blocks in the
+        row (``N // vecsize``), one CTA tile already spans the whole row
+        (``tiler_mn[1] >= N``); local_tile then collapses every peer onto tile 0,
+        so the peers re-reduce the same columns and double-count in the cluster
+        reduction. Capping to ``(N // vecsize) // threads_per_row`` guarantees
+        ``tiler_mn[1] < N`` whenever the resulting ``cluster_n > 1``.
+        """
+        max_cluster_n = max(1, (self.N // vecsize) // self._threads_per_row())
+        self.cluster_n = min(self.cluster_n, max_cluster_n)
+
     def _get_tiled_copy(self, vecsize: int = 1):
         assert self.N % vecsize == 0, f"Input N {self.N} is not divisible by vector size {vecsize}"
         threads_per_row = self._threads_per_row()

@@ -13,3 +13,8 @@ Distributed optimizer is not currently supported when using CUDA tensors
 .. automodule:: torch.distributed.optim
     :members: DistributedOptimizer, PostLocalSGDOptimizer, ZeroRedundancyOptimizer
 ```
+
+```{eval-rst}
+.. currentmodule:: torch.distributed.optim.utils
+.. autofunction:: register_functional_optim
+```

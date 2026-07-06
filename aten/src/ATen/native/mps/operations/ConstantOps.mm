@@ -39,6 +39,7 @@ static void fill_mps_kernel(TensorIterator& iter, const Scalar& value) {
   const auto stream = getCurrentMPSStream();
   const auto type_str = scalarToMetalTypeString(dtype);
   const bool can_fill_linearly = self.is_non_overlapping_and_dense();
+  const bool is_byte_type = self.element_size() == 1;
 
   // For tensors with gaps or overlaps (e.g. stride-2 slices) use a 2D strided
   // kernel: tid.y indexes dim 0 directly (no division), tid.x is the linear
@@ -65,11 +66,14 @@ static void fill_mps_kernel(TensorIterator& iter, const Scalar& value) {
     return;
   }
 
-  // Single-byte dtypes (bool, uint8, int8) use vec4 kernels that fill
-  // 4 elements per thread; all others fill 1 element per thread.
-  const bool is_byte_type = self.element_size() == 1;
+  // Single-byte dtypes (bool, uint8, int8) use a vec4 kernel that fills
+  // 4 elements per thread. The vec<T,4> store requires a 4-byte-aligned
+  // address; the kernel re-aligns its buffer pointer (see ConstantKernel.metal),
+  // so the data region is shifted by `offs` bytes (0..3) of the realigned
+  // buffer and we need that many extra threads to cover the tail.
   const uint32_t numel = static_cast<uint32_t>(iter.numel());
-  const int64_t threads = is_byte_type ? (numel + 3) / 4 : numel;
+  const uint32_t offs = is_byte_type ? static_cast<uint32_t>(iter_tensor_offset(iter, 0) & 3) : 0;
+  const int64_t threads = is_byte_type ? (numel + offs + 3) / 4 : numel;
 
   auto fillPSO = lib.getPipelineStateForFunc(fmt::format("fill_scalar_dense_{}", type_str));
   dispatch_sync_with_rethrow(stream->queue(), ^() {

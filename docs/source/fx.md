@@ -1231,6 +1231,8 @@ The set of leaf modules can be customized by overriding
 
 ```{eval-rst}
 .. currentmodule:: torch.fx.passes.graph_manipulation
+.. autofunction:: get_size_of_all_nodes
+.. autofunction:: get_size_of_node
 ```
 
 ```{eval-rst}
@@ -1345,6 +1347,7 @@ The set of leaf modules can be customized by overriding
 
 ```{eval-rst}
 .. currentmodule:: torch.fx.passes.split_utils
+.. autofunction:: split_by_tags
 ```
 
 ```{eval-rst}
@@ -1373,6 +1376,7 @@ The set of leaf modules can be customized by overriding
 
 ```{eval-rst}
 .. currentmodule:: torch.fx.passes.utils.common
+.. autofunction:: lift_subgraph_as_module
 ```
 
 ```{eval-rst}
@@ -1387,6 +1391,7 @@ The set of leaf modules can be customized by overriding
 
 ```{eval-rst}
 .. currentmodule:: torch.fx.passes.utils.fuser_utils
+.. autofunction:: fuse_as_graphmodule
 ```
 
 ```{eval-rst}
@@ -1403,6 +1408,7 @@ The set of leaf modules can be customized by overriding
 
 ```{eval-rst}
 .. currentmodule:: torch.fx.passes.utils.source_matcher_utils
+.. autofunction:: get_source_partitions
 ```
 
 ```{eval-rst}
@@ -1471,6 +1477,7 @@ The set of leaf modules can be customized by overriding
 .. py:module:: torch.fx.immutable_collections
 .. py:module:: torch.fx.interpreter
 .. py:module:: torch.fx.passes.annotate_getitem_nodes
+.. autofunction:: annotate_getitem_nodes
 .. py:module:: torch.fx.passes.backends.cudagraphs
 .. py:module:: torch.fx.passes.dialect.common.cse_pass
 .. py:module:: torch.fx.passes.fake_tensor_prop
@@ -1518,6 +1525,7 @@ The set of leaf modules can be customized by overriding
 .. py:module:: torch.fx.passes.splitter_base
 
 .. currentmodule:: torch.fx.passes.splitter_base
+.. autofunction:: generate_inputs_for_submodules
 
 .. autosummary::
     :toctree: generated

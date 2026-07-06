@@ -127,7 +127,9 @@ op_db: list[OpInfo] = [
         ndimensional=SpectralFuncType.OneD,
         dtypes=all_types_and_complex_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
-        dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.complex32),
+        dtypesIfCUDA=all_types_and_complex_and(
+            torch.bool, torch.half, torch.bfloat16, torch.complex32
+        ),
         sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=1),
         error_inputs_func=error_inputs_fft,
         # https://github.com/pytorch/pytorch/issues/80411
@@ -145,7 +147,9 @@ op_db: list[OpInfo] = [
         ndimensional=SpectralFuncType.TwoD,
         dtypes=all_types_and_complex_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
-        dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.complex32),
+        dtypesIfCUDA=all_types_and_complex_and(
+            torch.bool, torch.half, torch.bfloat16, torch.complex32
+        ),
         sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=(1, 1)),
         error_inputs_func=error_inputs_fftn,
         # https://github.com/pytorch/pytorch/issues/80411
@@ -191,6 +195,7 @@ op_db: list[OpInfo] = [
         dtypesIfCUDA=all_types_and_complex_and(
             torch.bool,
             torch.half,
+            torch.bfloat16,
             torch.complex32,
         ),
         sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=(1, 1)),
@@ -230,6 +235,7 @@ op_db: list[OpInfo] = [
         dtypesIfCUDA=all_types_and_complex_and(
             torch.bool,
             torch.half,
+            torch.bfloat16,
             torch.complex32,
         ),
         sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=2),
@@ -262,6 +268,7 @@ op_db: list[OpInfo] = [
         dtypesIfCUDA=all_types_and_complex_and(
             torch.bool,
             torch.half,
+            torch.bfloat16,
             torch.complex32,
         ),
         sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=(2, 2)),
@@ -304,7 +311,9 @@ op_db: list[OpInfo] = [
         ndimensional=SpectralFuncType.ND,
         dtypes=all_types_and_complex_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
-        dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.complex32),
+        dtypesIfCUDA=all_types_and_complex_and(
+            torch.bool, torch.half, torch.bfloat16, torch.complex32
+        ),
         sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=(2, 2)),
         error_inputs_func=error_inputs_fftn,
         # https://github.com/pytorch/pytorch/issues/80411
@@ -338,7 +347,7 @@ op_db: list[OpInfo] = [
         ndimensional=SpectralFuncType.OneD,
         dtypes=all_types_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
-        dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+        dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
         sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=1),
         error_inputs_func=error_inputs_fft,
         # https://github.com/pytorch/pytorch/issues/80411
@@ -356,7 +365,7 @@ op_db: list[OpInfo] = [
         ndimensional=SpectralFuncType.TwoD,
         dtypes=all_types_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
-        dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+        dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
         sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=(1, 1)),
         error_inputs_func=error_inputs_fftn,
         # https://github.com/pytorch/pytorch/issues/80411
@@ -377,7 +386,7 @@ op_db: list[OpInfo] = [
         ndimensional=SpectralFuncType.ND,
         dtypes=all_types_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
-        dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+        dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
         sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=(1, 1)),
         error_inputs_func=error_inputs_fftn,
         # https://github.com/pytorch/pytorch/issues/80411
@@ -406,15 +415,8 @@ op_db: list[OpInfo] = [
         check_batched_forward_grad=False,
         dtypes=all_types_and_complex_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
-        dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.complex32),
-        skips=(
-            # AssertionError: Resizing an out= argument with no elements threw a resize warning!
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_out",
-                device_type="mps",
-            ),
+        dtypesIfCUDA=all_types_and_complex_and(
+            torch.bool, torch.half, torch.bfloat16, torch.complex32
         ),
     ),
     SpectralFuncInfo(
@@ -433,7 +435,9 @@ op_db: list[OpInfo] = [
         check_batched_forward_grad=False,
         dtypes=all_types_and_complex_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
-        dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.complex32),
+        dtypesIfCUDA=all_types_and_complex_and(
+            torch.bool, torch.half, torch.bfloat16, torch.complex32
+        ),
         decorators=[
             DecorateInfo(
                 precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4}),
@@ -477,6 +481,7 @@ op_db: list[OpInfo] = [
         dtypesIfCUDA=all_types_and_complex_and(
             torch.bool,
             torch.half,
+            torch.bfloat16,
             torch.complex32,
         ),
         decorators=[
@@ -514,13 +519,7 @@ op_db: list[OpInfo] = [
         check_batched_forward_grad=False,
         dtypes=all_types_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
-        dtypesIfCUDA=all_types_and(torch.bool, torch.half),
-        skips=(
-            # AssertionError: Resizing an out= argument with no elements threw a resize warning!
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
-            ),
-        ),
+        dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
         check_batched_grad=False,
     ),
     SpectralFuncInfo(
@@ -539,7 +538,7 @@ op_db: list[OpInfo] = [
         check_batched_forward_grad=False,
         dtypes=all_types_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
-        dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+        dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
         check_batched_grad=False,
         check_batched_gradgrad=False,
         decorators=(
@@ -569,7 +568,7 @@ op_db: list[OpInfo] = [
         check_batched_forward_grad=False,
         dtypes=all_types_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archss
-        dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+        dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
         check_batched_grad=False,
         check_batched_gradgrad=False,
         decorators=[
@@ -598,7 +597,9 @@ op_db: list[OpInfo] = [
         check_batched_forward_grad=False,
         dtypes=all_types_and_complex_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
-        dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.complex32),
+        dtypesIfCUDA=all_types_and_complex_and(
+            torch.bool, torch.half, torch.bfloat16, torch.complex32
+        ),
         check_batched_gradgrad=False,
     ),
     SpectralFuncInfo(
@@ -617,7 +618,9 @@ op_db: list[OpInfo] = [
         check_batched_forward_grad=False,
         dtypes=all_types_and_complex_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
-        dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.complex32),
+        dtypesIfCUDA=all_types_and_complex_and(
+            torch.bool, torch.half, torch.bfloat16, torch.complex32
+        ),
         check_batched_gradgrad=False,
         decorators=[
             DecorateInfo(
@@ -643,7 +646,9 @@ op_db: list[OpInfo] = [
         check_batched_forward_grad=False,
         dtypes=all_types_and_complex_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
-        dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.complex32),
+        dtypesIfCUDA=all_types_and_complex_and(
+            torch.bool, torch.half, torch.bfloat16, torch.complex32
+        ),
         check_batched_gradgrad=False,
         decorators=[
             DecorateInfo(
@@ -679,62 +684,26 @@ python_ref_db: list[OpInfo] = [
     SpectralFuncPythonRefInfo(
         "_refs.fft.fft",
         torch_opinfo_name="fft.fft",
-        skips=(
-            # AssertionError: Resizing an out= argument with no elements threw a resize warning!
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
-            ),
-        ),
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.ifft",
         torch_opinfo_name="fft.ifft",
-        skips=(
-            # AssertionError: Resizing an out= argument with no elements threw a resize warning!
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
-            ),
-        ),
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.rfft",
         torch_opinfo_name="fft.rfft",
-        skips=(
-            # AssertionError: Resizing an out= argument with no elements threw a resize warning!
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
-            ),
-        ),
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.irfft",
         torch_opinfo_name="fft.irfft",
-        skips=(
-            # AssertionError: Resizing an out= argument with no elements threw a resize warning!
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
-            ),
-        ),
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.hfft",
         torch_opinfo_name="fft.hfft",
-        skips=(
-            # AssertionError: Resizing an out= argument with no elements threw a resize warning!
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
-            ),
-        ),
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.ihfft",
         torch_opinfo_name="fft.ihfft",
-        skips=(
-            # AssertionError: Resizing an out= argument with no elements threw a resize warning!
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
-            ),
-        ),
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.fftn",
@@ -761,15 +730,6 @@ python_ref_db: list[OpInfo] = [
     SpectralFuncPythonRefInfo(
         "_refs.fft.rfftn",
         torch_opinfo_name="fft.rfftn",
-        skips=(
-            # AssertionError: Resizing an out= argument with no elements threw a resize warning!
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_out",
-                device_type="mps",
-            ),
-        ),
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.irfftn",
@@ -781,12 +741,6 @@ python_ref_db: list[OpInfo] = [
                 "test_reference_nd",
             )
         ],
-        skips=(
-            # AssertionError: Resizing an out= argument with no elements threw a resize warning!
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
-            ),
-        ),
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.hfftn",
@@ -798,12 +752,6 @@ python_ref_db: list[OpInfo] = [
                 "test_reference_nd",
             )
         ],
-        skips=(
-            # AssertionError: Resizing an out= argument with no elements threw a resize warning!
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
-            ),
-        ),
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.ihfftn",
@@ -844,12 +792,6 @@ python_ref_db: list[OpInfo] = [
                 device_type="cuda",
             ),
         ],
-        skips=(
-            # AssertionError: Resizing an out= argument with no elements threw a resize warning!
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
-            ),
-        ),
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.fft2",
@@ -869,12 +811,6 @@ python_ref_db: list[OpInfo] = [
     SpectralFuncPythonRefInfo(
         "_refs.fft.rfft2",
         torch_opinfo_name="fft.rfft2",
-        skips=(
-            # AssertionError: Resizing an out= argument with no elements threw a resize warning!
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
-            ),
-        ),
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.irfft2",
@@ -886,12 +822,6 @@ python_ref_db: list[OpInfo] = [
                 "test_reference_nd",
             )
         ],
-        skips=(
-            # AssertionError: Resizing an out= argument with no elements threw a resize warning!
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
-            ),
-        ),
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.hfft2",
@@ -903,12 +833,6 @@ python_ref_db: list[OpInfo] = [
                 "test_reference_nd",
             )
         ],
-        skips=(
-            # AssertionError: Resizing an out= argument with no elements threw a resize warning!
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
-            ),
-        ),
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.ihfft2",
@@ -939,12 +863,6 @@ python_ref_db: list[OpInfo] = [
                 device_type="cuda",
             ),
         ],
-        skips=(
-            # AssertionError: Resizing an out= argument with no elements threw a resize warning!
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
-            ),
-        ),
     ),
     PythonRefInfo(
         "_refs.fft.fftshift",

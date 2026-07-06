@@ -13,9 +13,9 @@
 #include <ATen/native/LinearAlgebra.h>
 #include <ATen/native/BatchLinearAlgebra.h>
 #include <ATen/native/TransposeType.h>
+#include <c10/macros/Export.h>
 #if defined(BUILD_LAZY_CUDA_LINALG)
 #include <ATen/native/cuda/linalg/BatchLinearAlgebraLib.h>
-
 #if AT_MAGMA_ENABLED()
 #include <ATen/cuda/detail/CUDAHooks.h>
 
@@ -172,6 +172,24 @@ Tensor _cholesky_solve_helper_cuda(const Tensor& self, const Tensor& A, bool upp
     return disp.cholesky_solve_helper(self, A, upper);
 }
 
+C10_EXPORT void* getCurrentCUDASolverDnHandleLazy() {
+  using GetCurrentCUDASolverDnHandleFn = void* (*)();
+  static auto* fn = reinterpret_cast<GetCurrentCUDASolverDnHandleFn>(
+      getTorchLinalgLibrary().sym("at_cuda_getCurrentCUDASolverDnHandle"));
+  TORCH_CHECK(
+      fn != nullptr,
+      "Failed to resolve at_cuda_getCurrentCUDASolverDnHandle from "
+      "libtorch_cuda_linalg.so. This usually indicates a version mismatch "
+      "or a build missing torch_cuda_linalg.");
+  return fn();
+}
+
 #endif /*defined(BUILD_LAZY_CUDA_LINALG)*/
+
+#if !defined(BUILD_LAZY_CUDA_LINALG)
+C10_EXPORT void* getCurrentCUDASolverDnHandleLazy() {
+  return reinterpret_cast<void*>(at::cuda::getCurrentCUDASolverDnHandle());
+}
+#endif
 
 } // namespace at::native
