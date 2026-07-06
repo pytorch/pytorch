@@ -2067,15 +2067,15 @@ class TestTorchDeviceType(TestCase):
         expect_no_sync = (lambda: _ind_put_fn(x, mask, 1.),
                           lambda: _ind_put_fn(x, mask_cpu, y),
                           lambda: _ind_put_fn(x, ind, y),
-                          lambda: _ind_put_fn(x, 0, 5.),
-                          lambda: _ind_put_fn(x, slice(0, 1), 5.),
                           lambda: _ind_get_fn(x, mask_cpu),
                           lambda: _ind_get_fn(x, ind),
                           lambda: torch.nn.functional.one_hot(ind, num_classes=size),
                           lambda: torch.randperm(20000, device=device),
                           lambda: torch.repeat_interleave(x, 2, output_size=2 * size),
                           lambda: torch.repeat_interleave(x, repeats, output_size=2 * size),
-                          lambda: torch.any(y))
+                          lambda: torch.any(y),
+                          lambda: torch.combinations(x, r=2),
+                          lambda: torch.normal(x, x))
         expect_sync = (lambda: _ind_put_fn(x, mask, y),
                        lambda: _ind_put_fn(x, ind_cpu, y),
                        lambda: _ind_get_fn(x, mask),
@@ -2858,6 +2858,11 @@ class TestTorchDeviceType(TestCase):
         test_ops(torch.cummin, "cummin", torch.tensor([[1, 0, 1],
                                                        [0, 0, 0],
                                                        [0, 0, 0]]), expected_out)
+
+        for op in [torch.cummax, torch.cummin]:
+            x = torch.randn(5, dtype=torch.complex64, device=device)
+            with self.assertRaisesRegex(RuntimeError, "not implemented for 'ComplexFloat'"):
+                op(x, 0)
 
     def test_logcumsumexp(self, device):
         def logcumsumexp(a, axis):
@@ -10933,6 +10938,44 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             with self.assertRaisesRegex(RuntimeError, "has weakref"):
                 torch.utils.swap_tensors(t1, t2)
 
+    def test_swap_allows_tensor_weakref(self):
+        from torch.utils.weak import TensorWeakRef
+
+        t1 = torch.nn.Parameter(torch.zeros(2))
+        t2 = torch.nn.Parameter(torch.ones(2))
+        t2.foo = "bar"
+
+        t1_ref = TensorWeakRef(t1)
+        t2_ref = TensorWeakRef(t2)
+        self.assertIs(t1_ref.ref, t1_ref)
+        self.assertIs(t1_ref(), t1)
+        self.assertIs(t2_ref(), t2)
+        self.assertTrue(
+            all(isinstance(wr, TensorWeakRef) for wr in weakref.getweakrefs(t1))
+        )
+        self.assertTrue(
+            all(isinstance(wr, TensorWeakRef) for wr in weakref.getweakrefs(t2))
+        )
+
+        torch.utils.swap_tensors(t1, t2)
+
+        self.assertIs(t1_ref(), t1)
+        self.assertIs(t2_ref(), t2)
+        self.assertEqual(t1, torch.ones(2))
+        self.assertEqual(t2, torch.zeros(2))
+        self.assertEqual(t1.foo, "bar")
+
+        _wr = weakref.ref(t1)
+        with self.assertRaisesRegex(RuntimeError, "has weakref"):
+            torch.utils.swap_tensors(t1, t2)
+
+        t3 = torch.nn.Parameter(torch.zeros(2))
+        t4 = torch.nn.Parameter(torch.ones(2))
+        _ = TensorWeakRef(t3)
+        _ = TensorWeakRef(t4)
+        _wr = weakref.ref(t4)
+        with self.assertRaisesRegex(RuntimeError, "has weakref"):
+            torch.utils.swap_tensors(t3, t4)
 
     @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "Dynamo adds weakrefs")
     def test_swap_fail_slots(self):

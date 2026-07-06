@@ -45,6 +45,7 @@ import sympy
 
 import torch
 from torch import SymInt
+from torch._custom_class_base import CustomClassBase
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.graph_bytecode_inputs import (
     CURRENT_STREAM_INDEX,
@@ -67,7 +68,6 @@ from torch._library.opaque_object import (
     is_opaque_value_type,
     should_hoist,
 )
-from torch._opaque_base import OpaqueBase
 from torch._ops import HigherOrderOperator, OpOverload, OpOverloadPacket
 from torch._subclasses.fake_tensor import (
     FakeTensor,
@@ -296,6 +296,7 @@ from .tensor import (
     NumpyNdarrayVariable,
     supported_const_comparison_op_values,
     SymNodeVariable,
+    TensorSpecializedProps,
     TensorSubclassVariable,
     TensorVariable,
     UnspecializedPythonVariable,
@@ -764,6 +765,21 @@ ITERTOOLS_POLYFILLED_TYPE_IDS: set[int] = set()
 # as static in case user overrides fn ptr
 og_module_named_buffers_fn_ptr = torch.nn.Module.named_buffers
 og_module_named_parameters_fn_ptr = torch.nn.Module.named_parameters
+
+
+def _is_dim_dynamic_from_source_dynamism(
+    source: Source, normalized_source_name: str, dim: int
+) -> bool:
+    if isinstance(source, ChainedSource):
+        source = source.get_base()
+    if not isinstance(source, LocalSource) or source.dynamism is None:
+        return False
+
+    source_dynamism: dict[str, tuple[bool, ...]] = dict(
+        typing.cast(Any, source.dynamism)
+    )
+    dim_dynamism = source_dynamism.get(normalized_source_name)
+    return dim_dynamism is not None and dim < len(dim_dynamism) and dim_dynamism[dim]
 
 
 class VariableBuilder:
@@ -1470,20 +1486,34 @@ class VariableBuilder:
             )
         elif (
             isinstance(value, types.MethodType)
-            and value.__name__ in ("shuffle", "sample")
+            and value.__name__ in ("shuffle", "sample", "seed")
             and isinstance(value.__self__, random.Random)
             and RandomVariable.is_supported_random_obj(value.__self__)
         ):
-            # Module-level random.shuffle/random.sample are methods bound to the
-            # module-global random.Random instance. The scalar-returning helpers
-            # (random.random/randint/randrange/uniform) already have a dedicated
-            # RandomValueSource path in UserDefinedObjectVariable; shuffle/sample
-            # return sequences instead, so route them through RandomVariable to
-            # model the RNG state rather than skipping into the random module.
+            # Module-level random.shuffle/random.sample/random.seed are methods
+            # bound to the module-global random.Random instance. The
+            # scalar-returning helpers (random.random/randint/randrange/uniform)
+            # already have a dedicated RandomValueSource path in
+            # UserDefinedObjectVariable; these return sequences or mutate the RNG
+            # state instead, so route them through RandomVariable to model the
+            # RNG state rather than skipping into the random module.
             random_self = value.__self__
             obj_source = self.source and AttrSource(self.source, "__self__")
             obj_vt = VariableTracker.build(self.tx, random_self, obj_source)
             return GetAttrVariable(obj_vt, value.__name__, py_type=type(value))
+        elif (
+            isinstance(value, types.BuiltinMethodType)
+            and isinstance(value.__self__, random.Random)
+            and RandomVariable.is_supported_random_obj(value.__self__)
+            and value in UserDefinedObjectVariable._supported_random_functions()
+        ):
+            # Module-level random.random is a C builtin method bound to the
+            # module-global random.Random instance (unlike randint/randrange/
+            # uniform, which are Python-level methods). Route it through
+            # UserDefinedObjectVariable so its call_random_fn / RandomValueSource
+            # path models the RNG value instead of skipping into the C builtin.
+            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            return UserDefinedObjectVariable(value, source=self.source)
         elif isinstance(value, torch._C._ImperativeEngine):
             self.install_guards(GuardBuilder.ID_MATCH)
             return AutogradEngineVariable(value, source=self.source)
@@ -1955,7 +1985,7 @@ class VariableBuilder:
             # tracing, but in dynamo we handle it as a regular object so that
             # trace_rules-based graph breaks (e.g. initial_seed, manual_seed)
             # work gracefully — allowing dynamo to compile code before and
-            # after the generator call. TorchScriptObjectVariable's var_getattr
+            # after the generator call. TorchScriptObjectVariable's getattro_impl
             # and call_method are decorated with @_raise_hard_error_if_graph_break,
             # which turns any graph break into a hard error that falls back to
             # eager for the entire function. Generator methods intentionally
@@ -3259,9 +3289,6 @@ class VariableBuilder:
             # and it is inappropriate to eagerly duck size them with
             # real sizevars
             normalized_source_name = normalize_source_name(self.source.name)
-            base_source = self.source
-            if isinstance(base_source, ChainedSource):
-                base_source = base_source.get_base()
 
             if dynamism is not None:
                 dynamic_dim = dynamism
@@ -3272,12 +3299,9 @@ class VariableBuilder:
                 set_feature_use("dynamo.automatic_dynamic_shapes", True)
                 dynamic_dim = get_automatic_dynamic_shapes_mark_as()
             elif (
-                isinstance(base_source, LocalSource)
-                and base_source.dynamism is not None
-                # pyrefly: ignore[no-matching-overload]
-                and dict(base_source.dynamism).get(normalized_source_name, {0: False})[
-                    0
-                ]
+                _is_dim_dynamic_from_source_dynamism(
+                    self.source, normalized_source_name, 0
+                )
             ) or not config.assume_static_by_default:
                 symbolic_shape_log.info(
                     "marking %s as dynamic (from assume_static_by_default = False)",
@@ -4177,7 +4201,7 @@ def get_specialized_props(
     tx: "InstructionTranslatorBase",
     example_value: Any,
     subclass_type: type | None,
-) -> dict[str, Any]:
+) -> TensorSpecializedProps:
     specialized_props = target_cls.specialize(example_value)
     # TODO: not sure about this fake mode test
     if (
@@ -4472,11 +4496,11 @@ def _automatic_dynamic(
                     inner_contexts[attr] = _automatic_dynamic(
                         inner_value, tx, inner_source, static_shapes
                     )
-                case OpaqueBase():
+                case CustomClassBase():
                     pass
                 case unexpected:
                     raise AssertionError(
-                        f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
                     )
 
         return SubclassSymbolicContext(
@@ -4610,15 +4634,9 @@ def _automatic_dynamic(
         # For dynamic, apply None always
 
         normalized_source_name = normalize_source_name(source.name)
-        base_source = source
-        if isinstance(base_source, ChainedSource):
-            base_source = base_source.get_base()
 
         if marked_dynamic or (
-            isinstance(base_source, LocalSource)
-            and base_source.dynamism is not None
-            # pyrefly: ignore[no-matching-overload]
-            and dict(base_source.dynamism).get(normalized_source_name, {i: False})[i]
+            _is_dim_dynamic_from_source_dynamism(source, normalized_source_name, i)
         ):
             # TODO: This can be batched
             # TODO: Doing this here is kind of sus, maybe better to set this
@@ -5044,7 +5062,7 @@ class SourcelessBuilder:
                 cls_obj_vt = SourcelessBuilder.create(tx, value.__self__)
                 try:
                     # pyrefly: ignore[bad-argument-type]
-                    return cls_obj_vt.var_getattr(tx, value.__func__.__name__)
+                    return cls_obj_vt.getattro_impl(tx, value.__func__.__name__)
                 except NotImplementedError:
                     pass  # failthrough to unimplemented branch
             else:

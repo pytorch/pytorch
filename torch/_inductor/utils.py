@@ -2692,6 +2692,14 @@ def _rocm_native_device_arch_name(device: str) -> str:
     return torch.cuda.get_device_properties(device).gcnArchName
 
 
+@functools.lru_cache
+def using_rocm_rdna3() -> bool:
+    """Returns true if the device is based on RDNA3, otherwise returns false."""
+    return torch.cuda.is_available() and _rocm_native_device_arch_name(
+        "cuda"
+    ).startswith("gfx11")
+
+
 @functools.cache
 def try_import_ck_lib() -> tuple[
     str | None, Callable[[], list[Any]], Callable[[], list[Any]], type[Any]
@@ -4715,6 +4723,42 @@ def python_subprocess_env() -> dict[str, str]:
         env["PYTHONHOME"] = sysconfig.get_path("data")
 
     return env
+
+
+def apply_subprocess_env(extra_env: Mapping[str, str | None] | None) -> None:
+    """
+    Apply environment updates sent from a parent process to a persistent worker.
+    A None value means the variable is absent in the parent and should be
+    removed from the worker, rather than leaving a stale value behind.
+    """
+    if extra_env is None:
+        return
+
+    for key, value in extra_env.items():
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = value
+
+
+@contextlib.contextmanager
+def patch_subprocess_env(
+    extra_env: Mapping[str, str | None] | None,
+) -> Iterator[None]:
+    """
+    Temporarily apply parent process environment updates in a persistent worker.
+    """
+    if extra_env is None:
+        yield
+        return
+
+    old_env = dict(os.environ)
+    apply_subprocess_env(extra_env)
+    try:
+        yield
+    finally:
+        os.environ.clear()
+        os.environ.update(old_env)
 
 
 @dataclasses.dataclass(frozen=True)

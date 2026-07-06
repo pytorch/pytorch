@@ -40,7 +40,7 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.node import _get_qualified_name
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.functions import FloorDiv, Max, Min
+from torch.utils._sympy.functions import CleanDiv, Max, Min
 from torch.utils._sympy.singleton_int import SingletonInt
 from torch.utils._sympy.solve import try_solve
 from torch.utils._sympy.symbol import symbol_is_type, SymT
@@ -98,36 +98,18 @@ log = logging.getLogger(__name__)
 pexpr = PythonPrinter().doprint
 
 
+def _rewrite_symbol_solution_for_int_codegen(expr: sympy.Expr) -> sympy.Expr:
+    expr = sympy.together(sympy.sympify(expr))
+    numerator, denominator = sympy.fraction(expr)
+    if denominator == 1:
+        return numerator
+    return CleanDiv(numerator, denominator)
+
+
 ReuseKey = tuple[torch.device, torch.dtype, str, bool, int]
 CommBufferReuseKey = tuple[torch.device, torch.dtype, str, "ir.CommBufferType", str]
 BufferLike = ir.Buffer | WorkspaceArg
 FxConversionFunc = Callable[["WrapperLine"], None]
-
-
-def _replace_floor_div(expr: sympy.Expr) -> sympy.Expr:
-    """
-    Replace sympy.floor with FloorDiv.
-    """
-
-    def replace(expr: sympy.Expr) -> sympy.Expr:
-        expr = sympy.together(expr)
-
-        # Division is represented as a Mul with a Rational factor or a Pow with
-        # negative exponent. Convert floor(Mul(...)) to FloorDiv(numerator,
-        # denominator) by partitioning factors into the numerator and denominator.
-        numerator, denominator = (sympy.S.One,) * 2
-        for arg in sympy.Mul.make_args(expr):
-            if isinstance(arg, sympy.Rational):
-                numerator *= arg.numerator
-                denominator *= arg.denominator
-            elif isinstance(arg, sympy.Pow) and arg.exp.is_negative:
-                denominator *= arg.base**-arg.exp
-            else:
-                numerator *= arg
-
-        return FloorDiv(numerator, denominator)
-
-    return expr.replace(sympy.floor, replace)
 
 
 @dataclasses.dataclass
@@ -2491,8 +2473,9 @@ class PythonWrapperCodegen(CodeGen):
         name: str,
         value: ir.TensorBox | sympy.Expr,
         bound_vars: OrderedSet[sympy.Symbol],
+        deferred_symbol_assignments=None,
     ):
-        """Assign wrapper locals for symbolic input sizes and strides."""
+        """Assign symbolic graph inputs and tensor size/stride symbols to locals."""
         code = self.prefix
 
         @functools.cache
@@ -2506,67 +2489,85 @@ class PythonWrapperCodegen(CodeGen):
             return f"{name}_stride"
 
         def maybe_emit_replacement_aliases(sym: sympy.Symbol) -> None:
-            # Deferred runtime asserts reference pre-replacement backed
-            # symbols (e.g. s77) that were replaced to this canonical
-            # symbol (s31) during constraint solving. Emit aliases so
-            # the asserts compile. Skip unbacked symbols — they are
-            # defined separately by the unbacked symbol codegen path.
+            # Deferred runtime asserts and graph input metadata can reference
+            # either side of a backed-symbol replacement. Emit aliases so both
+            # the pre-replacement and canonical names are defined.
+
+            def is_backed_symbol(s: sympy.Symbol) -> bool:
+                return not symbol_is_type(s, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT))
+
             for src, tgt in V.graph.sizevars.shape_env.replacements.items():
                 if (
                     tgt == sym
                     and isinstance(src, sympy.Symbol)
                     and src not in bound_vars
-                    and not symbol_is_type(
-                        src, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT)
-                    )
+                    and is_backed_symbol(src)
+                    and is_backed_symbol(sym)
                 ):
                     code.writeline(f"{src} = {sym}")
                     bound_vars.add(src)
+                elif (
+                    src == sym
+                    and isinstance(tgt, sympy.Symbol)
+                    and tgt not in bound_vars
+                    and is_backed_symbol(sym)
+                    and is_backed_symbol(tgt)
+                ):
+                    code.writeline(f"{tgt} = {sym}")
+                    bound_vars.add(tgt)
 
         def codegen_symbol(
-            sym_or_exp: object,
-            name: str,
-            accessor: Callable[[str], str],
+            sym_or_exp: sympy.Symbol | sympy.Expr,
+            base_name: str,
+            name_fn: Callable[[str], str],
             dim: int,
-            bound_vars: OrderedSet[sympy.Symbol],
-        ) -> None:
+            deferred_symbol_assignments=None,
+        ) -> bool:
             if isinstance(sym_or_exp, sympy.Symbol):
                 if sym_or_exp in bound_vars:
-                    return
-                code.writeline(f"{sym_or_exp} = {accessor(name)}[{dim}]")
+                    return False
+                code.writeline(f"{sym_or_exp} = {name_fn(base_name)}[{dim}]")
                 bound_vars.add(sym_or_exp)
                 maybe_emit_replacement_aliases(sym_or_exp)
-                return
+                return True
+            elif isinstance(sym_or_exp, sympy.Expr):
+                undefined_symbols = [
+                    sym for sym in sym_or_exp.free_symbols if sym not in bound_vars
+                ]
+                if len(undefined_symbols) != 1:
+                    # Skip constants and underdetermined expressions; a later
+                    # input may define the remaining symbols directly.
+                    if (
+                        len(undefined_symbols) > 1
+                        and deferred_symbol_assignments is not None
+                    ):
 
-            if not isinstance(sym_or_exp, sympy.Expr):
-                return
+                        def retry(deferred_symbol_assignments):
+                            return codegen_symbol(
+                                sym_or_exp,
+                                base_name,
+                                name_fn,
+                                dim,
+                                deferred_symbol_assignments,
+                            )
 
-            undefined_symbols = [
-                sym for sym in sym_or_exp.free_symbols if sym not in bound_vars
-            ]
-            if not undefined_symbols:
-                return
-            if len(undefined_symbols) > 1:
-                return
+                        deferred_symbol_assignments.append(retry)
+                    return False
 
-            runtime_symbol = sympy.Symbol(
-                f"{accessor(name)}_{dim}", integer=True, nonnegative=True
-            )
+                free_symbol = undefined_symbols.pop()
+                base_size_or_stride = name_fn(base_name)
+                dim_value = sympy.Symbol(f"{base_size_or_stride}_{dim}", integer=True)
+                solution = try_solve(sympy.Eq(sym_or_exp, dim_value), free_symbol)
+                if solution is None:
+                    return False
 
-            undefined_symbol = undefined_symbols[0]
-            solution = try_solve(sympy.Eq(sym_or_exp, runtime_symbol), undefined_symbol)
-            if solution is None:
-                return
-
-            code.writeline(f"{runtime_symbol} = {accessor(name)}[{dim}]")
-            undefined_symbol_expr = solution[1]
-            if undefined_symbol.is_integer:
-                undefined_symbol_expr = _replace_floor_div(
-                    sympy.floor(undefined_symbol_expr)
-                )
-            code.writeline(f"{undefined_symbol} = {pexpr(undefined_symbol_expr)}")
-            bound_vars.add(undefined_symbol)
-            maybe_emit_replacement_aliases(undefined_symbol)
+                code.writeline(f"{dim_value} = {base_size_or_stride}[{dim}]")
+                expr = _rewrite_symbol_solution_for_int_codegen(solution[1])
+                code.writeline(f"{free_symbol} = {pexpr(expr)}")
+                bound_vars.add(free_symbol)
+                maybe_emit_replacement_aliases(free_symbol)
+                return True
+            return False
 
         if isinstance(value, sympy.Expr):
             if not isinstance(value, sympy.Symbol) or value in bound_vars:
@@ -2576,9 +2577,9 @@ class PythonWrapperCodegen(CodeGen):
             maybe_emit_replacement_aliases(value)
         elif isinstance(value, ir.TensorBox):
             for dim, size in enumerate(value.get_size()):
-                codegen_symbol(size, name, sizeof, dim, bound_vars)
+                codegen_symbol(size, name, sizeof, dim, deferred_symbol_assignments)
             for dim, stride in enumerate(value.get_stride()):
-                codegen_symbol(stride, name, strideof, dim, bound_vars)
+                codegen_symbol(stride, name, strideof, dim, deferred_symbol_assignments)
         elif isinstance(
             value, (ir.TorchBindObject, ir.GeneratorState, ir.OpaqueObjectState)
         ):
@@ -2588,6 +2589,16 @@ class PythonWrapperCodegen(CodeGen):
                 pass
             else:
                 raise AssertionError(f"Unknown value type: {type(value)}")
+
+    def _retry_deferred_symbol_assignments(self, deferred_symbol_assignments) -> None:
+        while deferred_symbol_assignments:
+            next_deferred_symbol_assignments = []
+            progress = False
+            for assignment in deferred_symbol_assignments:
+                progress = assignment(next_deferred_symbol_assignments) or progress
+            if not progress:
+                break
+            deferred_symbol_assignments = next_deferred_symbol_assignments
 
     def codegen_inputs(self):
         """Assign all symbolic shapes to locals"""
@@ -2603,8 +2614,12 @@ class PythonWrapperCodegen(CodeGen):
         inputs = [
             (k, v) for k, v in graph_inputs.items() if isinstance(v, sympy.Symbol)
         ] + [(k, v) for k, v in graph_inputs.items() if not isinstance(v, sympy.Symbol)]
+        deferred_symbol_assignments = []
         for name, value in inputs:
-            self.codegen_input_symbol_assignment(name, value, bound_vars)
+            self.codegen_input_symbol_assignment(
+                name, value, bound_vars, deferred_symbol_assignments
+            )
+        self._retry_deferred_symbol_assignments(deferred_symbol_assignments)
 
         def _verify_input_symbol_assignment(
             value: ir.TensorBox,
@@ -4363,8 +4378,13 @@ class PythonWrapperCodegen(CodeGen):
         )
         self.writeline(f"del partition{partition_id}_args")
 
+    def get_partition_name(self, partition_id: int) -> str:
+        return f"partition_{partition_id}"
+
     def set_all_partition_names(self, num_partitions: int):
-        self.all_partition_names = [f"partition_{idx}" for idx in range(num_partitions)]
+        self.all_partition_names = list(
+            map(self.get_partition_name, range(num_partitions))
+        )
 
     def codegen_subgraph_call_with_flattened_outputs(
         self, subgraph, outer_inputs, outer_flattened_outputs
