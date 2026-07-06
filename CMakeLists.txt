@@ -389,6 +389,14 @@ cmake_dependent_option(
     USE_C10D_XCCL "USE C10D XCCL" ON "USE_DISTRIBUTED;USE_XCCL" OFF)
 cmake_dependent_option(
     USE_C10D_MPI "USE C10D MPI" ON "USE_DISTRIBUTED;USE_MPI" OFF)
+# TCCL (Thunderbolt Collective Communications Library): RDMA backend for MPS
+# over Apple Silicon Thunderbolt 5. macOS-only and off by default. Enable with
+# -DUSE_TCCL=ON on macOS 26.2+ with librdma.dylib present.
+cmake_dependent_option(
+    USE_TCCL "Use TCCL (Thunderbolt RDMA) backend for MPS." OFF
+    "USE_DISTRIBUTED;APPLE" OFF)
+cmake_dependent_option(
+    USE_C10D_TCCL "USE C10D TCCL" ON "USE_DISTRIBUTED;USE_TCCL" OFF)
 cmake_dependent_option(
     USE_TENSORPIPE "Use TensorPipe. Only available if USE_DISTRIBUTED is on." ON
     "USE_DISTRIBUTED AND NOT WIN32" OFF)

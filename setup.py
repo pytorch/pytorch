@@ -1127,6 +1127,7 @@ def configure_extension_build() -> tuple[
         "nccl = torch.distributed.distributed_c10d:_register_builtin_nccl_backend",
         "ucc = torch.distributed.distributed_c10d:_register_builtin_ucc_backend",
         "xccl = torch.distributed.distributed_c10d:_register_builtin_xccl_backend",
+        "tccl = torch.distributed.distributed_c10d:_register_builtin_tccl_backend",
     ]
     return ext_modules, cmdclass, packages, entry_points, extra_install_requires
 
