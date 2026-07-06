@@ -5456,6 +5456,40 @@
       ]
     }
   ],
+  "GB5167": [
+    {
+      "Gb_type": "assume_constant_result specialize_args unguardable argument",
+      "Context": "function {name}, source {source.name}, value type {type(value).__name__}",
+      "Explanation": "Cannot install value guards for argument `{source.name}` of type {type(value).__name__} passed to function {name} marked with torch._dynamo.assume_constant_result(specialize_args=True). Only simple scalar types, tuples/lists/dicts of them, and shallow dataclasses/objects built from those are supported.",
+      "Hints": [
+        "Restructure this argument to use simple guardable types",
+        "Use plain torch._dynamo.assume_constant_result (without specialize_args) ",
+        "to guard this argument by object identity instead"
+      ]
+    }
+  ],
+  "GB0931": [
+    {
+      "Gb_type": "assume_constant_result specialize_args sourceless argument conversion failed",
+      "Context": "function {name}, variable type {type(x).__name__}",
+      "Explanation": "Cannot convert sourceless argument of type {type(x).__name__} to a Python constant for function {name} marked with torch._dynamo.assume_constant_result(specialize_args=True).",
+      "Hints": [
+        "Pass this argument from outside the torch.compile region so it has a source",
+        "Ensure all arguments can be converted to constants"
+      ]
+    }
+  ],
+  "GB6069": [
+    {
+      "Gb_type": "assume_constant_result specialize_args argument conversion failed",
+      "Context": "function {name}, variable type {type(x).__name__}",
+      "Explanation": "Cannot convert argument of type {type(x).__name__} to a Python constant for function {name} marked with torch._dynamo.assume_constant_result(specialize_args=True).",
+      "Hints": [
+        "Use plain torch._dynamo.assume_constant_result (without specialize_args) instead",
+        "Ensure all arguments can be converted to constants"
+      ]
+    }
+  ],
   "GB2404": [
     {
       "Gb_type": "Unsupported object.__new__ user-defined class construction",

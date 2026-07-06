@@ -304,7 +304,7 @@ def list_backends(exclude_tags=("debug", "experimental")) -> list[str]:
     return torch._dynamo.list_backends(exclude_tags)
 
 
-def assume_constant_result(fn):
+def assume_constant_result(fn=None, *, specialize_args=False):
     """
     This function is used to mark a function `fn` as having a constant result.
     This allows the compiler to optimize away your function.
@@ -312,6 +312,10 @@ def assume_constant_result(fn):
 
     Args:
         fn: The function to be marked as having a constant result.
+        specialize_args: If True, guard the baked constant on the values of the
+            arguments (walking dataclass/dict/tuple/list structure) instead of object
+            identity, so it is recomputed when a field value changes and a fresh
+            but equal object does not force a recompile.
 
     .. warning::
         `assume_constant_result` can, if invalid, cause safety and soundness issues, :func:`torch.compile`
@@ -320,7 +324,7 @@ def assume_constant_result(fn):
     """
     import torch._dynamo
 
-    return torch._dynamo.assume_constant_result(fn)
+    return torch._dynamo.assume_constant_result(fn, specialize_args=specialize_args)
 
 
 def disable(fn=None, recursive=True, *, reason=None):

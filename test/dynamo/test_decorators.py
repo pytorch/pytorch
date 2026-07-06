@@ -1518,6 +1518,92 @@ class DecoratorTests(PytreeRegisteringTestCase):
 
         self.assertTrue(torch.allclose(result_eager, result_compiled))
 
+    def _run_specialize_args(self, decorator, calls):
+        import dataclasses
+
+        @dataclasses.dataclass(frozen=True)
+        class Params:
+            dtype: str
+            seqlen: int
+            causal: bool
+
+        torch._dynamo.reset()
+
+        @decorator
+        def select(p):
+            return 1.0 if p.causal else 2.0
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(x, p):
+            return x * select(p)
+
+        for args in calls:
+            fn(torch.ones(4), Params(*args))
+        return cnts.frame_count
+
+    def test_assume_constant_result_specialize_args_fresh_object(self):
+        same = [("bf16", 128, True)] * 5
+        decorator = torch._dynamo.assume_constant_result(specialize_args=True)
+        self.assertEqual(self._run_specialize_args(decorator, same), 1)
+        # Plain variant guards by identity, so a fresh object recompiles.
+        self.assertEqual(
+            self._run_specialize_args(torch._dynamo.assume_constant_result, same), 5
+        )
+
+    def test_assume_constant_result_specialize_args_value_change(self):
+        calls = [
+            ("bf16", 128, True),
+            ("fp16", 128, True),
+            ("bf16", 256, False),
+            ("fp16", 128, True),
+        ]
+        decorator = torch._dynamo.assume_constant_result(specialize_args=True)
+        self.assertEqual(self._run_specialize_args(decorator, calls), 3)
+
+    def test_assume_constant_result_specialize_args_list(self):
+        @torch._dynamo.assume_constant_result(specialize_args=True)
+        def select(sizes):
+            return float(sum(sizes))
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(x, sizes):
+            return x * select(sizes)
+
+        for sizes in [[1, 2, 3], [1, 2, 3], [1, 2, 4], [1, 2]]:
+            self.assertEqual(fn(torch.ones(4), sizes), torch.ones(4) * sum(sizes))
+        self.assertEqual(cnts.frame_count, 3)
+
+    def test_assume_constant_result_specialize_args_unguardable(self):
+        @torch._dynamo.assume_constant_result(specialize_args=True)
+        def select(s):
+            return float(len(s))
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x, s):
+            return x * select(s)
+
+        with self.assertRaisesRegex(Unsupported, "unguardable argument"):
+            fn(torch.ones(4), {1, 2, 3})
+
+    def test_assume_constant_result_specialize_args_compiler_api(self):
+        @torch.compiler.assume_constant_result(specialize_args=True)
+        def select(p):
+            return p["scale"]
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(x, p):
+            return x * select(p)
+
+        for scale in [2.0, 2.0, 3.0]:
+            self.assertEqual(fn(torch.ones(4), {"scale": scale}), torch.ones(4) * scale)
+        self.assertEqual(cnts.frame_count, 2)
+
     def test_set_stance_aot_eager_then_compile(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
