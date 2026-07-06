@@ -46,7 +46,7 @@ from .constant import ConstantVariable
 from .dicts import ConstDictVariable
 from .hashable import HashableTracker
 from .lists import ListVariable
-from .misc import GetAttrVariable
+from .misc import CallMethodVariable
 from .user_defined import UserDefinedObjectVariable
 
 
@@ -144,7 +144,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
 
         return super().call_method(tx, name, args, kwargs)
 
-    def var_getattr(
+    def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         # Note: this allows us to intercept the call in call_method
@@ -153,12 +153,11 @@ class OptimizerVariable(UserDefinedObjectVariable):
         if name in ("_init_group"):
             if not self.source:
                 raise AssertionError(
-                    "OptimizerVariable requires a source for var_getattr"
+                    "OptimizerVariable requires a source for getattro_impl"
                 )
-            return GetAttrVariable(
+            return CallMethodVariable(
                 self,
                 name,
-                py_type=type(getattr(self.value, name)),
                 source=AttrSource(self.source, name),
             )
 
@@ -171,7 +170,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
 
             self._set_capturable(tx)
 
-        return super().var_getattr(tx, name)
+        return super().getattro_impl(tx, name)
 
     def graph_break_if_pending_mutation(self, tx: "InstructionTranslatorBase") -> None:
         # If there are pending mutations on a parameter (due to using closure)

@@ -712,7 +712,7 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(x), self._compile(fn, x))
 
     def test_getattr_dict_subscript(self):
-        """obj.__dict__["key"] → GetAttrVariable → DunderDictVariable."""
+        """obj.__dict__["key"] dispatches through DunderDictVariable."""
 
         class Model(torch.nn.Module):
             def __init__(self):

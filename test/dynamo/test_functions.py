@@ -5457,7 +5457,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         for fn in [fn_add, fn_pop, fn_update, fn_remove, fn_discard, fn_clear]:
             torch._dynamo.reset()
             opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-            with self.assertRaises(torch._dynamo.exc.InternalTorchDynamoError):
+            with self.assertRaises(torch._dynamo.exc.Unsupported):
                 opt_fn()
 
     def test_is_tensor_tensor(self):

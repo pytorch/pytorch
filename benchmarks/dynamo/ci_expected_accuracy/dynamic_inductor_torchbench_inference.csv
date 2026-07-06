@@ -42,7 +42,7 @@ dcgan,pass,0
 
 
 
-demucs,pass,3
+demucs,pass,5
 
 
 
@@ -102,7 +102,7 @@ doctr_det_predictor,pass,3
 
 
 
-doctr_reco_predictor,pass,1
+doctr_reco_predictor,pass,3
 
 
 
@@ -258,7 +258,7 @@ torchrec_dlrm,eager_fail_to_run,0
 
 
 
-tts_angular,pass,2
+tts_angular,pass,4
 
 
 
