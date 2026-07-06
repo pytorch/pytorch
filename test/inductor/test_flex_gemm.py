@@ -735,6 +735,20 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
             )
         with self.assertRaisesRegex(RuntimeError, "local_reduce_out shape"):
             validate_local_reduce_out_shape((128, 7), (128, 8))
+        column_major_plan = self.runtimeLocalReducePlan(
+            out=torch.empty_strided((128, 8), (1, 128), device="cuda"),
+            group=8,
+            axis=1,
+        )
+        with self.assertRaisesRegex(NotImplementedError, "row-major"):
+            validate_runtime_local_reduce(
+                column_major_plan,
+                torch.empty(128, 64, device="cuda"),
+                (128, 64),
+                None,
+                1.0,
+                1.0,
+            )
 
     def test_runtime_validation_rejects_local_reduce_with_c_alpha_beta(self):
         from torch._inductor.kernel.flex_gemm.runtime import (

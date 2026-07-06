@@ -90,7 +90,9 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         # Each thread should only see its own entry (length 1)
         for thread_id, length in results.items():
             self.assertEqual(
-                length, 1, f"Thread {thread_id} saw {length} entries instead of 1"
+                length,
+                1,
+                lambda msg: f"{msg}\nThread {thread_id} saw {length} entries instead of 1",
             )
 
     def test_chromium_event_timed_scoped_reset_preserves_outer_event(self):

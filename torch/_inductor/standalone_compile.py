@@ -144,51 +144,82 @@ class CacheCompiledArtifact(CompiledArtifact):
         # (we only expect one)
         return len(cache_info.aot_autograd_artifacts) == 1
 
+    def _to_binary_bytes(self) -> bytes:
+        """Serialize this artifact to the in-memory ``binary`` byte format.
+
+        Produces exactly the bytes that ``save(format="binary")`` writes to disk, so
+        callers that only need the bytes (rather than a file on disk) can reuse this
+        without going through ``save``. The byte layout is the one
+        ``load(format="binary")`` reads back: header, ``torch_key``, the autograd-cache
+        ``key`` string, then the opaque ``artifact_bytes``.
+        """
+        if self._artifacts is None:
+            raise RuntimeError(
+                "CompiledArtifact.save failed to save since there's no artifact to save"
+            )
+        artifact_bytes, cache_info = self._artifacts
+        if len(cache_info.aot_autograd_artifacts) == 0:
+            raise RuntimeError(
+                f"CompiledArtifact.save failed to save due to no aot_autograd artifacts. "
+                f"This likely means there was something that was not serializable in the "
+                f"graph passed to standalone_compile. This can generally be fixed by "
+                f"ensuring that your model only uses constructs that are serializable. "
+                f"{cache_info}"
+            )
+        if len(cache_info.aot_autograd_artifacts) > 1:
+            raise AssertionError(
+                f"CompiledArtifact.save failed to save because there was more than one "
+                f"artifact but we only expected one. {cache_info}"
+            )
+        key = cache_info.aot_autograd_artifacts[0]
+
+        from torch.utils._appending_byte_serializer import BytesWriter
+
+        from .codecache import torch_key
+
+        writer = BytesWriter()
+        writer.write_bytes(CacheCompiledArtifact.CACHE_HEADER)
+        writer.write_bytes(torch_key())
+        writer.write_str(key)
+        writer.write_bytes(artifact_bytes)
+        return writer.to_bytes()
+
     def save(
         self, *, path: str, format: Literal["binary", "unpacked"] = "binary"
     ) -> None:
         with dynamo_timed("CompiledArtifact.save"):
-            if self._artifacts is None:
-                raise RuntimeError(
-                    "CompiledArtifact.save failed to save since there's no artifact to save"
-                )
-            artifact_bytes, cache_info = self._artifacts
-            if len(cache_info.aot_autograd_artifacts) == 0:
-                raise RuntimeError(
-                    f"CompiledArtifact.save failed to save due to no aot_autograd artifacts. "
-                    f"This likely means there was something that was not serializable in the "
-                    f"graph passed to standalone_compile. This can generally be fixed by "
-                    f"ensuring that your model only uses constructs that are serializable. "
-                    f"{cache_info}"
-                )
-            if len(cache_info.aot_autograd_artifacts) > 1:
-                raise AssertionError(
-                    f"CompiledArtifact.save failed to save because there was more than one "
-                    f"artifact but we only expected one. {cache_info}"
-                )
-            key = cache_info.aot_autograd_artifacts[0]
-
             if format == "binary":
                 # can't assert that it is a file since it might not exist yet
                 if os.path.isdir(path):
                     raise AssertionError(f"expected path to not be a dir: {path}")
 
-                from torch.utils._appending_byte_serializer import BytesWriter
-
-                from .codecache import torch_key
-
-                writer = BytesWriter()
-                writer.write_bytes(CacheCompiledArtifact.CACHE_HEADER)
-                writer.write_bytes(torch_key())
-                writer.write_str(key)
-                writer.write_bytes(artifact_bytes)
-
                 from torch._inductor.codecache import write_atomic
 
-                write_atomic(path, writer.to_bytes())
+                # ``_to_binary_bytes`` is the single source of the None / empty /
+                # multiple aot_autograd_artifacts validation, so the binary branch
+                # does not repeat those checks here.
+                write_atomic(path, self._to_binary_bytes())
             else:
                 if format != "unpacked":
                     raise AssertionError(f"expected format == 'unpacked', got {format}")
+                if self._artifacts is None:
+                    raise RuntimeError(
+                        "CompiledArtifact.save failed to save since there's no artifact to save"
+                    )
+                artifact_bytes, cache_info = self._artifacts
+                if len(cache_info.aot_autograd_artifacts) == 0:
+                    raise RuntimeError(
+                        f"CompiledArtifact.save failed to save due to no aot_autograd artifacts. "
+                        f"This likely means there was something that was not serializable in the "
+                        f"graph passed to standalone_compile. This can generally be fixed by "
+                        f"ensuring that your model only uses constructs that are serializable. "
+                        f"{cache_info}"
+                    )
+                if len(cache_info.aot_autograd_artifacts) > 1:
+                    raise AssertionError(
+                        f"CompiledArtifact.save failed to save because there was more than one "
+                        f"artifact but we only expected one. {cache_info}"
+                    )
                 if os.path.exists(path):
                     if not os.path.isdir(path):
                         raise AssertionError(f"expected path to be a dir: {path}")
