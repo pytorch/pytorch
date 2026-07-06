@@ -950,7 +950,7 @@ class GraphLowering(torch.fx.Interpreter):
 
     def find_nodes_prefer_channels_last(self) -> OrderedSet[Node]:
         """
-        The rule to decide if an node prefer channels last is simple.
+        The rule to decide if a node prefers channels last is simple.
         1. if it's input/output of a convolution
         2. if one of its user prefers channels last
 
@@ -1279,12 +1279,7 @@ class GraphLowering(torch.fx.Interpreter):
         example = super().placeholder(target, args, kwargs)  # type: ignore[arg-type]
         target = self.qualify_name(target)
         if isinstance(example, SymTypes):
-            # TODO fix partitioning issue and re-enable for backward
-            # https://github.com/pytorch/pytorch/issues/155468.
-            if not V.graph.is_backward:
-                expr = _get_placeholder_expr(example.node)
-            else:
-                expr = example.node.expr
+            expr = _get_placeholder_expr(example.node)
             self.graph_inputs[target] = expr
             self.graph_input_names.append(target)
             return expr
