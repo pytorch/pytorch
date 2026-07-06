@@ -202,7 +202,7 @@ class _ExecOrderData:
             }
             world_num_valid_indices = torch.zeros(self.world_size, **tensor_kwargs)  # type: ignore[arg-type, call-overload]
             local_num_valid_indices = torch.tensor([num_valid_indices], **tensor_kwargs)  # type: ignore[arg-type, call-overload]
-            dist.all_gather_into_tensor(
+            dist.all_gather_single(
                 world_num_valid_indices,
                 local_num_valid_indices,
                 group=self.process_group,
@@ -235,7 +235,7 @@ class _ExecOrderData:
                 self.world_size * num_valid_indices, **tensor_kwargs
             )
             local_indices = torch.tensor(optional_local_indices, **tensor_kwargs)  # type: ignore[arg-type]
-            dist.all_gather_into_tensor(
+            dist.all_gather_single(
                 world_indices, local_indices, group=self.process_group
             )
             # Copy entire tensor from D2H once to avoid per element D2H copies

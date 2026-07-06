@@ -1,0 +1,10 @@
+# FlexGEMM-specific QuACK patch order.
+#
+# The generic vendoring patches in ../patches/ are applied first. The patches
+# below are ordered explicitly because they form one FlexGEMM feature series and
+# later patches may depend on earlier autotuner changes.
+0001-flex-gemm-epilogue-minimal.patch
+0002-flex-gemm-precompile-tensor-kwargs.patch
+0003-flex-gemm-autotune-precompile-toggle.patch
+0004-flex-gemm-device-capacity-override.patch
+0005-flex-gemm-tuple-aux-output.patch

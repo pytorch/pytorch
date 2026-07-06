@@ -7,7 +7,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Context.h>
 #include <ATen/core/Tensor.h>
-#include <ATen/core/NamedTensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/OpMathType.h>
@@ -22,7 +21,7 @@
 #include <ATen/native/cuda/RowwiseScaledMM.h>
 #include <ATen/native/cuda/ScaledGroupMM.h>
 #include <ATen/native/cuda/GroupMM.h>
-#ifdef USE_ROCM
+#if defined(USE_ROCM) && defined(USE_ROCM_CK_GEMM)
 #include <ATen/native/hip/ck_group_gemm.h>
 #endif
 #include <ATen/ceil_div.h>
@@ -518,9 +517,9 @@ _scaled_grouped_mm_cuda(
 
 namespace {
 
-using acceptance_fn = std::function<bool(c10::ScalarType, std::vector<ScalingType>&, ArrayRef<Tensor>&, c10::ScalarType, std::vector<ScalingType>&, ArrayRef<Tensor>&)>;
+using scaled_blas::ScaleKernelDispatchEntry;
 
-std::array<std::tuple<std::string, acceptance_fn, ScaledGemmImplementation>, 4> scale_grouped_kernel_dispatch = {{
+std::array<ScaleKernelDispatchEntry, 4> scale_grouped_kernel_dispatch = {{
   { "rowwise_rowwise", scaled_blas::check_rowwise_recipe, ScaledGemmImplementation::ROWWISE_ROWWISE},
   { "mxfp8_mxfp8", scaled_blas::check_mxfp8_recipe, ScaledGemmImplementation::MXFP8_MXFP8},
   { "mxfp4_mxfp4", scaled_blas::check_mxfp4_recipe, ScaledGemmImplementation::MXFP4_MXFP4},
@@ -603,20 +602,14 @@ _scaled_grouped_mm_cuda_v2(
   // Try to do as few steps as possible.
   // NOTE: support is deliberately sparse, can explicitly enumerate all combinations allowed.
   // Do this via a list of defined (name, acceptance, concrete_impl) tuples.
-  ScaledGemmImplementation gemm_impl = ScaledGemmImplementation::NONE;
-  for (const auto& fn_entry : scale_grouped_kernel_dispatch) {
-    const auto [name, accept_fn, scaled_gemm_impl] = fn_entry;
-    bool ok = accept_fn(mat_a.scalar_type(),
-                        scale_recipe_a_enum,
-                        scale_a,
-                        mat_b.scalar_type(),
-                        scale_recipe_b_enum,
-                        scale_b);
-    if (ok) {
-      gemm_impl = scaled_gemm_impl;
-      break;
-    }
-  }
+  ScaledGemmImplementation gemm_impl = scaled_blas::find_scaled_gemm_impl(
+      scale_grouped_kernel_dispatch,
+      mat_a.scalar_type(),
+      scale_recipe_a_enum,
+      scale_a,
+      mat_b.scalar_type(),
+      scale_recipe_b_enum,
+      scale_b);
   TORCH_CHECK_VALUE(gemm_impl != ScaledGemmImplementation::NONE,
       "No gemm implementation was found");
 
@@ -711,20 +704,19 @@ std::optional<c10::ScalarType> out_dtype) {
   // On ROCm fast path routes to group_gemm_ck and slow path to _grouped_mm_fallback.
   // Keep use_fast_path as false till ck kernel perf is optimal.
   // To enable CK path, use env variable ROCM_ALLOW_GROUP_GEMM_CK=1.
-  bool use_fast_path = false;
-  // ifdef USE_ROCM_CK_GEMM is required since ROCm systems w/o CK should not call ck path.
-#if defined(USE_ROCM_CK_GEMM)
-  if (at::globalContext().rocmAllowGroupGemmCk() && at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950", "gfx90a"})) {
-    use_fast_path = true;
-  }
-#endif //USE_ROCM_CK_GEMM
   const auto out_dtype_ = _resolve_grouped_mm_out_dtype(mat_a, mat_b, out_dtype);
   Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
-  if (use_fast_path) {
+#if defined(USE_ROCM_CK_GEMM)
+  // ifdef USE_ROCM_CK_GEMM is required since ROCm systems w/o CK should not call ck path.
+  // To enable CK path, use env variable ROCM_ALLOW_GROUP_GEMM_CK=1.
+  if (at::globalContext().rocmAllowGroupGemmCk() && at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950", "gfx90a"})) {
     at::hip::detail::group_gemm_ck(mat_a, mat_b, offs, bias, out);
   } else {
     _grouped_mm_fallback(mat_a, mat_b, offs, bias, out_dtype, out);
   }
+#else
+  _grouped_mm_fallback(mat_a, mat_b, offs, bias, out_dtype, out);
+#endif //USE_ROCM_CK_GEMM
 #endif //ifndef USE_ROCM
   return out;
 }

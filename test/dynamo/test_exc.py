@@ -2,6 +2,7 @@
 
 import linecache
 import os
+import pickle
 import re
 import sys
 import tempfile
@@ -14,6 +15,10 @@ import torch._dynamo.config
 import torch._dynamo.test_case
 from torch._dynamo.comptime import comptime
 from torch._dynamo.exc import (
+    BackendCompilerFailed,
+    InvalidBackend,
+    ResetRequired,
+    ShortenTraceback,
     TorchDynamoException,
     Unsupported,
     UserError,
@@ -39,35 +44,6 @@ def _capture_y_source_location(ctx) -> None:
     y_vt = tx.symbolic_locals.get("y")
     if y_vt is not None and y_vt.source_location is not None:
         _source_location_capture["source_location"] = y_vt.source_location
-
-
-def _strip_source_markers(message: str) -> str:
-    return re.sub(r"(?m)^[ ]*[~^]+\n?", "", message)
-
-
-def _unsupported_error_source_attribution() -> str:
-    if sys.version_info < (3, 11):
-        return """\
-Stack variable source attribution:
-  ConstantVariable(int: 1) originated from:
-  File "test_exc.py", line N
-                return {1, 2}
-"""
-
-    return """\
-Stack variable source attribution:
-  ConstantVariable(int: 1) originated from:
-  File "test_exc.py", line N
-                return {1, 2}
-  ConstantVariable(int: 2) originated from:
-  File "test_exc.py", line N
-                return {1, 2}
-"""
-
-
-def _munge_with_source_markers_removed(message: str) -> str:
-    munged = munge_exc(message, suppress_suffix=True, skip=0)
-    return _strip_source_markers(munged)
 
 
 def _format_multiline_source_location() -> str:
@@ -113,6 +89,57 @@ class ExcTests(LoggingTestCase):
         self.assertEqual(err.msg, "bad input")
         self.assertEqual(err.message, "bad input")
         self.assertEqual(str(err), "bad input")
+
+    @torch._dynamo.config.patch(suppress_errors=False)
+    def test_backend_compiler_failed_pickles_without_frame(self):
+        def backend_fn(gm, example_inputs):
+            exc = RuntimeError("backend exploded")
+            exc.frame = sys._getframe()
+            raise exc
+
+        def fn(x):
+            return x + 1
+
+        with self.assertRaises(BackendCompilerFailed) as cm:
+            torch.compile(fn, backend=backend_fn)(torch.ones(1))
+
+        err = cm.exception
+
+        restored = pickle.loads(pickle.dumps(err))
+
+        self.assertIsInstance(restored, BackendCompilerFailed)
+        self.assertEqual(restored.args, err.args)
+        self.assertEqual(str(restored), str(err))
+        self.assertEqual(restored.backend_name, "backend_fn")
+        self.assertIsInstance(restored.inner_exception, RuntimeError)
+        self.assertEqual(str(restored.inner_exception), "backend exploded")
+        self.assertEqual(
+            restored.inner_exception._dynamo_original_exception_type,
+            "builtins.RuntimeError",
+        )
+        self.assertIsNone(restored.first_useful_frame)
+
+    def test_dynamo_exceptions_pickle_without_rerunning_init(self):
+        cases = [
+            InvalidBackend("bad_backend"),
+            ResetRequired(),
+            ShortenTraceback("shortened", first_useful_frame=sys._getframe()),
+            UserError(UserErrorType.INVALID_INPUT, "bad input"),
+        ]
+
+        for err in cases:
+            with self.subTest(exc_type=type(err).__name__):
+                restored = pickle.loads(pickle.dumps(err))
+
+                self.assertIsInstance(restored, type(err))
+                self.assertEqual(restored.args, err.args)
+                self.assertEqual(str(restored), str(err))
+
+        self.assertIsNone(pickle.loads(pickle.dumps(cases[2])).first_useful_frame)
+        self.assertEqual(
+            pickle.loads(pickle.dumps(cases[3])).error_type,
+            UserErrorType.INVALID_INPUT,
+        )
 
     def test_unsupported_real_stack(self):
         # exercise Unsupported constructor and augment_exc_message
@@ -221,10 +248,9 @@ from user code:
         torch.compile(fn001, backend="eager")(torch.randn(1))
 
         record = self.getRecord(records, "missing BUILD_SET handler")
-        if sys.version_info < (3, 11):
-            self.assertExpectedInline(
-                _munge_with_source_markers_removed(record.getMessage()),
-                """\
+        self.assertExpectedInline(
+            munge_exc(record.getMessage(), suppress_suffix=True, skip=0),
+            """\
 Graph break in user code at test_exc.py:N
 Graph Break Reason: Failed to handle graph break gracefully. Skipping the function and falling back to eager. Graph break encountered:
 
@@ -237,9 +263,6 @@ missing BUILD_SET handler
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0200.html
 
 Stack variable source attribution:
-  ConstantVariable(int: 1) originated from:
-  File "test_exc.py", line N
-                return {1, 2}
 
 User code traceback:
   File "test_exc.py", line N, in test_unsupported_error
@@ -247,37 +270,7 @@ User code traceback:
   File "test_exc.py", line N, in fn001
     return {1, 2}
 """,
-            )
-        else:
-            self.assertExpectedInline(
-                _munge_with_source_markers_removed(record.getMessage()),
-                """\
-Graph break in user code at test_exc.py:N
-Graph Break Reason: Failed to handle graph break gracefully. Skipping the function and falling back to eager. Graph break encountered:
-
-missing BUILD_SET handler
-  Explanation: Missing BUILD_SET bytecode handler (for testing purposes).
-
-
-  Developer debug context:
-
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0200.html
-
-Stack variable source attribution:
-  ConstantVariable(int: 1) originated from:
-  File "test_exc.py", line N
-                return {1, 2}
-  ConstantVariable(int: 2) originated from:
-  File "test_exc.py", line N
-                return {1, 2}
-
-User code traceback:
-  File "test_exc.py", line N, in test_unsupported_error
-    torch.compile(fn001, backend="eager")(torch.randn(1))
-  File "test_exc.py", line N, in fn001
-    return {1, 2}
-""",
-            )
+        )
 
     @torch._dynamo.config.patch(suppress_errors=False)
     def test_internal_error_no_suppress(self):
@@ -537,7 +530,7 @@ Failed Source Expressions:
         result = _format_multiline_source_location()
 
         self.assertExpectedInline(
-            _strip_source_markers(result),
+            re.sub(r"(?m)^[ ]*[~^]+\n?", "", result),
             """\
   File "<source_path>", line 1
     value = (

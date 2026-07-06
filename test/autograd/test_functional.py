@@ -13,6 +13,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skipIfTorchDynamo,
     subtest,
     TestCase,
 )
@@ -673,10 +674,12 @@ class TestAutogradFunctional(TestCase):
             api(foo, x, vectorize=True)
         self.assertEqual(len(wa), 0)
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/153707")
     @base_and_logging_tensor
     def test_jacobian_vectorize_raises_no_warnings(self, ctors):
         return self._test_vectorize_raises_no_warnings(autogradF.jacobian, ctors)
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/153644")
     @base_and_logging_tensor
     def test_hessian_vectorize_raises_no_warnings(self, ctors):
         return self._test_vectorize_raises_no_warnings(autogradF.hessian, ctors)

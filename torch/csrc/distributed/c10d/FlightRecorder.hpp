@@ -58,7 +58,7 @@ DEFINE_CONSTANT(thread_name_key, "thread_name")
 #undef DEFINE_CONSTANT
 
 // Write NCCL debug info to local disk or any storage users define.
-// There are some constrains we set for the debug info writer:
+// There are some constraints we set for the debug info writer:
 // 1. The writer should only be registered once.
 // 2. Once registered, users cannot change it including un-register.
 // 3. It is recommended to register the customized writer in the trainer setup,

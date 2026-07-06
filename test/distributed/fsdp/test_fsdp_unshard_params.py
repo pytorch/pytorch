@@ -3,6 +3,7 @@ import contextlib
 import itertools
 import math
 import sys
+import unittest
 from typing import Any
 
 import torch
@@ -29,7 +30,11 @@ from torch.testing._internal.common_fsdp import (
     NestedWrappedModule,
     TransformerWithSharedParams,
 )
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_utils import (
+    run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
+    TEST_WITH_ROCM,
+)
 
 
 device_type = torch.device(get_devtype())
@@ -255,6 +260,7 @@ class TestUnshardParams(TestUnshardParamsBase):
         else:  # wrote to padding
             self.assertEqual(self.rank + 2, flat_param[0])
 
+    @unittest.skipIf(TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/159348")
     @skip_if_lt_x_gpu(2)
     def test_unshard_params_respects_reshard(self):
         """
