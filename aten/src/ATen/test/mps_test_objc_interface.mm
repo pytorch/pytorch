@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include <torch/torch.h>
+#include <ATen/mps/MPSAllocatorInterface.h>
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
 
@@ -17,8 +18,10 @@ kernel void add_arrays(device const float* inA,
 }
 )MPS_ADD_ARRAYS";
 
+// MPS tensor data pointers are unified-memory addresses; the allocator maps
+// them back to the backing MTLBuffer for kernel-argument binding.
 static inline id<MTLBuffer> getMTLBufferStorage(const torch::Tensor& tensor) {
-  return __builtin_bit_cast(id<MTLBuffer>, tensor.storage().data());
+  return __builtin_bit_cast(id<MTLBuffer>, at::mps::getIMPSAllocator()->getMTLBuffer(tensor.storage().data()));
 }
 
 TEST(MPSObjCInterfaceTest, MPSCustomKernel) {
