@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 import itertools
 import sys
+import types
 import unittest
 from collections import OrderedDict
 
@@ -22,6 +23,7 @@ class GeneratorTestsBase(torch._dynamo.test_case.TestCase):
         super().setUp()
         self._old = torch._dynamo.config.enable_faithful_generator_behavior
         torch._dynamo.config.enable_faithful_generator_behavior = True
+        self._prev = torch._dynamo.config.enable_trace_load_build_class = True
         self._unittest_old = torch._dynamo.config.enable_trace_unittest
         torch._dynamo.config.enable_trace_unittest = True
 
@@ -29,6 +31,7 @@ class GeneratorTestsBase(torch._dynamo.test_case.TestCase):
         super().tearDown()
         torch._dynamo.config.enable_faithful_generator_behavior = self._old
         torch._dynamo.config.enable_trace_unittest = self._unittest_old
+        torch._dynamo.config.enable_trace_load_build_class = self._prev
 
     def _compile_check(self, fn, args=None, fullgraph=True):
         eager = EagerAndRecordGraphs()
@@ -860,7 +863,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(y, t.sin())
 
     @unittest.skipIf(sys.version_info < (3, 12), "Test CLEANUP_THROW")
-    @unittest.expectedFailure
     def test_cleanup_throw_subgen_return_value(self):
         # CLEANUP_THROW must resume the delegating generator with the
         # subgenerator's return value (StopIteration.value). When the
@@ -891,7 +893,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(y, t.sin())
 
     @unittest.skipIf(sys.version_info < (3, 12), "Test CLEANUP_THROW")
-    @unittest.expectedFailure
     def test_cleanup_throw_empty_stopiteration(self):
         def nested_generator():
             yield 1
@@ -1300,7 +1301,6 @@ class TestGeneratorClose(GeneratorTestsBase):
 
         @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
-            nonlocal z
             gen = whoo(t)
             i = next(gen)
             y = gen.close()
@@ -1328,7 +1328,6 @@ class TestGeneratorClose(GeneratorTestsBase):
 
         @torch.compile(backend="eager", fullgraph=fullgraph)
         def fn(t):
-            nonlocal z
             gen = whoo(t)
             i = next(gen)
             gen.close()
@@ -1536,6 +1535,92 @@ class TestGeneratorClose(GeneratorTestsBase):
         self.assertEqual(b, t.tan())
         self.assertEqual(z, 2)
 
+    def test_untrack_generator_after_hop(self):
+        # Regression: speculate_subgraph clones SideEffects and leaves the clone
+        # as the live instance, so the set of open generators must be owned by
+        # OutputGraph, not SideEffects. torch.cond's branch speculation swaps in
+        # a clone (which never carried local_generators); exhausting a generator
+        # created before the cond then untracked it on the clone, raising
+        # "ValueError: list.remove(x): x not in list".
+        # See https://github.com/pytorch/pytorch/pull/157149
+        def whoo(t):
+            yield t.sin()
+            yield t.cos()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            gen = whoo(t)
+            a = next(gen)
+            # cond speculates both branches, swapping SideEffects to a clone
+            b = torch.cond(t.sum() > 0, lambda x: x + 1, lambda x: x - 1, (t,))
+            acc = a + b
+            # Exhaust the generator after the swap: untrack must not crash
+            for x in gen:
+                acc = acc + x
+            return acc
+
+        t = torch.randn(2)
+        y = fn(t)
+        ref = torch.cond(t.sum() > 0, lambda x: x + 1, lambda x: x - 1, (t,))
+        self.assertEqual(y, t.sin() + ref + t.cos())
+
+    def test_close_open_generator_after_hop(self):
+        # An open (non-exhausted) generator created before a HOP must still be
+        # closed at compile_subgraph time after SideEffects is swapped, so its
+        # finally block runs. Reads the tracking list from OutputGraph.
+        z = 0
+
+        def whoo(t):
+            nonlocal z
+            try:
+                yield t.sin()
+                yield t.cos()
+            finally:
+                z += 1
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            gen = whoo(t)
+            a = next(gen)
+            b = torch.cond(t.sum() > 0, lambda x: x + 1, lambda x: x - 1, (t,))
+            return a + b  # gen left open; finally must run via close
+
+        t = torch.randn(2)
+        y = fn(t)
+        ref = torch.cond(t.sum() > 0, lambda x: x + 1, lambda x: x - 1, (t,))
+        self.assertEqual(y, t.sin() + ref)
+        self.assertEqual(z, 1)
+
+    def test_close_open_generator_fast_path(self):
+        # An open generator whose only pending work is a finally block must be
+        # closed at compile_subgraph time even when the frame is eligible for
+        # the fast path (single frame, all-tensor stack, empty side effects).
+        # Returning an input tensor keeps side effects empty -- a freshly
+        # produced tensor (e.g. t.sin()) is tracked as a new mutation and would
+        # divert to the slow path, which closes generators unconditionally.
+        # The fast-path guard `not self.local_generators` at output_graph.py is
+        # what forces close_local_generators to run here so the finally fires.
+        z = 0
+
+        def whoo(t):
+            nonlocal z
+            try:
+                yield t
+                yield t
+            finally:
+                z += 1
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            gen = whoo(t)
+            next(gen)  # start generator; finally now pending
+            return t  # return input tensor -> fast-path eligible
+
+        t = torch.randn(2)
+        y = fn(t)
+        self.assertEqual(y, t)
+        self.assertEqual(z, 1)
+
 
 class TestGeneratorThrow(GeneratorTestsBase):
     def test_throw(self):
@@ -1555,7 +1640,6 @@ class TestGeneratorThrow(GeneratorTestsBase):
         y = self._compile_check(fn, (t,))
         self.assertEqual(y, t.sin() + t.cos())
 
-    @unittest.expectedFailure
     def test_throw_with_finally(self):
         z = 0
 
@@ -1631,8 +1715,13 @@ class TestGeneratorThrow(GeneratorTestsBase):
             a = next(gen)
             try:
                 gen.throw(ValueError)
-            except StopIteration:
+            except StopIteration as e:
+                if len(e.args) > 0:
+                    raise AssertionError(
+                        "Expected StopIteration with no arguments"
+                    ) from e
                 return a
+            raise AssertionError("Expected StopIteration")
 
         t = torch.randn(2)
         y = self._compile_check(fn, (t,))
@@ -1691,7 +1780,6 @@ class TestGeneratorThrow(GeneratorTestsBase):
         with self.assertRaises(RuntimeError):
             fn(t)
 
-    @unittest.expectedFailure
     def test_throw_yield_finally(self):
         z = 0
 
@@ -1719,7 +1807,6 @@ class TestGeneratorThrow(GeneratorTestsBase):
         with self.assertRaises(Unsupported):
             fn(t)
 
-    @unittest.expectedFailure
     def test_throw_try_except_finally(self):
         z = 0
 
@@ -1837,6 +1924,522 @@ class TestGeneratorThrow(GeneratorTestsBase):
             return t.sin()
 
         self._compile_check(fn)
+
+
+class TestGeneratorPEP(GeneratorTestsBase):
+    # Ported from CPython Lib/test/test_generators.py `pep_tests` doctest block.
+
+    @make_dynamo_test
+    def test_resume_running_generator(self):
+        # A generator cannot be resumed while it is actively running.
+        def g():
+            i = next(me)
+            yield i
+
+        me = g()
+        self.assertRaisesRegex(ValueError, "generator already executing", next, me)
+
+    @make_dynamo_test
+    def test_return_is_not_stopiteration(self):
+        # return simply exits; it is not caught by a bare except.
+        def f1():
+            try:
+                return
+            except:  # noqa: E722
+                yield 1
+
+        self.assertEqual(list(f1()), [])
+
+        # a raised StopIteration is caught by a bare except, like any exception.
+        def f2():
+            try:
+                raise StopIteration
+            except:  # noqa: E722
+                yield 42
+
+        self.assertEqual(list(f2()), [42])
+
+    @make_dynamo_test
+    def test_exception_propagation(self):
+        def f():
+            return 1 // 0
+
+        def g():
+            yield f()  # the zero division exception propagates
+            yield 42  # and we'll never get here
+
+        k = g()
+        self.assertRaises(ZeroDivisionError, next, k)
+        self.assertRaises(StopIteration, next, k)  # cannot be resumed
+
+    @make_dynamo_test
+    def test_try_except_finally(self):
+        def f():
+            try:
+                yield 1
+                try:
+                    yield 2
+                    1 // 0
+                    yield 3  # never get here
+                except ZeroDivisionError:
+                    yield 4
+                    yield 5
+                    raise
+                except:  # noqa: E722
+                    yield 6
+                yield 7  # the "raise" above stops this
+            except:  # noqa: E722
+                yield 8
+            yield 9
+            try:
+                x = 12  # noqa: F841
+            finally:
+                yield 10
+            yield 11
+
+        self.assertEqual(list(f()), [1, 2, 4, 5, 8, 9, 10, 11])
+
+    @unittest.expectedFailure
+    @make_dynamo_test
+    def test_recursive_inorder_tree(self):
+        class Tree:
+            def __init__(self, label, left=None, right=None):
+                self.label = label
+                self.left = left
+                self.right = right
+
+            def __iter__(self):
+                return inorder(self)
+
+        def tree(lst):
+            n = len(lst)
+            if n == 0:
+                return []
+            i = n // 2
+            return Tree(lst[i], tree(lst[:i]), tree(lst[i + 1 :]))
+
+        def inorder(t):
+            if t:
+                for x in inorder(t.left):
+                    yield x
+                yield t.label
+                for x in inorder(t.right):
+                    yield x
+
+        t = tree("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+        self.assertEqual("".join(t), "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+
+
+class TestGeneratorCoroutine(GeneratorTestsBase):
+    # Ported from CPython Lib/test/test_generators.py `coroutine_tests` doctest
+    # block. Cases relying on stdout capture were rewritten to record into a
+    # list and assert; cases relying on gc finalization, traceback-level or
+    # gi_frame introspection, and the deprecated 3-arg throw() were omitted.
+
+    @make_dynamo_test
+    def test_send_into_started_generator(self):
+        sent = []
+
+        def f():
+            sent.append((yield 1))
+            yield 2
+
+        g = f()
+        self.assertEqual(next(g), 1)
+        self.assertEqual(g.send(42), 2)
+        self.assertEqual(sent, [42])
+
+    @make_dynamo_test
+    def test_send_non_none_to_just_started(self):
+        def f():
+            yield 1
+            yield 2
+
+        self.assertRaisesRegex(
+            TypeError,
+            "can't send non-None value to a just-started generator",
+            f().send,
+            "foo",
+        )
+
+    @make_dynamo_test
+    def test_bare_yield_yields_none(self):
+        def f():
+            yield
+
+        self.assertEqual(list(f()), [None])
+
+    @make_dynamo_test
+    def test_yield_in_generator_expression(self):
+        def f():
+            list(i for i in [(yield 26)])  # noqa: C400
+
+        self.assertIsInstance(f(), types.GeneratorType)
+
+    @make_dynamo_test
+    def test_augmented_assignment_coroutine(self):
+        def coroutine(seq):
+            count = 0
+            while count < 200:
+                count += yield
+                seq.append(count)
+
+        seq = []
+        c = coroutine(seq)
+        next(c)
+        self.assertEqual(seq, [])
+        c.send(10)
+        self.assertEqual(seq, [10])
+        c.send(10)
+        self.assertEqual(seq, [10, 20])
+        c.send(10)
+        self.assertEqual(seq, [10, 20, 30])
+
+    @make_dynamo_test
+    def test_throw_caught_in_loop(self):
+        caught = []
+
+        def f():
+            while True:
+                try:
+                    yield
+                except ValueError as v:
+                    caught.append(str(v))
+
+        g = f()
+        next(g)
+        g.throw(ValueError)
+        self.assertEqual(caught, [""])
+        g.throw(ValueError("xyz"))
+        self.assertEqual(caught, ["", "xyz"])
+
+    # gen.throw() of a non-exception should raise a catchable TypeError, but
+    # Dynamo surfaces it as an uncatchable InternalTorchDynamoError.
+    @unittest.expectedFailure
+    @make_dynamo_test
+    def test_throw_non_exception_is_type_error(self):
+        def f():
+            while True:
+                try:
+                    yield
+                except ValueError:
+                    pass
+
+        g = f()
+        next(g)
+        self.assertRaises(TypeError, g.throw, "abc")
+        self.assertRaises(TypeError, g.throw, 0)
+        self.assertRaises(TypeError, g.throw, list)
+
+    @make_dynamo_test
+    def test_throw_terminates_generator(self):
+        caught = []
+
+        def f():
+            while True:
+                try:
+                    yield
+                except ValueError as v:
+                    caught.append(str(v))
+
+        g = f()
+        next(g)
+        self.assertRaises(TypeError, g.throw, TypeError)
+        self.assertRaises(StopIteration, g.send, 2)
+
+    @make_dynamo_test
+    def test_throw_on_just_opened_generator(self):
+        def f():
+            yield 1
+
+        self.assertRaisesRegex(ValueError, "7", f().throw, ValueError(7))
+
+    @make_dynamo_test
+    def test_close_catches_generator_exit(self):
+        log = []
+
+        def f():
+            try:
+                yield
+            except GeneratorExit:
+                log.append("exiting")
+
+        g = f()
+        next(g)
+        g.close()
+        self.assertEqual(log, ["exiting"])
+        g.close()  # should be a no-op now
+        self.assertEqual(log, ["exiting"])
+
+    @make_dynamo_test
+    def test_close_on_various_states(self):
+        def f():
+            yield
+
+        f().close()  # close before opening
+        g = f()
+        next(g)
+        g.close()  # close normally
+
+    @make_dynamo_test
+    def test_generator_exit_not_caught_by_except_exception(self):
+        log = []
+
+        def f():
+            try:
+                yield
+            except Exception:
+                log.append("except")
+            finally:
+                log.append("finally")
+
+        g = f()
+        next(g)
+        g.close()
+        self.assertEqual(log, ["finally"])
+
+    @make_dynamo_test
+    def test_generator_ignored_generator_exit(self):
+        def f():
+            try:
+                yield
+            except GeneratorExit:
+                yield "foo!"
+
+        g = f()
+        next(g)
+        self.assertRaisesRegex(RuntimeError, "generator ignored GeneratorExit", g.close)
+        g.close()
+
+    @make_dynamo_test
+    def test_error_during_close_propagates(self):
+        def f():
+            try:
+                yield
+            except GeneratorExit:
+                raise TypeError("fie!") from None
+
+        g = f()
+        next(g)
+        self.assertRaisesRegex(TypeError, "fie!", g.close)
+
+    @make_dynamo_test
+    def test_yield_expression_makes_generator(self):
+        def f():
+            x = yield  # noqa: F841
+
+        self.assertIsInstance(f(), types.GeneratorType)
+
+    @make_dynamo_test
+    def test_send_to_subscript_targets(self):
+        def f(d):
+            d[(yield "a")] = d[(yield "b")] = 27
+
+        data = [1, 2]
+        g = f(data)
+        self.assertEqual(g.send(None), "a")
+        self.assertEqual(data, [1, 2])
+        self.assertEqual(g.send(0), "b")
+        self.assertEqual(data, [27, 2])
+        self.assertRaises(StopIteration, g.send, 1)
+        self.assertEqual(data, [27, 27])
+
+
+class _DelegatingIterator:
+    # An iterator (not a generator) implementing the generator protocol, used to
+    # exercise `yield from <iterator>` where the subiterator has its own
+    # throw()/close(). Defined at module scope so tracing doesn't hit the local
+    # class definition (__build_class__) limitation.
+    def __init__(self, log):
+        self.log = log
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        return 1
+
+    def send(self, value):
+        return 1
+
+    def throw(self, typ, val=None, tb=None):
+        self.log.append("iter throw")
+        return 2
+
+    def close(self):
+        self.log.append("iter close")
+
+
+class TestSubgeneratorDelegation(GeneratorTestsBase):
+    # Delegation semantics for send/throw/close through `yield from`. CPython
+    # forwards throw() and close() into the subiterator the delegating
+    # generator is suspended on; these tests assert the subgenerator's own
+    # handlers/finally run, which distinguishes real forwarding from raising
+    # the exception at the outer `yield from` point.
+
+    @make_dynamo_test
+    def test_send_into_subgen(self):
+        got = []
+
+        def subgen():
+            x = yield 1
+            got.append(x)
+            yield 2
+
+        def outer():
+            yield from subgen()
+
+        g = outer()
+        self.assertEqual(next(g), 1)
+        self.assertEqual(g.send(42), 2)
+        self.assertEqual(got, [42])
+
+    @make_dynamo_test
+    def test_throw_into_subgen_caught(self):
+        log = []
+
+        def subgen():
+            try:
+                yield 1
+            except ValueError:
+                log.append("subgen caught")
+                yield 2
+
+        def outer():
+            yield from subgen()
+
+        g = outer()
+        self.assertEqual(next(g), 1)
+        self.assertEqual(g.throw(ValueError), 2)
+        self.assertEqual(log, ["subgen caught"])
+
+    @make_dynamo_test
+    def test_throw_into_subgen_uncaught_runs_finally(self):
+        log = []
+
+        def subgen():
+            try:
+                yield 1
+            finally:
+                log.append("subgen finally")
+
+        def outer():
+            yield from subgen()
+
+        g = outer()
+        next(g)
+        self.assertRaises(ValueError, g.throw, ValueError)
+        self.assertEqual(log, ["subgen finally"])
+
+    @make_dynamo_test
+    def test_throw_through_nested_yield_from(self):
+        log = []
+
+        def leaf():
+            try:
+                yield 1
+            except ValueError:
+                log.append("leaf caught")
+                yield 2
+
+        def mid():
+            yield from leaf()
+
+        def outer():
+            yield from mid()
+
+        g = outer()
+        next(g)
+        self.assertEqual(g.throw(ValueError), 2)
+        self.assertEqual(log, ["leaf caught"])
+
+    @make_dynamo_test
+    def test_close_runs_subgen_finally(self):
+        log = []
+
+        def subgen():
+            try:
+                yield 1
+                yield 2
+            finally:
+                log.append("subgen finally")
+
+        def outer():
+            yield from subgen()
+
+        g = outer()
+        next(g)
+        g.close()
+        self.assertEqual(log, ["subgen finally"])
+
+    @make_dynamo_test
+    def test_close_subgen_catches_generator_exit(self):
+        log = []
+
+        def subgen():
+            try:
+                yield 1
+            except GeneratorExit:
+                log.append("subgen exit")
+
+        def outer():
+            yield from subgen()
+
+        g = outer()
+        next(g)
+        g.close()
+        self.assertEqual(log, ["subgen exit"])
+
+    @make_dynamo_test
+    def test_close_subgen_ignores_generator_exit(self):
+        def subgen():
+            try:
+                yield 1
+            except GeneratorExit:
+                yield 2
+
+        def outer():
+            yield from subgen()
+
+        g = outer()
+        next(g)
+        self.assertRaisesRegex(RuntimeError, "generator ignored GeneratorExit", g.close)
+
+    @make_dynamo_test
+    def test_throw_into_iterator_subiter(self):
+        log = []
+
+        def outer():
+            yield from _DelegatingIterator(log)
+
+        g = outer()
+        self.assertEqual(next(g), 1)
+        self.assertEqual(g.throw(ValueError), 2)
+        self.assertEqual(log, ["iter throw"])
+
+    @make_dynamo_test
+    def test_close_into_iterator_subiter(self):
+        log = []
+
+        def outer():
+            yield from _DelegatingIterator(log)
+
+        g = outer()
+        next(g)
+        g.close()
+        self.assertEqual(log, ["iter close"])
+
+    @make_dynamo_test
+    @unittest.expectedFailure
+    def test_throw_into_iterator_without_throw(self):
+        # A plain iterator (no throw method): the exception is raised in the
+        # outer frame at the yield-from point (CPython's `goto throw_here`).
+        def outer():
+            yield from iter([1, 2, 3])
+
+        g = outer()
+        next(g)
+        self.assertRaises(ValueError, g.throw, ValueError)
 
 
 instantiate_parametrized_tests(GeneratorTests)
