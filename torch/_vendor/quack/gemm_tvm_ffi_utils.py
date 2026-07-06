@@ -11,7 +11,7 @@ from cutlass.cute.runtime import make_ptr
 from .compile_utils import make_fake_tensor as fake_tensor
 from .cute_dsl_utils import torch2cute_dtype_map
 from .tile_scheduler import TileSchedulerOptions
-from .varlen_utils import VarlenArguments, VarlenNArguments
+from .varlen_utils import VarlenArguments
 
 
 def div_for_dtype(dtype):
@@ -24,7 +24,7 @@ def perm3d_single(t, varlen_m=False):
     return t.permute(1, 2, 0) if t is not None and t.ndim == 3 and not varlen_m else t
 
 
-def perm3d(A, B, D, C, varlen_m=False, varlen_k=False, varlen_n=False):
+def perm3d(A, B, D, C, varlen_m=False, varlen_k=False):
     """Permute 3D tensors from (L, *, *) to (*, *, L)."""
 
     def _perm(t):
@@ -34,8 +34,6 @@ def perm3d(A, B, D, C, varlen_m=False, varlen_k=False, varlen_n=False):
         return A, _perm(B), D, C
     elif varlen_k:
         return A, B, _perm(D), _perm(C)
-    elif varlen_n:
-        return _perm(A), B, D, C
     else:
         return _perm(A), _perm(B), _perm(D), _perm(C)
 
@@ -89,16 +87,9 @@ def make_fake_scheduler_args(has_semaphore, has_batch_idx_permute, l_sym):
     )
 
 
-def make_varlen_args(cu_seqlens_m, cu_seqlens_k, A_idx=None, *, cu_seqlens_n=None):
-    if cu_seqlens_m is None and cu_seqlens_k is None and cu_seqlens_n is None:
+def make_varlen_args(cu_seqlens_m, cu_seqlens_k, A_idx):
+    if cu_seqlens_m is None and cu_seqlens_k is None:
         return None
-    if cu_seqlens_n is not None:
-        return VarlenNArguments(
-            mCuSeqlensM=cu_seqlens_m,
-            mCuSeqlensK=cu_seqlens_k,
-            mAIdx=A_idx,
-            mCuSeqlensN=cu_seqlens_n,
-        )
     return VarlenArguments(
         mCuSeqlensM=cu_seqlens_m,
         mCuSeqlensK=cu_seqlens_k,
@@ -106,32 +97,20 @@ def make_varlen_args(cu_seqlens_m, cu_seqlens_k, A_idx=None, *, cu_seqlens_n=Non
     )
 
 
-def make_fake_varlen_args(varlen_m, varlen_k, gather_A=False, aidx_len=None, *, varlen_n=False):
-    if not varlen_m and not varlen_k and not varlen_n:
+def make_fake_varlen_args(varlen_m, varlen_k, gather_A, aidx_len):
+    if not varlen_m and not varlen_k:
         return None
     num_seqlens = cute.sym_int()
-    cu_seqlens_m = (
-        fake_tensor(Int32, (num_seqlens,), leading_dim=0, divisibility=4) if varlen_m else None
-    )
-    cu_seqlens_k = (
-        fake_tensor(Int32, (num_seqlens,), leading_dim=0, divisibility=4) if varlen_k else None
-    )
-    a_idx = (
-        fake_tensor(Int32, (aidx_len,), leading_dim=0, divisibility=4)
-        if gather_A is True
-        else None
-    )
-    if varlen_n:
-        return VarlenNArguments(
-            mCuSeqlensM=cu_seqlens_m,
-            mCuSeqlensK=cu_seqlens_k,
-            mAIdx=a_idx,
-            mCuSeqlensN=fake_tensor(Int32, (num_seqlens,), leading_dim=0, divisibility=4),
-        )
     return VarlenArguments(
-        mCuSeqlensM=cu_seqlens_m,
-        mCuSeqlensK=cu_seqlens_k,
-        mAIdx=a_idx,
+        mCuSeqlensM=(
+            fake_tensor(Int32, (num_seqlens,), leading_dim=0, divisibility=4) if varlen_m else None
+        ),
+        mCuSeqlensK=(
+            fake_tensor(Int32, (num_seqlens,), leading_dim=0, divisibility=4) if varlen_k else None
+        ),
+        mAIdx=(
+            fake_tensor(Int32, (aidx_len,), leading_dim=0, divisibility=4) if gather_A else None
+        ),
     )
 
 
@@ -146,7 +125,6 @@ def make_fake_gemm_tensors(
     c_major,
     varlen_m=False,
     varlen_k=False,
-    varlen_n=False,
     gather_A=False,
 ):
     """Create fake tensors for mA, mB, mD, mC with shared sym_ints.
@@ -179,12 +157,6 @@ def make_fake_gemm_tensors(
         mB = fake_tensor(b_dtype, (n, k), leading_dim=b_leading, divisibility=div_b)
         mD = fake_tensor(d_dtype, (m, n, l), leading_dim=d_leading, divisibility=div_d)
         mC = fake_tensor(c_dtype, (m, n, l), leading_dim=c_leading, divisibility=div_c)
-    elif varlen_n:
-        n = cute.sym_int()
-        mA = fake_tensor(a_dtype, (m, k, l), leading_dim=a_leading, divisibility=div_a)
-        mB = fake_tensor(b_dtype, (n, k), leading_dim=b_leading, divisibility=div_b)
-        mD = fake_tensor(d_dtype, (m, n), leading_dim=d_leading, divisibility=div_d)
-        mC = fake_tensor(c_dtype, (m, n), leading_dim=c_leading, divisibility=div_c)
     else:
         mA = fake_tensor(a_dtype, (m, k, l), leading_dim=a_leading, divisibility=div_a)
         mB = fake_tensor(b_dtype, (n, k, l), leading_dim=b_leading, divisibility=div_b)

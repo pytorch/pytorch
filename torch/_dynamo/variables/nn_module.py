@@ -43,7 +43,7 @@ from ..exc import (
     UnspecializeRestartAnalysis,
     Unsupported,
 )
-from ..guards import GuardBuilder, install_guard
+from ..guards import GuardBuilder, install_guard, make_dupe_guard
 from ..mutation_guard import GenerationTracker
 from ..source import (
     AttrSource,
@@ -107,7 +107,21 @@ def initialize_lazy_module(
             elif isinstance(x, (list, tuple, set)):
                 return type(x)(convert_to_fake(elem) for elem in x)
             elif isinstance(x, torch.fx.Proxy):
-                return get_fake_value(x.node, tx)
+                fake = get_fake_value(x.node, tx)
+                if isinstance(fake, torch.Tensor) and any(
+                    isinstance(s, torch.SymInt) for s in fake.shape
+                ):
+                    # _infer_parameters runs real ops on the module, so
+                    # symbolic shapes must be concretized to their hints.
+                    shape = [
+                        s.node.hint if isinstance(s, torch.SymInt) else s
+                        for s in fake.shape
+                    ]
+                    assert all(isinstance(s, int) for s in shape), shape  # noqa: S101
+                    return torch.empty(  # pyrefly: ignore[no-matching-overload]
+                        shape, dtype=fake.dtype, device=fake.device
+                    )
+                return fake
             else:
                 return x
 
@@ -167,12 +181,18 @@ def guard_to_detect_forward_monkeypatching(
     # `forward` sits in the type(mod).__dict__
     if source:
         if "forward" in mod.__dict__ and callable(mod.__dict__["forward"]):
-            # Monkeypatched forward method, add an ID_MATCH guard on forward function
+            # Monkeypatched forward method, guard on call-relevant structure.
             fwd = mod.__dict__["forward"]
             forward_source = AttrSource(source, "forward")
             if type(fwd) is types.MethodType:
                 forward_source = AttrSource(forward_source, "__func__")
-            install_guard(forward_source.make_guard(GuardBuilder.CLOSURE_MATCH))
+                install_guard(forward_source.make_guard(GuardBuilder.CLOSURE_MATCH))
+            elif isinstance(fwd, functools.partial):
+                guard_to_detect_forward_partial_monkeypatching(
+                    source, mod, forward_source, fwd
+                )
+            else:
+                install_guard(forward_source.make_guard(GuardBuilder.CLOSURE_MATCH))
         else:
             # Common case - check that the forward key is absent in mod __dict__
             install_guard(
@@ -182,6 +202,62 @@ def guard_to_detect_forward_monkeypatching(
                     )
                 )
             )
+
+
+def guard_to_detect_forward_partial_monkeypatching(
+    module_source: Source,
+    mod: torch.nn.Module,
+    partial_source: Source,
+    partial_obj: functools.partial[Any],
+) -> None:
+    install_guard(partial_source.make_guard(GuardBuilder.TYPE_MATCH))
+
+    func_source = AttrSource(partial_source, "func")
+    if isinstance(partial_obj.func, functools.partial):
+        guard_to_detect_forward_partial_monkeypatching(
+            module_source, mod, func_source, partial_obj.func
+        )
+    else:
+        install_guard(func_source.make_guard(GuardBuilder.CLOSURE_MATCH))
+
+    args_source = AttrSource(partial_source, "args")
+    install_guard(args_source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
+    for i, arg in enumerate(partial_obj.args):
+        guard_to_detect_forward_partial_value(
+            module_source, mod, GetItemSource(args_source, i), arg
+        )
+
+    keywords_source = AttrSource(partial_source, "keywords")
+    if partial_obj.keywords is None:
+        install_guard(keywords_source.make_guard(GuardBuilder.NONE_MATCH))
+        return
+
+    install_guard(keywords_source.make_guard(GuardBuilder.DICT_KEYS_MATCH))
+    for key, value in partial_obj.keywords.items():
+        guard_to_detect_forward_partial_value(
+            module_source, mod, DictGetItemSource(keywords_source, key), value
+        )
+
+
+def guard_to_detect_forward_partial_value(
+    module_source: Source,
+    mod: torch.nn.Module,
+    value_source: Source,
+    value: Any,
+) -> None:
+    if value is mod:
+        dupe_guard = make_dupe_guard(value_source, module_source)
+        install_guard(value_source.make_guard(dupe_guard or GuardBuilder.ID_MATCH))
+    elif isinstance(value, functools.partial):
+        guard_to_detect_forward_partial_monkeypatching(
+            module_source, mod, value_source, value
+        )
+    elif type(value) is types.FunctionType:
+        install_guard(value_source.make_guard(GuardBuilder.CLOSURE_MATCH))
+    elif is_safe_constant(value):
+        install_guard(value_source.make_guard(GuardBuilder.CONSTANT_MATCH))
+    else:
+        install_guard(value_source.make_guard(GuardBuilder.ID_MATCH))
 
 
 class NNModuleVariable(VariableTracker):
@@ -339,7 +415,7 @@ class NNModuleVariable(VariableTracker):
             except Unsupported:
                 unimplemented(
                     gb_type="Custom __getattribute__ in nn.Module attribute access",
-                    context=f"var_getattr {self} {name}",
+                    context=f"getattro_impl {self} {name}",
                     explanation="Dynamo could not trace through the custom "
                     "`__getattribute__` method on this `nn.Module`.",
                     hints=[
@@ -356,7 +432,7 @@ class NNModuleVariable(VariableTracker):
         if not isinstance(getattr_fn, types.FunctionType):
             unimplemented(
                 gb_type="torch.nn.Module with a non-function custom __getattr__",
-                context=f"var_getattr {self} {name}",
+                context=f"getattro_impl {self} {name}",
                 explanation=(
                     "Dynamo detected a nn.Module object with a custom "
                     "`__getattr__` method, but this method is not a standard "
@@ -378,7 +454,7 @@ class NNModuleVariable(VariableTracker):
             tx, [VariableTracker.build(tx, name)], {}
         )
 
-    def var_getattr(
+    def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         source = self.source and AttrSource(self.source, name)
@@ -396,7 +472,7 @@ class NNModuleVariable(VariableTracker):
         if not self.source:
             unimplemented(
                 gb_type="getattr with no source",
-                context=f"var_getattr {self} {name}",
+                context=f"getattro_impl {self} {name}",
                 explanation="Dynamo does not know how to access an attribute "
                 "on an `nn.Module` instance that lacks a source. This is "
                 "usually an internal error in Dynamo.",
@@ -495,7 +571,7 @@ class NNModuleVariable(VariableTracker):
                     ],
                 )
 
-        return super().var_getattr(tx, name)
+        return super().getattro_impl(tx, name)
 
     def call_function(
         self,
@@ -1131,7 +1207,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 globals_vt = tx.nn_modules_globals_vt
 
                 def _hooks_dict_len(obj: VariableTracker, attr: str) -> int:
-                    vt = obj.var_getattr(tx, attr)
+                    vt = obj.getattro_impl(tx, attr)
                     vt = vt.realize() if hasattr(vt, "realize") else vt
                     return vt.len()  # type: ignore[union-attr]
 
@@ -1286,16 +1362,38 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     def getattr_helper(
         self, tx: "InstructionTranslatorBase", field: str, name_vt: VariableTracker
     ) -> VariableTracker | None:
-        dict_vt = self.var_getattr(tx, field)
+        dict_vt = self.getattro_impl(tx, field)
         if isinstance(dict_vt, variables.UserDefinedDictVariable):
             dict_vt = dict_vt._base_vt
         if isinstance(dict_vt, variables.ConstDictVariable):
             return dict_vt.maybe_getitem_const(name_vt)
         return None
 
-    def var_getattr(
+    def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
+        if (
+            tx.output.side_effects.is_attribute_mutation(self)
+            and name
+            in (
+                "named_parameters",
+                "parameters",
+                "named_buffers",
+                "buffers",
+                "named_modules",
+                "modules",
+            )
+            and self.is_state_mutated
+            and tx.output.side_effects.has_pending_mutation(self)
+        ):
+            unimplemented(
+                gb_type="getattr() on nn.Module with pending mutation",
+                context=f"getattr({self}, {name})",
+                explanation="Intentionally graph breaking on getattr() on a nn.Module "
+                "with a pending mutation",
+                hints=[],
+            )
+
         # Allow skipping of empty hook dict guards on inbuilt nn modules
         if name in (
             "_backward_hooks",
@@ -1317,7 +1415,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                                 GuardBuilder.EMPTY_NN_MODULE_HOOKS_DICT
                             )
                         )
-                    return variables.ConstDictVariable({})
+                    return variables.ConstDictVariable({}, user_cls=type(hooks_dict))
 
         # For non-empty hook dicts, one way is to just fallback to VariableTracker.build() and create a ConstDictVariable.
         # However, ConstDictVariable guards on keys. This can cause recompiles when the same hook is installed for
@@ -1361,7 +1459,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             return variables.NNModuleHooksDictVariable(
                 result, type(hooks_dict), source=hooks_dict_source
             )
-        return super().var_getattr(tx, name)
+        return super().getattro_impl(tx, name)
 
     def manually_trace_nn_module_getattr(
         self, tx: "InstructionTranslatorBase", name: str
