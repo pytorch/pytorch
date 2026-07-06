@@ -294,7 +294,7 @@ static void registerXpuDeviceProperties(PyObject* module) {
                       prop.device_type);
         break;
     }
-    return std::move(stream).str();
+    return stream.str();
   };
   auto gpu_subslice_count = [](const DeviceProp& prop) {
     return (prop.gpu_eu_count / prop.gpu_eu_count_per_subslice);
@@ -390,7 +390,7 @@ static void registerXpuDeviceProperties(PyObject* module) {
                    << ", is_integrated_gpu=" << prop.is_integrated_gpu
 #endif
                    << ')';
-            return std::move(stream).str();
+            return stream.str();
           });
 }
 
