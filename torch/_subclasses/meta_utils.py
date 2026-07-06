@@ -1512,10 +1512,9 @@ class MetaConverter(Generic[_TensorT]):
 
                     # For other closed-over tensor state, fake-ify it as all dynamic with an
                     # ephemeral source. This avoids invalid specialization during view replay.
-                    # If we find that in practice the usage of ephemeral sources isn't enough
-                    # to guarantee that we don't have guards on these symbols, we may need to
-                    # explicitly suppress guards (as is done for _base in the dense -> dense
-                    # view case).
+                    # Replay-internal guards are suppressed around view_func.apply below, so
+                    # closed-over tensor metadata is related back to real sources by the final
+                    # size/stride/storage_offset checks instead of by ephemeral-symbol guards.
                     temp_source = EphemeralSource("tensor_visitor_fn")
                     return self.meta_tensor(
                         visited_desc,
@@ -1531,15 +1530,18 @@ class MetaConverter(Generic[_TensorT]):
                 # for symbolic SymInts or fake tensors.
                 if t.view_func is None:
                     raise AssertionError("t.view_func must not be None for view replay")
-                # NB: we do NOT suppress guards here, we need to remove ephemeral
-                # sources
-                fake_t = t.view_func.apply(
-                    t,
-                    base,
-                    # pyrefly: ignore[bad-argument-type]
-                    symint_visitor_fn,
-                    tensor_visitor_fn,
-                )
+                # View replay may allocate ephemeral symbols for saved view state
+                # and then make intermediate guards over them. Those symbols are
+                # checked against the real output metadata below, so suppress
+                # replay-internal guards and keep only the final metadata guards.
+                with maybe_suppress():
+                    fake_t = t.view_func.apply(
+                        t,
+                        base,
+                        # pyrefly: ignore[bad-argument-type]
+                        symint_visitor_fn,
+                        tensor_visitor_fn,
+                    )
 
                 # Ensure the output has symbolic shapes according to the outer symbolic context.
                 # These checks should simplify out any symbols created for closed-over view func
@@ -1896,8 +1898,11 @@ class MetaConverter(Generic[_TensorT]):
                         raise AssertionError("t.base must not be None for view tensor")
 
                     base_symbolic_context = None
+                    base_source = torch._dynamo.source.AttrSource(source, "_base")
+                    has_symbolic_view_metadata = False
                     if shape_env and symbolic_context is not None:
                         from torch.fx.experimental.symbolic_shapes import (
+                            DimDynamic,
                             StatelessSymbolicContext,
                         )
 
@@ -1910,6 +1915,23 @@ class MetaConverter(Generic[_TensorT]):
                         # a work in progress.
                         if symbolic_context.view_base_context is not None:
                             base_symbolic_context = symbolic_context.view_base_context
+                        has_symbolic_view_metadata = any(
+                            s is not DimDynamic.STATIC
+                            for s in symbolic_context.dynamic_sizes
+                        ) or any(
+                            s is not DimDynamic.INFER_STRIDE
+                            for s in symbolic_context.dynamic_strides
+                        )
+                    # For subclass view replay, static hidden-base metadata can
+                    # force saved view SymInts to concrete values before the
+                    # final metadata checks see the real input sources.
+                    if has_symbolic_view_metadata and (
+                        t.is_traceable_wrapper_subclass
+                        or t.base.is_traceable_wrapper_subclass
+                    ):
+                        base_symbolic_context = all_dynamic_symbolic_context(
+                            t.base, base_source, shape_env, callback
+                        )
 
                     # We don't track the example values of base tensors.
                     # Allocation of unbacked symbols can happen when mark_unbacked
@@ -1923,7 +1945,7 @@ class MetaConverter(Generic[_TensorT]):
                             t.base,
                             shape_env,
                             callback,
-                            torch._dynamo.source.AttrSource(source, "_base"),
+                            base_source,
                             base_symbolic_context,
                         )
 
