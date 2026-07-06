@@ -508,7 +508,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
         self.assertEqual(ref, res)
 
     def test_nonstrict_trace_pre_existing_register_constant_type_guard(self):
-        class State(torch._opaque_base.OpaqueBase):
+        class State(torch._custom_class_base.CustomClassBase):
             def __init__(self, n):
                 self.n = n
 
@@ -531,7 +531,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
         # Assume `State` is implemented in C, and the author didn't bother to
         # provide a pytree decomposition for it, and its instances are safe to
         # treat as a constant by `torch.compile`.
-        torch._library.opaque_object.register_opaque_type(State, typ="value")
+        torch._library.opaque_object.register_custom_class(State, typ="constant")
 
         @torch._dynamo.nonstrict_trace
         def trace_me(x, s):
@@ -810,7 +810,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
             )
 
     def test_nonstrict_newly_constructed_trace_register_constant_type_error(self):
-        class State(torch._opaque_base.OpaqueBase):
+        class State(torch._custom_class_base.CustomClassBase):
             def __init__(self, n):
                 self.n = n
 
@@ -827,7 +827,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
         # Assume `State` is implemented in C, and the author didn't bother to
         # provide a pytree decomposition for it, and its instances are safe to
         # treat as a constant by `torch.compile`.
-        torch._library.opaque_object.register_opaque_type(State, typ="reference")
+        torch._library.opaque_object.register_custom_class(State, typ="symbolic")
 
         @torch._dynamo.nonstrict_trace
         def trace_me(x, s):
@@ -1596,6 +1596,42 @@ class DecoratorTests(PytreeRegisteringTestCase):
             fn(3, torch.randn(3), {0: torch.randn(3)})
 
         # frame count 2 since we added a graph break
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_set_stance_eager_then_compile_rank_change(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, dynamic=True)
+        def fn(x):
+            return x + 1
+
+        with torch.compiler.set_stance("eager_then_compile"):
+            x1 = torch.randn(10)
+            self.assertEqual(fn(x1), x1 + 1)
+            x2 = torch.randn(10)
+            self.assertEqual(fn(x2), x2 + 1)
+            x3 = torch.randn(10, 10)
+            self.assertEqual(fn(x3), x3 + 1)
+
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_set_stance_eager_then_compile_delayed_rank_change(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, dynamic=True)
+        def fn(x):
+            return x + 1
+
+        x1 = torch.randn(4)
+        x2 = torch.randn(4)
+
+        with torch.compiler.set_stance("eager_then_compile"):
+            self.assertEqual(fn(x1), x1 + 1)
+            self.assertEqual(fn(x2), x2 + 1)
+            self.assertEqual(fn(x2), x2 + 1)
+            x3 = torch.randn(2, 3, 4, 5)
+            self.assertEqual(fn(x3), x3 + 1)
+
         self.assertEqual(cnts.frame_count, 2)
 
     def test_set_stance_force_eager(self):
