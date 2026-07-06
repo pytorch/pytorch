@@ -31,6 +31,7 @@ from trymerge import (
     get_drci_classifications,
     gh_get_team_members,
     GitHubPR,
+    is_maintainer_for_pr,
     iter_issue_timeline_until_comment,
     JobCheckState,
     main as trymerge_main,
@@ -352,6 +353,38 @@ class TestTryMerge(TestCase):
         pr = GitHubPR("pytorch", "pytorch", 115495)
         # Test that PR with the correct approvers doesn't raise any exception
         self.assertTrue(find_matching_merge_rule(pr, repo) is not None)
+
+    @mock.patch("trymerge.gh_get_team_members", return_value=[])
+    @mock.patch("trymerge.read_merge_rules", side_effect=mocked_read_merge_rules)
+    def test_is_maintainer_for_pr_global_rule(self, *args: Any) -> None:
+        "Approver of an all-files rule is a maintainer for any PR"
+        pr = GitHubPR("pytorch", "pytorch", 95233)
+        self.assertTrue(is_maintainer_for_pr(pr, "ngimel", DummyGitRepo()))
+
+    @mock.patch("trymerge.gh_get_team_members", return_value=[])
+    @mock.patch("trymerge.read_merge_rules", side_effect=mocked_read_merge_rules)
+    def test_is_maintainer_for_pr_wrong_area(self, *args: Any) -> None:
+        "Approver of only an unrelated narrow rule is not a maintainer"
+        # PR 95233 does not touch .github/ci_commit_pins/xla.txt, so the xla
+        # rule (approved_by pytorchbot) does not cover it.
+        pr = GitHubPR("pytorch", "pytorch", 95233)
+        self.assertFalse(is_maintainer_for_pr(pr, "pytorchbot", DummyGitRepo()))
+
+    @mock.patch("trymerge.gh_get_team_members", return_value=[])
+    @mock.patch("trymerge.read_merge_rules", side_effect=mocked_read_merge_rules)
+    def test_is_maintainer_for_pr_not_an_approver(self, *args: Any) -> None:
+        "Someone absent from every covering rule is not a maintainer"
+        pr = GitHubPR("pytorch", "pytorch", 95233)
+        self.assertFalse(is_maintainer_for_pr(pr, "nonmember", DummyGitRepo()))
+
+    @mock.patch("trymerge.gh_get_team_members", return_value=["team_member_login"])
+    @mock.patch("trymerge.read_merge_rules", side_effect=mocked_read_merge_rules)
+    def test_is_maintainer_for_pr_team_expansion(self, *args: Any) -> None:
+        "Team references in approved_by are expanded to their members"
+        # The "super" rule is approved_by pytorch/metamates; expansion above
+        # makes team_member_login a maintainer.
+        pr = GitHubPR("pytorch", "pytorch", 95233)
+        self.assertTrue(is_maintainer_for_pr(pr, "team_member_login", DummyGitRepo()))
 
     @mock.patch("trymerge.read_merge_rules", side_effect=mocked_read_merge_rules)
     def test_lint_fails(self, *args: Any) -> None:

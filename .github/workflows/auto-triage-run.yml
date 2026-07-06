@@ -1,0 +1,89 @@
+# Owner(s): ["module: ci"]
+name: Auto-triage open source PRs Run
+
+# Privileged half of the auto-triage automation. Triggered by workflow_run, so
+# it always executes the trusted default-branch workflow file and checked-out
+# code -- the PR-triggerable capture job (auto-triage.yml) never runs with the
+# PAT. It consumes the recorded {actor, pr_num} purely as data, re-derives all
+# PR state from the API, and adds the "triaged" label if the actor is a
+# maintainer for the PR.
+
+on:
+  workflow_run:
+    workflows: ["Auto-triage open source PRs"]
+    types: [completed]
+
+jobs:
+  triage:
+    if: |
+      github.repository == 'pytorch/pytorch' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow.path == '.github/workflows/auto-triage.yml'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: pytorchbot-env
+    # These permissions scope the default GITHUB_TOKEN, used only for the
+    # artifact download and checkout below. The label write is performed by
+    # GH_PYTORCHBOT_TOKEN (a PAT), which is required because resolving org/team
+    # approvers in merge_rules.yaml needs read:org that the default token lacks.
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Download request artifact
+        id: download
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          REPO: ${{ github.repository }}
+        run: |
+          if gh run download "$RUN_ID" --repo "$REPO" --name auto-triage-request --dir auto-triage-request; then
+            echo "found=1" >> "$GITHUB_OUTPUT"
+          else
+            # No artifact: the capture job was skipped by its gates. Nothing to do.
+            echo "No auto-triage-request artifact on run $RUN_ID; nothing to triage."
+            echo "found=0" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Validate request
+        id: request
+        if: steps.download.outputs.found == '1'
+        run: |
+          PR_NUM=$(cat auto-triage-request/pr_num.txt)
+          ACTOR=$(cat auto-triage-request/actor.txt)
+          if ! [[ "$PR_NUM" =~ ^[0-9]+$ ]]; then
+            echo "::error::Invalid PR number in artifact: '$PR_NUM'"
+            exit 1
+          fi
+          if ! [[ "$ACTOR" =~ ^[A-Za-z0-9-]+$ ]]; then
+            echo "::error::Invalid actor login in artifact: '$ACTOR'"
+            exit 1
+          fi
+          echo "pr_num=$PR_NUM" >> "$GITHUB_OUTPUT"
+          echo "actor=$ACTOR" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout repo
+        if: steps.download.outputs.found == '1'
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 1
+
+      - name: Setup Python
+        if: steps.download.outputs.found == '1'
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.10'
+          check-latest: false
+          cache: pip
+          architecture: x64
+
+      - if: steps.download.outputs.found == '1'
+        run: pip install pyyaml==6.0.2
+
+      - name: Auto-triage
+        if: steps.download.outputs.found == '1'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
+          PR_NUM: ${{ steps.request.outputs.pr_num }}
+          ACTOR: ${{ steps.request.outputs.actor }}
+        run: python3 .github/scripts/auto_triage.py

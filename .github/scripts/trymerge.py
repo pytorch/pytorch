@@ -1480,6 +1480,19 @@ def _find_non_matching_files(patterns: list[str], files: list[str]) -> list[str]
     ]
 
 
+def resolve_rule_approvers(rule: MergeRule) -> set[str]:
+    """Expand a rule's approved_by list into concrete logins, resolving any
+    org/team references to their members."""
+    approvers: set[str] = set()
+    for approver in rule.approved_by:
+        if "/" in approver:
+            org, name = approver.split("/")
+            approvers.update(gh_get_team_members(org, name))
+        else:
+            approvers.add(approver)
+    return approvers
+
+
 def find_matching_merge_rule(
     pr: GitHubPR,
     repo: GitRepo | None = None,
@@ -1562,13 +1575,7 @@ def find_matching_merge_rule(
             continue
 
         # Does the PR have the required approvals for this rule?
-        rule_approvers = set()
-        for approver in rule.approved_by:
-            if "/" in approver:
-                org, name = approver.split("/")
-                rule_approvers.update(gh_get_team_members(org, name))
-            else:
-                rule_approvers.add(approver)
+        rule_approvers = resolve_rule_approvers(rule)
         approvers_intersection = approved_by.intersection(rule_approvers)
         # If rule requires approvers but they aren't the ones that reviewed PR
         if len(approvers_intersection) == 0 and len(rule_approvers) > 0:
@@ -1669,6 +1676,23 @@ def find_matching_merge_rule(
     if reject_reason_score == 20000:
         raise MandatoryChecksMissingError(reject_reason, rule)
     raise MergeRuleFailedError(reject_reason, rule)
+
+
+def is_maintainer_for_pr(pr: GitHubPR, actor: str, repo: GitRepo | None = None) -> bool:
+    """Return True if `actor` could approve this PR per merge_rules.yaml, i.e.
+    they are an approver of some rule that covers every file the PR touches.
+
+    Unlike find_matching_merge_rule, this only answers the maintainer question:
+    it ignores review state and mandatory checks. Approver resolution (including
+    org/team expansion) is shared via resolve_rule_approvers.
+    """
+    changed_files = pr.get_changed_files()
+    for rule in read_merge_rules(repo, pr.org, pr.project):
+        if _find_non_matching_files(rule.patterns, changed_files):
+            continue
+        if actor in resolve_rule_approvers(rule):
+            return True
+    return False
 
 
 def checks_to_str(checks: list[tuple[str, str | None]]) -> str:

@@ -1,0 +1,48 @@
+# Owner(s): ["module: ci"]
+name: Auto-triage open source PRs
+
+# Capture-only job: this runs on PR-triggerable events and therefore holds NO
+# secrets. It records the {actor, pr_num} of a maintainer engagement into an
+# artifact; the privileged maintainer-check + label-add happens in
+# auto-triage-run.yml, which runs trusted default-branch code via workflow_run.
+
+on:
+  pull_request_review:
+    types: [submitted]
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    name: capture
+    # Cheap gates so we only record when it can matter: the event is on a PR,
+    # it carries the "open source" label, and it isn't already triaged.
+    if: >
+      github.repository == 'pytorch/pytorch' &&
+      (github.event.issue.pull_request || github.event.pull_request) &&
+      contains(github.event.*.labels.*.name, 'open source') &&
+      !contains(github.event.*.labels.*.name, 'triaged')
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Record request
+        # Untrusted inputs (ACTOR, PR_NUM) are passed as env vars, never
+        # interpolated into the shell. They are only written verbatim to files
+        # and validated by the downstream privileged job before use.
+        env:
+          PR_NUM: ${{ github.event.issue.number || github.event.pull_request.number }}
+          ACTOR: ${{ github.event.comment.user.login || github.event.review.user.login }}
+        run: |
+          mkdir -p auto-triage-request
+          printf '%s' "$PR_NUM" > auto-triage-request/pr_num.txt
+          printf '%s' "$ACTOR" > auto-triage-request/actor.txt
+
+      - name: Upload request artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: auto-triage-request
+          path: auto-triage-request/
+          retention-days: 1
+          if-no-files-found: error
