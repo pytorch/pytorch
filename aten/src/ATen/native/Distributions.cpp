@@ -19,8 +19,6 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_dirichlet_grad_native.h>
-#include <ATen/ops/_philox_normal_native.h>
-#include <ATen/ops/_philox_uniform_native.h>
 #include <ATen/ops/_sample_dirichlet_native.h>
 #include <ATen/ops/_standard_gamma_grad_native.h>
 #include <ATen/ops/_standard_gamma_native.h>
@@ -642,16 +640,6 @@ Tensor multinomial(
   Tensor result = at::empty({0}, self.options().dtype(kLong));
   native::multinomial_out(self, n_sample, with_replacement, std::move(gen), result);
   return result;
-}
-
-// Functional variants: empty_like avoids the clone the autogen functional would
-// do (self is fully overwritten).
-Tensor _philox_normal(const Tensor& self, const Tensor& key, double mean, double std) {
-  return at::empty_like(self)._philox_normal_(key, mean, std);
-}
-
-Tensor _philox_uniform(const Tensor& self, const Tensor& key, double low, double high) {
-  return at::empty_like(self)._philox_uniform_(key, low, high);
 }
 
 } // namespace at::native

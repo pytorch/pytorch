@@ -15,7 +15,6 @@
 #else
 #include <ATen/ops/_philox_normal_native.h>
 #include <ATen/ops/_philox_uniform_native.h>
-#include <ATen/ops/empty.h>
 #endif
 
 namespace at::native {
@@ -318,20 +317,6 @@ Tensor& _philox_normal_cuda_(
         "_philox_normal_", self, key, sample_func, param_func);
   });
   return self;
-}
-
-Tensor _philox_uniform_size_cuda(
-    IntArrayRef size, const Tensor& key,
-    double low, double high, std::optional<ScalarType> dtype) {
-  Tensor result = at::empty(size, key.options().dtype(dtype.value_or(kFloat)));
-  return _philox_uniform_cuda_(result, key, low, high);
-}
-
-Tensor _philox_normal_size_cuda(
-    IntArrayRef size, const Tensor& key,
-    double mean, double std, std::optional<ScalarType> dtype) {
-  Tensor result = at::empty(size, key.options().dtype(dtype.value_or(kFloat)));
-  return _philox_normal_cuda_(result, key, mean, std);
 }
 
 } // namespace at::native

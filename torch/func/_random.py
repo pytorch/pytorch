@@ -176,7 +176,11 @@ def normal(
     if len(shape) == 1 and isinstance(shape[0], Sequence):
         # pyrefly: ignore [bad-argument-type]
         shape = tuple(shape[0])
-    return torch.ops.aten._philox_normal.size(shape, key, mean, std, dtype=dtype)
+    if dtype is None:
+        dtype = torch.float32
+    # pyrefly: ignore [no-matching-overload]
+    result = torch.empty(shape, dtype=dtype, device=key.device)
+    return normal_(key, result, mean=mean, std=std)
 
 
 def uniform_(
@@ -252,4 +256,8 @@ def uniform(
     if len(shape) == 1 and isinstance(shape[0], Sequence):
         # pyrefly: ignore [bad-argument-type]
         shape = tuple(shape[0])
-    return torch.ops.aten._philox_uniform.size(shape, key, low, high, dtype=dtype)
+    if dtype is None:
+        dtype = torch.float32
+    # pyrefly: ignore [no-matching-overload]
+    result = torch.empty(shape, dtype=dtype, device=key.device)
+    return uniform_(key, result, low=low, high=high)

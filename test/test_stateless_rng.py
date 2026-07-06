@@ -1,5 +1,7 @@
 # Owner(s): ["module: random"]
 
+import unittest
+
 import torch
 import torch.func._random as random
 from torch.testing._internal.common_device_type import (
@@ -8,6 +10,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_dtype import floating_types_and
 from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
+from torch.utils._triton import has_triton
 
 
 all_floating_dtypes = floating_types_and(torch.half, torch.bfloat16)
@@ -553,60 +556,31 @@ class TestStatelessRNGCompile(TestCase):
 
         self.assertEqual(f(key), random.uniform(random.fold_in(key, 3), (100,)))
 
-    def test_factory_matches_inplace(self, device):
-        # The out-of-place uniform()/normal() route through the size-taking
-        # factory ops; they must match filling a buffer in-place.
+    @unittest.skipUnless(has_triton(), "requires triton for inductor codegen")
+    @parametrize("op", ["uniform", "normal"])
+    def test_generation_no_extra_clone(self, device, op):
+        # Out-of-place uniform()/normal() fully overwrite their output; ensure
+        # generation in torch.compile doesn't allocate an extra full-size buffer
+        # (i.e. ensure peak ~= output size).
+        gen = getattr(random, op)
         key = random.key(42, device=device)
-        buf = torch.empty(1000, device=device)
-        random.uniform_(key, buf, low=2.0, high=5.0)
-        self.assertEqual(random.uniform(key, (1000,), low=2.0, high=5.0), buf)
-        random.normal_(key, buf, mean=1.0, std=3.0)
-        self.assertEqual(random.normal(key, (1000,), mean=1.0, std=3.0), buf)
+        shape = (2048, 2048)  # 16 MiB fp32; an extra clone would ~double peak
+        out_bytes = shape[0] * shape[1] * torch.float32.itemsize
 
-    def test_generation_avoids_wasted_copy(self, device):
-        # Generation fully overwrites its output, so neither path should copy it.
-        from functorch.compile import aot_function
-        from torch.utils._python_dispatch import TorchDispatchMode
-
-        aten = torch.ops.aten
-        key = random.key(42, device=device)
-
-        # Out-of-place lowers to the factory op: no dead empty, no clone.
-        fw_graphs = []
-
-        def fw(gm, inputs):
-            fw_graphs.append(gm)
-            return gm
-
+        @torch.compile(fullgraph=True)
         def f(key):
-            return random.uniform(random.fold_in(key, 3), (128, 128))
+            return gen(key, shape)
 
-        aot_function(f, fw_compiler=fw)(key)
-        self.assertEqual(len(fw_graphs), 1)
-        nodes = fw_graphs[0].graph.nodes
-        targets = {n.target for n in nodes if n.op == "call_function"}
-        self.assertNotIn(aten.empty.memory_format, targets)
-        self.assertNotIn(aten.clone.default, targets)
-        self.assertIn(aten._philox_uniform.size, targets)
+        f(key)  # compile + warm up the allocator
+        torch.cuda.synchronize()
+        base = torch.cuda.memory_allocated(device)
+        torch.cuda.reset_peak_memory_stats(device)
+        result = f(key)
+        torch.cuda.synchronize()
+        extra = torch.cuda.max_memory_allocated(device) - base
 
-        # In-place functional counterpart clones inside the kernel (not a graph
-        # node), so count clones directly.
-        class CloneCounter(TorchDispatchMode):
-            def __init__(self):
-                self.clones = 0
-
-            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-                if func is aten.clone.default:
-                    self.clones += 1
-                return func(*args, **(kwargs or {}))
-
-        buf = torch.empty(1024, device=device)
-        counter = CloneCounter()
-        with counter:
-            aten._philox_uniform(buf, key)
-            aten._philox_normal(buf, key)
-        self.assertEqual(counter.clones, 0)
-        self.assertIn(torch.ops.aten._philox_uniform.size, targets)
+        self.assertEqual(result, gen(key, shape))
+        self.assertLess(extra, 1.5 * out_bytes)  # no extra full-size clone
 
 
 instantiate_device_type_tests(TestStatelessRNGKey, globals(), only_for=("cuda",))
