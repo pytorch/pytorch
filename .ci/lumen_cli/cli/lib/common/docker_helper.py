@@ -7,7 +7,7 @@ from __future__ import annotations
 import logging
 
 import docker
-from docker.errors import APIError, NotFound
+from docker.errors import APIError, DockerException, NotFound
 
 
 logger = logging.getLogger(__name__)
@@ -30,11 +30,11 @@ def local_image_exists(
     if not image_name:
         return False
 
-    client = client or _get_client()
     try:
+        client = client or _get_client()
         client.images.get(image_name)
         return True
-    except (NotFound, APIError) as e:
+    except (NotFound, APIError, DockerException) as e:
         logger.error(
             "Error when checking Docker image '%s': %s",
             image_name,
