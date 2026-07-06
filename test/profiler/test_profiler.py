@@ -4905,7 +4905,7 @@ class TestMetadataJsonFormat(TestCase):
         for act in activities:
             if act.type() == "kernel":
                 return act.metadata_json()
-        self.fail("No kernel activity found in trace")
+        self.fail(f"No kernel activity found in trace. Found: {act.metadata_json()}")
 
     def test_metadata_json_is_valid_json_fragment(self):
         md = self._get_kernel_metadata()
