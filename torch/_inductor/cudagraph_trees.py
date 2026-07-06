@@ -103,7 +103,6 @@ if TYPE_CHECKING:
 
     from torch._guards import CompileId
     from torch._inductor.utils import InputType
-    from torch.cuda import _POOL_HANDLE
     from torch.types import _bool
 
 StorageWeakRefPointer = int
@@ -408,11 +407,6 @@ def registered_external_stream(
     "The capture stream registered for ``pool_id`` on ``device``, if any."
     entry = _registered_external.get(device, {}).get(pool_id)
     return entry[1] if entry is not None else None
-
-
-def _managed_pool_ids(device: int, primary: tuple[int, int]) -> list[tuple[int, int]]:
-    "Primary capture pool first, then any registered external pools for the device."
-    return [primary] + [p for p in registered_external_pool_ids(device) if p != primary]
 
 
 def reset_cudagraph_trees() -> None:
@@ -778,30 +772,34 @@ class CUDAWarmupNode:
         self,
         wrapped_function: WrappedFunction,
         parent: CUDAGraphNode | CUDAWarmupNode | None,
-        cuda_graphs_pool: tuple[int, int],
+        managed_pools: list[tuple[tuple[int, int], torch.cuda.Stream | None]],
         existing_cuda_graph: torch.cuda.CUDAGraph | None,
         device_index: int,
         stack_traces: StackTraces | None,
-        stream: torch.cuda.Stream,
         already_warm: bool,
         id: GraphID,
     ) -> None:
         self.wrapped_function = wrapped_function
         self.parent: CUDAGraphNode | CUDAWarmupNode | None = parent
-        self.cuda_graphs_pool = cuda_graphs_pool
         self.outputs_weakrefs: list[StorageWeakRefWrapper | None] = []
         self.tensor_weakrefs: list[TensorWeakRef | None] = []
         self.existing_cuda_graph = existing_cuda_graph
         self.has_run = False
         self.device_index = device_index
         self.stack_traces = stack_traces
-        self.stream = stream
         self.already_warm = already_warm
         self.id = id
-        # Private capture pool plus any registered external pools; validated together.
-        self.managed_pools = _managed_pool_ids(device_index, cuda_graphs_pool)
+        # The pools this node manages (built by the manager), each paired with
+        # its capture stream. Entry 0 is the private capture pool with the capture
+        # stream; the rest are registered external pools.
+        self.managed_pools = managed_pools
+
+    @property
+    def managed_pool_ids(self) -> list[tuple[int, int]]:
+        return [pool_id for pool_id, _ in self.managed_pools]
 
     def run(self, new_inputs: Any) -> OutputType:
+        "Eagerly run the model for warmup, tracking output storages for liveness."
         if self.has_run:
             raise AssertionError("Wrapped function should never be run twice")
 
@@ -824,14 +822,18 @@ class CUDAWarmupNode:
 
         if config.triton.slow_path_cudagraph_asserts and not self.already_warm:
             refs = list(self.path_live_weakrefs())
-            check_memory_pool(self.device_index, self.managed_pools, refs)
+            check_memory_pool(self.device_index, self.managed_pool_ids, refs)
 
+        capture_pool, capture_stream = self.managed_pools[0]
+        # entry 0 is the private capture pool; its stream is always set
+        if capture_stream is None:
+            raise AssertionError("expected a capture stream for the private pool")
         with (
             torch.cuda.device(self.device_index),
             disable_conv_cache_emptying(),
             clear_cublas_manager(),
             _use_cuda_memory_pool_manager(
-                self.device_index, self.cuda_graphs_pool, self.stream
+                self.device_index, capture_pool, capture_stream
             ),
             # NB: must go after _use_cuda_memory_pool_manager which switches the stream
             _update_current_stream_external_object(),
@@ -875,7 +877,7 @@ class CUDAWarmupNode:
 
         if config.triton.slow_path_cudagraph_asserts and not self.already_warm:
             out_refs = list(self.path_live_weakrefs())
-            check_memory_pool(self.device_index, self.managed_pools, out_refs)
+            check_memory_pool(self.device_index, self.managed_pool_ids, out_refs)
 
         return out
 
@@ -978,10 +980,9 @@ class CUDAGraphNode:
         id: GraphID,
         parent: CUDAGraphNode | None,
         inputs: list[InputType],
-        cuda_graphs_pool: _POOL_HANDLE,
+        managed_pools: list[tuple[tuple[int, int], torch.cuda.Stream | None]],
         device_index: int,
         stack_traces: StackTraces | None,
-        stream: torch.cuda.Stream,
         mode: CompilationMode | None,
         compile_id: CompileId | None,
     ) -> None:
@@ -994,7 +995,6 @@ class CUDAGraphNode:
         self.id = id
         self.device = device_index
         self.stack_traces = stack_traces
-        self.stream = stream
 
         # Enable re-record a cudagraph when static tensor address changed.
         # if not we should error when it changed.
@@ -1002,12 +1002,11 @@ class CUDAGraphNode:
 
         # if this is a root parent will be None. use weakref to prevent reference cycle
         self._parent = weakref.ref(parent) if parent is not None else None
-        # reference to the shared memory pool for the entire cuda graphs tree
-        self.cuda_graphs_pool = cuda_graphs_pool
-        # All pools whose allocations this node manages: the private capture pool
-        # (index 0, handed to CUDA graph capture) plus any registered external
-        # pools for this device. Lifecycle bookkeeping loops over all of them.
-        self.managed_pools = _managed_pool_ids(self.device, cuda_graphs_pool)
+        # The pools this node manages (built by the manager), each paired with
+        # its capture stream. Entry 0 is the private capture pool with the capture
+        # stream handed to CUDA graph capture; the rest are registered external
+        # pools.
+        self.managed_pools = managed_pools
 
         # A single wrapped function may be recorded multiple times if memory patterns or
         # invariants change from one execution to the next
@@ -1245,6 +1244,10 @@ class CUDAGraphNode:
         if self.graph is not None:
             self.graph.replay()
 
+    @property
+    def managed_pool_ids(self) -> list[tuple[int, int]]:
+        return [pool_id for pool_id, _ in self.managed_pools]
+
     def _copy_inputs_and_remove_from_src(
         self, dsts: list[InputType], srcs: list[InputType]
     ) -> None:
@@ -1460,13 +1463,18 @@ class CUDAGraphNode:
             )
         }
 
+        capture_pool, capture_stream = self.managed_pools[0]
+        # entry 0 is the private capture pool; its stream is always set
+        if capture_stream is None:
+            raise AssertionError("expected a capture stream for the private pool")
+
         if self.wrapped_function.kernel_free_cudagraph:
             with (
                 preserve_rng_state(),
                 torch.cuda.device(self.device),
                 clear_cublas_manager(),
                 _use_cuda_memory_pool_manager(
-                    self.device, self.cuda_graphs_pool, self.stream
+                    self.device, capture_pool, capture_stream
                 ),
                 # NB: must go after _use_cuda_memory_pool_manager which switches the stream
                 _update_current_stream_external_object(),
@@ -1502,7 +1510,7 @@ class CUDAGraphNode:
                 and i not in self.wrapped_function.static_input_idxs
                 and elem.untyped_storage().data_ptr() != 0
             ]
-            check_memory_pool(self.device, self.managed_pools, memory)
+            check_memory_pool(self.device, self.managed_pool_ids, memory)
 
         with (
             preserve_rng_state(),
@@ -1510,8 +1518,10 @@ class CUDAGraphNode:
             clear_cublas_manager(),
             torch.cuda.graph(
                 self.graph,
-                stream=self.stream,
-                pool=self.cuda_graphs_pool,
+                stream=capture_stream,
+                # a (int, int) mempool id is a valid graph pool handle at runtime
+                # pyrefly: ignore [bad-argument-type]
+                pool=capture_pool,
                 capture_error_mode="thread_local",
             ),
             # NB: must go after torch.cuda.graph which switches the stream
@@ -1624,7 +1634,7 @@ class CUDAGraphNode:
         self.recorded_liveness_after_graph = self._get_liveness(self.path_weakrefs)
         self.checkpointed_caching_states = {
             pool_id: torch._C._cuda_getCheckpointState(self.device, pool_id)
-            for pool_id in self.managed_pools
+            for pool_id in self.managed_pool_ids
         }
 
         # now, get liveness with outputs added
@@ -1636,7 +1646,7 @@ class CUDAGraphNode:
         self.debug_check_invariants_after_invocation()
         if config.triton.slow_path_cudagraph_asserts:
             check_memory_pool(
-                self.device, self.managed_pools, list(self.path_live_weakrefs())
+                self.device, self.managed_pool_ids, list(self.path_live_weakrefs())
             )
 
     def _mark_prior_graph_output_as_aliased(self, index: PathOutputIndex) -> None:
@@ -1826,7 +1836,9 @@ class CUDAGraphNode:
         nodes = list(self._path_from_root)
 
         live_blocks = [
-            addr for pool_id in self.managed_pools for addr in get_block_addrs(pool_id)
+            addr
+            for pool_id in self.managed_pool_ids
+            for addr in get_block_addrs(pool_id)
         ]
 
         live_storage_data_ptrs = OrderedSet[Any]()
@@ -1959,8 +1971,12 @@ class CUDAGraphNode:
         and copy over the tensor values.
         """
 
+        capture_pool, capture_stream = self.managed_pools[0]
+        # entry 0 is the private capture pool; its stream is always set
+        if capture_stream is None:
+            raise AssertionError("expected a capture stream for the private pool")
         torch.cuda.synchronize()
-        self.stream.wait_stream(torch.cuda.current_stream())
+        capture_stream.wait_stream(torch.cuda.current_stream())
         recording_inputs: list[InputType] = []
 
         with (
@@ -1968,8 +1984,8 @@ class CUDAGraphNode:
             torch.cuda.device(self.device),
             _use_cuda_memory_pool_manager(
                 self.device,
-                mem_pool=self.cuda_graphs_pool,
-                stream=self.stream,
+                mem_pool=capture_pool,
+                stream=capture_stream,
             ),
         ):
             for i, inp in enumerate(inputs):
@@ -2308,6 +2324,18 @@ class CUDAGraphTreeManager:
             ):
                 pass
 
+        # The pools + paired streams that this tree manages: the private capture
+        # pool at entry 0 and any registered external pools at later indices.
+        # Built once and shared by every node. Pools registered after the
+        # manager is created are not picked up until the next tree.
+        self.managed_pools: list[tuple[tuple[int, int], torch.cuda.Stream | None]] = [
+            (self.cuda_graphs_thread_pool, self.stream)
+        ] + [
+            (p, registered_external_stream(device_index, p))
+            for p in registered_external_pool_ids(device_index)
+            if p != self.cuda_graphs_thread_pool
+        ]
+
         self.graph_counter = itertools.count(0)
         self.func_counter = itertools.count(0)
 
@@ -2623,10 +2651,9 @@ class CUDAGraphTreeManager:
                 graph_id,
                 self.current_node,
                 new_inputs,
-                self.cuda_graphs_thread_pool,
+                self.managed_pools,
                 self.device_index,
                 self.ids_to_stack_traces[function_id],
-                self.stream,
                 self.mode,
                 self.compile_id,
             )
@@ -2672,11 +2699,10 @@ class CUDAGraphTreeManager:
         node = CUDAWarmupNode(
             self.ids_to_funcs[function_id],
             self.current_node,
-            self.cuda_graphs_thread_pool,
+            self.managed_pools,
             self.graph,
             self.device_index,
             self.ids_to_stack_traces[function_id],
-            self.stream,
             already_warm,
             self.new_warmup_node_id(),
         )
@@ -3007,7 +3033,7 @@ class CUDAGraphTreeManager:
         # touches the pool its state was captured from, and addStorageDeleterFns
         # re-attaches deleters only to storages whose data_ptr the restore
         # re-allocated, so passing the full live-storage list to each call is safe.
-        for pool_id in self.current_node.managed_pools:
+        for pool_id in self.current_node.managed_pool_ids:
             state = states.get(pool_id)
             if state is None:
                 continue
@@ -3027,7 +3053,7 @@ class CUDAGraphTreeManager:
         if config.triton.slow_path_cudagraph_asserts:
             check_memory_pool(
                 self.device_index,
-                self.current_node.managed_pools,
+                self.current_node.managed_pool_ids,
                 live_storages_wrappers,
             )
             for wrapper in live_storages_wrappers:
