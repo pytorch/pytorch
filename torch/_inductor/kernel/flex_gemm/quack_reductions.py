@@ -592,7 +592,8 @@ def lower_full_scalar(node: torch.fx.Node) -> Any | None:
     shape = normalize_shape(node.args[0])
     if shape != ():
         return None
-    return node.args[1]
+    value = node.args[1]
+    return value if isinstance(value, (bool, int, float)) else None
 
 
 def lower_squeeze(
@@ -619,6 +620,8 @@ def lower_getitem(
     if not isinstance(source_node, torch.fx.Node) or not isinstance(index, int):
         return None
     source = _cute_arg(source_node, env)
+    if not isinstance(source, (tuple, list)) or not -len(source) <= index < len(source):
+        return None
     if source_node in local_reduce_store_sources:
         local_reduce_store_sources[node] = local_reduce_store_sources[source_node][
             index

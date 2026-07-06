@@ -964,7 +964,7 @@ struct SymbolicShapeGraphAnalyzer {
     // When we add a new tensor node, we do two things:
     // 1: record a mapping from the tensor node output to its shape in the
     // partial eval graph 2: add each symbolic shape dimension that we have
-    // not already added as a output to the large shape compute graph
+    // not already added as an output to the large shape compute graph
 
     // Once we are done stitching together all partial eval'd graphs, we can
     // cleanup the graph and remove the unneeded complete shapes as outputs,

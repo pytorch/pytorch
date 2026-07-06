@@ -1004,12 +1004,16 @@ class profile:
         group_by_input_shape=False,
         group_by_stack_n=0,
         group_by_overload_name=False,
+        include_python_functions=False,
     ):
         self._ensure_function_events()
         if self._function_events is None:
             raise AssertionError("Expected profiling results")
         return self._function_events.key_averages(
-            group_by_input_shape, group_by_stack_n, group_by_overload_name
+            group_by_input_shape,
+            group_by_stack_n,
+            group_by_overload_name,
+            include_python_functions,
         )
 
     key_averages.__doc__ = EventList.key_averages.__doc__
