@@ -457,6 +457,10 @@ class OpsHandler(Generic[T]):
     def bitwise_right_shift(self, x0: T, x1: T) -> T:
         raise NotImplementedError
 
+    def umulhi(self, x0: T, x1: T) -> T:
+        # High 32 bits of the product of two uint32 values (hardware __umulhi).
+        raise NotImplementedError
+
     def rsqrt(self, x0: T) -> T:
         raise NotImplementedError
 

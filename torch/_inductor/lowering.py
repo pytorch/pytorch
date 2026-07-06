@@ -2913,6 +2913,94 @@ def philox_rand(size, seed, offset, stride, device, dtype):
     return random_values_node, offset_node
 
 
+@register_lowering(aten._philox_uniform, type_promotion_kind=None)
+def _philox_uniform(self, key, low=0.0, high=1.0):
+    # Inline, bit-identical philox4x32-10 + uniform_real so out-of-place uniform()
+    # fuses with consumers and needs no output clone (`self` is a write-only
+    # template). Mirrors StatelessPhilox4x32.cuh + PhiloxDistribution.cu.
+    # digits = std::numeric_limits<T>::digits (TransformationHelper.h uniform_real).
+    digits_for = {torch.float32: 24, torch.float16: 11, torch.bfloat16: 8}
+    device = self.get_device()
+    dtype = self.get_dtype()
+    size = self.get_size()
+    # Inline only 4-elems-per-call float dtypes with a single key; else fall back.
+    if dtype not in digits_for or len(key.get_size()) != 1:
+        return fallback_handler(aten._philox_uniform.default)(self, key, low, high)
+
+    digits = digits_for[dtype]
+    mantissa_mask = (1 << digits) - 1
+    divisor = 1.0 / (1 << digits)
+    low = float(low)
+    scale = float(high) - low
+
+    key_loader = key.make_loader()
+    indexer = ir.FixedLayout(
+        device, dtype, size, ir.FlexibleLayout.contiguous_strides(size)
+    ).make_indexer()
+
+    def inner_fn(index):
+        i32, i64 = torch.int32, torch.int64
+
+        def C(u):  # uint32 literal as signed int32
+            return ops.constant(u - (1 << 32) if u >= (1 << 31) else u, i32)
+
+        # int32 mul/add/xor wrap mod 2^32 = uint32 arithmetic for free.
+        def lo32(a, b):  # low 32 of a * b
+            return ops.mul(a, b)
+
+        def hi32(a, b):  # high 32 of a * b (unsigned)
+            return ops.umulhi(a, b)
+
+        xor = ops.bitwise_xor
+        SA, SB = C(0xD2511F53), C(0xCD9E8D57)
+
+        def philox_round(x, y, z, w, kx, ky):
+            return (
+                xor(xor(hi32(SB, z), y), kx),
+                lo32(SB, z),
+                xor(xor(hi32(SA, x), w), ky),
+                lo32(SA, x),
+            )
+
+        # seed = key[0], offset = key[1] (uint64); lo/hi split the 64-bit values.
+        seed = ops.to_dtype(key_loader([sympy.Integer(0)]), i64)
+        offset = ops.to_dtype(key_loader([sympy.Integer(1)]), i64)
+        lin = indexer(index)
+        oc = ops.add(offset, ops.index_expr(FloorDiv(lin, 4), i64))  # offset + chunk
+
+        def lo(v):  # low 32 bits (to_dtype truncates)
+            return ops.to_dtype(v, i32)
+
+        def hi(v):  # high 32 bits
+            return ops.to_dtype(ops.bitwise_right_shift(v, ops.constant(32, i64)), i32)
+
+        x, y, z, w = lo(oc), hi(oc), C(0), C(0)
+        kx, ky = lo(seed), hi(seed)
+        for _ in range(9):
+            x, y, z, w = philox_round(x, y, z, w, kx, ky)
+            kx, ky = ops.add(kx, C(0x9E3779B9)), ops.add(ky, C(0xBB67AE85))
+        x, y, z, w = philox_round(x, y, z, w, kx, ky)
+
+        # Select this element's lane (i % 4) of the 4 generated values.
+        lane = ops.index_expr(ModularIndexing(lin, 1, 4), i32)
+        u = ops.where(
+            ops.eq(lane, C(0)),
+            x,
+            ops.where(ops.eq(lane, C(1)), y, ops.where(ops.eq(lane, C(2)), z, w)),
+        )
+
+        # uniform_real: (u & mantissa_mask) * 2^-digits, then affine to [low, high).
+        f32 = torch.float32
+        val = ops.to_dtype(ops.bitwise_and(u, C(mantissa_mask)), f32)
+        val = ops.mul(val, ops.constant(divisor, f32))
+        val = ops.add(ops.mul(val, ops.constant(scale, f32)), ops.constant(low, f32))
+        return ops.to_dtype(val, dtype)
+
+    return Pointwise.create(
+        device=device, dtype=dtype, inner_fn=inner_fn, ranges=list(size)
+    )
+
+
 @register_lowering(aten.native_dropout, type_promotion_kind=None)
 def native_dropout(x, p, train):
     if config.fallback_random:
