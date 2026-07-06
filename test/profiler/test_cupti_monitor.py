@@ -148,9 +148,11 @@ class TestCuptiRecords(TestCase):
             # An explicit arg overrides the env var.
             self.assertEqual(CuptiMonitor(buffer_size=2048).buffer_size, 2048)
 
+    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     def test_monitor_use_approx_timestamps_arg(self):
         # The approx-clock timestamp callback is a constructor setting (no env var):
-        # off by default, on when use_approx_timestamps=True. No CUDA -- config only.
+        # off by default, on when use_approx_timestamps=True. No CUDA, but constructing
+        # CuptiMonitor loads libcupti (>= 13.3) via pylibcupti().
         from torch.profiler._cupti.monitor import CuptiMonitor
 
         self.assertFalse(CuptiMonitor()._timestamp_callback_enabled)
