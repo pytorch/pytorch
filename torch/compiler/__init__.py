@@ -319,7 +319,8 @@ def assume_constant_result(fn=None, *, specialize_args=False):
             types and their containers, dataclasses of those, and opaque
             objects whose class defines ``__eq__`` and is registered with
             ``torch.utils._pytree.register_constant`` (see its docstring);
-            anything else triggers a graph break.
+            anything else triggers a graph break. Default: ``False`` (the
+            cached result is keyed on argument identity).
 
     .. warning::
         `assume_constant_result` can, if invalid, cause safety and soundness issues, :func:`torch.compile`
