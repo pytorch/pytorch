@@ -120,24 +120,27 @@ def fx_graph_cse(
                 bases.add(b)
 
     nodes_used_as_mutation_base: set[fx.Node] = set()
-    for n in fx_g.nodes:
-        if n.op != "call_function":
-            continue
-        if n.target is torch.ops.higher_order.auto_functionalized_v2:
-            # v2 lists its mutable buffers explicitly in ``_all_bases``.
-            for base in n.kwargs.get("_all_bases", ()):
-                _add_base(base, nodes_used_as_mutation_base)
-        elif n.target is torch.ops.higher_order.auto_functionalized:
-            # v1 has no ``_all_bases``; the mutated tensors are the args named by
-            # the wrapped op's schema (``_mutable_op`` is the first positional).
-            mutable_op = n.args[0]
-            mutable_args_names, _ = get_mutable_args(mutable_op)
-            for name in mutable_args_names:
-                _add_base(n.kwargs.get(name), nodes_used_as_mutation_base)
-        elif n.target is triton_kernel_wrapper_functional:
-            inner_kwargs = n.kwargs.get("kwargs", {})
-            for name in n.kwargs.get("tensors_to_clone", ()):
-                _add_base(inner_kwargs.get(name), nodes_used_as_mutation_base)
+    for n in fx_g.find_nodes(
+        op="call_function", target=torch.ops.higher_order.auto_functionalized_v2
+    ):
+        # v2 lists its mutable buffers explicitly in ``_all_bases``.
+        for base in n.kwargs.get("_all_bases", ()):
+            _add_base(base, nodes_used_as_mutation_base)
+    for n in fx_g.find_nodes(
+        op="call_function", target=torch.ops.higher_order.auto_functionalized
+    ):
+        # v1 has no ``_all_bases``; the mutated tensors are the args named by the
+        # wrapped op's schema (``_mutable_op`` is the first positional).
+        mutable_op = n.args[0]
+        mutable_args_names, _ = get_mutable_args(mutable_op)
+        for name in mutable_args_names:
+            _add_base(n.kwargs.get(name), nodes_used_as_mutation_base)
+    for n in fx_g.find_nodes(
+        op="call_function", target=triton_kernel_wrapper_functional
+    ):
+        inner_kwargs = n.kwargs.get("kwargs", {})
+        for name in n.kwargs.get("tensors_to_clone", ()):
+            _add_base(inner_kwargs.get(name), nodes_used_as_mutation_base)
 
     for n in fx_g.nodes:
         # The placeholder, output, and get_attr nodes are copied to the new graph without change
