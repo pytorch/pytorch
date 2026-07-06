@@ -368,9 +368,22 @@ class CuptiMonitor:
         # so they release CUPTI on teardown rather than us finalizing global state.)
         # Subscribe solo only when the timestamp callback is opted in: CUPTI honors it only
         # while multiple subscribers are NOT allowed. Otherwise allow coexistence (default).
-        self._subscriber = self._cupti.subscribe(
-            allow_multiple=not self._timestamp_callback_enabled
-        )
+        try:
+            self._subscriber = self._cupti.subscribe(
+                allow_multiple=not self._timestamp_callback_enabled
+            )
+        except cupti_python.CuptiError as e:
+            if self._timestamp_callback_enabled:
+                # We requested sole-subscriber mode only because the approx-clock timestamp
+                # callback needs it; another CUPTI consumer is likely attached. Point the user
+                # at the opt-out so they can coexist (the callback is then off).
+                raise RuntimeError(
+                    "cupti_monitor could not subscribe as the sole subscriber, which the "
+                    "opt-in approx-clock timestamp callback requires (another CUPTI consumer "
+                    "is likely attached). Retry with use_approx_timestamps=False to allow "
+                    f"coexisting subscribers: {e}"
+                ) from e
+            raise
         self._cupti.arm_user_defined_records(
             self._subscriber, request_addr, complete_addr
         )
