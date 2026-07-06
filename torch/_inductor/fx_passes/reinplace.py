@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import functools
 import itertools
 import logging
 import operator
@@ -408,6 +409,31 @@ for outplace_op, inplace_op in inplaceable_foreach_ops_lowerings.items():
 inplaceable_triton_ops = OrderedSet([triton_kernel_wrapper_functional])
 
 
+@functools.lru_cache(None)
+def _maybe_inplaceable_op(target):
+    """Synthesize an InplaceableOp from a functional op's in-place counterpart
+    (OpOverload._inplace_variant), so reinplacing handles ops like uniform,
+    normal, digamma, and _philox_uniform without a manual registry entry.
+    Returns None when not applicable."""
+    from torch._inductor.lowering import fallbacks, lowerings
+
+    if not isinstance(target, torch._ops.OpOverload):
+        return None
+    inplace = target._inplace_variant
+    if inplace is None:
+        return None
+    # Reinplace only fallbacks (a real lowering allocates cleanly); skip view
+    # mutators; and skip in-place targets with their own lowering (e.g.
+    # bernoulli_, which must be decomposed for RNG correctness).
+    if (
+        (target in lowerings and target not in fallbacks)
+        or torch.Tag.inplace_view in inplace.tags
+        or (inplace in lowerings and inplace not in fallbacks)
+    ):
+        return None
+    return InplaceableOp(inplace, 0)
+
+
 # Operators that don't depend on the tensor data
 META_ONLY_OPS = OrderedSet(
     [
@@ -809,7 +835,9 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
         return tensors_to_clone
 
     for node in graph.nodes:
-        if (inplaceable_op := inplaceable_ops.get(node.target)) is not None:
+        if inplaceable_op := (
+            inplaceable_ops.get(node.target) or _maybe_inplaceable_op(node.target)
+        ):
             # Check if ALL mutated args can be inplaced
             # Only convert if we don't need to clone any tensor
             mutated_args = [node.args[idx] for idx in inplaceable_op.mutated_args]
@@ -819,6 +847,11 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                     if copy_node is not None:
                         replace_dict[copy_node] = copy_node.args[0]
                 node.target = inplaceable_op.inplace_op
+                # Tell lowering this in-place op came from reinplacing, so
+                # make_fallback may override a decomp it would otherwise assert
+                # on (e.g. uniform_, normal_ are decomposed but never survive
+                # functionalization, so reinplacing reintroduces them).
+                node.meta["reinplaced_from_functional"] = True
         elif node.target is torch.ops.higher_order.auto_functionalized_v2:
             _mutable_op = node.args[0]
             kwargs = node.kwargs
