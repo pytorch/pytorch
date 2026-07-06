@@ -2577,16 +2577,16 @@ class GraphModule(torch.nn.Module):
 
     @parametrize("dynamic", [False, True])
     def test_subclass_views(self, dynamic):
-        def _get_views(t):  # returns (view: Tensor, expects_raises_false)
+        def _get_views(t):
             # Note that any closed-over SymInts will be symbolicized during fake-ification.
-            yield t.narrow(dim=-1, start=3, length=8), False
-            yield t.split(5, -1)[2], False
-            yield t.split_with_sizes([9, 6], -1)[1], False
-            yield t.unsqueeze(-1).expand(4, 15, 10), False
-            yield t.select(-1, 6), False
+            yield t.narrow(dim=-1, start=3, length=8)
+            yield t.split(5, -1)[2]
+            yield t.split_with_sizes([9, 6], -1)[1]
+            yield t.unsqueeze(-1).expand(4, 15, 10)
+            yield t.select(-1, 6)
             # https://github.com/pytorch/pytorch/issues/128649
-            yield t[2:3, 5:9], dynamic
-            yield t.view(-1, 15), False
+            yield t[2:3, 5:9]
+            yield t.view(-1, 15)
 
         def f(x):
             return x * 2
@@ -2597,15 +2597,25 @@ class GraphModule(torch.nn.Module):
 
         # Take a view of a subclass to pass as input.
         t = TwoTensor(torch.randn(4, 15), torch.randn(4, 15))
-        for view, expects_raises in _get_views(t):
+        for view in _get_views(t):
             torch._dynamo.reset()
             out_ref = f(view)
-            if expects_raises:
-                with self.assertRaises(AssertionError):
-                    out_test = compiled_f(view)
-            else:
-                out_test = compiled_f(view)
-                self.assertEqual(out_ref, out_test)
+            out_test = compiled_f(view)
+            self.assertEqual(out_ref, out_test)
+
+    def test_subclass_view_splits_dimension_mark_dynamic(self):
+        def f(x):
+            return x * 2
+
+        compiled_f = torch.compile(f, backend="aot_eager", fullgraph=True)
+
+        t = TwoTensor(torch.randn(4, 15), torch.randn(4, 15))
+        view = t.view(t.size(0), 3, 5)
+        torch._dynamo.mark_dynamic(view, 0)
+
+        out_ref = f(view)
+        out_test = compiled_f(view)
+        self.assertEqual(out_ref, out_test)
 
     @parametrize("dynamic", [True, False])
     def test_mark_static_with_subclass_desugaring(self, dynamic):
@@ -4552,102 +4562,114 @@ class GraphModule(torch.nn.Module):
                 self.assertExpectedInline(
                     guard_str,
                     """\
-Eq(s85 - 1, s64)
-Eq(s20, s64)
-Eq(s80 - 1, s77)
-Eq(s72, s71)""",
+Eq(s85 - 1, s77)
+Eq(s20, s77)
+Eq(s64, s20)""",
                 )
             elif nt_view_name == "base_is_nt_False_leaf_False_False":
                 self.assertExpectedInline(
                     guard_str,
                     """\
-Eq(s85 - 1, s64)
-Eq(s80 - 1, s77)
-Eq(s72, s71)""",
+Eq(s85 - 1, s77)
+Eq(s64, s77)""",
                 )
             elif nt_view_name == "base_is_nt_False_leaf_False_True":
                 self.assertExpectedInline(
                     guard_str,
                     """\
-Eq(s85 - 1, s64)
-Eq(s20, s64)
-Eq(s80 - 1, s77)
-Eq(s72, s71)""",
+Eq(s85 - 1, s77)
+Eq(s20, s77)
+Eq(s64, s20)""",
                 )
             elif nt_view_name == "base_is_nt_False_leaf_True_False":
                 self.assertExpectedInline(
                     guard_str,
                     """\
-Eq(s85 - 1, s64)
-Eq(s20, s64)
-Eq(s80 - 1, s77)
-Eq(s72, s71)""",
+Eq(s85 - 1, s77)
+Eq(s20, s77)
+Eq(s64, s20)""",
                 )
             elif nt_view_name == "base_is_nt_False_leaf_True_True":
                 self.assertExpectedInline(
                     guard_str,
                     """\
-Eq(s85 - 1, s64)
-Eq(s20, s64)
-Eq(s80 - 1, s77)
-Eq(s72, s71)""",
+Eq(s85 - 1, s77)
+Eq(s20, s77)
+Eq(s64, s20)""",
                 )
             elif nt_view_name == "base_is_nt_False_obscure":
                 self.assertExpectedInline(
                     guard_str,
                     """\
-Eq(s85 - 1, s64)
-Eq(s20, s64)
-Eq(s80 - 1, s77)
-Eq(s72, s71)""",
+Eq(s85 - 1, s77)
+Eq(s20, s77)
+Eq(s64, s20)""",
                 )
             elif nt_view_name == "base_is_nt_True_basic":
                 self.assertExpectedInline(
                     guard_str,
                     """\
 Eq(s17 - 1, s83)
-Eq(s20, s83)""",
+Eq(s58, s21)
+Eq(s83, s77)
+Eq(s20, s77)
+Eq(s21, s20)""",
                 )
             elif nt_view_name == "base_is_nt_True_leaf_False_False":
                 self.assertExpectedInline(
                     guard_str,
-                    """Eq(s17 - 1, s83)""",
+                    """\
+Eq(s17 - 1, s83)
+Eq(s58, s21)
+Eq(s83, s77)
+Eq(s21, s77)""",
                 )
             elif nt_view_name == "base_is_nt_True_leaf_False_True":
                 self.assertExpectedInline(
                     guard_str,
                     """\
 Eq(s17 - 1, s83)
-Eq(s20, s83)""",
+Eq(s58, s21)
+Eq(s83, s77)
+Eq(s20, s77)
+Eq(s21, s20)""",
                 )
             elif nt_view_name == "base_is_nt_True_leaf_True_False":
                 self.assertExpectedInline(
                     guard_str,
                     """\
 Eq(s17 - 1, s83)
-Eq(s20, s83)""",
+Eq(s58, s21)
+Eq(s83, s77)
+Eq(s20, s77)
+Eq(s21, s20)""",
                 )
             elif nt_view_name == "base_is_nt_True_leaf_True_True":
                 self.assertExpectedInline(
                     guard_str,
                     """\
 Eq(s17 - 1, s83)
-Eq(s20, s83)""",
+Eq(s58, s21)
+Eq(s83, s77)
+Eq(s20, s77)
+Eq(s21, s20)""",
                 )
             elif nt_view_name == "base_is_nt_True_obscure":
                 self.assertExpectedInline(
                     guard_str,
                     """\
 Eq(s17 - 1, s83)
-Eq(s20, s83)""",
+Eq(s58, s21)
+Eq(s83, s77)
+Eq(s20, s77)
+Eq(s21, s20)""",
                 )
             elif nt_view_name == "dense_subclass_dense_subclass":
                 self.assertExpectedInline(
                     guard_str,
                     """\
 Eq(s85 - 1, s77)
-Eq(s80 - 1, s78)
-Eq(s72, s71)""",
+Eq(s64, s53)""",
                 )
             elif nt_view_name == "subclass_dense":
                 self.assertExpectedInline(
@@ -4714,7 +4736,7 @@ Eq(s20, s77)""",
 class GraphModule(torch.nn.Module):
     def forward(
         self,
-        primals_1: "f64[s64, s55]",  # SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='_values')
+        primals_1: "f64[s65, s55]",  # SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='_values')
         primals_2: "i64[s51 + 1]",  # SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='_offsets')
         primals_3: "f32[s0, 0]",  # SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='_min_seqlen_tensor')
         primals_4: "f32[s83, 0]",  # SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='_max_seqlen_tensor')
@@ -4725,9 +4747,9 @@ class GraphModule(torch.nn.Module):
         primals_9: "Sym(s71)",  # PlainAOTInput(idx=2)
         primals_10: "Sym(s55)",  # PlainAOTInput(idx=3)
     ):
-        clone: "f64[s64, s55]" = torch.ops.aten.clone.default(primals_1);  primals_1 = None
+        clone: "f64[s65, s55]" = torch.ops.aten.clone.default(primals_1);  primals_1 = None
 
-        mul: "f64[s64, s55]" = torch.ops.aten.mul.Tensor(clone, primals_8);  clone = None
+        mul: "f64[s65, s55]" = torch.ops.aten.mul.Tensor(clone, primals_8);  clone = None
         return (
             mul,  # SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='_values')
             primals_2,  # SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='_offsets')
@@ -4738,6 +4760,7 @@ class GraphModule(torch.nn.Module):
             primals_10,  # SubclassStrideAOTOutput(base=PlainAOTOutput(idx=0), idx=1)
             primals_8,  # SavedForBackwardsAOTOutput(idx=0)
             primals_10,  # SavedForBackwardsAOTOutput(idx=1)
+            primals_6,  # SavedForBackwardsAOTOutput(idx=2)
         )
 """,
         )
@@ -4750,12 +4773,13 @@ class GraphModule(torch.nn.Module):
         self,
         primals_8: "Sym(s51)",  # PlainAOTInput(idx=1)
         primals_10: "Sym(s55)",  # PlainAOTInput(idx=3)
-        tangents_1: "f64[s64, s55]",  # SubclassGetAttrAOTInput(base=TangentAOTInput(output=PlainAOTOutput(idx=0)), attr='_values')
+        primals_6: "Sym(s55)",  # SubclassSizeAOTInput(base=PlainAOTInput(idx=0), idx=2)
+        tangents_1: "f64[s65, s55]",  # SubclassGetAttrAOTInput(base=TangentAOTInput(output=PlainAOTOutput(idx=0)), attr='_values')
         tangents_2: "i64[s51 + 1]",  # SubclassGetAttrAOTInput(base=TangentAOTInput(output=PlainAOTOutput(idx=0)), attr='_offsets')
         tangents_3: "f32[s0, 0]",  # SubclassGetAttrAOTInput(base=TangentAOTInput(output=PlainAOTOutput(idx=0)), attr='_min_seqlen_tensor')
         tangents_4: "f32[s83, 0]",  # SubclassGetAttrAOTInput(base=TangentAOTInput(output=PlainAOTOutput(idx=0)), attr='_max_seqlen_tensor')
     ):
-        mul_1: "f64[s64, s55]" = torch.ops.aten.mul.Tensor(tangents_1, primals_8);  tangents_1 = None
+        mul_1: "f64[s65, s55]" = torch.ops.aten.mul.Tensor(tangents_1, primals_8);  tangents_1 = None
         return (
             mul_1,  # SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=0)), attr='_values')
             tangents_2,  # SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=0)), attr='_offsets')
@@ -4787,7 +4811,7 @@ class GraphModule(torch.nn.Module):
 class GraphModule(torch.nn.Module):
     def forward(
         self,
-        primals_1: "f64[s64, s55]",  # SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='_values')
+        primals_1: "f64[s65, s55]",  # SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='_values')
         primals_2: "i64[s51 + 1]",  # SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='_offsets')
         primals_3: "f32[s0, 0]",  # SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='_min_seqlen_tensor')
         primals_4: "f32[s83, 0]",  # SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='_max_seqlen_tensor')
@@ -4798,9 +4822,9 @@ class GraphModule(torch.nn.Module):
         primals_9: "Sym(s71)",  # PlainAOTInput(idx=2)
         primals_10: "Sym(s55)",  # PlainAOTInput(idx=3)
     ):
-        clone: "f64[s64, s55]" = torch.ops.aten.clone.default(primals_1);  primals_1 = None
+        clone: "f64[s65, s55]" = torch.ops.aten.clone.default(primals_1);  primals_1 = None
 
-        cat: "f64[s64, 2*s55]" = torch.ops.aten.cat.default([clone, clone], 1);  clone = None
+        cat: "f64[s65, 2*s55]" = torch.ops.aten.cat.default([clone, clone], 1);  clone = None
 
         add_2: "Sym(2*s55)" = primals_10 + primals_10
         return (
@@ -4827,14 +4851,14 @@ class GraphModule(torch.nn.Module):
         primals_8: "Sym(s51)",  # PlainAOTInput(idx=1)
         primals_10: "Sym(s55)",  # PlainAOTInput(idx=3)
         add_2: "Sym(2*s55)",
-        tangents_1: "f64[s64, 2*s55]",  # SubclassGetAttrAOTInput(base=TangentAOTInput(output=PlainAOTOutput(idx=0)), attr='_values')
+        tangents_1: "f64[s65, 2*s55]",  # SubclassGetAttrAOTInput(base=TangentAOTInput(output=PlainAOTOutput(idx=0)), attr='_values')
         tangents_2: "i64[s51 + 1]",  # SubclassGetAttrAOTInput(base=TangentAOTInput(output=PlainAOTOutput(idx=0)), attr='_offsets')
         tangents_3: "f32[s0, 0]",  # SubclassGetAttrAOTInput(base=TangentAOTInput(output=PlainAOTOutput(idx=0)), attr='_min_seqlen_tensor')
         tangents_4: "f32[s83, 0]",  # SubclassGetAttrAOTInput(base=TangentAOTInput(output=PlainAOTOutput(idx=0)), attr='_max_seqlen_tensor')
     ):
-        slice_1: "f64[s64, s55]" = torch.ops.aten.slice.Tensor(tangents_1, 1, 0, primals_10)
-        slice_2: "f64[s64, s55]" = torch.ops.aten.slice.Tensor(tangents_1, 1, primals_10, add_2);  tangents_1 = add_2 = None
-        add_4: "f64[s64, s55]" = torch.ops.aten.add.Tensor(slice_1, slice_2);  slice_1 = slice_2 = None
+        slice_1: "f64[s65, s55]" = torch.ops.aten.slice.Tensor(tangents_1, 1, 0, primals_10)
+        slice_2: "f64[s65, s55]" = torch.ops.aten.slice.Tensor(tangents_1, 1, primals_10, add_2);  tangents_1 = add_2 = None
+        add_4: "f64[s65, s55]" = torch.ops.aten.add.Tensor(slice_1, slice_2);  slice_1 = slice_2 = None
         return (
             add_4,  # SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=0)), attr='_values')
             tangents_2,  # SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=0)), attr='_offsets')
