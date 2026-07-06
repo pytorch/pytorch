@@ -16,6 +16,7 @@ import types
 import unittest
 import warnings
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Any, cast
 from typing_extensions import override
 from unittest import mock
@@ -200,6 +201,7 @@ class TestCacheKeyStrategy(TestCase):
                     fake_strategy,
                 ),
                 mock.patch("torch._inductor.runtime.triton_compat.HAS_TRITON", False),
+                mock.patch.object(torch.cuda, "is_initialized", return_value=True),
                 mock.patch.object(torch.cuda, "current_device", return_value=0),
                 mock.patch.object(
                     torch.cuda,
@@ -220,6 +222,118 @@ class TestCacheKeyStrategy(TestCase):
             },
         )
         self.assertTrue(fake_strategy.sort_keys)
+
+    def test_cache_base_get_system_uninitialized_does_not_poison_cache(self):
+        class FakeStrategy:
+            values = []
+
+            def key_from_json(self, value, *, sort_keys=True):
+                self.values.append(copy.deepcopy(value))
+                return f"sentinel-{len(self.values)}"
+
+        fake_strategy = FakeStrategy()
+        device_properties = types.SimpleNamespace(
+            name="test-gpu", gcnArchName="test-gcn"
+        )
+
+        CacheBase.get_system.cache_clear()
+        try:
+            with (
+                mock.patch(
+                    "torch._inductor.codecache.SYSTEM_CACHE_KEY_STRATEGY",
+                    fake_strategy,
+                ),
+                mock.patch("torch._inductor.runtime.triton_compat.HAS_TRITON", False),
+                mock.patch.object(
+                    torch.cuda,
+                    "is_initialized",
+                    side_effect=[False, True],
+                ),
+                mock.patch.object(torch.cuda, "current_device", return_value=0),
+                mock.patch.object(
+                    torch.cuda,
+                    "get_device_properties",
+                    return_value=device_properties,
+                ),
+                mock.patch.object(torch.version, "cuda", "test-cuda"),
+            ):
+                self.assertEqual(CacheBase.get_system()["hash"], "sentinel-1")
+                self.assertEqual(CacheBase.get_system()["hash"], "sentinel-2")
+        finally:
+            CacheBase.get_system.cache_clear()
+
+        self.assertEqual(
+            fake_strategy.values,
+            [
+                {},
+                {
+                    "device": {"name": "test-gpu"},
+                    "version": {"triton": None, "cuda": "test-cuda"},
+                },
+            ],
+        )
+
+    def test_cache_base_get_local_cache_path_uninitialized_does_not_poison_cache(self):
+        class FakeStrategy:
+            values = []
+
+            def key_from_json(self, value, *, sort_keys=True):
+                self.values.append(copy.deepcopy(value))
+                return f"sentinel-{len(self.values)}"
+
+        fake_strategy = FakeStrategy()
+        device_properties = types.SimpleNamespace(
+            name="test-gpu", gcnArchName="test-gcn"
+        )
+        cache_root = os.path.join(tempfile.gettempdir(), "test-inductor-cache")
+
+        CacheBase.get_system.cache_clear()
+        CacheBase._get_local_cache_path_cached.cache_clear()
+        try:
+            with (
+                mock.patch(
+                    "torch._inductor.codecache.SYSTEM_CACHE_KEY_STRATEGY",
+                    fake_strategy,
+                ),
+                mock.patch(
+                    "torch._inductor.codecache.cache_dir", return_value=cache_root
+                ),
+                mock.patch("torch._inductor.runtime.triton_compat.HAS_TRITON", False),
+                mock.patch.object(
+                    torch.cuda,
+                    "is_initialized",
+                    side_effect=[False, True, True],
+                ),
+                mock.patch.object(torch.cuda, "current_device", return_value=0),
+                mock.patch.object(
+                    torch.cuda,
+                    "get_device_properties",
+                    return_value=device_properties,
+                ),
+                mock.patch.object(torch.version, "cuda", "test-cuda"),
+            ):
+                self.assertEqual(
+                    CacheBase.get_local_cache_path(),
+                    Path(os.path.join(cache_root, "cache", "sentinel-1")),
+                )
+                self.assertEqual(
+                    CacheBase.get_local_cache_path(),
+                    Path(os.path.join(cache_root, "cache", "sentinel-2")),
+                )
+        finally:
+            CacheBase.get_system.cache_clear()
+            CacheBase._get_local_cache_path_cached.cache_clear()
+
+        self.assertEqual(
+            fake_strategy.values,
+            [
+                {},
+                {
+                    "device": {"name": "test-gpu"},
+                    "version": {"triton": None, "cuda": "test-cuda"},
+                },
+            ],
+        )
 
     def test_autotune_prepare_key_uses_strategy(self):
         from torch._inductor.runtime.autotune_cache import AutotuneCache

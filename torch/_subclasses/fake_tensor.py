@@ -1632,16 +1632,19 @@ class FakeTensorMode(TorchDispatchMode):
     #   (see NOTE: [torch.tensor, lift_fresh, and device movement])
     @property
     def avoid_device_init(self) -> bool:
+        def has_eagerly_available_backend() -> bool:
+            return (hasattr(torch, "hpu") and torch.hpu.is_available()) or bool(
+                _is_privateuse1_backend_available()
+            )
+
         if torch.xpu._is_compiled():
             if torch.cuda._is_compiled():
                 raise AssertionError("Cannot have both xpu and cuda compiled")
-            return not torch.xpu.is_available()
+            return not (torch.xpu.is_initialized() or has_eagerly_available_backend())
+        if torch.cuda._is_compiled():
+            return not (torch.cuda.is_initialized() or has_eagerly_available_backend())
 
-        return not (
-            torch.cuda.is_available()
-            or (hasattr(torch, "hpu") and torch.hpu.is_available())
-            or _is_privateuse1_backend_available()
-        )
+        return not (torch.cuda.is_available() or has_eagerly_available_backend())
 
     @property
     def stack(self) -> str:
