@@ -402,6 +402,10 @@ _DEFAULT_SPARSE_BLOCK_SIZE = 128
 _LARGE_SPARSE_BLOCK_SIZE = 1 << 30
 
 
+def _cdiv(a: int, b: int) -> int:
+    return (a + b - 1) // b
+
+
 def _ordered_to_dense(
     num_blocks_in_row: Tensor, col_indices: Tensor, num_cols: int
 ) -> Tensor:
@@ -1398,13 +1402,15 @@ class BlockMask:
 
     def sparsity(self) -> float:
         """Computes the percentage of blocks that are sparse (i.e. not computed)"""
-        total_size = self.numel()
+        total_blocks = math.prod(self.kv_num_blocks.shape[:-1])
+        for seq_len, block_size in zip(self.seq_lengths, self.BLOCK_SIZE, strict=True):
+            total_blocks *= _cdiv(seq_len, block_size)
+
         computed_blocks = self.kv_num_blocks.sum()
         if self.full_kv_num_blocks is not None:
             computed_blocks += self.full_kv_num_blocks.sum()
 
-        computed_size = computed_blocks.item() * self.BLOCK_SIZE[0] * self.BLOCK_SIZE[1]
-        dense_ratio = computed_size / total_size
+        dense_ratio = computed_blocks.item() / total_blocks
         return 100 * (1 - dense_ratio)
 
     def to_dense(self) -> Tensor:
@@ -1457,11 +1463,8 @@ class BlockMask:
                 else:
                     return "░"
 
-            def cdiv(a, b):
-                return (a + (b - 1)) // b
-
-            row_step = max(1, cdiv(num_rows, max_rows))
-            col_step = max(1, cdiv(num_cols, max_cols))
+            row_step = max(1, _cdiv(num_rows, max_rows))
+            col_step = max(1, _cdiv(num_cols, max_cols))
 
             for r in range(0, num_rows, row_step):
                 for c in range(0, num_cols, col_step):
@@ -2139,10 +2142,10 @@ def _apply_kernel_options(
             "Use return_aux=AuxRequest(lse=True) or omit max_scores."
         )
     kernel_options["OUTPUT_MAX"] = output_max
-    if (any_inputs_on_cpu_device or any_inputs_on_mps_device) and output_max:
-        # CPU/MPS don't support returning max yet
-        # TODO: support CPU/MPS for returning max
-        raise NotImplementedError("Returning max scores is not supported on CPU/MPS.")
+    if any_inputs_on_cpu_device and output_max:
+        # CPU doesn't support returning max yet
+        # TODO: support CPU for returning max
+        raise NotImplementedError("Returning max scores is not supported on CPU.")
 
     return kernel_options
 
