@@ -381,6 +381,20 @@ Tensor fn_square_impl(const Tensor& tensor) {
 Tensor fn_square_meta(const Tensor& tensor) {
   return at::empty_like(tensor);
 }
+
+// Optional (Tensor?) output: nullopt at runtime while its meta reports a
+// tensor. Reproduces the cpp_wrapper null-handle assert_size_stride crash.
+std::tuple<Tensor, std::optional<Tensor>> fn_optional_output_impl(
+    const Tensor& x) {
+  return {x + 1, std::nullopt};
+}
+
+std::tuple<Tensor, std::optional<Tensor>> fn_optional_output_meta(
+    const Tensor& x) {
+  // Distinct shape (11, 13) for the optional output so its assert_size_stride
+  // is identifiable in the generated code.
+  return {at::empty_like(x), at::empty({11, 13}, x.options())};
+}
 } // namespace at
 
 
@@ -415,6 +429,58 @@ extern "C" {
       auto tmp_result = at::fn_square_impl(
           torch::aot_inductor::resolve_tensor_dispatch_flags(input));
       *ret = torch::aot_inductor::new_tensor_handle(std::move(tmp_result));
+    });
+  }
+
+  // ret1 is the optional output; impl returns nullopt -> write a null handle.
+  AOTI_TORCH_EXPORT AOTITorchError
+  aoti_torch_cpu_fn_optional_output(
+      AtenTensorHandle x,
+      AtenTensorHandle* ret0,
+      AtenTensorHandle* ret1) {
+    AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+      auto result = at::fn_optional_output_impl(
+          torch::aot_inductor::resolve_tensor_dispatch_flags(x));
+      *ret0 =
+          torch::aot_inductor::new_tensor_handle(std::move(std::get<0>(result)));
+      auto& opt = std::get<1>(result);
+      *ret1 = opt.has_value()
+          ? torch::aot_inductor::new_tensor_handle(std::move(*opt))
+          : nullptr;
+    });
+  }
+
+  AOTI_TORCH_EXPORT AOTITorchError
+  aoti_torch_cuda_fn_optional_output(
+      AtenTensorHandle x,
+      AtenTensorHandle* ret0,
+      AtenTensorHandle* ret1) {
+    AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+      auto result = at::fn_optional_output_impl(
+          torch::aot_inductor::resolve_tensor_dispatch_flags(x));
+      *ret0 =
+          torch::aot_inductor::new_tensor_handle(std::move(std::get<0>(result)));
+      auto& opt = std::get<1>(result);
+      *ret1 = opt.has_value()
+          ? torch::aot_inductor::new_tensor_handle(std::move(*opt))
+          : nullptr;
+    });
+  }
+
+  AOTI_TORCH_EXPORT AOTITorchError
+  aoti_torch_xpu_fn_optional_output(
+      AtenTensorHandle x,
+      AtenTensorHandle* ret0,
+      AtenTensorHandle* ret1) {
+    AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+      auto result = at::fn_optional_output_impl(
+          torch::aot_inductor::resolve_tensor_dispatch_flags(x));
+      *ret0 =
+          torch::aot_inductor::new_tensor_handle(std::move(std::get<0>(result)));
+      auto& opt = std::get<1>(result);
+      *ret1 = opt.has_value()
+          ? torch::aot_inductor::new_tensor_handle(std::move(*opt))
+          : nullptr;
     });
   }
 }
@@ -466,6 +532,7 @@ TORCH_LIBRARY(aoti_custom_ops, m) {
 
   m.def("fn_out_variant_without_return(Tensor x, Tensor(a!) out) -> ()");
   m.def("fn_square(Tensor x) -> Tensor");
+  m.def("fn_optional_output(Tensor x) -> (Tensor, Tensor?)");
 }
 
 TORCH_LIBRARY_IMPL(aoti_custom_ops, CompositeExplicitAutograd, m) {
@@ -482,6 +549,7 @@ TORCH_LIBRARY_IMPL(aoti_custom_ops, CompositeExplicitAutograd, m) {
   m.impl("fn_with_input_mutation", at::fn_with_input_mutation_impl);
   m.impl("fn_out_variant_without_return", at::fn_out_variant_without_return_impl);
   m.impl("fn_square", at::fn_square_impl);
+  m.impl("fn_optional_output", at::fn_optional_output_impl);
 }
 
 TORCH_LIBRARY_IMPL(aoti_custom_ops, Meta, m) {
@@ -497,4 +565,5 @@ TORCH_LIBRARY_IMPL(aoti_custom_ops, Meta, m) {
   m.impl("fn_with_input_mutation", at::fn_with_input_mutation_meta);
   m.impl("fn_out_variant_without_return", at::fn_out_variant_without_return_meta);
   m.impl("fn_square", at::fn_square_meta);
+  m.impl("fn_optional_output", at::fn_optional_output_meta);
 }
