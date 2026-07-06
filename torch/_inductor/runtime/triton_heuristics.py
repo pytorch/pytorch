@@ -38,13 +38,14 @@ from torch._inductor.config import triton as inductor_triton_config
 from torch._prims_common import compute_required_storage_length
 from torch.utils._debug_mode import get_active_debug_mode
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._triton import get_triton_version
+from torch.utils._triton import get_triton_version, has_triton_stable_tma_api
 
 from ..triton_bundler import TritonBundler
 from ..utils import (
     GPU_KERNEL_BIN_EXTS,
     prefix_is_reduction,
     tlx_only_cuda_options,
+    TMA_ALIGNMENT,
     triton_version_uses_attrs_dict,
     XPU_KERNEL_FORMAT,
 )
@@ -195,6 +196,42 @@ def get_total_reduction_numel(numels: dict[str, int]) -> int:
     return conditional_product(
         *[numel for prefix, numel in numels.items() if prefix_is_reduction(prefix)]
     )
+
+
+def _resolve_dims(dims, cfg_kwargs, constants):
+    """Resolve a list of block/shape/stride dims to concrete ints."""
+    result = []
+    for s in dims:
+        if isinstance(s, int):
+            result.append(s)
+        elif isinstance(s, str) and s in constants:
+            result.append(int(constants[s]))
+        elif isinstance(s, str) and s in cfg_kwargs:
+            result.append(int(cfg_kwargs[s]))
+        else:
+            log.debug("host-side TMA: unresolved descriptor dim %r; skipping", s)
+            return None
+    return result
+
+
+@functools.lru_cache(None)
+def _warn_host_tma_clone(name: str) -> None:
+    log.warning(
+        "host-side TMA: input %s is not %d-byte aligned; cloning it (an extra "
+        "copy per launch). Pass aligned inputs to avoid this.",
+        name,
+        TMA_ALIGNMENT,
+    )
+
+
+def _host_tma_aligned(tensor, name):
+    """Return a TMA_ALIGNMENT-aligned view of `tensor`, cloning (with a one-time
+    warning) only if its base address is not aligned. Used by the host-side TMA
+    launcher to build TensorDescriptors from aligned storage."""
+    if tensor.data_ptr() % TMA_ALIGNMENT == 0:
+        return tensor
+    _warn_host_tma_clone(name)
+    return tensor.clone()
 
 
 def autotune_hints_to_configs(
@@ -1167,6 +1204,40 @@ class CachingAutotuner(KernelInterface):
             compile_meta["num_buffers_warp_spec"] = getattr(
                 cfg, "num_buffers_warp_spec", 0
             )
+
+        host_tma_args = self.inductor_meta.get("host_tma_descriptor_args")
+        if host_tma_args:
+            all_constants = compile_meta["constants"]
+            for key in list(compile_meta["signature"]):
+                desc_info = host_tma_args.get(key)
+                if desc_info is None or not isinstance(desc_info, dict):
+                    continue
+                block_shape_vals = _resolve_dims(
+                    desc_info["block_shape"], cfg_kwargs, all_constants
+                )
+                shape_vals = _resolve_dims(
+                    desc_info["shape"], cfg_kwargs, all_constants
+                )
+                stride_vals = _resolve_dims(
+                    desc_info["strides"], cfg_kwargs, all_constants
+                )
+                if (
+                    block_shape_vals is None
+                    or shape_vals is None
+                    or stride_vals is None
+                    or any(v <= 0 for v in block_shape_vals)
+                ):
+                    continue
+                ty = compile_meta["signature"][key]
+                if isinstance(ty, str) and ty.startswith("*"):
+                    dtype_str = ty[1:]
+                elif isinstance(ty, str) and ty.startswith("tensordesc<"):
+                    dtype_str = ty.split("<")[1].split("[")[0]
+                else:
+                    continue
+                compile_meta["signature"][key] = (
+                    f"tensordesc<{dtype_str}{list(block_shape_vals)}>"
+                )
 
         compile_meta["debug"] = _should_enable_triton_debug_asserts(self.inductor_meta)
 
@@ -2627,7 +2698,9 @@ class CompileResult(Generic[_T]):
 
     def make_launcher(self) -> LauncherType: ...
 
-    def _gen_launcher_code(self, scope, def_args, runner_args) -> LauncherType:
+    def _gen_launcher_code(
+        self, scope, def_args, runner_args, pre_runner_lines=None
+    ) -> LauncherType:
         grid = GridExpr.from_meta(self.inductor_meta, self.config)
         # grid.prefix is usually empty, grid.x_grid is something like `-(xnumel//-1024)`
         lines = [
@@ -2636,6 +2709,7 @@ class CompileResult(Generic[_T]):
             f"    grid_0 = {grid.x_grid}",
             f"    grid_1 = {grid.y_grid}",
             f"    grid_2 = {grid.z_grid}",
+            *(f"    {l}" for l in (pre_runner_lines or [])),
             f"    runner({', '.join(runner_args)})",
         ]
         launcher_code = "\n".join(lines)
@@ -3091,7 +3165,53 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
                 *call_args,
             ]
 
-        launcher = self._gen_launcher_code(scope, def_args, runner_args)
+        host_tma_args = self.inductor_meta.get("host_tma_descriptor_args")
+        pre_runner_lines: list[str] = []
+        if host_tma_args:
+            if not has_triton_stable_tma_api():
+                raise RuntimeError(
+                    "host-side TMA requires a Triton with the stable TMA API "
+                    "(triton.tools.tensor_descriptor.TensorDescriptor)"
+                )
+            from triton.tools.tensor_descriptor import TensorDescriptor
+
+            scope["_host_tma_aligned"] = _host_tma_aligned
+            scope["TensorDescriptor"] = TensorDescriptor
+            cfg_kwargs = cfg.kwargs
+            all_constants = compile_meta["constants"]
+
+            for inner_name, desc_info in host_tma_args.items():
+                if inner_name not in call_args or not isinstance(desc_info, dict):
+                    continue
+                block_shape_vals = _resolve_dims(
+                    desc_info["block_shape"], cfg_kwargs, all_constants
+                )
+                shape_vals = _resolve_dims(
+                    desc_info["shape"], cfg_kwargs, all_constants
+                )
+                stride_vals = _resolve_dims(
+                    desc_info["strides"], cfg_kwargs, all_constants
+                )
+                if (
+                    block_shape_vals is None
+                    or shape_vals is None
+                    or stride_vals is None
+                ):
+                    continue
+                desc_var = f"{inner_name}_host_tma_desc"
+                aligned_var = f"{inner_name}_aligned"
+                pre_runner_lines.append(
+                    f'{aligned_var} = _host_tma_aligned({inner_name}, "{inner_name}")'
+                )
+                pre_runner_lines.append(
+                    f"{desc_var} = TensorDescriptor({aligned_var}, {shape_vals},"
+                    f" {stride_vals}, {block_shape_vals})"
+                )
+                runner_args = [desc_var if a == inner_name else a for a in runner_args]
+
+        launcher = self._gen_launcher_code(
+            scope, def_args, runner_args, pre_runner_lines=pre_runner_lines
+        )
 
         launcher = scope["launcher"]
         launcher.config = cfg
