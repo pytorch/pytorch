@@ -486,12 +486,14 @@ static PyObject* pyobject_dispatch_vectorcall(
   auto* self = reinterpret_cast<PyObjectDispatchFunc*>(callable);
   Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
   Py_ssize_t nkwargs = kwnames == nullptr ? 0 : PyTuple_GET_SIZE(kwnames);
+  bool skip_torch_function = torch::peek_should_skip_torch_function();
   if (C10_UNLIKELY(
+          !skip_torch_function &&
           pyobject_dispatch_has_torch_function(args, nargs, nkwargs, 0))) {
     return PyObject_Vectorcall(
         self->cpp_dispatch_fn, args, static_cast<size_t>(nargs), kwnames);
   }
-  if (C10_UNLIKELY(torch::peek_should_skip_torch_function())) {
+  if (C10_UNLIKELY(skip_torch_function)) {
     torch::consume_should_skip_torch_function();
   }
   c10::SmallVector<PyObject*, 64> normalized_args;
@@ -510,6 +512,9 @@ static PyObject* pyobject_dispatch_vectorcall(
       normalized_args.empty() ? args : normalized_args.data();
   auto key_set = pyobject_dispatch_compute_keyset(
       self->handle->dispatchKeyExtractor(), op_args, nargs);
+  if (C10_UNLIKELY(skip_torch_function)) {
+    key_set = key_set.remove(c10::DispatchKey::Python);
+  }
   return pyobject_dispatch_with_keyset(
       self, key_set, op_args, nargs, kwnames, 0);
   END_HANDLE_TH_ERRORS
@@ -524,12 +529,14 @@ static PyObject* pyobject_redispatch_vectorcall(
   auto* self = reinterpret_cast<PyObjectRedispatchFunc*>(callable);
   Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
   Py_ssize_t nkwargs = kwnames == nullptr ? 0 : PyTuple_GET_SIZE(kwnames);
+  bool skip_torch_function = torch::peek_should_skip_torch_function();
   if (C10_UNLIKELY(
+          !skip_torch_function &&
           pyobject_dispatch_has_torch_function(args, nargs, nkwargs, 1))) {
     return PyObject_Vectorcall(
         self->cpp_redispatch_fn, args, static_cast<size_t>(nargs), kwnames);
   }
-  if (C10_UNLIKELY(torch::peek_should_skip_torch_function())) {
+  if (C10_UNLIKELY(skip_torch_function)) {
     torch::consume_should_skip_torch_function();
   }
   if (nargs == 0) {
@@ -549,6 +556,9 @@ static PyObject* pyobject_redispatch_vectorcall(
     return nullptr;
   }
   auto key_set = c10::DispatchKeySet::from_raw_repr(raw_repr);
+  if (C10_UNLIKELY(skip_torch_function)) {
+    key_set = key_set.remove(c10::DispatchKey::Python);
+  }
   return pyobject_dispatch_with_keyset(self, key_set, args, nargs, kwnames, 1);
   END_HANDLE_TH_ERRORS
 }
