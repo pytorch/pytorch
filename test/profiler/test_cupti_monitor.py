@@ -684,7 +684,7 @@ class TestWindowFinalizer(TestCase):
             # _poll_once() by hand for determinism.
             self._init_observation_window(poll_interval_ms=3_600_000)
 
-        def now_native_ns(self) -> int:
+        def now_record_ns(self) -> int:
             return self._clock
 
         def deliver(self, *starts: int) -> None:
@@ -1804,9 +1804,9 @@ class TestCuptiClock(TestCase):
         clock = _SynchronizedClock()
         clock.calibrate(callback_active=False, native_now=self._realtime)
         v = self._realtime() + 12_345
-        self.assertEqual(clock.convert(v), v)
+        self.assertEqual(clock.convert_unix(v), v)
         col = np.array([self._realtime(), 0, self._realtime() + 50], dtype=np.int64)
-        np.testing.assert_array_equal(clock.convert_array(col), col)
+        np.testing.assert_array_equal(clock.convert_unix_array(col), col)
 
     def test_callback_scales_approx_ticks_to_unix(self):
         # Timestamp-callback path: records are approx ticks. calibrate() recovers the
@@ -1823,12 +1823,34 @@ class TestCuptiClock(TestCase):
         a0 = clock.approx_anchor_ns
         ticks = [a0, a0 + 1000, a0 + 10_000_000, a0 + 5_000_000_000]
         for t in ticks:
-            self.assertLessEqual(abs(clock.convert(t) - conv.to_unix_ns(t)), 2)
+            self.assertLessEqual(abs(clock.convert_approx(t) - conv.to_unix_ns(t)), 2)
         col = np.array([*ticks, 0], dtype=np.int64)
-        got = clock.convert_array(col)
+        got = clock.convert_approx_array(col)
         self.assertEqual(int(got[-1]), 0)  # 0 sentinel preserved
         for i, t in enumerate(ticks):
             self.assertLessEqual(abs(int(got[i]) - conv.to_unix_ns(t)), 2)
+
+    def test_unix_array_bypasses_callback_scaling(self):
+        # PM-sampling frames stay on the unix (CLOCK_REALTIME) domain even under the timestamp
+        # callback, which moves *records* to the approx domain. convert_unix_array applies the
+        # native->unix offset (~identity here, since native == realtime == unix), so native ns
+        # land back on ~themselves and 0 stays 0 -- whereas convert_approx_array (the record path
+        # under the callback) would misread the same column as approx ticks and diverge wildly.
+        import numpy as np
+
+        from torch.profiler._cupti.monitor import _SynchronizedClock
+
+        conv = torch._C._profiler._ApproximateClockToUnixTimeConverter()
+        clock = _SynchronizedClock()
+        clock.calibrate(callback_active=True, native_now=self._realtime, converter=conv)
+        col = np.array(
+            [self._realtime(), 0, self._realtime() + 1_000_000], dtype=np.int64
+        )
+        got = clock.convert_unix_array(col)
+        self.assertEqual(int(got[1]), 0)  # 0 sentinel preserved
+        for i in (0, 2):
+            self.assertLessEqual(abs(int(got[i]) - int(col[i])), 100_000)
+        self.assertFalse(np.array_equal(clock.convert_approx_array(col), got))
 
 
 if __name__ == "__main__":

@@ -180,45 +180,42 @@ class _SynchronizedClock:
             self._unix_ns = self._native_ns
             self._scale = 1.0
 
-    def convert(self, value: int) -> int:
-        # Record clock -> unix. Identity until calibrated (and for the 0 sentinel).
+    # A timestamp is in one of two source domains -- approx-clock ticks or CLOCK_REALTIME/unix --
+    # and both map to unix; these are the two conversion primitives (0, and the uncalibrated
+    # state, always map to itself). Which domain a record is in depends on the timestamp callback,
+    # so the record dispatch lives in CuptiMonitor.convert_time[_array], not here.
+
+    def convert_approx(self, value: int) -> int:
+        # Approx-clock tick -> unix ns via the recovered converter slope.
         if value == 0 or self._native_ns == 0:
             return value
-        if self._callback_active:
-            return self._unix_ns + int((value - self._approx_ns) * self._scale)
-        return value - self._native_ns + self._unix_ns
+        return self._unix_ns + int((value - self._approx_ns) * self._scale)
 
-    def convert_array(self, values: np.ndarray) -> np.ndarray:
-        # Vectorized convert over a whole record column; 0 (and uncalibrated) maps to itself.
-        out = values.astype(np.int64)
-        if self._native_ns == 0:
-            return out
-        if self._callback_active:
-            # Approx-clock ticks; scale to unix ns. Keep the delta in float (small magnitude)
-            # and add the unix anchor as int64 -- adding at the ~1e18 unix magnitude in
-            # float64 would lose ~us of precision.
-            delta = ((out - self._approx_ns).astype(np.float64) * self._scale).astype(
-                np.int64
-            )
-            return np.where(out == 0, out, self._unix_ns + delta)
-        offset = self._unix_ns - self._native_ns
-        return np.where(out == 0, out, out + offset)
-
-    def convert_native(self, value: int) -> int:
-        # Native cuptiGetTimestamp clock -> unix. Used for PM-sampling frames, which stay on
-        # the native clock even when the record timestamp callback is active.
+    def convert_unix(self, value: int) -> int:
+        # Native cuptiGetTimestamp clock (CLOCK_REALTIME) -> unix ns: a constant offset.
         if value == 0 or self._native_ns == 0:
             return value
         return value - self._native_ns + self._unix_ns
 
-    def convert_native_array(self, values: np.ndarray) -> np.ndarray:
+    def convert_approx_array(self, values: np.ndarray) -> np.ndarray:
+        # Vectorized convert_approx. Keep the delta in float (small magnitude) and add the unix
+        # anchor as int64 -- adding at the ~1e18 unix magnitude in float64 would lose ~us.
+        out = values.astype(np.int64)
+        if self._native_ns == 0:
+            return out
+        ticks = (out - self._approx_ns).astype(np.float64)
+        delta = (ticks * self._scale).astype(np.int64)
+        return np.where(out == 0, out, self._unix_ns + delta)
+
+    def convert_unix_array(self, values: np.ndarray) -> np.ndarray:
+        # Vectorized convert_unix.
         out = values.astype(np.int64)
         if self._native_ns == 0:
             return out
         offset = self._unix_ns - self._native_ns
         return np.where(out == 0, out, out + offset)
 
-    def now_native_ns(self) -> int:
+    def now_record_ns(self) -> int:
         # Current record-clock value: the approx clock when the callback is active, else the
         # native cuptiGetTimestamp clock (read cheaply via clock_gettime when it is realtime).
         # 0 before calibration.
@@ -229,9 +226,6 @@ class _SynchronizedClock:
         if self._native_is_realtime:
             return time.clock_gettime_ns(time.CLOCK_REALTIME)
         return self._native_now()
-
-    def now_unix_ns(self) -> int:
-        return self.convert(self.now_native_ns())
 
     def reset(self) -> None:
         self._native_ns = 0
@@ -339,7 +333,7 @@ class CuptiMonitor:
         self._chains_gc_pending: list[int] = []
         self._chains_gc_ready: list[int] = []
         # Record-timestamp -> unix conversion lives in the clock; the monitor delegates
-        # convert_time / now_native_ns to it and calibrates it in start(). Records normally
+        # convert_time / now_record_ns to it and calibrates it in start(). Records normally
         # arrive on the native (realtime) clock; the approx-clock timestamp callback is opt-in
         # via TORCH_CUPTI_TRY_REGISTER_APPROX_TIMESTAMP_CALLBACK (current libcupti rejects it,
         # and it needs sole-subscriber mode).
@@ -598,27 +592,27 @@ class CuptiMonitor:
             return None
 
     def convert_time(self, value: int) -> int:
-        """Convert a record-clock timestamp to unix-epoch ns (passthrough for observers)."""
-        return self._clock.convert(value)
+        """Convert a record-clock timestamp to unix-epoch ns. Records ride the approx clock
+        while the timestamp callback is engaged, else CLOCK_REALTIME."""
+        if self._timestamp_callback_active:
+            return self._clock.convert_approx(value)
+        return self._clock.convert_unix(value)
 
     def convert_time_array(self, values: np.ndarray) -> np.ndarray:
         """Vectorized :meth:`convert_time` over a whole record column."""
-        return self._clock.convert_array(values)
-
-    def _convert_native_time_array(self, values: np.ndarray) -> np.ndarray:
-        """Native cuptiGetTimestamp clock -> unix for PM-sampling frame columns (on the
-        native clock in both callback and fallback modes)."""
-        return self._clock.convert_native_array(values)
+        if self._timestamp_callback_active:
+            return self._clock.convert_approx_array(values)
+        return self._clock.convert_unix_array(values)
 
     def now_unix_ns(self) -> int:
         """Current time on the record clock, converted to unix-epoch ns."""
-        return self._clock.now_unix_ns()
+        return self.convert_time(self._clock.now_record_ns())
 
-    def now_native_ns(self) -> int:
+    def now_record_ns(self) -> int:
         """Current value of the record clock -- the unconverted timebase of decoded record
         START/END. Use this (not now_unix_ns) to stamp a window boundary compared against raw
         record timestamps. Returns 0 before the session is calibrated."""
-        return self._clock.now_native_ns()
+        return self._clock.now_record_ns()
 
     def _try_register_timestamp_callback(self) -> bool:
         """Best-effort: hand CUPTI the profiler's approx-clock timestamp callback so it
