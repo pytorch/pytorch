@@ -1256,6 +1256,22 @@ class BytecodeDispatchTableMeta(type):
 
 
 @dataclasses.dataclass
+class Segment:
+    """
+    One frame's slice of the exception stack, mirroring CPython's
+    `_PyErr_StackItem` (`gi_exc_state`).
+
+    CPython represents the exc_state as a linked list of `_PyErr_StackItem`s,
+    where each item contains the exception type, value, and traceback for the
+    frame. We simulate this with a linked list of `Segment`s, where each
+    `Segment` is a list of `ExceptionVals`
+    """
+
+    items: list[ExceptionVals] = dataclasses.field(default_factory=list)
+    prev: Segment | None = dataclasses.field(default=None)
+
+
+@dataclasses.dataclass
 class ExceptionStack:
     """
     Exception stack that it is shared among all InstructionTranslator instances
@@ -1272,8 +1288,22 @@ class ExceptionStack:
     #  + PUSH_EXC_INFO := pushes the current_exception to the *exception stack*
     #  + POP_EXCEPT := pops TOS from the *exception stack*
 
-    _exc_stack: list[ExceptionVals] = dataclasses.field(default_factory=list)
+    _exc_stack: Segment = dataclasses.field(default_factory=Segment)
     _current_exception: ExceptionVals | None = dataclasses.field(default=None)
+
+    def push_segment(self, segment: Segment) -> None:
+        """Make `segment` the head, linking it to the current head (resume)."""
+        segment.prev = self._exc_stack
+        self._exc_stack = segment
+
+    def pop_segment(self) -> Segment:
+        """Restore the head to the segment below (suspend)."""
+        segment = self._exc_stack
+        if segment.prev is None:
+            raise AssertionError("cannot pop the base exception segment")
+        self._exc_stack = segment.prev
+        segment.prev = None
+        return segment
 
     def clear_current_exception(self) -> None:
         self._current_exception = None
@@ -1281,6 +1311,7 @@ class ExceptionStack:
     def set_current_exception(
         self, val: ExceptionVals, set_context: bool = True
     ) -> None:
+        # Mirrors CPython's PyErr_SetObject
         if set_context:
             self._set_context_and_break_context_reference_cycle(val)
         self._current_exception = val
@@ -1294,6 +1325,7 @@ class ExceptionStack:
         self.clear_current_exception()
 
     def get_current_exception(self) -> ExceptionVals:
+        # Mirrors CPython's PyErr_GetRaisedException()
         if self._current_exception is None:
             raise AssertionError(
                 "expected self._current_exception is not None to be true"
@@ -1305,8 +1337,8 @@ class ExceptionStack:
     ) -> ExceptionVals:
         if (ctx := val.__context__) and not ctx.is_constant_none():  # type: ignore[union-attr]
             return val
-        if len(self._exc_stack) + prev_idx > 0:
-            prev = self._exc_stack[prev_idx]
+        if len(self) + prev_idx > 0:
+            prev = self[prev_idx]
             self._set_context_recursive(prev, prev_idx - 1)
             if prev is not val:
                 val.set_context(prev)  # type: ignore[union-attr, arg-type]
@@ -1343,20 +1375,40 @@ class ExceptionStack:
         self, val: ExceptionVals
     ) -> None:
         # set Exception.__context__
-        self._set_context_recursive(val, len(self._exc_stack) - 1)
+        self._set_context_recursive(val, len(self) - 1)
         self._break_context_reference_cycle(val)
 
     def pop(self) -> ExceptionVals:
-        return self._exc_stack.pop()
+        return self._exc_stack.items.pop()
 
     def append(self, val: ExceptionVals) -> None:
-        self._exc_stack.append(val)
+        self._exc_stack.items.append(val)
 
     def __len__(self) -> int:
-        return len(self._exc_stack)
+        n = 0
+        segment: Segment | None = self._exc_stack
+        while segment is not None:
+            n += len(segment.items)
+            segment = segment.prev
+        return n
 
     def __getitem__(self, index: int) -> ExceptionVals:
-        return self._exc_stack[index]
+        # Global indexing over the segment chain: `prev` segments (lower)
+        # concatenated with the head segment (upper), so `[-1]` falls through
+        # to the caller when the head segment is empty.
+        n = len(self)
+        if index < 0:
+            index += n
+        if not 0 <= index < n:
+            raise IndexError("exception stack index out of range")
+        segment = self._exc_stack
+        base = n - len(segment.items)
+        while index < base:
+            if segment.prev is None:
+                raise AssertionError("expected segment.prev to not be None")
+            segment = segment.prev
+            base -= len(segment.items)
+        return segment.items[index - base]
 
     def __str__(self) -> str:
         return f"{self._exc_stack=} - {self._current_exception=}"
@@ -6322,6 +6374,15 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         self.generated_items = []
         self.is_generator_from_ctx_manager = False
         self.frame_state = FrameState.FRAME_CREATED
+        self.gi_exc_state = Segment()
+
+    @contextlib.contextmanager
+    def link_gi_exc_state(self):
+        try:
+            self.exn_vt_stack.push_segment(self.gi_exc_state)
+            yield
+        finally:
+            self.exn_vt_stack.pop_segment()
 
     def inline_call_(self) -> VariableTracker:
         with profile_inline_call(self.output, self.f_code, lambda: self.inline_depth):
