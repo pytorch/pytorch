@@ -81,6 +81,12 @@ def check_matrix_major_layout(name: str, tensor: torch.Tensor) -> None:
         )
 
 
+def check_matrix_row_major_layout(name: str, tensor: torch.Tensor) -> None:
+    """Require last-dim-contiguous matrix strides for QuACK-written aux storage."""
+    if tensor.stride(-1) != 1:
+        raise NotImplementedError(f"FlexGEMM requires {name} to be row-major")
+
+
 def check_epilogue_arg_kinds(epilogue_arg_kinds: tuple[str, ...]) -> None:
     """Require each epilogue arg kind to be row, col, or tile."""
     for kind in epilogue_arg_kinds:
@@ -252,7 +258,7 @@ def validate_runtime_local_reduce(
     if local_reduce_out is None:
         raise RuntimeError(LOCAL_REDUCE_RUNTIME_OUT_ERROR)
     check_matrix("local_reduce_out", local_reduce_out)
-    check_matrix_major_layout("local_reduce_out", local_reduce_out)
+    check_matrix_row_major_layout("local_reduce_out", local_reduce_out)
     expected_local_reduce_shape = local_reduce_compressed_shape(
         expected_shape, plan.group, plan.axis
     )
