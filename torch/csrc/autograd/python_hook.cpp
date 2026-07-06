@@ -98,12 +98,13 @@ PyFunctionTensorPreHook::PyFunctionTensorPreHook(
   Py_INCREF(dict);
 }
 
-// NOLINTNEXTLINE(bugprone-exception-escape)
 PyFunctionTensorPreHook::~PyFunctionTensorPreHook() {
   // If python is already dead, leak the wrapped python objects
   if (Py_IsInitialized()) {
-    pybind11::gil_scoped_acquire gil;
-    Py_DECREF(dict);
+    torch::detail::SafeGilScopedAcquire gil;
+    if (gil.acquired()) {
+      Py_DECREF(dict);
+    }
   }
 }
 
@@ -126,12 +127,13 @@ PyFunctionPreHook::PyFunctionPreHook(PyObject* dict) : dict(dict) {
   Py_INCREF(dict);
 }
 
-// NOLINTNEXTLINE(bugprone-exception-escape)
 PyFunctionPreHook::~PyFunctionPreHook() {
   // If python is already dead, leak the wrapped python objects
   if (Py_IsInitialized()) {
-    pybind11::gil_scoped_acquire gil;
-    Py_DECREF(dict);
+    torch::detail::SafeGilScopedAcquire gil;
+    if (gil.acquired()) {
+      Py_DECREF(dict);
+    }
   }
 }
 
@@ -149,12 +151,13 @@ PyFunctionPostHook::PyFunctionPostHook(PyObject* dict) : dict(dict) {
   Py_INCREF(dict);
 }
 
-// NOLINTNEXTLINE(bugprone-exception-escape)
 PyFunctionPostHook::~PyFunctionPostHook() {
   // If python is already dead, leak the wrapped python objects
   if (Py_IsInitialized()) {
-    pybind11::gil_scoped_acquire gil;
-    Py_DECREF(dict);
+    torch::detail::SafeGilScopedAcquire gil;
+    if (gil.acquired()) {
+      Py_DECREF(dict);
+    }
   }
 }
 
@@ -212,12 +215,13 @@ PyFunctionTensorPostAccGradHooks::PyFunctionTensorPostAccGradHooks(
   Py_INCREF(dict);
 }
 
-// NOLINTNEXTLINE(bugprone-exception-escape)
 PyFunctionTensorPostAccGradHooks::~PyFunctionTensorPostAccGradHooks() {
   // If python is already dead, leak the wrapped python objects
   if (Py_IsInitialized()) {
-    pybind11::gil_scoped_acquire gil;
-    Py_DECREF(dict);
+    torch::detail::SafeGilScopedAcquire gil;
+    if (gil.acquired()) {
+      Py_DECREF(dict);
+    }
   }
 }
 

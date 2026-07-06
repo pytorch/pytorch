@@ -1,5 +1,7 @@
 #include <torch/csrc/distributed/c10d/python_callback_work.hpp>
 
+#include <torch/csrc/Exceptions.h>
+
 namespace c10d {
 
 PythonCallbackWork::PythonCallbackWork(py::function callback)
@@ -9,12 +11,15 @@ PythonCallbackWork::PythonCallbackWork(py::function callback)
       c10::ListType::create(c10::TensorType::get()));
 }
 
-// NOLINTNEXTLINE(bugprone-exception-escape)
 PythonCallbackWork::~PythonCallbackWork() {
-  py::gil_scoped_acquire ag;
-  callback_.dec_ref();
+  torch::detail::SafeGilScopedAcquire ag;
+  if (ag.acquired()) {
+    callback_.dec_ref();
+  }
   // Explicitly set callback_ to nullptr to prevent py::object's dtor
-  // to decref on the PyObject again.
+  // to decref on the PyObject again. If the GIL could not be acquired
+  // above, this deliberately leaks the reference rather than touching
+  // the refcount without the GIL held.
   // See Note [Destructing py::object] in python_ivalue.h
   callback_.ptr() = nullptr;
 }

@@ -2,12 +2,14 @@
 
 #include <exception>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <system_error>
 
 #include <ATen/detail/FunctionTraits.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Logging.h>
 #include <c10/util/StringUtil.h>
 #include <pybind11/pybind11.h>
 #include <torch/csrc/Export.h>
@@ -386,6 +388,37 @@ struct PyWarningHandler {
 };
 
 namespace detail {
+
+// pybind11::gil_scoped_acquire's constructor can throw (e.g. if creating a
+// new Python thread state fails). Callers reachable from noexcept contexts
+// (destructors, refcount-management callbacks) must use this instead of
+// pybind11::gil_scoped_acquire directly, since an exception escaping a
+// noexcept function calls std::terminate. Check acquired() before touching
+// any Python API that requires the GIL.
+//
+// NB: deliberately still uses the default (not _simple) gil_scoped_acquire.
+// gil_scoped_acquire_simple (PyGILState_Ensure) inherits CPython's behavior
+// of hanging or killing a non-main thread that acquires the GIL during
+// interpreter finalization -- exactly what the default gil_scoped_acquire
+// was built to avoid (see its own comment in pybind11/gil.h). Since these
+// callers commonly run during exit-handler teardown, that tradeoff would
+// replace a rare, loud crash with a more likely, silent hang.
+class SafeGilScopedAcquire {
+ public:
+  SafeGilScopedAcquire() {
+    try {
+      guard_.emplace();
+    } catch (const std::exception& e) {
+      LOG(ERROR) << "Failed to acquire the GIL: " << e.what();
+    }
+  }
+  bool acquired() const {
+    return guard_.has_value();
+  }
+
+ private:
+  std::optional<pybind11::gil_scoped_acquire> guard_;
+};
 
 struct noop_gil_scoped_release {
   // user-defined constructor (i.e. not defaulted) to avoid
