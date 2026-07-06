@@ -1344,6 +1344,16 @@ pointwise_overrides_data: dict[str, OverridesData] = dict(
         else f"libdevice.mul_rn({x}, {y})",
         name="mul_rn",
     ),
+    # High 32 bits of the unsigned product of two int32 values (hardware __umulhi).
+    umulhi=OverridesData(
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+        cpp=lambda x, y: (
+            f"static_cast<int32_t>((static_cast<uint64_t>(static_cast<uint32_t>({x}))"
+            f" * static_cast<uint64_t>(static_cast<uint32_t>({y}))) >> 32)"
+        ),
+        triton=lambda x, y: f"tl.umulhi({x}, {y})",
+        name="umulhi",
+    ),
     # erfinv, exp2, expit, gammaln
     igamma=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
