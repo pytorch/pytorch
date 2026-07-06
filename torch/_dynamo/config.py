@@ -362,7 +362,9 @@ skip_guards_on_constant_func_defaults = True
 
 # Speedup guard execution of nested nn modules by recursively checking for dict
 # tags to avoid full guard execution.
-use_recursive_dict_tags_for_guards = False
+use_recursive_dict_tags_for_guards = (
+    os.environ.get("TORCHDYNAMO_USE_RECURSIVE_DICT_TAGS_FOR_GUARDS", "0") == "1"
+)
 
 # Maximum number of objects for which we check dict pointers tags. This is
 # useful for regional compilation.
