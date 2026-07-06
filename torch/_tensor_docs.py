@@ -2512,7 +2512,7 @@ Note:
 
 Args:
     dim (int): dimension along which to index
-    index (Tensor): indices of ``source`` to select from,
+    index (Tensor): indices of :attr:`self` to accumulate into,
         should have dtype either `torch.int64` or `torch.int32`
     source (FloatTensor): the tensor containing values to accumulate
     reduce (str): the reduction operation to apply
