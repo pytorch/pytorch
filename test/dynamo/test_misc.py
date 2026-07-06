@@ -86,6 +86,7 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA,
+    PYTORCH_CUDA_MEMCHECK,
 )
 from torch.testing._internal.common_methods_invocations import (
     sample_inputs_take_along_dim,
@@ -372,9 +373,9 @@ class MiscTests(torch._inductor.test_case.TestCase):
                 str(cnt.inductor_graphs[0].graph).strip(),
                 """\
 graph():
-    %arg0_1 : [num_users=0] = placeholder[target=arg0_1]
-    %arg1_1 : [num_users=1] = placeholder[target=arg1_1]
-    %sin : [num_users=1] = call_function[target=torch.ops.aten.sin.default](args = (%arg1_1,), kwargs = {})
+    %arg0_1 : [num_users=1] = placeholder[target=arg0_1]
+    %arg1_1 : [num_users=0] = placeholder[target=arg1_1]
+    %sin : [num_users=1] = call_function[target=torch.ops.aten.sin.default](args = (%arg0_1,), kwargs = {})
     %cos : [num_users=1] = call_function[target=torch.ops.aten.cos.default](args = (%sin,), kwargs = {})
     return (cos,)""",
             )
@@ -382,9 +383,9 @@ graph():
                 str(cnt1.inductor_graphs[0].graph).strip(),
                 """\
 graph():
-    %arg0_1 : [num_users=0] = placeholder[target=arg0_1]
-    %arg1_1 : [num_users=1] = placeholder[target=arg1_1]
-    %foo : [num_users=1] = call_function[target=torch.ops.mylib.foo.default](args = (%arg1_1,), kwargs = {})
+    %arg0_1 : [num_users=1] = placeholder[target=arg0_1]
+    %arg1_1 : [num_users=0] = placeholder[target=arg1_1]
+    %foo : [num_users=1] = call_function[target=torch.ops.mylib.foo.default](args = (%arg0_1,), kwargs = {})
     return (foo,)""",
             )
 
@@ -6403,6 +6404,88 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
                 sparse_copy = torch._dynamo.utils.clone_input(sparse_input)
                 # Make sure sparse clone is successful.
                 self.assertEqual(sparse_input, sparse_copy)
+
+    @unittest.skipIf(not TEST_CUDA, "pinned CPU memory requires CUDA")
+    @unittest.skipIf(
+        PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property"
+    )
+    def test_clone_input_preserves_pinned_cpu_tensor_metadata(self):
+        base = torch.randn(4, 6, pin_memory=True)
+        x = base[:, ::2].requires_grad_()
+        x.grad = torch.ones_like(x).pin_memory()
+        x._dynamo_dynamic_indices = {1}
+
+        cloned = torch._dynamo.utils.clone_input(x)
+
+        self.assertTrue(cloned.is_pinned())
+        self.assertEqual(cloned.stride(), x.stride())
+        self.assertEqual(cloned, x)
+        self.assertNotEqual(cloned.data_ptr(), x.data_ptr())
+        self.assertTrue(cloned.requires_grad)
+        self.assertIsNotNone(cloned.grad)
+        self.assertTrue(cloned.grad.is_pinned())
+        self.assertEqual(cloned.grad, x.grad)
+        self.assertEqual(cloned._dynamo_dynamic_indices, x._dynamo_dynamic_indices)
+        self.assertIsNot(cloned._dynamo_dynamic_indices, x._dynamo_dynamic_indices)
+
+        expanded = torch.arange(3, dtype=torch.float32, pin_memory=True).expand(2, 3)
+        expanded_cloned = torch._dynamo.utils.clone_input(expanded)
+        self.assertTrue(expanded_cloned.is_pinned())
+        self.assertEqual(expanded_cloned, expanded)
+
+    def test_clone_input_does_not_check_pinned_memory_for_wrapper_subclass(self):
+        class WrapperSubclass(torch.Tensor):
+            @staticmethod
+            def __new__(cls, elem):
+                return torch.Tensor._make_wrapper_subclass(
+                    cls,
+                    elem.size(),
+                    strides=elem.stride(),
+                    storage_offset=elem.storage_offset(),
+                    dtype=elem.dtype,
+                    layout=elem.layout,
+                    requires_grad=elem.requires_grad,
+                    device=elem.device,
+                )
+
+            def __init__(self, elem):
+                self.elem = elem
+
+            def __tensor_flatten__(self):
+                return ["elem"], None
+
+            @staticmethod
+            def __tensor_unflatten__(inner_tensors, metadata, outer_size, outer_stride):
+                if metadata is not None:
+                    raise AssertionError("Expected metadata to be None")
+                return WrapperSubclass(
+                    inner_tensors["elem"].as_strided(outer_size, outer_stride)
+                )
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                if func is torch.ops.aten.is_pinned.default:
+                    raise AssertionError(
+                        "clone_input should not check pinning on wrapper subclasses"
+                    )
+                if kwargs is None:
+                    kwargs = {}
+                args = python_pytree.tree_map_only(
+                    WrapperSubclass, lambda x: x.elem, args
+                )
+                kwargs = python_pytree.tree_map_only(
+                    WrapperSubclass, lambda x: x.elem, kwargs
+                )
+                out = func(*args, **kwargs)
+                return python_pytree.tree_map_only(torch.Tensor, WrapperSubclass, out)
+
+        x = WrapperSubclass(torch.randn(4, 6))
+
+        cloned = torch._dynamo.utils.clone_input(x)
+
+        self.assertIsInstance(cloned, WrapperSubclass)
+        self.assertEqual(cloned.elem, x.elem)
+        self.assertNotEqual(cloned.elem.data_ptr(), x.elem.data_ptr())
 
     def test_tensor_is_contiguous(self):
         def fn(x):
@@ -12704,6 +12787,48 @@ def ___make_guard_fn():
         self.assertEqual(list(eager), list(compiled))
         self.assertEqual(len(counters["graph_break"]), 0)
 
+    def test_itertools_repeat_length_hint(self):
+        def fn():
+            return (
+                operator.length_hint(itertools.repeat(None, 50)),
+                operator.length_hint(itertools.repeat(None, 0)),
+                operator.length_hint(itertools.repeat(None, -3)),
+                operator.length_hint(itertools.repeat(None), 12),
+            )
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(), compiled_fn())
+        self.assertEqual(compiled_fn(), (50, 0, 0, 12))
+
+    def test_itertools_repeat_repr(self):
+        def fn():
+            r = itertools.repeat("a", -1)
+            bounded = repr(r)
+            unbounded = repr(itertools.repeat(1 + 0j))
+            return bounded, unbounded
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(), compiled_fn())
+        self.assertEqual(compiled_fn(), ("repeat('a', 0)", "repeat((1+0j))"))
+
+    def test_itertools_repeat_bounded_exhausts(self):
+        def fn():
+            return list(itertools.repeat("a", 3)) + list(itertools.repeat("b", -2))
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(), compiled_fn())
+        self.assertEqual(compiled_fn(), ["a", "a", "a"])
+
+    def test_itertools_repeat_partial_iteration(self):
+        def fn():
+            r = itertools.repeat("a", 3)
+            next(r)
+            return operator.length_hint(r), repr(r)
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(), compiled_fn())
+        self.assertEqual(compiled_fn(), (2, "repeat('a', 2)"))
+
     def test_itertools_infinite_count(self):
         for args in ([], [10], [5, -1]):
             counters.clear()
@@ -14485,13 +14610,13 @@ fn
         from torch._dynamo.variables.user_defined import InspectVariable
 
         redirected_attrs = []
-        original_var_getattr = InspectVariable.var_getattr
+        original_getattro_impl = InspectVariable.getattro_impl
 
-        def tracking_var_getattr(self, tx, name):
+        def tracking_getattro_impl(self, tx, name):
             redirects = self._PROPERTY_REDIRECTS.get(type(self.value), {})
             if name in redirects:
                 redirected_attrs.append(name)
-            return original_var_getattr(self, tx, name)
+            return original_getattro_impl(self, tx, name)
 
         def fn(x, gn):
             sig = inspect.signature(gn)
@@ -14503,7 +14628,7 @@ fn
             return a + b
 
         x = torch.randn(2, 3)
-        with patch.object(InspectVariable, "var_getattr", tracking_var_getattr):
+        with patch.object(InspectVariable, "getattro_impl", tracking_getattro_impl):
             opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
             result = opt_fn(x, gn)
 
@@ -15017,7 +15142,7 @@ fn
         self.assertEqual(cnts.frame_count, 1)
 
     def test_getattrvariable_as_python_constant(self):
-        from torch._dynamo.variables.misc import GetAttrVariable
+        from torch._dynamo.variables.misc import CallMethodVariable as CMV
 
         @torch.compile(backend="eager")
         def fn(x, rand1):
@@ -15033,7 +15158,7 @@ fn
         x = torch.randn(3, 3)
         expected = fn.__wrapped__(x, get_rng())
 
-        with patch.object(GetAttrVariable, "as_python_constant", autospec=True) as po:
+        with patch.object(CMV, "as_python_constant", autospec=True) as po:
             actual = fn(x, get_rng())
 
         self.assertEqual(expected, actual)
@@ -16252,9 +16377,9 @@ with torch.library._scoped_library("mylib_ci", "FRAGMENT") as lib:
                 """\
 def forward(self, L_x_ : torch.Tensor):
     l_x_ = L_x_
-    a = l_x_.sin();  l_x_ = None
-    b = a.cos();  a = None
-    return (b,)""",
+    sin = l_x_.sin();  l_x_ = None
+    cos = sin.cos();  sin = None
+    return (cos,)""",
             )
 
     @torch._dynamo.config.patch(trace_autograd_ops=True)
@@ -16610,6 +16735,21 @@ def forward(self, L_x_ : torch.Tensor):
         x = torch.ones(3)
         result = opt(x)
         self.assertTrue(torch.all(result > x))
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_module_hooks_dict_reconstructed_as_ordered_dict(self):
+        """Empty hooks dicts on nn.Module must be reconstructed as OrderedDict,
+        not plain dict, so that weakref.ref() works in RemovableHandle.
+        """
+
+        def fn():
+            m = torch.nn.Linear(5, 7)
+            torch.nn.utils.spectral_norm(m)
+            return m(torch.randn(3, 5))
+
+        opt = torch.compile(fn, backend="eager")
+        result = opt()
+        self.assertEqual(result.shape, (3, 7))
 
 
 instantiate_parametrized_tests(MiscTests)
