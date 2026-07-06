@@ -1743,6 +1743,9 @@ class DecoratorTests(PytreeRegisteringTestCase):
             def __hash__(self):
                 return hash(self.algo)
 
+            def __fx_repr__(self):
+                return f"OpaqueCfg({self.algo!r})", {"OpaqueCfg": OpaqueCfg}
+
         pytree.register_constant(PytreeCfg)
         register_custom_class(OpaqueCfg, typ="constant")
 
