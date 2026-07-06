@@ -1071,6 +1071,29 @@ class GraphModule(torch.nn.Module):
         t = torch.randn(2)
         self.assertEqual(self._compile_check(fn, args=(t,)), t + 1.0)
 
+    @unittest.skipIf(
+        sys.version_info >= (3, 12),
+        "pre-3.12 converts StopIteration at the generator frame boundary",
+    )
+    @make_dynamo_test
+    def test_pep479_exception_stack_balanced(self):
+        # The pre-3.12 StopIteration -> RuntimeError conversion must not leave
+        # the StopIteration on the exception stack. Otherwise a later bare
+        # `raise` re-raises the leftover StopIteration instead of reporting that
+        # there is no active exception.
+        def gen():
+            yield 1
+            raise StopIteration
+
+        g = gen()
+        next(g)
+        try:
+            next(g)  # StopIteration escapes the body -> RuntimeError
+        except RuntimeError:
+            pass
+        with self.assertRaisesRegex(RuntimeError, "No active exception to reraise"):
+            raise  # noqa: PLE0704
+
 
 class TestGeneratorSend(GeneratorTestsBase):
     def test_send(self):
