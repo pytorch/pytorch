@@ -396,7 +396,7 @@ add_custom_target(
 if(USE_CUDA AND BUILD_PYTHON)
   execute_process(
     COMMAND "${Python_EXECUTABLE}" -c
-      "from tools.gen_cupti_field_ids import find_cupti_header as f; p = f(); print(p or '', end='')"
+      "from tools.setup_helpers.cupti import find_cupti_header as f; p = f(); print(p or '', end='')"
     WORKING_DIRECTORY "${TORCH_ROOT}"
     OUTPUT_VARIABLE CUPTI_ACTIVITY_HEADER)
   if(CUPTI_ACTIVITY_HEADER)

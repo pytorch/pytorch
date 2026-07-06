@@ -23,10 +23,8 @@ from __future__ import annotations
 
 import argparse
 import glob
-import importlib.util
 import os
 import re
-import sysconfig
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -80,31 +78,6 @@ class _FieldDef:
     name: str  # attribute name, e.g. "REGISTERS_PER_THREAD"
     value: int
     ctype: str  # Ctype member name: "UINT" | "INT" | "FLOAT" | "CSTR"
-
-
-def find_cupti_header() -> Path | None:
-    """Locate ``cupti_activity.h``: explicit override, then the ``nvidia-cuda-cupti``
-    wheel (namespace package ``nvidia.cu13``), then a CUDA toolkit install."""
-    if env := os.environ.get("CUPTI_INCLUDE_DIR"):
-        if (h := Path(env) / "cupti_activity.h").is_file():
-            return h
-
-    candidates: list[Path] = []
-    if (spec := importlib.util.find_spec("nvidia.cu13")) is not None:
-        for loc in spec.submodule_search_locations or []:
-            candidates.append(Path(loc) / "include")
-    for key in ("purelib", "platlib"):
-        candidates.append(
-            Path(sysconfig.get_paths()[key]) / "nvidia" / "cu13" / "include"
-        )
-    if cuda_home := (os.environ.get("CUDA_HOME") or os.environ.get("CUDA_PATH")):
-        candidates.append(Path(cuda_home) / "extras" / "CUPTI" / "include")
-        candidates.append(Path(cuda_home) / "include")
-
-    for inc in candidates:
-        if (h := inc / "cupti_activity.h").is_file():
-            return h
-    return None
 
 
 def _load_cindex(libclang: str | None):  # type: ignore[no-untyped-def]
@@ -205,34 +178,26 @@ def render(fields_by_class: dict[str, list[_FieldDef]], header: Path) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def generate(
-    output: Path, header: Path | None = None, libclang: str | None = None
-) -> bool:
-    """Write the generated module. Returns False (and writes nothing) if the CUPTI
-    header can't be found, so non-CUPTI builds proceed without it."""
-    header = header or find_cupti_header()
-    if header is None:
-        return False
+def generate(output: Path, header: Path, libclang: str | None = None) -> None:
+    """Write the generated module from ``header``. The caller resolves the header
+    (tools.setup_helpers.cupti.find_cupti_header); the CMake rule skips codegen
+    entirely when no header is present, so non-CUPTI builds proceed without it."""
     content = render(parse_header(header, libclang), header)
     output.parent.mkdir(parents=True, exist_ok=True)
     if not output.exists() or output.read_text() != content:
         output.write_text(content)
-    return True
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--header", type=Path, default=None)
+    parser.add_argument("--header", type=Path, required=True)
     parser.add_argument(
         "--libclang", type=str, default=None, help="path to libclang.so"
     )
     args = parser.parse_args()
-    header = args.header or find_cupti_header()
-    if header is None:
-        raise SystemExit("cupti_activity.h not found; set CUPTI_INCLUDE_DIR")
-    generate(args.output, header, args.libclang)
-    print(f"Generated {args.output} from {header}")
+    generate(args.output, args.header, args.libclang)
+    print(f"Generated {args.output} from {args.header}")
 
 
 if __name__ == "__main__":

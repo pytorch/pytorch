@@ -11552,6 +11552,131 @@ class TestHopSchema(TestCase):
             """cond(SymBool pred, Any true_fn, Any false_fn, Tensor operand0) -> ((Tensor))""",
         )
 
+    def test_switch_gen_schema_tensor_inputs(self):
+        schema = torch.ops.higher_order.switch.gen_schema(
+            torch.tensor(0),
+            (lambda x: x.sin(), lambda x: x.cos(), lambda x: x.tan()),
+            (torch.randn(3, 4),),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """switch(Tensor index, Any branch0_fn, Any branch1_fn, Any branch2_fn, Tensor operand0) -> ((Tensor))""",
+        )
+
+    def test_switch_gen_schema_symint_inputs(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        with fake_mode, fake_mode.shape_env.ignore_fresh_unbacked_symbols():
+            sym_int = torch.randn(3, 4).nonzero().size(0)
+
+        schema = torch.ops.higher_order.switch.gen_schema(
+            sym_int,
+            (lambda x: x.sin(), lambda x: x.cos()),
+            (torch.randn(3, 4),),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """switch(SymInt index, Any branch0_fn, Any branch1_fn, Tensor operand0) -> ((Tensor))""",
+        )
+
+    def test_switch_gen_schema_multiple_operands(self):
+        schema = torch.ops.higher_order.switch.gen_schema(
+            torch.tensor(1),
+            (lambda x, y: (x + y, x * y), lambda x, y: (x - y, x / y)),
+            (torch.randn(3, 4), torch.randn(3, 4)),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """switch(Tensor index, Any branch0_fn, Any branch1_fn, Tensor operand0, Tensor operand1) -> (Tensor, Tensor)""",
+        )
+
+    def test_switch_gen_schema_with_input_mutation(self):
+        def branch0(x, y):
+            x.add_(1)
+            return x + y
+
+        def branch1(x, y):
+            return x - y
+
+        schema = torch.ops.higher_order.switch.gen_schema(
+            torch.tensor(0),
+            (branch0, branch1),
+            (torch.randn(3, 4), torch.randn(3, 4)),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """switch(Tensor index, Any branch0_fn, Any branch1_fn, Tensor(a3!) operand0, Tensor operand1) -> ((Tensor))""",
+        )
+
+    def test_switch_gen_schema_with_disjoint_branch_mutation(self):
+        def branch0(x, y):
+            x.add_(1)
+            return x + y
+
+        def branch1(x, y):
+            y.sub_(1)
+            return x - y
+
+        schema = torch.ops.higher_order.switch.gen_schema(
+            torch.tensor(0),
+            (branch0, branch1),
+            (torch.randn(3, 4), torch.randn(3, 4)),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """switch(Tensor index, Any branch0_fn, Any branch1_fn, Tensor(a3!) operand0, Tensor(a4!) operand1) -> ((Tensor))""",
+        )
+
+    def test_switch_gen_schema_int_index(self):
+        schema = torch.ops.higher_order.switch.gen_schema(
+            0,
+            (lambda x: x.sin(), lambda x: x.cos()),
+            (torch.randn(3, 4),),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """switch(int index, Any branch0_fn, Any branch1_fn, Tensor operand0) -> ((Tensor))""",
+        )
+
+    def test_switch_gen_schema_differing_int_symint_outputs(self):
+        def branch0(x):
+            return x.sin(), 5
+
+        def branch1(x):
+            return x.cos(), 7
+
+        def branch2(x):
+            return x.tan(), 9
+
+        schema = torch.ops.higher_order.switch.gen_schema(
+            torch.tensor(0),
+            (branch0, branch1, branch2),
+            (torch.randn(3, 4),),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """switch(Tensor index, Any branch0_fn, Any branch1_fn, Any branch2_fn, Tensor operand0) -> (Tensor, SymInt)""",
+        )
+
+    def test_switch_gen_schema_matching_int_int_outputs(self):
+        def branch0(x):
+            return x.sin(), 5
+
+        def branch1(x):
+            return x.cos(), 5
+
+        schema = torch.ops.higher_order.switch.gen_schema(
+            torch.tensor(0),
+            (branch0, branch1),
+            (torch.randn(3, 4),),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """switch(Tensor index, Any branch0_fn, Any branch1_fn, Tensor operand0) -> (Tensor, int)""",
+        )
+
     def test_while_loop_gen_schema_tensor_inputs(self):
         def cond_fn(x, y):
             return x.sum() < 10
