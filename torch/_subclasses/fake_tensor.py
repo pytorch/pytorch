@@ -86,6 +86,12 @@ CONSTANT_NUMEL_LIMIT = 1
 
 RECURSION_COUNT = 0
 
+_MKLDNN_DISPATCH_KEY = torch._C._dispatch_key_parse("MkldnnCPU")
+
+
+def _dispatch_keys_has_mkldnn(dispatch_keys: torch.DispatchKeySet | None) -> bool:
+    return dispatch_keys is not None and dispatch_keys.has(_MKLDNN_DISPATCH_KEY)
+
 
 class _FakeTensorConstructorIgnoredState(TypedDict, total=False):
     # Recompute memo descriptor state when reconstructing from
@@ -476,6 +482,8 @@ class FakeTensorConverter:
 
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
+            if t.is_mkldnn and not maybe_memo.is_mkldnn:
+                maybe_memo.dispatch_keys = torch._C._dispatch_keys(t)
             return maybe_memo
         # not yet supported in metatensors
         if t.is_quantized:
@@ -521,6 +529,8 @@ class FakeTensorConverter:
         )
         if out is NotImplemented:
             raise UnsupportedFakeTensorException("meta converter nyi")
+        if t.is_mkldnn:
+            out.dispatch_keys = torch._C._dispatch_keys(t)
 
         # Propagate grad_dtype here rather than in meta_converter because
         # meta tensors don't carry autograd metadata.
@@ -826,6 +836,30 @@ class FakeTensor(Tensor):
     # Indicates to our torch_dispatch dispatching infra that
     # this is an "infra" mode with lower dispatching precedence.
     _mode_key = torch._C._TorchDispatchModeKey.FAKE
+
+    @property
+    # pyrefly: ignore [bad-override]
+    def is_mkldnn(self) -> bool:
+        return _dispatch_keys_has_mkldnn(self.dispatch_keys)
+
+    @property
+    # pyrefly: ignore [bad-override]
+    def layout(self) -> torch.layout:
+        if self.is_mkldnn:
+            return torch._mkldnn  # type: ignore[attr-defined]
+        return Tensor.layout.__get__(self, type(self))  # type: ignore[attr-defined]
+
+    def to_dense(
+        self,
+        dtype: torch.dtype | None = None,
+        *,
+        masked_grad: bool | None = None,
+    ) -> Tensor:
+        if self.is_mkldnn:
+            return torch.ops.aten._to_dense.default(
+                self, dtype=dtype, masked_grad=masked_grad
+            )
+        return Tensor.to_dense(self, dtype=dtype, masked_grad=masked_grad)
 
     @property
     # pyrefly: ignore [bad-override]
@@ -1911,6 +1945,9 @@ class FakeTensorMode(TorchDispatchMode):
         if func in self.lift_fns:
             raise _BypassDispatchCache("lift")
 
+        if func is aten.to_mkldnn.default:
+            raise _BypassDispatchCache("mkldnn tensor")
+
         if func.name() == "inductor::resize_storage_bytes_":
             raise _BypassDispatchCache("inductor::resize_storage_bytes_")
 
@@ -1960,6 +1997,8 @@ class FakeTensorMode(TorchDispatchMode):
                     raise _BypassDispatchCache("constant attribute")
                 if is_sparse_any(arg):
                     raise _BypassDispatchCache(f"{arg.layout} tensor")
+                if arg.is_mkldnn:
+                    raise _BypassDispatchCache("mkldnn tensor")
                 metadata = extract_tensor_metadata(arg)
                 metadata._flatten_into(result, self, state)
             elif isinstance(arg, Tensor):
@@ -2962,6 +3001,19 @@ class FakeTensorMode(TorchDispatchMode):
             if fast_impl is not None:
                 return maybe_propagate_real_tensors(fast_impl(self, *args, **kwargs))
 
+        if func is torch.ops.aten.to_dense.default:
+            # The registered fake op impl handles the usual path, but symbolic
+            # shapes can still reach generic decomposition below. The native
+            # composite sees a fake MKLDNN tensor's strided meta backing, so
+            # handle this before generic decomposition.
+            dtype = args[1] if len(args) > 1 else kwargs.get("dtype")
+            masked_grad = kwargs.get("masked_grad")
+            op_impl_out = maybe_to_dense_mkldnn(
+                self, args[0], dtype=dtype, masked_grad=masked_grad
+            )
+            if op_impl_out is not NotImplemented:
+                return maybe_propagate_real_tensors(cast(FakeTensor, op_impl_out))
+
         # If there's a Python meta, prefer that over the decomposition
         from torch._decomp import meta_table
 
@@ -3210,6 +3262,15 @@ class FakeTensorMode(TorchDispatchMode):
         # Lazily initialized, in case there are no tensor returns
         common_device = None
         has_scalar_only_inputs = False
+        preserve_dispatch_keys = False
+        input_dispatch_keys = None
+        if (
+            (func is aten.alias.default or func is aten.detach.default)
+            and len(flat_args) == 1
+            and isinstance(flat_args[0], FakeTensor)
+        ):
+            input_dispatch_keys = flat_args[0].dispatch_keys
+            preserve_dispatch_keys = input_dispatch_keys is not None
 
         def wrap(e: T) -> T | FakeTensor:
             nonlocal common_device
@@ -3230,17 +3291,22 @@ class FakeTensorMode(TorchDispatchMode):
                     e.device == common_device,
                     lambda: f"FakeTensor is wrapped to wrong device, found {e.device}, expected {common_device}",
                 )
+                if preserve_dispatch_keys:
+                    e.dispatch_keys = input_dispatch_keys
                 return cast(T, e)
             elif converter is not None:
                 if has_scalar_only_inputs:
                     # Under FakeTensorMode, op accepts scalar only inputs, such as aten.add/sub/mul/div,
                     # returns a real scalar tensor on CPU. See TensorMeta() in _prims/__init__.py for details.
                     # We thus directly convert real tensor to fake tensor.
-                    return converter.from_real_tensor(self, e)
+                    out = converter.from_real_tensor(self, e)
                 else:
-                    return converter.from_meta_and_device(
+                    out = converter.from_meta_and_device(
                         self, e, device or common_device
                     )
+                if preserve_dispatch_keys:
+                    out.dispatch_keys = input_dispatch_keys
+                return out
             else:
                 # pyrefly: ignore [bad-return]
                 return e
@@ -3646,6 +3712,7 @@ from torch._subclasses.fake_impls import (  # noqa: F401
     contains_tensor_types,
     get_fast_op_impls,
     has_meta,
+    maybe_to_dense_mkldnn,
     op_implementations_checks,
     stride_incorrect_op,
 )
