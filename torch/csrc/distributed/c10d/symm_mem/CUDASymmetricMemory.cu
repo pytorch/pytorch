@@ -966,10 +966,10 @@ c10::intrusive_ptr<Block> CUDASymmetricMemoryAllocator::find_block_covering(void
                                 auto ptr_int = reinterpret_cast<uintptr_t>(ptr);
                                 // The data buffer starts buffer_offset bytes
                                 // into the allocation (past the signal pad).
-                                auto data_base = reinterpret_cast<uintptr_t>(allocation->ptr) + block->buffer_offset;
+                                auto buffer_ptr = reinterpret_cast<uintptr_t>(allocation->ptr) + block->buffer_offset;
                                 // Modify offset so that it is returned
-                                offset = ptr_int - data_base;
-                                return ptr_int >= data_base && offset < block->buffer_size; });
+                                offset = ptr_int - buffer_ptr;
+                                return ptr_int >= buffer_ptr && offset < block->buffer_size; });
 
   if (alloc_it == ptr_to_block_.end()) {
     return nullptr;
