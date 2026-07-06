@@ -273,6 +273,51 @@ if HAS_CUDA_AND_TRITON:
             self.run_twc(foo_opt, zeros)
             self.assertEqual(self.get_root_children(), [0, 0])
 
+        @torch._dynamo.config.patch(capture_scalar_outputs=True)
+        def test_partition_none_input(self):
+            # A graph that materializes a scalar via .item() is partitioned for
+            # cudagraphs, and the partition boundary threads a None buffer as an
+            # input. Recording the partition must accept None inputs; it used to
+            # only allow int/Generator/OpaqueBase and crash on None.
+            def fn(x, y):
+                s = torch.full((1,), 3, dtype=torch.int16).squeeze().item()
+                return (x - y).expand(1, 8, x.shape[0]) - s
+
+            x = torch.randint(5, 30, (24,), dtype=torch.int16, device="cuda")
+            y = torch.randint(5, 30, (1,), dtype=torch.int16, device="cuda")
+            ref = fn(x, y)
+            opt = torch.compile(fn, mode="reduce-overhead", fullgraph=True)
+            for _ in range(3):
+                torch.compiler.cudagraph_mark_step_begin()
+                self.assertEqual(opt(x, y), ref)
+            self.assertIsNotNone(self.get_manager())
+
+        @torch._dynamo.config.patch(capture_scalar_outputs=True)
+        def test_partition_float_input(self):
+            # A data-dependent float scalar (.item() on a float tensor under
+            # capture_scalar_outputs) is threaded as a float graph-partition
+            # input. Recording the partition must accept float inputs; it used
+            # to only allow int/Generator/CustomClassBase/None and crash on float.
+            def fn(a, b, w):
+                s1 = a.item()
+                s2 = b.item()
+                m = torch.matmul(
+                    w, torch.full((w.shape[0], 1), 0.05, device="cuda")
+                ).squeeze()
+                return torch.tan(
+                    torch.divide(m, (2.17 - s2) * s1, rounding_mode="trunc")
+                )
+
+            a = torch.tensor(1.3, dtype=torch.float16, device="cuda")
+            b = torch.tensor(0.7, dtype=torch.float16, device="cuda")
+            w = torch.randn(6, device="cuda")
+            ref = fn(a, b, w)
+            opt = torch.compile(fn, mode="reduce-overhead", fullgraph=True)
+            for _ in range(3):
+                torch.compiler.cudagraph_mark_step_begin()
+                self.assertEqual(opt(a, b, w), ref)
+            self.assertIsNotNone(self.get_manager())
+
         def test_multithreaded_cudagraph_trees(self):
             import queue
             import threading

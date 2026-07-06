@@ -1913,9 +1913,12 @@ class CUDAGraphNode:
         ):
             for i, inp in enumerate(inputs):
                 if not isinstance(inp, torch.Tensor):
-                    if not isinstance(inp, (int, torch.Generator, CustomClassBase)):
+                    if inp is not None and not isinstance(
+                        inp, (int, float, torch.Generator, CustomClassBase)
+                    ):
                         raise AssertionError(
-                            f"expected int, Generator, or CustomClassBase, got {type(inp)}"
+                            "expected Tensor, int, float, Generator, "
+                            f"CustomClassBase, or None, got {type(inp)}"
                         )
 
                     recording_inputs.append(inp)
