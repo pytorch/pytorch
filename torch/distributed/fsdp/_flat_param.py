@@ -1747,6 +1747,11 @@ class FlatParamHandle:
             _same_storage(self.flat_param, self._get_padded_unsharded_flat_param()),
             "Expects the unpadded parameter to be a view into the padded parameter",
         )
+        if self.flat_param.device.type == "cpu":
+            # If already on CPU, freeing the unsharded parameter would leave
+            # flat_param (and its views) aliasing freed storage.
+            yield
+            return
         self.flat_param_to(torch.device("cpu"))
         self._free_unsharded_flat_param()
         try:
