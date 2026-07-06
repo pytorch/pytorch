@@ -4245,7 +4245,7 @@ such as `dist.all_reduce(tensor, async_op=True)`.
           py::arg("options") =
               c10::make_intrusive<::c10d::FakeProcessGroup::Options>())
       .def_property_readonly(
-          "options", &::c10d::FakeProcessGroup::getBackendOptions);
+          "options", &::c10d::FakeProcessGroup::getOptions);
   auto fakeWork =
       intrusive_ptr_no_gil_destructor_class_<::c10d::FakeWork>(
           module, "FakeWork", work)
