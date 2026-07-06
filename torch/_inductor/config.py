@@ -1066,8 +1066,9 @@ combo_kernel_per_subkernel_blocks: bool = Config(
     env_name_force="TORCHINDUCTOR_COMBO_KERNEL_PER_SUBKERNEL_BLOCKS",
     default=True,
 )
-# When True, each combo sub-kernel autotunes its block sizes standalone at compile time;
-# the winners are stitched and baked into the combo kernel. Requires
+# When True, each combo sub-kernel autotunes its block sizes standalone at compile time; the
+# winning per-subkernel blocks are stitched into the combo kernel and passed as args (the combo
+# then autotunes num_warps/num_stages over the winners). Requires
 # combo_kernel_per_subkernel_blocks.
 combo_kernel_compile_time_autotune = True
 # When True, combo-kernel autotuning groups sub-kernels that share the same
