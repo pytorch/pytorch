@@ -312,6 +312,39 @@ class TestUtils(TestCase):
 instantiate_device_type_tests(TestUtils, globals(), allow_xpu=True)
 
 
+class TestFillOrder(TestCase):
+    def test_get_fill_order_unbacked_stride_no_shape_env(self):
+        # get_stride_order / get_fill_order are called in several places
+        # without an explicit shape_env (e.g. GraphLowering.run_node's
+        # fixed-layout path). When a stride is an unbacked expression the
+        # plain argsort path used to guard and raise
+        # GuardOnDataDependentSymNode. get_fill_order now recovers the
+        # shape_env from the symbolic strides and routes through argsort_sym.
+        from torch._inductor.ir import get_fill_order, get_stride_order
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        with FakeTensorMode(shape_env=shape_env):
+            u0 = shape_env.create_unbacked_symint()
+            # u0 vs a concrete value is genuinely data-dependent.
+            seq = [5, u0, 1]
+            # No shape_env passed: must not raise GuardOnDataDependentSymNode.
+            self.assertEqual(len(get_fill_order(seq)), 3)
+            self.assertEqual(len(get_stride_order(seq)), 3)
+            # An explicitly passed shape_env yields the same result.
+            self.assertEqual(get_fill_order(seq), get_fill_order(seq, shape_env))
+
+    def test_get_fill_order_matches_argsort_when_static(self):
+        # For fully static strides the recovery is a no-op and the result
+        # matches the plain argsort path.
+        from torch._inductor.ir import get_fill_order
+        from torch._inductor.utils import argsort
+
+        for seq in ([32, 8, 8, 1], [1, 8, 8, 32], [4, 2, 7], []):
+            self.assertEqual(list(get_fill_order(seq)), argsort(seq))
+
+
 class TestRuntimeEstimation(TestCase):
     def test_get_compute_time_units(self):
         """TFLOPS-to-FLOPS/s conversion must use 1e12, not 1e15."""
