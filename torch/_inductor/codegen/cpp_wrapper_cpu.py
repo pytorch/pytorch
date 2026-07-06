@@ -46,6 +46,7 @@ from .cpp_utils import (
     LAYOUT_TO_ATEN,
 )
 from .wrapper import (
+    _rewrite_symbol_solution_for_int_codegen,
     codegen_reinterpret_view_helper,
     EnterSubgraphLine,
     ExitSubgraphLine,
@@ -54,18 +55,6 @@ from .wrapper import (
     SymbolicCallArg,
     WrapperLine,
 )
-
-
-def _rewrite_symbol_solution_for_int_codegen(expr: sympy.Expr) -> sympy.Expr:
-    """
-    Convert rational divisions in a solved integer symbol expression to exact
-    integer division before C++ printing.
-    """
-    expr = sympy.together(sympy.sympify(expr))
-    numerator, denominator = sympy.fraction(expr)
-    if denominator == 1:
-        return numerator
-    return CleanDiv(numerator, denominator)
 
 
 if TYPE_CHECKING:
@@ -657,6 +646,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         name: str,
         value: ir.TensorBox,
         bound_vars: OrderedSet[sympy.Symbol],
+        deferred_symbol_assignments=None,
     ):
         """Assign symbolic shapes to C++ locals, with replacement aliases."""
         code = self.prefix
@@ -672,39 +662,55 @@ class CppWrapperCpu(PythonWrapperCodegen):
             return f"{name}_stride"
 
         def maybe_emit_replacement_aliases(sym: sympy.Symbol) -> None:
-            # Deferred runtime asserts reference pre-replacement backed
-            # symbols (e.g. s77) that were replaced to this canonical
-            # symbol (s31) during constraint solving. Emit aliases so
-            # the asserts compile. Skip unbacked symbols — they are
-            # defined separately by the unbacked symbol codegen path.
-            from torch.utils._sympy.symbol import symbol_is_type, SymT
+            # Deferred runtime asserts and graph input metadata can reference
+            # either side of a backed-symbol replacement. Emit aliases so both
+            # the pre-replacement and canonical names are defined.
+            def is_backed_symbol(s: sympy.Symbol) -> bool:
+                return not symbol_is_type(s, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT))
+
+            def decl_type(s: sympy.Symbol) -> str:
+                if s.is_integer:
+                    return "int64_t"
+                if s.is_float:
+                    return "double"
+                raise AssertionError("Unexpected symbol type")
 
             for src, tgt in V.graph.sizevars.shape_env.replacements.items():
                 if (
                     tgt == sym
                     and isinstance(src, sympy.Symbol)
                     and src not in bound_vars
-                    and not symbol_is_type(
-                        src, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT)
-                    )
+                    and is_backed_symbol(src)
+                    and is_backed_symbol(sym)
                 ):
-                    code.writeline(f"int64_t {src} = {sym};")
+                    code.writeline(f"{decl_type(src)} {src} = {sym};")
                     bound_vars.add(src)
+                elif (
+                    src == sym
+                    and isinstance(tgt, sympy.Symbol)
+                    and tgt not in bound_vars
+                    and is_backed_symbol(sym)
+                    and is_backed_symbol(tgt)
+                ):
+                    code.writeline(f"{decl_type(tgt)} {tgt} = {sym};")
+                    bound_vars.add(tgt)
 
         def codegen_symbol(
             sym_or_exp: sympy.Symbol | sympy.Expr,
             base_name: str,
             name_fn: Callable[[str], str],
             dim: int,
-        ):
+            deferred_symbol_assignments=None,
+        ) -> bool:
             if isinstance(sym_or_exp, sympy.Symbol):
                 if sym_or_exp in bound_vars:
-                    return
+                    return False
                 code.writeline(f"int64_t {sym_or_exp} = {name_fn(base_name)}[{dim}];")
                 bound_vars.add(sym_or_exp)
                 if symbol_is_type(sym_or_exp, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT)):
                     self.unbacked_symbol_decls.add(str(sym_or_exp))
                 maybe_emit_replacement_aliases(sym_or_exp)
+                return True
             elif isinstance(sym_or_exp, sympy.Expr):
                 undefined_symbols = [
                     sym for sym in sym_or_exp.free_symbols if sym not in bound_vars
@@ -713,7 +719,22 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     # Skip if expression contains no symbols or if multiple
                     # symbols exists since we assume each base symbol is defined
                     # by other codegen_symbol calls.
-                    return
+                    if (
+                        len(undefined_symbols) > 1
+                        and deferred_symbol_assignments is not None
+                    ):
+
+                        def retry(deferred_symbol_assignments):
+                            return codegen_symbol(
+                                sym_or_exp,
+                                base_name,
+                                name_fn,
+                                dim,
+                                deferred_symbol_assignments,
+                            )
+
+                        deferred_symbol_assignments.append(retry)
+                    return False
 
                 from torch.utils._sympy.solve import try_solve
 
@@ -721,16 +742,20 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 base_name = name_fn(base_name)
                 # Use a size symbol to solve the free symbol
                 size_symbol = sympy.Symbol(f"{base_name}_{dim}", integer=True)
-                code.writeline(f"int64_t {size_symbol} = {base_name}[{dim}];")
                 solution = try_solve(sympy.Eq(sym_or_exp, size_symbol), free_symbol)
                 if solution is not None:
+                    code.writeline(f"int64_t {size_symbol} = {base_name}[{dim}];")
                     expr = _rewrite_symbol_solution_for_int_codegen(solution[1])
                     code.writeline(f"int64_t {free_symbol} = {cexpr(expr)};")
                     bound_vars.add(free_symbol)
-                else:
-                    raise AssertionError(
-                        str(sympy.Eq(sym_or_exp, size_symbol)) + " is not solvable"
-                    )
+                    if symbol_is_type(
+                        free_symbol, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT)
+                    ):
+                        self.unbacked_symbol_decls.add(str(free_symbol))
+                    maybe_emit_replacement_aliases(free_symbol)
+                    return True
+                return False
+            return False
 
         if isinstance(value, sympy.Expr):
             if not isinstance(value, sympy.Symbol) or value in bound_vars:
@@ -748,9 +773,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
             maybe_emit_replacement_aliases(value)
         elif isinstance(value, ir.TensorBox):
             for dim, size in enumerate(value.get_size()):
-                codegen_symbol(size, name, sizeof, dim)
+                codegen_symbol(size, name, sizeof, dim, deferred_symbol_assignments)
             for dim, stride in enumerate(value.get_stride()):
-                codegen_symbol(stride, name, strideof, dim)
+                codegen_symbol(stride, name, strideof, dim, deferred_symbol_assignments)
         elif isinstance(
             value, (ir.TorchBindObject, ir.GeneratorState, ir.OpaqueObjectState)
         ):
@@ -3787,6 +3812,12 @@ if (!custom_op_wrapper) {
 
             def codegen_ivalue(raw_arg: Any, arg_type: torch.JitType) -> str:
                 if raw_arg is None:
+                    # A None at a non-optional Tensor arg means an absent tensor.
+                    # Box it as an undefined at::Tensor (ATen's absent-tensor
+                    # sentinel, matching eager value_or(Tensor())); boxing None
+                    # would fail to unbox as `const Tensor&`.  Optionals stay None.
+                    if isinstance(arg_type, torch.TensorType):
+                        return "c10::IValue(at::Tensor())"
                     return "c10::IValue()"
 
                 if isinstance(arg_type, torch.OptionalType):

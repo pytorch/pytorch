@@ -418,7 +418,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                     context=f"value={real_obj}, attr={name}",
                     explanation=f"Member '{name}' is not registered for this opaque object type.",
                     hints=[
-                        f"Register '{name}' with a MemberType in register_opaque_type(members=...).",
+                        f"Register '{name}' with a MemberType in register_custom_class(members=...).",
                     ],
                 )
 
@@ -523,7 +523,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                         ),
                         hints=[
                             f"Register member '{name}' with MemberType.INLINED in "
-                            f"register_opaque_type({real_obj_type}, members=...).",
+                            f"register_custom_class({real_obj_type}, members=...).",
                         ],
                     )
 
@@ -549,7 +549,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                     context=f"value={real_obj}, attr={name}",
                     explanation=f"Member '{name}' is not registered for this opaque object type.",
                     hints=[
-                        f"Register '{name}' with a MemberType in register_opaque_type(members=...).",
+                        f"Register '{name}' with a MemberType in register_custom_class(members=...).",
                     ],
                 )
 
