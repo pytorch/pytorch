@@ -84,7 +84,9 @@ class ExpRelaxedCategorical(Distribution):
     def probs(self) -> Tensor:
         return self._categorical.probs
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
+    def rsample(self, sample_shape: _size | None = None) -> Tensor:
+        if sample_shape is None:
+            sample_shape = torch.Size()
         shape = self._extended_shape(sample_shape)
         uniforms = clamp_probs(
             torch.rand(shape, dtype=self.logits.dtype, device=self.logits.device)

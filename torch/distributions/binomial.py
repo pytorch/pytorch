@@ -130,7 +130,9 @@ class Binomial(Distribution):
     def param_shape(self) -> torch.Size:
         return self._param.size()
 
-    def sample(self, sample_shape=torch.Size()):
+    def sample(self, sample_shape=None):
+        if sample_shape is None:
+            sample_shape = torch.Size()
         shape = self._extended_shape(sample_shape)
         with torch.no_grad():
             return torch.binomial(

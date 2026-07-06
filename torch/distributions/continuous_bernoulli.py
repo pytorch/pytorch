@@ -173,13 +173,17 @@ class ContinuousBernoulli(ExponentialFamily):
     def param_shape(self) -> torch.Size:
         return self._param.size()
 
-    def sample(self, sample_shape=torch.Size()):
+    def sample(self, sample_shape=None):
+        if sample_shape is None:
+            sample_shape = torch.Size()
         shape = self._extended_shape(sample_shape)
         u = torch.rand(shape, dtype=self.probs.dtype, device=self.probs.device)
         with torch.no_grad():
             return self.icdf(u)
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
+    def rsample(self, sample_shape: _size | None = None) -> Tensor:
+        if sample_shape is None:
+            sample_shape = torch.Size()
         shape = self._extended_shape(sample_shape)
         u = torch.rand(shape, dtype=self.probs.dtype, device=self.probs.device)
         return self.icdf(u)

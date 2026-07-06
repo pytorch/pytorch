@@ -231,7 +231,9 @@ class Wishart(ExponentialFamily):
             V.pow(2) + torch.einsum("...i,...j->...ij", diag_V, diag_V)
         )
 
-    def _bartlett_sampling(self, sample_shape=torch.Size()):
+    def _bartlett_sampling(self, sample_shape=None):
+        if sample_shape is None:
+            sample_shape = torch.Size()
         p = self._event_shape[-1]  # has singleton shape
 
         # Implemented Sampling using Bartlett decomposition
@@ -249,7 +251,7 @@ class Wishart(ExponentialFamily):
         return chol @ chol.transpose(-2, -1)
 
     def rsample(
-        self, sample_shape: _size = torch.Size(), max_try_correction=None
+        self, sample_shape: _size | None = None, max_try_correction=None
     ) -> Tensor:
         r"""
         .. warning::
@@ -262,6 +264,8 @@ class Wishart(ExponentialFamily):
 
         if max_try_correction is None:
             max_try_correction = 3 if torch._C._get_tracing_state() else 10
+        if sample_shape is None:
+            sample_shape = torch.Size()
 
         sample_shape = torch.Size(sample_shape)
         sample = self._bartlett_sampling(sample_shape)

@@ -67,7 +67,9 @@ class GeneralizedPareto(Distribution):
         new._validate_args = self._validate_args
         return new
 
-    def rsample(self, sample_shape=torch.Size()):
+    def rsample(self, sample_shape=None):
+        if sample_shape is None:
+            sample_shape = torch.Size()
         shape = self._extended_shape(sample_shape)
         u = torch.rand(shape, dtype=self.loc.dtype, device=self.loc.device)
         return self.icdf(u)

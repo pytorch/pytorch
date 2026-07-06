@@ -45,10 +45,14 @@ class Distribution:
 
     def __init__(
         self,
-        batch_shape: torch.Size = torch.Size(),
-        event_shape: torch.Size = torch.Size(),
+        batch_shape: torch.Size | None = None,
+        event_shape: torch.Size | None = None,
         validate_args: bool | None = None,
     ) -> None:
+        if batch_shape is None:
+            batch_shape = torch.Size()
+        if event_shape is None:
+            event_shape = torch.Size()
         self._batch_shape = batch_shape
         self._event_shape = event_shape
         if validate_args is not None:
@@ -164,20 +168,24 @@ class Distribution:
         """
         return self.variance.sqrt()
 
-    def sample(self, sample_shape: _size = torch.Size()) -> Tensor:
+    def sample(self, sample_shape: _size | None = None) -> Tensor:
         """
         Generates a sample_shape shaped sample or sample_shape shaped batch of
         samples if the distribution parameters are batched.
         """
+        if sample_shape is None:
+            sample_shape = torch.Size()
         with torch.no_grad():
             return self.rsample(sample_shape)
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
+    def rsample(self, sample_shape: _size | None = None) -> Tensor:
         """
         Generates a sample_shape shaped reparameterized sample or sample_shape
         shaped batch of reparameterized samples if the distribution parameters
         are batched.
         """
+        if sample_shape is None:
+            sample_shape = torch.Size()
         raise NotImplementedError
 
     @deprecated(
@@ -263,7 +271,7 @@ class Distribution:
         """
         return torch.exp(self.entropy())
 
-    def _extended_shape(self, sample_shape: _size = torch.Size()) -> torch.Size:
+    def _extended_shape(self, sample_shape: _size | None = None) -> torch.Size:
         """
         Returns the size of the sample returned by the distribution, given
         a `sample_shape`. Note, that the batch and event shapes of a distribution
@@ -273,6 +281,8 @@ class Distribution:
         Args:
             sample_shape (torch.Size): the size of the sample to be drawn.
         """
+        if sample_shape is None:
+            sample_shape = torch.Size()
         if not isinstance(sample_shape, torch.Size):
             sample_shape = torch.Size(sample_shape)
         return torch.Size(sample_shape + self._batch_shape + self._event_shape)

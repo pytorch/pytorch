@@ -101,8 +101,9 @@ class OneHotCategorical(Distribution):
     def param_shape(self) -> torch.Size:
         return self._categorical.param_shape
 
-    def sample(self, sample_shape=torch.Size()):
-        sample_shape = torch.Size(sample_shape)
+    def sample(self, sample_shape=None):
+        if sample_shape is None:
+            sample_shape = torch.Size()
         probs = self._categorical.probs
         num_events = self._categorical._num_events
         indices = self._categorical.sample(sample_shape)
@@ -137,7 +138,7 @@ class OneHotCategoricalStraightThrough(OneHotCategorical):
 
     has_rsample = True
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
+    def rsample(self, sample_shape: _size | None = None) -> Tensor:
         samples = self.sample(sample_shape)
         probs = self._categorical.probs  # cached via @lazy_property
         return samples + (probs - probs.detach())

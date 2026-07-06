@@ -122,7 +122,9 @@ class NegativeBinomial(Distribution):
             validate_args=False,
         )
 
-    def sample(self, sample_shape=torch.Size()):
+    def sample(self, sample_shape=None):
+        if sample_shape is None:
+            sample_shape = torch.Size()
         with torch.no_grad():
             rate = self._gamma.sample(sample_shape=sample_shape)
             return torch.poisson(rate)

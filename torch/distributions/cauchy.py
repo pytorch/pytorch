@@ -73,7 +73,9 @@ class Cauchy(Distribution):
             self._extended_shape(), inf, dtype=self.loc.dtype, device=self.loc.device
         )
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
+    def rsample(self, sample_shape: _size | None = None) -> Tensor:
+        if not sample_shape:
+            sample_shape = torch.Size()
         shape = self._extended_shape(sample_shape)
         eps = self.loc.new(shape).cauchy_()
         return self.loc + eps * self.scale
