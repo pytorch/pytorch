@@ -908,6 +908,11 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
     # Use positional-only argument to avoid naming collision with aten ops arguments
     # that are named "self". This way, all the aten ops can be called by kwargs.
     def __call__(self, /, *args: _P.args, **kwargs: _P.kwargs) -> _T:
+        if (
+            self._pyobj_dispatcher is not None
+            and torch._C._peek_should_skip_torch_function()
+        ):
+            return self._cpp_dispatch_handle(*args, **kwargs)
         return self._op(*args, **kwargs)
 
     # Use positional-only argument to avoid naming collision with aten ops arguments
