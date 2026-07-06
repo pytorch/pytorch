@@ -1380,6 +1380,35 @@ class DequeVariable(CommonListMethodsVariable):
     # tp_hash = PyObject_HashNotImplemented (unhashable)
     _cpython_type = collections.deque
 
+    _nonvar_fields = {
+        "state",
+        *CommonListMethodsVariable._nonvar_fields,
+    }
+
+    # Method names that bump the deque's mutation state counter (CPython bumps
+    # deque->state on every structural change so its iterators can detect
+    # mutation during iteration). Only __delitem__ (sq_ass_item_impl delete
+    # path) and __init__ (tp_init_impl) bump state directly; deque_reverse and
+    # the setitem path deliberately do NOT bump in CPython, so they are absent
+    # here. extend/extendleft bump only when an item is actually appended.
+    # NOTE: if deque `*=` (sq_inplace_repeat) is ever implemented it must bump
+    # state too (CPython deque_inplace_repeat bumps); currently moot (it
+    # graph-breaks).
+    _state_mutating_methods = frozenset(
+        {
+            "append",
+            "appendleft",
+            "extend",
+            "extendleft",
+            "pop",
+            "popleft",
+            "insert",
+            "remove",
+            "clear",
+            "rotate",
+        }
+    )
+
     def richcompare_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -1426,6 +1455,9 @@ class DequeVariable(CommonListMethodsVariable):
         if self.maxlen.as_python_constant() is not None:
             items = items[-maxlen.as_python_constant() :]
         super().__init__(items, **kwargs)
+        # Mirrors CPython deque->state: bumped on every structural mutation so
+        # deque iterators can detect mutation during iteration.
+        self.state = 0
 
     def python_type(self) -> type:
         return collections.deque
@@ -1462,6 +1494,9 @@ class DequeVariable(CommonListMethodsVariable):
             raise_observed_exception(IndexError, tx, args=["deque index out of range"])
         tx.output.side_effects.mutation(self)
         if value is None:
+            # deque_ass_item_lock_held bumps deque->state only on the delete
+            # path (deque_del_item); the set path (Py_SETREF) does not bump.
+            self.state += 1
             self.items.__delitem__(idx)
         else:
             self.items[idx] = value
@@ -1567,11 +1602,33 @@ class DequeVariable(CommonListMethodsVariable):
         if name == "__init__":
             return self.tp_init_impl(tx, args, kwargs)
 
+        if name == "__reversed__":
+            # deque.__reversed__ returns a _deque_reverse_iterator that snapshots
+            # the current state and detects mutation during iteration.
+            if args or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+            return DequeReverseIteratorVariable(
+                list(reversed(self.items)),
+                self,
+                self.state,
+                mutation_type=ValueMutationNew(),
+            )
+
         maxlen = self.maxlen.as_python_constant()
         if maxlen is not None:
             slice_within_maxlen = slice(-maxlen, None)
         else:
             slice_within_maxlen = None
+
+        # Snapshot length before mutation so extend/extendleft only bump the
+        # deque state counter when an item is actually appended (CPython bumps
+        # state per appended item, so an empty extend is a no-op).
+        pre_len = len(self.items)
 
         if name == "extendleft" and self.is_mutable() and len(args) > 0:
             if kwargs or len(args) != 1:
@@ -1626,12 +1683,19 @@ class DequeVariable(CommonListMethodsVariable):
         else:
             result = super().call_method(tx, name, args, kwargs)
 
+        # Capture growth before the maxlen clamp: extend/extendleft appended an
+        # item iff the length grew here (the clamp may shrink it back).
+        extend_appended = len(self.items) > pre_len
         if (
             slice_within_maxlen is not None
             and maxlen is not None
             and len(self.items) > maxlen
         ):
             self.items[:] = self.items[slice_within_maxlen]
+        if name in self._state_mutating_methods and self.is_mutable():
+            # extend/extendleft with an empty iterable append nothing -> no bump.
+            if name not in ("extend", "extendleft") or extend_appended:
+                self.state += 1
         return result
 
     def call_obj_hasattr(
@@ -1662,6 +1726,7 @@ class DequeVariable(CommonListMethodsVariable):
             raise_args_mismatch(tx, "__init__")
         self.validate_maxlen(tx, new_maxlen)
         tx.output.side_effects.mutation(self)
+        self.state += 1
         self.maxlen = new_maxlen
         self.items.clear()
         if iterable is not None:
@@ -1670,10 +1735,12 @@ class DequeVariable(CommonListMethodsVariable):
 
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Modules/_collectionsmodule.c#L1886-L1904
-        # TODO(guilhermeleobas): Replace this by a proper DequeIteratorVariable
-        # that keeps track of the maxlen and doesn't allow iterating over more
-        # items than maxlen.
-        return ListIteratorVariable(self.items, mutation_type=ValueMutationNew())
+        return DequeIteratorVariable(
+            list(self.items),
+            self,
+            self.state,
+            mutation_type=ValueMutationNew(),
+        )
 
 
 class TupleVariable(BaseListVariable):
@@ -2275,6 +2342,59 @@ class ListIteratorVariable(IteratorVariable):
 class TupleIteratorVariable(ListIteratorVariable):
     # PyTupleIter_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/tupleobject.c#L1067
     _cpython_type = type(iter(()))
+
+
+class DequeIteratorVariable(ListIteratorVariable):
+    # _collections._deque_iterator: iterates over a snapshot of the deque taken
+    # at iter() time and raises RuntimeError if the source deque is structurally
+    # mutated during iteration (CPython dequeiter_next compares deque->state).
+    # ref: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L2100-L2140
+    _cpython_type = type(iter(collections.deque()))
+
+    _nonvar_fields = {
+        "saved_state",
+        *ListIteratorVariable._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        items: list[VariableTracker],
+        source_deque: "DequeVariable",
+        saved_state: int,
+        index: int = 0,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(items, index=index, **kwargs)
+        self.source_deque = source_deque
+        self.saved_state = saved_state
+
+    def _check_mutation(self, tx: "InstructionTranslatorBase") -> None:
+        if self.source_deque.state != self.saved_state:
+            raise_observed_exception(
+                RuntimeError, tx, args=["deque mutated during iteration"]
+            )
+
+    def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        self._check_mutation(tx)
+        return super().tp_iternext_impl(tx)
+
+    def unpack_var_sequence(
+        self, tx: "InstructionTranslatorBase"
+    ) -> list[VariableTracker]:
+        self._check_mutation(tx)
+        return super().unpack_var_sequence(tx)
+
+    def python_type(self) -> type:
+        cpython_type = self._cpython_type
+        if not isinstance(cpython_type, type):
+            raise AssertionError(f"expected a single type, got {cpython_type}")
+        return cpython_type
+
+
+class DequeReverseIteratorVariable(DequeIteratorVariable):
+    # _collections._deque_reverse_iterator: same state-based mutation detection
+    # as the forward iterator, over a reversed snapshot.
+    _cpython_type = type(reversed(collections.deque()))
 
 
 class RangeIteratorVariable(IteratorVariable):

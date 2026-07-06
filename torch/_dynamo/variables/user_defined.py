@@ -1216,6 +1216,39 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.lists.DequeVariable(
                 items, maxlen=maxlen, mutation_type=ValueMutationNew()
             )
+        elif self.value in (
+            variables.lists.DequeIteratorVariable._cpython_type,
+            variables.lists.DequeReverseIteratorVariable._cpython_type,
+        ):
+            # _deque_iterator(deque[, index]) / _deque_reverse_iterator(deque[, index])
+            # ref: dequeiter_new in Modules/_collectionsmodule.c
+            is_reverse = (
+                self.value is variables.lists.DequeReverseIteratorVariable._cpython_type
+            )
+            name = self.value.__name__
+            if kwargs or not 1 <= len(args) <= 2:
+                raise_args_mismatch(tx, name)
+            deque_arg = args[0]
+            if not isinstance(deque_arg, variables.lists.DequeVariable):
+                raise_type_error(
+                    tx,
+                    f"{name}() argument 1 must be collections.deque, "
+                    f"not {deque_arg.python_type_name()}",
+                )
+            index = args[1].as_python_constant() if len(args) == 2 else 0
+            if is_reverse:
+                cls = variables.lists.DequeReverseIteratorVariable
+                snapshot = list(reversed(deque_arg.items))
+            else:
+                cls = variables.lists.DequeIteratorVariable
+                snapshot = list(deque_arg.items)
+            return cls(
+                snapshot,
+                deque_arg,
+                deque_arg.state,
+                index=index,
+                mutation_type=ValueMutationNew(),
+            )
         elif (
             # https://github.com/python/cpython/blob/33efd7178e269cbd04233856261fd0aabbf35447/Lib/contextlib.py#L475-L477
             self.value is types.MethodType
