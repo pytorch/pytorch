@@ -1942,6 +1942,9 @@ class FakeTensorMode(TorchDispatchMode):
         if func is aten._unsafe_view.default:
             raise _BypassDispatchCache("unsafe view")
 
+        if func is torch.ops.prims.as_strided.default:
+            raise _BypassDispatchCache("prims.as_strided")
+
         if func in self.lift_fns:
             raise _BypassDispatchCache("lift")
 
