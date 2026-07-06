@@ -138,10 +138,19 @@ jobs:
 
       - name: Prepare vLLM wheel
         shell: bash
+        # Original ran this inside the manylinux container via docker exec (cwd
+        # /artifacts, with PYTHON_EXECUTABLE + auditwheel/wheel/unzip present).
+        # OSDC ARC has no host docker daemon, so run it directly on the pod: cd to
+        # the artifacts dir (where torch-* and externals/vllm/wheels live), point
+        # PYTHON_EXECUTABLE at the uv venv, and install the repackaging tools.
+        working-directory: ${{ runner.temp }}/artifacts
+        env:
+          PYTHON_EXECUTABLE: python
         run: |
           set -eux
-          # vLLM wheel renaming logic (from .buildkite/scripts/upload-wheels.sh),
-          # run directly in the container instead of via docker exec.
+          sudo apt-get update
+          sudo apt-get install -y unzip patchelf
+          uv pip install auditwheel wheel==0.45.1
           bash "${GITHUB_WORKSPACE}/.github/scripts/prepare_vllm_wheels.sh"
 
       - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
