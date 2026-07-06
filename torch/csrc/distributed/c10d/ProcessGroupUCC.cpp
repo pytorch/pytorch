@@ -5,8 +5,8 @@
 #include <c10/util/env.h>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupUCC.hpp>
-#include <torch/csrc/distributed/c10d/UCCTracing.hpp>
-#include <torch/csrc/distributed/c10d/UCCUtils.hpp>
+#include <torch/csrc/distributed/c10d/ucc/UCCTracing.hpp>
+#include <torch/csrc/distributed/c10d/ucc/UCCUtils.hpp>
 #include <list>
 #include <memory>
 #include <unordered_map>
@@ -962,7 +962,7 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::allgather(
   }
 }
 
-c10::intrusive_ptr<Work> ProcessGroupUCC::_allgather_base(
+c10::intrusive_ptr<Work> ProcessGroupUCC::all_gather_single(
     at::Tensor& outputTensor,
     at::Tensor& inputTensor,
     const AllgatherOptions& opts) {
@@ -1107,7 +1107,7 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::alltoall(
       "ucc:alltoall");
 }
 
-c10::intrusive_ptr<Work> ProcessGroupUCC::alltoall_base(
+c10::intrusive_ptr<Work> ProcessGroupUCC::all_to_all_single(
     at::Tensor& outputTensor,
     at::Tensor& inputTensor,
     std::vector<int64_t>& outputSplitSizes,
@@ -1457,7 +1457,7 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::reduce_scatter(
       "ucc:reduce_scatter");
 }
 
-c10::intrusive_ptr<Work> ProcessGroupUCC::_reduce_scatter_base(
+c10::intrusive_ptr<Work> ProcessGroupUCC::reduce_scatter_single(
     at::Tensor& outputTensor,
     at::Tensor& inputTensor,
     const ReduceScatterOptions& opts) {
@@ -1647,8 +1647,6 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::recv(
       tensors,
       "ucc:recv");
 }
-
-void ProcessGroupUCC::setSequenceNumberForGroup() {}
 
 uint64_t ProcessGroupUCC::getSequenceNumberForGroup() {
   return seq_;

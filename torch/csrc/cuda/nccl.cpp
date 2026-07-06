@@ -333,7 +333,7 @@ void check_inputs(
     std::stringstream err;
     err << "inputs and outputs sequences have to be of the same length, but got input of length "
         << len << " and output of length " << outputs.size();
-    TORCH_CHECK(false, err.str());
+    TORCH_CHECK(false, std::move(err).str());
   }
 
   device_set devices;
@@ -525,10 +525,13 @@ size_t get_max_count() {
 
 void broadcast(
     TensorList tensors,
+    int32_t root,
     const stream_list& streams,
     const comm_list& user_comms) {
 #ifdef USE_NCCL
   using namespace torch::cuda::nccl::detail;
+  TORCH_CHECK(
+      root >= 0 && static_cast<size_t>(root) < tensors.size(), "invalid root");
   check_inputs(tensors, tensors, 1, 1);
   auto data_type = to_nccl_data_type(tensors[0]);
   int64_t numel = tensors[0].numel();
@@ -558,7 +561,7 @@ void broadcast(
         tensors[i].mutable_data_ptr(),
         numel,
         data_type,
-        0,
+        root,
         to_nccl_comm(comm),
         stream));
   }

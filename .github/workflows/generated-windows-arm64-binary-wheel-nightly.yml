@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: releng", "module: windows"]
 # @generated DO NOT EDIT MANUALLY
 
 # Template is at:    .github/templates/windows_binary_build_workflow.yml.j2
@@ -263,7 +264,7 @@ jobs:
       R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
       R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
       R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-  libtorch-cpu-shared-with-deps-release-extract:
+  libtorch-arm64-cpu-shared-with-deps-release-extract:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
       - wheel-build
@@ -295,20 +296,21 @@ jobs:
             --output-dir "${{ runner.temp }}/libtorch_output" \
             --platform windows \
             --desired-cuda "$DESIRED_CUDA" \
-            --libtorch-variant "$LIBTORCH_VARIANT"
+            --libtorch-variant "$LIBTORCH_VARIANT" \
+            --arch arm64
       - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
-          name: libtorch-cpu-shared-with-deps-release
+          name: libtorch-arm64-cpu-shared-with-deps-release
           retention-days: 14
           if-no-files-found: error
           path: "${{ runner.temp }}/libtorch_output/"
-  libtorch-cpu-shared-with-deps-release-upload:  # Uploading
+  libtorch-arm64-cpu-shared-with-deps-release-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
-    needs: libtorch-cpu-shared-with-deps-release-extract
+    needs: libtorch-arm64-cpu-shared-with-deps-release-extract
     with:
       PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: libtorch
@@ -316,7 +318,7 @@ jobs:
       GPU_ARCH_TYPE: cpu
       LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
-      build_name: libtorch-cpu-shared-with-deps-release
+      build_name: libtorch-arm64-cpu-shared-with-deps-release
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
