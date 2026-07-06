@@ -4381,6 +4381,19 @@
       ]
     }
   ],
+  "GB7404": [
+    {
+      "Gb_type": "assume_constant_result specialize_args tensor argument",
+      "Context": "function {name}, variable type {type(x).__name__}",
+      "Explanation": "Function {name} marked with torch._dynamo.assume_constant_result(specialize_args=True) was called with a tensor argument. Tensor data cannot be value-guarded, so the baked constant could silently go stale when the data changes.",
+      "Hints": [
+        "Pass the relevant values as non-tensor arguments instead",
+        "Use plain torch._dynamo.assume_constant_result (without ",
+        "specialize_args), which passes tensors by real value without ",
+        "any guard"
+      ]
+    }
+  ],
   "GB0282": [
     {
       "Gb_type": "Placement with custom __getattr__ not supported",

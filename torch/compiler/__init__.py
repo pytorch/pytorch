@@ -324,7 +324,9 @@ def assume_constant_result(fn=None, *, specialize_args=False):
             ``torch.utils._pytree.register_constant`` or
             ``torch._library.opaque_object.register_custom_class`` with
             ``typ="constant"`` (both compare via the class's ``__eq__``);
-            anything else triggers a graph break.
+            anything else, including tensors, triggers a graph break (tensor
+            arguments are allowed only with ``specialize_args=False``, where
+            they are passed by real value without any guard).
 
     .. warning::
         `assume_constant_result` can, if invalid, cause safety and soundness issues, :func:`torch.compile`

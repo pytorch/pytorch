@@ -1947,6 +1947,21 @@ def invoke_and_store_as_constant(
             )
 
     def convert_specialized(x: VariableTracker) -> Any:
+        if x.is_tensor():
+            unimplemented(
+                gb_type="assume_constant_result specialize_args tensor argument",
+                context=f"function {name}, variable type {type(x).__name__}",
+                explanation=f"Function {name} marked with "
+                f"torch._dynamo.assume_constant_result(specialize_args=True) was "
+                f"called with a tensor argument. Tensor data cannot be value-guarded, "
+                f"so the baked constant could silently go stale when the data changes.",
+                hints=[
+                    "Pass the relevant values as non-tensor arguments instead",
+                    "Use plain torch._dynamo.assume_constant_result (without "
+                    "specialize_args), which passes tensors by real value without "
+                    "any guard",
+                ],
+            )
         if x.source is None:
             try:
                 return x.as_python_constant()
@@ -1996,10 +2011,10 @@ def invoke_and_store_as_constant(
         return value
 
     def convert(x: VariableTracker) -> Any:
-        if x.is_tensor():
-            return cast("TensorVariable", x).get_real_value()
         if specialize_args:
             return convert_specialized(x)
+        if x.is_tensor():
+            return cast("TensorVariable", x).get_real_value()
         return convert_plain(x)
 
     args = [convert(x) for x in args]

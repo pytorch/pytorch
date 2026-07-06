@@ -1719,6 +1719,18 @@ class DecoratorTests(PytreeRegisteringTestCase):
         fn(torch.ones(4), Cfg(torch.device("meta"), b"a"))
         self.assertEqual(cnts.frame_count, 2)
 
+    def test_assume_constant_result_specialize_args_tensor_arg(self):
+        @torch._dynamo.assume_constant_result(specialize_args=True)
+        def select(t):
+            return float(t.sum())
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x, t):
+            return x * select(t)
+
+        with self.assertRaisesRegex(Unsupported, "tensor argument"):
+            fn(torch.ones(4), torch.ones(4))
+
     def test_assume_constant_result_specialize_args_registered_constants(self):
         import torch.utils._pytree as pytree
         from torch._library.opaque_object import register_custom_class
