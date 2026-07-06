@@ -22,8 +22,8 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 # every test that uses these is gated on TEST_CUPTI_PM_SAMPLING (which implies TEST_CUPTI_PYTHON).
 if TEST_CUPTI_PYTHON:
     from torch.profiler._cupti.pm_sampling import (
-        _LOOKBACK_WINDOW_NS,
-        _SAMPLING_INTERVAL_NS,
+        _DEFAULT_LOOKBACK_WINDOW_NS,
+        _DEFAULT_SAMPLING_INTERVAL_NS,
         PmSampler,
         supported_metrics,
     )
@@ -75,11 +75,45 @@ class TestPmSamplingWindowSizing(TestCase):
         return sampler, ([frame] if frame is not None else [])
 
     def test_max_samples_from_process_config(self):
-        # max_samples = look-back / interval (process-wide env); accepted by a real
-        # configure()/decode() (start sizes the ring from it via get_counter_data_size).
+        # max_samples = look-back / interval (the process-wide default here, since no
+        # configure() call); accepted by a real start()/decode() (which sizes the ring
+        # from it via get_counter_data_size).
         sampler, _ = self._collect()
-        expected = max(1, _LOOKBACK_WINDOW_NS // _SAMPLING_INTERVAL_NS)
+        expected = max(1, _DEFAULT_LOOKBACK_WINDOW_NS // _DEFAULT_SAMPLING_INTERVAL_NS)
         self.assertEqual(sampler._max_samples, expected)
+
+    def test_configure_and_get_config_first_come_first_serve(self):
+        # Interval/look-back are a process-wide config (no env var): configure() sets them,
+        # get_config() reports them, and it's first-come-first-serve -- a second call is ignored.
+        # No CUDA needed; save/restore the class state so other tests are unperturbed.
+        saved = PmSampler.get_config()
+
+        def _restore():
+            PmSampler._sampling_interval_ns = saved["sampling_interval_ns"]
+            PmSampler._lookback_window_ns = saved["lookback_window_ns"]
+            PmSampler._configured = saved["configured"]
+
+        self.addCleanup(_restore)
+        PmSampler._sampling_interval_ns = _DEFAULT_SAMPLING_INTERVAL_NS
+        PmSampler._lookback_window_ns = _DEFAULT_LOOKBACK_WINDOW_NS
+        PmSampler._configured = False
+        self.assertEqual(
+            PmSampler.get_config(),
+            {
+                "sampling_interval_ns": _DEFAULT_SAMPLING_INTERVAL_NS,
+                "lookback_window_ns": _DEFAULT_LOOKBACK_WINDOW_NS,
+                "configured": False,
+            },
+        )
+        PmSampler.configure(sampling_interval_ms=0.5, lookback_window_ms=2000)
+        cfg = PmSampler.get_config()
+        self.assertEqual(cfg["sampling_interval_ns"], 500_000)
+        self.assertEqual(cfg["lookback_window_ns"], 2_000_000_000)
+        self.assertTrue(cfg["configured"])
+        # first-come-first-serve: a second configure() is ignored (and warns).
+        with self.assertLogs("torch.profiler._cupti.pm_sampling", level="WARNING"):
+            PmSampler.configure(sampling_interval_ms=0.1)
+        self.assertEqual(PmSampler.get_config()["sampling_interval_ns"], 500_000)
 
     def test_empty_metrics_rejected(self):
         # A consumer must bring a non-empty metric set; add_consumer rejects an empty one.
@@ -141,7 +175,7 @@ class TestPmSamplingWindowSizing(TestCase):
         if ts.size == 0:
             self.skipTest("no PM samples produced on this GPU")
         self.assertTrue((np.diff(np.sort(ts)) >= 0).all())  # monotonic HW timestamps
-        self.assertLessEqual(int(ts.max() - ts.min()), _LOOKBACK_WINDOW_NS)
+        self.assertLessEqual(int(ts.max() - ts.min()), _DEFAULT_LOOKBACK_WINDOW_NS)
 
     def test_select_metrics_by_name(self):
         # A caller passes metric name strings; each selected metric becomes its own frame column.
