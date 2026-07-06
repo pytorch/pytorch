@@ -163,7 +163,7 @@ class TORCH_API Reducer {
   // a tensor where index i = 1 if the Variable with that index has been used.
   at::Tensor get_local_used_map_on_device() const;
 
-  // An function for users to set sample_rate of collecting
+  // A function for users to set sample_rate of collecting
   // runtime stats. The time stats will be recorded for the
   // first 10 iterations, after 10 iterations time stats will be
   // recorded once every "sample_rate" training iterations.

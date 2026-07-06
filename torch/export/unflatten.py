@@ -101,6 +101,12 @@ def _assign_attr(
         for to_module in to_modules:
             if not hasattr(to_module, item):
                 setattr(to_module, item, torch.nn.Module())
+            # Collect `item` and every call-name variant `item@N` present in
+            # _modules, regardless of contiguity. Export passes (e.g.
+            # replace_set_grad_with_hop_pass) can relocate intermediate calls
+            # into HOP subgraphs, leaving non-contiguous indices (e.g. base + @3
+            # with @1/@2 absent); scanning contiguously from @1 would stop at the
+            # gap and never populate the surviving higher-index copies.
             ts.update(
                 t_call  # type: ignore[misc]
                 for k, t_call in to_module._modules.items()
