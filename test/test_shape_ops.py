@@ -17,11 +17,12 @@ from torch.testing._internal.common_device_type import (
     dtypesIfXPU,
     instantiate_device_type_tests,
     largeTensorTest,
+    onlyAccelerator,
     onlyCPU,
-    onlyNativeDeviceTypes,
-    onlyOn,
 )
 from torch.testing._internal.common_dtype import (
+    all_passthru_types,
+    all_passthru_types_and,
     all_types,
     all_types_and,
     all_types_and_complex_and,
@@ -269,7 +270,6 @@ class TestShapeOps(TestCase):
         self.assertEqual(expected.shape, result.shape)
         self.assertEqual(expected, result)
 
-    @onlyNativeDeviceTypes
     @dtypes(*all_types())
     @dtypesIfCUDA(*all_types_and(torch.half))
     @dtypesIfXPU(*all_types_and(torch.half))
@@ -407,7 +407,8 @@ class TestShapeOps(TestCase):
         with self.assertRaisesRegex(RuntimeError, error_msg):
             torch.clamp(X)
 
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @dtypes(*all_passthru_types())
+    @dtypesIfCUDA(*all_passthru_types_and(torch.chalf))
     def test_flip(self, device, dtype):
         make_from_data = partial(torch.tensor, device=device, dtype=dtype)
         make_from_size = partial(make_tensor, device=device, dtype=dtype)
@@ -577,7 +578,7 @@ class TestShapeOps(TestCase):
                     np_fn = partial(np.flip, axis=flip_dim)
                     self.compare_with_numpy(torch_fn, np_fn, data)
 
-    @onlyOn(["cuda", "xpu"])  # CPU is too slow
+    @onlyAccelerator  # CPU is too slow
     @largeTensorTest("17GB")  # 4 tensors of 4GB (in, out) x (torch, numpy) + 1GB
     @largeTensorTest(
         "81GB", "cpu"
@@ -650,8 +651,8 @@ class TestShapeOps(TestCase):
         self.assertEqual(data.rot90(-5, [0, 1]), data.rot90(-1, [0, 1]))
 
         # test for dims out-of-range error
-        self.assertRaises(RuntimeError, lambda: data.rot90(1, [0, -3]))
-        self.assertRaises(RuntimeError, lambda: data.rot90(1, [0, 2]))
+        self.assertRaises(IndexError, lambda: data.rot90(1, [0, -3]))
+        self.assertRaises(IndexError, lambda: data.rot90(1, [0, 2]))
 
         # test tensor with more than 2D
         data = torch.arange(1, 9, device=device).view(2, 2, 2)
@@ -661,7 +662,7 @@ class TestShapeOps(TestCase):
         self.assertEqual(data.rot90(1, [1, -1]), data.rot90(1, [1, 2]))
 
         # test for errors
-        self.assertRaises(RuntimeError, lambda: data.rot90(1, [0, 3]))
+        self.assertRaises(IndexError, lambda: data.rot90(1, [0, 3]))
         self.assertRaises(RuntimeError, lambda: data.rot90(1, [1, 1]))
         self.assertRaises(RuntimeError, lambda: data.rot90(1, [0, 1, 2]))
         self.assertRaises(RuntimeError, lambda: data.rot90(1, [0]))
@@ -783,7 +784,6 @@ class TestShapeOps(TestCase):
         self.assertEqual(traced_nontuple, expected_nontuple)
         self.assertEqual(traced_out, expected_nontuple)
 
-    @onlyNativeDeviceTypes
     def test_nonzero_discontiguous(self, device):
         shape = (4, 4)
         tensor = torch.randint(2, shape, device=device)

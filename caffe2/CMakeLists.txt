@@ -595,12 +595,6 @@ if(USE_CUDA)
       set_source_files_properties(${ASYNC_MM_FILE} PROPERTIES COMPILE_FLAGS "-gencode arch=compute_90a,code=sm_90a")
     endif()
   endif()
-  if(NOT WIN32)
-    set_source_files_properties(
-      ${TORCH_ROOT}/aten/src/ATen/cuda/CUDAGreenContext.cpp
-      PROPERTIES COMPILE_FLAGS "-DPYTORCH_C10_DRIVER_API_SUPPORTED=1"
-    )
-  endif()
   set_source_files_properties(
     ${TORCH_ROOT}/aten/src/ATen/cuda/detail/LazyNVRTC.cpp
     PROPERTIES COMPILE_DEFINITIONS "NVRTC_SHORTHASH=${CUDA_NVRTC_SHORTHASH}"
@@ -831,8 +825,8 @@ if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND NOT USE_IOS AND NOT USE_COREML
   endforeach()
 endif()
 if(USE_MPS)
+  add_dependencies(torch_cpu metallibs)
   if(CAN_COMPILE_METAL)
-    add_dependencies(torch_cpu metallibs)
     target_link_options(torch_cpu PRIVATE -Wl,-sectcreate,__TEXT,metal_basic,${CMAKE_CURRENT_BINARY_DIR}/aten/src/ATen/kernels_basic.metallib)
     if(CAN_COMPILE_METAL_40)
       target_link_options(torch_cpu PRIVATE -Wl,-sectcreate,__TEXT,metal_40,${CMAKE_CURRENT_BINARY_DIR}/aten/src/ATen/kernels_40.metallib)
@@ -1003,6 +997,9 @@ elseif(USE_CUDA)
   if(USE_NCCL)
     target_link_libraries(torch_cuda PRIVATE __caffe2_nccl)
     target_compile_definitions(torch_cuda PRIVATE USE_NCCL)
+  endif()
+  if(USE_NCCL_EP)
+    target_compile_definitions(torch_cuda PRIVATE USE_NCCL_EP)
   endif()
 
   # Compile with NVSHMEM
@@ -1465,7 +1462,7 @@ if(USE_ROCM)
   if(USE_MEM_EFF_ATTENTION)
     target_compile_definitions(torch_hip PRIVATE USE_MEM_EFF_ATTENTION)
   endif()
-  if(USE_ROCM_CK_SDPA)
+  if(TARGET ck_sdpa)
     target_compile_definitions(torch_hip PRIVATE USE_ROCM_CK_SDPA)
   endif()
 
@@ -1850,7 +1847,7 @@ if(USE_ROCM)
   target_link_libraries(torch_hip PUBLIC torch_cpu_library ${Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS})
   target_link_libraries(torch_hip PRIVATE ${Caffe2_HIP_DEPENDENCY_LIBS})
 
-  if(USE_ROCM_CK_SDPA)
+  if(TARGET ck_sdpa)
     target_link_libraries(torch_hip PRIVATE ck_sdpa)
   endif()
 
@@ -1918,7 +1915,9 @@ if(BUILD_TEST)
             if(TARGET Sanitizer::address)
               target_link_libraries(${test_name}_${CPU_CAPABILITY} Sanitizer::address)
             endif()
-            if(TARGET Sanitizer::undefined)
+            # Skip UBSan on ROCm: see cmake/Dependencies.cmake (UBSan + ASAN
+            # on ROCm Clang produces misaligned ASAN globals that abort).
+            if(TARGET Sanitizer::undefined AND NOT USE_ROCM)
               target_link_libraries(${test_name}_${CPU_CAPABILITY} Sanitizer::undefined)
             endif()
           endif()

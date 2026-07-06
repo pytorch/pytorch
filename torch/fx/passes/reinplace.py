@@ -50,7 +50,7 @@ def _get_view_type(tgt: object) -> _ViewType:
 
 # Stores a bunch of metadata related to functionalization each node.
 # Relevant metadata:
-# n.meta['fake_result']: FakeTensor (same type as the output of the node, but with FakeTenors instead of Tensors)
+# n.meta['fake_result']: FakeTensor (same type as the output of the node, but with FakeTensors instead of Tensors)
 #   The fake tensor output from running the current node
 # n.meta['view_of']: Node
 #   If the current node n is a view of some base tensor, the 'view_of' field tells us which
@@ -180,10 +180,7 @@ def _maybe_get_inplace_op(op: object) -> torch._ops.OpOverload | None:
     if maybe_inplace_op is None:
         return None
 
-    inplace_overloads = [
-        getattr(maybe_inplace_op, overload_name)
-        for overload_name in maybe_inplace_op.overloads()
-    ]
+    inplace_overloads = maybe_inplace_op.op_overloads()
     inplace_overloads_with_matching_schemas = [
         f for f in inplace_overloads if _schemas_match(op._schema, f._schema)
     ]
@@ -251,7 +248,7 @@ def _get_view_inverse_node_usages(
 ) -> set[Node]:
     def matching_view_metadata(a: FakeTensor, b: FakeTensor) -> bool:
         return (
-            a.size() == b.size()
+            a.size() == b.size()  # type: ignore[bad-return]
             and a.stride() == b.stride()
             and a.storage_offset() == b.storage_offset()
         )
