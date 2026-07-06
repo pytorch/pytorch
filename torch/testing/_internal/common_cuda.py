@@ -43,6 +43,7 @@ IS_JETSON = LazyVal(lambda: torch.cuda.is_available() and (torch.cuda.get_device
 IS_SM89 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (8, 9))
 IS_SM90 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (9, 0))
 IS_SM100 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (10, 0))
+IS_SM103 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (10, 3))
 IS_SM10X = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 10)
 IS_SM12X = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 12)
 
@@ -72,7 +73,7 @@ def CDNA2OrLater():
 
 def evaluate_platform_supports_flash_attention():
     if TEST_WITH_ROCM:
-        arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950"]
+        arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950", "gfx1250"]
         if os.environ.get("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "0") != "0":
             arch_list += ["gfx1101", "gfx1102", "gfx1150", "gfx1151", "gfx1200"]
         return evaluate_gfx_arch_within(arch_list)
@@ -90,7 +91,7 @@ def evaluate_platform_supports_ck_sdpa():
 
 def evaluate_platform_supports_efficient_attention():
     if TEST_WITH_ROCM:
-        arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950"]
+        arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950", "gfx1250"]
         if os.environ.get("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "0") != "0":
             arch_list += ["gfx1101", "gfx1102", "gfx1150", "gfx1151", "gfx1200"]
         return evaluate_gfx_arch_within(arch_list)
@@ -475,6 +476,11 @@ def xfailIfSM120OrLater(func):
     if TEST_WITH_ROCM:
         return func
     return func if not SM120OrLater else unittest.expectedFailure(func)
+
+def skipIfSM103(func):
+    if TEST_WITH_ROCM:
+        return func
+    return unittest.skip("Test skipped on SM103")(func) if IS_SM103 else func
 
 def xfailIfSM12X(func):
     return func if not IS_SM12X else unittest.expectedFailure(func)
