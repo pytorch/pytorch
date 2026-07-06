@@ -55,6 +55,16 @@ Generally, use `spin lint` as to run the lint and `spin fixlint` to apply automa
 When the user asks you to commit or amend, run `lintrunner -a` before creating
 the commit. Fix any lint errors it reports, then commit.
 
+# Git
+
+This refines the Bash tool's `# Git` guidance to "branch first" when on the
+default branch:
+
+- If HEAD is detached, that is intentional (the ghstack workflow). Do NOT
+  create a new branch; commit directly onto the current detached HEAD.
+- If you are on an actual branch (including `main`), follow the default
+  guidance and branch first before committing.
+
 # Commit messages
 
 Don't commit unless the user explicitly asks you to.

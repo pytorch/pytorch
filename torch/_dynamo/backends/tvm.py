@@ -182,8 +182,12 @@ def tvm(
     return exec_tvm
 
 
-tvm_meta_schedule = functools.partial(tvm, scheduler="meta_schedule")
-tvm_auto_scheduler = functools.partial(tvm, scheduler="auto_scheduler")
+tvm_meta_schedule = functools.partial(
+    tvm, options=MappingProxyType({"scheduler": "meta_schedule"})
+)
+tvm_auto_scheduler = functools.partial(
+    tvm, options=MappingProxyType({"scheduler": "auto_scheduler"})
+)
 
 
 def has_tvm() -> bool:

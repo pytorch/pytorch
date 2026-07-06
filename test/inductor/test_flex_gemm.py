@@ -739,6 +739,20 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
             )
         with self.assertRaisesRegex(RuntimeError, "local_reduce_out shape"):
             validate_local_reduce_out_shape((128, 7), (128, 8))
+        column_major_plan = self.runtimeLocalReducePlan(
+            out=torch.empty_strided((128, 8), (1, 128), device="cuda"),
+            group=8,
+            axis=1,
+        )
+        with self.assertRaisesRegex(NotImplementedError, "row-major"):
+            validate_runtime_local_reduce(
+                column_major_plan,
+                torch.empty(128, 64, device="cuda"),
+                (128, 64),
+                None,
+                1.0,
+                1.0,
+            )
 
     def test_runtime_validation_rejects_local_reduce_with_c_alpha_beta(self):
         from torch._inductor.kernel.flex_gemm.runtime import (
@@ -2396,6 +2410,32 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         a = torch.randn(m, 64, device="cuda", dtype=torch.bfloat16)
         b = torch.randn(64, n, device="cuda", dtype=torch.bfloat16)
         with self.assertRaisesRegex(Exception, "single physical local reduction"):
+            torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_tuple_aux_tensorSSA_rejects_mx_scale_finalizer(self):
+        m = 64
+        n = 128
+        k = 64
+        group = 16
+
+        def epilogue_fn(acc):
+            x = acc.float().view(m, -1, group)
+            return acc.relu(), mx_e8m0_scale(x.abs().amax(-1))
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+        with self.assertRaisesRegex(Exception, "requires physical local-reduce"):
             torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
     @skipIfNoCuteDSL

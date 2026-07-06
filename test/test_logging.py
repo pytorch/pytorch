@@ -86,7 +86,7 @@ class LoggingTest(TestCase):
             self.assertEqual(
                 result.returncode,
                 0,
-                f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+                lambda msg: f"{msg}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}",
             )
             self.assertIn("issue173759 component log", result.stderr)
             self.assertIn("issue173759 artifact log", result.stderr)
@@ -145,6 +145,101 @@ class LoggingTest(TestCase):
                 os.environ["TORCH_TRACE"] = old_env
             log_internal.LOG_TRACE_HANDLER = old_handler
             _init_logs()
+
+    def test_init_logs_preserves_active_trace_handler_stream(self):
+        old_env = os.environ.get("TORCH_TRACE")
+        old_handler = log_internal.LOG_TRACE_HANDLER
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                os.environ["TORCH_TRACE"] = tmpdir
+                log_internal.LOG_TRACE_HANDLER = None
+                _init_logs()
+
+                trace_structured(
+                    "before_reinit",
+                    metadata_fn=dict,
+                    expect_trace_id=False,
+                    record_logging_overhead=False,
+                )
+                handler = log_internal.LOG_TRACE_HANDLER
+                handler.flush()
+                stream_path = handler._stream_path
+                self.assertIsNotNone(stream_path)
+
+                _init_logs()
+                self.assertIs(log_internal.LOG_TRACE_HANDLER, handler)
+
+                trace_structured(
+                    "after_reinit",
+                    metadata_fn=dict,
+                    expect_trace_id=False,
+                    record_logging_overhead=False,
+                )
+                handler.flush()
+                self.assertEqual(handler._stream_path, stream_path)
+
+                log_files = glob.glob(os.path.join(tmpdir, "*.log"))
+                self.assertEqual(len(log_files), 1)
+                content = Path(stream_path).read_text()
+                self.assertIn("before_reinit", content)
+                self.assertIn("after_reinit", content)
+
+                handler.close()
+        finally:
+            if old_env is None:
+                os.environ.pop("TORCH_TRACE", None)
+            else:
+                os.environ["TORCH_TRACE"] = old_env
+            log_internal.LOG_TRACE_HANDLER = old_handler
+            _init_logs()
+
+    def test_init_logs_removes_marked_handlers_if_weak_registry_is_reset(self):
+        old_logs = os.environ.get(log_internal.LOG_ENV_VAR)
+        old_logs_out = os.environ.get(log_internal.LOG_OUT_ENV_VAR)
+        old_log_state = log_internal._get_log_state()
+        created_handlers = set()
+
+        def close_created_handlers():
+            for handler in created_handlers:
+                handler.close()
+            created_handlers.clear()
+
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                try:
+                    log_path = os.path.join(tmpdir, "torch.log")
+                    os.environ[log_internal.LOG_ENV_VAR] = "+dynamic"
+                    os.environ[log_internal.LOG_OUT_ENV_VAR] = log_path
+                    log_internal._set_log_state(log_internal.LogState())
+
+                    _init_logs()
+                    for log_qname in log_internal.log_registry.get_log_qnames():
+                        created_handlers.update(logging.getLogger(log_qname).handlers)
+
+                    log_internal.handlers.clear()
+                    _init_logs()
+                    for log_qname in log_internal.log_registry.get_log_qnames():
+                        logger = logging.getLogger(log_qname)
+                        created_handlers.update(logger.handlers)
+                        self.assertEqual(
+                            len(logger.handlers),
+                            2,
+                            f"{log_qname} should only have stream and file handlers",
+                        )
+                finally:
+                    close_created_handlers()
+        finally:
+            if old_logs is None:
+                os.environ.pop(log_internal.LOG_ENV_VAR, None)
+            else:
+                os.environ[log_internal.LOG_ENV_VAR] = old_logs
+            if old_logs_out is None:
+                os.environ.pop(log_internal.LOG_OUT_ENV_VAR, None)
+            else:
+                os.environ[log_internal.LOG_OUT_ENV_VAR] = old_logs_out
+            log_internal._set_log_state(old_log_state)
+            _init_logs()
+            close_created_handlers()
 
     def test_trace_handler_close_stream_can_skip_flush(self):
         paths: list[Path] = []

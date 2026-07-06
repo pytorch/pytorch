@@ -264,14 +264,6 @@ def _cute_scale_expr(
 ) -> str:
     """Render scale encoders as numeric CuTeDSL expressions before output casting."""
     if op_name == "mx_e8m0_scale":
-        if tensorssa:
-            scale_exp = f"(cute.math.floor(cute.math.log2({source})) - {max_power})"
-            return (
-                "cute.math.exp2("
-                f"cute.where({scale_exp} < -127.0, -127.0, "
-                f"cute.where({scale_exp} > 128.0, 128.0, {scale_exp}))"
-                ")"
-            )
         exponent = (
             f"(((cutlass.Float32({source}).bitcast(cutlass.Int32) >> 23) "
             f"& 0xFF) - 127 - {max_power})"
@@ -300,6 +292,10 @@ def _cute_scale_call(
         raise NotImplementedError("FlexGEMM mx_e8m0_scale requires static max_power")
     source = args[0]
     cse_var = CuteDSLOpOverrides._get_cse_var(source)
+    if op_name == "mx_e8m0_scale" and cse_var is not None:
+        raise NotImplementedError(
+            "FlexGEMM mx_e8m0_scale requires physical local-reduce finalization"
+        )
     expr = _cute_scale_expr(op_name, source, max_power, tensorssa=cse_var is not None)
     if cse_var is None:
         return expr
@@ -649,7 +645,8 @@ def lower_full_scalar(node: torch.fx.Node) -> Any | None:
     shape = normalize_shape(node.args[0])
     if shape != ():
         return None
-    return node.args[1]
+    value = node.args[1]
+    return value if isinstance(value, (bool, int, float)) else None
 
 
 def lower_squeeze(
@@ -676,6 +673,8 @@ def lower_getitem(
     if not isinstance(source_node, torch.fx.Node) or not isinstance(index, int):
         return None
     source = _cute_arg(source_node, env)
+    if not isinstance(source, (tuple, list)) or not -len(source) <= index < len(source):
+        return None
     if source_node in local_reduce_store_sources:
         local_reduce_store_sources[node] = local_reduce_store_sources[source_node][
             index
