@@ -510,27 +510,6 @@ def _load_global_deps() -> None:
         ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
 
 
-# In scikit-build-core editable installs with redirect mode, C extensions are
-# installed to the dist package directory (site-packages/torch/) rather than
-# the source tree. Extend __path__ to include that directory so that
-# submodule lookups (e.g. torch._C) find the C extension rather than the
-# torch/_C/ stub directory.
-_source_dir = os.path.dirname(os.path.abspath(__file__))
-if not any(
-    os.path.exists(os.path.join(_source_dir, f"_C{_s}"))
-    for _s in importlib.machinery.EXTENSION_SUFFIXES
-):
-    try:
-        from importlib.metadata import distribution as _dist
-
-        _pkg_dir = str(_dist("torch").locate_file("torch"))
-        if _pkg_dir != _source_dir and _pkg_dir not in __path__:
-            __path__.append(_pkg_dir)  # type: ignore[attr-defined]
-        del _pkg_dir
-    except Exception:
-        pass
-del _source_dir
-
 if (USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv("TORCH_USE_RTLD_GLOBAL")) and (
     platform.system() != "Windows"
 ):
