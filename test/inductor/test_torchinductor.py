@@ -16270,9 +16270,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         Currently inductor will skip such bad configs and pick the best one
         from the remaining configs.
         """
-        raise unittest.SkipTest(
-            "test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test"
-        )
 
         @torch.compile
         def fn(x, y):
