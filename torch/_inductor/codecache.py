@@ -881,12 +881,12 @@ class FxGraphCachePickler(pickle.Pickler):
             # I have not worked out the details for everything else
             # but I'm sure we could
             if (
-                opaque_object.is_opaque_type(cls)
+                opaque_object.is_custom_class(cls)
                 and opaque_object.should_hoist(cls)
                 and not opaque_object.has_members(cls)
             ):
                 return (_ident, (t.script_class_name,))
-            if opaque_object.is_opaque_type(cls):
+            if opaque_object.is_custom_class(cls):
                 # Opaque types (e.g., DeviceMesh) may have cyclic references
                 # that fast-mode pickling cannot handle.  Disable fast mode
                 # before the subtree is pickled so the memo table tracks cycles.

@@ -300,10 +300,10 @@ def unwrap_tensor_subclasses(
         if isinstance(v, CustomClassBase):
             from torch._guards import detect_fake_mode
             from torch._library.fake_class_registry import maybe_to_fake_obj
-            from torch._library.opaque_object import is_opaque_type
+            from torch._library.opaque_object import is_custom_class
 
             fake_mode = detect_fake_mode()
-            if fake_mode is not None and is_opaque_type(type(v)):
+            if fake_mode is not None and is_custom_class(type(v)):
                 return maybe_to_fake_obj(fake_mode, v)
         return v
 

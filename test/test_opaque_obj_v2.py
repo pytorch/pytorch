@@ -39,8 +39,8 @@ from torch._library.opaque_object import (
     _OPAQUE_TYPES,
     _OPAQUE_TYPES_BY_NAME,
     get_opaque_type_name,
+    is_custom_class,
     is_opaque_constant_type,
-    is_opaque_type,
     MemberType,
     register_custom_class,
 )
@@ -2098,7 +2098,7 @@ def forward(self, arg0_1):
 
             register_custom_class(TmpClass, typ="constant")
 
-            self.assertTrue(is_opaque_type(TmpClass))
+            self.assertTrue(is_custom_class(TmpClass))
             self.assertTrue(is_opaque_constant_type(TmpClass))
             self.assertIn(TmpClass, _OPAQUE_TYPES)
 
@@ -3357,7 +3357,7 @@ class GraphModule(torch.nn.Module):
                     {"ExtendedConfig": ExtendedConfig},
                 )
 
-        self.assertTrue(is_opaque_type(ExtendedConfig))
+        self.assertTrue(is_custom_class(ExtendedConfig))
         self.assertTrue(is_opaque_constant_type(ExtendedConfig))
 
         cfg = ExtendedConfig("square", 2.0)
