@@ -33,6 +33,7 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     LOCAL_REDUCE_SINGLE_PHYSICAL_FINALIZE_ERROR,
     LOCAL_REDUCE_SOURCE_EXPRESSION_ERROR,
     local_reduce_unsupported_tensorssa_error,
+    statically_known_shape_equal,
     validate_local_reduce_feed_main_capability,
     validate_local_reduce_group_axis,
     validate_local_reduce_tensorssa_group_size,
@@ -555,7 +556,7 @@ def local_reduce_feed_main_candidate_contract(
     validate_local_reduce_feed_main_capability(layout.axis, layout.group_size)
     source_meta = source_node.meta.get("val")
     if output_meta is not None and source_meta is not None:
-        if tuple(output_meta.shape) != tuple(source_meta.shape):
+        if not statically_known_shape_equal(output_meta.shape, source_meta.shape):
             return None
     return local_reduce_feed_value_contract(value, grouped_source, layout)
 
@@ -779,7 +780,7 @@ def local_reduce_compressed_aux_plan(
     expected_aux_shape = local_reduce_compressed_shape(
         output_meta.shape, contract.group, contract.axis
     )
-    if expected_aux_shape != tuple(aux_meta.shape):
+    if not statically_known_shape_equal(expected_aux_shape, aux_meta.shape):
         return None
     return contract.to_plan(store_node=aux, feeds_main=False)
 
