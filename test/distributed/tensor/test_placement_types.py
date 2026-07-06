@@ -128,7 +128,7 @@ class PlacementTypesTestCase(TestCase):
                     self.assertEqual(
                         selected,
                         shards[idx],
-                        msg=f"Mismatch for dim={dim}, dim_size={dim_size}, "
+                        msg=lambda msg: f"{msg}\nMismatch for dim={dim}, dim_size={dim_size}, "
                         f"num_chunks={num_chunks}, idx={idx}",
                     )
 
