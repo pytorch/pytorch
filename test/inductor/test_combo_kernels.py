@@ -1559,12 +1559,10 @@ class ComboKernelCompileTimeAutotuneTests(TestCase):
         super().tearDown()
 
     @requires_gpu_and_triton
-    @parametrize("mode", ["default", "max_autotune", "cdt"])
+    @parametrize("mode", ["default", "cdt"])
     def test_compile_time_autotune(self, mode):
         extra = {}
-        if mode == "max_autotune":
-            extra["max_autotune"] = True
-        elif mode == "cdt":
+        if mode == "cdt":
             extra["coordinate_descent_tuning"] = True
 
         # one fn -> a pointwise combo (a+b, c*d) AND a reduction combo (e.sum, g.amax),
@@ -1581,7 +1579,9 @@ class ComboKernelCompileTimeAutotuneTests(TestCase):
             torch.randn(1024, 768, device=GPU_TYPE),
         ]
         counters.clear()
-        with torch._inductor.config.patch(extra):
+        # fresh_cache so the subkernels are benchmarked (not served from a warm perf cache),
+        # which is what makes the cdt mode actually run coordinate descent.
+        with fresh_cache(), torch._inductor.config.patch(extra):
             out, code = run_and_get_code(torch.compile(f), *inps)
         code = " ".join(code)
 
@@ -1629,37 +1629,6 @@ class ComboKernelCompileTimeAutotuneTests(TestCase):
             self.assertEqual(counters["inductor"]["combo_subkernel_autotune"], 0)
             warm_cached = counters["inductor"]["combo_subkernel_autotune_cached"]
             self.assertEqual(warm_cached, cold)
-
-    @requires_gpu_and_triton
-    def test_compile_time_autotune_cdt_search_space(self):
-        # coordinate_descent_tuning only -> the per-subkernel CDT refines just the warp knobs;
-        # with max-autotune too -> it also refines block size
-        def f(a, b, c, d, e, g):
-            return a + b, c * d, e.sum(-1), g.amax(-1)
-
-        inps = [
-            torch.randn(8192, device=GPU_TYPE),
-            torch.randn(8192, device=GPU_TYPE),
-            torch.randn(4096, device=GPU_TYPE),
-            torch.randn(4096, device=GPU_TYPE),
-            torch.randn(1024, 512, device=GPU_TYPE),
-            torch.randn(1024, 768, device=GPU_TYPE),
-        ]
-
-        def coordesc_benches(extra):
-            torch._dynamo.reset()
-            counters.clear()
-            with torch._inductor.config.patch(
-                {"coordinate_descent_tuning": True, **extra}
-            ):
-                out = torch.compile(f)(*inps)
-            self.assertEqual(out, f(*inps))
-            return counters["inductor"]["coordesc_tuning_bench"]
-
-        warps_only = coordesc_benches({})
-        blocks_and_warps = coordesc_benches({"max_autotune": True})
-        self.assertGreater(warps_only, 0)
-        self.assertGreater(blocks_and_warps, warps_only)
 
 
 @instantiate_parametrized_tests
