@@ -4,6 +4,7 @@ import io
 import os
 import sys
 import unittest
+import warnings
 from pathlib import Path
 from typing import NamedTuple, Optional
 
@@ -11,9 +12,11 @@ import torch
 from torch import Tensor
 from torch.testing._internal.common_cuda import SM120OrLater
 from torch.testing._internal.common_utils import (
+    IS_FILESYSTEM_UTF8_ENCODING,
     IS_WINDOWS,
     raise_on_run_directly,
     skipIfTorchDynamo,
+    TemporaryDirectoryName,
     TemporaryFileName,
 )
 
@@ -403,6 +406,59 @@ class TestSaveLoad(JitTestCase):
 
         x = torch.tensor([1.0, 2.0, 3.0, 4.0])
         self.assertTrue(torch.equal(m(x), m2(x)))
+
+    @unittest.skipIf(
+        not IS_FILESYSTEM_UTF8_ENCODING,
+        "requires UTF-8 filesystem encoding",
+    )
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
+    def test_save_load_non_ascii_path(self):
+        class MyMod(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            m = torch.jit.script(MyMod())
+            x = torch.tensor([1.0, 2.0, 3.0])
+            expected = m(x)
+
+            for suffix in [
+                "用户_流星",  # Chinese
+                "ユーザー",  # Japanese
+                "данные",  # Cyrillic
+                "données_réseau",  # Accented Latin
+            ]:
+                with self.subTest(suffix=suffix):
+                    with TemporaryDirectoryName(suffix=suffix) as dname:
+                        path = os.path.join(dname, "model.pt")
+                        torch.jit.save(m, path)
+                        loaded = torch.jit.load(path)
+                        self.assertEqual(loaded(x), expected)
+
+    @unittest.skipIf(
+        not IS_FILESYSTEM_UTF8_ENCODING,
+        "requires UTF-8 filesystem encoding",
+    )
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
+    def test_save_load_non_ascii_nested_path(self):
+        class MyMod(torch.nn.Module):
+            def forward(self, x):
+                return x * 2
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            m = torch.jit.script(MyMod())
+            x = torch.tensor([1.0, 2.0])
+            expected = m(x)
+
+            with TemporaryDirectoryName(suffix="非ASCII") as dname:
+                nested = os.path.join(dname, "データ", "モデル")
+                os.makedirs(nested)
+                path = os.path.join(nested, "model.pt")
+                torch.jit.save(m, path)
+                loaded = torch.jit.load(path)
+                self.assertEqual(loaded(x), expected)
 
     def test_save_nonexit_file(self):
         class Foo(torch.nn.Module):
@@ -1200,6 +1256,24 @@ class TestSaveLoadFlatbuffer(JitTestCase):
         torch._C._get_model_extra_files_from_buffer(script_module_io, re_extra_files)
 
         self.assertEqual(extra_files, re_extra_files)
+
+    @unittest.skipIf(
+        not IS_FILESYSTEM_UTF8_ENCODING,
+        "requires UTF-8 filesystem encoding",
+    )
+    def test_save_load_non_ascii_path_flatbuffer(self):
+        class MyMod(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            m = torch.jit.script(MyMod())
+
+            with TemporaryDirectoryName(suffix="用户_données") as dname:
+                path = os.path.join(dname, "model.ptl")
+                m._save_for_lite_interpreter(path, _use_flatbuffer=True)
+                self.assertTrue(os.path.exists(path))
 
 
 if __name__ == "__main__":

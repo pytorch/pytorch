@@ -32,6 +32,7 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/core/qualified_name.h>
 #include <cerrno>
+#include <filesystem>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -864,7 +865,8 @@ void ExportModule(
     return;
   }
   std::ofstream ofile;
-  ofile.open(filename, std::ios::binary | std::ios::out);
+  ofile.open(
+      std::filesystem::path((const char8_t*)filename.c_str()), std::ios::binary | std::ios::out);
   if (ofile.fail()) {
     std::stringstream message;
     if (errno == ENOENT) {
