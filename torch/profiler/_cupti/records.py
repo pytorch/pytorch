@@ -1,254 +1,251 @@
 # mypy: allow-untyped-defs
 """CUPTI user-defined-record (v2) field schema.
 
-In the v2 / user-defined-record path, observers select specific *fields* per
-activity kind (rather than whole records). Each field is a :class:`Field` -- its
-CUpti_Activity*FieldId ``id`` and whether it is a ``string`` (const char*) to
-dereference during decode. The fields a kind supports are grouped in a small
-per-kind class (``Kernel``, ``Sync``, ...); cupti-python does not expose these
-field-id enums, so they are defined here from the CUPTI ABI (cupti_activity.h).
+In the v2 / user-defined-record path, observers select specific *fields* per activity
+kind (rather than whole records). The available fields per kind are the generated
+:mod:`_cupti_field_ids` catalogs (``Kernel``, ``Memcpy``, ...), one
+:class:`~_records_base.Field` per ``CUpti_Activity*FieldIds`` id, each carrying its
+:class:`~_records_base.Ctype` for decode. Those catalogs are generated from the CUPTI
+ABI (cupti_activity.h) at build time -- cupti-python does not expose the enums.
 
-The monitor does NOT compute record byte layouts: it requires libcupti >= 13.3,
-which reports each kind's packed record layout (field offsets/sizes, record size)
-via ``pBufferCompleteInfo->ppRecordLayouts``. The native layer parses that and
-attaches it to each completed buffer; :func:`decode` (below) demuxes a buffer against
-that captured layout. So this module only needs to know which field ids exist and
-which are strings.
+This module *curates* which of those fields the monitor selects per kind (:data:`FIELDS`)
+and derives the lookups the monitor/observers need. The selection is the editorial part
+that can't be generated: it bounds record size and per-buffer decode cost.
+
+The monitor does NOT compute record byte layouts: it requires libcupti >= 13.3, which
+reports each kind's packed record layout (field offsets/sizes, record size) via
+``pBufferCompleteInfo->ppRecordLayouts``. The native layer parses that and attaches it to
+each completed buffer; the monitor decodes a buffer against that captured layout, using
+:data:`FIELD_CTYPE` only to interpret each field's bytes (signed/unsigned/float/str).
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
 
-
-@dataclass(frozen=True)
-class Field:
-    """One field of a CUPTI user-defined record: its CUpti_Activity*FieldId ``id``
-    and whether it is a ``string`` (const char*) to dereference to a Python str
-    during decode. ``int(field)`` is the id, so a field is usable directly as a
-    selection element or a column key. Byte offset/size come from CUPTI's captured
-    record layout at decode time, not from here."""
-
-    id: int
-    string: bool = False
-
-    def __int__(self) -> int:
-        return self.id
+from torch.profiler._cupti._cupti_field_ids import (
+    Api,
+    CudaEvent,
+    ExternalCorrelation,
+    Kernel,
+    Memcpy,
+    Memcpy2,
+    Memset,
+    Overhead,
+    Synchronization,
+)
+from torch.profiler._cupti._records_base import Ctype, Field
 
 
-# Per-kind field catalogs. Each class lists the fields the v2 monitor supports for a
-# kind; the *_FIELD_KIND field (id 0) leads every record. Ids are CUPTI ABI
-# constants (cupti_activity.h).
-class Kernel:
-    """CUpti_ActivityKernel (CONCURRENT_KERNEL)."""
-
-    KIND = Field(0)
-    REGISTERS_PER_THREAD = Field(4)
-    START = Field(7)
-    END = Field(8)
-    DEVICE_ID = Field(10)
-    CONTEXT_ID = Field(11)
-    STREAM_ID = Field(12)
-    GRID_X = Field(13)
-    GRID_Y = Field(14)
-    GRID_Z = Field(15)
-    BLOCK_X = Field(16)
-    BLOCK_Y = Field(17)
-    BLOCK_Z = Field(18)
-    STATIC_SHARED_MEMORY = Field(19)
-    DYNAMIC_SHARED_MEMORY = Field(20)
-    CORRELATION_ID = Field(22)
-    NAME = Field(24, string=True)  # const char* (mangled symbol)
-    GRAPH_NODE_ID = Field(31)
-    GRAPH_ID = Field(33)
-    LAUNCH_PRIORITY = Field(45)
-    QUEUED = Field(25)
-    CHANNEL_ID = Field(35)
-    CHANNEL_TYPE = Field(36)
+# Short alias kept for the SYNCHRONIZATION catalog (the generated name is Synchronization).
+Sync = Synchronization
 
 
-class Memcpy:
-    """CUpti_ActivityMemcpy (MEMCPY)."""
-
-    KIND = Field(0)
-    COPY_KIND = Field(1)
-    SRC_KIND = Field(2)
-    DST_KIND = Field(3)
-    FLAGS = Field(4)
-    BYTES = Field(5)
-    START = Field(6)
-    END = Field(7)
-    DEVICE_ID = Field(8)
-    CONTEXT_ID = Field(9)
-    STREAM_ID = Field(10)
-    CORRELATION_ID = Field(11)
-    GRAPH_NODE_ID = Field(12)
-    GRAPH_ID = Field(13)
-
-
-class Memset:
-    """CUpti_ActivityMemset (MEMSET)."""
-
-    KIND = Field(0)
-    VALUE = Field(1)
-    BYTES = Field(2)
-    START = Field(3)
-    END = Field(4)
-    DEVICE_ID = Field(5)
-    CONTEXT_ID = Field(6)
-    STREAM_ID = Field(7)
-    CORRELATION_ID = Field(8)
-    FLAGS = Field(9)
-    MEMORY_KIND = Field(10)
-    GRAPH_NODE_ID = Field(11)
-    GRAPH_ID = Field(12)
+__all__ = [
+    "Ctype",
+    "Field",
+    "Api",
+    "CudaEvent",
+    "ExternalCorrelation",
+    "Kernel",
+    "Memcpy",
+    "Memcpy2",
+    "Memset",
+    "Overhead",
+    "Sync",
+    "Synchronization",
+    "FIELDS",
+    "FIELD_REGISTRY",
+    "FIELD_CTYPE",
+    "STRING_FIELDS",
+    "CORRELATION_FIELD",
+    "GRAPH_NODE_FIELD",
+    "RecordLayouts",
+]
 
 
-class Memcpy2:
-    """CUpti_ActivityMemcpyPtoP4 (MEMCPY2) -- peer-to-peer / cross-device copy. Like Memcpy but
-    with src/dst device+context fields inserted, which shifts correlation/graph ids."""
-
-    KIND = Field(0)
-    COPY_KIND = Field(1)
-    SRC_KIND = Field(2)
-    DST_KIND = Field(3)
-    FLAGS = Field(4)
-    BYTES = Field(5)
-    START = Field(6)
-    END = Field(7)
-    DEVICE_ID = Field(8)
-    CONTEXT_ID = Field(9)
-    STREAM_ID = Field(10)
-    SRC_DEVICE_ID = Field(11)
-    DST_DEVICE_ID = Field(13)
-    CORRELATION_ID = Field(15)
-    GRAPH_NODE_ID = Field(16)
-    GRAPH_ID = Field(17)
-
-
-class Api:
-    """CUpti_ActivityAPI -- shared by RUNTIME and DRIVER."""
-
-    KIND = Field(0)
-    CBID = Field(1)
-    START = Field(2)
-    END = Field(3)
-    PROCESS_ID = Field(4)
-    THREAD_ID = Field(5)
-    CORRELATION_ID = Field(6)
-    RETURN_VALUE = Field(7)
-
-
-class ExternalCorrelation:
-    """CUpti_ActivityExternalCorrelation (EXTERNAL_CORRELATION)."""
-
-    KIND = Field(0)
-    EXTERNAL_KIND = Field(1)
-    EXTERNAL_ID = Field(2)
-    CORRELATION_ID = Field(3)
-
-
-class Overhead:
-    """CUpti_ActivityOverhead (OVERHEAD)."""
-
-    KIND = Field(0)
-    OVERHEAD_KIND = Field(1)
-    PROCESS_ID = Field(2)
-    THREAD_ID = Field(3)
-    START = Field(4)
-    END = Field(5)
-    CORRELATION_ID = Field(6)
-
-
-class CudaEvent:
-    """CUpti_ActivityCudaEvent (CUDA_EVENT)."""
-
-    KIND = Field(0)
-    CORRELATION_ID = Field(1)
-    CONTEXT_ID = Field(2)
-    STREAM_ID = Field(3)
-    EVENT_ID = Field(4)
-    DEVICE_ID = Field(5)
-    DEVICE_TIMESTAMP = Field(6)
-    CUDA_EVENT_SYNC_ID = Field(7)
-
-
-class Sync:
-    """CUpti_ActivitySynchronization (SYNCHRONIZATION)."""
-
-    KIND = Field(0)
-    TYPE = Field(1)
-    START = Field(2)
-    END = Field(3)
-    CORRELATION_ID = Field(4)
-    CONTEXT_ID = Field(5)
-    STREAM_ID = Field(6)
-    CUDA_EVENT_ID = Field(7)
-    CUDA_EVENT_SYNC_ID = Field(8)
-    RETURN_VALUE = Field(9)
-
-
-def _catalog(cls: type) -> tuple[Field, ...]:
-    """The Fields declared on a per-kind catalog class, in declaration order."""
-    return tuple(v for v in vars(cls).values() if isinstance(v, Field))
-
-
-# kind -> its fields (the fields the v2 monitor supports for that kind).
+# kind -> the fields the v2 monitor selects for that kind, in declaration order. A curated
+# subset of each generated catalog; KIND (id 0) must lead every record (CUPTI
+# requires *_FIELD_KIND first at enable). RUNTIME and DRIVER share the Api catalog.
 FIELDS: dict[int, tuple[Field, ...]] = {
-    ActivityKind.CONCURRENT_KERNEL: _catalog(Kernel),
-    ActivityKind.MEMCPY: _catalog(Memcpy),
-    ActivityKind.MEMCPY2: _catalog(Memcpy2),
-    ActivityKind.MEMSET: _catalog(Memset),
-    ActivityKind.RUNTIME: _catalog(Api),
-    ActivityKind.DRIVER: _catalog(Api),
-    ActivityKind.EXTERNAL_CORRELATION: _catalog(ExternalCorrelation),
-    ActivityKind.OVERHEAD: _catalog(Overhead),
-    ActivityKind.CUDA_EVENT: _catalog(CudaEvent),
-    ActivityKind.SYNCHRONIZATION: _catalog(Sync),
+    ActivityKind.CONCURRENT_KERNEL: (
+        Kernel.KIND,
+        Kernel.REGISTERS_PER_THREAD,
+        Kernel.START,
+        Kernel.END,
+        Kernel.DEVICE_ID,
+        Kernel.CONTEXT_ID,
+        Kernel.STREAM_ID,
+        Kernel.GRID_X,
+        Kernel.GRID_Y,
+        Kernel.GRID_Z,
+        Kernel.BLOCK_X,
+        Kernel.BLOCK_Y,
+        Kernel.BLOCK_Z,
+        Kernel.STATIC_SHARED_MEMORY,
+        Kernel.DYNAMIC_SHARED_MEMORY,
+        Kernel.CORRELATION_ID,
+        Kernel.NAME,
+        Kernel.GRAPH_NODE_ID,
+        Kernel.GRAPH_ID,
+        Kernel.LAUNCH_PRIORITY,
+        Kernel.QUEUED,
+        Kernel.CHANNEL_ID,
+        Kernel.CHANNEL_TYPE,
+    ),
+    ActivityKind.MEMCPY: (
+        Memcpy.KIND,
+        Memcpy.COPY_KIND,
+        Memcpy.SRC_KIND,
+        Memcpy.DST_KIND,
+        Memcpy.FLAGS,
+        Memcpy.BYTES,
+        Memcpy.START,
+        Memcpy.END,
+        Memcpy.DEVICE_ID,
+        Memcpy.CONTEXT_ID,
+        Memcpy.STREAM_ID,
+        Memcpy.CORRELATION_ID,
+        Memcpy.GRAPH_NODE_ID,
+        Memcpy.GRAPH_ID,
+    ),
+    ActivityKind.MEMCPY2: (
+        Memcpy2.KIND,
+        Memcpy2.COPY_KIND,
+        Memcpy2.SRC_KIND,
+        Memcpy2.DST_KIND,
+        Memcpy2.FLAGS,
+        Memcpy2.BYTES,
+        Memcpy2.START,
+        Memcpy2.END,
+        Memcpy2.DEVICE_ID,
+        Memcpy2.CONTEXT_ID,
+        Memcpy2.STREAM_ID,
+        Memcpy2.SRC_DEVICE_ID,
+        Memcpy2.DST_DEVICE_ID,
+        Memcpy2.CORRELATION_ID,
+        Memcpy2.GRAPH_NODE_ID,
+        Memcpy2.GRAPH_ID,
+    ),
+    ActivityKind.MEMSET: (
+        Memset.KIND,
+        Memset.VALUE,
+        Memset.BYTES,
+        Memset.START,
+        Memset.END,
+        Memset.DEVICE_ID,
+        Memset.CONTEXT_ID,
+        Memset.STREAM_ID,
+        Memset.CORRELATION_ID,
+        Memset.FLAGS,
+        Memset.MEMORY_KIND,
+        Memset.GRAPH_NODE_ID,
+        Memset.GRAPH_ID,
+    ),
+    ActivityKind.RUNTIME: (
+        Api.KIND,
+        Api.CBID,
+        Api.START,
+        Api.END,
+        Api.PROCESS_ID,
+        Api.THREAD_ID,
+        Api.CORRELATION_ID,
+        Api.RETURN_VALUE,
+    ),
+    ActivityKind.DRIVER: (
+        Api.KIND,
+        Api.CBID,
+        Api.START,
+        Api.END,
+        Api.PROCESS_ID,
+        Api.THREAD_ID,
+        Api.CORRELATION_ID,
+        Api.RETURN_VALUE,
+    ),
+    ActivityKind.EXTERNAL_CORRELATION: (
+        ExternalCorrelation.KIND,
+        ExternalCorrelation.EXTERNAL_KIND,
+        ExternalCorrelation.EXTERNAL_ID,
+        ExternalCorrelation.CORRELATION_ID,
+    ),
+    ActivityKind.OVERHEAD: (
+        Overhead.KIND,
+        Overhead.OVERHEAD_KIND,
+        Overhead.PROCESS_ID,
+        Overhead.THREAD_ID,
+        Overhead.START,
+        Overhead.END,
+        Overhead.CORRELATION_ID,
+    ),
+    ActivityKind.CUDA_EVENT: (
+        CudaEvent.KIND,
+        CudaEvent.CORRELATION_ID,
+        CudaEvent.CONTEXT_ID,
+        CudaEvent.STREAM_ID,
+        CudaEvent.EVENT_ID,
+        CudaEvent.DEVICE_ID,
+        CudaEvent.DEVICE_TIMESTAMP,
+        CudaEvent.CUDA_EVENT_SYNC_ID,
+    ),
+    ActivityKind.SYNCHRONIZATION: (
+        Synchronization.KIND,
+        Synchronization.TYPE,
+        Synchronization.START,
+        Synchronization.END,
+        Synchronization.CORRELATION_ID,
+        Synchronization.CONTEXT_ID,
+        Synchronization.STREAM_ID,
+        Synchronization.CUDA_EVENT_ID,
+        Synchronization.CUDA_EVENT_SYNC_ID,
+        Synchronization.RETURN_VALUE,
+    ),
 }
 
 # kind -> frozenset of supported field ids; source of truth for validating observer
-# requests and resolving "all". CUPTI requires *_FIELD_KIND (id 0) first at enable.
+# requests and resolving "all". (Field is an int, so a Field is its id here.)
 FIELD_REGISTRY: dict[int, frozenset[int]] = {
-    kind: frozenset(f.id for f in fields) for kind, fields in FIELDS.items()
+    kind: frozenset(fields) for kind, fields in FIELDS.items()
 }
 
-# kind -> frozenset of field ids that are const char* strings (dereferenced during
-# decode rather than gathered as a numeric column).
+# kind -> {field id: Ctype}; how the decoder interprets each selected field's bytes
+# (width comes from CUPTI's captured layout, not from here).
+FIELD_CTYPE: dict[int, dict[int, Ctype]] = {
+    kind: {f.id: f.ctype for f in fields} for kind, fields in FIELDS.items()
+}
+
+# kind -> frozenset of field ids that are const char* strings (dereferenced during decode).
 STRING_FIELDS: dict[int, frozenset[int]] = {
     kind: frozenset(f.id for f in fields if f.string) for kind, fields in FIELDS.items()
 }
 
-# kind -> its CORRELATION_ID field id. The launch correlation id a kernel shares with
-# its runtime call; used to join activity to external-correlation (eager annotation).
+# kind -> its CORRELATION_ID field id. The launch correlation id a kernel shares with its
+# runtime call; used to join activity to external-correlation (eager annotation).
 CORRELATION_FIELD: dict[int, int] = {
-    ActivityKind.CONCURRENT_KERNEL: int(Kernel.CORRELATION_ID),
-    ActivityKind.MEMCPY: int(Memcpy.CORRELATION_ID),
-    ActivityKind.MEMCPY2: int(Memcpy2.CORRELATION_ID),
-    ActivityKind.MEMSET: int(Memset.CORRELATION_ID),
-    ActivityKind.RUNTIME: int(Api.CORRELATION_ID),
-    ActivityKind.DRIVER: int(Api.CORRELATION_ID),
-    ActivityKind.EXTERNAL_CORRELATION: int(ExternalCorrelation.CORRELATION_ID),
-    ActivityKind.OVERHEAD: int(Overhead.CORRELATION_ID),
-    ActivityKind.CUDA_EVENT: int(CudaEvent.CORRELATION_ID),
-    ActivityKind.SYNCHRONIZATION: int(Sync.CORRELATION_ID),
+    ActivityKind.CONCURRENT_KERNEL: Kernel.CORRELATION_ID.id,
+    ActivityKind.MEMCPY: Memcpy.CORRELATION_ID.id,
+    ActivityKind.MEMCPY2: Memcpy2.CORRELATION_ID.id,
+    ActivityKind.MEMSET: Memset.CORRELATION_ID.id,
+    ActivityKind.RUNTIME: Api.CORRELATION_ID.id,
+    ActivityKind.DRIVER: Api.CORRELATION_ID.id,
+    ActivityKind.EXTERNAL_CORRELATION: ExternalCorrelation.CORRELATION_ID.id,
+    ActivityKind.OVERHEAD: Overhead.CORRELATION_ID.id,
+    ActivityKind.CUDA_EVENT: CudaEvent.CORRELATION_ID.id,
+    ActivityKind.SYNCHRONIZATION: Synchronization.CORRELATION_ID.id,
 }
 
 
 # Per-kind graph-node-id field, for the graph annotation resolver: only the GPU-op kinds
 # carry a graph_node_id (the field the resolver maps to a region name).
 GRAPH_NODE_FIELD: dict[int, int] = {
-    ActivityKind.CONCURRENT_KERNEL: int(Kernel.GRAPH_NODE_ID),
-    ActivityKind.MEMCPY: int(Memcpy.GRAPH_NODE_ID),
-    ActivityKind.MEMCPY2: int(Memcpy2.GRAPH_NODE_ID),
-    ActivityKind.MEMSET: int(Memset.GRAPH_NODE_ID),
+    ActivityKind.CONCURRENT_KERNEL: Kernel.GRAPH_NODE_ID.id,
+    ActivityKind.MEMCPY: Memcpy.GRAPH_NODE_ID.id,
+    ActivityKind.MEMCPY2: Memcpy2.GRAPH_NODE_ID.id,
+    ActivityKind.MEMSET: Memset.GRAPH_NODE_ID.id,
 }
 
 
-# A record layout as captured by CUPTI (pBufferCompleteInfo->ppRecordLayouts) and
-# attached to a completed buffer by the native layer: a list of
-# (kind, record_size, [(field_id, offset, size), ...]). This is what the monitor
-# decodes against -- no spec/computed layout.
+# A record layout as captured by CUPTI (pBufferCompleteInfo->ppRecordLayouts) and attached
+# to a completed buffer by the native layer: a list of
+# (kind, record_size, [(field_id, offset, size), ...]). This is what the monitor decodes
+# against -- no spec/computed layout.
 RecordLayouts = list[tuple[int, int, list[tuple[int, int, int]]]]
