@@ -86,6 +86,8 @@ class VllmBuildParameters:
 
     max_jobs: str = env_str_field("MAX_JOBS", "64")
 
+    nvcc_threads: str = env_str_field("NVCC_THREADS", "8")
+
     sccache_bucket: str = env_str_field("SCCACHE_BUCKET")
 
     sccache_region: str = env_str_field("SCCACHE_REGION")
@@ -277,6 +279,7 @@ class VllmBuildRunner(BaseRunner):
                 {base_image_arg} \
                 {final_base_image_arg} \
                 --build-arg max_jobs={inputs.max_jobs} \
+                --build-arg nvcc_threads={inputs.nvcc_threads} \
                 --build-arg CUDA_VERSION={inputs.cuda_version} \
                 --build-arg PYTHON_VERSION={inputs.python_version} \
                 --build-arg USE_SCCACHE={int(bool(inputs.sccache_bucket and inputs.sccache_region))} \

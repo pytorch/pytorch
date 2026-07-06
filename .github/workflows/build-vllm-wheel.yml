@@ -119,10 +119,13 @@ jobs:
         env:
           CUDA_VERSION: ${{ matrix.device == 'cu130' && '13.0' || '13.2' }}
           TORCH_CUDA_ARCH_LIST: '8.0;8.9;9.0;10.0;12.0'
-          # arm64 buildkitd is memory-constrained: 8 parallel CUDA compiles (each
-          # targeting 5 arches) OOM it. Throttle arm64; the x86 buildkitd handles
-          # lumen's default 64. lumen reads MAX_JOBS -> --build-arg max_jobs.
-          MAX_JOBS: ${{ contains(matrix.platform, 'aarch64') && '4' || '64' }}
+          # vLLM sets cmake jobs = max(1, MAX_JOBS // NVCC_THREADS), and each nvcc
+          # spawns NVCC_THREADS threads (up to one per arch). The x86 buildkitd
+          # handles 64/8 (8 jobs). The arm64 buildkitd is memory-constrained and
+          # OOMs at that level, so run many single-thread jobs: 16/1 = 16 jobs but
+          # only 16 concurrent single-arch compiles (well under the ~40 that OOM'd).
+          MAX_JOBS: ${{ contains(matrix.platform, 'aarch64') && '16' || '64' }}
+          NVCC_THREADS: ${{ contains(matrix.platform, 'aarch64') && '1' || '8' }}
           # Use the manylinux builder as the base; remote buildkit pulls it from
           # the registry (no local docker daemon needed).
           BASE_IMAGE: ${{ matrix.manylinux-image }}
