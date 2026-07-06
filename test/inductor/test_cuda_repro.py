@@ -35,6 +35,7 @@ from torch.testing._internal.common_cuda import (
     SM80OrLater,
     SM90OrLater,
     TEST_MULTIGPU,
+    tf32_on_and_off,
 )
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
@@ -53,7 +54,7 @@ from torch.testing._internal.common_utils import (
     TEST_XPU,
     xfailIfROCm,
 )
-from torch.testing._internal.inductor_utils import IS_BIG_GPU
+from torch.testing._internal.inductor_utils import HAS_GPU, IS_BIG_GPU
 
 
 if TEST_WITH_ROCM:
@@ -532,6 +533,7 @@ class CudaReproTests(TestCase):
 
         self._test_split_reduction_impl(x)
 
+    @tf32_on_and_off(0.001)
     def test_split_with_sizes_reshape_cat_cantsplit_regression(self):
         class Repro(nn.Module):
             def __init__(self):
@@ -572,7 +574,7 @@ class CudaReproTests(TestCase):
             eager_out = model(x, indices)
             compiled_out = torch.compile(model)(x, indices)
 
-        torch.testing.assert_close(compiled_out, eager_out)
+        self.assertEqual(compiled_out, eager_out)
 
     @config.patch({"emulate_precision_casts": True})
     def test_bool_emulate_low_precision(self):
@@ -1735,6 +1737,22 @@ class CudaReproTests(TestCase):
         expected = fn(x)
         actual = opt_fn(x)
         self.assertEqual(expected, actual)
+
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @torch._inductor.config.patch(emulate_precision_casts=True)
+    def test_emulate_precision_casts_promoted_lowp_cuda(self):
+        def fn(x):
+            y = x.to(torch.float16)
+            return y + x
+
+        x = torch.tensor([70000.0], device=device_type)
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+
+        expected = fn(x)
+        actual, (code,) = run_and_get_code(opt_fn, x)
+
+        self.assertEqual(expected, actual)
+        self.assertIn(".to(tl.float16)", code)
 
     @torch._inductor.config.patch(emulate_precision_casts=True)
     def test_emulate_precision_casts_norm_rounding(self):
@@ -3128,7 +3146,75 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         self.assertEqual(compile_decimal, Decimal(0))
 
-    @skipIfXpu(msg="AssertionError: torch-xpu-ops: #3006")
+    @unittest.skipUnless(HAS_GPU, "requires GPU")
+    def test_fused_slice_scatter_int32_const_overflow(self):
+        # End-to-end repro for the int32 address-constant overflow guarded
+        # by SIMDKernelFeatures.any_index_expr_const_overflows_int32.
+        # On unfixed builds the fused backward kernel raises
+        #   ValueError('Scalar -2779057358 is out of range for type int32')
+        # because slice_scatter.backward + mm.backward fuse into a kernel
+        # whose simplified index expression contains a constant > 2**31.
+        # Needs ~30 GB free GPU memory (leaves + grads); skipped otherwise.
+        total_rows = 9_500_000
+        slice_begin = 9_472_768
+        slice_end = 9_499_648
+        col_widths = [32, 32, 32, 32, 32, 32, 32, 32, 32, 22]
+        total_cols = sum(col_widths)
+        int32_max = 2**31 - 1
+
+        # Three triggering conditions for the bug.
+        self.assertLess(total_rows * max(col_widths), int32_max)
+        self.assertLess((slice_end - slice_begin) * total_cols, int32_max)
+        self.assertGreater(slice_begin * total_cols, int32_max)
+
+        # ~2x leaf bytes for .grad, plus 1.3x safety margin.
+        leaf_bytes = sum(total_rows * w * 4 for w in col_widths)
+        need_gb = leaf_bytes * 2 / 1024**3 * 1.3
+        free_gb = getattr(torch, device_type).mem_get_info()[0] / 1024**3
+        if free_gb < need_gb:
+            raise unittest.SkipTest(
+                f"requires ~{need_gb:.1f} GB free GPU memory, have {free_gb:.1f} GB"
+            )
+
+        class SliceConcatDense(nn.Module):
+            def __init__(self, widths):
+                super().__init__()
+                self.widths = widths
+                self.linears = nn.ModuleList(
+                    [nn.Linear(w, w, bias=False) for w in widths]
+                )
+
+            def forward(self, inputs):
+                sliced = [t[slice_begin:slice_end, :] for t in inputs]
+                cat = torch.cat(sliced, dim=1)
+                out = cat.new_zeros(())
+                col = 0
+                for w, linear in zip(self.widths, self.linears):
+                    out = out + linear(cat[:, col : col + w]).sum()
+                    col += w
+                return out
+
+        torch._dynamo.reset()
+        torch.manual_seed(0)
+        inputs = [
+            torch.randn(
+                total_rows,
+                w,
+                device=device_type,
+                dtype=torch.float32,
+                requires_grad=True,
+            )
+            for w in col_widths
+        ]
+        model = SliceConcatDense(col_widths).to(device_type)
+        compiled = torch.compile(model, dynamic=False)
+        try:
+            loss = compiled(inputs)
+            loss.backward()
+        finally:
+            del inputs, model, compiled
+            getattr(torch, device_type).empty_cache()
+
     @config.patch(
         {"triton.use_block_ptr": True, "triton.codegen_upcast_to_fp32": False}
     )
