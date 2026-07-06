@@ -33,11 +33,19 @@ class FakeProcessGroup : public Backend {
     bool error_on_collective = false;
   };
 
-  // Static factory method for official APIs
+  // Static factory method for official APIs. options may arrive null: the
+  // Python creator passes None through when init_process_group is called
+  // without pg_options, and pybind converts that to a null intrusive_ptr (the
+  // default arg below only applies when the arg is omitted). Coalesce to a real
+  // Options here so the backend never holds a null that splitGroup would later
+  // dereference via getBackendOptions().
   static c10::intrusive_ptr<FakeProcessGroup> _create_internal(
       int rank,
       int size,
       c10::intrusive_ptr<Options> options = c10::make_intrusive<Options>()) {
+    if (!options) {
+      options = c10::make_intrusive<Options>();
+    }
     return c10::make_intrusive<FakeProcessGroup>(
         rank, size, std::move(options));
   }
@@ -396,16 +404,10 @@ class FakeProcessGroup : public Backend {
     return c10::make_intrusive<FakeWork>();
   }
 
-  // Private constructor used by official APIs. options may be null: the Python
-  // creator passes None through when init_process_group is called without
-  // pg_options, and pybind converts that to a null intrusive_ptr (the
-  // _create_internal default only applies when the arg is omitted). Normalize
-  // to a real Options so getBackendOptions() never hands splitGroup a null it
-  // would dereference.
+  // Private constructor used by official APIs. Callers (the _create_internal
+  // factory and split() above) guarantee a non-null options.
   FakeProcessGroup(int rank, int size, c10::intrusive_ptr<Options> options)
-      : Backend(rank, size),
-        options_(
-            options ? std::move(options) : c10::make_intrusive<Options>()) {
+      : Backend(rank, size), options_(std::move(options)) {
     TORCH_CHECK(
         rank >= 0 && rank < size,
         "Cannot init process group where rank (",
