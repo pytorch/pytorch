@@ -18,8 +18,13 @@
 #include <c10/util/Exception.h>
 #include <c10/util/string_view.h>
 
+#include <algorithm>
+
 #if AT_CUDNN_ENABLED()
 #include <ATen/cudnn/cudnn-wrapper.h>
+#if defined(__has_include) && __has_include(<cudnn_frontend_version.h>)
+#include <cudnn_frontend_version.h>
+#endif
 #endif
 
 #include <c10/core/SymBool.h>
@@ -62,6 +67,14 @@
 
 namespace sdp {
 namespace {
+
+constexpr long kMinCuDNNFrontendVersionForD256 = 12400;
+#if AT_CUDNN_ENABLED() && defined(CUDNN_FRONTEND_VERSION)
+constexpr bool kCuDNNFrontendSupportsD256 =
+    CUDNN_FRONTEND_VERSION >= kMinCuDNNFrontendVersionForD256;
+#else
+constexpr bool kCuDNNFrontendSupportsD256 = false;
+#endif
 
 // tracks whether we've set the default priority order once, to avoid setting
 // it redundantly or overwriting a user-specified priority order
@@ -627,18 +640,13 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
     return false;
   }
   auto head_dim_limit = 128;
-  // Hopper: head_dim<=256 support with cuDNN >= 9.10.0
-  if (cudnn_version >= 91000) {
-    auto dprops = at::cuda::getCurrentDeviceProperties();
-    if (dprops->major == 9 && !dprops->minor) {
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+  const bool is_sm90_or_sm10x =
+      (dprops->major == 9 && !dprops->minor) || dprops->major == 10;
+  if (is_sm90_or_sm10x) {
+    if (cudnn_version > 92200 && kCuDNNFrontendSupportsD256) {
       head_dim_limit = 256;
-    }
-  }
-  // Blackwell GPUs: B200, GB200 (SM 10.0), B300, GB300 (SM 10.3)
-  // Special case allowed by cuDNN frontend to support DeepSeek dimensions
-  if (cudnn_version >= 91100) {
-    auto dprops = at::cuda::getCurrentDeviceProperties();
-    if (dprops->major == 10 && d_qk == 192 && d_v == 128) {
+    } else if (cudnn_version >= 91100 && d_qk == 192 && d_v == 128) {
       head_dim_limit = 192;
     }
   }
@@ -686,6 +694,69 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
       TORCH_WARN_ONCE("cudnn SDPA does not support query sequence length 1 with dropout.");
     }
     return false;
+  }
+  return true;
+}
+
+bool check_cudnn_query_seq_len_nested(sdp_params const& params, bool debug) {
+  if (!params.query.is_nested()) {
+    return true;
+  }
+
+  const auto nt_q_tensor_impl =
+      at::native::get_nested_tensor_impl(params.query);
+  const at::Tensor& sizes = nt_q_tensor_impl->get_nested_sizes();
+  const auto* sizes_ptr = sizes.const_data_ptr<int64_t>();
+  const int64_t n_tensors = params.query.size(0);
+  const int64_t size_tensor_stride = sizes.stride(0);
+
+  int64_t max_seqlen_q = 0;
+  // This is being called inside SDPA with shape [batch, heads, {seq_len}, dim].
+  for (const auto i : c10::irange(n_tensors)) {
+    max_seqlen_q = std::max(
+        max_seqlen_q, sizes_ptr[(i * size_tensor_stride) + 1]);
+  }
+
+  if (max_seqlen_q <= 128) {
+    if (debug) {
+      TORCH_WARN_ONCE(
+          "cuDNN attention does not support nested tensor query sequence "
+          "length <= 128.");
+    }
+    return false;
+  }
+  return true;
+}
+
+bool check_cudnn_d256_bprop_head_dim(
+    sdp_params const& params,
+    bool debug) {
+  if (!input_requires_grad(params)) {
+    return true;
+  }
+
+  long cudnn_version = at::detail::getCUDAHooks().versionRuntimeCuDNN();
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+  const auto d_qk = params.query.sym_size(3);
+  const auto d_v = params.value.sym_size(3);
+  const bool is_sm90_or_sm10x =
+      (dprops->major == 9 && !dprops->minor) || dprops->major == 10;
+  const bool supports_d256 =
+      cudnn_version > 92200 && kCuDNNFrontendSupportsD256 &&
+      is_sm90_or_sm10x;
+  if (supports_d256) {
+    const bool supports_bprop = (d_qk <= 128 && d_v <= 128) ||
+        (d_qk == 192 && d_v == 128) || (d_qk == 256 && d_v == 256);
+    if (!supports_bprop) {
+      if (debug) {
+        TORCH_WARN(
+            "cuDNN SDPA on SM 9.0/10.x does not support backward with these head dimensions. Got d_qk: ",
+            d_qk,
+            ", d_v: ",
+            d_v);
+      }
+      return false;
+    }
   }
   return true;
 }
@@ -896,11 +967,23 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
       check_nonzero_sequence_lengths_dense,
       check_last_dim_stride_equals_1_dense<true /*ignore_singleton_dim=*/>,
       check_batch_size_and_num_heads_dense<true /*enable_gqa*/, false /*requires_same_num_heads*/>,
-      check_cudnn_tensor_shapes
+      check_cudnn_tensor_shapes,
+      check_cudnn_d256_bprop_head_dim
   );
 
   if (has_only_dense_inputs(params)) {
     for (auto& constraint : dense_constraints) {
+      if (!constraint(params, debug)) {
+        return false;
+      }
+    }
+  }
+  constexpr auto nested_constraints =
+      c10::array_of<bool (*)(sdp_params const&, bool)>(
+          check_cudnn_query_seq_len_nested);
+
+  if (has_for_nested_inputs(params)) {
+    for (auto& constraint : nested_constraints) {
       if (!constraint(params, debug)) {
         return false;
       }

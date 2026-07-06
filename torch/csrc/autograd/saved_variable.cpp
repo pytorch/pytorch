@@ -194,7 +194,7 @@ Variable SavedVariable::unpack(c10::intrusive_ptr<Node> saved_for) const {
                "that failed to compute its gradient. The variable in question "
                "was changed in there or anywhere later. Good luck!";
       }
-      TORCH_CHECK(false, message.str());
+      TORCH_CHECK(false, std::move(message).str());
     }
   }
 

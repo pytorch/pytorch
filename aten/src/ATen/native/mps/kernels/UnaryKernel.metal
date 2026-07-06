@@ -665,6 +665,29 @@ REGISTER_UNARY_OP(bitwise_not, char, char);
 REGISTER_UNARY_OP(bitwise_not, uchar, uchar);
 REGISTER_UNARY_OP(bitwise_not, bool, bool);
 
+struct logical_not_functor {
+  template <typename T, enable_if_t<!is_complex_v<T>, bool> = true>
+  inline bool operator()(const T x) {
+    return x == T(0);
+  }
+  template <typename T, enable_if_t<is_complex_v<T>, bool> = true>
+  inline bool operator()(const T x) {
+    return x.x == 0 && x.y == 0;
+  }
+};
+
+REGISTER_UNARY_OP(logical_not, bool, bool);
+REGISTER_UNARY_OP(logical_not, uchar, bool);
+REGISTER_UNARY_OP(logical_not, char, bool);
+REGISTER_UNARY_OP(logical_not, short, bool);
+REGISTER_UNARY_OP(logical_not, int, bool);
+REGISTER_UNARY_OP(logical_not, long, bool);
+REGISTER_UNARY_OP(logical_not, half, bool);
+REGISTER_UNARY_OP(logical_not, float, bool);
+REGISTER_UNARY_OP(logical_not, bfloat, bool);
+REGISTER_UNARY_OP(logical_not, float2, bool);
+REGISTER_UNARY_OP(logical_not, half2, bool);
+
 REGISTER_UNARY_OP(abs, int, int);
 REGISTER_UNARY_OP(abs, long, long);
 REGISTER_UNARY_OP(abs, short, short);

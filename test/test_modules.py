@@ -11,7 +11,7 @@ import torch
 from torch._subclasses.meta_utils import assert_metadata_eq
 from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests, onlyCPU, onlyOn, toleranceOverride, tol, skipMeta)
+    instantiate_device_type_tests, onlyCPU, onlyAccelerator, toleranceOverride, tol, skipMeta, skipMPS)
 from torch.testing._internal.common_modules import module_db, modules, ModuleErrorEnum, TrainEvalMode
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, freeze_rng_state, mock_wrapper, get_tensors_from, gradcheck,
@@ -23,10 +23,6 @@ if TEST_WITH_ROCM:
     import os
     os.environ["PYTORCH_MIOPEN_SUGGEST_NHWC"] = "1"
     os.environ["PYTORCH_MIOPEN_SUGGEST_NHWC_BATCHNORM"] = "1"
-
-device_type = (
-    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
-)
 
 class TestModule(TestCase):
     _do_cuda_memory_leak_check = True
@@ -45,11 +41,11 @@ class TestModule(TestCase):
             for item_name, item in items:
                 self.assertEqual(
                     item.device, device,
-                    f'{name} {item_name} is on device {item.device} instead of the expected device {device}')
+                    lambda msg: f'{msg}\n{name} {item_name} is on device {item.device} instead of the expected device {device}')
                 if item.dtype.is_floating_point:
                     self.assertEqual(
                         item.dtype, dtype,
-                        f'{name} {item_name} is of dtype {item.dtype} instead of the expected dtype {dtype}')
+                        lambda msg: f'{msg}\n{name} {item_name} is of dtype {item.dtype} instead of the expected dtype {dtype}')
         _check_module(module.named_parameters(), "Parameter")
         _check_module(module.named_buffers(), "Buffer")
 
@@ -148,7 +144,8 @@ class TestModule(TestCase):
                 m.train(training)
                 self._assert_module_parameters_and_buffer_are(m, device, dtype)
 
-    @onlyOn(["cuda", "xpu"])
+    @skipMPS
+    @onlyAccelerator
     @modules(module_db)
     def test_multiple_device_transfer(self, device, dtype, module_info, training):
         module_cls = module_info.module_cls
@@ -181,7 +178,7 @@ class TestModule(TestCase):
                 self._assert_module_parameters_and_buffer_are(m, "cpu", dtype)
 
                 # === Move back to GPU and forward pass ===
-                m.to(device_type)
+                m.to(device)
                 m(*input_device_args, **input_device_kwargs)
                 self._assert_module_parameters_and_buffer_are(m, device, dtype)
 
@@ -202,7 +199,7 @@ class TestModule(TestCase):
                     m.to(1)
                     with torch.accelerator.device_index(1):
                         m(*input_device_1_args, **input_device_1_kwargs)
-                    self._assert_module_parameters_and_buffer_are(m, torch.device(f"{device_type}:1"), dtype)
+                    self._assert_module_parameters_and_buffer_are(m, torch.device(f"{torch.device(device).type}:1"), dtype)
 
     @modules(module_db)
     def test_repr(self, device, dtype, module_info, training):
@@ -452,7 +449,7 @@ class TestModule(TestCase):
             self.skipTest("GradcheckError issue in MultiheadAttention, https://github.com/intel/torch-xpu-ops/issues/2356")
         # === Set nondet tol for gradcheck to user-defined value if on CUDA and cudNN is enabled
         gradcheck_nondet_tol = 0.0
-        if (torch.device(device).type == 'cuda' and torch.backends.cudnn.enabled) or device_type == "xpu":
+        if (torch.device(device).type == 'cuda' and torch.backends.cudnn.enabled) or torch.device(device).type == 'xpu':
             gradcheck_nondet_tol = module_info.gradcheck_nondet_tol
 
         for module_input in module_inputs:
@@ -539,7 +536,8 @@ class TestModule(TestCase):
     def test_gradgrad(self, device, dtype, module_info, training):
         self._test_gradients_helper(device, dtype, module_info, training, gradgradcheck)
 
-    @onlyOn(["cuda", "xpu"])
+    @skipMPS
+    @onlyAccelerator
     @with_tf32_off  # Turn off TF32 to compute at full precision https://github.com/pytorch/pytorch/issues/86798
     @toleranceOverride({torch.float32: tol(5e-2, 0),
                         torch.float64: tol(4e-4, 0)})
@@ -636,8 +634,8 @@ class TestModule(TestCase):
     @with_tf32_off
     @modules(module_db)
     def test_memory_format(self, device, dtype, module_info, training):
-        is_sm86or80 = device.startswith("cuda") and (torch.cuda.get_device_capability(0) == (8, 6)
-                                                     or torch.cuda.get_device_capability(0) == (8, 0))
+        is_sm86or80 = torch.device(device).type == "cuda" and (torch.cuda.get_device_capability(0) == (8, 6)
+                                                               or torch.cuda.get_device_capability(0) == (8, 0))
         # TODO tighten it to a specific module
         atol, rtol = (3e-3, 7e-3) if is_sm86or80 else (None, None)
         module_cls = module_info.module_cls
@@ -882,6 +880,7 @@ class TestModule(TestCase):
                 raise NotImplementedError(f"Unknown error type {error_input.error_on}")
 
     # Only run this test for float32 because the test loops over all the dtypes
+    @skipMPS
     @modules([module for module in module_db if not module.is_lazy], allowed_dtypes=[torch.float32])
     @parametrize('swap', [True, False])
     @parametrize('set_grad', [True, False])
@@ -889,8 +888,8 @@ class TestModule(TestCase):
     def test_to(self, device, dtype, module_info, training, swap, set_grad):
         module_cls = module_info.module_cls
         devices = ['cpu']
-        if torch.cuda.is_available() or torch.xpu.is_available():
-            devices += [device_type]
+        if torch.accelerator.is_available():
+            devices.append(torch.device(device).type)
         dtypes = module_info.dtypes
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
                                                        requires_grad=False, training=training)

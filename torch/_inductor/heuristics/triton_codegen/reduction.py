@@ -17,6 +17,7 @@ from torch._inductor.heuristics.registry import (
 from torch._inductor.runtime.hints import ReductionHint, TRITON_MAX_BLOCK
 from torch._inductor.runtime.runtime_utils import next_power_of_2
 from torch._inductor.utils import prefix_is_reduction
+from torch.utils._ordered_set import OrderedSet
 
 
 if TYPE_CHECKING:
@@ -98,6 +99,8 @@ def _adapt_config_for_tiling(
     register_intensive=False,
     persistent_reduction=False,
     waves_per_eu=None,
+    *,
+    warp_size: int = 32,
 ) -> Config:
     """
     Create an adapted configuration based on tiling scores,
@@ -105,7 +108,10 @@ def _adapt_config_for_tiling(
     """
     from torch._inductor.runtime.triton_heuristics import triton_config_tiled_reduction
 
-    assert all(s in tiling_scores for s in size_hints)
+    if not all(s in tiling_scores for s in size_hints):
+        raise AssertionError(
+            f"Missing size_hints in tiling_scores: {OrderedSet(size_hints) - OrderedSet(tiling_scores)}"
+        )
     target_block_product = original_x * original_r
     block_sizes = _match_target_block_product(
         size_hints, tiling_scores, target_block_product
@@ -119,6 +125,7 @@ def _adapt_config_for_tiling(
         num_stages=num_stages,
         register_intensive=register_intensive,
         waves_per_eu=waves_per_eu,
+        warp_size=warp_size,
     )
 
 
@@ -202,6 +209,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
         )
 
         device_major = triton_meta["device"].major
+        warp_size = triton_meta["device"].warp_size_or_default
         MAX_R0_BLOCK = 1024 if device_major is not None and device_major >= 10 else 2048
         if size_hints["x"] >= 1024 and loads_and_red >= 10:
             MAX_R0_BLOCK = 1024
@@ -241,6 +249,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
                     num_stages=num_stages,
                     register_intensive=register_intensive,
                     waves_per_eu=waves_per_eu,
+                    warp_size=warp_size,
                 )
             else:
                 return triton_config_reduction(
@@ -253,10 +262,16 @@ class ReductionHeuristic(CodegenConfigHeuristics):
                     waves_per_eu=waves_per_eu,
                     dynamic_scale_rblock=dynamic_scale_rblock,
                     reduction_hint=reduction_hint,
+                    warp_size=warp_size,
                 )
 
         contiguous_config = make_config(
-            2 if rnumel <= 2048 else 1,
+            # Default XBLOCK=2 launches too few programs to fill
+            # the device. Prefer XBLOCK=1 so the autotuner has a candidate
+            # that can saturate all CUs.
+            1
+            if (torch.version.hip and size_hints.get("x", 0) <= 64)
+            else (2 if rnumel <= 2048 else 1),
             min(rnumel, MAX_R0_BLOCK),
             register_intensive=register_intensive,
         )
@@ -340,6 +355,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
         rnumel = get_total_reduction_numel(size_hints)
 
         MAX_PERSISTENT_BLOCK_NUMEL = 4096
+        warp_size = triton_meta["device"].warp_size_or_default
 
         if triton_meta.get("native_matmul"):
             from torch._inductor.runtime.hints import native_matmul_persistent_rblock
@@ -380,6 +396,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
                     rnumel,
                     register_intensive=True,
                     reduction_hint=reduction_hint,
+                    warp_size=warp_size,
                 )
                 for xblock in xblock_vals
                 if xblock == 1
@@ -398,7 +415,11 @@ class ReductionHeuristic(CodegenConfigHeuristics):
                 )
                 configs.append(
                     triton_config_tiled_reduction(
-                        size_hints, block_sizes["x"], block_sizes["y"], rnumel
+                        size_hints,
+                        block_sizes["x"],
+                        block_sizes["y"],
+                        rnumel,
+                        warp_size=warp_size,
                     )
                 )
 
@@ -407,6 +428,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
                 size_hints,
                 2 * (256 // rnumel) if rnumel <= 256 else 1,
                 rnumel,
+                warp_size=warp_size,
             )
         ]
 
@@ -428,6 +450,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
                         xnumel,
                         inductor_meta,
                         reduction_hint,
+                        warp_size,
                     )
             elif reduction_hint == ReductionHint.OUTER:
                 configs = configs[-1:]
@@ -481,6 +504,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
         xnumel,
         inductor_meta,
         reduction_hint,
+        warp_size: int = 32,
     ) -> list[Config]:
         """Config for INNER hint in persistent reduction."""
         from torch._inductor.runtime.triton_heuristics import triton_config_reduction
@@ -495,6 +519,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
                 num_warps=1,
                 min_num_warps=1,
                 reduction_hint=reduction_hint,
+                warp_size=warp_size,
             )
         ]
 
@@ -696,6 +721,7 @@ class XPUReductionHeuristic(ReductionHeuristic):
         xnumel,
         inductor_meta,
         reduction_hint,
+        warp_size: int = 32,
     ) -> list[Config]:
         from torch._inductor.runtime.triton_heuristics import triton_config_reduction
 
@@ -718,5 +744,6 @@ class XPUReductionHeuristic(ReductionHeuristic):
                 num_warps=None,
                 min_num_warps=None,
                 reduction_hint=None,
+                warp_size=warp_size,
             )
         ]
