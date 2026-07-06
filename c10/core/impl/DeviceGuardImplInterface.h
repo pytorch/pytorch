@@ -155,6 +155,21 @@ struct C10_API DeviceGuardImplInterface {
   }
 
   /**
+   * Return the priority that this stream is associated with. Lower numbers
+   * represent higher priority.
+   */
+  virtual int getStreamPriority(const Stream /*unused*/) const {
+    return 0;
+  }
+
+  /**
+   * Return the range of priority **supported by PyTorch**.
+   */
+  virtual std::tuple<int, int> getStreamPriorityRange() const {
+    return std::make_tuple(0, 0);
+  }
+
+  /**
    * Destroys the given event.
    */
   virtual void destroyEvent(void* /*event*/, const DeviceIndex /*device_index*/)

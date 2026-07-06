@@ -96,6 +96,15 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     return reinterpret_cast<void*>(&(stream.queue()));
   }
 
+  int getStreamPriority(const Stream s) const override {
+    const XPUStream stream{s};
+    return stream.priority();
+  }
+
+  std::tuple<int, int> getStreamPriorityRange() const override {
+    return XPUStream::priority_range();
+  }
+
   DeviceIndex deviceCount() const noexcept override {
     return c10::xpu::device_count();
   }
