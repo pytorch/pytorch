@@ -1,15 +1,13 @@
 # Owner(s): ["module: inductor"]
 import ast
-import os
-import tempfile
 import textwrap
 from unittest import mock
 
 import torch
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters
-from torch._functorch import config as functorch_config
-from torch._inductor import compile_to_python, CompiledArtifact, config
+from torch._inductor import compile_to_python, config, load_from_python
+from torch._inductor.decomposition import select_decomp_table
 from torch._inductor.standalone_compile import NoRunnableInductorModuleError
 from torch._inductor.utils import fresh_cache
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -18,11 +16,15 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
-def _capture(m, x, tracing_mode="real"):
+def _capture(m, x, tracing_mode="fake"):
     """Trace ``m(x)`` into a flat-input ATen graph (params+buffers then ``x`` lifted to
     inputs), mirroring how ``torch.compiler.precompile`` feeds a post-AOTAutograd inner
-    graph to ``torch._inductor.compile_to_python``. Tracing runs ``m(x)`` once, so pass
-    a throwaway module. ``tracing_mode="symbolic"`` produces a graph with dynamic dims."""
+    graph to ``torch._inductor.compile_to_python``. The graph is decomposed against the
+    inductor decomposition table (``compile_to_python`` drives inductor codegen directly
+    and requires an already-decomposed graph) and traced under a single ``FakeTensorMode``
+    (placeholders carry the fake ``val`` metadata inductor lowers against). Tracing runs
+    ``m(x)`` once, so pass a throwaway module. ``tracing_mode="symbolic"`` produces a
+    graph with dynamic dims."""
     pnames = [n for n, _ in m.named_parameters()]
     bnames = [n for n, _ in m.named_buffers()]
     pb = [p for _, p in m.named_parameters()] + [b for _, b in m.named_buffers()]
@@ -38,7 +40,11 @@ def _capture(m, x, tracing_mode="real"):
         return pytree.tree_flatten(out)[0]
 
     with torch.enable_grad():
-        return make_fx(flat_fn, tracing_mode=tracing_mode)(pb + [x])
+        return make_fx(
+            flat_fn,
+            decomposition_table=select_decomp_table(),
+            tracing_mode=tracing_mode,
+        )(pb + [x])
 
 
 def _flat_inputs(m, x):
@@ -107,17 +113,17 @@ class TestInductorCompileToPythonCodegen(TestCase):
             call_src,
             """\
 def call(args):
-    arg0_1, arg1_1, arg2_1 = args
+    flat_1, flat_2, flat_3 = args
     args.clear()
-    assert_size_stride(arg1_1, (3, ), (1, ), 'input')
-    assert_size_stride(arg2_1, (5, 4), (4, 1), 'input')
-    assert_size_stride(arg0_1, (3, 4), (4, 1), 'input')
+    assert_size_stride(flat_2, (3, ), (1, ), 'input')
+    assert_size_stride(flat_3, (5, 4), (4, 1), 'input')
+    assert_size_stride(flat_1, (3, 4), (4, 1), 'input')
     buf0 = empty_strided_cpu((5, 3), (3, 1), torch.float32)
-    # Topologically Sorted Source Nodes: [t, addmm], Original ATen: [aten.t, aten.addmm]
-    extern_kernels.addmm(arg1_1, arg2_1, reinterpret_tensor(arg0_1, (4, 3), (1, 4), 0), alpha=1, beta=1, out=buf0)
-    del arg0_1
-    del arg1_1
-    del arg2_1
+    # Topologically Sorted Source Nodes: [], Original ATen: []
+    extern_kernels.addmm(flat_2, flat_3, reinterpret_tensor(flat_1, (4, 3), (1, 4), 0), alpha=1, beta=1, out=buf0)
+    del flat_1
+    del flat_2
+    del flat_3
     return (buf0, )""",
         )
         with torch.no_grad():
@@ -131,15 +137,15 @@ def call(args):
             call_src,
             """\
 def call(args):
-    arg0_1, arg1_1 = args
+    flat_1, flat_2 = args
     args.clear()
-    assert_size_stride(arg1_1, (5, 4), (4, 1), 'input')
-    assert_size_stride(arg0_1, (3, 4), (4, 1), 'input')
+    assert_size_stride(flat_2, (5, 4), (4, 1), 'input')
+    assert_size_stride(flat_1, (3, 4), (4, 1), 'input')
     buf0 = empty_strided_cpu((5, 3), (3, 1), torch.float32)
-    # Topologically Sorted Source Nodes: [t, mm], Original ATen: [aten.t, aten.mm]
-    extern_kernels.mm(arg1_1, reinterpret_tensor(arg0_1, (4, 3), (1, 4), 0), out=buf0)
-    del arg0_1
-    del arg1_1
+    # Topologically Sorted Source Nodes: [], Original ATen: []
+    extern_kernels.mm(flat_2, reinterpret_tensor(flat_1, (4, 3), (1, 4), 0), out=buf0)
+    del flat_1
+    del flat_2
     return (buf0, )""",
         )
         with torch.no_grad():
@@ -153,19 +159,19 @@ def call(args):
             call_src,
             """\
 def call(args):
-    arg0_1, arg1_1, arg2_1 = args
+    flat_1, flat_2, flat_3 = args
     args.clear()
-    assert_size_stride(arg1_1, (3, ), (1, ), 'input')
-    assert_size_stride(arg2_1, (5, 4), (4, 1), 'input')
-    assert_size_stride(arg0_1, (3, 4), (4, 1), 'input')
+    assert_size_stride(flat_2, (3, ), (1, ), 'input')
+    assert_size_stride(flat_3, (5, 4), (4, 1), 'input')
+    assert_size_stride(flat_1, (3, 4), (4, 1), 'input')
     buf0 = empty_strided_cpu((5, 3), (3, 1), torch.float32)
-    # Topologically Sorted Source Nodes: [t, addmm], Original ATen: [aten.t, aten.addmm]
-    extern_kernels.addmm(arg1_1, arg2_1, reinterpret_tensor(arg0_1, (4, 3), (1, 4), 0), alpha=1, beta=1, out=buf0)
-    del arg0_1
-    del arg1_1
-    del arg2_1
+    # Topologically Sorted Source Nodes: [], Original ATen: []
+    extern_kernels.addmm(flat_2, flat_3, reinterpret_tensor(flat_1, (4, 3), (1, 4), 0), alpha=1, beta=1, out=buf0)
+    del flat_1
+    del flat_2
+    del flat_3
     buf1 = buf0; del buf0  # reuse
-    cpp_fused_relu_0(buf1)
+    cpp_fused_0(buf1)
     return (buf1, )""",
         )
         with torch.no_grad():
@@ -221,24 +227,27 @@ class TestInductorCompileToPythonCudaCodegen(TestCase):
             call_src,
             """\
 def call(args):
-    arg0_1, = args
+    flat_1, = args
     args.clear()
-    assert_size_stride(arg0_1, (128, 64), (64, 1), 'input')
+    assert_size_stride(flat_1, (128, 64), (64, 1), 'input')
     with torch.cuda._DeviceGuard(0):
         torch.cuda.set_device(0)
-        arg0_1 = copy_if_misaligned(arg0_1)
+        flat_1 = copy_if_misaligned(flat_1)
         buf0 = empty_strided_cuda((128, 64), (64, 1), torch.float32)
-        # Topologically Sorted Source Nodes: [mul, add, relu], Original ATen: [aten.mul, aten.add, aten.relu]
+        # Topologically Sorted Source Nodes: [], Original ATen: []
         raw_stream0 = get_raw_stream(0)
-        triton_poi_fused_add_mul_relu_0.run(arg0_1, buf0, 8192, stream=raw_stream0)
-        del arg0_1
+        triton_poi_fused_0.run(flat_1, buf0, 8192, stream=raw_stream0)
+        del flat_1
     return (buf0, )""",
         )
         # The pointwise fusion lowers to a single @triton.jit pointwise kernel; the
         # call drives it directly with no extern (BLAS/cuDNN) kernel.
         self.assertIn("@triton.jit", src)
         self.assertIn("@triton_heuristics.pointwise", src)
-        self.assertIn("def triton_poi_fused_add_mul_relu_0(", src)
+        # Kernel name is generic (triton_poi_fused_0) because the make_fx test graph
+        # carries no source-node provenance; a real AOTAutograd graph would name it after
+        # the fused ops (e.g. triton_poi_fused_add_mul_relu_0).
+        self.assertIn("def triton_poi_fused_0(", src)
         self.assertIn("tl.load", src)
         self.assertIn("tl.store", src)
         self.assertIn("tl.maximum", src)  # the fused relu
@@ -254,23 +263,25 @@ def call(args):
             call_src,
             """\
 def call(args):
-    arg0_1, = args
+    flat_1, = args
     args.clear()
-    assert_size_stride(arg0_1, (64, 256), (256, 1), 'input')
+    assert_size_stride(flat_1, (64, 256), (256, 1), 'input')
     with torch.cuda._DeviceGuard(0):
         torch.cuda.set_device(0)
-        arg0_1 = copy_if_misaligned(arg0_1)
+        flat_1 = copy_if_misaligned(flat_1)
         buf0 = empty_strided_cuda((64, ), (1, ), torch.float32)
-        # Topologically Sorted Source Nodes: [sum_1], Original ATen: [aten.sum]
+        # Topologically Sorted Source Nodes: [], Original ATen: []
         raw_stream0 = get_raw_stream(0)
-        triton_per_fused_sum_0.run(arg0_1, buf0, 64, 256, stream=raw_stream0)
-        del arg0_1
+        triton_per_fused_0.run(flat_1, buf0, 64, 256, stream=raw_stream0)
+        del flat_1
     return (buf0, )""",
         )
         # A row reduction lowers to a (persistent) reduction Triton kernel doing the
         # cross-row ``tl.sum``; there is no extern kernel.
         self.assertIn("@triton_heuristics.persistent_reduction", src)
-        self.assertIn("def triton_per_fused_sum_0(", src)
+        # Generic kernel name (no source-node provenance on the make_fx test graph); a real
+        # AOTAutograd graph would name it triton_per_fused_sum_0.
+        self.assertIn("def triton_per_fused_0(", src)
         self.assertIn("tl.sum", src)
         self.assertNotIn("extern_kernels", call_src)
         with torch.no_grad():
@@ -279,7 +290,9 @@ def call(args):
     def test_addmm_relu_fused_triton_epilogue_codegen(self):
         # CUDA counterpart of test_addmm_relu_fused_pointwise_codegen: the matmul is an
         # extern BLAS call but the relu epilogue fuses into a @triton.jit kernel
-        # (triton_poi_fused_addmm_relu_0) rather than the CPU cpp_fused_relu_0.
+        # (triton_poi_fused_add_0 here; a real AOTAutograd graph, with source-node
+        # provenance, would name it triton_poi_fused_addmm_relu_0) rather than the CPU
+        # cpp_fused_relu_0.
         m = torch.nn.Sequential(torch.nn.Linear(4, 3), torch.nn.ReLU()).eval().cuda()
         x = torch.randn(5, 4, device="cuda")
         src, call_src = self._inner_call(m, x)
@@ -287,31 +300,31 @@ def call(args):
             call_src,
             """\
 def call(args):
-    arg0_1, arg1_1, arg2_1 = args
+    flat_1, flat_2, flat_3 = args
     args.clear()
-    assert_size_stride(arg2_1, (5, 4), (4, 1), 'input')
-    assert_size_stride(arg0_1, (3, 4), (4, 1), 'input')
+    assert_size_stride(flat_3, (5, 4), (4, 1), 'input')
+    assert_size_stride(flat_1, (3, 4), (4, 1), 'input')
     with torch.cuda._DeviceGuard(0):
         torch.cuda.set_device(0)
-        arg2_1 = copy_if_misaligned(arg2_1)
-        arg0_1 = copy_if_misaligned(arg0_1)
+        flat_3 = copy_if_misaligned(flat_3)
+        flat_1 = copy_if_misaligned(flat_1)
         buf0 = empty_strided_cuda((5, 3), (3, 1), torch.float32)
-        # Topologically Sorted Source Nodes: [t, addmm], Original ATen: [aten.t, aten.addmm]
-        extern_kernels.mm(arg2_1, reinterpret_tensor(arg0_1, (4, 3), (1, 4), 0), out=buf0)
-        del arg0_1
-        del arg2_1
-        assert_size_stride(arg1_1, (3, ), (1, ), 'input')
-        arg1_1 = copy_if_misaligned(arg1_1)
+        # Topologically Sorted Source Nodes: [], Original ATen: [aten.mm]
+        extern_kernels.mm(flat_3, reinterpret_tensor(flat_1, (4, 3), (1, 4), 0), out=buf0)
+        del flat_1
+        del flat_3
+        assert_size_stride(flat_2, (3, ), (1, ), 'input')
+        flat_2 = copy_if_misaligned(flat_2)
         buf1 = buf0; del buf0  # reuse
-        # Topologically Sorted Source Nodes: [addmm, relu], Original ATen: [aten.addmm, aten.relu]
+        # Topologically Sorted Source Nodes: [], Original ATen: [aten.add]
         raw_stream0 = get_raw_stream(0)
-        triton_poi_fused_addmm_relu_0.run(buf1, arg1_1, 15, stream=raw_stream0)
-        del arg1_1
+        triton_poi_fused_add_0.run(buf1, flat_2, 15, stream=raw_stream0)
+        del flat_2
     return (buf1, )""",
         )
         self.assertIn("extern_kernels.mm", call_src)
         self.assertIn("@triton.jit", src)
-        self.assertIn("def triton_poi_fused_addmm_relu_0(", src)
+        self.assertIn("def triton_poi_fused_add_0(", src)
         self.assertIn("tl.maximum", src)  # the fused relu epilogue
         with torch.no_grad():
             self.assertEqual(_exec(src)(_flat_inputs(m, x))[0], m(x))
@@ -379,6 +392,30 @@ def call(args):
                 _exec(src)(_flat_inputs(m, x))[0], m(x), atol=1e-2, rtol=1e-2
             )
 
+    @config.patch({"compile_threads": 1})
+    def test_warm_load_rehydrates_static_launcher(self):
+        # The cache must let a COLD (fresh-dir) load reuse the compiled kernels AND the
+        # static CUDA launcher, not fall back to the slower dynamic launch. This works only
+        # because compile_to_python defaults keep_static_cubin_raw=True, travelling the raw
+        # cubin in the bundle; with the default False, reload_cubin_path can't find the cubin
+        # file in a fresh dir and the static launcher is silently dropped. Assert the static
+        # autotuner is rehydrated on the warm load (counter > 0) and the result matches eager.
+        if config.force_disable_caches or not config.fx_graph_cache:
+            self.skipTest("requires inductor FxGraphCache enabled")
+        if not config.use_static_cuda_launcher:
+            self.skipTest("requires the static CUDA launcher")
+        m = _Pointwise().eval().cuda()
+        x = torch.randn(1024, 1024, device="cuda")
+        src, cache = compile_to_python(_capture(m, x), _flat_inputs(m, x))
+        self.assertIsInstance(cache, bytes)
+        with fresh_cache():
+            counters.clear()
+            with torch.no_grad():
+                out = load_from_python(src, cache)(_flat_inputs(m, x))
+            rehydrated = counters["inductor"]["triton_bundler_load_static_autotuner"]
+        self.assertGreater(rehydrated, 0)
+        self.assertEqual(out[0], m(x))
+
 
 class TestInductorCompileToPythonContract(TestCase):
     # Contract + branch coverage the codegen-golden classes above do not exercise: the
@@ -410,33 +447,28 @@ class TestInductorCompileToPythonContract(TestCase):
         with torch.no_grad():
             self.assertEqual(_exec(src)(_flat_inputs(m, x))[0], m(x))
 
-    def test_returned_cache_loads_and_runs(self):
-        # End-to-end: the returned cache IS the binary CompiledArtifact format, so loading
-        # it back (in a fresh cache dir, so nothing comes from the ambient warm cache) must
-        # yield a runnable artifact that matches eager. The bytes come from the AOTAutograd
-        # cache artifact, requiring force_disable_caches off AND enable_autograd_cache on;
-        # those flags are env-authoritative on PyTorch CI's cache-disabled shards (cannot be
-        # patched back on), where compile_to_python correctly returns None -- skip there
-        # (test_no_cache_when_caches_disabled covers the None path).
-        if (
-            config.force_disable_caches
-            or not config.fx_graph_cache
-            or not functorch_config.enable_autograd_cache
-        ):
-            self.skipTest("requires inductor + autograd caches enabled")
+    def test_load_from_python_standalone_and_warm(self):
+        # load_from_python(python_code, cache) is the inverse of compile_to_python. The
+        # python_code is self-contained: it loads and runs with cache=None (JIT path). The
+        # cache is a PURE ACCELERATOR -- passing it warms the kernel caches so exec loads
+        # precompiled binaries instead of recompiling; both paths must match eager. Run each
+        # in a fresh cache dir so the standalone path is a genuine cold load. The cache
+        # bytes require force_disable_caches off AND fx_graph_cache on; those flags are
+        # env-authoritative on PyTorch CI's cache-disabled shards (cannot be patched back
+        # on), where compile_to_python returns None -- skip there (test_no_cache_when_caches
+        # _disabled covers the None path).
+        if config.force_disable_caches or not config.fx_graph_cache:
+            self.skipTest("requires inductor FxGraphCache enabled")
         m = torch.nn.Linear(4, 3).eval()
         x = torch.randn(5, 4)
-        _src, cache = compile_to_python(_capture(m, x), _flat_inputs(m, x))
+        src, cache = compile_to_python(_capture(m, x), _flat_inputs(m, x))
         self.assertIsInstance(cache, bytes)
-        with tempfile.TemporaryDirectory() as d:
-            path = os.path.join(d, "artifact.bin")
-            with open(path, "wb") as f:
-                f.write(cache)
-            with fresh_cache():
-                loaded = CompiledArtifact.load(path=path, format="binary")
-                with torch.no_grad():
-                    out = loaded(*_flat_inputs(m, x))
-        self.assertEqual(out[0], m(x))
+        # Standalone: no cache, the module JIT-compiles its own kernels.
+        with fresh_cache(), torch.no_grad():
+            self.assertEqual(load_from_python(src)(_flat_inputs(m, x))[0], m(x))
+        # Warm: the cache accelerates the same module; result is identical.
+        with fresh_cache(), torch.no_grad():
+            self.assertEqual(load_from_python(src, cache)(_flat_inputs(m, x))[0], m(x))
 
     def test_no_cache_when_caches_disabled(self):
         # With caches disabled there is no saveable artifact, so cache is None; the source
@@ -466,19 +498,16 @@ class TestInductorCompileToPythonContract(TestCase):
             self.assertEqual(_exec(src)(_flat_inputs(m, x))[0], m(x))
 
     def test_dynamic_shapes_emits_symbolic_codegen(self):
-        # dynamic_shapes="from_graph" on a symbolically-traced graph emits a call() keyed
-        # on symbolic sizes (sN) rather than baked constants, and the single module runs at
-        # multiple shapes. (The default "from_example_inputs" specializes instead -- the
-        # other tests exercise that static path.) Symbol names are non-deterministic, so
-        # assert structure + multi-shape numerics rather than goldening.
+        # A symbolically-traced graph carries symbolic sizes in its placeholder val
+        # metadata, so the emitted call() is keyed on symbolic sizes (sN) rather than baked
+        # constants and the single module runs at multiple shapes. Shapes come from the
+        # graph (there is no dynamic_shapes knob); the other tests exercise the static path.
+        # Symbol names are non-deterministic, so assert structure + multi-shape numerics
+        # rather than goldening.
         m = _Pointwise().eval()
         x = torch.randn(8, 4)
         gm = _capture(m, x, tracing_mode="symbolic")
-        src, _cache = compile_to_python(
-            gm,
-            _flat_inputs(m, x),
-            dynamic_shapes="from_graph",
-        )
+        src, _cache = compile_to_python(gm, _flat_inputs(m, x))
         call_src = _extract_call(src)
         self.assertRegex(call_src, r"\bs\d+\b")  # a symbolic size symbol is present
         self.assertNotIn("(8, 4)", call_src)  # the input shape is not baked in
