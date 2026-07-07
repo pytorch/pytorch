@@ -1,7 +1,7 @@
 # Owner(s): ["module: inductor"]
 import ast
 import textwrap
-from unittest import mock
+from unittest import mock, skipIf
 
 import torch
 import torch.utils._pytree as pytree
@@ -13,6 +13,7 @@ from torch._inductor.utils import fresh_cache
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.utils import stateless
 from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.inductor_utils import IS_BIG_GPU
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
@@ -346,6 +347,11 @@ def call(args):
         with torch.no_grad():
             self.assertEqual(_exec(src)(_flat_inputs(m, x))[0], m(x))
 
+    @skipIf(
+        not IS_BIG_GPU,
+        "Skipping triton backend only since not big GPU (not enough SMs for "
+        "max_autotune_gemm; the TRITON-only GEMM backend then has no choices)",
+    )
     def test_max_autotune_excludes_benchmark_lowerings(self):
         # max_autotune's decompose_k GEMM choice compiles each k-split as a nested
         # SubgraphChoiceCaller benchmark GraphLowering during autotuning. compile_to_python
