@@ -1047,7 +1047,7 @@ def gemm_act(
             raise RuntimeError("local_reduce_group must be positive")
         if local_reduce_axis not in (0, 1):
             raise RuntimeError("local_reduce_axis must be 0 or 1")
-        if (local_reduce_axis == 0 or local_reduce_group > 16) and (
+        if (local_reduce_axis == 0 or local_reduce_group > 32) and (
             local_reduce_combine_key is None or local_reduce_finalize_key is None
         ):
             raise RuntimeError(

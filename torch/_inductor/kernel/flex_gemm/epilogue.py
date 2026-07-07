@@ -58,6 +58,7 @@ from torch._inductor.kernel.flex_gemm.quack_reductions import (
     lower_view_or_reshape,
     propagate_grouped_tensorssa_info,
     reduction_from_node,
+    reduction_requires_physical_finalize,
     squeeze_source_node,
     tensor_meta_shape,
     unsupported_reduction_from_node,
@@ -154,6 +155,7 @@ class FlexGemmOutputLocalReducePlan:
     value_node: torch.fx.Node
     store_node: torch.fx.Node | None = None
     feeds_main: bool = False
+    requires_physical_finalize: bool = False
 
     def __post_init__(self) -> None:
         """Reject invalid local-reduce output nodes."""
@@ -177,7 +179,7 @@ class FlexGemmOutputLocalReducePlan:
 
     @property
     def needs_physical_callbacks(self) -> bool:
-        return self.geometry.needs_physical_callbacks
+        return self.requires_physical_finalize or self.geometry.needs_physical_callbacks
 
 
 @dataclasses.dataclass(frozen=True)
@@ -204,6 +206,7 @@ class FlexGemmLocalReduceContract:
     aux: torch.fx.Node
     group: int
     axis: int
+    requires_physical_finalize: bool = False
 
     def __post_init__(self) -> None:
         """Reject invalid local-reduce source nodes and geometry."""
@@ -220,6 +223,7 @@ class FlexGemmLocalReduceContract:
             self.aux,
             store_node=store_node,
             feeds_main=feeds_main,
+            requires_physical_finalize=self.requires_physical_finalize,
         )
 
 
@@ -316,7 +320,7 @@ class FlexGemmLocalReduceAnalysis:
         if contract is None:
             return False
         self.contracts[node] = FlexGemmLocalReduceContract(
-            node, contract.group, contract.axis
+            node, contract.group, contract.axis, contract.requires_physical_finalize
         )
         return True
 
@@ -758,7 +762,14 @@ def local_reduce_contract_from_grouped_input(
         if not raise_invalid_dims:
             return None
         raise NotImplementedError(LOCAL_REDUCE_INNERMOST_GROUPED_DIM_ERROR)
-    return FlexGemmLocalReduceContract(node, info.group_size, info.axis)
+    return FlexGemmLocalReduceContract(
+        node,
+        info.group_size,
+        info.axis,
+        requires_physical_finalize=reduction_requires_physical_finalize(
+            node, info.layout
+        ),
+    )
 
 
 def local_reduce_analysis(

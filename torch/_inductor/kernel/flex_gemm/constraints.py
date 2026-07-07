@@ -31,7 +31,7 @@ def grouped_reduce_dims_match(dim: Any, reduce_dims: Sequence[Any]) -> bool:
 # compressed aux reductions. Axis-1 feeds whose groups fit in one TensorSSA
 # fragment lower as plain generated TensorSSA without a feed plan.
 MAX_SAME_WARP_LOCAL_REDUCE_FEED_MAIN_GROUP = 32
-MAX_TENSORSSA_LOCAL_REDUCE_GROUP_WITHOUT_PHYSICAL_CALLBACKS = 16
+MAX_TENSORSSA_LOCAL_REDUCE_GROUP_WITHOUT_PHYSICAL_CALLBACKS = 32
 LOCAL_REDUCE_FEED_MAIN_AXIS_ERROR = (
     "FlexGEMM local-reduce feed-main currently supports only axis 0"
 )
