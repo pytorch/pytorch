@@ -43,4 +43,8 @@ The largest limitation coming from this approach is that it's impossible to main
 semantics for certain operations; notably those which require the interleaved layout.
 
 The two most common examples of this are the operations ``torch.view_as_real`` and
-``torch.view_as_complex``. Another common case is modifying an input to `torch.compile`.
+``torch.view_as_complex``. Another common case is modifying a complex input to `torch.compile`.
+
+However, use of these operations may not show up in the compiled graph due to fusion; and therefore
+many functions with these operations present may actually compile successfully despite
+using the operations in user code.
