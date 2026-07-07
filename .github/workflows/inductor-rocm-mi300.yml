@@ -60,6 +60,6 @@ jobs:
     needs: linux-noble-rocm-py3_12-inductor-build
     with:
       build-environment: ${{ needs.linux-noble-rocm-py3_12-inductor-build.outputs.build-environment }}
-      docker-image: ${{ needs.linux-noble-rocm-py3_12-inductor-build.outputs.docker-image }}
+      docker-image: ci-image:pytorch-linux-noble-rocm-nightly-py3
       test-matrix:  ${{ needs.linux-noble-rocm-py3_12-inductor-build.outputs.test-matrix }}
     secrets: inherit
