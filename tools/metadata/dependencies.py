@@ -1,9 +1,13 @@
-"""scikit-build-core dynamic metadata provider for dependencies.
+"""Dynamic-metadata provider for the dependencies field.
 
 Replicates the old setup.py logic that reads PYTORCH_EXTRA_INSTALL_REQUIREMENTS
 (pipe-separated PEP 508 dependency strings) and appends them to the base
 dependency list.  Also handles BUILD_PYTHON_ONLY which adds a dependency on
 the libtorch wheel package.
+
+The dynamic_wheel hook marks dependencies as Dynamic in the sdist PKG-INFO:
+the env vars above can legitimately differ between the sdist build and a
+wheel built from it (e.g. CUDA nightly wheels).
 """
 
 from __future__ import annotations
@@ -15,7 +19,7 @@ from typing import Any, TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-__all__ = ["dynamic_metadata"]
+__all__ = ["dynamic_metadata", "dynamic_wheel"]
 
 BASE_DEPENDENCIES = [
     "filelock",
@@ -48,11 +52,11 @@ def _get_torch_version() -> str:
 
 
 def dynamic_metadata(
-    field: str,
     settings: Mapping[str, Any],
-) -> list[str]:
-    if field != "dependencies":
-        msg = f"This provider only supports the 'dependencies' field, got {field!r}"
+    project: Mapping[str, Any],
+) -> dict[str, Any]:
+    if settings:
+        msg = f"This provider takes no settings, got {sorted(settings)}"
         raise RuntimeError(msg)
 
     deps = list(BASE_DEPENDENCIES)
@@ -68,4 +72,8 @@ def dynamic_metadata(
     if extra:
         deps.extend(r.strip() for r in extra.split("|") if r.strip())
 
-    return deps
+    return {"dependencies": deps}
+
+
+def dynamic_wheel(settings: Mapping[str, Any]) -> dict[str, bool]:
+    return {"dependencies": True}

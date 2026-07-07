@@ -49,7 +49,7 @@ PIP_PACKAGES: list[str] = [
     "ninja",
     "typing_extensions",
     "setuptools==78.1.1",
-    "scikit-build-core",
+    "scikit-build-core==1.0.0",
     "spin==0.17",
 ]
 
