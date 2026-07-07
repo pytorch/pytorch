@@ -1845,6 +1845,7 @@ class OutputGraph(OutputGraphCommon):
         queue = [
             *tx.stack,
             *tx.symbolic_locals.values(),
+            *tx.symbolic_cellvars.values(),
             *self.side_effects.store_attr_mutations.keys(),
         ]
 
@@ -1982,6 +1983,12 @@ class OutputGraph(OutputGraphCommon):
 
         meta.num_stack = len(stack_values)
 
+        # Cells are codegen'd by codegen_cells from the symbolic_cellvars
+        # registry. A symbolic_locals entry whose name is also a cell/free var
+        # is either the cell itself (shared slot) or a colliding fast local
+        # (e.g. an inlined comprehension iteration variable shadowing a
+        # nonlocal); both are skipped here, consistent with resume argname
+        # generation in create_call_resume_at.
         cell_and_freevars = set(tx.cellvars() + tx.freevars())
 
         # NB: Typically (i.e., for graph compile from RETURN_VALUE),
@@ -2008,7 +2015,9 @@ class OutputGraph(OutputGraphCommon):
                 and tx is self.root_tx
             ):
                 continue
-            # Do not load cell/free vars
+            # Do not load cell/free vars (real cells are handled by
+            # codegen_cells; a colliding fast local sharing a cell's name is
+            # skipped to match resume argname generation).
             if k in cell_and_freevars:
                 continue
             # Do not load variable if it is NULL.
