@@ -2305,9 +2305,7 @@ class aot_inductor:
     # time into cudagraph-eligible and non-eligible subgraphs. The generated
     # C++ code lazily captures eligible partitions as CUDA graphs and replays
     # them on subsequent calls.
-    enable_cuda_graph: bool = (
-        os.environ.get("AOT_INDUCTOR_ENABLE_CUDA_GRAPH", "0") == "1"
-    )
+    enable_cuda_graph: bool = True
 
     # Regional cuda-graph behavior (single max-sized per-instance slab with
     # cg-aware slab reuse, eager/passthrough chaining, and in-slab partition
