@@ -764,22 +764,25 @@ class SymNumberMemoDescriptor:
             return None
 
         # Version counter based tracking isn't 100% sound but it's close
-        # enough
-        if not self._is_nested_int and getattr(obj, self._memo_vc(obj)) != obj._version:
-            setattr(obj, self._memo(obj), None)
-            return None
+        # enough.  Inference tensors don't track version counters, so
+        # skip that check for them.
+        if not self._is_nested_int and not obj.is_inference():
+            if getattr(obj, self._memo_vc(obj), None) != obj._version:
+                setattr(obj, self._memo(obj), None)
+                return None
 
-        # Backed SymFloats are stable across retracing epochs. Keep this after
-        # the version check so tensor mutation still invalidates the memo.
+        # Backed SymFloats are stable across retracing epochs, but tensor
+        # mutation (version counter check above) still invalidates the memo.
         if isinstance(r, torch.SymFloat) and r.node.hint is not None:
             return r
 
         if (
             not self._is_nested_int
-            and getattr(obj, self._memo_epoch(obj)) != obj.fake_mode.epoch
+            and getattr(obj, self._memo_epoch(obj), None) != obj.fake_mode.epoch
         ):
             setattr(obj, self._memo(obj), None)
             return None
+
         return r
 
     def __set__(
@@ -791,9 +794,9 @@ class SymNumberMemoDescriptor:
             setattr(obj, self._memo(obj), None)
             setattr(obj, self._memo_vc(obj), None)
             setattr(obj, self._memo_epoch(obj), None)
-        elif not obj.is_inference() or self._is_nested_int:
+        else:
             setattr(obj, self._memo(obj), value)
-            if not self._is_nested_int:
+            if not self._is_nested_int and not obj.is_inference():
                 setattr(obj, self._memo_vc(obj), obj._version)
             setattr(obj, self._memo_epoch(obj), obj.fake_mode.epoch)
 
@@ -1344,12 +1347,15 @@ def extract_tensor_metadata(t: Tensor) -> TensorMetadata:
     """
     Extract the TensorMetadata of a tensor.
     """
+    # Read layout/sparseness once (hot-path Python properties on FakeTensor).
+    layout = t.layout
+    _is_sparse_any: bool = is_sparse_any(t)
     memory_format = suggest_memory_format(t)
     # Don't call is_contiguous() on a Tensor which has symbolic sizes or things
     # will go badly (guards will be messed up?)
     if (
         t._has_symbolic_sizes_strides
-        or is_sparse_any(t)
+        or _is_sparse_any
         or not t.is_contiguous(memory_format=memory_format)
     ):
         memory_format = None  # type: ignore[assignment]
@@ -1359,13 +1365,13 @@ def extract_tensor_metadata(t: Tensor) -> TensorMetadata:
     return TensorMetadata(
         t.dtype,
         t.shape,
-        t.stride() if t.layout == torch.strided else (),
+        t.stride() if layout == torch.strided else (),
         t.device,
-        t.layout,
+        layout,
         memory_format,
         storage_offset,
         # Only set storage_bytes for tensors that have storage (not sparse)
-        t.untyped_storage().nbytes() if not is_sparse_any(t) else None,
+        t.untyped_storage().nbytes() if not _is_sparse_any else None,
         t.requires_grad,
         t.is_quantized,
         t.is_conj(),
@@ -1373,8 +1379,8 @@ def extract_tensor_metadata(t: Tensor) -> TensorMetadata:
         t.is_inference(),
         t.is_sparse,
         t.is_coalesced() if t.is_sparse else None,
-        t.dense_dim() if is_sparse_any(t) else None,
-        t.sparse_dim() if is_sparse_any(t) else None,
+        t.dense_dim() if _is_sparse_any else None,
+        t.sparse_dim() if _is_sparse_any else None,
     )
 
 
