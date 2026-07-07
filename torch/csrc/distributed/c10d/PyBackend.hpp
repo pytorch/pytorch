@@ -96,6 +96,9 @@ class PyBackend : public Backend {
   }
 
   static c10::intrusive_ptr<Work> wrapWork(py::object work) {
+    if (work.is_none()) {
+      return nullptr;
+    }
     return c10::make_intrusive<PyProcessGroup::PyWorkHolder>(std::move(work));
   }
 
