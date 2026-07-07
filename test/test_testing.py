@@ -80,18 +80,14 @@ class TestTesting(TestCase):
             self.longMessage = long_message
 
     def test_callable_msg(self):
-        # A callable msg is invoked only on the failure path, receiving the
-        # auto-generated standard message and returning the final message. This
-        # works for assertEqual and for the unittest-style assertions routed
-        # through _formatMessage (assertTrue, assertIn, ...), letting call sites
-        # defer expensive message construction to failures only.
+        # A callable msg is invoked only on failure, across all assert* methods.
         invoked = []
 
         def lazy(standard_msg):
             invoked.append(standard_msg)
             return f"{standard_msg}\nsentinel"
 
-        # Passing assertions must NOT invoke the callable.
+        # Passing: callable not invoked.
         self.assertEqual(1, 1, msg=lazy)
         self.assertTrue(True, msg=lazy)
         self.assertIn(1, [1, 2], msg=lazy)
@@ -99,8 +95,7 @@ class TestTesting(TestCase):
         self.assertIsNone(None, msg=lazy)
         self.assertEqual(invoked, [])
 
-        # Failing assertions invoke the callable once with the standard message
-        # and use its return value as the final message.
+        # Failing: callable invoked once with the standard message.
         failing = [
             lambda: self.assertTrue(False, msg=lazy),
             lambda: self.assertIn(9, [1, 2], msg=lazy),
@@ -114,7 +109,7 @@ class TestTesting(TestCase):
             self.assertEqual(len(invoked), 1)
             self.assertEqual(str(cm.exception), f"{invoked[0]}\nsentinel")
 
-        # A plain string msg still behaves exactly as before (unchanged path).
+        # A plain string msg is unchanged.
         with self.assertRaisesRegex(AssertionError, re.escape("True is not false : plain")):
             self.assertFalse(True, msg="plain")
 
