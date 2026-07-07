@@ -465,37 +465,44 @@ def create_flex_flash_attention_kernel(
         stride=[sympy.sympify(s) for s in output.get_stride()],
     )
 
-    sparse_q_block_size = V.graph.sizevars.guard_int(sparse_q_block_size)
-    sparse_kv_block_size = V.graph.sizevars.guard_int(sparse_kv_block_size)
-
     mask_graph_is_trivial = is_trivial_mask_graph(mask_graph.graph_module)
     score_graph_is_trivial = subgraph is None or is_trivial_score_graph(
         subgraph.graph_module
     )
 
-    needs_block_mask = not mask_graph_is_trivial
+    if kv_num_blocks is None or kv_indices is None:
+        raise AssertionError("kv block metadata is required for flex FLASH")
+
     has_score_mod = not score_graph_is_trivial
+    has_mask_mod = not mask_graph_is_trivial
     has_full_blocks = full_kv_num_blocks is not None
+    if has_full_blocks and full_kv_indices is None:
+        raise AssertionError("full_kv_indices must be provided with full_kv_num_blocks")
+    is_noop_block_mask = not has_full_blocks and V.graph.sizevars.statically_known_true(
+        sympy.And(
+            sympy.Eq(sparse_q_block_size, 1 << 30),
+            sympy.Eq(sparse_kv_block_size, 1 << 30),
+        )
+    )
+    needs_block_mask = not (mask_graph_is_trivial and is_noop_block_mask)
+    sparse_q_block_size = V.graph.sizevars.guard_int(sparse_q_block_size)
+    sparse_kv_block_size = V.graph.sizevars.guard_int(sparse_kv_block_size)
 
     choices: list[Any] = []
     if flash_attention_cutedsl_template is None:
         raise AssertionError("flash_attention_cutedsl_template must not be None")
 
     input_nodes = [query, key, value, lse]
-    if has_full_blocks:
-        input_nodes.extend(
-            [kv_num_blocks, kv_indices, full_kv_num_blocks, full_kv_indices]
-        )
-
-    if needs_block_mask and not has_full_blocks:
-        raise NotImplementedError(
-            "Flash attention with block mask but without full blocks is not supported yet"
-        )
+    if needs_block_mask:
+        input_nodes.extend([kv_num_blocks, kv_indices])
+        if has_full_blocks:
+            input_nodes.extend([full_kv_num_blocks, full_kv_indices])
 
     subgraphs = []
     if has_score_mod:
         subgraphs.append(subgraph_buffer)
-    subgraphs.append(mask_graph_buffer)
+    if has_mask_mod:
+        subgraphs.append(mask_graph_buffer)
 
     aux_scalar_symbols = collect_aux_scalar_symbols(
         score_mod_other_buffers, mask_mod_other_buffers
@@ -520,7 +527,7 @@ def create_flex_flash_attention_kernel(
             subgraph.graph_module if has_score_mod and subgraph is not None else None
         ),
         score_mod_other_buffers=score_mod_other_buffers,
-        has_mask_mod=needs_block_mask,
+        has_mask_mod=has_mask_mod,
         has_mask_aux_tensors=has_mask_aux_tensors,
         mask_mod_graph_module=mask_graph.graph_module,
         mask_mod_other_buffers=mask_mod_other_buffers,
@@ -543,6 +550,8 @@ def create_flex_flash_attention_kernel(
                 MASK_MOD_OTHER_BUFFERS=mask_mod_other_buffers,
                 AUX_SCALAR_SYMBOLS=aux_scalar_symbols,
                 NEEDS_BLOCK_MASK=needs_block_mask,
+                HAS_MASK_MOD=has_mask_mod,
+                HAS_FULL_BLOCKS=has_full_blocks,
                 SPARSE_Q_BLOCK_SIZE=sparse_q_block_size,
                 SPARSE_KV_BLOCK_SIZE=sparse_kv_block_size,
             )
@@ -556,13 +565,18 @@ def create_flex_flash_attention_kernel(
         raise RuntimeError(f"CuteDSL template failed: {error}")
 
     input_gen_fns: dict[int, Callable] | None = None
-    if has_full_blocks:
+    if needs_block_mask:
         input_gen_fns = {
             4: create_num_blocks_fake_generator(kv_indices),
             5: create_indices_fake,
-            6: create_num_blocks_fake_generator(full_kv_indices),
-            7: create_indices_fake,
         }
+        if has_full_blocks:
+            input_gen_fns.update(
+                {
+                    6: create_num_blocks_fake_generator(full_kv_indices),
+                    7: create_indices_fake,
+                }
+            )
 
     template_output, _ = autotune_select_algorithm(
         "flex_flash_attention",
