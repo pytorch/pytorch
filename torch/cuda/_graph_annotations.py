@@ -3,8 +3,8 @@
 During CUDA graph capture, ``mark_kernels`` records the current capture
 frontier and the direct dependents already attached to that frontier.
 On scope exit it walks only the newly added dependent edges to find the
-nodes created within the scope. Each kernel or memcpy node found is
-annotated by its ``toolsId`` so it can later be matched to profiler
+nodes created within the scope. Each kernel, memcpy, or memset node found
+is annotated by its ``toolsId`` so it can later be matched to profiler
 trace events.
 
 ``mark_kernels`` now snapshots capture state from whatever stream is
@@ -19,25 +19,21 @@ Requires ``cuda.bindings`` package and a CUDA driver that supports
 ``cudaGraphNodeGetToolsId`` (CUDA >= 13.1 or appropriate cuda-compat).
 When unavailable, ``mark_kernels`` silently becomes a no-op.
 
+Annotation recording is enabled per capture via ``torch.cuda.graph``'s
+``enable_annotations`` argument, which also resolves and remaps the recorded
+annotations to the exec graph automatically on context exit.
+
 Usage during capture::
 
-    from torch.cuda._graph_annotations import (
-        enable_annotations,
-        mark_kernels,
-        resolve_pending_annotations,
-        remap_to_exec_graph,
-    )
+    from torch.cuda._graph_annotations import mark_kernels, get_kernel_annotations
 
-    enable_annotations()
-
-    with torch.cuda.graph(graph):
+    with torch.cuda.graph(graph, enable_annotations=True):
         with mark_kernels("phase_A"):
             y = workload_a(x)
         with mark_kernels("phase_B"):
             z = workload_b(y)
-        resolve_pending_annotations()
 
-    remap_to_exec_graph(graph)
+    annotations = get_kernel_annotations()
 """
 
 import importlib.metadata
@@ -75,20 +71,19 @@ _ExistingDirectDependents: TypeAlias = dict[int, set[int]]
 # Deferred to first use to avoid premature CUDA initialization.
 _tools_id_available: bool | None = None
 
-# Global kill switch. When False, mark_kernels and mark_stream are no-ops.
+# Whether annotation recording is active. Scoped to a ``torch.cuda.graph``
+# capture: set by the context manager on entry (from its ``enable_annotations``
+# argument) and cleared on exit. When False, mark_kernels/mark_stream and the
+# capture-id stamp are no-ops. Module-level (not thread-local) because capture
+# can span threads (e.g. autograd).
 _annotations_enabled: bool = False
 
 
-def enable_annotations() -> None:
-    """Enable kernel annotation recording."""
+def _set_annotations_enabled(enabled: bool) -> None:
+    """Set whether annotation recording is active. Used by ``torch.cuda.graph``
+    to scope annotations to a capture; not a public API."""
     global _annotations_enabled
-    _annotations_enabled = True
-
-
-def disable_annotations() -> None:
-    """Disable kernel annotation recording."""
-    global _annotations_enabled
-    _annotations_enabled = False
+    _annotations_enabled = enabled
 
 
 def _probe_tools_id() -> bool:
@@ -238,9 +233,9 @@ def _collect_descendants(
 # toolsId -> list of annotation objects.
 _kernel_annotations: defaultdict[int, list[Any]] = defaultdict(list)
 
-# Node types we annotate (kernels, memcpys, and batch mem ops), as driver
-# node-type enums. Initialized lazily to avoid touching cuda.bindings at import
-# time.
+# Node types we annotate (kernels, memcpys, memsets, and batch mem ops), as
+# driver node-type enums. Initialized lazily to avoid touching cuda.bindings at
+# import time.
 _ANNOTATABLE_TYPES: set[Any] | None = None
 
 
@@ -251,6 +246,7 @@ def _get_annotatable_types() -> set[Any]:
         _ANNOTATABLE_TYPES = {
             node_types.CU_GRAPH_NODE_TYPE_KERNEL,
             node_types.CU_GRAPH_NODE_TYPE_MEMCPY,
+            node_types.CU_GRAPH_NODE_TYPE_MEMSET,
             node_types.CU_GRAPH_NODE_TYPE_BATCH_MEM_OP,
         }
     return _ANNOTATABLE_TYPES
@@ -281,7 +277,7 @@ def mark_kernels(annotation: str | dict[str, Any]):
 
     Args:
         annotation: Arbitrary object appended to the annotation list for
-            every kernel/memcpy node captured within this scope.
+            every kernel/memcpy/memset node captured within this scope.
     """
     if not _annotations_enabled or _is_tools_id_unavailable():
         yield

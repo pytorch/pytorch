@@ -81,6 +81,7 @@ class TestCase(TorchTestCase):
                 raise_on_ctx_manager_usage=True,
                 suppress_errors=False,
                 log_compilation_metrics=False,
+                canonicalize_output_graph_node_order=True,
             ),
         )
 

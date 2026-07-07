@@ -201,21 +201,21 @@ class TestTensorCreation(TestCase):
 
         single_roll = numbers.roll(1, 0)
         expected = torch.tensor([8, 1, 2, 3, 4, 5, 6, 7], device=device)
-        self.assertEqual(single_roll, expected, msg=f"{single_roll} did not equal expected result")
+        self.assertEqual(single_roll, expected, msg=lambda msg: f"{msg}\n{single_roll} did not equal expected result")
 
         roll_backwards = numbers.roll(-2, 0)
         expected = torch.tensor([3, 4, 5, 6, 7, 8, 1, 2], device=device)
-        self.assertEqual(roll_backwards, expected, msg=f"{roll_backwards} did not equal expected result")
+        self.assertEqual(roll_backwards, expected, msg=lambda msg: f"{msg}\n{roll_backwards} did not equal expected result")
 
         data = numbers.view(2, 2, 2)
         rolled = data.roll(1, 0)
         expected = torch.tensor([5, 6, 7, 8, 1, 2, 3, 4], device=device).view(2, 2, 2)
-        self.assertEqual(expected, rolled, msg=f"{rolled} did not equal expected result: {expected}")
+        self.assertEqual(expected, rolled, msg=lambda msg: f"{msg}\n{rolled} did not equal expected result: {expected}")
 
         data = data.view(2, 4)
         # roll a loop until back where started
         loop_rolled = data.roll(2, 0).roll(4, 1)
-        self.assertEqual(data, loop_rolled, msg=f"{loop_rolled} did not equal the original: {data}")
+        self.assertEqual(data, loop_rolled, msg=lambda msg: f"{msg}\n{loop_rolled} did not equal the original: {data}")
         # multiple inverse loops
         self.assertEqual(data, data.roll(-20, 0).roll(-40, 1))
         self.assertEqual(torch.tensor([8, 1, 2, 3, 4, 5, 6, 7], device=device), numbers.roll(1, 0))
@@ -227,7 +227,7 @@ class TestTensorCreation(TestCase):
         expected = torch.tensor([4, 8, 1, 5, 2, 6, 3, 7]).view(4, 2)
         rolled = strided.roll(1, 0)
         self.assertEqual(expected, rolled,
-                         msg=f"non contiguous tensor rolled to {rolled} instead of {expected} ")
+                         msg=lambda msg: f"{msg}\nnon contiguous tensor rolled to {rolled} instead of {expected} ")
 
         # test roll with no dimension specified
         expected = numbers.roll(1, 0).view(2, 4)
@@ -238,7 +238,7 @@ class TestTensorCreation(TestCase):
         expected = torch.tensor([[7, 8, 5, 6], [3, 4, 1, 2]], device=device)
         double_rolled = data.roll(shifts=(2, -1), dims=(1, 0))
         self.assertEqual(double_rolled, expected,
-                         msg=f"should be able to roll over two dimensions, got {double_rolled}")
+                         msg=lambda msg: f"{msg}\nshould be able to roll over two dimensions, got {double_rolled}")
 
         self.assertRaisesRegex(RuntimeError, "required", lambda: data.roll(shifts=(), dims=()))
         self.assertRaisesRegex(RuntimeError, "required", lambda: data.roll(shifts=(), dims=1))
@@ -1278,6 +1278,22 @@ class TestTensorCreation(TestCase):
 
         with self.assertRaises(RuntimeError):
             torch.repeat_interleave(torch.tensor([1, 2, -1, 3, 4], device=device))
+
+        # Negative repeats must be rejected even when output_size is passed,
+        # otherwise the CPU kernel can write out of bounds: the corrupted cumsum
+        # makes a later non-negative element produce start < 0, and in a
+        # multi-threaded run that OOB write races ahead of the sibling thread's
+        # check. See https://github.com/pytorch/pytorch/issues/188938
+        # On CUDA the kernel rejects these inputs via a device-side assert,
+        # which cannot be caught cleanly and poisons the context, so this is
+        # validated on CPU only.
+        if torch.device(device).type == "cpu":
+            with self.assertRaisesRegex(RuntimeError, "repeats can not be negative"):
+                torch.repeat_interleave(
+                    torch.tensor([-1, -1, 2], device=device), output_size=0)
+            with self.assertRaisesRegex(RuntimeError, "repeats can not be negative"):
+                torch.repeat_interleave(
+                    torch.tensor([5, -2, 1], device=device), output_size=4)
 
         y = torch.tensor([[1, 2], [3, 4]], device=device)
 
@@ -3481,8 +3497,9 @@ class TestRandomTensorCreation(TestCase):
             with self.assertRaisesRegex(RuntimeError, r'normal expects std >= 0.0, but found std'):
                 torch.normal(input, -1, (10,))
 
-            with self.assertRaisesRegex(RuntimeError, r'normal expects all elements of std >= 0.0'):
-                torch.normal(input, std)
+            if not std.is_cuda:  # on GPU this error is raised asynchronously
+                with self.assertRaisesRegex(RuntimeError, r'normal expects all elements of std >= 0.0'):
+                    torch.normal(input, std)
 
     # https://github.com/pytorch/pytorch/issues/126834
     @xfailIfTorchDynamo

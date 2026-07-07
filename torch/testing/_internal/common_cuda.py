@@ -6,6 +6,7 @@ import functools
 import torch
 import torch.cuda
 from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS, IS_MACOS, TEST_XPU
+from torch.utils._import_utils import _check_module_exists
 import inspect
 import contextlib
 import os
@@ -26,6 +27,20 @@ else:
 TEST_CUDNN_VERSION = LazyVal(lambda: torch.backends.cudnn.version() if TEST_CUDNN else 0)
 ROCM_VERSION = LazyVal(lambda : tuple(int(v) for v in torch.version.hip.split('.')[:2]) if torch.version.hip else (0, 0))
 
+TEST_CUPTI = _check_module_exists("cupti") and not TEST_WITH_ROCM
+
+def _cupti_version():
+    if not TEST_CUPTI:
+        return 0
+    try:
+        from torch.profiler._cupti.cupti_python import pylibcupti
+        return pylibcupti().get_version()
+    except Exception:
+        return 0
+
+
+TEST_CUPTI_V13_3 = LazyVal(lambda: TEST_CUPTI and _cupti_version() >= 130300)
+
 SM53OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (5, 3))
 SM60OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (6, 0))
 SM70OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (7, 0))
@@ -43,6 +58,7 @@ IS_JETSON = LazyVal(lambda: torch.cuda.is_available() and (torch.cuda.get_device
 IS_SM89 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (8, 9))
 IS_SM90 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (9, 0))
 IS_SM100 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (10, 0))
+IS_SM103 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (10, 3))
 IS_SM10X = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 10)
 IS_SM12X = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 12)
 
@@ -72,7 +88,7 @@ def CDNA2OrLater():
 
 def evaluate_platform_supports_flash_attention():
     if TEST_WITH_ROCM:
-        arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950"]
+        arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950", "gfx1250"]
         if os.environ.get("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "0") != "0":
             arch_list += ["gfx1101", "gfx1102", "gfx1150", "gfx1151", "gfx1200"]
         return evaluate_gfx_arch_within(arch_list)
@@ -90,7 +106,7 @@ def evaluate_platform_supports_ck_sdpa():
 
 def evaluate_platform_supports_efficient_attention():
     if TEST_WITH_ROCM:
-        arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950"]
+        arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950", "gfx1250"]
         if os.environ.get("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "0") != "0":
             arch_list += ["gfx1101", "gfx1102", "gfx1150", "gfx1151", "gfx1200"]
         return evaluate_gfx_arch_within(arch_list)
@@ -104,14 +120,12 @@ def evaluate_platform_supports_cudnn_attention():
     return (not TEST_WITH_ROCM) and SM80OrLater and (TEST_CUDNN_VERSION >= 90000)
 
 def evaluate_platform_supports_green_context():
-    if IS_WINDOWS:
+    from torch.cuda.green_contexts import _ensure_supported
+    try:
+        _ensure_supported()
+        return True
+    except RuntimeError:
         return False
-    if not _get_torch_cuda_version() >= (12, 8):
-        return False
-    driver_version = torch.utils.collect_env.get_nvidia_driver_version(torch.utils.collect_env.run)
-    if driver_version is None:
-        return False
-    return int(driver_version.split('.')[0]) >= 570
 
 PLATFORM_SUPPORTS_FLASH_ATTENTION: bool = LazyVal(lambda: evaluate_platform_supports_flash_attention())
 PLATFORM_SUPPORTS_MEM_EFF_ATTENTION: bool = LazyVal(lambda: evaluate_platform_supports_efficient_attention())
@@ -157,14 +171,13 @@ PLATFORM_SUPPORTS_HALF_ATOMICS: bool = LazyVal(lambda: evaluate_platform_support
 PLATFORM_SUPPORTS_GREEN_CONTEXT: bool = LazyVal(lambda: evaluate_platform_supports_green_context())
 
 def evaluate_platform_supports_workqueue_config():
-    if IS_WINDOWS:
+    from torch.cuda.green_contexts import _ensure_supported, _ensure_workqueue_supported
+    try:
+        _ensure_supported()
+        _ensure_workqueue_supported()
+        return True
+    except RuntimeError:
         return False
-    if not _get_torch_cuda_version() >= (13, 1):
-        return False
-    driver_version = torch.utils.collect_env.get_nvidia_driver_version(torch.utils.collect_env.run)
-    if driver_version is None:
-        return False
-    return int(driver_version.split('.')[0]) >= 590
 
 PLATFORM_SUPPORTS_WORKQUEUE_CONFIG: bool = LazyVal(lambda: evaluate_platform_supports_workqueue_config())
 
@@ -478,6 +491,11 @@ def xfailIfSM120OrLater(func):
     if TEST_WITH_ROCM:
         return func
     return func if not SM120OrLater else unittest.expectedFailure(func)
+
+def skipIfSM103(func):
+    if TEST_WITH_ROCM:
+        return func
+    return unittest.skip("Test skipped on SM103")(func) if IS_SM103 else func
 
 def xfailIfSM12X(func):
     return func if not IS_SM12X else unittest.expectedFailure(func)
