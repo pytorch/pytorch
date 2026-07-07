@@ -4189,7 +4189,7 @@ class TestBufferProtocol(TestCase):
             result = torch.asarray(arr)
             self.assertEqual(result.dtype, expected_dtype)
             self.assertEqual(result.tolist(), list(arr))
-    
+
     @skipIfTorchDynamo("numpy non-native byteorder dtype ('>i4') isn't traceable by dynamo")
     def test_asarray_buffer_non_native_byteorder_raises(self, device):
         # A non-native byte order can't be reinterpreted (torch has no
