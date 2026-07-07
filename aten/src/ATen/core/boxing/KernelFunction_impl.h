@@ -84,11 +84,6 @@ inline bool KernelFunction::isFallthrough() const {
   return boxed_kernel_func_.isFallthrough();
 }
 
-template <class KernelFunctor>
-inline const KernelFunctor* KernelFunction::boxedKernelFunctor() const {
-  return boxed_kernel_func_.getFunctor<KernelFunctor>();
-}
-
 inline void KernelFunction::callBoxed(
     const OperatorHandle& opHandle,
     DispatchKeySet dispatchKeySet,

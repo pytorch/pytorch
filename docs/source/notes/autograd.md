@@ -295,7 +295,7 @@ mode. If you cannot avoid such use in your case, you can always switch back
 to no-grad mode.
 
 For details on inference mode please see
-[Inference Mode](https://pytorch.org/cppdocs/notes/inference_mode.html).
+[Inference Mode](https://docs.pytorch.org/docs/2.9/notes/autograd.html#inference-mode).
 
 For implementation details of inference mode see
 [RFC-0011-InferenceMode](https://github.com/pytorch/rfcs/pull/17).
