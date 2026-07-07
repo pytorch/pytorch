@@ -46,6 +46,11 @@ To test Tensor equality, use assertEqual.
 For tests over multiple inputs, use the `@parametrize` decorator.
 For any test that checks numerics of the on-device implementation, use `instantiate_device_type_tests` to write device-generic tests.
 
+# Type Stubs
+
+Many `.pyi` files are generated from corresponding `.pyi.in` templates. Always
+edit the `.pyi.in` file, not the generated `.pyi`.
+
 # Linting
 
 Only use commands provided via `spin` for linting.
