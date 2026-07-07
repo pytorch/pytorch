@@ -14,6 +14,7 @@ C10_DIAGNOSTIC_POP()
 
 #include <ATen/TensorUtils.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/cuda/CUDAContextLight.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cudnn/Handle.h>
 #include <ATen/native/ConvUtils.h>
@@ -696,9 +697,12 @@ bool plan_errata_exception(
                     }
                 ]
             })");
+  // Only disable Engine 5 on SM 8.6 GPUs (A10G, A2) where it causes
+  // nondeterminism. Other architectures (H100, A100, etc.) are unaffected.
   if (cudnn_frontend::check_errata(
           hardcoded_errata_json_handle_188288, executionPlanTag, handle, []() {
-            return true;
+            auto* prop = at::cuda::getCurrentDeviceProperties();
+            return prop->major == 8 && prop->minor == 6;
           })) {
     return true;
   }
