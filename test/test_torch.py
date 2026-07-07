@@ -2108,7 +2108,11 @@ class TestTorchDeviceType(TestCase):
         temp = y.repeat_interleave(2)
         self.assertEqual(torch.Size([8]), temp.size())
 
-        for dtype in [torch.int, torch.long]:
+        repeat_dtypes = [torch.int, torch.long]
+        if device == "cpu":
+            repeat_dtypes.extend([torch.int8, torch.uint8, torch.int16])
+
+        for dtype in repeat_dtypes:
             lengths = torch.tensor([1, 2], dtype=dtype, device=device)
             output_size = torch.sum(lengths)
             a = torch.repeat_interleave(
