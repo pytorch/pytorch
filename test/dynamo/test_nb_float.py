@@ -2,13 +2,8 @@
 """Tests for nb_float_impl: unified __float__ / float() protocol in Dynamo."""
 
 import torch
-import torch._dynamo.testing
-from torch.testing._internal.common_utils import (
-    make_dynamo_test,
-    run_tests,
-    skipIfCrossRef,
-    TestCase,
-)
+from torch._dynamo.test_case import run_tests, TestCase
+from torch.testing._internal.common_utils import make_dynamo_test, skipIfCrossRef
 
 
 class NbFloatTests(TestCase):
@@ -305,6 +300,25 @@ class NbFloatTests(TestCase):
 
         result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(5))
         self.assertEqual(result, 5.0)
+
+    # --- Blocked slot: __float__ = None ---
+
+    def test_user_defined_float_none_raises(self):
+        class NoFloat:
+            __float__ = None
+
+        obj = NoFloat()
+
+        def fn(x):
+            try:
+                return float(obj)
+            except TypeError as e:
+                return str(e)
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
+        eager_result = fn(torch.tensor(0))
+        self.assertIn("NoneType", result)
+        self.assertEqual(result, eager_result)
 
     # --- SymNodeVariable ---
 

@@ -5,21 +5,25 @@
 # LICENSE file in the root directory of this source tree.
 
 import itertools
+import logging
 import os
 import unittest
 from collections import namedtuple
+from contextlib import contextmanager
 
 from functorch_additional_op_db import additional_op_db
 
 import torch
 import torch.utils._pytree as pytree
 from functorch import vmap
-from torch.testing._internal.autograd_function_db import autograd_function_db
 from torch.testing._internal.common_device_type import toleranceOverride
 from torch.testing._internal.common_methods_invocations import DecorateInfo, op_db
 from torch.testing._internal.common_modules import module_db
-from torch.testing._internal.custom_op_db import custom_op_db
-from torch.testing._internal.opinfo.core import sample_skips_and_xfails, XFailRule
+from torch.testing._internal.opinfo.core import (
+    sample_skips_and_xfails,
+    SkipRule,
+    XFailRule,
+)
 
 
 IS_FBCODE = os.getenv("FUNCTORCH_TEST_FBCODE") == "1"
@@ -503,39 +507,23 @@ def skip(op_name, variant_name="", *, device_type=None, dtypes=None):
     )
 
 
-def skipOps(test_case_name, base_test_name, to_skip):
-    all_opinfos = op_db + additional_op_db + autograd_function_db + custom_op_db
-    for decorate_meta in to_skip:
-        matching_opinfos = [
-            o
-            for o in all_opinfos
-            if o.name == decorate_meta.op_name
-            and o.variant_test_name == decorate_meta.variant_name
-        ]
-        if len(matching_opinfos) == 0:
-            raise AssertionError(f"Couldn't find OpInfo for {decorate_meta}")
-        if len(matching_opinfos) != 1:
-            raise AssertionError(
-                "OpInfos should be uniquely determined by their (name, variant_name). "
-                f"Got more than one result for ({decorate_meta.op_name}, {decorate_meta.variant_name})"
-            )
-        opinfo = matching_opinfos[0]
-        decorators = list(opinfo.decorators)
-        new_decorator = DecorateInfo(
-            decorate_meta.decorator,
-            test_case_name,
-            base_test_name,
-            device_type=decorate_meta.device_type,
-            dtypes=decorate_meta.dtypes,
-        )
-        decorators.append(new_decorator)
-        opinfo.decorators = tuple(decorators)
-
-    # This decorator doesn't modify fn in any way
-    def wrapped(fn):
-        return fn
-
-    return wrapped
+def skipIf(op_name, fail_fn, variant_name="", *, device_type=None, dtypes=None):
+    return decorate(
+        op_name=op_name,
+        variant_name=variant_name,
+        decorator=sample_skips_and_xfails(
+            [
+                SkipRule(
+                    # op matching is already handled by DecorateMeta
+                    op_match_fn=lambda device, op: True,
+                    # device matching is already handled by DecorateMeta
+                    sample_match_fn=lambda device, sample: fail_fn(sample),
+                )
+            ]
+        ),
+        device_type=device_type,
+        dtypes=dtypes,
+    )
 
 
 def decorateForModules(decorator, module_classes, device_type=None, dtypes=None):
@@ -668,3 +656,31 @@ def saved_tensors_hooks_to_gm(
     set_manual_hash(unpack_gm.graph, unpack_cache_hash)
 
     return pack_gm, unpack_gm
+
+
+@contextmanager
+def capture_codegen_source(artifact_name):
+    trace_log = logging.getLogger("torch.__trace")
+    captured: list[str] = []
+
+    class _ArtifactHandler(logging.Handler):
+        def emit(self, record):
+            metadata = getattr(record, "metadata", {})
+            if (
+                "artifact" in metadata
+                and metadata["artifact"].get("name") == artifact_name
+            ):
+                payload = getattr(record, "payload", None)
+                if payload is not None:
+                    captured.append(payload)
+
+    handler = _ArtifactHandler()
+    handler.setLevel(logging.DEBUG)
+    old_level = trace_log.level
+    trace_log.setLevel(logging.DEBUG)
+    trace_log.addHandler(handler)
+    try:
+        yield captured
+    finally:
+        trace_log.removeHandler(handler)
+        trace_log.setLevel(old_level)

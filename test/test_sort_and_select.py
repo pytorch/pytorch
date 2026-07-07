@@ -73,7 +73,7 @@ class TestSortAndSelect(TestCase):
                 self.assertEqual(
                     x[k][ixx[k][j]],
                     mxx[k][j],
-                    msg=f"torch.sort ({order}) indices wrong for {task}",
+                    msg=lambda msg: f"{msg}\ntorch.sort ({order}) indices wrong for {task}",
                 )
                 seen.add(ixx[k][j])
             self.assertEqual(len(seen), size)
@@ -189,16 +189,16 @@ class TestSortAndSelect(TestCase):
         # tests direct cub path
         x = torch.randn(4, 1024000, device=device)
         res1val, res1ind = torch.sort(x, stable=True)
-        torch.cuda.synchronize()
+        torch.get_device_module().synchronize()
         # assertIsOrdered is too slow, so just compare to cpu
         res1val_cpu, res1ind_cpu = torch.sort(x.cpu(), stable=True)
-        self.assertEqual(res1val, res1val_cpu.cuda())
-        self.assertEqual(res1ind, res1ind_cpu.cuda())
+        self.assertEqual(res1val, res1val_cpu.to(device))
+        self.assertEqual(res1ind, res1ind_cpu.to(device))
         res1val, res1ind = torch.sort(x, descending=True, stable=True)
-        torch.cuda.synchronize()
+        torch.get_device_module().synchronize()
         res1val_cpu, res1ind_cpu = torch.sort(x.cpu(), descending=True, stable=True)
-        self.assertEqual(res1val, res1val_cpu.cuda())
-        self.assertEqual(res1ind, res1ind_cpu.cuda())
+        self.assertEqual(res1val, res1val_cpu.to(device))
+        self.assertEqual(res1ind, res1ind_cpu.to(device))
 
     @dtypes(*all_types_and(torch.bool, torch.half, torch.bfloat16))
     def test_stable_sort(self, device, dtype):
@@ -844,6 +844,44 @@ class TestSortAndSelect(TestCase):
         for curr_size in (small, large, verylarge):
             self._test_topk_dtype(device, dtype, True, curr_size)
 
+    @dtypes(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64)
+    def test_topk_integral_warp_sort_path(self, device, dtype):
+        # Regression test for the warpMergeSortTopK integer-sentinel bug on
+        # ROCm >= 7.0: slice sizes in (0, 256] and k == slice_size dispatched
+        # through warpMergeSortTopK, which used numeric_limits::infinity() as a
+        # padding sentinel. For integer scalar_t that evaluates to 0, a legal
+        # input value, and OOB placeholder indices leaked into the output.
+        #
+        # Exercise the k == slice_size boundary and a few neighbouring sizes,
+        # in both largest=True and largest=False modes, with enough slices to
+        # flush out the bad case.
+        torch.manual_seed(0)
+        num_slices = 1024
+        for slice_size in (1, 33, 63, 64, 65, 71, 127, 128, 129, 255, 256):
+            iinfo = torch.iinfo(dtype)
+            a = torch.randint(
+                iinfo.min,
+                iinfo.max,
+                size=(num_slices, slice_size),
+                dtype=dtype,
+                device=device,
+            )
+            for largest in (True, False):
+                for k in (1, slice_size // 2 or 1, slice_size):
+                    vals, idx = a.topk(k, dim=1, largest=largest)
+                    self.assertTrue(
+                        (idx >= 0).all().item() and (idx < slice_size).all().item(),
+                        f"OOB index from topk k={k} slice_size={slice_size} "
+                        f"dtype={dtype} largest={largest}",
+                    )
+                    ref = a.gather(1, idx)
+                    self.assertEqual(
+                        vals,
+                        ref,
+                        lambda msg: f"{msg}\nvalue/index mismatch k={k} slice_size={slice_size} "
+                        f"dtype={dtype} largest={largest}",
+                    )
+
     @dtypes(torch.bfloat16, torch.half)
     def test_topk_lower_precision(self, device, dtype):
         small = 10
@@ -1385,7 +1423,9 @@ class TestSortAndSelect(TestCase):
         cpu_indices_copy.copy_(indices.squeeze(0))
         total_unique = torch.unique(cpu_indices_copy).numel()
         self.assertEqual(
-            total_unique, k, f"Duplicates found in topk test: {k - total_unique}"
+            total_unique,
+            k,
+            lambda msg: f"{msg}\nDuplicates found in topk test: {k - total_unique}",
         )
         # for random case, values must match at returned indices (use pre-allocated tensor)
         if test_case == "random":
@@ -1401,7 +1441,9 @@ class TestSortAndSelect(TestCase):
                     data[0], 0, chunk_indices, out=gpu_chunk_values[:chunk_size_actual]
                 )
                 self.assertEqual(
-                    chunk_values, actual_values, msg=f"Value mismatch in chunk {i + 1}"
+                    chunk_values,
+                    actual_values,
+                    msg=lambda msg: f"{msg}\nValue mismatch in chunk {i + 1}",
                 )
 
         # for identical case, all values must equal to constant

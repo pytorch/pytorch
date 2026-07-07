@@ -10,6 +10,11 @@
 #include <mutex>
 #include <thread>
 
+#if defined(__cpp_lib_atomic_shared_ptr) && \
+    __cpp_lib_atomic_shared_ptr >= 201711L
+#define TORCH_RPC_HAS_ATOMIC_SHARED_PTR 1
+#endif
+
 namespace torch::distributed::rpc {
 
 using DeviceMap = std::unordered_map<c10::Device, c10::Device>;
@@ -198,7 +203,7 @@ class TORCH_API RpcAgent {
   // before every RPC process exits.
   virtual void join(bool shutdown = false, float timeout = 0) = 0;
 
-  // Synchronize the this process with other ``RpcAgent`` processes. Block until
+  // Synchronize this process with other ``RpcAgent`` processes. Block until
   // all ``RpcAgent``s reach this method and send all pending messages.
   virtual void sync() = 0;
 
@@ -274,7 +279,11 @@ class TORCH_API RpcAgent {
   std::atomic<bool> rpcAgentRunning_;
 
  private:
+#if defined(TORCH_RPC_HAS_ATOMIC_SHARED_PTR)
+  static std::atomic<std::shared_ptr<RpcAgent>> currentRpcAgent_;
+#else
   static std::shared_ptr<RpcAgent> currentRpcAgent_;
+#endif
   // Add GIL wait time data point to metrics
   virtual void addGilWaitTime(const std::chrono::microseconds gilWaitTime) = 0;
   friend class PythonRpcHandler;

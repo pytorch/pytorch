@@ -9,7 +9,7 @@ from itertools import zip_longest
 from typing import Any, TYPE_CHECKING
 
 import torch
-from torch._opaque_base import OpaqueBase
+from torch._custom_class_base import CustomClassBase
 from torch.distributed import is_available
 from torch.distributed._mesh_layout import _FlatLayout, _MeshLayout
 from torch.types import IntLikeType
@@ -45,6 +45,7 @@ else:
     from torch.distributed import config as dist_config
     from torch.distributed.distributed_c10d import (
         _get_default_group,
+        _register_process_group_opaque_type,
         _resolve_process_group,
         get_backend,
         get_process_group_ranks,
@@ -75,7 +76,7 @@ else:
     def _get_pg_from_name(mesh: "DeviceMesh", name: str) -> ProcessGroup:
         """
         This method allows us to torch.compile through DeviceMesh and lift its
-        PGs a inputs to the graph since all PGs will have a source from the
+        PGs as inputs to the graph since all PGs will have a source from the
         DeviceMesh through the `_pg_registry`.
         This will be moved to the DeviceMesh backend object once we separate
         DeviceMesh into the frontend and backend.
@@ -149,7 +150,7 @@ else:
         """
         return getattr(torch, device_type, None)
 
-    class DeviceMesh(OpaqueBase):
+    class DeviceMesh(CustomClassBase):
         """
         DeviceMesh represents a mesh of devices, where layout of devices could be
         represented as a n-d dimension array, and each value of the n-d dimensional
@@ -232,7 +233,7 @@ else:
                         "Cannot provide _layout and/or _rank_map if passing explicit mesh"
                     )
                 if isinstance(mesh, torch.Tensor) and mesh.device.type != "cpu":
-                    raise ValueError(f"`mesh` must be a CPU tensor, got {mesh}")
+                    mesh = mesh.to("cpu")
                 mesh_tensor = (
                     mesh.detach().to(dtype=torch.int).contiguous()
                     if isinstance(mesh, torch.Tensor)
@@ -576,6 +577,10 @@ else:
             # and append the `group_name` to the `dim_group_names` list when the current rank is in the subgroup.
             # Otherwise, we use `new_group` instead of `split_group` to create subgroups by looping over `pg_ranks_by_dim`
             # along with appending information to the `dim_group_names` list whenever necessary.
+            # When torchcomms is enabled with a fake backend (e.g. disabled mesh dimensions), use hashed PG names so they
+            # stay consistent with the hash-based names produced by split_group for real backends. Sequential integer names
+            # from new_group are not resolvable from compiled code when mixed with split_group hash names.
+            use_hashed = dist_config.use_torchcomms and backend == "fake"
             pg_name = None
             for dim_mesh in pg_ranks_by_dim:
                 subgroup_ranks = dim_mesh.tolist()
@@ -585,6 +590,7 @@ else:
                     backend=backend,
                     pg_options=pg_options,
                     group_desc=group_desc,
+                    use_local_synchronization=use_hashed,
                 )
 
                 # only add to dim_groups if the current rank in the subgroup
@@ -1232,7 +1238,7 @@ else:
             return self._coordinate_on_dim
 
         def _sym_get_coordinate(self, index: int) -> IntLikeType:
-            import torch.distributed.config as config
+            import torch.compiler.config as config
             from torch._guards import detect_fake_mode
 
             if (
@@ -1590,8 +1596,8 @@ _distributed_opaque_types_registered = False
 
 
 def _device_mesh_reconstruct_fn(
-    mesh: "OpaqueBase",
-    get_tracked_proxy: Callable[["OpaqueBase"], "torch.fx.Proxy | None"],
+    mesh: "CustomClassBase",
+    get_tracked_proxy: Callable[["CustomClassBase"], "torch.fx.Proxy | None"],
     tracer: Any,
 ) -> "torch.fx.Proxy | None":
     """Reconstruct a DeviceMesh submesh from a tracked ancestor mesh.
@@ -1669,25 +1675,13 @@ def _register_distributed_opaque_types():
         return
     _distributed_opaque_types_registered = True
 
-    from torch._library.opaque_object import MemberType, register_opaque_type
+    from torch._library.opaque_object import MemberType, register_custom_class
 
-    register_opaque_type(
-        ProcessGroup,
-        typ="reference",
-        members={
-            "size": MemberType.USE_REAL,
-            "rank": MemberType.USE_REAL,
-            "_get_backend_name": MemberType.USE_REAL,
-            "group_name": MemberType.USE_REAL,
-            "group_desc": MemberType.USE_REAL,
-            "__eq__": MemberType.USE_REAL,
-            "__ne__": MemberType.USE_REAL,
-        },
-    )
+    _register_process_group_opaque_type()
 
-    register_opaque_type(
+    register_custom_class(
         DeviceMesh,
-        typ="reference",
+        typ="symbolic",
         reconstruct_fn=_device_mesh_reconstruct_fn,
         guard_fn=lambda obj: [
             obj._flatten_rank_map,

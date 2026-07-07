@@ -142,6 +142,43 @@ class TestComplexTensor(TestCase):
     def test_maybe_error(self, device, dtype, op: OpInfo):
         self.check_consistency(device, dtype, op, Variant.Op)
 
+    def test_get_set_components(self):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        c = ComplexTensor.from_interleaved(
+            torch.tensor([1 + 2j, 3 + 4j], dtype=torch.complex64)
+        )
+        self.assertEqual(c.real, torch.tensor([1, 3], dtype=torch.float32))
+        self.assertEqual(c.imag, torch.tensor([2, 4], dtype=torch.float32))
+
+        c.real = torch.tensor([5, 6])
+        c.imag = torch.tensor([7, 8])
+        self.assertEqual(c.real, torch.tensor([5, 6], dtype=torch.float32))
+        self.assertEqual(c.imag, torch.tensor([7, 8], dtype=torch.float32))
+        self.assertEqual(c, torch.tensor([5 + 7j, 6 + 8j], dtype=torch.complex64))
+
+    def test_mul_inplace_complex(self):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        a = torch.tensor([1 + 2j, 3 + 4j], dtype=torch.complex64)
+        b = torch.tensor([7 - 8j, -9 + 1j], dtype=torch.complex64)
+        expected = a * b
+
+        xa = ComplexTensor.from_interleaved(a)
+        result = xa.mul_(ComplexTensor.from_interleaved(b))
+
+        self.assertIs(result, xa)
+        self.assertEqual(xa.as_interleaved(), expected)
+
+    def test_ne_real_operand(self):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        r = torch.tensor([1.0, 3.0, 5.0])
+        c = torch.tensor([1 + 2j, 3 + 0j, 0 + 4j], dtype=torch.complex64)
+        xc = ComplexTensor.from_interleaved(c)
+
+        self.assertEqual(torch.ne(r, xc), torch.ne(r, c))
+
 
 @unMarkDynamoStrictTest
 class TestComplexBwdGradients(TestCase):

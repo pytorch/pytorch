@@ -4,7 +4,6 @@ import json
 import os
 from collections import defaultdict
 from typing import Any, cast
-from warnings import warn
 
 from tools.stats.import_test_stats import (
     ADDITIONAL_CI_FILES_FOLDER,
@@ -53,11 +52,7 @@ def _get_ratings_for_tests(
     tests_to_run: set[str],
 ) -> dict[str, float]:
     # Get the files edited
-    try:
-        changed_files = query_changed_files()
-    except Exception as e:
-        warn(f"Can't query changed test files due to {e}")
-        return {}
+    changed_files = query_changed_files()
 
     test_class_correlations = _get_historical_test_class_correlations()
     if not test_class_correlations:

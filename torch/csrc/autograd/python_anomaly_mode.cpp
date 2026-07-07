@@ -74,7 +74,7 @@ void PyAnomalyMetadata::print_stack(const std::string& current_node_name) {
 }
 
 void PyAnomalyMetadata::assign_parent(
-    const std::shared_ptr<Node>& parent_node) {
+    const c10::intrusive_ptr<Node>& parent_node) {
   // assign the python object of parent_node in metadata["parent_"]
   // if parent_node is nullptr, then do nothing (it can mean that "parent_" key
   // is not in metadata)

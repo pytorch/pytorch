@@ -10,6 +10,7 @@
 #include <ATen/native/cuda/MiscUtils.h>
 #include <ATen/native/sparse/SparseBlasImpl.h>
 #include <ATen/native/sparse/cuda/SparseBlasImpl.h>
+#include <ATen/cuda/CUDAContext.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -141,9 +142,9 @@ void block_sparse_triangular_solve_vec(
         auto values = A.values();
         auto values_data_ptr = values.data_ptr<scalar_t>();
         auto crow_indices = A.crow_indices().to(kInt);
-        auto crow_indices_data_ptr = crow_indices.data_ptr<int>();
+        auto crow_indices_data_ptr = crow_indices.const_data_ptr<int>();
         auto col_indices = A.col_indices().to(kInt);
-        auto col_indices_data_ptr = col_indices.data_ptr<int>();
+        auto col_indices_data_ptr = col_indices.const_data_ptr<int>();
         auto handle = at::cuda::getCurrentCUDASparseHandle();
         int buffer_size = 0;
 
@@ -265,9 +266,9 @@ void block_sparse_triangular_solve_mat(
         auto values = A.values();
         auto values_data_ptr = values.data_ptr<scalar_t>();
         auto crow_indices = A.crow_indices().to(kInt);
-        auto crow_indices_data_ptr = crow_indices.data_ptr<int>();
+        auto crow_indices_data_ptr = crow_indices.const_data_ptr<int>();
         auto col_indices = A.col_indices().to(kInt);
-        auto col_indices_data_ptr = col_indices.data_ptr<int>();
+        auto col_indices_data_ptr = col_indices.const_data_ptr<int>();
         auto handle = at::cuda::getCurrentCUDASparseHandle();
         int buffer_size = 0;
 
@@ -383,9 +384,9 @@ void block_sparse_mv(
         auto values = mat.values();
         auto values_data_ptr = values.data_ptr<scalar_t>();
         auto crow_indices = mat.crow_indices().to(kInt);
-        auto crow_indices_data_ptr = crow_indices.data_ptr<int>();
+        auto crow_indices_data_ptr = crow_indices.const_data_ptr<int>();
         auto col_indices = mat.col_indices().to(kInt);
-        auto col_indices_data_ptr = col_indices.data_ptr<int>();
+        auto col_indices_data_ptr = col_indices.const_data_ptr<int>();
         at::cuda::sparse::bsrmv(
             handle,
             block_layout,
@@ -494,9 +495,9 @@ void block_sparse_mm(
         auto values = mat1.values();
         auto values_data_ptr = values.data_ptr<scalar_t>();
         auto crow_indices = mat1.crow_indices().to(kInt);
-        auto crow_indices_data_ptr = crow_indices.data_ptr<int>();
+        auto crow_indices_data_ptr = crow_indices.const_data_ptr<int>();
         auto col_indices = mat1.col_indices().to(kInt);
-        auto col_indices_data_ptr = col_indices.data_ptr<int>();
+        auto col_indices_data_ptr = col_indices.const_data_ptr<int>();
 
         at::cuda::sparse::bsrmm(
             handle,
@@ -1335,16 +1336,35 @@ void sampled_addmm_out_sparse_csr(
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(batchCount(A) == batchCount(B));
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(batchCount(A) == batchCount(C));
 
+  // cuSPARSE SDDMM has a native float16 kernel (with float32 accumulation) but
+  // no bfloat16 kernel: cusparseSDDMM_bufferSize returns
+  // CUSPARSE_STATUS_NOT_SUPPORTED for bfloat16 even on Ampere/Ada (e.g. sm_89),
+  // so this is not a compute-capability gate. Run bfloat16 in float32 -- which
+  // is already its opmath/accumulation type, so the only rounding is the
+  // bfloat16 input/output itself -- and copy the result back into the bfloat16
+  // output. float16 keeps its native cuSPARSE path below.
+  if (C.scalar_type() == kBFloat16) {
+    Tensor C_f32 = C.to(kFloat);
+    sampled_addmm_out_sparse_csr(A.to(kFloat), B.to(kFloat), beta, alpha, C_f32);
+    C.values().copy_(C_f32.values());
+    return;
+  }
+
   cusparseOperation_t opA = CUSPARSE_OPERATION_NON_TRANSPOSE;
   cusparseOperation_t opB = CUSPARSE_OPERATION_NON_TRANSPOSE;
 
   c10::MaybeOwned<Tensor> A_ = prepare_dense_matrix_for_cusparse(A);
   c10::MaybeOwned<Tensor> B_ = prepare_dense_matrix_for_cusparse(B);
 
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(
+      kHalf,
       C.scalar_type(),
       "sampled_addmm_out_sparse_csr",
       [&] {
+        // cuSPARSE SDDMM has a native float16 kernel that accumulates in
+        // float32. opmath_type<Half> == float, so alpha/beta and compute_type
+        // select the float32 accumulation path automatically.
+        using opmath_t = at::opmath_type<scalar_t>;
         // CUDA 11.6 doesn't support batched inputs, it raises an error:
         // ** On entry to cusparseSDDMM_bufferSize(): batched SDDMM is not supported
         // So we need to resort to the for loop
@@ -1353,9 +1373,9 @@ void sampled_addmm_out_sparse_csr(
           auto descB = at::cuda::sparse::CuSparseConstDnMatDescriptor(*B_, /*batch_offset=*/i);
           auto descC = at::cuda::sparse::CuSparseSpMatCsrDescriptor(C, /*batch_offset=*/i);
 
-          auto beta_ = beta.to<scalar_t>();
-          auto alpha_ = alpha.to<scalar_t>();
-          auto compute_type = at::cuda::getCudaDataType<scalar_t>();
+          auto beta_ = beta.to<opmath_t>();
+          auto alpha_ = alpha.to<opmath_t>();
+          cudaDataType compute_type = at::cuda::getCudaDataType<opmath_t>();
           auto handle = at::cuda::getCurrentCUDASparseHandle();
           size_t buffer_size = 0;
           TORCH_CUDASPARSE_CHECK(cusparseSDDMM_bufferSize(

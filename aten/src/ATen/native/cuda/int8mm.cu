@@ -45,7 +45,7 @@ void launch_weight_int8pack_mm_cuda_kernel(
   weight_int8pack_mm_kernel<<<grid, block, 0, stream>>>(
       x.data_ptr<float>(),
       w_int8.data_ptr<int8_t>(),
-      scale.data_ptr<float>(),
+      scale.const_data_ptr<float>(),
       out.data_ptr<float>(),
       B,
       K,

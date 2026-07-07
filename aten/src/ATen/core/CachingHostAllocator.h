@@ -298,7 +298,14 @@ struct CachingHostAllocatorImpl {
 
     // Round up the allocation to the nearest power of two to improve reuse.
     // These power of two sizes are also used to index into the free list.
-    size_t roundSize = c10::llvm::PowerOf2Ceil(size);
+    const auto roundSize = [&]() -> size_t {
+      if (size <= pinned_max_round_threshold() &&
+          size <= pinned_max_cached_size()) {
+        return c10::llvm::PowerOf2Ceil(size);
+      } else {
+        return size;
+      }
+    }();
 
     // First, try to allocate from the free list of the chosen pool
     auto* block = get_free_block(roundSize, pool);
@@ -382,9 +389,7 @@ struct CachingHostAllocatorImpl {
 
     if (!events.has_value()) {
       auto& pool = pool_from_block(block);
-      auto index = size_index(block->size_);
-      std::lock_guard<std::mutex> g(pool.free_list_[index].mutex_);
-      pool.free_list_[index].list_.push_back(block);
+      maybe_cache_block(block, pool);
     } else if (allocated_during_capture) {
       // pass: No events are ever recorded during stream capture.
 
@@ -427,24 +432,14 @@ struct CachingHostAllocatorImpl {
 
   void free_from_pool(BlockPool &pool) {
     for (size_t i = 0; i < pool.free_list_.size(); ++i) {
-      std::lock(pool.free_list_[i].mutex_, pool.blocks_mutex_);
-      std::lock_guard<std::mutex> gf(pool.free_list_[i].mutex_, std::adopt_lock);
-      std::lock_guard<std::mutex> gb(pool.blocks_mutex_, std::adopt_lock);
+      std::scoped_lock lock(pool.free_list_[i].mutex_, pool.blocks_mutex_);
 
       std::vector<B*> blocks_to_remove(pool.free_list_[i].list_.begin(),
                                        pool.free_list_[i].list_.end());
       pool.free_list_[i].list_.clear();
 
       for (auto* block : blocks_to_remove) {
-        pool.blocks_.erase(block);
-        pool.ptr_to_block_.erase(block->ptr_);
-        auto index = size_index(block->size_);
-        free_block(block);
-        stats_.allocations.decrease(1);
-        stats_.allocated_bytes.decrease(block->size_);
-        stats_.allocation_bucket_stats[index].decrease(1);
-        stats_.allocated_bytes_bucket_stats[index].decrease(block->size_);
-        delete block;
+        destroy_block(block, pool, /*is_active=*/false);
       }
     }
   }
@@ -503,12 +498,8 @@ struct CachingHostAllocatorImpl {
     // free list mutexes and the blocks mutex. Previously, this was only done in
     // empty_cache function.
     for (size_t i = 0; i < default_pool_.free_list_.size(); ++i) {
-      std::lock(
+      std::scoped_lock lock(
           default_pool_.free_list_[i].mutex_, default_pool_.blocks_mutex_);
-      std::lock_guard<std::mutex> gf(
-          default_pool_.free_list_[i].mutex_, std::adopt_lock);
-      std::lock_guard<std::mutex> gb(
-          default_pool_.blocks_mutex_, std::adopt_lock);
 
       // We collect the slow-path stats only once, since they are not collected
       // per bucket (we pick index 0 arbitrarily). These are also all the host
@@ -543,12 +534,8 @@ struct CachingHostAllocatorImpl {
     // free list mutexes and the blocks mutex. Previously, this was only done in
     // empty_cache function.
     for (size_t i = 0; i < default_pool_.free_list_.size(); ++i) {
-      std::lock(
+      std::scoped_lock lock(
           default_pool_.free_list_[i].mutex_, default_pool_.blocks_mutex_);
-      std::lock_guard<std::mutex> gf(
-          default_pool_.free_list_[i].mutex_, std::adopt_lock);
-      std::lock_guard<std::mutex> gb(
-          default_pool_.blocks_mutex_, std::adopt_lock);
 
       if (i == 0) {
         stats_.allocations.reset_accumulated();
@@ -573,12 +560,8 @@ struct CachingHostAllocatorImpl {
     // free list mutexes and the blocks mutex. Previously, this was only done in
     // empty_cache function.
     for (size_t i = 0; i < default_pool_.free_list_.size(); ++i) {
-      std::lock(
+      std::scoped_lock lock(
           default_pool_.free_list_[i].mutex_, default_pool_.blocks_mutex_);
-      std::lock_guard<std::mutex> gf(
-          default_pool_.free_list_[i].mutex_, std::adopt_lock);
-      std::lock_guard<std::mutex> gb(
-          default_pool_.blocks_mutex_, std::adopt_lock);
 
       if (i == 0) {
         stats_.allocations.reset_peak();
@@ -719,11 +702,8 @@ struct CachingHostAllocatorImpl {
       }
 
       if (available) {
-        auto index = size_index(block->size_);
-        std::lock_guard<std::mutex> g(pool.free_list_[index].mutex_);
-        pool.free_list_[index].list_.push_back(block);
-        stats_.active_bucket_stats[index].decrease(1);
-        stats_.active_bytes_bucket_stats[index].decrease(size);
+        auto& pool = pool_from_block(block);
+        maybe_cache_block(block, pool);
         if (size != -1) {
           return;
         }
@@ -734,6 +714,52 @@ struct CachingHostAllocatorImpl {
   TaskThreadPool* getBackgroundThreadPool() {
     static TaskThreadPool* pool = new TaskThreadPool(1);
     return pool;
+  }
+
+  void maybe_cache_block(B* block, BlockPool& pool) {
+    auto size = block->size_;
+    auto index = size_index(size);
+
+    if (size > pinned_max_cached_size()) {
+      std::scoped_lock lock(pool.free_list_[index].mutex_, pool.blocks_mutex_);
+      destroy_block(block, pool, /*is_active=*/true);
+    } else {
+      std::lock_guard<std::mutex> g(pool.free_list_[index].mutex_);
+      pool.free_list_[index].list_.push_back(block);
+      stats_.active_bucket_stats[index].decrease(1);
+      stats_.active_bytes_bucket_stats[index].decrease(size);
+    }
+  }
+
+  // Remove a block from the pool, free its memory, update stats, and delete it.
+  // Caller must hold both pool.blocks_mutex_ and pool.free_list_[index].mutex_.
+  // When is_active is true, also decrements active stats (for blocks going
+  // directly from in-use to freed without being cached first).
+  void destroy_block(B* block, BlockPool& pool, bool is_active) {
+    auto size = block->size_;
+    auto index = size_index(size);
+
+    pool.blocks_.erase(block);
+    pool.ptr_to_block_.erase(block->ptr_);
+    free_block(block);
+
+    stats_.allocations.decrease(1);
+    stats_.allocated_bytes.decrease(size);
+    stats_.allocation_bucket_stats[index].decrease(1);
+    stats_.allocated_bytes_bucket_stats[index].decrease(size);
+    if (is_active) {
+      stats_.active_bucket_stats[index].decrease(1);
+      stats_.active_bytes_bucket_stats[index].decrease(size);
+    }
+    delete block;
+  }
+
+  virtual size_t pinned_max_round_threshold() const {
+    return c10::CachingAllocator::AcceleratorAllocatorConfig::pinned_max_round_threshold();
+  }
+
+  virtual size_t pinned_max_cached_size() const {
+    return c10::CachingAllocator::AcceleratorAllocatorConfig::pinned_max_cached_size();
   }
 
  public:

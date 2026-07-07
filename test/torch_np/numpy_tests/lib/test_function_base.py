@@ -872,6 +872,7 @@ class TestDiff(TestCase):
 @instantiate_parametrized_tests
 class TestDelete(TestCase):
     def setUp(self):
+        super().setUp()
         self.a = np.arange(5)
         self.nd_a = np.arange(5).repeat(2).reshape(1, 5, 2)
 

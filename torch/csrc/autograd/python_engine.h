@@ -18,7 +18,7 @@ struct PythonEngine : public Engine {
       bool should_increment) override;
   void thread_on_exception(
       const std::shared_ptr<GraphTask>& graph_task,
-      const std::shared_ptr<Node>& fn,
+      const c10::intrusive_ptr<Node>& fn,
       std::exception& e) override;
   variable_list execute(
       const edge_list& roots,
@@ -30,7 +30,7 @@ struct PythonEngine : public Engine {
 
   c10::intrusive_ptr<at::ivalue::Future> execute_with_graph_task(
       const std::shared_ptr<GraphTask>& graph_task,
-      std::shared_ptr<Node> graph_root,
+      c10::intrusive_ptr<Node> graph_root,
       InputBuffer&& input_buffer) override;
 
   std::unique_ptr<AnomalyMetadata> make_anomaly_metadata() override;

@@ -126,6 +126,10 @@ class SubgraphMatcher:
         if not isinstance(gn.target, str):
             raise AssertionError(f"gn.target {gn.target} must be a string.")
 
+        if pn.graph.owning_module is None:
+            raise AssertionError("pn.graph.owning_module must not be None")
+        if gn.graph.owning_module is None:
+            raise AssertionError("gn.graph.owning_module must not be None")
         pn_value = torch.fx.graph_module._get_attr(pn.graph.owning_module, pn.target)
         gn_value = torch.fx.graph_module._get_attr(gn.graph.owning_module, gn.target)
 
@@ -352,8 +356,8 @@ class SubgraphMatcher:
         in order for the match to be valid. This is implemented with backtracking. See `backtracking`
         for more details.
 
-        Notice: graph traversal must be done in the reverser order because a tensor can have multiple
-        consumers, but can only have a single producer. Only with reverser order, we can we jointly
+        Notice: graph traversal must be done in the reverse order because a tensor can have multiple
+        consumers, but can only have a single producer. Only with reverse order can we jointly
         traverse the pattern and target graph in a deterministic path.
 
         Warning: In theory, this backtracking algorithm have an **exponential** time complexity. However,

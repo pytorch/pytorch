@@ -129,7 +129,8 @@ class PrecompileContext:
         """
         Edit the content of an existing artifact
         """
-        assert key in cls._backend_artifacts_by_key, f"Key {key} not found in artifacts"
+        if key not in cls._backend_artifacts_by_key:
+            raise AssertionError(f"Key {key} not found in artifacts")
         artifact = cls._backend_artifacts_by_key[_BackendId(key)]
         artifact.edit_contents(edit_fn)
 

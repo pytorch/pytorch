@@ -21,6 +21,7 @@ constexpr const char* OCCL_BACKEND_NAME = "occl";
 
 class OPENREG_EXPORT ProcessGroupOCCL : public Backend {
  public:
+  // LITERALINCLUDE START: OCCL DUMMYWORK
   class DummyWork : public Work {
    public:
     DummyWork();
@@ -39,6 +40,7 @@ class OPENREG_EXPORT ProcessGroupOCCL : public Backend {
    private:
     c10::intrusive_ptr<c10::ivalue::Future> future_;
   };
+  // LITERALINCLUDE END: OCCL DUMMYWORK
 
   struct OPENREG_EXPORT Options : public Backend::Options {
     explicit Options(
@@ -86,12 +88,12 @@ class OPENREG_EXPORT ProcessGroupOCCL : public Backend {
     std::vector<at::Tensor>& tensors,
     const ReduceOptions& opts = ReduceOptions()) override;
 
-  c10::intrusive_ptr<Work> _reduce_scatter_base(
+  c10::intrusive_ptr<Work> reduce_scatter_single(
     at::Tensor& outputTensor,
     at::Tensor& inputTensor,
     const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
 
-  c10::intrusive_ptr<Work> _allgather_base(
+  c10::intrusive_ptr<Work> all_gather_single(
     at::Tensor& output_tensor,
     at::Tensor& input_tensor,
     const AllgatherOptions& opts = AllgatherOptions()) override;
@@ -106,7 +108,7 @@ class OPENREG_EXPORT ProcessGroupOCCL : public Backend {
     std::vector<at::Tensor>& input_list,
     const AllgatherOptions& opts = AllgatherOptions()) override;
 
-  c10::intrusive_ptr<Work> allgather_into_tensor_coalesced(
+  c10::intrusive_ptr<Work> all_gather_single_coalesced(
     std::vector<at::Tensor>& outputs,
     std::vector<at::Tensor>& inputs,
     const AllgatherOptions& opts = AllgatherOptions()) override;
@@ -126,12 +128,12 @@ class OPENREG_EXPORT ProcessGroupOCCL : public Backend {
     std::vector<std::vector<at::Tensor>>& inputs,
     const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
 
-  c10::intrusive_ptr<Work> reduce_scatter_tensor_coalesced(
+  c10::intrusive_ptr<Work> reduce_scatter_single_coalesced(
     std::vector<at::Tensor>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
 
-  c10::intrusive_ptr<Work> alltoall_base(
+  c10::intrusive_ptr<Work> all_to_all_single(
     at::Tensor& outputTensor,
     at::Tensor& inputTensor,
     std::vector<int64_t>& outputCounts,
@@ -158,11 +160,6 @@ class OPENREG_EXPORT ProcessGroupOCCL : public Backend {
  protected:
   const c10::intrusive_ptr<Options> options_;
 };
-OPENREG_EXPORT c10::intrusive_ptr<ProcessGroupOCCL> createProcessGroupOCCL(
-    const c10::intrusive_ptr<c10d::Store>& store,
-    int rank,
-    int size,
-    const std::chrono::duration<float>& timeout);
 
 } // namespace c10d
 #endif // USE_DISTRIBUTED

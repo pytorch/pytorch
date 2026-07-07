@@ -890,6 +890,16 @@ def optim_inputs_func_muon(device, dtype=None):
             },
             desc="passing alternative ns_coefficients",
         ),
+        OptimizerInput(
+            params=None,
+            kwargs={"adjust_lr_fn": "match_rms_adamw"},
+            desc="match_rms_adamw lr adjustment",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"adjust_lr_fn": "spectral_unclamped"},
+            desc="spectral_unclamped lr adjustment",
+        ),
     ]
 
 
@@ -916,7 +926,7 @@ def optim_error_inputs_func_muon(device, dtype):
             OptimizerInput(
                 params=[param],
                 kwargs={"adjust_lr_fn": "arbitrary"},
-                desc="only support `original` and `match_rms_adamw`",
+                desc="unsupported adjust_lr_fn",
             ),
             error_type=ValueError,
             error_regex="Adjust learning rate function arbitrary is not supported",
@@ -1426,11 +1436,6 @@ optim_db: list[OptimizerInfo] = [
         has_capturable_arg=True,
         skips=(
             DecorateInfo(
-                skipIfTorchDynamo("See #116028"),
-                "TestOptimRenewed",
-                "test_set_default_dtype_works_with_foreach",
-            ),
-            DecorateInfo(
                 skipIfTorchDynamo(
                     "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"
                 ),
@@ -1536,11 +1541,6 @@ optim_db: list[OptimizerInfo] = [
                 device_type="cuda",
             ),
             DecorateInfo(
-                skipIfTorchDynamo("See #116028 regarding copy not supported"),
-                "TestOptimRenewed",
-                "test_set_default_dtype_works_with_foreach",
-            ),
-            DecorateInfo(
                 skipIfTorchDynamo("See #133268 regarding dtype being None"),
                 "TestOptimRenewed",
                 "test_state_dict_deterministic",
@@ -1621,7 +1621,7 @@ optim_db: list[OptimizerInfo] = [
             "maximize",
             "capturable",
         ),
-        supports_fused_on=("cpu", "cuda"),
+        supports_fused_on=("cpu", "cuda", "xpu"),
         supports_sparse=True,
         metadata_for_sparse=(
             {"lr": 0.1, "weight_decay": 0, "lr_decay": 0},
@@ -1633,9 +1633,9 @@ optim_db: list[OptimizerInfo] = [
         decorators=(
             DecorateInfo(
                 #  Note on tolerances:
-                #  difference comes from the fact that the non fused kernel have
+                #  difference comes from the fact that the non-fused kernels have
                 #  more dtype cast operations. We have another test test_fused_cpu_matches_cuda
-                #  to make sure there is no discrepancies between cuda fused kernel
+                #  to make sure there are no discrepancies between cuda fused kernel
                 #  and cpu fused kernel
                 toleranceOverride(
                     {
@@ -1658,11 +1658,6 @@ optim_db: list[OptimizerInfo] = [
             ),
         ),
         skips=(
-            DecorateInfo(
-                skipIfTorchDynamo("See #116028"),
-                "TestOptimRenewed",
-                "test_set_default_dtype_works_with_foreach",
-            ),
             DecorateInfo(
                 skipIfTorchDynamo(
                     "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"
@@ -1722,9 +1717,9 @@ optim_db: list[OptimizerInfo] = [
             ),
             DecorateInfo(
                 #  Note on tolerances:
-                #  difference comes from the fact that the non fused kernel have
+                #  difference comes from the fact that the non-fused kernels have
                 #  more dtype cast operations. We have another test test_fused_cpu_matches_cuda
-                #  to make sure there is no discrepancies between cuda fused kernel
+                #  to make sure there are no discrepancies between cuda fused kernel
                 #  and cpu fused kernel
                 toleranceOverride(
                     {
@@ -1737,13 +1732,6 @@ optim_db: list[OptimizerInfo] = [
             ),
         ),
         skips=(
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Errors w/ Global state changed, see https://github.com/pytorch/pytorch/issues/116028"
-                ),
-                "TestOptimRenewed",
-                "test_set_default_dtype_works_with_foreach",
-            ),
             DecorateInfo(
                 skipIfTorchDynamo(
                     "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"
@@ -1767,11 +1755,6 @@ optim_db: list[OptimizerInfo] = [
         supported_impls=("foreach", "differentiable"),
         has_capturable_arg=True,
         skips=(
-            DecorateInfo(
-                skipIfTorchDynamo("See #116028"),
-                "TestOptimRenewed",
-                "test_set_default_dtype_works_with_foreach",
-            ),
             DecorateInfo(
                 skipIfTorchDynamo(
                     "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"
@@ -1819,9 +1802,9 @@ optim_db: list[OptimizerInfo] = [
             DecorateInfo(
                 toleranceOverride(
                     #  Note on tolerances:
-                    #  difference comes from the fact that the non fused kernel have
+                    #  difference comes from the fact that the non-fused kernels have
                     #  more dtype cast operations. We have another test test_fused_cpu_matches_cuda
-                    #  to make sure there is no discrepancies between cuda fused kernel
+                    #  to make sure there are no discrepancies between cuda fused kernel
                     #  and cpu fused kernel
                     {
                         torch.bfloat16: tol(atol=5e-3, rtol=5e-3),
@@ -1833,13 +1816,6 @@ optim_db: list[OptimizerInfo] = [
             ),
         ),
         skips=(
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Errors w/ Global state changed, see https://github.com/pytorch/pytorch/issues/116028"
-                ),
-                "TestOptimRenewed",
-                "test_set_default_dtype_works_with_foreach",
-            ),
             DecorateInfo(
                 skipIfTorchDynamo(
                     "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"
@@ -1863,13 +1839,6 @@ optim_db: list[OptimizerInfo] = [
         supported_impls=("foreach", "differentiable"),
         has_capturable_arg=True,
         skips=(
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Errors w/ Global state changed, see https://github.com/pytorch/pytorch/issues/116028"
-                ),
-                "TestOptimRenewed",
-                "test_set_default_dtype_works_with_foreach",
-            ),
             DecorateInfo(
                 skipIfTorchDynamo(
                     "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"
@@ -1990,13 +1959,6 @@ optim_db: list[OptimizerInfo] = [
         skips=(
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "Errors w/ Global state changed, see https://github.com/pytorch/pytorch/issues/116028"
-                ),
-                "TestOptimRenewed",
-                "test_set_default_dtype_works_with_foreach",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
                     "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"
                 ),
                 "TestOptimRenewed",
@@ -2025,13 +1987,6 @@ optim_db: list[OptimizerInfo] = [
         supported_impls=("foreach", "differentiable"),
         has_capturable_arg=True,
         skips=(
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Errors w/ Global state changed, see https://github.com/pytorch/pytorch/issues/116028"
-                ),
-                "TestOptimRenewed",
-                "test_set_default_dtype_works_with_foreach",
-            ),
             DecorateInfo(
                 skipIfTorchDynamo(
                     "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"
@@ -2066,11 +2021,6 @@ optim_db: list[OptimizerInfo] = [
         has_capturable_arg=True,
         skips=(
             DecorateInfo(
-                skipIfTorchDynamo("See #116028"),
-                "TestOptimRenewed",
-                "test_set_default_dtype_works_with_foreach",
-            ),
-            DecorateInfo(
                 skipIfTorchDynamo(
                     "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"
                 ),
@@ -2103,11 +2053,6 @@ optim_db: list[OptimizerInfo] = [
         supported_impls=("foreach", "differentiable"),
         has_capturable_arg=True,
         skips=(
-            DecorateInfo(
-                skipIfTorchDynamo("See #116028"),
-                "TestOptimRenewed",
-                "test_set_default_dtype_works_with_foreach",
-            ),
             DecorateInfo(
                 skipIfTorchDynamo(
                     "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"
@@ -2179,13 +2124,6 @@ optim_db: list[OptimizerInfo] = [
             "mps",
         ),
         skips=(
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Errors w/ Global state changed, see https://github.com/pytorch/pytorch/issues/116028"
-                ),
-                "TestOptimRenewed",
-                "test_set_default_dtype_works_with_foreach",
-            ),
             DecorateInfo(
                 skipIfTorchDynamo(
                     "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"

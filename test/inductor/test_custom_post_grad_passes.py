@@ -78,6 +78,19 @@ class ChangeCosCustomPass(CustomGraphPass):
         return get_hash_for_files((__file__,))
 
 
+class RecordCustomPass(CustomGraphPass):
+    def __init__(self, name, calls) -> None:
+        super().__init__()
+        self.name = name
+        self.calls = calls
+
+    def __call__(self, g: torch.fx.graph.Graph):
+        self.calls.append(self.name)
+
+    def uuid(self) -> str:
+        return self.name
+
+
 class TestPostGradCustomPrePostPass(TestCustomPassBase):
     #  mkldnn fusion's pattern_matcher
     # (torch/_inductor/fx_passes/mkldnn_fusion.py),
@@ -168,6 +181,45 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
 
             x = torch.randn(8, dtype=torch.float32)
             torch.testing.assert_close(torch.compile(f)(x), g(x))
+
+    def test_custom_pass_list_runs_in_order(self):
+        def f(x):
+            return (x.sin() + 1).relu()
+
+        x = torch.randn(8, dtype=torch.float32)
+        for field in (
+            "post_grad_custom_pre_pass",
+            "post_grad_custom_post_pass",
+            "joint_custom_pre_pass",
+            "joint_custom_post_pass",
+            "pre_grad_custom_pass",
+        ):
+            with self.subTest(field=field):
+                calls = []
+                torch._dynamo.reset()
+                with config.patch(
+                    {
+                        field: [
+                            RecordCustomPass(f"{field}_first", calls),
+                            RecordCustomPass(f"{field}_second", calls),
+                        ]
+                    }
+                ):
+                    torch.compile(f)(x)
+                self.assertEqual(calls, [f"{field}_first", f"{field}_second"])
+
+        calls = []
+        torch._dynamo.reset()
+        with config.patch(
+            {
+                "post_grad_custom_post_pass": (
+                    RecordCustomPass("tuple_first", calls),
+                    RecordCustomPass("tuple_second", calls),
+                )
+            }
+        ):
+            torch.compile(f)(x)
+        self.assertEqual(calls, ["tuple_first", "tuple_second"])
 
     def test_custom_pre_pass(self):
         with config.patch(
@@ -262,7 +314,9 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
                     m.target = operator.getitem
                     m.args = (split_vals, idx)
 
-        @config.patch(pre_grad_custom_pass=merge_mm_shared_rhs)
+        @config.patch(
+            pre_grad_custom_pass=merge_mm_shared_rhs, pre_grad_pass_timing="early"
+        )
         def inner_test():
             @torch.compile
             def f(W, nested_seqs):

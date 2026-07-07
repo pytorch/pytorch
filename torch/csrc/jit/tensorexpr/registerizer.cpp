@@ -517,7 +517,7 @@ void RegisterizerAnalysis::mergeHiddenScope(bool allowClosed) {
   }
 }
 
-// Merge currentScope_ into it's parent, and make parent the new currentScope_.
+// Merge currentScope_ into its parent, and make parent the new currentScope_.
 void RegisterizerAnalysis::mergeCurrentScopeIntoParent() {
   auto parent = currentScope_->parent();
 

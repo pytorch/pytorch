@@ -139,6 +139,7 @@ def odd_or_even(x: int) -> int:
 
 class TestDataChunk(TestCase):
     def setUp(self):
+        super().setUp()
         self.elements = list(range(10))
         random.shuffle(self.elements)
         self.chunk: DataChunk[int] = DataChunk(self.elements)
@@ -270,6 +271,7 @@ class TestStreamWrapper(TestCase):
 
 class TestIterableDataPipeBasic(TestCase):
     def setUp(self):
+        super().setUp()
         ret = create_temp_dir_and_files()
         self.temp_dir = ret[0][0]
         self.temp_files = ret[0][1:]
@@ -2644,7 +2646,7 @@ class TestTyping(TestCase):
         # Non-DataPipe input with DataPipe hint
         datasource = [(1, "1"), (2, "2"), (3, "3")]
         with self.assertRaisesRegex(
-            TypeError, r"Expected argument 'dp' as a IterDataPipe"
+            TypeError, r"Expected argument 'dp' as an IterDataPipe"
         ):
             dp0 = DP0(datasource)
 

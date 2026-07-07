@@ -19,6 +19,7 @@ def set_default_dtype(dtype):
 
 class TestExitStack(torch._dynamo.test_case.TestCase):
     def setUp(self):
+        super().setUp()
         self._prev = torch._dynamo.config.enable_trace_unittest
         torch._dynamo.config.enable_trace_unittest = True
 

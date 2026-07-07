@@ -79,6 +79,12 @@ class AOTIModelContainerRunnerCuda:
         validate_full_updates: bool,
         user_managed: bool = ...,
     ) -> None: ...
+    def update_constant_buffer_from_cpu(
+        self,
+        tensor_map: dict[str, Tensor],
+        use_inactive: bool,
+        validate_full_updates: bool,
+    ) -> None: ...
     def swap_constant_buffer(self) -> None: ...
     def free_inactive_constant_buffer(self) -> None: ...
 
@@ -107,6 +113,12 @@ class AOTIModelContainerRunnerXpu:
         validate_full_updates: bool,
         user_managed: bool = ...,
     ) -> None: ...
+    def update_constant_buffer_from_cpu(
+        self,
+        tensor_map: dict[str, Tensor],
+        use_inactive: bool,
+        validate_full_updates: bool,
+    ) -> None: ...
     def swap_constant_buffer(self) -> None: ...
     def free_inactive_constant_buffer(self) -> None: ...
 
@@ -125,6 +137,12 @@ class AOTIModelContainerRunnerMps:
         use_inactive: bool,
         validate_full_updates: bool,
         user_managed: bool = ...,
+    ) -> None: ...
+    def update_constant_buffer_from_cpu(
+        self,
+        tensor_map: dict[str, Tensor],
+        use_inactive: bool,
+        validate_full_updates: bool,
     ) -> None: ...
     def swap_constant_buffer(self) -> None: ...
     def free_inactive_constant_buffer(self) -> None: ...
@@ -154,6 +172,7 @@ class AOTIModelPackageLoader:
         use_inactive: bool,
         check_full_update: bool,
         user_managed: bool = ...,
+        allow_h2d_copy: bool = ...,
     ) -> None: ...
     def update_constant_buffer(
         self,

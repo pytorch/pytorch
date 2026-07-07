@@ -111,7 +111,7 @@ def _propagate_qconfig_helper(
 
     for name, child in module.named_children():
         module_prefix = prefix + "." + name if prefix else name
-        #  do no not propagate qconfig to child if child is non traceable
+        #  do not propagate qconfig to child if child is non traceable
         if prepare_custom_config_dict is None or not (
             name in prepare_custom_config_dict.get("non_traceable_module_name", [])
             or type(child)
