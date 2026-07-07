@@ -584,13 +584,22 @@ class NativeFunction:
     # changes the semantics of set_output to call the parent class.
     structured_inherits: str | None
 
-    # Structured kernels can declare elements as "precomputed". These elements
-    # are returned by the meta function in one struct and passed to the impl
-    # function in lieu of certain kernel arguments that these precomputed
-    # elements supersede. Information about the names and types of these
-    # precomputed elements and how they correspond to kernel arguments is stored
-    # in this member, if applicable.
+    # When True for a structured op, suppress auto-generation of the Meta
+    # dispatch-key kernel so that an explicit Meta: entry in the dispatch table
+    # is used instead. The structured meta class is still generated for the
+    # device backends; this only redirects the Meta key. Used when the
+    # structured (int-only) set_output path cannot express a kernel's behavior,
+    # e.g. SymInt output sizes, so a hand-written symint-aware Meta kernel is
+    # needed.
     precomputed: Precompute | None
+
+    # For a structured op, whether to auto-generate the Meta dispatch-key
+    # kernel. Defaults to True. Set to False to instead provide an explicit
+    # Meta: entry in the dispatch table, e.g. to express SymInt output sizes
+    # that the int-only structured set_output path cannot. The structured meta
+    # class is still generated for the device backends; this only affects the
+    # Meta key.
+    structured_generate_meta: bool
 
     # Argument names whose default  should be excluded from the C++ interface.
     # Intended for resolving overload ambiguities between signatures.
@@ -745,6 +754,15 @@ class NativeFunction:
                 f"precomputed requires structured=True, got structured={structured}"
             )
         precomputed = Precompute.parse(precomputed_dict) if precomputed_dict else None
+
+        structured_generate_meta = e.pop("structured_generate_meta", True)
+        if not isinstance(structured_generate_meta, bool):
+            raise AssertionError(f"not a bool: {structured_generate_meta}")
+        if not structured_generate_meta and not structured:
+            raise AssertionError(
+                "structured_generate_meta=False requires structured=True, "
+                f"got structured={structured}"
+            )
 
         tags_inp = e.pop("tags", [])
         if isinstance(tags_inp, str):
@@ -1010,6 +1028,7 @@ class NativeFunction:
                 structured_delegate=structured_delegate,
                 structured_inherits=structured_inherits,
                 precomputed=precomputed,
+                structured_generate_meta=structured_generate_meta,
                 autogen=autogen,
                 ufunc_inner_loop=ufunc_inner_loop,
                 manual_kernel_registration=manual_kernel_registration,

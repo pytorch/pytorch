@@ -1410,6 +1410,7 @@
 - func: cat(Tensor[] tensors, int dim=0) -> Tensor
   structured_delegate: cat.out
   dispatch:
+    Meta: cat_meta
     SparseCPU, SparseCUDA, SparseMPS, SparseXPU: cat_sparse
     QuantizedCPU: cat_quantized_cpu
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA, NestedTensorXPU: cat_nested
@@ -1417,6 +1418,7 @@
 
 - func: cat.out(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
+  structured_generate_meta: False
   precomputed:
   - dim -> int dim, int valid, bool all_contiguous, bool all_same_dtype, bool all_same_sizes_and_stride, MemoryFormat memory_format
   dispatch:
@@ -1425,6 +1427,7 @@
     MPS: cat_out_mps
     XPU: cat_out_xpu
     QuantizedCPU: cat_out_quantized_cpu
+    Meta: cat_out_meta
 
 - func: concat(Tensor[] tensors, int dim=0) -> Tensor
 
