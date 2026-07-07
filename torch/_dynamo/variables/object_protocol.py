@@ -41,6 +41,7 @@ from ..source import (
     AttrSource,
     CellContentsSource,
     ConstDictKeySource,
+    DefaultsSource,
     DictGetItemSource,
     GetItemSource,
     GlobalSource,
@@ -126,6 +127,8 @@ def vt_identity_compare(
             source,
             (GlobalSource, LocalSource, TypeSource, NNModuleSource, CellContentsSource),
         ):
+            return resolve_source_value(source)
+        if isinstance(source, DefaultsSource):
             return resolve_source_value(source)
         if isinstance(source, DictGetItemSource):
             return resolve_source_value(source)

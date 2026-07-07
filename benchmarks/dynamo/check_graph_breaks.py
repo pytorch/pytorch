@@ -29,21 +29,9 @@ def check_graph_breaks(
 ) -> tuple[list[str], str]:
     failed: list[str] = []
     improved: list[str] = []
-    flaky = set(flaky_models)
-    cuda_timm_training = "rocm" not in expected_filename and os.path.basename(
-        expected_filename
-    ) in {
-        "inductor_timm_training.csv",
-        "dynamic_inductor_timm_training.csv",
-    }
-
-    if cuda_timm_training:
-        # CUDA TIMM training can fail before Dynamo runs due to exact-tolerance
-        # eager/eager drift in near-zero BatchNorm gradients.
-        flaky.add("mobilenetv2_100")
 
     if "rocm" in expected_filename:
-        flaky.update(
+        flaky_models.update(
             {
                 "alexnet",
                 "demucs",
@@ -83,7 +71,7 @@ def check_graph_breaks(
 
         graph_breaks = get_field(actual_csv, model, "graph_breaks")
         expected_graph_breaks = get_field(expected_csv, model, "graph_breaks")
-        is_flaky = model in flaky
+        flaky = model in flaky_models
 
         if expected_graph_breaks is None:
             status = "MISSING:"
@@ -92,17 +80,17 @@ def check_graph_breaks(
             print(f"{model:34}  EAGER_FAILED")
             continue
         elif graph_breaks == expected_graph_breaks:
-            status = "PASS_BUT_FLAKY" if is_flaky else "PASS"
+            status = "PASS_BUT_FLAKY" if flaky else "PASS"
             print(f"{model:34}  {status}")
             continue
         elif graph_breaks > expected_graph_breaks:
-            if is_flaky:
+            if flaky:
                 status = "FAIL_BUT_FLAKY:"
             else:
                 status = "FAIL:"
                 failed.append(model)
         elif graph_breaks < expected_graph_breaks:
-            if is_flaky:
+            if flaky:
                 status = "IMPROVED_BUT_FLAKY:"
             else:
                 status = "IMPROVED:"
