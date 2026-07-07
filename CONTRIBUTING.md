@@ -772,27 +772,39 @@ only interested in a specific component.
   rebuild only that test binary (without rerunning cmake). (Replace `ninja` with
   `make` if you don't have ninja installed).
 
-On the initial build, you can also speed things up with the environment
-variables `DEBUG`, `USE_DISTRIBUTED`, `USE_MKLDNN`, `USE_CUDA`, `USE_FLASH_ATTENTION`, `USE_MEM_EFF_ATTENTION`, `BUILD_TEST`, `USE_FBGEMM`, `USE_NNPACK` and `USE_QNNPACK`.
+On the initial build, you can also speed things up by disabling the features you don't need. Common ones to know about are
 
-- `DEBUG=1` will enable debug builds (-g -O0)
+- `DEBUG=1` will enable debug builds (this should rarely be used) (-g -O0)
 - `REL_WITH_DEB_INFO=1` will enable debug symbols with optimizations (-g -O3)
 - `USE_DISTRIBUTED=0` will disable distributed (c10d, gloo, mpi, etc.) build.
 - `USE_MKLDNN=0` will disable using MKL-DNN.
-- `USE_CUDA=0` will disable compiling CUDA (in case you are developing on something not CUDA related), to save compile time.
+- `USE_CUDA=0` will disable compiling CUDA.
 - `BUILD_TEST=0` will disable building C++ test binaries.
 - `USE_FBGEMM=0` will disable using FBGEMM (quantized 8-bit server operators).
 - `USE_NNPACK=0` will disable compiling with NNPACK.
 - `USE_QNNPACK=0` will disable QNNPACK build (quantized 8-bit operators).
 - `USE_XNNPACK=0` will disable compiling with XNNPACK.
-- `USE_FLASH_ATTENTION=0` and `USE_MEM_EFF_ATTENTION=0` will disable compiling flash attention and memory efficient kernels respectively
+- `USE_FLASH_ATTENTION=0` and `USE_MEM_EFF_ATTENTION=0` will disable compiling flash attention and memory efficient kernels respectively.
+- `BUILD_LAZY_TS_BACKEND=0` will disable the lazy TorchScript backend (Lazy Tensor Core).
+- `USE_PYTORCH_QNNPACK=0` will disable PyTorch's internal QNNPACK quantized kernels.
+- `USE_CPU_VECTORIZATION=0` will disable building vectorized CPU kernel variants (AVX2, AVX512, VSX, ZVECTOR, SVE). Only the scalar DEFAULT kernels are built. Fine for correctness/dispatch work; not for CPU benchmarking.
+- `USE_COLORIZE_OUTPUT=1` will colorize compiler output for easier reading.
 
-For example:
-
+For example, a good default for the most minimal build is to add to your bashrc is:
 ```bash
-DEBUG=1 USE_DISTRIBUTED=0 USE_MKLDNN=0 USE_CUDA=0 BUILD_TEST=0 \
-    USE_FBGEMM=0 USE_NNPACK=0 USE_QNNPACK=0 USE_XNNPACK=0 \
-    python -m pip install --no-build-isolation -v -e .
+alias BUILD_CONFIG='CMAKE_GENERATOR=Ninja USE_DISTRIBUTED=0 USE_FLASH_ATTENTION=0 USE_MEM_EFF_ATTENTION=0 USE_MKLDNN=0 USE_CUDA=0 BUILD_TEST=0 USE_FBGEMM=0 USE_NNPACK=0 USE_QNNPACK=0 USE_XNNPACK=0 BUILD_LAZY_TS_BACKEND=0 USE_PYTORCH_QNNPACK=0 USE_CPU_VECTORIZATION=0 USE_COLORIZE_OUTPUT=1'
+```
+
+You can then re-enable features selectively
+```bash
+# Minimal cpu build
+BUILD_CONFIG pip install --no-build-isolation -v -e .
+
+# Minimal cuda build
+BUILD_CONFIG USE_CUDA=1 pip install --no-build-isolation -v -e .
+
+# Minimal cuda distributed build
+BUILD_CONFIG USE_CUDA=1 USE_DISTRIBUTED=1 pip install --no-build-isolation -v -e .
 ```
 
 For subsequent builds (i.e., when `build/CMakeCache.txt` exists), the build

@@ -771,6 +771,77 @@ class ComprehensionTests(torch._dynamo.test_case.TestCase):
         for i in range(2):
             self.assertEqual(count_op(backend.graphs[i], operator.add), 3)
 
+    def test_reuse_name(self):
+        def fn(x):
+            i = [(i + x, torch._dynamo.graph_break()) for i in range(5)]
+            return i
+
+        x = torch.randn(3, 3)
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_store_multiple(self):
+        def fn(x):
+            i, j, k = [(i + x, torch._dynamo.graph_break()) for i in range(3)]
+            return i, j, k
+
+        x = torch.randn(3, 3)
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_store_nonlocal(self):
+        i = 0
+
+        def fn(x):
+            nonlocal i
+            i = [(i + x, torch._dynamo.graph_break()) for i in range(2)]
+            return i
+
+        x = torch.randn(3, 3)
+        opt_fn = torch.compile(fn, backend="eager")
+        res = fn(x)
+        self.assertEqual(res, opt_fn(x))
+        self.assertEqual(i, res)
+
+    def test_store_global(self):
+        global _comprehension_global
+
+        def fn(x):
+            global _comprehension_global
+            _comprehension_global = [
+                (i + x, torch._dynamo.graph_break()) for i in range(2)
+            ]
+            return _comprehension_global
+
+        x = torch.randn(3, 3)
+        opt_fn = torch.compile(fn, backend="eager")
+        res = fn(x)
+        self.assertEqual(res, opt_fn(x))
+        self.assertEqual(_comprehension_global, res)
+
+    def test_store_attribute(self):
+        class C:
+            pass
+
+        def fn(x):
+            obj = C()
+            obj.vals = [(i + x, torch._dynamo.graph_break()) for i in range(2)]
+            return obj.vals
+
+        x = torch.randn(3, 3)
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_augmented_assign(self):
+        def fn(x):
+            acc = [x]
+            acc += [(i + x, torch._dynamo.graph_break()) for i in range(2)]
+            return acc
+
+        x = torch.randn(3, 3)
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(fn(x), opt_fn(x))
+
 
 @skipIfNotPy312
 class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):

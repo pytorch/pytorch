@@ -595,10 +595,6 @@ class TestTryMerge(TestCase):
                 "name": "lintrunner / linux-job",
                 "expected": "lintrunner / linux-job",
             },
-            {
-                "name": "Test `run_test.py` is usable without boto3",
-                "expected": "Test `run_test.py` is usable without boto3",
-            },
         ]
 
         for case in test_cases:
