@@ -1269,7 +1269,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
     def test_donated_buffer1(self):
         logger_name = "torch._functorch._aot_autograd.graph_compile"
 
-        @torch.compile()
+        @torch.compile()  # noqa: UNSPECIFIED_BACKEND
         def relu(x):
             return torch.nn.functional.relu(x)
 
@@ -1290,7 +1290,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         logger_name = "torch._functorch._aot_autograd.graph_compile"
 
         # we will reuse the graph for g across f1 and f2
-        @torch.compile()
+        @torch.compile()  # noqa: UNSPECIFIED_BACKEND
         def g(activation, param2):
             return torch.matmul(activation, param2)
 
@@ -1312,7 +1312,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         logger_name = "torch._functorch._aot_autograd.graph_compile"
 
         # we will reuse the graph for g across f1 and f2
-        @torch.compile()
+        @torch.compile()  # noqa: UNSPECIFIED_BACKEND
         def g(activation, param2):
             return torch.matmul(activation, param2)
 
@@ -1343,7 +1343,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
                 return torch.nn.functional.relu(x) + self.param
 
         mod = Mod()
-        mod = torch.compile(mod)
+        mod = torch.compile(mod)  # noqa: UNSPECIFIED_BACKEND
 
         inp = torch.ones([2, 2], requires_grad=True)
 
@@ -1365,7 +1365,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
     def test_donated_buffer5(self):
         logger_name = "torch._functorch._aot_autograd.graph_compile"
 
-        @torch.compile()
+        @torch.compile()  # noqa: UNSPECIFIED_BACKEND
         def f(x, z):
             y = x.view(2, 3)
             z = torch.nn.functional.relu(z)
@@ -1413,7 +1413,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
             p = torch.nn.Parameter(x + 123)
             return p, p.sin()
 
-        opt = torch.compile(fn, fullgraph=True)
+        opt = torch.compile(fn, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         x = torch.randn(16)
 
         with self.assertLogs(logger_name, level="INFO") as captured:
@@ -1435,7 +1435,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
         inp = torch.randn(3, 3, requires_grad=True)
 
-        mod = torch.compile(Mod())
+        mod = torch.compile(Mod())  # noqa: UNSPECIFIED_BACKEND
         for _ in range(5):
             mod(inp).sum().backward()
 
@@ -1452,7 +1452,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
         inp = torch.randn(3, 3, requires_grad=True)
 
-        mod = torch.compile(Mod())
+        mod = torch.compile(Mod())  # noqa: UNSPECIFIED_BACKEND
         out = mod(inp).sum()
         for _ in range(5):
             out.backward(retain_graph=True)
@@ -1471,7 +1471,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
         inp = torch.randn(3, 3, requires_grad=True)
 
-        mod = torch.compile(Mod())
+        mod = torch.compile(Mod())  # noqa: UNSPECIFIED_BACKEND
         mod(inp).sum().backward(create_graph=True)
         out = mod(inp).sum()
         for _ in range(5):
@@ -1518,7 +1518,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
         inp = torch.randn(3, 3, requires_grad=True)
 
-        mod = torch.compile(Mod())
+        mod = torch.compile(Mod())  # noqa: UNSPECIFIED_BACKEND
         mod(inp).sum().backward()
         out = mod(inp).sum()
         with self.assertRaisesRegex(
@@ -1772,7 +1772,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
         result_original = fuzzed_program(*args)
 
-        compiled_program = torch.compile(fuzzed_program, fullgraph=True, dynamic=True)
+        compiled_program = torch.compile(fuzzed_program, fullgraph=True, dynamic=True)  # noqa: UNSPECIFIED_BACKEND
         result_compiled = compiled_program(*args)
 
         self.assertTrue(torch.allclose(result_original, result_compiled))
@@ -1877,7 +1877,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
             patch.object(P, "_sync_decision_cross_ranks", inject_symbool_nodes),
             patch.object(functorch_config, "_sync_decision_cross_ranks", True),
         ):
-            compiled_fn = torch.compile(fn)
+            compiled_fn = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
             loss = compiled_fn(x, splits_tensor, mask)
             # Without the fix, this raises:
             # InductorError: Unsupported inductor graph input type:
@@ -1984,7 +1984,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
                 return (x @ w).sum()
 
         torch._dynamo.reset()
-        result = torch.compile(f)(x, w)
+        result = torch.compile(f)(x, w)  # noqa: UNSPECIFIED_BACKEND
         self.assertIsInstance(result, torch.Tensor)
 
 
