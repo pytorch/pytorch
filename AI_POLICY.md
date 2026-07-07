@@ -1,5 +1,5 @@
-We are supportive to contributors using AI tools to help prepare issues, pull
-requests, reviews, or comments. We expect contributors to be responsible for
+We support the use of AI tools to help prepare issues, pull
+requests, reviews, or comments. We expect everyone to be responsible for
 anything they submit, including anything written with AI assistance.
 
 *AI-generated content in comments, issues, or PRs must be clearly disclosed and
