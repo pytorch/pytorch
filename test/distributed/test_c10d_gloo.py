@@ -2052,6 +2052,57 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     def test_alltoall_multidim_cuda(self):
         self._test_alltoall_multidim(lambda t: t.clone().cuda())
 
+    def _test_split_group(self, backend):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            backend, rank=self.rank, world_size=self.world_size, store=store
+        )
+        pg = c10d.distributed_c10d._get_default_group()
+        parent_backend = pg._get_backend(torch.device("cpu"))
+
+        mid = self.world_size // 2
+        first_half = list(range(mid))
+        second_half = list(range(mid, self.world_size))
+        my_ranks = first_half if self.rank < mid else second_half
+
+        ng1 = c10d.split_group(pg, [first_half, second_half])
+        self.assertIsNotNone(ng1)
+        self.assertEqual(ng1.group_desc, "default_pg:split:0")
+        backend1 = ng1._get_backend(torch.device("cpu"))
+        self.assertEqual(parent_backend.options._timeout, backend1.options._timeout)
+
+        self.assertEqual(dist.get_process_group_ranks(ng1), my_ranks)
+        self.assertEqual(dist.get_rank(ng1), my_ranks.index(self.rank))
+
+        tensor = torch.full((1,), self.rank)
+        dist.broadcast(tensor, src=my_ranks[0], group=ng1)
+        self.assertEqual(tensor, torch.full((1,), my_ranks[0]))
+
+        tensor = torch.ones(2)
+        dist.all_reduce(tensor, group=ng1)
+        self.assertEqual(tensor, torch.full((2,), float(len(my_ranks))))
+
+        # ranks outside every split get None
+        ng2 = c10d.split_group(pg, [first_half])
+        if self.rank < mid:
+            self.assertIsNotNone(ng2)
+            self.assertEqual(ng2.group_desc, "default_pg:split:1")
+        else:
+            self.assertIsNone(ng2)
+
+        dist.destroy_process_group()
+
+    @requires_gloo()
+    def test_split_group_cpu_only(self):
+        # No accelerator/bound device is required to split a cpu:gloo group.
+        self._test_split_group("cpu:gloo")
+
+    @requires_gloo()
+    def test_split_group_bare_gloo(self):
+        # A bare "gloo" registers the same backend for cpu and cuda; the
+        # split must reuse a single child backend for both device types.
+        self._test_split_group("gloo")
+
 
 class DistributedDataParallelTest(
     test_c10d_common.CommonDistributedDataParallelTest, MultiProcessTestCase
