@@ -27,9 +27,14 @@
 #endif
 
 #ifdef USE_XPU
+#include <ATen/detail/XPUHooksInterface.h>
+#include <ATen/xpu/level_zero_stub/ATenLevelZero.h>
 #include <c10/core/DeviceGuard.h>
 #include <c10/xpu/XPUCachingAllocator.h>
+#include <c10/xpu/XPUFunctions.h>
 #include <c10/xpu/XPUStream.h>
+#include <sycl/ext/oneapi/backend/level_zero.hpp>
+#include <sycl/sycl.hpp>
 #endif
 
 #include <ATen/MapAllocator.h>
@@ -645,8 +650,144 @@ namespace {
 struct XpuSharedStorageArgs {
   c10::DeviceIndex device;
   std::string handle;
+  std::string event;
   size_t storage_size;
   ptrdiff_t storage_offset_bytes;
+};
+
+class XpuIpcEvent {
+ public:
+  static XpuIpcEvent create(c10::DeviceIndex device) {
+    return XpuIpcEvent(device, false, std::nullopt);
+  }
+
+  static XpuIpcEvent open(
+      c10::DeviceIndex device,
+      const std::string& ipc_pool_handle) {
+    return XpuIpcEvent(device, true, ipc_pool_handle);
+  }
+
+  XpuIpcEvent(const XpuIpcEvent&) = delete;
+  XpuIpcEvent& operator=(const XpuIpcEvent&) = delete;
+  XpuIpcEvent(XpuIpcEvent&&) = delete;
+  XpuIpcEvent& operator=(XpuIpcEvent&&) = delete;
+
+  ~XpuIpcEvent() {
+#ifndef _WIN32
+    const auto& ze = at::detail::getXPUHooks().level_zero();
+    if (event_) {
+      ze.zeEventDestroy(event_);
+    }
+    if (pool_) {
+      if (opened_ipc_pool_) {
+        ze.zeEventPoolCloseIpcHandle(pool_);
+      }
+      ze.zeEventPoolDestroy(pool_);
+    }
+#endif
+  }
+
+  std::string exportHandle() const {
+#ifndef _WIN32
+    ze_ipc_event_pool_handle_t ipc_handle{};
+    const auto& ze = at::detail::getXPUHooks().level_zero();
+    TORCH_CHECK(
+        pool_,
+        "XPU IPC event pool is not initialized before export");
+    TORCH_CHECK(
+        ze.zeEventPoolGetIpcHandle(pool_, &ipc_handle) == ZE_RESULT_SUCCESS,
+        "Failed to export XPU IPC event pool handle");
+    return std::string(
+        reinterpret_cast<const char*>(&ipc_handle), sizeof(ipc_handle));
+#else
+    return {};
+#endif
+  }
+
+  void signal() const {
+#ifndef _WIN32
+    const auto& ze = at::detail::getXPUHooks().level_zero();
+    TORCH_CHECK(event_, "XPU IPC event is not initialized");
+    TORCH_CHECK(
+        ze.zeEventHostSignal(event_) == ZE_RESULT_SUCCESS,
+        "Failed to signal XPU IPC event");
+#endif
+  }
+
+  void waitOnStream(const c10::xpu::XPUStream& stream) const {
+#ifndef _WIN32
+    TORCH_CHECK(event_, "XPU IPC event is not initialized");
+    auto backend_event = sycl::backend_input_t<
+        sycl::backend::ext_oneapi_level_zero,
+        sycl::event>{
+        event_, sycl::ext::oneapi::level_zero::ownership::keep};
+    auto sycl_event = sycl::make_event<sycl::backend::ext_oneapi_level_zero>(
+        backend_event, c10::xpu::get_device_context());
+    std::vector<sycl::event> event_list{sycl_event};
+    stream.queue().ext_oneapi_submit_barrier(event_list);
+#else
+    (void)stream;
+#endif
+  }
+
+ private:
+  XpuIpcEvent(
+      c10::DeviceIndex device,
+      bool open_from_ipc,
+      std::optional<std::string> ipc_pool_handle) {
+#ifndef _WIN32
+    const auto& ze = at::detail::getXPUHooks().level_zero();
+    auto& sycl_device = c10::xpu::get_raw_device(device);
+    auto& sycl_context = c10::xpu::get_device_context();
+    auto l0_device =
+        sycl::get_native<sycl::backend::ext_oneapi_level_zero>(sycl_device);
+    auto l0_context =
+        sycl::get_native<sycl::backend::ext_oneapi_level_zero>(sycl_context);
+
+    if (open_from_ipc) {
+      TORCH_CHECK(ipc_pool_handle.has_value(), "Missing XPU IPC pool handle");
+      TORCH_CHECK(
+          ipc_pool_handle->size() == sizeof(ze_ipc_event_pool_handle_t),
+          "Invalid XPU IPC event pool handle size");
+      ze_ipc_event_pool_handle_t ipc_handle{};
+      std::memcpy(
+          &ipc_handle,
+          ipc_pool_handle->data(),
+          sizeof(ze_ipc_event_pool_handle_t));
+      TORCH_CHECK(
+          ze.zeEventPoolOpenIpcHandle(l0_context, ipc_handle, &pool_) ==
+              ZE_RESULT_SUCCESS,
+          "Failed to open XPU IPC event pool handle");
+      opened_ipc_pool_ = true;
+    } else {
+      ze_event_pool_desc_t pool_desc{};
+      pool_desc.stype = ZE_STRUCTURE_TYPE_EVENT_POOL_DESC;
+      pool_desc.flags = ZE_EVENT_POOL_FLAG_HOST_VISIBLE | ZE_EVENT_POOL_FLAG_IPC;
+      pool_desc.count = 1;
+      TORCH_CHECK(
+          ze.zeEventPoolCreate(l0_context, &pool_desc, 1, &l0_device, &pool_) ==
+              ZE_RESULT_SUCCESS,
+          "Failed to create XPU IPC event pool");
+    }
+
+    ze_event_desc_t event_desc{};
+    event_desc.stype = ZE_STRUCTURE_TYPE_EVENT_DESC;
+    event_desc.index = 0;
+    event_desc.signal = ZE_EVENT_SCOPE_FLAG_HOST;
+    event_desc.wait = ZE_EVENT_SCOPE_FLAG_HOST;
+    TORCH_CHECK(
+        ze.zeEventCreate(pool_, &event_desc, &event_) == ZE_RESULT_SUCCESS,
+        "Failed to create XPU IPC event");
+#else
+    (void)device;
+    (void)open_from_ipc;
+    (void)ipc_pool_handle;
+#endif
+  }
+
+  ze_event_pool_handle_t pool_{nullptr};
+  ze_event_handle_t event_{nullptr};
+  bool opened_ipc_pool_{false};
 };
 
 bool isImportedStorage(const c10::StorageImpl& storage) {
@@ -658,9 +799,10 @@ void markImportedStorage(c10::StorageImpl& storage) {
 }
 
 THPObjectPtr createXpuShareTuple(const at::Storage& storage) {
-  THPObjectPtr tuple(PyTuple_New(4));
+  THPObjectPtr tuple(PyTuple_New(5));
   THPObjectPtr device(THPUtils_packInt32(storage.device().index()));
   THPObjectPtr handle(Py_NewRef(Py_None));
+  THPObjectPtr event(PyBytes_FromStringAndSize(nullptr, 0));
   THPObjectPtr size_bytes(THPUtils_packUInt64(storage.nbytes()));
   THPObjectPtr offset_bytes(THPUtils_packInt32(0));
 
@@ -668,37 +810,44 @@ THPObjectPtr createXpuShareTuple(const at::Storage& storage) {
     c10::xpu::syncStreamsOnDevice(storage.device().index());
     auto shandle =
         c10::xpu::XPUCachingAllocator::shareIpcHandle(storage.mutable_data());
+    auto ipc_event = XpuIpcEvent::create(storage.device().index());
+    ipc_event.signal();
     handle = PyBytes_FromStringAndSize(
         shandle.handle.c_str(), static_cast<Py_ssize_t>(shandle.handle.size()));
+    const auto event_handle = ipc_event.exportHandle();
+    event = PyBytes_FromStringAndSize(
+        event_handle.c_str(), static_cast<Py_ssize_t>(event_handle.size()));
     offset_bytes = PyLong_FromSsize_t(static_cast<Py_ssize_t>(shandle.offset));
   }
 
-  if (!tuple || !device || !handle || !size_bytes || !offset_bytes) {
+  if (!tuple || !device || !handle || !event || !size_bytes || !offset_bytes) {
     return {};
   }
 
   PyTuple_SET_ITEM(tuple.get(), 0, device.release());
   PyTuple_SET_ITEM(tuple.get(), 1, handle.release());
-  PyTuple_SET_ITEM(tuple.get(), 2, size_bytes.release());
-  PyTuple_SET_ITEM(tuple.get(), 3, offset_bytes.release());
+  PyTuple_SET_ITEM(tuple.get(), 2, event.release());
+  PyTuple_SET_ITEM(tuple.get(), 3, size_bytes.release());
+  PyTuple_SET_ITEM(tuple.get(), 4, offset_bytes.release());
   return tuple;
 }
 
 bool parseXpuSharedStorageArgs(PyObject* args, XpuSharedStorageArgs& parsed) {
-  TORCH_CHECK(PyTuple_GET_SIZE(args) == 4, "tuple of 4 items expected");
+  TORCH_CHECK(PyTuple_GET_SIZE(args) == 5, "tuple of 5 items expected");
   PyObject* device = PyTuple_GET_ITEM(args, 0);
   PyObject* handle = PyTuple_GET_ITEM(args, 1);
-  PyObject* size_bytes = PyTuple_GET_ITEM(args, 2);
-  PyObject* offset_bytes = PyTuple_GET_ITEM(args, 3);
+  PyObject* event = PyTuple_GET_ITEM(args, 2);
+  PyObject* size_bytes = PyTuple_GET_ITEM(args, 3);
+  PyObject* offset_bytes = PyTuple_GET_ITEM(args, 4);
 
-  if (!(THPUtils_checkLong(device) && PyBytes_Check(handle) &&
+  if (!(THPUtils_checkLong(device) && PyBytes_Check(handle) && PyBytes_Check(event) &&
         THPUtils_checkLong(size_bytes) && THPUtils_checkLong(offset_bytes))) {
     THPUtils_invalidArguments(
         args,
         nullptr,
         "_new_shared in XPU mode",
         1,
-        "(int device, bytes handle, int storage_size_bytes, int storage_offset_bytes)");
+        "(int device, bytes handle, bytes event, int storage_size_bytes, int storage_offset_bytes)");
     return false;
   }
 
@@ -714,24 +863,45 @@ bool parseXpuSharedStorageArgs(PyObject* args, XpuSharedStorageArgs& parsed) {
     TORCH_CHECK(false, "Failed to extract IPC handle bytes");
   }
   parsed.handle = std::string(handle_data, handle_size);
+
+  char* event_data = nullptr;
+  Py_ssize_t event_size = 0;
+  if (PyBytes_AsStringAndSize(event, &event_data, &event_size) == -1) {
+    TORCH_CHECK(false, "Failed to extract IPC event bytes");
+  }
+  parsed.event = std::string(event_data, event_size);
   return true;
 }
 
 c10::intrusive_ptr<at::StorageImpl> createStorageImplFromXpuShared(
     const XpuSharedStorageArgs& args) {
   c10::DeviceGuard device_guard(c10::Device(c10::kXPU, args.device));
+  std::optional<XpuIpcEvent> ipc_event;
+  if (!args.event.empty()) {
+    ipc_event = XpuIpcEvent::open(args.device, args.event);
+    ipc_event->waitOnStream(c10::xpu::getCurrentXPUStream(args.device));
+  }
   auto base_ptr =
       c10::xpu::XPUCachingAllocator::getIpcDevPtr(args.handle, args.device);
 
-  void* dev_ptr = base_ptr.get();
+  struct XpuIpcDeleterContext {
+    std::shared_ptr<void> base_ptr;
+    std::optional<XpuIpcEvent> ipc_event;
+  };
+
+  auto ctx = std::make_unique<XpuIpcDeleterContext>();
+  ctx->base_ptr = std::move(base_ptr);
+  ctx->ipc_event = std::move(ipc_event);
+
+  void* dev_ptr = ctx->base_ptr.get();
   dev_ptr = static_cast<char*>(dev_ptr) + args.storage_offset_bytes;
 
   c10::DataPtr data_ptr(
       dev_ptr,
-      new std::shared_ptr<void>(base_ptr),
+      ctx.release(),
       +[](void* ctx_) {
-        auto* base_ptr_ctx = static_cast<std::shared_ptr<void>*>(ctx_);
-        delete base_ptr_ctx;
+        std::unique_ptr<XpuIpcDeleterContext> ctx(
+            static_cast<XpuIpcDeleterContext*>(ctx_));
       },
       at::Device(at::DeviceType::XPU, args.device));
 
