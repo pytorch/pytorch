@@ -42,7 +42,8 @@ void add_clamp_kernel(
     const Scalar& alpha_scalar,
     const Scalar& min_val,
     const Scalar& max_val) {
-  AT_DISPATCH_ALL_TYPES(iter.dtype(), "add_clamp_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND2(
+      kHalf, kBFloat16, iter.dtype(), "add_clamp_cpu", [&]() {
     auto alpha = alpha_scalar.to<scalar_t>();
     auto alpha_vec = Vectorized<scalar_t>(alpha);
     auto min_scalar = min_val.to<scalar_t>();
