@@ -27,11 +27,13 @@ class DataPtr;
  *   bit 2 (0x4): IPC-shareable (interprocess)
  *   bits 3-7:    reserved (used internally by legacy sentinel values)
  *
- * PYTORCH_DEFAULT and BACKEND_DEFAULT are legacy sentinels kept for backward
- * compatibility. New code should compose bit flags directly, e.g.:
+ * PYTORCH_DEFAULT (0x0), BACKEND_DEFAULT (0xF9), and INVALID (0xFF) are
+ * legacy sentinels preserved for backward compatibility. New code should
+ * compose bit flags directly, e.g.:
  *
+ *   EventFlag::TIMING
  *   EventFlag::TIMING | EventFlag::BLOCKING
- *   EventFlag::TIMING | EventFlag::INTERPROCESS
+ *   EventFlag::BLOCKING | EventFlag::INTERPROCESS
  *
  * Backends that do not support a flag should ignore the corresponding bit.
  */
@@ -39,7 +41,7 @@ enum class EventFlag : uint8_t {
   // Legacy sentinels -- BC preserved
   PYTORCH_DEFAULT = 0x0, // no timing, no blocking, no interprocess
   BACKEND_DEFAULT = 0xF9, // legacy CUDA default (timing only); bits 3-7 set to
-  // distinguish from new bitmask values
+                          // distinguish from new bitmask values
   INVALID = 0xFF, // sentinel for testing; not a valid flag
 
   // Bit flags -- combine with operator|.
