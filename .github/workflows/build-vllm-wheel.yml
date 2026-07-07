@@ -117,7 +117,11 @@ jobs:
           set -eux
           # Build against the torch nightly we just downloaded; use_existing_torch.py
           # strips torch from vLLM's requirements so the build keeps that nightly.
-          "${PYTHON_EXECUTABLE}" -m pip install \
+          # Install offline from the downloaded wheels: torch nightly pins a
+          # triton==X+gitYYY that only exists on the nightly index, not PyPI, and
+          # pip download already fetched it (and the rest) into artifacts.
+          "${PYTHON_EXECUTABLE}" -m pip install --no-index \
+            --find-links "${RUNNER_TEMP}/artifacts" \
             "${RUNNER_TEMP}"/artifacts/torch-*.whl \
             "${RUNNER_TEMP}"/artifacts/torchvision-*.whl \
             "${RUNNER_TEMP}"/artifacts/torchaudio-*.whl
