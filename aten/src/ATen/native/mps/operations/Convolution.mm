@@ -6,7 +6,9 @@
 #include <ATen/native/mps/kernels/Convolution.h>
 #include <ATen/ops/_mps_convolution_native.h>
 #include <ATen/ops/_mps_convolution_transpose_native.h>
+#include <ATen/ops/addmm.h>
 #include <ATen/ops/constant_pad_nd.h>
+#include <ATen/ops/mm.h>
 #include <ATen/ops/mps_convolution_backward_native.h>
 #include <ATen/ops/mps_convolution_transpose_backward_native.h>
 #include <fmt/format.h>
@@ -442,6 +444,48 @@ static bool conv3d_prefer_im2col(const Tensor& input,
   return input.scalar_type() == kFloat && input.size(0) == 1 && plane <= 256 && K >= 4096;
 }
 
+// A 1x1x1 stride-1 no-pad conv is a per-voxel GEMM over channels; both the
+// direct kernel and im2col (which trivially matches the patch-embed gate here)
+// lose to a plain matmul, so peel it off first.
+static bool conv3d_is_pointwise(const Tensor& weight, IntArrayRef stride, IntArrayRef padding, int64_t groups) {
+  return groups == 1 && weight.size(2) == 1 && weight.size(3) == 1 && weight.size(4) == 1 && stride[0] == 1 &&
+      stride[1] == 1 && stride[2] == 1 && padding[0] == 0 && padding[1] == 0 && padding[2] == 0;
+}
+
+static void conv3d_pointwise_matmul(const Tensor& input,
+                                    const Tensor& weight,
+                                    const std::optional<Tensor>& bias_opt,
+                                    const Tensor& output) {
+  const int64_t N = input.size(0), C = input.size(1), O = weight.size(0);
+  const int64_t D = input.size(2), H = input.size(3), W = input.size(4), M = D * H * W;
+  // out[o, m] = bias[o] + weight[O, C] @ in[C, M] per batch; addmm fuses bias
+  // into the GEMM epilogue (one kernel, no separate bias pass), so it beats a
+  // batched baddbmm here. Written straight into the output buffer when possible.
+  const auto x = input.contiguous().reshape({N, C, M});
+  const auto w = weight.reshape({O, C});
+  const bool has_bias = bias_opt && bias_opt->defined();
+  std::optional<Tensor> b;
+  if (has_bias) {
+    const auto& bo = *bias_opt;
+    b = bo.scalar_type() == output.scalar_type() ? bo : bo.to(output.scalar_type());
+  }
+  if (output.is_contiguous()) {
+    auto ov = output.view({N, O, M});
+    const auto b2 = has_bias ? b->reshape({O, 1}) : Tensor();
+    for (const auto n : c10::irange(N)) {
+      auto on = ov.select(0, n);
+      has_bias ? at::addmm_out(on, b2, w, x.select(0, n)) : at::mm_out(on, w, x.select(0, n));
+    }
+  } else {
+    // Channels-last output: matmul into a fresh buffer, then permute-copy.
+    auto out = w.unsqueeze(0).expand({N, O, C}).bmm(x);
+    if (has_bias) {
+      out = out.add(b->reshape({1, O, 1}));
+    }
+    output.copy_(out.reshape({N, O, D, H, W}));
+  }
+}
+
 // conv as unfold(im2col) + matmul; weight OIDHW flattens to [O, Cin*kvol].
 static void conv3d_im2col_matmul(const Tensor& input,
                                  const Tensor& weight,
@@ -646,7 +690,9 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
   convolution_shape_check(c, input, weight, output, padding, stride, dilation, groups);
 
   if (is3DConv) {
-    if (conv3d_prefer_im2col(input_t, weight_t, stride, padding, dilation, groups, output_t)) {
+    if (conv3d_is_pointwise(weight_t, stride, padding, groups)) {
+      conv3d_pointwise_matmul(input_t, weight_t, bias_opt, output_t);
+    } else if (conv3d_prefer_im2col(input_t, weight_t, stride, padding, dilation, groups, output_t)) {
       conv3d_im2col_matmul(input_t, weight_t, bias_opt, stride, padding, output_t);
     } else {
       conv3d_metal_forward(input_t, weight_t, bias_opt, padding, stride, dilation, groups, output_t);
