@@ -15,25 +15,12 @@ permissions:
   contents: read
 
 jobs:
-  get-label-type:
-    name: get-label-type
-    # Don't run on forked repos
-    if: github.repository_owner == 'pytorch'
-    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
-    with:
-      triggering_actor: ${{ github.triggering_actor }}
-      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
-      curr_branch: ${{ github.head_ref || github.ref_name }}
-      curr_ref_type: ${{ github.ref_type }}
-      check_experiments: "arc,lf"
-
   upload_test_stats_while_running:
     # Don't run on forked repos
     if: github.repository_owner == 'pytorch'
     name: Upload test stats while running
-    needs: get-label-type
-    # OSDC ARC runner, equivalent of linux.2xlarge.
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64"
+    # Meta OSDC ARC runner, equivalent of linux.2xlarge.
+    runs-on: l-x86iavx512-8-64
     # ARC has no host docker daemon, so run inside a container. The
     # actions-runner image ships no python; uv provisions it below.
     container:
