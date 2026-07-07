@@ -30,6 +30,7 @@ import shutil
 import subprocess
 import sys
 import textwrap
+import types
 import typing
 import uuid
 from importlib import import_module
@@ -606,12 +607,40 @@ if "__compile_source__" in globals():
         fn: Any = kernel if isinstance(kernel, JITFunction) else kernel.fn
         return fn.__name__.split(".")[-1]
 
+    def get_triton_import_line(name: str, val: Any) -> str | None:
+        # User-defined Triton kernels are serialized from their source, not from
+        # their original Python module.  If the source references a global
+        # imported from Triton, such as `from triton.language.extra import
+        # libdevice`, the standalone repro must recreate that import.
+        if name in ("triton", "tl"):
+            return None
+
+        if isinstance(val, types.ModuleType):
+            module_name = val.__name__
+            if module_name == "triton" or module_name.startswith("triton."):
+                return f"import {module_name} as {name}"
+            return None
+
+        module_name = getattr(val, "__module__", None)
+        object_name = getattr(val, "__name__", None)
+        if (
+            isinstance(module_name, str)
+            and (module_name == "triton" or module_name.startswith("triton."))
+            and isinstance(object_name, str)
+        ):
+            if name == object_name:
+                return f"from {module_name} import {object_name}"
+            return f"from {module_name} import {object_name} as {name}"
+
+        return None
+
     def write_kernel_dependencies(
         kernel: Any,
         written_constexpr_vars: set[str],
         written_nested_kernels: set[str],
+        written_triton_imports: set[str],
     ) -> str:
-        """Write out global tl.constexpr vars and nested kernel dependencies."""
+        """Write out global triton imports, tl.constexpr vars, and nested kernels."""
         result = ""
         jit_fn = kernel if isinstance(kernel, JITFunction) else kernel.fn
         if not getattr(jit_fn, "fn", None) or not getattr(jit_fn, "src", None):
@@ -629,11 +658,20 @@ if "__compile_source__" in globals():
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
                 called_names.add(node.func.id)
 
-        # Write out global tl.constexpr variables
-        for name in referenced_names:
+        # Only recreate globals that are safe and useful for a standalone
+        # Triton repro: imports anchored in the Triton package and simple
+        # constants.  Other user globals remain unsupported here.
+        for name in sorted(referenced_names):
             if name in written_constexpr_vars:
                 continue
             val = fn_globals.get(name)
+
+            import_line = get_triton_import_line(name, val)
+            if import_line is not None:
+                if import_line not in written_triton_imports:
+                    result += import_line + "\n"
+                    written_triton_imports.add(import_line)
+                continue
 
             if isinstance(val, TritonConstexpr) and getattr(val, "value", None):
                 result += f"{name} = tl.constexpr({val.value})\n"
@@ -654,7 +692,10 @@ if "__compile_source__" in globals():
             # Mark as written before recursing to prevent cycles
             written_nested_kernels.add(nested_fn_name)
             result += write_kernel_dependencies(
-                val, written_constexpr_vars, written_nested_kernels
+                val,
+                written_constexpr_vars,
+                written_nested_kernels,
+                written_triton_imports,
             )
             result += generate_custom_triton_kernel(val)
 
@@ -662,6 +703,10 @@ if "__compile_source__" in globals():
 
     written_nested_kernels: set[str] = set()
     written_constexpr_vars: set[str] = set()
+    written_triton_imports: set[str] = {
+        "import triton",
+        "import triton.language as tl",
+    }
 
     model_str += f"{kernel_side_table_prefix}.reset_table()\n"
 
@@ -670,7 +715,10 @@ if "__compile_source__" in globals():
 
         try:
             model_str += write_kernel_dependencies(
-                kernel, written_constexpr_vars, written_nested_kernels
+                kernel,
+                written_constexpr_vars,
+                written_nested_kernels,
+                written_triton_imports,
             )
             fn_name = get_fn_name(kernel)
 
