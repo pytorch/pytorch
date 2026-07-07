@@ -11,8 +11,8 @@
 #include <string_view>
 #include <utility>
 #include <vector>
-#ifndef _WIN32
 #include <torch/csrc/distributed/c10d/FakeStore.hpp>
+#ifndef _WIN32
 #include <torch/csrc/distributed/c10d/HashStore.hpp>
 #endif
 #include <torch/csrc/distributed/c10d/FakeProcessGroup.hpp>
@@ -4244,8 +4244,7 @@ such as `dist.all_reduce(tensor, async_op=True)`.
           py::arg("world_size"),
           py::arg("options") =
               c10::make_intrusive<::c10d::FakeProcessGroup::Options>())
-      .def_property_readonly(
-          "options", &::c10d::FakeProcessGroup::getOptions);
+      .def_property_readonly("options", &::c10d::FakeProcessGroup::getOptions);
   auto fakeWork =
       intrusive_ptr_no_gil_destructor_class_<::c10d::FakeWork>(
           module, "FakeWork", work)
