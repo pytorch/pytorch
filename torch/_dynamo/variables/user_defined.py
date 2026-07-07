@@ -2001,7 +2001,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             isinstance(method_var, variables.GetAttrVariable)
             and self.is_python_constant()
         ):
-            return variables.ConstantVariable.create(direct_fn(self.value))
+            return variables.ConstantVariable.create(
+                direct_fn(self.as_python_constant())
+            )
         return method_var.call_function(tx, [], {})
 
     def nb_index_impl(

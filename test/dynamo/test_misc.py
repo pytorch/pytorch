@@ -246,10 +246,17 @@ class MiscTests(torch._inductor.test_case.TestCase):
         """
         mod = load_inline(name="pybind11_enum_test", cpp_sources=cpp_source)
         e = mod.E.A
-        self.assertEqual(torch.compile(lambda x: int(x), backend="eager")(e), 0)
-        self.assertEqual(torch.compile(lambda x: float(x), backend="eager")(e), 0.0)
         self.assertEqual(
-            torch.compile(lambda x: [10, 20][x], backend="eager")(mod.E.B), 20
+            torch.compile(lambda x: int(x), backend="eager", fullgraph=True)(e), 0
+        )
+        self.assertEqual(
+            torch.compile(lambda x: float(x), backend="eager", fullgraph=True)(e), 0.0
+        )
+        self.assertEqual(
+            torch.compile(lambda x: [10, 20][x], backend="eager", fullgraph=True)(
+                mod.E.B
+            ),
+            20,
         )
 
     def test_boolarg(self):
