@@ -2037,13 +2037,8 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
             f"cpu:dummy,{device_type}:dummy" if device_type != "cpu" else "cpu:dummy"
         )
 
-        acc = torch.accelerator.current_accelerator()
-        acc_type = acc.type if acc is not None else "cuda"
+        # Ensure backend config can be created with the following arguments
 
-        # Ensure backend config can be created with the following arguments.
-        # "dummy" was registered without explicit devices, so its capability
-        # is ["cpu", acc_type] — derived from the current accelerator.
-        dummy_expected = f"cpu:dummy,{acc_type}:dummy"
         backend_config_strings_and_expected_values = [
             (dist.Backend.GLOO, "cpu:gloo,cuda:gloo"),
             (dist.Backend.XCCL, "xpu:xccl"),
