@@ -484,6 +484,7 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
+    @requires_multicast_support()
     @parametrize("shape", [(), (64, 64)])
     @parametrize("symm_mem_input", [True, False])
     def test_low_contention_all_gather_ce_multicast(
@@ -495,6 +496,7 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
+    @requires_multicast_support()
     @parametrize("shape", [(), (64, 64)])
     def test_low_contention_all_gather_ce_multicast_out(
         self, shape: tuple[int, ...]
@@ -1664,6 +1666,7 @@ class SymmetricMemoryTestCudaGraph(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
+    @requires_multicast_support()
     def test_low_contention_all_gather_ce_multicast_cuda_graph(self) -> None:
         self._init_process()
 
@@ -1946,6 +1949,7 @@ class LoweringTest(MultiProcContinuousTest):
 
     @skip_if_rocm_multiprocess  # requires registered-buffer support
     @skip_if_lt_x_gpu(2)
+    @requires_multicast_support()
     @fresh_inductor_cache()
     def test_low_contention_all_gather_planned_output_codegen(self):
         self._init_process()
