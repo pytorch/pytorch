@@ -1420,13 +1420,13 @@ class GraphModule(torch.nn.Module):
 
         get_external_object_by_index = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(1);  get_external_object_by_index = None
 
-        a: "f32[1024]" = l_x_ * 2
+        mul: "f32[1024]" = l_x_ * 2
 
-        b: "f32[1024]" = l_x_ * 3;  l_x_ = None
+        mul_1: "f32[1024]" = l_x_ * 3;  l_x_ = None
 
         synchronize_stream = torch.ops.streams.synchronize_stream(1);  synchronize_stream = None
 
-        add: "f32[1024]" = a + b;  a = b = None
+        add: "f32[1024]" = mul + mul_1;  mul = mul_1 = None
         return (add,)
 """,
         )
@@ -1484,26 +1484,26 @@ with torch.cuda._DeviceGuard(0):
             normalize_gm(counter.graphs[0].print_readable(print_output=False)),
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_: "f32[32, 32]", L_w1_: "f32[32, 32]", L_w2_: "f32[32, 32]"):
-        l_x_ = L_x_
+    def forward(self, L_w1_: "f32[32, 32]", L_w2_: "f32[32, 32]", L_x_: "f32[32, 32]"):
         l_w1_ = L_w1_
         l_w2_ = L_w2_
+        l_x_ = L_x_
 
         get_external_object_by_index = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(1);  get_external_object_by_index = None
 
         get_external_object_by_index_1 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(2);  get_external_object_by_index_1 = None
 
-        a: "f32[32, 32]" = l_x_ @ l_w1_;  l_x_ = l_w1_ = None
+        matmul: "f32[32, 32]" = l_x_ @ l_w1_;  l_x_ = l_w1_ = None
 
         get_external_object_by_index_2 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(0);  get_external_object_by_index_2 = None
         record_event = torch.ops.streams.record_event(2, 0);  record_event = None
 
         wait_event = torch.ops.streams.wait_event(2, 1);  wait_event = None
 
-        b: "f32[32, 32]" = a @ l_w2_;  a = l_w2_ = None
+        matmul_1: "f32[32, 32]" = matmul @ l_w2_;  matmul = l_w2_ = None
 
         synchronize_stream = torch.ops.streams.synchronize_stream(1);  synchronize_stream = None
-        return (b,)
+        return (matmul_1,)
 """,
         )
 
@@ -1562,11 +1562,11 @@ class GraphModule(torch.nn.Module):
             normalize_gm(counter.graphs[0].print_readable(print_output=False)),
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_: "f32[32, 32]", L_w1_: "f32[32, 32]", L_w2_: "f32[32, 32]", L_w3_: "f32[32, 32]"):
-        l_x_ = L_x_
+    def forward(self, L_w1_: "f32[32, 32]", L_w2_: "f32[32, 32]", L_w3_: "f32[32, 32]", L_x_: "f32[32, 32]"):
         l_w1_ = L_w1_
         l_w2_ = L_w2_
         l_w3_ = L_w3_
+        l_x_ = L_x_
 
         get_external_object_by_index = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(1);  get_external_object_by_index = None
 
@@ -1578,26 +1578,26 @@ class GraphModule(torch.nn.Module):
 
         get_external_object_by_index_4 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(5);  get_external_object_by_index_4 = None
 
-        a: "f32[32, 32]" = l_x_ @ l_w1_;  l_x_ = l_w1_ = None
+        matmul: "f32[32, 32]" = l_x_ @ l_w1_;  l_x_ = l_w1_ = None
 
         record_event = torch.ops.streams.record_event(4, 1);  record_event = None
 
         wait_event = torch.ops.streams.wait_event(4, 2);  wait_event = None
 
-        b: "f32[32, 32]" = a @ l_w2_;  a = l_w2_ = None
+        matmul_1: "f32[32, 32]" = matmul @ l_w2_;  matmul = l_w2_ = None
 
         record_event_1 = torch.ops.streams.record_event(5, 2);  record_event_1 = None
 
         wait_event_1 = torch.ops.streams.wait_event(5, 3);  wait_event_1 = None
 
-        c: "f32[32, 32]" = b @ l_w3_;  b = l_w3_ = None
+        matmul_2: "f32[32, 32]" = matmul_1 @ l_w3_;  matmul_1 = l_w3_ = None
 
         synchronize_stream = torch.ops.streams.synchronize_stream(1);  synchronize_stream = None
 
         synchronize_stream_1 = torch.ops.streams.synchronize_stream(2);  synchronize_stream_1 = None
 
         synchronize_stream_2 = torch.ops.streams.synchronize_stream(3);  synchronize_stream_2 = None
-        return (c,)
+        return (matmul_2,)
 """,
         )
 
@@ -1659,10 +1659,10 @@ class GraphModule(torch.nn.Module):
             normalize_gm(counter.graphs[0].print_readable(print_output=False)),
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_: "f32[32, 32]", L_w1_: "f32[32, 32]", L_w2_: "f32[32, 32]"):
-        l_x_ = L_x_
+    def forward(self, L_w1_: "f32[32, 32]", L_w2_: "f32[32, 32]", L_x_: "f32[32, 32]"):
         l_w1_ = L_w1_
         l_w2_ = L_w2_
+        l_x_ = L_x_
 
         get_external_object_by_index = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(1);  get_external_object_by_index = None
 
@@ -1672,11 +1672,11 @@ class GraphModule(torch.nn.Module):
 
         get_external_object_by_index_3 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(4);  get_external_object_by_index_3 = None
 
-        a: "f32[32, 32]" = l_x_ @ l_w1_;  l_w1_ = None
+        matmul: "f32[32, 32]" = l_x_ @ l_w1_;  l_w1_ = None
 
         record_event = torch.ops.streams.record_event(3, 1);  record_event = None
 
-        b: "f32[32, 32]" = l_x_ @ l_w2_;  l_x_ = l_w2_ = None
+        matmul_1: "f32[32, 32]" = l_x_ @ l_w2_;  l_x_ = l_w2_ = None
 
         record_event_1 = torch.ops.streams.record_event(4, 2);  record_event_1 = None
 
@@ -1684,12 +1684,12 @@ class GraphModule(torch.nn.Module):
 
         wait_event_1 = torch.ops.streams.wait_event(4, 0);  wait_event_1 = None
 
-        c: "f32[32, 32]" = a + b;  a = b = None
+        add: "f32[32, 32]" = matmul + matmul_1;  matmul = matmul_1 = None
 
         synchronize_stream = torch.ops.streams.synchronize_stream(1);  synchronize_stream = None
 
         synchronize_stream_1 = torch.ops.streams.synchronize_stream(2);  synchronize_stream_1 = None
-        return (c,)
+        return (add,)
 """,
         )
 
