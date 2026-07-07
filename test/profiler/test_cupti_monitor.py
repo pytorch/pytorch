@@ -385,6 +385,58 @@ class TestCuptiRecords(TestCase):
         self.assertEqual(args["func"], "AllReduce")
         self.assertEqual(args["count"], 4096)
 
+    def test_chrome_counter_events_from_pm(self):
+        # PM counters render as chrome "C" (counter) events in a dedicated per-device
+        # "GPU N Counters" process row, separate from the GPU kernel work. No CUDA.
+        import numpy as np
+
+        from torch.profiler._cupti.monitor_trace import (
+            _build_chrome_counters,
+            _build_pm_counters,
+            _gpu_counter_process,
+            _merge_counters,
+            _pm_label,
+        )
+
+        # friendly labels for known metrics; unknown metrics fall back to the raw name
+        self.assertEqual(
+            _pm_label("nvlrx__bytes.avg.pct_of_peak_sustained_elapsed"), "NVLink RX (%)"
+        )
+        self.assertEqual(
+            _pm_label("some__unknown_metric.sum"), "some__unknown_metric.sum"
+        )
+
+        name = "sm__cycles_active.avg.pct_of_peak_sustained_elapsed"
+        n = 4
+        pm = {
+            "start_ns": np.arange(1000, 1000 + n * 100, 100, dtype=np.int64),
+            "device_id": np.zeros(n, dtype=np.int64),
+            name: np.linspace(80.0, 95.0, n),
+        }
+        # empty active_devices -> no device filtering (keep all samples)
+        events = _build_chrome_counters(
+            _merge_counters(_build_pm_counters(pm, set())), base_ns=0
+        )
+        counters = [e for e in events if e["ph"] == "C"]
+        self.assertEqual(len(counters), n)  # one metric x n samples
+        e = counters[0]
+        self.assertEqual(e["pid"], _gpu_counter_process(0))  # "GPU 0 Counters"
+        self.assertEqual(
+            e["name"], "SM Active (%)"
+        )  # friendly label for sm__cycles_active
+        self.assertEqual(e["ts"], 1.0)  # (1000 - base_ns) / 1000
+        self.assertEqual(e["args"], {"": 80.0})
+        # counters go on a dedicated string-pid process row so Perfetto renders them as a
+        # separate "GPU N Counters" group, not under the device's kernel process
+        self.assertTrue(
+            any(
+                m["ph"] == "M"
+                and m["name"] == "process_sort_index"
+                and m["pid"] == _gpu_counter_process(0)
+                for m in events
+            )
+        )
+
     def test_metadata_store_explicit_id(self):
         # put_external(blob, external_id): an explicit non-zero id targets a specific
         # collective rather than the current pushed one -- the seam for a backend to
