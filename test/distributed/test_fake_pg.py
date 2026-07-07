@@ -11,7 +11,7 @@ import torch.nn as nn
 from torch._C._distributed_c10d import FakeProcessGroup
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.tensor import DeviceMesh, Shard
+from torch.distributed.tensor import Shard
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
