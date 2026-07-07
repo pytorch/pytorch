@@ -11,7 +11,6 @@ from torch._dynamo.backends.debugging import ExplainWithBackend
 from torch._dynamo.backends.registry import lookup_backend
 from torch._dynamo.backends.tvm import has_tvm
 from torch._dynamo.testing import same
-from torch.fx._lazy_graph_module import _force_skip_lazy_graph_module
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyHPU,
@@ -139,7 +138,6 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
         self._check_backend_works("eager_noexcept", device, boxed=False)
 
     @skipIfHpu
-    @_force_skip_lazy_graph_module()
     def test_torchscript(self, device):
         self._check_backend_works("ts", device, boxed=False)
 
@@ -150,7 +148,6 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
         self._check_backend_works("aot_eager_decomp_partition", device)
 
     @skipIfHpu
-    @_force_skip_lazy_graph_module()
     def test_aot_ts(self, device):
         self._check_backend_works("aot_ts", device)
 

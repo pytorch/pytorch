@@ -152,7 +152,9 @@ def eager_debug(
 def torchscript(
     gm: torch.fx.GraphModule, fake_tensor_inputs: list[torch.Tensor]
 ) -> torch.jit.ScriptModule:
-    return torch.jit.script(gm)
+    from torch.fx._lazy_graph_module import _unwrap_lazy_graph_module
+
+    return torch.jit.script(_unwrap_lazy_graph_module(gm))
 
 
 def invoke_subgraph_inner_compiler(
