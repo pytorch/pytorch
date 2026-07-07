@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-import functools
 import itertools
 import logging
 import operator
@@ -409,27 +408,56 @@ for outplace_op, inplace_op in inplaceable_foreach_ops_lowerings.items():
 inplaceable_triton_ops = OrderedSet([triton_kernel_wrapper_functional])
 
 
-@functools.lru_cache(None)
-def _maybe_inplaceable_op(target):
+def _maybe_inplaceable_op(node):
     """Synthesize an InplaceableOp from a functional op's in-place counterpart
     (OpOverload._inplace_variant), so reinplacing handles ops like uniform,
-    normal, digamma, and _philox_uniform without a manual registry entry.
+    normal, and _philox_uniform without a manual registry entry.
     Returns None when not applicable."""
-    from torch._inductor.lowering import fallbacks, lowerings
+    from torch._inductor.lowering import lowerings
 
+    target = node.target
     if not isinstance(target, torch._ops.OpOverload):
         return None
     inplace = target._inplace_variant
     if inplace is None:
         return None
-    # Reinplace only fallbacks (a real lowering allocates cleanly); skip view
-    # mutators; and skip in-place targets with their own lowering (e.g.
-    # bernoulli_, which must be decomposed for RNG correctness).
-    if (
-        (target in lowerings and target not in fallbacks)
-        or torch.Tag.inplace_view in inplace.tags
-        or (inplace in lowerings and inplace not in fallbacks)
-    ):
+
+    def has_non_fallback_lowering(op):
+        # A real lowering, as opposed to a fallback handler. Membership in
+        # `fallbacks` is not the inverse: an op like cumsum has both a real scan
+        # lowering and a registered fallback handler.
+        lowering = lowerings.get(op)
+        return lowering is not None and not getattr(
+            lowering, "_is_fallback_handler", False
+        )
+
+    def preserves_dtype():
+        # A synthesized in-place op writes its result into `self`, so it's only
+        # valid when the op preserves `self`'s dtype (excludes type-promoting
+        # ops, e.g. cumsum on an int/bool input promotes to int64).
+        out = node.meta.get("val")
+        arg = node.args[0] if node.args else None
+        val = arg.meta.get("val") if isinstance(arg, torch.fx.Node) else None
+        return (
+            isinstance(out, torch.Tensor)
+            and isinstance(val, torch.Tensor)
+            and out.dtype == val.dtype
+        )
+
+    # Only reinplace ops that lower as a fallback: an op with a real lowering
+    # allocates its output cleanly (no wasted clone), and reinplacing it would
+    # both discard that lowering and risk a dtype change (e.g. cumsum promotes
+    # an int/bool input to int64, which the in-place `self` can't hold).
+    if has_non_fallback_lowering(target):
+        return None
+    # Skip view/metadata mutators (set_, transpose_, ...).
+    if torch.Tag.inplace_view in inplace.tags:
+        return None
+    # Skip in-place targets with their own real lowering (e.g. bernoulli_, which
+    # asserts it must be decomposed for RNG correctness).
+    if has_non_fallback_lowering(inplace):
+        return None
+    if not preserves_dtype():
         return None
     return InplaceableOp(inplace, 0)
 
@@ -836,7 +864,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
 
     for node in graph.nodes:
         if inplaceable_op := (
-            inplaceable_ops.get(node.target) or _maybe_inplaceable_op(node.target)
+            inplaceable_ops.get(node.target) or _maybe_inplaceable_op(node)
         ):
             # Check if ALL mutated args can be inplaced
             # Only convert if we don't need to clone any tensor

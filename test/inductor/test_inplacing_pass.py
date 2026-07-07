@@ -868,16 +868,13 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             if my_wait_functional._opoverload in inplaceable_ops:
                 del inplaceable_ops[my_wait_functional._opoverload]
 
-    # digamma has no decomp; uniform does (exercises the override-decomp path).
-    @parametrize("name", ["digamma", "uniform"])
-    def test_functional_op_reinplaced(self, name):
-        # A functional op over a dead buffer is reinplaced via its in-place variant.
-        functional_op = getattr(aten, name).default
-        inplace_op = getattr(aten, name + "_").default
-
+    def test_functional_op_reinplaced(self):
+        # A fallback functional op over a dead buffer is reinplaced via its
+        # in-place variant (uniform lowers as a fallback and has a decomp, so it
+        # also exercises the override-decomp path).
         def f(x):
             buf = torch.empty_like(x)  # dead, written by the functional op only
-            return functional_op(buf)
+            return aten.uniform.default(buf)
 
         x = torch.randn(8)  # CPU; reinplacing is device-independent
         gm = make_fx(f, tracing_mode="fake")(x)
@@ -885,8 +882,23 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         gm.graph.lint()
 
         targets = [node.target for node in gm.graph.nodes]
-        self.assertIn(inplace_op, targets)
-        self.assertNotIn(functional_op, targets)
+        self.assertIn(aten.uniform_.default, targets)
+        self.assertNotIn(aten.uniform.default, targets)
+
+    def test_op_with_real_lowering_not_reinplaced(self):
+        # cumsum has a real lowering (plus a registered fallback handler), so it
+        # must NOT be reinplaced: reinplacing to cumsum_ would discard the
+        # lowering and, on int/bool inputs, change dtype (cumsum promotes to
+        # int64, which the in-place `self` can't hold).
+        def f(x):
+            buf = torch.empty_like(x)
+            return aten.cumsum.default(buf, 0)
+
+        for x in (torch.randn(8), torch.zeros(8, dtype=torch.bool)):
+            gm = make_fx(f, tracing_mode="fake")(x)
+            reinplace_inplaceable_ops_core(gm.graph)
+            targets = [node.target for node in gm.graph.nodes]
+            self.assertNotIn(aten.cumsum_.default, targets)
 
 
 instantiate_parametrized_tests(TestReinplacingPassCorrectness)
