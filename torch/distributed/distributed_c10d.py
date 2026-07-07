@@ -2472,6 +2472,8 @@ def _new_process_group_helper(
     if not pg_backend_set:
         if Backend.NCCL in backend_config.device_backend_map.values():
             pg._set_default_backend(ProcessGroup.BackendType.NCCL)
+        elif Backend.XCCL in backend_config.device_backend_map.values():
+            pg._set_default_backend(ProcessGroup.BackendType.XCCL)
         else:
             custom_backend = next(
                 (
