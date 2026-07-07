@@ -765,10 +765,14 @@ class GraphLowering(torch.fx.Interpreter):
         if config.force_layout_optimization:
             return True
 
-        conv_op = [torch.ops.aten.convolution.default]
-        if torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available():  # pyrefly: ignore [unbound-name]
-            conv_op.append(torch.ops.aten.convolution_backward.default)
-        conv_nodes = [n for n in gm.graph.nodes if n.target in conv_op]
+        conv_nodes = [
+            n for n in gm.graph.nodes
+            if n.target is torch.ops.aten.convolution.default
+            or (
+                n.target is torch.ops.aten.convolution_backward.default
+                and any(n.args[idx].meta["val"].device.type in SUPPORTED_MKLDNN_DEVICES for idx in [0, 1])
+            )
+        ]
 
         for n in gm.graph.nodes:
             if is_mkldnn_conv(n):
