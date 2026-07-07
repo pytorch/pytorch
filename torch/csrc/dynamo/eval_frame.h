@@ -27,10 +27,13 @@ typedef struct THPPyInterpreterFrame {
   PyObject_HEAD
   THP_EVAL_API_FRAME_OBJECT* frame; // Borrowed reference
   PyObject* locals;
+  FrameLocalsMapping* locals_mapping; // Borrowed reference
 } THPPyInterpreterFrame;
 
 THPPyInterpreterFrame* THPPyInterpreterFrame_New(
     THP_EVAL_API_FRAME_OBJECT* frame);
+
+FrameLocalsMapping* THPPyInterpreterFrame_GetFrameLocalsMapping(PyObject* obj);
 
 extern bool is_skip_guard_eval_unsafe;
 extern int fullgraph_compiled_frame_count;

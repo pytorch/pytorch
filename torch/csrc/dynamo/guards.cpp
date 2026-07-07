@@ -13,6 +13,7 @@
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
+#include <torch/csrc/dynamo/eval_frame.h>
 #include <torch/csrc/dynamo/guards.h>
 #include <torch/csrc/inductor/inductor_ops.h>
 #include <torch/csrc/utils/disable_torch_function.h>
@@ -1840,6 +1841,15 @@ class LeafGuard {
     return GuardDebugInfo(true, 0);
   }
 
+  virtual GuardDebugInfo check_verbose_nopybind(
+      FrameLocalsMapping* map) { // borrowed ref
+    bool result = check_nopybind(map);
+    if (!result) {
+      return GuardDebugInfo(result, _verbose_code_parts, 0, get_user_stack());
+    }
+    return GuardDebugInfo(true, 0);
+  }
+
   py::list verbose_code_parts() {
     return _verbose_code_parts;
   }
@@ -1926,6 +1936,10 @@ class LAMBDA_GUARD : public LeafGuard {
       return GuardDebugInfo(true, 0);
     }
     return GuardDebugInfo(false, verbose_code_parts(), 0);
+  }
+
+  GuardDebugInfo check_verbose_nopybind(FrameLocalsMapping* map) override {
+    return check_verbose_nopybind((PyObject*)map->to_dict());
   }
 
  private:
@@ -2381,6 +2395,14 @@ class GLOBAL_STATE : public LeafGuard {
   }
 
   GuardDebugInfo check_verbose_nopybind(PyObject* value) override {
+    if (!_guard->check()) {
+      return GuardDebugInfo(
+          false, "GLOBAL_STATE changed: " + _guard->reason(), 0);
+    }
+    return GuardDebugInfo(true, 1);
+  }
+
+  GuardDebugInfo check_verbose_nopybind(FrameLocalsMapping* value) override {
     if (!_guard->check()) {
       return GuardDebugInfo(
           false, "GLOBAL_STATE changed: " + _guard->reason(), 0);
@@ -3268,6 +3290,9 @@ class GuardAccessor {
     return check_nopybind((PyObject*)map->to_dict(), matches_dict_tag);
   }
   virtual GuardDebugInfo check_verbose_nopybind(PyObject* obj) = 0;
+  virtual GuardDebugInfo check_verbose_nopybind(FrameLocalsMapping* map) {
+    return check_verbose_nopybind((PyObject*)map->to_dict());
+  }
   virtual std::string repr() const = 0;
 
   virtual ~GuardAccessor() = default;
@@ -4023,8 +4048,8 @@ class GuardManager {
 
   // This function has some code duplication with function check. This is
   // deliberate to keep check function simple and fast.
-  virtual GuardDebugInfo check_verbose_nopybind(
-      PyObject* value) { // borrowed ref
+  template <typename T>
+  GuardDebugInfo check_verbose_nopybind_template(T* value) { // borrowed ref
     int num_guards_executed = 0;
 
     const GuardDebugInfo& debug_info =
@@ -4036,8 +4061,19 @@ class GuardManager {
     return check_accessors_verbose_nopybind(value, num_guards_executed);
   }
 
+  virtual GuardDebugInfo check_verbose_nopybind(
+      PyObject* value) { // borrowed ref
+    return check_verbose_nopybind_template(value);
+  }
+
+  virtual GuardDebugInfo check_verbose_nopybind(
+      FrameLocalsMapping* value) { // borrowed ref
+    return check_verbose_nopybind_template(value);
+  }
+
+  template <typename T>
   GuardDebugInfo check_leaf_guards_verbose_nopybind(
-      PyObject* value,
+      T* value,
       int& num_guards_executed) {
     // Iterate over leaf guards
     for (const auto& guard : _leaf_guards) {
@@ -4055,8 +4091,9 @@ class GuardManager {
     return GuardDebugInfo(true, num_guards_executed);
   }
 
+  template <typename T>
   GuardDebugInfo check_accessors_verbose_nopybind(
-      PyObject* value,
+      T* value,
       int& num_guards_executed) {
     // Iterate over accessors
     for (const auto& accessor : _accessors) {
@@ -4271,11 +4308,19 @@ class RootGuardManager : public GuardManager {
 
   // Python visible API to check guard function.
   bool check(py::handle value) {
+    if (FrameLocalsMapping* map =
+            THPPyInterpreterFrame_GetFrameLocalsMapping(value.ptr())) {
+      return check_nopybind(map);
+    }
     return check_nopybind(value.ptr());
   }
 
   // Python visible API to check_verbose guard function.
   GuardDebugInfo check_verbose(py::handle value) {
+    if (FrameLocalsMapping* map =
+            THPPyInterpreterFrame_GetFrameLocalsMapping(value.ptr())) {
+      return check_verbose_nopybind(map);
+    }
     return check_verbose_nopybind(value.ptr());
   }
 
@@ -4341,8 +4386,8 @@ class RootGuardManager : public GuardManager {
   }
 
   // Fast check_verbose function.
-  GuardDebugInfo check_verbose_nopybind(
-      PyObject* value) override { // borrowed ref
+  template <typename T>
+  GuardDebugInfo check_verbose_nopybind_template(T* value) { // borrowed ref
     // Check [Note on GIL interaction with mutex lock] for details on why we
     // need mutex and its interactions with GIL.
     PyThreadState* _save = nullptr;
@@ -4402,6 +4447,16 @@ class RootGuardManager : public GuardManager {
     at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
     _reset_relational_guard_state();
     return GuardDebugInfo(true, num_guards_executed);
+  }
+
+  GuardDebugInfo check_verbose_nopybind(
+      PyObject* value) override { // borrowed ref
+    return check_verbose_nopybind_template(value);
+  }
+
+  GuardDebugInfo check_verbose_nopybind(
+      FrameLocalsMapping* value) override { // borrowed ref
+    return check_verbose_nopybind_template(value);
   }
 
   void add_epilogue_lambda_guard(std::unique_ptr<LeafGuard> leaf_guard) {
@@ -5603,6 +5658,17 @@ class FrameLocalsGuardAccessor : public GuardAccessor {
     return result;
   }
 
+  GuardDebugInfo check_verbose_nopybind(
+      FrameLocalsMapping* obj) override { // borrowed ref
+    PyObject* x = obj->get(_framelocals_idx);
+    if (x == nullptr) {
+      PyErr_Clear();
+      return GuardDebugInfo(
+          false, std::string("KeyError on ") + get_source(), 0);
+    }
+    return _guard_manager->check_verbose_nopybind(x);
+  }
+
   std::string repr() const override {
     return fmt::format(
         "FrameLocalsGuardAccessor(key={}, framelocals_idx={})",
@@ -6448,6 +6514,11 @@ class GlobalsGuardAccessor : public GuardAccessor {
   bool check_nopybind(FrameLocalsMapping* map, bool matches_dict_tag) override {
     // Ensure that we don't construct the framelocals to dict here.
     return _guard_manager->check_nopybind(_globals_dict);
+  }
+
+  GuardDebugInfo check_verbose_nopybind(FrameLocalsMapping* map) override {
+    // Ensure that we don't construct the framelocals to dict here.
+    return _guard_manager->check_verbose_nopybind(_globals_dict);
   }
 
  public: // cloning functions

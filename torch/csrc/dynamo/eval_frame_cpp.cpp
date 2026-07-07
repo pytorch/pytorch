@@ -265,16 +265,24 @@ static py::object dynamo_call_callback(
   TORCH_CHECK(
       frame, "Dynamo failed to initialize CPython interpreter frame wrapper");
   frame->locals = (PyObject*)framelocals_mapping_to_dict(locals);
+  frame->locals_mapping = locals;
 
   py::object cache_entry_obj = py::none();
   if (cache_entry) {
     cache_entry_obj = py::cast(cache_entry, py::return_value_policy::reference);
   }
 
-  py::object result = callback(
-      py::handle((PyObject*)frame), cache_entry_obj, py::handle(frame_state));
-  Py_DECREF(frame);
-  return result;
+  try {
+    py::object result = callback(
+        py::handle((PyObject*)frame), cache_entry_obj, py::handle(frame_state));
+    frame->locals_mapping = nullptr;
+    Py_DECREF(frame);
+    return result;
+  } catch (...) {
+    frame->locals_mapping = nullptr;
+    Py_DECREF(frame);
+    throw;
+  }
 }
 
 static py::handle _callback_from_action(
