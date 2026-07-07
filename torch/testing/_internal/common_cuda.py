@@ -5,7 +5,7 @@ r"""This file is allowed to initialize CUDA context when imported."""
 import functools
 import torch
 import torch.cuda
-from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS, IS_MACOS, TEST_XPU
+from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS, IS_MACOS, TEST_XPU, TEST_PRIVATEUSE1
 import inspect
 import contextlib
 import os
@@ -81,11 +81,15 @@ def evaluate_platform_supports_flash_attention():
         return not IS_WINDOWS and SM80OrLater
     if TEST_XPU:
         return True
+    if TEST_PRIVATEUSE1:
+        return True
     return False
 
 def evaluate_platform_supports_ck_sdpa():
     if TEST_WITH_ROCM:
         return torch.backends.cuda.is_ck_sdpa_available()
+    elif TEST_PRIVATEUSE1:
+        return True
     else:
         return False
 
@@ -99,12 +103,18 @@ def evaluate_platform_supports_efficient_attention():
         return True
     if TEST_XPU:
         return True
+    if TEST_PRIVATEUSE1:
+        return True
     return False
 
 def evaluate_platform_supports_cudnn_attention():
+    if TEST_PRIVATEUSE1:
+        return True
     return (not TEST_WITH_ROCM) and SM80OrLater and (TEST_CUDNN_VERSION >= 90000)
 
 def evaluate_platform_supports_green_context():
+    if TEST_PRIVATEUSE1:
+        return True
     from torch.cuda.green_contexts import _ensure_supported
     try:
         _ensure_supported()
@@ -120,7 +130,7 @@ PLATFORM_SUPPORTS_FUSED_ATTENTION: bool = LazyVal(lambda: PLATFORM_SUPPORTS_FLAS
                                                   PLATFORM_SUPPORTS_CUDNN_ATTENTION or
                                                   PLATFORM_SUPPORTS_MEM_EFF_ATTENTION)
 
-PLATFORM_SUPPORTS_FUSED_SDPA: bool = TEST_CUDA and not TEST_WITH_ROCM
+PLATFORM_SUPPORTS_FUSED_SDPA: bool = (TEST_CUDA and not TEST_WITH_ROCM) or TEST_PRIVATEUSE1
 
 PLATFORM_SUPPORTS_CK_SDPA: bool = LazyVal(lambda: evaluate_platform_supports_ck_sdpa())
 
@@ -132,6 +142,8 @@ def evaluate_platform_supports_bf16():
         return True
     elif TEST_XPU:
         return True
+    elif TEST_PRIVATEUSE1:
+        return True
     return False
 
 
@@ -140,10 +152,14 @@ def evaluate_platform_supports_bf16_atomics():
         return SM80OrLater
     elif torch.version.hip:
         return ROCM_VERSION >= (8, 0)
+    elif TEST_PRIVATEUSE1:
+        return True
     return False
 
 
 def evaluate_platform_supports_half_atomics():
+    if TEST_PRIVATEUSE1:
+        return True
     if torch.version.hip:
         return ROCM_VERSION >= (8, 0)
     return True
@@ -156,6 +172,8 @@ PLATFORM_SUPPORTS_HALF_ATOMICS: bool = LazyVal(lambda: evaluate_platform_support
 PLATFORM_SUPPORTS_GREEN_CONTEXT: bool = LazyVal(lambda: evaluate_platform_supports_green_context())
 
 def evaluate_platform_supports_workqueue_config():
+    if TEST_PRIVATEUSE1:
+        return True
     from torch.cuda.green_contexts import _ensure_supported, _ensure_workqueue_supported
     try:
         _ensure_supported()
@@ -182,6 +200,8 @@ def evaluate_platform_supports_fp8():
             return SM90OrLater or torch.cuda.get_device_capability() == (8, 9)
     if torch.xpu.is_available():
         return True
+    if TEST_PRIVATEUSE1:
+        return True
     # As CPU supports FP8 and is always available, return True.
     return True
 
@@ -196,6 +216,8 @@ def evaluate_platform_supports_fp8_grouped_gemm():
                     return True
         else:
             return SM90OrLater and not SM100OrLater
+    if TEST_PRIVATEUSE1:
+        return True
     return False
 
 def evaluate_platform_supports_mx_gemm():
@@ -205,12 +227,16 @@ def evaluate_platform_supports_mx_gemm():
                 return 'gfx950' in torch.cuda.get_device_properties(0).gcnArchName
         else:
             return SM100OrLater
+    if TEST_PRIVATEUSE1:
+        return True
     return False
 
 def evaluate_platform_supports_mxfp8_grouped_gemm():
     if torch.cuda.is_available() and not torch.version.hip:
         built_with_mslk = "USE_MSLK" in torch.__config__.show()
         return built_with_mslk and IS_SM100
+    if TEST_PRIVATEUSE1:
+        return True
     return False
 
 def evaluate_platform_supports_fp8_sparse():
@@ -223,6 +249,8 @@ def evaluate_platform_supports_fp8_sparse():
                 and torch.backends.cusparselt.is_available()
                 and torch.backends.cusparselt.version() >= 602
             )
+    if TEST_PRIVATEUSE1:
+        return True
     return False
 
 PLATFORM_SUPPORTS_MX_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_mx_gemm())
