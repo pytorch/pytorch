@@ -4678,9 +4678,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                 # RuntimeError: Expected all tensors to be on the same device,
                 # but found at least two devices, cuda:0 and cpu!
                 xfail("ge", device_type="cuda"),
-                xfail(
-                    "searchsorted"
-                ),  # aten::searchsorted.Scalar hit the vmap fallback which is currently disabled
                 xfail("native_group_norm"),
                 xfail("torch.ops.aten._scaled_dot_product_flash_attention_for_cpu"),
             }
