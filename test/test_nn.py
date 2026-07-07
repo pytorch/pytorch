@@ -7365,6 +7365,25 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         _batch_norm_stats(torch.randn(1, 96, 112, 112, dtype=torch.float, device='cuda'), torch.channels_last, (0, 2, 3))
         _batch_norm_stats(torch.randn(1, 96, 112, 112, 112, dtype=torch.float, device='cuda'), torch.channels_last_3d, (0, 2, 3, 4))
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_batch_norm_backward_reduce_invalid_shapes_cuda(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/188958.
+        # A non-empty input paired with an inconsistent (empty) grad_out/invstd used
+        # to launch the channels-last reduce kernel with mismatched buffers, causing
+        # an out-of-bounds read. The op must validate shapes instead.
+        input = torch.full((2, 2), float('nan'), dtype=torch.float64, device='cuda')
+        mean = torch.zeros(2, dtype=torch.float64, device='cuda')
+        # grad_out has the wrong number of elements (0 vs input's 4)
+        grad_out = torch.ones(0, 128, dtype=torch.float64, device='cuda')
+        invstd = torch.ones(0, 16, 16, 3, dtype=torch.float64, device='cuda')
+        with self.assertRaisesRegex(RuntimeError, "batch_norm_backward_reduce"):
+            torch.batch_norm_backward_reduce(grad_out, input, mean, invstd, None, False, False, False)
+        # invstd has the wrong number of channels (grad_out now consistent with input)
+        grad_out = torch.ones(2, 2, dtype=torch.float64, device='cuda')
+        bad_invstd = torch.ones(0, dtype=torch.float64, device='cuda')
+        with self.assertRaisesRegex(RuntimeError, "mean and invstd"):
+            torch.batch_norm_backward_reduce(grad_out, input, mean, bad_invstd, None, False, False, False)
+
     def test_flatten(self):
         tensor_input = torch.randn(2, 1, 2, 3)
 

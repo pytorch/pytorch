@@ -735,6 +735,17 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_backward_reduce_cuda(const
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
 
+  TORCH_CHECK(input.dim() >= 2,
+      "batch_norm_backward_reduce: expected input to have at least 2 dimensions, but got input of sizes ",
+      input.sizes());
+  const auto n_channels = input.size(1);
+  TORCH_CHECK(grad_output.numel() == input.numel(),
+      "batch_norm_backward_reduce: expected grad_output to have the same number of elements as input (",
+      input.numel(), "), but got ", grad_output.numel());
+  TORCH_CHECK(mean.numel() == n_channels && invstd.numel() == n_channels,
+      "batch_norm_backward_reduce: expected mean and invstd to each have one element per channel (",
+      n_channels, "), but got ", mean.numel(), " and ", invstd.numel(), " elements");
+
   if (at::cuda::detail::canUse32BitIndexMath(grad_output) &&
       batch_norm_use_channels_last_kernels(grad_output) &&
       batch_norm_use_channels_last_kernels(input) &&
