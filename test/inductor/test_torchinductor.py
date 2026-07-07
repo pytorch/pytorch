@@ -4491,6 +4491,17 @@ for dtype in (torch.int32, torch.int64):
 
         self.common(fn, (torch.randn(2, 1, 2),))
 
+    def test_expand_implicit_kwarg(self):
+        # aten::expand's schema is `expand(Tensor self, SymInt[] size, *, bool
+        # implicit=False)`. Autograd emits calls with `implicit=False` (e.g.
+        # from mean_backward and broadcast backward). The Inductor lowering
+        # must accept the kwarg or such graphs fail with
+        # `TypeError: expand() got an unexpected keyword argument 'implicit'`.
+        def fn(a):
+            return torch.ops.aten.expand.default(a, [3, 4], implicit=False) + 1
+
+        self.common(fn, (torch.randn(1, 4),))
+
     def test_squeeze1(self):
         def fn(a):
             return ((a + 1).squeeze() + 2, a.squeeze() + 2)
