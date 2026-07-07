@@ -112,7 +112,7 @@ def get_scale_by_from_metas(*metas: ChunkingMeta) -> Node | None:
     raise a CantChunk exception.
 
     If no ChunkingMeta has scale_by field, return None.
-    Other wise return the only scale_by field.
+    Otherwise return the only scale_by field.
     """
 
     scale_by_list = []
@@ -142,7 +142,8 @@ def get_node_is_scalar(nodes: Sequence[Node]) -> dict[Node, bool]:
     node_is_scalar = {}
     for node in nodes:
         ft = get_fake_tensor_from_node_arg(node)
-        assert ft is not None
+        if ft is None:
+            raise AssertionError(f"expected a fake tensor for node {node}, got None")
         node_is_scalar[node] = ft.numel() == 1
     return node_is_scalar
 
@@ -154,7 +155,8 @@ def get_node_ndim(nodes: Sequence[Node]) -> dict[Node, int]:
     node_ndim = {}
     for node in nodes:
         ft = get_fake_tensor_from_node_arg(node)
-        assert ft is not None
+        if ft is None:
+            raise AssertionError(f"expected a fake tensor for node {node}, got None")
         node_ndim[node] = ft.ndim
     return node_ndim
 

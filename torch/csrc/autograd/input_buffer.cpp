@@ -21,6 +21,46 @@
 
 namespace torch::autograd {
 
+std::optional<c10::Stream> maybe_override_stale_capture_stream(
+    const std::optional<c10::Stream>& node_stream,
+    const std::optional<c10::Stream>& capturing_stream,
+    const std::string& node_name) {
+  TORCH_INTERNAL_ASSERT(
+      node_stream.has_value() && !node_stream->is_capturing(),
+      "maybe_override_stale_capture_stream: node_stream must be set and "
+      "non-capturing");
+  TORCH_INTERNAL_ASSERT(
+      capturing_stream.has_value() && capturing_stream->is_capturing(),
+      "maybe_override_stale_capture_stream: capturing_stream must be set "
+      "and capturing");
+  if (at::globalContext().overrideStaleCaptureStream()) {
+    return capturing_stream;
+  }
+  if (node_stream->id() == 0) {
+    TORCH_CHECK(
+        false,
+        "During CUDA graph capture, autograd node '",
+        node_name,
+        "' has a stale reference to the default stream (stream 0) from "
+        "warmup. This will invalidate the capture because "
+        "cudaStreamWaitEvent on the default stream pulls a non-capturing "
+        "stream into the graph.\n\n"
+        "To fix, either:\n"
+        "  (a) Run warmup on the same stream that capture will use, or\n"
+        "  (b) Delete references to the loss / autograd graph (e.g. "
+        "`del loss`) before capture, or\n"
+        "  (c) Call torch.autograd.graph."
+        "set_override_stale_capture_stream(True) to automatically "
+        "redirect stale nodes to the capturing stream.");
+  }
+  // Non-default stale stream: leave unchanged. The user may have joined it
+  // into the capture (e.g. via `capture_stream.wait_stream(stale_stream)`)
+  // in which case the capture will succeed; otherwise the CUDA runtime will
+  // fail the capture with a downstream error. Users who want an automatic
+  // redirect can opt in via set_override_stale_capture_stream(True).
+  return node_stream;
+}
+
 namespace {
 // look what you made me do >.<
 // Divergent paths for per-Impl stream recording that leak implementation
@@ -226,28 +266,61 @@ void InputBuffer::add(
   // opt_consumer_stream is always non-null when is_accelerator is true
   // when InputBuffer is used in the engine. InputBuffer is also called
   // elsewhere however! (e.g. other engine implementations)
-  const std::optional<c10::Stream>& opt_consumer_stream =
-      (opt_consumer_stream_.has_value()
-           ? opt_consumer_stream_
-           : std::optional<c10::Stream>(
-                 at::accelerator::getCurrentStream(device.index())));
+  //
+  // If a prior add() on this InputBuffer applied the stale-capture
+  // override, reuse the cached stream so every producer sees the same
+  // consumer stream. Otherwise honor the caller-provided value, falling
+  // back to the device's current stream.
+  std::optional<c10::Stream> opt_consumer_stream;
+  if (opt_overridden_consumer_stream.has_value()) {
+    opt_consumer_stream = opt_overridden_consumer_stream;
+  } else if (opt_consumer_stream_.has_value()) {
+    opt_consumer_stream = opt_consumer_stream_;
+  } else {
+    opt_consumer_stream = at::accelerator::getCurrentStream(device.index());
+  }
 
   TORCH_INTERNAL_ASSERT(opt_consumer_stream && opt_producer_stream);
 
-  if (*opt_consumer_stream != *opt_producer_stream &&
-      dynamic_cast<AccumulateGrad*>(fn) &&
+  // Handle producer/consumer stream mismatch. Two independent cases:
+  //   1. Producer is capturing but the consumer holds a stale non-capturing
+  //      stream (e.g. from warmup). Depending on
+  //      `set_override_stale_capture_stream` the helper either errors out
+  //      (default stream), overrides the consumer stream with the producer's
+  //      capturing stream, or leaves it unchanged. A successful override
+  //      resolves the mismatch for case 2 and is cached on the InputBuffer
+  //      so every producer and Engine::evaluate_function see it.
+  //   2. Pre-existing AccumulateGrad-stream-mismatch warning from
+  //      PR #166136. Fires only when the mismatch still exists after case 1.
+  bool stream_mismatch = opt_consumer_stream->id() != opt_producer_stream->id();
+  if (stream_mismatch && opt_producer_stream->is_capturing() &&
+      !opt_consumer_stream->is_capturing()) {
+    auto resolved = maybe_override_stale_capture_stream(
+        opt_consumer_stream, opt_producer_stream, fn->name());
+    if (resolved != opt_consumer_stream) {
+      // Override was applied. Cache so subsequent add() calls and
+      // Engine::evaluate_function consult the same consumer stream.
+      opt_consumer_stream = resolved;
+      opt_overridden_consumer_stream = opt_consumer_stream;
+      stream_mismatch = false;
+    }
+  }
+  if (stream_mismatch && dynamic_cast<AccumulateGrad*>(fn) &&
       at::globalContext().warnOnAccumulateGradStreamMismatch()) {
     TORCH_WARN_ONCE(
-        "The AccumulateGrad node's stream does not match the stream of the node that produced "
-        "the incoming gradient. This may incur unnecessary synchronization and break CUDA graph "
-        "capture if the AccumulateGrad node's stream is the default stream. This mismatch is "
-        "caused by an AccumulateGrad node created prior to the current iteration being kept alive. "
-        "This can happen if the autograd graph is still being kept alive by tensors such as the "
-        "loss, or if you are using DDP, which will stash a reference to the node. To resolve the "
-        "mismatch, delete all references to the autograd graph or ensure that DDP initialization is "
-        "performed under the same stream as subsequent forwards. If the mismatch is intentional, "
-        "you can use torch.autograd.graph.set_warn_on_accumulate_grad_stream_mismatch(False) to suppress this "
-        "warning.");
+        "The AccumulateGrad node's stream does not match the stream of the "
+        "node that produced the incoming gradient. This may incur unnecessary "
+        "synchronization and break CUDA graph capture if the AccumulateGrad "
+        "node's stream is the default stream. This mismatch is caused by an "
+        "AccumulateGrad node created prior to the current iteration being "
+        "kept alive. This can happen if the autograd graph is still being "
+        "kept alive by tensors such as the loss, or if you are using DDP, "
+        "which will stash a reference to the node. To resolve the mismatch, "
+        "delete all references to the autograd graph or ensure that DDP "
+        "initialization is performed under the same stream as subsequent "
+        "forwards. If the mismatch is intentional, you can use "
+        "torch.autograd.graph.set_warn_on_accumulate_grad_stream_mismatch("
+        "False) to suppress this warning.");
   }
   // See Note: [Autograd Producer-Consumer Stream Syncs]
   if (!opt_accum_streams[pos].has_value()) {

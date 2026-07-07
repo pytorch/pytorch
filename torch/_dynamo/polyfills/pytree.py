@@ -195,15 +195,22 @@ class PyTreeSpec:
 
     def __post_init__(self, /) -> None:
         if self._type is None:
-            assert len(self._children) == 0
-            assert self._metadata is None
-            assert self._entries == ()
-            assert self._unflatten_func is None
+            if len(self._children) != 0:
+                raise AssertionError("Leaf node must have no children")
+            if self._metadata is not None:
+                raise AssertionError("Leaf node must have no metadata")
+            if self._entries != ():
+                raise AssertionError("Leaf node must have no entries")
+            if self._unflatten_func is not None:
+                raise AssertionError("Leaf node must have no unflatten_func")
             num_nodes = 1
             num_leaves = 1
             num_children = 0
         else:
-            assert callable(self._unflatten_func)
+            if not callable(self._unflatten_func):
+                raise AssertionError(
+                    "Non-leaf node must have a callable unflatten_func"
+                )
             num_nodes = 1
             num_leaves = 0
             for child in self._children:
@@ -218,11 +225,16 @@ class PyTreeSpec:
     def __repr__(self, /) -> str:
         def helper(treespec: PyTreeSpec) -> str:
             if treespec.is_leaf():
-                assert treespec.type is None
+                if treespec.type is not None:
+                    raise AssertionError("Leaf treespec must have type None")
                 return _asterisk
 
-            assert treespec.type is not None
-            assert callable(treespec._unflatten_func)
+            if treespec.type is None:
+                raise AssertionError("Non-leaf treespec must have a type")
+            if not callable(treespec._unflatten_func):
+                raise AssertionError(
+                    "Non-leaf treespec must have a callable unflatten_func"
+                )
             children_representations = [
                 helper(subspec) for subspec in treespec._children
             ]
@@ -285,11 +297,13 @@ class PyTreeSpec:
                 return
 
             node_type = treespec.type
-            assert node_type is not None
+            if node_type is None:
+                raise AssertionError("Non-leaf treespec must have a type")
             handler = optree.register_pytree_node.get(
                 node_type, namespace=treespec.namespace
             )
-            assert handler is not None
+            if handler is None:
+                raise AssertionError(f"No pytree handler registered for {node_type}")
             kind: optree.PyTreeKind = handler.kind
             path_entry_type: type[optree.PyTreeEntry] = handler.path_entry_type
 
@@ -428,7 +442,8 @@ class PyTreeSpec:
             subtrees.append(subspec.unflatten(leaves[start:end]))
             start = end
 
-        assert callable(self._unflatten_func)
+        if not callable(self._unflatten_func):
+            raise AssertionError("Non-leaf node must have a callable unflatten_func")
         return self._unflatten_func(self._metadata, subtrees)
 
 
@@ -485,7 +500,8 @@ def treespec_tuple(
             f"as the parent; expected {namespace!r}, got: {children!r}.",
         )
     handler = optree.register_pytree_node.get(tuple, namespace=namespace)
-    assert handler is not None
+    if handler is None:
+        raise AssertionError("No pytree handler registered for tuple")
     return PyTreeSpec(
         tuple(children),
         tuple,
@@ -710,7 +726,8 @@ def tree_unflatten(treespec: PyTreeSpec, leaves: Iterable[Any]) -> PyTree:
 
 
 _none_registration = optree.register_pytree_node.get(type(None))
-assert _none_registration is not None
+if _none_registration is None:
+    raise AssertionError("No pytree handler registered for NoneType")
 
 
 @substitute_in_graph(  # type: ignore[arg-type]
@@ -726,7 +743,8 @@ def none_unflatten(_: None, children: Iterable[_T], /) -> None:
 
 with optree.dict_insertion_ordered(False, namespace="torch"):
     _dict_registration = optree.register_pytree_node.get(dict)
-    assert _dict_registration is not None
+    if _dict_registration is None:
+        raise AssertionError("No pytree handler registered for dict")
 
 
 @substitute_in_graph(  # type: ignore[arg-type]

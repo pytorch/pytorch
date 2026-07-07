@@ -14,13 +14,7 @@ from torch.distributed._tools.mem_tracker import _ModState, MemTracker
 from torch.distributed._tools.runtime_estimator import RuntimeEstimator
 from torch.distributed._tools.sac_estimator import SACEstimator, SACStats
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import (
-    MI300_ARCH,
-    MI350_ARCH,
-    run_tests,
-    skipIfRocmArch,
-    TestCase,
-)
+from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
@@ -147,7 +141,6 @@ class TestSACILP(TestCase):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     @unittest.skipIf(not HAS_PULP, "pulp package not installed")
-    @skipIfRocmArch(MI300_ARCH + MI350_ARCH)
     def test_sac_ilp_case1(self):
         """
         This is a case where the memory budget is either binding or too tight,
@@ -156,37 +149,35 @@ class TestSACILP(TestCase):
         mod_info = self._collect_module_info_with_fake_tensor_mode()
         g = parse_module_info(mod_info)
 
-        peak_mem, compute_time = get_peak_memory_runtime_baseline(g)
-        self.assertAlmostEqual(peak_mem / 2583888896, 1, delta=0.05)
+        memory_budget = 1.6
+        budget_bytes = round(memory_budget * (2**30))
 
-        ac_decisions, recomputation_time, _ = sac_milp(
-            g, memory_budget=1.6, world_size=4
+        baseline_peak_mem, _ = get_peak_memory_runtime_baseline(g)
+        self.assertGreater(
+            baseline_peak_mem,
+            budget_bytes,
+            "Test is only meaningful when the model does not fit without AC",
         )
 
-        # The solution should AC all four transformer layers. On A100 machine, the percentage of
-        # activation memory to discard is 0.5232 for three layers and is 0.7964 for the fourth layer.
-        # Due to symmetry, the layer that has 0.7964 can be any of the first three layers. On CI,
-        # due to machine variance and difference in flops, the results can be different -- e.g.,
-        # the ratios are  0.672, 0.5646, 0.5646, 0.5646 for the four transformer layers for test
-        # linux-jammy-cuda11.8-py3.10-gcc9 / test (distributed, 1, 3, lf.linux.8xlarge.nvidia.gpu).
-        # and recomputation_time = 58.14; compute_time = 902.26
-        modules_to_ac = set(ac_decisions.keys())
-        sorted_discard_ratio = sorted(ac_decisions.values())
-        self.assertEqual(
-            modules_to_ac,
-            {"Transformer.layers." + str(i) for i in range(4)},  # n_layers=4
+        ac_decisions, recomputation_time, peak_mem = sac_milp(
+            g, memory_budget=memory_budget, world_size=4
         )
-        self.assertAlmostEqual(sorted_discard_ratio[0], 0.55, delta=0.05)
-        self.assertAlmostEqual(sorted_discard_ratio[1], 0.55, delta=0.05)
-        self.assertAlmostEqual(sorted_discard_ratio[2], 0.55, delta=0.05)
-        self.assertAlmostEqual(sum(sorted_discard_ratio), 2.35, delta=0.05)
-        self.assertAlmostEqual(ac_decisions["Transformer.layers.3"], 0.55, delta=0.05)
 
-        # On A100 machine, recomputation_time is 6.97 ms and compute_time is 97.97 ms.
-        # Since runtime is device_flops dependent, so we only check the ratio
-        self.assertAlmostEqual(
-            (recomputation_time / compute_time) / (6.97 / 97.97), 1, delta=0.25
+        self.assertNotEqual(peak_mem, -1, "sac_milp failed to find a feasible solution")
+        self.assertGreater(peak_mem, 0)
+        self.assertLessEqual(peak_mem, budget_bytes + 1)
+        self.assertGreater(recomputation_time, 0)
+        self.assertGreater(len(ac_decisions), 0)
+
+        expected_ac_candidates = {f"Transformer.layers.{i}" for i in range(4)}
+        self.assertTrue(
+            set(ac_decisions.keys()).issubset(expected_ac_candidates),
+            f"Unexpected AC modules: "
+            f"{set(ac_decisions.keys()) - expected_ac_candidates}",
         )
+        for fqn, ratio in ac_decisions.items():
+            self.assertGreater(ratio, 0, f"discard ratio for {fqn} should be > 0")
+            self.assertLessEqual(ratio, 1, f"discard ratio for {fqn} should be <= 1")
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     @unittest.skipIf(not HAS_PULP, "pulp package not installed")

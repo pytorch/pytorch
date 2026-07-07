@@ -30,30 +30,11 @@ PREFIX = "test-config/"
 logging.basicConfig(level=logging.INFO)
 
 
-def is_cuda_or_rocm_job(
-    job_name: str | None, config: dict[str, Any] | None = None
-) -> bool:
-    if job_name and ("cuda" in job_name or "rocm" in job_name):
-        return True
-
-    # Also check the runner name in the config, since some workflows (e.g.
-    # inductor-unittest) use job names that don't include "cuda" even though
-    # they target CUDA runners.
-    if config:
-        runner = config.get("runner", "")
-        if "nvidia.gpu" in runner or "rocm.gpu" in runner:
-            return True
-
-    return False
-
-
 # Supported modes when running periodically. Only applying the mode when
 # its lambda condition returns true. Each callable receives (job_name, config).
 SUPPORTED_PERIODICAL_MODES: dict[
     str, Callable[[str | None, dict[str, Any] | None], bool]
 ] = {
-    # Memory leak check is only needed for CUDA and ROCm jobs which utilize GPU memory
-    "mem_leak_check": is_cuda_or_rocm_job,
     "rerun_disabled_tests": lambda job_name, config=None: True,
 }
 
@@ -69,7 +50,6 @@ TEST_JOB_NAME = "test"
 BUILD_AND_TEST_JOB_NAME = "build-and-test"
 JOB_NAME_CFG_REGEX = re.compile(r"(?P<job>[\w-]+)\s+\((?P<cfg>[\w-]+)\)")
 EXCLUDED_BRANCHES = ["nightly"]
-MEM_LEAK_LABEL = "enable-mem-leak-check"
 
 
 class IssueType(Enum):
@@ -513,6 +493,36 @@ def check_for_setting(labels: set[str], body: str, setting: str) -> bool:
     return setting in labels or f"[{setting}]" in body
 
 
+# Number of stacked PRs the current PR can sit on top of before we refuse
+# to run CI on it. Top-of-stack PRs in tall ghstacks rarely need full CI
+# until the lower entries land; the filter step fails so the author has to
+# rebase (or add ciflow/trunk) to get fresh signal before merging.
+GHSTACK_BELOW_SKIP_THRESHOLD = 10
+# Matches a single ghstack stack-list entry, e.g. "* #12345" or
+# "* __->__ #12345" (the marker for the current PR).
+GHSTACK_STACK_ENTRY_REGEX = re.compile(r"^\* (?:__->__ )?#\d+\s*$", re.MULTILINE)
+# Marks the current PR's line in the stack list.
+GHSTACK_CURRENT_MARKER = "__->__"
+
+
+def get_ghstack_below_count(pr_body: str) -> int:
+    """
+    Return the number of PRs the current PR sits on top of in its ghstack.
+
+    The ghstack PR body lists the stack newest-first (oldest at bottom) with
+    the current PR marked by "__->__". Entries appearing after the current
+    marker are the PRs the current one depends on (its parents in the stack).
+    Returns 0 if the body doesn't look like a ghstack description.
+    """
+    if not pr_body or GHSTACK_CURRENT_MARKER not in pr_body:
+        return 0
+    entries = list(GHSTACK_STACK_ENTRY_REGEX.finditer(pr_body))
+    for i, m in enumerate(entries):
+        if GHSTACK_CURRENT_MARKER in m.group(0):
+            return len(entries) - i - 1
+    return 0
+
+
 def perform_misc_tasks(
     labels: set[str],
     test_matrix: dict[str, list[Any]],
@@ -568,12 +578,6 @@ def perform_misc_tasks(
     )
 
     set_output("reenabled-issues", ",".join(get_reenabled_issues(pr_body=pr_body)))
-
-    if MEM_LEAK_LABEL in labels:
-        # Enable mem leak check if label is added
-        for config in test_matrix.get("include", []):
-            if is_cuda_or_rocm_job(job_name):
-                config["mem_leak_check"] = "mem_leak_check"
 
 
 def main() -> None:
@@ -633,8 +637,8 @@ def main() -> None:
         )
 
     if args.event_name == "schedule" and args.schedule == "29 8 * * *":
-        # we don't want to run the mem leak check or disabled tests on normal
-        # periodically scheduled jobs, only the ones at this time
+        # Only run rerun_disabled_tests on this dedicated periodic schedule,
+        # not on every periodically scheduled job.
         filtered_test_matrix = set_periodic_modes(filtered_test_matrix, args.job_name)
 
     if args.workflow and args.job_name and args.branch not in EXCLUDED_BRANCHES:
@@ -649,6 +653,25 @@ def main() -> None:
         )
 
     pr_body = get_pr_info(int(pr_number)).get("body", "") if pr_number else ""
+
+    # Fail the workflow for PRs sitting on top of a long ghstack: those PRs
+    # will need to be retested once everything underneath lands, so running
+    # full CI now is wasted work. We fail rather than emit an empty matrix so
+    # that the missing signal is visible and pytorchbot won't merge the PR
+    # against stale CI results -- the author must rebase to re-trigger CI.
+    if (
+        pr_number
+        and "ciflow/trunk" not in labels
+        and get_ghstack_below_count(pr_body) >= GHSTACK_BELOW_SKIP_THRESHOLD
+    ):
+        print(
+            f"PR #{pr_number} sits on top of "
+            f">={GHSTACK_BELOW_SKIP_THRESHOLD} ghstack entries; refusing to "
+            "run CI. Rebase once the lower PRs land, or add the ciflow/trunk "
+            "label to force CI on this PR.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     perform_misc_tasks(
         labels=labels,

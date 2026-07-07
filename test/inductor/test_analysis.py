@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 import torch
 import torch.nn.functional as F
+from torch._inductor.analysis.device_info import _device_mapping, lookup_device_info
 from torch._inductor.analysis.profile_analysis import (
     _augment_trace_helper,
     _create_extern_mapping,
@@ -271,6 +272,15 @@ class TestUtils(TestCase):
         self.assertEqual(set(res1), {("a", 1, 3), ("b", 2, 48), ("c", 32, 4)})
         res2 = zip_dicts(d1, d2)
         self.assertEqual(set(res2), {("a", 1, 3), ("b", 2, None), ("c", None, 4)})
+
+    def test_device_mapping_keys_are_upper_case(self):
+        self.assertTrue(all(k == k.upper() for k in _device_mapping))
+
+    def test_lookup_device_info_is_case_insensitive(self):
+        upper = lookup_device_info("AMD INSTINCT MI300X")
+        self.assertIsNotNone(upper)
+        self.assertEqual(lookup_device_info("AMD Instinct MI300X"), upper)
+        self.assertEqual(lookup_device_info("amd instinct mi300x"), upper)
 
 
 def has_supported_gpu():

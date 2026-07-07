@@ -3,6 +3,7 @@
 #include <c10/util/Logging.h>
 #include <c10/util/Type.h>
 
+#include <atomic>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -117,6 +118,7 @@ void torchCheckFail(
     const char* file,
     uint32_t line,
     const std::string& msg) {
+  // NOLINTNEXTLINE(modernize-use-designated-initializers)
   throw ::c10::Error({func, file, line}, msg);
 }
 
@@ -125,6 +127,7 @@ void torchCheckFail(
     const char* file,
     uint32_t line,
     const char* msg) {
+  // NOLINTNEXTLINE(modernize-use-designated-initializers)
   throw ::c10::Error({func, file, line}, msg);
 }
 
@@ -189,14 +192,14 @@ WarningHandler* get_warning_handler() noexcept(true) {
   return ThreadWarningHandler::get_handler();
 }
 
-static bool warn_always = false;
+static constinit std::atomic<bool> warn_always{false};
 
 void set_warnAlways(bool setting) noexcept(true) {
-  warn_always = setting;
+  warn_always.store(setting, std::memory_order_relaxed);
 }
 
 bool get_warnAlways() noexcept(true) {
-  return warn_always;
+  return warn_always.load(std::memory_order_relaxed);
 }
 
 WarnAlways::WarnAlways(bool setting /*=true*/)

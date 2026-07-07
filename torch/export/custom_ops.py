@@ -4,7 +4,7 @@ import importlib
 import torch
 
 
-lib = torch.library.Library("export", "FRAGMENT")  # noqa: TOR901
+lib = torch.library.Library("export", "FRAGMENT")
 
 lib.define(
     "access_subclass_inner_tensor(Tensor src_subclass_tensor, str attr) -> Tensor"

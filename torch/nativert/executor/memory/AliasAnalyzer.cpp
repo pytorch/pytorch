@@ -160,7 +160,7 @@ void AliasAnalyzer::squash_deep_aliases(const Graph& graph) {
         auto& srcs_of_src = srcAliasIt->second;
         for (const auto* src_of_src : srcs_of_src) {
           // if the source of the source is not an alias
-          // (i.e., it has ownership over it's data ptr)
+          // (i.e., it has ownership over its data ptr)
           // then we want to add it as a source of 'output'
           if (aliases_.find(src_of_src) == aliases_.end()) {
             filtered_srcs.emplace(src_of_src);

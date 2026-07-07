@@ -70,7 +70,7 @@ void _segment_reduce_lengths_cpu_kernel1(
             }
             for (const auto inner_idx : c10::irange(inner_offset)) {
               // ===== step1: initialize starting value
-              scalar_t initial_value;
+              scalar_t initial_value = 0;
               if (initial.has_value()) {
                 initial_value = initial.value().to<scalar_t>();
               } else if (reduction == ReductionType::MAX) {

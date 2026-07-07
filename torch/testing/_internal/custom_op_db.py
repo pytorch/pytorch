@@ -556,7 +556,7 @@ custom_op_db = [
 # some mechanical test cases
 # ==============================================================
 
-lib = torch.library.Library("_torch_testing", "FRAGMENT")  # noqa: TOR901
+lib = torch.library.Library("_torch_testing", "FRAGMENT")
 
 lib.define("source0(Tensor x) -> Tensor")
 

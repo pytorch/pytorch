@@ -176,7 +176,7 @@ class Verifier(metaclass=_VerifierMeta):
         return (torch.fx.GraphModule, torch.utils._pytree.TreeSpec)
 
     def allowed_getattr_types_for_subgm(self) -> tuple[type[Any], ...]:
-        # subgm in HOP's argument could has have getattr(weight) nodes, thus stateful
+        # subgm in HOP's argument could have getattr(weight) nodes, thus stateful
         return (
             torch.fx.GraphModule,
             torch.nn.parameter.Parameter,
@@ -376,6 +376,10 @@ def _verify_exported_program_signature(exported_program) -> None:
     # Check ExportedProgram signature matches
     gs = exported_program.graph_signature
 
+    # Lazily computed on first use; avoids calling graph_module.state_dict()
+    # unless at least one buffer is missing from the top-level state_dict.
+    _gm_state_dict: dict | None = None
+
     # Check every node in the signature exists in the graph
     input_node_names = [
         node.name for node in exported_program.graph.nodes if node.op == "placeholder"
@@ -446,7 +450,18 @@ def _verify_exported_program_signature(exported_program) -> None:
                 input_spec.persistent is True
                 and buffer not in exported_program.state_dict
             ):
-                raise SpecViolationError(f"Buffer {buffer} is not in the state dict.")
+                # Allow buffers that live in constants or in a subgraph
+                # submodule (e.g. lifted tensor constants from
+                # invoke_subgraph tracing stored under repeated_subgraph0).
+                # Use a lazy copy of the graph module state to avoid the
+                # cost of state_dict() when no fallback is needed.
+                if buffer not in exported_program.constants:
+                    if _gm_state_dict is None:
+                        _gm_state_dict = exported_program.graph_module.state_dict()
+                    if buffer not in _gm_state_dict:
+                        raise SpecViolationError(
+                            f"Buffer {buffer} is not in the state dict."
+                        )
 
             if input_spec.persistent is False and buffer in exported_program.state_dict:
                 raise SpecViolationError(
@@ -514,41 +529,44 @@ def _verify_exported_program_signature(exported_program) -> None:
         )
 
     num_tokens = len(gs.output_tokens)
+    buffers_to_mutate = gs.buffers_to_mutate
+    parameters_to_mutate = gs.parameters_to_mutate
+    user_inputs_to_mutate = gs.user_inputs_to_mutate
     end = (
-        len(gs.buffers_to_mutate)
-        + len(gs.parameters_to_mutate)
-        + len(gs.user_inputs_to_mutate)
+        len(buffers_to_mutate)
+        + len(parameters_to_mutate)
+        + len(user_inputs_to_mutate)
         + num_tokens
     )
     mutate_nodes: list[str] = output_nodes[num_tokens:end]
     user_output_nodes = output_nodes[end : end + len(gs.user_outputs)]
 
     for mutation_node in mutate_nodes:
-        if mutation_node in gs.buffers_to_mutate:
-            if gs.buffers_to_mutate[mutation_node] not in gs.buffers:
+        if mutation_node in buffers_to_mutate:
+            if buffers_to_mutate[mutation_node] not in gs.buffers:
                 raise SpecViolationError(
                     f"Buffer output {mutation_node} does not point to a buffer that exists. \n"
-                    f"Dict of buffers that are mutated, in order: {gs.buffers_to_mutate} \n"
+                    f"Dict of buffers that are mutated, in order: {buffers_to_mutate} \n"
                     f"Buffer nodes available: {gs.buffers} \n"
                 )
-        elif mutation_node in gs.parameters_to_mutate:
-            if gs.parameters_to_mutate[mutation_node] not in gs.parameters:
+        elif mutation_node in parameters_to_mutate:
+            if parameters_to_mutate[mutation_node] not in gs.parameters:
                 raise SpecViolationError(
                     f"Parameter output {mutation_node} does not point to a parameter that exists. \n"
-                    f"Dict of parameters that are mutated, in order: {gs.parameters_to_mutate} \n"
+                    f"Dict of parameters that are mutated, in order: {parameters_to_mutate} \n"
                     f"Parameter nodes available: {gs.parameters} \n"
                 )
-        elif mutation_node in gs.user_inputs_to_mutate:
-            if gs.user_inputs_to_mutate[mutation_node] not in gs.user_inputs:
+        elif mutation_node in user_inputs_to_mutate:
+            if user_inputs_to_mutate[mutation_node] not in gs.user_inputs:
                 raise SpecViolationError(
                     f"User input output {mutation_node} does not point to a user input that exists. \n"
-                    f"Dict of user inputs that are mutated, in order: {gs.user_inputs_to_mutate} \n"
+                    f"Dict of user inputs that are mutated, in order: {user_inputs_to_mutate} \n"
                     f"User input nodes available: {gs.user_inputs} \n"
                 )
         else:
             raise SpecViolationError(
                 f"Mutation node {mutation_node} is neither a buffer nor a user input. "
-                f"Buffers to mutate: {gs.buffers_to_mutate}, User inputs to mutate: {gs.user_inputs_to_mutate}"
+                f"Buffers to mutate: {buffers_to_mutate}, User inputs to mutate: {user_inputs_to_mutate}"
             )
 
     for user_output_node, user_output_name in zip(user_output_nodes, gs.user_outputs):

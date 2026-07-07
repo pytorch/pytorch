@@ -1,9 +1,10 @@
-#include <sstream>
+// @allow-raw-throw
 #include <unordered_map>
 
 #include <c10/util/Exception.h>
 #include <c10/util/FileSystem.h>
 #include <c10/util/thread_name.h>
+#include <nlohmann/json.hpp>
 #include <torch/csrc/distributed/c10d/control_plane/WorkerServer.hpp>
 #include <torch/csrc/distributed/c10d/logging.h>
 
@@ -45,32 +46,6 @@ class ResponseImpl : public Response {
   httplib::Response& res_;
 };
 
-std::string jsonStrEscape(const std::string& str) {
-  std::ostringstream ostream;
-  for (char ch : str) {
-    if (ch == '"') {
-      ostream << "\\\"";
-    } else if (ch == '\\') {
-      ostream << "\\\\";
-    } else if (ch == '\b') {
-      ostream << "\\b";
-    } else if (ch == '\f') {
-      ostream << "\\f";
-    } else if (ch == '\n') {
-      ostream << "\\n";
-    } else if (ch == '\r') {
-      ostream << "\\r";
-    } else if (ch == '\t') {
-      ostream << "\\t";
-    } else if (ch <= '\x1f') {
-      ostream << "\\u" << std::hex << std::setw(4) << std::setfill('0')
-              << static_cast<int>(ch);
-    } else {
-      ostream << ch;
-    }
-  }
-  return ostream.str();
-}
 } // namespace
 
 WorkerServer::WorkerServer(const std::string& hostOrFile, int port) {
@@ -85,20 +60,8 @@ WorkerServer::WorkerServer(const std::string& hostOrFile, int port) {
   server_.Get(
       "/handler/",
       [](const httplib::Request& req [[maybe_unused]], httplib::Response& res) {
-        std::ostringstream body;
-        body << '[';
-        bool first = true;
-        for (const auto& name : getHandlerNames()) {
-          if (!first) {
-            body << ',';
-          }
-          first = false;
-
-          body << '"' << jsonStrEscape(name) << '"';
-        }
-        body << ']';
-
-        res.set_content(body.str(), "application/json");
+        res.set_content(
+            nlohmann::json(getHandlerNames()).dump(), "application/json");
       });
   server_.Post(
       "/handler/:handler",

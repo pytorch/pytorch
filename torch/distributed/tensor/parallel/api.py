@@ -64,7 +64,7 @@ def parallelize_module(  # type: ignore[return]
 
     .. note:: For complex module architecture like Attention, MLP layers, we recommend composing
         different ParallelStyles together (i.e. ``ColwiseParallel`` and ``RowwiseParallel``) and pass
-        as a parallelize_plan, to achieves the desired sharding computation.
+        as a parallelize_plan, to achieve the desired sharding computation.
     """
     torch._C._log_api_usage_once("torch.distributed.tensor.parallel.parallelize_module")
 

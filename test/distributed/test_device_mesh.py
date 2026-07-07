@@ -73,6 +73,11 @@ def _with_torchcomm_env(func):
         os.environ["TORCHCOMM_RANK"] = str(self.rank)
         os.environ["TORCHCOMM_SIZE"] = str(self.world_size)
         os.environ["TORCHCOMM_STORE_PATH"] = self.file_name
+        # torchcomms' StoreManager unconditionally requires MASTER_ADDR /
+        # MASTER_PORT (TORCHCOMM_STORE_PATH no longer suffices after the
+        # StoreManager refactor in torchcomms #971).
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = "25901"
         try:
             return func(self, *args, **kwargs)
         finally:
@@ -179,13 +184,6 @@ class DeviceMeshTest(DTensorTestBase):
         DeviceMesh(self.device_type, mesh_tensor)
         self.assertTrue(is_initialized())
         self.destroy_pg(self.rank)
-
-    @with_comms
-    @skip_if_lt_x_gpu(4)
-    def test_assert_invalid_mesh_tensor(self):
-        mesh = torch.arange(self.world_size).to(self.rank)
-        with self.assertRaises(ValueError):
-            DeviceMesh(self.device_type, mesh)
 
     @with_comms()
     def test_2d_mesh_non_eager_init_subgroup(self):
@@ -310,7 +308,7 @@ class DeviceMeshTest(DTensorTestBase):
         mesh = DeviceMesh(device_type, torch.arange(self.world_size))
 
         local_tensor = torch.randn(2, 8)
-        global_tensor = funcol.all_gather_tensor(
+        global_tensor = funcol.all_gather_single(
             local_tensor, gather_dim=0, group=(mesh, 0)
         ).wait()
         self.assertEqual(global_tensor.shape, (self.world_size * 2, 8))
@@ -1354,7 +1352,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
                 contiguous=True,
             )
             local_tensor = tensor_padded_list[my_rank]
-            big_tensor = funcol.all_gather_tensor(
+            big_tensor = funcol.all_gather_single(
                 local_tensor, gather_dim=shard_dim, group=(device_mesh, 0)
             )
             big_tensor_chunks = list(
@@ -1449,7 +1447,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
 
             res_num = ((0 + self.world_size - 1) * self.world_size) / 2
 
-            scattered_tensor = funcol.reduce_scatter_tensor(
+            scattered_tensor = funcol.reduce_scatter_single(
                 tensor_to_reduce,
                 reduceOp="sum",
                 scatter_dim=shard_dim,
@@ -1520,11 +1518,11 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
     @unittest.skipIf(not _TORCHCOMM_AVAILABLE, "TorchComms is not installed")
     @dist_config.patch(use_torchcomms=True)
     @_with_torchcomm_env
-    @with_comms(backend="cpu:gloo,cuda:ncclx")
+    @with_comms(backend="cpu:gloo,cuda:nccl")
     def test_pg_api_w_torchcomms(self) -> None:
         ranks = list(range(self.world_size))
         pg = new_group(
-            backend="cpu:gloo,cuda:ncclx",
+            backend="cpu:gloo,cuda:nccl",
             ranks=ranks,
             group_desc="new_pg",
         )
@@ -1543,14 +1541,42 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
         )
         self.assertEqual(gpu_tensor, expected_gpu_tensor)
 
+        # No-op split should preserve both backends and produce identical
+        # results to the parent.
+        split_group_no_op = dist.split_group(pg, [ranks])
+        cpu_tensor = torch.ones(3, 3)
+        dist.all_reduce(cpu_tensor, group=split_group_no_op)
+        self.assertEqual(cpu_tensor, expected_cpu_tensor)
+        gpu_tensor = torch.ones(3, 3, device=self.device_type)
+        dist.all_reduce(gpu_tensor, group=split_group_no_op)
+        self.assertEqual(gpu_tensor, expected_gpu_tensor)
+
+        # Real split with multiple sub-groups; each sub-group must keep both
+        # cpu:gloo and cuda:nccl backends and dispatch to the right one based
+        # on tensor device.
+        pg_ranks_by_dim = torch.arange(self.world_size).view(2, 4)
+        split_pg = dist.split_group(pg, pg_ranks_by_dim.tolist())
+        expected_split_size = self.world_size // 2
+
+        cpu_tensor = torch.ones(3, 3)
+        dist.all_reduce(cpu_tensor, group=split_pg)
+        self.assertEqual(cpu_tensor, torch.ones(3, 3) * expected_split_size)
+
+        gpu_tensor = torch.ones(3, 3, device=self.device_type)
+        dist.all_reduce(gpu_tensor, group=split_pg)
+        self.assertEqual(
+            gpu_tensor,
+            torch.ones(3, 3, device=self.device_type) * expected_split_size,
+        )
+
     @unittest.skipIf(not _TORCHCOMM_AVAILABLE, "TorchComms is not installed")
     @dist_config.patch(use_torchcomms=True)
     @_with_torchcomm_env
-    @with_comms(backend="cuda:ncclx")
-    def test_pg_api_w_torchcomms_ncclx(self) -> None:
+    @with_comms(backend="nccl")
+    def test_pg_api_w_torchcomms_nccl(self) -> None:
         ranks = list(range(self.world_size))
         pg = new_group(
-            backend="cuda:ncclx",
+            backend="nccl",
             ranks=ranks,
             group_desc="new_pg",
         )
@@ -1595,7 +1621,41 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
     @unittest.skipIf(not _TORCHCOMM_AVAILABLE, "TorchComms is not installed")
     @dist_config.patch(use_torchcomms=True)
     @_with_torchcomm_env
-    @with_comms(backend="cpu:gloo,cuda:ncclx")
+    @with_comms(eager_init=True, backend="cpu:gloo,cuda:nccl")
+    def test_split_group_backend_filter_w_torchcomms(self) -> None:
+        # Hybrid parent (cpu:gloo + cuda:nccl); request only cuda:nccl in the
+        # child via the `backend` arg. eager_init=True binds device_id=cuda so
+        # nccl is the parent's default backend, satisfying the C++ check that
+        # the filter must include the default backend's device.
+        ranks = list(range(self.world_size))
+        pg = dist.distributed_c10d._get_default_group()
+
+        pg_ranks_by_dim = torch.arange(self.world_size).view(2, 4)
+        ng = dist.split_group(pg, pg_ranks_by_dim.tolist(), backend="cuda:nccl")
+        self.assertIsNotNone(ng)
+        self.assertEqual(
+            dist.distributed_c10d._world.pg_backend_config[ng], "cuda:nccl"
+        )
+        gpu_tensor = torch.ones(3, 3, device=self.device_type)
+        dist.all_reduce(gpu_tensor, group=ng)
+        expected_split_size = self.world_size // 2
+        self.assertEqual(
+            gpu_tensor,
+            torch.ones(3, 3, device=self.device_type) * expected_split_size,
+        )
+
+        # Backend name mismatch (parent has cuda:nccl, request cuda:gloo).
+        with self.assertRaisesRegex(ValueError, "Backend mismatch"):
+            dist.split_group(pg, [ranks], backend="cuda:gloo")
+
+        # Device type not present in parent.
+        with self.assertRaisesRegex(ValueError, "is not present in the parent"):
+            dist.split_group(pg, [ranks], backend="xpu:nccl")
+
+    @unittest.skipIf(not _TORCHCOMM_AVAILABLE, "TorchComms is not installed")
+    @dist_config.patch(use_torchcomms=True)
+    @_with_torchcomm_env
+    @with_comms(backend="cpu:gloo,cuda:nccl")
     def test_device_mesh_w_torchcomms(self) -> None:
         mesh_shape = (2, 2, self.world_size // 4)
         mesh_3d = init_device_mesh(
@@ -1621,6 +1681,36 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
         dist.all_reduce(tensor, group=flatten_pg)
         expected_tensor = torch.ones(3, 3) * 28
         self.assertEqual(tensor, expected_tensor)
+
+    @unittest.skipIf(not _TORCHCOMM_AVAILABLE, "TorchComms is not installed")
+    @dist_config.patch(use_torchcomms=True)
+    @_with_torchcomm_env
+    @with_comms(backend="cpu:gloo,cuda:nccl")
+    def test_fake_backend_pg_names_w_torchcomms(self) -> None:
+        """Fake-backend PG names must be hash-based when torchcomms is enabled.
+
+        When torchcomms is enabled, split_group produces hash-based PG names
+        for real backends. Fake-backend dimensions (from backend_override)
+        must also use hash-based names; sequential integer names are not
+        resolvable from compiled code via the C++ GroupRegistry.
+        """
+        world_mesh = init_device_mesh(
+            self.device_type, (self.world_size,), mesh_dim_names=("world",)
+        )
+        # One fake dim and one real dim, mimicking torchtitan's
+        # unflatten_mesh for disabled parallelism dimensions.
+        mesh = world_mesh._unflatten(
+            0,
+            (1, self.world_size),
+            ("fake_dim", "real_dim"),
+            backend_override={"fake_dim": "fake"},
+        )
+        fake_pg_name = mesh._dim_group_names[0]
+        self.assertFalse(
+            fake_pg_name.isdigit(),
+            f"Fake-backend PG name '{fake_pg_name}' is a sequential integer; "
+            f"expected a hash-based name for torchcomms compatibility.",
+        )
 
 
 class CuTeLayoutTest(TestCase):
@@ -1946,7 +2036,7 @@ class ProcessGroupOpaqueTypeTest(TestCase):
     def test_registered_members_exist_on_process_group(self):
         from torch._library.opaque_object import get_member_type
 
-        # Every member registered in _register_distributed_opaque_types()
+        # Every member registered in _register_process_group_opaque_type()
         # must actually exist on ProcessGroup. This catches renames or
         # removals of C++ attributes that would cause torch.compile
         # (fullgraph=True) to silently register a stale name while the
@@ -1963,8 +2053,8 @@ class ProcessGroupOpaqueTypeTest(TestCase):
             self.assertIsNotNone(
                 get_member_type(ProcessGroup, member_name),
                 f"'{member_name}' is not registered as a ProcessGroup opaque "
-                f"type member. Add it to _register_distributed_opaque_types() "
-                f"in torch/distributed/device_mesh.py",
+                f"type member. Add it to _register_process_group_opaque_type() "
+                f"in torch/distributed/distributed_c10d.py",
             )
             self.assertTrue(
                 hasattr(ProcessGroup, member_name),

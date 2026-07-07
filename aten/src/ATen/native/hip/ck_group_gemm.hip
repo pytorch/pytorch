@@ -110,8 +110,8 @@ void launch_grouped_bgemm_ck_impl_dispatch(
     const int mat_a_dim = mat_a.dim();
     const int mat_b_dim = mat_b.dim();
 
-    const char* a_ptr_base = reinterpret_cast<const char*>(mat_a.data_ptr());
-    const char* b_ptr_base = reinterpret_cast<const char*>(mat_b.data_ptr());
+    const char* a_ptr_base = reinterpret_cast<const char*>(mat_a.const_data_ptr());
+    const char* b_ptr_base = reinterpret_cast<const char*>(mat_b.const_data_ptr());
     char* out_ptr_base = reinterpret_cast<char*>(out.data_ptr());
     const size_t a_element_size = mat_a.element_size();
     const size_t b_element_size = mat_b.element_size();

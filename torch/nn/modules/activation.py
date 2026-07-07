@@ -266,14 +266,14 @@ class Hardtanh(Module):
         super().__init__()
         if min_value is not None:
             warnings.warn(
-                "keyword argument `min_value` is deprecated and rename to `min_val`",
+                "keyword argument `min_value` is deprecated and renamed to `min_val`",
                 FutureWarning,
                 stacklevel=2,
             )
             min_val = min_value
         if max_value is not None:
             warnings.warn(
-                "keyword argument `max_value` is deprecated and rename to `max_val`",
+                "keyword argument `max_value` is deprecated and renamed to `max_val`",
                 FutureWarning,
                 stacklevel=2,
             )
@@ -1806,6 +1806,8 @@ class Softmax(Module):
     dim: int | None
 
     def __init__(self, dim: int | None = None) -> None:
+        if dim is not None and (not isinstance(dim, int) or isinstance(dim, bool)):
+            raise TypeError(f"dim must be an int or None, got {type(dim)}")
         super().__init__()
         self.dim = dim
 
@@ -1891,6 +1893,8 @@ class LogSoftmax(Module):
     dim: int | None
 
     def __init__(self, dim: int | None = None) -> None:
+        if dim is not None and (not isinstance(dim, int) or isinstance(dim, bool)):
+            raise TypeError(f"dim must be an int or None, got {type(dim)}")
         super().__init__()
         self.dim = dim
 

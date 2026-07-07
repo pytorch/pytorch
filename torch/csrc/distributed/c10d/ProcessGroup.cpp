@@ -5,6 +5,9 @@
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 
+#include <algorithm>
+#include <unordered_set>
+
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 
 namespace c10d {
@@ -158,19 +161,39 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
     const std::optional<std::chrono::milliseconds>& timeout,
     const std::optional<c10::intrusive_ptr<Backend::Options>>& opts,
     const std::optional<std::string>& name,
-    const std::optional<std::string>& desc) {
+    const std::optional<std::string>& desc,
+    const std::optional<std::vector<c10::Device>>& devices) {
   TORCH_CHECK(
       !ranks.empty(),
       "Split ranks cannot be empty. Please provide a non-empty list of ranks to split the group.");
   TORCH_CHECK(
-      ranks.size() <= static_cast<size_t>(size_),
+      ranks.size() <= static_cast<size_t>(getSize()),
       "the split group's size should be no larger than the world_size set by init_process_group");
-  std::set<int> ranks_set(ranks.begin(), ranks.end());
+  std::unordered_set<int> ranks_set(ranks.begin(), ranks.end());
   TORCH_CHECK(
       ranks_set.size() == ranks.size(),
       "Split ranks should not have duplicates. Please provide a list of unique ranks to split the group.");
+  std::set<c10::DeviceType> deviceTypeFilter;
+  for (const auto& d : devices.value_or(std::vector<c10::Device>{})) {
+    deviceTypeFilter.insert(d.type());
+  }
+  if (!deviceTypeFilter.empty()) {
+    for (const auto& deviceType : deviceTypeFilter) {
+      TORCH_CHECK(
+          deviceTypeToBackendType_.contains(deviceType),
+          "Requested device type for splitGroup is not present in the parent process group: ",
+          deviceType);
+    }
+    auto defaultBackendIt = std::ranges::find_if(
+        deviceTypeToBackendType_,
+        [&](const auto& p) { return p.second == backendType_; });
+    TORCH_CHECK(
+        defaultBackendIt != deviceTypeToBackendType_.end() &&
+            deviceTypeFilter.contains(defaultBackendIt->first),
+        "splitGroup deviceTypes filter must include the parent process group's default backend device type.");
+  }
   std::vector<int> sorted_ranks = ranks;
-  std::sort(sorted_ranks.begin(), sorted_ranks.end());
+  std::ranges::sort(sorted_ranks);
   c10::intrusive_ptr<ProcessGroup> newGroup;
   std::string groupName = name.has_value()
       ? name.value()
@@ -184,6 +207,10 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
   for (const auto& pair : deviceTypeToBackendType_) {
     c10::DeviceType deviceType = pair.first;
     BackendType backendType = pair.second;
+
+    if (!deviceTypeFilter.empty() && !deviceTypeFilter.contains(deviceType)) {
+      continue;
+    }
 
     auto parentBackend = getBackend(deviceType);
     auto backendOpts =
@@ -259,6 +286,7 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::mergeRemoteGroup(
 
 namespace {
 
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 class WorkRegistry {
  public:
   void register_work(

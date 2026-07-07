@@ -163,11 +163,13 @@ def vector_norm(
     else:
         # From here on the computation dtype is important as the reduction is non-trivial
         x = _maybe_convert_to_dtype(x, computation_dtype)  # type: ignore[assignment]
-        reduce_sum = partial(torch.sum, dim=dim, keepdim=keepdim)
-
         is_ord_even = ord % 2 == 0 if isinstance(ord, IntLike) else ord % 2.0 == 0.0
-        if dim == []:
+        if dim is not None and not isinstance(dim, IntLike) and len(dim) == 0:
             dim = None
+        elif dim is not None:
+            dim = utils.canonicalize_dims(x.ndim, dim)
+
+        reduce_sum = partial(torch.sum, dim=dim, keepdim=keepdim)
 
         if (dim is None and guard_or_false(x.numel() == 1)) or (
             dim is not None
@@ -432,5 +434,5 @@ def linalg_lu_solve_out_mps(LU, pivots, B, *, left=True, adjoint=False, out):
     out.copy_(x)
 
 
-mps_lib = torch.library.Library("aten", "IMPL", "MPS")  # noqa: TOR901
+mps_lib = torch.library.Library("aten", "IMPL", "MPS")
 mps_lib.impl("aten::linalg_lu_solve.out", linalg_lu_solve_out_mps)

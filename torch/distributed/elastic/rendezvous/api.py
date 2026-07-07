@@ -53,7 +53,7 @@ class RendezvousStateError(RendezvousError):
 
 
 class RendezvousGracefulExitError(RendezvousError):
-    """Raised when node wasn't not included in rendezvous and gracefully exits.
+    """Raised when node wasn't included in rendezvous and gracefully exits.
 
     Exception is a mechanism to exit the stack, however does not mean a failure.
     """

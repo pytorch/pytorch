@@ -249,7 +249,7 @@ def _chunk_dtensor(
     tensor = tensor.detach().clone()
 
     # When a layer is not involved in TP, then the tensor will not be a DTensor.
-    # e.g. When a layer is not sppecified in the parallelize_plan, TP will have no effect on the layer.
+    # e.g. When a layer is not specified in the parallelize_plan, TP will have no effect on the layer.
     # e.g. When you do PairwiseParallel on a 3 layer model, TP will have no effect on the third layer.
     if isinstance(tensor, torch.Tensor) and not isinstance(tensor, DTensor):
         # For tensors, it is replicated across tp dimension and sharded across FSDP dimension.
