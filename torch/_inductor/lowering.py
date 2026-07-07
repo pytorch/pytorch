@@ -30,7 +30,7 @@ from torch._functorch._aot_autograd.descriptors import (
 from torch._higher_order_ops.associative_scan import associative_scan_op
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_value
+from torch._library.opaque_object import is_custom_class_obj
 from torch._library.utils import get_layout_constraint_tag
 from torch._prims_common import (
     canonicalize_dim,
@@ -1043,6 +1043,8 @@ def _convert_element_type(x: TensorBox, dtype: torch.dtype):
             )(x, dtype)
     src_dtype = x.get_dtype()
     low_pr_fp = (torch.bfloat16, torch.float16)
+    # In precision-emulation mode, explicit lowp casts must materialize the
+    # storage dtype. Later pointwise barriers will widen from that rounded value.
     use_compute_types = not (
         config.emulate_precision_casts
         and (src_dtype in low_pr_fp or dtype in low_pr_fp)
@@ -2973,6 +2975,7 @@ make_fallback(aten.randint)
 make_fallback(aten.rand_like, override_decomp=True)
 make_fallback(aten.randn_like, override_decomp=True)
 make_fallback(aten.randint_like, override_decomp=True)
+make_fallback(aten.normal, override_decomp=True)
 make_fallback(aten.rrelu_with_noise_functional)
 
 # TODO: mlazos reevaluate if we want to codegen something different
@@ -3377,7 +3380,7 @@ def require_channels_last(_, *args, **kwargs):
 def constrain_to_fake_tensor(arg, fake_arg):
     if fake_arg is None:
         return arg
-    if isinstance(fake_arg, FakeScriptObject) or is_opaque_value(fake_arg):
+    if isinstance(fake_arg, FakeScriptObject) or is_custom_class_obj(fake_arg):
         return arg
     if isinstance(arg, ir.IRNode):
         return ir.ExternKernel.require_exact_strides(arg, fake_arg.stride())
@@ -3738,6 +3741,8 @@ make_fallback(aten._fft_r2c)  # needs complex as well
 
 # Data dependent (are these necessary?)
 make_fallback(aten.nonzero.default)
+# Not data-dependent, but still using fallback
+make_fallback(aten.nonzero_static.default)
 # Data-dependent output size; route to ATen eager kernel (CPU/CUDA/XPU all have
 # native implementations)
 make_fallback(aten.bincount.default, warn=False)
@@ -3777,6 +3782,44 @@ make_fallback(aten._efficientzerotensor)
 make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
 make_fallback(aten.to_sparse)
 make_fallback(aten._to_sparse)
+
+
+@register_lowering(aten._to_dense.default, type_promotion_kind=None)
+def _to_dense(x, dtype=None, masked_grad=None):
+    x = ir.ExternKernel.realize_input(x)
+    size = x.get_size()
+    device = x.get_device()
+    if device is None:
+        raise AssertionError("realized _to_dense input must have a device")
+    output_dtype = dtype if dtype is not None else x.get_dtype()
+
+    def unflatten_args(tensor_args, non_tensor_args):
+        return [tensor_args[0], *non_tensor_args], {}
+
+    # cpp_wrapper has no direct AOTI C shim for _to_dense, so route through the
+    # proxy-executor fallback while still describing the single dense output.
+    # MultiOutput lets this single-output op force a contiguous strided output
+    # layout instead of inheriting anything from the opaque MKLDNN input.
+    packed = ir.FallbackKernel(
+        ir.MultiOutputLayout(device=device),
+        aten._to_dense.default,
+        [x],
+        [dtype, masked_grad],
+        unflatten_args,
+    )
+    out = ir.MultiOutput(
+        ir.FixedLayout(
+            device,
+            output_dtype,
+            size,
+            ir.FlexibleLayout.contiguous_strides(size),
+        ),
+        packed,
+        [],
+    )
+    packed.outputs = [out]
+    return TensorBox.create(out)
+
 
 # 6) Pattern-matched
 make_fallback(
@@ -4811,7 +4854,13 @@ def index_put_impl_(self, indices, values, accumulate, check, may_realize=False)
     x_size = self.get_size()
     x_ndim = len(x_size)
 
-    if accumulate and needs_fallback_due_to_atomic_add_limitations(self.get_dtype()):
+    device = self.get_device()
+    if (
+        accumulate
+        and device is not None
+        and is_gpu(device.type)
+        and needs_fallback_due_to_atomic_add_limitations(self.get_dtype())
+    ):
         # self is an scalar Tensor
         if x_ndim == 0:
             self = view(self, [1])
@@ -4823,7 +4872,6 @@ def index_put_impl_(self, indices, values, accumulate, check, may_realize=False)
     values = to_dtype(values, self.get_dtype())
 
     try:
-        # Note that code will only get here when dtype is uint32
         indices, tensor_indices = check_and_broadcast_indices(
             indices, self.get_device()
         )
@@ -9060,6 +9108,21 @@ def invoke_quant_tracer(subgraph_fn: ir.Subgraph, *operands, scheme=None):
 def associative_scan(combine_fn: ir.Subgraph, xs, additional_inputs: tuple[Any, ...]):
     from .subgraph_lowering import InputDescriptor, lower_pointwise_subgraph
 
+    # combine_mode="pointwise" codegen requires a backend with scan support
+    # (e.g. Triton on CUDA/XPU). The eager wrapper no longer enforces a device
+    # requirement, so check every leaf here -- before lower_pointwise_subgraph
+    # runs -- to raise a clear device-specific error. ir.Scan.create re-checks
+    # the same feature on xs[0] below and otherwise fails with a generic "Unable
+    # to generate code" error. See https://github.com/pytorch/pytorch/issues/186594.
+    for x in xs:
+        device = x.get_device()
+        if not V.graph.has_feature(device, BackendFeature.SCAN):
+            device_str = device.type if device is not None else "unknown device"
+            raise RuntimeError(
+                "associative_scan with combine_mode='pointwise' is not supported "
+                f"on {device_str}. Try to use combine_mode='generic'."
+            )
+
     num_scan_inputs = 2 * len(xs)
     placeholders = [
         node for node in combine_fn.graph_module.graph.nodes if node.op == "placeholder"
@@ -9339,19 +9402,16 @@ from . import kernel
 
 import_submodule(kernel)
 
-from . import quantized_lowerings
-
-
-quantized_lowerings.register_quantized_ops()
-quantized_lowerings.register_woq_mm_ops()
-
 from . import (
     jagged_lowerings,
     mkldnn_lowerings,  # noqa: F401  # registers oneDNN fusion ops on import
+    quantized_lowerings,
 )
 
 
 jagged_lowerings.register_jagged_ops()
+quantized_lowerings.register_quantized_ops()
+quantized_lowerings.register_woq_mm_ops()
 
 
 @contextlib.contextmanager
