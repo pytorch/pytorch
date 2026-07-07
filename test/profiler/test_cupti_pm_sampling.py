@@ -39,14 +39,17 @@ _TEST_METRICS = (
 )
 
 
-# Needs CUDA + libcupti >= 13.3 (cupti-python ships with PyTorch). Whether the HW can actually
-# engage (perfmon access) is only known at start(), so tests still skip at runtime when no session
-# comes up.
-TEST_CUPTI_PM_SAMPLING = TEST_CUDA and TEST_CUPTI_V13_3
+# Needs CUDA + libcupti >= 13.3 (cupti-python ships with PyTorch) AND the nvperf profiler-host
+# libraries (libnvperf_host/target): supported_metrics() returns empty (and logs) when they can't
+# load, so it doubles as the availability probe (@cache, so it runs once). Whether the HW can
+# actually engage a live session (perfmon access) is only known at start(), so the session tests
+# still skip at runtime when none comes up.
+TEST_CUPTI_PM_SAMPLING = TEST_CUDA and TEST_CUPTI_V13_3 and bool(supported_metrics())
 
 
 @unittest.skipIf(
-    not TEST_CUPTI_PM_SAMPLING, "requires cupti pm_sampling + a capable CUDA GPU"
+    not TEST_CUPTI_PM_SAMPLING,
+    "requires cupti pm_sampling + the nvperf libraries + a capable CUDA GPU",
 )
 class TestPmSamplingWindowSizing(TestCase):
     """PM-sampling window sizing exercised through real CUPTI PM sampling: a PmSampler configured
@@ -124,21 +127,13 @@ class TestPmSamplingWindowSizing(TestCase):
 
     def test_multipass_metrics_rejected(self):
         # PM sampling is single-pass only; a metric that needs multiple passes (sm__throughput.*
-        # needs ~8) is rejected by add_consumer -> ValueError, no session, running state untouched.
-        # The check is best-effort: it needs the profiler-host pass-count query, which some
-        # GPUs/drivers don't support (add_consumer then defers single-pass enforcement to _start).
-        # So skip where the count is undeterminable rather than assume rejection.
+        # needs ~17) is rejected by add_consumer -> ValueError, no session, running state untouched.
+        # The class gate guarantees the nvperf profiler host is loadable, so the pass count is known.
         sampler = PmSampler(torch.cuda.current_device())
-        try:
-            handle = sampler.add_consumer(
-                ["sm__throughput.avg.pct_of_peak_sustained_elapsed"]
-            )
-        except ValueError as e:
-            self.assertIn("pass", str(e).lower())
-            self.assertIsNone(sampler._col)
-            return
-        handle.detach()
-        self.skipTest("profiler-host pass-count query unavailable on this GPU/driver")
+        with self.assertRaises(ValueError) as cm:
+            sampler.add_consumer(["sm__throughput.avg.pct_of_peak_sustained_elapsed"])
+        self.assertIn("pass", str(cm.exception).lower())
+        self.assertIsNone(sampler._col)
 
     def test_returns_per_device_singleton(self):
         # PmSampler(device) returns the one instance for that device -- repeated construction and the
