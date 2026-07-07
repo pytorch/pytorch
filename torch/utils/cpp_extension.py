@@ -46,7 +46,7 @@ TORCH_LIB_PATH = os.path.join(_TORCH_PATH, 'lib')
 
 SUBPROCESS_DECODE_ARGS = ('oem',) if IS_WINDOWS else ()
 MINIMUM_GCC_VERSION = (5, 0, 0)
-MINIMUM_MSVC_VERSION = (19, 0, 24215)
+MINIMUM_MSVC_VERSION = (19, 20, 0)
 
 VersionRange = tuple[tuple[int, ...], tuple[int, ...]]
 VersionMap = dict[str, VersionRange]

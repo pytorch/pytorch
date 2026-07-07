@@ -35,7 +35,11 @@ import torch._dynamo.config as dynamo_config
 import torch._inductor.aoti_eager
 import torch.fx.traceback as fx_traceback
 import torch.nn as nn
-from torch._C._dynamo.guards import assert_alignment, assert_size_stride
+from torch._C._dynamo.guards import (
+    assert_alignment,
+    assert_size_stride,
+    assert_size_stride_grouped,
+)
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.debug_utils import aot_graph_input_parser
 from torch._dynamo.device_interface import get_interface_for_device
@@ -106,6 +110,9 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_X86,
     MACOS_VERSION,
+    MI200_ARCH,
+    MI300_ARCH,
+    MI350_ARCH,
     NAVI_ARCH,
     parametrize,
     serialTest,
@@ -3145,7 +3152,7 @@ class CommonTemplate:
             retention = torch.cumprod(decay, dim=1)
             return (x * retention).sum()
 
-        x = torch.randn(2, seq_len, channels, device=self.device, requires_grad=True)
+        x = torch.rand(2, seq_len, channels, device=self.device, requires_grad=True)
         gamma = torch.full((channels,), 0.999, device=self.device).requires_grad_()
         x_ref = x.clone().detach().requires_grad_(True)
         gamma_ref = gamma.clone().detach().requires_grad_(True)
@@ -5540,6 +5547,25 @@ for dtype in (torch.int32, torch.int64):
         with config.patch({"triton.use_block_ptr": use_block_ptr}):
             self.common(fn, (torch.randn(1, 3, *[10] * dim),))
 
+    def test_max_unpool2d_channels_last(self):
+        # https://github.com/pytorch/pytorch/issues/187173
+        if self.device != "cpu":
+            raise unittest.SkipTest(
+                "only the native CPU kernel preserves the input memory format"
+            )
+
+        def fn(p, i):
+            return torch.nn.functional.max_unpool2d(p, i, (8, 8))
+
+        x = torch.randn(2, 4, 8, 8, device=self.device).to(
+            memory_format=torch.channels_last
+        )
+        pooled, indices = torch.nn.functional.max_pool2d(x, 2, return_indices=True)
+        expected = fn(pooled, indices)
+        actual = torch.compile(fn)(pooled, indices)
+        self.assertEqual(expected.stride(), actual.stride())
+        self.assertEqual(expected, actual)
+
     def test_max_unpool_empty_output(self):
         class Unpool1d(nn.Module):
             def __init__(self):
@@ -5949,6 +5975,9 @@ for dtype in (torch.int32, torch.int64):
             check_lowp=False,
         )
 
+    # The forced Triton conv-backward autotune below compiles pathologically
+    # slowly on these ROCm arches, timing out CI. Skip until fixed (see #178945).
+    @skipIfRocmArch(NAVI_ARCH + MI350_ARCH + MI300_ARCH + MI200_ARCH)
     @skip_if_cpu
     @config.patch(
         {
@@ -15616,6 +15645,16 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         with self.assertRaisesRegex(AssertionError, "torch.ops.dummy.op_name"):
             assert_size_stride(tensor, (32, 64), (32, 1), "torch.ops.dummy.op_name")
 
+    def test_assert_size_stride_grouped_op_name_fail(self):
+        tensors = [torch.empty((16, 32)), torch.empty((8, 4))]
+        with self.assertRaisesRegex(AssertionError, "torch.ops.dummy.op_name"):
+            assert_size_stride_grouped(
+                tensors,
+                [(16, 32), (8, 5)],
+                [(32, 1), (4, 1)],
+                "torch.ops.dummy.op_name",
+            )
+
     def test_assert_alignment_op_name_pass(self):
         tensor = torch.empty((16, 32))
         assert_alignment(tensor, 16, "torch.ops.dummy.op_name")
@@ -15645,9 +15684,27 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 "assert_size_stride", 2, exactly=True
             ).check("mm_out").run(code[0])
         else:
-            FileCheck().check("def call").check_count(
-                "assert_size_stride", 2, exactly=True
-            ).check("extern_kernels.mm(").run(code[0])
+            FileCheck().check("def call").check("assert_size_stride_grouped(").check(
+                "extern_kernels.mm("
+            ).check("assert_size_stride(").check("extern_kernels.mm(").run(code[0])
+
+    @requires_gpu()
+    @skip_if_not_triton
+    def test_input_asserts_grouped_for_same_first_use(self):
+        def fn(x, y, z):
+            return x + y + z
+
+        x = torch.randn(16, 32, device=self.device)
+        y = torch.randn(16, 32, device=self.device)
+        z = torch.randn(16, 32, device=self.device)
+
+        _, code = run_and_get_code(torch.compile(fn), x, y, z)
+        if config.cpp_wrapper:
+            FileCheck().check_count("assert_size_stride", 3, exactly=True).run(code[0])
+        else:
+            FileCheck().check_count(
+                "assert_size_stride_grouped(", 1, exactly=True
+            ).check_not("assert_size_stride(").run(code[0])
 
     @requires_gpu()
     @skip_if_not_triton
