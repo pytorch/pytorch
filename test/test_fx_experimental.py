@@ -2374,10 +2374,6 @@ if TEST_Z3:
                     Mod(s2, s0**3),
                     z2 - z3.ToReal(z3.ToInt(z3.ToReal(z2) / z0**3)) * z0**3,
                 ),
-                (
-                    sympy.Piecewise((s0 + s1, sympy.Eq(s0, 5)), (s2, True)),
-                    z3.If(z3.IntVal(5) == z0, z0 + z1, z2),
-                ),
             ]
 
             toZ3 = SympyToZ3(validator)

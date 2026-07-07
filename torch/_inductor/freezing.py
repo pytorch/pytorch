@@ -107,9 +107,13 @@ def _freeze(
 
     if tracing_context := torch._guards.TracingContext.try_get():
         fw_metadata = tracing_context.fw_metadata
-        assert tracing_context.params_flat_unwrap_subclasses is not None
+        if tracing_context.params_flat_unwrap_subclasses is None:
+            raise AssertionError(
+                "expected tracing_context.params_flat_unwrap_subclasses to be set"
+            )
         params_flat = tracing_context.params_flat_unwrap_subclasses
-        assert fw_metadata is not None and params_flat is not None
+        if not (fw_metadata is not None and params_flat is not None):
+            raise AssertionError("expected fw_metadata and params_flat to be set")
 
         preserved_arg_indices = replace_params_with_constants(
             aot_autograd_gm, params_flat, fw_metadata
@@ -157,7 +161,8 @@ class ErasedTensor(torch.Tensor):
             for e in pytree.arg_tree_leaves(*args, **kwargs)
             if isinstance(e, ErasedTensor)
         ]
-        assert len(erased_tensors) > 0
+        if len(erased_tensors) == 0:
+            raise AssertionError("expected at least one ErasedTensor argument")
         e = erased_tensors[0]
 
         raise RuntimeError(

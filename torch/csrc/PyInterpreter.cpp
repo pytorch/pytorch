@@ -959,7 +959,7 @@ void ConcretePyInterpreterVTable::reset_backward_hooks(
 std::string ConcretePyInterpreterVTable::name() const {
   std::stringstream ss;
   ss << getPyInterpreter();
-  return ss.str();
+  return std::move(ss).str();
 }
 
 PyInterpreterHolder self_interpreter;

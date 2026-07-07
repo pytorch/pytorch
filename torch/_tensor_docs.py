@@ -509,55 +509,6 @@ In-place version of :meth:`~Tensor.addr`
 )
 
 add_docstr_all(
-    "align_as",
-    r"""
-align_as(other) -> Tensor
-
-Permutes the dimensions of the :attr:`self` tensor to match the dimension order
-in the :attr:`other` tensor, adding size-one dims for any new names.
-
-This operation is useful for explicit broadcasting by names (see examples).
-
-All of the dims of :attr:`self` must be named in order to use this method.
-The resulting tensor is a view on the original tensor.
-
-All dimension names of :attr:`self` must be present in ``other.names``.
-:attr:`other` may contain named dimensions that are not in ``self.names``;
-the output tensor has a size-one dimension for each of those new names.
-
-To align a tensor to a specific order, use :meth:`~Tensor.align_to`.
-
-Examples::
-
-    # Example 1: Applying a mask
-    >>> mask = torch.randint(2, [127, 128], dtype=torch.bool).refine_names('W', 'H')
-    >>> imgs = torch.randn(32, 128, 127, 3, names=('N', 'H', 'W', 'C'))
-    >>> imgs.masked_fill_(mask.align_as(imgs), 0)
-
-
-    # Example 2: Applying a per-channel-scale
-    >>> def scale_channels(input, scale):
-    >>>    scale = scale.refine_names('C')
-    >>>    return input * scale.align_as(input)
-
-    >>> num_channels = 3
-    >>> scale = torch.randn(num_channels, names=('C',))
-    >>> imgs = torch.rand(32, 128, 128, num_channels, names=('N', 'H', 'W', 'C'))
-    >>> more_imgs = torch.rand(32, num_channels, 128, 128, names=('N', 'C', 'H', 'W'))
-    >>> videos = torch.randn(3, num_channels, 128, 128, 128, names=('N', 'C', 'H', 'W', 'D'))
-
-    # scale_channels is agnostic to the dimension order of the input
-    >>> scale_channels(imgs, scale)
-    >>> scale_channels(more_imgs, scale)
-    >>> scale_channels(videos, scale)
-
-.. warning::
-    The named tensor API is experimental and subject to change.
-
-""",
-)
-
-add_docstr_all(
     "all",
     r"""
 all(dim=None, keepdim=False) -> Tensor
@@ -1096,15 +1047,6 @@ add_docstr_all(
 ceil_() -> Tensor
 
 In-place version of :meth:`~Tensor.ceil`
-""",
-)
-
-add_docstr_all(
-    "cholesky",
-    r"""
-cholesky(upper=False) -> Tensor
-
-See :func:`torch.cholesky`
 """,
 )
 
@@ -2344,13 +2286,6 @@ In-place version of :meth:`~Tensor.greater`.
 )
 
 add_docstr_all(
-    "has_names",
-    r"""
-Is ``True`` if any of this tensor's dimensions are named. Otherwise, is ``False``.
-""",
-)
-
-add_docstr_all(
     "hardshrink",
     r"""
 hardshrink(lambd=0.5) -> Tensor
@@ -2577,7 +2512,7 @@ Note:
 
 Args:
     dim (int): dimension along which to index
-    index (Tensor): indices of ``source`` to select from,
+    index (Tensor): indices of :attr:`self` to accumulate into,
         should have dtype either `torch.int64` or `torch.int32`
     source (FloatTensor): the tensor containing values to accumulate
     reduce (str): the reduction operation to apply
@@ -6721,26 +6656,6 @@ Example::
     True
     # f requires grad, has no operation creating it
 
-
-""",
-)
-
-add_docstr_all(
-    "names",
-    r"""
-Stores names for each of this tensor's dimensions.
-
-``names[idx]`` corresponds to the name of tensor dimension ``idx``.
-Names are either a string if the dimension is named or ``None`` if the
-dimension is unnamed.
-
-Dimension names may contain characters or underscore. Furthermore, a dimension
-name must be a valid Python variable name (i.e., does not start with underscore).
-
-Tensors may not have two named dimensions with the same name.
-
-.. warning::
-    The named tensor API is experimental and subject to change.
 
 """,
 )

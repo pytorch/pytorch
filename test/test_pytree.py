@@ -152,7 +152,7 @@ class TestGenericPytree(TestCase):
                                 str(python_param.annotation),
                             ),
                             msg=(
-                                f"C++ parameter {cxx_param} "
+                                lambda msg: f"{msg}\nC++ parameter {cxx_param} "
                                 f"does not match Python parameter {python_param} "
                                 f"for API `{name}`"
                             ),
@@ -162,7 +162,7 @@ class TestGenericPytree(TestCase):
                             cxx_param.annotation,
                             python_param.annotation,
                             msg=(
-                                f"C++ parameter {cxx_param} "
+                                lambda msg: f"{msg}\nC++ parameter {cxx_param} "
                                 f"does not match Python parameter {python_param} "
                                 f"for API `{name}`"
                             ),
@@ -623,12 +623,12 @@ class TestGenericPytree(TestCase):
             self.assertEqual(
                 list(result.keys()),
                 list(tree.keys()),
-                msg=f"Dictionary keys order changed in tree_map: {tree!r} vs. {result!r}",
+                msg=lambda msg: f"{msg}\nDictionary keys order changed in tree_map: {tree!r} vs. {result!r}",
             )
             self.assertEqual(
                 list(result.values()),
                 list(tree.values()),
-                msg=f"Dictionary keys order changed in tree_map: {tree!r} vs. {result!r}",
+                msg=lambda msg: f"{msg}\nDictionary keys order changed in tree_map: {tree!r} vs. {result!r}",
             )
 
     @parametrize_pytree_module
