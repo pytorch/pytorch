@@ -389,22 +389,14 @@ struct PyWarningHandler {
 
 namespace detail {
 
-// pybind11::gil_scoped_acquire's constructor can throw (e.g. if creating a
-// new Python thread state fails). Callers reachable from noexcept contexts
-// (destructors, refcount-management callbacks) must use this instead of
-// pybind11::gil_scoped_acquire directly, since an exception escaping a
-// noexcept function calls std::terminate. Check the bool conversion before
-// touching any Python API that requires the GIL; if it's false, the GIL
-// could not be acquired and the caller must leak rather than touch
-// refcounts without holding it.
+// Acquiring the GIL can throw; letting that escape a noexcept context
+// (destructors, refcount callbacks) calls std::terminate. This catches the
+// exception and reports success via the bool conversion -- check it before
+// touching any GIL-dependent Python API.
 //
-// NB: deliberately still uses the default (not _simple) gil_scoped_acquire.
-// gil_scoped_acquire_simple (PyGILState_Ensure) inherits CPython's behavior
-// of hanging or killing a non-main thread that acquires the GIL during
-// interpreter finalization -- exactly what the default gil_scoped_acquire
-// was built to avoid (see its own comment in pybind11/gil.h). Since these
-// callers commonly run during exit-handler teardown, that tradeoff would
-// replace a rare, loud crash with a more likely, silent hang.
+// If the interpreter is finalizing, disarm() so our destructor skips
+// PyThreadState_DeleteCurrent: thread-state deletion isn't allowed during
+// shutdown (see gil_scoped_acquire::disarm()'s own comment).
 class SafeGilScopedAcquire {
  public:
   SafeGilScopedAcquire() {
@@ -412,6 +404,10 @@ class SafeGilScopedAcquire {
       guard_.emplace();
     } catch (const std::exception& e) {
       LOG(ERROR) << "Failed to acquire the GIL: " << e.what();
+      return;
+    }
+    if (Py_IsFinalizing()) {
+      guard_->disarm();
     }
   }
   explicit operator bool() const {

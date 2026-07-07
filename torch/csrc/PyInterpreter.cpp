@@ -240,9 +240,6 @@ void ConcretePyInterpreterVTable::decref(PyObject* pyobj) const {
   // PyObjects stored in them.
   if (!Py_IsInitialized())
     return;
-  // decref/incref/try_incref/refcnt are reachable from noexcept callers, so
-  // they must use SafeGilScopedAcquire (see its comment) rather than a bare
-  // pybind11::gil_scoped_acquire.
   torch::detail::SafeGilScopedAcquire gil;
   if (!gil) {
     return;
