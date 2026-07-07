@@ -2120,7 +2120,7 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
             {"cpu": "gloo", "xpu": "xccl"},
         )
         self.assertEqual(
-            _parse_backend_string("CPU:GLOO , XPU:XCCL"),
+            _parse_backend_string("CPU:GLOO , XPU:XCCL", available_devices=all_devices),
             {"cpu": "gloo", "xpu": "xccl"},
         )
         # Unknown device types in merged form are accepted (no validation here).
