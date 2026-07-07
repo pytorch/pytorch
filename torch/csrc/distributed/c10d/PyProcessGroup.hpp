@@ -50,7 +50,7 @@ class PyProcessGroup : public ProcessGroup {
         pybind11::get_override(static_cast<const cname*>(this), #name); \
     if (override) {                                                     \
       auto o = override(__VA_ARGS__);                                   \
-      return c10::make_intrusive<PyWorkHolder>(o);                      \
+      return c10::make_intrusive<PyWorkHolder>(std::move(o));           \
     }                                                                   \
     return cname::name(__VA_ARGS__);                                    \
   } while (false)
@@ -195,6 +195,18 @@ class PyProcessGroup : public ProcessGroup {
         opts);
   }
 
+  c10::intrusive_ptr<Work> all_gather_single(
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
+      const AllgatherOptions& opts = AllgatherOptions()) override {
+    WORK_OVERRIDE(
+        ProcessGroup, /* Parent class */
+        all_gather_single, /* Name of function in C++ */
+        outputBuffer,
+        inputBuffer,
+        opts);
+  }
+
   c10::intrusive_ptr<Work> all_gather_single_coalesced(
       std::vector<at::Tensor>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
@@ -240,6 +252,28 @@ class PyProcessGroup : public ProcessGroup {
         opts);
   }
 
+  c10::intrusive_ptr<Work> reduce(
+      std::vector<at::Tensor>& tensors,
+      const ReduceOptions& opts = ReduceOptions()) override {
+    WORK_OVERRIDE(
+        ProcessGroup, /* Parent class */
+        reduce, /* Name of function in C++ */
+        tensors,
+        opts);
+  }
+
+  c10::intrusive_ptr<Work> alltoall(
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
+      const AllToAllOptions& opts = AllToAllOptions()) override {
+    WORK_OVERRIDE(
+        ProcessGroup, /* Parent class */
+        alltoall, /* Name of function in C++ */
+        outputTensors,
+        inputTensors,
+        opts);
+  }
+
   c10::intrusive_ptr<Work> all_to_all_single(
       at::Tensor& outputBuffer,
       at::Tensor& inputBuffer,
@@ -282,6 +316,30 @@ class PyProcessGroup : public ProcessGroup {
         opts);
   }
 
+  c10::intrusive_ptr<Work> gather(
+      std::vector<std::vector<at::Tensor>>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
+      const GatherOptions& opts = GatherOptions()) override {
+    WORK_OVERRIDE(
+        ProcessGroup, /* Parent class */
+        gather, /* Name of function in C++ */
+        outputTensors,
+        inputTensors,
+        opts);
+  }
+
+  c10::intrusive_ptr<Work> scatter(
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<std::vector<at::Tensor>>& inputTensors,
+      const ScatterOptions& opts = ScatterOptions()) override {
+    WORK_OVERRIDE(
+        ProcessGroup, /* Parent class */
+        scatter, /* Name of function in C++ */
+        outputTensors,
+        inputTensors,
+        opts);
+  }
+
   c10::intrusive_ptr<Work> reduce_scatter(
       std::vector<at::Tensor>& outputTensors,
       std::vector<std::vector<at::Tensor>>& inputTensors,
@@ -291,6 +349,18 @@ class PyProcessGroup : public ProcessGroup {
         reduce_scatter, /* Name of function in C++ */
         outputTensors,
         inputTensors,
+        opts);
+  }
+
+  c10::intrusive_ptr<Work> reduce_scatter_single(
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) override {
+    WORK_OVERRIDE(
+        ProcessGroup, /* Parent class */
+        reduce_scatter_single, /* Name of function in C++ */
+        outputBuffer,
+        inputBuffer,
         opts);
   }
 
@@ -339,6 +409,16 @@ class PyProcessGroup : public ProcessGroup {
         recv, /* Name of function in C++ */
         tensors,
         srcRank,
+        tag);
+  }
+
+  c10::intrusive_ptr<Work> recvAnysource(
+      std::vector<at::Tensor>& tensors,
+      int tag) override {
+    WORK_OVERRIDE(
+        ProcessGroup, /* Parent class */
+        recvAnysource, /* Name of function in C++ */
+        tensors,
         tag);
   }
 
