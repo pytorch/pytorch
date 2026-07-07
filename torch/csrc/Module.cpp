@@ -15,6 +15,7 @@
 #include <ATen/CachedTensorUtils.h>
 #include <ATen/DLConvertor.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/FakeTensorDispatchTables.h>
 #include <ATen/LegacyVmapMode.h>
 #include <ATen/LinalgBackend.h>
 
@@ -2657,6 +2658,33 @@ PyObject* initModule() {
   auto py_module = py::reinterpret_borrow<py::module>(module);
   py_module.def("_initCrashHandler", &_initCrashHandler);
   py_module.def("_demangle", &c10::demangle);
+
+  {
+    using at::impl::FakeDispatchCategory;
+    auto add_for = [](FakeDispatchCategory category) {
+      return [category](const std::string& name, const std::string& overload) {
+        at::impl::fakeDispatchTableAdd(
+            category, c10::OperatorName(name, overload));
+      };
+    };
+    py_module.def(
+        "_fake_dispatch_register_decomp",
+        add_for(FakeDispatchCategory::Decomp));
+    py_module.def(
+        "_fake_dispatch_register_meta", add_for(FakeDispatchCategory::Meta));
+    py_module.def(
+        "_fake_dispatch_register_op_impl",
+        add_for(FakeDispatchCategory::OpImpl));
+    py_module.def(
+        "_fake_dispatch_register_prim_meta",
+        add_for(FakeDispatchCategory::PrimMeta));
+    py_module.def(
+        "_fake_dispatch_deregister_op_impl",
+        [](const std::string& name, const std::string& overload) {
+          at::impl::fakeDispatchTableRemove(
+              FakeDispatchCategory::OpImpl, c10::OperatorName(name, overload));
+        });
+  }
   py_module.def("_log_api_usage_metadata", &LogAPIUsageMetadataFromPython);
 
   py_module.def(

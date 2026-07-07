@@ -74,7 +74,6 @@ op_implementations_dict = {}
 # pyrefly: ignore [implicit-any]
 op_implementations_checks = []
 
-
 aten = torch._ops.ops.aten
 _MKLDNN_DISPATCH_KEYS = torch._C.DispatchKeySet(
     torch._C._dispatch_key_parse("MkldnnCPU")
@@ -221,6 +220,8 @@ def register_op_impl(
             if run_impl_check in op_implementations_dict:
                 raise AssertionError(f"duplicate registration: {run_impl_check}")
             op_implementations_dict[run_impl_check] = op_impl
+            schema = run_impl_check._schema
+            torch._C._fake_dispatch_register_op_impl(schema.name, schema.overload_name)
         elif isinstance(run_impl_check, (list, tuple)):
             for op in run_impl_check:
                 register_op_impl(op)(op_impl)
@@ -241,7 +242,11 @@ def _is_op_registered_to_fake_rule(op: OpOverload) -> bool:
 
 
 def _deregister_op_impl(op: OpOverload) -> None:
-    op_implementations_dict.pop(op, None)
+    if op in op_implementations_dict:
+        op_implementations_dict.pop(op, None)
+        torch._C._fake_dispatch_deregister_op_impl(
+            op._schema.name, op._schema.overload_name
+        )
     for check, impl in op_implementations_checks:
         if check is op:
             op_implementations_checks.remove((check, impl))
