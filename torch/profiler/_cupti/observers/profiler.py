@@ -248,7 +248,7 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
     def _boundary_clock_ns(self) -> int:
         # Stamp the boundary in the converted clock the events' start_ns use (convert_time
         # is monotonic, so the comparison stays order-equivalent).
-        return self.convert_time(self.now_native_ns())
+        return self.convert_time(self.now_record_ns())
 
     def _on_activities(self, columns: dict[Any, dict[int, Any]]) -> None:
         # Worker thread: build a named-column frame per kind (convert/demangle/resolve while
