@@ -834,8 +834,6 @@ print(t.is_pinned())
                     archs.append("gfx950")
                 if ROCM_VERSION >= (7, 13):
                     archs.extend(["gfx1100", "gfx1101", "gfx1151"])
-                if ROCM_VERSION >= (7, 14):
-                    archs.append("gfx1250")
                 gcn_arch_name = torch.cuda.get_device_properties(0).gcnArchName
                 hipblaslt_preferred = any(arch in gcn_arch_name for arch in archs)
                 if hipblaslt_preferred:
@@ -925,7 +923,7 @@ print(t.is_pinned())
             gcn_arch = str(
                 torch.cuda.get_device_properties(0).gcnArchName.split(":", 1)[0]
             )
-            if gcn_arch in ["gfx942", "gfx950", "gfx1250"]:
+            if "gfx94" in gcn_arch or "gfx95" in gcn_arch:
                 default_workspace_size = 1024 * 128 * 1024  # :1024:128
         else:
             default_workspace_size = (
@@ -1715,6 +1713,28 @@ print(t.is_pinned())
         self.assertEqual(src_device, torch.cuda.current_device())
         self.assertEqual(src_prev_stream, torch.cuda.current_stream())
         self.assertEqual(dst_prev_stream, torch.cuda.current_stream(dst_device))
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_event_elapsed_time_restores_device_on_error(self):
+        # The device-generic event path (torch.Event -> CUDAGuardImpl::elapsedTime)
+        # temporarily switches to the event's device to call cudaEventElapsedTime.
+        # A cross-device elapsed_time raises inside that switched region; the
+        # current device must still be restored on the throwing path. Regression
+        # test for the RAII restore in c10::cuda::impl::CUDAGuardImpl.
+        torch.cuda.set_device(0)
+        e0 = torch.Event(enable_timing=True)
+        e1 = torch.Event(enable_timing=True)
+        e0.record(torch.Stream(0))
+        e1.record(torch.Stream(1))
+        torch.cuda.synchronize(0)
+        torch.cuda.synchronize(1)
+        self.assertEqual(torch.cuda.current_device(), 0)
+
+        # device_index of elapsedTime is e1's device (1); the cross-device call
+        # switches to device 1 and then raises.
+        with self.assertRaises(RuntimeError):
+            e1.elapsed_time(e0)
+        self.assertEqual(torch.cuda.current_device(), 0)
 
     def test_noncontiguous_pinned_memory(self):
         # See issue #3266
@@ -2601,19 +2621,6 @@ torch.cuda.synchronize()
         g.replay()
 
         self.assertEqual(b.sum().item(), 11000.0)
-
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
-    )
-    def test_graph_scalar_assignment(self):
-        x = torch.zeros(2, 2, device="cuda")
-        g = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(g):
-            x[0, 1] = 5.0
-
-        x.zero_()  # Reset the side-effect of capture execution
-        g.replay()
-        self.assertEqual(x[0, 1].item(), 5.0)
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
@@ -5792,6 +5799,166 @@ class TestCudaAllocator(TestCase):
 
                 finally:
                     torch.cuda.memory._record_memory_history(None)
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
+    )
+    def test_host_memory_snapshot(self):
+        try:
+            torch._C._host_emptyCache()
+            torch.cuda.memory._record_memory_history(
+                "all",
+                context="alloc",
+                stacks="python",
+                record_pinned_host_memory=True,
+                clear_history=True,
+            )
+
+            def host_alloc():
+                return torch.empty(311, 411, pin_memory=True)
+
+            x = host_alloc()
+
+            ss = torch.cuda.memory._snapshot()
+
+            # Find our block by size in host_segments
+            found_it = False
+            for seg in ss["host_segments"]:
+                self.assertEqual(seg["device"], -1)
+                self.assertEqual(len(seg["blocks"]), 1)
+                b = seg["blocks"][0]
+                if b["state"] == "active_allocated":
+                    self.assertTrue("test_cuda" in b["frames"][0]["filename"])
+                    found_it = True
+            self.assertTrue(found_it)
+
+            # Verify alloc stack trace contains the named function
+            text = json.dumps(ss)
+            self.assertIn("host_alloc", text)
+
+            # Verify trace actions: segment_alloc then alloc
+            actions = [te["action"] for te in ss["host_traces"]]
+            self.assertIn("segment_alloc", actions)
+            self.assertIn("alloc", actions)
+
+            # Free and verify free traces
+            del x
+            ss = torch.cuda.memory._snapshot()
+            actions = [te["action"] for te in ss["host_traces"]]
+            self.assertIn("free_requested", actions)
+            self.assertIn("free_completed", actions)
+
+            # Empty cache and verify segment_free is the last action
+            torch._C._host_emptyCache()
+            ss = torch.cuda.memory._snapshot()
+            self.assertEqual(ss["host_traces"][-1]["action"], "segment_free")
+
+        finally:
+            torch.cuda.memory._record_memory_history(None)
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
+    )
+    def test_host_memory_snapshot_disabled(self):
+        try:
+            torch._C._host_emptyCache()
+            torch.cuda.memory._record_memory_history("all")
+            x = torch.empty(1024, pin_memory=True)
+            ss = torch.cuda.memory._snapshot()
+            self.assertEqual(len(ss["host_segments"]), 0)
+            self.assertEqual(len(ss["host_traces"]), 0)
+            del x
+        finally:
+            torch.cuda.memory._record_memory_history(None)
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
+    )
+    def test_host_memory_snapshot_max_entries(self):
+        try:
+            torch._C._host_emptyCache()
+            max_entries = 4
+            torch.cuda.memory._record_memory_history(
+                "all",
+                max_entries=max_entries,
+                record_pinned_host_memory=True,
+                clear_history=True,
+            )
+
+            # Allocate and free enough pinned tensors to overflow the ring
+            # buffer many times over (each alloc/free produces multiple trace
+            # entries: segment_alloc, alloc, free_requested, free_completed).
+            for i in range(20):
+                x = torch.empty(1024 + i, pin_memory=True)
+                del x
+                torch._C._host_emptyCache()
+
+            ss = torch.cuda.memory._snapshot()
+            self.assertLessEqual(len(ss["host_traces"]), max_entries)
+            # We did enough work that the buffer should be full.
+            self.assertEqual(len(ss["host_traces"]), max_entries)
+        finally:
+            torch.cuda.memory._record_memory_history(None)
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
+    )
+    def test_host_memory_snapshot_none_disables(self):
+        try:
+            torch._C._host_emptyCache()
+            torch.cuda.memory._record_memory_history(
+                "all",
+                record_pinned_host_memory=True,
+                clear_history=True,
+            )
+            x = torch.empty(1024, pin_memory=True)
+            ss = torch.cuda.memory._snapshot()
+            self.assertGreater(len(ss["host_traces"]), 0)
+            del x
+
+            # None should turn off host recording without record_pinned_host_memory=True
+            torch.cuda.memory._record_memory_history(None)
+
+            torch._C._host_emptyCache()
+            y = torch.empty(2048, pin_memory=True)
+            ss = torch.cuda.memory._snapshot()
+            self.assertEqual(len(ss["host_segments"]), 0)
+            self.assertEqual(len(ss["host_traces"]), 0)
+            del y
+        finally:
+            torch.cuda.memory._record_memory_history(None)
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
+    )
+    def test_host_memory_snapshot_host_only(self):
+        try:
+            torch._C._host_emptyCache()
+            torch.cuda.memory._record_memory_history(
+                "all",
+                record_pinned_host_memory=True,
+                record_cuda=False,
+                clear_history=True,
+            )
+
+            x = torch.empty(311, 411, pin_memory=True)
+            d = torch.empty(311, 411, device="cuda")
+
+            ss = torch.cuda.memory._snapshot()
+
+            # Host traces should be recorded.
+            self.assertGreater(len(ss["host_traces"]), 0)
+            self.assertGreater(len(ss["host_segments"]), 0)
+
+            # CUDA traces should be empty since record_cuda=False, even though
+            # we allocated a CUDA tensor.
+            for device_trace in ss["device_traces"]:
+                self.assertEqual(len(device_trace), 0)
+
+            del x
+            del d
+        finally:
+            torch.cuda.memory._record_memory_history(None)
 
     @unittest.skipIf(
         IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/180263"
@@ -9867,13 +10034,9 @@ class TestCompileKernel(TestCase):
 
         # Test error handling with more than supported shared memory size
         if torch.version.hip:
-            gcn_arch = get_device_properties().gcnArchName.split(":", 1)[0]
-            if gcn_arch == "gfx1250":
-                max_smem = 320 * 1024
-            elif gcn_arch == "gfx950":
-                max_smem = 160 * 1024
-            else:
-                max_smem = 65536
+            max_smem = (
+                65536 if get_device_properties().gcnArchName != "gfx950" else 160 * 1024
+            )
         else:
             max_smem = get_device_properties().shared_memory_per_block_optin
         excessive_shared_mem = max_smem * 2
@@ -10302,7 +10465,7 @@ class TestCudaDeviceParametrized(TestCase):
             # This writes allows wait_for_cpu to proceed
             # This is an atomic store at system scope according to this rule:
             # "the scope is thread_scope_system and it is a load or store that affects a naturally-aligned object of sizes 1, 2, 4, 8, or 16 bytes on mapped memory"
-            # https://nvidia.github.io/cccl/libcudacxx/extended_api/memory_model.html#atomicity
+            # https://github.com/NVIDIA/cccl/blob/main/docs/libcudacxx/extended_api/memory_model.rst
 
             # Note that every CPU store is implicitly system scope,
             # even if we don't use C++ atomics like this:
