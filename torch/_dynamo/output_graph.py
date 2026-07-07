@@ -69,7 +69,7 @@ from torch._guards import (
     TracingContext,
 )
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_type
+from torch._library.opaque_object import is_custom_class
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._utils_internal import signpost_event
 from torch.export.dynamic_shapes import _ConstraintTarget
@@ -145,6 +145,7 @@ from .source import (
 )
 from .utils import (
     _extract_tensor_dict,
+    _get_cudagraph_override,
     checkpoint_params,
     CleanupHook,
     clone_inputs,
@@ -589,6 +590,10 @@ def _is_safe_to_reorder(node: fx.Node) -> bool:
             return False
         if isinstance(node.kwargs.get("out"), fx.Node):
             return False
+        # triton_kernel_wrapper_mutation mutates tensors via kwargs but
+        # is not detected by is_impure() or trailing-underscore checks.
+        if name == "triton_kernel_wrapper_mutation":
+            return False
         # Non-OpOverload targets with no FX Node arguments are likely
         # state-changing (e.g., _vmap_increment_nesting,
         # _set_fwd_grad_enabled). This is intentionally conservative:
@@ -802,10 +807,21 @@ class OutputGraph(OutputGraphCommon):
             "co_firstlineno": f_code.co_firstlineno,
         }
 
-        # Cudagraph annotation is set during inlining in
-        # InliningInstructionTranslator.build_inline_tracer when a decorated
-        # function is inlined.
+        # The cudagraph annotation is normally set while tracing an
+        # `override_cudagraphs` context manager / decorator within this
+        # frame (see CudagraphOverrideVariable). Seed it here from any
+        # runtime-active override so a callee compiled as a separate frame
+        # (e.g. because it contains a graph break and cannot be inlined)
+        # inherits the override that lives lexically in a caller's frame.
+        # NOTE: we intentionally do not guard on the override state, so the
+        # override is sticky per code object (first compile wins): a function
+        # reached both inside and outside an override keeps whichever override
+        # was active when it first compiled.
         self.cudagraph_annotation: _CudagraphAnnotation | None = None
+        if (_override := _get_cudagraph_override()) is not None:
+            from torch._inductor import _CudagraphAnnotation as _CGA
+
+            self.cudagraph_annotation = _CGA(fwd=_override[0], bwd=_override[1])
 
         self.region_tracker = GraphRegionTracker()
         self._emit_debugger_breakpoint: bool = False
@@ -1750,7 +1766,7 @@ class OutputGraph(OutputGraphCommon):
                 )
 
             # HACKY CODE REGION END
-        elif is_opaque_type(type(target)):
+        elif is_custom_class(type(target)):
             # HACKY CODE REGION BEGIN
             # Same as SymInt/SymFloat above: piggybacking on self.nn_modules
             # to store opaque objects as graph attributes.
@@ -1765,7 +1781,7 @@ class OutputGraph(OutputGraphCommon):
                 )
                 proxy = tracer.create_proxy("get_attr", module_key, (), {})
                 set_example_value(proxy.node, fake_script_obj)
-                return torch._dynamo.variables.script_object.TorchScriptObjectVariable.create(
+                return torch._dynamo.variables.script_object.CustomClassObjectVariable.create(
                     proxy, fake_script_obj, tx=self.root_tx, **options
                 )
 
@@ -1967,10 +1983,11 @@ class OutputGraph(OutputGraphCommon):
 
         meta.num_stack = len(stack_values)
 
-        # After the symbolic_cellvars split, symbolic_locals holds only fast
-        # locals; a name here that is also a cell/free var is a colliding fast
-        # local (e.g. an inlined comprehension iteration variable shadowing a
-        # nonlocal). It is skipped here to stay consistent with resume argname
+        # Cells are codegen'd by codegen_cells from the symbolic_cellvars
+        # registry. A symbolic_locals entry whose name is also a cell/free var
+        # is either the cell itself (shared slot) or a colliding fast local
+        # (e.g. an inlined comprehension iteration variable shadowing a
+        # nonlocal); both are skipped here, consistent with resume argname
         # generation in create_call_resume_at.
         cell_and_freevars = set(tx.cellvars() + tx.freevars())
 
@@ -2501,7 +2518,10 @@ class OutputGraph(OutputGraphCommon):
                             raise AssertionError(
                                 "cur_tx.post_prune_cell_and_freevars must be set for nested frames"
                             )
-                        cg(cur_tx.post_prune_cell_and_freevars[cell])
+                        var = cur_tx.post_prune_cell_and_freevars[cell]
+                        if isinstance(var, NullVariable):
+                            raise AssertionError("Can't codgen null cell")
+                        cg(var)
                 cg.append_output(create_build_tuple(len(freevars)))
                 cur_tx = cur_tx.parent
                 tx_cnt += 1
@@ -3452,7 +3472,7 @@ class OutputGraph(OutputGraphCommon):
                                     fake_attr_val,
                                 )
                         continue
-                    if is_opaque_type(type(node.meta["grapharg"].example)):
+                    if is_custom_class(type(node.meta["grapharg"].example)):
                         continue
                     fake = (
                         arg.fake_tensor if arg.fake_tensor is not None else arg.example

@@ -141,6 +141,7 @@ from .trace_rules import is_builtin_constant, is_forbidden
 from .utils import (
     _get_error_on_graph_break,
     counters,
+    FrameState,
     get_fake_value,
     get_instruction_source_311,
     get_metrics_context,
@@ -189,7 +190,12 @@ from .variables.misc import (
     UnknownVariable,
 )
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
-from .variables.object_protocol import generic_bool, generic_contains, generic_getiter
+from .variables.object_protocol import (
+    generic_bool,
+    generic_contains,
+    generic_getattr,
+    generic_getiter,
+)
 from .variables.sets import SetVariable
 from .variables.streams import SymbolicStreamState
 from .variables.tensor import supported_comparison_ops, SymNodeVariable, TensorVariable
@@ -1250,6 +1256,22 @@ class BytecodeDispatchTableMeta(type):
 
 
 @dataclasses.dataclass
+class Segment:
+    """
+    One frame's slice of the exception stack, mirroring CPython's
+    `_PyErr_StackItem` (`gi_exc_state`).
+
+    CPython represents the exc_state as a linked list of `_PyErr_StackItem`s,
+    where each item contains the exception type, value, and traceback for the
+    frame. We simulate this with a linked list of `Segment`s, where each
+    `Segment` is a list of `ExceptionVals`
+    """
+
+    items: list[ExceptionVals] = dataclasses.field(default_factory=list)
+    prev: Segment | None = dataclasses.field(default=None)
+
+
+@dataclasses.dataclass
 class ExceptionStack:
     """
     Exception stack that it is shared among all InstructionTranslator instances
@@ -1266,8 +1288,22 @@ class ExceptionStack:
     #  + PUSH_EXC_INFO := pushes the current_exception to the *exception stack*
     #  + POP_EXCEPT := pops TOS from the *exception stack*
 
-    _exc_stack: list[ExceptionVals] = dataclasses.field(default_factory=list)
+    _exc_stack: Segment = dataclasses.field(default_factory=Segment)
     _current_exception: ExceptionVals | None = dataclasses.field(default=None)
+
+    def push_segment(self, segment: Segment) -> None:
+        """Make `segment` the head, linking it to the current head (resume)."""
+        segment.prev = self._exc_stack
+        self._exc_stack = segment
+
+    def pop_segment(self) -> Segment:
+        """Restore the head to the segment below (suspend)."""
+        segment = self._exc_stack
+        if segment.prev is None:
+            raise AssertionError("cannot pop the base exception segment")
+        self._exc_stack = segment.prev
+        segment.prev = None
+        return segment
 
     def clear_current_exception(self) -> None:
         self._current_exception = None
@@ -1275,6 +1311,7 @@ class ExceptionStack:
     def set_current_exception(
         self, val: ExceptionVals, set_context: bool = True
     ) -> None:
+        # Mirrors CPython's PyErr_SetObject
         if set_context:
             self._set_context_and_break_context_reference_cycle(val)
         self._current_exception = val
@@ -1288,6 +1325,7 @@ class ExceptionStack:
         self.clear_current_exception()
 
     def get_current_exception(self) -> ExceptionVals:
+        # Mirrors CPython's PyErr_GetRaisedException()
         if self._current_exception is None:
             raise AssertionError(
                 "expected self._current_exception is not None to be true"
@@ -1299,8 +1337,8 @@ class ExceptionStack:
     ) -> ExceptionVals:
         if (ctx := val.__context__) and not ctx.is_constant_none():  # type: ignore[union-attr]
             return val
-        if len(self._exc_stack) + prev_idx > 0:
-            prev = self._exc_stack[prev_idx]
+        if len(self) + prev_idx > 0:
+            prev = self[prev_idx]
             self._set_context_recursive(prev, prev_idx - 1)
             if prev is not val:
                 val.set_context(prev)  # type: ignore[union-attr, arg-type]
@@ -1337,20 +1375,40 @@ class ExceptionStack:
         self, val: ExceptionVals
     ) -> None:
         # set Exception.__context__
-        self._set_context_recursive(val, len(self._exc_stack) - 1)
+        self._set_context_recursive(val, len(self) - 1)
         self._break_context_reference_cycle(val)
 
     def pop(self) -> ExceptionVals:
-        return self._exc_stack.pop()
+        return self._exc_stack.items.pop()
 
     def append(self, val: ExceptionVals) -> None:
-        self._exc_stack.append(val)
+        self._exc_stack.items.append(val)
 
     def __len__(self) -> int:
-        return len(self._exc_stack)
+        n = 0
+        segment: Segment | None = self._exc_stack
+        while segment is not None:
+            n += len(segment.items)
+            segment = segment.prev
+        return n
 
     def __getitem__(self, index: int) -> ExceptionVals:
-        return self._exc_stack[index]
+        # Global indexing over the segment chain: `prev` segments (lower)
+        # concatenated with the head segment (upper), so `[-1]` falls through
+        # to the caller when the head segment is empty.
+        n = len(self)
+        if index < 0:
+            index += n
+        if not 0 <= index < n:
+            raise IndexError("exception stack index out of range")
+        segment = self._exc_stack
+        base = n - len(segment.items)
+        while index < base:
+            if segment.prev is None:
+                raise AssertionError("expected segment.prev to not be None")
+            segment = segment.prev
+            base -= len(segment.items)
+        return segment.items[index - base]
 
     def __str__(self) -> str:
         return f"{self._exc_stack=} - {self._current_exception=}"
@@ -1363,12 +1421,14 @@ class InstructionTranslatorBase(
 ):
     output: OutputGraph
     symbolic_locals: dict[str, VariableTracker]
-    # Cell/free variables that share a name with a fast local (e.g. an inlined
-    # comprehension iteration variable shadowing an enclosing `nonlocal`). In
-    # CPython these occupy distinct `localsplus` offsets; keying both on a name
-    # in `symbolic_locals` would let fast-local ops (LOAD_FAST_AND_CLEAR) clobber
-    # the cell, so the colliding cell lives here instead. Non-colliding cells
-    # stay in `symbolic_locals`.
+    # Registry of this frame's cells (cellvars + freevars), recorded at frame
+    # setup. `symbolic_locals` models localsplus slot contents, which
+    # fast-local ops may legitimately clobber (LOAD_FAST_AND_CLEAR in inlined
+    # comprehensions evicts a merged cell slot; a comprehension iteration
+    # variable shadowing an enclosing `nonlocal` reuses the cell's name for a
+    # distinct fast slot). The registry survives such slot traffic so cell
+    # lookups and cell codegen at a graph break never depend on what the slot
+    # happens to hold. See `_cellvar` for the resolution rule.
     symbolic_cellvars: dict[str, VariableTracker]
     symbolic_globals: dict[str, VariableTracker]
     symbolic_torch_function_state: SymbolicTorchFunctionState
@@ -1472,28 +1532,28 @@ class InstructionTranslatorBase(
             self._cell_and_freevars = self.cellvars() + self.freevars()
         return self._cell_and_freevars
 
-    def _split_colliding_cells(self) -> None:
-        # Move any free var that shares its name with a fast local into
-        # symbolic_cellvars. CPython gives such names two distinct localsplus
-        # slots (e.g. an inlined comprehension iteration variable shadowing an
-        # enclosing `nonlocal`); keeping the cell out of symbolic_locals stops
-        # fast-local ops (LOAD_FAST_AND_CLEAR) from clobbering it. Cellvars that
-        # match a fast local are merged into one slot by CPython and need no
-        # split. Idempotent: a second call finds the names already moved.
+    def _register_cells(self) -> None:
+        # Record this frame's cells in the symbolic_cellvars registry. A free
+        # var that shares its name with a fast local occupies a second,
+        # distinct localsplus slot in CPython (e.g. an inlined comprehension
+        # iteration variable shadowing an enclosing `nonlocal`); it is removed
+        # from symbolic_locals so fast-local ops on the name can't touch it.
+        # Cellvars that match a fast local are merged into one slot by CPython,
+        # so they (and non-colliding cells) stay in symbolic_locals as slot
+        # contents too. Idempotent: re-registering is a no-op.
         fastlocals = set(self.f_code.co_varnames)
+        for name in self.cell_and_freevars():
+            if name in self.symbolic_locals:
+                self.symbolic_cellvars[name] = self.symbolic_locals[name]
         for name in self.f_code.co_freevars:
-            if name in fastlocals and name in self.symbolic_locals:
-                self.symbolic_cellvars[name] = self.symbolic_locals.pop(name)
+            if name in fastlocals:
+                self.symbolic_locals.pop(name, None)
 
     def prune_dead_locals(self) -> None:
         # keep cell and freevar references alive
         self.post_prune_cell_and_freevars = {
-            k: v
-            for k, v in self.symbolic_locals.items()
-            if k in self.cell_and_freevars()
+            name: self._cellvar(name) for name in self.cell_and_freevars()
         }
-        # Colliding cells live in symbolic_cellvars rather than symbolic_locals.
-        self.post_prune_cell_and_freevars.update(self.symbolic_cellvars)
         # Only keep the locals that must remain on the stack.
         reads = livevars_analysis(self.instructions, self.current_instruction)
         # inspect.signature() renames ".N" to "implicitN" for comprehension
@@ -2131,11 +2191,17 @@ class InstructionTranslatorBase(
             self.symbolic_locals.pop(name)
 
     def _cellvar(self, name: str) -> VariableTracker:
-        # A colliding cell lives in `symbolic_cellvars`; otherwise it shares the
-        # `symbolic_locals` slot with no same-named fast local.
-        if name in self.symbolic_cellvars:
-            return self.symbolic_cellvars[name]
-        return self.symbolic_locals[name]
+        # The localsplus slot is authoritative while it holds a cell (a
+        # mid-function MAKE_CELL from an inlined comprehension can replace a
+        # merged cell slot's cell with a fresh one). Fall back to the registry
+        # when the slot doesn't hold a cell: either the name is a colliding
+        # free var that never lives in symbolic_locals, or the cell was
+        # temporarily evicted by LOAD_FAST_AND_CLEAR.
+        var = self.symbolic_locals.get(name)
+        # __instancecheck__ to avoid realizing lazy vts
+        if var is not None and type.__instancecheck__(CellVariable, var):
+            return var
+        return self.symbolic_cellvars[name]
 
     def LOAD_DEREF(self, inst: Instruction) -> None:
         if inst.argval not in self.cell_and_freevars():
@@ -2227,14 +2293,8 @@ class InstructionTranslatorBase(
             val.set_name_hint(cell.local_name)  # type: ignore[attr-defined]
 
     def LOAD_CLOSURE(self, inst: Instruction) -> None:
-        # LOAD_CLOSURE pushes the cell object itself. A colliding cell is in
-        # symbolic_cellvars; otherwise it shares the symbolic_locals slot, so
-        # fall back to LOAD_FAST.
-        name = inst.argval
-        if name in self.symbolic_cellvars:
-            self.push(self.symbolic_cellvars[name])
-        else:
-            self.LOAD_FAST(inst)
+        # LOAD_CLOSURE pushes the cell object itself.
+        self.push(self._cellvar(inst.argval))
 
     def _load_const(self, inst: Instruction) -> VariableTracker:
         i = inst.arg
@@ -2561,7 +2621,7 @@ class InstructionTranslatorBase(
     def _attach_traceback_to_exception(self, exc: ExceptionVals) -> None:
         # based on CPython's PyTraceBack_Here impl
         frame_summary = self.frame_summary()
-        tb = exc.var_getattr(
+        tb = exc.getattro_impl(
             # pyrefly: ignore [bad-argument-type]
             self,
             "__traceback__",
@@ -2743,7 +2803,7 @@ class InstructionTranslatorBase(
                     "expected self._isinstance_exception(val) to be true"
                 )
             typ = BuiltinVariable(val.exc_type)  # type: ignore[attr-defined, union-attr]
-            tb = val.var_getattr(
+            tb = val.getattro_impl(
                 # pyrefly: ignore[bad-argument-type]
                 self,
                 "__traceback__",
@@ -2762,7 +2822,7 @@ class InstructionTranslatorBase(
                 )
             typ = BuiltinVariable(val.exc_type)  # type: ignore[attr-defined]
 
-            tb = val.var_getattr(self, "__traceback__")
+            tb = val.getattro_impl(self, "__traceback__")
 
         args += [typ, val, tb]
         self.call_function(fn, args, {})
@@ -3205,12 +3265,16 @@ class InstructionTranslatorBase(
         )
 
     def _load_attr(self, attr: Any) -> None:
-        obj = self.pop()
-        result = VariableTracker.build(self, getattr).call_function(
-            self,  # type: ignore[arg-type]
-            [obj, VariableTracker.build(self, attr)],
-            {},
-        )
+        obj = self.pop().realize()
+        try:
+            result = generic_getattr(self, obj, attr)
+        except Unsupported:
+            if not obj.is_python_constant():
+                raise
+            source = AttrSource(obj.source, attr) if obj.source else None
+            result = VariableTracker.build(
+                self, getattr(obj.as_python_constant(), attr), source=source
+            )
         self.push(result)
 
     def LOAD_ATTR(self, inst: Instruction) -> None:
@@ -3244,7 +3308,7 @@ class InstructionTranslatorBase(
 
     def _maybe_sync_dealloc_attr(self, obj: VariableTracker, name: str) -> None:
         # Only check side_effects — a pure dict lookup with no observable
-        # side effects. We intentionally avoid var_getattr here because it
+        # side effects. We intentionally avoid getattro_impl here because it
         # can trigger __getattr__, add graph nodes, or cause graph breaks.
         if self.output.side_effects.has_pending_mutation_of_attr(obj, name):
             attr_var = self.output.side_effects.load_attr(obj, name)
@@ -4362,7 +4426,9 @@ class InstructionTranslatorBase(
         # https://github.com/python/cpython/commit/28187141cc34063ef857976ddbca87ba09a882c2
         val = self.stack[-1]
         if not self._isinstance_exception(val):
-            raise AssertionError("expected self._isinstance_exception(val) to be true")
+            raise AssertionError(
+                f"expected self._isinstance_exception(val) to be true, got {val}"
+            )
         if val.exc_type is StopIteration:  # type: ignore[union-attr]
             new_val = VariableTracker.build(self, RuntimeError).call_function(
                 self,  # type: ignore[arg-type]
@@ -4721,10 +4787,25 @@ class InstructionTranslatorBase(
         if sys.version_info >= (3, 12) and not self.accept_prefix_inst:
             # In 3.12+, MAKE_CELL is not longer necessarily a prefix instruction.
             # It can be generated by inlined comprehensions.
-            # MAKE_CELL creates a cellvar. A cellvar that shares a name with a
-            # fast local is merged into a single localsplus slot by CPython (only
-            # freevars get a distinct second slot), so it stays in
-            # symbolic_locals rather than symbolic_cellvars.
+            # A mid-function MAKE_CELL replaces the slot's contents with a
+            # fresh cell (the frame-entry cell was saved on the stack by a
+            # preceding LOAD_FAST_AND_CLEAR and is restored by the
+            # comprehension epilogue). Only the slot is updated: the
+            # symbolic_cellvars registry keeps the frame-entry cell, and
+            # `_cellvar` prefers the slot while it holds a cell.
+            if inst.argval in self.f_code.co_freevars:
+                # The name refers to three localsplus slots at once (fast
+                # local + comprehension cell + free var, e.g. `nonlocal i`
+                # with `[lambda: i for i in ...]`). Dynamo tracks locals by
+                # name and cannot model two same-named cells; tracing on
+                # would silently target the wrong cell.
+                unimplemented(
+                    gb_type="MAKE_CELL on a free variable name",
+                    context=f"MAKE_CELL {inst.argval}",
+                    explanation="An inlined comprehension creates a cell whose name "
+                    f"`{inst.argval}` is also a free variable of the enclosing function.",
+                    hints=[*graph_break_hints.DIFFICULT],
+                )
             if not isinstance(self.symbolic_locals[inst.argval], NullVariable):
                 raise AssertionError(
                     "expected isinstance(self.symbolic_locals[inst.argval], NullVariable) to be true"
@@ -5327,9 +5408,9 @@ class InstructionTranslatorBase(
         self.f_code: types.CodeType = f_code
         self.closure = closure
         # Inlined frames receive a fully-populated symbolic_locals (cells
-        # included); split out any colliding cells now. Root frames populate
-        # symbolic_locals after super().__init__ and split again there.
-        self._split_colliding_cells()
+        # included); register their cells now. Root frames populate
+        # symbolic_locals after super().__init__ and register there.
+        self._register_cells()
 
         # Execution record for replaying errors
         if closure is not None and config.replay_record_enabled:
@@ -5587,9 +5668,9 @@ class InstructionTranslator(InstructionTranslatorBase):
                 cell_var.local_name = name  # type: ignore[attr-defined]
                 self.symbolic_locals[name] = cell_var
 
-            # symbolic_locals is now fully populated; move colliding cells into
-            # symbolic_cellvars (base __init__ ran before this population).
-            self._split_colliding_cells()
+            # symbolic_locals is now fully populated; register the frame's
+            # cells (base __init__ ran before this population).
+            self._register_cells()
 
             self.symbolic_torch_function_state = SymbolicTorchFunctionState(
                 torch_function_mode_stack,
@@ -6118,7 +6199,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             if (
                 is_generator(code)
                 and isinstance(self, InliningGeneratorInstructionTranslator)
-                and self.generator_exhausted
+                and self.frame_state == FrameState.FRAME_CLEARED
             ):
                 if not isinstance(self, InliningGeneratorInstructionTranslator):
                     raise AssertionError(
@@ -6361,8 +6442,17 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.generated_items = []
-        self.generator_exhausted = False
         self.is_generator_from_ctx_manager = False
+        self.frame_state = FrameState.FRAME_CREATED
+        self.gi_exc_state = Segment()
+
+    @contextlib.contextmanager
+    def link_gi_exc_state(self):
+        try:
+            self.exn_vt_stack.push_segment(self.gi_exc_state)
+            yield
+        finally:
+            self.exn_vt_stack.pop_segment()
 
     def inline_call_(self) -> VariableTracker:
         with profile_inline_call(self.output, self.f_code, lambda: self.inline_depth):
@@ -6375,6 +6465,10 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
     def YIELD_VALUE(self, inst: Instruction) -> None:
         top = self.pop()
         self.generated_items.append(top)
+        if inst.argval == 1:
+            self.frame_state = FrameState.FRAME_SUSPENDED_YIELD_FROM
+        else:
+            self.frame_state = FrameState.FRAME_SUSPENDED
         if len(self.generated_items) > MAX_ITERATOR_LIMIT:
             raise exc.InfiniteGeneratorError
         if (
@@ -6397,11 +6491,11 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         raise ReturnValueOp
 
     def RETURN_VALUE(self, inst: Instruction) -> None:
-        self.generator_exhausted = True
+        self.frame_state = FrameState.FRAME_CLEARED
         return super().RETURN_VALUE(inst)
 
     def RETURN_CONST(self, inst: Instruction) -> None:
-        self.generator_exhausted = True
+        self.frame_state = FrameState.FRAME_CLEARED
         return super().RETURN_CONST(inst)
 
     def YIELD_FROM(self, inst: Instruction) -> None:
