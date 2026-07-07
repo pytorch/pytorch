@@ -1406,6 +1406,11 @@ class TestSparseCSR(TestCase):
                 torch.randint(100, (5, 5), device=device),
                 size=100)
 
+        with self.assertRaisesRegex(RuntimeError, "size must be non-negative"):
+            torch._convert_indices_from_coo_to_csr(
+                torch.tensor([1, 2, 3], device=device),
+                size=-1)
+
         size = (5, 5)
         sparse_dim = 2
         nnz = 10

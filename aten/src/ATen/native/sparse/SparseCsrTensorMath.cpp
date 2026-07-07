@@ -141,6 +141,7 @@ TORCH_META_FUNC(_convert_indices_from_coo_to_csr)
 (const Tensor& self, const int64_t size, const bool out_int32) {
   TORCH_CHECK(self.dim() <= 1, "Input is supposed to be a vector, but got ",
               self.dim(), " dimensional tensor.");
+  TORCH_CHECK(size >= 0, "size must be non-negative, got ", size);
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
   c10::TensorOptions options =
       TensorOptions().device(self.options().device()).dtype(scalar_type);
