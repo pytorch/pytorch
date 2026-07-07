@@ -73,11 +73,6 @@ on:
         required: false
         type: number
         default: 1
-      use-arc:
-        required: false
-        type: boolean
-        default: false
-        description: If true, use ARC (OSDC) runner path instead of EC2.
       python-version:
         required: false
         type: string
@@ -125,7 +120,7 @@ env:
 jobs:
   test:
     # Don't run on forked repos or empty test matrix
-    if: github.repository_owner == 'pytorch' && toJSON(fromJSON(inputs.test-matrix).include) != '[]' && inputs.use-arc
+    if: github.repository_owner == 'pytorch' && toJSON(fromJSON(inputs.test-matrix).include) != '[]'
     strategy:
       matrix: ${{ fromJSON(inputs.test-matrix) }}
       fail-fast: false

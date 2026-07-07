@@ -95,7 +95,6 @@ jobs:
           { config: "operator_microbenchmark_${{ inputs.operator }}_test", shard: 1, num_shards: 1, runner: "linux.dgx.b200" },
           { config: "operator_microbenchmark_${{ inputs.operator }}_baseline", shard: 1, num_shards: 1, runner: "linux.dgx.b200" }
         ]}
-      use-arc: true
       python-version: "3.10"
       compiler: gcc11
       cuda-version: "12.8"
@@ -113,7 +112,6 @@ jobs:
       build-environment: ${{ needs.build-b200.outputs.build-environment }}
       docker-image: ${{ needs.build-b200.outputs.docker-image }}
       test-matrix: ${{ needs.build-b200.outputs.test-matrix }}
-      use-arc: true
       python-version: "3.10"
       compiler: gcc11
       cuda-version: "12.8"
