@@ -1516,7 +1516,19 @@ if(USE_ROCM)
         target_compile_definitions(torch_rocshmem PUBLIC USE_NVSHMEM USE_ROCM)
 
         target_link_libraries(torch_rocshmem PRIVATE roc::rocshmem)
-        target_link_libraries(torch_hip PRIVATE torch_rocshmem)
+        # Do NOT hard-link torch_rocshmem into torch_hip. Doing so makes
+        # libtorch_rocshmem.so a NEEDED of libtorch_hip.so, so it loads on every
+        # `import torch` -- and its upstream rocSHMEM NUMAWrapper global
+        # constructor calls exit() at load time on hosts without a usable GPU /
+        # kfd. That exit() runs atexit handlers, where rocprofiler-sdk's
+        # finalize() deadlocks tearing down its thread pool, hanging (often
+        # intermittently) `import torch`. See pytorch/pytorch#189110.
+        #
+        # Instead, still build + install libtorch_rocshmem.so, but load it
+        # lazily -- only when a GPU is actually present and symmetric memory is
+        # used -- from torch/distributed/_symmetric_memory. add_dependencies
+        # keeps it in the build/install without creating the NEEDED link.
+        add_dependencies(torch_hip torch_rocshmem)
 
         install(TARGETS torch_rocshmem EXPORT Caffe2Targets DESTINATION
           "${TORCH_INSTALL_LIB_DIR}")

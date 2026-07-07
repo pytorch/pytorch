@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ctypes
 import math
 import os
 import socket
@@ -2016,6 +2017,33 @@ def rendezvous(
     return _SymmetricMemory.rendezvous(tensor, group_name)
 
 
+def _maybe_load_rocshmem_library() -> None:
+    """Lazily load ``libtorch_rocshmem.so`` on ROCm, only when a GPU is present.
+
+    ``libtorch_rocshmem.so`` is intentionally NOT linked as a hard dependency of
+    ``libtorch_hip.so`` (see ``caffe2/CMakeLists.txt``). Its upstream rocSHMEM
+    ``NUMAWrapper`` global constructor calls ``exit()`` at load time on hosts
+    without a usable GPU / kfd, which triggers a rocprofiler-sdk atexit deadlock
+    and hangs ``import torch`` (pytorch/pytorch#189110). So we load it here, on
+    demand, and only when an actual ROCm GPU is available. This registers the
+    rocSHMEM symmetric-memory ops/bindings for the calls below.
+    """
+    if not torch.version.hip:
+        return
+    try:
+        if not (torch.cuda.is_available() and torch.cuda.device_count() > 0):
+            return
+    except Exception:
+        return
+    lib = os.path.join(os.path.dirname(torch.__file__), "lib", "libtorch_rocshmem.so")
+    if not os.path.exists(lib):
+        return
+    try:
+        ctypes.CDLL(lib, mode=ctypes.RTLD_GLOBAL)
+    except OSError:
+        pass
+
+
 def is_nvshmem_available() -> bool:
     r"""
     is_nvshmem_available() -> bool
@@ -2024,6 +2052,11 @@ def is_nvshmem_available() -> bool:
     build and usable at runtime. On ROCm, rocSHMEM ``VERSION`` must be at
     least 3.3.0 (see ``rocshmem/rocshmem.hpp``).
     """
+    # On ROCm, rocSHMEM is loaded lazily (see _maybe_load_rocshmem_library);
+    # this makes the availability query and its bindings work without
+    # force-loading libtorch_rocshmem.so at `import torch`.
+    _maybe_load_rocshmem_library()
+
     try:
         from torch._C._distributed_c10d import _is_nvshmem_available
     except ImportError:
