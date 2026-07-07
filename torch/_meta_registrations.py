@@ -261,6 +261,16 @@ def linalg_matrix_exp(self):
     return torch.empty_like(self, memory_format=torch.contiguous_format)
 
 
+@register_meta(aten.linalg_matrix_sqrth)
+@out_wrapper()
+def linalg_matrix_sqrth(self):
+    squareCheckInputs(self, "linalg.matrix_sqrth")
+    checkFloatingOrComplex(
+        self, "linalg.matrix_sqrth", allow_low_precision_dtypes=False
+    )
+    return torch.empty_like(self, memory_format=torch.contiguous_format)
+
+
 @register_meta(
     [aten.cummax.default, aten.cummax.out, aten.cummin.default, aten.cummin.out]
 )
@@ -411,11 +421,20 @@ def meta_fft_r2c(self, dim, normalization, onesided):
     if onesided:
         out_sizes[last_dim] = last_dim_halfsize
 
+    # Determine output dtype based on input dtype and device
+    # bfloat16 FFT always produces complex64 output (not bcomplex32):
+    # - On CUDA: cuFFT CUDA_C_16BF is upcast to ComplexFloat (see SpectralOps.cpp line 376-379)
+    # - On ROCm/XPU: bfloat16 is promoted to float32 before FFT, yielding complex64
+    # See promote_type_fft() and _fft_r2c_cufft() in aten/src/ATen/native/SpectralOps.cpp
+    output_dtype = self.dtype
+    if output_dtype == torch.bfloat16 and (device_hint(self) in ("cuda", "xpu")):
+        output_dtype = torch.float32
+
     if device_hint(self) == "cuda" or device_hint(self) == "xpu":
         # _fft_r2c_cufft in aten/src/ATen/native/cuda/SpectralOps.cpp
         # _fft_r2c_xpu in torch-xpu-ops/src/ATen/native/xpu/SpectralOps.cpp
         output = self.new_empty(
-            out_sizes, dtype=utils.corresponding_complex_dtype(self.dtype)
+            out_sizes, dtype=utils.corresponding_complex_dtype(output_dtype)
         )
 
         working_tensor = self
@@ -427,7 +446,7 @@ def meta_fft_r2c(self, dim, normalization, onesided):
             _exec_fft(output, working_tensor, target_sizes, [last_dim], forward=True)
             if len(dim) > 1:
                 working_tensor = self.new_empty(
-                    out_sizes, dtype=utils.corresponding_complex_dtype(self.dtype)
+                    out_sizes, dtype=utils.corresponding_complex_dtype(output_dtype)
                 )
 
             # Then any remaining C2C transforms
@@ -456,13 +475,13 @@ def meta_fft_r2c(self, dim, normalization, onesided):
         # _fft_r2c_mkl in aten/src/ATen/native/mkl/SpectralOps.cpp
         sorted_dims = _sort_dims(self, dim, exclude_last=True)
         output = self.new_empty(
-            out_sizes, dtype=utils.corresponding_complex_dtype(self.dtype)
+            out_sizes, dtype=utils.corresponding_complex_dtype(output_dtype)
         )
         return _exec_fft(output, self, out_sizes, sorted_dims, forward=True)
 
     else:
         return self.new_empty(
-            out_sizes, dtype=utils.corresponding_complex_dtype(self.dtype)
+            out_sizes, dtype=utils.corresponding_complex_dtype(output_dtype)
         )
 
 
@@ -1657,6 +1676,34 @@ def linalg_qr_meta(A: Tensor, mode: str = "reduced") -> tuple[Tensor, Tensor]:
     return Q, R
 
 
+@register_meta([aten.linalg_polar.default, aten.linalg_polar.out])
+@out_wrapper("U", "H")
+def linalg_polar_meta(A: Tensor) -> tuple[Tensor, Tensor]:
+    checkIsMatrix(A, "linalg.polar")
+    checkFloatingOrComplex(A, "linalg.polar")
+
+    m = A.shape[-2]
+    n = A.shape[-1]
+    # Symbolic-safe comparison so a dynamic row dimension is not specialized.
+    torch._check(
+        m >= n,
+        lambda: f"linalg.polar: input must have at least as many rows as "
+        f"columns, but got {m} by {n} matrices",
+    )
+
+    # U matches A's shape; H is (n, n). Both row-major contiguous, matching the
+    # SVD-based C++ kernel and the CUDA override.
+    U_shape = list(A.shape)
+    U = A.new_empty(U_shape)
+    U.as_strided_(U_shape, make_contiguous_strides_for(U_shape))
+
+    H_shape = list(A.shape)
+    H_shape[-2] = n
+    H = A.new_empty(H_shape)
+    H.as_strided_(H_shape, make_contiguous_strides_for(H_shape))
+    return U, H
+
+
 @register_meta([aten._linalg_slogdet.default, aten._linalg_slogdet.sign])
 @out_wrapper("sign", "logabsdet", "LU", "pivots")
 def _linalg_slogdet(A: Tensor) -> tuple[Tensor, Tensor, Tensor, Tensor]:
@@ -2510,14 +2557,21 @@ def meta_mm(a, b, out_dtype: torch.dtype | None = None):
         lambda: f"a and b must have same reduction dim, but got [{N}, {M1}] X [{M2}, {P}].",
     )
     if out_dtype is not None:
-        torch._check(
-            out_dtype == a.dtype
-            or (
-                out_dtype == torch.float32
-                and a.dtype in (torch.float16, torch.bfloat16)
-            ),
-            lambda: "out_dtype must be the same as input dtype or fp32 for fp16/bf16 inputs",
-        )
+        # The out_dtype restriction below is a property of the in-tree CUDA/XPU
+        # backends (see aten/src/ATen/native/cuda/Blas.cpp and
+        # aten/src/ATen/native/mkldnn/xpu/Blas.cpp). Out-of-tree backends (e.g.
+        # accelerators registered via PrivateUse1) may support arbitrary
+        # out_dtype combinations, so only enforce it for the backends that have
+        # the restriction.
+        if device_hint(a) in ("cuda", "xpu"):
+            torch._check(
+                out_dtype == a.dtype
+                or (
+                    out_dtype == torch.float32
+                    and a.dtype in (torch.float16, torch.bfloat16)
+                ),
+                lambda: "out_dtype must be the same as input dtype or fp32 for fp16/bf16 inputs",
+            )
     result_dtype = a.dtype if out_dtype is None else out_dtype
     return a.new_empty((N, P), dtype=result_dtype)
 
@@ -2679,12 +2733,10 @@ def calc_conv_nd_return_shape(
                 _formula(dims[i], padding[i], dilation[i], kernel_size[i], stride[i])
             )
     # NOTE: Backend behavior for zero-sized spatial dimensions is inconsistent.
-    # CUDA (cuDNN) handles zero-sized outputs gracefully by short-circuiting,
-    # but other backends fail: CPU rejects it, ROCm/miopen returns
-    # miopenStatusBadParm, and MPS asserts "Placeholder tensor is empty".
-    # We only allow zero-sized outputs on CUDA with cuDNN (not ROCm/HIP).
+    # CUDA (cuDNN) and HIP handle zero-sized conv_transpose outputs by short-circuiting,
+    # but other backends fail: CPU rejects it and MPS asserts "Placeholder tensor is empty".
     from torch._subclasses.fake_tensor import FakeTensor
-    from torch.fx.experimental.symbolic_shapes import sym_or
+    from torch.fx.experimental.symbolic_shapes import sym_and, sym_or
 
     device = (
         input_tensor.fake_device
@@ -2692,9 +2744,18 @@ def calc_conv_nd_return_shape(
         else input_tensor.device
     )
 
-    # ROCm also reports device.type as "cuda", but miopen doesn't support zero-sized outputs
+    # ROCm reports device.type as "cuda"; keep the existing NVIDIA CUDA behavior
+    # unchanged and only apply the new check to HIP.
     is_cudnn = device.type == "cuda" and torch.version.hip is None
-    if not is_cudnn:
+    is_hip = device.type == "cuda" and torch.version.hip is not None
+    if is_hip:
+        torch._check(
+            sym_and(*[x >= 0 for x in ret_shape[2:]]),
+            lambda: f"Given input size per channel: {list(dims)}. "
+            f"Calculated output size per channel: {ret_shape[2:]}. "
+            f"Output size is too small",
+        )
+    elif not is_cudnn:
         torch._check(
             sym_or(*[x > 0 for x in ret_shape[2:]]),
             lambda: f"Given input size per channel: {list(dims)}. "
@@ -4871,13 +4932,20 @@ def common_meta_baddbmm_bmm(batch1, batch2, is_bmm, self_baddbmm=None, out_dtype
         f", {contraction_size}] but got: [{batch2_sizes[0]}, {batch2_sizes[1]}].",
     )
     if out_dtype:
-        supported_out_dtype = (
-            batch1.dtype == torch.float16 or batch1.dtype == torch.bfloat16
-        ) and out_dtype == torch.float32
-        torch._check(
-            out_dtype == batch1.dtype or supported_out_dtype,
-            lambda: "out_dtype only supported for torch.float32 output with float16/bfloat16 inputs or same as input dtypes",
-        )
+        # The out_dtype restriction below is a property of the in-tree CUDA/XPU
+        # backends (see aten/src/ATen/native/cuda/Blas.cpp and
+        # aten/src/ATen/native/mkldnn/xpu/Blas.cpp). Out-of-tree backends (e.g.
+        # accelerators registered via PrivateUse1) may support arbitrary
+        # out_dtype combinations, so only enforce it for the backends that have
+        # the restriction.
+        if device_hint(batch1) in ("cuda", "xpu"):
+            supported_out_dtype = (
+                batch1.dtype == torch.float16 or batch1.dtype == torch.bfloat16
+            ) and out_dtype == torch.float32
+            torch._check(
+                out_dtype == batch1.dtype or supported_out_dtype,
+                lambda: "out_dtype only supported for torch.float32 output with float16/bfloat16 inputs or same as input dtypes",
+            )
         output = batch2.new_empty(output_size).to(out_dtype)
     else:
         # TODO: handle out
@@ -8702,7 +8770,11 @@ def native_multi_head_attention_fake(
             "_native_multi_head_attention fake implementation does not support nested tensors"
         )
 
-    if query.numel() == 0:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    # Unbacked-safe: known-empty takes the empty path; if the size is symbolic
+    # and can't be decided, assume non-empty (the common case) instead of DDE-ing.
+    if guard_or_false(query.numel() == 0):
         return (query.new_empty(query.shape), query.new_empty(0))
 
     B = query.size(0)  # B: batch size
