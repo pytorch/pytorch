@@ -4101,6 +4101,49 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         FileCheck().check("cutlass.Float8E4M3FN").check_not(
             "local_reduce=FlexGemmRuntimeLocalReducePlan"
         ).run(code)
+        # Plan-less grouped fragments must gate tuned candidates like a plan:
+        # swap_ab configs would regroup the wrong accumulator elements.
+        self.assertIn("swap_ab', False", code)
+        self.assertNotIn("swap_ab', True", code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_local_n_reduce_feed_main_fragment_group_skinny_default_config(self):
+        m = 128
+        n = 4096
+        group = 16
+
+        def epilogue_fn(acc):
+            x = acc.float().view(m, -1, group)
+            scale = x.abs().amax(-1, keepdim=True).clamp(min=1e-12) / 448.0
+            return (x * scale.reciprocal()).view(m, n)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(m, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(64, n, device="cuda", dtype=torch.bfloat16)
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            epilogue_fn(a @ b),
+            epilogue_fn(a.double() @ b.double()),
+            a.shape[1],
+        )
+        FileCheck().check_not("local_reduce=FlexGemmRuntimeLocalReducePlan").run(code)
+        # The skinny-shape default config must satisfy the same grouped-fragment
+        # gate as tuned candidates even without a runtime local-reduce plan.
+        self.assertIn("swap_ab', False", code)
+        self.assertNotIn("swap_ab', True", code)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")

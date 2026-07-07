@@ -953,8 +953,14 @@ def materialize_flex_gemm_epilogue(
     gemm_op: torch._ops.OpOverload,
     outputs: FlexGemmOutputPlan,
     epilogue_arg_placeholders: tuple[torch.fx.Node, ...] = (),
-) -> tuple[str, str]:
-    """Build the generated CuTeDSL epilogue callable from a classified FX body."""
+) -> tuple[str, str, tuple[FlexGemmLocalReduceGeometry, ...]]:
+    """Build the generated CuTeDSL epilogue callable from a classified FX body.
+
+    Also returns the grouped TensorSSA fragment geometries the epilogue relies
+    on: grouped reshapes bake the accumulator fragment orientation into the
+    generated code, so config selection must gate on them (no swap_ab, tile
+    divisibility) even when no runtime local-reduce plan exists.
+    """
     gemm = gemm_node(graph_module, gemm_op)
     kernel = FlexGemmCuteDSLKernel()
     env: dict[torch.fx.Node, Any] = {
@@ -1197,4 +1203,10 @@ def materialize_flex_gemm_epilogue(
         f"{local_reduce_source}"
         f"@cute.jit\ndef {name}({epilogue_params}):\n"
         f"{body}    return {result}\n",
+        tuple(
+            OrderedSet(
+                FlexGemmLocalReduceGeometry(info.group_size, info.axis)
+                for info in grouped_tensors.values()
+            )
+        ),
     )
