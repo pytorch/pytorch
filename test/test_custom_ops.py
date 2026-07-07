@@ -45,6 +45,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     OpDTypes,
     ops,
+    PYTORCH_CUDA_MEMCHECK,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -66,6 +67,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.custom_op_db import numpy_nonzero
+from torch.testing._internal.optests.aot_autograd import _clone_input_for_aot_autograd
 from torch.testing._internal.two_tensor import TwoTensor
 
 
@@ -86,6 +88,54 @@ device_type = (
 def requires_compile(fun):
     fun = unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")(fun)
     return fun
+
+
+class AOTAutogradCopyNoIsPinnedWrapperSubclass(torch.Tensor):
+    @staticmethod
+    def __new__(cls, elem):
+        return torch.Tensor._make_wrapper_subclass(
+            cls,
+            elem.size(),
+            strides=elem.stride(),
+            storage_offset=elem.storage_offset(),
+            dtype=elem.dtype,
+            layout=elem.layout,
+            requires_grad=elem.requires_grad,
+            device=elem.device,
+        )
+
+    def __init__(self, elem):
+        self.elem = elem
+
+    def __tensor_flatten__(self):
+        return ["elem"], None
+
+    @staticmethod
+    def __tensor_unflatten__(inner_tensors, metadata, outer_size, outer_stride):
+        if metadata is not None:
+            raise AssertionError("Expected metadata to be None")
+        return AOTAutogradCopyNoIsPinnedWrapperSubclass(
+            inner_tensors["elem"].as_strided(outer_size, outer_stride)
+        )
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        if func is torch.ops.aten.is_pinned.default:
+            raise AssertionError(
+                "AOT input copying should not check pinning on wrapper subclasses"
+            )
+        if kwargs is None:
+            kwargs = {}
+        args = pytree.tree_map_only(
+            AOTAutogradCopyNoIsPinnedWrapperSubclass, lambda x: x.elem, args
+        )
+        kwargs = pytree.tree_map_only(
+            AOTAutogradCopyNoIsPinnedWrapperSubclass, lambda x: x.elem, kwargs
+        )
+        out = func(*args, **kwargs)
+        return pytree.tree_map_only(
+            torch.Tensor, AOTAutogradCopyNoIsPinnedWrapperSubclass, out
+        )
 
 
 class CustomOpTestCaseBase(TestCase):
@@ -5963,6 +6013,119 @@ opcheck(op, args, kwargs, test_utils="test_schema")
                 "test_faketensor": "SUCCESS",
             },
         )
+
+    @unittest.skipIf(not TEST_CUDA, "pinned CPU memory requires CUDA")
+    @unittest.skipIf(
+        PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property"
+    )
+    def test_opcheck_preserves_pinned_memory_for_schema_check(self):
+        lib = self.lib()
+        lib.define("requires_pinned(Tensor x) -> Tensor")
+        op = self.ns().requires_pinned.default
+
+        def requires_pinned_impl(x):
+            if not x.is_pinned():
+                raise RuntimeError("expected pinned input")
+            return x.clone()
+
+        lib.impl("requires_pinned", requires_pinned_impl, "CPU")
+
+        x = torch.arange(12, dtype=torch.float32, pin_memory=True).view(3, 4)
+        torch.library.opcheck(op, (x,), test_utils="test_schema")
+
+    @unittest.skipIf(not TEST_CUDA, "pinned CPU memory requires CUDA")
+    @unittest.skipIf(
+        PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property"
+    )
+    def test_opcheck_preserves_pinned_memory_by_default(self):
+        @torch.library.custom_op(
+            f"{self.test_ns}::requires_pinned_default", mutates_args=()
+        )
+        def requires_pinned_default(x: torch.Tensor) -> torch.Tensor:
+            if not x.is_pinned():
+                raise RuntimeError("expected pinned input")
+            return x + 1
+
+        @requires_pinned_default.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        x = torch.arange(12, dtype=torch.float32, pin_memory=True).view(3, 4)
+        result = torch.library.opcheck(requires_pinned_default, (x,))
+
+        self.assertEqual(
+            result,
+            {
+                "test_schema": "SUCCESS",
+                "test_autograd_registration": "SUCCESS",
+                "test_faketensor": "SUCCESS",
+                "test_aot_dispatch_dynamic": "SUCCESS",
+            },
+        )
+
+    @skipIfTorchDynamo("recursive dynamo")
+    def test_safe_aot_autograd_check_checks_gradients_for_non_leaf_inputs(self):
+        original_assert_close = torch.testing.assert_close
+        gradient_asserts = []
+
+        def assert_close(actual, expected, *args, **kwargs):
+            if isinstance(actual, tuple) and isinstance(expected, tuple):
+                gradient_asserts.append((actual, expected))
+            return original_assert_close(actual, expected, *args, **kwargs)
+
+        leaf = torch.randn(3, requires_grad=True)
+        non_leaf = leaf * 2
+        with patch("torch.testing.assert_close", assert_close):
+            optests.generate_tests.safe_aot_autograd_check(
+                torch.ops.aten.sin.default,
+                (non_leaf,),
+                {},
+                dynamic=True,
+            )
+
+        self.assertEqual(len(gradient_asserts), 1)
+
+    def test_aot_autograd_copy_does_not_check_pinned_memory_for_wrapper_subclass(
+        self,
+    ):
+        x = AOTAutogradCopyNoIsPinnedWrapperSubclass(torch.randn(4, 6))
+
+        cloned = _clone_input_for_aot_autograd(x)
+
+        self.assertIsInstance(cloned, AOTAutogradCopyNoIsPinnedWrapperSubclass)
+        self.assertEqual(cloned.elem, x.elem)
+        self.assertNotEqual(cloned.elem.data_ptr(), x.elem.data_ptr())
+
+    @unittest.skipIf(not TEST_CUDA, "pinned CPU memory requires CUDA")
+    @unittest.skipIf(
+        PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property"
+    )
+    def test_safe_schema_check_copy_inputs_preserves_pinned_memory_and_copies(self):
+        lib = self.lib()
+        lib.define("check_and_mutate(Tensor(a!) x) -> ()")
+        op = self.ns().check_and_mutate.default
+        seen_inputs = []
+
+        def check_and_mutate_impl(x):
+            seen_inputs.append((x.is_pinned(), x.data_ptr(), x.stride()))
+            x.add_(1)
+
+        lib.impl("check_and_mutate", check_and_mutate_impl, "CPU")
+
+        x = torch.zeros(4, 6, pin_memory=True)[:, ::2]
+        optests.generate_tests.safe_schema_check(op, (x,), {}, copy_inputs=True)
+
+        self.assertEqual(x, torch.zeros_like(x))
+        self.assertEqual(len(seen_inputs), 1)
+        self.assertTrue(seen_inputs[-1][0])
+        self.assertNotEqual(seen_inputs[-1][1], x.data_ptr())
+        self.assertEqual(seen_inputs[-1][2], x.stride())
+
+        optests.generate_tests.safe_schema_check(op, (x,), {}, copy_inputs=False)
+
+        self.assertEqual(x, torch.ones_like(x))
+        self.assertEqual(len(seen_inputs), 2)
+        self.assertEqual(seen_inputs[-1][1], x.data_ptr())
 
     def test_opcheck_customopdef(self):
         sample_inputs = [

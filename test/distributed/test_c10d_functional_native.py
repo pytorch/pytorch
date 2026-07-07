@@ -906,11 +906,11 @@ class ProcessGroupOpaqueTypeRegistrationTest(TestCase):
     def test_process_group_is_registered_on_distributed_import(self) -> None:
         from torch._library.opaque_object import (
             get_member_type,
-            is_opaque_type,
+            is_custom_class,
             MemberType,
         )
 
-        self.assertTrue(is_opaque_type(dist.ProcessGroup))
+        self.assertTrue(is_custom_class(dist.ProcessGroup))
         self.assertEqual(
             get_member_type(dist.ProcessGroup, "size"), MemberType.USE_REAL
         )
