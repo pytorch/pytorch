@@ -150,6 +150,40 @@ class FakeTensorTest(TestCase):
             self.assertEqual(z.device, torch.device("cpu"))
             self.assertTrue(isinstance(z, FakeTensor))
 
+    def test_mm_out_dtype(self):
+        # The out_dtype dtype restriction in mm/bmm/baddbmm is a property of the
+        # in-tree CUDA/XPU backends. Out-of-tree backends may support arbitrary
+        # out_dtype combinations
+
+        if torch._functorch.config.fake_tensor_propagate_real_tensors:
+            self.skipTest("Propagate real tensor not supported")
+
+        with FakeTensorMode():
+            a = torch.empty((8, 2048), dtype=torch.float8_e4m3fn, device="cpu")
+            b = torch.empty((2048, 768), dtype=torch.float8_e4m3fn, device="cpu")
+            out = torch.mm(a, b, out_dtype=torch.float32)
+            self.assertEqual(out.dtype, torch.float32)
+            self.assertEqual(out.shape, (8, 768))
+
+            a3 = torch.empty((2, 8, 2048), dtype=torch.float8_e4m3fn, device="cpu")
+            b3 = torch.empty((2, 2048, 768), dtype=torch.float8_e4m3fn, device="cpu")
+            out3 = torch.bmm(a3, b3, out_dtype=torch.float32)
+            self.assertEqual(out3.dtype, torch.float32)
+            self.assertEqual(out3.shape, (2, 8, 768))
+
+        # On CUDA the restriction must still be enforced by the meta kernel.
+        with FakeTensorMode(allow_non_fake_inputs=True):
+            a = torch.empty((8, 2048), dtype=torch.float8_e4m3fn, device="cuda")
+            b = torch.empty((2048, 768), dtype=torch.float8_e4m3fn, device="cuda")
+            with self.assertRaisesRegex(RuntimeError, "out_dtype must be the same"):
+                torch.mm(a, b, out_dtype=torch.float32)
+
+            # fp16/bf16 -> fp32 is still allowed on CUDA.
+            c = torch.empty((8, 2048), dtype=torch.bfloat16, device="cuda")
+            d = torch.empty((2048, 768), dtype=torch.bfloat16, device="cuda")
+            out = torch.mm(c, d, out_dtype=torch.float32)
+            self.assertEqual(out.dtype, torch.float32)
+
     def test_sparse_spdiags(self):
         with FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv()):
             out = torch.sparse.spdiags(torch.randn(2, 3), torch.tensor([0, -1]), (2, 3))
@@ -849,6 +883,74 @@ class FakeTensorTest(TestCase):
                 FileCheck().check_not("ADInplaceOrView").check_not("Autograd").run(
                     torch._C._dispatch_key_set(y)
                 )
+
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN not available")
+    def test_mkldnn_to_dense(self):
+        from torch._subclasses.functional_tensor import (
+            FunctionalTensor,
+            FunctionalTensorMode,
+        )
+
+        if torch._functorch.config.fake_tensor_propagate_real_tensors:
+            self.skipTest("Propagate real tensor not supported")
+        real = torch.randn(2, 3).to_mkldnn()
+        with FakeTensorMode() as fake_mode:
+            x = fake_mode.from_tensor(real)
+            self.assertTrue(x.is_mkldnn)
+            self.assertEqual(x.layout, torch._mkldnn)  # type: ignore[attr-defined]
+
+            y = x.to_dense()
+            self.assertFalse(y.is_mkldnn)
+            self.assertEqual(y.layout, torch.strided)
+            self.assertEqual(y.stride(), (3, 1))
+
+            y = torch.ops.aten.to_dense.default(x)
+            self.assertFalse(y.is_mkldnn)
+            self.assertEqual(y.layout, torch.strided)
+            self.assertEqual(y.stride(), (3, 1))
+
+            y = x.to_dense(torch.float8_e4m3fn)
+            self.assertFalse(y.is_mkldnn)
+            self.assertEqual(y.layout, torch.strided)
+            self.assertEqual(y.dtype, torch.float8_e4m3fn)
+            self.assertEqual(y.stride(), (3, 1))
+
+            detached = x.detach()
+            self.assertTrue(detached.is_mkldnn)
+            y = detached.to_dense()
+            self.assertFalse(y.is_mkldnn)
+            self.assertEqual(y.layout, torch.strided)
+            self.assertEqual(y.stride(), (3, 1))
+
+            aliased = torch.ops.aten.alias.default(x)
+            self.assertTrue(aliased.is_mkldnn)
+            y = aliased.to_dense()
+            self.assertFalse(y.is_mkldnn)
+            self.assertEqual(y.layout, torch.strided)
+            self.assertEqual(y.stride(), (3, 1))
+
+            dense = torch.randn(2, 3)
+            mkldnn = torch.ops.aten.to_mkldnn.default(dense)
+            self.assertTrue(mkldnn.is_mkldnn)
+            y = torch.ops.aten.to_dense.default(mkldnn)
+            self.assertFalse(y.is_mkldnn)
+            self.assertEqual(y.layout, torch.strided)
+            self.assertEqual(y.stride(), (3, 1))
+
+            with FunctionalTensorMode():
+                functional = FunctionalTensor.to_functional(x)
+                y = functional.detach().to_dense()
+                y_unwrapped = torch._from_functional_tensor(y.elem)
+                self.assertFalse(y_unwrapped.is_mkldnn)
+                self.assertEqual(y_unwrapped.layout, torch.strided)
+                self.assertEqual(y_unwrapped.stride(), (3, 1))
+
+                functional = FunctionalTensor.to_functional(x)
+                y = torch.ops.aten.alias.default(functional).to_dense()
+                y_unwrapped = torch._from_functional_tensor(y.elem)
+                self.assertFalse(y_unwrapped.is_mkldnn)
+                self.assertEqual(y_unwrapped.layout, torch.strided)
+                self.assertEqual(y_unwrapped.stride(), (3, 1))
 
     def test_compare_tensor_meta_unbacked_numel(self):
         from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
@@ -2220,6 +2322,11 @@ assert not torch.cuda.is_initialized()
             self.assertEqual(fake_inverse.dtype, real_inverse.dtype)
             self.assertEqual(fake_counts.dtype, real_counts.dtype)
 
+    def test_assert_tensor_metadata_with_list(self):
+        with FakeTensorMode():
+            x = torch.empty(10)
+            torch.ops.aten._assert_tensor_metadata.default(x, size=[10], stride=[1])
+
     def test_unique_default_dynamic_output_shape(self):
         x = torch.tensor([2, 1, 4, 2, 2])
         with FakeTensorMode() as mode:
@@ -3442,6 +3549,20 @@ class FakeTensorDispatchCache(TestCase):
                 extract_tensor_metadata(res1),
                 extract_tensor_metadata(res2),
             )
+
+    def test_cache_bypass_prims_as_strided(self):
+        x = torch.empty(0, 8)
+        y = torch.empty(0, 8)
+        mode = FakeTensorMode(shape_env=ShapeEnv())
+        x = mode.from_tensor(x, static_shapes=True)
+        y = mode.from_tensor(y, static_shapes=True)
+
+        with mode:
+            FakeTensorMode.cache_clear()
+            prims.as_strided(x, (0, 8), (8, 1), 0)
+            prims.as_strided(y, (0, 8), (8, 1), 0)
+
+            self.assertBypasses("prims.as_strided", 2)
 
     def test_cache_bypass(self):
         """
