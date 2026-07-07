@@ -23,7 +23,8 @@ class GeneratorTestsBase(torch._dynamo.test_case.TestCase):
         super().setUp()
         self._old = torch._dynamo.config.enable_faithful_generator_behavior
         torch._dynamo.config.enable_faithful_generator_behavior = True
-        self._prev = torch._dynamo.config.enable_trace_load_build_class = True
+        self._prev = torch._dynamo.config.enable_trace_load_build_class
+        torch._dynamo.config.enable_trace_load_build_class = True
         self._unittest_old = torch._dynamo.config.enable_trace_unittest
         torch._dynamo.config.enable_trace_unittest = True
 
