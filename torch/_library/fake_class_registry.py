@@ -19,13 +19,13 @@ class FakeScriptObject:
         object.__setattr__(self, "wrapped_obj", wrapped_obj)
         object.__setattr__(self, "script_class_name", script_class_name)
 
-        from torch._library.opaque_object import is_opaque_type
+        from torch._library.opaque_object import is_custom_class
 
         # We don't want to deepcopy when tracing with opaque objects because
         # if a mutation happens intentionally (Ex. caching in device mesh)
         # then we want it to be recorded on the real object
         real_obj = x
-        if not is_opaque_type(type(x)):
+        if not is_custom_class(type(x)):
             try:
                 with _disable_current_modes():
                     real_obj = copy.deepcopy(x)
@@ -51,7 +51,7 @@ class FakeScriptObject:
                 "The fake kernel should not depend on the contents of the "
                 "OpaqueObject at all, so we're erroring out. If this attr is "
                 "a method or constant attribute, you can allow this member access by "
-                "registering it via `register_opaque_type(members=...)`."
+                "registering it via `register_custom_class(members=...)`."
             ) from e
 
     def __setattr__(self, name, value):
@@ -243,12 +243,12 @@ def maybe_to_fake_obj(
         FakeOpaqueObject,
         get_opaque_obj_info,
         get_opaque_type_name,
-        is_opaque_type,
+        is_custom_class,
         OpaqueTypeStr,
     )
 
     x_type = type(x)
-    if is_opaque_type(x_type):
+    if is_custom_class(x_type):
         type_name = OpaqueTypeStr if x is None else get_opaque_type_name(x_type)
         fake_x_wrapped = FakeScriptObject(FakeOpaqueObject(), type_name, x)
 
