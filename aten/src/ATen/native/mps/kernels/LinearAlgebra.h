@@ -27,11 +27,6 @@ struct GeqrfParams {
   uint32_t n;
 };
 
-struct QrParams {
-  uint32_t m;
-  uint32_t n;
-};
-
 struct SvdParams {
   uint32_t m; // staged rows = max(orig m,n) >= n
   uint32_t n; // staged cols = k = min(orig m,n)
