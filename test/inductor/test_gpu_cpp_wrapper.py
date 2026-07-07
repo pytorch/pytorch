@@ -287,14 +287,7 @@ class TestGpuWrapper(InductorTestCase):
             )
 
     @config.patch(implicit_fallbacks=True)
-    def test_custom_op_optional_output_null_guards_size_assert(self):
-        # An optional (Tensor?) fallback output that is None at runtime must get
-        # a runtime-null-guarded assert_size_stride, else the absent (null)
-        # output dereferences null -> SIGSEGV (production crash: fbgemm
-        # block_bucketize_sparse_features_inference). Assert on the generated
-        # code that the optional output (meta shape 11x13) is guarded by
-        # `if (buf != nullptr)` while the required (8x4) output is not. Codegen
-        # is captured before the .so loads (its C-shim symbol may be absent).
+    def test_custom_op_fallback_boxes_none_as_undefined_tensor(self):
         if not RUN_GPU:
             self.skipTest("GPU not available")
         if IS_FBCODE or IS_SANDCASTLE:
@@ -309,10 +302,37 @@ class TestGpuWrapper(InductorTestCase):
                 self.skipTest("libaoti_custom_ops not built")
             torch.ops.load_library(str(lib_path))
 
-        import io
-        import logging as _logging
+        device = self.device
 
-        from torch._inductor.codecache import output_code_log
+        def fn(x):
+            return torch.ops.aoti_custom_ops.maybe_weighted(x, None, x.shape[0])
+
+        x = torch.randn(8, 4, device=device)
+        torch._dynamo.mark_dynamic(x, 0)
+        expected = fn(x)
+        compiled = torch.compile(fullgraph=True, options={"cpp_wrapper": True})(fn)
+        actual, code = test_torchinductor.run_and_get_cpp_code(compiled, x)
+        self.assertEqual(actual, expected)
+        # The composite must decompose to the inner op, which is boxed-dispatched
+        # with its undefined weight materialized as an undefined tensor, not None.
+        self.assertIn("aoti_custom_ops::forward_maybe_weighted", code)
+        self.assertIn("c10::IValue(at::Tensor())", code)
+
+    @config.patch(implicit_fallbacks=True)
+    def test_custom_op_optional_output_null_guards_size_assert(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+        if IS_FBCODE or IS_SANDCASTLE:
+            torch.ops.load_library("//caffe2/test/inductor:custom_ops")
+        elif IS_MACOS:
+            self.skipTest("non-portable load_library call used in test")
+        else:
+            lib_path = find_library_location("libaoti_custom_ops.so")
+            if IS_WINDOWS:
+                lib_path = find_library_location("aoti_custom_ops.dll")
+            if not os.path.exists(lib_path):
+                self.skipTest("libaoti_custom_ops not built")
+            torch.ops.load_library(str(lib_path))
 
         op = torch.ops.aoti_custom_ops.fn_optional_output.default
         c_shims = {
@@ -327,49 +347,27 @@ class TestGpuWrapper(InductorTestCase):
         }
 
         def fn(x):
+            # fn_optional_output returns (x + 1, None). The optional output is a
+            # null handle at runtime while its meta reports an (11, 13) tensor, so
+            # cpp_wrapper must null-guard its assert_size_stride rather than
+            # dereference the null handle.
             a, b = torch.ops.aoti_custom_ops.fn_optional_output(x)
             return a + 1, b
 
         x = torch.randn(8, 4, device=self.device)
-
-        # Capture the generated cpp_wrapper code even if the JIT .so fails to
-        # load (fbcode: the hand-written C-shim symbol is not resolvable at load).
-        cap = io.StringIO()
-        handler = _logging.StreamHandler(cap)
-        output_code_log.addHandler(handler)
-        prev_level = output_code_log.level
-        output_code_log.setLevel(_logging.DEBUG)
-        try:
-            with config.patch(
-                {"debug": True, "aot_inductor.custom_ops_to_c_shims": c_shims}
-            ):
-                compiled = torch.compile(fullgraph=True, options={"cpp_wrapper": True})(
-                    fn
-                )
-                try:
-                    compiled(x)
-                except Exception:
-                    pass  # codegen already emitted; load/exec may fail in fbcode
-        finally:
-            output_code_log.setLevel(prev_level)
-            output_code_log.removeHandler(handler)
-
-        code = cap.getvalue()
-        self.assertIn("fn_optional_output", code)  # took the C-shim path
-        assert_lines = [ln for ln in code.splitlines() if "assert_size_stride" in ln]
-        self.assertTrue(assert_lines, "expected assert_size_stride in generated code")
-        # The optional Tensor? output (meta shape 11x13) is still asserted, but
-        # under a runtime null guard; required/input outputs stay unconditional.
-        opt = [ln for ln in assert_lines if "13" in ln]
-        self.assertTrue(opt, "optional output should still be size-asserted (guarded)")
-        self.assertTrue(
-            all("nullptr" in ln for ln in opt),
-            f"optional Tensor? output assert must be runtime null-guarded; got: {opt}",
-        )
-        self.assertTrue(
-            any("nullptr" not in ln for ln in assert_lines),
-            f"required outputs must keep unconditional asserts; got: {assert_lines}",
-        )
+        expected = fn(x)
+        # custom_op_libs links the generated .so against libaoti_custom_ops so the
+        # C-shim symbols resolve when the JIT cpp_wrapper module is loaded.
+        with config.patch(
+            {
+                "aot_inductor.custom_ops_to_c_shims": c_shims,
+                "aot_inductor.custom_op_libs": ["aoti_custom_ops"],
+            }
+        ):
+            compiled = torch.compile(fullgraph=True, options={"cpp_wrapper": True})(fn)
+            actual = compiled(x)
+        self.assertEqual(actual[0], expected[0])
+        self.assertIsNone(actual[1])
 
     @skipIfXpu(msg="tests CUDA/ROCm CUDADeviceOpOverrides codegen")
     def test_cpp_scratch_scales_with_grid_size_for_tma(self):
