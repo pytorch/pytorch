@@ -293,7 +293,7 @@ class SubclassWithSubclassInnerTensor(torch.Tensor):
 
 
 # defines a custom __eq__() / __hash__() to be registered as a pytree constant type
-class CustomConstantType(torch._opaque_base.OpaqueBase):
+class CustomConstantType(torch._custom_class_base.CustomClassBase):
     def __init__(self, a, b):
         self.a = a
         self.b = b
@@ -315,7 +315,7 @@ class CustomConstantType(torch._opaque_base.OpaqueBase):
         }
 
 
-torch._library.opaque_object.register_opaque_type(CustomConstantType, typ="value")
+torch._library.opaque_object.register_custom_class(CustomConstantType, typ="constant")
 
 
 class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
