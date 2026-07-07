@@ -463,7 +463,6 @@ class TestOnlineSoftmax(TestCase):
         opt_f = torch.compile(f)
         torch.testing.assert_close(f(x, y), opt_f(x, y), atol=1e-3, rtol=1e-3)
 
-
     @parametrize("dtype", [torch.bfloat16, torch.float32])
     def test_nan_propagation(self, dtype):
         """

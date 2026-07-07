@@ -229,6 +229,8 @@ def reduction_combine(
         return f"{var} || {next_value}"
     if reduction_type in ("min", "max"):
         return f"{reduction_type}_propagate_nan({var}, {next_value})"
+    if reduction_type == "fmax":
+        return f"std::max({var}, {next_value})"
     if reduction_type == "welford_reduce":
         if helper_val:
             return f"welford_combine({var}, {next_value}, &{helper_val})"
@@ -1012,6 +1014,11 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     # pyrefly: ignore [bad-override]
+    def fmaximum(a, b):
+        return f"std::max({a}, {b})"
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
     def where(a, b, c):
         return f"{a} ? {b} : {c}"
 
@@ -1715,6 +1722,10 @@ class CppVecOverrides(CppOverrides):
             return f"{a_cast} | {b_cast}"
         else:
             return f"at::vec::maximum({a}, {b})"
+
+    @staticmethod
+    def fmaximum(a, b):
+        return f"at::vec::maximum({a}, {b})"
 
     @staticmethod
     def square(a):

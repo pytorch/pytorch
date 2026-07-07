@@ -1582,6 +1582,7 @@ class TritonOverrides(OpOverrides):
         return f"tl.maximum({a}, {b}, tl.PropagateNan.ALL)"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def fmaximum(a, b):
         return f"tl.maximum({a}, {b})"
 

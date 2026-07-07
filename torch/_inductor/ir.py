@@ -1914,7 +1914,13 @@ class Reduction(Loops):
     def default_accumulator(
         reduction_type: str, dtype: torch.dtype
     ) -> _NumLike | Sequence[_NumLike]:
-        if reduction_type in ("max", "fmax", "argmax", "argmax_value", "argmax_with_value"):
+        if reduction_type in (
+            "max",
+            "fmax",
+            "argmax",
+            "argmax_value",
+            "argmax_with_value",
+        ):
             if is_float_dtype(dtype):
                 return float("-inf")
             elif is_boolean_dtype(dtype):
