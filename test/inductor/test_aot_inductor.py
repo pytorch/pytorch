@@ -73,7 +73,6 @@ from torch.testing._internal.common_quantization import (
 )
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
-    IS_ARM64,
     IS_CI,
     IS_FBCODE,
     IS_MACOS,
@@ -90,7 +89,6 @@ from torch.testing._internal.common_utils import (
     skipIfXpu,
     TEST_MPS,
     TEST_WITH_ROCM,
-    xfailIf,
 )
 from torch.testing._internal.custom_tensor import CustomTensorPlainOut
 from torch.testing._internal.inductor_utils import (
@@ -2068,8 +2066,6 @@ class AOTInductorTestsTemplate:
         with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
             self.check_model(Model(self.device), example_inputs)
 
-    @xfailIf(IS_ARM64)
-    # see https://github.com/pytorch/pytorch/issues/177254
     @skipIfNoFBGEMM
     def test_quanatized_int8_linear(self):
         class Model(torch.nn.Module):
@@ -3780,7 +3776,8 @@ class AOTInductorTestsTemplate:
             def forward(self, x):
                 return torch.ops.aten.normal_functional.default(x)
 
-        self.check_model(Model(), (torch.empty(4, 1, 4, 4, device=self.device),))
+        with config.patch({"fallback_random": True}):
+            self.check_model(Model(), (torch.empty(4, 1, 4, 4, device=self.device),))
 
     def test_empty_graph(self):
         class Model(torch.nn.Module):
@@ -8779,7 +8776,7 @@ torch._inductor.aoti_load_package("{model_path}")
             self.assertEqual(
                 result.returncode,
                 0,
-                f"Failed to load package in subprocess: {result.stdout + result.stderr}",
+                lambda msg: f"{msg}\nFailed to load package in subprocess: {result.stdout + result.stderr}",
             )
 
     @unittest.skipIf(

@@ -25,10 +25,17 @@ log = logging.getLogger(__name__)
 class FlexGemmEpilogueConfig:
     """Metadata needed to render one Inductor-owned QuACK GEMM epilogue choice.
 
-    The epilogue fields identify the generated CuTeDSL callable, ``gemm_op``
-    describes how to map the original aten op's operands into QuACK's dense GEMM
-    adapter, and ``quack_config_key`` pins the exact QuACK config selected by
-    Inductor autotuning or default selection.
+    Attributes:
+        epilogue_name: Name of the generated CuTeDSL epilogue callable.
+        epilogue_source: Python source that defines ``epilogue_name``.
+        gemm_op: Original aten GEMM op spec used to map inputs into QuACK.
+        alpha: Static alpha multiplier for addmm/baddbmm inputs.
+        beta: Static beta multiplier for addmm/baddbmm bias inputs.
+        out_dtype: Optional dtype requested for the main GEMM output.
+        quack_config_key: Lossless key for the selected QuACK GEMM config.
+        epilogue_arg_indices: Template input indices for read-only epilogue captures.
+        epilogue_arg_kinds: Broadcast kind for each captured epilogue tensor.
+        aux_out_index: Template input index for the single supported aux output.
     """
 
     epilogue_name: str
@@ -38,6 +45,9 @@ class FlexGemmEpilogueConfig:
     beta: float
     out_dtype: Any | None = None
     quack_config_key: tuple[Any, ...] | None = None
+    epilogue_arg_indices: tuple[int, ...] = ()
+    epilogue_arg_kinds: tuple[str, ...] = ()
+    aux_out_index: int | None = None
 
 
 class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
@@ -70,9 +80,12 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
         quack_cache_dir_param = f"quack_cache_dir={inductor_quack_cache_dir()!r}"
         params.append(quack_cache_dir_param)
 
-        call_args, call_kwargs = self._gemm_call_args(
-            [arg_name for arg_name, _ in self._template_input_args], config
-        )
+        template_input_arg_names = [
+            arg_name for arg_name, _ in self._template_input_args
+        ]
+        # Template inputs include GEMM operands plus closed-over epilogue tensors for reads and aux writes.
+        call_args, call_kwargs = self._gemm_call_args(template_input_arg_names, config)
+        call_kwargs += self._epilogue_kwargs(template_input_arg_names, config)
         call_kwargs += (
             f", out={self.get_output()}, "
             f"expected_ndim={config.gemm_op.input_ndim}, "
@@ -83,9 +96,6 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
             call_kwargs += f", config_key={tuple(config.quack_config_key)!r}"
 
         output_name = self.get_output()
-        template_input_arg_names = [
-            arg_name for arg_name, _ in self._template_input_args
-        ]
 
         code = IndentedBuffer()
         code.splice(
@@ -143,7 +153,10 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
                 code.writeline(")")
         return PartialRender(code.getvalue(), self.render_hooks)
 
-    def _gemm_call_args(self, input_args, config):
+    def _gemm_call_args(
+        self, input_args: list[str], config: FlexGemmEpilogueConfig
+    ) -> tuple[list[str], str]:
+        """Return positional GEMM operands and scalar/bias kwargs for runtime dispatch."""
         out_dtype = (
             "" if config.out_dtype is None else f", out_dtype={config.out_dtype!r}"
         )
@@ -155,6 +168,21 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
             f", C={input_args[op.bias_index]}, alpha={config.alpha!r}, beta={config.beta!r}"
             f"{out_dtype}"
         )
+
+    def _epilogue_kwargs(
+        self, input_args: list[str], config: FlexGemmEpilogueConfig
+    ) -> str:
+        """Render captured tensor and aux-output kwargs for runtime dispatch."""
+        epilogue_args = [input_args[index] for index in config.epilogue_arg_indices]
+        kwargs: list[str] = []
+        if epilogue_args:
+            kwargs.append(
+                f", epilogue_args=({', '.join(epilogue_args)},), "
+                f"epilogue_arg_kinds={config.epilogue_arg_kinds!r}"
+            )
+        if config.aux_out_index is not None:
+            kwargs.append(f", aux_out={input_args[config.aux_out_index]}")
+        return "".join(kwargs)
 
 
 class FlexGemmEpilogueCaller(CuteDSLTemplateCaller):
