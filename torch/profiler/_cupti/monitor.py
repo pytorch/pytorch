@@ -348,6 +348,20 @@ class CuptiMonitor:
         self._outstanding_warned = False
         self._dropped_records = 0
 
+        # Opt-in PM sampling (true SM-active % / DRAM-throughput % counters): the monitor registers
+        # each requesting observer as a consumer of the current device's per-device PmSampler
+        # (only one PM session per device is possible), polls it on the flush cadence, and converts
+        # each polled frame's raw CUPTI-clock timestamps into the trace clock before pushing to the
+        # observer's sink (the sampler is clock-agnostic; conversion lives here, where the clock base
+        # does). Each consumer brings its own metrics; the shared session samples their union, starts
+        # on the first consumer, and disables after the last. self._pm_consumers maps an observer's
+        # sink to its sampler handle so poll/release can address it.
+        self._pm_consumers: dict[Callable[[dict[str, Any]], None], Any] = {}
+        self._pm_sampler: Any = None
+        # Serializes PM add/poll/remove so a flush-thread poll never decodes the collector while the
+        # foreground is tearing it down (concurrent decode on one collector is unsafe).
+        self._pm_lock = threading.Lock()
+
     def register_callbacks(self) -> None:
         if self._callbacks_registered:
             return
@@ -455,6 +469,9 @@ class CuptiMonitor:
             if self._flush_thread.is_alive():
                 logger.warning("CUPTI monitor flush thread did not stop within 5s")
             self._flush_thread = None
+        # Flush thread is down (no concurrent poll): final tail-drain + disable the PM sessions
+        # while observers are still registered, so their last samples are delivered.
+        self._stop_pm_sampler()
         # Drain everything in flight (incl. CUPTI's async deliveries) before we tear
         # the decoder down, so the final window is complete. Then stop the native
         # decode worker while the subscriber is STILL valid -- it may still decode a
@@ -525,6 +542,7 @@ class CuptiMonitor:
             self._cupti.activity_flush_all()
             self._account_dropped_records(0, 0)
             self._drain_and_dispatch()
+            self._poll_pm_sampler()
             return
         added = self._begin_fence_kind()
         try:
@@ -553,6 +571,7 @@ class CuptiMonitor:
             # The fence guarantees everything up to the sync point is decoded; hand
             # the accumulated window to the observers now.
             self._drain_and_dispatch()
+            self._poll_pm_sampler()
 
     def _begin_fence_kind(self) -> bool:
         """Enable + make decodable the SYNCHRONIZATION sync-point kind for the
@@ -694,6 +713,80 @@ class CuptiMonitor:
             self.stop()
         else:
             self._apply_selection()
+
+    # --- PM sampling (opt-in GPU utilization counters) -----------------------
+
+    def request_pm_sampling(
+        self, sink: Callable[[dict[str, Any]], None], metrics: Iterable[str]
+    ) -> None:
+        """Register ``sink`` as a PM-sampling consumer wanting ``metrics`` on the current device.
+        The shared per-device session samples the union of all consumers' metrics; the first
+        consumer starts it (see PmSampler.configure() for interval/look-back). Frames arrive on the
+        flush thread with ``start_ns`` already converted into the trace clock. No-op if CUDA is
+        unavailable, no metrics are given, or ``sink`` is already registered."""
+        from torch.profiler._cupti.pm_sampling import PmSampler
+
+        metrics = list(metrics)
+        if not torch.cuda.is_available() or not metrics:
+            return
+        with self._pm_lock:
+            if sink in self._pm_consumers:
+                return
+            sampler = PmSampler()  # per-device singleton for the current device
+            try:
+                handle = sampler.add_consumer(metrics)
+            except Exception as e:
+                logger.warning("PM sampling could not register consumer: %s", e)
+                return
+            self._pm_sampler = sampler
+            self._pm_consumers[sink] = handle
+
+    def _deliver_pm(
+        self, sink: Callable[[dict[str, Any]], None], frame: dict[str, Any] | None
+    ) -> None:
+        # Convert the sampler's raw CUPTI-clock timestamps into the trace clock (the observer buckets
+        # frames by trace-time start_ns), then push to the observer's sink. No-op on an empty poll.
+        if frame is None:
+            return
+        frame = dict(frame)
+        # PM samples are always on the unix (CLOCK_REALTIME) domain (the timestamp callback only
+        # restamps activity records onto the approx clock), so convert on the unix domain, not the
+        # record path.
+        frame["start_ns"] = self._clock.convert_unix_array(frame["start_ns"])
+        try:
+            sink(frame)
+        except Exception:
+            logger.exception("PM sampling sink error")
+
+    def release_pm_sampling(self, sink: Callable[[dict[str, Any]], None]) -> None:
+        """Unregister a PM-sampling consumer; the session disables once the last one leaves.
+        Idempotent. Polls the consumer one last time before removing so its final samples land
+        (removal itself delivers nothing)."""
+        with self._pm_lock:
+            handle = self._pm_consumers.pop(sink, None)
+            if handle is not None:
+                self._deliver_pm(sink, handle.poll())  # final delivery
+                handle.detach()
+            if not self._pm_consumers:
+                self._pm_sampler = None
+
+    def _poll_pm_sampler(self) -> None:
+        """Poll every PM consumer on the monitor's flush cadence -- decode drains, so this pulls the
+        HW ring before it overflows. The final poll at release/stop catches the tail."""
+        with self._pm_lock:
+            for sink, handle in self._pm_consumers.items():
+                self._deliver_pm(sink, handle.poll())
+
+    def _stop_pm_sampler(self) -> None:
+        """Poll then unregister the monitor's PM consumers (final delivery + disable when the last
+        leaves). Called at monitor stop in case observers have not released yet."""
+        with self._pm_lock:
+            self._pm_sampler = None
+            entries = list(self._pm_consumers.items())
+            self._pm_consumers.clear()
+            for sink, handle in entries:
+                self._deliver_pm(sink, handle.poll())
+                handle.detach()
 
     def _normalize_activities(
         self, activities: ActivitiesSpec
