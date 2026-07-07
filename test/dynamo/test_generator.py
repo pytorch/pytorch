@@ -23,7 +23,8 @@ class GeneratorTestsBase(torch._dynamo.test_case.TestCase):
         super().setUp()
         self._old = torch._dynamo.config.enable_faithful_generator_behavior
         torch._dynamo.config.enable_faithful_generator_behavior = True
-        self._prev = torch._dynamo.config.enable_trace_load_build_class = True
+        self._prev = torch._dynamo.config.enable_trace_load_build_class
+        torch._dynamo.config.enable_trace_load_build_class = True
         self._unittest_old = torch._dynamo.config.enable_trace_unittest
         torch._dynamo.config.enable_trace_unittest = True
 
@@ -2392,6 +2393,27 @@ class TestSubgeneratorDelegation(GeneratorTestsBase):
         g = outer()
         next(g)
         self.assertRaises(ValueError, g.throw, ValueError)
+        self.assertEqual(log, ["subgen finally"])
+
+    @make_dynamo_test
+    def test_throw_generator_exit_into_subgen(self):
+        # throw(GeneratorExit) through `yield from` closes the subiterator, then
+        # raises the GeneratorExit in the outer frame (CPython's `goto
+        # throw_here`), rather than throwing into the already-closed subiterator.
+        log = []
+
+        def subgen():
+            try:
+                yield 1
+            finally:
+                log.append("subgen finally")
+
+        def outer():
+            yield from subgen()
+
+        g = outer()
+        self.assertEqual(next(g), 1)
+        self.assertRaises(GeneratorExit, g.throw, GeneratorExit)
         self.assertEqual(log, ["subgen finally"])
 
     @make_dynamo_test

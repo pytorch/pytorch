@@ -51,7 +51,11 @@ from typing_extensions import TypeIs
 import torch
 import torch._logging
 from torch._dynamo.dynamo_profiler import DynamoProfilerState, FunctionTraceTiming
-from torch._dynamo.exc import ObservedException, TensorifyScalarRestartAnalysis
+from torch._dynamo.exc import (
+    get_dynamo_observed_exception,
+    ObservedException,
+    TensorifyScalarRestartAnalysis,
+)
 from torch._guards import InlinedCodeCache, tracing, TracingContext
 from torch._logging.structured import dump_file
 from torch.fx.experimental.symbolic_shapes import guard_bool
@@ -2679,7 +2683,7 @@ class InstructionTranslatorBase(
     def _raise_observed_exception(self, exc_: ExceptionVals) -> NoReturn:
         # Propagate `exc_` as an ObservedException to unwind the tracer to the
         # handler, preserving the original raise location via python_stack.
-        observed_exception_type = exc.get_dynamo_observed_exception(exc_.exc_type)  # type: ignore[attr-defined, union-attr]
+        observed_exception_type = get_dynamo_observed_exception(exc_.exc_type)  # type: ignore[attr-defined, union-attr]
         python_stack = getattr(exc_, "python_stack", None)
         raise observed_exception_type(
             f"raised exception {exc_.debug_repr()}", real_stack=python_stack
