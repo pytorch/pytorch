@@ -98,6 +98,7 @@ class Muon(Optimizer):
         eps: float = EPS,
         ns_steps: int = DEFAULT_NS_STEPS,
         adjust_lr_fn: str | None = None,
+        foreach: bool | None = None,
     ) -> None:
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
@@ -125,6 +126,7 @@ class Muon(Optimizer):
             "eps": eps,
             "ns_steps": ns_steps,
             "adjust_lr_fn": adjust_lr_fn,
+            "foreach": foreach,
         }
         super().__init__(params, defaults)
 
@@ -134,6 +136,13 @@ class Muon(Optimizer):
                     raise ValueError(
                         f"Muon only supports 2D parameters whereas we found a parameter with size: {p.size()}"
                     )
+
+    def __setstate__(self, state):
+        super().__setstate__(state)
+        # Backfill defaults for flags introduced after the original release so
+        # that state dicts saved by older versions of Muon load cleanly.
+        for group in self.param_groups:
+            group.setdefault("foreach", None)
 
     def _init_group(
         self,
@@ -192,6 +201,7 @@ class Muon(Optimizer):
                 params_with_grad,
                 grads,
                 muon_momentum_bufs,
+                foreach=group["foreach"],
                 lr=lr,
                 weight_decay=weight_decay,
                 momentum=momentum,
@@ -280,6 +290,11 @@ Muon.__doc__ = (
         ns_steps (int, optional): number of Newton–Schulz iteration steps. (default: {DEFAULT_NS_STEPS})
         adjust_lr_fn (str, optional): function to adjust learning rate. One of "original", "match_rms_adamw", and "spectral_unclamped".
             If not specified, we will default to use "original". (default: None)
+        foreach (bool, optional): whether to use the multi-tensor (``torch._foreach_*``) implementation. The
+            multi-tensor path fuses the momentum and parameter updates across same-shape 2D params; the
+            Newton-Schulz iteration itself is still performed per-tensor, so numerics match the single-tensor
+            path. If ``None`` (the default), the single-tensor path is used to preserve historical behavior;
+            pass ``foreach=True`` to opt in. (default: None)
 
     Example:
         >>> # xdoctest: +SKIP
@@ -351,6 +366,75 @@ def _single_tensor_muon(
         param.add_(update, alpha=-adjusted_lr)
 
 
+def _multi_tensor_muon(
+    params: list[Tensor],
+    grads: list[Tensor],
+    muon_momentum_bufs: list[Tensor],
+    *,
+    lr: float,
+    weight_decay: float,
+    momentum: float,
+    nesterov: bool,
+    ns_coefficients: tuple[float, float, float],
+    ns_steps: int,
+    eps: float,
+    adjust_lr_fn: str | None,
+    has_complex: bool,
+) -> None:
+    lr = _to_scalar(lr)
+    if has_complex:
+        raise ValueError("Complex parameters are not supported")
+    if not params:
+        return
+    for g in grads:
+        if g.ndim != 2:
+            raise ValueError("Param gradient must be a 2D matrix")
+
+    # Phase 1: momentum buffer update fused across all params.
+    # buf <- lerp(buf, grad, 1 - momentum) for every param in one call.
+    torch._foreach_lerp_(muon_momentum_bufs, grads, 1 - momentum)
+    if nesterov:
+        updates = list(torch._foreach_lerp(grads, muon_momentum_bufs, momentum))
+    else:
+        updates = list(muon_momentum_bufs)
+
+    # Phase 2: Newton-Schulz per tensor. Standard NS has no natural batching,
+    # so per-tensor preserves bit-for-bit numerics with _single_tensor_muon.
+    updates = [
+        _zeropower_via_newtonschulz(u, ns_coefficients, ns_steps, eps) for u in updates
+    ]
+
+    # Phase 3: weight-decay shrink (uniform scale across all params) followed
+    # by the shape-grouped negative-lr add. Group by shape, dtype, and device
+    # so each _foreach_add_ call preserves per-tensor dtype semantics while
+    # still sharing the shape-specific adjusted_lr.
+    torch._foreach_mul_(params, 1 - lr * weight_decay)
+
+    add_groups: dict[
+        tuple[int, int, torch.dtype, torch.dtype, torch.device, torch.device], list[int]
+    ] = {}
+    for i, (p, update) in enumerate(zip(params, updates, strict=True)):
+        add_groups.setdefault(
+            (p.size(0), p.size(1), p.dtype, update.dtype, p.device, update.device),
+            [],
+        ).append(i)
+    for indices in add_groups.values():
+        group_params = [params[i] for i in indices]
+        group_updates = [updates[i] for i in indices]
+        # _foreach_add_ silently falls back to per-tensor add_ when self/other
+        # dtypes differ. NS outputs bf16; params are typically fp32. Cast once
+        # via a fused _foreach_copy_ so _foreach_add_ stays on the multi-tensor
+        # fast path. The cast is bit-equivalent to the per-tensor add_ that the
+        # single-tensor path performs internally.
+        target_dtype = group_params[0].dtype
+        if group_updates[0].dtype != target_dtype:
+            cast = [torch.empty_like(p) for p in group_params]
+            torch._foreach_copy_(cast, group_updates)
+            group_updates = cast
+        adjusted_lr = _adjust_lr(lr, adjust_lr_fn, group_params[0].shape)
+        torch._foreach_add_(group_params, group_updates, alpha=-adjusted_lr)
+
+
 @_disable_dynamo_if_unsupported(single_tensor_fn=_single_tensor_muon)
 def muon(
     params: list[Tensor],
@@ -372,10 +456,9 @@ def muon(
 
     See :class:`~torch.optim.Muon` for details.
     """
-    if foreach is not None and foreach:
-        raise RuntimeError("Foreach is not supported for Muon yet")
-
-    func = _single_tensor_muon
+    # foreach=None preserves the historical single-tensor default; only an
+    # explicit True opts into the multi-tensor (_foreach_*) path.
+    func = _multi_tensor_muon if foreach else _single_tensor_muon
 
     func(
         params,
