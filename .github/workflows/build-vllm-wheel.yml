@@ -33,110 +33,120 @@ jobs:
           - platform: manylinux_2_28_x86_64
             device: cu130
             manylinux-image: 'pytorch/manylinux2_28-builder:cuda13.0'
-            runner: mt-rel-l-x86iavx512-8-64
-            buildkit_addr: tcp://buildkitd-amd64.buildkit:1234
+            runner: mt-l-x86iavx512-48-384
           - platform: manylinux_2_28_x86_64
             device: cu132
             manylinux-image: 'pytorch/manylinux2_28-builder:cuda13.2'
-            runner: mt-rel-l-x86iavx512-8-64
-            buildkit_addr: tcp://buildkitd-amd64.buildkit:1234
+            runner: mt-l-x86iavx512-48-384
           - platform: manylinux_2_28_aarch64
             device: cu130
             manylinux-image: 'pytorch/manylinuxaarch64-builder:cuda13.0'
-            runner: mt-rel-l-arm64g4-16-62
-            buildkit_addr: tcp://buildkitd-arm64.buildkit:1234
+            runner: mt-l-arm64g3-61-463
           - platform: manylinux_2_28_aarch64
             device: cu132
             manylinux-image: 'pytorch/manylinuxaarch64-builder:cuda13.2'
-            runner: mt-rel-l-arm64g4-16-62
-            buildkit_addr: tcp://buildkitd-arm64.buildkit:1234
+            runner: mt-l-arm64g3-61-463
     name: "Build ${{ matrix.device }} vLLM wheel on ${{ matrix.platform }}"
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 480
     permissions:
       id-token: write
       contents: read
-    # No host docker daemon on OSDC ARC; build via remote buildkit (like docker-builds.yml).
+    # Build inside the manylinux builder image (the pod is the builder): the wheel is
+    # manylinux-taggable and sccache can use the pod's role/arc creds. No docker/buildkit.
     container:
-      image: ghcr.io/actions/actions-runner:latest
+      image: ${{ matrix.manylinux-image }}
+      options: --ipc=host --tty
     env:
-      PY_VERS: ${{ matrix.python-version }}
-      MANYLINUX_IMAGE: ${{ matrix.manylinux-image }}
       PLATFORM: ${{ matrix.platform }}
       BUILD_DEVICE: ${{ matrix.device }}
+      # The PyTorch manylinux builder exposes cp312 here.
+      PYTHON_EXECUTABLE: /opt/python/cp312-cp312/bin/python
     steps:
-      - name: Setup Linux
-        uses: pytorch/pytorch/.github/actions/setup-linux@main
+      - name: Checkout PyTorch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          use-arc: true
           submodules: false
+          show-progress: false
 
-      - name: Login to ECR
-        uses: pytorch/pytorch/.github/actions/ecr-login@main
-        with:
-          aws-role-to-assume: arn:aws:iam::308535385114:role/arc
-
-      - name: Set up Docker Buildx (remote, no bootstrap)
+      - name: Get vLLM pinned commit
+        id: vllm-pinned-commit
         shell: bash
-        # Avoid docker/setup-buildx-action: its --bootstrap connect times out on cold start.
         run: |
-          set -ex
-          docker buildx create \
-            --name remote-buildkit \
-            --driver remote \
-            --use \
-            "${{ matrix.buildkit_addr }}"
+          echo "commit=$(cat .github/ci_commit_pins/vllm.txt)" >> "${GITHUB_OUTPUT}"
 
-      - uses: pytorch/test-infra/.github/actions/setup-uv@main
+      - name: Configure AWS credentials
+        id: aws-creds
+        continue-on-error: true
+        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
         with:
-          python-version: ${{ matrix.python-version }}
-          activate-environment: "true"
+          role-to-assume: arn:aws:iam::308535385114:role/arc
+          aws-region: us-east-1
+          role-duration-seconds: 18000
 
       - name: Get latest PyTorch nightly
         shell: bash
         run: |
           set -eux
-
-          # Runner arch matches the target platform, so pip resolves the right manylinux wheels.
+          # Keep the torch nightly wheels: installed into the build below, and
+          # prepare_vllm_wheels.sh reads the pinned torch version from them.
           mkdir -p "${RUNNER_TEMP}/artifacts/"
-          uv pip install pip==25.3
-          python -m pip download \
+          "${PYTHON_EXECUTABLE}" -m pip download \
             --pre torch torchvision torchaudio \
             --index-url "https://download.pytorch.org/whl/nightly/${BUILD_DEVICE}" \
             --dest "${RUNNER_TEMP}/artifacts"
 
+      - name: Checkout vLLM
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: vllm-project/vllm
+          path: vllm
+          ref: ${{ steps.vllm-pinned-commit.outputs.commit }}
+          submodules: recursive
+          show-progress: false
+
       - name: Build vLLM wheel
+        working-directory: vllm
         shell: bash
-        # No SCCACHE_*: buildkitd has no AWS creds, so lumen sets USE_SCCACHE=0 and the
-        # Dockerfile uses its ccache path (cache mount persists on buildkitd).
         env:
-          CUDA_VERSION: ${{ matrix.device == 'cu130' && '13.0' || '13.2' }}
           TORCH_CUDA_ARCH_LIST: '8.0;8.9;9.0;10.0;12.0'
-          # vLLM cmake jobs = max(1, MAX_JOBS // NVCC_THREADS). arm64 buildkitd OOMs
-          # at 64/8; 16/1 runs 16 single-arch compiles to stay under it.
-          MAX_JOBS: ${{ contains(matrix.platform, 'aarch64') && '16' || '64' }}
-          NVCC_THREADS: ${{ contains(matrix.platform, 'aarch64') && '1' || '8' }}
-          BASE_IMAGE: ${{ matrix.manylinux-image }}
-          TORCH_WHEELS_PATH: ${{ runner.temp }}/artifacts
-          OUTPUT_DIR: ${{ runner.temp }}/artifacts/externals/vllm
+          # sccache to S3 needs creds; skip it (build still succeeds, just cold) if OIDC failed.
+          SCCACHE_BUCKET: ${{ steps.aws-creds.outcome == 'success' && 'ossci-compiler-cache-circleci-v2' || '' }}
+          SCCACHE_REGION: ${{ steps.aws-creds.outcome == 'success' && 'us-east-1' || '' }}
         run: |
           set -eux
-          # Call lumen directly: build-external-packages runs `docker images` (needs a local daemon).
-          (cd .ci/lumen_cli && uv pip install -e .)
-          python3 -m cli.run build external vllm
+          # Build against the torch nightly we just downloaded; use_existing_torch.py
+          # strips torch from vLLM's requirements so the build keeps that nightly.
+          "${PYTHON_EXECUTABLE}" -m pip install \
+            "${RUNNER_TEMP}"/artifacts/torch-*.whl \
+            "${RUNNER_TEMP}"/artifacts/torchvision-*.whl \
+            "${RUNNER_TEMP}"/artifacts/torchaudio-*.whl
+          "${PYTHON_EXECUTABLE}" use_existing_torch.py
+          "${PYTHON_EXECUTABLE}" -m pip install -r requirements/build/cuda.txt
+
+          # sccache (S3 compiler cache) is best-effort: install if missing, never fail on it.
+          if [ -n "${SCCACHE_BUCKET}" ] && ! command -v sccache >/dev/null; then
+            arch="$(uname -m)"
+            curl -fsSL -o /tmp/sccache.tar.gz \
+              "https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-${arch}-unknown-linux-musl.tar.gz" \
+              && tar -C /tmp -xzf /tmp/sccache.tar.gz \
+              && mv /tmp/sccache-*/sccache /usr/local/bin/sccache || echo "sccache unavailable; building without it"
+          fi
+          command -v sccache >/dev/null && sccache --show-stats || true
+
+          "${PYTHON_EXECUTABLE}" setup.py bdist_wheel --dist-dir=dist --py-limited-api=cp38
+          command -v sccache >/dev/null && sccache --show-stats || true
 
       - name: Prepare vLLM wheel
-        shell: bash
-        # Originally ran in the manylinux container via docker exec; no docker daemon
-        # on the pod, so run it directly from the artifacts dir with the repackaging tools.
         working-directory: ${{ runner.temp }}/artifacts
-        env:
-          PYTHON_EXECUTABLE: python
+        shell: bash
+        # prepare_vllm_wheels.sh (auditwheel repair + nightly version rename) expects the
+        # raw wheel at externals/vllm/wheels/vllm/. auditwheel/patchelf ship in manylinux.
         run: |
           set -eux
-          sudo apt-get update
-          sudo apt-get install -y unzip patchelf
-          uv pip install auditwheel wheel==0.45.1
+          command -v unzip >/dev/null || (dnf install -y unzip || yum install -y unzip)
+          mkdir -p externals/vllm/wheels/vllm
+          mv "${GITHUB_WORKSPACE}/vllm/dist/"*.whl externals/vllm/wheels/vllm/
           bash "${GITHUB_WORKSPACE}/.github/scripts/prepare_vllm_wheels.sh"
 
       - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
