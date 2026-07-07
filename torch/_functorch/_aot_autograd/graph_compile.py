@@ -35,7 +35,7 @@ from torch._dynamo.utils import (
 )
 from torch._guards import CompileContext, TracingContext
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_value
+from torch._library.opaque_object import is_custom_class_obj
 from torch._logging import getArtifactLogger, trace_structured
 from torch._subclasses import FakeTensor
 from torch._subclasses.meta_utils import is_sparse_any
@@ -107,7 +107,7 @@ def is_opaque_node(node: Any) -> bool:
     if "val" not in getattr(node, "meta", {}):
         return False
     val = node.meta["val"]
-    if is_opaque_value(val):
+    if is_custom_class_obj(val):
         return True
     if isinstance(val, (torch.ScriptObject, FakeScriptObject)):
         return True
