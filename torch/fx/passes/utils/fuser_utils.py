@@ -120,8 +120,7 @@ def fuse_as_graphmodule(
     Returns:
         fused_gm (GraphModule): fused graph module, where its node is a copy of `nodes` in `gm`
 
-        original_inputs (Tuple[Node, ...]): input nodes to `nodes` in original `gm`,
-            ordered by their position in ``gm.graph``
+        original_inputs (Tuple[Node, ...]): input nodes to `nodes` in original `gm`
 
         original_outputs (Tuple[Node, ...]): consumer nodes of `nodes` in original `gm`
 
@@ -156,21 +155,37 @@ def fuse_as_graphmodule(
     ] = {}  # mapping of nodes from old graph to placeholder in new graph
     node_map: dict[Node, Node] = {}  # mapping of nodes from old graph to new graph
 
-    external_inputs: set[Node] = set()
-    for node in nodes:
-        for input_node in node.all_input_nodes:
-            if input_node not in partition_lookup_table:
-                external_inputs.add(input_node)
-
-    for input_node in gm.graph.nodes:
-        if input_node not in external_inputs:
-            continue
+    def create_placeholder(input_node: Node) -> None:
         placeholder_node = subgraph.placeholder(
             input_node.name, type_expr=input_node.type
         )
         # copy all meta fields, even if some fields might be irrelevant for the placeholder node
         placeholder_node.meta = copy.copy(input_node.meta)
         node_to_placeholder[input_node] = placeholder_node
+
+    external_inputs: list[Node] = []
+    external_inputs_set: set[Node] = set()
+    for node in nodes:
+        for input_node in node.all_input_nodes:
+            if (
+                input_node not in partition_lookup_table
+                and input_node not in external_inputs_set
+            ):
+                external_inputs.append(input_node)
+                external_inputs_set.add(input_node)
+
+    if external_inputs and all(
+        input_node.op == "placeholder" for input_node in external_inputs
+    ):
+        # True graph placeholders have a stable original input order. Keep the
+        # historical encounter order for mixed or intermediate boundaries,
+        # because downstream lowering may derive its own call args from the
+        # submodule placeholder order.
+        graph_order = {node: i for i, node in enumerate(gm.graph.nodes)}
+        external_inputs.sort(key=lambda node: graph_order[node])
+
+    for input_node in external_inputs:
+        create_placeholder(input_node)
 
     # handles inputs through graph.node_copy's arg_transform functions
     def remap_inputs(x: Node) -> Node:

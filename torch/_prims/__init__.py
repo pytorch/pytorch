@@ -657,7 +657,7 @@ def _cbrt_aten(a: torch.Tensor) -> Tensor:
         lambda: "cbrt: Complex inputs not supported. Consider calling torch.pow(a, 1.0/3.0)",
     )
     # Returns the real cubic root of the number.
-    # Note that if a < 0, pow(a, (1. / 3.)) returns th complex number
+    # Note that if a < 0, pow(a, (1. / 3.)) returns the complex number
     # exp(1/3 * log(a)) = exp(1/3 * (log(abs(a)) + pi*i)) = cbrt(abs(a)) * e^{pi/3*i}
     # which is a complex number.
     # For more info see the section Note in
@@ -1468,7 +1468,7 @@ def _collapse_view_helper(
             if guard_or_false(valid_op is False):
                 break
 
-    # for unbacked this become a runtime assertion.
+    # for unbacked this becomes a runtime assertion.
     valid_op = sym_or(valid_op, a.numel() == 0)
 
     if must_be_valid:
@@ -1880,7 +1880,7 @@ def _cat_meta(tensors: Sequence[TensorLikeType], dim: int) -> TensorLikeType:
                 )
 
     new_shape = list(tensors[0].shape).copy()
-    new_shape[dim] = torch.sym_sum(sym_sum_args)
+    new_shape[dim] = torch.sym_sum(sym_sum_args)  # type: ignore[call-overload]
     return TensorMeta(
         tensors[0],
         shape=new_shape,

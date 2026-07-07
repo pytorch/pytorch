@@ -4,6 +4,7 @@ import random
 
 import torch
 
+from torchfuzz.operators._dtypes import FLOAT_DTYPES
 from torchfuzz.operators.base import Operator
 from torchfuzz.tensor_fuzzer import ScalarSpec, Spec, TensorSpec
 from torchfuzz.type_promotion import (
@@ -38,7 +39,7 @@ def _random_broadcast_shape(output_size: tuple[int, ...]) -> tuple[int, ...]:
     return tuple(result)
 
 
-class PointwiseOperator(Operator):
+class PointwiseOperatorBase(Operator):
     """Base class for element-wise pointwise operations."""
 
     _scalar_input_positions: tuple[int, ...] = (0, 1)
@@ -122,7 +123,7 @@ class PointwiseOperator(Operator):
             return f"{output_name} = {expr}"
 
 
-class AddOperator(PointwiseOperator):
+class AddOperator(PointwiseOperatorBase):
     """Operator for element-wise addition."""
 
     def __init__(self, weight: float = 1.0):
@@ -152,7 +153,7 @@ class AddOperator(PointwiseOperator):
         return super().codegen(output_name, input_names, output_spec)
 
 
-class MulOperator(PointwiseOperator):
+class MulOperator(PointwiseOperatorBase):
     """Operator for element-wise multiplication."""
 
     def __init__(self):
@@ -163,7 +164,7 @@ class MulOperator(PointwiseOperator):
         return "torch.mul"
 
 
-class SubOperator(PointwiseOperator):
+class SubOperator(PointwiseOperatorBase):
     """Operator for element-wise subtraction."""
 
     def __init__(self):
@@ -174,7 +175,7 @@ class SubOperator(PointwiseOperator):
         return "torch.sub"
 
 
-class DivOperator(PointwiseOperator):
+class DivOperator(PointwiseOperatorBase):
     """Operator for element-wise division."""
 
     def __init__(self):
@@ -237,14 +238,22 @@ class ClampOperator(Operator):
         if not use_min and not use_max:
             use_min = True
 
+        # For integer-dtype tensors, emit integer bounds so the fuzzer doesn't
+        # generate float-bound + int-tensor mismatches between CPU and MTIA.
+        assert isinstance(output_spec, TensorSpec)  # noqa: S101
+        if output_spec.dtype in FLOAT_DTYPES:
+            min_literal, max_literal = "-1.0", "1.0"
+        else:
+            min_literal, max_literal = "-1", "1"
+
         args = [input_name]
         if use_min:
-            args.append("min=-1.0")
+            args.append(f"min={min_literal}")
         else:
             args.append("min=None")
 
         if use_max:
-            args.append("max=1.0")
+            args.append(f"max={max_literal}")
         else:
             args.append("max=None")
 

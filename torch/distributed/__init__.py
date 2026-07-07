@@ -72,12 +72,10 @@ if is_available():
     from torch._C._distributed_c10d import (
         _broadcast_coalesced,
         _compute_bucket_assignment_by_size,
-        _ControlCollectives,
         _DEFAULT_FIRST_BUCKET_BYTES,
         _make_nccl_premul_sum,
         _register_builtin_comm_hook,
         _register_comm_hook,
-        _StoreCollectives,
         _test_python_store,
         _verify_params_across_processes,
         Backend as _Backend,
@@ -141,7 +139,7 @@ if is_available():
         # avoid having the default timeout (if short) interrupt your debug session
         if timeout_s is not None:
             for group in torch.distributed.distributed_c10d._pg_map:
-                torch.distributed.distributed_c10d._set_pg_timeout(
+                torch.distributed.distributed_c10d.set_timeout(
                     timedelta(seconds=timeout_s), group
                 )
 

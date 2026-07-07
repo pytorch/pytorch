@@ -1119,6 +1119,10 @@
   self: linalg_matrix_exp_differential(self, grad, /*adjoint*/ true)
   result: linalg_matrix_exp_differential(self_p, self_t, /*adjoint*/ false)
 
+- name: linalg_matrix_sqrth(Tensor self) -> Tensor
+  self: linalg_matrix_sqrth_differential(self, grad)
+  result: linalg_matrix_sqrth_differential(self_p, self_t)
+
 - name: max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   self: value_selecting_reduction_backward_symint(grad, dim, indices, self.sym_sizes(), keepdim)
   values: gather_with_keepdimed_indices(self_t, dim, indices, keepdim)

@@ -404,12 +404,15 @@ def lint(ctx, *, lintrunner_args, apply_patches, **kwargs):
         lintrunner_args=lintrunner_args,
         return_json_output=write_json_output,
     )
+    # Slow linters default to changed files only so a bare `spin lint` stays
+    # fast locally, but must honor an explicit --all-files (e.g. trunk CI) so
+    # they continuously check the whole tree rather than just the merge-base diff.
     lint_found_changed, json_output_changed = _run_lintrunner(
         changed_files_linters,
         take=take,
         skip=skip,
         apply_patches=apply_patches,
-        all_files=False,
+        all_files=has_all_files,
         lintrunner_args=lintrunner_args,
         return_json_output=write_json_output,
     )
@@ -517,6 +520,44 @@ def docs(make_args):
         )
     cmd = ["make", *(make_args or ("html",))]
     spin.util.run(cmd, cwd="docs")
+
+
+def _pip_install_cmd(editable):
+    """Build the pip install command, preferring uv when available."""
+    if shutil.which("uv"):
+        cmd = ["uv", "pip", "install"]
+    else:
+        cmd = [sys.executable, "-m", "pip", "install"]
+    if editable:
+        cmd += ["-e"]
+    return cmd + [".", "-v", "--no-build-isolation"]
+
+
+@click.command()
+def develop():
+    """Build PyTorch (editable install).
+
+    Runs an editable pip install using uv when available, falling back to
+    regular pip.  Build configuration comes from the environment, e.g.
+    `BUILD_CONFIG spin develop`.
+    """
+    spin.util.run(_pip_install_cmd(editable=True))
+
+
+# Alias so `spin editable` also works.
+editable = click.command(name="editable")(develop.callback)
+editable.help = develop.help
+
+
+@click.command()
+def install():
+    """Install PyTorch (non-editable).
+
+    Runs a regular pip install using uv when available, falling back to
+    regular pip.  Build configuration comes from the environment, e.g.
+    `BUILD_CONFIG spin install`.
+    """
+    spin.util.run(_pip_install_cmd(editable=False))
 
 
 PYREFLY_LINTER_SCRIPT = CWD / "tools" / "linter" / "adapters" / "pyrefly_linter.py"
