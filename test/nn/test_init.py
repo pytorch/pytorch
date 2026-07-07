@@ -718,12 +718,12 @@ class TestNNInitDeviceType(TestCase):
         self.assertEqual(
             at_lower,
             0,
-            f"{dtype}: {at_lower} values clamped to lower bound a=-2.0",
+            lambda msg: f"{msg}\n{dtype}: {at_lower} values clamped to lower bound a=-2.0",
         )
         self.assertEqual(
             at_upper,
             0,
-            f"{dtype}: {at_upper} values clamped to upper bound b=2.0",
+            lambda msg: f"{msg}\n{dtype}: {at_upper} values clamped to upper bound b=2.0",
         )
 
     def _run_init_test(self, device, zero_element=False):

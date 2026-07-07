@@ -1986,6 +1986,16 @@ def empty(  # type: ignore[misc]
         return _SymmetricMemory.empty_strided_p2p(size, stride, dtype, device)
 
 
+def _resolve_group_name(group: c10d.GroupName | ProcessGroup) -> c10d.GroupName:
+    from torch._C._distributed_c10d import ProcessGroup
+
+    if isinstance(group, str):
+        return c10d.GroupName(group)
+    if isinstance(group, ProcessGroup):
+        return group.group_name
+    raise TypeError(f"unsupported group type: {type(group)}")
+
+
 def rendezvous(
     tensor: torch.Tensor, group: c10d.GroupName | ProcessGroup
 ) -> _SymmetricMemory:
@@ -2002,15 +2012,7 @@ def rendezvous(
         group (Union[str, :class:`torch.distributed.ProcessGroup`]): The group identifying the
             participating processes. This can be either a group name or a process group object.
     """
-    from torch._C._distributed_c10d import ProcessGroup
-
-    if isinstance(group, str):
-        group_name = c10d.GroupName(group)
-    elif isinstance(group, ProcessGroup):
-        group_name = group.group_name
-    else:
-        raise TypeError(f"rendezvous: unsupported group type: {type(group)}")
-
+    group_name = _resolve_group_name(group)
     return _SymmetricMemory.rendezvous(tensor, group_name)
 
 
@@ -2163,7 +2165,79 @@ def get_mem_pool(device: _device) -> torch.cuda.MemPool:
     return _symm_mem_pools[device]
 
 
+def _cuda_get_out(
+    dst: torch.Tensor, hdl: _SymmetricMemory, offset: int, size: int, peer: int
+) -> None:
+    storage_offset = hdl.offset // dst.element_size() + offset
+    remote_src = hdl.get_buffer(peer, (size,), dst.dtype, storage_offset)
+    dst.view(-1)[:size].copy_(remote_src)
+
+
 # One-sided communication APIs.
+def get(
+    dst: torch.Tensor,
+    hdl: _SymmetricMemory,
+    peer: int,
+    offset: int = 0,
+) -> None:
+    r"""
+    get(dst, hdl, peer, offset=0) -> ()
+
+    Copy ``dst.numel()`` elements starting at ``offset`` from ``peer``'s
+    symmetric allocation into local ``dst`` using one-sided symmetric memory
+    access.
+
+    ``hdl`` is the symmetric memory handle returned by
+    :func:`torch.distributed._symmetric_memory.rendezvous`; the remote source
+    is ``peer``'s allocation backing that handle. The number of elements copied
+    is inferred from ``dst``; pass a view (e.g. ``dst[:n]``) to fill only part
+    of a tensor. ``offset`` is expressed in elements of ``dst``'s dtype.
+    ``dst`` can be a regular CUDA tensor or a symmetric-memory tensor; it must
+    be on the same device as ``hdl`` and backed by contiguous memory. The copy
+    is issued on the current CUDA stream.
+
+    Args:
+        dst (Tensor): local destination tensor.
+        hdl (SymmetricMemory): handle whose peer allocation is the remote
+            source.
+        peer (int): rank to copy from.
+        offset (int, optional): element offset into the peer allocation to
+            start reading from. Defaults to ``0``.
+    """
+    if dst.device != hdl.device:
+        raise ValueError("get: dst must be on the same device as hdl")
+    if not dst.is_contiguous():
+        raise ValueError("get: dst must be backed by contiguous memory")
+    if offset < 0:
+        raise ValueError("get: offset must be non-negative")
+    if peer < 0 or peer >= hdl.world_size:
+        raise ValueError("get: invalid peer")
+    size = dst.numel()
+    element_size = dst.element_size()
+    if hdl.offset % element_size != 0:
+        raise RuntimeError("get: handle offset is not element-aligned")
+    start = hdl.offset + offset * element_size
+    end = start + size * element_size
+    if start > hdl.buffer_size or end > hdl.buffer_size:
+        raise ValueError("get: requested range exceeds symmetric allocation")
+
+    backend = get_backend(dst.device)
+    if backend == "CUDA":
+        _cuda_get_out(dst, hdl, offset, size, peer)
+        return
+
+    # `hdl` is a pybind `_SymmetricMemory` object. Dispatcher expects the
+    # TorchBind custom class type `__torch__.torch.classes.c10d.SymmetricMemory`.
+    # Convert via `.boxed()`.
+    hdl_boxed = hdl.boxed() if hasattr(hdl, "boxed") else hdl
+    if backend == "NVSHMEM":
+        torch.ops.symm_mem.nvshmem_get_out(dst, hdl_boxed, offset, size, peer)
+    elif backend == "NCCL":
+        torch.ops.symm_mem.nccl_get_out(dst, hdl_boxed, offset, size, peer)
+    else:
+        raise ValueError(f"get: unsupported backend: {backend}")
+
+
 def put_signal(src: torch.Tensor, hdl: _SymmetricMemory, peer: int) -> None:
     r"""
     put_signal(src, hdl, peer) -> None
@@ -2298,6 +2372,54 @@ def is_symm_mem_tensor(tensor: torch.Tensor) -> bool:
     return _SymmetricMemory.is_symm_mem_tensor(tensor)
 
 
+def all_to_all_nd(
+    input: torch.Tensor,
+    out: torch.Tensor,
+    scatter_dim: int,
+    gather_dim: int,
+    *,
+    group: str,
+) -> None:
+    r"""
+    all_to_all_nd(input, out, scatter_dim, gather_dim, *, group) -> None
+
+    Permute-free all-to-all: shards along ``scatter_dim`` of ``input`` are exchanged
+    so each rank receives one shard per peer; results are laid out along ``gather_dim``
+    of ``out``. Supported pairs are ``(scatter_dim=1, gather_dim=0)`` and
+    ``(scatter_dim=0, gather_dim=1)``.
+
+    For ``scatter_dim=1``, ``gather_dim=0`` (let ``G`` be the group size): ``input`` is
+    ``[rows, G * local_cols]`` or equivalently ``[rows, G, local_cols]``;
+    each rank ``r`` reads column block ``r`` from every peer and writes peer ``j`` into
+    ``out[j]``. ``out`` must be contiguous with shape ``[G, rows, local_cols]`` or the
+    flattened equivalent ``[G * rows, local_cols]``.
+
+    For ``scatter_dim=0``, ``gather_dim=1`` (``G`` is the group size): ``input`` is
+    ``[G * local_rows, cols]`` or equivalently ``[G, local_rows, cols]``;
+    each rank ``r`` reads row block ``r`` from every peer; peer ``j`` is stored in
+    ``out[:, j, :]``. ``out`` must be contiguous with shape ``[local_rows, G, cols]`` or
+    ``[local_rows, G * cols]`` (flattened gather and inner dims).
+
+    Args:
+        input (Tensor): For ``(scatter_dim=1, gather_dim=0)``, 2-D ``[rows, G*local_cols]`` or
+            3-D ``[rows, G, local_cols]`` in symmetric memory (innermost dimension contiguous).
+            For ``(scatter_dim=0, gather_dim=1)``, 2-D ``[G*local_rows, cols]`` or 3-D
+            ``[G, local_rows, cols]`` (same layout).
+        out (Tensor): Contiguous buffer (see shapes above; 2-D allowed where noted).
+        scatter_dim (int): ``0`` or ``1`` — dimension along which the input is partitioned.
+        gather_dim (int): ``0`` or ``1`` — dimension along which peer chunks are
+            concatenated in ``out``.
+        group (str): The name of the ``ProcessGroup`` to perform the operation on.
+    """
+    backend = get_backend(input.device)
+    if backend == "NCCL":
+        torch.ops.symm_mem.nccl_all_to_all_nd(
+            input, out, scatter_dim, gather_dim, group
+        )
+    else:
+        raise NotImplementedError(f"all_to_all_nd: unsupported backend: {backend}")
+
+
 __all__ = [
     "empty",
     "is_symm_mem_tensor",
@@ -2305,8 +2427,10 @@ __all__ = [
     "is_nvshmem_available",
     "set_backend",
     "get_backend",
+    "get",
     "set_signal_pad_size",
     "get_signal_pad_size",
     "get_mem_pool",
     "reduce_scatter_offset",
+    "all_to_all_nd",
 ]
