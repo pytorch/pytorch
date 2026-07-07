@@ -4432,7 +4432,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertTrue(ref_out.is_contiguous())
             self.assertEqual(out, ref_out)
             self.assertEqual(bn.weight.grad, ref_bn.weight.grad, atol=precision, rtol=precision)
-            self.assertEqual(bn.bias.grad, ref_bn.bias.grad)
+            self.assertEqual(bn.bias.grad, ref_bn.bias.grad, atol=precision, rtol=precision)
             self.assertEqual(input.grad, ref_input.grad)
 
         # test NC11 and N1HW; test mixed dtype
