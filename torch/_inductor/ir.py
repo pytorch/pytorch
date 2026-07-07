@@ -7610,28 +7610,40 @@ class ExternKernel(InputsKernel):
             for dim in expanded_dims:
                 x = torch._inductor.lowering.slice_(x, dim, 0, 1)
 
-        if exact_strides is not None and x.get_dtype().is_complex:
-            dst = torch._inductor.lowering.empty_strided(
+        if x.get_dtype().is_complex:
+            # Triton signature codegen has no complex pointer dtype, so avoid
+            # materializing complex layout constraints through a pointwise copy.
+            if exact_strides is not None:
+                layout = FlexibleLayout(
+                    x.get_device_or_error(), x.get_dtype(), x.get_size()
+                ).as_exact_strides(exact_strides, allow_padding=allow_padding)
+            else:
+                assert order is not None
+                layout = FlexibleLayout(
+                    x.get_device_or_error(), x.get_dtype(), x.get_size()
+                ).as_stride_order(order, allow_padding=allow_padding)
+
+            src = x
+            x = torch._inductor.lowering.empty_strided(
                 x.get_size(),
-                exact_strides,
+                layout.stride,
                 dtype=x.get_dtype(),
-                device=x.get_device(),
+                device=x.get_device_or_error(),
             )
-            InplaceCopyFallback.create(dst, x)
-            return dst
+            InplaceCopyFallback.create(x, src)
+        else:
+            # Although this is a clone, inductor is good about fusing clones into previous
+            # operations if they weren't realized and their layouts were flexible.
+            x = cls.copy_input(x)
 
-        # Although this is a clone, inductor is good about fusing clones into previous
-        # operations if they weren't realized and their layouts were flexible.
-        x = cls.copy_input(x)
-
-        as_storage_and_layout(
-            x,
-            freeze=True,
-            want_contiguous=False,
-            stride_order=order,
-            allow_padding=allow_padding,
-            exact_strides=exact_strides,
-        )
+            as_storage_and_layout(
+                x,
+                freeze=True,
+                want_contiguous=False,
+                stride_order=order,
+                allow_padding=allow_padding,
+                exact_strides=exact_strides,
+            )
         if (
             order
             and not free_unbacked_symbols(x.get_size())
