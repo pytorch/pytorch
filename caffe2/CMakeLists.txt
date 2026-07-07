@@ -389,10 +389,11 @@ add_custom_target(
   DEPENDS ${TORCH_GENERATED_CODE}
   )
 
-# Generate torch/profiler/_cupti/_cupti_field_ids.py (the CUPTI CUpti_Activity*FieldIds
-# enums) from the CUPTI ABI header shipped by nvidia-cuda-cupti. The header is located
-# at configure time so the rule re-runs when it changes; codegen is skipped when no
-# header is present (the torch.profiler._cupti consumer needs CUPTI at runtime anyway).
+# Generate torch/profiler/_cupti/_cupti_stubs.py (the CUPTI CUpti_Activity*FieldIds and
+# CUpti_ActivityAttribute enums) from the CUPTI ABI header shipped by nvidia-cuda-cupti.
+# The header is located at configure time so the rule re-runs when it changes; codegen is
+# skipped when no header is present (the torch.profiler._cupti consumer needs CUPTI at
+# runtime anyway).
 if(USE_CUDA AND BUILD_PYTHON)
   execute_process(
     COMMAND "${Python_EXECUTABLE}" -c
@@ -414,20 +415,20 @@ if(USE_CUDA AND BUILD_PYTHON)
       list(GET _libclang_candidates -1 _libclang_so)
       set(_libclang_arg --libclang "${_libclang_so}")
     endif()
-    set(CUPTI_FIELD_IDS_PY "${TORCH_SRC_DIR}/profiler/_cupti/_cupti_field_ids.py")
+    set(CUPTI_STUBS_PY "${TORCH_SRC_DIR}/profiler/_cupti/_cupti_stubs.py")
     add_custom_command(
-      COMMENT "Generating CUPTI field-id module from ${CUPTI_ACTIVITY_HEADER}"
-      OUTPUT "${CUPTI_FIELD_IDS_PY}"
-      COMMAND "${Python_EXECUTABLE}" tools/gen_cupti_field_ids.py
-        --output "${CUPTI_FIELD_IDS_PY}" --header "${CUPTI_ACTIVITY_HEADER}"
+      COMMENT "Generating CUPTI stub module from ${CUPTI_ACTIVITY_HEADER}"
+      OUTPUT "${CUPTI_STUBS_PY}"
+      COMMAND "${Python_EXECUTABLE}" tools/gen_cupti_stubs.py
+        --output "${CUPTI_STUBS_PY}" --header "${CUPTI_ACTIVITY_HEADER}"
         ${_libclang_arg}
       DEPENDS
-        "${TORCH_ROOT}/tools/gen_cupti_field_ids.py"
+        "${TORCH_ROOT}/tools/gen_cupti_stubs.py"
         "${CUPTI_ACTIVITY_HEADER}"
       WORKING_DIRECTORY "${TORCH_ROOT}")
-    add_custom_target(generate-cupti-field-ids ALL DEPENDS "${CUPTI_FIELD_IDS_PY}")
+    add_custom_target(generate-cupti-stubs ALL DEPENDS "${CUPTI_STUBS_PY}")
   else()
-    message(STATUS "CUPTI header not found; skipping CUPTI field-id codegen")
+    message(STATUS "CUPTI header not found; skipping CUPTI stub codegen")
   endif()
 endif()
 

@@ -3,7 +3,7 @@
 
 In the v2 / user-defined-record path, observers select specific *fields* per activity
 kind (rather than whole records). The available fields per kind are the generated
-:mod:`_cupti_field_ids` catalogs (``Kernel``, ``Memcpy``, ...), one
+:mod:`_cupti_stubs` catalogs (``Kernel``, ``Memcpy``, ...), one
 :class:`~_records_base.Field` per ``CUpti_Activity*FieldIds`` id, each carrying its
 :class:`~_records_base.Ctype` for decode. Those catalogs are generated from the CUPTI
 ABI (cupti_activity.h) at build time -- cupti-python does not expose the enums.
@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
 
-from torch.profiler._cupti._cupti_field_ids import (
+from torch.profiler._cupti._cupti_stubs import (
     Api,
     CudaEvent,
     ExternalCorrelation,
