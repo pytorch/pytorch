@@ -11,3 +11,4 @@
 0006-flex-gemm-local-reduce-aux-output.patch
 0007-flex-gemm-large-n-local-reduce.patch
 0008-flex-gemm-local-reduce-feed-main.patch
+0009-flex-gemm-scalar-epilogue-args.patch
