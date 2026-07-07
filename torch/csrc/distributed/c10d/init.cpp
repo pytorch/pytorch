@@ -3440,16 +3440,6 @@ Arguments:
               py::arg("input_list"),
               py::arg("opts") = ::c10d::AllgatherOptions(),
               py::call_guard<py::gil_scoped_release>())
-          // Deprecated alias of all_gather_single_coalesced, kept for backward
-          // compatibility. Bound to all_gather_single_coalesced to avoid
-          // referencing the deprecated C++ method.
-          .def(
-              "allgather_into_tensor_coalesced",
-              &::c10d::Backend::all_gather_single_coalesced,
-              py::arg("output_lists"),
-              py::arg("input_list"),
-              py::arg("opts") = ::c10d::AllgatherOptions(),
-              py::call_guard<py::gil_scoped_release>())
           .def(
               "gather",
               &::c10d::Backend::gather,
@@ -3543,16 +3533,6 @@ Arguments:
               py::call_guard<py::gil_scoped_release>())
           .def(
               "reduce_scatter_single_coalesced",
-              &::c10d::Backend::reduce_scatter_single_coalesced,
-              py::arg("outputTensors"),
-              py::arg("inputTensors"),
-              py::arg("opts") = ::c10d::ReduceScatterOptions(),
-              py::call_guard<py::gil_scoped_release>())
-          // Deprecated alias of reduce_scatter_single_coalesced, kept for
-          // backward compatibility. Bound to reduce_scatter_single_coalesced to
-          // avoid referencing the deprecated C++ method.
-          .def(
-              "reduce_scatter_tensor_coalesced",
               &::c10d::Backend::reduce_scatter_single_coalesced,
               py::arg("outputTensors"),
               py::arg("inputTensors"),
