@@ -421,11 +421,20 @@ def meta_fft_r2c(self, dim, normalization, onesided):
     if onesided:
         out_sizes[last_dim] = last_dim_halfsize
 
+    # Determine output dtype based on input dtype and device
+    # bfloat16 FFT always produces complex64 output (not bcomplex32):
+    # - On CUDA: cuFFT CUDA_C_16BF is upcast to ComplexFloat (see SpectralOps.cpp line 376-379)
+    # - On ROCm/XPU: bfloat16 is promoted to float32 before FFT, yielding complex64
+    # See promote_type_fft() and _fft_r2c_cufft() in aten/src/ATen/native/SpectralOps.cpp
+    output_dtype = self.dtype
+    if output_dtype == torch.bfloat16 and (device_hint(self) in ("cuda", "xpu")):
+        output_dtype = torch.float32
+
     if device_hint(self) == "cuda" or device_hint(self) == "xpu":
         # _fft_r2c_cufft in aten/src/ATen/native/cuda/SpectralOps.cpp
         # _fft_r2c_xpu in torch-xpu-ops/src/ATen/native/xpu/SpectralOps.cpp
         output = self.new_empty(
-            out_sizes, dtype=utils.corresponding_complex_dtype(self.dtype)
+            out_sizes, dtype=utils.corresponding_complex_dtype(output_dtype)
         )
 
         working_tensor = self
@@ -437,7 +446,7 @@ def meta_fft_r2c(self, dim, normalization, onesided):
             _exec_fft(output, working_tensor, target_sizes, [last_dim], forward=True)
             if len(dim) > 1:
                 working_tensor = self.new_empty(
-                    out_sizes, dtype=utils.corresponding_complex_dtype(self.dtype)
+                    out_sizes, dtype=utils.corresponding_complex_dtype(output_dtype)
                 )
 
             # Then any remaining C2C transforms
@@ -466,13 +475,13 @@ def meta_fft_r2c(self, dim, normalization, onesided):
         # _fft_r2c_mkl in aten/src/ATen/native/mkl/SpectralOps.cpp
         sorted_dims = _sort_dims(self, dim, exclude_last=True)
         output = self.new_empty(
-            out_sizes, dtype=utils.corresponding_complex_dtype(self.dtype)
+            out_sizes, dtype=utils.corresponding_complex_dtype(output_dtype)
         )
         return _exec_fft(output, self, out_sizes, sorted_dims, forward=True)
 
     else:
         return self.new_empty(
-            out_sizes, dtype=utils.corresponding_complex_dtype(self.dtype)
+            out_sizes, dtype=utils.corresponding_complex_dtype(output_dtype)
         )
 
 
@@ -2548,14 +2557,21 @@ def meta_mm(a, b, out_dtype: torch.dtype | None = None):
         lambda: f"a and b must have same reduction dim, but got [{N}, {M1}] X [{M2}, {P}].",
     )
     if out_dtype is not None:
-        torch._check(
-            out_dtype == a.dtype
-            or (
-                out_dtype == torch.float32
-                and a.dtype in (torch.float16, torch.bfloat16)
-            ),
-            lambda: "out_dtype must be the same as input dtype or fp32 for fp16/bf16 inputs",
-        )
+        # The out_dtype restriction below is a property of the in-tree CUDA/XPU
+        # backends (see aten/src/ATen/native/cuda/Blas.cpp and
+        # aten/src/ATen/native/mkldnn/xpu/Blas.cpp). Out-of-tree backends (e.g.
+        # accelerators registered via PrivateUse1) may support arbitrary
+        # out_dtype combinations, so only enforce it for the backends that have
+        # the restriction.
+        if device_hint(a) in ("cuda", "xpu"):
+            torch._check(
+                out_dtype == a.dtype
+                or (
+                    out_dtype == torch.float32
+                    and a.dtype in (torch.float16, torch.bfloat16)
+                ),
+                lambda: "out_dtype must be the same as input dtype or fp32 for fp16/bf16 inputs",
+            )
     result_dtype = a.dtype if out_dtype is None else out_dtype
     return a.new_empty((N, P), dtype=result_dtype)
 
@@ -4916,13 +4932,20 @@ def common_meta_baddbmm_bmm(batch1, batch2, is_bmm, self_baddbmm=None, out_dtype
         f", {contraction_size}] but got: [{batch2_sizes[0]}, {batch2_sizes[1]}].",
     )
     if out_dtype:
-        supported_out_dtype = (
-            batch1.dtype == torch.float16 or batch1.dtype == torch.bfloat16
-        ) and out_dtype == torch.float32
-        torch._check(
-            out_dtype == batch1.dtype or supported_out_dtype,
-            lambda: "out_dtype only supported for torch.float32 output with float16/bfloat16 inputs or same as input dtypes",
-        )
+        # The out_dtype restriction below is a property of the in-tree CUDA/XPU
+        # backends (see aten/src/ATen/native/cuda/Blas.cpp and
+        # aten/src/ATen/native/mkldnn/xpu/Blas.cpp). Out-of-tree backends (e.g.
+        # accelerators registered via PrivateUse1) may support arbitrary
+        # out_dtype combinations, so only enforce it for the backends that have
+        # the restriction.
+        if device_hint(batch1) in ("cuda", "xpu"):
+            supported_out_dtype = (
+                batch1.dtype == torch.float16 or batch1.dtype == torch.bfloat16
+            ) and out_dtype == torch.float32
+            torch._check(
+                out_dtype == batch1.dtype or supported_out_dtype,
+                lambda: "out_dtype only supported for torch.float32 output with float16/bfloat16 inputs or same as input dtypes",
+            )
         output = batch2.new_empty(output_size).to(out_dtype)
     else:
         # TODO: handle out
