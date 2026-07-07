@@ -2661,7 +2661,7 @@ class TestHardwareClassifications(TestCase):
         self._cu = _cu
 
     def _suite_test_names(self, suite) -> set[str]:
-        return {test_case.id().split(".")[-1] for test_case in self._cu._iter_test_cases_recursively(suite)}
+        return {test_case.id().split(".")[-1] for test_case in self._cu.HardwareClassificationTestLoader.iter_test_cases_recursively(suite)}
 
     def test_filter_suite(self):
         requirement = self._cu.HardwareClassification
@@ -2690,10 +2690,8 @@ class TestHardwareClassifications(TestCase):
             ]
         )
 
-        filtered_suite = self._cu._filter_suite_by_hw_classification(
-            suite,
-            {self._cu.HardwareClassification.GENERIC},
-        )
+        loader = self._cu.HardwareClassificationTestLoader({self._cu.HardwareClassification.GENERIC})
+        filtered_suite = loader.filter_suite_by_hw_classification(suite)
 
         self.assertEqual(
             self._suite_test_names(filtered_suite),
@@ -2711,10 +2709,8 @@ class TestHardwareClassifications(TestCase):
                 pass
 
         suite = unittest.defaultTestLoader.loadTestsFromTestCase(DeviceGenericChild)
-        filtered_suite = self._cu._filter_suite_by_hw_classification(
-            suite,
-            {self._cu.HardwareClassification.DEVICE_GENERIC},
-        )
+        loader = self._cu.HardwareClassificationTestLoader({self._cu.HardwareClassification.DEVICE_GENERIC})
+        filtered_suite = loader.filter_suite_by_hw_classification(suite)
 
         self.assertEqual(
             self._suite_test_names(filtered_suite),

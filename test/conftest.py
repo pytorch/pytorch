@@ -134,7 +134,7 @@ class HardwareClassificationPytestPlugin:
             if cls is None:
                 func_dropped += 1
                 continue
-            req = _cu._get_hw_classification(cls)
+            req = _cu.get_hw_classification(cls)
             if req is None:
                 unclassified_dropped += 1
             elif req in self.requirement:

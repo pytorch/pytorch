@@ -172,18 +172,7 @@ USE_PYTEST = False
 HW_CLASSIFICATION : set[HardwareClassification] | None = None
 
 
-def _iter_test_cases_recursively(
-    suite_or_case: unittest.TestSuite | unittest.TestCase,
-) -> Iterator[unittest.TestCase]:
-    if isinstance(suite_or_case, unittest.TestCase):
-        yield suite_or_case
-        return
-
-    for element in suite_or_case:
-        yield from _iter_test_cases_recursively(element)
-
-
-def _get_hw_classification(
+def get_hw_classification(
     test_case_cls: type[unittest.TestCase],
 ) -> HardwareClassification | None:
     requirement = getattr(test_case_cls, "hw_classification", None)
@@ -198,34 +187,6 @@ def _get_hw_classification(
 
     return requirement
 
-
-def _filter_suite_by_hw_classification(tests: unittest.TestSuite, hw_classification: set[HardwareClassification]) -> unittest.TestSuite:
-    if hw_classification is None:
-        return tests
-
-    filtered_suite = unittest.TestSuite()
-    total_count = 0
-    passed_count = 0
-    unclassified_count = 0
-
-    for test_case in _iter_test_cases_recursively(tests):
-        total_count += 1
-        requirement = _get_hw_classification(test_case.__class__)
-
-        if requirement is None:
-            unclassified_count += 1
-        elif requirement in hw_classification:
-            filtered_suite.addTest(test_case)
-            passed_count += 1
-
-    mismatched_count = total_count - passed_count - unclassified_count
-
-    warnings.warn(
-        f"HW classification mode active ({[e.name for e in hw_classification]}): "
-        f"total={total_count}, passed={passed_count}, "
-        f"unclassified={unclassified_count}, mismatched={mismatched_count}"
-    )
-    return filtered_suite
 
 def is_navi3_arch():
     if torch.cuda.is_available():
@@ -1371,16 +1332,57 @@ def get_pytest_test_cases(argv: list[str]) -> list[str]:
 
 
 class HardwareClassificationTestLoader(unittest.TestLoader):
+    """Unittest TestLoader that filters loaded tests by hw_classification."""
     def __init__(self, hw_classification):
         super().__init__()
         self.hw_classification = hw_classification
 
-    """Unittest TestLoader that filters loaded tests by hw_classification."""
+    @staticmethod
+    def iter_test_cases_recursively(
+        suite_or_case: unittest.TestSuite | unittest.TestCase,
+    ) -> Iterator[unittest.TestCase]:
+        if isinstance(suite_or_case, unittest.TestCase):
+            yield suite_or_case
+            return
+
+        _iter = HardwareClassificationTestLoader.iter_test_cases_recursively
+        for element in suite_or_case:
+            yield from _iter(element)
+
+    def filter_suite_by_hw_classification(self, tests: unittest.TestSuite) -> unittest.TestSuite:
+        if self.hw_classification is None:
+            return tests
+
+        filtered_suite = unittest.TestSuite()
+        total_count = 0
+        passed_count = 0
+        unclassified_count = 0
+
+        _iter = HardwareClassificationTestLoader.iter_test_cases_recursively
+        for test_case in _iter(tests):
+            total_count += 1
+            requirement = get_hw_classification(test_case.__class__)
+
+            if requirement is None:
+                unclassified_count += 1
+            elif requirement in self.hw_classification:
+                filtered_suite.addTest(test_case)
+                passed_count += 1
+
+        mismatched_count = total_count - passed_count - unclassified_count
+
+        warnings.warn(
+            f"HW classification mode active ({[e.name for e in self.hw_classification]}): "
+            f"total={total_count}, passed={passed_count}, "
+            f"unclassified={unclassified_count}, mismatched={mismatched_count}"
+        )
+        return filtered_suite
+
     def loadTestsFromModule(self, module, *args, pattern=None, **kwargs):
         suite = super().loadTestsFromModule(
             module, *args, pattern=pattern, **kwargs
         )
-        return _filter_suite_by_hw_classification(suite, self.hw_classification)
+        return self.filter_suite_by_hw_classification(suite)
 
 
 def run_tests(argv=None):
