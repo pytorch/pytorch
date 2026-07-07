@@ -41,7 +41,7 @@ enum class EventFlag : uint8_t {
   // Legacy sentinels -- BC preserved
   PYTORCH_DEFAULT = 0x0, // no timing, no blocking, no interprocess
   BACKEND_DEFAULT = 0xF9, // legacy CUDA default (timing only); bits 3-7 set to
-                          // distinguish from new bitmask values
+  // distinguish from new bitmask values
   INVALID = 0xFF, // sentinel for testing; not a valid flag
 
   // Bit flags -- combine with operator|.
