@@ -1534,9 +1534,7 @@ class TestPatternMatcher(TestCase):
         actual, (code) = run_and_get_code(fn3, args[0], args[1], args[2])
         expanded_bias = args[0].expand(4, 6, 8)
         self.assertEqual(expanded_bias.stride(1), 0)
-        self.assertEqual(
-            actual, torch.baddbmm(expanded_bias, args[1], args[2]).relu()
-        )
+        self.assertEqual(actual, torch.baddbmm(expanded_bias, args[1], args[2]).relu())
         FileCheck().check_not("extern_kernels.baddbmm(").check(
             "extern_kernels.bmm("
         ).run(code[0])
