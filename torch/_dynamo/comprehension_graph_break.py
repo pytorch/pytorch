@@ -6,6 +6,7 @@ import dis
 import functools
 import logging
 import sys
+from collections import Counter
 from typing import Any, TYPE_CHECKING
 
 
@@ -24,6 +25,7 @@ from .bytecode_transformation import (
 )
 from .codegen import PyCodegen
 from .exc import unimplemented
+from .graph_break_hints import DYNAMO_BUG
 from .output_graph import GraphCompileReason, StackLocalsMetadata
 from .variables.misc import NullVariable, UnknownVariable
 
@@ -216,27 +218,26 @@ def _analyze_comprehension(tx: InstructionTranslatorBase) -> ComprehensionAnalys
     # We use this to classify the handling of the result as discarded, stored,
     # or returned/consumed
     n_iter = len(iterator_vars)
-    store_targets = [tx.instructions[i].argval for i in range(store_fast_ip, scan_ip)]
+    store_targets = Counter(
+        tx.instructions[i].argval for i in range(store_fast_ip, scan_ip)
+    )
 
     result_var: str | None = None
     if pre_store_ops[-1:] == ["POP_TOP"]:  # discarded
         result_var = None
         result_on_stack = False
-    elif len(store_targets) > n_iter:  # stored
-        remaining = list(store_targets)
-        for iter_var in iterator_vars:
-            if iter_var in remaining:
-                remaining.remove(iter_var)
-        if len(remaining) != 1:
+    elif store_targets.total() > n_iter:  # stored
+        store_targets.subtract(iterator_vars)
+        if store_targets.total() != 1:
             unimplemented(
                 gb_type="Comprehension analysis failed: ambiguous result store",
                 context=f"store_targets={store_targets}, iterator_vars={iterator_vars}",
                 explanation="Expected exactly one comprehension result assignment.",
-                hints=[],
+                hints=DYNAMO_BUG,
             )
-        result_var = remaining[0]
+        result_var = next(iter(store_targets))
         result_on_stack = False
-    elif len(store_targets) == n_iter:  # returned/consumed
+    elif store_targets.total() == n_iter:  # returned/consumed
         result_var = None
         result_on_stack = True
     else:
@@ -245,7 +246,7 @@ def _analyze_comprehension(tx: InstructionTranslatorBase) -> ComprehensionAnalys
             context=f"pre_store_ops={pre_store_ops}, store_targets={store_targets}, "
             f"iterator_vars={iterator_vars}",
             explanation="Comprehension does not match any known bytecode pattern.",
-            hints=[],
+            hints=DYNAMO_BUG,
         )
 
     return ComprehensionAnalysis(
