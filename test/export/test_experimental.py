@@ -112,7 +112,7 @@ class TestExperiment(TestCase):
         self.assertExpectedInline(
             str(joint_ep.graph_module.code).strip(),
             """\
-def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
+def forward(self, p_linear_bias, p_linear_weight, c_lifted_tensor_0, x):
     view = torch.ops.aten.view.default(x, [1, 3]);  x = None
     permute = torch.ops.aten.permute.default(p_linear_weight, [1, 0]);  p_linear_weight = None
     addmm = torch.ops.aten.addmm.default(p_linear_bias, view, permute);  p_linear_bias = permute = None
@@ -148,13 +148,13 @@ def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
     sum_4 = torch.ops.aten.sum.dim_IntList(view_2, [0], True);  view_2 = None
     view_3 = torch.ops.aten.view.default(sum_4, [3]);  sum_4 = None
     permute_3 = torch.ops.aten.permute.default(permute_2, [1, 0]);  permute_2 = None
-    return (div, permute_3, view_3)""",
+    return (div, view_3, permute_3)""",
         )
         ep = joint_ep.run_decompositions()
         self.assertExpectedInline(
             str(ep.graph_module.code).strip(),
             """\
-def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
+def forward(self, p_linear_bias, p_linear_weight, c_lifted_tensor_0, x):
     view = torch.ops.aten.view.default(x, [1, 3]);  x = None
     permute = torch.ops.aten.permute.default(p_linear_weight, [1, 0]);  p_linear_weight = None
     addmm = torch.ops.aten.addmm.default(p_linear_bias, view, permute);  p_linear_bias = permute = None
@@ -190,7 +190,7 @@ def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
     sum_4 = torch.ops.aten.sum.dim_IntList(view_2, [0], True);  view_2 = None
     view_3 = torch.ops.aten.view.default(sum_4, [3]);  sum_4 = None
     permute_3 = torch.ops.aten.permute.default(permute_2, [1, 0]);  permute_2 = None
-    return (div, permute_3, view_3)""",
+    return (div, view_3, permute_3)""",
         )
 
     def _test_export_blockmask_with_mask_fn(self, make_mask_fn):
@@ -263,12 +263,12 @@ def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
             """\
 def forward(self, args_0):
     _fn_args = (args_0, )
-    L_self_modules_module_parameters_weight_ , L_self_modules_module_parameters_bias_ , L_args_0_ , = self._dynamo_bytecode_flatten(*_fn_args)
-    l_self_modules_module_parameters_weight_ = L_self_modules_module_parameters_weight_
-    l_self_modules_module_parameters_bias_ = L_self_modules_module_parameters_bias_
+    L_args_0_ , L_self_modules_module_parameters_bias_ , L_self_modules_module_parameters_weight_ , = self._dynamo_bytecode_flatten(*_fn_args)
     l_args_0_ = L_args_0_
-    out = torch._C._nn.linear(l_args_0_, l_self_modules_module_parameters_weight_, l_self_modules_module_parameters_bias_);  l_args_0_ = l_self_modules_module_parameters_weight_ = l_self_modules_module_parameters_bias_ = None
-    return self._dynamo_bytecode_unflatten((out,), _fn_args)""",
+    l_self_modules_module_parameters_bias_ = L_self_modules_module_parameters_bias_
+    l_self_modules_module_parameters_weight_ = L_self_modules_module_parameters_weight_
+    linear = torch._C._nn.linear(l_args_0_, l_self_modules_module_parameters_weight_, l_self_modules_module_parameters_bias_);  l_args_0_ = l_self_modules_module_parameters_weight_ = l_self_modules_module_parameters_bias_ = None
+    return self._dynamo_bytecode_unflatten((linear,), _fn_args)""",
         )
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
@@ -870,9 +870,9 @@ def forward(self, x):
             """\
 def forward(self, other):
     _fn_args = (self, other)
-    self, L_self_ , L_other_ , = self._dynamo_bytecode_flatten(*_fn_args)
-    l_self_ = L_self_
+    self, L_other_ , L_self_ , = self._dynamo_bytecode_flatten(*_fn_args)
     l_other_ = L_other_
+    l_self_ = L_self_
     add_tensor = torch.ops.aten.add.Tensor(self = l_self_, other = l_other_, alpha = 1);  l_self_ = l_other_ = None
     return self._dynamo_bytecode_unflatten((add_tensor,), _fn_args)""",
         )
@@ -1026,14 +1026,14 @@ def forward(self, args_0):
             """\
 def forward(self, args_0):
     _fn_args = (args_0, )
-    L_x_ , L_outer_ , = self._dynamo_bytecode_flatten(*_fn_args)
-    l_x_ = L_x_
+    L_outer_ , L_x_ , = self._dynamo_bytecode_flatten(*_fn_args)
     l_outer_ = L_outer_
-    z = l_x_ + l_outer_;  l_x_ = l_outer_ = None
-    y = z[(slice(None, -1, None), slice(None, None, None))];  z = None
-    stacked = torch.stack([y, y, y], dim = 0);  y = None
-    reshaped = stacked.reshape(-1, 3, 32);  stacked = None
-    return self._dynamo_bytecode_unflatten((reshaped,), _fn_args)""",
+    l_x_ = L_x_
+    add = l_x_ + l_outer_;  l_x_ = l_outer_ = None
+    getitem = add[(slice(None, -1, None), slice(None, None, None))];  add = None
+    stack = torch.stack([getitem, getitem, getitem], dim = 0);  getitem = None
+    reshape = stack.reshape(-1, 3, 32);  stack = None
+    return self._dynamo_bytecode_unflatten((reshape,), _fn_args)""",
         )
         self.assertEqual(ep(*inps), MyModel()(*inps))
 
@@ -1430,29 +1430,29 @@ def forward(self, arg0_1):
     gt = torch.ops.aten.gt.Scalar(sum_1, 0)
     lt = torch.ops.aten.lt.Scalar(sum_1, 16384);  sum_1 = None
     bitwise_and = torch.ops.aten.bitwise_and.Tensor(gt, lt);  gt = lt = None
-    _to_copy = torch.ops.aten._to_copy.default(bitwise_and, dtype = torch.int8);  bitwise_and = None
-    _to_copy_1 = torch.ops.aten._to_copy.default(eq, dtype = torch.int8);  eq = None
+    _to_copy = torch.ops.aten._to_copy.default(eq, dtype = torch.int8);  eq = None
+    _to_copy_1 = torch.ops.aten._to_copy.default(bitwise_and, dtype = torch.int8);  bitwise_and = None
     _to_copy_2 = torch.ops.aten._to_copy.default(_to_copy, dtype = torch.int32);  _to_copy = None
-    sum_2 = torch.ops.aten.sum.dim_IntList(_to_copy_2, [-1])
-    sort = torch.ops.aten.sort.stable(_to_copy_2, stable = True, descending = True);  _to_copy_2 = None
+    sort = torch.ops.aten.sort.stable(_to_copy_2, stable = True, descending = True)
     getitem_1 = sort[1];  sort = None
-    _to_copy_3 = torch.ops.aten._to_copy.default(sum_2, dtype = torch.int32, memory_format = torch.contiguous_format);  sum_2 = None
-    _to_copy_4 = torch.ops.aten._to_copy.default(getitem_1, dtype = torch.int32, memory_format = torch.contiguous_format);  getitem_1 = None
-    _to_copy_5 = torch.ops.aten._to_copy.default(_to_copy_1, dtype = torch.int32);  _to_copy_1 = None
-    sum_3 = torch.ops.aten.sum.dim_IntList(_to_copy_5, [-1])
-    sort_1 = torch.ops.aten.sort.stable(_to_copy_5, stable = True, descending = True);  _to_copy_5 = None
+    sum_2 = torch.ops.aten.sum.dim_IntList(_to_copy_2, [-1]);  _to_copy_2 = None
+    _to_copy_3 = torch.ops.aten._to_copy.default(_to_copy_1, dtype = torch.int32);  _to_copy_1 = None
+    sort_1 = torch.ops.aten.sort.stable(_to_copy_3, stable = True, descending = True)
     getitem_3 = sort_1[1];  sort_1 = None
-    _to_copy_6 = torch.ops.aten._to_copy.default(sum_3, dtype = torch.int32, memory_format = torch.contiguous_format);  sum_3 = None
-    _to_copy_7 = torch.ops.aten._to_copy.default(getitem_3, dtype = torch.int32, memory_format = torch.contiguous_format);  getitem_3 = None
-    new_zeros = torch.ops.aten.new_zeros.default(_to_copy_4, [1, 1, 1, 2], dtype = torch.int32, pin_memory = False)
+    sum_3 = torch.ops.aten.sum.dim_IntList(_to_copy_3, [-1]);  _to_copy_3 = None
+    _to_copy_4 = torch.ops.aten._to_copy.default(getitem_1, dtype = torch.int32, memory_format = torch.contiguous_format);  getitem_1 = None
+    _to_copy_5 = torch.ops.aten._to_copy.default(sum_2, dtype = torch.int32, memory_format = torch.contiguous_format);  sum_2 = None
+    _to_copy_6 = torch.ops.aten._to_copy.default(getitem_3, dtype = torch.int32, memory_format = torch.contiguous_format);  getitem_3 = None
+    _to_copy_7 = torch.ops.aten._to_copy.default(sum_3, dtype = torch.int32, memory_format = torch.contiguous_format);  sum_3 = None
+    new_zeros = torch.ops.aten.new_zeros.default(_to_copy_6, [1, 1, 1, 2], dtype = torch.int32, pin_memory = False)
     arange_4 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='cuda', index=0), pin_memory = False)
     unsqueeze_2 = torch.ops.aten.unsqueeze.default(arange_4, -1);  arange_4 = None
     arange_5 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='cuda', index=0), pin_memory = False)
-    unsqueeze_3 = torch.ops.aten.unsqueeze.default(_to_copy_3, 3)
+    new_ones = torch.ops.aten.new_ones.default(new_zeros, [1, 1], pin_memory = False)
+    unsqueeze_3 = torch.ops.aten.unsqueeze.default(_to_copy_7, 3)
     lt_1 = torch.ops.aten.lt.Tensor(arange_5, unsqueeze_3);  arange_5 = unsqueeze_3 = None
     scalar_tensor = torch.ops.aten.scalar_tensor.default(1, dtype = torch.int32, layout = torch.strided, device = device(type='cuda', index=0))
-    where = torch.ops.aten.where.self(lt_1, _to_copy_4, scalar_tensor);  lt_1 = scalar_tensor = None
-    new_ones = torch.ops.aten.new_ones.default(new_zeros, [1, 1], pin_memory = False)
+    where = torch.ops.aten.where.self(lt_1, _to_copy_6, scalar_tensor);  lt_1 = scalar_tensor = None
     arange_6 = torch.ops.aten.arange.default(1, dtype = torch.int64, layout = torch.strided, device = device(type='cuda', index=0))
     unsqueeze_4 = torch.ops.aten.unsqueeze.default(arange_6, -1);  arange_6 = None
     unsqueeze_5 = torch.ops.aten.unsqueeze.default(unsqueeze_4, -1);  unsqueeze_4 = None
@@ -1464,20 +1464,20 @@ def forward(self, arg0_1):
     index_put = torch.ops.aten.index_put.default(new_zeros, [unsqueeze_8, unsqueeze_5, unsqueeze_2, where], view_2);  new_zeros = unsqueeze_8 = unsqueeze_5 = unsqueeze_2 = where = view_2 = None
     slice_3 = torch.ops.aten.slice.Tensor(index_put, 3, 0, 1);  index_put = None
     transpose_1 = torch.ops.aten.transpose.int(slice_3, -2, -1);  slice_3 = None
-    sum_4 = torch.ops.aten.sum.dim_IntList(transpose_1, [-1])
-    sort_2 = torch.ops.aten.sort.stable(transpose_1, stable = True, descending = True);  transpose_1 = None
+    sort_2 = torch.ops.aten.sort.stable(transpose_1, stable = True, descending = True)
     getitem_5 = sort_2[1];  sort_2 = None
-    _to_copy_8 = torch.ops.aten._to_copy.default(sum_4, dtype = torch.int32, memory_format = torch.contiguous_format);  sum_4 = None
-    _to_copy_9 = torch.ops.aten._to_copy.default(getitem_5, dtype = torch.int32, memory_format = torch.contiguous_format);  getitem_5 = None
-    new_zeros_1 = torch.ops.aten.new_zeros.default(_to_copy_7, [1, 1, 1, 2], dtype = torch.int32, pin_memory = False)
+    sum_4 = torch.ops.aten.sum.dim_IntList(transpose_1, [-1]);  transpose_1 = None
+    _to_copy_8 = torch.ops.aten._to_copy.default(getitem_5, dtype = torch.int32, memory_format = torch.contiguous_format);  getitem_5 = None
+    _to_copy_9 = torch.ops.aten._to_copy.default(sum_4, dtype = torch.int32, memory_format = torch.contiguous_format);  sum_4 = None
+    new_zeros_1 = torch.ops.aten.new_zeros.default(_to_copy_4, [1, 1, 1, 2], dtype = torch.int32, pin_memory = False)
     arange_8 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='cuda', index=0), pin_memory = False)
     unsqueeze_9 = torch.ops.aten.unsqueeze.default(arange_8, -1);  arange_8 = None
     arange_9 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='cuda', index=0), pin_memory = False)
-    unsqueeze_10 = torch.ops.aten.unsqueeze.default(_to_copy_6, 3)
+    new_ones_1 = torch.ops.aten.new_ones.default(new_zeros_1, [1, 1], pin_memory = False)
+    unsqueeze_10 = torch.ops.aten.unsqueeze.default(_to_copy_5, 3)
     lt_2 = torch.ops.aten.lt.Tensor(arange_9, unsqueeze_10);  arange_9 = unsqueeze_10 = None
     scalar_tensor_1 = torch.ops.aten.scalar_tensor.default(1, dtype = torch.int32, layout = torch.strided, device = device(type='cuda', index=0))
-    where_1 = torch.ops.aten.where.self(lt_2, _to_copy_7, scalar_tensor_1);  lt_2 = scalar_tensor_1 = None
-    new_ones_1 = torch.ops.aten.new_ones.default(new_zeros_1, [1, 1], pin_memory = False)
+    where_1 = torch.ops.aten.where.self(lt_2, _to_copy_4, scalar_tensor_1);  lt_2 = scalar_tensor_1 = None
     arange_10 = torch.ops.aten.arange.default(1, dtype = torch.int64, layout = torch.strided, device = device(type='cuda', index=0))
     unsqueeze_11 = torch.ops.aten.unsqueeze.default(arange_10, -1);  arange_10 = None
     unsqueeze_12 = torch.ops.aten.unsqueeze.default(unsqueeze_11, -1);  unsqueeze_11 = None
@@ -1489,12 +1489,12 @@ def forward(self, arg0_1):
     index_put_1 = torch.ops.aten.index_put.default(new_zeros_1, [unsqueeze_15, unsqueeze_12, unsqueeze_9, where_1], view_3);  new_zeros_1 = unsqueeze_15 = unsqueeze_12 = unsqueeze_9 = where_1 = view_3 = None
     slice_6 = torch.ops.aten.slice.Tensor(index_put_1, 3, 0, 1);  index_put_1 = None
     transpose_3 = torch.ops.aten.transpose.int(slice_6, -2, -1);  slice_6 = None
-    sum_5 = torch.ops.aten.sum.dim_IntList(transpose_3, [-1])
-    sort_3 = torch.ops.aten.sort.stable(transpose_3, stable = True, descending = True);  transpose_3 = None
+    sort_3 = torch.ops.aten.sort.stable(transpose_3, stable = True, descending = True)
     getitem_7 = sort_3[1];  sort_3 = None
-    _to_copy_10 = torch.ops.aten._to_copy.default(sum_5, dtype = torch.int32, memory_format = torch.contiguous_format);  sum_5 = None
-    _to_copy_11 = torch.ops.aten._to_copy.default(getitem_7, dtype = torch.int32, memory_format = torch.contiguous_format);  getitem_7 = None
-    return (arg0_1, _to_copy_3, _to_copy_4, _to_copy_6, _to_copy_7, _to_copy_8, _to_copy_9, _to_copy_10, _to_copy_11)""",
+    sum_5 = torch.ops.aten.sum.dim_IntList(transpose_3, [-1]);  transpose_3 = None
+    _to_copy_10 = torch.ops.aten._to_copy.default(getitem_7, dtype = torch.int32, memory_format = torch.contiguous_format);  getitem_7 = None
+    _to_copy_11 = torch.ops.aten._to_copy.default(sum_5, dtype = torch.int32, memory_format = torch.contiguous_format);  sum_5 = None
+    return (arg0_1, _to_copy_7, _to_copy_6, _to_copy_5, _to_copy_4, _to_copy_9, _to_copy_8, _to_copy_11, _to_copy_10)""",
             )
 
             compiled_fn = aot_compile_joint_with_descriptors(joint_with_descriptors)
