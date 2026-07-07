@@ -538,6 +538,50 @@ class TestCuptiMonitorCUDA(TestCase):
         self.assertTrue(any(len(n) > 0 for c in columns for n in c[int(Kernel.NAME)]))
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    def test_approx_timestamp_callback_engages_under_udr(self):
+        # use_approx_timestamps hands CUPTI a per-subscriber timestamp callback
+        # (CUPTI_ACTIVITY_ATTR_TIMESTAMP_CALLBACK) so records ride the profiler's approx
+        # clock. Unlike the global cuptiActivityRegisterTimestampCallback (NOT_COMPATIBLE under
+        # user-defined records), the subscriber attribute coexists with the UDR path: assert it
+        # engages, and that collection still delivers records with it active.
+        from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
+
+        from torch.profiler._cupti.cupti_python import CuptiError
+        from torch.profiler._cupti.monitor import CuptiMonitor
+        from torch.profiler._cupti.records import Kernel
+
+        kind = ActivityKind.CONCURRENT_KERNEL
+        want = {kind: {Kernel.START, Kernel.END}}
+
+        lock = threading.Lock()
+        columns: list = []
+        monitor = CuptiMonitor(use_approx_timestamps=True)
+
+        def on_columns(cols):
+            if kind in cols:
+                with lock:
+                    columns.append(cols[kind])
+
+        try:
+            obs = monitor.register(want, on_columns)
+        except CuptiError as e:
+            self.skipTest(f"approx-clock callback needs sole-subscriber mode: {e}")
+        self.addCleanup(monitor.unregister, obs)
+        # The point: the per-subscriber timestamp callback engaged despite UDR being on.
+        self.assertTrue(monitor._timestamp_callback_active)
+
+        x = torch.randn(256, 256, device="cuda")
+        for _ in range(4):
+            x = torch.relu(x @ x)
+        x.sum().item()
+        torch.cuda.synchronize()
+        monitor.flush(sync=True)
+        monitor.unregister(obs)
+
+        # Records still flow with the callback active (it coexists with UDR collection).
+        self.assertGreater(sum(len(c[int(Kernel.START)]) for c in columns), 0)
+
+    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     def test_singleton_flush_accessible(self):
         # A user can reach the process-wide monitor singleton through the public
         # accessors and flush it: instance() constructs/returns it, get_monitor()

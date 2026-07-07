@@ -482,8 +482,8 @@ class CuptiMonitor:
         _cupti_monitor_native.stop_decoder()
         self._drain_and_dispatch()
         # Clear the timestamp callback (restore CUPTI's default timer) before unsubscribe.
-        if self._timestamp_callback_active:
-            self._cupti.unregister_timestamp_callback()
+        if self._timestamp_callback_active and self._subscriber is not None:
+            self._cupti.set_timestamp_callback(self._subscriber, 0)
             self._timestamp_callback_active = False
         # Disable everything we enabled, then tear down the subscription.
         self._disable(self._enabled.keys())
@@ -649,19 +649,18 @@ class CuptiMonitor:
         stamps activity records on kineto's exact timebase directly. Opt-in via the
         use_approx_timestamps monitor arg (and only as the sole subscriber); returns False --
         leaving records on the CLOCK_REALTIME pass-through -- when disabled or when CUPTI
-        rejects it (current libcupti returns CUPTI_ERROR_NOT_COMPATIBLE under the
-        user-defined-record path)."""
+        rejects it. Set as a per-subscriber attribute (CUPTI_ACTIVITY_ATTR_TIMESTAMP_CALLBACK),
+        which coexists with the user-defined-record path -- unlike the global
+        cuptiActivityRegisterTimestampCallback, which returns CUPTI_ERROR_NOT_COMPATIBLE."""
         if not self._timestamp_callback_enabled:
             return False
         addr = _cupti_monitor_native.approximate_time_callback_address()
-        rc = self._cupti.register_timestamp_callback(addr)
-        if rc == cupti_python.CUPTI_SUCCESS:
+        if self._cupti.set_timestamp_callback(cast(int, self._subscriber), addr):
             logger.info("CUPTI monitor: approx-clock timestamp callback engaged")
             return True
         logger.warning(
-            "CUPTI monitor: timestamp callback rejected (%s); using the cuptiGetTimestamp "
-            "(CLOCK_REALTIME) pass-through",
-            self._cupti._result_string(rc),
+            "CUPTI monitor: timestamp callback rejected; using the cuptiGetTimestamp "
+            "(CLOCK_REALTIME) pass-through"
         )
         return False
 
