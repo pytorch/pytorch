@@ -7,14 +7,12 @@ namespace c10d {
 
 PythonCommHook::~PythonCommHook() {
   torch::detail::SafeGilScopedAcquire ag;
-  if (ag.acquired()) {
+  if (ag) {
     state_.dec_ref();
     hook_.dec_ref();
   }
   // Explicitly set state_ and hook_ to nullptr to prevent py::object's dtor
-  // to decref on the PyObject again. If the GIL could not be acquired
-  // above, this deliberately leaks the references rather than touching
-  // the refcount without the GIL held.
+  // to decref on the PyObject again.
   // See Note [Destructing py::object] in python_ivalue.h
   state_.ptr() = nullptr;
   hook_.ptr() = nullptr;

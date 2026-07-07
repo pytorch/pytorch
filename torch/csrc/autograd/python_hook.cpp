@@ -106,7 +106,7 @@ PyFunctionTensorPreHook::~PyFunctionTensorPreHook() {
   // If python is already dead, leak the wrapped python objects
   if (Py_IsInitialized()) {
     torch::detail::SafeGilScopedAcquire gil;
-    if (gil.acquired()) {
+    if (gil) {
       Py_DECREF(dict);
     }
   }
@@ -136,7 +136,7 @@ PyFunctionPreHook::~PyFunctionPreHook() {
   // If python is already dead, leak the wrapped python objects
   if (Py_IsInitialized()) {
     torch::detail::SafeGilScopedAcquire gil;
-    if (gil.acquired()) {
+    if (gil) {
       Py_DECREF(dict);
     }
   }
@@ -160,7 +160,7 @@ PyFunctionPostHook::~PyFunctionPostHook() {
   // If python is already dead, leak the wrapped python objects
   if (Py_IsInitialized()) {
     torch::detail::SafeGilScopedAcquire gil;
-    if (gil.acquired()) {
+    if (gil) {
       Py_DECREF(dict);
     }
   }
@@ -224,7 +224,7 @@ PyFunctionTensorPostAccGradHooks::~PyFunctionTensorPostAccGradHooks() {
   // If python is already dead, leak the wrapped python objects
   if (Py_IsInitialized()) {
     torch::detail::SafeGilScopedAcquire gil;
-    if (gil.acquired()) {
+    if (gil) {
       Py_DECREF(dict);
     }
   }
