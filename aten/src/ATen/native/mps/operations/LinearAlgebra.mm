@@ -36,7 +36,6 @@
 #include <ATen/ops/linalg_lu_factor_native.h>
 #include <ATen/ops/linalg_lu_native.h>
 #include <ATen/ops/linalg_qr.h>
-#include <ATen/ops/linalg_qr_native.h>
 #include <ATen/ops/linalg_solve_triangular_native.h>
 #include <ATen/ops/linalg_svd.h>
 #include <ATen/ops/linalg_vector_norm.h>
@@ -1817,83 +1816,8 @@ static Tensor& cholesky_inverse_kernel_impl_mps(Tensor& result, Tensor& infos, b
   return result;
 }
 
-static void metal_qr_kernel_impl(const Tensor& A, const Tensor& Q, const Tensor& R, bool reduced_mode) {
+static void geqrf_kernel_mps(const Tensor& A, const Tensor& tau) {
   using namespace mps;
-
-  auto m = A.size(-2);
-  auto n = A.size(-1);
-
-  int64_t batch_size = 1;
-  for (int64_t i = 0; i < A.dim() - 2; i++) {
-    batch_size *= A.size(i);
-  }
-
-  auto A_work = A.reshape({batch_size, m, n}).contiguous();
-
-  QrParams params;
-  params.m = m;
-  params.n = n;
-
-  auto info = at::zeros({1}, A.options().dtype(kInt));
-  MPSStream* stream = getCurrentMPSStream();
-
-  Tensor Q_work = at::empty({batch_size, m, m}, A.options());
-  Tensor R_work = at::empty({batch_size, m, n}, A.options());
-  Tensor v_work = at::empty({batch_size, m}, A.options());
-
-  dispatch_sync_with_rethrow(stream->queue(), ^() {
-    @autoreleasepool {
-      auto compute_encoder = stream->commandEncoder();
-      auto pso = lib.getPipelineStateForFunc(fmt::format("linalg_qr_householder_{}", scalarToMetalTypeString(A)));
-
-      getMPSProfiler().beginProfileKernel(pso, "linalg_qr", {A});
-      [compute_encoder setComputePipelineState:pso];
-
-      MTLSize threadGroupSize = MTLSizeMake(1024, 1, 1);
-      // one threadgroup per matrix in batch
-      MTLSize gridSize = MTLSizeMake(batch_size, 1, 1);
-
-      mtl_setArgs(compute_encoder, A_work, Q_work, R_work, info, params, v_work);
-      [compute_encoder dispatchThreadgroups:gridSize threadsPerThreadgroup:threadGroupSize];
-
-      getMPSProfiler().endProfileKernel(pso);
-    }
-  });
-
-  bool is_batched = A.dim() > 2;
-
-  if (reduced_mode) {
-    auto k = std::min(m, n);
-    auto Q_reduced = Q_work.narrow(-1, 0, k); // [batch, m, k]
-    auto R_reduced = R_work.narrow(-2, 0, k); // [batch, k, n]
-
-    if (is_batched) {
-      Q.copy_(Q_reduced.reshape(Q.sizes()));
-      R.copy_(R_reduced.reshape(R.sizes()));
-    } else {
-      Q.copy_(Q_reduced.squeeze(0));
-      R.copy_(R_reduced.squeeze(0));
-    }
-  } else {
-    // Q=mxm, R=mxn
-    if (is_batched) {
-      Q.copy_(Q_work.reshape(Q.sizes()));
-      R.copy_(R_work.reshape(R.sizes()));
-    } else {
-      Q.copy_(Q_work.squeeze(0));
-      R.copy_(R_work.squeeze(0));
-    }
-  }
-
-  if (info.item<int>() != 0) {
-    TORCH_CHECK(false, "linalg_qr: MPS kernel failed with error code ", info.item<int>());
-  }
-}
-
-static void linalg_qr_out_impl_mps(const Tensor& A, const Tensor& Q, const Tensor& R, const c10::string_view mode) {
-  using namespace mps;
-
-  TORCH_CHECK(A.scalar_type() == kFloat, "linalg_qr: MPS currently supports float32 only");
 
   if (A.numel() == 0) {
     return;
@@ -1901,21 +1825,39 @@ static void linalg_qr_out_impl_mps(const Tensor& A, const Tensor& Q, const Tenso
 
   auto m = A.size(-2);
   auto n = A.size(-1);
+  auto k = std::min(m, n);
+  auto batch_size = c10::multiply_integers(A.sizes().slice(0, A.dim() - 2));
 
-  if (std::min(m, n) > 512) {
-    TORCH_WARN_ONCE(
-        "linalg_qr: MPS implementation is currently limited to min(m,n) <= 512, "
-        "falling back to CPU.");
-    auto A_cpu = A.to(at::kCPU);
-    auto [Q_cpu, R_cpu] = at::linalg_qr(A_cpu, mode);
-    const_cast<Tensor&>(Q).copy_(Q_cpu.to(at::kMPS));
-    const_cast<Tensor&>(R).copy_(R_cpu.to(at::kMPS));
-    return;
-  }
+  auto A_work = A.reshape({batch_size, m, n}).contiguous();
+  auto tau_work = at::empty({batch_size, k}, A.options());
+  auto v_work = at::empty({batch_size, m}, A.options());
 
-  bool reduced_mode = (mode != "complete");
+  GeqrfParams params;
+  params.m = m;
+  params.n = n;
 
-  metal_qr_kernel_impl(A, Q, R, reduced_mode);
+  MPSStream* stream = getCurrentMPSStream();
+
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto compute_encoder = stream->commandEncoder();
+      auto pso = lib.getPipelineStateForFunc(fmt::format("geqrf_{}", scalarToMetalTypeString(A)));
+
+      getMPSProfiler().beginProfileKernel(pso, "geqrf", {A});
+      [compute_encoder setComputePipelineState:pso];
+
+      MTLSize threadGroupSize = MTLSizeMake([pso maxTotalThreadsPerThreadgroup], 1, 1);
+      MTLSize gridSize = MTLSizeMake(batch_size, 1, 1);
+
+      mtl_setArgs(compute_encoder, A_work, tau_work, params, v_work);
+      [compute_encoder dispatchThreadgroups:gridSize threadsPerThreadgroup:threadGroupSize];
+
+      getMPSProfiler().endProfileKernel(pso);
+    }
+  });
+
+  A.copy_(A_work.reshape(A.sizes()));
+  tau.copy_(tau_work.reshape(tau.sizes()));
 }
 
 static void lstsq_kernel_mps(const Tensor& a,
@@ -2212,10 +2154,6 @@ TORCH_IMPL_FUNC(linalg_inv_ex_out_mps)(const Tensor& A, bool check_errors, const
   mps::linalg_inv_ex_out_mps_impl(A, check_errors, result, info);
 }
 
-TORCH_IMPL_FUNC(linalg_qr_out_mps)(const Tensor& A, c10::string_view mode, const Tensor& Q, const Tensor& R) {
-  mps::linalg_qr_out_impl_mps(A, Q, R, mode);
-}
-
 REGISTER_DISPATCH(cholesky_stub, mps::cholesky_stub_impl)
 REGISTER_DISPATCH(unpack_pivots_stub, mps::unpack_pivots_stub_impl)
 REGISTER_DISPATCH(orgqr_stub, mps::orgqr_stub_impl);
@@ -2223,5 +2161,6 @@ REGISTER_DISPATCH(cholesky_inverse_stub, mps::cholesky_inverse_kernel_impl_mps);
 REGISTER_DISPATCH(svd_stub, mps::svd_kernel_mps);
 REGISTER_DISPATCH(linalg_eigh_stub, mps::eigh_kernel_mps);
 REGISTER_DISPATCH(lstsq_stub, mps::lstsq_kernel_mps);
+REGISTER_DISPATCH(geqrf_stub, mps::geqrf_kernel_mps)
 
 } // namespace at::native

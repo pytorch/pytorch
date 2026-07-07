@@ -362,7 +362,6 @@ if torch.backends.mps.is_available():
             "linalg.eigvals": None,
             "put": None,
             "frexp": None,
-            "geqrf": None,
             "hash_tensor": None,
             "heaviside": None,
             # "kthvalue": None,
@@ -858,6 +857,7 @@ if torch.backends.mps.is_available():
             "linalg.householder_product": None,
             "linalg.lstsq": [torch.float32],
             "linalg.lstsqgrad_oriented": [torch.float32],
+            "geqrf": None,
             # No MPS kernel for linalg_polar.out; the grad test still runs the
             # forward leg, which raises NotImplementedError on MPS.
             "linalg.polar": None,
