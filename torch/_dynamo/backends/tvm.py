@@ -21,7 +21,7 @@ The backend can be used with torch.compile():
 """
 
 import functools
-import importlib
+import importlib.util
 import logging
 import os
 import sys
@@ -157,10 +157,12 @@ def tvm(
             return tvm.nd.array(torch_tensor.cpu().numpy())
         return tvm.nd.from_dlpack(torch_tensor)
 
+    # input info is fixed at compile time, so query it once instead of per call
+    shape_info, _ = m.get_input_info()
+    active_inputs = set(shape_info.keys())
+
     def exec_tvm(*i_args: torch.Tensor) -> list[torch.Tensor]:
         args = [a.contiguous() for a in i_args]
-        shape_info, _ = m.get_input_info()
-        active_inputs = set(shape_info.keys())
         for idx, arg in enumerate(args, 0):
             if arg.dim() != 0:
                 if arg.requires_grad:
@@ -191,11 +193,8 @@ tvm_auto_scheduler = functools.partial(
 
 
 def has_tvm() -> bool:
-    try:
-        importlib.import_module("tvm")
-        return True
-    except ImportError:
-        return False
+    # avoid the heavy tvm import just to check availability
+    return importlib.util.find_spec("tvm") is not None
 
 
 @functools.cache

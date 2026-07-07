@@ -21,6 +21,7 @@ from torch._inductor.cudagraph_utils import BoxedDeviceIndex
 from torch._inductor.runtime.cache_dir_utils import temporary_cache_dir
 from torch._inductor.utils import BoxedBool, InputType
 from torch._subclasses import FakeTensorMode
+from torch._subclasses.fake_tensor import maybe_get_fake_mode
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.fx.graph_module import _share_torchbind_and_process_group_on_deepcopy
 
@@ -144,6 +145,31 @@ class CacheCompiledArtifact(CompiledArtifact):
         # (we only expect one)
         return len(cache_info.aot_autograd_artifacts) == 1
 
+    def _validate_and_unpack(self) -> tuple[bytes, CacheInfo, str]:
+        """Validate the cached artifact, returning ``(artifact_bytes, cache_info, key)``.
+
+        Single source of the None / empty / multiple aot_autograd_artifacts checks,
+        shared by ``_to_binary_bytes`` and ``save``'s unpacked branch. Messages are
+        neutral (not tied to ``save``) because ``_to_binary_bytes`` callers obtain the
+        bytes without going through ``save``.
+        """
+        if self._artifacts is None:
+            raise RuntimeError("CompiledArtifact has no artifact to serialize")
+        artifact_bytes, cache_info = self._artifacts
+        if len(cache_info.aot_autograd_artifacts) == 0:
+            raise RuntimeError(
+                f"CompiledArtifact has no aot_autograd artifacts to serialize. This "
+                f"likely means there was something that was not serializable in the graph "
+                f"passed to standalone_compile. This can generally be fixed by ensuring "
+                f"that your model only uses constructs that are serializable. {cache_info}"
+            )
+        if len(cache_info.aot_autograd_artifacts) > 1:
+            raise AssertionError(
+                f"CompiledArtifact has more than one aot_autograd artifact but we only "
+                f"expected one. {cache_info}"
+            )
+        return artifact_bytes, cache_info, cache_info.aot_autograd_artifacts[0]
+
     def _to_binary_bytes(self) -> bytes:
         """Serialize this artifact to the in-memory ``binary`` byte format.
 
@@ -153,25 +179,7 @@ class CacheCompiledArtifact(CompiledArtifact):
         ``load(format="binary")`` reads back: header, ``torch_key``, the autograd-cache
         ``key`` string, then the opaque ``artifact_bytes``.
         """
-        if self._artifacts is None:
-            raise RuntimeError(
-                "CompiledArtifact.save failed to save since there's no artifact to save"
-            )
-        artifact_bytes, cache_info = self._artifacts
-        if len(cache_info.aot_autograd_artifacts) == 0:
-            raise RuntimeError(
-                f"CompiledArtifact.save failed to save due to no aot_autograd artifacts. "
-                f"This likely means there was something that was not serializable in the "
-                f"graph passed to standalone_compile. This can generally be fixed by "
-                f"ensuring that your model only uses constructs that are serializable. "
-                f"{cache_info}"
-            )
-        if len(cache_info.aot_autograd_artifacts) > 1:
-            raise AssertionError(
-                f"CompiledArtifact.save failed to save because there was more than one "
-                f"artifact but we only expected one. {cache_info}"
-            )
-        key = cache_info.aot_autograd_artifacts[0]
+        artifact_bytes, _cache_info, key = self._validate_and_unpack()
 
         from torch.utils._appending_byte_serializer import BytesWriter
 
@@ -202,24 +210,9 @@ class CacheCompiledArtifact(CompiledArtifact):
             else:
                 if format != "unpacked":
                     raise AssertionError(f"expected format == 'unpacked', got {format}")
-                if self._artifacts is None:
-                    raise RuntimeError(
-                        "CompiledArtifact.save failed to save since there's no artifact to save"
-                    )
-                artifact_bytes, cache_info = self._artifacts
-                if len(cache_info.aot_autograd_artifacts) == 0:
-                    raise RuntimeError(
-                        f"CompiledArtifact.save failed to save due to no aot_autograd artifacts. "
-                        f"This likely means there was something that was not serializable in the "
-                        f"graph passed to standalone_compile. This can generally be fixed by "
-                        f"ensuring that your model only uses constructs that are serializable. "
-                        f"{cache_info}"
-                    )
-                if len(cache_info.aot_autograd_artifacts) > 1:
-                    raise AssertionError(
-                        f"CompiledArtifact.save failed to save because there was more than one "
-                        f"artifact but we only expected one. {cache_info}"
-                    )
+                # Same None / empty / multiple validation as the binary branch, shared via
+                # _validate_and_unpack; the unpacked branch needs only artifact_bytes.
+                artifact_bytes, _cache_info, _key = self._validate_and_unpack()
                 if os.path.exists(path):
                     if not os.path.isdir(path):
                         raise AssertionError(f"expected path to be a dir: {path}")
@@ -502,8 +495,9 @@ def _resolve_fake_mode(
         for node in nodes:
             if "example_value" in node.meta:
                 maybe_tensor = node.meta["example_value"]
-                if isinstance(maybe_tensor, torch._subclasses.fake_tensor.FakeTensor):
-                    return maybe_tensor.fake_mode
+                maybe_fake_mode = maybe_get_fake_mode(maybe_tensor)
+                if maybe_fake_mode is not None:
+                    return maybe_fake_mode
 
         return FakeTensorMode(shape_env=ShapeEnv())
     else:
