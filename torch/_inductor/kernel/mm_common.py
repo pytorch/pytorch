@@ -194,6 +194,24 @@ def use_native_matmul(mat1, mat2):
     return True
 
 
+def _use_small_mm_pointwise(k, n, layout) -> bool:
+    """Check if mm should be lowered to pointwise ops for small K and N.
+
+    For small inner dimensions (K < 8 and N < 8), GEMM launch overhead
+    dominates and a fused pointwise kernel is faster.  Disabled under
+    max_autotune to avoid short-circuiting template selection.
+    See https://github.com/pytorch/pytorch/issues/186348
+    """
+    if config.max_autotune or config.max_autotune_gemm:
+        return False
+    if layout.device.type in ("cpu", "mps"):
+        return False
+    threshold = 8
+    return V.graph.sizevars.statically_known_true(
+        k < threshold
+    ) and V.graph.sizevars.statically_known_true(n < threshold)
+
+
 def _is_static_problem(layout: Layout) -> tuple[bool, bool]:
     """
     Check if input tensors and output layout have static shapes and non-zero sizes.

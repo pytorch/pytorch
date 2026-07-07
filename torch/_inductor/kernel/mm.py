@@ -59,6 +59,7 @@ from ..utils import (
 )
 from .mm_common import (
     _is_static_problem,
+    _use_small_mm_pointwise,
     load_kernel_template,
     mm_args,
     mm_grid,
@@ -378,6 +379,20 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
     m, n, k, layout, mat1, mat2 = mm_args(
         mat1, mat2, layout=layout, out_dtype=out_dtype
     )
+
+    if _use_small_mm_pointwise(k, n, layout):
+        counters["inductor"]["decompose_mm"] += 1
+        mat1 = lowerings[aten.unsqueeze](mat1, -1)
+        mat2 = lowerings[aten.unsqueeze](mat2, 0)
+        args, _ = transform_args(
+            args=[mat1, mat2],
+            kwargs={},
+            broadcast=True,
+            type_promotion_kind=None,
+            convert_input_to_bool=False,
+        )
+        return make_reduction("sum")(make_pointwise(ops.mul)(*args), axis=1)
+
     static_shape, is_nonzero = _is_static_problem(layout)
     name = "mm"
 
