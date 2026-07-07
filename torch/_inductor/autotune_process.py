@@ -21,6 +21,7 @@ from collections.abc import Callable, Iterable, Sequence
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from ctypes import byref, c_size_t, c_void_p, CDLL
 from typing import Any, IO, TYPE_CHECKING
+from typing_extensions import override
 
 import torch
 import torch._inductor.async_compile
@@ -33,12 +34,14 @@ from torch._inductor.codecache import (
     DLLWrapper,
     get_hash,
     PyCodeCache,
+    write,
     XPUCodeCache,
 )
 from torch._inductor.compile_worker.timer import Timer
 from torch._inductor.utils import (
     apply_subprocess_env,
     clear_caches,
+    clear_on_fresh_cache,
     do_bench_using_profiling,
     get_gpu_type,
     get_ld_library_path,
@@ -661,17 +664,29 @@ class _TestEnvBenchmarkRequest:
         return os.environ.get(self.key)
 
 
-class _TestCUDACodeCacheBenchmarkRequest:
+@clear_on_fresh_cache
+class _TestCodeCache:
+    @classmethod
+    def cache_clear(cls) -> None:
+        cls.write.cache_clear()
+
+    @classmethod
+    @functools.lru_cache(None)
+    def write(cls, source_code: str) -> tuple[str, str]:
+        return write(source_code, "txt")
+
+
+class _TestCodeCacheBenchmarkRequest:
     """
     Supports unit testing subprocess codecache resets.
     """
 
-    source_code = 'extern "C" __global__ void test_kernel() {}\n'
+    source_code = "test codecache contents\n"
 
     def benchmark(
         self, *input_tensors: torch.Tensor, out: torch.Tensor | None = None
     ) -> str:
-        _, input_path = CUDACodeCache.write(self.source_code, "so")
+        _, input_path = _TestCodeCache.write(self.source_code)
         return input_path
 
 
@@ -761,6 +776,7 @@ class TritonBenchmarkRequest(BenchmarkRequest):
         self.workspace_zero_fill = workspace_zero_fill
         self._benchmark_module: Any | None = None
 
+    @override
     def make_run_fn(
         self, *input_tensors: torch.Tensor, out: torch.Tensor
     ) -> Callable[[], None]:
@@ -806,36 +822,45 @@ class TritonBenchmarkRequest(BenchmarkRequest):
             warmup_arg["warmup"] = False
 
         if out.device.type == "cpu":
-            stream = 0
+            device_interface = None
+            device_index = 0
         else:
             device_type = out.device.type
             device_interface = get_interface_for_device(device_type)
-            stream = device_interface.get_raw_stream(
-                self.output_tensor_meta.device.index
-            )
+            device_index = self.output_tensor_meta.device.index
 
-        if isinstance(
+        is_debug_autotuner = isinstance(
             getattr(mod, self.kernel_name),
             torch._inductor.runtime.triton_heuristics.DebugAutotuner,
-        ):
-            return functools.partial(
-                run_method,
-                *input_tensors,
-                out,
-                *extra_args,
-                **warmup_arg,
-                stream=stream,
+        )
+
+        # Resolve the stream at call time (not at closure-creation time) so that
+        # CUDA graph capture on a different stream works correctly.
+        def run_fn() -> None:
+            stream = (
+                0
+                if device_interface is None
+                else device_interface.get_raw_stream(device_index)
             )
-        else:
-            return functools.partial(
-                run_method,
-                *input_tensors,
-                out,
-                *extra_args,
-                **warmup_arg,
-                stream=stream,
-                benchmark_run=True,
-            )
+            if is_debug_autotuner:
+                run_method(
+                    *input_tensors,
+                    out,
+                    *extra_args,
+                    **warmup_arg,
+                    stream=stream,
+                )
+            else:
+                run_method(
+                    *input_tensors,
+                    out,
+                    *extra_args,
+                    **warmup_arg,
+                    stream=stream,
+                    benchmark_run=True,
+                )
+
+        return run_fn
 
     def cleanup_run_fn(self) -> None:
         # Authoritative cleanup for one benchmark module load. Higher-level
