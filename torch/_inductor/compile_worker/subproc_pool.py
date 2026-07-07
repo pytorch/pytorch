@@ -9,6 +9,7 @@ import struct
 import subprocess
 import sys
 import threading
+import time
 import traceback
 import typing
 from collections.abc import Callable
@@ -542,3 +543,12 @@ class TestException(RuntimeError):
 
 def raise_testexc() -> Never:
     raise TestException
+
+
+def _test_signal_then_sleep(signal_path: str, seconds: float) -> None:
+    # Test helper: announce that this worker has begun executing by creating
+    # signal_path, then block. Lets a test wait until a job is actually running
+    # in a worker before acting on the pool (e.g. shutting it down).
+    with open(signal_path, "w"):
+        pass
+    time.sleep(seconds)
