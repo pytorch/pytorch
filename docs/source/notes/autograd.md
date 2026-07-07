@@ -66,8 +66,6 @@ In the previous code, ``y.grad_fn._saved_self`` refers to the same Tensor object
 But that may not always be the case. For instance:
 
 ```python
-import torch
-
 x = torch.randn(5, requires_grad=True)
 y = x.exp()
 print(y.equal(y.grad_fn._saved_result))  # True
@@ -109,8 +107,6 @@ When performing division by zero in PyTorch (e.g., ``x / 0``), the forward pass 
 During backpropagation, this can lead to problematic gradient expressions. For example:
 
 ```python
-import torch
-
 x = torch.tensor([1., 1.], requires_grad=True)
 div = torch.tensor([0., 1.])
 
@@ -128,8 +124,6 @@ To avoid this issue, there are several recommended approaches:
 1. Mask before division:
 
 ```python
-import torch
-
 x = torch.tensor([1., 1.], requires_grad=True)
 div = torch.tensor([0., 1.])
 

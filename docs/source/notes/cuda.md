@@ -757,8 +757,6 @@ b = torch.zeros(10, device='cuda')
 
 
 ```python
-import torch
-
 # Do an initial memory allocator
 b = torch.zeros(10, device='cuda')
 # Load the allocator

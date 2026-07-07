@@ -219,9 +219,6 @@ additional comments:
 ```{code-block} python
 :dedent: 4
 
-    import torch
-    from torch.autograd import Function
-
     # Inherit from Function
     class LinearFunction(Function):
 
@@ -286,9 +283,6 @@ non-Tensor arguments:
 ```{code-block} python
 :dedent: 4
 
-    import torch
-    from torch.autograd import Function
-
     class MulConstant(Function):
         @staticmethod
         def forward(tensor, constant):
@@ -312,9 +306,6 @@ And here, we optimize the above example by calling set_materialize_grads(False):
 
 ```{code-block} python
 :dedent: 4
-
-    import torch
-    from torch.autograd import Function
 
     class MulConstant(Function):
         @staticmethod
@@ -346,9 +337,6 @@ the remaining gradients:
 
 ```{code-block} python
 :dedent: 4
-
-    import torch
-    from torch.autograd import Function
 
     class TwoMatmuls(Function):
         clear_saved_tensors_on_access = True
