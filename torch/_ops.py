@@ -863,6 +863,51 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
             self._schema.name, self._schema.overload_name
         )
 
+    @cached_property
+    def _inplace_variant(self) -> "OpOverload | None":
+        """The in-place counterpart of this functional op, or None.
+
+        Uses the codegen naming convention + schema validation. The functional is
+        named either ``<base>`` with in-place ``<base>_`` (e.g. uniform/uniform_),
+        or, when ``<base>`` was taken, ``<base>_functional`` with in-place
+        ``<base>_`` (e.g. normal_functional/normal_). None if this op isn't
+        functional or no in-place variant validates.
+        """
+        schema = self._schema
+        # Must be a functional op returning a single Tensor from a Tensor self.
+        if (
+            schema.is_mutable
+            or not schema.arguments
+            or str(schema.arguments[0].type) != "Tensor"
+            or len(schema.returns) != 1
+            or str(schema.returns[0].type) != "Tensor"
+        ):
+            return None
+        base = self._opname
+        if base.endswith("functional"):
+            inplace_base = base[: -len("functional")]
+        else:
+            inplace_base = base + "_"
+        ns = getattr(torch.ops, self._namespace, None)
+        packet = getattr(ns, inplace_base, None) if ns is not None else None
+        inplace = getattr(packet, self._overloadname, None) if packet else None
+        if not isinstance(inplace, OpOverload):
+            return None
+        # The variant must mutate self (arg0) and otherwise match this op's args.
+        ischema = inplace._schema
+        if (
+            not ischema.is_mutable
+            or len(ischema.arguments) != len(schema.arguments)
+            or ischema.arguments[0].alias_info is None
+            or not ischema.arguments[0].alias_info.is_write
+            or any(
+                str(x.type) != str(y.type)
+                for x, y in zip(schema.arguments[1:], ischema.arguments[1:])
+            )
+        ):
+            return None
+        return inplace
+
     # it's a no-op since OpOverload object is immutable and must be unique for a given op overload.
     def __deepcopy__(self, memo=None):
         return self
