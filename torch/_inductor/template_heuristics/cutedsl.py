@@ -26,7 +26,7 @@ def get_exhaustive_groupgemm_configs() -> list[CuTeGemmConfig]:
     """
     Returns the exhaustive configuration set for the Blackwell CuTeDSL Grouped GEMM kernel.
     For information regarding valid config sets, see:
-    https://github.com/NVIDIA/cutlass/blob/main/examples/python/CuTeDSL/blackwell/grouped_gemm.py
+    https://github.com/NVIDIA/cutlass/blob/main/examples/python/CuTeDSL/cute/blackwell/kernel/grouped_gemm/grouped_gemm.py
     """
 
     # Tile_n is always the same regardless of 2cta
