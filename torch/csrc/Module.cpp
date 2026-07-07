@@ -163,10 +163,20 @@ static THPGenerator* THPDefaultCPUGenerator = nullptr;
 
 namespace {
 
+// Synthetic pybind type used only to let py::class_<..., CustomClassBase>
+// accept torch._custom_class_base.CustomClassBase as a Python base. It must not
+// become a C++ cast target; concrete subclasses own their real value_and_holder
+// entries.
 struct THPOpaqueBasePybindShim {};
 
-void opaqueBaseNoopDealloc(py::detail::value_and_holder& vh) {
-  (void)vh;
+void opaqueBaseDealloc(py::detail::value_and_holder& vh) {
+  auto*& value_ptr = vh.value_ptr();
+  if (value_ptr != nullptr) {
+    py::detail::call_operator_delete(
+        value_ptr, vh.type->type_size, vh.type->type_align);
+    value_ptr = nullptr;
+  }
+  vh.set_holder_constructed(false);
 }
 
 void markOpaqueBaseHolderConstructed(PyObject* self) {
@@ -207,12 +217,14 @@ void registerOpaqueBasePybindTypeInfo(PyTypeObject* type) {
   auto* tinfo = new py::detail::type_info();
   tinfo->type = type;
   tinfo->cpptype = &typeid(THPOpaqueBasePybindShim);
+  // This tiny size supports pybind's generic lazy-allocation path. It is not
+  // an embedded base subobject, and the dummy allocation is freed above.
   tinfo->type_size = sizeof(THPOpaqueBasePybindShim);
   tinfo->type_align = alignof(THPOpaqueBasePybindShim);
   tinfo->holder_size_in_ptrs = 0;
   tinfo->operator_new = nullptr;
   tinfo->init_instance = opaqueBaseInitInstance;
-  tinfo->dealloc = opaqueBaseNoopDealloc;
+  tinfo->dealloc = opaqueBaseDealloc;
   tinfo->simple_type = true;
   tinfo->simple_ancestors = true;
   tinfo->module_local = false;
@@ -245,6 +257,8 @@ py::object createOpaqueBasePybindType() {
   type->tp_base = py::detail::type_incref(
       reinterpret_cast<PyTypeObject*>(internals.instance_base));
   type->tp_basicsize = static_cast<ssize_t>(sizeof(py::detail::instance));
+  // Direct _OpaqueBase instances hold no Python references. Python and pybind
+  // subclasses get GC behavior from their own type creation paths if needed.
   type->tp_flags =
       Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE | Py_TPFLAGS_HEAPTYPE;
   type->tp_new = opaqueBaseNew;
@@ -994,6 +1008,8 @@ static PyObject* THPModule_ConstDLPackExchangeAPI(
     PyObject* noargs) {
   HANDLE_TH_ERRORS
   return PyCapsule_New(
+      // PyCapsule_New takes void*, but this capsule exposes a const API.
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       const_cast<DLPackExchangeAPI*>(TorchConstDLPackExchangeAPI::Global()),
       "dlpack_exchange_api",
       nullptr);

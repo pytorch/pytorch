@@ -5,8 +5,8 @@ from functools import wraps
 # Cached lazily on first __instancecheck__ miss to avoid an import cycle at
 # module load (FakeScriptObject's module imports torch, which imports us).
 _FakeScriptObject_cls: type | None = None
-_MISSING = object()
 _skipped_dynamo_codes: set[object] = set()
+_constructing_instance_ids: dict[int, int] = {}
 
 
 def _maybe_skip_dynamo_code(fn):
@@ -139,9 +139,9 @@ def _is_custom_class_base_instance(cls, instance, base_instancecheck):
         if base_instancecheck(instance):
             return True
 
-        from torch._library.opaque_object import is_opaque_value
+        from torch._library.opaque_object import is_custom_class_obj
 
-        return is_opaque_value(instance)
+        return is_custom_class_obj(instance)
 
     if base_instancecheck(instance):
         return True
@@ -162,29 +162,25 @@ def _is_custom_class_base_instance(cls, instance, base_instancecheck):
 
 
 def _set_constructing(instance):
-    try:
-        instance_dict = object.__getattribute__(instance, "__dict__")
-    except AttributeError:
-        instance_dict = {}
-    if "_opaque_base_constructing" in instance_dict:
-        instance_constructing = instance_dict["_opaque_base_constructing"]
-    else:
-        instance_constructing = _MISSING
-    try:
-        object.__setattr__(instance, "_opaque_base_constructing", True)
-    except (AttributeError, TypeError):
-        pass
-    return instance_constructing
+    instance_id = id(instance)
+    _constructing_instance_ids[instance_id] = (
+        _constructing_instance_ids.get(instance_id, 0) + 1
+    )
+    return instance_id
 
 
-def _restore_constructing(instance, instance_constructing):
-    if instance_constructing is _MISSING:
-        try:
-            object.__delattr__(instance, "_opaque_base_constructing")
-        except AttributeError:
-            pass
+def _restore_constructing(instance, instance_id):
+    if id(instance) != instance_id:
+        return
+    depth = _constructing_instance_ids.get(instance_id, 0)
+    if depth <= 1:
+        _constructing_instance_ids.pop(instance_id, None)
     else:
-        object.__setattr__(instance, "_opaque_base_constructing", instance_constructing)
+        _constructing_instance_ids[instance_id] = depth - 1
+
+
+def _is_custom_class_base_constructing(instance):
+    return _constructing_instance_ids.get(id(instance), 0) > 0
 
 
 def _ensure_custom_class_base_initialized(instance):
@@ -262,6 +258,8 @@ def _install_custom_class_base(_PybindCustomClassBase: type) -> tuple[type, type
             init = _find_python_init_after_custom_class_base(type(self))
             if init is not None:
                 init(self, *args, **kwargs)
+            elif args or kwargs:
+                raise TypeError(f"{type(self).__name__}() takes no arguments")
 
         def __init_subclass__(cls, **kwargs):
             super().__init_subclass__(**kwargs)

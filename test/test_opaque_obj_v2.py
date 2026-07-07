@@ -4,6 +4,7 @@ import contextlib
 import copy
 import enum
 import gc
+import io
 import pickle
 import random
 import re
@@ -42,8 +43,8 @@ from torch._library.opaque_object import (
     _OPAQUE_TYPES,
     _OPAQUE_TYPES_BY_NAME,
     get_opaque_type_name,
-    is_opaque_type,
-    is_opaque_value_type,
+    is_custom_class,
+    is_opaque_constant_type,
     MemberType,
     register_custom_class,
     register_opaque_type,
@@ -1052,6 +1053,23 @@ class TestOpaqueObject(TestCase):
         self.assertEqual(obj.fake_self.value, 5)
         self.assertFalse(hasattr(obj.fake_self, "late"))
 
+    def test_opaque_base_constructing_guard_ignores_user_attribute(self):
+        class ForgedConstructingOpaque(OpaqueBase):
+            pass
+
+        register_opaque_type(
+            ForgedConstructingOpaque,
+            typ="reference",
+            members={"late": MemberType.USE_REAL},
+        )
+
+        obj = ForgedConstructingOpaque()
+        obj._opaque_base_constructing = True
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        with self.assertRaisesRegex(TypeError, "member 'late'"):
+            with fake_mode:
+                maybe_to_fake_obj(fake_mode, obj)
+
     def test_isinstance_opaque_base_covers_all_opaque_types(self):
         # isinstance(x, CustomClassBase) should match all registered opaque types,
         # not just classes that directly subclass CustomClassBase.
@@ -1233,6 +1251,14 @@ def forward(self, x_1, cfg_1):
             "Opaque output should reuse the input placeholder, not create a get_attr constant",
         )
 
+    def test_opaque_base_rejects_unused_constructor_args(self):
+        class EmptyOpaque(OpaqueBase):
+            pass
+
+        self.assertIsInstance(EmptyOpaque(), OpaqueBase)
+        with self.assertRaisesRegex(TypeError, r"EmptyOpaque\(\) takes no arguments"):
+            EmptyOpaque(1, y=2)
+
     def test_opaque_base_is_pybind_backed(self):
         self.assertTrue(hasattr(torch._C, "_OpaqueBase"))
         self.assertIn(torch._C._OpaqueBase, OpaqueBase.__mro__)
@@ -1373,6 +1399,19 @@ def forward(self, x_1, cfg_1):
                 return 123
 
         self.assertEqual(NonInstanceNew(), 123)
+
+    def test_opaque_base_weights_only_safe_globals_roundtrip(self):
+        obj = SizeStore(13)
+        buffer = io.BytesIO()
+        torch.save(obj, buffer)
+        buffer.seek(0)
+
+        with torch.serialization.safe_globals([SizeStore]):
+            loaded = torch.load(buffer, weights_only=True)
+
+        self.assertEqual(loaded, obj)
+        self.assertIsInstance(loaded, torch._C._OpaqueBase)
+        self.assertIsInstance(loaded, OpaqueBase)
 
     def test_guard_pickle_subclass_with_opaque_inner_attr(self):
         # Regression test: the guard state pickler serializes tensor subclasses
@@ -2363,8 +2402,8 @@ def forward(self, arg0_1):
 
             register_custom_class(TmpClass, typ="constant")
 
-            self.assertTrue(is_opaque_type(TmpClass))
-            self.assertTrue(is_opaque_value_type(TmpClass))
+            self.assertTrue(is_custom_class(TmpClass))
+            self.assertTrue(is_opaque_constant_type(TmpClass))
             self.assertIn(TmpClass, _OPAQUE_TYPES)
 
             return get_opaque_type_name(TmpClass)
@@ -3280,14 +3319,14 @@ def forward(self, primals_1, tangents_1):
         """Test that opaque class attribute access works correctly.
 
         This tests the code path where:
-        1. An opaque class (like Color) is accessed via OpaqueObjectClassVariable
+        1. An opaque class (like Color) is accessed via CustomClassVariable
         2. Attribute access (Color.RED) goes through getattro_impl with static getattr
         3. The opaque object is correctly lifted as a graph input
         """
-        from torch._library.opaque_object import is_opaque_reference_type
+        from torch._library.opaque_object import is_opaque_symbolic_type
 
-        self.assertTrue(is_opaque_reference_type(Color))
-        self.assertTrue(is_opaque_reference_type(type(Color.RED)))
+        self.assertTrue(is_opaque_symbolic_type(Color))
+        self.assertTrue(is_opaque_symbolic_type(type(Color.RED)))
 
         captured = {"graph": None, "example_inputs": None}
 
@@ -3470,7 +3509,7 @@ def forward(self, L_x_ : torch.Tensor):
     def test_opaque_class_staticmethod(self):
         """Test that accessing a staticmethod on an opaque class works correctly.
 
-        This verifies that OpaqueObjectClassVariable.getattro_impl properly handles
+        This verifies that CustomClassVariable.getattro_impl properly handles
         staticmethod descriptors (instead of raising 'Unsupported descriptor').
         """
         captured = {"graph": None}
@@ -3493,7 +3532,7 @@ def forward(self, L_x_ : torch.Tensor):
     def test_opaque_class_property(self):
         """Test that accessing a property descriptor on an opaque class works correctly.
 
-        This verifies that OpaqueObjectClassVariable.getattro_impl properly handles
+        This verifies that CustomClassVariable.getattro_impl properly handles
         property descriptors. When accessing a property on the class (not instance),
         you get the property object back.
         """
@@ -3622,8 +3661,8 @@ class GraphModule(torch.nn.Module):
                     {"ExtendedConfig": ExtendedConfig},
                 )
 
-        self.assertTrue(is_opaque_type(ExtendedConfig))
-        self.assertTrue(is_opaque_value_type(ExtendedConfig))
+        self.assertTrue(is_custom_class(ExtendedConfig))
+        self.assertTrue(is_opaque_constant_type(ExtendedConfig))
 
         cfg = ExtendedConfig("square", 2.0)
 
@@ -3991,7 +4030,7 @@ class GraphModule(torch.nn.Module):
 
     @torch._dynamo.config.patch(skip_fwd_side_effects_in_bwd_under_checkpoint=True)
     def test_script_object_intermediate_exposed_from_checkpoint(self):
-        # A TorchScriptObjectVariable created inside an AC region and accessed
+        # A CustomClassObjectVariable created inside an AC region and accessed
         # outside via a list side effect must be exposed as a subgraph output.
         import torch.utils.checkpoint
 

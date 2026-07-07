@@ -637,10 +637,10 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
 
         self._assert_hash_equals(dist.GroupMember)
 
-    # --- OpaqueObjectClassVariable ---
+    # --- CustomClassVariable ---
 
     def test_hash_opaque_value_type(self):
-        """OpaqueObjectClassVariable: hash of registered opaque value type."""
+        """CustomClassVariable: hash of registered opaque value type."""
         from torch._library.opaque_object import register_custom_class
 
         class _HashTestOpaque:
