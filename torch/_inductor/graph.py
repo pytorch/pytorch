@@ -26,9 +26,9 @@ from torch._decomp import get_decompositions
 from torch._dynamo.utils import defake, dynamo_timed
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import (
-    is_opaque_reference_type,
-    is_opaque_type,
-    is_opaque_value_type,
+    is_custom_class,
+    is_opaque_constant_type,
+    is_opaque_symbolic_type,
 )
 from torch._library.utils import get_layout_constraint_tag
 from torch._logging import LazyString, trace_structured
@@ -1279,12 +1279,7 @@ class GraphLowering(torch.fx.Interpreter):
         example = super().placeholder(target, args, kwargs)  # type: ignore[arg-type]
         target = self.qualify_name(target)
         if isinstance(example, SymTypes):
-            # TODO fix partitioning issue and re-enable for backward
-            # https://github.com/pytorch/pytorch/issues/155468.
-            if not V.graph.is_backward:
-                expr = _get_placeholder_expr(example.node)
-            else:
-                expr = example.node.expr
+            expr = _get_placeholder_expr(example.node)
             self.graph_inputs[target] = expr
             self.graph_input_names.append(target)
             return expr
@@ -1312,7 +1307,7 @@ class GraphLowering(torch.fx.Interpreter):
             self.graph_inputs[target] = gen  # type: ignore[assignment]
             self.graph_input_names.append(target)
             return gen
-        elif is_opaque_reference_type(type(example)):
+        elif is_opaque_symbolic_type(type(example)):
             opaque_obj = ir.OpaqueObjectState(name=target, value=example)
             self.graph_inputs[target] = opaque_obj  # type: ignore[assignment]
             self.graph_input_names.append(target)
@@ -1580,7 +1575,7 @@ class GraphLowering(torch.fx.Interpreter):
             self.torchbind_constants[target] = value
             self.constant_reprs[target] = ""
             return TorchBindObject(name=target, value=value)
-        elif is_opaque_type(type(value)):
+        elif is_custom_class(type(value)):
             self.torchbind_constants[target] = value  # type: ignore[arg-type]
             self.constant_reprs[target] = ""
             return TorchBindObject(name=target, value=value)  # type: ignore[arg-type]
@@ -1634,7 +1629,9 @@ class GraphLowering(torch.fx.Interpreter):
         if not isinstance(result, (tuple, list)):
             raise AssertionError(f"Expected tuple or list, got {type(result)}")
         result = [
-            ir.OpaqueValueTypeConstant(value=x) if is_opaque_value_type(type(x)) else x
+            ir.OpaqueValueTypeConstant(value=x)
+            if is_opaque_constant_type(type(x))
+            else x
             for x in result
         ]
         _allowed_output_types = (

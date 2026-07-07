@@ -2139,14 +2139,21 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         if not isinstance(kernel_inputs, MMKernelInputs):
             raise AssertionError(f"Expected MMKernelInputs, got {type(kernel_inputs)}")
         m, n, k = kernel_inputs.mnk_symbolic()
-        # allow_tf32 alignment heuristics based on reverse engineering
-        # H100 CUDA 12.8 behavior
-        size_threshold = V.graph.sizevars.statically_known_true(
-            sympy.And(sympy.Ge(m, 16), sympy.Ge(Min(n, k), 512))
-        )
-        allow_tf32 = torch.backends.cuda.matmul.fp32_precision == "tf32" and (
-            size_threshold
-        )
+        device_type = kernel_inputs.device_type
+        if device_type == "xpu":
+            # XPU eager matmul takes TF32 from the oneDNN flag, not the CUDA one.
+            allow_tf32 = torch.backends.mkldnn.allow_tf32
+        elif device_type == "cuda":
+            # allow_tf32 alignment heuristics based on reverse engineering
+            # H100 CUDA 12.8 behavior
+            size_threshold = V.graph.sizevars.statically_known_true(
+                sympy.And(sympy.Ge(m, 16), sympy.Ge(Min(n, k), 512))
+            )
+            allow_tf32 = (
+                torch.backends.cuda.matmul.fp32_precision == "tf32" and size_threshold
+            )
+        else:
+            allow_tf32 = False
 
         return {
             "ALLOW_TF32": allow_tf32,
