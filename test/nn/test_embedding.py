@@ -23,6 +23,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
     _assertGradAndGradgradChecks,
+    DeterministicGuard,
     dtype2prec_DONTUSE,
     instantiate_parametrized_tests,
     IS_JETSON,
@@ -708,71 +709,76 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         4. In non-deterministic mode
 
         """
-        torch.use_deterministic_algorithms(False)
+        with DeterministicGuard(False):
+            num_embeddings = 100
+            embedding_dim = 256
+            num_unique_indices = 5
+            repetitions_per_index = 1000
 
-        num_embeddings = 100
-        embedding_dim = 256
-        num_unique_indices = 5
-        repetitions_per_index = 1000
+            unique_indices = torch.randint(
+                0,
+                num_embeddings,
+                (num_unique_indices,),
+                device=device,
+                dtype=torch.long,
+            )
+            indices = unique_indices.repeat(repetitions_per_index)
+            total_indices = indices.numel()
 
-        unique_indices = torch.randint(
-            0, num_embeddings, (num_unique_indices,), device=device, dtype=torch.long
-        )
-        indices = unique_indices.repeat(repetitions_per_index)
-        total_indices = indices.numel()
+            embedding = nn.Embedding(num_embeddings, embedding_dim).to(device, dtype)
+            embedding.zero_grad()
 
-        embedding = nn.Embedding(num_embeddings, embedding_dim).to(device, dtype)
-        embedding.zero_grad()
+            output = embedding(indices)
+            grad_output = torch.randn_like(output)
+            output.backward(grad_output)
 
-        output = embedding(indices)
-        grad_output = torch.randn_like(output)
-        output.backward(grad_output)
+            # Verify gradient shape and basic correctness
+            self.assertEqual(
+                embedding.weight.grad.shape, (num_embeddings, embedding_dim)
+            )
 
-        # Verify gradient shape and basic correctness
-        self.assertEqual(embedding.weight.grad.shape, (num_embeddings, embedding_dim))
+            # Verify that only the used indices have non-zero gradients
+            used_indices_set = set(unique_indices.tolist())
+            for i in range(num_embeddings):
+                if i in used_indices_set:
+                    # Used indices should have non-zero gradients (accumulated from repetitions)
+                    self.assertGreater(
+                        embedding.weight.grad[i].abs().sum(),
+                        0,
+                        f"Expected non-zero gradient for used index {i}",
+                    )
+                else:
+                    # Unused indices should have zero gradients
+                    self.assertEqual(
+                        embedding.weight.grad[i].abs().sum(),
+                        0,
+                        lambda msg: f"{msg}\nExpected zero gradient for unused index {i}",
+                    )
 
-        # Verify that only the used indices have non-zero gradients
-        used_indices_set = set(unique_indices.tolist())
-        for i in range(num_embeddings):
-            if i in used_indices_set:
-                # Used indices should have non-zero gradients (accumulated from repetitions)
-                self.assertGreater(
-                    embedding.weight.grad[i].abs().sum(),
-                    0,
-                    f"Expected non-zero gradient for used index {i}",
-                )
+            # Test correctness by comparing with a reference computation
+            # Manually compute expected gradients using the same accumulation type as the kernel:
+            # - For half/bfloat16: accumulate in float (acc_type)
+            # - For float/double: accumulate in the same dtype
+            acc_dtype = torch.float if dtype in [torch.half, torch.bfloat16] else dtype
+            expected_grad = torch.zeros(
+                num_embeddings, embedding_dim, device=device, dtype=acc_dtype
+            )
+            grad_output_acc = grad_output.to(acc_dtype)
+            for i in range(total_indices):
+                idx = indices[i].item()
+                expected_grad[idx] += grad_output_acc[i]
+            expected_grad = expected_grad.to(dtype)
+
+            # Compare with computed gradients (use appropriate tolerance for dtype)
+            if dtype in [torch.half, torch.bfloat16]:
+                atol = 1e-3
+                rtol = 1e-3
             else:
-                # Unused indices should have zero gradients
-                self.assertEqual(
-                    embedding.weight.grad[i].abs().sum(),
-                    0,
-                    f"Expected zero gradient for unused index {i}",
-                )
-
-        # Test correctness by comparing with a reference computation
-        # Manually compute expected gradients using the same accumulation type as the kernel:
-        # - For half/bfloat16: accumulate in float (acc_type)
-        # - For float/double: accumulate in the same dtype
-        acc_dtype = torch.float if dtype in [torch.half, torch.bfloat16] else dtype
-        expected_grad = torch.zeros(
-            num_embeddings, embedding_dim, device=device, dtype=acc_dtype
-        )
-        grad_output_acc = grad_output.to(acc_dtype)
-        for i in range(total_indices):
-            idx = indices[i].item()
-            expected_grad[idx] += grad_output_acc[i]
-        expected_grad = expected_grad.to(dtype)
-
-        # Compare with computed gradients (use appropriate tolerance for dtype)
-        if dtype in [torch.half, torch.bfloat16]:
-            atol = 1e-3
-            rtol = 1e-3
-        else:
-            atol = 5e-5
-            rtol = 5e-5
-        torch.testing.assert_close(
-            embedding.weight.grad, expected_grad, atol=atol, rtol=rtol
-        )
+                atol = 5e-5
+                rtol = 5e-5
+            torch.testing.assert_close(
+                embedding.weight.grad, expected_grad, atol=atol, rtol=rtol
+            )
 
     @onlyOn(["cuda", "xpu"])
     @dtypes(
@@ -789,41 +795,91 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         Test that embedding_dense_backward with padding_idx works correctly
         when using the atomic accmulate kernel path.
         """
-        torch.use_deterministic_algorithms(False)
+        with DeterministicGuard(False):
+            num_embeddings = 50
+            embedding_dim = 128
+            padding_idx = 5
+            repetitions_per_index = 1000
 
-        num_embeddings = 50
-        embedding_dim = 128
-        padding_idx = 5
-        repetitions_per_index = 1000
-
-        unique_indices = torch.tensor(
-            [padding_idx, 10, 20, 30], device=device, dtype=torch.long
-        )
-        indices = unique_indices.repeat(repetitions_per_index)
-
-        embedding = nn.Embedding(
-            num_embeddings, embedding_dim, padding_idx=padding_idx
-        ).to(device, dtype)
-        embedding.zero_grad()
-
-        output = embedding(indices)
-        grad_output = torch.randn_like(output)
-        output.backward(grad_output)
-
-        # Verify padding_idx has zero gradient
-        self.assertEqual(
-            embedding.weight.grad[padding_idx].abs().sum(),
-            0,
-            f"Expected zero gradient for padding_idx {padding_idx}",
-        )
-
-        # Verify other used indices have non-zero gradients
-        for idx in [10, 20, 30]:
-            self.assertGreater(
-                embedding.weight.grad[idx].abs().sum(),
-                0,
-                f"Expected non-zero gradient for index {idx}",
+            unique_indices = torch.tensor(
+                [padding_idx, 10, 20, 30], device=device, dtype=torch.long
             )
+            indices = unique_indices.repeat(repetitions_per_index)
+
+            embedding = nn.Embedding(
+                num_embeddings, embedding_dim, padding_idx=padding_idx
+            ).to(device, dtype)
+            embedding.zero_grad()
+
+            output = embedding(indices)
+            grad_output = torch.randn_like(output)
+            output.backward(grad_output)
+
+            # Verify padding_idx has zero gradient
+            self.assertEqual(
+                embedding.weight.grad[padding_idx].abs().sum(),
+                0,
+                lambda msg: f"{msg}\nExpected zero gradient for padding_idx {padding_idx}",
+            )
+
+            # Verify other used indices have non-zero gradients
+            for idx in [10, 20, 30]:
+                self.assertGreater(
+                    embedding.weight.grad[idx].abs().sum(),
+                    0,
+                    f"Expected non-zero gradient for index {idx}",
+                )
+
+    @onlyOn(["cuda", "xpu"])
+    @dtypes(
+        *(
+            (torch.float, torch.double, torch.bfloat16, torch.half)
+            if TEST_WITH_ROCM
+            else (torch.float, torch.double, torch.half)
+        )
+    )
+    def test_embedding_backward_deterministic(self, device, dtype):
+        """
+        Test that embedding_dense_backward produces bitwise-identical results
+        across multiple runs when deterministic algorithms are enabled, even in
+        scenarios that would otherwise trigger the non-deterministic atomic
+        accumulate kernel.
+        """
+        with DeterministicGuard(True):
+            num_embeddings = 100
+            embedding_dim = 256
+            num_unique_indices = 5
+            repetitions_per_index = 1000
+
+            unique_indices = torch.randint(
+                0,
+                num_embeddings,
+                (num_unique_indices,),
+                device=device,
+                dtype=torch.long,
+            )
+            indices = unique_indices.repeat(repetitions_per_index)
+
+            weight = torch.randn(
+                num_embeddings,
+                embedding_dim,
+                device=device,
+                dtype=dtype,
+                requires_grad=True,
+            )
+            grad_output = torch.randn(
+                indices.numel(), embedding_dim, device=device, dtype=dtype
+            )
+
+            reference_grad = None
+            for _ in range(5):
+                out = torch.nn.functional.embedding(input=indices, weight=weight)
+                out.backward(grad_output)
+                if reference_grad is None:
+                    reference_grad = weight.grad.clone()
+                else:
+                    self.assertEqual(weight.grad, reference_grad, atol=0, rtol=0)
+                weight.grad = None
 
     @onlyOn(["cuda", "xpu"])
     @dtypes(
@@ -906,6 +962,29 @@ class TestEmbeddingNNDeviceType(NNTestCase):
             raise AssertionError(
                 f"Expected grad_weight.dtype == torch.bfloat16, got {grad_weight.dtype}"
             )
+
+    # https://github.com/pytorch/pytorch/issues/188467
+    @onlyOn(["cuda"])
+    @dtypes(torch.int32, torch.int64)
+    @largeTensorTest("20GB", device="cuda")
+    def test_embedding_bag_max_backward_large_offset_overflow(self, device, dtype):
+        # chosen to guarantee an int32 overflow
+        dim = 2**16
+        r = 2**15
+
+        def grad_at_r(idx_dtype):
+            w = torch.zeros(r + 1, dim, device=device, requires_grad=True)
+
+            # make the final row contain the matrix's max value
+            with torch.no_grad():
+                w[r, :] = 1.0
+
+            idx = torch.tensor([0, r], device=device, dtype=idx_dtype)
+            off = torch.tensor([0], device=device, dtype=idx_dtype)
+            F.embedding_bag(idx, w, off, mode="max").sum().backward()
+            return w.grad[r].clone()
+
+        torch.testing.assert_close(torch.ones(dim, device=device), grad_at_r(dtype))
 
     # Check correctness of torch.nn.functional.embedding_bag forward and
     # backward functions with padding_idx, given a 2D indices input. Compare
@@ -1284,7 +1363,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         *itertools.product(
             (torch.int, torch.long),
             (torch.int, torch.long),
-            (torch.float, torch.double, torch.half),
+            (torch.float, torch.double, torch.half, torch.bfloat16),
         )
     )
     @dtypesIfXPU(
@@ -1357,7 +1436,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         *itertools.product(
             (torch.int, torch.long),
             (torch.int, torch.long),
-            (torch.float, torch.double, torch.half),
+            (torch.float, torch.double, torch.half, torch.bfloat16),
         )
     )
     @dtypesIfXPU(

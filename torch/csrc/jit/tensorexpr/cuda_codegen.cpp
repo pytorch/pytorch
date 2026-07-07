@@ -1312,7 +1312,7 @@ void CudaCodeGen::CompileToNVRTC(
     cu << log.data() << '\n';
     cu << "nvrtc compilation failed: " << '\n';
     cu << code << '\n';
-    throw std::runtime_error(cu.str());
+    throw std::runtime_error(std::move(cu).str());
   }
   ResourceGuard holdProgram(
       [&] { AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcDestroyProgram(&program)); });
