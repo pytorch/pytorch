@@ -36,6 +36,13 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   fi
   echo "NVCC version:"
   nvcc --version
+
+  # The CUPTI monitor's native worker compiles against cupti_activity.h from the
+  # nvidia-cuda-cupti wheel, and its field-id codegen parses that header with clang's
+  # python bindings. Both are CUDA-only build inputs, so they are installed here rather
+  # than in [build-system].requires / requirements-build.txt -- keeping CPU builds (which
+  # never compile the monitor) from having to provide a CUDA-only wheel.
+  python -mpip install "nvidia-cuda-cupti>=13.3.75" clang
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *cuda13* ]]; then
