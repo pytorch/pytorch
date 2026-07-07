@@ -13,8 +13,9 @@ from torch._functorch._aot_autograd.to_standalone_python import (
     _known_helper_table,
     _module_level_names,
 )
-from torch._functorch.aot_autograd import compile_to_python
+from torch._functorch.aot_autograd import compile_to_python, load_from_python
 from torch._higher_order_ops.effects import _get_effect
+from torch._inductor.utils import fresh_cache
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.utils import stateless
 from torch.testing._internal.common_utils import run_tests, TestCase
@@ -160,6 +161,25 @@ class TestAOTCompileToPython(TestCase):
         with torch.no_grad():
             self.assertEqual(_exec(src)(_flat_inputs(m, x))[0], m(x))
 
+    def test_load_from_python_standalone_and_warm(self):
+        # load_from_python is the inverse of compile_to_python: python_code runs standalone
+        # (kernels JIT on first use), and the forwarded inductor cache is a pure accelerator
+        # (warms the kernel caches so exec loads precompiled binaries). Both paths must match
+        # eager; run each in a fresh cache dir so the standalone path is a genuine cold load.
+        m = _Pointwise().eval()
+        x = torch.randn(8, 4)
+        src, cache = _compose(m, x)
+        # Standalone: no cache, the module JIT-compiles its own kernels.
+        with fresh_cache(), torch.no_grad():
+            self.assertEqual(load_from_python(src)(_flat_inputs(m, x))[0], m(x))
+        # Warm: the forwarded cache accelerates the same module; result is identical. cache
+        # is None on cache-disabled shards, where only the standalone path applies.
+        if cache is not None:
+            with fresh_cache(), torch.no_grad():
+                self.assertEqual(
+                    load_from_python(src, cache)(_flat_inputs(m, x))[0], m(x)
+                )
+
     def test_linear_addmm_runs_like_eager(self):
         m = torch.nn.Linear(4, 3).eval()
         x = torch.randn(5, 4)
@@ -191,11 +211,7 @@ class TestAOTCompileToPython(TestCase):
         m = _Pointwise().eval()
         x = torch.randn(8, 4)
         gm = _capture(m, x, tracing_mode="symbolic")
-        src, _cache = compile_to_python(
-            gm,
-            _flat_inputs(m, x),
-            dynamic_shapes="from_graph",
-        )
+        src, _cache = compile_to_python(gm, _flat_inputs(m, x))
         _assert_composed(self, src)
         fn = _exec(src)
         for n in (8, 16, 5):

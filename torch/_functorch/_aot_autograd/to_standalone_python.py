@@ -47,15 +47,15 @@ from .source_emit import _emit_value, _REBUILD_HELPER
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Sequence
+    from collections.abc import Callable, Iterator, Sequence
 
-    from torch._inductor.standalone_compile import DynamicShapesType
     from torch.fx import GraphModule
 
 
 # Serializes compile_to_python: the wrapper-source capture is thread-local, but the
-# underlying standalone_compile swaps process-global cache state (see the THREADING
-# note on compile_to_python), so concurrent compiles must not overlap. An RLock (not a
+# AOTAutograd capture pass and the inner inductor compile swap process-global cache state
+# (see the THREADING note on compile_to_python), so concurrent compiles must not overlap.
+# An RLock (not a
 # plain Lock) because this entry point is re-entrant on a single thread: a custom
 # backend or inductor pass invoked while the lock is held may call back into this
 # lowering to compile a subgraph on the SAME thread, and a plain Lock would
@@ -113,9 +113,12 @@ _COMPILE_LOCK = threading.RLock()
 # We do NOT reimplement any of this. We CAPTURE AOTAutograd's exact codegen'd wrapper
 # source together with the (pre-exec) globals dict each wrapper closed over: a
 # thread-local sink in codegen.py records one GeneratedSource per wrapper.
-# The capture is triggered for free -- the inner ``inductor.compile_to_python``
-# re-enters AOTAutograd (under no_grad, the inference path), and that re-entry is what
-# emits, and so what we record, the wrappers.
+# To trigger the capture we run AOTAutograd ourselves (under no_grad, the inference path)
+# with a capture-only inner compiler: it grabs the dense inner graph and returns a
+# placeholder callable, so AOTAutograd still codegen's the runtime-wrapper chain AROUND
+# that placeholder -- which is what the sink records. Inductor does not run in that pass;
+# it runs once afterward on the captured dense graph (via inductor.compile_to_python), and
+# the composer swaps the placeholder for the inner inductor ``call`` by object identity.
 #
 # THE COMPOSITION PROBLEM. To turn a captured wrapper into a real top-level ``def`` in
 # the standalone module we splice its source verbatim. But that source refers to each
@@ -660,25 +663,54 @@ def _find_effectful_op(gm: GraphModule, get_effect: Any) -> Any:
     return _scan(gm)
 
 
+def _graph_has_dynamic_shapes(gm: GraphModule) -> bool:
+    """True if any placeholder carries a symbolic (SymInt) shape or is itself a SymInt --
+    i.e. the graph was traced with dynamic dims. Drives the shapes mode for the capture
+    pass: dynamic graphs stay dynamic, static graphs specialize so the composer can bake
+    their (static) view metadata."""
+    import torch
+
+    for node in gm.graph.nodes:
+        if node.op != "placeholder":
+            continue
+        val = node.meta.get("val")
+        if isinstance(val, torch.SymInt):
+            return True
+        if isinstance(val, torch.Tensor) and any(
+            isinstance(s, torch.SymInt) for s in val.shape
+        ):
+            return True
+    return False
+
+
 def compile_to_python(
     gm: GraphModule,
     example_inputs: Sequence[Any],
     *,
-    dynamic_shapes: DynamicShapesType = "from_example_inputs",
     options: dict[str, Any] | None = None,
 ) -> tuple[str, bytes | None]:
     """Compile ``gm`` to ``(python_code, cache)``; see the module docstring.
 
-    THREADING: serialized by a process-global lock (``_COMPILE_LOCK``). The wrapper-
-    source capture is thread-local, but the underlying ``standalone_compile`` enters
-    ``CacheArtifactManager.with_fresh_cache()``, which swaps process-global class
-    state; a concurrent compile on another thread would corrupt the captured cache
-    artifacts, so concurrent calls (including via ``torch.compiler.precompile``) are serialized
-    rather than run in parallel.
+    THREADING: serialized by a process-global lock (``_COMPILE_LOCK``). The wrapper-source
+    capture is thread-local, but the AOTAutograd pass and the inner inductor compile both
+    swap process-global cache state (``CacheArtifactManager.with_fresh_cache()``); a
+    concurrent compile on another thread would corrupt the captured wrappers or cache
+    artifacts, so concurrent calls (including via ``torch.compiler.precompile``) are
+    serialized rather than run in parallel.
     """
+    import copy
+
     import torch
     from torch._higher_order_ops.effects import _get_effect
     from torch._inductor import compile_to_python as _inductor_compile_to_python
+    from torch._inductor.compile_fx import compile_fx
+    from torch._inductor.standalone_compile import (
+        _resolve_ignore_shape_env,
+        _standalone_context,
+    )
+    from torch.fx.graph_module import _share_torchbind_and_process_group_on_deepcopy
+
+    from .utils import make_boxed_func
 
     # Validate up front: this layer dereferences ``gm.graph`` (the effectful-op scan
     # below) before reaching inductor's own type-check, so a non-GraphModule would
@@ -706,13 +738,87 @@ def compile_to_python(
         )
 
     with _COMPILE_LOCK:
+        # Run AOTAutograd ONCE to do two things: (1) produce the dense, decomposed,
+        # functionalized inner graph, and (2) codegen its runtime-wrapper chain, which the
+        # thread-local ``capture_generated_sources`` sink records. A capture-only inner
+        # compiler grabs the dense graph and returns a placeholder boxed callable, so
+        # AOTAutograd still builds and codegen's the wrappers AROUND it -- that codegen is
+        # what we capture. Inductor is NOT run in this pass; it runs exactly once below, on
+        # the captured dense graph, via the ``_inductor_compile_to_python`` call (which
+        # drives inductor's ``compile_fx_inner`` directly, not a re-entry into AOTAutograd).
+        # The composer swaps the placeholder (the wrappers' inner reference) for the
+        # inner inductor ``call`` by object identity, so the placeholder is only a
+        # compile-time token and never runs.
         captured: list[GeneratedSource] = []
-        with capture_generated_sources(captured):
-            inner_python, cache = _inductor_compile_to_python(
-                gm,
+        dense: dict[str, Any] = {}
+
+        def _capture_inner_compile(dense_gm, dense_inputs, **kwargs):
+            if "gm" in dense:
+                raise NotImplementedError(
+                    "aot_autograd.compile_to_python does not support a graph whose "
+                    "AOTAutograd lowering emits more than one inner forward graph."
+                )
+            dense["gm"] = dense_gm
+            return make_boxed_func(dense_gm.forward)
+
+        # Drive inductor's own ``compile_fx`` (i.e. its exact AOTAutograd invocation --
+        # decomposition table + aot config) but swap in the capture inner compiler so the
+        # dense graph is intercepted before codegen and no inductor compile happens. Using
+        # compile_fx (rather than calling aot_autograd directly) guarantees the dense graph
+        # matches what the step-2 inductor compile below expects. Pick the shapes mode from
+        # the graph (there is no dynamic_shapes knob): a symbolically-traced graph uses
+        # ``"from_graph"`` to stay dynamic, a static one ``"from_example_inputs"`` to
+        # specialize -- matching what the composer can bake (symbolic view metadata is
+        # rejected downstream). no_grad pins the inference path (one forward module).
+        # Deepcopy first so compile_fx cannot mutate the caller's gm (torchbind
+        # ProcessGroups smuggled through as shared references). Note: the raw-collective /
+        # torchbind rewrites are inductor-lowering prereqs and belong to the step-2 inductor
+        # compile, which applies them to the dense graph -- not duplicated here.
+        shapes_mode = (
+            "from_graph" if _graph_has_dynamic_shapes(gm) else "from_example_inputs"
+        )
+        with (
+            torch.no_grad(),
+            _standalone_context(gm, shapes_mode, aot=False),
+            capture_generated_sources(captured),
+        ):
+            with _share_torchbind_and_process_group_on_deepcopy():
+                gm_owned = copy.deepcopy(gm)
+            compile_fx(
+                gm_owned,
                 example_inputs,
-                dynamic_shapes=dynamic_shapes,
-                options=options,
+                # Placeholder returns a boxed callable, not a full OutputCode; AOTAutograd
+                # only wraps it (never inductor-post-compiles it), so this is fine at runtime.
+                inner_compile=_capture_inner_compile,  # pyrefly: ignore[bad-argument-type]
+                ignore_shape_env=_resolve_ignore_shape_env(shapes_mode),
             )
+        if "gm" not in dense:
+            raise RuntimeError(
+                "aot_autograd.compile_to_python: AOTAutograd never reached the inner "
+                "forward compiler, so no dense graph was captured."
+            )
+
+        inner_python, cache = _inductor_compile_to_python(
+            dense["gm"], example_inputs, options=options
+        )
         source = _compose_standalone_module(inner_python, captured)
     return source, cache
+
+
+def load_from_python(
+    python_code: str, cache: bytes | None = None
+) -> Callable[..., Any]:
+    """Load the module emitted by ``compile_to_python`` into a runnable ``call`` -- the
+    inverse of ``compile_to_python``: (python_code, cache) in, runnable ``call`` out.
+
+    The composed module is self-contained -- the inductor kernels and the pure-Python
+    runtime wrappers are inlined -- so this delegates straight to the inductor loader:
+    ``python_code`` runs standalone (kernels JIT-compile on first use), and ``cache`` (the
+    inductor accelerator bundle this layer forwards) warms the kernel caches so exec loads
+    the precompiled binaries instead of recompiling. There is no separate aot-level load
+    step: exec'ing the module yields the aot-composed top-level ``call`` directly, and the
+    wrappers carry no kernels to load.
+    """
+    from torch._inductor import load_from_python as _inductor_load_from_python
+
+    return _inductor_load_from_python(python_code, cache)
