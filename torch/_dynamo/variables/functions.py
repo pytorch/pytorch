@@ -1403,16 +1403,16 @@ class LocalGeneratorObjectVariable(VariableTracker):
         if self._frame_state_finished():
             return ConstantVariable.create(None)
 
-        err = 0
+        err = False
         yf = self.pygen_yf()
         if yf:
             with tracer.temporarily_set_frame_state(FrameState.FRAME_EXECUTING):
                 try:
                     yf.call_method(tx, "close", [], {})
                 except ObservedException:
-                    err = 1
+                    err = True
 
-        if err == 0:
+        if err is False:
             self._setup_exception(tx, VariableTracker.build(tx, GeneratorExit))
 
         try:
@@ -1477,7 +1477,8 @@ class LocalGeneratorObjectVariable(VariableTracker):
                     with tracer.temporarily_set_frame_state(FrameState.FRAME_EXECUTING):
                         yf.call_method(tx, "close", [], {})
                 except ObservedException:
-                    return throw_here()
+                    pass
+                return throw_here()
 
             try:
                 with tracer.temporarily_set_frame_state(FrameState.FRAME_EXECUTING):
