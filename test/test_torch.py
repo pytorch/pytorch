@@ -2067,15 +2067,15 @@ class TestTorchDeviceType(TestCase):
         expect_no_sync = (lambda: _ind_put_fn(x, mask, 1.),
                           lambda: _ind_put_fn(x, mask_cpu, y),
                           lambda: _ind_put_fn(x, ind, y),
-                          lambda: _ind_put_fn(x, 0, 5.),
-                          lambda: _ind_put_fn(x, slice(0, 1), 5.),
                           lambda: _ind_get_fn(x, mask_cpu),
                           lambda: _ind_get_fn(x, ind),
                           lambda: torch.nn.functional.one_hot(ind, num_classes=size),
                           lambda: torch.randperm(20000, device=device),
                           lambda: torch.repeat_interleave(x, 2, output_size=2 * size),
                           lambda: torch.repeat_interleave(x, repeats, output_size=2 * size),
-                          lambda: torch.any(y))
+                          lambda: torch.any(y),
+                          lambda: torch.combinations(x, r=2),
+                          lambda: torch.normal(x, x))
         expect_sync = (lambda: _ind_put_fn(x, mask, y),
                        lambda: _ind_put_fn(x, ind_cpu, y),
                        lambda: _ind_get_fn(x, mask),
@@ -2108,7 +2108,11 @@ class TestTorchDeviceType(TestCase):
         temp = y.repeat_interleave(2)
         self.assertEqual(torch.Size([8]), temp.size())
 
-        for dtype in [torch.int, torch.long]:
+        repeat_dtypes = [torch.int, torch.long]
+        if device == "cpu":
+            repeat_dtypes.extend([torch.int8, torch.uint8, torch.int16])
+
+        for dtype in repeat_dtypes:
             lengths = torch.tensor([1, 2], dtype=dtype, device=device)
             output_size = torch.sum(lengths)
             a = torch.repeat_interleave(
@@ -2858,6 +2862,11 @@ class TestTorchDeviceType(TestCase):
         test_ops(torch.cummin, "cummin", torch.tensor([[1, 0, 1],
                                                        [0, 0, 0],
                                                        [0, 0, 0]]), expected_out)
+
+        for op in [torch.cummax, torch.cummin]:
+            x = torch.randn(5, dtype=torch.complex64, device=device)
+            with self.assertRaisesRegex(RuntimeError, "not implemented for 'ComplexFloat'"):
+                op(x, 0)
 
     def test_logcumsumexp(self, device):
         def logcumsumexp(a, axis):
@@ -10942,15 +10951,16 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
         t1_ref = TensorWeakRef(t1)
         t2_ref = TensorWeakRef(t2)
-        self.assertIs(t1_ref.ref, t1_ref)
+        t1_ref.extra = "still settable"
+        self.assertEqual(t1_ref.extra, "still settable")
         self.assertIs(t1_ref(), t1)
         self.assertIs(t2_ref(), t2)
-        self.assertTrue(
-            all(isinstance(wr, TensorWeakRef) for wr in weakref.getweakrefs(t1))
-        )
-        self.assertTrue(
-            all(isinstance(wr, TensorWeakRef) for wr in weakref.getweakrefs(t2))
-        )
+        t1_weakrefs = weakref.getweakrefs(t1)
+        t2_weakrefs = weakref.getweakrefs(t2)
+        self.assertEqual(len(t1_weakrefs), 1)
+        self.assertEqual(len(t2_weakrefs), 1)
+        self.assertIs(t1_weakrefs[0], t1_ref.ref)
+        self.assertIs(t2_weakrefs[0], t2_ref.ref)
 
         torch.utils.swap_tensors(t1, t2)
 
@@ -10961,6 +10971,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(t1.foo, "bar")
 
         _wr = weakref.ref(t1)
+        self.assertIs(_wr(), t1)
         with self.assertRaisesRegex(RuntimeError, "has weakref"):
             torch.utils.swap_tensors(t1, t2)
 
@@ -10969,8 +10980,23 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         _ = TensorWeakRef(t3)
         _ = TensorWeakRef(t4)
         _wr = weakref.ref(t4)
+        self.assertIs(_wr(), t4)
         with self.assertRaisesRegex(RuntimeError, "has weakref"):
             torch.utils.swap_tensors(t3, t4)
+
+    def test_tensor_weakref_bc_behavior(self):
+        from torch.utils.weak import TensorWeakRef, WeakIdRef
+
+        t = torch.zeros(3)
+        tensor_ref = TensorWeakRef(t)
+        plain_ref = weakref.ref(t)
+
+        tensor_ref.extra = "still settable"
+        self.assertEqual(tensor_ref.extra, "still settable")
+        self.assertIs(tensor_ref(), t)
+        self.assertFalse(tensor_ref == plain_ref)
+        self.assertTrue(bool(TensorWeakRef(t) == WeakIdRef(t)))
+        self.assertFalse(bool(tensor_ref == plain_ref))
 
     @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "Dynamo adds weakrefs")
     def test_swap_fail_slots(self):

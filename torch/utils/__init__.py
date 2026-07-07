@@ -42,14 +42,14 @@ def swap_tensors(t1, t2):
     """
     # Ensure there are no weakrefs that could observe swapped tensor contents.
     # Import lazily because torch.utils is imported while torch is still initializing.
-    from torch.utils.weak import TensorWeakRef
+    from torch.utils.weak import _TensorWeakRef
 
     def has_unsafe_weakrefs(t):
-        # TensorWeakRef is the internal tensor-only weakref used by Dynamo and
-        # Inductor; it has no user callback and fixes the tensor weakref before
-        # returning it. Keep other weakref types, including WeakIdRef-backed
-        # caches, on the conservative path.
-        return any(not isinstance(wr, TensorWeakRef) for wr in weakref.getweakrefs(t))
+        # TensorWeakRef owns _TensorWeakRef, the internal tensor-only weakref
+        # used by Dynamo and Inductor. It has no user callback and fixes the
+        # tensor weakref before returning it. Keep other weakref types,
+        # including WeakIdRef-backed caches, on the conservative path.
+        return any(not isinstance(wr, _TensorWeakRef) for wr in weakref.getweakrefs(t))
 
     if has_unsafe_weakrefs(t1):
         raise RuntimeError("Cannot swap t1 because it has weakref associated with it")
