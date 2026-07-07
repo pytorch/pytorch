@@ -4618,14 +4618,7 @@ class TestCase(expecttest.TestCase):
             self.assertEqual(x, y, msg, atol=atol, rtol=rtol, **kwargs)
 
     def _formatMessage(self, msg, standardMsg) -> str:  # type: ignore[override]
-        # Extend unittest's _formatMessage to allow `msg` to be a callable.
-        # _formatMessage is only called on the failure path, so a callable msg
-        # lets call sites defer expensive message construction (e.g. tensor
-        # reprs that force device->host syncs) until an assertion actually
-        # fails. The callable receives the auto-generated standard message and
-        # returns the full final message. This mirrors assertEqual's callable
-        # msg support (which has its own handling) and extends it to every
-        # unittest-style assertion (assertTrue, assertIn, assertGreater, ...).
+        # Allow a callable msg, invoked lazily on failure to build the message.
         if callable(msg):
             return msg(standardMsg)
         return super()._formatMessage(msg, standardMsg)
