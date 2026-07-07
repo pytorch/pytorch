@@ -26,6 +26,7 @@ log: logging.Logger = logging.getLogger(__name__)
 
 
 inductor_config.autotune_num_choices_displayed = None
+# Harmless comment
 # force autotuning, but reuse compilation artifacts
 inductor_config.autotune_local_cache = False
 # uncomment for better debugging
