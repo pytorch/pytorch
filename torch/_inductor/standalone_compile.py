@@ -610,7 +610,7 @@ def _runnable_source(artifact: CompiledArtifact) -> str:
     such source, which we surface as ``NoRunnableInductorModuleError``.
     """
     source = getattr(artifact._compiled_fn, "source_code", None)
-    if not isinstance(source, str) or not source:
+    if not source:
         raise NoRunnableInductorModuleError(
             "the compiled graph produced no runnable Inductor output module: it has no "
             "compute to lower (returns inputs/constants unchanged)."
@@ -630,18 +630,15 @@ def _binary_cache_bytes(artifact: CompiledArtifact) -> bytes | None:
     if not isinstance(artifact, CacheCompiledArtifact) or not artifact.is_saveable():
         log.debug("standalone artifact has no saveable cache entry; no cache")
         return None
-    try:
-        # Serialize fully in memory: these are exactly the bytes ``save(format=
-        # "binary")`` would write, and ``CompiledArtifact.load`` reads them back via
-        # ``load_cache_artifacts``, so the cache round-trips. Avoiding a temp file
-        # here means a SIGKILL mid-compile leaves no stray ``.bin`` in the cache dir.
-        return artifact._to_binary_bytes()
-    except Exception:
-        log.warning(
-            "standalone artifact failed to serialize unexpectedly; no cache",
-            exc_info=True,
-        )
-        return None
+    # Serialize fully in memory: these are exactly the bytes ``save(format="binary")``
+    # would write, and ``CompiledArtifact.load`` reads them back via
+    # ``load_cache_artifacts``, so the cache round-trips. Avoiding a temp file here
+    # means a SIGKILL mid-compile leaves no stray ``.bin`` in the cache dir. The
+    # expensive serialization already happened at compile time (``save_cache_artifacts``
+    # captured the bytes and ``is_saveable`` gated the one expected no-cache case), so
+    # this only re-frames known-good bytes: any exception here is a genuine bug and is
+    # allowed to propagate rather than being silently downgraded to a cache miss.
+    return artifact._to_binary_bytes()
 
 
 def compile_to_python(
@@ -714,13 +711,28 @@ def compile_to_python(
             f"got {type(gm)}. This is an internal entry point wrapped by a higher AOT "
             f"layer and is not meant to be called directly."
         )
+    # The experimental TORCHINDUCTOR_FX_COMPILE_MODE=async+/progressive+ schemes make
+    # compile_fx return an _AsyncOutputCode/_ProgressiveOutputCode that carries only
+    # _boxed_call and never surfaces the wrapper ``source_code`` this contract reads off.
+    # These are module-level globals resolved from the env at import time, not
+    # config-patchable like the pins below, so detect them up front and fail with a
+    # distinct error instead of the no-compute NoRunnableInductorModuleError -- the graph
+    # is runnable, the async scheme just did not surface its source.
+    from torch._inductor import compile_fx as _compile_fx
+
+    if _compile_fx.fx_compile_async or _compile_fx.fx_compile_progressive:
+        raise RuntimeError(
+            "compile_to_python needs synchronous source capture and does not yet "
+            "support TORCHINDUCTOR_FX_COMPILE_MODE=async+/progressive+ (the async "
+            "output code does not surface the wrapper source)."
+        )
     # Treat ``options`` as inductor config overrides and fold them into the same
     # ``config.patch`` we wrap the compile in. The two output pins are applied AFTER the
     # user options so they override any conflicting key: benchmark_harness=False keeps
     # the emitted module runnable (no get_args()/benchmark_compiled_module()/__main__),
     # and cpp_wrapper=False keeps it a python wrapper (the C++ backend emits a C++
     # ``call`` we cannot inline). A caller must not be able to break either.
-    config_patches: dict[str, Any] = dict(options or {})
+    config_patches: dict[str, Any] = dict(options) if options is not None else {}
     config_patches.update(
         {
             "benchmark_harness": False,
@@ -736,6 +748,13 @@ def compile_to_python(
     # are this graph's own, and we never have to second-guess the strides or tensor
     # subclasses of a backward AOTAutograd would otherwise synthesize.
     with torch.no_grad(), config.patch(config_patches):
+        # Go through ``standalone_compile`` (full ``compile_fx`` + AOTAutograd) rather
+        # than driving ``_compile_fx_inner`` on the dense graph directly: the ``cache``
+        # half of the contract is the bundled AOTAutograd-level artifact captured by
+        # ``save_cache_artifacts()``, which only exists on the AOTAutograd path. The
+        # ``no_grad`` pin above tames the re-entry (forces ``aot_dispatch_base``, one
+        # forward module), so the second AOTAutograd pass over the already-dense graph is
+        # idempotent for the tested shapes.
         # ``options`` are already applied above as config, so pass none down to
         # ``standalone_compile`` (it forwards options as ``compile_fx`` kwargs, which a
         # config key like ``max_autotune`` is not).
