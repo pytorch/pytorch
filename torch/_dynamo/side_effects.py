@@ -937,7 +937,9 @@ class SideEffects:
         # gather stack/symbolic_locals for all tx's up the chain
         cur_tx: InstructionTranslatorBase | None = tx
         while cur_tx is not None:
-            init_live_vars.extend([cur_tx.stack, cur_tx.symbolic_locals])
+            init_live_vars.extend(
+                [cur_tx.stack, cur_tx.symbolic_locals, cur_tx.symbolic_cellvars]
+            )
             if cur_tx.parent is not None:
                 # for non-root tx'es, also keep the cells/freevars alive so they get codegen'd properly
                 # TODO see if we could prune dead cells - cell pruning information needs to be forwarded
