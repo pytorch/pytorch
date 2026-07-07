@@ -1936,6 +1936,69 @@ except RuntimeError as e:
         ]
         self.assertTrue(any(msg in out or msg in err for msg in expected_messages))
 
+    @unittest.skipIf(
+        not TEST_CUDAMALLOCASYNC, "requires the cudaMallocAsync allocator backend"
+    )
+    @serialTest()
+    def test_cudamallocasync_trim_on_oom_retry(self):
+        # The fix under test: when the cudaMallocAsync allocator cannot fit an
+        # allocation it normally raises OutOfMemoryError; the fix first releases the
+        # pool's freed-but-cached backing to the OS and tries once more. We build an
+        # allocation that only succeeds if that retry runs -- it OOMs before the fix
+        # and succeeds after.
+        #
+        # The trick is to make memory that is freed but not yet reusable at the
+        # moment of the allocation:
+        #   1. Fill the GPU with a "wall" we keep alive, so almost nothing is free.
+        #   2. On a side stream, keep the stream busy, then allocate A and free it.
+        #      A's free is queued behind the busy work and has not run, so A is
+        #      released by us but not yet reusable by the allocator.
+        #   3. Ask for B (larger than A). Little is free and A is unusable, so the
+        #      first attempt fails; the fix then syncs the stream (running A's free),
+        #      trims the pool, retries, and B fits (a recovery is logged). Without
+        #      the fix the allocation raises OutOfMemoryError and the test fails.
+        dev = torch.cuda.current_device()
+        # Neutralize any inherited per-process memory fraction: a fractional cap
+        # would raise a *preemptive* OOM before cudaMallocAsync ever fails, which is
+        # a different path than the trim-and-retry this test targets.
+        orig_fraction = torch.cuda.get_per_process_memory_fraction(dev)
+        torch.cuda.set_per_process_memory_fraction(1.0, dev)
+        torch.cuda.empty_cache()  # start from a clean, predictable amount of free memory
+        torch.cuda.synchronize()
+        free, _ = torch.cuda.mem_get_info(dev)
+        if free < 16 * 1024**3:
+            self.skipTest("insufficient free CUDA memory for the trim-on-OOM repro")
+
+        # wall + A reserve 0.92; with A unusable only ~0.08 is free, so B (0.15)
+        # fails, and reclaiming A's 0.10 lets the retry fit.
+        wall_size = int(free * 0.82)
+        a_size = int(free * 0.10)
+        b_size = int(free * 0.15)
+
+        wall = torch.empty(wall_size, dtype=torch.int8, device=dev)  # keep most memory
+        s1 = torch.cuda.Stream()
+        b = None
+        try:
+            with torch.cuda.stream(s1):
+                a = torch.empty(a_size, dtype=torch.int8, device=dev)
+                # Keep the stream busy so A's free stays queued (pending, not yet
+                # reclaimable) when B is requested. The sleep must still be running
+                # when the host reaches B; if it finished first, A's free would run
+                # and B would simply reuse it. 1s comfortably covers the host's
+                # sub-ms trip to B even on a loaded machine.
+                torch.cuda._sleep(int(1000 * get_cycles_per_ms()))
+                del a
+                gc.collect()  # free A, but its release is queued behind the busy work
+                # Pre-fix this raises OutOfMemoryError; the fix trims and retries.
+                b = torch.empty(b_size, dtype=torch.int8, device=dev)
+                torch.cuda.synchronize()
+            # Reaching here without OutOfMemoryError means the trim-and-retry ran.
+            self.assertIsNotNone(b)
+        finally:
+            del wall, b
+            torch.cuda.empty_cache()
+            torch.cuda.set_per_process_memory_fraction(orig_fraction, dev)
+
     @slowTest
     def test_multinomial_invalid_probs_cuda(self):
         self._spawn_test_multinomial_invalid_probs_cuda([1.0, -1.0, 1.0])
