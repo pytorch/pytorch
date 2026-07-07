@@ -1,7 +1,7 @@
 """Base types for the CUPTI user-defined-record schema: :class:`Ctype` and :class:`Field`.
 
 Kept in a tiny leaf module (no intra-package imports) so both the generated
-``_cupti_field_ids`` module and the hand-curated ``records`` module can import it
+``_cupti_stubs`` module and the hand-curated ``records`` module can import it
 without a cycle.
 """
 

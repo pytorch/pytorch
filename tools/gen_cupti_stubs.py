@@ -1,12 +1,13 @@
-"""Generate ``torch/profiler/_cupti/_cupti_field_ids.py`` from the CUPTI ABI.
+"""Generate ``torch/profiler/_cupti/_cupti_stubs.py`` from the CUPTI ABI.
 
 The v2 / user-defined-record CUPTI path selects activity records by *field id*
-(``CUpti_Activity*FieldIds``). cupti-python does not expose those enums, so the
-monitor previously hard-coded the integer ids by hand. This script parses them
-straight out of ``cupti_activity.h`` (shipped by the ``nvidia-cuda-cupti`` build
-dependency) and emits a Python module of the same constants, so the ids can never
-drift from the header. ``records.py`` curates *which* fields the monitor selects;
-this module is only the ABI source of truth.
+(``CUpti_Activity*FieldIds``) and is configured via *attribute* selectors
+(``CUpti_ActivityAttribute``). cupti-python exposes neither enum, so the monitor
+previously hard-coded the integer ids/attrs by hand. This script parses them straight
+out of ``cupti_activity.h`` (shipped by the ``nvidia-cuda-cupti`` build dependency) and
+emits a Python module of the same constants -- the per-kind ``Field`` catalogs plus
+``ActivityAttr`` -- so they can never drift from the header. ``records.py`` curates
+*which* fields the monitor selects; this module is only the ABI source of truth.
 
 Parsing uses libclang (the ``clang`` python bindings) so the C frontend -- not a
 fragile regex -- computes every enumerator value. The shared ``libclang.so`` is
@@ -16,7 +17,7 @@ read from each enumerator's doc comment, the header's only record of the C type.
 
 Run standalone for debugging:
 
-    python tools/gen_cupti_field_ids.py --output torch/profiler/_cupti/_cupti_field_ids.py
+    python tools/gen_cupti_stubs.py --output torch/profiler/_cupti/_cupti_stubs.py
 """
 
 from __future__ import annotations
@@ -31,6 +32,11 @@ from pathlib import Path
 
 _FIELDIDS_PREFIX = "CUpti_Activity"
 _FIELDIDS_SUFFIX = "FieldIds"
+# The activity-attribute enum (cuptiActivitySetAttribute_v2 selectors: UDR, kernel-latency
+# timestamps, the timestamp callback, ...). Emitted as ActivityAttr so cupti_python need not
+# hardcode the (cupti-python-renumbered) ints.
+_ATTR_ENUM = "CUpti_ActivityAttribute"
+_ATTR_PREFIX = "CUPTI_ACTIVITY_ATTR_"
 # A field's doc comment opens with its C declaration (``<type> <name>;``), the only place
 # the C type is recorded: the record structs can't supply it (the enum->struct name mapping
 # is irregular -- e.g. Memcpy2FieldIds -> CUpti_ActivityMemcpyPtoP4 -- and positional mapping
@@ -110,14 +116,15 @@ def _load_cindex(libclang: str | None):  # type: ignore[no-untyped-def]
 
 def parse_header(
     header: Path, libclang: str | None = None
-) -> dict[str, list[_FieldDef]]:
-    """Map ``<X>FieldIds`` class name -> its fields, in declaration order, via libclang."""
+) -> tuple[dict[str, list[_FieldDef]], list[tuple[str, int]]]:
+    """Parse the header via libclang. Returns (``<X>FieldIds`` class name -> its fields, in
+    declaration order) and the CUpti_ActivityAttribute enumerators (name, value)."""
     cindex = _load_cindex(libclang)
     args = ["-x", "c", f"-I{header.parent}"]
     if cuda_home := (os.environ.get("CUDA_HOME") or os.environ.get("CUDA_PATH")):
         args.append(f"-I{Path(cuda_home) / 'include'}")
     # A missing <cuda.h> only yields diagnostics; libclang parses past it and the
-    # FieldIds enums (plain int enums) are recovered regardless.
+    # FieldIds / attribute enums (plain int enums) are recovered regardless.
     tu = cindex.Index.create().parse(
         str(header),
         args=args,
@@ -125,10 +132,22 @@ def parse_header(
     )
 
     fields_by_class: dict[str, list[_FieldDef]] = {}
+    attrs: list[tuple[str, int]] = []
     for cur in tu.cursor.walk_preorder():
         if cur.kind != cindex.CursorKind.TYPEDEF_DECL:
             continue
         name = cur.spelling
+        if name == _ATTR_ENUM:
+            enum = cur.underlying_typedef_type.get_declaration()
+            if enum.kind == cindex.CursorKind.ENUM_DECL:
+                for c in enum.get_children():
+                    if c.kind != cindex.CursorKind.ENUM_CONSTANT_DECL:
+                        continue
+                    an = c.spelling.removeprefix(_ATTR_PREFIX)
+                    if an.endswith(_SENTINEL_SUFFIXES):
+                        continue
+                    attrs.append((an, c.enum_value))
+            continue
         if not (name.startswith(_FIELDIDS_PREFIX) and name.endswith(_FIELDIDS_SUFFIX)):
             continue
         enum = cur.underlying_typedef_type.get_declaration()
@@ -151,18 +170,25 @@ def parse_header(
 
     if not fields_by_class:
         raise SystemExit(f"no CUpti_Activity*FieldIds enums parsed from {header}")
-    return fields_by_class
+    if not attrs:
+        raise SystemExit(f"no {_ATTR_ENUM} enumerators parsed from {header}")
+    return fields_by_class, attrs
 
 
-def render(fields_by_class: dict[str, list[_FieldDef]], header: Path) -> str:
+def render(
+    fields_by_class: dict[str, list[_FieldDef]],
+    attrs: list[tuple[str, int]],
+    header: Path,
+) -> str:
     lines = [
-        "# @" + "generated by tools/gen_cupti_field_ids.py -- do not edit.",
+        "# @" + "generated by tools/gen_cupti_stubs.py -- do not edit.",
         f"# Source: {header.name} (CUPTI ABI; nvidia-cuda-cupti build dependency).",
-        '"""CUPTI ``CUpti_Activity*Fields`` catalogs, generated from the CUPTI ABI.',
+        '"""CUPTI ABI enum catalogs, generated from cupti_activity.h.',
         "",
-        "One class per activity kind; each attribute is a :class:`Field` (its",
-        "``CUpti_Activity*FieldIds`` id plus its :class:`Ctype` for decode). ``records``",
-        "curates which of these the monitor selects per kind.",
+        "One class per activity kind: each attribute is a :class:`Field` (its",
+        "``CUpti_Activity*FieldIds`` id plus its :class:`Ctype` for decode); ``records``",
+        "curates which of these the monitor selects per kind. ``ActivityAttr`` holds the",
+        "``CUpti_ActivityAttribute`` selectors (cuptiActivitySetAttribute_v2).",
         '"""',
         "",
         "from torch.profiler._cupti._records_base import Ctype, Field",
@@ -175,6 +201,12 @@ def render(fields_by_class: dict[str, list[_FieldDef]], header: Path) -> str:
             lines.append(f"    {f.name} = Field({f.value}, Ctype.{f.ctype})")
         lines.append("")
         lines.append("")
+    lines.append("class ActivityAttr:")
+    lines.append(
+        '    """CUpti_ActivityAttribute selectors (cuptiActivitySetAttribute_v2), by name."""'
+    )
+    for an, val in attrs:
+        lines.append(f"    {an} = {val}")
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -182,7 +214,8 @@ def generate(output: Path, header: Path, libclang: str | None = None) -> None:
     """Write the generated module from ``header``. The caller resolves the header
     (tools.setup_helpers.cupti.find_cupti_header); the CMake rule skips codegen
     entirely when no header is present, so non-CUPTI builds proceed without it."""
-    content = render(parse_header(header, libclang), header)
+    fields_by_class, attrs = parse_header(header, libclang)
+    content = render(fields_by_class, attrs, header)
     output.parent.mkdir(parents=True, exist_ok=True)
     if not output.exists() or output.read_text() != content:
         output.write_text(content)
