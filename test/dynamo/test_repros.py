@@ -82,7 +82,6 @@ from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._python_dispatch import TorchDispatchMode
 
-
 _orig_module_call = torch.nn.Module.__call__
 
 # Custom operator that only supports CPU and Meta
@@ -4841,7 +4840,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     def test_invalid_seq_unpack(self):
         def myfn(arg):
-            (a, b) = arg  # noqa: F841
+            a, b = arg  # noqa: F841
 
         def fn():
             return myfn((1, 2, 3))
@@ -5005,7 +5004,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             assert x.shape[0] > 3  # noqa: S101
             assert x[0].sum() > 0  # noqa: S101
             assert 1 % (x.shape[0] // 2) != 0  # noqa: S101
-            assert 32 * (x.shape[0] // 2) ** 2 - 16 * (x.shape[0] // 2) != 0  # noqa: S101
+            assert (
+                32 * (x.shape[0] // 2) ** 2 - 16 * (x.shape[0] // 2) != 0
+            )  # noqa: S101
             return x.cos()
 
         f(torch.ones(6, 4))
@@ -5081,9 +5082,9 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
                 with warnings.catch_warnings(record=True):
                     data_len = len(value)
                 if len(self._fields):
-                    assert len(self) == data_len, (  # noqa: S101
-                        f"Adding a field of length {data_len} to a Instances of length {len(self)}"
-                    )
+                    assert (
+                        len(self) == data_len
+                    ), f"Adding a field of length {data_len} to a Instances of length {len(self)}"  # noqa: S101
                 self._fields[name] = value
 
             def get(self, name: str) -> Any:
@@ -5091,7 +5092,9 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
 
             @staticmethod
             def cat(instance_lists: list["Instances"]) -> "Instances":
-                assert all(isinstance(i, Instances) for i in instance_lists)  # noqa: S101
+                assert all(
+                    isinstance(i, Instances) for i in instance_lists
+                )  # noqa: S101
                 assert len(instance_lists) > 0  # noqa: S101
                 if len(instance_lists) == 1:
                     return instance_lists[0]

@@ -99,7 +99,6 @@ from ..utils import (
 from .base import MutationType, raise_type_error_exc, ValueMutationNew, VariableTracker
 from .dicts import ConstDictVariable, DefaultDictVariable, SetVariable
 
-
 try:
     import numpy as np
 except ModuleNotFoundError:
@@ -1250,9 +1249,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return super().guard_as_python_constant()
 
     def torch_function_check(self) -> None:
-        assert has_torch_function(self), (
-            f"calling torch function on object without __torch_function__ {self}"
-        )
+        assert has_torch_function(
+            self
+        ), f"calling torch function on object without __torch_function__ {self}"
 
     def get_torch_fn(self, tx: "InstructionTranslator") -> VariableTracker:
         self.torch_function_check()
@@ -1351,7 +1350,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     method = unpatched_nn_module_init
                 return UserMethodVariable(
                     method, self, source_fn=source_fn, source=source
-                ).call_function(tx, args, kwargs)  # type: ignore[arg-type]
+                ).call_function(
+                    tx, args, kwargs
+                )  # type: ignore[arg-type]
 
             if method is list.__len__ and self.source and not (args or kwargs):
                 install_guard(self.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
@@ -1567,7 +1568,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # If we have a PyCFunction, we make an assumption that there is no side effect.
         return isinstance(
             subobj.fget, types.BuiltinFunctionType
-        ) or torch._C._dynamo.utils.is_instancemethod(subobj.fget)  # type: ignore[attr-defined]
+        ) or torch._C._dynamo.utils.is_instancemethod(
+            subobj.fget
+        )  # type: ignore[attr-defined]
 
     def _getattr_static(self, name: str) -> object:
         if name in self._looked_up_attrs:
@@ -2680,9 +2683,9 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
     ) -> None:
         super().__init__(value, **kwargs)
         if dict_vt is None:
-            assert self.source is None, (
-                "dict_vt must be constructed by builder.py when source is present"
-            )
+            assert (
+                self.source is None
+            ), "dict_vt must be constructed by builder.py when source is present"
             self._dict_vt = ConstDictVariable(
                 {}, type(value), mutation_type=ValueMutationNew()
             )
@@ -2768,9 +2771,9 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
         self._set_methods = set_methods if python_type is set else frozenset_methods
 
         if set_vt is None:
-            assert self.source is None, (
-                "set_vt must be constructed by builder.py when source is present"
-            )
+            assert (
+                self.source is None
+            ), "set_vt must be constructed by builder.py when source is present"
             if python_type is set:
                 # set is initialized later
                 self._set_vt = variables.SetVariable(
@@ -2780,7 +2783,9 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
             else:
                 init_args = kwargs.get("init_args", {})
                 if tx is None:
-                    tx = torch._dynamo.symbolic_convert.InstructionTranslator.current_tx()
+                    tx = (
+                        torch._dynamo.symbolic_convert.InstructionTranslator.current_tx()
+                    )
                 self._set_vt = SourcelessBuilder.create(tx, python_type).call_function(  # type: ignore[assignment]
                     tx, init_args, {}
                 )
@@ -2858,9 +2863,9 @@ class UserDefinedListVariable(UserDefinedObjectVariable):
 
         super().__init__(value, **kwargs)
         if list_vt is None:
-            assert self.source is None, (
-                "list_vt must be constructed by builder.py when source is present"
-            )
+            assert (
+                self.source is None
+            ), "list_vt must be constructed by builder.py when source is present"
             self._list_vt = ListVariable([], mutation_type=ValueMutationNew())
         else:
             self._list_vt = list_vt
@@ -2909,9 +2914,9 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
         tx = kwargs.pop("tx", None)
         super().__init__(value, init_args=init_args, **kwargs)
         if tuple_vt is None:
-            assert self.source is None, (
-                "tuple_vt must be constructed by builder.py when source is present"
-            )
+            assert (
+                self.source is None
+            ), "tuple_vt must be constructed by builder.py when source is present"
             assert init_args, "init_args must be provided when tuple_vt is None"
             # Emulate `tuple.__new__`
             # https://github.com/python/cpython/blob/3.11/Objects/tupleobject.c#L697-L710
