@@ -4832,8 +4832,15 @@ def is_nonfreeable_buffers(dep: Dep) -> bool:
 # Make sure to also include your jinja templates within torch_package_data in setup.py, or this function won't be able to find them
 def load_template(name: str, template_dir: Path) -> str:
     """Load a template file and return its content."""
-    with open(template_dir / f"{name}.py.jinja") as f:
-        return f.read()
+    path = template_dir / f"{name}.py.jinja"
+    try:
+        with open(path, encoding="utf-8") as f:
+            return f.read()
+    except UnicodeDecodeError as e:
+        # Name the offending file: a bare UnicodeDecodeError hides which
+        # template is malformed, which is easy to misdiagnose when it surfaces
+        # deep inside kernel lowering.
+        raise ValueError(f"Template {path} is not valid UTF-8: {e}") from e
 
 
 def should_fallback_by_default(node: torch.fx.Node) -> bool:

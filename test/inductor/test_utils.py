@@ -1,8 +1,12 @@
 # Owner(s): ["module: inductor"]
 
+import builtins
 import importlib.util
+import tempfile
 import unittest
 from collections.abc import Callable, Iterator
+from pathlib import Path
+from unittest import mock
 
 from sympy import I, Max, Min, Symbol, sympify
 
@@ -17,7 +21,12 @@ from torch._inductor.fx_utils import (
     FakeTensorUpdater,
     get_fake,
 )
-from torch._inductor.utils import get_device_tflops, sympy_str, sympy_subs
+from torch._inductor.utils import (
+    get_device_tflops,
+    load_template,
+    sympy_str,
+    sympy_subs,
+)
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.ops import aten
@@ -310,6 +319,38 @@ class TestUtils(TestCase):
 
 
 instantiate_device_type_tests(TestUtils, globals(), allow_xpu=True)
+
+
+class TestLoadTemplate(TestCase):
+    def test_load_template_uses_utf8(self):
+        # load_template must decode templates as UTF-8 regardless of the ambient
+        # locale. On a host whose default encoding is ascii, reading a template
+        # that contains a non-ascii byte otherwise raises UnicodeDecodeError,
+        # producing a host-dependent (flaky) compile failure.
+        real_open = builtins.open
+
+        def ascii_default_open(*args, **kwargs):
+            # Emulate an ascii-locale host: open() with no explicit encoding
+            # decodes as ascii (open's 4th positional arg is encoding).
+            if kwargs.get("encoding") is None and (len(args) < 4 or args[3] is None):
+                kwargs["encoding"] = "ascii"
+            return real_open(*args, **kwargs)
+
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "t.py.jinja").write_text("# unicode \u2014\n", encoding="utf-8")
+            with mock.patch("builtins.open", ascii_default_open):
+                content = load_template("t", Path(d))
+        self.assertIn("\u2014", content)
+
+    def test_load_template_invalid_utf8_names_the_file(self):
+        # A template that is genuinely not valid UTF-8 (e.g. saved in a non-UTF-8
+        # codepage) must raise an error that names the offending file, not an
+        # opaque UnicodeDecodeError that hides which template is bad.
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "bad.py.jinja").write_bytes(b"# not utf-8: \x97\n")
+            with self.assertRaises(ValueError) as cm:
+                load_template("bad", Path(d))
+        self.assertIn("bad.py.jinja", str(cm.exception))
 
 
 class TestRuntimeEstimation(TestCase):
