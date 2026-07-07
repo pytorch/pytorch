@@ -3808,6 +3808,332 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_local_m_reduce_feed_main_supports_trailing_fp8_quant(self):
+        m = 128
+        n = 64
+        group = 32
+
+        def epilogue_fn(acc):
+            x = acc.float().view(-1, group, n)
+            scale = x.sum(1, keepdim=True)
+            return (x * scale.reciprocal()).view(m, n).to(torch.float8_e4m3fn)
+
+        def high_precision_fn(acc):
+            x = acc.view(-1, group, n)
+            return (x * x.sum(1, keepdim=True).reciprocal()).view(m, n)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.rand(m, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.rand(64, n, device="cuda", dtype=torch.bfloat16)
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+
+        self.assertEqual(actual.dtype, torch.float8_e4m3fn)
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            epilogue_fn(a @ b),
+            high_precision_fn(a.double() @ b.double()),
+            a.shape[1],
+        )
+        self.assertPhysicalFeedMainCode(code, group)
+        FileCheck().check("cutlass.Float8E4M3FN").check("feeds_main=True").run(code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_local_m_reduce_feed_main_supports_trailing_pointwise_chain(self):
+        m = 128
+        n = 64
+        group = 8
+
+        def epilogue_fn(acc):
+            x = acc.float().view(-1, group, n)
+            scale = x.sum(1, keepdim=True)
+            return (x * scale.reciprocal()).view(m, n) * 0.5 + 1.0
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.rand(m, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.rand(64, n, device="cuda", dtype=torch.bfloat16)
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+
+        self.assertMatchesEpilogue(
+            actual,
+            epilogue_fn(a @ b),
+            epilogue_fn(a.double() @ b.double()),
+            a.shape[1],
+        )
+        self.assertPhysicalFeedMainCode(code, group)
+        FileCheck().check("feeds_main=True").run(code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_local_m_reduce_feed_main_trailing_quant_with_scale_store(self):
+        m = 128
+        n = 64
+        group = 32
+
+        def epilogue_fn(acc):
+            x = acc.float().view(-1, group, n)
+            scale = x.sum(1, keepdim=True)
+            quant = (x * scale.reciprocal()).view(m, n).to(torch.float8_e4m3fn)
+            return quant, scale.squeeze(1)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.rand(m, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.rand(64, n, device="cuda", dtype=torch.bfloat16)
+        (actual, aux), (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+
+        high_precision_acc = a.double() @ b.double()
+        high_precision_x = high_precision_acc.view(-1, group, n)
+        self.assertEqual(actual.dtype, torch.float8_e4m3fn)
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            epilogue_fn(a @ b)[0],
+            (
+                high_precision_x * high_precision_x.sum(1, keepdim=True).reciprocal()
+            ).view(m, n),
+            a.shape[1],
+        )
+        torch.testing.assert_close(
+            aux,
+            high_precision_x.sum(1).float(),
+            atol=1e-3,
+            rtol=1e-3,
+        )
+        FileCheck().check("local_reduce=FlexGemmRuntimeLocalReducePlan").check(
+            self.localReduceGeometryPattern(group, 0)
+        ).check("out=").check("feeds_main=True").check(
+            "callbacks=FlexGemmLocalReduceCallbacks"
+        ).run(code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @parametrize("group", (4, 8, 16))
+    def test_mm_local_n_reduce_feed_main_fragment_group_sum(self, group):
+        m = 128
+        n = 128
+
+        def epilogue_fn(acc):
+            x = acc.float().view(m, -1, group)
+            scale = x.sum(-1, keepdim=True)
+            return (x * scale.reciprocal()).view(m, n)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.rand(m, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.rand(64, n, device="cuda", dtype=torch.bfloat16)
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            epilogue_fn(a @ b),
+            epilogue_fn(a.double() @ b.double()),
+            a.shape[1],
+        )
+        FileCheck().check("cute.ReductionOp.ADD").check_not(
+            "local_reduce=FlexGemmRuntimeLocalReducePlan"
+        ).run(code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @parametrize("group", (4, 8, 16))
+    def test_mm_local_n_reduce_feed_main_fragment_group_fp8_quant(self, group):
+        m = 128
+        n = 128
+
+        def epilogue_fn(acc):
+            x = acc.float().view(m, -1, group)
+            scale = x.abs().amax(-1, keepdim=True).clamp(min=1e-12) / 448.0
+            return (x * scale.reciprocal()).view(m, n).to(torch.float8_e4m3fn)
+
+        def high_precision_fn(acc):
+            x = acc.view(m, -1, group)
+            scale = x.abs().amax(-1, keepdim=True).clamp(min=1e-12) / 448.0
+            return (x * scale.reciprocal()).view(m, n)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(m, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(64, n, device="cuda", dtype=torch.bfloat16)
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+
+        self.assertEqual(actual.dtype, torch.float8_e4m3fn)
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            epilogue_fn(a @ b),
+            high_precision_fn(a.double() @ b.double()),
+            a.shape[1],
+        )
+        FileCheck().check("cutlass.Float8E4M3FN").check_not(
+            "local_reduce=FlexGemmRuntimeLocalReducePlan"
+        ).run(code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @parametrize("group", (4, 8, 16))
+    def test_mm_local_n_reduce_feed_main_fragment_group_scale_store(self, group):
+        m = 128
+        n = 128
+
+        def epilogue_fn(acc):
+            x = acc.float().view(m, -1, group)
+            scale = x.abs().amax(-1, keepdim=True).clamp(min=1e-12) / 448.0
+            return (x * scale.reciprocal()).view(m, n), scale.squeeze(-1)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(m, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(64, n, device="cuda", dtype=torch.bfloat16)
+        (actual, aux), (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+
+        expected, _ = epilogue_fn(a @ b)
+        high_precision_expected, high_precision_aux = epilogue_fn(
+            a.double() @ b.double()
+        )
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            expected,
+            high_precision_expected,
+            a.shape[1],
+        )
+        torch.testing.assert_close(
+            aux,
+            high_precision_aux.float(),
+            atol=1e-3,
+            rtol=1e-3,
+        )
+        self.assertLocalReduceAuxCode(code, group)
+        FileCheck().check_not("feeds_main=True").run(code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_local_n_reduce_feed_main_fragment_group_tuned(self):
+        m = 128
+        n = 128
+        group = 16
+
+        def epilogue_fn(acc):
+            x = acc.float().view(m, -1, group)
+            scale = x.abs().amax(-1, keepdim=True).clamp(min=1e-12) / 448.0
+            return (x * scale.reciprocal()).view(m, n).to(torch.float8_e4m3fn)
+
+        def high_precision_fn(acc):
+            x = acc.view(m, -1, group)
+            scale = x.abs().amax(-1, keepdim=True).clamp(min=1e-12) / 448.0
+            return (x * scale.reciprocal()).view(m, n)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK", "tuned": True},
+            )
+
+        a = torch.randn(m, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(64, n, device="cuda", dtype=torch.bfloat16)
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+
+        self.assertEqual(actual.dtype, torch.float8_e4m3fn)
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            epilogue_fn(a @ b),
+            high_precision_fn(a.double() @ b.double()),
+            a.shape[1],
+        )
+        FileCheck().check("cutlass.Float8E4M3FN").check_not(
+            "local_reduce=FlexGemmRuntimeLocalReducePlan"
+        ).run(code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @parametrize("group", (32, 128))
+    def test_mm_local_n_reduce_feed_main_rejects_multi_fragment_group(self, group):
+        torch._dynamo.reset()
+        m = 128
+        n = 256
+
+        def epilogue_fn(acc):
+            x = acc.float().view(m, -1, group)
+            scale = x.sum(-1, keepdim=True)
+            return (x * scale.reciprocal()).view(m, n)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.rand(m, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.rand(64, n, device="cuda", dtype=torch.bfloat16)
+        with self.assertRaisesRegex(
+            Exception, "axis-1 groups larger than one TensorSSA fragment"
+        ):
+            torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     @parametrize(
         "case",
         (
