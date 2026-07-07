@@ -1397,17 +1397,15 @@ def unload_xpu_triton_pyds() -> None:
                             result,
                             torch._inductor.runtime.triton_heuristics.TritonCompileResult,
                         ):
-                            mod = getattr(result.kernel.run, "mod", None)
-                            if mod is not None:
-                                mod.__del__()
+                            if hasattr(result.kernel.run, "mod"):
+                                result.kernel.run.mod.__del__()
         del sys.modules[module_name]
 
     # unload spirv_utils.pyd
     if "triton.runtime.driver" in sys.modules:
         driver_mod = sys.modules["triton.runtime.driver"]
-        utils_obj = getattr(driver_mod.driver.active, "utils", None)
-        if utils_obj is not None:
-            utils_cls = type(utils_obj)
+        if hasattr(driver_mod.driver.active, "utils"):
+            utils_cls = type(driver_mod.driver.active.utils)
             if hasattr(utils_cls, "instance"):
                 del utils_cls.instance
             elif hasattr(utils_cls, "_instance"):
