@@ -8,4 +8,8 @@ pyyaml
 requests
 six  # dependency chain: NNPACK -> PeachPy -> six
 typing-extensions>=4.15.0
+# nvidia-cuda-cupti ships cupti_activity.h, which the CUPTI monitor's native worker compiles
+# against; clang's python bindings parse it to generate _cupti_field_ids.py.
+nvidia-cuda-cupti>=13.3.75; platform_machine == "x86_64" or platform_machine == "aarch64"
+clang; platform_machine == "x86_64" or platform_machine == "aarch64"
 pip  # not technically needed, but this makes setup.py invocation work
