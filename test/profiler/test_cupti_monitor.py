@@ -106,6 +106,13 @@ def _isolated(test_fn):
 class TestCuptiRecords(TestCase):
     """Pure monitor + metadata unit tests (no CUDA)."""
 
+    def setUp(self):
+        # CuptiMonitor is a process-wide singleton; drop it so each test builds a fresh one.
+        from torch.profiler._cupti import monitor as _cupti_monitor
+
+        _cupti_monitor._reset_for_test()
+        self.addCleanup(_cupti_monitor._reset_for_test)
+
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     def test_monitor_normalize_activities(self):
         # A registration request resolves to (kinds, per-kind field selection): a
@@ -132,33 +139,73 @@ class TestCuptiRecords(TestCase):
         self.assertEqual(fields[memcpy], all_memcpy)
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
-    def test_monitor_buffer_size_from_env(self):
-        # The per-buffer pool size is user-configurable: an explicit buffer_size
-        # arg wins, otherwise TORCH_CUPTI_MONITOR_BUFFER_SIZE is honored, else the
-        # 4 MiB default. No CUDA -- this only reads the constructor config.
-        import unittest.mock
+    def test_configure_and_get_config(self):
+        # configure() sets the process-wide config get_config() reports; it is first-come-
+        # first-serve. Pure config -- no session. setUp reset the singleton, so this starts
+        # from the defaults: both cadences off (-1, caller-driven) and the approx clock on.
+        from torch.profiler._cupti import monitor as cupti_monitor
 
-        from torch.profiler._cupti.monitor import _DEFAULT_BUFFER_SIZE, CuptiMonitor
+        cfg = cupti_monitor.get_config()
+        self.assertEqual(cfg["buffer_size"], 4 * 1024 * 1024)
+        self.assertEqual(cfg["background_flush_period_s"], -1.0)
+        self.assertEqual(cfg["background_drain_period_s"], -1.0)
+        self.assertFalse(cfg["use_approx_timestamps"])
+        self.assertFalse(cfg["configured"])
 
-        self.assertEqual(CuptiMonitor().buffer_size, _DEFAULT_BUFFER_SIZE)
-        with unittest.mock.patch.dict(
-            "os.environ", {"TORCH_CUPTI_MONITOR_BUFFER_SIZE": "1048576"}
-        ):
-            self.assertEqual(CuptiMonitor().buffer_size, 1048576)
-            # An explicit arg overrides the env var.
-            self.assertEqual(CuptiMonitor(buffer_size=2048).buffer_size, 2048)
+        cupti_monitor.configure(
+            buffer_size=2048, background_flush_period_s=0.5, use_approx_timestamps=True
+        )
+        cfg = cupti_monitor.get_config()
+        self.assertEqual(cfg["buffer_size"], 2048)
+        self.assertEqual(cfg["background_flush_period_s"], 0.5)
+        self.assertEqual(
+            cfg["background_drain_period_s"], -1.0
+        )  # independent; still off
+        self.assertTrue(cfg["use_approx_timestamps"])
+        self.assertTrue(cfg["configured"])
+
+        # First-come-first-serve: a second configure() is ignored.
+        cupti_monitor.configure(buffer_size=4096)
+        self.assertEqual(cupti_monitor.get_config()["buffer_size"], 2048)
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
-    def test_monitor_use_approx_timestamps_arg(self):
-        # The approx-clock timestamp callback is a constructor setting (no env var):
-        # off by default, on when use_approx_timestamps=True. No CUDA, but constructing
-        # CuptiMonitor loads libcupti (>= 13.3) via pylibcupti().
+    def test_singleton_snapshots_config(self):
+        # CuptiMonitor() is the process-wide singleton: every accessor returns the one
+        # instance, built once from the configure() settings.
+        from torch.profiler._cupti import monitor as cupti_monitor
+        from torch.profiler._cupti.monitor import CuptiMonitor
+
+        cupti_monitor.configure(
+            buffer_size=2048,
+            background_flush_period_s=0.5,
+            background_drain_period_s=2.0,
+        )
+        m = CuptiMonitor()
+        self.assertEqual(m.buffer_size, 2048)
+        self.assertEqual(m.background_flush_period_s, 0.5)
+        self.assertEqual(m.background_drain_period_s, 2.0)
+        self.assertIs(CuptiMonitor(), m)
+        self.assertIs(cupti_monitor.instance(), m)
+        self.assertIs(cupti_monitor.get_monitor(), m)
+
+        # Unconfigured, both cadences default off (caller-driven).
+        cupti_monitor._reset_for_test()
+        m = CuptiMonitor()
+        self.assertEqual(m.background_flush_period_s, -1.0)
+        self.assertEqual(m.background_drain_period_s, -1.0)
+
+    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    def test_monitor_use_approx_timestamps_config(self):
+        # use_approx_timestamps is a configure() setting the singleton snapshots: OFF by
+        # default (the per-subscriber callback only times device records correctly when the
+        # monitor is the first CUPTI consumer), opt-in on. Constructing loads libcupti (>= 13.3).
+        from torch.profiler._cupti import monitor as cupti_monitor
         from torch.profiler._cupti.monitor import CuptiMonitor
 
         self.assertFalse(CuptiMonitor()._timestamp_callback_enabled)
-        self.assertTrue(
-            CuptiMonitor(use_approx_timestamps=True)._timestamp_callback_enabled
-        )
+        cupti_monitor._reset_for_test()
+        cupti_monitor.configure(use_approx_timestamps=True)
+        self.assertTrue(CuptiMonitor()._timestamp_callback_enabled)
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     def test_monitor_external_correlation_not_started(self):
@@ -461,6 +508,13 @@ class TestCuptiRecords(TestCase):
 class TestCuptiMonitorCUDA(TestCase):
     """Collection through CuptiMonitor directly (not via torch.profiler.profile)."""
 
+    def setUp(self):
+        # CuptiMonitor is a process-wide singleton; drop it so each test builds a fresh one.
+        from torch.profiler._cupti import monitor as _cupti_monitor
+
+        _cupti_monitor._reset_for_test()
+        self.addCleanup(_cupti_monitor._reset_for_test)
+
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     def test_fence_enables_sync_transiently(self):
         # flush(sync=True) fences at a SYNCHRONIZATION sync point, enabled only for
@@ -504,9 +558,12 @@ class TestCuptiMonitorCUDA(TestCase):
         # Fully caller-driven (both periods < 0): no background self-flush and no
         # background drain, so the explicit flush(sync=True) below is the sole,
         # deterministic flush + drain -- nothing races it to consume the decoded columns.
-        monitor = CuptiMonitor(
+        from torch.profiler._cupti import monitor as cupti_monitor
+
+        cupti_monitor.configure(
             background_flush_period_s=-1, background_drain_period_s=-1
         )
+        monitor = CuptiMonitor()
 
         def on_columns(cols):
             if kind in cols:
@@ -597,6 +654,7 @@ class TestCuptiMonitorCUDA(TestCase):
         # device records; collection still proceeds on the CLOCK_REALTIME pass-through.
         from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
 
+        from torch.profiler._cupti import monitor as cupti_monitor
         from torch.profiler._cupti.cupti_python import CuptiError
         from torch.profiler._cupti.monitor import CuptiMonitor
         from torch.profiler._cupti.records import Kernel
@@ -609,7 +667,8 @@ class TestCuptiMonitorCUDA(TestCase):
 
         lock = threading.Lock()
         columns: list = []
-        monitor = CuptiMonitor(use_approx_timestamps=True)
+        cupti_monitor.configure(use_approx_timestamps=True)
+        monitor = CuptiMonitor()
 
         def on_columns(cols):
             if kind in cols:
@@ -764,7 +823,10 @@ class TestCuptiMonitorCUDA(TestCase):
                     len(next(iter(c.values()))) if c else 0
                 )
 
-        m = CuptiMonitor(buffer_size=1024, background_flush_period_s=0.02)
+        from torch.profiler._cupti import monitor as cupti_monitor
+
+        cupti_monitor.configure(buffer_size=1024, background_flush_period_s=0.02)
+        m = CuptiMonitor()
         want = {
             ActivityKind.CONCURRENT_KERNEL: {
                 Kernel.START,
@@ -899,6 +961,13 @@ class TestWindowFinalizer(TestCase):
 class TestCuptiMonitorProfiler(TestCase):
     """The monitor driven through ``torch.profiler.profile`` (trace shape, op/kernel
     parity, record_shapes, sync/async export, multithread thread-assignment, ...)."""
+
+    def setUp(self):
+        # CuptiMonitor is a process-wide singleton; drop it so each test builds a fresh one.
+        from torch.profiler._cupti import monitor as _cupti_monitor
+
+        _cupti_monitor._reset_for_test()
+        self.addCleanup(_cupti_monitor._reset_for_test)
 
     @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
     @unittest.skipUnless(
