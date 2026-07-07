@@ -204,13 +204,27 @@ def _filter_suite_by_hw_classification(tests: unittest.TestSuite, hw_classificat
         return tests
 
     filtered_suite = unittest.TestSuite()
+    total_count = 0
+    passed_count = 0
+    unclassified_count = 0
 
     for test_case in _iter_test_cases_recursively(tests):
+        total_count += 1
         requirement = _get_hw_classification(test_case.__class__)
 
-        if requirement is not None and requirement in hw_classification:
+        if requirement is None:
+            unclassified_count += 1
+        elif requirement in hw_classification:
             filtered_suite.addTest(test_case)
+            passed_count += 1
 
+    mismatched_count = total_count - passed_count - unclassified_count
+
+    warnings.warn(
+        f"HW classification mode active ({[e.name for e in hw_classification]}): "
+        f"total={total_count}, passed={passed_count}, "
+        f"unclassified={unclassified_count}, mismatched={mismatched_count}"
+    )
     return filtered_suite
 
 def is_navi3_arch():
@@ -1480,6 +1494,8 @@ def run_tests(argv=None):
             raise AssertionError("Some test shards have failed")
     elif USE_PYTEST:
         pytest_args = argv + ["--use-main-module"]
+        if HW_CLASSIFICATION is not None:
+            pytest_args += ['--hw-classification'] + [req.name for req in HW_CLASSIFICATION]
         test_report_path = ""
         if TEST_SAVE_XML:
             test_report_path = get_report_path(pytest=True)

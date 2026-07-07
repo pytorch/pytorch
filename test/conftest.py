@@ -4,6 +4,7 @@ import json
 import os
 import re
 import sys
+import warnings
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 from types import MethodType
@@ -45,13 +46,6 @@ def pytest_addoption(parser: Parser) -> None:
     group.addoption("--scs", action="store", default=None, dest="stepcurrent_skip")
     group.addoption("--sc", action="store", default=None, dest="stepcurrent")
     group.addoption("--rs", action="store", default=None, dest="run_single")
-    parser.addoption(
-        "--hw-classification",
-        nargs="+",
-        default=None,
-        metavar="SCOPE",
-        help="filter tests by hardware classification categories (e.g., GENERIC DEVICE_GENERIC CPU CUDA MPS XPU)",
-    )
 
     parser.addoption("--use-main-module", action="store_true")
     group = parser.getgroup("terminal reporting")
@@ -96,6 +90,14 @@ def pytest_addoption(parser: Parser) -> None:
         "Emit XML for schema: one of legacy|xunit1|xunit2",
         default="xunit2",
     )
+    parser.addoption(
+        "--hw-classification",
+        nargs="+",
+        default=None,
+        metavar="SCOPE",
+        dest="hw_classification",
+        help="filter tests by hardware classification categories (e.g., GENERIC DEVICE_GENERIC CPU CUDA MPS XPU)",
+    )
     shard_addoptions(parser)
 
 
@@ -103,7 +105,17 @@ class HardwareClassificationPytestPlugin:
     """Pytest plugin to filter collected tests by hw_classification."""
 
     def __init__(self, requirement):
-        self.requirement = requirement
+        self.requirement = self._check_requirement(requirement)
+
+    @staticmethod
+    def _check_requirement(hw_classification):
+        if hw_classification is None:
+            return None
+        try:
+            from torch.testing._internal.common_utils import HardwareClassification
+        except ImportError:
+            return None
+        return {HardwareClassification[name] for name in hw_classification}
 
     def pytest_collection_modifyitems(self, items):
         if self.requirement is None:
@@ -111,38 +123,41 @@ class HardwareClassificationPytestPlugin:
         import torch.testing._internal.common_utils as _cu
 
         filtered = []
-        for item in items:
-            # hw_classification is a class-level attribute. Function-based tests
-            # do not have item.cls and are therefore filtered.
-            cls = getattr(item, "cls", None)
-            if cls is not None:
-                req = _cu._get_hw_classification(cls)
-                if req is not None and req in self.requirement:
-                    filtered.append(item)
+        total_count = 0
+        passed_count = 0
+        func_dropped = 0
+        unclassified_dropped = 0
 
+        for item in items:
+            total_count += 1
+            cls = getattr(item, "cls", None)
+            if cls is None:
+                func_dropped += 1
+                continue
+            req = _cu._get_hw_classification(cls)
+            if req is None:
+                unclassified_dropped += 1
+            elif req in self.requirement:
+                filtered.append(item)
+                passed_count += 1
+
+        mismatched_dropped = (
+            total_count - passed_count - func_dropped - unclassified_dropped
+        )
+
+        warnings.warn(
+            f"HW classification mode active "
+            f"({[e.name for e in self.requirement]}): "
+            f"total={total_count}, passed={passed_count}, "
+            f"func_dropped={func_dropped}, "
+            f"unclassified_dropped={unclassified_dropped}, "
+            f"mismatched_dropped={mismatched_dropped}"
+        )
         items[:] = filtered
 
 
 def pytest_configure(config: Config) -> None:
     parse_cmd_line_args()
-
-    # Some pytest jobs (e.g. tools/* tests) run directly from the source tree
-    # without a built torch package. In that environment importing
-    # torch.testing._internal.common_utils may fail because generated files such
-    # as torch.version are not available yet. Skip hardware classification plugin
-    # registration in that case.
-    try:
-        import torch.testing._internal.common_utils as _cu
-    except ImportError:
-        _cu = None
-
-    # Use getattr to handle the case where this conftest.py runs against a nightly
-    # torch that doesn't yet have HW_CLASSIFICATION in common_utils.
-    if _cu is not None and getattr(_cu, "HW_CLASSIFICATION", None) is not None:
-        config.pluginmanager.register(
-            HardwareClassificationPytestPlugin(_cu.HW_CLASSIFICATION),
-            "hw_classification_plugin",
-        )
 
     xmlpath = config.option.xmlpath_reruns
     # Prevent opening xmllog on worker nodes (xdist).
@@ -166,6 +181,11 @@ def pytest_configure(config: Config) -> None:
         config.pluginmanager.register(StepcurrentPlugin(config), "stepcurrentplugin")
     if config.getoption("num_shards"):
         config.pluginmanager.register(PytestShardPlugin(config), "pytestshardplugin")
+    if config.getoption("hw_classification"):
+        config.pluginmanager.register(
+            HardwareClassificationPytestPlugin(config.getoption("hw_classification")),
+            "hw_classification_plugin",
+        )
 
 
 def pytest_unconfigure(config: Config) -> None:
