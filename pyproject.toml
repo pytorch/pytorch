@@ -33,6 +33,13 @@ dev = [
     "requests",
     "six",  # dependency chain: NNPACK -> PeachPy -> six
     "typing-extensions>=4.10.0",
+    # nvidia-cuda-cupti ships cupti_activity.h; the CUPTI monitor's native worker
+    # compiles against it at build time. >=13.3.75 for the v2 user-defined-record
+    # field ids / record layouts the monitor relies on.
+    "nvidia-cuda-cupti>=13.3.75; platform_machine == 'x86_64' or platform_machine == 'aarch64'",
+    # clang python bindings (loading a system libclang.so) parse cupti_activity.h at
+    # build time to generate torch/profiler/_cupti/_cupti_field_ids.py.
+    "clang; platform_machine == 'x86_64' or platform_machine == 'aarch64'",
 
     # This list should be kept in sync with the requirements.txt in
     # PyTorch root until the project fully migrates to pyproject.toml
