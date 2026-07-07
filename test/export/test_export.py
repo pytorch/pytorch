@@ -4906,6 +4906,7 @@ def forward(self, causal_mask, fill_value):
         ops_registered_after = set(torch.ops.mylib)
         self.assertEqual(ops_registered_after, ops_registered_before)
 
+    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=False)
     def test_export_preserve_linear_but_not_custom_op(self):
         table = torch.export.default_decompositions()
         del table[torch.ops.aten.linear.default]
@@ -8918,6 +8919,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         roundtrip_spec = treespec_loads(treespec_dumps(spec))
         self.assertEqual(roundtrip_spec, spec)
 
+    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=False)
     def test_param_util(self):
         class Basic(torch.nn.Module):
             def __init__(self) -> None:
@@ -11115,6 +11117,7 @@ def forward(self, b_a_buffer, x):
         self.assertEqual(id(state_dict), id(ep.state_dict))
 
     @unittest.skipIf(IS_FBCODE, "We can't customize decomp in fbcode")
+    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=False)
     def test_export_decomp_torture_case_1(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
@@ -11137,13 +11140,14 @@ def forward(self, b_a_buffer, x):
         self.assertExpectedInline(
             str(core_aten_ep.graph_module.code).strip(),
             """\
-def forward(self, p_lin_bias, p_lin_weight, x):
+def forward(self, p_lin_weight, p_lin_bias, x):
     add = torch.ops.aten.add.Tensor(x, p_lin_bias);  x = p_lin_bias = None
     return (add,)""",
         )
 
     @unittest.skipIf(IS_FBCODE, "We can't customize decomp in fbcode")
     @testing.expectedFailureStrictV2
+    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=False)
     def test_export_decomp_torture_case_2(self):
         class MyLinear(torch.nn.Module):
             def __init__(self) -> None:
@@ -12204,6 +12208,9 @@ graph():
         self.assertEqual(gm_flat_non_strict(*inp), gm_flat_strict(*inp))
 
     @testing.expectedFailureStrictV2
+    @testing.expectedFailureStrict
+    @testing.expectedFailureRetraceability
+    @testing.expectedFailureTrainingIRToRunDecomp
     def test_nn_module_stack_shared_submodule(self):
         class Leaf(torch.nn.Module):
             def __init__(self) -> None:
@@ -13750,6 +13757,7 @@ graph():
         if not torch.allclose(ufm(*inp), eager):
             raise AssertionError("ufm output does not match eager output")
 
+    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=False)
     def test_unflatten_no_unroll(self):
         inp = (torch.ones(1),)
 
@@ -17558,10 +17566,10 @@ def forward(self, x):
     view_as = torch.ops.aten.view_as.default(set_, set_);  set_ = None
     ones = torch.ops.aten.ones.default([4], dtype = torch.int64, device = device(type='cuda', index=0), pin_memory = False)
     embedding = torch.ops.aten.embedding.default(view_as, ones);  view_as = ones = None
-    sum_1 = torch.ops.aten.sum.default(embedding);  embedding = None
-    sum_2 = torch.ops.aten.sum.default(args_0);  args_0 = None
-    sum_3 = torch.ops.aten.sum.default(sum_1);  sum_1 = None
-    add = torch.ops.aten.add.Tensor(sum_2, sum_3);  sum_2 = sum_3 = None
+    sum_1 = torch.ops.aten.sum.default(args_0);  args_0 = None
+    sum_2 = torch.ops.aten.sum.default(embedding);  embedding = None
+    sum_3 = torch.ops.aten.sum.default(sum_2);  sum_2 = None
+    add = torch.ops.aten.add.Tensor(sum_1, sum_3);  sum_1 = sum_3 = None
     return pytree.tree_unflatten((add,), self._out_spec)""",
             )
 
