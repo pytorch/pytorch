@@ -6,6 +6,8 @@ selection + non-empty enforcement, and discovery -- exercised through real CUPTI
 (needs a perfmon-capable GPU; the tests skip otherwise).
 """
 
+from __future__ import annotations
+
 import time
 import unittest
 
