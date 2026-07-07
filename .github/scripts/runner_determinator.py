@@ -72,7 +72,6 @@ import logging
 import os
 import random
 import re
-import sys
 from argparse import ArgumentParser
 from collections.abc import Iterable
 from functools import cache
@@ -685,13 +684,15 @@ def get_runner_prefix(
             else:
                 prefixes.append(label)
 
-    # ARC experiment takes precedence: return a fixed label prefix
     if use_arc:
-        arc_prefix = (
-            ARC_CANARY_LABEL_PREFIX + ARC_LABEL_PREFIX
-            if is_canary
-            else ARC_LABEL_PREFIX
-        )
+        if fleet_prefix:
+            arc_prefix = "lf-"
+        else:
+            arc_prefix = (
+                ARC_CANARY_LABEL_PREFIX + ARC_LABEL_PREFIX
+                if is_canary
+                else ARC_LABEL_PREFIX
+            )
         return RunnerPrefixResult(
             prefix=arc_prefix, use_arc=True, amd_do_prefix=amd_do_prefix
         )
@@ -772,16 +773,17 @@ def main() -> None:
     runner_label_prefix = DEFAULT_LABEL_PREFIX
     amd_do_label_prefix = ""
 
-    # Check if the PR is opt-out
+    # no-runner-experiments means "use Meta, not LF": opt out of the lf
+    # experiment only. OSDC/arc stays on (arc workflows -> mt-, others -> bare).
+    opt_out_experiments = args.opt_out_experiments
     if args.pr_number:
         labels = get_labels(args.github_repo, args.github_token, int(args.pr_number))
         if OPT_OUT_LABEL in labels:
             log.info(
-                f"Opt-out runner determinator because #{args.pr_number} has {OPT_OUT_LABEL} label"
+                f"#{args.pr_number} has {OPT_OUT_LABEL}; opting out of the "
+                f"'{LF_FLEET_EXPERIMENT}' experiment"
             )
-            set_github_output(GH_OUTPUT_KEY_LABEL_TYPE, runner_label_prefix)
-            set_github_output(GH_OUTPUT_KEY_AMD_DO_LABEL_TYPE, amd_do_label_prefix)
-            sys.exit()
+            opt_out_experiments = opt_out_experiments | {LF_FLEET_EXPERIMENT}
 
     if args.workflow_name:
         log.info(f"Workflow name: '{args.workflow_name}'")
@@ -806,7 +808,7 @@ def main() -> None:
             (args.github_issue_owner, username),
             args.github_branch,
             args.eligible_experiments,
-            args.opt_out_experiments,
+            opt_out_experiments,
             is_canary,
             workflow_name=args.workflow_name,
         )

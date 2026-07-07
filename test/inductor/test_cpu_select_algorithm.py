@@ -35,6 +35,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     requires_mkl,
     requires_onednn,
+    TEST_ACL,
     TEST_MKL,
     xfailIf,
 )
@@ -761,6 +762,30 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         v = torch.randn(*B, in_features).to(dtype=dtype)
         u = torch.randn(*B, out_features).to(dtype=dtype)
         mod = M(bias=bias, binary=binary, other=u).to(dtype=dtype).eval()
+        with verify(dtype) as (atol, rtol):
+            self.common(mod, (v,), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
+
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @requires_mkl
+    @parametrize("batch_size", (384,))
+    @parametrize("features", (196,))
+    @parametrize("bias", (True, False))
+    @dtypes(torch.bfloat16)
+    def test_linear_binary_same_input(self, batch_size, features, bias, dtype):
+        class M(torch.nn.Module):
+            def __init__(self, bias):
+                super().__init__()
+                self.linear = torch.nn.Linear(features, features, bias)
+
+            def forward(self, x):
+                return self.linear(x) + x
+
+        counters.clear()
+        v = torch.randn(batch_size, features).to(dtype=dtype)
+        mod = M(bias=bias).to(dtype=dtype).eval()
         with verify(dtype) as (atol, rtol):
             self.common(mod, (v,), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
@@ -1698,6 +1723,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @unittest.skipIf(
         IS_ARM64 and not IS_CPU_EXT_SVE_SUPPORTED, "flaky on AArch64 (no SVE)"
     )
+    @unittest.skipIf(TEST_ACL, "OP fusion disabled with ACL")
     def test_int8_woq_mm(self, dtype, batch_size, mid_dim, in_features, out_features):
         def _convert_weight_to_int8pack(w):
             scale, zp = _calculate_dynamic_per_channel_qparams(

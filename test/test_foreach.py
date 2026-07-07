@@ -1958,7 +1958,9 @@ class TestForeachMM(TestCase):
         # torch.mm, so fp32 needs relaxed tolerances.
         kwargs = {"atol": 2e-4, "rtol": 2e-4} if dtype == torch.float32 else {}
         for i, (r, o) in enumerate(zip(ref, out)):
-            self.assertEqual(o, r, msg=f"mismatch at group {i}", **kwargs)
+            self.assertEqual(
+                o, r, msg=lambda msg: f"{msg}\nmismatch at group {i}", **kwargs
+            )
 
     @parametrize(
         "label,shapes",
