@@ -41,7 +41,7 @@ jobs:
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       use-arc: true
       build-environment: linux-jammy-rocm-py3.10-mi200
-      docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3
+      docker-image-name: ci-image:pytorch-linux-noble-rocm-nightly-py3
       test-matrix: |
         { include: [
           { config: "inductor", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.mi210.1" },
@@ -55,6 +55,6 @@ jobs:
     needs: linux-jammy-rocm-py3_10-inductor-build
     with:
       build-environment: ${{ needs.linux-jammy-rocm-py3_10-inductor-build.outputs.build-environment }}
-      docker-image: ${{ needs.linux-jammy-rocm-py3_10-inductor-build.outputs.docker-image }}
+      docker-image: ci-image:pytorch-linux-noble-rocm-nightly-py3
       test-matrix:  ${{ needs.linux-jammy-rocm-py3_10-inductor-build.outputs.test-matrix }}
     secrets: inherit
