@@ -2871,6 +2871,9 @@ class TMACompatibilityChecker:
                     self.failed_debug_prefix,
                 )
                 return False
+            # CPU tensor descriptors are lowered by the CPU backend instead of
+            # CUDA TMA hardware, so the CUDA dtype map and 16-byte store
+            # constraints below do not apply.
             return True
 
         if not (

@@ -293,9 +293,13 @@ class CommonTemplate:
     @parametrize(
         "x_size,y_size",
         [
-            tma_xfail((8, 8), (8, 1), cpu=True),  # R3: y inner dim 1*4B < 16B
+            # CUDA R3: y inner dim 1*4B < 16B.
+            # CPU: broadcasted y inner stride is 0.
+            tma_xfail((8, 8), (8, 1), cpu=True),
             ((8, 8), (1, 8)),
-            tma_xfail((4, 1, 4), (1, 4, 1), cpu=True),  # R3: y inner dim 1*4B < 16B
+            # CUDA R3: y inner dim 1*4B < 16B.
+            # CPU: broadcasted y inner stride is 0.
+            tma_xfail((4, 1, 4), (1, 4, 1), cpu=True),
             ((1, 1, 1, 4), (4, 4, 4, 4)),  # Unmatched dims for first operand.
         ],
     )
@@ -1126,7 +1130,12 @@ class CommonTemplate:
         self._assert_reduction_ndims(code, 1)
 
     @xfail_if_cuda_tensor_descriptor
-    @parametrize("unroll", (False, True))
+    @parametrize(
+        "unroll",
+        # CPU tensor descriptor codegen emits fewer descriptors than the unrolled
+        # reduction test expects today. Keep the original expectation and xfail.
+        [False, subtest(True, decorators=[xfail_if_cpu_tensor_descriptor])],
+    )
     def test_reduce_trailing_dims_discontiguous_input(self, unroll: bool):
         """
         Test a [Y, X, R0, R1] reduction where the input tensor is discontiguous, but we
@@ -1134,12 +1143,6 @@ class CommonTemplate:
         """
         view = self._discontiguous_tensor((7, 5, 3, 2), self.device)
         expected_num_block_pointers = 7 if unroll else 2
-        if (
-            unroll
-            and self.device == "cpu"
-            and self.block_descriptor_constructor_str == "tl.make_tensor_descriptor"
-        ):
-            expected_num_block_pointers = 1
 
         # We expect block pointers for the inputs and output.
         # Note there are more inputs if unrolled.
