@@ -18,7 +18,7 @@ jobs:
   upload_test_stats_while_running:
     if: github.repository_owner == 'pytorch'
     name: Upload test stats while running
-    runs-on: mt-l-x86iavx512-8-64
+    runs-on: mt-l-x86iamx-8-16
     container:
       image: ghcr.io/actions/actions-runner:latest
     steps:
