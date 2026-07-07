@@ -178,7 +178,6 @@ ignore = [
     "E741",
     "EXE001",
     "F405",
-    "FURB122", # writelines
     # these ignores are from ruff NPY; please fix!
     "NPY002",
     # these ignores are from ruff PERF; please fix!
@@ -362,6 +361,9 @@ package = 'torch'
 
 [tool.spin.commands]
 "Build" = [
+  ".spin/cmds.py:develop",
+  ".spin/cmds.py:editable",
+  ".spin/cmds.py:install",
   ".spin/cmds.py:clean",
   ".spin/cmds.py:lint",
   ".spin/cmds.py:fixlint",

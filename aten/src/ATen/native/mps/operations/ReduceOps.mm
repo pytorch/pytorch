@@ -718,92 +718,130 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
                                   const Tensor& output_t,
                                   MPSReductionType reduction_type,
                                   const std::string& func_name) {
-  using CachedGraph = MPSUnaryCachedGraph;
+  const bool is_argmax = (reduction_type == MPSReductionType::MAX);
+  const char* op_name = is_argmax ? "argmax()" : "argmin()";
 
   int64_t dim_ = -1;
-
   if (dim.has_value()) {
     dim_ = maybe_wrap_dim(dim.value(), input_t.dim());
-    zero_numel_check_dims(input_t, dim_, reduction_type == MPSReductionType::MAX ? "argmax()" : "argmin()");
+    zero_numel_check_dims(input_t, dim_, op_name);
   } else {
-    TORCH_CHECK_INDEX(input_t.numel() != 0,
-                      reduction_type == MPSReductionType::MAX ? "argmax()" : "argmin()",
-                      ": Expected reduction dim to be specified for input.numel() == 0.");
-    // Since input will be flattened, take argmax or argmin along 0'th dimension
-    dim_ = 0;
-  }
-
-  // Calculate the output shape according to keepdim=True
-  // If there is no dim argument, the input shape is flattened
-  IntArrayRef input_shape = input_t.sizes();
-  int64_t num_input_dims = input_shape.size();
-  NSMutableArray<NSNumber*>* apparent_in_shape = nil;
-  NSMutableArray<NSNumber*>* apparent_out_shape = nil;
-
-  if (dim.has_value()) {
-    apparent_out_shape = [NSMutableArray<NSNumber*> arrayWithCapacity:num_input_dims];
-    for (const auto i : c10::irange(num_input_dims)) {
-      apparent_out_shape[i] = dim_ == i ? @1 : [NSNumber numberWithInt:input_shape[i]];
-    }
-  } else {
-    apparent_in_shape = [NSMutableArray<NSNumber*> arrayWithCapacity:1];
-    int64_t num_in_elements = c10::multiply_integers(input_shape);
-    apparent_in_shape[0] = [NSNumber numberWithInt:num_in_elements];
-
-    apparent_out_shape = [NSMutableArray<NSNumber*> arrayWithCapacity:1];
-    apparent_out_shape[0] = @1;
+    TORCH_CHECK_INDEX(
+        input_t.numel() != 0, op_name, ": Expected reduction dim to be specified for input.numel() == 0.");
   }
 
   if (output_t.numel() == 0) {
     return;
   }
-
-  if (!apparent_in_shape) {
-    apparent_in_shape = [getMPSShape(input_t.sizes()) mutableCopy];
+  // 0-dim input: only index 0 is reachable.
+  if (input_t.dim() == 0) {
+    output_t.fill_(0);
+    return;
   }
 
-  @autoreleasepool {
-    NSString* ns_key = [[apparent_in_shape valueForKey:@"description"] componentsJoinedByString:@","];
-    std::string key = func_name + ":" + std::to_string(dim_) + ":" + getTensorsStringKey(input_t) + ":" +
-        std::string([ns_key UTF8String]);
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      auto inputScalarType = input_t.scalar_type();
-      MPSGraphTensor* inputTensor =
-          mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(inputScalarType), apparent_in_shape);
-      MPSGraphTensor* argreduceOutTensor = nil;
+  // For full reduction (dim==None) we materialize a contiguous 1-D view so the
+  // returned linear index follows the standard "as-if-contiguous" convention,
+  // regardless of input strides.
+  Tensor input;
+  Tensor output_view;
+  int64_t reduce_dim = 0;
+  if (dim.has_value()) {
+    input = input_t;
+    output_view = keepdim ? output_t : output_t.unsqueeze(dim_);
+    reduce_dim = dim_;
+  } else {
+    input = input_t.contiguous().view(-1);
+    output_view = output_t.view({1});
+  }
+  TORCH_CHECK(static_cast<uint32_t>(input.dim()) <= c10::metal::max_ndim,
+              func_name,
+              ": tensor rank > ",
+              c10::metal::max_ndim,
+              " is not supported");
 
-      MPSGraphTensor* castInputTensor = inputTensor;
-      if (inputScalarType != kInt && inputScalarType != kHalf && inputScalarType != kFloat &&
-          inputScalarType != kLong) {
-        castInputTensor = castMPSTensor(mpsGraph, inputTensor, kFloat);
+  // Metal has no simd_min/max for bool; remap to 1-byte char (identical 0/1
+  // layout). Complex types have no ordering, so argmax/argmin is undefined.
+  ScalarType in_kdtype = input.scalar_type();
+  TORCH_CHECK(!c10::isComplexType(in_kdtype), func_name, ": not implemented for ", in_kdtype);
+  if (in_kdtype == kBool) {
+    in_kdtype = kChar;
+  }
+  const auto op_prefix = is_argmax ? "argmax" : "argmin";
+  const auto in_str = scalarToMetalTypeString(in_kdtype);
+  MPSStream* stream = getCurrentMPSStream();
+
+  // Fast paths: when the reduced dim is the outermost or innermost dim of a
+  // contiguous input (and the output is contiguous), dispatch a specialized
+  // kernel with a tuned grid layout, mirroring value_reduction_outer /
+  // value_reduction_inner.
+  if (dim.has_value() && input.is_contiguous() && output_t.is_contiguous() && input.dim() >= 2 &&
+      (reduce_dim == 0 || reduce_dim == input.dim() - 1)) {
+    const bool is_outer = (reduce_dim == 0);
+    const uint32_t M = is_outer ? static_cast<uint32_t>(input.size(0))
+                                : static_cast<uint32_t>(input.numel() / input.size(input.dim() - 1));
+    const uint32_t N = is_outer ? static_cast<uint32_t>(input.numel() / input.size(0))
+                                : static_cast<uint32_t>(input.size(input.dim() - 1));
+    const auto kernel_name = fmt::format("{}_reduction_{}_{}_long", op_prefix, is_outer ? "outer" : "inner", in_str);
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      @autoreleasepool {
+        id<MTLComputeCommandEncoder> ce = stream->commandEncoder();
+        auto ps = lib.getPipelineStateForFunc(kernel_name);
+        getMPSProfiler().beginProfileKernel(ps, func_name, {input});
+        [ce setComputePipelineState:ps];
+        if (is_outer) {
+          constexpr uint32_t TG_X = 32, TG_Y = 32;
+          // 4th element is trailing pad so the host-side bind matches the
+          // kernel's `constant uint3&` slot (uint3 has 16-byte alignment in
+          // Metal even though only 12 bytes are read). Without this Metal
+          // API validation flags a buffer-length mismatch.
+          const std::array<uint32_t, 4> sizes_s{M, N, 1, 0};
+          mtl_setArgs(ce, input, output_t, sizes_s);
+          const auto num_tg_x = c10::metal::ceil_div(N, TG_X);
+          [ce dispatchThreads:MTLSizeMake(num_tg_x * TG_X, TG_Y, 1) threadsPerThreadgroup:MTLSizeMake(TG_X, TG_Y, 1)];
+        } else {
+          constexpr uint32_t TG_SIZE = 256;
+          constexpr uint32_t rows_per_tg = TG_SIZE / 32;
+          const auto num_tgs = c10::metal::ceil_div(M, rows_per_tg);
+          struct {
+            uint32_t M, N;
+          } sizes_s = {M, N};
+          mtl_setArgs(ce, input, output_t, sizes_s);
+          [ce dispatchThreads:MTLSizeMake(num_tgs * TG_SIZE, 1, 1) threadsPerThreadgroup:MTLSizeMake(TG_SIZE, 1, 1)];
+        }
+        getMPSProfiler().endProfileKernel(ps);
       }
-      if (reduction_type == MPSReductionType::MAX) {
-        argreduceOutTensor = [mpsGraph reductionArgMaximumWithTensor:castInputTensor axis:(NSInteger)dim_ name:nil];
-      } else {
-        argreduceOutTensor = [mpsGraph reductionArgMinimumWithTensor:castInputTensor axis:(NSInteger)dim_ name:nil];
-      }
-
-      MPSGraphTensor* outputTensor = argreduceOutTensor;
-      if (getMPSDataType(output_t) != [argreduceOutTensor dataType]) {
-        outputTensor = castMPSTensor(mpsGraph, argreduceOutTensor, output_t.scalar_type());
-      }
-
-      MPSGraphTensor* outputClampedTensor =
-          [mpsGraph clampWithTensor:outputTensor
-                     minValueTensor:[mpsGraph constantWithScalar:0 dataType:MPSDataTypeInt64]
-                     maxValueTensor:[mpsGraph constantWithScalar:0x7FEFFFFFFFFFFFFF dataType:MPSDataTypeInt64]
-                               name:nil];
-
-      newCachedGraph->inputTensor_ = inputTensor;
-      newCachedGraph->outputTensor_ = outputClampedTensor;
     });
-
-    auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input_t, apparent_in_shape);
-    auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output_t, apparent_out_shape);
-
-    auto feeds = dictionaryFromPlaceholders(inputPlaceholder);
-    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
+    return;
   }
+
+  const auto kernel_name = fmt::format("{}_reduction_{}_long", op_prefix, in_str);
+
+  NormParams params{};
+  params.ndim = input.dim();
+  params.reduction_size = static_cast<uint32_t>(input.size(reduce_dim));
+  for (const auto d : c10::irange(input.dim())) {
+    params.input_sizes[d] = input.size(d);
+    params.input_strides[d] = input.stride(d);
+    params.output_sizes[d] = output_view.size(d);
+    params.output_strides[d] = output_view.stride(d);
+  }
+
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      id<MTLComputeCommandEncoder> ce = stream->commandEncoder();
+      auto ps = lib.getPipelineStateForFunc(kernel_name);
+      getMPSProfiler().beginProfileKernel(ps, func_name, {input});
+      [ce setComputePipelineState:ps];
+      mtl_setArgs(ce, input, output_view, params);
+      // Pad per-TG thread count up to a full simdgroup; padding lanes load
+      // Op::identity() and skip the per-thread scan, keeping the two-stage
+      // SIMD reduction well-defined for all reduction sizes.
+      const auto threads_per_group = std::min(MAX_THREADGROUP_SIZE, c10::metal::round_up(params.reduction_size, 32u));
+      const auto num_threads = static_cast<uint32_t>(output_view.numel()) * threads_per_group;
+      [ce dispatchThreads:MTLSizeMake(num_threads, 1, 1) threadsPerThreadgroup:MTLSizeMake(threads_per_group, 1, 1)];
+      getMPSProfiler().endProfileKernel(ps);
+    }
+  });
 }
 
 // Unified host-side dispatch for value-preserving reductions on MPS, shared
@@ -880,9 +918,10 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
           id<MTLComputeCommandEncoder> ce = stream->commandEncoder();
           auto ps = lib.getPipelineStateForFunc(outer_kernel);
           getMPSProfiler().beginProfileKernel(ps, opts.prefix + "reduction_outer", {input_orig});
-          struct {
-            uint32_t M, N, out_stride;
-          } sizes_s = {M, N, 1};
+          // 4th element is trailing pad so the host-side bind matches the
+          // kernel's `constant uint3&` slot (16-byte alignment in Metal even
+          // though only 12 bytes are read).
+          const std::array<uint32_t, 4> sizes_s{M, N, 1, 0};
           [ce setComputePipelineState:ps];
           if (opts.divisor.has_value()) {
             mtl_setArgs(ce, input_orig, output, sizes_s, *opts.divisor);

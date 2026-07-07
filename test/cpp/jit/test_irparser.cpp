@@ -21,7 +21,7 @@ static void checkRoundtrip(const std::string& s) {
   parseIR(s, &*graph);
   std::ostringstream ss;
   ss << *graph;
-  std::string parsed = std::move(ss).str();
+  std::string parsed = ss.str();
 
   // Skip whitespace in the beginning of the input string.
   int i = 0;

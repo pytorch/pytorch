@@ -226,7 +226,7 @@ void throw_nccl_error(torch::cuda::nccl::ncclResult status) {
   std::ostringstream err;
   err << "NCCL Error " << static_cast<int>(status) << ": "
       << ncclGetErrorString(to_nccl_result(status));
-  TORCH_CHECK(false, std::move(err).str());
+  TORCH_CHECK(false, err.str());
 }
 
 struct NcclCommList {
