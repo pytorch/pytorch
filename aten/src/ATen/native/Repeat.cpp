@@ -28,8 +28,15 @@ static void compute_cpu(
     for (const auto i : c10::irange(i_begin, i_end)) {
       int64_t end = cumsum_ptr[i];
       index_t size = repeat_ptr[i];
-      TORCH_CHECK((size >= 0), "repeats can not be negative");
       int64_t start = end - size;
+      // A negative repeat makes the cumsum non-monotonic, so even a
+      // non-negative element can yield start < 0 or end > result_size and write
+      // out of bounds. When output_size is given this per-element check is the
+      // only guard against negative repeats, so validate the write range before
+      // touching result_ptr.
+      TORCH_CHECK(
+          size >= 0 && start >= 0 && end <= result_size,
+          "repeats can not be negative");
       for (const auto j : c10::irange(start, end)) {
         result_ptr[j] = i;
       }
