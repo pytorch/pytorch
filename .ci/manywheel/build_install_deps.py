@@ -56,6 +56,11 @@ def main() -> None:
 
     os.chdir(args.package_dir)
     pip_install("-qU", "-r", "requirements-build.txt")
+    # The CUPTI monitor (CUDA-only) compiles against cupti_activity.h from the
+    # nvidia-cuda-cupti wheel and parses it with clang's python bindings. Installed here,
+    # not in requirements-build.txt, so CPU/ROCm/XPU builds don't require a CUDA-only wheel.
+    if os.environ.get("DESIRED_CUDA", "").startswith("cu"):
+        pip_install("-q", "nvidia-cuda-cupti>=13.3.75", "clang")
     # Skip when sharing build/ across Pythons in build_all.sh -- the per-Python
     # bits (libtorch_python, _C.so) are invalidated by tools/setup_helpers/cmake.py.
     if not os.environ.get("SKIP_SETUP_CLEAN"):

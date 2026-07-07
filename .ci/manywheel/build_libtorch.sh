@@ -87,6 +87,12 @@ if [[ -z "$PYTORCH_ROOT" ]]; then
 fi
 pushd "$PYTORCH_ROOT"
 retry pip install -qUr requirements-build.txt
+if [[ "$DESIRED_CUDA" == cu* ]]; then
+    # The CUPTI monitor (CUDA-only) compiles against cupti_activity.h from the
+    # nvidia-cuda-cupti wheel and parses it with clang's python bindings. Installed here,
+    # not in requirements-build.txt, so CPU/ROCm/XPU builds don't require a CUDA-only wheel.
+    retry pip install -q "nvidia-cuda-cupti>=13.3.75" clang
+fi
 python setup.py clean
 retry pip install -qr requirements.txt
 retry pip install -q numpy==2.0.1
