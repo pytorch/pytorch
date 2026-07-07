@@ -617,8 +617,8 @@ PyObject* THPModule_toDLPackImpl(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static torch::PythonArgParser parser(
-      {"_to_dlpack(Tensor data, *, IntArrayRef? dl_device=None, bool? copy=None)"});
-  torch::ParsedArgs<3> parsed_args{};
+      {"_to_dlpack(Tensor data, *, IntArrayRef? dl_device=None, bool? copy=None, bool read_only=False)"});
+  torch::ParsedArgs<4> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
 
   TORCH_INTERNAL_ASSERT(r.idx == 0);
@@ -626,6 +626,7 @@ PyObject* THPModule_toDLPackImpl(
   auto data = r.tensor(0);
   auto dl_device = r.intlist(1);
   auto copy = r.toBoolOptional(2);
+  auto read_only = r.toBool(3);
 
   // Parse the int list into a tuple.
   std::optional<DLDevice> optional_dl_device;
@@ -639,8 +640,22 @@ PyObject* THPModule_toDLPackImpl(
         static_cast<int32_t>(dl_device[1])};
   }
 
-  auto tensor = at::DLPackTraits<T>::toDLPack(
-      at::maybeCopyTensor(data, optional_dl_device, copy));
+  auto src = at::maybeCopyTensor(data, optional_dl_device, copy);
+  T* tensor = nullptr;
+  if (read_only) {
+    // read_only is only representable on the versioned struct, which carries a
+    // flags field. The legacy DLManagedTensor cannot express it.
+    if constexpr (std::is_same_v<T, DLManagedTensorVersioned>) {
+      tensor = at::toDLPackVersionedReadOnly(src);
+    } else {
+      TORCH_CHECK(
+          false,
+          "read_only DLPack export requires the versioned DLPack protocol "
+          "(max_version >= 1)");
+    }
+  } else {
+    tensor = at::DLPackTraits<T>::toDLPack(src);
+  }
   return PyCapsule_New(
       tensor, at::DLPackTraits<T>::capsule, DLPack_Capsule_Destructor<T>);
 
@@ -807,6 +822,61 @@ static PyObject* THPModule_DLPackExchangeAPI(
   HANDLE_TH_ERRORS
   return PyCapsule_New(
       const_cast<DLPackExchangeAPI*>(TorchDLPackExchangeAPI::Global()),
+      "dlpack_exchange_api",
+      nullptr);
+  END_HANDLE_TH_ERRORS
+}
+
+// Read-only exchange API: identical to TorchDLPackExchangeAPI except the two
+// export slots advertise the tensor as read-only
+// (DLPACK_FLAG_BITMASK_READ_ONLY) and export through const_data_ptr(). The
+// import, allocator (which produces a fresh writable output) and stream slots
+// are inherited unchanged.
+struct TorchConstDLPackExchangeAPI : public TorchDLPackExchangeAPI {
+  TorchConstDLPackExchangeAPI() {
+    managed_tensor_from_py_object_no_sync = ManagedTensorFromPyObjectNoSync;
+    dltensor_from_py_object_no_sync = DLTensorFromPyObjectNoSync;
+  }
+
+  static const DLPackExchangeAPI* Global() {
+    static TorchConstDLPackExchangeAPI inst;
+    return &inst;
+  }
+
+ private:
+  static int DLTensorFromPyObjectNoSync(void* py_obj, DLTensor* out) {
+    try {
+      py::handle handle(static_cast<PyObject*>(py_obj));
+      at::Tensor tensor = handle.cast<at::Tensor>();
+      at::toDLPackNonOwning(tensor, out, /*read_only=*/true);
+      return 0;
+    } catch (const std::exception& e) {
+      PyErr_SetString(PyExc_RuntimeError, e.what());
+      return -1;
+    }
+  }
+
+  static int ManagedTensorFromPyObjectNoSync(
+      void* py_obj,
+      DLManagedTensorVersioned** out) {
+    try {
+      py::handle handle(static_cast<PyObject*>(py_obj));
+      at::Tensor tensor = handle.cast<at::Tensor>();
+      *out = at::toDLPackVersionedReadOnly(tensor);
+      return 0;
+    } catch (const std::exception& e) {
+      PyErr_SetString(PyExc_RuntimeError, e.what());
+      return -1;
+    }
+  }
+};
+
+static PyObject* THPModule_ConstDLPackExchangeAPI(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  return PyCapsule_New(
+      const_cast<DLPackExchangeAPI*>(TorchConstDLPackExchangeAPI::Global()),
       "dlpack_exchange_api",
       nullptr);
   END_HANDLE_TH_ERRORS
@@ -2178,6 +2248,10 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      METH_O,
      nullptr},
     {"_dlpack_exchange_api", THPModule_DLPackExchangeAPI, METH_NOARGS, nullptr},
+    {"_const_dlpack_exchange_api",
+     THPModule_ConstDLPackExchangeAPI,
+     METH_NOARGS,
+     nullptr},
     {"_get_cpp_backtrace", THModule_getCppBacktrace, METH_VARARGS, nullptr},
     {"_rename_privateuse1_backend",
      THModule_rename_privateuse1_backend,
@@ -2280,7 +2354,6 @@ void THCPStream_init(PyObject* module);
 void THCPEvent_init(PyObject* module);
 void THCPGraph_init(PyObject* module);
 void THCPMemPool_init(PyObject* module);
-void THCPGreenContext_init(PyObject* module);
 PyMethodDef* THCPModule_methods();
 namespace torch::cuda {
 void initModule(PyObject* module);
@@ -2517,7 +2590,6 @@ PyObject* initModule() {
   THCPEvent_init(module);
   THCPGraph_init(module);
   THCPMemPool_init(module);
-  THCPGreenContext_init(module);
 #endif
 
 #ifdef USE_XPU

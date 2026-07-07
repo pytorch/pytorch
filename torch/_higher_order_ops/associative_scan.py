@@ -164,8 +164,10 @@ def associative_scan(
         Read more about feature classification at:
         https://pytorch.org/blog/pytorch-feature-classification-changes/#prototype
 
-    This operator requires runtime code generation and so requires support for
-    ``torch.compile``. Further, only CUDA device codegen is supported at the moment.
+    With ``combine_mode="pointwise"``, efficient execution requires runtime code
+    generation via ``torch.compile``, and codegen is only supported on backends
+    with scan support (currently CUDA and XPU). On other devices the operator
+    still runs eagerly via the generic fallback.
 
     Args:
         combine_fn (Callable): A binary callable with type ``(Tensor, Tensor) -> Tensor``,
@@ -177,8 +179,9 @@ def associative_scan(
         dim (int): the dimension to scan over
         reverse (bool): A boolean stating if the scan should be reversed with respect to ``dim``, default ``False``.
         combine_mode (str): A string indicating whether the ``combine_fn`` is ``pointwise`` or ``generic``, default ``pointwise``.
-            If ``combine_mode=pointwise``, ``combine_fn`` must be pure, may only contain pointwise operations
-            and ``xs`` must be CUDA tensors.
+            If ``combine_mode=pointwise``, ``combine_fn`` must be pure and may only contain pointwise
+            operations; under ``torch.compile`` ``xs`` must be on a backend with scan codegen support
+            (CUDA or XPU), otherwise the generic fallback is used.
             In all other cases ``combine_mode=generic`` should be used.
             Note: ``combine_mode=pointwise`` is more efficient than ``combine_mode=generic``.
 
@@ -211,10 +214,6 @@ def associative_scan(
         if cm not in ["pointwise", "generic"]:
             raise ValueError(
                 f"Combine_mode must either 'pointwise' or 'generic', but got {cm}"
-            )
-        if cm == "pointwise" and not all(l.device.type in ("cuda", "xpu") for l in lxs):
-            raise ValueError(
-                "For combine_mode='pointwise', all input tensors need to be on CUDA or XPU"
             )
 
         # Checks for xs

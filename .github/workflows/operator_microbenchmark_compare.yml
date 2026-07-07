@@ -155,7 +155,7 @@ jobs:
         needs.test-rocm.result == 'success'
       )
     needs: [test-cuda, test-b200, test-rocm]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       OPERATOR: ${{ inputs.operator }}
