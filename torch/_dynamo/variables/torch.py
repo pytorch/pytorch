@@ -2415,7 +2415,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 else:
                     device = None
 
-                stream_var = tx.symbolic_stream_state.cur_stream(device, tx=tx)
+                stream_var = tx.symbolic_stream_state.cur_stream(device)
                 stream_variable_cls = _get_stream_variable_cls(self.value)
                 if stream_variable_cls is not None and not isinstance(
                     stream_var, stream_variable_cls

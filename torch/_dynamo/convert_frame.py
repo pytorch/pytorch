@@ -161,7 +161,6 @@ from .utils import (
     dynamo_timed,
     format_bytecode,
     gen_record_file_name,
-    get_device_rng_state_if_initialized,
     get_hook_for_recompile_user_context,
     get_metrics_context,
     increment_frame,
@@ -350,13 +349,11 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                 torch._C._is_default_mobile_cpu_allocator_set()
             )
             prior_dtype = torch.get_default_dtype()
-            with (
-                torch._C.DisableTorchFunction(),
-                torch.utils._python_dispatch._disable_current_modes(),
-                torch._C._DisableFuncTorch(),
-            ):
-                torch_rng_state = torch.random.get_rng_state()
-                cuda_rng_state = get_device_rng_state_if_initialized(torch.cuda)
+            torch_rng_state = torch.random.get_rng_state()
+            cuda_rng_state = None
+            if torch.cuda.is_available():
+                with torch._C.DisableTorchFunction():
+                    cuda_rng_state = torch.cuda.get_rng_state()
             cuda_matmul_fp32_prec = torch._C._get_fp32_precision_getter(
                 "cuda", "matmul"
             )
@@ -378,19 +375,16 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                 torch.use_deterministic_algorithms(
                     prior_deterministic, warn_only=prior_warn_only
                 )
-                with (
-                    torch._C.DisableTorchFunction(),
-                    torch.utils._python_dispatch._disable_current_modes(),
-                    torch._C._DisableFuncTorch(),
-                ):
-                    torch.random.set_rng_state(torch_rng_state)
-                    cuda_rng_state.restore()
+                torch.random.set_rng_state(torch_rng_state)
                 torch.set_default_dtype(prior_dtype)
                 curr_mobile_allocator_state = (
                     torch._C._is_default_mobile_cpu_allocator_set()
                 )
                 if prior_mobile_allocator_state != curr_mobile_allocator_state:
                     torch._C._unset_default_mobile_cpu_allocator()
+                if cuda_rng_state is not None:
+                    with torch._C.DisableTorchFunction():
+                        torch.cuda.set_rng_state(cuda_rng_state)
                 torch._C._set_fp32_precision_setter(
                     "cuda", "matmul", cuda_matmul_fp32_prec
                 )
@@ -914,7 +908,7 @@ def trace_frame(
     from torch.fx.experimental.validator import bisect, translation_validation_enabled
 
     if (
-        torch.cuda.is_initialized()
+        torch.cuda.is_available()
         and hasattr(torch._C, "_cuda_isCurrentStreamCapturing")
         and not isinstance(torch._C._cuda_isCurrentStreamCapturing, type)
         and torch.cuda.is_current_stream_capturing()
