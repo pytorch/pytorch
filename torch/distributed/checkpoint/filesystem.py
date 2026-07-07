@@ -396,11 +396,7 @@ def _write_files_from_queue(
             # TODO: Using the OverlappingCpuLoader with multiple threads creates significant
             # performance degradation, observed as being related to cuda stream syncs. We
             # should try to fix this and use _OverlappingCpuLoader for all threaded cases
-            if (
-                thread_count == 1
-                and has_stream_support
-                and inflight_threshhold > 0
-            ):
+            if thread_count == 1 and has_stream_support and inflight_threshhold > 0:
                 loader = _OverlappingCpuLoader(
                     planner.resolve_data,
                     inflight_threshhold=inflight_threshhold,
