@@ -25,7 +25,7 @@ namespace c10d::nccl_extension {
 
 using namespace c10d::symmetric_memory;
 
-#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+#ifdef NCCL_HAS_DEVCOMM
 
 namespace {
 
@@ -130,7 +130,7 @@ __global__ void all_to_all_lsa_kernel(
   bar.sync(coop, cuda::memory_order_release);
 }
 
-#endif // NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+#endif // NCCL_HAS_DEVCOMM
 
 // Host entry point.  Validates arguments, builds the devcomm (cached), and
 // launches the kernel.  See file-level comment for semantics.
@@ -140,7 +140,7 @@ void nccl_all_to_all_nd(
     int64_t scatter_dim,
     int64_t gather_dim,
     const std::string& group_name) {
-#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+#ifdef NCCL_HAS_DEVCOMM
   TORCH_CHECK(
       input.stride(-1) == 1,
       "nccl_all_to_all_nd: innermost dimension must be contiguous (stride[-1] == 1)");
@@ -368,8 +368,8 @@ void nccl_all_to_all_nd(
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 #else
-  TORCH_CHECK(false, "nccl_all_to_all_nd requires NCCL >= 2.28 with symmetric memory device support");
-#endif // NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+  TORCH_CHECK(false, "nccl_all_to_all_nd requires NCCL >= 2.29 with the symmetric-memory device-communicator API");
+#endif // NCCL_HAS_DEVCOMM
 }
 
 } // namespace c10d::nccl_extension

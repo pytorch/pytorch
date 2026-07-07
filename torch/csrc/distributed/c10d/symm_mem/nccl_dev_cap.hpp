@@ -9,15 +9,21 @@
 #define NCCL_HAS_SYMMEM_SUPPORT
 #endif
 
-// 2.28.4 is the first release with the usable symmetric-memory device API: the
-// device-side LSA barrier (ncclLsaBarrierSession) landed in 2.28.4, alongside
-// ncclGetLsaPointer and the device communicator. Earlier 2.28.x ship an
-// incomplete nccl_device.h, so gate on 2.28.4.
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 4)
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0)
 #if !defined(USE_ROCM)
 #define NCCL_HAS_SYMMEM_DEVICE_SUPPORT
 #include <nccl_device.h>
 #endif
+#endif
+
+// Host-side device-communicator setup: ncclDevCommCreate together with
+// ncclDevCommRequirements / NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER. These land
+// in NCCL 2.29 (verified: absent in 2.28.9, present in 2.29.2), later than the
+// device-side kernel symbols, so ops that construct a ncclDevComm gate on this
+// rather than NCCL_HAS_SYMMEM_DEVICE_SUPPORT.
+#if defined(NCCL_HAS_SYMMEM_DEVICE_SUPPORT) && \
+    NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 0)
+#define NCCL_HAS_DEVCOMM
 #endif
 
 #if defined(NCCL_HAS_SYMMEM_DEVICE_SUPPORT) && \
