@@ -7715,6 +7715,8 @@ class TestConstantPadNd(TestCase):
 class TestAddRelu(TestCase):
     @dtypes(torch.int8, torch.int16, torch.int32, torch.int64,
             torch.float32, torch.float64, torch.float16, torch.bfloat16)
+    @dtypesIfMPS(torch.int8, torch.int16, torch.int32, torch.int64,
+                 torch.float32, torch.float16, torch.bfloat16)
     def test_add_relu(self, device, dtype):
         for alpha in (1, 2, -1):
             if dtype.is_floating_point:
