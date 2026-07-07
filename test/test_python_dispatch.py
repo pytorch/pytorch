@@ -112,6 +112,20 @@ class TestDispatcherPythonBindings(TestCase):
         y = torch._C._dispatch_call_boxed(sin, x)
         self.assertEqual(y, x.sin())
 
+    def test_inplace_variant(self) -> None:
+        # OpOverload._inplace_variant maps a functional op to its in-place
+        # counterpart: both <base> and <base>_functional map to <base>_, via
+        # naming convention plus schema validation.
+        aten = torch.ops.aten
+        self.assertEqual(aten.uniform.default._inplace_variant, aten.uniform_.default)
+        self.assertEqual(aten.digamma.default._inplace_variant, aten.digamma_.default)
+        self.assertEqual(
+            aten.normal_functional.default._inplace_variant, aten.normal_.default
+        )
+        # In-place ops and ops with no in-place variant return None.
+        self.assertIsNone(aten.uniform_.default._inplace_variant)
+        self.assertIsNone(aten.mm.default._inplace_variant)
+
 
 class TestPythonRegistration(TestCase):
     test_ns = "_test_python_registration"

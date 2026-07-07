@@ -1395,6 +1395,11 @@ class GraphLowering(torch.fx.Interpreter):
             if not isinstance(target, torch._ops.OpOverload):
                 raise AssertionError(f"{target} is not an OpOverload")
             base_name = target.name().split(".")[0]
+            # Reinplaced ops may be decomposed but still need a fallback.
+            reinplaced = bool(
+                self.current_node is not None
+                and self.current_node.meta.get("reinplaced_from_functional")
+            )
             if base_name in FALLBACK_ALLOW_LIST:
                 make_fallback(
                     target,
@@ -1402,7 +1407,7 @@ class GraphLowering(torch.fx.Interpreter):
                     get_decomp_fn=self.get_decomp_fn,
                     override_decomp=True,
                 )
-            elif config.implicit_fallbacks:
+            elif config.implicit_fallbacks or reinplaced:
                 error = (
                     MissingOperatorWithDecomp
                     if get_decompositions([target])
@@ -1443,6 +1448,7 @@ class GraphLowering(torch.fx.Interpreter):
                     target,
                     layout_constraint=decided_constraint,
                     get_decomp_fn=self.get_decomp_fn,
+                    override_decomp=reinplaced,
                 )
 
             elif get_decompositions([target]):
