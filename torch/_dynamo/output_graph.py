@@ -2511,7 +2511,7 @@ class OutputGraph(OutputGraphCommon):
                             )
                         var = cur_tx.post_prune_cell_and_freevars[cell]
                         if isinstance(var, NullVariable):
-                            raise AssertionError("Can't codgen null cell")
+                            raise AssertionError("Can't codegen null cell")
                         cg(var)
                 cg.append_output(create_build_tuple(len(freevars)))
                 cur_tx = cur_tx.parent
