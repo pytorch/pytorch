@@ -340,7 +340,7 @@ void validate_scaled_mm_v2_inputs(
   // XPU (oneDNN) also accepts a column-major (transpose-contiguous) layout
   // because it calls .contiguous() internally; CUDA/ROCm require a plain
   // contiguous scale.
-  auto scale_layout_ok = [is_xpu](const Tensor& s) {
+  auto is_scale_contiguous = [is_xpu](const Tensor& s) {
     return is_xpu ? (s.is_contiguous() || s.t().is_contiguous())
                   : s.is_contiguous();
   };
@@ -494,7 +494,7 @@ void validate_scaled_mm_v2_inputs(
     // recipes). scale_a[0]/scale_b[0] are the blockwise scales and were
     // size-validated in the per-recipe branches above.
     TORCH_CHECK_VALUE(
-        scale_layout_ok(scale_a[0]) && scale_layout_ok(scale_b[0]),
+        is_scale_contiguous(scale_a[0]) && is_scale_contiguous(scale_b[0]),
         is_xpu
             ? "For Blockwise scaling both scales should be contiguous (row-major or column-major)"
             : "For Blockwise scaling both scales should be contiguous");
