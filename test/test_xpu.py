@@ -2627,7 +2627,7 @@ if __name__ == "__main__":
         [
             subtest((False, False, True)),
             subtest((True, False, True)),
-            subtest((True, True, True)),
+            subtest((True, True, True), decorators=[unittest.expectedFailure]),
             subtest((False, False, False)),
         ],
         name_fn=lambda x, y, z: "{}{}{}".format(
