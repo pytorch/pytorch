@@ -34,6 +34,14 @@ In some cases, the terms `torch.compile`, TorchDynamo, `torch.compiler`
 might be used interchangeably in this documentation.
 :::
 
+`torch.compiler` also includes an ahead-of-time API,
+`torch.compiler.precompile`, which captures `fn(*example_inputs)` -- where the model(s)
+are among `example_inputs`, e.g. `precompile(lambda model, x: model(x), model, x)` -- (using
+`make_fx` as the default tracer, with a Dynamo-based tracer planned) and lowers it to a
+self-contained, runnable Python source artifact plus an acceleration cache (reload with
+`torch.compiler.precompile.load`; you pass the model again at runtime, so no weights are
+baked in). See the API reference for details.
+
 :::{warning}
 `torch.compile` may not support recently released major versions of Python.
 

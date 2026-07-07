@@ -501,9 +501,16 @@ def _resolve_fake_mode(
             if isinstance(last_node.args[0], torch.fx.Node)
             else last_node.args[0]
         )
-        for node in nodes:
-            if "example_value" in node.meta:
-                maybe_tensor = node.meta["example_value"]
+        # Look for a FakeTensor in the output metadata first, then anywhere in the graph,
+        # and grab its FakeTensorMode. A Dynamo/AOT graph stores it under "example_value";
+        # a make_fx graph under "val" (so a symbolic make_fx graph's ShapeEnv, including
+        # unbacked symints, is recovered rather than replaced by a fresh one). Output
+        # entries may be None (e.g. a training graph's grad slots) or plain constants, so
+        # skip anything that is not a Node carrying a FakeTensor.
+        output_nodes = [n for n in nodes if isinstance(n, torch.fx.Node)]
+        for node in [*output_nodes, *gm.graph.nodes]:
+            for key in ("example_value", "val"):
+                maybe_tensor = node.meta.get(key)
                 if isinstance(maybe_tensor, torch._subclasses.fake_tensor.FakeTensor):
                     return maybe_tensor.fake_mode
 
