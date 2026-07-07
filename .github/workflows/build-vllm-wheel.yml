@@ -115,6 +115,9 @@ jobs:
           SCCACHE_REGION: ${{ steps.aws-creds.outcome == 'success' && 'us-east-1' || '' }}
         run: |
           set -eux
+          # Put the manylinux cp312 bin first so pip-installed build tools (cmake,
+          # ninja) win over the old system cmake (3.18.4 < vLLM's required 3.26).
+          export PATH="/opt/python/cp312-cp312/bin:${PATH}"
           # Build against the torch nightly we just downloaded; use_existing_torch.py
           # strips torch from vLLM's requirements so the build keeps that nightly.
           # Install offline from the downloaded wheels: torch nightly pins a
