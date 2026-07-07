@@ -2,9 +2,9 @@
 r"""Weight Normalization from https://arxiv.org/abs/1602.07868."""
 
 from typing import Any, TypeVar
-import torch
 from typing_extensions import deprecated
 
+import torch
 from torch import _weight_norm, norm_except_dim
 from torch.nn.modules import Module
 from torch.nn.parameter import Parameter, UninitializedParameter
