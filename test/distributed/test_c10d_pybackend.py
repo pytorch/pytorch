@@ -386,6 +386,23 @@ class TestPyBackend(TestCase):
 
         self.assertGreater(backend.wait_count, 0)
 
+    def test_collective_returns_none(self) -> None:
+        backend = RecordingBackend(0, 1)
+        backend.allreduce = lambda tensors, opts: [t.add_(2) for t in tensors] and None
+        backend.broadcast = lambda tensors, opts: [t.add_(1) for t in tensors] and None
+        backend.barrier = lambda opts: None
+        group = create_process_group(backend)
+
+        t = torch.zeros(2)
+        self.assertIsNone(group.allreduce([t]))
+        self.assertEqual(t, torch.full((2,), 2.0))
+
+        t = torch.zeros(2)
+        self.assertIsNone(group.broadcast([t]))
+        self.assertEqual(t, torch.ones(2))
+
+        self.assertIsNone(group.barrier())
+
     def test_backend_only_overrides(self) -> None:
         backend = RecordingBackend(0, 1)
         group = create_process_group(backend)
@@ -462,7 +479,6 @@ class TestPyBackend(TestCase):
         group.shutdown()
         self.assertTrue(backend.aborted)
         self.assertTrue(backend.shut_down)
-
 
 
 class TestPyBackendProcessGroup(MultiProcessTestCase):
