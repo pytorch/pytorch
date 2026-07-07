@@ -6,6 +6,7 @@ import functools
 import torch
 import torch.cuda
 from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS, IS_MACOS, TEST_XPU
+from torch.utils._import_utils import _check_module_exists
 import inspect
 import contextlib
 import os
@@ -25,6 +26,20 @@ else:
 
 TEST_CUDNN_VERSION = LazyVal(lambda: torch.backends.cudnn.version() if TEST_CUDNN else 0)
 ROCM_VERSION = LazyVal(lambda : tuple(int(v) for v in torch.version.hip.split('.')[:2]) if torch.version.hip else (0, 0))
+
+TEST_CUPTI = _check_module_exists("cupti") and not TEST_WITH_ROCM
+
+def _cupti_version():
+    if not TEST_CUPTI:
+        return 0
+    try:
+        from torch.profiler._cupti.cupti_python import pylibcupti
+        return pylibcupti().get_version()
+    except Exception:
+        return 0
+
+
+TEST_CUPTI_V13_3 = LazyVal(lambda: TEST_CUPTI and _cupti_version() >= 130300)
 
 SM53OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (5, 3))
 SM60OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (6, 0))
