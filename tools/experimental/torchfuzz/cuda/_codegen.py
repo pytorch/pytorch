@@ -592,6 +592,194 @@ class ReduceOverheadMemPoolFuzzTemplate(ReduceOverheadFuzzTemplate):
         return wrapped
 
 
+class ReduceOverheadMemPoolStreamsFuzzTemplate(ReduceOverheadFuzzTemplate):
+    """reduce-overhead mixing CUDA streams and registered MemPools.
+
+    Partitions the body across streams (fork/join) and allocates from several
+    registered MemPools, nesting ``use_mem_pool`` and ``torch.cuda.stream``
+    contexts. One arrangement is chosen per program:
+
+    - ``aligned``: each op gets its own stream+pool pair (nesting order random),
+      so pool boundaries coincide with stream boundaries.
+    - ``pool_spans_streams``: one ``use_mem_pool`` region wraps a run of ops that
+      run on different streams (a pool spanning several stream blocks).
+    - ``stream_spans_pools``: one ``torch.cuda.stream`` region wraps a run of ops
+      that switch pools (a pool switch mid-stream).
+
+    The latter two produce non-aligned scopes, exercising the allocator scope
+    stack with pool/stream boundaries that do not coincide. Public
+    justification: NCCL userbuffer pools produced across streamed regions.
+    """
+
+    num_pools = 3
+
+    def flags_codegen(self):
+        return super().flags_codegen() + [
+            "from torch._inductor.cudagraph_trees import register_external",
+            f"_FUZZ_POOLS = [torch.cuda.MemPool() for _ in range({self.num_pools})]",
+            "for _p in _FUZZ_POOLS:",
+            "    register_external(_p)",
+        ]
+
+    def wrap_body(
+        self, generated_code_lines: list[str], graph: OperationGraph
+    ) -> list[str]:
+        return self._wrap_body_streams_pools(
+            generated_code_lines, graph, self.num_pools
+        )
+
+    @staticmethod
+    def _wrap_body_streams_pools(
+        generated_code_lines: list[str],
+        graph: OperationGraph,
+        num_pools: int,
+    ) -> list[str]:
+        topo_order = graph.get_topological_order()
+
+        leaf_ids: set[str] = set()
+        non_leaf_ids: list[str] = []
+        for nid in topo_order:
+            node = graph.nodes[nid]
+            if (
+                node.op_name == "arg"
+                or node.op_name.startswith("arg_")
+                or node.op_name == "constant"
+            ):
+                leaf_ids.add(nid)
+            else:
+                non_leaf_ids.append(nid)
+
+        if not non_leaf_ids:
+            return generated_code_lines
+
+        num_streams = random.randint(2, 3)
+        stream_names = [f"s{i + 1}" for i in range(num_streams)]
+        node_stream = {nid: random.choice(stream_names) for nid in non_leaf_ids}
+
+        # Group original body lines by the node that produces them.
+        node_lines: dict[str, list[str]] = {}
+        current_node: str | None = None
+        current_buf: list[str] = []
+        for line in generated_code_lines:
+            stripped = line.strip()
+            matched_node = None
+            for nid in topo_order:
+                if stripped.startswith((f"var_{nid} =", f"var_{nid},")):
+                    matched_node = nid
+                    break
+            if matched_node is not None:
+                if current_node is not None:
+                    node_lines[current_node] = current_buf
+                current_node = matched_node
+                current_buf = [line]
+            else:
+                current_buf.append(line)
+        if current_node is not None:
+            node_lines[current_node] = current_buf
+
+        mode = random.choice(["aligned", "pool_spans_streams", "stream_spans_pools"])
+
+        # Split non-leaf nodes into contiguous groups sharing one outer context
+        # (aligned mode uses singleton groups so each op stands on its own).
+        groups: list[list[str]] = []
+        cur: list[str] = []
+        target = 1 if mode == "aligned" else random.randint(2, 4)
+        for nid in topo_order:
+            if nid in leaf_ids:
+                if cur:
+                    groups.append(cur)
+                    cur = []
+                groups.append([nid])
+                continue
+            cur.append(nid)
+            if len(cur) >= target:
+                groups.append(cur)
+                cur = []
+                target = 1 if mode == "aligned" else random.randint(2, 4)
+        if cur:
+            groups.append(cur)
+
+        # Resolve each node's effective stream (for cross-stream sync) and pool.
+        eff_stream: dict[str, str] = {}
+        node_pool: dict[str, int] = {}
+        group_pool: dict[int, int] = {}
+        group_stream: dict[int, str] = {}
+        for gi, group in enumerate(groups):
+            if group[0] in leaf_ids:
+                continue
+            if mode == "aligned":
+                for nid in group:
+                    eff_stream[nid] = node_stream[nid]
+                    node_pool[nid] = stream_names.index(node_stream[nid]) % num_pools
+            elif mode == "pool_spans_streams":
+                group_pool[gi] = random.randrange(num_pools)
+                for nid in group:
+                    eff_stream[nid] = node_stream[nid]
+            else:  # stream_spans_pools
+                group_stream[gi] = random.choice(stream_names)
+                for nid in group:
+                    eff_stream[nid] = group_stream[gi]
+                    node_pool[nid] = random.randrange(num_pools)
+
+        new_lines: list[str] = [f"    {s} = torch.cuda.Stream()" for s in stream_names]
+
+        def append_body(nid: str, base_indent: int) -> None:
+            pad = " " * (base_indent - 4)
+            for line in node_lines.get(nid, []):
+                new_lines.append(pad + line if line.strip() else line)
+
+        def emit_sync(nid: str, indent: int) -> None:
+            eff = eff_stream[nid]
+            waited: set[str] = set()
+            for dep_id in graph.nodes[nid].input_nodes:
+                dep_eff = eff_stream.get(dep_id)
+                if dep_eff is not None and dep_eff != eff and dep_eff not in waited:
+                    new_lines.append(f"{' ' * indent}{eff}.wait_stream({dep_eff})")
+                    waited.add(dep_eff)
+
+        for gi, group in enumerate(groups):
+            if group[0] in leaf_ids:
+                new_lines.extend(node_lines.get(group[0], []))
+                continue
+
+            if mode == "aligned":
+                nid = group[0]
+                stream_ctx = f"torch.cuda.stream({node_stream[nid]})"
+                pool_ctx = f"torch.cuda.use_mem_pool(_FUZZ_POOLS[{node_pool[nid]}])"
+                emit_sync(nid, 4)
+                outer, inner = (
+                    (stream_ctx, pool_ctx)
+                    if random.choice([True, False])
+                    else (pool_ctx, stream_ctx)
+                )
+                new_lines.append(f"    with {outer}:")
+                new_lines.append(f"        with {inner}:")
+                append_body(nid, 12)
+            elif mode == "pool_spans_streams":
+                new_lines.append(
+                    f"    with torch.cuda.use_mem_pool(_FUZZ_POOLS[{group_pool[gi]}]):"
+                )
+                for nid in group:
+                    emit_sync(nid, 8)
+                    new_lines.append(
+                        f"        with torch.cuda.stream({node_stream[nid]}):"
+                    )
+                    append_body(nid, 12)
+            else:  # stream_spans_pools
+                new_lines.append(f"    with torch.cuda.stream({group_stream[gi]}):")
+                for nid in group:
+                    emit_sync(nid, 8)
+                    new_lines.append(
+                        f"        with torch.cuda.use_mem_pool(_FUZZ_POOLS[{node_pool[nid]}]):"
+                    )
+                    append_body(nid, 12)
+
+        for s in stream_names:
+            new_lines.append(f"    torch.cuda.current_stream().wait_stream({s})")
+
+        return new_lines
+
+
 class DTensorFuzzPlacementsTemplate(DTensorFuzzTemplate):
     """DTensor template with randomized placements (Replicate, Shard, Partial).
 

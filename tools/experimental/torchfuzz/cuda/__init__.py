@@ -100,6 +100,7 @@ from torchfuzz.cuda._codegen import (
     DTensorFuzzTemplate,
     ReduceOverheadFuzzTemplate,
     ReduceOverheadMemPoolFuzzTemplate,
+    ReduceOverheadMemPoolStreamsFuzzTemplate,
     ReduceOverheadStreamsFuzzTemplate,
     StreamFuzzTemplate,
     UnbackedFuzzTemplate,
@@ -120,6 +121,7 @@ def register_codegen() -> dict[str, type[FuzzTemplate]]:
         "reduce_overhead": ReduceOverheadFuzzTemplate,
         "reduce_overhead_streams": ReduceOverheadStreamsFuzzTemplate,
         "reduce_overhead_mempool": ReduceOverheadMemPoolFuzzTemplate,
+        "reduce_overhead_mempool_streams": ReduceOverheadMemPoolStreamsFuzzTemplate,
     }
 
 
