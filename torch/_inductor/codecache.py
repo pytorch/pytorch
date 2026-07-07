@@ -328,12 +328,8 @@ def triton_key() -> str | None:
 
 class CacheBase:
     @staticmethod
-    def _empty_system() -> SystemInfo:
-        return {"hash": SYSTEM_CACHE_KEY_STRATEGY.key_from_json({})}
-
     @functools.cache
-    @staticmethod
-    def _get_system_cached() -> SystemInfo:
+    def get_system() -> SystemInfo:
         with dynamo_timed("CacheBase.get_system.triton_key"):
             triton_version = triton_key()
 
@@ -360,34 +356,13 @@ class CacheBase:
             }
         except (AssertionError, RuntimeError):
             # If cuda is not installed, none of the above config is relevant.
-            return CacheBase._empty_system()
-
-    @staticmethod
-    def get_system() -> SystemInfo:
-        if not torch.cuda.is_initialized():
-            return CacheBase._empty_system()
-        return CacheBase._get_system_cached()
-
-    get_system.__func__.cache_clear = (  # type: ignore[attr-defined]
-        _get_system_cached.cache_clear
-    )
+            return {"hash": SYSTEM_CACHE_KEY_STRATEGY.key_from_json({})}
 
     @staticmethod
     @clear_on_fresh_cache
     @functools.cache
-    def _get_local_cache_path_cached() -> Path:
-        return Path(os.path.join(cache_dir(), "cache", CacheBase.get_system()["hash"]))
-
-    @staticmethod
     def get_local_cache_path() -> Path:
-        if not torch.cuda.is_initialized():
-            system_hash = CacheBase._empty_system()["hash"]
-            return Path(os.path.join(cache_dir(), "cache", system_hash))
-        return CacheBase._get_local_cache_path_cached()
-
-    get_local_cache_path.__func__.cache_clear = (  # type: ignore[attr-defined]
-        _get_local_cache_path_cached.__func__.cache_clear
-    )
+        return Path(os.path.join(cache_dir(), "cache", CacheBase.get_system()["hash"]))
 
     def __init__(self) -> None:
         self.system = CacheBase.get_system()
@@ -2248,14 +2223,13 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         compiled_graph.guards_expr = shape_env.produce_guards_expression(
             placeholders=symints, guards=guards
         )
-        if torch.utils._triton.has_initialized_accelerator():
-            try:
-                backend = torch.utils._triton.triton_backend()
-                compiled_graph.extern_libs_key = torch.utils._triton._extern_libs_key(
-                    backend
-                )
-            except Exception:
-                pass
+        try:
+            backend = torch.utils._triton.triton_backend()
+            compiled_graph.extern_libs_key = torch.utils._triton._extern_libs_key(
+                backend
+            )
+        except Exception:
+            pass
         disk_compiled_graph = copy(compiled_graph)
         disk_compiled_graph.prepare_for_serialization()
 

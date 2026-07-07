@@ -2292,32 +2292,6 @@ assert not torch.cuda.is_initialized()
             delattr(torch, backend_name)
             del sys.modules[f"torch.{backend_name}"]
 
-    @skipIfTorchDynamo(
-        "TorchDynamo exposes https://github.com/pytorch/pytorch/issues/166696"
-    )
-    def test_avoid_device_init_with_privateuse1_backend_and_cuda_compiled(self):
-        class _DummyPrivateUse1Module:
-            @staticmethod
-            def is_available() -> bool:
-                return True
-
-        backend_name = "privateuseone"
-
-        try:
-            torch._register_device_module(backend_name, _DummyPrivateUse1Module)
-
-            fake_mode = FakeTensorMode()
-            with (
-                patch.object(torch.xpu, "_is_compiled", return_value=False),
-                patch.object(torch.cuda, "_is_compiled", return_value=True),
-                patch.object(torch.cuda, "is_initialized", return_value=False),
-                patch.object(torch.cuda, "is_available", side_effect=AssertionError),
-            ):
-                self.assertFalse(fake_mode.avoid_device_init)
-        finally:
-            delattr(torch, backend_name)
-            del sys.modules[f"torch.{backend_name}"]
-
     def test_unique_output_dtype(self):
         shape_env = ShapeEnv()
         for input_dtype in [torch.float32, torch.float16, torch.bfloat16]:
