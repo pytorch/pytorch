@@ -1679,7 +1679,7 @@ bool FunctionSignature::parse(
 
   if (static_cast<size_t>(nargs) > max_pos_args && !allow_varargs_intlist) {
     if (raise_exception) {
-      // foo() takes takes 2 positional arguments but 3 were given
+      // foo() takes 2 positional arguments but 3 were given
       extra_args(*this, nargs);
     }
     return false;
