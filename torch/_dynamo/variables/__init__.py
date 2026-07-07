@@ -272,6 +272,7 @@ __all__ = [
     "SetAttrBuiltinVariable",
     "SkipFunctionVariable",
     "SliceVariable",
+    "StopIterationVariable",
     "StringFormatVariable",
     "StructSequenceVariable",
     "SuperVariable",
