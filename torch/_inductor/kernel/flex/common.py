@@ -96,27 +96,39 @@ def zeros_and_scatter_lowering(shape: list[int], indices, values):
     grad.realize()
     x_size = grad.get_size()
     values = to_dtype(values, grad.get_dtype())
-    indices_loaders = [i.make_loader() if i is not None else None for i in indices]
-    indices, tensor_indices = check_and_broadcast_indices(indices, grad.get_device())
-    # We can use the first one since they are all required to be the same size
-    tensor_size = list(indices[tensor_indices[0]].get_size())
-    indexed_size = [x_size[i] for i in range(len(indices))]
-
-    expected_vals_size, inner_fn = index_output_size_and_inner_fn(
-        x_size,
-        indices,
-        tensor_indices,
-        tensor_size,
-        indices_loaders,
-        indexed_size,
-        None,
-        check=True,
-    )
-
-    values = expand(values, expected_vals_size)
     device = grad.get_device()
     if device is None:
         raise AssertionError("device must not be None")
+    if not indices:
+        if shape:
+            raise AssertionError(
+                "zeros_and_scatter with no indices only supports scalar outputs"
+            )
+        expected_vals_size = values.get_size()
+
+        def inner_fn(index):
+            return []
+
+    else:
+        indices_loaders = [i.make_loader() if i is not None else None for i in indices]
+        indices, tensor_indices = check_and_broadcast_indices(
+            indices, grad.get_device()
+        )
+        # We can use the first one since they are all required to be the same size
+        tensor_size = list(indices[tensor_indices[0]].get_size())
+        indexed_size = [x_size[i] for i in range(len(indices))]
+
+        expected_vals_size, inner_fn = index_output_size_and_inner_fn(
+            x_size,
+            indices,
+            tensor_indices,
+            tensor_size,
+            indices_loaders,
+            indexed_size,
+            None,
+            check=True,
+        )
+        values = expand(values, expected_vals_size)
     scatter = Scatter(
         device=device,
         dtype=grad.get_dtype(),

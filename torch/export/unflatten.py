@@ -16,7 +16,7 @@ import torch
 import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_value
+from torch._library.opaque_object import is_custom_class_obj
 from torch.export import ExportedProgram
 from torch.export._tree_utils import reorder_kwargs
 from torch.export.exported_program import (
@@ -138,7 +138,7 @@ def _assign_attr(
                     torch.Tensor,
                     torch.ScriptObject,
                 ),
-            ) and not is_opaque_value(from_obj):
+            ) and not is_custom_class_obj(from_obj):
                 raise AssertionError(
                     f"expected torch.Tensor, torch.ScriptObject, or opaque type for CONSTANT attr_kind, got {type(from_obj)}"
                 )
