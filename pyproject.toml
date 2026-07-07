@@ -5,10 +5,10 @@ requires = [
     "numpy",
     "packaging>=24.2",  # required by setuptools>=77 to validate PEP 639 license expressions
     "pyyaml",
-    # 0.12 tightens license-files handling (PEP 639); only acceptable if
-    # license-files lives solely under [project], which we do. CI pins the
-    # exact 0.12 patch we test against in .ci/docker/requirements-ci.txt.
-    "scikit-build-core>=0.12",
+    # 1.0 is required for [[tool.dynamic-metadata]], the [tool.scikit-build.env]
+    # table, and native CMAKE_BUILD_TYPE env handling used below. CI pins the
+    # exact patch we test against in .ci/docker/requirements-ci.txt.
+    "scikit-build-core>=1.0",
     # Imported by torchgen at build time (cmake/Codegen.cmake runs
     # `python -m torchgen.gen`, and torchgen/utils.py uses `Self` /
     # `assert_never`). Currently also pulled in transitively through
@@ -21,25 +21,34 @@ requires = [
     # default (USE_NNPACK=ON); isolated PEP 517 builds need six available.
     "six",
 ]
-# Thin local wrapper around scikit_build_core.build that aliases MAX_JOBS to
-# CMAKE_BUILD_PARALLEL_LEVEL (see tools/build_backend/pytorch_build_backend.py).
-build-backend = "pytorch_build_backend"
-backend-path = ["tools/build_backend"]
+build-backend = "scikit_build_core.build"
 
 [tool.scikit-build]
-# experimental = true is required for the metadata.version / metadata.dependencies
-# custom provider modules used below (provider-path-based dynamic metadata is
-# gated behind this flag in scikit-build-core).
-experimental = true
+# Track the build-system.requires floor (scikit-build-core>=1.0) so the schema
+# and defaults are pinned to the version we build against.
+minimum-version = "build-system.requires"
 build-dir = "build"
 
-[tool.scikit-build.cmake]
-# Default to Release. On multi-config generators (Visual Studio), this is
-# passed as --config to cmake --build and cmake --install, ensuring they
-# match. Overrides below handle DEBUG and REL_WITH_DEB_INFO env vars,
-# mirroring the old setup.py behavior.
-build-type = "Release"
+[tool.scikit-build.env]
+# MAX_JOBS is PyTorch's historical umbrella parallelism knob (also read by
+# linters, cpp_extension JIT, nccl/MKLDNN sub-builds); alias it to the
+# variable CMake natively honors for `cmake --build`. setdefault semantics:
+# a user-set CMAKE_BUILD_PARALLEL_LEVEL always wins.
+CMAKE_BUILD_PARALLEL_LEVEL = { env = "MAX_JOBS" }
+# Listing CC/CXX here opts out of scikit-build-core's sysconfig-compiler
+# injection (a documented env-table behavior), so CMake detects from PATH as
+# setup.py did -- avoids the conda compiler_compat / stale-venv-gcc probe breaks.
+# An ambient CC/CXX is still respected.
+CC = { env = "CC" }
+CXX = { env = "CXX" }
 
+# cmake.build-type is deliberately not set: it defaults to Release, and
+# leaving it unconfigured lets scikit-build-core honor a CMAKE_BUILD_TYPE
+# set in the environment (.ci/pytorch/build.sh exports RelWithAssert for
+# *-debug CI images). The overrides below map PyTorch's historical DEBUG
+# and REL_WITH_DEB_INFO env vars, mirroring the old setup.py behavior; on
+# multi-config generators (Visual Studio) the resolved type is passed as
+# --config to cmake --build and cmake --install, ensuring they match.
 [[tool.scikit-build.overrides]]
 if.env.DEBUG = true
 cmake.build-type = "Debug"
@@ -48,79 +57,40 @@ cmake.build-type = "Debug"
 if.env.REL_WITH_DEB_INFO = true
 cmake.build-type = "RelWithDebInfo"
 
-# .ci/pytorch/build.sh exports CMAKE_BUILD_TYPE directly for the debug CI
-# images (RelWithAssert for *-debug, Debug for *-full-debug). scikit-build-core
-# manages the build type itself and passes -DCMAKE_BUILD_TYPE=Release on the
-# command line, which pre-defines the cache variable and blocks the env value
-# forwarded by EnvVarForwarding.cmake. Honor these explicitly so the *-debug
-# job keeps NDEBUG-free asserts (test.sh's _crash_if_debug_asserts_fail check).
 [[tool.scikit-build.overrides]]
-if.env.CMAKE_BUILD_TYPE = "RelWithAssert"
-cmake.build-type = "RelWithAssert"
-
-[[tool.scikit-build.overrides]]
-if.env.CMAKE_BUILD_TYPE = "Debug"
-cmake.build-type = "Debug"
-
-[[tool.scikit-build.overrides]]
-# PyTorch CI uses a /opt/conda-installed Python whose sysconfig CC includes
-# "-B <prefix>/compiler_compat" (a too-narrow sysroot). When CC is unset in
-# the parent shell, scikit-build-core's set_environment_for_gen() picks that
-# value up and sets it in the cmake subprocess env, breaking CMake try_compile
-# probes (FindBLAS check_function_exists(sgemm_), FindOpenMP, ...). Passing
-# CMAKE_C/CXX_COMPILER via -D takes precedence over the env-side CC, so cmake
-# uses the bare-named compiler from PATH instead. Defaulting to gcc/g++ when
-# the parent shell didn't pre-set CC/CXX matches what .ci/pytorch/common.sh
-# already does for *gcc* build environments; if a *clang* build environment
-# pre-sets CC=clang/CXX=clang++, the env-backed lookup respects that.
-if.platform-system = "linux"
-if.env.ANACONDA_PYTHON_VERSION = true
-cmake.define.CMAKE_C_COMPILER = { env = "CC", default = "gcc" }
-cmake.define.CMAKE_CXX_COMPILER = { env = "CXX", default = "g++" }
-
-[[tool.scikit-build.overrides]]
-# The aarch64 CI image is a venv (no ANACONDA_PYTHON_VERSION), and its build env
-# name has no "gcc" tag, so .ci/pytorch/common.sh exports no CC/CXX. With CC
-# unset, scikit-build-core's set_environment_for_gen() leaks the venv Python's
-# sysconfig compiler (aarch64-linux-gnu-gcc 11.4), which fails FindARM.cmake's
-# SVE bf16 probe -- the image actually ships gcc 15. Pin the generic cc/c++
-# names: green setup.py builds compile via /opt/cache/bin/c++ (the sccache shim
-# resolving the image's gcc 15), which is exactly what CMake's default search
-# picks before scikit-build-core overrides it. Respect CC/CXX if set.
-if.platform-system = "linux"
-if.env.BUILD_ENVIRONMENT = "aarch64"
-cmake.define.CMAKE_C_COMPILER = { env = "CC", default = "cc" }
-cmake.define.CMAKE_CXX_COMPILER = { env = "CXX", default = "c++" }
-
-[[tool.scikit-build.overrides]]
-# On Windows with the Ninja generator, CMake does not default to MSVC. With the
-# Intel oneAPI environment active (XPU builds), icx is on PATH and gets picked
-# up as the host compiler, which miscompiles CPU code: icx passes sleef's
-# __float128 cmake probe but then cannot compile sleefqp.c on the Windows target
-# (ENABLEFLOAT128 gets set, the build fails). setup.py defaulted CC/CXX=cl for
-# Windows+Ninja builds (tools/build_pytorch_libs.py); replicate that so the host
-# build stays on MSVC while the XPU sub-projects keep using icx. Respect CC/CXX
-# if explicitly set (e.g. clang-cl). platform-system matches sys.platform.
+# Force the Ninja generator on Windows. scikit-build-core otherwise defaults to
+# the Visual Studio (multi-config) generator, under which the oneDNN-XPU
+# ExternalProject's -DCMAKE_CXX_COMPILER=icx is ignored (VS picks the compiler by
+# toolset), so oneDNN configures with MSVC and fails its -fsycl driver check.
+# setup.py used Ninja whenever it was on PATH; 1.0's generator resolution honors
+# cmake.define.CMAKE_GENERATOR, so this lives here as the single source of truth
+# (and covers plain non-CI editable builds too) instead of a CI-exported env var.
+#
+# Under Ninja, CMake does not default to MSVC: with the Intel oneAPI environment
+# active (XPU builds) icx is on PATH and gets picked up as the host compiler,
+# which miscompiles CPU code (icx passes sleef's __float128 cmake probe but then
+# cannot compile sleefqp.c on the Windows target, ENABLEFLOAT128 gets set, the
+# build fails). Pin CC/CXX=cl so the host build stays on MSVC while the XPU
+# sub-projects keep using icx. env.CC/CXX setdefault semantics respect an
+# explicitly set CC/CXX (e.g. clang-cl); platform-system matches sys.platform.
 if.platform-system = "win32"
-cmake.define.CMAKE_C_COMPILER = { env = "CC", default = "cl" }
-cmake.define.CMAKE_CXX_COMPILER = { env = "CXX", default = "cl" }
+cmake.define.CMAKE_GENERATOR = "Ninja"
+env.CC = "cl"
+env.CXX = "cl"
 
-# Other than CMAKE_C/CXX_COMPILER above, cmake.define is intentionally absent
+# Other than CMAKE_GENERATOR above (win32), cmake.define is intentionally absent
 # -- all BUILD_*/USE_* env vars and additional passthrough variables are
-# forwarded by cmake/EnvVarForwarding.cmake so there is a single source of
-# truth.
+# forwarded by cmake/EnvVarForwarding.cmake so there is a single source of truth.
 
-[tool.scikit-build.metadata.version]
+[[tool.dynamic-metadata]]
 # Delegates to tools/generate_torch_version.py which resolves the version from
 # PYTORCH_BUILD_VERSION (release/nightly), PKG-INFO (sdist), or version.txt.
-provider = "version"
-provider-path = "tools/metadata"
+provider = { path = "tools/metadata", module = "version" }
 
-[tool.scikit-build.metadata.dependencies]
+[[tool.dynamic-metadata]]
 # Reads PYTORCH_EXTRA_INSTALL_REQUIREMENTS env var (pipe-separated PEP 508
 # strings) to inject CUDA/ROCm/XPU pip package dependencies into the wheel.
-provider = "dependencies"
-provider-path = "tools/metadata"
+provider = { path = "tools/metadata", module = "dependencies" }
 
 [tool.scikit-build.install]
 # scikit-build-core auto-strips binaries in Release builds. PyTorch needs to
