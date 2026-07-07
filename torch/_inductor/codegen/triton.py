@@ -157,9 +157,9 @@ INNER_REDUCTION_RATIO_THRESHOLD = 8
 
 
 def get_triton_reduction_function(reduction_type):
-    use_helper = reduction_type in ("any", "max", "min", "prod")
+    use_helper = reduction_type in ("any", "max", "min", "prod", "fmax")
     module = "triton_helpers" if use_helper else "tl"
-    if reduction_type in ("max", "min"):
+    if reduction_type in ("max", "min", "fmax"):
         return f"{module}.{reduction_type}2"
     else:
         return f"{module}.{reduction_type}"
@@ -1580,6 +1580,10 @@ class TritonOverrides(OpOverrides):
     # pyrefly: ignore [bad-override]
     def maximum(a, b):
         return f"tl.maximum({a}, {b}, tl.PropagateNan.ALL)"
+
+    @staticmethod
+    def fmaximum(a, b):
+        return f"tl.maximum({a}, {b})"
 
     @staticmethod
     # pyrefly: ignore [bad-override]
