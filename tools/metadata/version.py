@@ -1,4 +1,4 @@
-"""scikit-build-core dynamic metadata provider for version.
+"""Dynamic-metadata provider for the version field.
 
 Delegates to tools/generate_torch_version.py which resolves the version from
 (in order of precedence):
@@ -21,11 +21,11 @@ __all__ = ["dynamic_metadata"]
 
 
 def dynamic_metadata(
-    field: str,
     settings: Mapping[str, Any],
-) -> str:
-    if field != "version":
-        msg = f"This provider only supports the 'version' field, got {field!r}"
+    project: Mapping[str, Any],
+) -> dict[str, Any]:
+    if settings:
+        msg = f"This provider takes no settings, got {sorted(settings)}"
         raise RuntimeError(msg)
 
     spec = importlib.util.spec_from_file_location(
@@ -36,4 +36,4 @@ def dynamic_metadata(
         raise ImportError("Could not load generate_torch_version.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    return mod.get_torch_version()
+    return {"version": mod.get_torch_version()}
