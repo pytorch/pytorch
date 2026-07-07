@@ -24,10 +24,10 @@ void add_clamp_kernel_cuda(
 
         gpu_kernel(
             iter, [alpha, lo, hi] GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-              opmath_t r{static_cast<opmath_t>(a) + alpha * static_cast<opmath_t>(b)};
+              opmath_t r(static_cast<opmath_t>(a) + alpha * static_cast<opmath_t>(b));
 
               // clamp to [lo, hi] via ternaries (device/ROCm-safe std::clamp).
-              opmath_t m{(lo < r) ? r : lo};
+              opmath_t m((lo < r) ? r : lo);
               return scalar_t((m < hi) ? m : hi);
             });
       });
