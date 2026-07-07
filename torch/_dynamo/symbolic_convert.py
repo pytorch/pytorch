@@ -1259,9 +1259,9 @@ class BytecodeDispatchTableMeta(type):
 def pyexception_class_check(val: VariableTracker) -> TypeIs[ExceptionTypes]:
     # Mirror's CPython PyExceptionClass_Check
     # https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Include/pyerrors.h#L60-L62
-    return isinstance(
-        val, (variables.BuiltinVariable, UserDefinedExceptionClassVariable)
-    )
+    if isinstance(val, variables.BuiltinVariable):
+        return issubclass(val.fn, BaseException)
+    return isinstance(val, UserDefinedExceptionClassVariable)
 
 
 def pyexception_instance_check(val: VariableTracker) -> TypeIs[ExceptionVals]:
@@ -2591,9 +2591,7 @@ class InstructionTranslatorBase(
     def _create_exception_instance(
         self, val: ExceptionTypes | ExceptionVals
     ) -> ExceptionVals:
-        if isinstance(
-            val, (variables.BuiltinVariable, UserDefinedExceptionClassVariable)
-        ):
+        if pyexception_class_check(val):
             # Create the instance of the exception type
             # https://github.com/python/cpython/blob/3.11/Python/ceval.c#L6547-L6549
             type_name = val.python_type_name()
@@ -2605,7 +2603,10 @@ class InstructionTranslatorBase(
                     f"calling {type_name} should have returned an instance of BaseException, not {val.python_type_name()}",
                 )
         if not pyexception_instance_check(val):
-            raise AssertionError("expected _exception_instance_check(val) to be true")
+            exc.raise_type_error(
+                self,
+                "exceptions must derive from BaseException",
+            )
         return val
 
     def set_exception_obj(
