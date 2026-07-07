@@ -255,11 +255,10 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
                 thread_name="cupti-profiler-export",
                 auto_start_poller=defer_export,
             )
-        # Opt-in PM sampling (true SM-active % + DRAM-throughput %): the monitor registers us as a
-        # consumer (with our metrics) of the current device's shared session, delivering decoded
-        # frames to on_pm_samples. We keep a rolling last-N-seconds buffer that each window slices
-        # its in-range samples from (they render as GPU counter tracks). Off by default -- it locks
-        # GPU clocks; also a no-op when no metrics are configured (pm_metrics).
+        # Opt-in PM sampling (true SM-active % + DRAM-throughput %) is a feature of the CUPTI
+        # monitor: it registers us as a consumer (with our metrics) of the current device's shared
+        # session, delivering decoded frames to on_pm_samples (they render as GPU counter tracks).
+        # Off by default; also a no-op when no metrics are configured (pm_metrics).
         self._pm_metrics = list(pm_metrics or [])
         self._pm_enabled = (
             enable_pm_sampling
