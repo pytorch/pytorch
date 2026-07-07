@@ -8804,13 +8804,13 @@ class Scheduler:
         if device_scheduling is None:
             raise RuntimeError(f"Unsupported device type: {device.type}")
 
-        if not has_triton():
+        if is_gpu(device.type) and device.type != "mps" and not has_triton():
             if (
                 device.type == "cuda"
                 and (device_props := torch.cuda.get_device_properties(device)).major < 7
             ):
                 raise GPUTooOldForTriton(device_props, inspect.currentframe())
-            elif is_gpu(device.type) and not device.type == "mps":
+            else:
                 raise TritonMissing(inspect.currentframe())
 
         return device_scheduling(self)
@@ -9536,11 +9536,12 @@ class Scheduler:
 
         parent_wrapper_code = V.graph.wrapper_code
         graph_partition_id = next(self._graph_partition_counter)
+        graph_name = parent_wrapper_code.get_partition_name(graph_partition_id)
 
         with V.graph.set_current_wrapper_code():
             V.graph.init_wrapper_code(
                 is_subgraph=True,
-                subgraph_name=f"partition_{graph_partition_id}",
+                subgraph_name=graph_name,
                 parent_wrapper_code=parent_wrapper_code,
                 partition_signatures=signature,
             )
@@ -9570,7 +9571,6 @@ class Scheduler:
             V.graph.wrapper_code.partition_signatures = signature
             V.graph.wrapper_code.write_prefix()
 
-            graph_name = V.graph.name
             partition_code, _ = V.graph.wrapper_code.generate(V.graph.is_inference)
 
         V.graph.wrapper_code.define_subgraph_launcher_fn(graph_name, partition_code)

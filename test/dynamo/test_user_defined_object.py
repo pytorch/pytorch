@@ -330,7 +330,7 @@ class TestUserDefinedObjectConstruction(TestCase):
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, "Unsupported method call"
+            torch._dynamo.exc.Unsupported, "existing exception object"
         ):
             opt_fn()
 

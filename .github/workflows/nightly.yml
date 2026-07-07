@@ -80,7 +80,7 @@ jobs:
 
   update-metamates-rule:
     if: github.repository_owner == 'pytorch' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: update-commit-hash
     steps:
       - name: Checkout repo
@@ -132,7 +132,7 @@ jobs:
           fi
 
   update-commit-hashes:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: update-commit-hash
     strategy:
       fail-fast: false

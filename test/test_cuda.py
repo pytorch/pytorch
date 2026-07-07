@@ -934,7 +934,7 @@ print(t.is_pinned())
                 default_workspace_size = 4096 * 8 * 1024
 
         def check_workspace_size(inp):
-            torch.cuda._clear_cublas_workspaces()
+            torch._C._cuda_clearCublasWorkspaces()
             start = torch.cuda.memory_stats()["active_bytes.all.allocated"]
             with torch.no_grad():
                 torch.matmul(inp, inp)
@@ -959,7 +959,7 @@ print(t.is_pinned())
         torch._C._cuda_resetCublasWorkspaceSize()
         self.assertLess(abs(check_workspace_size(a) - default_workspace_size), 524288)
 
-        torch.cuda._clear_cublas_workspaces()
+        torch._C._cuda_clearCublasWorkspaces()
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled for async")
     @unittest.skipIf(IS_FBCODE, "not enabled by default on fbcode")
@@ -1069,7 +1069,7 @@ print(t.is_pinned())
         torch.backends.cuda.preferred_blas_library("cublas")
 
         original_size = torch.backends.cuda.cublas_workspace_size()
-        torch.cuda._clear_cublas_workspaces()
+        torch._C._cuda_clearCublasWorkspaces()
 
         # Trigger initial allocation with matmul
         a = torch.randn(7, 7, device="cuda", requires_grad=False)
@@ -2603,19 +2603,6 @@ torch.cuda.synchronize()
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
-    def test_graph_scalar_assignment(self):
-        x = torch.zeros(2, 2, device="cuda")
-        g = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(g):
-            x[0, 1] = 5.0
-
-        x.zero_()  # Reset the side-effect of capture execution
-        g.replay()
-        self.assertEqual(x[0, 1].item(), 5.0)
-
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
-    )
     def test_graph_capture_stale_default_stream_error(self):
         """Default-stream warmup + side-stream capture raises a clear error
         (not an opaque CUDA crash) when override is not enabled."""
@@ -3402,9 +3389,7 @@ exit(2)
             # TODO: reenable multinomial tests if/when the implementation is capturable.
             # ("multinomial", (input.clone(), size, True), {}),
             # ("multinomial", (input.clone(), size // 2, False), {}),
-            # TODO: reenable normal test, where std is a device
-            # tensor, when graph test failures are fixed
-            # ("normal", (input.clone() + 1, input.clone()), {}),
+            ("normal", (input.clone() + 1, input.clone()), {}),
             ("normal", (input.clone() + 1, 1.0), {}),
             ("poisson", (input.clone(),), {}),
             ("rand", (size,), {"device": "cuda", "dtype": torch.float}),
@@ -5669,7 +5654,7 @@ class TestCudaAllocator(TestCase):
     def test_memory_plots_free_segment_stack(self):
         for context in ["alloc", "all", "state"]:
             try:
-                torch.cuda._clear_cublas_workspaces()
+                torch._C._cuda_clearCublasWorkspaces()
                 torch.cuda.memory.empty_cache()
                 torch.cuda.memory._record_memory_history(context=context)
                 x = torch.rand(3, 4, device="cuda")
@@ -5688,7 +5673,7 @@ class TestCudaAllocator(TestCase):
     def test_memory_plots_metadata(self):
         for context in ["alloc", "all", "state"]:
             try:
-                torch.cuda._clear_cublas_workspaces()
+                torch._C._cuda_clearCublasWorkspaces()
                 torch.cuda.memory.empty_cache()
                 torch.cuda.memory._set_memory_metadata("metadata test")
                 torch.cuda.memory._record_memory_history(context=context)
@@ -5708,7 +5693,7 @@ class TestCudaAllocator(TestCase):
     )
     def test_memory_snapshot_script(self):
         try:
-            torch.cuda._clear_cublas_workspaces()
+            torch._C._cuda_clearCublasWorkspaces()
             torch.cuda.memory.empty_cache()
             torch.cuda.memory._record_memory_history("state", stacks="python")
 
@@ -5792,6 +5777,166 @@ class TestCudaAllocator(TestCase):
 
                 finally:
                     torch.cuda.memory._record_memory_history(None)
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
+    )
+    def test_host_memory_snapshot(self):
+        try:
+            torch._C._host_emptyCache()
+            torch.cuda.memory._record_memory_history(
+                "all",
+                context="alloc",
+                stacks="python",
+                record_pinned_host_memory=True,
+                clear_history=True,
+            )
+
+            def host_alloc():
+                return torch.empty(311, 411, pin_memory=True)
+
+            x = host_alloc()
+
+            ss = torch.cuda.memory._snapshot()
+
+            # Find our block by size in host_segments
+            found_it = False
+            for seg in ss["host_segments"]:
+                self.assertEqual(seg["device"], -1)
+                self.assertEqual(len(seg["blocks"]), 1)
+                b = seg["blocks"][0]
+                if b["state"] == "active_allocated":
+                    self.assertTrue("test_cuda" in b["frames"][0]["filename"])
+                    found_it = True
+            self.assertTrue(found_it)
+
+            # Verify alloc stack trace contains the named function
+            text = json.dumps(ss)
+            self.assertIn("host_alloc", text)
+
+            # Verify trace actions: segment_alloc then alloc
+            actions = [te["action"] for te in ss["host_traces"]]
+            self.assertIn("segment_alloc", actions)
+            self.assertIn("alloc", actions)
+
+            # Free and verify free traces
+            del x
+            ss = torch.cuda.memory._snapshot()
+            actions = [te["action"] for te in ss["host_traces"]]
+            self.assertIn("free_requested", actions)
+            self.assertIn("free_completed", actions)
+
+            # Empty cache and verify segment_free is the last action
+            torch._C._host_emptyCache()
+            ss = torch.cuda.memory._snapshot()
+            self.assertEqual(ss["host_traces"][-1]["action"], "segment_free")
+
+        finally:
+            torch.cuda.memory._record_memory_history(None)
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
+    )
+    def test_host_memory_snapshot_disabled(self):
+        try:
+            torch._C._host_emptyCache()
+            torch.cuda.memory._record_memory_history("all")
+            x = torch.empty(1024, pin_memory=True)
+            ss = torch.cuda.memory._snapshot()
+            self.assertEqual(len(ss["host_segments"]), 0)
+            self.assertEqual(len(ss["host_traces"]), 0)
+            del x
+        finally:
+            torch.cuda.memory._record_memory_history(None)
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
+    )
+    def test_host_memory_snapshot_max_entries(self):
+        try:
+            torch._C._host_emptyCache()
+            max_entries = 4
+            torch.cuda.memory._record_memory_history(
+                "all",
+                max_entries=max_entries,
+                record_pinned_host_memory=True,
+                clear_history=True,
+            )
+
+            # Allocate and free enough pinned tensors to overflow the ring
+            # buffer many times over (each alloc/free produces multiple trace
+            # entries: segment_alloc, alloc, free_requested, free_completed).
+            for i in range(20):
+                x = torch.empty(1024 + i, pin_memory=True)
+                del x
+                torch._C._host_emptyCache()
+
+            ss = torch.cuda.memory._snapshot()
+            self.assertLessEqual(len(ss["host_traces"]), max_entries)
+            # We did enough work that the buffer should be full.
+            self.assertEqual(len(ss["host_traces"]), max_entries)
+        finally:
+            torch.cuda.memory._record_memory_history(None)
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
+    )
+    def test_host_memory_snapshot_none_disables(self):
+        try:
+            torch._C._host_emptyCache()
+            torch.cuda.memory._record_memory_history(
+                "all",
+                record_pinned_host_memory=True,
+                clear_history=True,
+            )
+            x = torch.empty(1024, pin_memory=True)
+            ss = torch.cuda.memory._snapshot()
+            self.assertGreater(len(ss["host_traces"]), 0)
+            del x
+
+            # None should turn off host recording without record_pinned_host_memory=True
+            torch.cuda.memory._record_memory_history(None)
+
+            torch._C._host_emptyCache()
+            y = torch.empty(2048, pin_memory=True)
+            ss = torch.cuda.memory._snapshot()
+            self.assertEqual(len(ss["host_segments"]), 0)
+            self.assertEqual(len(ss["host_traces"]), 0)
+            del y
+        finally:
+            torch.cuda.memory._record_memory_history(None)
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
+    )
+    def test_host_memory_snapshot_host_only(self):
+        try:
+            torch._C._host_emptyCache()
+            torch.cuda.memory._record_memory_history(
+                "all",
+                record_pinned_host_memory=True,
+                record_cuda=False,
+                clear_history=True,
+            )
+
+            x = torch.empty(311, 411, pin_memory=True)
+            d = torch.empty(311, 411, device="cuda")
+
+            ss = torch.cuda.memory._snapshot()
+
+            # Host traces should be recorded.
+            self.assertGreater(len(ss["host_traces"]), 0)
+            self.assertGreater(len(ss["host_segments"]), 0)
+
+            # CUDA traces should be empty since record_cuda=False, even though
+            # we allocated a CUDA tensor.
+            for device_trace in ss["device_traces"]:
+                self.assertEqual(len(device_trace), 0)
+
+            del x
+            del d
+        finally:
+            torch.cuda.memory._record_memory_history(None)
 
     @unittest.skipIf(
         IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/180263"
