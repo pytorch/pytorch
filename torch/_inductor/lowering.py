@@ -4068,12 +4068,17 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
             x_loader(idx),
         )
 
-    return Pointwise.create(
+    res = Pointwise.create(
         device=x.get_device(),
         dtype=x.get_dtype(),
         inner_fn=inner_fn,
         ranges=list(x.get_size()),
     )
+
+    if torch.are_deterministic_algorithms_enabled():
+        res.realize()
+
+    return res
 
 
 def _unwrap(x):
