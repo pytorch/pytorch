@@ -4,34 +4,29 @@
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
+#include <stdexcept>
+
+// nvidia-cuda-cupti (a build dependency of python CUDA builds) ships
+// cupti_activity.h; the CMake rule adds its include dir to torch_python. This
+// TU is compiled only in python + CUDA builds, so the header -- and cuda.h,
+// which it pulls in -- is always present, giving the real CUPTI v2
+// record-layout structs and function declarations. The one CUPTI function
+// called here (cuptiActivityGetNextRecord_v2) is left undefined in torch_python
+// and binds at runtime to the nvidia-cuda-cupti wheel's libcupti (see
+// decode_buffer), so this TU still needs no libcupti link.
+#include <cupti_activity.h>
+#include <cupti_version.h> // cuptiGetVersion / CUPTI_API_VERSION for the version guard
 
 namespace torch::profiler::impl {
 
 namespace {
 
-// ABI mirrors of the CUPTI v2 user-defined-record structs (from
-// cupti_activity.h, CUPTI >= 13.2). Mirrored here so this file needs no CUPTI
-// v2 header; member order and types must match CUPTI exactly. complete_info is
-// read by reinterpreting the void* the callback receives.
-struct AbiFieldLayoutEntry {
-  size_t structSize;
-  int fieldId;
-  size_t offset;
-  size_t size;
-  size_t alignment;
-};
-struct AbiRecordLayout {
-  size_t structSize;
-  AbiFieldLayoutEntry* pEntries;
-  size_t numFields;
-  size_t recordSize;
-};
-struct AbiBufferCompleteInfo {
-  size_t structSize;
-  uint64_t threadId;
-  AbiRecordLayout** ppRecordLayouts;
-  size_t numRecordLayouts;
-};
+// The CUPTI v2 user-defined-record layout structs (from cupti_activity.h).
+// complete_info is reinterpreted from the void* the buffer-complete callback
+// receives.
+using MonitorFieldLayoutEntry = CUpti_ActivityFieldLayoutEntry;
+using MonitorRecordLayout = CUpti_ActivityRecordLayout;
+using MonitorBufferCompleteInfo = CUpti_BufferCallbackCompleteInfo;
 
 // A record layout's grouping key: its sorted (field_id, size) pairs. Records
 // sharing this key share an identical column layout, so they accumulate
@@ -56,14 +51,15 @@ std::vector<CuptiRecordLayout> cuptiMonitorParseRecordLayouts(
   if (complete_info == nullptr) {
     return out;
   }
-  const auto* info = static_cast<const AbiBufferCompleteInfo*>(complete_info);
+  const auto* info =
+      static_cast<const MonitorBufferCompleteInfo*>(complete_info);
   if (info->ppRecordLayouts == nullptr) {
     return out;
   }
   // ppRecordLayouts is indexed by activity kind; entries are null for kinds
   // without a user-defined layout.
   for (size_t kind = 0; kind < info->numRecordLayouts; ++kind) {
-    const AbiRecordLayout* layout = info->ppRecordLayouts[kind];
+    const MonitorRecordLayout* layout = info->ppRecordLayouts[kind];
     if (layout == nullptr) {
       continue;
     }
@@ -72,7 +68,7 @@ std::vector<CuptiRecordLayout> cuptiMonitorParseRecordLayouts(
     parsed.record_size = layout->recordSize;
     parsed.fields.reserve(layout->numFields);
     for (size_t f = 0; f < layout->numFields; ++f) {
-      const AbiFieldLayoutEntry& e = layout->pEntries[f];
+      const MonitorFieldLayoutEntry& e = layout->pEntries[f];
       parsed.fields.push_back({e.fieldId, e.offset, e.size});
     }
     out.push_back(std::move(parsed));
@@ -138,15 +134,28 @@ void CuptiMonitorBuffers::on_complete(
   cv_.notify_one();
 }
 
-std::optional<CompletedCuptiBuffer> CuptiMonitorBuffers::get_completed() {
-  std::unique_lock<std::mutex> lock(mutex_);
-  cv_.wait(lock, [this] { return !completed_.empty() || shutdown_; });
+std::optional<CompletedCuptiBuffer> CuptiMonitorBuffers::
+    pop_completed_locked() {
   if (completed_.empty()) {
-    return std::nullopt; // shutdown
+    return std::nullopt; // timeout or shutdown
   }
   CompletedCuptiBuffer buf = std::move(completed_.front());
   completed_.pop_front();
   return buf;
+}
+
+std::optional<CompletedCuptiBuffer> CuptiMonitorBuffers::get_completed() {
+  std::unique_lock<std::mutex> lock(mutex_);
+  cv_.wait(lock, [this] { return !completed_.empty() || shutdown_; });
+  return pop_completed_locked();
+}
+
+std::optional<CompletedCuptiBuffer> CuptiMonitorBuffers::get_completed_for(
+    std::chrono::nanoseconds timeout) {
+  std::unique_lock<std::mutex> lock(mutex_);
+  cv_.wait_for(
+      lock, timeout, [this] { return !completed_.empty() || shutdown_; });
+  return pop_completed_locked();
 }
 
 void CuptiMonitorBuffers::return_buffer(uint8_t* ptr) {
@@ -210,13 +219,29 @@ CuptiMonitorDecoder::~CuptiMonitorDecoder() {
 
 void CuptiMonitorDecoder::configure(
     uintptr_t subscriber,
-    uintptr_t get_next_record_fn,
     uint32_t fence_kind,
-    int fence_end_field) {
+    int fence_end_field,
+    bool self_flush,
+    uint64_t flush_period_ns) {
+  // The decoder issues cuptiActivityGetNextRecord_v2 directly against the
+  // libcupti resolved at runtime (the nvidia-cuda-cupti wheel's), so verify
+  // that runtime libcupti is >= 13.3.0: the v2 user-defined-record iterator and
+  // the per-buffer ppRecordLayouts the decoder relies on require it. Mirrors
+  // Python's LIBCUPTI_MIN_VERSION check, enforced here too since native makes
+  // the direct calls. Called with the GIL held, so the throw surfaces as a
+  // Python exception.
+  uint32_t version = 0;
+  if (cuptiGetVersion(&version) != CUPTI_SUCCESS || version < 130300) {
+    throw std::runtime_error(
+        "CUPTI monitor requires libcupti >= 13.3.0 (CUPTI_API_VERSION 130300), "
+        "but the runtime libcupti reports version " +
+        std::to_string(version));
+  }
   subscriber_ = subscriber;
-  get_next_record_fn_ = get_next_record_fn;
   fence_kind_ = fence_kind;
   fence_end_field_ = fence_end_field;
+  self_flush_ = self_flush;
+  flush_period_ns_ = flush_period_ns;
   max_sync_ns_.store(0);
   buffers_decoded_.store(0);
   valid_bytes_.store(0);
@@ -249,37 +274,59 @@ void CuptiMonitorDecoder::stop() {
 }
 
 void CuptiMonitorDecoder::worker_loop() {
-  // get_completed() blocks until a buffer is ready and returns nullopt only
-  // once the pool is shut down AND drained, so on stop() the worker decodes
-  // every already-completed buffer (incl. the fence's trailing flush) before
-  // exiting.
+  // Single native thread: drives the periodic plain flush (when self_flush_ is
+  // set) AND decodes. cuptiActivityFlushAll(0) is called directly (completed
+  // buffers only), resolved like the other CUPTI calls to the wheel's libcupti
+  // -- no libcupti link. We track the time since the last flush and re-flush
+  // before waiting once the period has elapsed, so the cadence holds no matter
+  // how busy the decode is. The wait is bounded by the period so an idle thread
+  // still re-checks the cadence; without self-flush it blocks until a buffer or
+  // shutdown. nullopt from get_completed*() means timeout OR shutdown --
+  // distinguished by running_. On stop() the pool is shut down and the worker
+  // drains every already-completed buffer before exiting.
+  const bool do_flush = self_flush_;
+  const auto period = std::chrono::nanoseconds(flush_period_ns_);
+  // Backdate so the first iteration flushes immediately (matters for HES, whose
+  // records only surface on a flush).
+  auto last_flush = std::chrono::steady_clock::now() - period;
+  auto& buffers = CuptiMonitorBuffers::get();
   while (true) {
+    if (do_flush) {
+      auto now = std::chrono::steady_clock::now();
+      if (now - last_flush >= period) {
+        cuptiActivityFlushAll(0);
+        last_flush = now;
+      }
+    }
     std::optional<CompletedCuptiBuffer> buf =
-        CuptiMonitorBuffers::get().get_completed();
-    if (!buf.has_value()) {
+        do_flush ? buffers.get_completed_for(period) : buffers.get_completed();
+    if (buf.has_value()) {
+      decode_buffer(*buf);
+      buffers.return_buffer(buf->ptr);
+    } else if (!running_.load()) {
       break; // shut down and drained
     }
-    decode_buffer(*buf);
-    CuptiMonitorBuffers::get().return_buffer(buf->ptr);
   }
 }
 
 void CuptiMonitorDecoder::decode_buffer(const CompletedCuptiBuffer& buf) {
-  if (get_next_record_fn_ == 0 || buf.valid_size == 0) {
+  if (buf.valid_size == 0) {
     return;
   }
   buffers_decoded_.fetch_add(1);
   valid_bytes_.fetch_add(buf.valid_size);
-  // cuptiActivityGetNextRecord_v2(subscriber, buffer, validSize, &record).
-  // Called via the address Python passed (libcupti is loaded Python-side), so
-  // this TU needs no CUPTI header/link. CUPTI_SUCCESS == 0; any other status
-  // (MAX_LIMIT_REACHED at end-of-buffer, INVALID_KIND, real errors) ends the
-  // buffer.
-  using GetNextRecordFn = int (*)(void*, uint8_t*, size_t, void**);
-  // NOLINTNEXTLINE(performance-no-int-to-ptr)
-  auto get_next = reinterpret_cast<GetNextRecordFn>(get_next_record_fn_);
-  // NOLINTNEXTLINE(performance-no-int-to-ptr)
-  auto* subscriber = reinterpret_cast<void*>(subscriber_);
+  // Walk the buffer's records with cuptiActivityGetNextRecord_v2, called
+  // directly (declared by cupti_activity.h). The symbol is left undefined in
+  // torch_python and binds at runtime to the nvidia-cuda-cupti wheel's
+  // libcupti: torch front-loads that wheel (torch/__init__.py
+  // _preload_cuda_deps) so it wins libtorch_cpu's DT_NEEDED "libcupti.so.13"
+  // soname lookup, and torch_python reaches it through that dependency closure.
+  // So the runtime libcupti matches the header the monitor compiled against
+  // (one 13.3 CUPTI instance), with no load-time libcupti dependency on
+  // torch_python itself. The walk ends at CUPTI_ERROR_MAX_LIMIT_REACHED (buffer
+  // exhausted) or any error. The subscriber handle comes from Python, which
+  // owns the subscription. NOLINTNEXTLINE(performance-no-int-to-ptr)
+  auto subscriber = reinterpret_cast<CUpti_SubscriberHandle>(subscriber_);
 
   // Accumulate locally (no lock during the record walk), then merge once.
   // Grouped by kind -> layout signature so records sharing a layout stay
@@ -294,9 +341,10 @@ void CuptiMonitorDecoder::decode_buffer(const CompletedCuptiBuffer& buf) {
   // field).
   std::map<uint32_t, int64_t> cbid_off_by_kind;
   uint64_t local_max_sync = 0;
-  void* record = nullptr;
-  while (get_next(subscriber, buf.ptr, buf.valid_size, &record) == 0) {
-    const auto* rec = static_cast<const uint8_t*>(record);
+  CUpti_Activity* record = nullptr;
+  while (cuptiActivityGetNextRecord_v2(
+             subscriber, buf.ptr, buf.valid_size, &record) == CUPTI_SUCCESS) {
+    const auto* rec = reinterpret_cast<const uint8_t*>(record);
     uint32_t kind = *reinterpret_cast<const uint32_t*>(rec); // KIND @ offset 0
     auto cached = layout_by_kind.find(kind);
     const CuptiRecordLayout* layout = nullptr;

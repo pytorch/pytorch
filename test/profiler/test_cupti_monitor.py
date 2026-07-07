@@ -501,7 +501,12 @@ class TestCuptiMonitorCUDA(TestCase):
 
         lock = threading.Lock()
         columns: list = []
-        monitor = CuptiMonitor()
+        # Fully caller-driven (both periods < 0): no background self-flush and no
+        # background drain, so the explicit flush(sync=True) below is the sole,
+        # deterministic flush + drain -- nothing races it to consume the decoded columns.
+        monitor = CuptiMonitor(
+            background_flush_period_s=-1, background_drain_period_s=-1
+        )
 
         def on_columns(cols):
             if kind in cols:
@@ -536,6 +541,97 @@ class TestCuptiMonitorCUDA(TestCase):
             self.assertEqual(len(start), len(name))
             self.assertTrue(all(int(e) - int(s) >= 0 for s, e in zip(start, end)))
         self.assertTrue(any(len(n) > 0 for c in columns for n in c[int(Kernel.NAME)]))
+
+    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    def test_approx_timestamp_callback_engages_under_udr(self):
+        # use_approx_timestamps hands CUPTI a per-subscriber timestamp callback
+        # (CUPTI_ACTIVITY_ATTR_TIMESTAMP_CALLBACK) so records ride the profiler's approx
+        # clock. Unlike the global cuptiActivityRegisterTimestampCallback (NOT_COMPATIBLE under
+        # user-defined records), the subscriber attribute coexists with the UDR path. It only
+        # re-times device records when the monitor subscribes before any CUDA context exists
+        # (cuptiSubscribe otherwise latches device correlation on the pre-existing context), so
+        # this runs in an inline-script child that never imports common_cuda (which would init
+        # CUDA at import) and subscribes first. Assert the callback engaged and that device
+        # records land on the approx clock (~1e14-1e15 ticks), not CLOCK_REALTIME ns (~1e18).
+        script = textwrap.dedent(
+            """
+            import torch
+            from cupti.cupti import ActivityKind
+            from torch.profiler._cupti import monitor as mon
+            from torch.profiler._cupti.records import Kernel
+
+            assert not torch.cuda.is_initialized()
+            kind = ActivityKind.CONCURRENT_KERNEL
+            seen = []
+            mon.configure(use_approx_timestamps=True)
+            m = mon.CuptiMonitor()
+            obs = m.register({kind: {Kernel.START, Kernel.END}},
+                             lambda cols: seen.append(cols[kind]) if kind in cols else None)
+            assert m._timestamp_callback_active, "callback did not engage"
+            x = torch.randn(256, 256, device="cuda")
+            for _ in range(4):
+                x = torch.relu(x @ x)
+            x.sum().item()
+            torch.cuda.synchronize()
+            m.flush(sync=True)
+            m.unregister(obs)
+            starts = [int(v) for c in seen for v in c[int(Kernel.START)]]
+            assert starts, "no kernel records"
+            assert max(starts) < 1e17, f"device records off the approx clock: {max(starts)}"
+            print("OK", len(starts))
+            """
+        )
+        p = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True, timeout=300
+        )
+        self.assertEqual(
+            p.returncode, 0, f"child failed:\nstdout={p.stdout}\nstderr={p.stderr}"
+        )
+        self.assertIn("OK", p.stdout)
+
+    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    def test_approx_timestamp_callback_skipped_with_existing_context(self):
+        # cuptiSubscribe latches device-record correlation against a pre-existing CUDA context,
+        # so the (post-subscribe) per-subscriber callback can't re-time device records. When a
+        # context already exists, the monitor must refuse to engage rather than silently drop
+        # device records; collection still proceeds on the CLOCK_REALTIME pass-through.
+        from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
+
+        from torch.profiler._cupti.cupti_python import CuptiError
+        from torch.profiler._cupti.monitor import CuptiMonitor
+        from torch.profiler._cupti.records import Kernel
+
+        kind = ActivityKind.CONCURRENT_KERNEL
+        want = {kind: {Kernel.START, Kernel.END}}
+        torch.randn(8, device="cuda").sum().item()
+        torch.cuda.synchronize()
+        self.assertTrue(torch.cuda.is_initialized())
+
+        lock = threading.Lock()
+        columns: list = []
+        monitor = CuptiMonitor(use_approx_timestamps=True)
+
+        def on_columns(cols):
+            if kind in cols:
+                with lock:
+                    columns.append(cols[kind])
+
+        try:
+            obs = monitor.register(want, on_columns)
+        except CuptiError as e:
+            self.skipTest(f"monitor could not subscribe: {e}")
+        self.addCleanup(monitor.unregister, obs)
+        self.assertFalse(monitor._timestamp_callback_active)
+
+        x = torch.randn(256, 256, device="cuda")
+        for _ in range(4):
+            x = torch.relu(x @ x)
+        x.sum().item()
+        torch.cuda.synchronize()
+        monitor.flush(sync=True)
+        monitor.unregister(obs)
+
+        self.assertGreater(sum(len(c[int(Kernel.START)]) for c in columns), 0)
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     def test_singleton_flush_accessible(self):
@@ -668,7 +764,7 @@ class TestCuptiMonitorCUDA(TestCase):
                     len(next(iter(c.values()))) if c else 0
                 )
 
-        m = CuptiMonitor(buffer_size=1024, flush_period_s=0.02)
+        m = CuptiMonitor(buffer_size=1024, background_flush_period_s=0.02)
         want = {
             ActivityKind.CONCURRENT_KERNEL: {
                 Kernel.START,
@@ -1598,9 +1694,12 @@ _cupti_monitor.enable_hes_early()
         self.assertIn("OK", p.stdout)
 
 
+@unittest.skipIf(
+    not TEST_CUDA, "requires a CUDA build (native cupti monitor extension)"
+)
 class TestCuptiMonitorNative(TestCase):
     """The monitor's native buffer-pool / v2-record-layout callbacks driven directly
-    via ctypes -- pure C++, no CUDA/cupti-python."""
+    via ctypes -- pure C++ (no cupti-python), but the extension is built only on CUDA builds."""
 
     @skipIfTorchDynamo("native ctypes/CUPTI probe; nothing to compile")
     def test_cupti_monitor_buffer_pool_reuse(self):
