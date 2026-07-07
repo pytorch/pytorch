@@ -464,6 +464,7 @@ class TestPyBackend(TestCase):
         self.assertTrue(backend.shut_down)
 
 
+
 class TestPyBackendProcessGroup(MultiProcessTestCase):
     def setUp(self):
         super().setUp()
@@ -498,6 +499,29 @@ class TestPyBackendProcessGroup(MultiProcessTestCase):
         allreduce_tensor = torch.zeros(2)
         dist.all_reduce(allreduce_tensor)
         self.assertEqual(allreduce_tensor, torch.full((2,), 2.0))
+
+        sync_tensor = torch.zeros(2)
+        dist.all_reduce(sync_tensor, async_op=False)
+        self.assertEqual(sync_tensor, torch.full((2,), 2.0))
+
+        async_tensor = torch.zeros(2)
+        work = dist.all_reduce(async_tensor, async_op=True)
+        self.assertIsNotNone(work)
+        work.wait()
+        self.assertEqual(async_tensor, torch.full((2,), 2.0))
+
+        future_tensor = torch.ones(2)
+        work = dist.all_reduce(future_tensor, async_op=True)
+        fut = work.get_future()
+        fut.wait()
+        self.assertEqual(future_tensor, torch.full((2,), 3.0))
+
+        async_tensors = [torch.zeros(2) for _ in range(4)]
+        works = [dist.all_reduce(t, async_op=True) for t in async_tensors]
+        for w in works:
+            w.wait()
+        for t in async_tensors:
+            self.assertEqual(t, torch.full((2,), 2.0))
 
         peer = (self.rank + 1) % self.world_size
         send_tensor = torch.zeros(2)
