@@ -47,11 +47,6 @@ on:
         description: prefix for runner label
         type: string
         default: ""
-      use-arc:
-        required: false
-        type: boolean
-        default: false
-        description: If true, use ARC (OSDC) runner path instead of EC2.
       python-version:
         required: false
         type: string
@@ -74,7 +69,7 @@ on:
 
 jobs:
   build-docs:
-    if: github.repository_owner == 'pytorch' && inputs.use-arc
+    if: github.repository_owner == 'pytorch'
     permissions:
       id-token: write
       contents: read

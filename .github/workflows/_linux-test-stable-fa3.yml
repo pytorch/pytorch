@@ -33,11 +33,6 @@ on:
         required: false
         type: string
         default: "gha-artifacts"
-      use-arc:
-        required: false
-        type: boolean
-        default: false
-        description: If true, use ARC (OSDC) runner path instead of EC2.
       python-version:
         required: false
         type: string
@@ -73,7 +68,7 @@ env:
 jobs:
   test:
     # Don't run on forked repos
-    if: github.repository_owner == 'pytorch' && inputs.use-arc
+    if: github.repository_owner == 'pytorch'
     runs-on: mt-l-x86iamx-22-225-h100
     container:
       image: ${{ inputs.docker-image }}
