@@ -24,10 +24,7 @@ class TestUnspecifiedBackendLinter(unittest.TestCase):
 
     def test_bare_call_without_backend_is_flagged(self):
         messages = self._check(
-            "import torch\n"
-            "def f(x):\n"
-            "    return x\n"
-            "g = torch.compile(f)\n"
+            "import torch\ndef f(x):\n    return x\ng = torch.compile(f)\n"
         )
         self.assertEqual(len(messages), 1)
         msg = messages[0]
@@ -49,10 +46,7 @@ class TestUnspecifiedBackendLinter(unittest.TestCase):
 
     def test_bare_decorator_is_flagged(self):
         messages = self._check(
-            "import torch\n"
-            "@torch.compile\n"
-            "def f(x):\n"
-            "    return x\n"
+            "import torch\n@torch.compile\ndef f(x):\n    return x\n"
         )
         self.assertEqual(len(messages), 1)
         self.assertEqual(messages[0].line, 2)
@@ -60,10 +54,7 @@ class TestUnspecifiedBackendLinter(unittest.TestCase):
 
     def test_call_decorator_without_backend_is_flagged(self):
         messages = self._check(
-            "import torch\n"
-            "@torch.compile()\n"
-            "def f(x):\n"
-            "    return x\n"
+            "import torch\n@torch.compile()\ndef f(x):\n    return x\n"
         )
         self.assertEqual(len(messages), 1)
         self.assertEqual(messages[0].line, 2)
@@ -98,10 +89,7 @@ class TestUnspecifiedBackendLinter(unittest.TestCase):
         self.assertEqual(messages, [])
 
     def test_unrelated_compile_is_ignored(self):
-        messages = self._check(
-            "import re\n"
-            'p = re.compile("x")\n'
-        )
+        messages = self._check('import re\np = re.compile("x")\n')
         self.assertEqual(messages, [])
 
     def test_multiple_offenders(self):
