@@ -170,6 +170,18 @@ class TestCuptiRecords(TestCase):
             self.assertEqual(CuptiMonitor(buffer_size=2048).buffer_size, 2048)
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    def test_monitor_use_approx_timestamps_arg(self):
+        # The approx-clock timestamp callback is a constructor setting (no env var):
+        # off by default, on when use_approx_timestamps=True. No CUDA, but constructing
+        # CuptiMonitor loads libcupti (>= 13.3) via pylibcupti().
+        from torch.profiler._cupti.monitor import CuptiMonitor
+
+        self.assertFalse(CuptiMonitor()._timestamp_callback_enabled)
+        self.assertTrue(
+            CuptiMonitor(use_approx_timestamps=True)._timestamp_callback_enabled
+        )
+
+    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     def test_monitor_external_correlation_not_started(self):
         # External-correlation push/pop are no-ops until the monitor is started (no
         # subscriber yet), returning None rather than touching CUPTI's global stack.
@@ -684,7 +696,7 @@ class TestWindowFinalizer(TestCase):
             # _poll_once() by hand for determinism.
             self._init_observation_window(poll_interval_ms=3_600_000)
 
-        def now_native_ns(self) -> int:
+        def now_record_ns(self) -> int:
             return self._clock
 
         def deliver(self, *starts: int) -> None:
@@ -1781,6 +1793,76 @@ class TestCuptiMonitorNative(TestCase):
         item_b = pyprof._cupti_monitor.get_completed()
         self.assertEqual(item_b[4], [(3, 8, [(0, 0, 4)])])
         pyprof._cupti_monitor.return_buffer(item_b[0])
+
+
+@unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
+class TestCuptiClock(TestCase):
+    """Clock-alignment math for the cupti_monitor -- record timestamps -> unix-epoch ns on
+    kineto's axis. Drives the production _SynchronizedClock directly (its calibrate() reads
+    the native clock through an injected callable), so no CUDA / live CUPTI session is needed;
+    a lambda returning CLOCK_REALTIME stands in for cuptiGetTimestamp."""
+
+    @staticmethod
+    def _realtime():
+        return time.clock_gettime_ns(time.CLOCK_REALTIME)
+
+    def test_realtime_fallback_is_identity(self):
+        # cuptiGetTimestamp == CLOCK_REALTIME == kineto's unix base: records are already unix
+        # ns, so conversion is identity (offset 0) and 0 stays 0.
+        import numpy as np
+
+        from torch.profiler._cupti.monitor import _SynchronizedClock
+
+        clock = _SynchronizedClock()
+        clock.calibrate(callback_active=False, native_now=self._realtime)
+        v = self._realtime() + 12_345
+        self.assertEqual(clock.convert_unix(v), v)
+        col = np.array([self._realtime(), 0, self._realtime() + 50], dtype=np.int64)
+        np.testing.assert_array_equal(clock.convert_unix_array(col), col)
+
+    def test_callback_scales_approx_ticks_to_unix(self):
+        # Timestamp-callback path: records are approx ticks. calibrate() recovers the
+        # converter's slope from two synthetic evaluations and applies it as a linear map (so
+        # it never calls the converter per record); pass calibrate a converter we hold and
+        # verify convert reproduces it -- to integer-rounding noise -- across a range of ticks.
+        import numpy as np
+
+        from torch.profiler._cupti.monitor import _SynchronizedClock
+
+        conv = torch._C._profiler._ApproximateClockToUnixTimeConverter()
+        clock = _SynchronizedClock()
+        clock.calibrate(callback_active=True, native_now=self._realtime, converter=conv)
+        a0 = clock.approx_anchor_ns
+        ticks = [a0, a0 + 1000, a0 + 10_000_000, a0 + 5_000_000_000]
+        for t in ticks:
+            self.assertLessEqual(abs(clock.convert_approx(t) - conv.to_unix_ns(t)), 2)
+        col = np.array([*ticks, 0], dtype=np.int64)
+        got = clock.convert_approx_array(col)
+        self.assertEqual(int(got[-1]), 0)  # 0 sentinel preserved
+        for i, t in enumerate(ticks):
+            self.assertLessEqual(abs(int(got[i]) - conv.to_unix_ns(t)), 2)
+
+    def test_unix_array_bypasses_callback_scaling(self):
+        # PM-sampling frames stay on the unix (CLOCK_REALTIME) domain even under the timestamp
+        # callback, which moves *records* to the approx domain. convert_unix_array applies the
+        # native->unix offset (~identity here, since native == realtime == unix), so native ns
+        # land back on ~themselves and 0 stays 0 -- whereas convert_approx_array (the record path
+        # under the callback) would misread the same column as approx ticks and diverge wildly.
+        import numpy as np
+
+        from torch.profiler._cupti.monitor import _SynchronizedClock
+
+        conv = torch._C._profiler._ApproximateClockToUnixTimeConverter()
+        clock = _SynchronizedClock()
+        clock.calibrate(callback_active=True, native_now=self._realtime, converter=conv)
+        col = np.array(
+            [self._realtime(), 0, self._realtime() + 1_000_000], dtype=np.int64
+        )
+        got = clock.convert_unix_array(col)
+        self.assertEqual(int(got[1]), 0)  # 0 sentinel preserved
+        for i in (0, 2):
+            self.assertLessEqual(abs(int(got[i]) - int(col[i])), 100_000)
+        self.assertFalse(np.array_equal(clock.convert_approx_array(col), got))
 
 
 if __name__ == "__main__":
