@@ -135,7 +135,7 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     if (xpu_event)
       delete xpu_event;
 
-    if (flag == EventFlag::BACKEND_DEFAULT) {
+    if (flag & EventFlag::TIMING) {
       // Use the profiling tag to record the event to enable timing feature.
       xpu_event =
           new sycl::event(sycl::ext::oneapi::experimental::submit_profiling_tag(
