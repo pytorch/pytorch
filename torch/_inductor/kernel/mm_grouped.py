@@ -147,8 +147,8 @@ def has_grouped_mm_triton_support() -> bool:
     if not torch.cuda.is_available():
         return False
     if torch.version.hip:
-        # ROCm grouped_mm always has the ATen fallback: a loop over mm_out/bmm_out,
-        # which uses hipBLASLt where available and rocBLAS otherwise.
+        # The grouped GEMM Triton template is supported on ROCm too. ATen
+        # remains a separate autotune choice when fallback kernels are enabled.
         return True
     return torch.cuda.get_device_capability() >= (9, 0)
 
