@@ -13,13 +13,11 @@ PythonCallbackWork::PythonCallbackWork(py::function callback)
 
 PythonCallbackWork::~PythonCallbackWork() {
   torch::detail::SafeGilScopedAcquire ag;
-  if (ag.acquired()) {
+  if (ag) {
     callback_.dec_ref();
   }
   // Explicitly set callback_ to nullptr to prevent py::object's dtor
-  // to decref on the PyObject again. If the GIL could not be acquired
-  // above, this deliberately leaks the reference rather than touching
-  // the refcount without the GIL held.
+  // to decref on the PyObject again.
   // See Note [Destructing py::object] in python_ivalue.h
   callback_.ptr() = nullptr;
 }

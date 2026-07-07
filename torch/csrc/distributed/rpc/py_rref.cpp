@@ -143,13 +143,11 @@ PyRRef::PyRRef(const py::object& value, const py::object& type_hint)
 PyRRef::~PyRRef() {
   if (type_.has_value()) {
     torch::detail::SafeGilScopedAcquire ag;
-    if (ag.acquired()) {
+    if (ag) {
       (*type_).dec_ref();
     }
     // explicitly setting PyObject* to nullptr to prevent py::object's dtor to
-    // decref on the PyObject again. If the GIL could not be acquired above,
-    // this deliberately leaks the reference rather than touching the
-    // refcount without the GIL held.
+    // decref on the PyObject again.
     // See Note [Destructing py::object] in python_ivalue.h
     (*type_).ptr() = nullptr;
   }

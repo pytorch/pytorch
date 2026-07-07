@@ -94,13 +94,11 @@ struct C10_EXPORT ConcretePyObjectHolder final : PyObjectHolder {
   // https://docs.python.org/3/c-api/refcounting.html#c.Py_XDECREF
   ~ConcretePyObjectHolder() override {
     torch::detail::SafeGilScopedAcquire ag;
-    if (ag.acquired()) {
+    if (ag) {
       py_obj_.dec_ref();
     }
     // explicitly setting PyObject* to nullptr to prevent py::object's dtor to
-    // decref on the PyObject again. If the GIL could not be acquired above,
-    // this deliberately leaks the reference rather than touching the
-    // refcount without the GIL held.
+    // decref on the PyObject again.
     py_obj_.ptr() = nullptr;
   }
 

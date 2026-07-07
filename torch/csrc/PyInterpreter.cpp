@@ -244,8 +244,7 @@ void ConcretePyInterpreterVTable::decref(PyObject* pyobj) const {
   // they must use SafeGilScopedAcquire (see its comment) rather than a bare
   // pybind11::gil_scoped_acquire.
   torch::detail::SafeGilScopedAcquire gil;
-  if (!gil.acquired()) {
-    // Leak pyobj rather than touch its refcount without the GIL held.
+  if (!gil) {
     return;
   }
   Py_DECREF(pyobj);
@@ -255,7 +254,7 @@ void ConcretePyInterpreterVTable::incref(PyObject* pyobj) const {
   if (!Py_IsInitialized())
     return;
   torch::detail::SafeGilScopedAcquire gil;
-  if (!gil.acquired()) {
+  if (!gil) {
     return;
   }
   Py_INCREF(pyobj);
@@ -266,7 +265,7 @@ bool ConcretePyInterpreterVTable::try_incref(
   if (!Py_IsInitialized())
     return false;
   torch::detail::SafeGilScopedAcquire gil;
-  if (!gil.acquired()) {
+  if (!gil) {
     return false;
   }
   PyObject* pyobj = pyobj_slot.load_pyobj();
@@ -280,7 +279,7 @@ size_t ConcretePyInterpreterVTable::refcnt(PyObject* pyobj) const {
   if (!Py_IsInitialized() || pyobj == nullptr)
     return 0;
   torch::detail::SafeGilScopedAcquire gil;
-  if (!gil.acquired()) {
+  if (!gil) {
     return 0;
   }
   return Py_REFCNT(pyobj);

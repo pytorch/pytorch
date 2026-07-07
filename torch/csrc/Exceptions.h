@@ -393,8 +393,10 @@ namespace detail {
 // new Python thread state fails). Callers reachable from noexcept contexts
 // (destructors, refcount-management callbacks) must use this instead of
 // pybind11::gil_scoped_acquire directly, since an exception escaping a
-// noexcept function calls std::terminate. Check acquired() before touching
-// any Python API that requires the GIL.
+// noexcept function calls std::terminate. Check the bool conversion before
+// touching any Python API that requires the GIL; if it's false, the GIL
+// could not be acquired and the caller must leak rather than touch
+// refcounts without holding it.
 //
 // NB: deliberately still uses the default (not _simple) gil_scoped_acquire.
 // gil_scoped_acquire_simple (PyGILState_Ensure) inherits CPython's behavior
@@ -412,7 +414,7 @@ class SafeGilScopedAcquire {
       LOG(ERROR) << "Failed to acquire the GIL: " << e.what();
     }
   }
-  bool acquired() const {
+  explicit operator bool() const {
     return guard_.has_value();
   }
 
