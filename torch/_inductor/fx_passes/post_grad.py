@@ -4,7 +4,6 @@ import functools
 import itertools
 import logging
 import operator
-import os
 from collections import Counter, defaultdict
 from collections.abc import Callable, Sequence
 from typing import Any, TypeVar
@@ -2028,10 +2027,6 @@ def addmm(match, mat1, mat2, *, inp):
 
 def _is_addcdiv_fma_eligible(match: Match) -> bool:
     """Guards for the addcdiv FMA re-fusion pass."""
-    # Set PYTORCH_DISABLE_ROCM_FMA=1 to skip this pass (restores pre-PR behavior).
-    if torch.version.hip and os.environ.get("PYTORCH_DISABLE_ROCM_FMA", "0") != "0":
-        return False
-
     # aten.addcdiv requires floating-point self; check inp, not output, because
     # aten.div promotes integers to float so the output is float even for int inp.
     inp_val = match.kwargs["inp"].meta.get("val")

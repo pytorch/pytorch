@@ -670,18 +670,6 @@ def promote_constants(
     return out
 
 
-def _rocm_fma_disabled() -> bool:
-    """Return True when ROCm FMA lowering should be skipped.
-
-    Set PYTORCH_DISABLE_ROCM_FMA=1 to restore pre-PR behavior (no FMA on ROCm).
-    This is used to bisect which test failures are caused by the ROCm FMA change.
-    Has no effect on CUDA (non-ROCm) builds.
-    """
-    return bool(
-        torch.version.hip and os.environ.get("PYTORCH_DISABLE_ROCM_FMA", "0") != "0"
-    )
-
-
 def _add_with_alpha_fma(a, b, alpha):
     """Compute a + alpha * b using FMA for CUDA floating-point precision."""
     dtype = get_promoted_dtype(
@@ -777,7 +765,6 @@ def make_pointwise(
                         inputs[0].get_dtype().is_floating_point
                         and inp_device is not None
                         and inp_device.type == "cuda"
-                        and not _rocm_fma_disabled()
                     ):
                         return _add_with_alpha_fma(inputs[0], inputs[1], alpha)
 
@@ -8416,7 +8403,6 @@ def addcmul(self, tensor1, tensor2, *, value=1):
         dtype.is_floating_point
         and device is not None
         and device.type in ["cuda", "xpu"]
-        and not _rocm_fma_disabled()
     )
 
     def inner_fn(idx):
@@ -8492,7 +8478,6 @@ def addcdiv(self, tensor1, tensor2, *, value=1):
         dtype.is_floating_point
         and device is not None
         and device.type in ["cuda", "xpu"]
-        and not _rocm_fma_disabled()
     )
 
     def inner_fn(idx):

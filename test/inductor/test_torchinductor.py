@@ -19033,7 +19033,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     def test_addcdiv_fma_uses_fma_and_div_rn(self):
         """Test that addcdiv re-fusion emits tl.fma and triton.language.div_rn."""
         from torch._dynamo.utils import counters
-        from torch._inductor.compile_fx import fx_compile_mode, FxCompileMode
 
         # Reset the compilation cache so the counter is incremented on a fresh
         # compile regardless of what ran earlier in the test session.
@@ -19053,7 +19052,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         # The counter increments inside the compilation process. In SUBPROCESS
         # mode the compile runs in a child process so the counter is not visible
         # here; skip that assertion and rely on the generated-code checks below.
-        if fx_compile_mode != FxCompileMode.SUBPROCESS:
+        if torch._inductor.compile_fx.fx_compile_mode != FxCompileMode.SUBPROCESS:
             self.assertEqual(counters["inductor"].get("addcdiv_fma_fused", 0), 1)
         self.assertIn("tl.fma", code)
         self.assertIn("triton.language.div_rn", code)
