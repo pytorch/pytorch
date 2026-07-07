@@ -5713,11 +5713,12 @@ class TestGradTrackingTensorToList(TestCase):
         self.assertEqual(result, [2.0 + 4.0j, 6.0 + 8.0j])
 
 
-only_for = ("cpu", "cuda")
+only_for = ("cpu", "cuda", "xpu")
 instantiate_device_type_tests(
     TestGradTransform,
     globals(),
     only_for=only_for,
+    allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestVmapOfGrad,
@@ -5738,6 +5739,7 @@ instantiate_device_type_tests(
     TestLinearize,
     globals(),
     only_for=only_for,
+    allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestVmapJvpInplaceView,
@@ -5753,11 +5755,13 @@ instantiate_device_type_tests(
     TestComposability,
     globals(),
     only_for=only_for,
+    allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestExamplesCorrectness,
     globals(),
     only_for=only_for,
+    allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestHigherOrderOperatorInteraction,
@@ -5768,6 +5772,7 @@ instantiate_device_type_tests(
     TestFunctionalize,
     globals(),
     only_for=only_for,
+    allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestAutogradFunction,
@@ -5791,6 +5796,7 @@ instantiate_device_type_tests(
     TestCompileTransforms,
     globals(),
     only_for=only_for,
+    allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestGradTrackingTensorToList, globals(), only_for=only_for
