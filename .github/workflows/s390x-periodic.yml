@@ -56,7 +56,7 @@ jobs:
 
   linux-manylinux-2_28-py3-cpu-s390x-test:
     name: linux-manylinux-2_28-py3-cpu-s390x
-    uses: ./.github/workflows/_linux-test.yml
+    uses: ./.github/workflows/_s390x-test.yml
     needs:
       - linux-manylinux-2_28-py3-cpu-s390x-build
       - target-determination
