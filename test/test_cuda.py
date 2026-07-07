@@ -1714,6 +1714,28 @@ print(t.is_pinned())
         self.assertEqual(src_prev_stream, torch.cuda.current_stream())
         self.assertEqual(dst_prev_stream, torch.cuda.current_stream(dst_device))
 
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_event_elapsed_time_restores_device_on_error(self):
+        # The device-generic event path (torch.Event -> CUDAGuardImpl::elapsedTime)
+        # temporarily switches to the event's device to call cudaEventElapsedTime.
+        # A cross-device elapsed_time raises inside that switched region; the
+        # current device must still be restored on the throwing path. Regression
+        # test for the RAII restore in c10::cuda::impl::CUDAGuardImpl.
+        torch.cuda.set_device(0)
+        e0 = torch.Event(enable_timing=True)
+        e1 = torch.Event(enable_timing=True)
+        e0.record(torch.Stream(0))
+        e1.record(torch.Stream(1))
+        torch.cuda.synchronize(0)
+        torch.cuda.synchronize(1)
+        self.assertEqual(torch.cuda.current_device(), 0)
+
+        # device_index of elapsedTime is e1's device (1); the cross-device call
+        # switches to device 1 and then raises.
+        with self.assertRaises(RuntimeError):
+            e1.elapsed_time(e0)
+        self.assertEqual(torch.cuda.current_device(), 0)
+
     def test_noncontiguous_pinned_memory(self):
         # See issue #3266
         x = torch.arange(0, 10).view((2, 5))
