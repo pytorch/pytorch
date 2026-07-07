@@ -53,7 +53,6 @@ from ..pattern_matcher import (
 from ..utils import (
     decode_device,
     get_all_devices,
-    get_gpu_type,
     is_gpu,
     is_pointwise_use,
     OPTIMUS_EXCLUDE_POST_GRAD,
@@ -1771,12 +1770,40 @@ def view_to_reshape(gm):
     _recursive_view_to_reshape(gm.graph)
 
 
+def _is_bias_like_addmm_input(inp: torch.fx.Node, output: torch.fx.Node) -> bool:
+    if inp.op in ("placeholder", "get_attr"):
+        return True
+
+    inp_val = inp.meta.get("val")
+    output_val = output.meta.get("val")
+    if not (isinstance(inp_val, torch.Tensor) and isinstance(output_val, torch.Tensor)):
+        return False
+
+    if len(inp_val.shape) != len(output_val.shape):
+        return True
+
+    same_shape = statically_known_true(sym_eq(inp_val.shape, output_val.shape))
+    if not same_shape:
+        for inp_dim, output_dim in zip(inp_val.shape, output_val.shape):
+            if statically_known_true(sym_eq(inp_dim, 1)) and not statically_known_true(
+                sym_eq(output_dim, 1)
+            ):
+                return True
+        return False
+
+    return inp_val.layout == torch.strided and any(
+        statically_known_true(sym_eq(stride, 0)) for stride in inp_val.stride()
+    )
+
+
 def should_prefer_unfused_addmm(match):
     inp = match.kwargs["inp"]
     if not is_gpu(inp.meta["val"].device.type):
         return False
 
     output = match.output_node()
+    if not _is_bias_like_addmm_input(inp, output):
+        return False
     return all(is_pointwise_use(use) for use in output.users)
 
 
@@ -2271,6 +2298,16 @@ def move_constructors_to_gpu(graph: fx.Graph) -> None:
     """
     Moves intermediary tensors which are constructed on the cpu to gpu when safe
     """
+    gpu_types: OrderedSet[str] = OrderedSet(
+        val.device.type
+        for node in graph.nodes
+        if isinstance((val := node.meta.get("val")), torch.Tensor)
+        and is_gpu(val.device.type)
+    )
+    if not gpu_types:
+        return
+    if len(gpu_types) != 1:
+        return
 
     # cudagraph does not support cpu tensors. In this pass, we update the graph
     # by explicitly moving cpu scalar tensors to gpu when profitable, relying on
@@ -2281,7 +2318,7 @@ def move_constructors_to_gpu(graph: fx.Graph) -> None:
         and torch._inductor.config.graph_partition
     )
     ConstructorMoverPass(
-        get_gpu_type(),
+        next(iter(gpu_types)),
         allow_inputs=allow_inputs_outputs,
         allow_outputs=allow_inputs_outputs,
     )(graph)
