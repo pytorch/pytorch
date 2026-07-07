@@ -6,7 +6,7 @@ import os
 import re
 import sys
 from itertools import count, zip_longest
-from typing import Any
+from typing import Any, cast
 from typing_extensions import Self
 
 import sympy
@@ -26,6 +26,7 @@ from ..ir import (
     TMADescriptorStable,
 )
 from ..runtime.hints import (
+    InductorMeta,
     TRITON_DEFAULT_BLOCK_SIZES,
     TRITON_DEFAULT_RSPLIT,
     TRITON_DEFAULT_RSPLIT_SIZE,
@@ -498,7 +499,9 @@ class DeferredTritonCallWrapper:
         else:
             from ..runtime.triton_heuristics import GridExpr
 
-            grid = GridExpr.from_meta_lazy(self.inductor_meta, kernel_name)
+            grid = GridExpr.from_meta_lazy(
+                cast("InductorMeta | None", self.inductor_meta), kernel_name
+            )
             for line in grid.prefix:
                 prefix.writeline(line)
 
@@ -818,7 +821,9 @@ class DeferredTritonCallWrapper:
     ):
         from ..runtime.triton_heuristics import GridExpr
 
-        grid = GridExpr.from_meta(inductor_meta, params["config"], mode="cpp")
+        grid = GridExpr.from_meta(
+            cast("InductorMeta", inductor_meta), params["config"], mode="cpp"
+        )
         for line in grid.prefix:
             prefix.writeline(line)
         prefix.splice(
