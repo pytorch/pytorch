@@ -2036,11 +2036,7 @@ kernel void gemmLU(
   tensor<device float, dextents<int32_t, 2>, tensor_inline> tC(
       cP, dextents<int32_t, 2>(Tn, Tm), array<int32_t, 2>{1, gN});
 
-  const bool inside = (ro + BM <= Tm) && (co + BN <= Tn);
-  if (inside) {
-    auto mA = tA.template slice<dynamic_extent, BM>(0, ro);
-    auto mB = tB.template slice<BN, dynamic_extent>(co, 0);
-    auto mC = tC.template slice<BN, BM>(co, ro);
+  auto schur = [&](auto mA, auto mB, auto mC, bool checkValid) {
     auto cT = op.template get_destination_cooperative_tensor<
         decltype(mA),
         decltype(mB),
@@ -2048,24 +2044,7 @@ kernel void gemmLU(
     op.run(mA, mB, cT);
     uint16_t e = 0;
     for (auto it = cT.begin(); it != cT.end(); ++it, ++e) {
-      auto idx = it.get_multidimensional_index();
-      const int r = ro + int(idx[1]);
-      const int c = co + int(idx[0]);
-      cT[e] = cP[r * gN + c] - cT[e];
-    }
-    cT.store(mC);
-  } else {
-    auto mA = tA.slice(0, ro);
-    auto mB = tB.slice(co, 0);
-    auto mC = tC.slice(co, ro);
-    auto cT = op.template get_destination_cooperative_tensor<
-        decltype(mA),
-        decltype(mB),
-        float>();
-    op.run(mA, mB, cT);
-    uint16_t e = 0;
-    for (auto it = cT.begin(); it != cT.end(); ++it, ++e) {
-      if (!cT.is_valid_element(e)) {
+      if (checkValid && !cT.is_valid_element(e)) {
         continue;
       }
       auto idx = it.get_multidimensional_index();
@@ -2074,6 +2053,17 @@ kernel void gemmLU(
       cT[e] = cP[r * gN + c] - cT[e];
     }
     cT.store(mC);
+  };
+
+  const bool inside = (ro + BM <= Tm) && (co + BN <= Tn);
+  if (inside) {
+    schur(
+        tA.template slice<dynamic_extent, BM>(0, ro),
+        tB.template slice<BN, dynamic_extent>(co, 0),
+        tC.template slice<BN, BM>(co, ro),
+        false);
+  } else {
+    schur(tA.slice(0, ro), tB.slice(co, 0), tC.slice(co, ro), true);
   }
 }
 
