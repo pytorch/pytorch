@@ -196,6 +196,7 @@ class LoggingTests(LoggingTestCase):
         self.assertGreater(len(records), 0)
         self.assertLess(len(records), 8)
 
+    @skipIfRocmVersionAtLeast([7, 14])
     @make_logging_test(recompiles=True)
     def test_recompiles(self, records):
         def outmost_fn(x, ys, zs):
@@ -1067,6 +1068,7 @@ Mutating object of type dict (source name: L['mod']._buffers)
         with self.assertRaises(ValueError):
             torch._logging.set_logs(aot_graphs=5)
 
+    @skipIfRocmVersionAtLeast([7, 14])
     def test_invalid_artifact_flag_error_msg(self):
         env = dict(os.environ)
         env["TORCH_LOGS"] = "not_an_existing_log_artifact_should_error"

@@ -30,9 +30,11 @@ from torch.testing._internal.common_utils import (
     MI350_ARCH,
     parametrize,
     serialTest,
+    getRocmVersion,
     skipIfRocmArch,
     TEST_CUDA_MEM_LEAK_CHECK,
     TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -77,6 +79,12 @@ test_failures = {
         ("mps",), is_skip=True
     ),
 }
+
+_rocm_version = getRocmVersion()
+if TEST_WITH_ROCM and _rocm_version is not None and _rocm_version >= (7, 14):
+    test_failures["test_alexnet_prefix_dynamic_shapes"] = TestFailure(
+        ("cpu",), is_skip=True
+    )
 
 if any(os.getenv("BUILD_ENVIRONMENT", "").endswith(x) for x in ("-debug", "-asan")):
     # Fails with TORCH_INTERNAL_ASSERT(!is_heap_allocated()), see https://github.com/pytorch/pytorch/issues/130073

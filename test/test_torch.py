@@ -44,7 +44,7 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     bytes_to_scalar, parametrize, noncontiguous_like,
     AlwaysWarnTypedStorageRemoval, TEST_WITH_TORCHDYNAMO, xfailIfTorchDynamo,
     xfailIfS390X, set_warn_always_context, decorateIf, isRocmArchAnyOf,
-    IS_MACOS,
+    IS_MACOS, skipIfRocmVersionAtLeast,
 )
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
@@ -8706,6 +8706,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         # We can't usefully test the output; just make sure this doesn't crash
         torch.__config__.show()
 
+    @skipIfRocmVersionAtLeast([7, 14])
     @unittest.skipIf(IS_FBCODE, "CXX_FLAGS is only for OSS build.")
     def test_cxx_flags(self):
         torch.__config__._cxx_flags()

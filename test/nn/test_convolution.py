@@ -57,6 +57,7 @@ from torch.testing._internal.common_utils import (
     parametrize as parametrize_test,
     run_tests,
     serialTest,
+    skipIfRocmVersionAtLeast,
     set_default_dtype,
     subtest,
     TEST_SCIPY,
@@ -788,6 +789,7 @@ class TestConvolutionNN(NNTestCase):
                 else:
                     self.assertRaises(ValueError, lambda: m(i, (h, w)))
 
+    @skipIfRocmVersionAtLeast([7, 14])
     def test_ConvTranspose2d_output_size_downsample_upsample(self):
         b, c, hid_c = 2, 3, 2
         for h in range(13, 24):

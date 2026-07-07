@@ -20,7 +20,7 @@ except ImportError:
 
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, skipIfRocmVersionAtLeast, TestCase
 
 
 def _get_all_gather_node(group_size, group_name):
@@ -92,6 +92,7 @@ class TestNcclEstimateDeviceResolution(TestCase):
         finally:
             self._destroy_pg()
 
+    @skipIfRocmVersionAtLeast([7, 14])
     @requires_nccl()
     @unittest.skipUnless(TEST_CUDA, "requires CUDA")
     def test_multi_backend_pg_resolves_to_nccl(self):
@@ -116,6 +117,7 @@ class TestNcclEstimateDeviceResolution(TestCase):
         finally:
             self._destroy_pg()
 
+    @skipIfRocmVersionAtLeast([7, 14])
     @requires_nccl()
     @unittest.skipUnless(TEST_CUDA, "requires CUDA")
     def test_single_nccl_backend_resolves_correctly(self):

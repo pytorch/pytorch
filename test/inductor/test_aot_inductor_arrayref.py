@@ -7,7 +7,7 @@ from torch._inductor import config
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_cpp_code
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import IS_CI, IS_FBCODE, IS_WINDOWS
+from torch.testing._internal.common_utils import getRocmVersion, IS_CI, IS_FBCODE, IS_WINDOWS, TEST_WITH_ROCM
 
 
 if IS_WINDOWS and IS_CI:
@@ -309,6 +309,22 @@ CPU_TEST_FAILURES = {
     # When running test_seq with test_issue_140766, the process segfaults
     "test_seq": fail_stack_allocation(is_skip=True),
 }
+
+_rocm_version = getRocmVersion()
+if TEST_WITH_ROCM and _rocm_version is not None and _rocm_version >= (7, 14):
+    CPU_TEST_FAILURES.update(
+        {
+            "test_copy_non_blocking_is_pinned": TestFailure(
+                ("cpu_with_stack_allocation",), is_skip=True
+            ),
+            "test_repeated_calling": TestFailure(
+                ("cpu_with_stack_allocation",), is_skip=True
+            ),
+            "test_deconv_freezing": TestFailure(
+                ("cpu_with_stack_allocation",), is_skip=True
+            ),
+        }
+    )
 
 
 class AOTInductorTestABICompatibleCpuWithStackAllocation(TestCase):

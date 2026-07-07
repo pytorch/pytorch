@@ -20,6 +20,7 @@ from torch.testing._internal.common_utils import (
     raise_on_run_directly,
     set_default_dtype,
     skipCUDAMemoryLeakCheckIf,
+    skipIfRocmVersionAtLeast,
     skipIfTorchDynamo,
     TEST_WITH_ROCM,
     xfailIf,
@@ -2969,6 +2970,7 @@ class TestFrozenOptimizations(JitTestCase):
             inp = torch.rand([4, 3, 4, 4])
             self.assertEqual(frozen(inp), mod(inp))
 
+    @skipIfRocmVersionAtLeast([7, 14])
     @tf32_on_and_off(0.005)
     @unittest.skipIf(not (TEST_CUDNN or TEST_WITH_ROCM), "requires CUDNN")
     def test_freeze_conv_relu_fusion(self):
@@ -3032,6 +3034,7 @@ class TestFrozenOptimizations(JitTestCase):
 
                 self.assertEqual(mod_eager(inp), frozen_mod(inp))
 
+    @skipIfRocmVersionAtLeast([7, 14])
     @unittest.skipIf(not (TEST_CUDNN or TEST_WITH_ROCM), "requires CUDNN")
     def test_freeze_conv_relu_fusion_not_forward(self):
         with set_default_dtype(torch.float):

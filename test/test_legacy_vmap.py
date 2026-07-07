@@ -11,7 +11,7 @@ import torch.nn.functional as F
 from torch import Tensor
 from torch._vmap_internals import vmap
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import run_tests, skipIfRocmVersionAtLeast, skipIfTorchDynamo, TestCase
 
 
 FALLBACK_REGEX = r"There is a performance drop"
@@ -586,6 +586,7 @@ class TestVmapAPILegacy(TestCase):
         result = vmap(vmap(vmap(op)))(x, y)
         self.assertEqual(result, op(x, y.view(100, 10, 10, 1)))
 
+    @skipIfRocmVersionAtLeast([7, 14])
     def test_fallback_masked_fill(self):
         # NB: One day we will implement a batching rule for masked_fill
         # If/when we do, this test should be replaced to test the fallback

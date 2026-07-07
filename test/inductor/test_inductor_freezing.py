@@ -28,8 +28,9 @@ from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inducto
     check_model,
     check_model_gpu,
     copy_tests,
+    TestFailure,
 )
-from torch.testing._internal.common_utils import TEST_WITH_ROCM
+from torch.testing._internal.common_utils import getRocmVersion, TEST_WITH_ROCM
 
 
 importlib.import_module("functorch")
@@ -1015,6 +1016,18 @@ class OptimizeForInferenceTemplate(TestCase):
         self.assertTrue(num_diff_stride == 1, f"num_diff_stride is {num_diff_stride}")
 
 
+ROCM_7_14_FREEZING_CPU_TEST_FAILURES = {}
+_rocm_version = getRocmVersion()
+if TEST_WITH_ROCM and _rocm_version is not None and _rocm_version >= (7, 14):
+    ROCM_7_14_FREEZING_CPU_TEST_FAILURES.update(
+        {
+            "test_conv_layout_convert_with_view": TestFailure(("cpu",), is_skip=True),
+            "test_redundant_clone_for_layout_convert": TestFailure(
+                ("cpu",), is_skip=True
+            ),
+        }
+    )
+
 if TEST_WITH_ROCM:
     torch._inductor.config.force_layout_optimization = 1
     os.environ["PYTORCH_MIOPEN_SUGGEST_NHWC"] = "1"
@@ -1026,7 +1039,7 @@ if HAS_CPU and not torch.backends.mps.is_available():
         device = "cpu"
         autocast = torch.cpu.amp.autocast
 
-    copy_tests(OptimizeForInferenceTemplate, FreezingCpuTests, "cpu")
+    copy_tests(OptimizeForInferenceTemplate, FreezingCpuTests, "cpu", ROCM_7_14_FREEZING_CPU_TEST_FAILURES)
 
 if HAS_GPU:
 

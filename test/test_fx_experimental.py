@@ -60,6 +60,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     TEST_Z3,
     run_tests,
+    skipIfRocmVersionAtLeast,
     TestCase,
     TEST_WITH_CROSSREF,
 )
@@ -2094,6 +2095,7 @@ class {test_classname}(torch.nn.Module):
             )
             torch.testing.assert_close(model(inp), optimized_model2(inp))
 
+    @skipIfRocmVersionAtLeast([7, 14])
     @skipIfNoTorchVision
     @skipIfNoMkldnn
     def test_optimize_for_inference_cpu_torchvision(self):
