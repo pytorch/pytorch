@@ -19,8 +19,22 @@ from torch.testing._internal.common_utils import (
 from torch.utils._cuda_debug import warn_on_null_stream_use
 
 
+def _has_cupti():
+    try:
+        from cupti import cupti as cupti_module
+    except ImportError:
+        return False
+    return cupti_module is not None
+
+
+TEST_CUPTI = _has_cupti()
+
+
 if not TEST_CUDA:
     print("CUDA not available, skipping tests", file=sys.stderr)
+    TestCase = NoTest
+elif not TEST_CUPTI:
+    print("cupti-python not available, skipping tests", file=sys.stderr)
     TestCase = NoTest
 
 
