@@ -906,7 +906,8 @@ def _codegen_epilogue(
     rw_lines: list[str],
     rw_globals: dict[str, object],
     runtime_metadata: ViewAndMutationMeta,
-    runtime_epilogue: _RuntimeForwardEpilogue,
+    apply_mutations_fn: Callable[..., Any] | None,
+    replay_aliases_fn: Callable[..., Any] | None,
     num_mutated_runtime_inps: int,
     expected_outs: int,
 ) -> None:
@@ -920,12 +921,12 @@ def _codegen_epilogue(
         rw_lines.append(f"    updated_inputs = all_outs[:{num_mutated_runtime_inps}]")
         rw_lines.append(f"    fw_outs = all_outs[{num_mutated_runtime_inps}:]")
         rw_lines.append("    _apply_mutations_(orig_inputs, updated_inputs)")
-        rw_globals["_apply_mutations_"] = runtime_epilogue._apply_input_mutations
+        rw_globals["_apply_mutations_"] = apply_mutations_fn
     else:
         rw_lines.append("    fw_outs = all_outs")
 
     if runtime_metadata.num_outputs_aliased > 0:
-        rw_globals["_replay_aliases_"] = runtime_epilogue._replay_output_aliases
+        rw_globals["_replay_aliases_"] = replay_aliases_fn
         rw_lines.append("    ret_outs = _replay_aliases_(orig_inputs, fw_outs)")
     else:
         rw_lines.append("    ret_outs = fw_outs")
@@ -966,6 +967,12 @@ def _create_runtime_wrapper(
         trace_joint=trace_joint,
         keep_input_mutations=keep_input_mutations,
     )
+
+    # The orchestration closes over these two codegen'd epilogue functions directly
+    # (bound into rw_globals as _apply_mutations_ / _replay_aliases_ in _codegen_epilogue).
+    # Each stays None when its epilogue step is absent for this graph.
+    codegen_apply_mutations: Callable[..., Any] | None = None
+    _codegen_alias_fn: Callable[..., Any] | None = None
 
     # Codegen output alias regeneration: emit straight-line code per output
     # with all handler branches resolved at compile time.
@@ -1025,19 +1032,10 @@ def _create_runtime_wrapper(
         alias_lines.append("    return ret_outs")
         alias_source = "\n".join(alias_lines)
 
-        from .subclass_codegen import _compile_and_exec_source
+        from .codegen import _compile_and_exec_source
 
         _codegen_alias_fn = _compile_and_exec_source(
             alias_source, alias_globals, "_alias_fn", "output_alias_wrapper"
-        )
-        import types
-
-        def _replay_alias(self, orig_inputs, fw_outs):
-            return _codegen_alias_fn(orig_inputs, fw_outs)
-
-        runtime_epilogue._replay_output_aliases = types.MethodType(  # type: ignore[attr-defined]
-            _replay_alias,
-            runtime_epilogue,
         )
 
     def record_runtime_wrapper_prologue_enter() -> AbstractContextManager[None] | None:
@@ -1119,21 +1117,13 @@ def _create_runtime_wrapper(
             mut_lines.append("    pass")
         mut_source = "\n".join(mut_lines)
 
-        from .subclass_codegen import _compile_and_exec_source
+        from .codegen import _compile_and_exec_source
 
         codegen_apply_mutations = _compile_and_exec_source(
             mut_source, mut_globals, "_apply_mutations", "mutation_epilogue"
         )
-        import types
 
-        runtime_epilogue._apply_input_mutations = types.MethodType(  # type: ignore[attr-defined]
-            lambda self, orig_inputs, updated_inputs: codegen_apply_mutations(
-                orig_inputs, updated_inputs
-            ),
-            runtime_epilogue,
-        )
-
-    from .subclass_codegen import _compile_and_exec_source
+    from .codegen import _compile_and_exec_source
 
     epilogue_args_idx = runtime_epilogue.epilogue_args_idx
     num_mutated_runtime_inps = runtime_metadata.num_mutated_inp_runtime_indices
@@ -1160,7 +1150,8 @@ def _create_runtime_wrapper(
         rw_lines,
         rw_globals,
         runtime_metadata,
-        runtime_epilogue,
+        codegen_apply_mutations,
+        _codegen_alias_fn,
         num_mutated_runtime_inps,
         expected_outs,
     )
@@ -1258,7 +1249,7 @@ class FunctionalizedRngRuntimeWrapper(InductorWrapper):
                 f"expected num_outputs_rng_offset == 1, got {runtime_metadata.num_outputs_rng_offset}"
             )
 
-        from .subclass_codegen import _compile_and_exec_source
+        from .codegen import _compile_and_exec_source
 
         offset_index = runtime_metadata.num_forward_returns
         lines = ["def _functionalized_rng_wrapper(runtime_args):"]
@@ -1483,7 +1474,7 @@ class EffectTokensWrapper(CompilerWrapper):
         if num_tokens == 0:
             return compiled_fn
 
-        from .subclass_codegen import _compile_and_exec_source
+        from .codegen import _compile_and_exec_source
 
         lines = ["def _effect_tokens_wrapper(args):"]
         lines.append(f"    new_args = [{', '.join(['None'] * num_tokens)}, *args]")
@@ -1787,7 +1778,7 @@ class AOTDedupeWrapper(CompilerWrapper):
             f"    args.clear()\n"
             f"    return compiled_fn(deduped_args)\n"
         )
-        from .subclass_codegen import _compile_and_exec_source
+        from .codegen import _compile_and_exec_source
 
         wrapped_compiled_fn: Callable[..., Any] = _compile_and_exec_source(  # type: ignore[assignment]
             source,
@@ -2034,7 +2025,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         if not self.needs_post_compile:
             return compiled_fn
 
-        from .subclass_codegen import _compile_and_exec_source
+        from .codegen import _compile_and_exec_source
 
         base_groups = self.base_groups
         other_indices = self.other_arg_indices
@@ -2986,7 +2977,7 @@ def _codegen_backward_prologue(
     maybe_subclass_meta: SubclassMeta | None,
     codegen_unwrap_fn: Callable[..., Any] | None,
 ) -> Callable[..., Any]:
-    from .subclass_codegen import _compile_and_exec_source
+    from .codegen import _compile_and_exec_source
 
     num_mutated_runtime_inps = fw_metadata.num_mutated_inp_runtime_indices
     num_outputs = fw_metadata.num_outputs
@@ -3152,7 +3143,7 @@ def _codegen_backward_epilogue(
     maybe_subclass_meta: SubclassMeta | None,
     codegen_wrap_fn: Callable[..., Any] | None,
 ) -> Callable[..., Any]:
-    from .subclass_codegen import _compile_and_exec_source
+    from .codegen import _compile_and_exec_source
 
     num_bw_tokens = fw_metadata.num_backward_tokens
     is_rng = fw_metadata.is_rng_op_functionalized
@@ -3211,7 +3202,7 @@ def _codegen_compiled_forward(
     disable_amp: bool,
     num_rng: int,
 ) -> Callable[..., Any]:
-    from .subclass_codegen import _compile_and_exec_source
+    from .codegen import _compile_and_exec_source
 
     lines: list[str] = [
         "def _compiled_forward(ctx, args, _rng_add_, _save_, _finalize_, _compiled_fw_):"
@@ -3255,7 +3246,7 @@ def _codegen_compiled_backward(
     num_tensors_no_vc_check: int | None,
     inputs_require_grad: bool,
 ) -> Callable[..., Any]:
-    from .subclass_codegen import _compile_and_exec_source
+    from .codegen import _compile_and_exec_source
 
     lines: list[str] = [
         "def _compiled_backward("
@@ -3447,7 +3438,7 @@ class _AOTDispatchAutogradFunctionFactory:
 
         _xform_source = "\n".join(_xform_lines)
 
-        from .subclass_codegen import _compile_and_exec_source
+        from .codegen import _compile_and_exec_source
 
         _codegen_transform_raw_returns: Callable[..., list[Any]] = (
             _compile_and_exec_source(  # type: ignore[assignment]
@@ -3846,7 +3837,7 @@ class DebugAssertWrapper(CompilerWrapper):
         source = "\n".join(lines)
         globals_dict["Tensor"] = Tensor
 
-        from .subclass_codegen import _compile_and_exec_source
+        from .codegen import _compile_and_exec_source
 
         return _compile_and_exec_source(
             source,
