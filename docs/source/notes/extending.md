@@ -667,7 +667,6 @@ into issues:
 ```{code-block} python
 :dedent: 2
 
-  >>> import torch
   >>> torch.mean(d)
   TypeError: mean(): argument 'input' (position 1) must be Tensor, not ScalarTensor
 
@@ -1163,7 +1162,6 @@ Here is an example that shows logging modes of each type:
 ```{code-block} python
 :dedent: 2
 
-  import torch
   from torch.overrides import TorchFunctionMode, resolve_name
   from torch.utils._python_dispatch import TorchDispatchMode
 

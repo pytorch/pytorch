@@ -74,8 +74,6 @@ suggest to use the new APIs for better control.
 We can set float32 precision per backend and per operators. We can also override the global setting for a specific operator.
 
 ```python
-import torch
-
 torch.backends.fp32_precision = "ieee"
 torch.backends.cuda.matmul.fp32_precision = "ieee"
 torch.backends.cudnn.fp32_precision = "ieee"
@@ -744,8 +742,6 @@ The user is responsible for supplying the path to the `.so` file and the name
 of the alloc/free functions that match the signatures specified above.
 
 ```python
-import torch
-
 # Load the allocator
 new_alloc = torch.cuda.memory.CUDAPluggableAllocator(
     'alloc.so', 'my_malloc', 'my_free')
@@ -805,7 +801,6 @@ The code below shows `ncclMemAlloc` wrapped in a {class}`torch.cuda.memory.CUDAP
 ```python
 import os
 
-import torch
 import torch.distributed as dist
 from torch.cuda.memory import CUDAPluggableAllocator
 from torch.distributed.distributed_c10d import _get_default_group
@@ -1176,7 +1171,6 @@ have a flag that can be used to disable CUDA, in combination with
 
 ```python
 import argparse
-import torch
 
 parser = argparse.ArgumentParser(description='PyTorch Example')
 parser.add_argument('--disable-cuda', action='store_true',
@@ -1843,8 +1837,6 @@ An example of using the cudagraphs backend to torch.compile on code
 using torch.cond is demonstrated below:
 
 ```python
-import torch
-
 def true_fn(x):
     return x.sin()
 
