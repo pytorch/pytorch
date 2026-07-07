@@ -1933,8 +1933,10 @@ optim_db: list[OptimizerInfo] = [
         Muon,
         optim_inputs_func=optim_inputs_func_muon,
         optim_error_inputs_func=optim_error_inputs_func_muon,
-        supported_impls=(),
-        not_og_supported_flags=(),
+        supported_impls=("foreach",),
+        # `foreach` was not in the original Muon release; it must be exercised by
+        # the BC tests that compare new impls against the original (single-tensor).
+        not_og_supported_flags=("foreach",),
         supports_complex=False,
         skips=(
             # Note on numerical differences: `compile` applies different matmul tuning,
@@ -1947,6 +1949,13 @@ optim_db: list[OptimizerInfo] = [
                 ),
                 "CompiledOptimizerParityTests",
                 "test_correctness",
+            ),
+            DecorateInfo(
+                unittest.skip(
+                    "Muon only supports 2D params; its Newton-Schulz foreach path is not applicable to the generic 1D large tensor test."
+                ),
+                "TestOptimRenewed",
+                "test_foreach_large_tensor",
             ),
         ),
     ),
