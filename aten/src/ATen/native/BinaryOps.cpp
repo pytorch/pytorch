@@ -831,6 +831,12 @@ static Tensor& add_relu_impl(
   } else if (self.dtype() == at::kDouble) {
     min_val = 0.0;
     max_val = std::numeric_limits<double>::max();
+  } else if (self.dtype() == at::kHalf) {
+    min_val = 0.0;
+    max_val = static_cast<double>(std::numeric_limits<at::Half>::max());
+  } else if (self.dtype() == at::kBFloat16) {
+    min_val = 0.0;
+    max_val = static_cast<double>(std::numeric_limits<at::BFloat16>::max());
   } else {
     TORCH_INTERNAL_ASSERT(
         false, "Unsupported datatype for add_relu:", self.dtype().name());
