@@ -402,7 +402,7 @@ class StreamVariable(StreamContextVariable):
     def python_type(self) -> type:
         return self._cpython_type
 
-    def var_getattr(
+    def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> "VariableTracker":
         if self._device_handle_attr is not None and name == self._device_handle_attr:
@@ -417,7 +417,7 @@ class StreamVariable(StreamContextVariable):
             if hasattr(self.value, "native_handle"):
                 return ConstantVariable.create(self.value.native_handle)
 
-        return super().var_getattr(tx, name)
+        return super().getattro_impl(tx, name)
 
     def get_real_python_backed_value(self) -> object:
         return self.value
@@ -514,8 +514,8 @@ class StreamVariable(StreamContextVariable):
         from .constant import ConstantVariable
 
         if not isinstance(other, StreamVariable):
-            # Stream's tp_richcompare never returns NotImplemented.
-            # Non-Stream: eq->False, ne->True, ordering->False.
+            # Stream's tp_richcompare (THPStream_richcompare) compares
+            # stream_id/device and never returns NotImplemented.
             return ConstantVariable.create(op == "__ne__")
         if self.source:
             install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
@@ -625,7 +625,9 @@ class EventVariable(VariableTracker):
         self.value = value
         self.user_object_index = user_object_index
 
-    def richcompare_impl(self, tx, other, op):
+    def richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
         from .object_protocol import object_richcompare
 
         return object_richcompare(self, tx, other, op)

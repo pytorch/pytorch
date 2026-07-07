@@ -348,7 +348,10 @@ Tensor mkldnn_convolution_pointwise(
       (input_t.requires_grad() || weight_t.requires_grad() ||
        (bias_opt.has_value() && bias_opt->defined() &&
         bias_opt->requires_grad()));
-  if (!maybe_backward) {
+  // With format_tag::any on dense contiguous inputs, oneDNN may choose a
+  // forward_inference primitive with an NHWC-like layout that is slower than
+  // the forward_training primitive and still has to be converted back to dense.
+  if (!maybe_backward && use_channels_last) {
     aprop_kind = ideep::prop_kind::forward_inference;
   }
   return _mkldnn_convolution(

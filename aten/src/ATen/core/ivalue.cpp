@@ -642,7 +642,7 @@ std::ostream& IValue::repr(
       std::stringstream device_stream;
       device_stream << v.toDevice();
       out << "torch.device(";
-      c10::printQuotedString(out, device_stream.str());
+      c10::printQuotedString(out, std::move(device_stream).str());
       return out << ')';
     }
     case IValue::Tag::Generator: {
@@ -758,7 +758,7 @@ IValueComparator getLessThanComparator(const IValue& v) {
     torch::jit::Function* lt_func =
         checkObjectSortSchema(v.type()->expect<ClassType>(), why_not);
     if (!lt_func) {
-      TORCH_CHECK(false, why_not.str());
+      TORCH_CHECK(false, std::move(why_not).str());
     }
 
     return [lt_func](const IValue& a, const IValue& b) {
@@ -1054,7 +1054,7 @@ c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(
       }
       err << ". Please define serialization methods via def_pickle() for "
             "this class.";
-      TORCH_CHECK(false, err.str());
+      TORCH_CHECK(false, std::move(err).str());
     }
     object->setSlot(i, slots_[i].deepcopy(memo, device));
   }

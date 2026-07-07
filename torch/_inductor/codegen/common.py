@@ -200,9 +200,12 @@ class WorkspaceArg(CodegenSymbol):
 
     @staticmethod
     def maximum(a: WorkspaceArg, b: WorkspaceArg) -> WorkspaceArg:
-        assert (
+        if not (
             a.dtype == b.dtype and a.device == b.device and a.inner_name == b.inner_name
-        )
+        ):
+            raise AssertionError(
+                "WorkspaceArg.maximum requires matching dtype, device, and inner_name"
+            )
         return WorkspaceArg(
             count=Max(a.count, b.count),
             zero_mode=WorkspaceZeroMode.combine(a.zero_mode, b.zero_mode),
@@ -421,12 +424,13 @@ def register_backend_for_device(
     )
     custom_backend_passes[device] = device_custom_pass
     if device_custom_config:
-        assert (
+        if not (
             isinstance(device_custom_config, ConfigModule)
             and device_custom_config is not config
-        ), (
-            f"{device_custom_config=} cannot be the same as the default inductor config {config=}"
-        )
+        ):
+            raise AssertionError(
+                f"{device_custom_config=} cannot be the same as the default inductor config {config=}"
+            )
     custom_backend_codegen_configs[device] = device_custom_config
 
 
@@ -452,11 +456,13 @@ def get_backend_features(
     if isinstance(device, torch.device):
         device_type = device.type
     else:
-        assert isinstance(device, str), type(device)
+        if not isinstance(device, str):
+            raise AssertionError(type(device))
         device_type = device
         device = torch.device(device_type)
     scheduling_ctor = get_scheduling_for_device(device_type)
-    assert scheduling_ctor
+    if not scheduling_ctor:
+        raise AssertionError(f"no scheduling registered for device {device_type}")
     scheduling = scheduling_ctor(None)
     return scheduling.get_backend_features(device)
 
@@ -465,7 +471,8 @@ def has_backend_feature(
     device: torch.device | str | None, feature: BackendFeature
 ) -> bool:
     """See also V.graph.has_feature"""
-    assert isinstance(feature, BackendFeature)
+    if not isinstance(feature, BackendFeature):
+        raise AssertionError(f"expected BackendFeature, got {type(feature)}")
     return feature in get_backend_features(device)
 
 
@@ -655,7 +662,8 @@ def _initialize_device_op_overrides():
 
 
 def get_device_op_overrides(device: str) -> DeviceOpOverrides:
-    assert isinstance(device, str), type(device)
+    if not isinstance(device, str):
+        raise AssertionError(type(device))
     _initialize_device_op_overrides()
     return device_op_overrides_dict[device]
 
@@ -725,16 +733,28 @@ def deduce_output_dtype_by_name(
     return None
 
 
+def _is_runtime_triton_assert_target() -> bool:
+    return (
+        get_current_backend() == "triton"
+        and V.graph.get_current_device_or_throw().type != "cpu"
+        and hasattr(V.kernel, "triton_tensor_ndim")
+    )
+
+
 def check_dtype(
     buffer: IndentedBuffer, var: CSEVariableType, dtype: torch.dtype
 ) -> None:
     backend = get_current_backend()
-    if config.test_configs.runtime_triton_dtype_assert and backend == "triton":
+    if (
+        config.test_configs.runtime_triton_dtype_assert
+        and _is_runtime_triton_assert_target()
+    ):
         buffer.writeline(f"tl.static_assert({var}.dtype == {triton_type(dtype)})")
     elif config.test_configs.static_cpp_dtype_assert and backend == "cpp":
         from .cpp_utils import CppCSEVariable, DTYPE_TO_CPP
 
-        assert isinstance(var, CppCSEVariable), type(var)
+        if not isinstance(var, CppCSEVariable):
+            raise AssertionError(type(var))
         if dtype == torch.bool:
             if var.is_vec:
                 is_same_dt = f"IsVecMaskType<decltype({var})>::value"
@@ -753,9 +773,12 @@ def check_dtype(
 def check_shape(
     buffer: IndentedBuffer, var: CSEVariableType, shape: BlockShapeType
 ) -> None:
-    backend = get_current_backend()
-    assert shape is not None
-    if config.test_configs.runtime_triton_shape_assert and backend == "triton":
+    if shape is None:
+        raise AssertionError("expected shape to be not None")
+    if (
+        config.test_configs.runtime_triton_shape_assert
+        and _is_runtime_triton_assert_target()
+    ):
         shape_str = (
             ", ".join(str(d) for d in shape) if len(shape) != 1 else f"{shape[0]},"
         )
@@ -804,7 +827,8 @@ class DataTypePropagation:
     def deduce_node_dtype_by_subgraph(self, node: torch.fx.Node) -> torch.dtype:
         sub_graph = self.graphs[node.target]
         dtype = self.propagate_graph(sub_graph)
-        assert dtype
+        if not dtype:
+            raise AssertionError("expected subgraph to propagate a dtype")
         return dtype
 
     def deduce_node_dtype(self, node: torch.fx.Node) -> torch.dtype | None:
@@ -817,10 +841,12 @@ class DataTypePropagation:
 
         if node.target is operator.getitem:
             node_arg = node.args[0]
-            assert isinstance(node_arg, torch.fx.Node), type(node_arg)
+            if not isinstance(node_arg, torch.fx.Node):
+                raise AssertionError(type(node_arg))
             return self.deduce_node_dtype(node_arg)
 
-        assert isinstance(node.target, str), type(node.target)
+        if not isinstance(node.target, str):
+            raise AssertionError(type(node.target))
 
         if node.target.startswith("masked_subblock"):
             return self.deduce_node_dtype_by_subgraph(node)
@@ -837,7 +863,8 @@ class DataTypePropagation:
         return self.deduce_node_dtype_by_inputs(node)
 
     def propagate_graph(self, graph: torch.fx.Graph) -> torch.dtype | None:
-        assert graph.nodes
+        if not graph.nodes:
+            raise AssertionError("expected graph to have nodes")
         graph_dtype: torch.dtype | None = None
         # For masked_subblock, we use output's dtype to represent
         # the dtype of this subgraph. For other cases, graph_dtype
@@ -866,8 +893,10 @@ class DataTypePropagation:
         from ..loop_body import LoopBody
         from ..scheduler import SchedulerNode
 
-        assert isinstance(node, SchedulerNode), type(node)
-        assert isinstance(node._body, LoopBody), type(node._body)
+        if not isinstance(node, SchedulerNode):
+            raise AssertionError(type(node))
+        if not isinstance(node._body, LoopBody):
+            raise AssertionError(type(node._body))
         return DataTypePropagation.propagate_loopbody(node._body)
 
 
@@ -1002,7 +1031,8 @@ def _all_in_parens(string: str) -> bool:
             count -= 1
         if count == 0 and i != len(string) - 2:
             return False
-    assert count == 0
+    if count != 0:
+        raise AssertionError(f"expected balanced count == 0, got {count}")
     return True
 
 
@@ -1211,7 +1241,8 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
 
     @classmethod
     def _initialize_pointwise_overrides(cls, target: str) -> None:
-        assert target in ("triton", "cpp", "cppvec", "halide", "mps"), target
+        if target not in ("triton", "cpp", "cppvec", "halide", "mps"):
+            raise AssertionError(target)
 
         for funcname, data in pointwise_overrides_data.items():
             impl = getattr(data, target)
@@ -1219,9 +1250,10 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
                 if cls._is_unimplemented(funcname):
                     setattr(cls, funcname, cls._unimplemented(funcname))
             else:
-                assert funcname not in cls.__dict__, (
-                    f"multiple definitions of {funcname} on {cls.__name__}"
-                )
+                if funcname in cls.__dict__:
+                    raise AssertionError(
+                        f"multiple definitions of {funcname} on {cls.__name__}"
+                    )
                 impl.__name__ = funcname
                 setattr(cls, funcname, staticmethod(impl))
 
@@ -1506,7 +1538,8 @@ class DeferredLine(DeferredLineBase):
     def __init__(self, name: str, line: str):
         super().__init__(line)
         self.name = name
-        assert not isinstance(line, DeferredLineBase)
+        if isinstance(line, DeferredLineBase):
+            raise AssertionError("line must not be a DeferredLineBase")
 
     def __call__(self) -> str | None:
         if not is_buffer_removed(self.name):
@@ -1604,7 +1637,8 @@ class KernelArgs:
     def input(self, name: str) -> str:
         if V.graph.scheduler:
             name = V.graph.scheduler.mutation_real_name.get(name, name)
-        assert name not in V.graph.removed_buffers, name
+        if name in V.graph.removed_buffers:
+            raise AssertionError(name)
         if name in self.output_buffers:
             return cast(str, self.output_buffers[name])
         if name in self.inplace_buffers:
@@ -1616,7 +1650,8 @@ class KernelArgs:
     def output(self, name: str) -> str:
         if V.graph.scheduler:
             name = V.graph.scheduler.mutation_real_name.get(name, name)
-        assert name not in V.graph.removed_buffers, name
+        if name in V.graph.removed_buffers:
+            raise AssertionError(name)
         if name in self.inplace_buffers:
             return cast(InplacedBuffer, self.inplace_buffers[name]).inner_name
         return self._lookup("out_ptr", self.output_buffers, name)
@@ -1624,10 +1659,12 @@ class KernelArgs:
     def make_inplace(self, input_name: str, output_name: str) -> None:
         if input_name in V.graph.unaligned_buffers:
             V.graph.unaligned_buffers.add(output_name)
-        assert output_name not in self.inplace_buffers, output_name
+        if output_name in self.inplace_buffers:
+            raise AssertionError(output_name)
         if input_name in self.inplace_buffers:
             buf = self.inplace_buffers[input_name]
-            assert not isinstance(buf, RemovedArg)
+            if isinstance(buf, RemovedArg):
+                raise AssertionError("buf must not be a RemovedArg")
             buf.other_names.append(output_name)
             self.inplace_buffers[output_name] = buf
         else:
@@ -1689,10 +1726,11 @@ class KernelArgs:
                 offset = existing_arg.count
                 self.workspace_args[i] = WorkspaceArg.join(existing_arg, arg)
                 return existing_arg.inner_name, existing_arg.outer_name, offset
-            assert (
+            if not (
                 existing_arg.inner_name != arg.inner_name
                 and existing_arg.outer_name != arg.outer_name
-            ), existing_arg
+            ):
+                raise AssertionError(existing_arg)
         self.workspace_args.append(arg)
         return arg.inner_name, arg.outer_name, 0
 
@@ -1720,12 +1758,14 @@ class KernelArgs:
         )
         for existing_arg in self.workspace_args:
             if existing_arg.inner_name == arg.inner_name:
-                assert arg == existing_arg, (arg, existing_arg)
+                if arg != existing_arg:
+                    raise AssertionError((arg, existing_arg))
         self.workspace_args.append(arg)
         return arg.inner_name
 
     def seed_offset(self, name: str, value: int) -> str:
-        assert isinstance(value, int), (type(value), value)
+        if not isinstance(value, int):
+            raise AssertionError((type(value), value))
         # here we are lifting a constant integer into an arg to the kernel to try to get additional cache hits
         value = sympy.Integer(value)
         if value in self.sizevars:
@@ -1738,7 +1778,8 @@ class KernelArgs:
         return name
 
     def size(self, name: sympy.Symbol) -> str:
-        assert isinstance(name, sympy.Symbol), (type(name), name)
+        if not isinstance(name, sympy.Symbol):
+            raise AssertionError((type(name), name))
         if name.name == "seed":
             self.sizevars[name] = "seed"  # don't manage the name of seeds
             return "seed"
@@ -1818,7 +1859,8 @@ class KernelArgs:
             call_args.append(self.wrap_size_arg(outer))
             if V.graph.wrapper_code:
                 V.graph.wrapper_code.ensure_size_computed(outer)
-        assert not self.workspace_args, "Workspace not supported on CPU "
+        if self.workspace_args:
+            raise AssertionError("Workspace not supported on CPU ")
         return arg_defs, call_args, arg_types
 
     def python_argdefs(
@@ -1923,7 +1965,8 @@ class CSEVariable:
         shape: BlockShapeType = None,
     ):
         super().__init__()
-        assert isinstance(bounds, ValueRanges), type(bounds)
+        if not isinstance(bounds, ValueRanges):
+            raise AssertionError(type(bounds))
         self.name = name
         self.bounds = bounds
         self.use_count = 1  # track how many times this expression is used
@@ -2042,7 +2085,8 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
         if isinstance(expr, OpsValue):
             expr = expr.value
 
-        assert write or assignment
+        if not (write or assignment):
+            raise AssertionError("expected write or assignment to be set")
         if isinstance(expr, CSEVariable):
             # If the expressions were always created with all the information, we could
             # assert expr.bounds == bounds, but sometimes the expression is created
@@ -2055,7 +2099,8 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
         elif isinstance(expr, DeferredLineBase):
             cache_key = expr.line
         else:
-            assert isinstance(expr, str)
+            if not isinstance(expr, str):
+                raise AssertionError(f"expected str, got {type(expr)}")
             cache_key = expr
         var = self.try_get(cache_key)
         if shape is None and not assignment:
@@ -2076,7 +2121,8 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
                     buffer.splice(expr)
                     buffer.writeline(self.suffix)
                 elif isinstance(expr, DeferredLineBase):
-                    assert assignment
+                    if not assignment:
+                        raise AssertionError("expected assignment to be set")
                     buffer.writeline(
                         expr._new_line(f"{self.prefix}{var} = {expr.line}{self.suffix}")
                     )
@@ -2224,7 +2270,8 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
             self.cse = cse
             # pyrefly: ignore [unbound-name]
             if disallow_stores:
-                assert not sb, "unexpected store inside swap_buffers"
+                if sb:
+                    raise AssertionError("unexpected store inside swap_buffers")
 
     def emit_kernel_override(
         self,
@@ -2336,9 +2383,12 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
     ) -> str:
         if isinstance(var, CSEVariable):
             var = str(var)
-        assert isinstance(var, str), type(var)
-        assert lower is None or isinstance(lower, str)
-        assert upper is None or isinstance(upper, str)
+        if not isinstance(var, str):
+            raise AssertionError(type(var))
+        if not (lower is None or isinstance(lower, str)):
+            raise AssertionError(f"expected lower to be None or str, got {type(lower)}")
+        if not (upper is None or isinstance(upper, str)):
+            raise AssertionError(f"expected upper to be None or str, got {type(upper)}")
         if lower and upper:
             # The conditions need to be in parens because of Python's operator precedence.
             # It'd be less error-prone to use and/or/not, which is supported by triton
@@ -2348,7 +2398,8 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
             cond = f"{lower} <= {var}"
             cond_print = cond
         else:
-            assert upper
+            if not upper:
+                raise AssertionError("expected upper to be set")
             cond = f"{var} < {upper}"
             cond_print = cond
 
@@ -2367,7 +2418,8 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
 
     def __enter__(self) -> Self:
         super().__enter__()
-        assert self.overrides
+        if not self.overrides:
+            raise AssertionError("expected overrides to be set")
         self.exit_stack.enter_context(
             V.set_ops_handler(CSEProxy(self, self.overrides()))
         )
@@ -2681,7 +2733,8 @@ class CSEProxy(DefaultHandler):
 
         if backend in ("triton", "cpp"):
             # maybe there are some exceptions on mps?
-            assert output_dtype is not None
+            if output_dtype is None:
+                raise AssertionError("expected output_dtype to be not None")
 
         output_idx = 0
 
@@ -2722,13 +2775,16 @@ class CSEProxy(DefaultHandler):
             if (
                 config.test_configs.runtime_triton_dtype_assert
                 or config.test_configs.static_cpp_dtype_assert
-            ):
-                assert var_dtype is not None
+            ) and var_dtype is not None:
                 check_dtype(V.kernel.compute, csevar, var_dtype)
 
-            if config.test_configs.runtime_triton_shape_assert:
-                assert output_shape is not None
-                check_shape(V.kernel.compute, csevar, output_shape)
+            if (
+                config.test_configs.runtime_triton_shape_assert
+                and _is_runtime_triton_assert_target()
+            ):
+                shape_to_check = csevar.shape if csevar.shape is not None else var_shape
+                if shape_to_check is not None:
+                    check_shape(V.kernel.compute, csevar, shape_to_check)
 
             if config.runtime_triton_nan_asserts:
                 check_nan(V.kernel.compute, csevar)
@@ -2757,9 +2813,8 @@ class CSEProxy(DefaultHandler):
 
         fx_node = V.interpreter.current_node
         if fx_node.target == name and self.kernel.node_to_bounds is not None:
-            assert isinstance(self.kernel.node_to_bounds, dict), type(
-                self.kernel.node_to_bounds
-            )
+            if not isinstance(self.kernel.node_to_bounds, dict):
+                raise AssertionError(type(self.kernel.node_to_bounds))
             return self.kernel.node_to_bounds.get(fx_node, ValueRanges.unknown())
         elif config.compute_all_bounds and hasattr(ValueRangeAnalysis, name):
             # These create lots of inner strings. We would need to compute the bounds at the ops
@@ -2771,7 +2826,8 @@ class CSEProxy(DefaultHandler):
             # intermediary strings, wrap them in CSE variables with properly initialised bounds.
 
             # If there is no FX bound but we know how to compute one we do so
-            assert not kwargs
+            if kwargs:
+                raise AssertionError("expected no kwargs")
 
             def arg_to_bound(x: Any) -> Any:
                 if isinstance(x, CSEVariable):
@@ -2794,7 +2850,8 @@ class CSEProxy(DefaultHandler):
     ) -> sympy.Symbol:
         if isinstance(size, int):
             size = sympy.Integer(size)
-        assert isinstance(size, sympy.Expr), (type(size), size)
+        if not isinstance(size, sympy.Expr):
+            raise AssertionError((type(size), size))
         # Skip CSE since this doesn't return an expression
 
         if var.bounds.lower < 0:

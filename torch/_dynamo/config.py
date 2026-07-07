@@ -175,8 +175,8 @@ use_lazy_graph_module = (
 assume_static_by_default = True
 
 # Internal: Shape specification patched during tracing by enter_exit_hooks.
-# Set via torch.compile(shapes_spec=...), not directly by users.
-_shapes_spec = None
+# Set via torch.compile(dynamic_shapes=...), not directly by users.
+_dynamic_shapes_spec = None
 
 # This flag changes how dynamic_shapes=True works, and is meant to be used in conjunction
 # with assume_static_by_default=True.
@@ -258,7 +258,7 @@ prepare_freezing = os.environ.get("TORCHDYNAMO_PREPARE_FREEZING", "0") == "1"
 # NOTE this has been deprecated, it does nothing now.
 traceable_tensor_subclasses: set[type[Any]] = set()
 
-# If a tensor subclass is put into this set, Dynamo will model its instasnces in
+# If a tensor subclass is put into this set, Dynamo will model its instances in
 # a very conservative and limited way (most likely causing lots of graph breaks
 # if one apply tensor ops on these instances). This is useful if you encounter
 # internal compiler errors from Dynamo which are caused by tensor subclasses,
@@ -882,7 +882,7 @@ run_gc_after_compile = Config(  # type: ignore[var-annotated]
 )
 
 # Does not graph break on torch.autograd._profiler_enabled if set to True. We
-# want this flag to be True by default, but there is an unsolbed bug that causes
+# want this flag to be True by default, but there is an unsolved bug that causes
 # distributed jobs to timeout with Kineto profiler when this is set to True.
 constant_fold_autograd_profiler_enabled = False
 
@@ -922,6 +922,11 @@ inline_single_use_invoke_subgraph: bool = True
 # - True: always clear regardless of backend
 # - False: never clear regardless of backend
 invalidate_compile_context_weakrefs: bool | None = None
+
+# Reorder and rename output graph nodes into a canonical topological order so
+# that structurally equivalent graphs (e.g., same model traced with different
+# dict iteration orders across distributed ranks) produce identical FX graphs.
+canonicalize_output_graph_node_order: bool = False
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F403
