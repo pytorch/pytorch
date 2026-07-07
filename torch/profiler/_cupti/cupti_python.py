@@ -36,7 +36,6 @@ except ModuleNotFoundError as exc:
         "Install cupti-python to use the experimental CUPTI monitor."
     ) from exc
 
-
 if TYPE_CHECKING:
     # Used only in pylibcupti method signatures (Any to pyrefly; cupti has no stub).
     from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
@@ -160,11 +159,6 @@ def _configure_ctypes(lib: ctypes.CDLL) -> None:
             ctypes.POINTER(ctypes.c_uint64),
         ]
         lib.cuptiGetTimestamp_v2.restype = ctypes.c_int
-    # Custom timestamp callback (CUpti_TimestampCallbackFunc, a uint64_t(*)(void)): CUPTI invokes
-    # it to stamp activity records, replacing its default CPU timer -- used to put records on the
-    # profiler's approx clock (kineto's timebase). Set per-subscriber via the TIMESTAMP_CALLBACK
-    # attribute (cuptiActivitySetAttribute_v2, bound above), which coexists with UDR; usable only
-    # when multiple subscribers are NOT allowed; a NULL address unregisters.
     # External correlation push/pop. The plain (v1) calls return
     # CUPTI_ERROR_NOT_COMPATIBLE while a user-defined-record subscriber is active
     # (same as cuptiGetTimestamp), so the subscriber-aware _v2 variants are required
@@ -364,16 +358,17 @@ class _PyLibCupti:
         )
         return ts.value
 
-    def set_timestamp_callback(self, sub_handle: int, callback_addr: int) -> bool:
-        """Set this subscriber's timestamp callback via CUPTI_ACTIVITY_ATTR_TIMESTAMP_CALLBACK:
+    def arm_approx_timestamp_callback(
+        self, sub_handle: int, callback_addr: int
+    ) -> bool:
+        """Arm this subscriber's timestamp callback via CUPTI_ACTIVITY_ATTR_TIMESTAMP_CALLBACK:
         CUPTI stamps the subscriber's activity records with ``callback_addr`` (a
         CUpti_TimestampCallbackFunc, uint64_t(*)(void)) instead of its default CPU timer -- used
-        to put records directly on the profiler's approx clock (kineto's timebase).
-        ``callback_addr=0`` restores the default timer. Unlike the global
-        cuptiActivityRegisterTimestampCallback (CUPTI_ERROR_NOT_COMPATIBLE under user-defined
-        records) this per-subscriber attribute coexists with UDR. Best-effort: returns False if
-        CUPTI rejects it -- the attribute is beta and still usable only when multiple subscribers
-        are NOT allowed."""
+        to put records directly on the profiler's approx clock (kineto's timebase). Unlike the
+        global cuptiActivityRegisterTimestampCallback (CUPTI_ERROR_NOT_COMPATIBLE under
+        user-defined records) this per-subscriber attribute coexists with UDR. Best-effort:
+        returns False if CUPTI rejects it -- the attribute is beta and still usable only when
+        multiple subscribers are NOT allowed."""
         val = ctypes.c_void_p(callback_addr or None)
         size = ctypes.c_size_t(ctypes.sizeof(ctypes.c_void_p))
         return (
@@ -383,7 +378,20 @@ class _PyLibCupti:
                 ctypes.byref(size),
                 ctypes.byref(val),
             )
-            == 0
+            == CUPTI_SUCCESS
+        )
+
+    def disarm_approx_timestamp_callback(self, sub_handle: int) -> None:
+        """Restore CUPTI's default CPU timer for this subscriber (callback_addr=0), the
+        inverse of arm_approx_timestamp_callback -- called before unsubscribe so a following
+        consumer isn't left with our callback."""
+        val = ctypes.c_void_p(None)
+        size = ctypes.c_size_t(ctypes.sizeof(ctypes.c_void_p))
+        self._lib.cuptiActivitySetAttribute_v2(
+            ctypes.c_void_p(sub_handle),
+            _ATTR_TIMESTAMP_CALLBACK,
+            ctypes.byref(size),
+            ctypes.byref(val),
         )
 
     def activity_flush_all(self) -> None:

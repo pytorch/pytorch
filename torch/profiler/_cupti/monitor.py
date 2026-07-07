@@ -398,6 +398,11 @@ class CuptiMonitor:
                     f"coexisting subscribers: {e}"
                 ) from e
             raise
+        # Arm the per-subscriber approx-clock timestamp callback right after subscribe, before
+        # arming UDR, so it is in effect before any user-defined record is produced.
+        self._timestamp_callback_active = self._try_arm_approx_timestamp_callback(
+            self._subscriber
+        )
         self._cupti.arm_user_defined_records(
             self._subscriber, request_addr, complete_addr
         )
@@ -411,9 +416,8 @@ class CuptiMonitor:
         self.register_callbacks()
         # Put activity records on kineto's unix timeline via the clock (see _SynchronizedClock):
         # normally cuptiGetTimestamp == CLOCK_REALTIME == unix and records pass through, unless
-        # the timestamp callback stamps them on the approx clock. calibrate() reads the native
-        # clock through this callable, which is valid for the life of the subscription.
-        self._timestamp_callback_active = self._try_register_timestamp_callback()
+        # register_callbacks armed the timestamp callback (approx clock). calibrate() reads the
+        # native clock through this callable, which is valid for the life of the subscription.
         self._clock.calibrate(
             callback_active=self._timestamp_callback_active,
             native_now=lambda: self._cupti.get_timestamp(cast(int, self._subscriber)),
@@ -483,7 +487,7 @@ class CuptiMonitor:
         self._drain_and_dispatch()
         # Clear the timestamp callback (restore CUPTI's default timer) before unsubscribe.
         if self._timestamp_callback_active and self._subscriber is not None:
-            self._cupti.set_timestamp_callback(self._subscriber, 0)
+            self._cupti.disarm_approx_timestamp_callback(self._subscriber)
             self._timestamp_callback_active = False
         # Disable everything we enabled, then tear down the subscription.
         self._disable(self._enabled.keys())
@@ -644,7 +648,7 @@ class CuptiMonitor:
         record timestamps. Returns 0 before the session is calibrated."""
         return self._clock.now_record_ns()
 
-    def _try_register_timestamp_callback(self) -> bool:
+    def _try_arm_approx_timestamp_callback(self, sub_handle: int) -> bool:
         """Best-effort: hand CUPTI the profiler's approx-clock timestamp callback so it
         stamps activity records on kineto's exact timebase directly. Opt-in via the
         use_approx_timestamps monitor arg (and only as the sole subscriber); returns False --
@@ -654,8 +658,18 @@ class CuptiMonitor:
         cuptiActivityRegisterTimestampCallback, which returns CUPTI_ERROR_NOT_COMPATIBLE."""
         if not self._timestamp_callback_enabled:
             return False
+        # cuptiSubscribe latches the device-record correlation base against a pre-existing CUDA
+        # context, so a callback armed now (post-subscribe) can't re-time device records if one
+        # exists -- they stay pinned to CLOCK_REALTIME. Refuse rather than silently drop them.
+        if _has_active_cuda_context():
+            logger.warning(
+                "CUPTI monitor: use_approx_timestamps requested but a CUDA context already "
+                "exists; device records were correlated on CLOCK_REALTIME at subscribe and "
+                "cannot be re-timed. Falling back to the CLOCK_REALTIME pass-through."
+            )
+            return False
         addr = _cupti_monitor_native.approximate_time_callback_address()
-        if self._cupti.set_timestamp_callback(cast(int, self._subscriber), addr):
+        if self._cupti.arm_approx_timestamp_callback(sub_handle, addr):
             logger.info("CUPTI monitor: approx-clock timestamp callback engaged")
             return True
         logger.warning(
