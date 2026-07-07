@@ -270,9 +270,7 @@ class TestTritonHeuristics(TestCase):
 
         create.assert_called_once()
         self.assertIs(autotuner.save_cache_hook, fake_cache.save)
-        self.assertEqual(
-            autotuner.autotune_cache_info["autotune_cache_state"], "miss"
-        )
+        self.assertEqual(autotuner.autotune_cache_info["autotune_cache_state"], "miss")
         self.assertEqual(autotuner.autotune_cache_info["num_configs"], 1)
 
     def test_cached_autotune_loads_single_dsr_reduction_cache_hit(self):
@@ -305,9 +303,7 @@ class TestTritonHeuristics(TestCase):
         create.assert_not_called()
         self.assertEqual(configs, [cfg])
         self.assertIsNone(autotune_cache)
-        self.assertEqual(
-            autotune_cache_info["autotune_cache_state"], "only 1 config"
-        )
+        self.assertEqual(autotune_cache_info["autotune_cache_state"], "only 1 config")
 
     def _test_artificial_zgrid(self):
         def forward(primals_1, primals_2, primals_5):
