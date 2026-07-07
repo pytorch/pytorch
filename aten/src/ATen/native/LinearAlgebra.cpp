@@ -2792,6 +2792,13 @@ Tensor linalg_matrix_exp(const Tensor& a) {
   squareCheckInputs(a, "linalg.matrix_exp");
   checkFloatingOrComplex(a, "linalg.matrix_exp");
 
+  // MPSGraph complex matmul is numerically unreliable before macOS 15, which
+  // breaks the scale-and-square recurrence this op relies on.
+  TORCH_CHECK(
+      a.device().type() != at::kMPS ||
+          at::detail::getMPSHooks().isOnMacOSorNewer(15, 0),
+      "linalg.matrix_exp on MPS requires macOS 15.0 or newer");
+
   NoTF32Guard disable_tf32;
 
   // Trivial cases

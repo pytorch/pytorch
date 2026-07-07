@@ -355,9 +355,10 @@ if torch.backends.mps.is_available():
         }
 
         MACOS_BEFORE_15_0_XFAILLIST = {
-            # matrix_exp chains complex matmuls; MPSGraph complex matmul is
-            # numerically unreliable before macOS 15 (NaN/inf via scale-square).
-            "matrix_exp": [torch.complex64],
+            # matrix_exp is disabled on MPS before macOS 15 (TORCH_CHECK): MPSGraph
+            # complex matmul is numerically unreliable there and breaks the
+            # scale-and-square recurrence, so the op raises for every dtype.
+            "matrix_exp": None,
         }
 
         # Those ops are not expected to work
@@ -972,11 +973,9 @@ if torch.backends.mps.is_available():
         }
 
         MACOS_BEFORE_15_0_XFAILLIST_GRAD = {
-            # matrix_exp backward exponentiates a 2n x 2n augmented matrix, so it
-            # leans even harder on MPSGraph matmul than the forward; before macOS
-            # 15 that matmul is unreliable enough to make the fp32 grad diverge
-            # wildly from CPU (the forward leg still matches, hence grad-only).
-            "matrix_exp": [torch.float32],
+            # matrix_exp is disabled on MPS before macOS 15 (TORCH_CHECK), so the
+            # forward leg of the grad test raises for every dtype.
+            "matrix_exp": None,
         }
 
         def addDecorator(op: OpInfo, d: DecorateInfo) -> None:
