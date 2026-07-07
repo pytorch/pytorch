@@ -262,6 +262,75 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
     @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
     @skipIfNoDynamoSupport
+    def test_compile_inductor_effect_ordering_scheduler_deps(self):
+        # The effect-chain StarDeps recorded in V.graph.additional_star_deps
+        # must survive to the scheduler as real dependencies between the
+        # effectful ops. The scheduler looks them up by operation name
+        # ("opN"); keying them by buffer name ("bufN") silently drops them,
+        # leaving the ops free to be reordered by passes like simple_overlap
+        # (deadlocking collectives that rely on effect ordering).
+        from torch._inductor import config as inductor_config
+        from torch._inductor.virtualized import V
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define("mylib::effectful_id", "(Tensor x) -> Tensor", lib=lib)
+
+            def effectful_id(x):
+                return x.clone()
+
+            lib.impl("effectful_id", effectful_id, "CompositeExplicitAutograd")
+            handle = _register_effectful_op(
+                torch.ops.mylib.effectful_id.default, _EffectType.ORDERED
+            )
+            try:
+
+                def f(x):
+                    a = torch.ops.mylib.effectful_id(x)
+                    b = torch.ops.mylib.effectful_id(x)
+                    return a + b
+
+                captured: list[dict] = []
+
+                def capture(nodes):
+                    op_names = {n.get_name() for n in nodes}
+                    star_deps = {
+                        k: set(v) for k, v in V.graph.additional_star_deps.items()
+                    }
+                    unmet = {
+                        n.get_name(): {d.name for d in n.unmet_dependencies}
+                        for n in nodes
+                    }
+                    captured.append(
+                        {"op_names": op_names, "star_deps": star_deps, "unmet": unmet}
+                    )
+                    return nodes
+
+                torch._dynamo.reset()
+                with inductor_config.patch(_pre_fusion_custom_pass=capture):
+                    inputs = (torch.randn(2, 3),)
+                    res = torch.compile(f, backend="inductor", fullgraph=True)(*inputs)
+                self.assertTrue(torch.allclose(res, f(*inputs)))
+
+                self.assertTrue(captured, "expected at least one Inductor compile")
+                state = captured[0]
+                self.assertTrue(
+                    state["star_deps"], "expected effect-chain star deps to be recorded"
+                )
+                # Every recorded effect dependency must be keyed by an
+                # operation the scheduler knows about...
+                for op_name in state["star_deps"]:
+                    self.assertIn(op_name, state["op_names"])
+                # ...and materialize as a scheduler dependency so the second
+                # effectful op cannot be reordered before the first.
+                scheduled_deps = set().union(*state["unmet"].values())
+                for deps in state["star_deps"].values():
+                    for dep in deps:
+                        self.assertIn(dep, scheduled_deps)
+            finally:
+                handle.destroy()
+
+    @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
+    @skipIfNoDynamoSupport
     def test_compile_inductor_external_op_return_none(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(

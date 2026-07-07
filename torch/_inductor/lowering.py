@@ -9239,7 +9239,10 @@ def with_effects(token, op, *args, **kwargs):
             # Patch has_side_effects to return True
             new_op.has_side_effects = lambda: True  # pyrefly: ignore[missing-attribute]
             if prev_effect_buffer:
-                op_name = new_op.get_name()  # pyrefly: ignore[missing-attribute]
+                # Keyed by operation name ("opN"): the scheduler looks these up
+                # via BaseSchedulerNode.get_name(), not the buffer name ("bufN").
+                # pyrefly: ignore[missing-attribute]
+                op_name = new_op.get_operation_name()
                 V.graph.additional_star_deps[op_name].add(prev_effect_buffer.get_name())
         # Update the effectful ops chain to point to the latest operation
         V.graph.effectful_ops[effect_type] = (
