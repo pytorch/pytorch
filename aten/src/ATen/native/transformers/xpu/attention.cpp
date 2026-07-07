@@ -49,7 +49,7 @@ _scaled_dot_product_flash_attention_xpu(
       max_seqlen_batch_k,
       philox_seed,
       philox_offset,
-      /* debug_attn_mask */ at::Tensor());
+      /* debug_attn_mask */ at::empty({0}, query.options()));
 }
 
 } // namespace native

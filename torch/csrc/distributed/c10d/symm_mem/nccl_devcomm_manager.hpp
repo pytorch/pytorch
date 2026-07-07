@@ -11,7 +11,7 @@
 #include <string>
 #include <unordered_map>
 
-#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+#ifdef NCCL_HAS_SYMMEM_SUPPORT
 
 namespace c10d::symmetric_memory {
 
@@ -28,25 +28,30 @@ namespace c10d::symmetric_memory {
 //
 // Device communicators are stored by value in the registry, but methods return
 // references wrapped in std::optional for safe access.
-class NCCLDevCommManager {
+class TORCH_API NCCLDevCommManager {
  public:
   // Constructor
   // @param device The CUDA device this manager is associated with
   explicit NCCLDevCommManager(const c10::Device device) : device_(device) {}
 
-  // Get the singleton instance for the given device.
-  // This ensures there's only one manager per device. If called with a
-  // different device than the one used to create the singleton, it will throw.
-  // @param device The CUDA device to get the manager for
-  // @return Reference to the singleton manager instance
+  // Per-device singleton: lazily creates one manager per CUDA device so
+  // callers on different devices don't share state.
   static NCCLDevCommManager& get(const c10::Device device) {
-    static NCCLDevCommManager manager(device);
-    TORCH_CHECK_VALUE(
-        manager.device_ == device,
-        "Detected use of NCCLDevCommManager on multiple devices. This is not supported.");
-    return manager;
+    static std::mutex mu;
+    static std::
+        unordered_map<c10::DeviceIndex, std::unique_ptr<NCCLDevCommManager>>
+            managers;
+    std::lock_guard<std::mutex> lock(mu);
+    auto& slot = managers[device.index()];
+    if (!slot) {
+      slot =
+          std::unique_ptr<NCCLDevCommManager>(new NCCLDevCommManager(device));
+      LOG(INFO) << "[NCCLDevCommManager] created manager for device=" << device;
+    }
+    return *slot;
   }
 
+#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
   // Get an NCCL device communicator for a group, for the caller function.  By
   // default, we search for the device communicator using the caller function
   // name as the key.  If you previously registered a device communicator with a
@@ -83,6 +88,7 @@ class NCCLDevCommManager {
     // directly
     return std::make_optional(std::ref(key_it->second));
   }
+#endif // NCCL_HAS_SYMMEM_DEVICE_SUPPORT
 
   // Get a host-side NCCL communicator for a group.
   // This is the regular host-side communicator, not the device communicator.
@@ -102,6 +108,7 @@ class NCCLDevCommManager {
     return it->second;
   }
 
+#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
   // Register a device communicator for a group. If `key` is not
   // specified, we use the caller function name as the default `key`, to
   // distinguish between different collective functions within the same group.
@@ -157,24 +164,32 @@ class NCCLDevCommManager {
     // Return a reference to the newly registered device communicator
     return std::make_optional(std::ref(key_it->second));
   }
+#endif // NCCL_HAS_SYMMEM_DEVICE_SUPPORT
 
-  // Register a host-side NCCL communicator for a group.
-  // This should be called before registering any device communicators for the
-  // same group, as device communicators need the host communicator for cleanup.
-  // @param group_name The process group name
-  // @param comm The host-side NCCL communicator to register
-  // @throws TORCH_CHECK if the group is already registered with a different
-  // communicator.
+  // Register the host-side NCCL communicator for `group_name` on this
+  // manager's device. Last-write-wins so a successor PG can replace the
+  // entry before the prior PG's destructor runs (e.g. restart-after-error).
+  // Producers must call `unregister_comm` from their destructor.
   void register_comm(const std::string& group_name, ncclComm_t comm) {
     std::lock_guard<std::mutex> lock(mutex_);
-    auto [it, inserted] = group_to_comm_.try_emplace(group_name, comm);
-    // If the communicator is already registered, check if it is the same one.
-    // If not, throw an error.
-    TORCH_CHECK(
-        inserted || it->second == comm, // this is just a pointer comparison
-        "NCCL host communicator for group ",
-        group_name,
-        " already registered.");
+    group_to_comm_[group_name] = comm;
+  }
+
+  // Unregister `group_name` on this manager's device. Safe to call when
+  // nothing is registered. Does not destroy the host comm; lifetime stays
+  // with the producer.
+  //
+  // Producers are expected to skip already-aborted comms in their
+  // destructor (e.g. ProcessGroupNCCL guards on isAborted()). Without that
+  // discipline, a stale destructor could race with a successor PG that
+  // re-registered under the same `group_name` (e.g. restart-after-error)
+  // and silently drop the successor's entry.
+  void unregister_comm(const std::string& group_name) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    group_to_comm_.erase(group_name);
+#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+    devcomm_registry_.erase(group_name);
+#endif
   }
 
   // Destructor: Clean up all registered device communicators.
@@ -182,6 +197,7 @@ class NCCLDevCommManager {
   // destroyed, the cleanup will be skipped. All errors are caught and ignored
   // to prevent exceptions from propagating during destruction.
   ~NCCLDevCommManager() noexcept {
+#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
     // Best effort to destroy the device communicators. Skip if CUDA context has
     // exited.
     try {
@@ -209,6 +225,7 @@ class NCCLDevCommManager {
       LOG(WARNING)
           << "Failed to destroy the NCCL device communicator, skipping";
     }
+#endif // NCCL_HAS_SYMMEM_DEVICE_SUPPORT
   }
 
  private:
@@ -225,6 +242,7 @@ class NCCLDevCommManager {
   // for the same group.
   std::unordered_map<std::string, ncclComm_t> group_to_comm_;
 
+#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
   // A two-level map for device communicators:
   // - First level: keyed by process group name
   // - Second level: keyed by an optional key (defaults to caller function name
@@ -237,7 +255,8 @@ class NCCLDevCommManager {
   // device communicators.
   std::unordered_map<std::string, std::unordered_map<std::string, ncclDevComm>>
       devcomm_registry_;
+#endif // NCCL_HAS_SYMMEM_DEVICE_SUPPORT
 };
 
 } // namespace c10d::symmetric_memory
-#endif // NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+#endif // NCCL_HAS_SYMMEM_SUPPORT

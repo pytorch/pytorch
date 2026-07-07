@@ -11,6 +11,8 @@
 
 // see https://bugs.python.org/issue35886
 #define Py_BUILD_CORE
+// avoid dependency on _Py_tss_tstate
+#define Py_BUILD_CORE_MODULE
 
 #ifndef __cplusplus
 // C-only headers
@@ -34,6 +36,7 @@
 #endif
 
 #undef Py_BUILD_CORE
+#undef Py_BUILD_CORE_MODULE
 
 #ifdef __cplusplus
 extern "C" {
