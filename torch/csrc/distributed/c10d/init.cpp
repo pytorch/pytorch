@@ -3204,10 +3204,6 @@ Arguments:
               &::c10d::Backend::setUsePgForSymmMemRendezvous,
               py::arg("value"))
           .def_property(
-              "use_pg_for_symm_mem_rendezvous",
-              &::c10d::Backend::getUsePgForSymmMemRendezvous,
-              &::c10d::Backend::setUsePgForSymmMemRendezvous)
-          .def_property(
               "bound_device_id",
               &::c10d::Backend::getBoundDeviceId,
               &::c10d::Backend::setBoundDeviceId)
