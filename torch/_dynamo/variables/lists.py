@@ -891,13 +891,14 @@ class RangeVariable(BaseListVariable):
             )
         return super().call_method(tx, name, args, kwargs)
 
-    def var_getattr(
+    def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         fields = ["start", "stop", "step"]
         if name in fields:
             return self.items[fields.index(name)]
-        return super().var_getattr(tx, name)
+
+        return super().getattro_impl(tx, name)
 
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # CPython range_hash: https://github.com/python/cpython/blob/e76aa128fe/Objects/rangeobject.c#L572
@@ -1232,7 +1233,7 @@ class ListVariable(CommonListMethodsVariable):
             self.call_method(tx, "extend", args, {})
         return ConstantVariable.create(None)
 
-    def var_getattr(
+    def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         if name == "__class__":
@@ -1242,7 +1243,7 @@ class ListVariable(CommonListMethodsVariable):
                 return VariableTracker.build(tx, class_type, source=source)
             else:
                 return VariableTracker.build(tx, class_type, source)
-        return super().var_getattr(tx, name)
+        return super().getattro_impl(tx, name)
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
@@ -1547,12 +1548,12 @@ class DequeVariable(CommonListMethodsVariable):
             ]
         )
 
-    def var_getattr(
+    def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         if name == "maxlen":
             return self.maxlen
-        return super().var_getattr(tx, name)
+        return super().getattro_impl(tx, name)
 
     def call_method(
         self,
@@ -1571,6 +1572,21 @@ class DequeVariable(CommonListMethodsVariable):
             slice_within_maxlen = slice(-maxlen, None)
         else:
             slice_within_maxlen = None
+
+        if name in ("copy", "__copy__"):
+            # deque_copy preserves maxlen: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L890
+            if args or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+            return DequeVariable(
+                list(self.items),
+                maxlen=self.maxlen,
+                mutation_type=ValueMutationNew(),
+            )
 
         if name == "extendleft" and self.is_mutable() and len(args) > 0:
             if kwargs or len(args) != 1:
@@ -1718,14 +1734,14 @@ class TupleVariable(BaseListVariable):
         else:
             return f"({', '.join([item.reconstruct_pycode(codegen) for item in self.items])},)"
 
-    def var_getattr(
+    def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         if name == "__class__":
             source = AttrSource(self.source, name) if self.source else None
             class_type = self.python_type()
             return VariableTracker.build(tx, class_type, source=source)
-        return super().var_getattr(tx, name)
+        return super().getattro_impl(tx, name)
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
@@ -2143,7 +2159,7 @@ class SliceVariable(VariableTracker):
         codegen.foreach(self.items)
         codegen.append_output(create_instruction("BUILD_SLICE", arg=len(self.items)))
 
-    def var_getattr(
+    def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         if name in cmp_name_to_op_mapping or name in ("__hash__", "indices"):
@@ -2154,7 +2170,7 @@ class SliceVariable(VariableTracker):
         if name not in fields:
             unimplemented(
                 gb_type="Unsupported attribute for slice() object",
-                context=f"var_getattr {self} {name}",
+                context=f"getattro_impl {self} {name}",
                 explanation=f"Expected attribute to be one of {','.join(fields)} "
                 f"but got {name}",
                 hints=[*graph_break_hints.USER_ERROR],
@@ -2310,6 +2326,35 @@ class RangeIteratorVariable(IteratorVariable):
         current = self.start
         self.start += self.step
         return VariableTracker.build(tx, current)
+
+    def call_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name == "__setstate__":
+            # rangeiter_setstate clamps the arg against the current remaining
+            # length, then advances: r->start += arg*step; r->len -= arg.
+            # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/rangeobject.c#L1093-L1107
+            if len(args) != 1 or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+            arg = args[0].as_python_constant()
+            index = min(max(arg, 0), self.len)
+            self.start += index * self.step
+            self.len -= index
+            return ConstantVariable.create(None)
+        elif name == "__length_hint__":
+            # rangeiter_len: remaining items.
+            # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/rangeobject.c#L1109-L1115
+            return ConstantVariable.create(self.len)
+        return super().call_method(tx, name, args, kwargs)
 
     def python_type(self) -> type:
         return range_iterator

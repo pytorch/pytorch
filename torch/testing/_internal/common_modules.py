@@ -4185,17 +4185,7 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.AvgPool2d,
                module_inputs_func=module_inputs_torch_nn_AvgPool2d,
-               skips=(
-                   # The difference between channels last backward and
-                   # channels first backward of AvgPool2d on CUDA is too large
-                   # See https://github.com/pytorch/pytorch/issues/107201
-                   DecorateInfo(
-                       unittest.expectedFailure,
-                       'TestModule',
-                       'test_memory_format',
-                       active_if=operator.itemgetter('training'),
-                       device_type='cuda',),
-               ),),
+               ),
     ModuleInfo(torch.nn.AvgPool3d,
                module_inputs_func=module_inputs_torch_nn_AvgPool3d,
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
