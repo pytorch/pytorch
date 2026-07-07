@@ -7713,27 +7713,39 @@ class TestConstantPadNd(TestCase):
 
 
 class TestAddRelu(TestCase):
-    def test_add_relu(self):
-        a = torch.rand((7, 11))
-        b = torch.rand((7, 11))
-        a = a.float()
-        b = b.float()
-        a = a * -10
-        a = a + 5
-        add_res = a + b
-        relu_res = torch.relu(add_res)
-        add_relu_res = torch._VF._add_relu(a, b)
+    @dtypes(torch.int8, torch.int16, torch.int32, torch.int64,
+            torch.float32, torch.float64, torch.float16, torch.bfloat16)
+    def test_add_relu(self, device, dtype):
+        for alpha in (1, 2, -1):
+            if dtype.is_floating_point:
+                a = torch.randn(7, 11, device=device, dtype=dtype) * 5
+                b = torch.randn(7, 11, device=device, dtype=dtype) * 5
+            else:
+                a = torch.randint(-10, 11, (7, 11), device=device, dtype=dtype)
+                b = torch.randint(-10, 11, (7, 11), device=device, dtype=dtype)
+            expected = torch.add(a, b, alpha=alpha).clamp_min(0)
 
-        self.assertEqual(add_relu_res, relu_res)
+            self.assertEqual(torch._VF._add_relu(a, b, alpha=alpha), expected)
 
-    def test_add_relu_broadcasting(self):
-        a = torch.rand((1, 32))
-        b = 1
-        b_scalar = torch.ones(1, 32)
-        res = torch._VF._add_relu(a, b)
+            out = torch.empty_like(a)
+            torch._VF._add_relu(a, b, alpha=alpha, out=out)
+            self.assertEqual(out, expected)
+
+            a_inplace = a.clone()
+            torch._VF._add_relu_(a_inplace, b, alpha=alpha)
+            self.assertEqual(a_inplace, expected)
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    def test_add_relu_broadcasting(self, device, dtype):
+        a = torch.randn(1, 32, device=device, dtype=dtype)
+        b_scalar = torch.ones(1, 32, device=device, dtype=dtype)
+        res = torch._VF._add_relu(a, 1)
         broadcasted_res = torch._VF._add_relu(a, b_scalar)
 
         self.assertEqual(broadcasted_res, res)
+
+
+instantiate_device_type_tests(TestAddRelu, globals())
 
 
 def add_test(test, decorator=None):
