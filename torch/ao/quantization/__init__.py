@@ -25,8 +25,6 @@ from .utils import MatchAllNode, Pattern
 ObserverOrFakeQuantize = TypeAliasType(
     "ObserverOrFakeQuantize", ObserverBase | FakeQuantizeBase
 )
-Pattern.__module__ = __name__
-MatchAllNode.__module__ = __name__
 
 
 __all__ = [
