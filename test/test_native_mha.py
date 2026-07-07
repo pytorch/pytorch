@@ -8,7 +8,7 @@ from torch.testing._internal.common_device_type import (
     dtypesIfCUDA,
     dtypesIfXPU,
     instantiate_device_type_tests,
-    onlyOn,
+    onlyAccelerator,
     skipMeta,
     skipXPUIf,
 )
@@ -106,8 +106,8 @@ class TestMHADeviceType(TestCase):
     @dtypesIfXPU(torch.float)
     @dtypes(torch.float)
     @skipMeta
+    @onlyAccelerator
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/2182")
-    @onlyOn(["cuda", "xpu"])
     def test_transform_bias_rescale_qkv_nested(self, device, dtype):
         for use_padding in (False, True):
             with self.subTest(use_padding=use_padding):
@@ -191,9 +191,8 @@ class TestMHADeviceType(TestCase):
             embed_dim=embed_dim, num_heads=num_heads, qkv=native_qkv, proj=native_proj
         ).to(dtype)
 
-        if device == "cuda" or device == "xpu":
-            pt = pt.to(device)
-            npt = npt.to(device)
+        pt = pt.to(device)
+        npt = npt.to(device)
 
         ypt, weight_pt = pt(
             q,
