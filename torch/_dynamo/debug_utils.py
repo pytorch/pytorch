@@ -455,7 +455,10 @@ class NNModuleToString:
 
 
 @functools.cache  # subprocess is expensive
-def _initialized_cuda_system_info_comment() -> str:
+def _cuda_system_info_comment() -> str:
+    if not torch.cuda.is_available():
+        return "# torch.cuda.is_available()==False, no GPU info collected\n"
+
     model_str = "# CUDA Info: \n"
     try:
         if torch.version.hip is None:
@@ -477,19 +480,6 @@ def _initialized_cuda_system_info_comment() -> str:
         model_str += f"# {name} : {count} \n"
     model_str += "\n"
     return model_str
-
-
-def _cuda_system_info_comment() -> str:
-    if not torch.cuda._is_compiled():
-        return "# torch.cuda._is_compiled()==False, no GPU info collected\n"
-    if not torch.cuda.is_initialized():
-        return "# torch.cuda.is_initialized()==False, no GPU info collected\n"
-    return _initialized_cuda_system_info_comment()
-
-
-_cuda_system_info_comment.cache_clear = (  # type: ignore[attr-defined]
-    _initialized_cuda_system_info_comment.cache_clear
-)
 
 
 def generate_env_vars_string(*, stable_output: bool = False) -> str:

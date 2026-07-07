@@ -2002,7 +2002,7 @@ def record_compilation_metrics(
         "inductor_config": _scrubbed_inductor_config_for_logging(),
         "compiler_config": _compiler_config_for_logging(),
         "cuda_version": torch.version.cuda,
-        "triton_version": triton.__version__ if has_triton_package() else "",
+        "triton_version": triton.__version__ if has_triton() else "",
         "remote_cache_version": remote_cache_version,
         "inductor_fx_remote_cache_backend_type": inductor_fx_remote_cache_backend_type,
         "python_version": sys.version,
@@ -2679,81 +2679,6 @@ def skip_frame_if_in_functorch_mode(val: torch.Tensor) -> None:
         )
 
 
-class _DeviceRNGState:
-    def __init__(self, device_module: Any) -> None:
-        self.device_module = device_module
-        self.rng_state: torch.Tensor | None = None
-        self._queued_calls: list[Any] | None = None
-        self._queued_calls_len: int | None = None
-        self._lazy_seed_tracker: Any | None = None
-        self._manual_seed_all_cb: Any = None
-        self._manual_seed_cb: Any = None
-        self._call_order: list[Any] | None = None
-
-        if device_module.is_initialized():
-            self.rng_state = torch.clone(device_module.get_rng_state())
-            return
-
-        queued_calls = getattr(device_module, "_queued_calls", None)
-        lazy_call = getattr(device_module, "_lazy_call", None)
-        lazy_seed_tracker = getattr(device_module, "_lazy_seed_tracker", None)
-        if queued_calls is None or lazy_call is None or lazy_seed_tracker is None:
-            return
-
-        self._queued_calls = queued_calls
-        self._queued_calls_len = len(queued_calls)
-        self._lazy_seed_tracker = lazy_seed_tracker
-        self._manual_seed_all_cb = lazy_seed_tracker.manual_seed_all_cb
-        self._manual_seed_cb = lazy_seed_tracker.manual_seed_cb
-        self._call_order = lazy_seed_tracker.call_order.copy()
-        entry_seed_calls = [
-            call for call in lazy_seed_tracker.get_calls() if call is not None
-        ]
-
-        def capture_rng_state() -> None:
-            self.rng_state = torch.clone(device_module.get_rng_state())
-
-        def defer_capture_until_after_entry_seeds() -> None:
-            insert_at = None
-            for idx, (queued_call, _) in enumerate(queued_calls):
-                if queued_call is defer_capture_until_after_entry_seeds:
-                    insert_at = idx + 1
-                    break
-            if insert_at is None:
-                return
-            # _lazy_init() appends seed calls immediately after this callback.
-            # Reinsert the entry seeds first so the snapshot captures the same
-            # state initialization would have produced at scope entry.
-            queued_calls[insert_at:insert_at] = [
-                *entry_seed_calls,
-                (capture_rng_state, traceback.format_stack()),
-            ]
-
-        lazy_call(defer_capture_until_after_entry_seeds)
-
-    def restore(self) -> None:
-        if self.rng_state is not None:
-            self.device_module.set_rng_state(self.rng_state)
-            self._restore_queued_calls()
-        elif not self.device_module.is_initialized():
-            self._restore_lazy_state()
-
-    def _restore_lazy_state(self) -> None:
-        self._restore_queued_calls()
-        if self._lazy_seed_tracker is not None and self._call_order is not None:
-            self._lazy_seed_tracker.manual_seed_all_cb = self._manual_seed_all_cb
-            self._lazy_seed_tracker.manual_seed_cb = self._manual_seed_cb
-            self._lazy_seed_tracker.call_order = self._call_order
-
-    def _restore_queued_calls(self) -> None:
-        if self._queued_calls is not None and self._queued_calls_len is not None:
-            del self._queued_calls[self._queued_calls_len :]
-
-
-def get_device_rng_state_if_initialized(device_module: Any) -> _DeviceRNGState:
-    return _DeviceRNGState(device_module)
-
-
 @contextmanager
 def preserve_rng_state() -> Generator[None, None, None]:
     disable_functorch = torch._C._DisableFuncTorch
@@ -2761,15 +2686,19 @@ def preserve_rng_state() -> Generator[None, None, None]:
     with disable_current_modes(), disable_functorch():
         rng_state = torch.clone(torch.random.get_rng_state())
         skip_frame_if_in_functorch_mode(rng_state)
-        cuda_rng_state = get_device_rng_state_if_initialized(torch.cuda)
-        xpu_rng_state = get_device_rng_state_if_initialized(torch.xpu)
+        if torch.cuda.is_available():
+            cuda_rng_state = torch.clone(torch.cuda.get_rng_state())
+        if torch.xpu.is_available():
+            xpu_rng_state = torch.clone(torch.xpu.get_rng_state())
     try:
         yield
     finally:
-        with disable_current_modes(), disable_functorch():
+        with torch.utils._python_dispatch._disable_current_modes():
             torch.random.set_rng_state(rng_state)
-            cuda_rng_state.restore()
-            xpu_rng_state.restore()
+            if torch.cuda.is_available():
+                torch.cuda.set_rng_state(cuda_rng_state)  # type: ignore[possibly-undefined]
+            if torch.xpu.is_available():
+                torch.xpu.set_rng_state(xpu_rng_state)  # type: ignore[possibly-undefined]
 
 
 def is_jit_model(
@@ -2887,7 +2816,8 @@ def namedtuple_fields(cls: type) -> tuple[str, ...]:
 def checkpoint_params(gm: torch.fx.GraphModule) -> Callable[[], None]:
     with torch.no_grad():
         rng_state = torch.clone(torch.random.get_rng_state())
-        cuda_rng_state = get_device_rng_state_if_initialized(torch.cuda)
+        if torch.cuda.is_available():
+            cuda_rng_state = torch.clone(torch.cuda.get_rng_state())
         saved_state = [
             (param, param._version, torch.clone(param))
             # pyrefly: ignore [bad-argument-type]
@@ -2895,13 +2825,10 @@ def checkpoint_params(gm: torch.fx.GraphModule) -> Callable[[], None]:
         ]
 
     def restore() -> None:
-        with (
-            torch.no_grad(),
-            torch.utils._python_dispatch._disable_current_modes(),
-            torch._C._DisableFuncTorch(),
-        ):
+        with torch.no_grad():
             torch.random.set_rng_state(rng_state)
-            cuda_rng_state.restore()
+            if torch.cuda.is_available():
+                torch.cuda.set_rng_state(cuda_rng_state)
             for param, version, original_value in saved_state:
                 if param._version != version:
                     param.copy_(original_value)
