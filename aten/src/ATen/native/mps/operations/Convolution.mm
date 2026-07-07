@@ -149,73 +149,67 @@ struct Conv3dTile {
   int BO, BW, BH, NSG;
 };
 
-// Fixed MPP output-tile, fit to wall-clock timings per (OG, plane, precision).
-static Conv3dTile conv3d_mpp_tile(int64_t OG, int64_t HO, int64_t WO, bool low_precision) {
-  const int64_t plane = HO * WO;
-  const int BOp = static_cast<int>(std::min<int64_t>(64, std::max<int64_t>(32, OG)));
-  // Degenerate planes: a 1-wide (or <=4-tall) tile avoids padding out a square.
-  if (WO == 1) {
-    return {BOp, 1, 64, 4};
-  }
-  if (HO <= 4) {
-    return {BOp, WO >= 32 ? 32 : 16, 4, 4};
-  }
-  if (low_precision) {
-    if (OG <= 4) {
-      return plane > 5000 ? Conv3dTile{32, 8, 8, 2} : Conv3dTile{32, 16, 8, 2};
+static float conv3d_tile_cost(Conv3dTile t, const Conv3dDims& d, int64_t groups, int64_t cores) {
+  constexpr float kFill = 300.0f, kS = 8.0f, kBO = 90.0f, kW = 0.15f, kSt = 0.4f;
+  const auto OGT = (d.OG + t.BO - 1) / t.BO;
+  const auto WT = (d.WO + t.BW - 1) / t.BW, HT = (d.HO + t.BH - 1) / t.BH;
+  const auto n_tg = int64_t(OGT) * groups * WT * HT * d.NB * d.DO; // 64-bit: guards int32 overflow
+  const auto K = d.KD * d.KH * d.KW;
+  const auto padded_out = float(n_tg) * t.BO * t.BW * t.BH;
+  const auto S = float(t.BW * t.BH) / t.NSG;
+  const auto in_w = int64_t(t.BW - 1) * d.SX + (d.KW - 1) * d.DX + 1;
+  const auto in_h = int64_t(t.BH - 1) * d.SY + (d.KH - 1) * d.DY + 1;
+  const auto stage = float(t.BW * t.BH) / (float(in_w * in_h) + kW * t.BO * K);
+  const auto eff = S / (S + kS) * (t.BO / (t.BO + kBO)) * (stage / (stage + kSt));
+  const auto util = float(n_tg) / (n_tg + cores * kFill);
+  return padded_out / (eff * util);
+}
+
+static Conv3dTile conv3d_mpp_tile(const Conv3dDims& d, int64_t groups) {
+  static const int64_t cores = []() {
+    const unsigned c = at::mps::MPSDevice::getInstance()->getCoreCount();
+    return c > 0 ? static_cast<int64_t>(c) : 16;
+  }();
+  const int BOp = static_cast<int>(std::min<int64_t>(64, std::max<int64_t>(32, d.OG)));
+  Conv3dTile cands[11];
+  int nc = 0;
+  // Degenerate planes add tiles the square candidates lack (a 1-wide plane can't use
+  // an 8-wide tile); the argmin still chooses among them.
+  if (d.WO == 1) {
+    for (const auto& t :
+         {Conv3dTile{BOp, 1, 32, 2}, {BOp, 1, 32, 4}, {BOp, 1, 64, 2}, {BOp, 1, 64, 4}, {BOp, 1, 128, 4}}) {
+      cands[nc++] = t;
     }
-    if (OG <= 64) {
-      return {32, 8, 8, 2};
+  } else {
+    for (const auto& t : {Conv3dTile{32, 8, 8, 2},
+                          {32, 8, 8, 4},
+                          {32, 16, 8, 4},
+                          {64, 8, 8, 2},
+                          {64, 8, 8, 4},
+                          {64, 16, 4, 4},
+                          {64, 16, 8, 4},
+                          {128, 8, 8, 4},
+                          {128, 16, 4, 4}}) {
+      cands[nc++] = t;
     }
-    if (OG <= 128) {
-      if (plane <= 600) {
-        return {32, 8, 8, 2};
-      }
-      if (plane <= 1000) {
-        return {128, 16, 4, 4};
-      }
-      return plane <= 8000 ? Conv3dTile{64, 16, 8, 4} : Conv3dTile{32, 16, 8, 2};
+    if (d.HO <= 4) {
+      cands[nc++] = {BOp, d.WO >= 32 ? 32 : 16, 4, 4};
+      cands[nc++] = {BOp, 16, 4, 4};
+    } else if (d.WO <= 8) {
+      cands[nc++] = {BOp, 8, 8, 4};
+      cands[nc++] = {BOp, 8, 8, 2};
     }
-    if (OG <= 256) {
-      if (plane <= 200) {
-        return {64, 16, 4, 4};
-      }
-      return plane <= 1500 ? Conv3dTile{128, 16, 4, 4} : Conv3dTile{64, 8, 8, 4};
+  }
+  auto best = cands[0];
+  auto best_cost = conv3d_tile_cost(best, d, groups, cores);
+  for (int i = 1; i < nc; ++i) {
+    const auto cost = conv3d_tile_cost(cands[i], d, groups, cores);
+    if (cost < best_cost) {
+      best_cost = cost;
+      best = cands[i];
     }
-    if (plane <= 300) {
-      return OG > 1000 ? Conv3dTile{32, 16, 8, 4} : Conv3dTile{32, 8, 8, 2};
-    }
-    return {32, 16, 8, 4};
   }
-  // fp32
-  if (OG <= 4) {
-    return {32, 16, 8, 2};
-  }
-  if (OG <= 64) {
-    if (plane <= 2500) {
-      return {32, 8, 8, 2};
-    }
-    return plane <= 4000 ? Conv3dTile{64, 8, 8, 2} : Conv3dTile{32, 16, 8, 4};
-  }
-  if (OG <= 128) {
-    if (plane <= 700) {
-      return {64, 8, 8, 2};
-    }
-    return plane <= 1000 ? Conv3dTile{64, 16, 4, 2} : Conv3dTile{64, 16, 8, 4};
-  }
-  if (OG <= 256) {
-    return plane <= 200 ? Conv3dTile{64, 16, 4, 4} : Conv3dTile{32, 8, 8, 2};
-  }
-  if (plane <= 64) {
-    return {32, 8, 8, 2};
-  }
-  if (plane <= 300) {
-    if (OG > 1000) {
-      return {64, 16, 4, 2};
-    }
-    return OG > 640 ? Conv3dTile{32, 16, 8, 4} : Conv3dTile{64, 16, 4, 4};
-  }
-  return {64, 16, 4, 4};
+  return best;
 }
 
 // pre-Metal-4 fallback: implicit-GEMM tile; small planes prefer the narrow BM.
@@ -407,7 +401,7 @@ static void conv3d_metal_forward(const Tensor& input_t,
 
   Conv3dTile tile;
   if (use_mpp) {
-    tile = conv3d_mpp_tile(OG, HO, WO, spec.relaxed);
+    tile = conv3d_mpp_tile(dims, groups);
   } else if (huge_plane) {
     tile = {64, 64, 2, 2};
   } else {
