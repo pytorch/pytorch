@@ -6,7 +6,7 @@ import traceback
 import warnings
 
 
-MIN_CUDA_VERSION = "11.6"
+MIN_CUDA_VERSION = "12.1"
 MIN_ROCM_VERSION = "5.4"
 MIN_PYTHON_VERSION = (3, 10)
 
@@ -174,7 +174,6 @@ def check_dynamo(backend, device, err_msg) -> None:
                 return x + x
 
         mod = Module()
-        # pyrefly: ignore [bad-argument-type]
         opt_mod = dynamo.optimize(backend, nopython=True)(mod)
 
         for f in (fn, opt_mod):

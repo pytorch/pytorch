@@ -30,7 +30,7 @@ DistilBertForMaskedLM,pass,0
 
 
 
-DistillGPT2,pass,2
+DistillGPT2,pass,3
 
 
 
@@ -50,7 +50,7 @@ LayoutLMForMaskedLM,pass,0
 
 
 
-M2M100ForConditionalGeneration,pass,7
+M2M100ForConditionalGeneration,pass,0
 
 
 
@@ -122,7 +122,7 @@ google/gemma-3-4b-it,pass_due_to_skip,0
 
 
 
-openai/whisper-tiny,pass,6
+openai/whisper-tiny,pass,0
 
 
 

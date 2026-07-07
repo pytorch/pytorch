@@ -16,6 +16,7 @@
 #else
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_strided.h>
+#include <ATen/ops/zeros.h>
 
 #include <algorithm>
 #endif
@@ -596,7 +597,7 @@ void apply_lstsq(const Tensor& A, Tensor& B, Tensor& rank, Tensor& singular_valu
   Tensor jpvt;
   int* jpvt_data = nullptr;
   if (driver_t::Gelsy == driver_type) {
-    jpvt = at::empty({std::max<int64_t>(1, n)}, A.options().dtype(at::kInt));
+    jpvt = at::zeros({std::max<int64_t>(1, n)}, A.options().dtype(at::kInt));
     jpvt_data = jpvt.mutable_data_ptr<int>();
   }
 
@@ -654,6 +655,12 @@ void apply_lstsq(const Tensor& A, Tensor& B, Tensor& rank, Tensor& singular_valu
       rank_working_ptr = rank_working_ptr ? &rank_data[A_linear_batch_idx] : nullptr;
       s_working_ptr = s_working_ptr ? &s_data[A_linear_batch_idx * s_stride] : nullptr;
       int* infos_working_ptr = &infos_data[A_linear_batch_idx];
+
+      // JPVT is an input/output argument for *gelsy. Non-zero values on
+      // input mark fixed columns, so reset it before each call.
+      if (jpvt_data != nullptr) {
+        jpvt.zero_();
+      }
 
       lapack_func(trans, m, n, nrhs,
         A_working_ptr, lda,
@@ -948,6 +955,16 @@ void ldl_solve_kernel(
     const Tensor& result,
     bool upper,
     bool hermitian) {
+  // Lapack SYTRS writes into unrelated memory if |IPIV(k)| is outside [1, N]
+  // (negative values encode 2x2 block pivots), so sanity-check user-provided
+  // pivots before dispatch on CPU.
+  TORCH_CHECK(pivots.abs().ge(1).all().item<bool>(),
+              "Pivots given to ldl_solve must all satisfy |pivot| >= 1. "
+              "Did you properly pass the result of ldl_factor?");
+  TORCH_CHECK(pivots.abs().le(LD.size(-2)).all().item<bool>(),
+              "Pivots given to ldl_solve must all satisfy |pivot| <= LD.size(-2). "
+              "Did you properly pass the result of ldl_factor?");
+
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
       LD.scalar_type(), "ldl_solve_kernel_cpu", [&] {
         apply_ldl_solve<scalar_t>(LD, pivots, result, upper, hermitian);

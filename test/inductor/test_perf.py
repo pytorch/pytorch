@@ -1,12 +1,14 @@
 # Owner(s): ["module: inductor"]
 import contextlib
 import re
+import unittest
 from unittest.mock import patch
 
 import functorch
 import torch
 import torch._inductor.config as config
 import torch.autograd
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._inductor import metrics
 from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 from torch._inductor.test_case import TestCase as InductorTestCase
@@ -28,6 +30,7 @@ from torch._inductor.utils import run_and_get_code
 # performance for that setting.
 #
 # Defines all the kernels for tests
+from torch.testing._internal.common_utils import skipIfXpu, TEST_WITH_ROCM
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU_AND_TRITON
 from torch.testing._internal.triton_utils import requires_gpu_and_triton
 
@@ -91,6 +94,13 @@ def TI(*size, mx=10, dtype=torch.int32, device=DEVICE):
 
 class TestCase(InductorTestCase):
     device = DEVICE
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._exit_stack.enter_context(
+            torch._dynamo.config.patch(canonicalize_output_graph_node_order=False),
+        )
 
 
 class NumBytesMetricTests(TestCase):
@@ -337,6 +347,35 @@ class NumBytesMetricTests(TestCase):
         inp = (T(10), TI(10, mx=10))
         self.assertExpectedInline(count_numel(f, *inp), """30""")
 
+    @requires_gpu_and_triton
+    def test_delay_realize_cheap_outputs_shared_mask(self):
+        # Shared tril mask across multiple users gets eagerly materialized
+        # as an output buffer, inflating downstream read counts. With
+        # delay_realize_cheap_outputs, the mask stays inlined as index
+        # arithmetic, reducing memory traffic.
+        def f(x1, x2, x3):
+            mask = torch.tril(torch.ones(32, 32, device=x1.device))
+            return x1 + mask, x2 + mask, x3 + mask
+
+        inp = (
+            T(32, 32, grad=True),
+            T(32, 32, grad=True),
+            T(32, 32, grad=True),
+        )
+
+        # Without deferred realization: mask gets materialized as output buffer
+        with patch.object(config, "delay_realize_cheap_outputs", False):
+            metrics.reset()
+            torch.compile(f, backend=compile_but_use_eager)(*inp)
+            eager_bytes = metrics.num_bytes_accessed
+
+        # Default (deferred realization on): mask stays inlined
+        metrics.reset()
+        torch.compile(f, backend=compile_but_use_eager)(*inp)
+        deferred_bytes = metrics.num_bytes_accessed
+
+        self.assertLessEqual(deferred_bytes, eager_bytes)
+
 
 class FusionTests(TestCase):
     """
@@ -360,6 +399,34 @@ class FusionTests(TestCase):
 
         inp = (T(10, 10),)
         self.assertExpectedInline(count_numel(f, *inp), """120""")
+
+    @requires_gpu_and_triton
+    @config.patch({"force_disable_caches": True, "triton.multi_kernel": 0})
+    def test_aot_autograd_cse_preserves_reduction_fusion(self):
+        def fn(x):
+            return x.abs().max(), x.abs().mean(), x.square().mean()
+
+        def count_kernels(requires_grad):
+            torch._dynamo.reset()
+            metrics.reset()
+            x = torch.rand((1024, 32768), device=DEVICE, requires_grad=requires_grad)
+            result = torch.compile(fn, fullgraph=True, dynamic=False)(x)
+            expected = fn(x)
+            self.assertEqual(result, expected)
+            get_interface_for_device(DEVICE).synchronize()
+            forward_kernel_count = metrics.generated_kernel_count
+            if requires_grad:
+                result_sum = result[0] + result[1] + result[2]
+                expected_sum = expected[0] + expected[1] + expected[2]
+                (result_grad,) = torch.autograd.grad(result_sum, (x,))
+                (expected_grad,) = torch.autograd.grad(expected_sum, (x,))
+                self.assertEqual(result_grad, expected_grad)
+            return forward_kernel_count
+
+        inference_kernel_count = count_kernels(requires_grad=False)
+        autograd_kernel_count = count_kernels(requires_grad=True)
+
+        self.assertEqual(autograd_kernel_count, inference_kernel_count)
 
     def test_horizontal_reduction_pointwise2(self):
         def f(a, b):
@@ -484,6 +551,26 @@ class FusionTests(TestCase):
         inp = (T(10, 10), T(10, 10), T(10, 10))
         self.assertExpectedInline(count_numel(f, *inp), """500""")
 
+    @skipIfXpu(msg="copy_(cat()) fusion not supported on XPU")
+    @unittest.skipIf(TEST_WITH_ROCM, "copy_(cat()) fusion not supported on ROCm")
+    # TODO(ivankobzarev): enable copy_(cat()) fusion for CUDA 13+
+    @unittest.skipIf(
+        torch.version.cuda
+        and tuple(int(x) for x in torch.version.cuda.split(".")) >= (13, 0),
+        "copy_(cat()) fusion not supported on CUDA 13+",
+    )
+    def test_copy_cat_fusion(self):
+        """copy_(cat(...)) should fuse: no intermediate allocation for cat."""
+
+        def f(dst, a, b):
+            dst.copy_(torch.cat([a, b]))
+
+        dst = T(20)
+        inp = (dst, T(10), T(10))
+        # 10 (read a) + 10 (read b) + 20 (write dst) = 40
+        # Without fusion cat would allocate intermediate: 80
+        self.assertExpectedInline(count_numel(f, *inp), """40""")
+
     def test_reduction_pointwise_multi_level_reduction(self):
         hidden_size = 4096
         layer_norm = torch.nn.LayerNorm(hidden_size).to(GPU_TYPE).float()
@@ -505,7 +592,10 @@ class FusionTests(TestCase):
         expected_numel = (
             1 + hidden_size * 2 + 4 * 2048 * hidden_size * 2 + 4 * 2048 * 2 + 1
         )
-        if config.triton.cooperative_reductions:
+        if (
+            config.triton.cooperative_reductions
+            or config.triton.force_cooperative_reductions
+        ):
             expected_numel = 134225922
 
         self.assertExpectedInline(count_numel(f, *inp, True), str(expected_numel))

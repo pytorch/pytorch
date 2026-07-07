@@ -100,6 +100,7 @@ using Constant = std::variant<
     std::vector<bool>,
     std::vector<std::string>,
     std::vector<std::vector<int64_t>>,
+    std::vector<std::vector<double>>,
     std::unique_ptr<Graph>>;
 
 c10::IValue constantToIValue(const Constant& constant);
@@ -314,7 +315,7 @@ class Node : public c10::IntrusiveListHook {
   std::string toString() const {
     std::stringstream ss;
     ss << *this;
-    return ss.str();
+    return std::move(ss).str();
   }
 
   void updateInputName(std::string_view oldName, std::string_view newName) {
@@ -632,7 +633,7 @@ class Graph {
   std::string toString() const {
     std::stringstream ss;
     ss << *this;
-    return ss.str();
+    return std::move(ss).str();
   }
 
   /* Reassigns IDs to every Value in this Graph so that they are contiguous from

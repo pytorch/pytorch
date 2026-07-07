@@ -73,14 +73,14 @@ class OnnxDecompMeta:
                         self.onnx_function, "__traced", self.onnx_function.__name__
                     )
             except Exception as e:
-                # Log an warning if the op is custom. Raise exception for builtin ops.
+                # Log a warning if the op is custom. Raise exception for builtin ops.
                 if not self.is_custom:
                     raise
                 else:
                     # When the function is targeting an HOP, for example, it will accept
                     # functions as arguments and fail to generate an ONNX signature.
                     # In this case we set signature to None and dispatch to this function always.
-                    logger.warning(  # noqa: G200
+                    logger.warning(
                         "Failed to infer the signature for function '%s' because '%s'"
                         "All nodes targeting `%s` will be dispatched to this function",
                         self.onnx_function,

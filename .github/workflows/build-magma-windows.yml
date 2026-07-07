@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: releng", "module: windows"]
 name: Build MAGMA for Windows
 
 on:
@@ -22,7 +23,7 @@ jobs:
     runs-on: windows-2022
     strategy:
       matrix:
-        cuda_version: ["130", "129", "128", "126"]
+        cuda_version: ["132", "130", "129", "128", "126"]
         config: ["Release", "Debug"]
     env:
       CUDA_VERSION: ${{ matrix.cuda_version }}

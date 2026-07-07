@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: releng", "module: windows"]
 name: Build Flash Attention 3 wheels (Windows)
 
 on:
@@ -90,7 +91,7 @@ jobs:
           echo "CUDA_HOME=${CUDA_PATH}" >> "${GITHUB_ENV}"
           echo "${CUDA_PATH}/bin" >> "${GITHUB_PATH}"
       - name: Setup MSVC
-        uses: ilammy/msvc-dev-cmd@v1
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
 
       - name: Remove link.exe conflict
         run: rm -f /usr/bin/link

@@ -490,7 +490,7 @@ x = add_1, y = add_2);  getitem = None
         self.assertEqual(
             fusion_ops_no_print,
             fusion_ops_with_print,
-            f"Fusion patterns differ!\n"
+            lambda msg: f"{msg}\nFusion patterns differ!\n"
             f"Without print: {fusion_ops_no_print}\n"
             f"With print: {fusion_ops_with_print}",
         )
@@ -562,7 +562,7 @@ x = add_1, y = add_2);  getitem = None
         self.assertEqual(
             fusion_ops_no_print,
             fusion_ops_with_print,
-            f"Fusion patterns differ!\n"
+            lambda msg: f"{msg}\nFusion patterns differ!\n"
             f"Without print: {fusion_ops_no_print}\n"
             f"With print: {fusion_ops_with_print}",
         )
@@ -628,7 +628,7 @@ def forward(self, primals_1, primals_2):
     with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops.higher_order.print, \
 'values {} {}', 3, add);  getitem = None
     getitem_2 = with_effects_1[0];  with_effects_1 = None
-    return (getitem_2, add)""",  # noqa: B950
+    return (getitem_2, add)""",
         )
 
         # Check backward graph - print HOP doesn't contribute to gradients
@@ -680,7 +680,7 @@ def forward(self, arg1_1):
     with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops.higher_order.print, 'values {} {}', 3, add);  getitem = None
     getitem_2 = with_effects_1[0];  with_effects_1 = None
     _sink_tokens_default = torch.ops.prims._sink_tokens.default([getitem_2]);  getitem_2 = _sink_tokens_default = None
-    return (add,)""",  # noqa: B950
+    return (add,)""",
         )
 
 

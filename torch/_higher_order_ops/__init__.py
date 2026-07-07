@@ -18,8 +18,10 @@ from torch._higher_order_ops.flex_attention import (
     flex_attention,
     flex_attention_backward,
 )
+from torch._higher_order_ops.flex_gemm import flex_gemm
 from torch._higher_order_ops.foreach_map import _foreach_map, foreach_map
 from torch._higher_order_ops.hints_wrap import hints_wrapper
+from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwise
 from torch._higher_order_ops.invoke_leaf_function import invoke_leaf_function
 from torch._higher_order_ops.invoke_subgraph import invoke_subgraph
 from torch._higher_order_ops.local_map import local_map_hop
@@ -29,6 +31,7 @@ from torch._higher_order_ops.print import print
 from torch._higher_order_ops.run_const_graph import run_const_graph
 from torch._higher_order_ops.scan import scan
 from torch._higher_order_ops.strict_mode import strict_mode
+from torch._higher_order_ops.switch import switch
 from torch._higher_order_ops.torchbind import call_torchbind
 from torch._higher_order_ops.while_loop import (
     while_loop,
@@ -46,6 +49,7 @@ from torch._higher_order_ops.wrap import (
 
 __all__ = [
     "cond",
+    "switch",
     "while_loop",
     "invoke_subgraph",
     "scan",
@@ -57,6 +61,7 @@ __all__ = [
     "flat_apply",
     "foreach_map",
     "_foreach_map",
+    "flex_gemm",
     "with_effects",
     "tag_activation_checkpoint",
     "auto_functionalized",
@@ -81,4 +86,6 @@ __all__ = [
     "local_map_hop",
     "print",
     "inductor_compiled_code",
+    "inline_asm_elementwise",
+    "register_hook",
 ]

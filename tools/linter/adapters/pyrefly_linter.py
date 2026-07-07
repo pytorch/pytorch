@@ -5,8 +5,9 @@
 #   "numpy==2.1.0 ; python_version >= '3.12' and python_version <= '3.13'",
 #   "numpy==2.3.4 ; python_version >= '3.14'",
 #   "expecttest==0.3.0",
-#   "pyrefly==0.52.0",
+#   "pyrefly==0.58.0",
 #   "sympy==1.13.3",
+#   "spmd_types==0.2.1",
 #   "types-requests==2.27.25",
 #   "types-pyyaml==6.0.2",
 #   "types-tabulate==0.8.8",
@@ -24,6 +25,11 @@
 #   "libcst",
 #   "isort",
 #   "usort",
+# ]
+#
+# [tool.uv]
+# dependency-metadata = [
+#   { name = "spmd-types", version = "0.2.1", requires-dist = [] },
 # ]
 # ///
 from __future__ import annotations

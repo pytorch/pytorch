@@ -1,5 +1,6 @@
 #pragma once
 #include <stdbool.h>
+#include <stdint.h>
 
 #include <torch/csrc/dynamo/extra_state.h>
 #include <torch/csrc/utils/python_compat.h>
@@ -32,12 +33,16 @@ THPPyInterpreterFrame* THPPyInterpreterFrame_New(
     THP_EVAL_API_FRAME_OBJECT* frame);
 
 extern bool is_skip_guard_eval_unsafe;
+extern int fullgraph_compiled_frame_count;
+extern bool fullgraph_error_on_nested_compile;
 
 void clear_old_frame_if_python_312_plus(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame);
 
 void eval_frame_callback_set(PyObject* obj);
+
+int64_t get_current_isolate_recompiles_id(void);
 
 const char* get_frame_name(THP_EVAL_API_FRAME_OBJECT* frame);
 

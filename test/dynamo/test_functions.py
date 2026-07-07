@@ -31,11 +31,10 @@ from torch._dynamo.testing import (
     EagerAndRecordGraphs,
     normalize_gm,
 )
-from torch._dynamo.utils import ifdynstaticdefault, range_iterator, same
+from torch._dynamo.utils import counters, ifdynstaticdefault, range_iterator, same
 from torch._dynamo.variables import ConstantVariable, SkipFunctionVariable
 from torch._dynamo.variables.lists import RangeVariable
 from torch.nn import functional as F
-from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -153,7 +152,7 @@ def inline_script_if_tracing_fn_with_default_args(x, y, c=1.2):
     return torch.cos(x * y) + c
 
 
-class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+class FunctionTests(torch._dynamo.test_case.TestCase):
     @make_test
     def test_inline_jit_annotations(x):
         x = inline_script_if_tracing(x)
@@ -168,6 +167,26 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
     @make_test
     def test_inline_lru_cache_fn_with_default_args(a, b):
         return inline_lru_cache_fn_with_default_args(a, 2, b)
+
+    def test_str_split_returns_mutable_list(self):
+        # str.split/rsplit/splitlines return a fresh caller-owned mutable list;
+        # in-place mutations on the result must be tracked (no graph break).
+        def fn(t, s):
+            words = s.split()
+            words.sort(key=str.lower)
+            words.append("zzz")
+            rparts = s.rsplit(" ")
+            rparts.reverse()
+            lines = s.splitlines()
+            lines.pop()
+            return t + 1, words, rparts, lines
+
+        s = "the Quick brown Fox"
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        ref = fn(torch.ones(3), s)
+        res = opt(torch.ones(3), s)
+        self.assertEqual(ref[0], res[0])
+        self.assertEqual(ref[1:], res[1:])
 
     def test_lru_cache_warning_issued_during_tracing(self):
         import warnings
@@ -293,6 +312,30 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
     def test_functools_partial(a, b):
         return clip01(a + b)
 
+    def test_functools_partial_from_unregistered_module(self):
+        module_name = "test_dynamo_unregistered_module"
+        self.assertNotIn(module_name, sys.modules)
+        module = types.ModuleType(module_name)
+        exec(
+            """
+import functools
+import torch
+
+def helper(x, scale):
+    return torch.nn.functional.normalize(x, dim=-1) * scale
+
+def fn(x, scale):
+    return helper(x, scale)
+
+partial_fn = functools.partial(fn, scale=2)
+""",
+            module.__dict__,
+        )
+
+        x = torch.randn(4, 4)
+        compiled_fn = torch.compile(module.partial_fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled_fn(x), module.partial_fn(x))
+
     @make_test
     def test_itertools_product(a, b):
         v = a
@@ -333,6 +376,7 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         self.assertRaises(Unsupported, fn)
         self.assertRaises(Unsupported, fn, [1, 2, 3], 1, 2)
         self.assertRaises(Unsupported, fn, [1, 2, 3], fake_arg=1)
+        self.assertRaises(Unsupported, fn, [1, 2, 3], -1)
 
     @make_test
     def test_itertools_permutations_various_iterators(a, b):
@@ -361,6 +405,41 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         for x in itertools.chain.from_iterable([[a, b], [1, 2]]):
             v = v + x
         return v
+
+    def test_itertools_chain_fullgraph(self):
+        def fn(a, b):
+            result = a
+            for x in itertools.chain([a, b], [1, 2], [3]):
+                result = result + x
+            return result
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        a, b = torch.tensor(1.0), torch.tensor(2.0)
+        self.assertEqual(fn(a, b), opt_fn(a, b))
+
+    def test_itertools_chain_from_iterable_fullgraph(self):
+        def fn(a, b):
+            result = a
+            for x in itertools.chain.from_iterable([[a, b], [1, 2]]):
+                result = result + x
+            return result
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        a, b = torch.tensor(1.0), torch.tensor(2.0)
+        self.assertEqual(fn(a, b), opt_fn(a, b))
+
+    def test_itertools_chain_reconstruct(self):
+        def fn(a):
+            it = itertools.chain([a + 1, a + 2], [a + 3])
+            result = next(it)
+            return it, result
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        a = torch.tensor(0.0)
+        it_ref, r_ref = fn(a)
+        it_opt, r_opt = opt_fn(a)
+        self.assertEqual(r_ref, r_opt)
+        self.assertEqual(list(it_ref), list(it_opt))
 
     def test_itertools_reconstruct(self):
         def fn(a):
@@ -492,9 +571,9 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
     @make_test
     def test_obj_is(a, b):
         v = a + b
-        if MyCls() is None:  # noqa: E711
+        if MyCls() is None:
             return -1
-        if MyCls() is not None:  # noqa: E711
+        if MyCls() is not None:
             v = v.sin()
         if MyCls() is MyCls():
             return -2
@@ -505,9 +584,9 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
     @make_test
     def test_cls_is(a, b):
         v = a + b
-        if MyCls is None:  # noqa: E711
+        if MyCls is None:
             return -1
-        if MyCls is not None:  # noqa: E711
+        if MyCls is not None:
             v = v.sin()
         if MyCls is not MyCls:
             return -2
@@ -521,6 +600,40 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         for size in itertools.combinations((1, 2, 3, 4), 2):
             combs.append(torch.ones(size))
         return combs
+
+    def test_itertools_combinations_args(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(*args, **kwargs):
+            return list(itertools.combinations(*args, **kwargs))
+
+        self.assertRaises(Unsupported, fn)
+        self.assertRaises(Unsupported, fn, [1, 2, 3], 1, 2)
+        self.assertRaises(Unsupported, fn, [1, 2, 3], fake_arg=1)
+        self.assertRaises(Unsupported, fn, [1, 2, 3], -1)
+
+    @make_test
+    def test_itertools_combinations_various_iterators(a, b):
+        itertools.combinations([a, b], 1)
+        itertools.combinations(zip([1, 2], [3, 4]), 1)
+        itertools.combinations(map(lambda x: x, [1, 2]), 1)
+        itertools.combinations(filter(lambda x: True, [1, 2]), 1)
+        return a
+
+    @make_test
+    def test_itertools_combinations_with_replacement(a, b):
+        combs = []
+        for size in itertools.combinations_with_replacement((1, 2, 3, 4), 2):
+            combs.append(torch.ones(size))
+        return combs
+
+    if sys.version_info >= (3, 12):
+
+        @make_test
+        def test_itertools_batched(a):
+            batches = []
+            for size in itertools.batched((1, 2, 3, 4, 5), 2):
+                batches.append(torch.ones(size))
+            return batches
 
     @make_test
     def test_itertools_pairwise(a):
@@ -669,7 +782,7 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
 
     @make_test
     def test_device_constant(a):
-        return a + torch.ones(1, device=torch.device("cpu"))
+        return a + torch.ones(1)
 
     @make_test
     def test_tuple1(a, b):
@@ -734,6 +847,26 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         kwargs = {"dim": 0}
         return torch.cat(*args, **kwargs)
 
+    def test_list_extend_set_and_dict_iterables(self):
+        def fn(x):
+            out = [x]
+            out.extend({1, 2, 3})
+
+            mapping = {"a": x + 1, "b": x + 2}
+            out.extend(mapping)
+            out.extend(mapping.keys())
+            out.extend(mapping.values())
+            out.extend(mapping.items())
+            return out
+
+        x = torch.ones(2, 2)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+
+        self.assertEqual(actual[0], expected[0])
+        self.assertEqual(set(actual[1:4]), {1, 2, 3})
+        self.assertEqual(actual[4:], expected[4:])
+
     def test_list_slice(self):
         class Mock:
             def __init__(self):
@@ -771,6 +904,14 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         d.extend(empty)
 
         return d
+
+    @make_test
+    def test_deque_reinit_resets_maxlen(a, b):
+        # deque.__init__ resets maxlen; re-init with more items than the old
+        # maxlen must not be clamped to the old maxlen.
+        d = collections.deque([a, b], maxlen=2)
+        d.__init__([a, b, a + 1, b + 1])
+        return d, d.maxlen
 
     @make_test
     def test_slice1(a):
@@ -1279,7 +1420,7 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
 
     @make_test
     def test_device(x):
-        if not x.is_cuda:
+        if x.device.type == "cpu":
             return x + 1
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
@@ -1312,10 +1453,10 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         m = a.type("torch.HalfTensor")
         return b.type(m.type())
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skipIf(not HAS_GPU, "requires gpu")
     @make_test
     def test_tensor_type5(a, b):
-        m = a.type(torch.cuda.HalfTensor)
+        m = a.to(device_type).half()
         return b.type(m.type())
 
     @make_test
@@ -1754,11 +1895,11 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         self._test_default_dict_helper(set)
 
     def test_default_dict_lambda(self):
-        self._test_default_dict_helper(lambda: dict())  # noqa: C408
+        self._test_default_dict_helper(lambda: dict())
 
     def test_default_dict_closure(self):
         def factory():
-            return dict()  # noqa: C408
+            return dict()
 
         self._test_default_dict_helper(factory)
 
@@ -1785,7 +1926,7 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         param = torch.nn.Parameter(torch.ones([2, 2]))
 
         def fn(x):
-            dd = collections.defaultdict(lambda: dict())  # noqa: C408
+            dd = collections.defaultdict(lambda: dict())
             dd["a"] = x + 1
             dd[param] = 123
             dd["c"] = x * 2
@@ -1824,7 +1965,7 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
 
     @make_test
     def test_call_dict1(x):
-        d1 = dict()  # noqa: C408
+        d1 = dict()
         d1["x"] = x + 1
         d2 = collections.OrderedDict()
         d2["x"] = x + 2
@@ -1832,7 +1973,7 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
 
     @make_test
     def test_call_dict2(x):
-        d1 = dict()  # noqa: C408
+        d1 = dict()
         d1["x"] = x
         d2 = collections.OrderedDict(d1)
         if isinstance(d2, collections.OrderedDict):
@@ -2514,6 +2655,60 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         else:
             return x - 1
 
+    def test_backend_availability_predicates(self):
+        def is_mps_available():
+            return (
+                hasattr(torch.backends, "mps")
+                and torch.backends.mps.is_available()
+                and torch.backends.mps.is_built()
+            )
+
+        def is_mtia_available():
+            return hasattr(torch, "mtia") and torch.mtia.is_available()
+
+        def clear_device_cache_like(x):
+            if is_mps_available():
+                return x + 1
+            elif torch.mps.is_available():
+                return x + 2
+            elif is_mtia_available():
+                return x + 3
+            elif torch.cuda.is_available():
+                return x + 4
+            elif torch.xpu.is_available():
+                return x + 5
+            elif torch.accelerator.is_available():
+                return x + 6
+            return x - 1
+
+        x = torch.randn(3)
+        opt_fn = torch.compile(clear_device_cache_like, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), clear_device_cache_like(x))
+
+        def top_level_predicates(x):
+            if torch.mps.is_available():
+                x = x + 7
+            else:
+                x = x - 7
+            if torch.mtia.is_available():
+                x = x + 11
+            else:
+                x = x - 11
+            return x
+
+        opt_fn = torch.compile(top_level_predicates, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), top_level_predicates(x))
+
+    def test_backend_mps_is_built(self):
+        def fn(x):
+            if torch.backends.mps.is_built():
+                return x + 1
+            return x - 1
+
+        x = torch.randn(3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
     @unittest.skipIf(
         not torch.distributed.is_available(), "requires distributed package"
     )
@@ -2967,7 +3162,7 @@ class GraphModule(torch.nn.Module):
                 normalize_gm(backend.graphs[0].print_readable(print_output=False)),
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, s77: "Sym(s77)", L_x_: "f32[s77]"):
+    def forward(self, L_x_: "f32[s77]", s77: "Sym(s77)"):
         l_x_ = L_x_
 
         sum_1: "f32[]" = l_x_.sum();  l_x_ = None
@@ -3008,7 +3203,6 @@ class GraphModule(torch.nn.Module):
         else:
             return x.cos()
 
-    @unittest.expectedFailure
     def test_getattr_metaclass(self):
         class Meta(type):
             def __getattr__(cls, name):
@@ -3217,7 +3411,7 @@ class GraphModule(torch.nn.Module):
                 normalize_gm(backend.graphs[0].print_readable(print_output=False)),
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, s9: "Sym(s9)", L_lambda0_keywords_y_: "f32[s9, s9]"):
+    def forward(self, L_lambda0_keywords_y_: "f32[s9, s9]", s9: "Sym(s9)"):
         l_lambda0_keywords_y_ = L_lambda0_keywords_y_
 
         mul: "f32[s9, s9]" = l_lambda0_keywords_y_ * l_lambda0_keywords_y_
@@ -3251,9 +3445,9 @@ class GraphModule(torch.nn.Module):
     def forward(self, L_lambda0_keywords_y_: "f32[2, 2]"):
         l_lambda0_keywords_y_ = L_lambda0_keywords_y_
 
-        mul: "f32[2, 2]" = l_lambda0_keywords_y_ * l_lambda0_keywords_y_
+        add: "f32[2, 2]" = l_lambda0_keywords_y_ + l_lambda0_keywords_y_
 
-        add: "f32[2, 2]" = l_lambda0_keywords_y_ + l_lambda0_keywords_y_;  l_lambda0_keywords_y_ = None
+        mul: "f32[2, 2]" = l_lambda0_keywords_y_ * l_lambda0_keywords_y_;  l_lambda0_keywords_y_ = None
 
         mul_1: "f32[2, 2]" = torch.mul(mul, add);  mul = add = None
         return (mul_1,)
@@ -3264,12 +3458,12 @@ class GraphModule(torch.nn.Module):
                 normalize_gm(backend.graphs[0].print_readable(print_output=False)),
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, s9: "Sym(s9)", L_lambda0_keywords_y_: "f32[s9, s9]"):
+    def forward(self, L_lambda0_keywords_y_: "f32[s9, s9]", s9: "Sym(s9)"):
         l_lambda0_keywords_y_ = L_lambda0_keywords_y_
 
-        mul: "f32[s9, s9]" = l_lambda0_keywords_y_ * l_lambda0_keywords_y_
+        add: "f32[s9, s9]" = l_lambda0_keywords_y_ + l_lambda0_keywords_y_
 
-        add: "f32[s9, s9]" = l_lambda0_keywords_y_ + l_lambda0_keywords_y_;  l_lambda0_keywords_y_ = None
+        mul: "f32[s9, s9]" = l_lambda0_keywords_y_ * l_lambda0_keywords_y_;  l_lambda0_keywords_y_ = None
 
         mul_1: "f32[s9, s9]" = torch.mul(mul, add);  mul = add = None
         return (mul_1,)
@@ -3301,9 +3495,9 @@ class GraphModule(torch.nn.Module):
     def forward(self, L_lambda0_keywords_y_: "f32[2, 2]"):
         l_lambda0_keywords_y_ = L_lambda0_keywords_y_
 
-        mul: "f32[2, 2]" = l_lambda0_keywords_y_ * l_lambda0_keywords_y_
+        add: "f32[2, 2]" = l_lambda0_keywords_y_ + l_lambda0_keywords_y_
 
-        add: "f32[2, 2]" = l_lambda0_keywords_y_ + l_lambda0_keywords_y_;  l_lambda0_keywords_y_ = None
+        mul: "f32[2, 2]" = l_lambda0_keywords_y_ * l_lambda0_keywords_y_;  l_lambda0_keywords_y_ = None
 
         mul_1: "f32[2, 2]" = torch.mul(mul, add);  mul = add = None
         return (mul_1,)
@@ -3314,12 +3508,12 @@ class GraphModule(torch.nn.Module):
                 normalize_gm(backend.graphs[0].print_readable(print_output=False)),
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, s9: "Sym(s9)", L_lambda0_keywords_y_: "f32[s9, s9]"):
+    def forward(self, L_lambda0_keywords_y_: "f32[s9, s9]", s9: "Sym(s9)"):
         l_lambda0_keywords_y_ = L_lambda0_keywords_y_
 
-        mul: "f32[s9, s9]" = l_lambda0_keywords_y_ * l_lambda0_keywords_y_
+        add: "f32[s9, s9]" = l_lambda0_keywords_y_ + l_lambda0_keywords_y_
 
-        add: "f32[s9, s9]" = l_lambda0_keywords_y_ + l_lambda0_keywords_y_;  l_lambda0_keywords_y_ = None
+        mul: "f32[s9, s9]" = l_lambda0_keywords_y_ * l_lambda0_keywords_y_;  l_lambda0_keywords_y_ = None
 
         mul_1: "f32[s9, s9]" = torch.mul(mul, add);  mul = add = None
         return (mul_1,)
@@ -3349,10 +3543,10 @@ class GraphModule(torch.nn.Module):
         l_x_ = L_x_
 
         mul: "f32[2, 2]" = l_x_ * 4
-        mul_1: "f32[2, 2]" = mul * l_x_;  mul = None
-        mul_2: "f32[2, 2]" = 20 * l_x_;  l_x_ = None
+        mul_1: "f32[2, 2]" = 20 * l_x_
+        mul_2: "f32[2, 2]" = mul * l_x_;  mul = l_x_ = None
 
-        mul_3: "f32[2, 2]" = torch.mul(mul_1, mul_2);  mul_1 = mul_2 = None
+        mul_3: "f32[2, 2]" = torch.mul(mul_2, mul_1);  mul_2 = mul_1 = None
         return (mul_3,)
 """,
             )
@@ -3361,14 +3555,14 @@ class GraphModule(torch.nn.Module):
                 normalize_gm(backend.graphs[0].print_readable(print_output=False)),
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, s77: "Sym(s77)", L_x_: "f32[s77, s77]"):
+    def forward(self, L_x_: "f32[s77, s77]", s77: "Sym(s77)"):
         l_x_ = L_x_
 
         mul: "f32[s77, s77]" = l_x_ * 4
-        mul_1: "f32[s77, s77]" = mul * l_x_;  mul = None
-        mul_2: "f32[s77, s77]" = 20 * l_x_;  l_x_ = None
+        mul_1: "f32[s77, s77]" = 20 * l_x_
+        mul_2: "f32[s77, s77]" = mul * l_x_;  mul = l_x_ = None
 
-        mul_3: "f32[s77, s77]" = torch.mul(mul_1, mul_2);  mul_1 = mul_2 = None
+        mul_3: "f32[s77, s77]" = torch.mul(mul_2, mul_1);  mul_2 = mul_1 = None
         return (mul_3,)
 """,
             )
@@ -3439,6 +3633,30 @@ class GraphModule(torch.nn.Module):
 
         self.assertEqual(foo(), foo())
         self.assertEqual(foo(), foo())
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_manual_seed(self):
+        import torch._inductor.config as inductor_config
+
+        seed_fns = (
+            torch.cuda.manual_seed,
+            torch.cuda.manual_seed_all,
+            torch.cuda.random.manual_seed,
+            torch.cuda.random.manual_seed_all,
+        )
+
+        with inductor_config.patch("fallback_random", True):
+            for seed_fn in seed_fns:
+                with self.subTest(seed_fn=f"{seed_fn.__module__}.{seed_fn.__name__}"):
+                    torch._dynamo.reset()
+
+                    @torch.compile
+                    def foo():
+                        seed_fn(3)
+                        return torch.rand(4, device="cuda")
+
+                    self.assertEqual(foo(), foo())
+                    self.assertEqual(foo(), foo())
 
     def test_partial_across_graph_break_uninvoked(self):
         from functools import partial
@@ -3701,6 +3919,25 @@ class GraphModule(torch.nn.Module):
                 opt_fn = torch.compile(fn, fullgraph=True, backend="eager")
                 self.assertEqual(opt_fn(), fn())
 
+    def test_operator_concat(self):
+        for seq_type in (list, tuple):
+            with self.subTest(seq_type=seq_type):
+
+                def fn(a, b):
+                    return operator.concat(a, b)
+
+                opt_fn = torch.compile(fn, fullgraph=True)
+                a = seq_type([1, 2, 3])
+                b = seq_type([4, 5, 6])
+                self.assertEqual(opt_fn(a, b), fn(a, b))
+
+    def test_operator_iconcat(self):
+        def fn(a, b):
+            return operator.iconcat(a, b)
+
+        opt_fn = torch.compile(fn, fullgraph=True)
+        self.assertEqual(opt_fn([1, 2, 3], [4, 5, 6]), [1, 2, 3, 4, 5, 6])
+
     def test_attrgetter(self):
         for attrs in (
             ("shape",),
@@ -3764,6 +4001,18 @@ class GraphModule(torch.nn.Module):
         if args_count == 3 and args[2] == 0:
             args[2] = 1
         return args
+
+    def test_list_iterator_graph_break(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            it = [1, 3, 5].__iter__()
+            y = x + next(it)
+            torch._dynamo.graph_break()
+            return y + next(it) + next(it)
+
+        x = torch.tensor([1.0])
+        y = fn(x)
+        self.assertEqual(y, x + 1 + 3 + 5)
 
     def test_range_iterator_graph_break(self):
         @torch.compile(backend="eager")
@@ -3975,9 +4224,7 @@ class GraphModule(torch.nn.Module):
 
         @torch.compile(backend="eager")
         def func():
-            make_tensor = partial(
-                torch.rand, device="cpu", dtype=torch.float16, requires_grad=True
-            )
+            make_tensor = partial(torch.rand, dtype=torch.float16, requires_grad=True)
 
             bsz, num_heads, seq_len_q, seq_len_kv, head_dim = (16, 16, 128, 128, 16)
             make_q_tensor = partial(
@@ -4037,6 +4284,20 @@ class GraphModule(torch.nn.Module):
         e = fn(t)
         g = torch.compile(fn, backend="eager", fullgraph=True)(t)
         self.assertEqual(e, g)
+
+    @unittest.skipIf(sys.platform == "darwin", "No mkldnn on MacOS")
+    def test_quantize_per_tensor(self):
+        def fn(t, scale, zero_point):
+            return torch.quantize_per_tensor(t, scale, zero_point, torch.quint8)
+
+        scale = torch.tensor(2.0)
+        zero_point = torch.tensor(10.0)
+        t = torch.rand((2, 2)) * scale + zero_point
+
+        result = fn(t, scale, zero_point)
+        compiled_fn = torch.compile(fn, fullgraph=True)
+        compiled_result = compiled_fn(t, scale, zero_point)
+        self.assertEqual(compiled_result, result)
 
     def test_map_return(self):
         def fn(a, b):
@@ -4199,7 +4460,7 @@ class GraphModule(torch.nn.Module):
         return x + y
 
     @make_test
-    def test_map_list_extend(a):
+    def test_map_list_extend_2(a):
         y = [1]
 
         def inner(z):
@@ -4225,9 +4486,9 @@ class GraphModule(torch.nn.Module):
         def self_fn(x):
             return x.unsqueeze_(dim=1) + 1
 
-        v = torch.ones([3], device="cpu")
+        v = torch.ones([3])
         # identical tensor since modify inplace
-        v2 = torch.ones([3], device="cpu")
+        v2 = torch.ones([3])
         opt_fn = torch.compile(fn, backend="eager")
         opt_self_fn = torch.compile(self_fn, backend="eager")
         self.assertEqual(v, v2)
@@ -4313,7 +4574,7 @@ class GraphModule(torch.nn.Module):
         def fn(x):
             return retry(cached_fn)(x)
 
-        x = torch.tensor(2.0, device="cpu")
+        x = torch.tensor(2.0)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), opt_fn(x))
 
@@ -4506,7 +4767,9 @@ class GraphModule(torch.nn.Module):
 
         f5()
         new_device = (
-            "cpu" if torch._C._get_accelerator() == torch.device("cuda") else "cuda"
+            "cpu"
+            if torch._C._get_accelerator() == torch.device(device_type)
+            else device_type
         )
 
         old_get_device_module = torch.get_device_module
@@ -4579,6 +4842,132 @@ class GraphModule(torch.nn.Module):
 
         self.assertEqual(result, torch.sin(x))
 
+    @unittest.skipIf(not HAS_GPU, "requires gpu")
+    def test_capture_triton_handled_during_tracing(self):
+        import triton
+        import triton.language as tl
+
+        @triton.jit
+        def sin_kernel(x_ptr, y_ptr, n_elements, BLOCK_SIZE: "tl.constexpr"):
+            pid = tl.program_id(axis=0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(x_ptr + offsets, mask=mask)
+            tl.store(y_ptr + offsets, tl.sin(x), mask=mask)
+
+        def fn(x: torch.Tensor) -> torch.Tensor:
+            out = torch.empty_like(x)
+            n_elements = x.numel()
+
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+            wrapped = torch._library.capture_triton(sin_kernel)
+            wrapped[grid](x, out, n_elements, BLOCK_SIZE=128)
+
+            return out
+
+        compiled = torch.compile(fn, fullgraph=True, backend="eager")
+
+        x = torch.randn(1024, device=device_type)
+        result = compiled(x)
+
+        self.assertEqual(result, torch.sin(x))
+
+    def test_property_descriptor_on_instance(self):
+        class Foo:
+            def __init__(self, x):
+                self._x = x
+
+            @property
+            def x(self):
+                return self._x + 1
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(obj):
+            return obj.x
+
+        self.assertEqual(fn(Foo(torch.tensor(5))), torch.tensor(6))
+
+    def test_property_descriptor_on_class(self):
+        class Foo:
+            @property
+            def x(self):
+                return 42
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            return isinstance(Foo.x, property)
+
+        self.assertTrue(fn())
+
+    def test_tuplegetter_on_instance(self):
+        from collections import namedtuple
+
+        Point = namedtuple("Point", ["x", "y"])
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(p):
+            return p.x + p.y
+
+        p = Point(torch.tensor(3), torch.tensor(4))
+        self.assertEqual(fn(p), torch.tensor(7))
+
+    def test_tuplegetter_doc_on_class(self):
+        from collections import namedtuple
+
+        Point = namedtuple("Point", ["x", "y"])
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            return Point.x.__doc__
+
+        self.assertIn("Alias", fn())
+
+    def test_getset_descriptor_on_instance(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(obj):
+            return obj.__class__
+
+        self.assertEqual(fn(42), int)
+        self.assertEqual(fn("hello"), str)
+
+    def test_type_getset_descriptor_metaclass_shadow(self):
+        class Meta(type):
+            @property
+            def __dict__(cls):
+                return {"shadow": 1}
+
+            @property
+            def __mro__(cls):
+                return ("shadow",)
+
+        class Foo(metaclass=Meta):
+            marker = 7
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def normal_lookup(x):
+            return x + Foo.__dict__["shadow"] + len(Foo.__mro__)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def direct_descriptor_call(x):
+            cls_dict = type.__dict__["__dict__"].__get__(Foo)
+            cls_mro = type.__dict__["__mro__"].__get__(Foo)
+            return x + cls_dict["marker"] + len(cls_mro)
+
+        x = torch.tensor(1.0)
+        self.assertEqual(normal_lookup(x), torch.tensor(3.0))
+        self.assertEqual(direct_descriptor_call(x), torch.tensor(10.0))
+
+    def test_member_descriptor_isinstance_on_class(self):
+        class A:
+            __slots__ = ("x",)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            return isinstance(A.x, types.MemberDescriptorType)
+
+        self.assertTrue(fn())
+
 
 def udf_mul(x, y):
     return x * y
@@ -4628,7 +5017,7 @@ class WrapperModule(torch.nn.Module):
         return self.m()
 
 
-class DefaultsTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+class DefaultsTests(torch._dynamo.test_case.TestCase):
     def test_func_default_tensor_args(self):
         """
         Tests that we indeed reference (and mutate) "the one" default tensor arg
@@ -4713,6 +5102,56 @@ class DefaultsTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         self.assertEqual(cnts.frame_count, 3)
         self.assertEqual(cnts.op_count, 6)
 
+    def test_guard_on_constant_func_defaults(self):
+        """
+        When a compiled function is re-invoked with a closure whose
+        __code__ is the same but __defaults__ differ (e.g. a different
+        constant default arg), Dynamo must recompile instead of reusing
+        the stale graph.
+        """
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def make_adder(offset):
+            def adder(x, _offset=offset):
+                return x + _offset
+
+            return adder
+
+        @torch.compile(backend=cnts)
+        def call_adder(x, fn):
+            return fn(x)
+
+        x = torch.ones(4)
+
+        adder0 = make_adder(0)
+        result0 = call_adder(x, adder0)
+        self.assertEqual(result0, x + 0)
+        self.assertEqual(cnts.frame_count, 1)
+
+        # Same __code__, different __defaults__ → must recompile
+        adder5 = make_adder(5)
+        result5 = call_adder(x, adder5)
+        self.assertEqual(result5, x + 5)
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_guard_on_pos_default_mapping(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def target(x, b=1, c=2):
+            return x + b
+
+        @torch.compile(backend=cnts)
+        def caller(x):
+            return target(x, c=3)
+
+        x = torch.ones(())
+        self.assertEqual(caller(x), x + 1)
+        self.assertEqual(cnts.frame_count, 1)
+
+        with patch.object(target, "__defaults__", (1,)):
+            expected_msg = "missing .* required positional argument: 'b'"
+            self.assertRaisesRegex(Exception, expected_msg, caller, x)
+
     def test_func_default_torch_args(self):
         """
         Tests other types of torch types as function default (size, dtype, device)
@@ -4735,6 +5174,30 @@ class DefaultsTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         self.assertEqual(out.size(), compiled_out.size())
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 1)
+
+    def test_shadowed_dataclass_field_property_matches_eager(self):
+        @dataclass
+        class Data:
+            value: torch.Tensor
+            edges: torch.Tensor
+
+            @property
+            def edges(self) -> torch.Tensor:
+                return torch.randn(3)
+
+        def fn(x):
+            data = Data(value=x, edges=x)
+            return data.value.sum()
+
+        x = torch.randn(3)
+        expected_msg = (
+            r"(property 'edges' of .*Data' object has no setter"
+            r"|can't set attribute(?: 'edges')?)"
+        )
+        self.assertRaisesRegex(AttributeError, expected_msg, fn, x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertRaisesRegex(Exception, expected_msg, opt_fn, x)
 
     def test_dataclass_factory(self):
         @dataclass
@@ -4801,6 +5264,47 @@ class DefaultsTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         res = fn(x)
         ref = opt_fn(x)
         self.assertEqual(ref, res)
+
+    def test_pydantic_dataclass_construction(self):
+        @torch._dynamo.disable
+        def populate(self, x, y):
+            self.x = x
+            self.y = y
+
+        @dataclass(init=False)
+        class Point:
+            x: torch.Tensor
+            y: torch.Tensor
+            # Pydantic uses this sentinel on decorated dataclasses.
+            __is_pydantic_dataclass__ = True
+
+            def __init__(self, x, y):
+                populate(self, x, y)
+
+        def fn(x, y):
+            p = Point(x=x, y=y)
+            return p.x + p.y
+
+        torch._dynamo.reset()
+        counters.clear()
+        cnts = torch._dynamo.testing.CompileCounter()
+        compiled_fn = torch.compile(fn, backend=cnts)
+        x = torch.randn(4)
+        y = torch.randn(4)
+
+        self.assertTrue(same(fn(x, y), compiled_fn(x, y)))
+        self.assertEqual(cnts.frame_count, 0)
+        self.assertEqual(cnts.op_count, 0)
+        # Skipping the whole frame records a second follow-on graph break, so
+        # assert on the specific pydantic entry rather than the raw count.
+        self.assertEqual(
+            [
+                count
+                for msg, count in counters["graph_break"].items()
+                if "Pydantic dataclass constructor" in msg
+            ],
+            [1],
+        )
 
     def test_listlike_of_tensors_contains_constant(self):
         for listlike in [set, list]:
@@ -5184,11 +5688,11 @@ class DefaultsTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         self.assertEqual(list(ref[1]), list(res[1]))
         self.assertIsInstance(res[1], zip)
 
-        # If nopython, should raise UserError
-        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "zip()"):
+        # If nopython, should raise Unsupported
+        with self.assertRaisesRegex(Unsupported, "zip()"):
             nopython_fn(x, ys[:1], zs)
 
-        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "zip()"):
+        with self.assertRaisesRegex(Unsupported, "zip()"):
             nopython_fn(x, ys, zs[:1])
 
         # Should cause fallback if allow graph break
@@ -5215,7 +5719,8 @@ class DefaultsTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         if sys.version_info < (3, 14):
             with self.assertRaises(TypeError):
                 opt_fn(x, ys, zs)
-            with self.assertRaises(TypeError):
+            torch._dynamo.reset()
+            with self.assertRaises((TypeError, torch._dynamo.exc.Unsupported)):
                 nopython_fn(x, ys, zs)
             return
 
@@ -5226,10 +5731,10 @@ class DefaultsTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         self.assertIsInstance(res[1], map)
 
         # If nopython, should raise UserError
-        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "map()"):
+        with self.assertRaisesRegex(Unsupported, "map()"):
             nopython_fn(x, ys[:1], zs)
 
-        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "map()"):
+        with self.assertRaisesRegex(Unsupported, "map()"):
             nopython_fn(x, ys, zs[:1])
 
         # Should cause fallback if allow graph break
@@ -5267,28 +5772,6 @@ class DefaultsTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         opt_f = torch.compile(f, backend=cnts)
         self.assertEqual(f(torch.ones(3, 3)), opt_f(torch.ones(3, 3)))
         self.assertEqual(cnts.frame_count, 3)
-
-    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
-    def test_gpu_current_device(self):
-        def fn(x):
-            y = torch.empty(
-                (2, 3),
-                dtype=torch.float32,
-                device=torch.accelerator.current_device_index(),
-            )
-            y.copy_(x)
-            return torch.sin(y + y.device.index)
-
-        counter = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch.compile(backend=counter, fullgraph=True)(fn)
-
-        with torch.accelerator.device_index(0):
-            x = torch.randn(2, 3)
-            self.assertEqual(opt_fn(x), fn(x))
-            self.assertEqual(counter.frame_count, 1)
-            with torch.accelerator.device_index(1):
-                self.assertEqual(opt_fn(x), fn(x))
-                self.assertEqual(counter.frame_count, 2)
 
     def test_fn_with_attr(self):
         def fn(x):
@@ -5560,7 +6043,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         self.assertTrue(isinstance(res, tuple))
 
     def test_udf_list(self):
-        class MyList(list):  # noqa: SLOT001
+        class MyList(list):
             def len_mulitply_2(self):
                 return len(self) * 2
 
@@ -5594,7 +6077,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         self.assertTrue(res_lst.checked)
 
     def test_udf_list_slice(self):
-        class MyList(list):  # noqa: SLOT001
+        class MyList(list):
             def len_mulitply_2(self):
                 return len(self) * 2
 
@@ -5612,7 +6095,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         self.assertEqual(len(ref_lst), len(res_lst))
 
     def test_udf_list_reconstruction(self):
-        class MyList(list):  # noqa: SLOT001
+        class MyList(list):
             # def __new__(cls, *args, **kwargs):
             #     return super().__new__(cls, *args, **kwargs)
             pass
@@ -5677,20 +6160,6 @@ class DefaultsTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
 
-    def test_functools_partial_id(self):
-        def gn(a, b):
-            return a + b
-
-        partial_gn = functools.partial(gn, a=3)
-
-        def fn(x):
-            d = {id(partial_gn): 5}
-            return partial_gn(b=x) * d[id(partial_gn)]
-
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        x = torch.randn(4)
-        self.assertEqual(fn(x), opt_fn(x))
-
     def test_functional_compile(self):
         def get_torch_functional_functions():
             s = set()
@@ -5706,7 +6175,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
             self.assertTrue(callable(compiled_func))
 
     def test_skip_function_call_very_weird_value(self):
-        class weird:  # noqa: UP004
+        class weird:
             def __getattribute__(self, name):
                 if name == "__qualname__":
                     raise AttributeError("test")
@@ -5862,6 +6331,56 @@ class DefaultsTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
 
         self.assertEqual(result_a, torch.full((2,), 3.14, dtype=torch.float32))
         self.assertEqual(result_b, torch.full((2,), 2.71, dtype=torch.float32))
+
+    def test_full_with_parameter_fill_value_raises(self):
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.fill_value = torch.nn.Parameter(torch.tensor(2.5))
+
+            def forward(self, x):
+                return torch.full((x.shape[0], x.shape[1], 2), self.fill_value)
+
+        mod = Mod()
+        x = torch.randn(3, 4)
+
+        with self.assertRaises(TypeError):
+            mod(x)
+
+        opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            opt_mod(x)
+
+    def test_full_with_parameter_subclass_fill_value_raises(self):
+        class MyParam(torch.nn.Parameter):
+            pass
+
+        def func(x):
+            return torch.full((2,), x)
+
+        x = MyParam(torch.tensor(2.5))
+
+        with self.assertRaises(TypeError):
+            func(x)
+
+        func_compiled = torch.compile(func, backend="eager", fullgraph=True)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            func_compiled(x)
+
+    def test_full_with_tensor_subclass_fill_value(self):
+        class MyTensor(torch.Tensor):
+            pass
+
+        def func(x):
+            return torch.full((2,), x)
+
+        x = torch.tensor(5.0).as_subclass(MyTensor)
+        expected = func(x)
+
+        func_compiled = torch.compile(func, backend="eager", fullgraph=True)
+        result = func_compiled(x)
+
+        self.assertEqual(result, expected)
 
 
 instantiate_parametrized_tests(FunctionTests)

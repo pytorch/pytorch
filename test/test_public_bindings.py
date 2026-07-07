@@ -123,7 +123,6 @@ class TestPublicBindings(TestCase):
             "FutureType",
             "Generator",
             "GeneratorType",
-            "GreenContext",
             "get_autocast_cpu_dtype",
             "get_autocast_dtype",
             "get_autocast_ipu_dtype",
@@ -184,7 +183,6 @@ class TestPublicBindings(TestCase):
             "PyTorchFileReader",
             "PyTorchFileWriter",
             "qscheme",
-            "read_vitals",
             "RRefType",
             "ScriptClass",
             "ScriptClassFunction",
@@ -211,7 +209,6 @@ class TestPublicBindings(TestCase):
             "set_flush_denormal",
             "set_num_interop_threads",
             "set_num_threads",
-            "set_vital",
             "Size",
             "StaticModule",
             "Stream",
@@ -232,7 +229,6 @@ class TestPublicBindings(TestCase):
             "Value",
             "set_autocast_gpu_dtype",
             "get_autocast_gpu_dtype",
-            "vitals_enabled",
             "wait",
             "Tag",
             "set_autocast_xla_enabled",
@@ -415,9 +411,24 @@ class TestPublicBindings(TestCase):
 
         errors = []
         for mod, exc in failures:
-            if mod in private_allowlist:
-                # make sure mod is actually private
-                if not any(t.startswith("_") for t in mod.split(".")):
+            # Prefixes for modules whose top-level imports pull in optional
+            # runtime deps (cutlass, cuda-python, triton, cupti-python) that
+            # aren't available in CPU-only CI. Registrations are no-ops when the
+            # runtime is missing, so it's safe to skip them here.
+            cuda_dep_prefixes = (
+                "torch._native.ops.foreach_mm.",
+                "torch._native.ops.polar.",
+                "torch._native.ops.scatter_add.",
+                "torch._native.ops.topk.",
+                "torch._vendor.quack",
+                "torch.profiler._cupti.",
+            )
+            if (
+                mod in private_allowlist
+                or (mod.startswith("torch._native.ops.") and "triton" in mod)
+                or mod.startswith(cuda_dep_prefixes)
+            ):
+                if self._is_mod_public(mod):
                     raise AssertionError(
                         f"Expected private module name to include '_' segments: {mod}"
                     )

@@ -285,7 +285,7 @@ def _conv1d_op_with_squeeze(
 ) -> torch.Tensor:
     # In quantized version, conv1d is emulated using conv2d with squeeze and unsqueeze
     # operations before and after the conv2d operation to match the dimension of weights.
-    # Reference: https://github.com/pytorch/pytorch/blob/eca0cb0fbe84bb0a34fa94afe261bceecd52c436/aten/src/ATen/native/quantized/cpu/qconv.cpp#L1827  # noqa: B950
+    # Reference: https://github.com/pytorch/pytorch/blob/eca0cb0fbe84bb0a34fa94afe261bceecd52c436/aten/src/ATen/native/quantized/cpu/qconv.cpp#L1827
     s_inp = torch.ops.aten.unsqueeze(inp, 2)
     conv1d_res = torch.ops.aten.conv2d(
         s_inp,

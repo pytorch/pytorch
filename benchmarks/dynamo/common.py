@@ -198,8 +198,16 @@ BENCHMARK_USE_SGD = {
     "XGLMForCausalLM",
     # TIMM
     "adv_inception_v3",
-    "tf_efficientnet_b0",
     "ghostnet_100",
+    "tf_efficientnet_b0",
+}
+
+# These CUDA Inductor TIMM models fail fp16 training accuracy with the default
+# eager Adam reference, but this has not been validated for non-accuracy runs,
+# non-Inductor, or ROCm periodic baselines.
+CUDA_INDUCTOR_ACCURACY_USE_SGD = {
+    "convnextv2_nano.fcmae_ft_in22k_in1k",
+    "vit_base_patch14_dinov2.lvd142m",
 }
 
 # These models OOM in CI
@@ -1069,66 +1077,87 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     tolerance = args.xla_tolerance if args.trace_on_xla else 1e-4
     torch._dynamo.config.repro_tolerance = tolerance
 
-    with maybe_profile(args.export_profiler_trace, **args.profile_details) as p:
-        if args.export_aot_inductor:
-            frozen_model_iter_fn = export_aot_inductor(
-                model, example_inputs, args.inductor_compile_mode
-            )
-        elif args.export_nativert:
-            frozen_model_iter_fn = export_nativert(model, example_inputs)
-        elif args.torchscript_jit_trace:
-            frozen_model_iter_fn = torchscript_jit_trace(model, example_inputs)
-        elif args.aot_precompile:
-            frozen_model_iter_fn = aot_precompile(model, example_inputs)
+    if args.export_aot_inductor:
+        frozen_model_iter_fn = export_aot_inductor(
+            model, example_inputs, args.inductor_compile_mode
+        )
+    elif args.export_nativert:
+        frozen_model_iter_fn = export_nativert(model, example_inputs)
+    elif args.torchscript_jit_trace:
+        frozen_model_iter_fn = torchscript_jit_trace(model, example_inputs)
+    elif args.aot_precompile:
+        frozen_model_iter_fn = aot_precompile(model, example_inputs)
+    else:
+        if kwargs["hf_llm"]:
+            # If it's an llm, we want to optimize model.forward, and use
+            # the generate function
+            model.forward = torch._dynamo.run(model)
+            frozen_model_iter_fn = model_iter_fn
         else:
-            if kwargs["hf_llm"]:
-                # If it's an llm, we want to optimize model.forward, and use
-                # the generate function
-                model.forward = torch._dynamo.run(model)
-                frozen_model_iter_fn = model_iter_fn
-            else:
-                frozen_model_iter_fn = torch._dynamo.run(model_iter_fn)
+            frozen_model_iter_fn = torch._dynamo.run(model_iter_fn)
 
-        for rep in trange(args.repeat, desc="running benchmark"):
-            inputs = (
-                randomize_input(copy.deepcopy(example_inputs))
-                if should_randomize_input
-                else example_inputs
+    for rep in trange(args.repeat, desc="running benchmark"):
+        inputs = (
+            randomize_input(copy.deepcopy(example_inputs))
+            if should_randomize_input
+            else example_inputs
+        )
+        # need call mark_step to perform the computation
+        # on randomize_input. Otherwise the first call using the
+        # inputs will incur high penalty then the next one.
+        maybe_mark_step(args)
+
+        # interleave the runs to handle frequency scaling and load changes
+        with torch.compiler.set_stance("force_eager"):
+            timings[rep, 0], expected_output = timed(
+                model,
+                model_iter_fn,
+                inputs,
+                return_result=True,
+                times=times,
+                collect_outputs=args.collect_outputs,
+                batch_size=kwargs.get("batch_size"),
             )
-            # need call mark_step to perform the computation
-            # on randomize_input. Otherwise the first call using the
-            # inputs will incur high penalty then the next one.
-            maybe_mark_step(args)
 
-            # interleave the runs to handle frequency scaling and load changes
+        # call mark_step between the 2 calls to make the comparison fair.
+        maybe_mark_step(args)
+
+        timings[rep, 1], actual_output = timed(
+            model,
+            frozen_model_iter_fn,
+            inputs,
+            return_result=True,
+            times=times,
+            collect_outputs=args.collect_outputs,
+        )
+
+    # Collect profiler trace in a separate run so that profiler overhead
+    # does not pollute the wall-clock performance numbers above.
+    if args.export_profiler_trace:
+        inputs = example_inputs
+        with maybe_profile(True, **args.profile_details) as p:
             with (
                 maybe_mark_profile(p=p, mark="expected"),
                 torch.compiler.set_stance("force_eager"),
             ):
-                timings[rep, 0], expected_output = timed(
+                timed(
                     model,
                     model_iter_fn,
                     inputs,
-                    return_result=True,
+                    return_result=False,
                     times=times,
-                    collect_outputs=args.collect_outputs,
-                    batch_size=kwargs.get("batch_size"),
+                    collect_outputs=False,
                 )
-
-            # call mark_step between the 2 calls to make the comparison fair.
-            maybe_mark_step(args)
-
             with maybe_mark_profile(p=p, mark="actual"):
-                timings[rep, 1], actual_output = timed(
+                timed(
                     model,
                     frozen_model_iter_fn,
                     inputs,
-                    return_result=True,
+                    return_result=False,
                     times=times,
-                    collect_outputs=args.collect_outputs,
+                    collect_outputs=False,
                 )
 
-    if args.export_profiler_trace:
         name = args.profiler_trace_name + "_" + model.name
         if hasattr(args, "rank"):
             name += f"_rank_{args.rank}"
@@ -1834,7 +1863,17 @@ class BenchmarkRunner:
 
     def init_optimizer(self, name, device, params):
         if device == "cuda" and self.args.training and name not in CI_SKIP_OPTIMIZER:
-            if (name in CI_USE_SGD and self.args.ci) or name in BENCHMARK_USE_SGD:
+            use_sgd = (
+                (name in CI_USE_SGD and self.args.ci)
+                or name in BENCHMARK_USE_SGD
+                or (
+                    torch.version.hip is None
+                    and self.args.backend == "inductor"
+                    and self.args.accuracy
+                    and name in CUDA_INDUCTOR_ACCURACY_USE_SGD
+                )
+            )
+            if use_sgd:
                 self.optimizer = torch.optim.SGD(params, lr=0.01, foreach=True)
                 # Disable multi_tensor_sgd for benchmarking, there isn't a large performance benefit (~1%) to compiling
                 # this optimizer because it is a single foreach add, and increases compile time.
@@ -1953,10 +1992,6 @@ class BenchmarkRunner:
     def guard_on_nn_module_models(self):
         return set()
 
-    @property
-    def inline_inbuilt_nn_modules_models(self):
-        return set()
-
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
         raise NotImplementedError
 
@@ -2028,17 +2063,18 @@ class BenchmarkRunner:
 
         return model, example_inputs
 
-    def validate_model(self, model, example_inputs):
+    def validate_model(self, name, model, example_inputs):
         """
         Runs the eager model with example inputs to ensure that eager passes.
         """
         model = self.deepcopy_model(model)
         example_inputs = clone_inputs(example_inputs)
         model, example_inputs = self.cast_based_on_args(model, example_inputs)
-        try:
-            self.model_iter_fn(model, example_inputs)
-        except Exception as e:
-            raise RuntimeError("Eager run failed") from e
+        with self.pick_grad(name, self.args.training):
+            try:
+                self.model_iter_fn(model, example_inputs)
+            except Exception as e:
+                raise RuntimeError("Eager run failed") from e
 
     def maybe_cast(self, model, example_inputs):
         model, example_inputs = self.cast_based_on_args(model, example_inputs)
@@ -2169,6 +2205,38 @@ class BenchmarkRunner:
             )
         return model
 
+    def _write_accuracy_row(self, status, dynamo_start_stats, tag):
+        """
+        Shared CSV + signpost writer for accuracy checks.
+        """
+        headers = ["dev", "name", "batch_size", "accuracy"]
+        fields = [current_device, current_name, current_batch_size, status]
+
+        if tag is not None:
+            headers.insert(3, "tag")
+            fields.insert(3, tag)
+
+        o_headers = list(headers)
+        o_fields = list(fields)
+
+        dynamo_stats = get_dynamo_stats()
+        dynamo_stats.subtract(dynamo_start_stats)
+        for k, v in dynamo_stats.items():
+            headers.append(k)
+            fields.append(v)
+
+        total_wall_time = output_signpost(
+            dict(zip(o_headers, o_fields)),
+            self.args,
+            self.suite_name,
+        )
+        headers.append("compilation_latency")
+        fields.append(total_wall_time)
+        write_outputs(output_filename, headers, fields)
+
+        if self.args.print_compilation_time:
+            print(f"Compilation time (from dynamo_timed): {total_wall_time}")
+
     def check_accuracy(
         self, name, model, example_inputs, optimize_ctx, experiment, tag
     ):
@@ -2191,34 +2259,7 @@ class BenchmarkRunner:
                 ):
                     accuracy_status = "pass"
 
-            headers = ["dev", "name", "batch_size", "accuracy"]
-            fields = [current_device, current_name, current_batch_size, accuracy_status]
-
-            if tag is not None:
-                headers.insert(3, "tag")
-                fields.insert(3, tag)
-
-            o_headers = list(headers)
-            o_fields = list(fields)
-
-            dynamo_stats = get_dynamo_stats()
-            dynamo_stats.subtract(dynamo_start_stats)
-            for k, v in dynamo_stats.items():
-                headers.append(k)
-                fields.append(v)
-
-            total_wall_time = output_signpost(
-                dict(zip(o_headers, o_fields)),
-                self.args,
-                self.suite_name,
-            )
-            headers.append("compilation_latency")
-            fields.append(total_wall_time)
-            write_outputs(output_filename, headers, fields)
-
-            if self.args.print_compilation_time:
-                print(f"Compilation time (from dynamo_timed): {total_wall_time}")
-
+            self._write_accuracy_row(accuracy_status, dynamo_start_stats, tag)
             return accuracy_status
 
         if name in self.skip_accuracy_checks_large_models_dashboard:
@@ -2506,6 +2547,141 @@ class BenchmarkRunner:
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
         return record_status(accuracy_status, dynamo_start_stats=start_stats)
+
+    def check_batch_invariance(
+        self, name, model, example_inputs, optimize_ctx, experiment, tag
+    ):
+        """
+        Batch invariance check: run the compiled forward at N, N/2, ..., 1 and
+        verify each output matches the reference sliced to that range bitwise.
+
+        Always exercises forward-only, even under --training: batch invariance
+        is a property of the forward pass; backward and optimizer step
+        aggregate over the batch and are not batch-invariant by construction.
+        Models with batch-dependent forward ops (e.g. BatchNorm in train mode)
+        will still fail here -- that's inherent, not a harness bug.
+        """
+        start_stats = get_dynamo_stats()
+
+        def record_status(status, dynamo_start_stats):
+            self._write_accuracy_row(status, dynamo_start_stats, tag)
+            return status
+
+        if name in self.skip_accuracy_checks_large_models_dashboard:
+            return record_status("pass_due_to_skip", dynamo_start_stats=start_stats)
+
+        if (
+            name in self.skip_accuracy_check_as_eager_non_deterministic
+            or name in self.non_deterministic_models
+        ):
+            return record_status("pass_due_to_skip", dynamo_start_stats=start_stats)
+
+        full_batch = current_batch_size
+        if full_batch is None or full_batch < 2:
+            return record_status("pass_due_to_skip", dynamo_start_stats=start_stats)
+
+        # If no input tensor has batch as its first dim, the slicer below is a
+        # no-op and the comparison would trivially pass without actually
+        # exercising batch invariance. Skip rather than report a misleading pass.
+        if not any(
+            isinstance(x, torch.Tensor) and x.dim() > 0 and x.shape[0] == full_batch
+            for x in pytree.tree_leaves(example_inputs)
+        ):
+            return record_status("pass_due_to_skip", dynamo_start_stats=start_stats)
+
+        def make_slicer(target):
+            def slicer(x):
+                if x.dim() > 0 and x.shape[0] == full_batch:
+                    return x[:target].contiguous()
+                return x
+
+            return slicer
+
+        def run_fresh(inputs):
+            # Rebuild model for every run so parameter-mutating side effects
+            # (BN running stats, caches, etc.) from a prior run don't bleed
+            # into the next comparison. Force eval mode regardless of
+            # --training: dropout and train-mode BN are batch-size-dependent
+            # by construction. Forward-only: backward/optimizer aggregate
+            # over the batch and are not batch-invariant by construction.
+            reset_rng_state()
+            torch._dynamo.reset()
+            torch._dynamo.utils.counters.clear()
+            model_copy = self.deepcopy_and_maybe_parallelize(model)
+            model_copy.eval()
+            try:
+                optimized_iter_fn = optimize_ctx(self.forward_pass)
+                return self.run_n_iterations(model_copy, inputs, optimized_iter_fn)
+            finally:
+                del model_copy
+                empty_gpu_cache(current_device)
+
+        with self.pick_grad(name, self.args.training):
+            model, example_inputs = self.maybe_cast(model, example_inputs)
+
+            try:
+                reference = run_fresh(clone_inputs(example_inputs))
+            except Exception as e:
+                log.exception("")
+                status = (
+                    "OOM"
+                    if isinstance(e, torch.cuda.OutOfMemoryError)
+                    else "fail_to_run"
+                )
+                return record_status(status, dynamo_start_stats=start_stats)
+
+            size = full_batch // 2
+            while size >= 1:
+                slicer = make_slicer(size)
+                sliced_inputs = tree_map_only(
+                    torch.Tensor, slicer, clone_inputs(example_inputs)
+                )
+
+                try:
+                    out = run_fresh(sliced_inputs)
+                except Exception as e:
+                    log.exception("")
+                    status = (
+                        "OOM"
+                        if isinstance(e, torch.cuda.OutOfMemoryError)
+                        else f"fail_to_run_at_batch_{size}"
+                    )
+                    return record_status(status, dynamo_start_stats=start_stats)
+
+                reference_sliced = tree_map_only(torch.Tensor, slicer, reference)
+
+                # Only compare batch-first output tensors. Aggregated outputs
+                # (e.g. HuggingFace's MaskedLMOutput.loss) don't have a batch
+                # dim and legitimately differ between batch sizes; comparing
+                # them would produce misleading failures.
+                def keep_batch_first(x):
+                    return x if x.dim() > 0 and x.shape[0] == size else None
+
+                ref_for_cmp = tree_map_only(
+                    torch.Tensor, keep_batch_first, reference_sliced
+                )
+                out_for_cmp = tree_map_only(torch.Tensor, keep_batch_first, out)
+
+                try:
+                    is_same = bitwise_same(
+                        ref_for_cmp, out_for_cmp, equal_nan=self.equal_nan
+                    )
+                except Exception:
+                    is_same = False
+
+                if not is_same:
+                    if self.args.skip_accuracy_check:
+                        return record_status(
+                            "pass_due_to_skip", dynamo_start_stats=start_stats
+                        )
+                    return record_status(
+                        f"fail_batch_invariance_at_{size}",
+                        dynamo_start_stats=start_stats,
+                    )
+
+                size //= 2
+
+        return record_status("pass", dynamo_start_stats=start_stats)
 
     def check_tolerance(
         self, name, model, example_inputs, optimize_ctx, base_device="cpu"
@@ -3025,9 +3201,14 @@ class BenchmarkRunner:
         start_stats = get_dynamo_stats()
 
         if self.args.accuracy:
-            status = self.check_accuracy(
-                name, model, example_inputs, optimize_ctx, experiment, tag
-            )
+            if self.args.batch_invariant:
+                status = self.check_batch_invariance(
+                    name, model, example_inputs, optimize_ctx, experiment, tag
+                )
+            else:
+                status = self.check_accuracy(
+                    name, model, example_inputs, optimize_ctx, experiment, tag
+                )
             print(status)
             if status == "fail_accuracy" and self.args.minify:
                 self.minify_model(
@@ -3209,6 +3390,17 @@ def parse_args(args=None):
         "--freezing", action="store_true", help="turn on freezing", default=False
     )
     parser.add_argument(
+        "--deterministic",
+        action="store_true",
+        help="Enable deterministic mode (torch.use_deterministic_algorithms, cudnn.deterministic, etc.)",
+    )
+    parser.add_argument(
+        "--batch-invariant",
+        action="store_true",
+        help="Check batch invariance: compare compiled forward outputs at full vs half batch "
+        "size and verify they match bitwise. Only valid with --accuracy.",
+    )
+    parser.add_argument(
         "--inductor-config",
         "-c",
         action="append",
@@ -3277,7 +3469,7 @@ def parse_args(args=None):
     parser.add_argument(
         "--distributed-master-port",
         default="6789",
-        help="Port to bind for for torch.distributed.  Use the default unless it's conflicting with another user",
+        help="Port to bind for torch.distributed.  Use the default unless it's conflicting with another user",
     )
     parser.add_argument(
         "--dynamic-shapes",
@@ -3719,7 +3911,14 @@ def parse_args(args=None):
     run_mode_group.add_argument(
         "--inference", action="store_true", help="Performs inference"
     )
-    return parser.parse_args(args)
+    parsed = parser.parse_args(args)
+    if parsed.batch_invariant and not parsed.accuracy:
+        parser.error("--batch-invariant requires --accuracy")
+    if parsed.dashboard and parsed.performance:
+        # Dashboard memory should measure the warmed model, not compile/autotune
+        # transients.
+        parsed.use_warm_peak_memory = True
+    return parsed
 
 
 def process_caching_precompile():
@@ -3871,7 +4070,8 @@ def _run_compare_backed_unbacked(runner, args):
                 )
         print(f"{'=' * 80}", flush=True)
 
-    # Build base command, stripping --compare-backed-unbacked and --only + value
+    # Build base command, stripping --compare-backed-unbacked, --only, --filter and their values
+    # Handles both space-separated (--filter VALUE) and equals-separated (--filter=VALUE) forms
     filtered = []
     skip_next = False
     for a in sys.argv:
@@ -3880,8 +4080,13 @@ def _run_compare_backed_unbacked(runner, args):
         if skip_next:
             skip_next = False
             continue
-        if a == "--only":
-            skip_next = True
+        if a == "--only" or a.startswith("--only="):
+            if "=" not in a:
+                skip_next = True
+            continue
+        if a == "--filter" or a.startswith("--filter="):
+            if "=" not in a:
+                skip_next = True
             continue
         filtered.append(a)
     base_cmd = [sys.executable, "-B"] + filtered
@@ -3988,7 +4193,7 @@ def write_csv_when_exception(args, name: str, status: str, device=None):
         write_outputs(output_filename, headers, row)
 
 
-def setup_determinism_for_accuracy_test(args):
+def setup_determinism(args):
     if args.only is not None and args.only not in {
         "alexnet",
         "Background_Matting",
@@ -4024,6 +4229,22 @@ def setup_determinism_for_accuracy_test(args):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
     torch.backends.mkldnn.deterministic = True
+    os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+    torch.backends.cudnn.allow_tf32 = False
+    torch.backends.cuda.matmul.allow_tf32 = False
+    torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp(False)
+    patch_torch_manual_seed()
+
+
+def setup_batch_invariant(args):
+    if not torch.cuda.is_available():
+        return
+    setup_determinism(args)
+    inductor_config.batch_invariant = True
+    inductor_config.triton.cudagraphs = False
+    torch.backends.cuda.preferred_blas_library("cublaslt")
+    torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (False, False)
+    torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (False, False)
 
 
 def run(runner, args, original_dir=None):
@@ -4084,12 +4305,22 @@ def run(runner, args, original_dir=None):
                 "DLRM+DDP is unsupported as it requires sharding the embedding layer separately from DDP"
             )
             return sys.exit(-1)
+    if args.deterministic and not args.accuracy:
+        setup_determinism(args)
+
     if args.accuracy:
         # Use small batch size. We use >1 batch size to ensure we test
         # batch_norm type of operators that work on batch dims.
         # TODO - Go through the failures for batch size = 2
         if args.batch_size is None:
-            if runner.suite_name == "huggingface":
+            if args.batch_invariant:
+                if runner.suite_name == "huggingface":
+                    args.batch_size = 8
+                elif runner.suite_name == "torchbench":
+                    args.batch_size = 8
+                else:
+                    args.batch_size = 16
+            elif runner.suite_name == "huggingface":
                 args.batch_size = 1
             elif runner.suite_name == "torchbench":
                 args.batch_size = 4
@@ -4107,9 +4338,10 @@ def run(runner, args, original_dir=None):
             args.use_eval_mode = True
         inductor_config.fallback_random = True
 
-        setup_determinism_for_accuracy_test(args)
+        setup_determinism(args)
+        if args.batch_invariant:
+            setup_batch_invariant(args)
 
-        os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
         if args.only is not None and args.only in {
             "nvidia_deeprecommender",
         }:
@@ -4117,12 +4349,24 @@ def run(runner, args, original_dir=None):
             torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
             torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
 
-        torch.backends.cudnn.allow_tf32 = False
-        torch.backends.cuda.matmul.allow_tf32 = False
-        torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp(False)
-
-        # Remove randomness when torch manual seed is called
-        patch_torch_manual_seed()
+        if (
+            args.training
+            and args.only is not None
+            and args.only
+            in {
+                "DistillGPT2",
+            }
+        ):
+            # With the harness-wide fallback_random=True, inductor falls back
+            # to ATen rng for the dropout decomposition. That fallback Philox
+            # path indexes randoms by flat element offset, whereas eager CUDA
+            # rng indexes by (thread_id, intra_thread_iter), so the two produce
+            # different dropout masks for the same seed and trip DistillGPT2's
+            # tight accuracy tolerance (observed on gfx942). Setting
+            # fallback_random=False re-enables inductor's replace_random passes,
+            # which align the masks with eager. This is correct/harmless on
+            # other backends since it only changes how inductor lowers rng.
+            inductor_config.fallback_random = False
 
         # Some models e.g. yolov3 assert batch size on n_gpus
         if "CUDA_VISIBLE_DEVICES" not in os.environ and not args.multiprocess:
@@ -4335,8 +4579,8 @@ def run(runner, args, original_dir=None):
             )
             model_iter_fn = baseline_ctx(runner.model_iter_fn)
 
-            # needed to avoid error that causes inconsistent timing due to:
-            # Unable to hit fast path of CUDAGraphs because of pending, uninvoked backwards
+            # needed to avoid CUDAGraph fast-path warning / inconsistent timing when prior
+            # outputs still require backward (see torch._inductor.cudagraph_trees)
             def model_iter_fn_and_mark_step(*args, **kwargs):
                 torch.compiler.cudagraph_mark_step_begin()
                 model_iter_fn(*args, **kwargs)
@@ -4657,22 +4901,17 @@ def run(runner, args, original_dir=None):
             if name in runner.guard_on_nn_module_models:
                 guard_ctx = torch._dynamo.config.patch(guard_nn_modules=True)
 
-            inline_ctx = contextlib.nullcontext()
-            if name in runner.inline_inbuilt_nn_modules_models:
-                inline_ctx = torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
-
             with guard_ctx:
-                with inline_ctx:
-                    runner.run_one_model(
-                        name,
-                        model,
-                        example_inputs,
-                        optimize_ctx,
-                        experiment,
-                        explain=args.explain,
-                        tag=args.tag,
-                        batch_size=batch_size if args.dynamic_batch_only else None,
-                    )
+                runner.run_one_model(
+                    name,
+                    model,
+                    example_inputs,
+                    optimize_ctx,
+                    experiment,
+                    explain=args.explain,
+                    tag=args.tag,
+                    batch_size=batch_size if args.dynamic_batch_only else None,
+                )
         if args.generate_aot_autograd_stats:
             stats_file = output_filename.split(".csv")[0] + "_stats.csv"
             write_outputs(

@@ -724,6 +724,19 @@ inline T logaddexp2(T a, T b) {
 }
 
 template <typename T>
+inline float xlogy(T x, T y) {
+  if (::metal::isnan(y)) {
+    return NAN;
+  }
+
+  if (x == 0) {
+    return x;
+  }
+
+  return x * precise::log(float(y));
+}
+
+template <typename T>
 inline float xlog1py(T x, T y) {
   if (::metal::isnan(y)) {
     return NAN;

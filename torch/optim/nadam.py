@@ -29,7 +29,7 @@ from .optimizer import (
 __all__ = ["NAdam", "nadam"]
 
 
-class NAdam(Optimizer):  # noqa: D101
+class NAdam(Optimizer):
     def __init__(
         self,
         params: ParamsT,
@@ -44,7 +44,7 @@ class NAdam(Optimizer):  # noqa: D101
         maximize: bool = False,
         capturable: bool = False,
         differentiable: bool = False,
-    ) -> None:  # noqa: D107
+    ) -> None:
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
         if not 0.0 <= lr:
@@ -73,7 +73,7 @@ class NAdam(Optimizer):  # noqa: D101
         }
         super().__init__(params, defaults)
 
-    def __setstate__(self, state):  # noqa: D105
+    def __setstate__(self, state):
         super().__setstate__(state)
         for group in self.param_groups:
             group.setdefault("maximize", False)
@@ -260,7 +260,7 @@ NAdam.__doc__ = (
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-8)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
-        momentum_decay (float, optional): momentum momentum_decay (default: 4e-3)
+        momentum_decay (float, optional): momentum decay (default: 4e-3)
         decoupled_weight_decay (bool, optional): whether to decouple the weight
             decay as in AdamW to obtain NAdamW. If True, the algorithm does not
             accumulate weight decay in the momentum nor variance. (default: False)
@@ -338,7 +338,7 @@ def _single_tensor_nadam(
 
         if weight_decay != 0:
             if decoupled_weight_decay:
-                # Perform stepweight decay
+                # Perform step weight decay
                 param.mul_(1 - lr * weight_decay)
             else:
                 grad = grad.add(param, alpha=weight_decay)
@@ -462,7 +462,7 @@ def _multi_tensor_nadam(
 
         if weight_decay != 0:
             if decoupled_weight_decay:
-                # Perform stepweight decay
+                # Perform step weight decay
                 torch._foreach_mul_(grouped_params, 1 - lr * weight_decay)
             else:
                 # Reuse the intermediate memory (grouped_grads) already allocated for maximize

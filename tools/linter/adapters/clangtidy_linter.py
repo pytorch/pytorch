@@ -19,13 +19,11 @@ from typing import NamedTuple
 # PyTorch directory root
 def scm_root() -> str:
     path = os.path.abspath(os.getcwd())
-    # pyrefly: ignore [bad-assignment]
     while True:
         if os.path.exists(os.path.join(path, ".git")):
             return path
         if os.path.isdir(os.path.join(path, ".hg")):
             return path
-        # pyrefly: ignore [bad-argument-type]
         n = len(path)
         path = os.path.dirname(path)
         if len(path) == n:
@@ -33,6 +31,14 @@ def scm_root() -> str:
 
 
 PYTORCH_ROOT = scm_root()
+
+
+def _default_num_workers() -> int | None:
+    # clang-tidy is memory hungry, so respect MAX_JOBS to cap parallelism.
+    max_jobs = os.environ.get("MAX_JOBS")
+    if max_jobs and max_jobs.isdigit() and int(max_jobs) > 0:
+        return int(max_jobs)
+    return os.cpu_count()
 
 
 # Returns '/usr/local/include/python<version number>'
@@ -138,6 +144,8 @@ include_dir = [
     "/usr/lib/llvm-11/include/openmp",
     get_python_include_dir(),
     os.path.join(PYTORCH_ROOT, "third_party/pybind11/include"),
+    # For header-only lints (no compile_commands.json entry) to resolve <ATen/...>.
+    os.path.join(PYTORCH_ROOT, "aten/src"),
     PYTORCH_ROOT,
 ] + clang_search_dirs()
 for dir in include_dir:
@@ -151,7 +159,13 @@ def check_file(
     std: str | None,
 ) -> list[LintMessage]:
     # Explicitly pass include path for linters that only check headers.
-    build_include_args = include_args + ["--extra-arg", f"-I{build_dir}"]
+    # build/aten/src covers generated <ATen/...> headers (Functions.h etc.).
+    build_include_args = include_args + [
+        "--extra-arg",
+        f"-I{build_dir}",
+        "--extra-arg",
+        f"-I{build_dir}/aten/src",
+    ]
     cmd = [
         binary,
         f"-p={build_dir}",
@@ -243,11 +257,24 @@ def main() -> None:
         help="verbose logging",
     )
     parser.add_argument(
+        "-j",
+        "--num-workers",
+        type=int,
+        default=None,
+        help=(
+            "number of clang-tidy processes to run in parallel. Defaults to the "
+            "MAX_JOBS environment variable if set, otherwise the CPU count. "
+            "Lower this to reduce peak memory usage (clang-tidy is memory hungry)."
+        ),
+    )
+    parser.add_argument(
         "filenames",
         nargs="+",
         help="paths to lint",
     )
     args = parser.parse_args()
+
+    num_workers = args.num_workers or _default_num_workers()
 
     logging.basicConfig(
         format="<%(threadName)s:%(levelname)s> %(message)s",
@@ -288,7 +315,7 @@ def main() -> None:
     binary_path = os.path.abspath(args.binary)
 
     with concurrent.futures.ThreadPoolExecutor(
-        max_workers=os.cpu_count(),
+        max_workers=num_workers,
         thread_name_prefix="Thread",
     ) as executor:
         futures = {

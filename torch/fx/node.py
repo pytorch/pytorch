@@ -49,7 +49,7 @@ base_types = typing.get_args(BaseArgumentTypes)
 
 Target: TypeAlias = Callable[..., Any] | str
 
-Argument = Optional[  # noqa: UP007, UP045
+Argument = Optional[  # noqa: UP045
     Union[
         tuple["Argument", ...],
         Sequence["Argument"],
@@ -117,6 +117,24 @@ _side_effectful_functions: set[Callable[..., Any]] = {
 
 if hasattr(_ops.inductor, "resize_storage_bytes_"):
     _side_effectful_functions.add(_ops.inductor.resize_storage_bytes_.default)
+
+
+def _device_annotation(device: torch.device) -> str:
+    # Render a tensor's device for graph printing. Under compile-on-one-rank the device
+    # index is rank-specific; drop it when it is the current default device for the
+    # accelerator (e.g. "cuda:3" -> "cuda") so the printed graph is byte-identical across
+    # ranks. A non-current index keeps its index, preserving debuggability.
+    import torch.compiler.config as compiler_config
+
+    if compiler_config.compile_on_one_rank and device.index is not None:
+        acc = torch.accelerator.current_accelerator()
+        if (
+            acc is not None
+            and device.type == acc.type
+            and device.index == torch.accelerator.current_device_index()
+        ):
+            return device.type
+    return str(device)
 
 
 @compatibility(is_backward_compatible=False)
@@ -230,6 +248,8 @@ def _format_arg(arg: object, max_list_len: float = float("inf")) -> str:
 
     if isinstance(arg, Node):
         return "%" + str(arg)
+    elif isinstance(arg, torch.device):
+        return _device_annotation(arg)
     else:
         return str(arg)
 
@@ -280,7 +300,7 @@ class Node(_NodeBase):
     # All of the nodes that use the value produced by this Node
     # Note one user may correspond to several uses, e.g. the node for ``x + x``
     # would appear once here, but represents two uses.
-    # Is a dict to act as an "ordered set". Keys are significant, value dont-care
+    # Is a dict to act as an "ordered set". Keys are significant, value don't-care
     users: dict["Node", None]
     # Type expression representing the output value of this node.
     # This should contain the same class of Type objects that would appear
@@ -292,6 +312,7 @@ class Node(_NodeBase):
     # generated function return type. (Note this is a special case. ``return``
     # does not produce a value, it's more of a notation. Thus, this value
     # describes the type of args[0] in the ``return`` node.
+    # TODO: narrow this to TensorType | _DynType | None
     type: Any | None
     _sort_key: Any
     # If set, use this fn to print this node
@@ -506,7 +527,7 @@ class Node(_NodeBase):
     @compatibility(is_backward_compatible=True)
     def insert_arg(self, idx: int, arg: Argument) -> None:
         """
-        Insert an positional argument to the argument list with given index.
+        Insert a positional argument to the argument list with given index.
 
         Args:
 
@@ -655,7 +676,7 @@ class Node(_NodeBase):
             return f"return {self.args[0]}"
         else:
 
-            def stringify_shape(shape: Iterable) -> str:
+            def stringify_shape(shape: Iterable[Any]) -> str:
                 return f"[{', '.join([str(x) for x in shape])}]"
 
             meta_val = self.meta.get(
@@ -673,7 +694,7 @@ class Node(_NodeBase):
                 )
             ):
                 stride_annotation = f"{stringify_shape(meta_val.stride())}"
-                device_annotation = f"{meta_val.device}"
+                device_annotation = _device_annotation(meta_val.device)
                 type_annotation = (
                     f'Tensor "{dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}'
                     f'{stride_annotation}{device_annotation}"'
@@ -757,6 +778,10 @@ class Node(_NodeBase):
             if self.graph.owning_module is None:
                 raise AssertionError(
                     "self.graph.owning_module not set for purity check"
+                )
+            if not isinstance(self.target, str):
+                raise AssertionError(
+                    f"Expected str target for call_module, got {type(self.target)}"
                 )
             target_mod = self.graph.owning_module.get_submodule(self.target)
             if target_mod is None:

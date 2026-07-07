@@ -10,6 +10,9 @@ redirects = {
     "torch.compiler": "user_guide/torch_compiler/torch.compiler.html",
     "torch.compiler.config": "user_guide/torch_compiler/torch.compiler.config.html",
     "torch.compiler_aot_inductor": "user_guide/torch_compiler/torch.compiler_aot_inductor.html",
+    "torch.compiler_aot_compile": (
+        "user_guide/torch_compiler/torch.compiler_aot_compile.html"
+    ),
     "torch.compiler_aot_inductor_debugging_guide": (
         "user_guide/torch_compiler/torch.compiler_aot_inductor_debugging_guide.html"
     ),
@@ -156,4 +159,6 @@ redirects = {
         "user_guide/torch_compiler/compile/"
         "programming_model.where_to_apply_compile.html"
     ),
+    # Redirect for removed experimental torch.distributed._dist2 API
+    "distributed._dist2": "distributed.html",
 }

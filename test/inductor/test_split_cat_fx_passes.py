@@ -111,7 +111,7 @@ class TestSplitCatFxPasses(TestCase):
             self.assertEqual(
                 counters["inductor"]["normalization_pass"],
                 expected_split_norm_count,
-                msg=f"for {fn}",
+                msg=lambda msg: f"{msg}\nfor {fn}",
             )
             counters.clear()
 
@@ -138,7 +138,7 @@ class TestSplitCatFxPasses(TestCase):
             self.assertEqual(
                 counters["inductor"]["normalization_pass"],
                 expected_cat_norm_count,
-                msg=f"for {fn}",
+                msg=lambda msg: f"{msg}\nfor {fn}",
             )
             counters.clear()
 
@@ -806,7 +806,7 @@ class TestSplitCatFxPasses(TestCase):
         def unbind_stack(x):
             return torch.stack(torch.unbind(x, 1), 1)
 
-        def unbind_cat(x):  # noqa: F841
+        def unbind_cat(x):
             return torch.cat(torch.unbind(x, dim=-3), 1)
 
         def unbind_stack_argspec1(x):
@@ -934,32 +934,32 @@ class TestSplitCatFxPasses(TestCase):
             self.assertEqual(
                 counters["inductor"]["scmerge_split_added"],
                 expected_unbind_added,
-                msg=f"for {fn}",
+                msg=lambda msg: f"{msg}\nfor {fn}",
             )
             self.assertEqual(
                 counters["inductor"]["scmerge_split_removed"],
                 expected_unbind_removed,
-                msg=f"for {fn}",
+                msg=lambda msg: f"{msg}\nfor {fn}",
             )
             self.assertEqual(
                 counters["inductor"]["scmerge_cat_added"],
                 expected_cat_added,
-                msg=f"for {fn}",
+                msg=lambda msg: f"{msg}\nfor {fn}",
             )
             self.assertEqual(
                 counters["inductor"]["scmerge_cat_removed"],
                 expected_cat_removed,
-                msg=f"for {fn}",
+                msg=lambda msg: f"{msg}\nfor {fn}",
             )
             self.assertEqual(
                 counters["inductor"]["scmerge_split_sections_removed"],
                 expected_sections_removed,
-                msg=f"for {fn}",
+                msg=lambda msg: f"{msg}\nfor {fn}",
             )
             self.assertEqual(
                 counters["inductor"]["normalization_pass"],
                 expected_unbind_normalized,
-                msg=f"for {fn}",
+                msg=lambda msg: f"{msg}\nfor {fn}",
             )
             counters.clear()
 

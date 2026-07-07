@@ -65,12 +65,7 @@ PyTypeObject THPLayoutType = {
 };
 
 void THPLayout_init(PyObject* module) {
-  if (PyType_Ready(&THPLayoutType) < 0) {
-    throw python_error();
-  }
-  Py_INCREF(&THPLayoutType);
-  if (PyModule_AddObject(
-          module, "layout", reinterpret_cast<PyObject*>(&THPLayoutType)) != 0) {
+  if (PyModule_AddType(module, &THPLayoutType) < 0) {
     throw python_error();
   }
 }

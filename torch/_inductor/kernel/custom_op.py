@@ -287,7 +287,8 @@ def _adapt_user_input_gen_fns(
 
         def internal_input_gen_fn(ir_buffer: Any) -> torch.Tensor:
             fake_tensor = ir_node_to_tensor(ir_buffer, replace_symbols_with_hints=True)
-            assert fake_tensor is not None, "ir_node_to_tensor returned None"
+            if fake_tensor is None:
+                raise AssertionError("ir_node_to_tensor returned None")
             return user_function(fake_tensor)
 
         return internal_input_gen_fn
@@ -497,7 +498,7 @@ def autotune_custom_op(
     choices = template.generate_custom_op_choices(
         name=name,
         decompositions=decompositions,
-        # pyrefly: ignore [no-matching-overload]
+        # pyrefly: ignore [bad-argument-type, no-matching-overload]
         input_nodes=list(inputs),
         non_tensor_args=non_tensor_args,
         input_gen_fns=input_gen_fns if input_gen_fns else None,
@@ -654,7 +655,8 @@ def _prepare_configs_and_decompositions(
             tensor_inputs, config_generator, op_overload, name
         )
     else:
-        assert processed_configs is not None
+        if processed_configs is None:
+            raise AssertionError("processed_configs must not be None")
         configs_to_use = processed_configs
 
     # Prepare decompositions and kwargs for autotuning

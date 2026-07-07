@@ -7,7 +7,7 @@ import unittest
 
 import expecttest
 
-from torchgen.gen import _GLOBAL_PARSE_NATIVE_YAML_CACHE  # noqa: F401
+from torchgen.gen import _GLOBAL_PARSE_NATIVE_YAML_CACHE
 from torchgen.gen_backend_stubs import run
 
 
@@ -123,7 +123,7 @@ supported:
             """\
 unknown dispatch key NOT_XLA
   The provided value for "backend" must be a valid DispatchKey, but got NOT_XLA.""",
-        )  # noqa: B950
+        )
 
     def test_missing_cpp_namespace(self) -> None:
         yaml_str = """\
@@ -183,7 +183,7 @@ autograd:
         output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
         self.assertExpectedInline(
             output_error, """Found an invalid operator name: add"""
-        )  # noqa: B950
+        )
 
     # in an operator group, currently all operators must either be registered to the backend or autograd kernel.
     # Here, functional and out mismatch
@@ -198,7 +198,7 @@ autograd:
         output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
         self.assertExpectedInline(
             output_error,
-            """Currently, all variants of an op must either be registered to a backend key, or to a backend's autograd key. They cannot be mix and matched. If this is something you need, feel free to create an issue! add is listed under "supported", but add_out is listed under "autograd".""",  # noqa: B950
+            """Currently, all variants of an op must either be registered to a backend key, or to a backend's autograd key. They cannot be mix and matched. If this is something you need, feel free to create an issue! add is listed under "supported", but add_out is listed under "autograd".""",
         )
 
     # in an operator group, currently all operators must either be registered to the backend or autograd kernel.
@@ -214,7 +214,7 @@ autograd:
         output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
         self.assertExpectedInline(
             output_error,
-            """Currently, all variants of an op must either be registered to a backend key, or to a backend's autograd key. They cannot be mix and matched. If this is something you need, feel free to create an issue! add is listed under "supported", but add_ is listed under "autograd".""",  # noqa: B950
+            """Currently, all variants of an op must either be registered to a backend key, or to a backend's autograd key. They cannot be mix and matched. If this is something you need, feel free to create an issue! add is listed under "supported", but add_ is listed under "autograd".""",
         )
 
     # Currently, the same operator can't be listed under both 'supported' and 'autograd', which would
@@ -231,7 +231,7 @@ autograd:
         output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
         self.assertExpectedInline(
             output_error,
-            """Currently, all variants of an op must either be registered to a backend key, or to a backend's autograd key. They cannot be mix and matched. If this is something you need, feel free to create an issue! add is listed under "supported", but add is listed under "autograd".""",  # noqa: B950
+            """Currently, all variants of an op must either be registered to a backend key, or to a backend's autograd key. They cannot be mix and matched. If this is something you need, feel free to create an issue! add is listed under "supported", but add is listed under "autograd".""",
         )
 
     # unrecognized extra yaml key
@@ -245,7 +245,7 @@ invalid_key: invalid_val"""
         output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
         self.assertExpectedInline(
             output_error,
-            """ contains unexpected keys: invalid_key. Only the following keys are supported: backend, class_name, cpp_namespace, extra_headers, supported, autograd, full_codegen, non_native, ir_gen, symint""",  # noqa: B950
+            """ contains unexpected keys: invalid_key. Only the following keys are supported: backend, class_name, cpp_namespace, extra_headers, supported, autograd, full_codegen, non_native, ir_gen, symint""",
         )
 
     # if use_out_as_primary is provided, it must be a bool
@@ -260,7 +260,7 @@ supported:
         self.assertExpectedInline(
             output_error,
             """You must provide either True or False for use_out_as_primary. Provided: frue""",
-        )  # noqa: B950
+        )
 
     # if device_guard is provided, it must be a bool
     def test_device_guard_non_bool(self) -> None:
@@ -274,7 +274,7 @@ supported:
         self.assertExpectedInline(
             output_error,
             """You must provide either True or False for device_guard. Provided: frue""",
-        )  # noqa: B950
+        )
 
     def test_incorrect_kernel_name(self) -> None:
         yaml_str = """\

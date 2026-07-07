@@ -29,6 +29,15 @@ from .exported_program import ExportedProgram
 log = logging.getLogger(__name__)
 
 
+_DRAFT_EXPORT_WARNING_COLOR = "\033[31m"
+_DRAFT_EXPORT_SUCCESS_COLOR = "\033[32m"
+_DRAFT_EXPORT_END_COLOR = "\033[0m"
+
+
+def _format_colored(text: str, color: str) -> str:
+    return f"{color}{text}{_DRAFT_EXPORT_END_COLOR}"
+
+
 class FailureType(IntEnum):
     MISSING_FAKE_KERNEL = 1
     DATA_DEPENDENT_ERROR = 2
@@ -101,7 +110,7 @@ class FailureReport:
     torch.ops.{op} is missing a fake kernel implementation.
 
     Please refer to https://docs.google.com/document/d/1_W62p8WJOQQUzPsJYa7s701JXt0qf2OfLub2sbkHOaU/edit#heading=h.ahugy69p2jmz for more detailed instructions on how to write a meta implementation.
-"""  # noqa: B950
+"""
 
         elif self.failure_type == FailureType.GUARD_ADDED:
             locals_info = (
@@ -140,7 +149,7 @@ class FailureReport:
 
     Please add `torch._check(...)` to the original code to assert this data-dependent assumption.
     Please refer to https://docs.google.com/document/d/1kZ_BbB3JnoLbUZleDT6635dHs88ZVYId8jT-yTFgf3A/edit#heading=h.boi2xurpqa0o for more details.
-"""  # noqa: B950
+"""
 
         elif self.failure_type == FailureType.MISMATCHED_FAKE_KERNEL:
             op = self.data["op"]
@@ -150,7 +159,7 @@ class FailureReport:
     The reason for the mismatch is: {reason}.
 
     Please refer to https://docs.google.com/document/d/1_W62p8WJOQQUzPsJYa7s701JXt0qf2OfLub2sbkHOaU/edit#heading=h.ahugy69p2jmz for more detailed instructions on how to write a fake implementation.
-"""  # noqa: B950
+"""
 
         else:
             raise ValueError(f"Unknown failure type: {self.failure_type}")
@@ -178,29 +187,31 @@ class DraftExportReport:
         return f"DraftExportReport({self.failures})"
 
     def __str__(self) -> str:
-        WARNING_COLOR = "\033[93m"
-        GREEN_COLOR = "\033[92m"
-        END_COLOR = "\033[0m"
-
         if self.successful():
-            return f"""{GREEN_COLOR}
+            return _format_colored(
+                """
 ##############################################################################################
-Congratuations: No issues are found during export, and it was able to soundly produce a graph.
+Congratulations: No issues are found during export, and it was able to soundly produce a graph.
 You can now change back to torch.export.export()
 ##############################################################################################
-{END_COLOR}"""
+""",
+                _DRAFT_EXPORT_SUCCESS_COLOR,
+            )
 
-        error = f"""{WARNING_COLOR}
+        error = _format_colored(
+            f"""
 ###################################################################################################
 WARNING: {len(self.failures)} issue(s) found during export, and it was not able to soundly produce a graph.
 Please follow the instructions to fix the errors.
 ###################################################################################################
 
-"""
+""",
+            _DRAFT_EXPORT_WARNING_COLOR,
+        )
+        error += "\n"
 
         for i, failure in enumerate(self.failures):
             error += f"{i + 1}. {failure.print(self.str_to_filename)}\n"
-        error += END_COLOR
         return error
 
     def apply_suggested_fixes(self) -> None:
@@ -528,7 +539,7 @@ with torch._library.fake_profile.unsafe_generate_fake_kernels(ep._report.op_prof
         log.info(
             """
 ##############################################################################################
-Congratuations: No issues are found during export, and it was able to soundly produce a graph.
+Congratulations: No issues are found during export, and it was able to soundly produce a graph.
 You can now change back to torch.export.export()
 ##############################################################################################
     """

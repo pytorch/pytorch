@@ -4,6 +4,7 @@
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/Storage.h>
+#include <torch/csrc/utils/object_ptr.h>
 
 #include <array>
 #include <stdexcept>
@@ -58,14 +59,13 @@ PyObject* createPyObject(const at::Storage& storage) {
 }
 
 static PyTypeObject* loadTypedStorageTypeObject() {
-  PyObject* storage_module = PyImport_ImportModule("torch.storage");
+  THPObjectPtr storage_module(PyImport_ImportModule("torch.storage"));
   TORCH_INTERNAL_ASSERT(storage_module && PyModule_Check(storage_module));
 
   PyObject* typed_storage_obj =
       PyObject_GetAttrString(storage_module, "TypedStorage");
   TORCH_INTERNAL_ASSERT(typed_storage_obj && PyType_Check(typed_storage_obj));
-  return reinterpret_cast<PyTypeObject*>(
-      PyObject_GetAttrString(storage_module, "TypedStorage"));
+  return reinterpret_cast<PyTypeObject*>(typed_storage_obj);
 }
 
 static PyTypeObject* getTypedStorageTypeObject() {
@@ -113,7 +113,7 @@ std::tuple<at::Storage, at::ScalarType, bool> createStorageGetType(
       "'");
 
   auto storage = THPStorage_Unpack(untyped_storage_obj);
-  return std::make_tuple(storage, scalar_type, is_typed_storage);
+  return std::make_tuple(std::move(storage), scalar_type, is_typed_storage);
 }
 
 at::Storage createStorage(PyObject* obj) {

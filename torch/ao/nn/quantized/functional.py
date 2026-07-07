@@ -221,7 +221,7 @@ def conv1d(
         >>> q_filters = torch.quantize_per_tensor(filters, scale, zero_point, dtype_filters)
         >>> q_inputs = torch.quantize_per_tensor(inputs, scale, zero_point, dtype_inputs)
         >>> qF.conv1d(q_inputs, q_filters, bias, padding=1, scale=scale, zero_point=zero_point)
-    """  # noqa: E501
+    """
     if padding_mode != "zeros":
         raise NotImplementedError("Only zero-padding is supported!")
     if input.dtype != torch.quint8:
@@ -293,7 +293,7 @@ def conv2d(
         >>> q_filters = torch.quantize_per_tensor(filters, scale, zero_point, dtype_filters)
         >>> q_inputs = torch.quantize_per_tensor(inputs, scale, zero_point, dtype_inputs)
         >>> qF.conv2d(q_inputs, q_filters, bias, padding=1, scale=scale, zero_point=zero_point)
-    """  # noqa: E501
+    """
     if padding_mode != "zeros":
         raise NotImplementedError("Only zero-padding is supported!")
     if input.dtype != torch.quint8:
@@ -369,7 +369,7 @@ def conv3d(
         >>> q_filters = torch.quantize_per_tensor(filters, scale, zero_point, dtype_filters)
         >>> q_inputs = torch.quantize_per_tensor(inputs, scale, zero_point, dtype_inputs)
         >>> qF.conv3d(q_inputs, q_filters, bias, padding=1, scale=scale, zero_point=zero_point)
-    """  # noqa: E501
+    """
     if padding_mode != "zeros":
         raise NotImplementedError("Only zero-padding is supported!")
     if input.dtype != torch.quint8:

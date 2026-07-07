@@ -3,6 +3,7 @@ import operator
 import warnings
 from collections import namedtuple
 from typing import Any
+from typing_extensions import TypeIs
 
 import torch
 import torch.ao.nn.intrinsic as nni
@@ -327,7 +328,9 @@ def node_supports_equalization(node: Node, modules) -> bool:
     return False
 
 
-def is_equalization_observer(observer: nn.Module) -> bool:
+def is_equalization_observer(
+    observer: nn.Module,
+) -> TypeIs[_InputEqualizationObserver | _WeightEqualizationObserver]:
     return isinstance(
         observer, (_InputEqualizationObserver, _WeightEqualizationObserver)
     )

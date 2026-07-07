@@ -17,6 +17,7 @@
     can_device_access_peer
     check_error
     current_blas_handle
+    current_solver_handle
     current_device
     current_stream
     cudart
@@ -110,6 +111,8 @@
     CUDAGraph
     graph
     make_graphed_callables
+    export_dot
+    export_graph_data
 ```
 
 (cuda-memory-management-api)=
@@ -165,6 +168,7 @@
     :toctree: generated
     :nosignatures:
 
+    caching_allocator_disabled
     caching_allocator_enable
 ```
 
@@ -174,6 +178,30 @@
 
 ```{eval-rst}
 .. autoclass:: torch.cuda.use_mem_pool
+```
+
+```{eval-rst}
+.. currentmodule:: torch.cuda.nccl
+```
+
+```{eval-rst}
+.. autofunction:: version
+```
+
+```{eval-rst}
+.. currentmodule:: torch.cuda.profiler
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    profile
+    start
+    stop
+```
+
+```{eval-rst}
+.. currentmodule:: torch.cuda
 ```
 
 ## NVIDIA Tools Extension (NVTX)
@@ -187,6 +215,8 @@
     nvtx.range_push
     nvtx.range_pop
     nvtx.range
+    nvtx.range_end
+    nvtx.range_start
 ```
 
 ## Jiterator (beta)
@@ -263,9 +293,30 @@ See the docs for {class}`~torch.cuda.gds.GdsFile` for an example of how to use t
 `torch.cuda.green_contexts` provides thin wrappers around the CUDA Green Context APIs
 to enable more general carveout of SM resources for CUDA kernels.
 
-These APIs can be used in PyTorch with CUDA versions greater than or equal to 12.8.
+These APIs require the `cuda.bindings` package and can be used in PyTorch with
+CUDA versions greater than or equal to 12.8. Workqueue configuration requires
+CUDA 13.1 or newer.
 
-See the docs for {class}`~torch.cuda.green_contexts.GreenContext` for an example of how to use these.
+Install instructions for `cuda.bindings` can be found here:
+https://nvidia.github.io/cuda-python/
+
+Create streams from the green context and use them like other custom CUDA
+streams:
+
+```python
+ctx = GreenContext(...)
+stream = ctx.Stream()
+with torch.cuda.stream(stream):
+    # torch operations here are using resources from `ctx`
+    pass
+```
+
+Synchronization between green-context streams and other streams is the user's
+responsibility. Use CUDA events to order work, just as you would for any other
+custom stream.
+
+The `GreenContext.set_context()` and `GreenContext.pop_context()` methods are
+deprecated compatibility APIs.
 
 ```{eval-rst}
 .. currentmodule:: torch.cuda.green_contexts
@@ -307,7 +358,11 @@ See the docs for {class}`~torch.cuda.green_contexts.GreenContext` for an example
 ```
 
 ```{eval-rst}
-.. py:module:: torch.cuda.nvtx
+.. automodule:: torch.cuda.nvtx
+```
+
+```{eval-rst}
+.. currentmodule:: torch.cuda.nvtx
 ```
 
 ```{eval-rst}

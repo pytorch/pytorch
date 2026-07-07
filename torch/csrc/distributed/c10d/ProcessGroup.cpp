@@ -5,6 +5,9 @@
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 
+#include <algorithm>
+#include <unordered_set>
+
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 
 namespace c10d {
@@ -56,7 +59,6 @@ std::string opTypeToString(OpType opType) {
     default:
       TORCH_INTERNAL_ASSERT(false, "Unknown op type!");
   }
-  return "UNKNOWN";
 }
 
 bool isP2POp(OpType opType, bool batchP2P /*= false*/) {
@@ -159,41 +161,73 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
     const std::optional<std::chrono::milliseconds>& timeout,
     const std::optional<c10::intrusive_ptr<Backend::Options>>& opts,
     const std::optional<std::string>& name,
-    const std::optional<std::string>& desc) {
+    const std::optional<std::string>& desc,
+    const std::optional<std::vector<c10::Device>>& devices) {
   TORCH_CHECK(
       !ranks.empty(),
       "Split ranks cannot be empty. Please provide a non-empty list of ranks to split the group.");
   TORCH_CHECK(
-      ranks.size() <= static_cast<size_t>(size_),
+      ranks.size() <= static_cast<size_t>(getSize()),
       "the split group's size should be no larger than the world_size set by init_process_group");
-  std::set<int> ranks_set(ranks.begin(), ranks.end());
+  std::unordered_set<int> ranks_set(ranks.begin(), ranks.end());
   TORCH_CHECK(
       ranks_set.size() == ranks.size(),
       "Split ranks should not have duplicates. Please provide a list of unique ranks to split the group.");
-  std::vector<int> sorted_ranks = ranks;
-  std::sort(sorted_ranks.begin(), sorted_ranks.end());
+  std::set<c10::DeviceType> deviceTypeFilter;
+  for (const auto& d : devices.value_or(std::vector<c10::Device>{})) {
+    deviceTypeFilter.insert(d.type());
+  }
+  if (!deviceTypeFilter.empty()) {
+    for (const auto& deviceType : deviceTypeFilter) {
+      TORCH_CHECK(
+          deviceTypeToBackendType_.contains(deviceType),
+          "Requested device type for splitGroup is not present in the parent process group: ",
+          deviceType);
+    }
+    auto defaultBackendIt = std::ranges::find_if(
+        deviceTypeToBackendType_,
+        [&](const auto& p) { return p.second == backendType_; });
+    TORCH_CHECK(
+        defaultBackendIt != deviceTypeToBackendType_.end() &&
+            deviceTypeFilter.contains(defaultBackendIt->first),
+        "splitGroup deviceTypes filter must include the parent process group's default backend device type.");
+  }
   c10::intrusive_ptr<ProcessGroup> newGroup;
   std::string groupName = name.has_value()
       ? name.value()
-      : c10::str(getGroupName(), ":split:", fmt::format("{}", sorted_ranks));
+      : c10::str(getGroupName(), ":split:", fmt::format("{}", ranks));
   c10::intrusive_ptr<Store> store = c10::static_intrusive_pointer_cast<Store>(
       c10::make_intrusive<PrefixStore>(
           fmt::format("{}/", groupName), store_->clone()));
   std::string groupDesc = desc.has_value()
       ? desc.value()
       : c10::str(getGroupDesc(), ":split:", incrementSplitCount());
+  // A single backend may serve multiple device types (e.g. a bare "gloo"
+  // group registers the same backend for cpu and cuda); split it only once.
+  std::unordered_map<BackendType, c10::intrusive_ptr<Backend>> splitBackends;
   for (const auto& pair : deviceTypeToBackendType_) {
     c10::DeviceType deviceType = pair.first;
     BackendType backendType = pair.second;
 
-    auto parentBackend = getBackend(deviceType);
-    auto backendOpts =
-        opts.has_value() ? opts.value() : parentBackend->getBackendOptions();
-    backendOpts->group_name = groupName;
-    backendOpts->timeout =
-        timeout.has_value() ? timeout.value() : backendOpts->timeout;
-    backendOpts->group_desc = groupDesc;
-    auto splitBackend = parentBackend->split(store, sorted_ranks, backendOpts);
+    if (!deviceTypeFilter.empty() && !deviceTypeFilter.contains(deviceType)) {
+      continue;
+    }
+
+    auto splitIt = splitBackends.find(backendType);
+    c10::intrusive_ptr<Backend> splitBackend;
+    if (splitIt != splitBackends.end()) {
+      splitBackend = splitIt->second;
+    } else {
+      auto parentBackend = getBackend(deviceType);
+      auto backendOpts =
+          opts.has_value() ? opts.value() : parentBackend->getBackendOptions();
+      backendOpts->group_name = groupName;
+      backendOpts->timeout =
+          timeout.has_value() ? timeout.value() : backendOpts->timeout;
+      backendOpts->group_desc = groupDesc;
+      splitBackend = parentBackend->split(store, ranks, backendOpts);
+      splitBackends.emplace(backendType, splitBackend);
+    }
     if (splitBackend == nullptr) {
       continue;
     }
@@ -260,6 +294,7 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::mergeRemoteGroup(
 
 namespace {
 
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 class WorkRegistry {
  public:
   void register_work(

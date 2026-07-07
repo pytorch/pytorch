@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <c10/macros/Macros.h>
+#include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 
 namespace c10d::nccl_extension {
 
@@ -11,6 +12,13 @@ TORCH_API void nccl_put(at::Tensor& tensor, const int64_t peer);
 
 TORCH_API void nccl_get(at::Tensor& tensor, const int64_t peer);
 
+TORCH_API void nccl_get_out(
+    at::Tensor& dst,
+    const c10::intrusive_ptr<c10d::symmetric_memory::SymmetricMemory>& hdl,
+    int64_t offset,
+    int64_t size,
+    int64_t peer);
+
 TORCH_API void nccl_wait_for_signal(at::Tensor& sigpad, int64_t signal);
 
 TORCH_API void nccl_put_with_signal(
@@ -18,4 +26,27 @@ TORCH_API void nccl_put_with_signal(
     int64_t signal,
     int64_t peer);
 
+// Simultaneously reduce N blocks of a 2-D input tensor from a shared symmetric
+// memory buffer, routing each to a specific destination rank. Blocks are
+// described by inclusive-prefix-sum offsets along `dim` (0 or 1); all blocks
+// must have equal size.
+TORCH_API void nccl_reduce_scatter_offset(
+    const at::Tensor& input,
+    at::TensorList out,
+    const std::string& group_name,
+    int64_t dim,
+    std::optional<at::IntArrayRef> offsets,
+    std::optional<at::IntArrayRef> dst_ranks,
+    const std::string& red_op);
+
+// Permute-free all-to-all: scatter shards along `scatter_dim`, gather peer
+// chunks along `gather_dim`. Supported: (scatter_dim=1, gather_dim=0) -> [rows,
+// p*lc] to [p, rows, lc]; (scatter_dim=0, gather_dim=1) -> [p*lr, cols] to [lr,
+// p, cols].
+TORCH_API void nccl_all_to_all_nd(
+    const at::Tensor& input,
+    at::Tensor& out,
+    int64_t scatter_dim,
+    int64_t gather_dim,
+    const std::string& group_name);
 } // namespace c10d::nccl_extension

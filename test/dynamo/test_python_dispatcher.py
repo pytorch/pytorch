@@ -77,7 +77,7 @@ class GraphModule(torch.nn.Module):
         sub: "f32[2, 3]" = l_x_ - 1;  l_x_ = None
         sin: "f32[2, 3]" = torch.sin(sub);  sub = None
         return (sin,)
-""",  # NOQA: B950
+""",
         )
 
     @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "requires cuda or xpu")
@@ -135,6 +135,35 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(fn(x, y), torch.tensor([11, 24, 39, 11]))
         # No recompile
         self.assertEqual(counter.frame_count, 1)
+
+    def test_graph_break_recovers_missing_python_tls_snapshot(self):
+        @torch.compile(backend="eager_noexcept")
+        def fn(x):
+            torch._C._dispatch_tls_set_dispatch_key_included(
+                torch._C.DispatchKey.Python, True
+            )
+            torch._C._dispatch_tls_set_dispatch_key_included(
+                torch._C.DispatchKey.PythonTLSSnapshot, False
+            )
+            torch._dynamo.graph_break()
+            return torch.sin(x)
+
+        saved_python = torch._C._dispatch_tls_is_dispatch_key_included(
+            torch._C.DispatchKey.Python
+        )
+        saved_python_tls_snapshot = torch._C._dispatch_tls_is_dispatch_key_included(
+            torch._C.DispatchKey.PythonTLSSnapshot
+        )
+        try:
+            x = torch.randn(3)
+            self.assertEqual(fn(x), x.sin())
+        finally:
+            torch._C._dispatch_tls_set_dispatch_key_included(
+                torch._C.DispatchKey.Python, saved_python
+            )
+            torch._C._dispatch_tls_set_dispatch_key_included(
+                torch._C.DispatchKey.PythonTLSSnapshot, saved_python_tls_snapshot
+            )
 
 
 if __name__ == "__main__":

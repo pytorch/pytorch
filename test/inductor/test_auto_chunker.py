@@ -122,7 +122,7 @@ class AutoChunkerTest(TestCase):
         self.common_matmul_test(has_softmax=True, use_bias=True)
 
     @config.patch("auto_chunker.num_chunk", config.auto_chunker.num_chunk or 16)
-    @largeTensorTest("6GB", device=GPU_TYPE, inductor=True)
+    @largeTensorTest("10GB", device=GPU_TYPE, inductor=True)
     def test_fused_linear_cel(self):
         B = 32
         T = 1024
@@ -267,6 +267,110 @@ class AutoChunkerTest(TestCase):
         w.grad = None
         opt_f = torch.compile(f)
         actual = (opt_f(x, w), x.grad, w.grad)
+
+        self.assertTrue(same(expect, actual, tol=1e-3))
+        self.assertEqual(metrics.num_auto_chunking, 1)
+
+    @config.patch("auto_chunker.output_size_threshold", 1024)
+    @config.patch("auto_chunker.num_chunk", 2)
+    def test_propagate_amax_unsqueeze(self):
+        M, K, N = 256, 4, 256
+        x = torch.randn(M, K, device=GPU_TYPE, requires_grad=True)
+        w = torch.randn(K, N, device=GPU_TYPE, requires_grad=True)
+
+        def f(x, w):
+            out = (x * 2) @ w
+            max_val = out.amax(dim=-1)
+            out = out - max_val.unsqueeze(-1)
+            out = torch.exp(out)
+            loss = out.sum()
+            loss.backward()
+            return loss
+
+        expect = (f(x, w), x.grad, w.grad)
+        x.grad = None
+        w.grad = None
+        opt_f = torch.compile(f)
+        actual = (opt_f(x, w), x.grad, w.grad)
+
+        self.assertTrue(same(expect, actual, tol=1e-3))
+        self.assertEqual(metrics.num_auto_chunking, 1)
+
+    @config.patch("auto_chunker.output_size_threshold", 1024)
+    @config.patch("auto_chunker.num_chunk", 2)
+    def test_propagate_gather(self):
+        M, K, N = 256, 4, 256
+        x = torch.randn(M, K, device=GPU_TYPE, requires_grad=True)
+        w = torch.randn(K, N, device=GPU_TYPE, requires_grad=True)
+        targets = torch.randint(0, N, (M,), device=GPU_TYPE)
+
+        def f(x, w, targets):
+            out = (x * 2) @ w
+            out = out.softmax(dim=-1)
+            selected = out.gather(1, targets.unsqueeze(1))
+            loss = selected.squeeze(1).sum()
+            loss.backward()
+            return loss
+
+        expect = (f(x, w, targets), x.grad, w.grad)
+        x.grad = None
+        w.grad = None
+        opt_f = torch.compile(f)
+        actual = (opt_f(x, w, targets), x.grad, w.grad)
+
+        self.assertTrue(same(expect, actual, tol=1e-3))
+        self.assertEqual(metrics.num_auto_chunking, 1)
+
+    @config.patch("auto_chunker.output_size_threshold", 1024)
+    @config.patch("auto_chunker.num_chunk", 2)
+    def test_propagate_scatter(self):
+        M, K, N = 256, 4, 256
+        x = torch.randn(M, K, device=GPU_TYPE, requires_grad=True)
+        w = torch.randn(K, N, device=GPU_TYPE, requires_grad=True)
+        targets = torch.randint(0, N, (M,), device=GPU_TYPE)
+
+        def f(x, w, targets):
+            out = (x * 2) @ w
+            out = out.softmax(dim=-1)
+            out = out.scatter(1, targets.unsqueeze(1), 0.0)
+            loss = out.sum()
+            loss.backward()
+            return loss
+
+        expect = (f(x, w, targets), x.grad, w.grad)
+        x.grad = None
+        w.grad = None
+        opt_f = torch.compile(f)
+        actual = (opt_f(x, w, targets), x.grad, w.grad)
+
+        self.assertTrue(same(expect, actual, tol=1e-3))
+        self.assertEqual(metrics.num_auto_chunking, 1)
+
+    @config.patch("auto_chunker.output_size_threshold", 1024)
+    @config.patch("auto_chunker.num_chunk", 2)
+    def test_propagate_manual_cross_entropy(self):
+        M, K, N = 256, 4, 256
+        x = torch.randn(M, K, device=GPU_TYPE, requires_grad=True)
+        w = torch.randn(K, N, device=GPU_TYPE, requires_grad=True)
+        targets = torch.randint(0, N, (M,), device=GPU_TYPE)
+
+        def f(x, w, targets):
+            logits = (x * 2) @ w
+            max_logits = logits.amax(dim=-1)
+            shifted = logits - max_logits.unsqueeze(-1)
+            exp_shifted = shifted.exp()
+            sum_exp = exp_shifted.sum(dim=-1)
+            log_probs = shifted - sum_exp.log().unsqueeze(-1)
+            target_log_probs = log_probs.gather(1, targets.unsqueeze(1))
+            loss = -target_log_probs.squeeze(1).sum() / M
+            loss.backward()
+            return loss
+
+        expect = (f(x, w, targets), x.grad, w.grad)
+        x.grad = None
+        w.grad = None
+        opt_f = torch.compile(f)
+        actual = (opt_f(x, w, targets), x.grad, w.grad)
 
         self.assertTrue(same(expect, actual, tol=1e-3))
         self.assertEqual(metrics.num_auto_chunking, 1)

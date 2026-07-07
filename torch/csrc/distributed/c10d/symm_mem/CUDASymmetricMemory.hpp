@@ -6,6 +6,8 @@
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryTypes.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 
+#include <shared_mutex>
+
 namespace c10d::symmetric_memory {
 
 // Resource wrapper that owns a (vaddr, allocation handle) pair. Upon
@@ -84,7 +86,8 @@ class CUDAPeerAllocInfo : public c10::intrusive_ptr_target {
       size_t buffer_size,
       int local_device_idx,
       int rank,
-      int world_size);
+      int world_size,
+      std::string group_name);
 
  private:
   std::vector<c10::intrusive_ptr<AllocationRef>> alloc_refs_;
@@ -98,6 +101,7 @@ class CUDAPeerAllocInfo : public c10::intrusive_ptr_target {
   int world_size_;
   void** buffers_dev_;
   void** signal_pads_dev_;
+  std::string group_name_;
 
   friend class CUDASymmetricMemory;
 };
@@ -135,6 +139,7 @@ class CUDASymmetricMemoryAllocator : public SymmetricMemoryAllocator {
       void* ptr,
       const std::optional<std::string>& group_name) override;
   bool has_multicast_support(int device_idx) override;
+  bool has_allocation(void* ptr) override;
   c10::DeviceType supported_device_type() override;
   std::string name() override;
 

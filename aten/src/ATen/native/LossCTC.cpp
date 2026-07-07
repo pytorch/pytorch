@@ -119,7 +119,11 @@ std::tuple<Tensor, Tensor, size_t, std::vector<int64_t>> ctc_loss_allocate_outpu
   Tensor log_alpha = at::empty({batch_size, log_probs.size(0), 2*max_target_length+1}, log_probs.options());
   Tensor neg_log_likelihood = at::empty({batch_size}, log_probs.options());
 
-  return std::make_tuple(neg_log_likelihood, log_alpha, tg_target_stride, tg_batch_offsets);
+  return std::make_tuple(
+      std::move(neg_log_likelihood),
+      std::move(log_alpha),
+      tg_target_stride,
+      std::move(tg_batch_offsets));
 }
 
 // This kernel is a relatively straightforward implementation of the alpha calculation in the forward backward algorithm (section 4.1).
@@ -225,7 +229,7 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
     }
   });
 
-  return std::make_tuple(neg_log_likelihood, log_alpha);
+  return std::make_tuple(std::move(neg_log_likelihood), std::move(log_alpha));
 }
 
 // This is the backward. It consists of two phases:
@@ -416,7 +420,7 @@ std::tuple<Tensor, Tensor> ctc_loss_meta(const Tensor& log_probs, const Tensor& 
           std::tie(neg_log_likelihood, log_alpha, std::ignore, std::ignore) = ctc_loss_allocate_outputs<scalar_t, kInt>(
               log_probs, targets, input_lengths, target_lengths, BLANK);
         }
-        return std::make_tuple(neg_log_likelihood, log_alpha);
+        return std::make_tuple(std::move(neg_log_likelihood), std::move(log_alpha));
       });
 }
 
@@ -472,8 +476,8 @@ Tensor ctc_loss_backward_tensor(
 
   Tensor ilc = input_lengths.to(Device(at::kCPU), at::kLong).contiguous();
   Tensor tlc = target_lengths.to(Device(at::kCPU), at::kLong).contiguous();
-  IntArrayRef il(ilc.data_ptr<int64_t>(), ilc.numel());
-  IntArrayRef tl(tlc.data_ptr<int64_t>(), tlc.numel());
+  IntArrayRef il(ilc.const_data_ptr<int64_t>(), ilc.numel());
+  IntArrayRef tl(tlc.const_data_ptr<int64_t>(), tlc.numel());
   return at::_ctc_loss_backward(grad, log_probs, targets, il, tl, neg_log_likelihood, log_alpha, BLANK, zero_infinity);
 }
 

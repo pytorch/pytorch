@@ -103,7 +103,7 @@ std::tuple<Tensor, Tensor> fake_quantize_per_channel_affine_cachemask(
   // TODO(future, optional): look into packing the mask further (BoolTensor uses
   //   1 byte per element, we only need 1 bit per element).
   fake_quant_per_channel_cachemask_stub(iter.device_type(), iter, iter_mask, quant_min, quant_max);
-  return std::make_tuple(Y, mask);
+  return std::make_tuple(std::move(Y), std::move(mask));
 }
 
 /* Backward path to fake-quantize the 'inputs' tensor per channel, with mask.
@@ -260,6 +260,6 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_channel_affine_b
   auto dScale = dScale_vec.sum(at::IntArrayRef(axis_for_reduction.data(), numElements));
   auto dZeroPoint = dZeroPoint_vec.sum(at::IntArrayRef(axis_for_reduction.data(), numElements));
 
-  return std::make_tuple(dX, dScale, dZeroPoint);
+  return std::make_tuple(std::move(dX), std::move(dScale), std::move(dZeroPoint));
 }
 } // namespace at::native

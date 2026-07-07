@@ -431,7 +431,7 @@ void NodeToONNX(
   auto processSymbolicOutput = [&](const std::string& op_name,
                                    Node* n,
                                    const py::object& raw_output) {
-    if (raw_output.ptr() == Py_None) {
+    if (Py_IsNone(raw_output.ptr())) {
       cloneNode(n);
       return;
     }

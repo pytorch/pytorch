@@ -64,8 +64,8 @@ from typing_extensions import ParamSpec
 
 from torch.distributed.elastic.utils.logging import get_logger
 
-from .error_handler import ErrorHandler  # noqa: F401
-from .handlers import get_error_handler  # noqa: F401
+from .error_handler import ErrorHandler
+from .handlers import get_error_handler
 
 
 __all__ = [
@@ -293,6 +293,19 @@ class ChildFailedError(Exception):
                 .get("py_callstack", failure.message.get("message", "<N/A>"))
                 .replace("\n", "\n  ")  # to properly indent the traceback
             )
+
+        # For signal failures, let the (build-swapped) handler append
+        # device-fault context (e.g. ROCm GPU faults) to the rendered message.
+        # Works on the local string, so error_file_data is never mutated, and it
+        # is a no-op in OSS (the base handler returns the message unchanged).
+        # Best-effort: never let a handler override break failure rendering.
+        if failure.exitcode < 0:
+            try:
+                msg = get_error_handler().maybe_enrich_signal_failure_message(
+                    msg, failure.error_file
+                )
+            except Exception:
+                logger.warning("Failed to enrich signal failure message", exc_info=True)
 
         signal_name = failure.signal_name()
         signal_name_str = f" ({signal_name})" if signal_name != _NOT_AVAILABLE else ""

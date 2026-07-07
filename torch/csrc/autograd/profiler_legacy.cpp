@@ -126,7 +126,7 @@ struct ProfilerLegacyThreadLocalState : public ProfilerStateBase {
   ~ProfilerLegacyThreadLocalState() override = default;
 
   static ProfilerLegacyThreadLocalState* getTLS() {
-    auto tls = ProfilerStateBase::get(/*global=*/false);
+    ProfilerStateBase* tls = ProfilerStateBase::getTLS();
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         tls == nullptr || tls->profilerType() == ActiveProfilerType::LEGACY);
     return static_cast<ProfilerLegacyThreadLocalState*>(tls);

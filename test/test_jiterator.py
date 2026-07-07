@@ -12,7 +12,7 @@ from torch.testing._internal.common_device_type import (
 
 if not TEST_CUDA:
     print('CUDA not available, skipping tests', file=sys.stderr)
-    TestCase = NoTest  # noqa: F811
+    TestCase = NoTest
 
 
 code_string = "template <typename T> T my_fused_kernel(T x, T y, T alpha, T beta) { return alpha * x + beta * y; }"

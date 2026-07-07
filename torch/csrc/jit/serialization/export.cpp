@@ -1446,7 +1446,6 @@ void check_onnx_proto(const std::string& proto_string) {
   onnx::ModelProto model;
   if (!ParseProtoFromBytes(&model, proto_string.c_str(), proto_string.size())) {
     throw std::runtime_error("Invalid ONNX proto string.");
-    return;
   }
   // 1. baseline check
   // These two checks prevent broken graph being generated

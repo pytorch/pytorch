@@ -183,6 +183,14 @@ specifying the {class}`DeviceMesh` and {class}`Placement` for the {class}`DTenso
 ```
 
 ```{eval-rst}
+.. autofunction:: linspace
+```
+
+```{eval-rst}
+.. autofunction:: logspace
+```
+
+```{eval-rst}
 .. autofunction:: rand
 ```
 
@@ -264,7 +272,10 @@ these features.
 
 ```{eval-rst}
 .. autofunction:: register_sharding
+```
 
+```{eval-rst}
+.. autofunction:: implicit_replication
 ```
 
 % modules that are missing docs, add the doc later when necessary

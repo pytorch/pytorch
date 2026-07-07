@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.27 FATAL_ERROR)
 
 project(headeronly CXX)
 
-set(CMAKE_CXX_STANDARD 17 CACHE STRING "The C++ standard whose features are requested to build this target.")
+set(CMAKE_CXX_STANDARD 20 CACHE STRING "The C++ standard whose features are requested to build this target.")
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Main build file for torch/headeronly, except there's no build cuz this lib is header-only!
@@ -18,7 +18,7 @@ configure_file(
     ${CMAKE_CURRENT_LIST_DIR}/macros/cmake_macros.h.in
     ${CMAKE_BINARY_DIR}/torch/headeronly/macros/cmake_macros.h)
 
-file(GLOB HEADERONLY_HEADERS
+file(GLOB HEADERONLY_HEADERS CONFIGURE_DEPENDS
     *.h
     core/**/*.h
     cpu/**/*.h
@@ -30,6 +30,8 @@ add_library(headeronly INTERFACE ${HEADERONLY_HEADERS})
 
 install(FILES ${CMAKE_BINARY_DIR}/torch/headeronly/macros/cmake_macros.h
         DESTINATION include/torch/headeronly/macros)
+install(FILES ${CMAKE_BINARY_DIR}/torch/headeronly/core/enum_tag.h
+        DESTINATION include/torch/headeronly/core)
 
 if(NOT BUILD_LIBTORCHLESS)
   # ---[ Installation copied from c10/CMakeLists.txt

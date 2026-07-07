@@ -93,22 +93,27 @@ inline void check_foreach_api_restrictions(
 // same device and dtype.
 inline bool _check_tensors_share_device_and_dtype(
     ArrayRef<TensorList> tensorLists,
-    const bool skip_dtype_check = false) {
+    const bool skip_cross_list_dtype_check = false) {
   const auto expected_dtype = tensorLists[0][0].dtype();
   const auto expected_device = tensorLists[0][0].device();
-
-  auto is_tensor_okay = [&](const Tensor& tensor) {
-    return (skip_dtype_check || tensor.dtype() == expected_dtype) &&
-        tensor.device() == expected_device && tensor.layout() == at::kStrided &&
-        tensor.is_non_overlapping_and_dense();
-  };
 
   return std::all_of(
       tensorLists.cbegin(),
       tensorLists.cend(),
       [&](const TensorList& tensorList) {
+        if (tensorList.empty()) {
+          return true;
+        }
+        const auto list_dtype = tensorList[0].dtype();
         return std::all_of(
-            tensorList.cbegin(), tensorList.cend(), is_tensor_okay);
+            tensorList.cbegin(), tensorList.cend(), [&](const Tensor& tensor) {
+              return tensor.device() == expected_device &&
+                  tensor.layout() == at::kStrided &&
+                  tensor.is_non_overlapping_and_dense() &&
+                  tensor.dtype() == list_dtype &&
+                  (skip_cross_list_dtype_check ||
+                   tensor.dtype() == expected_dtype);
+            });
       });
 }
 
@@ -192,8 +197,10 @@ inline bool _check_tensors_do_type_promotion_with_scalars(
 inline bool check_fast_path_restrictions(
     ArrayRef<TensorList> tensorLists,
     ArrayRef<Scalar> scalarList = {},
-    bool does_op_promote_integer_inputs_to_float = false) {
-  return _check_tensors_share_device_and_dtype(tensorLists) &&
+    bool does_op_promote_integer_inputs_to_float = false,
+    bool skip_cross_list_dtype_check = false) {
+  return _check_tensors_share_device_and_dtype(
+             tensorLists, skip_cross_list_dtype_check) &&
       _check_tensors_share_sizes_and_strides(tensorLists) &&
       _check_tensors_do_type_promotion_with_scalars(
              tensorLists[0],
@@ -217,8 +224,9 @@ inline std::vector<c10::Scalar> convert_tensor_to_scalar_list(
       "Expected packed scalar Tensor to be of dimension 1. Got ",
       scalarList_.dim(),
       " instead.");
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND5(
       kComplexHalf,
+      kBComplex32,
       kHalf,
       kBool,
       kBFloat16,
@@ -233,6 +241,7 @@ inline std::vector<c10::Scalar> convert_tensor_to_scalar_list(
             " but got ",
             scalarList_.size(0),
             " instead.");
+        scalarList.reserve(scalarList_.size(0));
         for (int64_t i = 0; i < scalarList_.size(0); i++) {
           scalarList.emplace_back(scalar_data[i]);
         }
@@ -318,9 +327,17 @@ inline FlatMap _group_tensors_by_first_tensors_device_and_dtype(
                 const auto s = tensor->scalar_type();
                 const auto d = tensor->device();
                 // Note: `step` or `state_step` is float32 by default.
+                // BFloat16 is allowed here for mixed-precision optimizer
+                // states (e.g. fp32 params with bf16 exp_avg/exp_avg_sq).
+                // Currently only BFloat16 is permitted because it is the
+                // only low-precision state dtype validated end-to-end in
+                // large-scale training (e.g. DeepSeek-V3 671B).
+                // TBD: make the set of allowed extra dtypes configurable
+                // per optimizer so this function stays dtype-agnostic.
                 if (key.first == d) {
                   return key.second == s || s == at::ScalarType::Float ||
-                      s == at::ScalarType::Double;
+                      s == at::ScalarType::Double ||
+                      s == at::ScalarType::BFloat16;
                 } else if (d.is_cpu()) {
                   // note(crcrpar): There are some test cases (e.g.
                   // TestOptim::test_adam) where state_steps are on CPU and the
@@ -333,43 +350,36 @@ inline FlatMap _group_tensors_by_first_tensors_device_and_dtype(
                 }
               }
             }),
-        "Tensors of the same index must be on the same device and the same dtype except `step` tensors that can be CPU and float32/64 notwithstanding");
-    grouped_tensors_with_indices.try_emplace(
-        key,
-        TensorsAndIndicesT{
-            [&]() -> nested_optional_tensorvec_t {
-              nested_optional_tensorvec_t nested_tensorvec;
-              nested_tensorvec.reserve(num_lists);
-              for (const auto& i : c10::irange(num_lists)) {
-                std::vector<std::optional<at::Tensor>> tensors;
-                if (!nested_tensorlist[i].empty()) {
-                  // NB: num_tensors is the max possible length for any of
-                  // the inner lists of tensor references. Reserving the max
-                  // trades memory for perf. This should not have significant
-                  // impact.
-                  tensors.reserve(num_tensors);
-                }
-                nested_tensorvec.emplace_back(std::move(tensors));
-              }
-              return nested_tensorvec;
-            }(),
-            [&]() -> IndicesT {
-              if (!with_indices) {
-                return {};
-              } else {
-                IndicesT indices;
-                indices.reserve(num_tensors);
-                return indices;
-              }
-            }()});
+        "Tensors of the same index must be on the same device and the same dtype "
+        "except `step` tensors that can be CPU and float32/64, and optimizer "
+        "states that can be bfloat16 for mixed-precision training");
+    auto [it, inserted] = grouped_tensors_with_indices.try_emplace(key);
+    auto& tensors_and_indices = it->second;
+    if (inserted) {
+      auto& nested_tensorvec = tensors_and_indices.first;
+      nested_tensorvec.reserve(num_lists);
+      for (const auto& i : c10::irange(num_lists)) {
+        std::vector<std::optional<at::Tensor>> tensors;
+        if (!nested_tensorlist[i].empty()) {
+          // NB: num_tensors is the max possible length for any of the inner
+          // lists of tensor references. Reserving the max trades memory for
+          // perf. This should not have significant impact.
+          tensors.reserve(num_tensors);
+        }
+        nested_tensorvec.emplace_back(std::move(tensors));
+      }
+      if (with_indices) {
+        tensors_and_indices.second.reserve(num_tensors);
+      }
+    }
     for (const auto& list_index : c10::irange(num_lists)) {
       if (!nested_tensorlist[list_index].empty()) {
-        grouped_tensors_with_indices[key].first[list_index].emplace_back(
+        tensors_and_indices.first[list_index].emplace_back(
             nested_tensorlist[list_index][tensor_index]);
       }
     }
     if (with_indices) {
-      grouped_tensors_with_indices[key].second.emplace_back(tensor_index);
+      tensors_and_indices.second.emplace_back(tensor_index);
     }
   }
 

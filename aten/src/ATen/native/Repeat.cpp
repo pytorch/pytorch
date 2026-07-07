@@ -28,8 +28,15 @@ static void compute_cpu(
     for (const auto i : c10::irange(i_begin, i_end)) {
       int64_t end = cumsum_ptr[i];
       index_t size = repeat_ptr[i];
-      TORCH_CHECK((size >= 0), "repeats can not be negative");
       int64_t start = end - size;
+      // A negative repeat makes the cumsum non-monotonic, so even a
+      // non-negative element can yield start < 0 or end > result_size and write
+      // out of bounds. When output_size is given this per-element check is the
+      // only guard against negative repeats, so validate the write range before
+      // touching result_ptr.
+      TORCH_CHECK(
+          size >= 0 && start >= 0 && end <= result_size,
+          "repeats can not be negative");
       for (const auto j : c10::irange(start, end)) {
         result_ptr[j] = i;
       }
@@ -43,10 +50,11 @@ Tensor repeat_interleave_cpu(
     const Tensor& repeat,
     std::optional<int64_t> output_size) {
   Tensor output;
-  AT_DISPATCH_INDEX_TYPES(repeat.scalar_type(), "repeat_interleave_cpu", [&]() {
-    output = repeat_interleave_common<index_t, compute_cpu<index_t>>(
-        repeat, output_size);
-  });
+  AT_DISPATCH_INTEGRAL_TYPES(
+      repeat.scalar_type(), "repeat_interleave_cpu", [&]() {
+        output = repeat_interleave_common<scalar_t, compute_cpu<scalar_t>>(
+            repeat, output_size);
+      });
 
   return output;
 }
@@ -86,8 +94,13 @@ Tensor repeat_interleave_symint(
     TORCH_CHECK(false, "repeats must be 0-dim or 1-dim tensor");
   }
 
-  auto ret = input.index_select(
-      dim.value(), at::repeat_interleave_symint(repeats_, std::move(output_size)));
+  Tensor repeat_indices =
+      at::repeat_interleave_symint(repeats_, std::move(output_size));
+  if (repeat_indices.scalar_type() != at::kLong &&
+      repeat_indices.scalar_type() != at::kInt) {
+    repeat_indices = repeat_indices.to(at::kLong);
+  }
+  auto ret = input.index_select(dim.value(), repeat_indices);
   // Restore conj and neg bits
   if (conj) {
     ret = ret.conj();
@@ -105,7 +118,7 @@ Tensor repeat_interleave_symint(
     std::optional<SymInt> output_size) {
   Tensor input = dim_opt ? self : self.flatten();
   int64_t dim = c10::maybe_wrap_dim(dim_opt.value_or(0), self.dim());
-  TORCH_CHECK(repeats >= 0, "Repeats must be non-negative");
+  TORCH_SYM_CHECK(repeats.sym_ge(0), "Repeats must be non-negative");
 
   input = input.unsqueeze(dim + 1);
   auto expand_shape = input.sym_sizes().vec();
@@ -115,9 +128,13 @@ Tensor repeat_interleave_symint(
   // This argument doesn't really make sense for the scalar overload, but exists
   // for consistency with the tensor overload
   if (output_size) {
-    auto calculated_size = (repeats * expand_shape[dim]).guard_int(__FILE__, __LINE__);
-    TORCH_CHECK(*output_size == calculated_size, "repeat_interleave: Invalid output_size, expected ",
-                calculated_size, " but got ", *output_size);
+    auto calculated_size = repeats * expand_shape[dim];
+    TORCH_SYM_CHECK(
+        output_size->sym_eq(calculated_size),
+        "repeat_interleave: Invalid output_size, expected ",
+        calculated_size,
+        " but got ",
+        *output_size);
   }
 
   return input.clone(at::MemoryFormat::Contiguous).flatten(dim, dim + 1);

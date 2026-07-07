@@ -52,7 +52,7 @@ def _strip_filename(msg: str) -> str:
 def _run_mypy() -> dict[str, list[str]]:
     """Clears the cache and run mypy before running any of the typing tests."""
     if os.path.isdir(CACHE_DIR):
-        shutil.rmtree(CACHE_DIR)
+        shutil.rmtree(CACHE_DIR, ignore_errors=True)
 
     rc: dict[str, list[str]] = {}
     for directory in (REVEAL_DIR, PASS_DIR, FAIL_DIR):
@@ -186,7 +186,7 @@ class TestTyping(TestCase):
         name_fn=lambda b: os.path.relpath(b, start=FAIL_DIR),
     )
     def test_fail(self, path):
-        __tracebackhide__ = True  # noqa: F841
+        __tracebackhide__ = True
 
         with open(path) as fin:
             lines = fin.readlines()
@@ -225,7 +225,7 @@ class TestTyping(TestCase):
         name_fn=lambda b: os.path.relpath(b, start=REVEAL_DIR),
     )
     def test_reveal(self, path):
-        __tracebackhide__ = True  # noqa: F841
+        __tracebackhide__ = True
 
         with open(path) as fin:
             lines = _parse_reveals(fin)

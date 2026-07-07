@@ -19,7 +19,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._guards import detect_fake_mode
-from torch._library.opaque_object import is_opaque_type
+from torch._library.opaque_object import is_custom_class
 from torch._logging import getArtifactLogger
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch._subclasses.meta_utils import safe_is_leaf
@@ -49,6 +49,7 @@ from .functional_utils import (
     to_fun,
     ViewMetaSequence,
     was_inductor_storage_resized,
+    was_shallow_copy_data,
 )
 from .schemas import (
     InputAliasInfo,
@@ -168,8 +169,6 @@ def run_functionalized_fw_and_collect_metadata(
     *,
     flat_args_descs: list[AOTInput],
     keep_input_mutations: bool,
-    # TODO: refactor to kill this flag
-    is_train: bool = False,
     # Note: this is guaranteed to be set when running under dynamo
     static_input_indices: list[int] | None = None,
     pre_dispatch: bool = False,
@@ -192,7 +191,7 @@ def run_functionalized_fw_and_collect_metadata(
     def inner(*flat_args: Any) -> ViewAndMutationMeta:
         # This function is meant to be run with the forward, which expects a flat list of tensor/symint/other args.
         if not all(
-            isinstance(a, tuple(KNOWN_TYPES)) or is_opaque_type(type(a))
+            isinstance(a, tuple(KNOWN_TYPES)) or is_custom_class(type(a))
             for a in flat_args
         ):
             raise AssertionError("all flat_args must be KNOWN_TYPES or opaque types")
@@ -253,18 +252,10 @@ def run_functionalized_fw_and_collect_metadata(
         # Inspect the state of the input tensor functional wrapper to detect input mutation info
         # If inp[i] has a metadata-only mutation, then maybe_inputs_with_mutated_metadata[i] contains the updated version
         for arg, f_arg in zip(flat_args, flat_f_args):
-            # NB: Mutation of non-contiguous tensor subclass input can result in a mismatch in
-            # strides between the functionalized arg inner tensors and non-functionalized arg inner
-            # tensors. This is a problem as the inner tensor stride change may not be reflected
-            # correctly in the outer tensor, so disallow this for now.
             mutates_data = has_data_mutation(f_arg)
             mutates_metadata = has_metadata_mutation(
                 f_arg, arg, check_only_storage_mutation=False
             )
-            if mutates_metadata and is_traceable_wrapper_subclass(arg):
-                raise RuntimeError(
-                    "Metadata mutations are currently not allowed on tensor subclasses"
-                )
             mutates_storage_metadata = has_metadata_mutation(
                 f_arg, arg, check_only_storage_mutation=True
             )
@@ -289,6 +280,7 @@ def run_functionalized_fw_and_collect_metadata(
                     mutates_metadata=mutates_metadata,
                     mutations_hidden_from_autograd=mutations_hidden_from_autograd,
                     mutates_storage_metadata=mutates_storage_metadata,
+                    mutation_is_shallow_copy_data=was_shallow_copy_data(f_arg),
                     mutations_under_no_grad_or_inference_mode=mutations_under_no_grad_or_inference_mode,
                     mutation_inductor_storage_resize=mutation_inductor_storage_resize,
                     requires_grad=requires_grad,
@@ -448,7 +440,7 @@ def run_functionalized_fw_and_collect_metadata(
         #     return out
         #
         # In this scenario, 'x' and 'out' have different shapes and are stored at different memory addresses, aka no aliasing.
-        # However, due to how set_() and more specificlaly, set is functionalized, is defined to preserve eager semantics,
+        # However, due to how set_() and more specifically, set is functionalized, is defined to preserve eager semantics,
         # the autograd engine mistakenly assumes that 'x' and 'out' are aliased, treating 'x' as 'out._base'.
         # This misinterpretation leads to an 'alias_of_input' flag, causing an unnecessary as_strided() call to be generated,
         # which could lead to issues later in the code.
@@ -664,7 +656,7 @@ from a multi-output view call"
                 #    (iii) alias_of_intermediate_base_is_user_output.
                 #
                 # No need to worry about in-place view operations here, since
-                # this functionalization step elimitates mutations.
+                # this functionalization step eliminates mutations.
                 #
                 # i.e. we have access to the actual base tensor, before the
                 # in-place operation was applied.
@@ -676,7 +668,7 @@ from a multi-output view call"
                 )
             ) or (
                 # 2. If the output_type is alias_of_input, and no in-place view
-                #    operationthe was run on the input (base tensor).
+                #    operation was run on the input (base tensor).
                 #
                 # In this case, we need to check for metadata mutation because
                 # the runtime explicitly reconstructs the inputs, before actually
@@ -835,25 +827,15 @@ from a multi-output view call"
             for inp, info in zip(flat_f_args, input_info)
             if info.mutation_type == MutationType.MUTATED_OUT_GRAPH
         ]
-        f_metadata_mutated_inputs = [
-            inp for inp, info in zip(flat_f_args, input_info) if info.mutates_metadata
-        ]
-        # This logic (annoyingly) re-figures out exactly what the outputs to the compiled fw graph will be.
-        # When handling subclasses, we need info about **all** outputs of compiled forward graph,
-        # so we know precisely which graph outputs to wrap back into tensor subclasses
-        # Ideally we would refactor this so not have an is_train flag, and have the separate
-        # inference and training paths decide which inputs/output to ask for subclass info on.
-        # However, we currently stash indexing information on each SubclassMeta about its order
-        # in the graph outputs list.
-        f_fw_graph_outs = list(flat_f_outs)
-        if is_train or not keep_input_mutations:
-            f_fw_graph_outs = f_mutated_inputs + f_fw_graph_outs
-        else:
-            # even when "keep_input_mutations" is True,
-            # we never keep metadata-only mutations in the fw graph
-            f_fw_graph_outs = f_metadata_mutated_inputs + f_fw_graph_outs
-        if is_train:
-            f_fw_graph_outs = f_fw_graph_outs + intermediate_bases
+        # Build the full list of forward graph outputs so the subclass wrapping
+        # code knows exactly which graph outputs to wrap back into subclasses.
+        # Including intermediate_bases unconditionally is safe: they are only
+        # populated when outputs require grad (line ~539), so they are naturally
+        # empty during pure inference.  In the "downgrade from training to
+        # inference" path, num_intermediate_bases > 0 is already gated behind
+        # `assert not req_subclass_dispatch` (aot_autograd.py), so the subclass
+        # wrapping code that consumes subclass_fw_graph_out_meta never sees them.
+        f_fw_graph_outs = [*f_mutated_inputs, *flat_f_outs, *intermediate_bases]
         fw_graph_outs = pytree.tree_map(from_fun, f_fw_graph_outs)
 
         grad_enabled_mutation = None
@@ -870,6 +852,12 @@ from a multi-output view call"
                 grad_enabled_mutation,
             )
 
+        subclass_inp_meta = create_subclass_meta(flat_args)
+        subclass_fw_graph_out_meta = create_subclass_meta(fw_graph_outs)
+        subclass_tangent_meta = create_subclass_meta(
+            traced_tangents, count_symints=False, with_memory_format=True
+        )
+
         metadata = ViewAndMutationMeta(
             input_info=input_info,
             output_info=output_info,
@@ -877,14 +865,9 @@ from a multi-output view call"
             keep_input_mutations=keep_input_mutations,
             traced_tangents=traced_tangents,
             traced_tangents_descs=traced_tangents_descs,
-            subclass_inp_meta=create_subclass_meta(flat_args),
-            subclass_fw_graph_out_meta=create_subclass_meta(fw_graph_outs),
-            subclass_tangent_meta=create_subclass_meta(
-                traced_tangents,
-                count_symints=False,
-                with_memory_format=True,
-            ),
-            is_train=is_train,
+            subclass_inp_meta=subclass_inp_meta,
+            subclass_fw_graph_out_meta=subclass_fw_graph_out_meta,
+            subclass_tangent_meta=subclass_tangent_meta,
             grad_enabled_mutation=grad_enabled_mutation,
             static_input_indices=static_input_indices,
             tokens=mode._tokens,

@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import torch
 import torch.nn as nn
-from torch import Tensor  # noqa: F401
+from torch import Tensor
 from torch._jit_internal import List, Optional  # noqa: F401
 
 from .utils import _hide_packed_params_repr, _quantize_weight

@@ -148,6 +148,29 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
     )
 
     fb_xplat_cxx_library(
+        name = "ukernels_wasm",
+        srcs = select({
+            "DEFAULT": [],
+            "ovr_config//runtime:wasm-emscripten": prod_srcs_for_arch_wrapper("wasm"),
+        }),
+        headers = get_xnnpack_headers(),
+        header_namespace = "",
+        apple_sdks = (IOS, MACOSX),
+        compiler_flags = [
+            "-O2",
+            "-fno-fast-math",
+            "-fno-math-errno",
+            "-ffp-contract=off",
+        ] + WASM_EMSCRIPTEN_COMPILER_FLAGS,
+        labels = labels,
+        fbandroid_link_whole = True,
+        preferred_linkage = "static",
+        preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
+        visibility = ["PUBLIC"],
+        deps = XNN_COMMON_MICROKERNEL_EXPORTED_DEPS,
+    )
+
+    fb_xplat_cxx_library(
         name = "ukernels_sse",
         srcs = select({
             "DEFAULT": [],
@@ -1828,6 +1851,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "ovr_config//runtime:arm64-linux-ubuntu-neon": [":arm64_lib"],
             "ovr_config//runtime:fbcode-arm64": [":arm64_lib"],
             "ovr_config//runtime:platform010": [":x86_and_x86_64_lib"],
+            "ovr_config//runtime:wasm-emscripten": [":ukernels_wasm"],
         }),
     )
 

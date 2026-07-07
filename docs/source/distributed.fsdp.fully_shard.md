@@ -204,3 +204,8 @@ The frontend API is `fully_shard` that can be called on a `module`:
 ```{eval-rst}
 .. autofunction:: share_comm_ctx
 ```
+
+```{eval-rst}
+.. autoclass:: DataParallelMeshDims
+    :members:
+```

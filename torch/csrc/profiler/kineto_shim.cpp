@@ -61,6 +61,7 @@ const ActivityTypeMap kMtiaTypes{
     {libkineto::ActivityType::MTIA_CCP_EVENTS,       "MTIA_CCP_EVENTS"},
     {libkineto::ActivityType::MTIA_RUNTIME,          "MTIA_RUNTIME"},
     {libkineto::ActivityType::MTIA_INSIGHT,          "MTIA_INSIGHT"},
+    {libkineto::ActivityType::MTIA_COUNTERS,         "MTIA_COUNTERS"},
 };
 
 const ActivityTypeMap kHpuTypes{
@@ -119,9 +120,14 @@ const DeviceAndResource kineto_ids() {
 void addMetadata(
     activity_t* activity,
     const std::string& key,
-    const std::string& value) {
+    const std::string& value,
+    bool quote) {
 #ifdef USE_KINETO
-  activity->addMetadata(key, value);
+  if (quote) {
+    activity->addMetadataQuoted(key, value);
+  } else {
+    activity->addMetadata(key, value);
+  }
 #endif // USE_KINETO
 }
 
@@ -201,63 +207,6 @@ void ActivityTraceWrapper::save(const std::string& path) {
 #endif // USE_KINETO
 }
 
-namespace {
-// Handles processing of Experimental Config options for Kineto
-class ExperimentalConfigWrapper {
- public:
-  explicit ExperimentalConfigWrapper(
-      const torch::profiler::impl::ExperimentalConfig& config)
-      : config_(config) {}
-
-  bool assertValid() {
-    return !config_.profiler_metrics.empty();
-  }
-
-  void prepareTraceWithExperimentalOptions(
-      std::set<libkineto::ActivityType>&& enabled_activities) {
-    std::set<libkineto::ActivityType> k_activities =
-        std::move(enabled_activities);
-#ifdef USE_KINETO
-    k_activities.insert(libkineto::ActivityType::CUDA_PROFILER_RANGE);
-
-    // Add CPU activities if we are measuring per kernel ranges
-    if (config_.profiler_measure_per_kernel) {
-      for (const auto& [type, name] : kCpuTypes) {
-        k_activities.insert(type);
-      }
-    }
-
-    const size_t num_metrics = config_.profiler_metrics.size();
-    std::stringstream configss;
-
-    LOG(INFO) << "CUPTI profiler metrics size = " << num_metrics;
-
-    configss << "ACTIVITIES_WARMUP_PERIOD_SECS=0\n"
-             << "CUPTI_PROFILER_METRICS=";
-
-    for (size_t i = 0; i < num_metrics; i++) {
-      configss << config_.profiler_metrics[i];
-      if (num_metrics > 1 && i < (num_metrics - 1)) {
-        configss << ',';
-      }
-    }
-    configss << "\nCUPTI_PROFILER_ENABLE_PER_KERNEL="
-             << (config_.profiler_measure_per_kernel ? "true" : "false")
-             << '\n';
-    configss << "CUSTOM_CONFIG=" << config_.custom_profiler_config << '\n';
-    LOG(INFO) << "Generated config = " << configss.str();
-
-    libkineto::api().activityProfiler().prepareTrace(
-        k_activities, configss.str());
-#endif // USE_KINETO
-  }
-
- private:
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
-  const torch::profiler::impl::ExperimentalConfig& config_;
-};
-} // namespace
-
 bool collectivesProfilerExists() {
 #if defined(KINETO_HAS_HCCL_PROFILER)
   return true;
@@ -275,7 +224,7 @@ static const std::string setTraceID(const std::string& trace_id) {
   std::stringstream configss;
   configss << "REQUEST_TRACE_ID=" << trace_id << '\n';
   configss << "REQUEST_GROUP_TRACE_ID=" << trace_id << '\n';
-  return configss.str();
+  return std::move(configss).str();
 }
 
 static const std::string appendCustomConfig(
@@ -287,7 +236,7 @@ static const std::string appendCustomConfig(
   std::stringstream configss;
   configss << config;
   configss << "CUSTOM_CONFIG=" << custom_profiler_config << '\n';
-  return configss.str();
+  return std::move(configss).str();
 }
 #endif
 
@@ -356,6 +305,12 @@ void prepareTrace(
       } else {
         LOG(INFO) << "Disabling MTIA insight events";
       }
+      if (config.custom_profiler_config.find("disable_counter_events") ==
+          std::string::npos) {
+        k_activities.insert(libkineto::ActivityType::MTIA_COUNTERS);
+      } else {
+        LOG(INFO) << "Disabling MTIA counter events";
+      }
     }
   }
   if (activities.count(torch::autograd::profiler::ActivityType::HPU)) {
@@ -375,14 +330,6 @@ void prepareTrace(
     insertActivities(
         torch::autograd::profiler::ActivityType::PrivateUse1,
         kPrivateUse1Types);
-  }
-
-  ExperimentalConfigWrapper configWrap(config);
-
-  // Experimental Configuration options are present
-  if (config && configWrap.assertValid()) {
-    configWrap.prepareTraceWithExperimentalOptions(std::move(k_activities));
-    return;
   }
 
   const std::string traceIdStr = setTraceID(trace_id);
@@ -490,6 +437,7 @@ c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
     // TODO: T151322015
     case libkineto::ActivityType::MTIA_CCP_EVENTS:
     case libkineto::ActivityType::MTIA_INSIGHT:
+    case libkineto::ActivityType::MTIA_COUNTERS:
       return device_type_privateuse1_or(c10::DeviceType::MTIA);
     case libkineto::ActivityType::HPU_OP:
       return c10::DeviceType::HPU;
@@ -541,6 +489,17 @@ void profilerStep() {
     VLOG(1) << "Profiler is not initialized: skipping step() invocation";
   }
 #endif // USE_KINETO
+}
+
+bool isKinetoStopped() {
+#ifdef USE_KINETO
+  if (libkineto::api().isProfilerInitialized()) {
+    return libkineto::api().activityProfiler().isStopped();
+  }
+  return false;
+#else
+  return false;
+#endif
 }
 
 } // namespace autograd::profiler

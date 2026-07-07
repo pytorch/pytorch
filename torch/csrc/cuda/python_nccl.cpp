@@ -60,7 +60,7 @@ static void destroy_nccl_comm(PyObject* capsule) {
 static std::vector<std::optional<at::cuda::CUDAStream>> unpack_streams(
     PyObject* obj,
     size_t size) {
-  if (obj == Py_None) {
+  if (Py_IsNone(obj)) {
     return std::vector<std::optional<at::cuda::CUDAStream>>(size, std::nullopt);
   }
   auto streams = THPUtils_PySequence_to_CUDAStreamList(obj);
@@ -74,7 +74,7 @@ static at::Tensor extract_tensor(PyObject* obj);
 static std::vector<at::Tensor> extract_tensors(PyObject* obj);
 
 static std::vector<ncclComm_t> unpack_comms(PyObject* obj, size_t size) {
-  if (obj == Py_None) {
+  if (Py_IsNone(obj)) {
     return std::vector<ncclComm_t>();
   }
   std::vector<ncclComm_t> comms;
@@ -216,7 +216,7 @@ PyObject* THCPModule_nccl_broadcast(PyObject* self, PyObject* args) {
 
   {
     pybind11::gil_scoped_release no_gil;
-    torch::cuda::nccl::broadcast(inputs, streams, user_comms);
+    torch::cuda::nccl::broadcast(inputs, root, streams, user_comms);
   }
 
   Py_RETURN_NONE;

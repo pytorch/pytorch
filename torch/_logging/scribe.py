@@ -59,5 +59,5 @@ struct TorchOpenSourceSignpostLogEntry {
   # The weight of the record according to current sampling rate
   18: optional i64 weight;
 }
-""",  # noqa: B950
+""",
 )

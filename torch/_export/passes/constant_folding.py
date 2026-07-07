@@ -219,7 +219,7 @@ def constant_fold(
 
         erased_params = []
         # Get all attr users by looking up the graph instead from node.users, because in this case
-        # _tensor_constant0 and _tensor_constant0_1 are actually refereing to the same tensor.
+        # _tensor_constant0 and _tensor_constant0_1 are actually referring to the same tensor.
 
         #     opcode         name                 target            args                         kwargs
         # -------------  -------------------  ----------------  ---------------------------  --------

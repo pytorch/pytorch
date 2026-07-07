@@ -359,19 +359,19 @@ TORCH_IMPL_FUNC(avg_pool3d_out_cuda) (
 
   checkAllSameGPU(__func__, {output_arg, input_arg});
 
-  const int kT = safe_downcast<int, int64_t>(kernel_size[0]);
-  const int kH = kernel_size.size() == 1 ? kT : safe_downcast<int, int64_t>(kernel_size[1]);
-  const int kW = kernel_size.size() == 1 ? kT : safe_downcast<int, int64_t>(kernel_size[2]);
+  const int kT = c10::checked_convert<int>(kernel_size[0], "int");
+  const int kH = kernel_size.size() == 1 ? kT : c10::checked_convert<int>(kernel_size[1], "int");
+  const int kW = kernel_size.size() == 1 ? kT : c10::checked_convert<int>(kernel_size[2], "int");
 
-  const int dT = stride.empty() ? kT : safe_downcast<int, int64_t>(stride[0]);
+  const int dT = stride.empty() ? kT : c10::checked_convert<int>(stride[0], "int");
   const int dH = stride.empty() ? kH :
-                 stride.size() == 1 ? dT : safe_downcast<int, int64_t>(stride[1]);
+                 stride.size() == 1 ? dT : c10::checked_convert<int>(stride[1], "int");
   const int dW = stride.empty() ? kW :
-                 stride.size() == 1 ? dT : safe_downcast<int, int64_t>(stride[2]);
+                 stride.size() == 1 ? dT : c10::checked_convert<int>(stride[2], "int");
 
-  const int padT = safe_downcast<int, int64_t>(padding[0]);
-  const int padH = padding.size() == 1 ? padT : safe_downcast<int, int64_t>(padding[1]);
-  const int padW = padding.size() == 1 ? padT : safe_downcast<int, int64_t>(padding[2]);
+  const int padT = c10::checked_convert<int>(padding[0], "int");
+  const int padH = padding.size() == 1 ? padT : c10::checked_convert<int>(padding[1], "int");
+  const int padW = padding.size() == 1 ? padT : c10::checked_convert<int>(padding[2], "int");
 
   // if divisor==0 then we will ignore it
   int64_t divisor = 0;
@@ -465,19 +465,19 @@ TORCH_IMPL_FUNC(avg_pool3d_backward_out_cuda) (
   checkAllSameGPU(__func__,
                   {gradInput_arg, gradOutput_arg, input_arg});
 
-  const int kT = safe_downcast<int, int64_t>(kernel_size[0]);
-  const int kH = kernel_size.size() == 1 ? kT : safe_downcast<int, int64_t>(kernel_size[1]);
-  const int kW = kernel_size.size() == 1 ? kT : safe_downcast<int, int64_t>(kernel_size[2]);
+  const int kT = c10::checked_convert<int>(kernel_size[0], "int");
+  const int kH = kernel_size.size() == 1 ? kT : c10::checked_convert<int>(kernel_size[1], "int");
+  const int kW = kernel_size.size() == 1 ? kT : c10::checked_convert<int>(kernel_size[2], "int");
 
-  const int dT = stride.empty() ? kT : safe_downcast<int, int64_t>(stride[0]);
+  const int dT = stride.empty() ? kT : c10::checked_convert<int>(stride[0], "int");
   const int dH = stride.empty() ? kH :
-                 stride.size() == 1 ? dT : safe_downcast<int, int64_t>(stride[1]);
+                 stride.size() == 1 ? dT : c10::checked_convert<int>(stride[1], "int");
   const int dW = stride.empty() ? kW :
-                 stride.size() == 1 ? dT : safe_downcast<int, int64_t>(stride[2]);
+                 stride.size() == 1 ? dT : c10::checked_convert<int>(stride[2], "int");
 
-  const int padT = safe_downcast<int, int64_t>(padding[0]);
-  const int padH = padding.size() == 1 ? padT : safe_downcast<int, int64_t>(padding[1]);
-  const int padW = padding.size() == 1 ? padT : safe_downcast<int, int64_t>(padding[2]);
+  const int padT = c10::checked_convert<int>(padding[0], "int");
+  const int padH = padding.size() == 1 ? padT : c10::checked_convert<int>(padding[1], "int");
+  const int padW = padding.size() == 1 ? padT : c10::checked_convert<int>(padding[2], "int");
 
   TORCH_CHECK((gradOutput.ndimension() == 4 || gradOutput.ndimension() == 5),
     "non-empty 4D or 5D (batch mode) tensor expected for gradOutput");
@@ -499,11 +499,6 @@ TORCH_IMPL_FUNC(avg_pool3d_backward_out_cuda) (
   const int64_t otime = gradOutput.size(-3);
   const int64_t oheight = gradOutput.size(-2);
   const int64_t owidth = gradOutput.size(-1);
-
-  /* XXX shape check behavior from TH */
-  const int64_t otime_for_shape_check = pooling_output_shape<int64_t>(itime, kT, padT, dT, 1, ceil_mode);
-  const int64_t oheight_for_shape_check = pooling_output_shape<int64_t>(iheight, kH, padH, dH, 1, ceil_mode);
-  const int64_t owidth_for_chape_check = pooling_output_shape<int64_t>(iwidth, kW, padW, dW, 1, ceil_mode);
 
   const bool kernelsOverlap = (dT < kT) || (dH < kH) || (dW < kW);
 

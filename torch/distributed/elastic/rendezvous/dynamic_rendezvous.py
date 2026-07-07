@@ -329,8 +329,8 @@ def _remove_participant_epilogue(
     else:
         if len(state.participants) < settings.min_nodes:
             msg = (
-                f"Number of participants {len(state.participants)}) less than"
-                f"min_nodes {settings.min_nodes}, clearning deadline in state"
+                f"Number of participants {len(state.participants)} less than "
+                f"min_nodes {settings.min_nodes}, clearing deadline in state"
             )
             logger.debug(msg)
             state.deadline = None
@@ -1203,9 +1203,12 @@ class DynamicRendezvousHandler(RendezvousHandler):
             )
 
         # This will only be hit when TCPStore sharing is enabled.
-        if self._bootstrap_store_info is None:
-            # To avoid race in get_free_port because we release the port after the call,
-            # we want to create a TCPStore server soon afterwards.
+        # Rebuild bootstrap store info when this is the first rendezvous or
+        # when the node became rank 0 but hasn't created a TCP store server
+        # yet (rank changed between rounds due to elastic membership changes).
+        if self._bootstrap_store_info is None or (
+            rank == 0 and self._shared_tcp_store_server is None
+        ):
             server_port = 0
             if rank == 0:
                 self._shared_tcp_store_server = self._create_tcp_store_server(

@@ -334,7 +334,7 @@ qconfig.
     * This qconfig uses signed activations and weights. Weights have added
     restrictions such as zero point is forced to be 0, making the weights
     symmetric, hence the name. And the 8-bit quantized values are
-    restricting to to [-127, +127], excluding -128.
+    restricting to [-127, +127], excluding -128.
 
     * xnnpack has a requantization scale value restriction, 0x1p-32 <=
     requantization_scale < 256.0 where, `requantization_scale = (input_scale

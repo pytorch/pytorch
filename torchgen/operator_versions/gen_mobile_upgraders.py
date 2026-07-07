@@ -100,7 +100,7 @@ ONE_UPGRADER_SRC = CodeTemplate(
 
 ONE_UPGRADER_IN_VERSION_MAP = CodeTemplate(
     """Upgrader({${upgrader_min_version}, ${upgrader_max_version}, "${upgrader_name}", ${bytecode_func_index}})"""
-)  # noqa: E501
+)
 
 ONE_OPERATOR_IN_VERSION_MAP = CodeTemplate(
     """

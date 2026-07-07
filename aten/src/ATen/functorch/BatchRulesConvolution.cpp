@@ -329,7 +329,7 @@ convolution_backward_weight_batch_rule(
             dilation, transposed, output_padding, groups, mask);
         auto& grad_weight = std::get<1>(result);
         grad_weight = reshape_dim_outof_symint(1, batch_size, grad_weight);
-        return std::make_tuple(grad_weight, 1);
+        return std::make_tuple(std::move(grad_weight), 1);
       } else {
         // transposed: N(GO), BN(GI) -> N(GO), N(GBI) -> (GBI)O
         const auto dummy_weight = make_dummy(weight, weight_bdim, 0, batch_size);

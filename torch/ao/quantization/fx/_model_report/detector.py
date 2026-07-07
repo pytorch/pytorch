@@ -712,7 +712,7 @@ class DynamicStaticDetector(DetectorBase):
             model (GraphModule): The prepared and calibrated GraphModule with inserted ModelReportObservers
 
         Returns a tuple with two elements:
-            String report of of whether dynamic or static quantization is recommended for certain modules
+            String report of whether dynamic or static quantization is recommended for certain modules
             Dictionary mapping modules with ModelReportObservers around them to:
                 whether dynamic quantization is recommended
                 their S metric of input to module
@@ -1252,7 +1252,7 @@ class InputWeightEqualizationDetector(DetectorBase):
             model (GraphModule): The prepared and calibrated GraphModule with inserted ModelReportObservers
 
         Returns a tuple with two elements:
-            String report of of whether input weight equalization is recommended for certain modules
+            String report of whether input weight equalization is recommended for certain modules
             Dictionary mapping modules of interest to:
                 whether input weight equalization is recommended
                 their s_c metric compared to the threshold
@@ -1652,7 +1652,7 @@ class OutlierDetector(DetectorBase):
             model (GraphModule): The prepared and calibrated GraphModule with inserted ModelReportObservers
 
         Returns a tuple with two elements:
-            String report of of whether there are outliers in the activations around certain modules
+            String report of whether there are outliers in the activations around certain modules
             Dictionary mapping modules of interest to:
                 whether there were outliers found in activation before
                 the number of batches used for each channel

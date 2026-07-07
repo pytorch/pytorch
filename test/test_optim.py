@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 from optim.test_lrscheduler import TestLRScheduler  # noqa: F401
 from optim.test_optim import TestDifferentiableOptimizer  # noqa: F401
-from optim.test_swa_utils import TestSWAUtils  # noqa: F401
+from optim.test_swa_utils import TestSWAUtils
 
 import torch
 from torch.nn import Parameter
@@ -24,6 +24,7 @@ from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     largeTensorTest,
+    onlyAccelerator,
     onlyCPU,
     onlyCUDA,
     onlyNativeDeviceTypes,
@@ -43,6 +44,7 @@ from torch.testing._internal.common_utils import (
     markDynamoStrictTest,
     parametrize,
     run_tests,
+    serialTest,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
@@ -63,6 +65,38 @@ def drosenbrock(tensor):
         raise AssertionError(f"Requires tensor with 2 scalars but got {tensor.size()}")
     x, y = tensor
     return torch.stack((-400 * x * (y - x**2) - 2 * (1 - x), 200 * (y - x**2)))
+
+
+def _bf16_state_init_hook(optimizer, args, kwargs):
+    """Step pre-hook that initializes Adam/AdamW states in bfloat16.
+
+    Pre-populates optimizer state before Adam's lazy initialization so that
+    ``_init_group`` finds non-empty state and skips its own fp32 allocation.
+    The fused CUDA kernel then dispatches to its mixed-precision path.
+    """
+    for group in optimizer.param_groups:
+        for p in group["params"]:
+            if p.grad is None:
+                continue
+            state = optimizer.state[p]
+            if len(state) == 0:
+                state["step"] = (
+                    torch.zeros((), dtype=torch.float32, device=p.device)
+                    if group.get("capturable") or group.get("fused")
+                    else torch.tensor(0.0, dtype=torch.float32)
+                )
+                state["exp_avg"] = torch.zeros_like(
+                    p, dtype=torch.bfloat16, memory_format=torch.preserve_format
+                )
+                state["exp_avg_sq"] = torch.zeros_like(
+                    p, dtype=torch.bfloat16, memory_format=torch.preserve_format
+                )
+                if group.get("amsgrad"):
+                    state["max_exp_avg_sq"] = torch.zeros_like(
+                        p,
+                        dtype=torch.bfloat16,
+                        memory_format=torch.preserve_format,
+                    )
 
 
 @markDynamoStrictTest
@@ -934,7 +968,8 @@ class TestOptimRenewed(TestCase):
                     actual = new_p_state[k]
                     self.assertEqual(og_p_state[k], actual, rtol=rtol, atol=atol)
 
-    @onlyCUDA
+    @skipMPS  # MPS does not support float64
+    @onlyAccelerator
     @optims(
         [optim for optim in optim_db if "foreach" in optim.supported_impls],
         dtypes=[torch.float64],
@@ -964,6 +999,7 @@ class TestOptimRenewed(TestCase):
 
     @onlyCUDA
     @largeTensorTest("72GB", "cuda")
+    @serialTest()
     @optims(
         [optim for optim in optim_db if "foreach" in optim.supported_impls],
         dtypes=[torch.float16],
@@ -1129,6 +1165,7 @@ class TestOptimRenewed(TestCase):
 
     @onlyNativeDeviceTypes
     @largeTensorTest("64GB")
+    @serialTest()
     @optims(
         [optim for optim in optim_db if "fused" in optim.supported_impls],
         dtypes=[torch.float16],
@@ -1146,13 +1183,14 @@ class TestOptimRenewed(TestCase):
             optimizer = optim_cls(params, fused=True, **optim_input.kwargs)
             optimizer.step()
 
-    @onlyCUDA
+    @skipMPS  # MPS fused optimizer does not properly handle found_inf
+    @onlyAccelerator
     @optims(
         [optim for optim in optim_db if "fused" in optim.supported_impls],
         dtypes=[torch.float32],
     )
     def test_fused_does_not_step_if_foundinf(self, device, dtype, optim_info):
-        if device not in optim_info.supports_fused_on:
+        if _get_device_type(device) not in optim_info.supports_fused_on:
             self.skipTest(
                 f"{device} is not supported for fused on {optim_info.optim_cls.__name__}"
             )
@@ -1358,8 +1396,6 @@ class TestOptimRenewed(TestCase):
         all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
             device, dtype, optim_info
         )
-        param = torch.randn((5, 1), device=device, dtype=dtype, requires_grad=True)
-        old_param = param.detach().clone()
 
         def closure():
             return torch.tensor([1], device=device, dtype=dtype)
@@ -1372,13 +1408,13 @@ class TestOptimRenewed(TestCase):
             if kwargs.get("weight_decay", 0) != 0:
                 continue
 
-            # AdamW/Muon params will be updated regardless of grads due to lr, so make lr smaller
-            if optim_cls.__name__ == "AdamW" or optim_cls.__name__ == "Muon":
-                kwargs["lr"] = (
-                    torch.tensor(1e-5)
-                    if isinstance(kwargs.get("lr", 1e-5), torch.Tensor)
-                    else 1e-5
-                )
+            # AdamW and Muon have a nonzero default weight_decay, which decays
+            # params even with zero grads; override it so the step is a true no-op.
+            if optim_cls.__name__ in ("AdamW", "Muon"):
+                kwargs["weight_decay"] = 0
+
+            param = torch.randn((5, 1), device=device, dtype=dtype, requires_grad=True)
+            old_param = param.detach().clone()
 
             if kwargs.get("differentiable", False):
                 params = [param.detach()]
@@ -1777,13 +1813,14 @@ class TestOptimRenewed(TestCase):
             optimizer.load_state_dict(state_dict)
             optimizer.step(closure)
 
-    @onlyCUDA
+    @skipMPS  # Muon optimizer creates float64 tensors internally, unsupported on MPS
+    @onlyAccelerator
     @optims(optim_db, dtypes=[torch.float32])
-    def test_state_dict_with_cuda_params(self, device, dtype, optim_info):
+    def test_state_dict_cross_device(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls
 
         # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
-        # We limit our configs to CPU only, because we will be moving them to CUDA later
+        # We limit our configs to CPU only, because we will be moving them to the target device later
         cpu_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
             "cpu", dtype, optim_info, skip=("differentiable",)
         )
@@ -1797,10 +1834,10 @@ class TestOptimRenewed(TestCase):
         for optim_input in cpu_optim_inputs:
             if (
                 "fused" in optim_input.kwargs
-                and "cuda" not in optim_info.supports_fused_on
+                and _get_device_type(device) not in optim_info.supports_fused_on
             ):
                 self.skipTest(
-                    f"cuda is not supported for fused on {optim_cls.__name__}"
+                    f"{_get_device_type(device)} is not supported for fused on {optim_cls.__name__}"
                 )
             params = [
                 Parameter(torch.randn(2, 3, device="cpu", dtype=dtype))
@@ -1819,36 +1856,36 @@ class TestOptimRenewed(TestCase):
                 optimizer.step(closure)
 
             with torch.no_grad():
-                params_cuda = [p.to(device="cuda") for p in params]
-                for i, p in enumerate(params_cuda):
-                    p.grad = params[i].grad.to(device="cuda")
-            optimizer_cuda = optim_cls(params_cuda, **optim_input.kwargs)
+                params_device = [p.to(device=device) for p in params]
+                for i, p in enumerate(params_device):
+                    p.grad = params[i].grad.to(device=device)
+            optimizer_device = optim_cls(params_device, **optim_input.kwargs)
 
             state_dict_cpu = deepcopy(optimizer.state_dict())
-            state_dict_cuda = deepcopy(optimizer.state_dict())
-            optimizer_cuda.load_state_dict(state_dict_cuda)
+            state_dict_device = deepcopy(optimizer.state_dict())
+            optimizer_device.load_state_dict(state_dict_device)
 
-            # Make sure state_dict_cuda isn't modified by merely calling load_state_dict
-            self.assertEqual(state_dict_cpu, state_dict_cuda)
+            # Make sure state_dict_device isn't modified by merely calling load_state_dict
+            self.assertEqual(state_dict_cpu, state_dict_device)
 
             # Make sure that device of state['step'] is still CPU _unless_ torch.compile() added a capturable!
             capturable = state_dict_cpu["param_groups"][0].get("capturable", False)
             fused = state_dict_cpu["param_groups"][0].get("fused", False)
-            new_state_dict = optimizer_cuda.state_dict()
-            for state_cpu, state_cuda in zip(
+            new_state_dict = optimizer_device.state_dict()
+            for state_cpu, state_device in zip(
                 state_dict_cpu["state"].values(), new_state_dict["state"].values()
             ):
                 if "step" in state_cpu and torch.is_tensor(state_cpu["step"]):
                     self.assertEqual(
-                        state_cuda["step"].device.type,
-                        "cuda" if capturable or fused else "cpu",
+                        state_device["step"].device.type,
+                        _get_device_type(device) if capturable or fused else "cpu",
                     )
 
             for _ in range(5):
                 optimizer.step(closure)
-                optimizer_cuda.step(closure)
-                self.assertEqual(params, params_cuda)
-                self.assertEqual(optimizer.state_dict(), optimizer_cuda.state_dict())
+                optimizer_device.step(closure)
+                self.assertEqual(params, params_device)
+                self.assertEqual(optimizer.state_dict(), optimizer_device.state_dict())
 
     @staticmethod
     def _state_dict_pre_hook(optimizer: Optimizer) -> None:
@@ -2197,24 +2234,25 @@ class TestOptimRenewed(TestCase):
             res2 = optim_neg_inf.step(closure)
             self.assertEqual(type(res1), type(res2))
 
-    @onlyCUDA
+    @skipMPS  # MPS does not support float64
+    @onlyAccelerator
     @optims(
-        [
-            optim
-            for optim in optim_db
-            if "cpu" in optim.supports_fused_on and "cuda" in optim.supports_fused_on
-        ],
+        [optim for optim in optim_db if "cpu" in optim.supports_fused_on],
         dtypes=floating_types_and(
             torch.bfloat16,
             torch.float16,
         ),
     )
-    def test_fused_cpu_matches_cuda(self, device, dtype, optim_info):
+    def test_fused_cpu_matches_device(self, device, dtype, optim_info):
+        if _get_device_type(device) not in optim_info.supports_fused_on:
+            self.skipTest(
+                f"{_get_device_type(device)} is not supported for fused on {optim_info.optim_cls.__name__}"
+            )
         optim_cls = optim_info.optim_cls
         optim_inputs = optim_info.optim_inputs_func(device="cpu")
         for optim_input in optim_inputs:
             inpts, models, optimizers = [], [], []
-            for dev in ("cpu", "cuda"):
+            for dev in ("cpu", _get_device_type(device)):
                 kwargs = optim_input.kwargs
                 kwargs["fused"] = True
                 inpt = torch.tensor(
@@ -2313,6 +2351,160 @@ class TestOptimRenewed(TestCase):
             for state in optim.state.values():
                 self.assertGreater(len(state), 0)
 
+    @onlyCUDA
+    @parametrize("amsgrad", [False, True])
+    @optims(
+        [o for o in optim_db if o.optim_cls.__name__ in ["Adam", "AdamW"]],
+        dtypes=[torch.float32],
+    )
+    def test_fused_mixed_precision_state_init(self, device, dtype, optim_info, amsgrad):
+        optim_cls = optim_info.optim_cls
+        params = [torch.rand(20, 7, device=device, dtype=dtype) for _ in range(5)]
+        for p in params:
+            p.grad = torch.rand_like(p)
+
+        optim = optim_cls(params, lr=1e-3, fused=True, amsgrad=amsgrad)
+        optim.register_step_pre_hook(_bf16_state_init_hook)
+
+        optim.step()
+
+        for p in params:
+            self.assertEqual(p.dtype, torch.float32)
+            state = optim.state[p]
+            self.assertEqual(state["step"].dtype, torch.float32)
+            self.assertEqual(state["exp_avg"].dtype, torch.bfloat16)
+            self.assertEqual(state["exp_avg_sq"].dtype, torch.bfloat16)
+            if amsgrad:
+                self.assertEqual(state["max_exp_avg_sq"].dtype, torch.bfloat16)
+
+        # Second step: hook should be idempotent (skips already-populated state)
+        for p in params:
+            p.grad = torch.rand_like(p)
+        optim.step()
+
+        for p in params:
+            state = optim.state[p]
+            self.assertEqual(state["step"].dtype, torch.float32)
+            self.assertEqual(state["exp_avg"].dtype, torch.bfloat16)
+            self.assertEqual(state["exp_avg_sq"].dtype, torch.bfloat16)
+            if amsgrad:
+                self.assertEqual(state["max_exp_avg_sq"].dtype, torch.bfloat16)
+
+    @onlyCUDA
+    @parametrize("amsgrad", [False, True])
+    @optims(
+        [o for o in optim_db if o.optim_cls.__name__ in ["Adam", "AdamW"]],
+        dtypes=[torch.float32],
+    )
+    def test_fused_mixed_precision_hook_skips_existing_state(
+        self, device, dtype, optim_info, amsgrad
+    ):
+        optim_cls = optim_info.optim_cls
+
+        # Two param groups: group 1 gets f32 state pre-populated (hook should
+        # skip it), group 2 has no state (hook should initialize it in bf16).
+        # This exercises the fused kernel handling two groups whose states have
+        # different dtypes within the same optimizer.step() call.
+        g1_params = [torch.rand(10, 5, device=device, dtype=dtype) for _ in range(2)]
+        g2_params = [torch.rand(10, 5, device=device, dtype=dtype) for _ in range(2)]
+        for p in g1_params + g2_params:
+            p.grad = torch.rand_like(p)
+
+        optim = optim_cls(
+            [{"params": g1_params}, {"params": g2_params}],
+            lr=1e-3,
+            fused=True,
+            amsgrad=amsgrad,
+        )
+
+        for p in g1_params:
+            optim.state[p]["step"] = torch.zeros(
+                (), dtype=torch.float32, device=p.device
+            )
+            optim.state[p]["exp_avg"] = torch.zeros_like(p)
+            optim.state[p]["exp_avg_sq"] = torch.zeros_like(p)
+            if amsgrad:
+                optim.state[p]["max_exp_avg_sq"] = torch.zeros_like(p)
+
+        optim.register_step_pre_hook(_bf16_state_init_hook)
+        optim.step()
+
+        # Group 1: hook skipped (state was non-empty), dtypes stay f32.
+        for p in g1_params:
+            state = optim.state[p]
+            self.assertEqual(state["step"].dtype, torch.float32)
+            self.assertEqual(state["exp_avg"].dtype, torch.float32)
+            self.assertEqual(state["exp_avg_sq"].dtype, torch.float32)
+            if amsgrad:
+                self.assertEqual(state["max_exp_avg_sq"].dtype, torch.float32)
+
+        # Group 2: hook initialized state in bf16.
+        for p in g2_params:
+            state = optim.state[p]
+            self.assertEqual(state["step"].dtype, torch.float32)
+            self.assertEqual(state["exp_avg"].dtype, torch.bfloat16)
+            self.assertEqual(state["exp_avg_sq"].dtype, torch.bfloat16)
+            if amsgrad:
+                self.assertEqual(state["max_exp_avg_sq"].dtype, torch.bfloat16)
+
+    @onlyCUDA
+    @optims(
+        [o for o in optim_db if o.optim_cls.__name__ in ["Adam", "AdamW"]],
+        dtypes=[torch.float32],
+    )
+    def test_fused_mixed_precision_numerics(self, device, dtype, optim_info):
+        optim_inputs = optim_info.optim_inputs_func(device=device, dtype=dtype)
+        optim_cls = optim_info.optim_cls
+        for optim_input in optim_inputs:
+            kwargs = {**optim_input.kwargs, "fused": True}
+
+            params = [torch.rand(20, 7, device=device, dtype=dtype) for _ in range(10)]
+            for p in params:
+                p.grad = torch.rand_like(p)
+
+            params_c = [p.clone() for p in params]
+            for p, pc in zip(params, params_c):
+                pc.grad = p.grad.clone()
+
+            ref_optim = optim_cls(params, **kwargs)
+            bf16_optim = optim_cls(params_c, **kwargs)
+            bf16_optim.register_step_pre_hook(_bf16_state_init_hook)
+
+            # Simulate bf16 storage: after each ref step, quantize states to
+            # bf16 and back so the reference matches the mixed-precision kernel.
+            tracker = TensorTracker()
+            for i in range(7):
+                ref_optim.step()
+                bf16_optim.step()
+                for p in params:
+                    tracker.add(p)
+                    tracker.add(p.grad)
+                for d in ref_optim.state.values():
+                    exp_avg_bf16 = d["exp_avg"].to(torch.bfloat16)
+                    tracker.add(exp_avg_bf16)
+                    d["exp_avg"] = exp_avg_bf16.to(torch.float32)
+                    exp_avg_sq_bf16 = d["exp_avg_sq"].to(torch.bfloat16)
+                    tracker.add(exp_avg_sq_bf16)
+                    d["exp_avg_sq"] = exp_avg_sq_bf16.to(torch.float32)
+                    if "max_exp_avg_sq" in d:
+                        max_exp_avg_sq_bf16 = d["max_exp_avg_sq"].to(torch.bfloat16)
+                        tracker.add(max_exp_avg_sq_bf16)
+                        d["max_exp_avg_sq"] = max_exp_avg_sq_bf16.to(torch.float32)
+
+                for e, pc in enumerate(params_c):
+                    tracker.pop_check_set(pc, self)
+                    tracker.pop_check_set(pc.grad, self)
+
+                for p, pc in zip(params, params_c):
+                    self.assertEqual(p, pc)
+
+                for dc in bf16_optim.state.values():
+                    tracker.pop_check_set(dc["exp_avg"], self)
+                    tracker.pop_check_set(dc["exp_avg_sq"], self)
+                    if "max_exp_avg_sq" in dc:
+                        tracker.pop_check_set(dc["max_exp_avg_sq"], self)
+                self.assertTrue(tracker.all_popped())
+
     @parametrize("dtype", [torch.float32])
     def test_step_iteration(self, device, dtype):
         def _get_model_and_input_tensor(device, dtype):
@@ -2343,6 +2535,7 @@ class TestOptimRenewed(TestCase):
 
 
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)
+instantiate_device_type_tests(TestSWAUtils, globals(), allow_mps=True)
 
 
 if __name__ == "__main__":

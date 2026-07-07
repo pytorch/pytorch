@@ -330,8 +330,9 @@ bool mkldnnPrepackedConvIsSupportedJit(const torch::jit::Node* node) {
       _pair_int(*pad),
       _pair_int(*dilation),
       groups->toInt());
-#endif
+#else
   return false;
+#endif
 }
 
 bool isConv2d(const Node* node) {
@@ -568,7 +569,7 @@ static bool constZeroDimTensorAsScalarArg(
       std::stringstream ss;
       ss << "Unsupported tensor dtype:" << dtype
          << " for converting constant 0-dim Tensor to scalar" << '\n';
-      throw unsupported_dtype(ss.str());
+      throw unsupported_dtype(std::move(ss).str());
   }
 }
 
@@ -996,7 +997,7 @@ void TensorExprKernel::genInputDebugNames() {
     std::string sanitized_name = sanitizeName(input->debugName());
     // we could get fancier here, but name conflict is extremely unlikely
     while (name_set.count(sanitized_name)) {
-      sanitized_name.append("_");
+      sanitized_name.push_back('_');
     }
     value_to_name[input] = sanitized_name;
     name_set.insert(sanitized_name);
@@ -1275,7 +1276,7 @@ Tensor TensorExprKernel::convertSymbolicOutputToCorrectStrides(
   // `val` we want here is equal to the indices for the output
   // tensor that would have given the same position as the output
   // The position is equal to the sum of stride[i] * index[i],
-  // and we can can calculate the equivalent indices in the
+  // and we can calculate the equivalent indices in the
   // output tensor strides by iteratively computing the index of
   // the biggest stride:
   // absolute = ...

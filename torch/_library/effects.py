@@ -11,7 +11,7 @@ from torch._library.utils import RegistrationHandle
 
 
 # These classes do not have side effects as they just store quantization
-# params, so we dont need to mark them as ordered
+# params, so we don't need to mark them as ordered
 skip_classes = (
     "__torch__.torch.classes.quantized.Conv2dPackedParamsBase",
     "__torch__.torch.classes.quantized.Conv3dPackedParamsBase",

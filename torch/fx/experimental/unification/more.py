@@ -1,4 +1,7 @@
-# mypy: allow-untyped-defs
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from .core import (  # type: ignore[attr-defined]
     _reify as core_reify,
     _unify as core_unify,
@@ -8,10 +11,14 @@ from .core import (  # type: ignore[attr-defined]
 from .dispatch import dispatch
 
 
+if TYPE_CHECKING:
+    from .variable import Var
+
+
 __all__ = ["unifiable", "reify_object", "unify_object"]
 
 
-def unifiable(cls):
+def unifiable(cls: type) -> type:
     """Register standard unify and reify operations on class
     This uses the type and __dict__ or __slots__ attributes to define the
     nature of the term
@@ -40,7 +47,7 @@ def unifiable(cls):
 #########
 
 
-def reify_object(o, s):
+def reify_object(o: object, s: dict[Var, object]) -> object:
     """Reify a Python object with a substitution
     >>> # xdoctest: +SKIP
     >>> class Foo(object):
@@ -63,32 +70,38 @@ def reify_object(o, s):
         return _reify_object_dict(o, s)
 
 
-def _reify_object_dict(o, s):
+def _reify_object_dict(o: object, s: dict[Var, object]) -> object:
     obj = object.__new__(type(o))
-    d = reify(o.__dict__, s)
-    if d == o.__dict__:
+    d = reify(o.__dict__, s)  # pyrefly: ignore[missing-attribute]
+    if d == o.__dict__:  # pyrefly: ignore[missing-attribute]
         return o
-    obj.__dict__.update(d)
+    obj.__dict__.update(d)  # pyrefly: ignore[missing-attribute, no-matching-overload]
     return obj
 
 
-def _reify_object_slots(o, s):
-    attrs = [getattr(o, attr) for attr in o.__slots__]
+def _reify_object_slots(o: object, s: dict[Var, object]) -> object:
+    attrs = [
+        getattr(o, attr)
+        for attr in o.__slots__  # pyrefly: ignore[missing-attribute]
+    ]
     new_attrs = reify(attrs, s)
     if attrs == new_attrs:
         return o
     else:
         newobj = object.__new__(type(o))
-        for slot, attr in zip(o.__slots__, new_attrs):
+        for slot, attr in zip(
+            o.__slots__,  # pyrefly: ignore[missing-attribute]
+            new_attrs,  # pyrefly: ignore[bad-argument-type]
+        ):
             setattr(newobj, slot, attr)
         return newobj
 
 
 @dispatch(slice, dict)
-def _reify(o, s):
+def _reify(o: slice, s: dict[Var, object]) -> slice:
     """Reify a Python ``slice`` object"""
 
-    return slice(*reify((o.start, o.stop, o.step), s))
+    return slice(*reify((o.start, o.stop, o.step), s))  # pyrefly: ignore[not-iterable]
 
 
 #########
@@ -96,7 +109,9 @@ def _reify(o, s):
 #########
 
 
-def unify_object(u, v, s):
+def unify_object(
+    u: object, v: object, s: dict[Var, object]
+) -> dict[Var, object] | bool:
     """Unify two Python objects
     Unifies their type and ``__dict__`` attributes
     >>> # xdoctest: +SKIP
@@ -117,15 +132,25 @@ def unify_object(u, v, s):
         return False
     if hasattr(u, "__slots__"):
         return unify(
-            [getattr(u, slot) for slot in u.__slots__],
-            [getattr(v, slot) for slot in v.__slots__],
+            [
+                getattr(u, slot)
+                for slot in u.__slots__  # pyrefly: ignore[missing-attribute]
+            ],
+            [
+                getattr(v, slot)
+                for slot in v.__slots__  # pyrefly: ignore[missing-attribute]
+            ],
             s,
         )
     else:
-        return unify(u.__dict__, v.__dict__, s)
+        return unify(
+            u.__dict__,  # pyrefly: ignore[missing-attribute]
+            v.__dict__,  # pyrefly: ignore[missing-attribute]
+            s,
+        )
 
 
 @dispatch(slice, slice, dict)
-def _unify(u, v, s):
+def _unify(u: slice, v: slice, s: dict[Var, object]) -> dict[Var, object] | bool:
     """Unify a Python ``slice`` object"""
     return unify((u.start, u.stop, u.step), (v.start, v.stop, v.step), s)

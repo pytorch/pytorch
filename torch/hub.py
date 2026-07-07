@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 from typing_extensions import deprecated
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlparse  # noqa: F401
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 import torch
@@ -278,7 +278,7 @@ def _get_cache_or_reload(
     repo_owner, repo_name, ref = _parse_repo_info(github)
     # Github allows branch name with slash '/',
     # this causes confusion with path on both Linux and Windows.
-    # Backslash is not allowed in Github branch name so no need to
+    # Backslash is not allowed in Github branch name so no need
     # to worry about it.
     normalized_br = ref.replace("/", "_")
     # Github renames folder repo-v1.x.x to repo-1.x.x
@@ -513,7 +513,7 @@ def list(
         hubconf_path = os.path.join(repo_dir, MODULE_HUBCONF)
         hub_module = _import_module(MODULE_HUBCONF, hubconf_path)
 
-    # We take functions starts with '_' as internal helper functions
+    # We take functions starting with '_' as internal helper functions
     entrypoints = [
         f
         for f in dir(hub_module)

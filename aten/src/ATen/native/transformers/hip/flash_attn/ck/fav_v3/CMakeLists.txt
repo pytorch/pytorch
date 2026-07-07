@@ -1,14 +1,21 @@
 include(CMakePrintHelpers)
 
-# Generate AITER/CK Asm code
+# Generate AITER/CK Asm code. aiter's hsa/codegen.py imports pandas/numpy purely
+# to read small CSV config files and emit a C++ header; pandas/numpy publish no
+# CPython 3.15 wheels yet (and pandas requires numpy), so provisioning them on
+# 3.15 fails. codegen_compat.py reproduces codegen.py's output using only the
+# standard library, so this step runs under plain python3 like every other CK
+# generator here -- no venv or pandas/numpy install required.
 execute_process(
     COMMAND ${CMAKE_COMMAND} -E env "AITER_GPU_ARCHS=gfx942;gfx950"
-            python3 ${CMAKE_SOURCE_DIR}/third_party/aiter/hsa/codegen.py -m fmha_v3_bwd --output_dir ${CMAKE_CURRENT_LIST_DIR}
+            python3 ${CMAKE_CURRENT_LIST_DIR}/codegen_compat.py
+            --hsa-dir ${CMAKE_SOURCE_DIR}/third_party/aiter/hsa
+            -m fmha_v3_bwd --output_dir ${CMAKE_CURRENT_LIST_DIR}
     RESULT_VARIABLE ret
 )
 
 if(ret AND NOT ret EQUAL 0)
-    message( FATAL_ERROR "Failed to generate FAv3 CK Kernels")
+    message(FATAL_ERROR "Failed to generate FAv3 CK Kernels")
 endif()
 
 execute_process(COMMAND bash -c "cp ${CMAKE_SOURCE_DIR}/third_party/aiter/csrc/cpp_itfs/mha_bwd.cu ${CMAKE_CURRENT_LIST_DIR}/mha_bwd.hip")

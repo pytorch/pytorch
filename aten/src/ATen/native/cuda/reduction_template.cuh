@@ -4,6 +4,7 @@ const std::string reduction_template_0 = R"ESCAPE(
   #define C10_HOST_DEVICE __host__ __device__
   #define C10_DEVICE __device__
   #if defined(__clang__) && defined(__HIP__)
+  #define USE_ROCM 1
   #ifndef __forceinline__
   #define __forceinline__ inline __attribute__((always_inline))
   #endif
@@ -570,6 +571,49 @@ struct ReduceJitOp {
     }
   }
 
+  #ifdef USE_ROCM
+  // This function implements a committed store.
+  // Upon returning, the store is committed to global memory.
+  // This is useful in avoiding the need for fences.
+  // If multiple stores are done in a row there is option to skip
+  // waiting for commit for all but the last store.
+  template <typename T, bool wait_for_commit = true>
+  __device__ inline void cmtdStore(void* address, T value) const {
+        int constexpr num_long_per_val = sizeof(value)/sizeof(long);
+        int constexpr num_int_per_val = sizeof(value)/sizeof(int);
+        int constexpr num_short_per_val = sizeof(value)/sizeof(short);
+        int constexpr num_char_per_val = sizeof(value)/sizeof(char);
+        union pnr { T v;
+                    long l[num_long_per_val];
+                    int i[num_int_per_val];
+                    short s[num_short_per_val];
+                    char c[num_char_per_val]; }
+              _pnr = {.v = value };
+        if constexpr (num_long_per_val*sizeof(long) == sizeof(value))
+          for (int i=0; i<num_long_per_val; i++)
+            __hip_atomic_store(reinterpret_cast<long *>(address)+i, _pnr.l[i], __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+        else if constexpr (num_int_per_val*sizeof(int) == sizeof(value))
+          for (int i=0; i<num_int_per_val; i++)
+            __hip_atomic_store(reinterpret_cast<int *>(address)+i, _pnr.i[i], __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+        else if constexpr (num_short_per_val*sizeof(short) == sizeof(value))
+          for (int i=0; i<num_short_per_val; i++)
+            __hip_atomic_store(reinterpret_cast<short *>(address)+i, _pnr.s[i], __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+        else if constexpr (num_char_per_val*sizeof(char) == sizeof(value))
+          for (int i=0; i<num_char_per_val; i++)
+            __hip_atomic_store(reinterpret_cast<char *>(address)+i, _pnr.c[i], __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+        if constexpr (wait_for_commit)
+        {
+          __atomic_signal_fence(__ATOMIC_SEQ_CST);
+  #ifdef __gfx1250__
+          asm volatile("s_wait_loadcnt(0)" ::: "memory");
+  #else
+          asm volatile("s_waitcnt vmcnt(0)" ::: "memory");
+  #endif
+          __atomic_signal_fence(__ATOMIC_SEQ_CST);
+        }
+  }
+  #endif
+
   template <int output_vec_size>
   C10_DEVICE Array<arg_t, output_vec_size> global_reduce(Array<arg_t, output_vec_size> value, Array<arg_t, output_vec_size> *acc, char* shared_memory) const {
     using arg_vec_t = Array<arg_t, output_vec_size>;
@@ -590,15 +634,25 @@ struct ReduceJitOp {
     bool should_store = config.should_store(output_idx);
     if (should_store) {
       uint32_t offset = config.staging_memory_offset(blockIdx.y);
+  #ifndef USE_ROCM
       reduce_buffer[offset] = value;
+  #else // [CMTSTRS]
+      // In architectures with split caches, global fences are costly.
+      // Here we preempt need for fences by committing stores to global memory.
+      cmtdStore(&reduce_buffer[offset], value);
+  #endif // [CMTSTRS]
     }
 
+  #ifndef USE_ROCM // skip fence if store are committed [CMTSTRS]
     __threadfence(); // make sure writes are globally visible
+  #endif
     __syncthreads(); // if multiple warps in this block wrote to staging, make sure they're all done
     bool is_last_block_done = mark_block_finished();
 
     if (is_last_block_done) {
+  #ifndef USE_ROCM // skip fence if store are committed [CMTSTRS]
       __threadfence(); //complete acquire pattern
+  #endif
       value = ident;
       if (config.should_block_x_reduce()) {
         uint32_t input_offset = threadIdx.x + threadIdx.y * blockDim.x;

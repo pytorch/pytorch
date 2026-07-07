@@ -21,7 +21,7 @@ def module_contains_param(module: nn.Module, parametrization: type[nn.Module]) -
         # see if any of the module tensors have a parametriztion attached that matches the one passed in
         return any(
             any(isinstance(param, parametrization) for param in param_list)
-            for key, param_list in module.parametrizations.items()  # type: ignore[union-attr,operator]
+            for param_list in module.parametrizations.values()  # type: ignore[union-attr,operator]
         )
     return False
 
@@ -69,7 +69,7 @@ def swap_module(
 
 def module_to_fqn(model: nn.Module, module: nn.Module, prefix: str = "") -> str | None:
     """
-    Returns the fqn for a module or None if module not a descendent of model.
+    Returns the fqn for a module or None if module not a descendant of model.
     """
     if module is model:
         return ""

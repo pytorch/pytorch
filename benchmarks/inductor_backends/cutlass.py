@@ -454,7 +454,7 @@ def main():
         )
     )
     for i, group_config in enumerate(tqdm(configs)):
-        group_results = run_single_experiment_group(group_config)  # noqa: G004
+        group_results = run_single_experiment_group(group_config)
         results.append(
             ExperimentGroup(config=group_config, results=group_results),
         )

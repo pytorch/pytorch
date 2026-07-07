@@ -6,7 +6,9 @@
 #include <ATen/cpu/vec/sve/vec_float.h>
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/util/bit_cast.h>
+#include <algorithm>
 #include <cmath>
+
 namespace at {
 namespace vec {
 // Note [CPU_CAPABILITY namespace]
@@ -100,7 +102,7 @@ class Vectorized<BFloat16> {
     std::memcpy(
         reinterpret_cast<bfloat16_t*>(ptr),
         reinterpret_cast<const bfloat16_t*>(tmp),
-        count * sizeof(bfloat16_t));
+        std::min<int64_t>(count, size()) * sizeof(bfloat16_t));
   }
   const BFloat16& operator[](int idx) const = delete;
   BFloat16& operator[](int idx) = delete;
@@ -240,9 +242,18 @@ convert_bfloat16_float(const Vectorized<c10::BFloat16>& a) {
   return {Vectorized<float>(x1), Vectorized<float>(x2)};
 }
 
-inline Vectorized<c10::BFloat16> convert_float_bfloat16(
-    const Vectorized<float>& a,
-    const Vectorized<float>& b) {
+#if defined(TORCH_INDUCTOR_PRECOMPILE_HEADERS) && defined(__GNUC__) && \
+    !defined(__clang__) &&                                             \
+    ((__GNUC__ == 14 && __GNUC_MINOR__ < 4) ||                         \
+     (__GNUC__ == 15 && __GNUC_MINOR__ < 3))
+// GCC 14/15 can ICE when compiling AArch64 SVE intrinsics with PCH enabled
+// (GCC PR target/123457). The fix is expected in GCC 14.4 and 15.3, and is
+// backported to only some 14.3 and 15.2 packages, so conservatively guard by
+// upstream minor version.
+__attribute__((optimize("O0")))
+#endif
+inline Vectorized<c10::BFloat16>
+convert_float_bfloat16(const Vectorized<float>& a, const Vectorized<float>& b) {
   static_assert(
       Vectorized<c10::BFloat16>::size() == 2 * Vectorized<float>::size());
   svbfloat16_t x1 = svcvt_bf16_f32_z(ptrue, a);
@@ -584,6 +595,85 @@ Vectorized<BFloat16> inline fmadd(
     const Vectorized<BFloat16>& b,
     const Vectorized<BFloat16>& c) {
   return a * b + c;
+}
+
+template <>
+void inline transpose_mxn<BFloat16>(
+    const BFloat16* src,
+    int64_t ld_src,
+    BFloat16* dst,
+    int64_t ld_dst,
+    int M,
+    int N) {
+  if (M <= 0 || N <= 0) {
+    return;
+  }
+  constexpr int TILE = 8;
+
+  alignas(64) BFloat16 tile_in[TILE * TILE];
+  alignas(64) BFloat16 tile_out[TILE * TILE];
+
+  // Predicated bf16 load with zeroing of inactiva lanes as raw 16-bit lanes
+  auto ld_bf16_u16_zeroed = [](const BFloat16* p, int count) -> svuint16_t {
+    svuint16_t z = svdup_n_u16(0);
+    if (count <= 0) {
+      return z;
+    }
+    // Works for any count<= vector lanes
+    svbool_t pg = svwhilelt_b16((uint64_t)0, (uint64_t)count);
+    const uint16_t* pu16 = &p->x;
+    svuint16_t v = svld1_u16(pg, pu16);
+    return svsel_u16(pg, v, z);
+  };
+
+  // Predicated bf16 store as raw 16-bit lanes(only those active will be stored)
+  auto st_bf16_u16 = [](BFloat16* p, int count, svuint16_t v) {
+    if (count <= 0) {
+      return;
+    }
+    svbool_t pg = svwhilelt_b16((uint64_t)0, (uint64_t)count);
+    uint16_t* pu16 = &p->x;
+    svst1_u16(pg, pu16, v);
+  };
+
+  for (int i0 = 0; i0 < M; i0 += TILE) {
+    const int m_blk = std::min(TILE, M - i0);
+    for (int j0 = 0; j0 < N; j0 += TILE) {
+      const int n_blk = std::min(TILE, N - j0);
+
+      // Load src tile into tile_in(row major, ld=TILE), pad with zeros
+      // Use SVE load+store(from the helpers above) into each row
+      for (int r = 0; r < TILE; r++) {
+        for (int c = 0; c < TILE; c++) {
+          tile_in[r * TILE + c].x = 0;
+        }
+        if (r < m_blk) {
+          const BFloat16* srow = src + (i0 + r) * ld_src + j0;
+          svuint16_t v = ld_bf16_u16_zeroed(srow, n_blk);
+          st_bf16_u16(tile_in + r * TILE, n_blk, v);
+        }
+      }
+
+      // Transpose tile_in to tile_out (scalar on tiny tile)
+      for (int r = 0; r < TILE; r++) {
+        for (int c = 0; c < TILE; c++) {
+          tile_out[r * TILE + c].x = 0;
+        }
+      }
+      for (int r = 0; r < m_blk; r++) {
+        for (int c = 0; c < n_blk; c++) {
+          tile_out[c * TILE + r].x = tile_in[r * TILE + c].x;
+        }
+      }
+
+      // Store tile_out to dst with SVE store(from the helpers above)
+      for (int r = 0; r < n_blk; r++) {
+        BFloat16* drow = dst + (j0 + r) * ld_dst + i0;
+        svuint16_t v = ld_bf16_u16_zeroed(tile_out + r * TILE, m_blk);
+        st_bf16_u16(drow, m_blk, v);
+      }
+    }
+  }
 }
 
 #endif // defined(CPU_CAPABILITY_SVE256) && defined(__ARM_FEATURE_BF16)

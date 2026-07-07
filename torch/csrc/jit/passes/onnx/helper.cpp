@@ -39,14 +39,8 @@ void eraseUnusedBlockInputs(Block* b) {
 }
 
 void eraseUnusedValuesFromMap(ValueToParamPairMap& valsToParamsMap) {
-  auto it = valsToParamsMap.begin();
-  while (it != valsToParamsMap.end()) {
-    if (!it->first->hasUses()) {
-      it = valsToParamsMap.erase(it);
-    } else {
-      ++it;
-    }
-  }
+  std::erase_if(
+      valsToParamsMap, [](const auto& pr) { return !pr.first->hasUses(); });
 }
 
 void buildParamsMapFromValueToParamsMap(
@@ -101,7 +95,6 @@ std::optional<at::ScalarType> ONNXTypeToATenType(int32_t onnx_type) {
           onnx_type,
           " is an unexpected tensor scalar type");
   }
-  return std::optional<at::ScalarType>{};
 }
 
 Node* addNodeToBlock(Block* block, Symbol kind, ArrayRef<Value*> inputs) {

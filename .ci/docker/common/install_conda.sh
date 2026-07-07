@@ -57,21 +57,18 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   fi
   # Install correct Python version
   # Also ensure sysroot is using a modern GLIBC to match system compilers
+  # NB: pip is no longer pulled in transitively by conda-forge's python
+  # package, so request it explicitly. Without it, `python3 -m pip` in the
+  # env fails and `conda run -n env pip` silently falls back to base.
   as_jenkins conda create -n py_$ANACONDA_PYTHON_VERSION -y\
              ${PYTHON_DEP} \
              ${SYSROOT_DEP} \
+             pip \
              "icu<78"
 
   # Miniforge installer doesn't install sqlite by default
   if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
     conda_install sqlite
-  fi
-
-  # Install PyTorch conda deps, as per https://github.com/pytorch/pytorch README
-  if [[ $(uname -m) != "aarch64" ]]; then
-    pip_install mkl==2024.2.0
-    pip_install mkl-static==2024.2.0
-    pip_install mkl-include==2024.2.0
   fi
 
   # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
@@ -82,7 +79,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # I.e. magma-cuda102 package corresponds to CUDA_VERSION=10.2 and CUDA_VERSION=10.2.89
   # Magma is installed from a tarball in the ossci-linux bucket into the conda env
   if [ -n "$CUDA_VERSION" ]; then
-    conda_run ${SCRIPT_FOLDER}/install_magma_conda.sh $(cut -f1-2 -d'.' <<< ${CUDA_VERSION})
+    env_run ${SCRIPT_FOLDER}/install_magma_conda.sh $(cut -f1-2 -d'.' <<< ${CUDA_VERSION})
   fi
 
   if [[ "$UBUNTU_VERSION" == "24.04"* ]] ; then
@@ -102,6 +99,9 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     # We are currently building docs with python 3.8 (min support version)
     pip_install -r /opt/conda/requirements-docs.txt
   fi
+
+  # Clean conda package cache
+  as_jenkins conda clean -ya
 
   popd
 fi

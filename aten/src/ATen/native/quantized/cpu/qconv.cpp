@@ -802,7 +802,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl_xnnp(
   // Setup the operator
   status = at::native::xnnp_utils::xnnp_setup_convolution2d_nhwc(
       xnnp_convolution_op.get(),
-      reinterpret_cast<const underlying_t*>(act_nhwc.template data_ptr<scalar_t>()),
+      reinterpret_cast<const underlying_t*>(act_nhwc.template const_data_ptr<scalar_t>()),
       reinterpret_cast<underlying_t*>(output.template data_ptr<scalar_t>()),
       per_channel(),
       transpose());
@@ -898,7 +898,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
     auto weight_contig = orig_weight.contiguous(channels_last);
     auto bias_fp32 = bias;
     int8_t* w_data =
-        reinterpret_cast<int8_t*>(weight_contig.template data_ptr<c10::qint8>());
+        reinterpret_cast<int8_t*>(weight_contig.template mutable_data_ptr<c10::qint8>());
 
     float* weight_scales_data = w_scales.data_ptr<float>();
     // We calculate requant scale here as the vector holding the requant scale
@@ -1490,7 +1490,9 @@ static at::Tensor _fp8_convolution_onednn_ref(
       y_f32 = y_f32.to(at::kHalf);
     }
     x1.copy_(y_f32.to(x1.scalar_type()).view(x1.sizes()));
-    return x1;
+    // Return a copy: custom ops must not return tensors that alias inputs.
+    // The accum buffer has already been mutated in-place above.
+    return x1.clone();
   } else {
     TORCH_CHECK(
         false,
@@ -1670,7 +1672,8 @@ static at::Tensor _quantized_convolution_onednn(
     weight_scales.ndimension() == 0 ||
     (weight_scales.strides().size() == 1 || weight_scales.stride(0) == 1),
     "weight_scales should be scalar tensor or contiguous 1D tensor.");
-  ideep::scale_t weights_scales(weight_scales.data_ptr<float>(), weight_scales.data_ptr<float>()+weight_scales.numel());
+  const float* weight_scales_ptr = weight_scales.const_data_ptr<float>();
+  ideep::scale_t weights_scales(weight_scales_ptr, weight_scales_ptr + weight_scales.numel());
 #elif IDEEP_PREREQ(3, 1, 0, 0)
   // TODO (leslie): optimize the performance here:
   // 1. Remove the reciprocal of weight scale, we have done the reciprocal of weight scale back in Ideep:
@@ -1751,7 +1754,9 @@ static at::Tensor _quantized_convolution_onednn(
               c10::MemoryFormat::ChannelsLast3d)
     );
   if (output.numel() == 0) {
-    return output;
+    // When has_accum_postop_sum, output aliases accum (the input). Custom ops
+    // must not return tensors that alias inputs, so return a copy.
+    return has_accum_postop_sum ? output.clone() : output;
   }
   ideep::tensor dst = at::native::itensor_view_from_dense(output);
   static ideep::tensor::desc dummy_accum_desc;
@@ -1885,10 +1890,12 @@ static at::Tensor _quantized_convolution_onednn(
 
   if (is_1d) {
     output.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
-    return output;
   }
   if (has_accum_postop_sum) {
-    return accum.value();
+    // When has_accum_postop_sum, output aliases accum (the input) — see
+    // assignment above. Return a copy: custom ops must not return tensors
+    // that alias inputs.
+    return output.clone();
   } else {
     return output;
   }

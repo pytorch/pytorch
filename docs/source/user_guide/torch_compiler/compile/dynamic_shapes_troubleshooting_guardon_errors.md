@@ -185,14 +185,13 @@ else:
     torch._check(x != 0)  # runtime check for the general path
     return compute(x)
 ```
+.
 
-**`hint_int(expr, fallback=None)`**: Extracts a hint from a symbolic size and uses it in a branch. You can use it to evaluate the expression using the traced program's input shapes without guarding. Unlike `statically_known_true`, it picks the path that works for the input example instead of returning `False`. The optional `fallback` argument substitutes unbacked symbols; if not provided and the symbol is unbacked, it will raise an error.
+**`optimization_hint(expr, fallback=None)`**: Evaluates a symbolic expression to a concrete integer for **optimization decisions only** (e.g., selecting a faster kernel). Unlike `guarding_hint_or_throw`, it handles unbacked symbols using the `fallback` value. Both branches must still be correct for all dynamic shapes — only performance should depend on the hint.
 
 ```python
-from torch.fx.experimental.symbolic_shapes import hint_int
-
 # Use ONLY for optimizations, not correctness-critical branches
-if hint_int(x.numel(), fallback=0) > 1024:
+if optimization_hint(x.numel(), fallback=0) > 1024:
     # optimized path for large tensors
     ...
 else:

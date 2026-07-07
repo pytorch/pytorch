@@ -5,6 +5,7 @@
 #include <ATen/native/NonEmptyUtils.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/ThrustAllocator.h>
+#include <ATen/cuda/cub.cuh>
 #include <c10/core/DeviceArray.h>
 
 #include <thrust/count.h>
@@ -14,7 +15,6 @@
 #include <thrust/extrema.h>
 #include <thrust/find.h>
 #include <thrust/inner_product.h>
-#include <thrust/iterator/constant_iterator.h>
 #include <thrust/sequence.h>
 #include <thrust/sort.h>
 
@@ -33,7 +33,7 @@ struct ModeImpl {
     auto cuda_allocator = at::cuda::getCUDADeviceAllocator();
     auto sort_buffer = c10::DeviceArray<int64_t>(*cuda_allocator, n_element);
     auto sort_buffer_ptr = thrust::device_pointer_cast(sort_buffer.get());
-    auto count_from_zero_iter = thrust::make_counting_iterator(int64_t{0});
+    auto count_from_zero_iter = cccl_counting_iterator<int64_t>{0ll};
     thrust::copy_n(policy, count_from_zero_iter, n_element, sort_buffer_ptr);
 
 
@@ -64,7 +64,7 @@ struct ModeImpl {
         policy,
         iter_begin,
         iter_end,
-        thrust::constant_iterator<int>(1),
+        cccl_constant_iterator<int>{1},
         keys_ptr,
         counts_ptr);
 

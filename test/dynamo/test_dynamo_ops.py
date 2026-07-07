@@ -13,8 +13,10 @@ from torch._dynamo.comptime import comptime, ComptimeContext
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     ops,
+    skip,
+    skipOps,
 )
-from torch.testing._internal.common_methods_invocations import op_db, skip, skipOps
+from torch.testing._internal.common_methods_invocations import op_db
 
 
 # Ops that fail the inplace requires_grad propagation test for known reasons
@@ -54,11 +56,7 @@ class TestTensorMetaProp(torch._dynamo.test_case.TestCase):
     """
 
     @ops([op for op in op_db if op.get_inplace() is not None])
-    @skipOps(
-        "TestTensorMetaProp",
-        "test_inplace_ops_propagate_requires_grad_metadata",
-        test_inplace_ops_propagate_requires_grad_metadata_skips,
-    )
+    @skipOps(test_inplace_ops_propagate_requires_grad_metadata_skips)
     def test_inplace_ops_propagate_requires_grad_metadata(self, device, dtype, op):
         """
         Test that inplace ops from OpInfo propagate requires_grad correctly.
@@ -161,14 +159,14 @@ class TestTensorMetaProp(torch._dynamo.test_case.TestCase):
             self.assertEqual(
                 x_eager.requires_grad,
                 x_compiled.requires_grad,
-                msg=f"{op.name}: requires_grad mismatch (eager={x_eager.requires_grad}, compiled={x_compiled.requires_grad})",
+                msg=lambda msg: f"{msg}\n{op.name}: requires_grad mismatch (eager={x_eager.requires_grad}, compiled={x_compiled.requires_grad})",
             )
 
             # Test 3: Verify gradients match (with tolerance for float16/bfloat16)
             self.assertEqual(
                 args_eager[requires_grad_idx].grad,
                 args_compiled[requires_grad_idx].grad,
-                msg=f"{op.name}: Gradient mismatch indicates metadata not propagated during tracing",
+                msg=lambda msg: f"{msg}\n{op.name}: Gradient mismatch indicates metadata not propagated during tracing",
             )
 
 

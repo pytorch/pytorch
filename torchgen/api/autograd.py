@@ -240,7 +240,7 @@ class DifferentiableInput:
 
 
 # Represents a differentiable `Return`.
-# How it it different from the `Return` type?
+# How is it different from the `Return` type?
 # - The name in `Return` is optional. Here it is always populated using the same
 #   `cpp.return_names()` method.
 #   TODO: some cpp naming logic (e.g. resolving name conflict) might be irrelevant?

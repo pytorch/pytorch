@@ -208,7 +208,8 @@ def debug_insert_nops(
         debug_checks(frame.f_code)
         code, _ = transform_code_object(frame.f_code, insert_nops)
         graph = OutputGraph(
-            code_options={},
+            # The nop-insertion path does not inspect code object attributes.
+            code_options={},  # type: ignore[arg-type]
             compiler_fn=None,
             root_tx=None,  # type: ignore[arg-type]
             export=False,
@@ -604,6 +605,7 @@ def _testing_capture_invoke_subgraph_inductor_compile_gms() -> Generator[
         # captured_gms will contain the list of captured graph modules
     """
     global _testing_invoke_subgraph_inductor_compile_captured_gms
+    # pyrefly: ignore [implicit-any]
     _testing_invoke_subgraph_inductor_compile_captured_gms = []
     try:
         yield _testing_invoke_subgraph_inductor_compile_captured_gms

@@ -13,10 +13,13 @@ struct TORCH_API SimpleGraphExecutorImpl : public GraphExecutorImplBase {
   const ExecutionPlan& getPlanFor(
       Stack& stack,
       std::optional<size_t> remaining_bailout_depth) override;
+  const ExecutionPlan& getInputIndependentPlan() override;
   GraphExecutorState getDebugState() override;
   ~SimpleGraphExecutorImpl() override = default;
 
  private:
+  const ExecutionPlan& getInputIndependentPlanImpl();
+
   std::optional<ExecutionPlan> execution_plan_;
 };
 

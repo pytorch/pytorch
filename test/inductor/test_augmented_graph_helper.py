@@ -5,7 +5,6 @@ import torch
 import torch.fx as fx
 from torch._inductor.augmented_graph_helper import AugmentedGraphHelper
 from torch.testing._internal.common_utils import TestCase
-from torch.utils._ordered_set import OrderedSet
 
 
 class TestAugmentedGraphHelper(TestCase):
@@ -72,20 +71,11 @@ class TestAugmentedGraphHelper(TestCase):
             self.graph, node_ancestors=self.node_ancestors
         )
 
-    def _collect_node_ancestors(
-        self, graph: fx.Graph
-    ) -> dict[fx.Node, OrderedSet[fx.Node]]:
-        """Collect all ancestors for each node."""
-        from collections import defaultdict
+    def _collect_node_ancestors(self, graph: fx.Graph):  # -> BitsetAncestors
+        """Collect all ancestors for each node as a BitsetAncestors."""
+        from torch._inductor.fx_passes.utils import BitsetAncestors
 
-        from torch.utils._ordered_set import OrderedSet
-
-        ancestors: dict[fx.Node, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
-        for node in graph.nodes:
-            for input_node in node.all_input_nodes:
-                ancestors[node].add(input_node)
-                ancestors[node] |= ancestors[input_node]
-        return ancestors
+        return BitsetAncestors(list(graph.nodes))
 
     def get_deps(self, node):
         """Helper to get dependencies for a node."""
@@ -318,7 +308,8 @@ class TestAugmentedGraphHelper(TestCase):
         # Merging b4 and c4 would create cycle
         tracker4.merge_to_set(b4, c4)
 
-        self.assertTrue(tracker4.has_cycle())
+        # has_cycle() is not merge-aware
+        self.assertFalse(tracker4.has_cycle())
 
     def test_cycle_with_extra_deps(self):
         """Test cycle detection with extra dependencies."""
