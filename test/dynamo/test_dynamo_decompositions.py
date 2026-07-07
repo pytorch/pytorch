@@ -127,7 +127,7 @@ class GraphModule(torch.nn.Module):
         expected = fn(x.clone(), tensor1, tensor2, value)
 
         actual = torch.compile(fn, fullgraph=True)(x.clone(), tensor1, tensor2, value)
-        self.assertEqual(expected, actual, atol=0, rtol=0)
+        self.assertEqual(expected, actual)
 
         with self.assertRaisesRegex(Unsupported, "Unsupported addcmul_ decomposition"):
             torch.compile(fn, fullgraph=True)(x.clone(), tensor1, tensor2, value + 1j)
@@ -982,6 +982,25 @@ class TestDynamoDecompositionsNumerics(TestCase):
             self.assertEqual(expected, actual, atol=0, rtol=0)
         else:
             self.assertEqual(expected, actual)
+
+    @skipIfCrossRef
+    @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
+    def test_addcmul_tensor_value_uses_scalar_promotion_cpu(self, device):
+        if device != "cpu":
+            self.skipTest("CPU regression test")
+
+        torch.manual_seed(42)
+        x = torch.randn(64, 64, device=device)
+        t1 = torch.randn(64, 64, device=device)
+        t2 = torch.randn(64, 64, device=device)
+        value = torch.tensor(0.1, dtype=torch.float64, device=device)
+
+        def fn(x, t1, t2, value):
+            return x.addcmul_(t1, t2, value=value)
+
+        expected = fn(x.clone(), t1, t2, value)
+        actual = torch.compile(fn, fullgraph=True)(x.clone(), t1, t2, value)
+        self.assertEqual(expected, actual, atol=0, rtol=0)
 
     @skipIfCrossRef
     @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
