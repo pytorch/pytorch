@@ -108,7 +108,7 @@ from torch._inductor.utils import (
     XPU_KERNEL_FORMAT,
 )
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_reference_type
+from torch._library.opaque_object import is_opaque_symbolic_type
 from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import (
     extract_tensor_metadata,
@@ -328,8 +328,12 @@ def triton_key() -> str | None:
 
 class CacheBase:
     @staticmethod
+    def _empty_system() -> SystemInfo:
+        return {"hash": SYSTEM_CACHE_KEY_STRATEGY.key_from_json({})}
+
     @functools.cache
-    def get_system() -> SystemInfo:
+    @staticmethod
+    def _get_system_cached() -> SystemInfo:
         with dynamo_timed("CacheBase.get_system.triton_key"):
             triton_version = triton_key()
 
@@ -356,13 +360,34 @@ class CacheBase:
             }
         except (AssertionError, RuntimeError):
             # If cuda is not installed, none of the above config is relevant.
-            return {"hash": SYSTEM_CACHE_KEY_STRATEGY.key_from_json({})}
+            return CacheBase._empty_system()
+
+    @staticmethod
+    def get_system() -> SystemInfo:
+        if not torch.cuda.is_initialized():
+            return CacheBase._empty_system()
+        return CacheBase._get_system_cached()
+
+    get_system.__func__.cache_clear = (  # type: ignore[attr-defined]
+        _get_system_cached.cache_clear
+    )
 
     @staticmethod
     @clear_on_fresh_cache
     @functools.cache
-    def get_local_cache_path() -> Path:
+    def _get_local_cache_path_cached() -> Path:
         return Path(os.path.join(cache_dir(), "cache", CacheBase.get_system()["hash"]))
+
+    @staticmethod
+    def get_local_cache_path() -> Path:
+        if not torch.cuda.is_initialized():
+            system_hash = CacheBase._empty_system()["hash"]
+            return Path(os.path.join(cache_dir(), "cache", system_hash))
+        return CacheBase._get_local_cache_path_cached()
+
+    get_local_cache_path.__func__.cache_clear = (  # type: ignore[attr-defined]
+        _get_local_cache_path_cached.__func__.cache_clear
+    )
 
     def __init__(self) -> None:
         self.system = CacheBase.get_system()
@@ -881,12 +906,12 @@ class FxGraphCachePickler(pickle.Pickler):
             # I have not worked out the details for everything else
             # but I'm sure we could
             if (
-                opaque_object.is_opaque_type(cls)
+                opaque_object.is_custom_class(cls)
                 and opaque_object.should_hoist(cls)
                 and not opaque_object.has_members(cls)
             ):
                 return (_ident, (t.script_class_name,))
-            if opaque_object.is_opaque_type(cls):
+            if opaque_object.is_custom_class(cls):
                 # Opaque types (e.g., DeviceMesh) may have cyclic references
                 # that fast-mode pickling cannot handle.  Disable fast mode
                 # before the subtree is pickled so the memo table tracks cycles.
@@ -1418,7 +1443,7 @@ class FxGraphHashDetails:
         processed_inputs: list[InputType | HashableOpaqueValue] = []
         seen_opaques: dict[int, HashableOpaqueValue] = {}
         for inp in example_inputs:
-            if is_opaque_reference_type(type(inp)):
+            if is_opaque_symbolic_type(type(inp)):
                 if id(inp) not in seen_opaques:
                     seen_opaques[id(inp)] = HashableOpaqueValue(len(seen_opaques))
                 processed_inputs.append(seen_opaques[id(inp)])
@@ -2223,13 +2248,14 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         compiled_graph.guards_expr = shape_env.produce_guards_expression(
             placeholders=symints, guards=guards
         )
-        try:
-            backend = torch.utils._triton.triton_backend()
-            compiled_graph.extern_libs_key = torch.utils._triton._extern_libs_key(
-                backend
-            )
-        except Exception:
-            pass
+        if torch.utils._triton.has_initialized_accelerator():
+            try:
+                backend = torch.utils._triton.triton_backend()
+                compiled_graph.extern_libs_key = torch.utils._triton._extern_libs_key(
+                    backend
+                )
+            except Exception:
+                pass
         disk_compiled_graph = copy(compiled_graph)
         disk_compiled_graph.prepare_for_serialization()
 

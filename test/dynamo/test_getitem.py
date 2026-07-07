@@ -23,7 +23,11 @@ import torch._dynamo.testing
 from torch._dynamo.variables.base import VariableTracker
 from torch._dynamo.variables.constant import ConstantVariable
 from torch._dynamo.variables.lists import BaseListVariable, DequeVariable, RangeVariable
-from torch._library.opaque_object import MemberType, OpaqueBase, register_opaque_type
+from torch._library.opaque_object import (
+    CustomClassBase,
+    MemberType,
+    register_custom_class,
+)
 from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON, HAS_GPU
 
 
@@ -727,34 +731,34 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
         compiled = torch.compile(model, backend="eager")
         self.assertEqual(model(x), compiled(x))
 
-    # --- TorchScriptObjectVariable ---
+    # --- CustomClassObjectVariable ---
 
     def test_opaque_object_getitem(self):
-        class OpaqueScaler(OpaqueBase):
+        class OpaqueScaler(CustomClassBase):
             def __init__(self, scale):
                 self.scale = scale
 
             def apply(self, x):
                 return x * self.scale
 
-        class OpaqueContainer(OpaqueBase):
+        class OpaqueContainer(CustomClassBase):
             def __init__(self, items):
                 self.items = items
 
             def __getitem__(self, idx):
                 return self.items[idx]
 
-        register_opaque_type(
+        register_custom_class(
             OpaqueScaler,
-            typ="reference",
+            typ="symbolic",
             members={
                 "scale": MemberType.USE_REAL,
                 "apply": MemberType.INLINED,
             },
         )
-        register_opaque_type(
+        register_custom_class(
             OpaqueContainer,
-            typ="reference",
+            typ="symbolic",
             members={
                 "items": MemberType.USE_REAL,
                 "__getitem__": MemberType.INLINED,
