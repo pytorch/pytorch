@@ -190,7 +190,7 @@ class LoggingTests(LoggingTestCase):
     @requires_cuda_and_triton
     @make_logging_test(cudagraphs=True)
     def test_cudagraphs(self, records):
-        fn_opt = torch.compile(mode="reduce-overhead")(inductor_schedule_fn)
+        fn_opt = torch.compile(mode="reduce-overhead")(inductor_schedule_fn)  # noqa: UNSPECIFIED_BACKEND
         fn_opt(torch.ones(1000, 1000, device=device_type))
         self.assertGreater(len(records), 0)
         self.assertLess(len(records), 8)
@@ -1329,7 +1329,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
 
     @make_logging_test(cudagraph_static_inputs=True)
     def test_cudagraph_static_inputs(self, records):
-        @torch.compile(mode="reduce-overhead")
+        @torch.compile(mode="reduce-overhead")  # noqa: UNSPECIFIED_BACKEND
         def fn(x):
             return x + 1
 
@@ -1347,7 +1347,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         for param in params:
             param.grad = torch.zeros_like(param)
         opt = torch.optim.Adam(params)
-        compiled_opt_step = torch.compile(opt.step, mode="reduce-overhead")
+        compiled_opt_step = torch.compile(opt.step, mode="reduce-overhead")  # noqa: UNSPECIFIED_BACKEND
         compiled_opt_step()
         self.assertGreater(len(records), 0)
         self.assertLess(len(records), 3)
@@ -1361,7 +1361,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
             def f(a, b):
                 return torch.mm(a, b)
 
-            f = torch.compile(f, mode="max-autotune-no-cudagraphs")
+            f = torch.compile(f, mode="max-autotune-no-cudagraphs")  # noqa: UNSPECIFIED_BACKEND
             f(
                 torch.randn(10, 10, device=device_type),
                 torch.randn(10, 10, device=device_type),
@@ -1481,7 +1481,7 @@ fn(torch.randn(5))
 
         foo()
 
-        @torch.compile
+        @torch.compile  # noqa: UNSPECIFIED_BACKEND
         def baz(x):
             return x + 1
 
@@ -1545,7 +1545,7 @@ TorchDynamo attempted to trace the following frames: [
     @torch._inductor.config.patch("force_disable_caches", True)
     @make_logging_test(autotuning_inputs=True)
     def test_autotuning_inputs(self, records):
-        @torch.compile(mode="max-autotune")
+        @torch.compile(mode="max-autotune")  # noqa: UNSPECIFIED_BACKEND
         def f(x):
             return (x * 2.0 + 1.0).sum(dim=1)
 
@@ -1564,7 +1564,7 @@ TorchDynamo attempted to trace the following frames: [
     @make_logging_test(inductor=logging.DEBUG)
     def test_autotuning_inputs_off_by_default(self, records):
         # off_by_default: must stay silent even with the parent inductor log at DEBUG
-        @torch.compile(mode="max-autotune")
+        @torch.compile(mode="max-autotune")  # noqa: UNSPECIFIED_BACKEND
         def f(x):
             return (x * 2.0 + 1.0).sum(dim=1)
 
