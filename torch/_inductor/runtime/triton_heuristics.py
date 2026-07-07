@@ -5047,7 +5047,7 @@ def cooperative_reduction(
     reduction_hint,
     triton_meta: TritonMeta,
     filename,
-    inductor_meta: InductorMeta,
+    inductor_meta: InductorMeta | None = None,
 ):
     inductor_meta = {} if inductor_meta is None else inductor_meta
     inductor_meta["reduction_hint"] = reduction_hint

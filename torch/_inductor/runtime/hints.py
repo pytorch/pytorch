@@ -274,7 +274,9 @@ class InductorMeta(typing.TypedDict, total=False):
     (total=False): consumers read via .get(...) with defaults, and several keys
     are injected only on specific paths (reductions, combo kernels, fixed grids).
     Dynamically keyed nested bags (e.g. combo_grid_meta) stay typed dict[str,
-    Any] because their keys are computed at runtime.
+    Any] because their keys are computed at runtime. The codegen-side producers
+    still build this bag as a plain dict[str, Any], so the write side is not yet
+    checked against this TypedDict; typing the producers is left as a follow-up.
     """
 
     # Global inductor config snapshot (inductor_meta_common / inductor_meta_from_config)
@@ -318,6 +320,7 @@ class InductorMeta(typing.TypedDict, total=False):
     RSPLIT_SIZE: int
     has_loadstore_with_contiguous_rdim: bool
     tma_min_block_sizes: dict[str, int]
+    host_tma_descriptor_args: dict[str, dict[str, typing.Any]]
     tiling_scores: typing.Any
     min_xblock: int
     min_rblock: int
