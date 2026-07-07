@@ -1188,7 +1188,14 @@ def register_fake(hop, fn=None, *, skip_cache=False):
 
         @hop.py_impl(DispatchKey.Fake)
         def cpp_fake_tensor_mode(*args, **kwargs):
-            return func(*args, **kwargs)
+            mode = _find_or_create_fake_mode()
+            maybe_ignore_fresh_unbacked_symbols = (
+                contextlib.nullcontext
+                if mode.shape_env is None
+                else mode.shape_env.ignore_fresh_unbacked_symbols
+            )
+            with maybe_ignore_fresh_unbacked_symbols():
+                return func(*args, **kwargs)
 
         registered_hop_fake_fns[hop] = func
         if skip_cache:
