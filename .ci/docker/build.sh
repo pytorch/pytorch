@@ -91,13 +91,6 @@ fi
 # configuration, so we hardcode everything here rather than do it
 # from scratch
 case "$tag" in
-  pytorch-linux-jammy-cuda12.4-cudnn9-py3-gcc11)
-    CUDA_VERSION=12.4
-    ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=11
-    KATEX=yes
-    TRITON=yes
-    ;;
   pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11)
     CUDA_VERSION=12.8.1
     ANACONDA_PYTHON_VERSION=3.10
