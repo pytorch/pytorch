@@ -397,6 +397,9 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     // Signal pad first at [0, signal_pad_size), data buffer at buffer_offset =
     // signal_pad_size. The signal pad size is already 16-aligned, so the data
     // buffer is aligned without extra padding; round up the data size instead.
+    // Returns the data buffer pointer (alloc_base + buffer_offset), not
+    // alloc_base; the signal pad stays hidden in front and free()/rendezvous()
+    // key off this returned pointer.
     const size_t signal_pad_size = get_signal_pad_size();
     const size_t buffer_offset = signal_pad_size;
     const size_t total_size = buffer_offset + at::round_up(size, 16UL);
@@ -453,9 +456,9 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
         allocations_.begin(), allocations_.end(), [&](const auto& pair) {
           auto& allocation = pair.second;
           auto ptr_int = reinterpret_cast<uintptr_t>(ptr);
-          auto buffer_ptr =
-              reinterpret_cast<uintptr_t>(allocation->alloc_base) +
-              allocation->buffer_offset;
+          // pair.first is buffer_ptr, the key alloc() stored (alloc_base +
+          // buffer_offset), i.e. the data buffer start past the signal pad.
+          auto buffer_ptr = reinterpret_cast<uintptr_t>(pair.first);
           return ptr_int >= buffer_ptr &&
               ptr_int < buffer_ptr + allocation->buffer_size;
         });
@@ -465,13 +468,14 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
         "is the tensor allocated from SymmetricMemory?");
 
     auto& allocation = alloc_it->second;
-    // Data buffer base (the pointer alloc() returned). Offsets are relative to
-    // it, and it is the key used to cache this allocation's base rendezvous.
-    void* buffer_ptr =
-        static_cast<char*>(allocation->alloc_base) + allocation->buffer_offset;
+    // alloc_it->first is buffer_ptr, the data buffer base (the pointer alloc()
+    // returned). Offsets are relative to it, and it is the key used to cache
+    // this allocation's base rendezvous.
+    void* buffer_ptr = alloc_it->first;
 
-    // Search again using the data buffer base ptr (the caching key)
-    auto it = symm_mems_.find(SymmMemKey{buffer_ptr, *group_name});
+    // The data buffer base + group name is the caching key; build it once.
+    SymmMemKey key{buffer_ptr, *group_name};
+    auto it = symm_mems_.find(key);
     c10::intrusive_ptr<NVSHMEMSymmetricMemory> symm_mem;
     if (it != symm_mems_.end()) {
       // Base allocation has been rendezvoused
@@ -483,7 +487,7 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     }
 
     // Cache rendezvous using the data buffer base address as key
-    symm_mems_[SymmMemKey{buffer_ptr, *group_name}] = symm_mem;
+    symm_mems_[key] = symm_mem;
 
     // TODO: change the `ptr` below to `tensor.data_ptr()` when adding support
     // for user slice/view operations. For MemPool support,
@@ -496,7 +500,9 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
       // Return a copy of the SymmetricMemory with an offset. This is a
       // "shallow" copy adjusting the offset field in the handle.
       return c10::make_intrusive<NVSHMEMSymmetricMemory>(
-          *symm_mem, (uintptr_t)ptr - (uintptr_t)buffer_ptr);
+          *symm_mem,
+          reinterpret_cast<uintptr_t>(ptr) -
+              reinterpret_cast<uintptr_t>(buffer_ptr));
     }
   };
 
