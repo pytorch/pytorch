@@ -2,6 +2,7 @@
 
 #include <c10/util/intrusive_ptr.h>
 #include <torch/csrc/distributed/c10d/FileStore.hpp>
+#include <torch/csrc/distributed/c10d/FakeStore.hpp>
 #include <torch/csrc/distributed/c10d/FlightRecorder.hpp>
 #include <torch/csrc/distributed/c10d/Functional.hpp>
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
@@ -11,7 +12,6 @@
 #include <string_view>
 #include <utility>
 #include <vector>
-#include <torch/csrc/distributed/c10d/FakeStore.hpp>
 #ifndef _WIN32
 #include <torch/csrc/distributed/c10d/HashStore.hpp>
 #endif
