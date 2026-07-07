@@ -10,7 +10,6 @@ import torch
 import torch._prims as prims
 import torch._prims_common as utils
 import torch._refs as refs
-from torch import SymFloat
 from torch._decomp import register_decomposition
 from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
@@ -548,7 +547,7 @@ def softshrink(a: TensorLikeType, lambd: float = 0.5):
         0 <= lambd <= torch.finfo(a.dtype).max,
         lambda: f"lambda must be in range [0, {torch.finfo(a.dtype).max}] for input dtype {a.dtype}, but found {lambd}",
     )
-    if not isinstance(lambd, SymFloat):
+    if a.dtype in (torch.bfloat16, torch.float16):
         lambd = torch.scalar_tensor(lambd, dtype=a.dtype, device=a.device)  # type: ignore[arg-type]
     # We implement this in one torch.where to generate better code in the backward
     # see https://github.com/pytorch/pytorch/pull/107052#discussion_r1293748211
