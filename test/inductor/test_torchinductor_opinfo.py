@@ -57,7 +57,7 @@ from torch.testing._internal.inductor_utils import (
 from torch.testing._internal.triton_utils import requires_gpu_and_triton
 from torch.utils._dtype_abbrs import dtype_abbrs
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils._pytree import tree_map
+from torch.utils._pytree import tree_leaves, tree_map
 
 
 try:
@@ -248,10 +248,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "resize_": {b8, f16, f32, f64, i32, i64},
     "resize_as_": {b8, f16, f32, f64, i32, i64},
     "histc": {f16},
-    "nonzero_static": {b8, f16, f32, f64, i32, i64},
-    ("normal", "in_place"): {f16, f32, f64},
-    ("normal", "number_mean"): {f16, f32, f64},
-    "normal": {f16, f32, f64},
     ("sparse.mm", "reduce"): {f32, f64, f16},
     "sparse.sampled_addmm": {f32, f64},
     "to_sparse": {
@@ -264,9 +260,6 @@ inductor_expected_failures_single_sample["cpu"] = {
 
 inductor_expected_failures_single_sample["cuda"] = {
     "_upsample_bilinear2d_aa": {f16, f32, f64},
-    ("normal", "in_place"): {f16, f32, f64},
-    ("normal", "number_mean"): {f16, f32, f64},
-    "normal": {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64, f16},
     "torch.ops.aten._flash_attention_forward": {f16},
     "torch.ops.aten._efficient_attention_forward": {f16, f32},
@@ -282,9 +275,6 @@ inductor_expected_failures_single_sample["cuda"] = {
 
 inductor_expected_failures_single_sample["xpu"] = {
     "_upsample_bilinear2d_aa": {f16, f32, f64},
-    ("normal", "in_place"): {f16, f32, f64},
-    ("normal", "number_mean"): {f16, f32, f64},
-    "normal": {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64, f16},
     "tan": {f16},
     "torch.ops.aten._flash_attention_forward": {f16},
@@ -1465,8 +1455,13 @@ class TestInductorOpInfo(TestCase):
 
                         # skip checking gradient on CPU for now
                         if device_type == GPU_TYPE:
+                            # Only check gradients if there are input tensors requiring gradients
+                            has_grad_inputs = any(
+                                getattr(x, "requires_grad", False)
+                                for x in tree_leaves((args, kwargs))
+                            )
                             adjusted_kwargs.update(
-                                check_gradient=requires_grad,
+                                check_gradient=requires_grad and has_grad_inputs,
                                 output_process_fn_grad=sample_input.output_process_fn_grad,
                             )
                         else:
