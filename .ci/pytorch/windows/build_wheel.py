@@ -5,7 +5,7 @@ Expects vcvarsall env (PATH/LIB/INCLUDE), GPU env (USE_CUDA, CUDA_PATH,
 TORCH_CUDA_ARCH_LIST, ...), and pip build deps to already be set up by
 the sibling build_env_setup.py + build_install_deps.py + the parent
 bash wrapper. This script is the wheel-build step proper -- the
-Windows-side analog of `.ci/manywheel/build_wheel.py`.
+Windows-side analog of `.ci/wheel/linux/build_wheel.py`.
 
 The Linux manywheel pipeline follows the build with a repair_wheel.py
 step that patches ELF RPATHs and bundles native deps. Windows doesn't

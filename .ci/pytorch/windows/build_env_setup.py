@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """GPU/toolchain environment setup for Windows manywheel/wheel CD builds.
 
-Mirrors the Linux `.ci/manywheel/build_env_setup.py` pattern: install heavy
+Mirrors the Linux `.ci/wheel/linux/build_env_setup.py` pattern: install heavy
 toolchain pieces (CUDA, MAGMA, MSVC env via vcvarsall, oneAPI for XPU),
 then emit `export KEY=VALUE` lines to the file given by --env-out for the
 parent bash wrapper to source. Without that handoff, the env we configure

@@ -16,7 +16,7 @@ from pathlib import Path
 
 
 # NumPy build-time pin selected by Python version.
-# Keep in sync with .ci/manywheel/build_common.sh.
+# Keep in sync with .ci/wheel/linux/build_common.sh.
 NUMPY_PINS: list[tuple[str, str]] = [
     ("cp314", "2.3.4"),
     ("cp31", "2.1.0"),

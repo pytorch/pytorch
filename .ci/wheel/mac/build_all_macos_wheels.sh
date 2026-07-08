@@ -7,7 +7,7 @@
 #
 # Per-Python orchestration (env setup, deps, build, delocate) lives in
 # .ci/wheel/mac/build.sh; this script only selects the interpreter, resolves the
-# package version, and loops. Mirrors .ci/manywheel/build_all.sh.
+# package version, and loops. Mirrors .ci/wheel/linux/build_all.sh.
 #
 # Inputs (env):
 #   PYTORCH_ROOT     Path to the PyTorch checkout.

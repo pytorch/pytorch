@@ -3,7 +3,7 @@
 
 Usage: repair_wheel.py <input_dir> <output_dir>
 
-Mirrors the .ci/manywheel/repair_wheel.py contract (read raw wheels from
+Mirrors the .ci/wheel/linux/repair_wheel.py contract (read raw wheels from
 input_dir, write finished wheels to output_dir) but uses delocate -- the macOS
 analog of auditwheel/patchelf. delocate bundles dependency dylibs into the
 wheel and rewrites their install names to @loader_path. It is

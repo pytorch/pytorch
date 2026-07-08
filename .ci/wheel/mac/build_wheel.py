@@ -3,7 +3,7 @@
 
 Usage: build_wheel.py <output_dir>
 
-Mirrors .ci/manywheel/build_wheel.py. Build flags are expected in the
+Mirrors .ci/wheel/linux/build_wheel.py. Build flags are expected in the
 environment (set by build_env_setup.py and sourced by build.sh); this script
 adds only the macOS host-platform plumbing and runs `python -m build`.
 """

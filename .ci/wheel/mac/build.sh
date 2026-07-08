@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Per-Python macOS arm64 wheel build orchestrator. Mirrors
-# .ci/manywheel/build.sh: this script owns the stage contract; the Python
+# .ci/wheel/linux/build.sh: this script owns the stage contract; the Python
 # modules (build_env_setup.py / build_install_deps.py / build_wheel.py /
 # repair_wheel.py) are non-orchestrating stages that stay version-agnostic.
 #

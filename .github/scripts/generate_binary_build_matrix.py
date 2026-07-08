@@ -233,7 +233,7 @@ def validate_cudnn_version_consistency(arch_version: str) -> None:
         )
 
 
-_BUILD_ENV_SETUP = REPO_ROOT / ".ci" / "manywheel" / "build_env_setup.py"
+_BUILD_ENV_SETUP = REPO_ROOT / ".ci" / "wheel" / "linux" / "build_env_setup.py"
 _RUNTIME_CUDA_INIT = REPO_ROOT / "torch" / "cuda" / "__init__.py"
 
 
@@ -263,7 +263,7 @@ def validate_runtime_release_table_consistency() -> None:
     if runtime != build:
         raise RuntimeError(
             "PYTORCH_RELEASES_CODE_CC in torch/cuda/__init__.py is out of sync "
-            "with TORCH_CUDA_ARCH_LIST_TABLE in .ci/manywheel/build_env_setup.py.\n"
+            "with TORCH_CUDA_ARCH_LIST_TABLE in .ci/wheel/linux/build_env_setup.py.\n"
             f"runtime: {runtime}\nbuild:   {build}"
         )
 
