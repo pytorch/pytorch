@@ -7375,7 +7375,7 @@ class TestAddRelu(TestCase):
             else:
                 a = torch.randint(-10, 11, (7, 11), device=device, dtype=dtype)
                 b = torch.randint(-10, 11, (7, 11), device=device, dtype=dtype)
-            expected = torch.add(a, b, alpha=alpha).clamp_min(0)
+            expected = torch.relu(torch.add(a, b, alpha=alpha))
 
             self.assertEqual(torch._VF._add_relu(a, b, alpha=alpha), expected)
 
