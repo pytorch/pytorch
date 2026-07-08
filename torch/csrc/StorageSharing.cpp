@@ -669,23 +669,25 @@ class XpuIpcEvent {
 
   XpuIpcEvent(const XpuIpcEvent&) = delete;
   XpuIpcEvent& operator=(const XpuIpcEvent&) = delete;
-  XpuIpcEvent(XpuIpcEvent&&) = delete;
-  XpuIpcEvent& operator=(XpuIpcEvent&&) = delete;
-
-  ~XpuIpcEvent() {
-#ifndef _WIN32
-    const auto& ze = at::detail::getXPUHooks().level_zero();
-    if (event_) {
-      ze.zeEventDestroy(event_);
-    }
-    if (pool_) {
-      if (opened_ipc_pool_) {
-        ze.zeEventPoolCloseIpcHandle(pool_);
-      }
-      ze.zeEventPoolDestroy(pool_);
-    }
-#endif
+  XpuIpcEvent(XpuIpcEvent&& other) noexcept
+      : pool_(other.pool_),
+        event_(other.event_),
+        opened_ipc_pool_(other.opened_ipc_pool_) {
+    other.release();
   }
+
+  XpuIpcEvent& operator=(XpuIpcEvent&& other) noexcept {
+    if (this != &other) {
+      cleanup();
+      pool_ = other.pool_;
+      event_ = other.event_;
+      opened_ipc_pool_ = other.opened_ipc_pool_;
+      other.release();
+    }
+    return *this;
+  }
+
+  ~XpuIpcEvent() { cleanup(); }
 
   std::string exportHandle() const {
 #ifndef _WIN32
@@ -731,6 +733,27 @@ class XpuIpcEvent {
   }
 
  private:
+  void cleanup() {
+#ifndef _WIN32
+    const auto& ze = at::detail::getXPUHooks().level_zero();
+    if (event_) {
+      ze.zeEventDestroy(event_);
+    }
+    if (pool_) {
+      if (opened_ipc_pool_) {
+        ze.zeEventPoolCloseIpcHandle(pool_);
+      }
+      ze.zeEventPoolDestroy(pool_);
+    }
+#endif
+  }
+
+  void release() noexcept {
+    pool_ = nullptr;
+    event_ = nullptr;
+    opened_ipc_pool_ = false;
+  }
+
   XpuIpcEvent(
       c10::DeviceIndex device,
       bool open_from_ipc,
@@ -788,6 +811,23 @@ class XpuIpcEvent {
   ze_event_pool_handle_t pool_{nullptr};
   ze_event_handle_t event_{nullptr};
   bool opened_ipc_pool_{false};
+};
+
+// Wrapper for XPU IPC event lifetime tracking (analogous to CUDA CudaIPCSentData).
+// Represents a ref-guarded event that ensures producer-consumer sync.
+struct XpuIpcEventRefGuard {
+  std::shared_ptr<XpuIpcEvent> event_sp;
+
+  XpuIpcEventRefGuard() = default;
+  explicit XpuIpcEventRefGuard(XpuIpcEvent&& event)
+      : event_sp(std::make_shared<XpuIpcEvent>(std::move(event))) {}
+
+  bool has_event() const { return event_sp != nullptr; }
+  void wait_on_stream(const c10::xpu::XPUStream& stream) const {
+    if (has_event()) {
+      event_sp->waitOnStream(stream);
+    }
+  }
 };
 
 bool isImportedStorage(const c10::StorageImpl& storage) {
@@ -876,22 +916,23 @@ bool parseXpuSharedStorageArgs(PyObject* args, XpuSharedStorageArgs& parsed) {
 c10::intrusive_ptr<at::StorageImpl> createStorageImplFromXpuShared(
     const XpuSharedStorageArgs& args) {
   c10::DeviceGuard device_guard(c10::Device(c10::kXPU, args.device));
-  std::optional<XpuIpcEvent> ipc_event;
+  XpuIpcEventRefGuard event_guard;
   if (!args.event.empty()) {
-    ipc_event = XpuIpcEvent::open(args.device, args.event);
-    ipc_event->waitOnStream(c10::xpu::getCurrentXPUStream(args.device));
+    XpuIpcEvent event = XpuIpcEvent::open(args.device, args.event);
+    event_guard = XpuIpcEventRefGuard(std::move(event));
+    event_guard.wait_on_stream(c10::xpu::getCurrentXPUStream(args.device));
   }
   auto base_ptr =
       c10::xpu::XPUCachingAllocator::getIpcDevPtr(args.handle, args.device);
 
   struct XpuIpcDeleterContext {
     std::shared_ptr<void> base_ptr;
-    std::optional<XpuIpcEvent> ipc_event;
+    XpuIpcEventRefGuard event_guard;
   };
 
   auto ctx = std::make_unique<XpuIpcDeleterContext>();
   ctx->base_ptr = std::move(base_ptr);
-  ctx->ipc_event = std::move(ipc_event);
+  ctx->event_guard = std::move(event_guard);
 
   void* dev_ptr = ctx->base_ptr.get();
   dev_ptr = static_cast<char*>(dev_ptr) + args.storage_offset_bytes;
