@@ -4,7 +4,6 @@
 Global configuration flags for torch.distributed
 """
 
-import os
 import sys
 from typing import TYPE_CHECKING
 
@@ -18,11 +17,13 @@ __all__ = [
     "use_torchcomms",
 ]
 
-# When enabled, coordinates are computed at runtime via a custom op rather
-# than being baked in at compile time. This allows compiling on one rank
-# and running on multiple ranks.
-compile_on_one_rank: bool = bool(
-    os.environ.get("TORCH_DISTRIBUTED_COMPILE_ON_ONE_RANK", False)
+# Deprecated alias. The canonical flag now lives in torch.compiler.config -- it is read
+# across the compiler stack (make_fx, inductor) not just by distributed. Kept here for
+# back-compat (reads, writes, and .patch forward to the canonical flag).
+compile_on_one_rank: bool = Config(
+    alias="torch.compiler.config.compile_on_one_rank",
+    deprecated=True,
+    deprecation_message="use torch.compiler.config.compile_on_one_rank instead",
 )
 
 # When enabled, uses TorchComms for communication backend instead of the

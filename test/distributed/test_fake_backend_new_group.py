@@ -40,7 +40,11 @@ class FakeBackendNewGroupTest(TestCase):
         # Hashed-name path preserved: sha1 hexdigest (40 chars), not a counter int.
         name = g.group_name
         self.assertFalse(name.isdigit(), f"expected hashed name, got int {name!r}")
-        self.assertEqual(len(name), 40, f"expected 40-char sha1 hash, got {name!r}")
+        self.assertEqual(
+            len(name),
+            40,
+            lambda msg: f"{msg}\nexpected 40-char sha1 hash, got {name!r}",
+        )
 
     def test_fake_subgroup_of_real_parent_builds_fake_pg(self):
         """With TorchComms 'enabled', new_group(backend='fake',
