@@ -491,6 +491,16 @@ std::string NCCLSymmetricMemory::get_group_name() {
 
 class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
  public:
+  // Allocate signal pad + buffer together in a single ncclMemAlloc call.
+  // Layout: signal pad in [0, buffer_offset), data buffer after it.
+  // buffer_offset is the signal pad size, which is already 16-aligned, so the
+  // data buffer is aligned without extra padding; the data size is rounded up
+  // instead. A single window is registered over the whole region at
+  // rendezvous time, so only the base pointer (already granularity-aligned by
+  // ncclMemAlloc) needs to satisfy NCCL's window-alignment requirement.
+  // Returns the data buffer pointer (alloc_base + buffer_offset), not
+  // alloc_base; the signal pad stays hidden in front and free()/rendezvous()
+  // key off this returned pointer.
   void* alloc(
       size_t size,
       int device_idx,
@@ -501,16 +511,6 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
         "must not be called with a group_name");
 
     c10::cuda::CUDAGuard guard(device_idx);
-    // Allocate signal pad + buffer together in a single ncclMemAlloc call.
-    // Layout: signal pad in [0, buffer_offset), data buffer after it.
-    // buffer_offset is the signal pad size, which is already 16-aligned, so the
-    // data buffer is aligned without extra padding; the data size is rounded up
-    // instead. A single window is registered over the whole region at
-    // rendezvous time, so only the base pointer (already granularity-aligned by
-    // ncclMemAlloc) needs to satisfy NCCL's window-alignment requirement.
-    // Returns the data buffer pointer (alloc_base + buffer_offset), not
-    // alloc_base; the signal pad stays hidden in front and free()/rendezvous()
-    // key off this returned pointer.
     const size_t buffer_offset = get_signal_pad_size();
     const size_t aligned_buffer_size = at::round_up(size, 16UL);
     const size_t total_size = buffer_offset + aligned_buffer_size;

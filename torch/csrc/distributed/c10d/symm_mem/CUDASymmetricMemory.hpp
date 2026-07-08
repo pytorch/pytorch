@@ -77,12 +77,10 @@ class CUDASymmetricMemory : public SymmetricMemory {
 // have different offsets compared to the base address.)
 class CUDAPeerAllocInfo : public c10::intrusive_ptr_target {
  public:
-  // bases are the per-rank mapped base pointers (the signal pad lives at the
-  // base); buffers are the data buffer pointers (base + buffer_offset).
   CUDAPeerAllocInfo(
       std::vector<c10::intrusive_ptr<AllocationRef>> alloc_refs,
-      std::vector<void*> bases,
       std::vector<void*> buffers,
+      std::vector<void*> signal_pads,
       HandleType mc_handle,
       void* mc_addr,
       size_t buffer_size,
@@ -94,7 +92,7 @@ class CUDAPeerAllocInfo : public c10::intrusive_ptr_target {
  private:
   std::vector<c10::intrusive_ptr<AllocationRef>> alloc_refs_;
   std::vector<void*> buffers_;
-  std::vector<void*> bases_;
+  std::vector<void*> signal_pads_;
   HandleType mc_handle_;
   void* mc_addr_;
   size_t buffer_size_;
@@ -102,7 +100,7 @@ class CUDAPeerAllocInfo : public c10::intrusive_ptr_target {
   int rank_;
   int world_size_;
   void** buffers_dev_;
-  void** bases_dev_;
+  void** signal_pads_dev_;
   std::string group_name_;
 
   friend class CUDASymmetricMemory;
@@ -126,6 +124,7 @@ struct Block : public c10::intrusive_ptr_target {
       int device_idx,
       size_t block_size,
       size_t buffer_size,
+      size_t buffer_offset,
       const std::optional<std::string>& group_name);
 };
 
