@@ -72,6 +72,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfTorchDynamo,
+    skipIfXpu,
     subtest,
     TEST_CUDA_MEM_LEAK_CHECK,
     TEST_WITH_TORCHDYNAMO,
@@ -5320,11 +5321,13 @@ sum_pyop = construct_sum_pyop()
 
 @markDynamoStrictTest
 class TestHigherOrderOperatorInteraction(TestCase):
+    @skipIfXpu(msg="See https://github.com/intel/torch-xpu-ops/issues/4283")
     def test_basic_sum(self, device):
         x = torch.randn(2, 3, 4, device=device)
         result = sum_pyop(x, 1)
         self.assertEqual(result, torch.sum(x, 1))
 
+    @skipIfXpu(msg="See https://github.com/intel/torch-xpu-ops/issues/4283")
     def test_vmap_sum(self, device):
         x = torch.randn(2, 3, 4, device=device)
         result = vmap(sum_pyop, (0, None))(x, 0)
@@ -5333,11 +5336,13 @@ class TestHigherOrderOperatorInteraction(TestCase):
         result = vmap(vmap(sum_pyop, (0, None)), (0, None))(x, 0)
         self.assertEqual(result, torch.sum(x, 2))
 
+    @skipIfXpu(msg="See https://github.com/intel/torch-xpu-ops/issues/4283")
     def test_grad_sum(self, device):
         x = torch.randn(3, device=device)
         gx = grad(sum_pyop)(x, 0)
         self.assertEqual(gx, torch.ones_like(x))
 
+    @skipIfXpu(msg="See https://github.com/intel/torch-xpu-ops/issues/4283")
     def test_grad_grad_sum(self, device):
         x = torch.randn(3, requires_grad=True, device=device)
 
@@ -5351,11 +5356,13 @@ class TestHigherOrderOperatorInteraction(TestCase):
         ggx = grad(grad_f_sum)(x)
         self.assertEqual(ggx, -x.sin())
 
+    @skipIfXpu(msg="See https://github.com/intel/torch-xpu-ops/issues/4283")
     def test_vmap_grad_sum(self, device):
         x = torch.randn(2, 3, device=device)
         gx = vmap(grad(sum_pyop), (0, None))(x, 0)
         self.assertEqual(gx, torch.ones_like(x))
 
+    @skipIfXpu(msg="See https://github.com/intel/torch-xpu-ops/issues/4283")
     def test_no_grad_outside_grad(self, device):
         x = torch.randn(3, device=device, requires_grad=True)
         with torch.no_grad():
@@ -5363,6 +5370,7 @@ class TestHigherOrderOperatorInteraction(TestCase):
         self.assertEqual(y, torch.ones_like(x))
         self.assertFalse(y.requires_grad)
 
+    @skipIfXpu(msg="See https://github.com/intel/torch-xpu-ops/issues/4283")
     def test_no_grad_inside_grad(self, device):
         def f(x):
             with torch.no_grad():
@@ -5677,17 +5685,20 @@ instantiate_device_type_tests(
 instantiate_device_type_tests(
     TestVmapOfGrad,
     globals(),
-    only_for=only_for,
+    only_for=("cpu", "cuda", "xpu"),
+    allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestJac,
     globals(),
-    only_for=only_for,
+    only_for=("cpu", "cuda", "xpu"),
+    allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestJvp,
     globals(),
-    only_for=only_for,
+    only_for=("cpu", "cuda", "xpu"),
+    allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestLinearize,
@@ -5697,12 +5708,14 @@ instantiate_device_type_tests(
 instantiate_device_type_tests(
     TestVmapJvpInplaceView,
     globals(),
-    only_for=only_for,
+    only_for=("cpu", "cuda", "xpu"),
+    allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestHessian,
     globals(),
-    only_for=only_for,
+    only_for=("cpu", "cuda", "xpu"),
+    allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestComposability,
@@ -5717,7 +5730,8 @@ instantiate_device_type_tests(
 instantiate_device_type_tests(
     TestHigherOrderOperatorInteraction,
     globals(),
-    only_for=only_for,
+    only_for=("cpu", "cuda", "xpu"),
+    allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestFunctionalize,
@@ -5727,17 +5741,20 @@ instantiate_device_type_tests(
 instantiate_device_type_tests(
     TestAutogradFunction,
     globals(),
-    only_for=only_for,
+    only_for=("cpu", "cuda", "xpu"),
+    allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestAutogradFunctionVmapAPI,
     globals(),
-    only_for=only_for,
+    only_for=("cpu", "cuda", "xpu"),
+    allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestHelpers,
     globals(),
-    only_for=only_for,
+    only_for=("cpu", "cuda", "xpu"),
+    allow_xpu=True,
 )
 instantiate_parametrized_tests(
     TestMakeFunctional,
