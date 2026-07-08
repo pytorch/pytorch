@@ -3336,7 +3336,6 @@ class TestDistributions(DistributionsTestCase):
         Wishart(torch.tensor(ndim), precision_matrix=P)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
     def test_wishart_log_prob(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
@@ -4695,7 +4694,7 @@ class TestDistributionsGPU(DistributionsTestCase):
     @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA and XPU not found")
     def test_torch_binomial_dtype_errors(self):
         dtypes = [torch.int, torch.long, torch.short]
-        device = "cuda"
+        device = device_type
 
         for count_dtype in dtypes:
             total_count = torch.tensor([10, 10], dtype=count_dtype, device=device)
