@@ -109,11 +109,6 @@ on:
         required: false
         type: string
         default: ""
-      use-arc:
-        required: false
-        type: boolean
-        default: false
-        description: If true, use ARC (OSDC) runner path instead of EC2.
       python-version:
         required: false
         type: string
@@ -154,7 +149,7 @@ jobs:
       contents: read
       actions: read
     # Don't run on forked repos
-    if: github.repository_owner == 'pytorch' && inputs.use-arc
+    if: github.repository_owner == 'pytorch'
     runs-on: ${{ inputs.runner_prefix }}${{ startsWith(inputs.runner, 'l-') && inputs.runner || contains(inputs.runner, 'arm64') && 'l-arm64g4-16-62' || 'l-x86iavx512-8-64' }}
     container:
       image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${{ inputs.docker-image-name }}${{ inputs.ci-docker-hash && format('-{0}', inputs.ci-docker-hash) || '' }}
