@@ -2772,6 +2772,7 @@ fake_autocast_device_skips["cuda"] = {"linalg.pinv", "pinverse"}
 dynamic_output_op_tests = (
     "argwhere",
     "bincount",
+    "combinations",
     "linalg.lstsq",
     "masked_select",
     "nonzero",
