@@ -2988,6 +2988,8 @@ make_fallback(torch.ops.streams.record_event.default)
 make_fallback(torch.ops.streams.wait_event.default)
 make_fallback(torch.ops.streams.synchronize_event.default)
 make_fallback(torch.ops.streams.synchronize_device.default)
+make_fallback(torch.ops.streams.synchronize_stream.default)
+make_fallback(torch.ops.streams.wait_stream.default)
 
 
 @register_lowering(aten.rand)
@@ -3727,6 +3729,7 @@ make_fallback(aten.linalg_lu_factor_ex)
 make_fallback(aten.linalg_lu_solve)
 make_fallback(aten.linalg_matrix_exp)
 make_fallback(aten.linalg_matrix_sqrth)
+make_fallback(aten.linalg_polar)
 make_fallback(aten.linalg_qr)
 make_fallback(aten._linalg_slogdet)
 make_fallback(aten._linalg_solve_ex)
@@ -3746,8 +3749,6 @@ make_fallback(aten._fft_r2c)  # needs complex as well
 
 # Data dependent (are these necessary?)
 make_fallback(aten.nonzero.default)
-# Not data-dependent, but still using fallback
-make_fallback(aten.nonzero_static.default)
 # Data-dependent output size; route to ATen eager kernel (CPU/CUDA/XPU all have
 # native implementations)
 make_fallback(aten.bincount.default, warn=False)
@@ -9071,10 +9072,13 @@ def control_deps_op_lowering(additional_deps, subgraph_fn, *args):
                 passthrough_vals.append(v)
     for val in passthrough_vals:
         barrier = ir.OrderingBarrier(val)
+        barrier_op = barrier.get_operation_name()
         for op in subgraph_ops:
             op_name = op.operation_name
             if op_name is not None:
-                V.graph.additional_buffer_deps[barrier.get_name()].add(op_name)
+                buf_name = op.get_buffer_name()
+                if buf_name is not None:
+                    V.graph.additional_buffer_deps[barrier_op].add(buf_name)
 
     return output
 
