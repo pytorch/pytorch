@@ -91,6 +91,29 @@ class TestUnittest(torch._dynamo.test_case.TestCase):
         self.assertIn("Unexpected success, please remove", proc.stdout)
         self.assertIn("SyntheticUnittestExpectedFailure.test_passes", proc.stdout)
 
+    def test_dynamo_expected_failure_handles_subtest_failure(self):
+        proc = self._run_python_with_dynamo(
+            """
+            import sys
+            from torch.testing._internal import dynamo_test_failures
+            from torch.testing._internal.common_utils import TestCase, run_tests
+
+            class SyntheticSubTestExpectedFailure(TestCase):
+                def test_subtest_fails(self):
+                    for value in (0, 1):
+                        with self.subTest(value=value):
+                            self.assertEqual(value, 0)
+
+            key = "SyntheticSubTestExpectedFailure.test_subtest_fails"
+            dynamo_test_failures.dynamo_expected_failures.add(key)
+            sys.argv = [sys.argv[0], key]
+            run_tests()
+            """
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout)
+        self.assertIn("OK", proc.stdout)
+        self.assertNotIn("Unexpected success, please remove", proc.stdout)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
