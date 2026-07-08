@@ -18067,6 +18067,56 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         compiled = torch.compile(fn, backend="inductor")(a, b)
         self.assertEqual(eager, compiled)
 
+    def test_slice_scatter_deterministic_mutation(self):
+        import torch
+        from torch._dynamo.testing import same
+
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                out = x.clone()
+                out[::2] = y
+                return out.sum()
+
+        with torch.backends.cudnn.flags(deterministic=True):
+            try:
+                torch.use_deterministic_algorithms(True)
+
+                m = Model().to(GPU_TYPE)
+                x = torch.randn(10, device=GPU_TYPE, requires_grad=True)
+                y = torch.randn(5, device=GPU_TYPE, requires_grad=True)
+
+                # Reference (Eager mode)
+                out_ref = m(x, y)
+                out_ref.backward()
+                grad_x_ref = x.grad.clone()
+                grad_y_ref = y.grad.clone()
+
+                x.grad = None
+                y.grad = None
+
+                # Test (Compiled mode)
+                m_opt = torch.compile(m)
+                out_test = m_opt(x, y)
+                out_test.backward()
+                grad_x_test = x.grad.clone()
+                grad_y_test = y.grad.clone()
+
+                # Verify outputs and gradients to catch WAW hazards / memory overlaps
+                self.assertTrue(
+                    same(out_ref, out_test), "Forward pass output mismatched"
+                )
+                self.assertTrue(
+                    same(grad_x_ref, grad_x_test),
+                    "Backward pass gradients (x) mismatched",
+                )
+                self.assertTrue(
+                    same(grad_y_ref, grad_y_test),
+                    "Backward pass gradients (y) mismatched",
+                )
+
+            finally:
+                torch.use_deterministic_algorithms(False)
+
     @requires_gpu_and_triton
     def test_gpu_scalar_with_cpu_tensor(self):
         def fn(a, b):
