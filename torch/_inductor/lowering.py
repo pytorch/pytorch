@@ -30,7 +30,7 @@ from torch._functorch._aot_autograd.descriptors import (
 from torch._higher_order_ops.associative_scan import associative_scan_op
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_value
+from torch._library.opaque_object import is_custom_class_obj
 from torch._library.utils import get_layout_constraint_tag
 from torch._prims_common import (
     canonicalize_dim,
@@ -1380,7 +1380,12 @@ def trunc(x):
 
 
 @register_lowering(aten.expand, type_promotion_kind=None)
-def expand(x, sizes):
+def expand(x, sizes, *, implicit=False):
+    # `implicit` is autograd-internal metadata (see aten::expand schema); it
+    # does not affect the produced tensor, so the lowering ignores it. Without
+    # this kwarg the lowering rejects graphs produced by dynamo autograd where
+    # aten.expand.default is emitted with implicit=False.
+    del implicit
     (x,) = promote_constants([x])
     if isinstance(x, ir.BaseConstant):
         return ExpandView.create(x, tuple(sizes))
@@ -3380,7 +3385,7 @@ def require_channels_last(_, *args, **kwargs):
 def constrain_to_fake_tensor(arg, fake_arg):
     if fake_arg is None:
         return arg
-    if isinstance(fake_arg, FakeScriptObject) or is_opaque_value(fake_arg):
+    if isinstance(fake_arg, FakeScriptObject) or is_custom_class_obj(fake_arg):
         return arg
     if isinstance(arg, ir.IRNode):
         return ir.ExternKernel.require_exact_strides(arg, fake_arg.stride())
@@ -9107,6 +9112,21 @@ def invoke_quant_tracer(subgraph_fn: ir.Subgraph, *operands, scheme=None):
 @register_lowering(associative_scan_op, type_promotion_kind=None)
 def associative_scan(combine_fn: ir.Subgraph, xs, additional_inputs: tuple[Any, ...]):
     from .subgraph_lowering import InputDescriptor, lower_pointwise_subgraph
+
+    # combine_mode="pointwise" codegen requires a backend with scan support
+    # (e.g. Triton on CUDA/XPU). The eager wrapper no longer enforces a device
+    # requirement, so check every leaf here -- before lower_pointwise_subgraph
+    # runs -- to raise a clear device-specific error. ir.Scan.create re-checks
+    # the same feature on xs[0] below and otherwise fails with a generic "Unable
+    # to generate code" error. See https://github.com/pytorch/pytorch/issues/186594.
+    for x in xs:
+        device = x.get_device()
+        if not V.graph.has_feature(device, BackendFeature.SCAN):
+            device_str = device.type if device is not None else "unknown device"
+            raise RuntimeError(
+                "associative_scan with combine_mode='pointwise' is not supported "
+                f"on {device_str}. Try to use combine_mode='generic'."
+            )
 
     num_scan_inputs = 2 * len(xs)
     placeholders = [
