@@ -16,7 +16,12 @@ Environment variables written (to --env-out):
 """
 
 import argparse
+import sys
 from pathlib import Path
+
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # .ci/wheel
+from _common import write_env_exports
 
 
 # macOS arm64 build flags.
@@ -35,20 +40,6 @@ MACOS_BUILD_ENV: dict[str, str] = {
 }
 
 OMP_PREFIX = Path("/opt/llvm-openmp")
-
-
-def shell_quote(value: str) -> str:
-    if value and all(c.isalnum() or c in "_-./:=" for c in value):
-        return value
-    return "'" + value.replace("'", "'\\''") + "'"
-
-
-def write_env_exports(env: dict[str, str], path: Path | None) -> None:
-    """Write `export KEY=VALUE` lines for the parent shell to source."""
-    if path is None:
-        return
-    lines = [f"export {k}={shell_quote(v)}" for k, v in env.items()]
-    path.write_text("\n".join(lines) + "\n")
 
 
 def main() -> None:

@@ -33,6 +33,10 @@ import tempfile
 from pathlib import Path
 
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # .ci/wheel
+from _common import write_env_exports
+
+
 # CUDA build flags that don't depend on CUDA version or host arch.
 # Values mirror the original build_cuda.sh; static linking is OFF (the
 # nvidia/* pypi packages provide the shared libs, and static linking causes
@@ -392,20 +396,6 @@ def source_oneapi_env() -> dict[str, str]:
     os.environ.update(diff)
     print(f"Sourced {len(existing)} oneAPI env scripts ({len(diff)} env vars changed)")
     return diff
-
-
-def write_env_exports(env: dict[str, str], path: Path | None) -> None:
-    """Write `export KEY=VALUE` lines for the parent shell to source."""
-    if path is None:
-        return
-    lines = [f"export {k}={shell_quote(v)}" for k, v in env.items()]
-    path.write_text("\n".join(lines) + "\n")
-
-
-def shell_quote(value: str) -> str:
-    if value and all(c.isalnum() or c in "_-./:=" for c in value):
-        return value
-    return "'" + value.replace("'", "'\\''") + "'"
 
 
 def main() -> None:
