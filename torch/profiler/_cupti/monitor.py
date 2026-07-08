@@ -1226,6 +1226,7 @@ class CuptiMonitor:
 
 _hes_enabled = False
 
+
 def enable_hes_early() -> None:
     global _hes_enabled
     if _hes_enabled:
