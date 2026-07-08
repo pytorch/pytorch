@@ -913,7 +913,7 @@
 /.github/ @pytorch/pytorch-dev-infra
 #
 # [infra_build_packaging]
-# /.ci/manywheel/
+# /.ci/wheel/
 # /.coveragerc
 # /.ctags.d/
 # /.dockerignore

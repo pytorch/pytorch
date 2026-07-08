@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Install build-time dependencies for a PyTorch Windows wheel build.
 
-Windows analog of `.ci/manywheel/build_install_deps.py`. Replaces the
+Windows analog of `.ci/wheel/linux/build_install_deps.py`. Replaces the
 pip-install + libuv-extract portion of the legacy
 `.ci/pytorch/windows/setup_build.bat`. The vcvarsall / CUDA / XPU env
 configuration lives in the sibling `build_env_setup.py`; both scripts run

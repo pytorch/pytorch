@@ -19,7 +19,7 @@ from pathlib import Path
 # NumPy build-time pin selected by Python version. Checked high-to-low; the
 # first entry whose (major, minor) floor is satisfied wins. A plain string
 # prefix ("cp31") would wrongly capture cp315, so match on the version tuple.
-# Keep in sync with .ci/manywheel/build_common.sh.
+# Keep in sync with .ci/wheel/linux/build_common.sh.
 NUMPY_PINS: list[tuple[tuple[int, int], str]] = [
     ((3, 15), "2.5.1"),
     ((3, 14), "2.3.4"),

@@ -3,7 +3,7 @@
 
 Usage: build_install_deps.py <package_dir>
 
-Mirrors .ci/manywheel/build_install_deps.py. macOS pins numpy by Python version
+Mirrors .ci/wheel/linux/build_install_deps.py. macOS pins numpy by Python version
 and, when the conda-forge libomp is not staged at /opt/llvm-openmp, installs
 libomp from Homebrew (matching the fallback in the previous shell build).
 """
