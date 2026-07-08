@@ -15,38 +15,8 @@ import time
 from pathlib import Path
 
 
-# NumPy build-time pin selected by Python version.
-# Keep in sync with .ci/wheel/linux/build_common.sh.
-NUMPY_PINS: list[tuple[str, str]] = [
-    ("cp314", "2.3.4"),
-    ("cp31", "2.1.0"),
-]
-DEFAULT_NUMPY = "2.0.2"
-
-
-def retry(cmd: list[str], delays: tuple[int, ...] = (1, 2, 4, 8)) -> None:
-    """Run cmd, retrying with backoff on failure (mirrors the shell retry helper)."""
-    last_rc = 0
-    for delay in (0, *delays):
-        if delay:
-            time.sleep(delay)
-        result = subprocess.run(cmd)
-        if result.returncode == 0:
-            return
-        last_rc = result.returncode
-    sys.exit(last_rc)
-
-
-def pip_install(*args: str) -> None:
-    retry([sys.executable, "-m", "pip", "install", *args])
-
-
-def numpy_pin() -> str:
-    tag = f"cp{sys.version_info.major}{sys.version_info.minor}"
-    for prefix, version in NUMPY_PINS:
-        if tag.startswith(prefix):
-            return version
-    return DEFAULT_NUMPY
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # .ci/wheel
+from _common import numpy_pin, pip_install
 
 
 def main() -> None:
@@ -61,7 +31,7 @@ def main() -> None:
     if not os.environ.get("SKIP_SETUP_CLEAN"):
         subprocess.run([sys.executable, "setup.py", "clean"], check=True)
     pip_install("-q", "-r", "requirements.txt")
-    pip_install("-q", "--pre", f"numpy=={numpy_pin()}")
+    pip_install("-q", f"numpy=={numpy_pin()}")
 
     if "rocm" in os.environ.get("DESIRED_CUDA", ""):
         print(f"Running build_amd.py at {time.strftime('%Y-%m-%d %H:%M:%S')}")

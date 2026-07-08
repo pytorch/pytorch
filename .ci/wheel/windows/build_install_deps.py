@@ -15,14 +15,14 @@ import argparse
 import os
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 
-# This pipeline script lives in .ci/wheel/windows; _common sits beside it.
+# This pipeline script lives in .ci/wheel/windows; shared helpers are one
+# level up in .ci/wheel/_common.py.
 _HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(_HERE))
-from _common import download, write_env_exports
+sys.path.insert(0, str(_HERE.parent))
+from _common import download, numpy_pin, pip_install, write_env_exports
 
 
 # The Windows CD workspace (scratch downloads, libuv) stays under the general
@@ -30,14 +30,6 @@ from _common import download, write_env_exports
 WIN_CI_DIR = _HERE.parents[1] / "pytorch" / "windows"
 # Repo root contains pyproject.toml; spin needs to run from there.
 PYTORCH_ROOT = _HERE.parents[2]
-
-
-# Pin numpy by Python version. Matches the legacy table in setup_build.bat.
-NUMPY_PINS: list[tuple[str, str]] = [
-    ("cp314", "2.3.2"),
-    ("cp313", "2.1.2"),
-]
-DEFAULT_NUMPY = "2.0.2"
 
 
 # Fixed build-time pip deps from setup_build.bat. Kept hardcoded for now;
@@ -58,31 +50,6 @@ PIP_PACKAGES: list[str] = [
 
 
 LIBUV_URL = "https://s3.amazonaws.com/ossci-windows/libuv-1.40.0-h8ffe710_0.tar.bz2"
-
-
-def retry(cmd: list[str], delays: tuple[int, ...] = (1, 2, 4, 8)) -> None:
-    """Run cmd, retrying with backoff on failure (mirrors the Linux helper)."""
-    last_rc = 0
-    for delay in (0, *delays):
-        if delay:
-            time.sleep(delay)
-        result = subprocess.run(cmd)
-        if result.returncode == 0:
-            return
-        last_rc = result.returncode
-    sys.exit(last_rc)
-
-
-def pip_install(*args: str) -> None:
-    retry([sys.executable, "-m", "pip", "install", *args])
-
-
-def numpy_pin() -> str:
-    tag = f"cp{sys.version_info.major}{sys.version_info.minor}"
-    for prefix, version in NUMPY_PINS:
-        if tag.startswith(prefix):
-            return version
-    return DEFAULT_NUMPY
 
 
 def install_libuv(workdir: Path, python_prefix: Path) -> Path:
