@@ -1397,7 +1397,9 @@ def unload_xpu_triton_pyds() -> None:
                             result,
                             torch._inductor.runtime.triton_heuristics.TritonCompileResult,
                         ):
+                            # pyrefly: ignore [missing-attribute]
                             if hasattr(result.kernel.run, "mod"):
+                                # pyrefly: ignore [missing-attribute]
                                 result.kernel.run.mod.__del__()
         del sys.modules[module_name]
 
