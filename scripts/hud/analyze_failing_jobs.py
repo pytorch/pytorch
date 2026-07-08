@@ -42,8 +42,11 @@ HUD_API = "https://hud.pytorch.org/api/hud/pytorch/pytorch"
 # we fetch whole pages and trim to the exact commit count requested.
 PER_PAGE = 100
 
-# Conclusions that don't represent a real signal for a commit/job pair.
-SKIPPED_CONCLUSIONS = {"neutral", "skipped"}
+# Conclusions without a completed signal for a commit/job pair. "pending" is an
+# in-progress run (no result yet), so it is treated as no-data rather than
+# breaking a streak -- otherwise an in-flight rerun at the tip would reset the
+# streak of a job that is otherwise consistently failing.
+SKIPPED_CONCLUSIONS = {"neutral", "skipped", "pending"}
 # Two failures whose captured error text is at least this similar are treated
 # as the same underlying failure.
 SIMILARITY_THRESHOLD = 0.75
@@ -139,8 +142,8 @@ def summarize_job(
         "current_streak": len(streak),
         "failing_since_sha": streak[-1].get("sha") if streak else None,
         # Clipped means the true start may predate the window, so more --commits
-        # could help. That needs two things: (A) no success/pending anywhere in
-        # the observed runs, so nothing pins the start (len(streak) == len(real)),
+        # could help. That needs two things: (A) every completed run in the
+        # window is a failure, so nothing pins the start (len(streak) == len(real)),
         # and (B) the job still has data at the oldest fetched commit, so older
         # data plausibly exists. (B) uses the oldest cell, not the oldest failure,
         # to tolerate no-data gaps at the window edge. A job that simply stopped
