@@ -2067,6 +2067,7 @@ class TestTorchDeviceType(TestCase):
         expect_no_sync = (lambda: _ind_put_fn(x, mask, 1.),
                           lambda: _ind_put_fn(x, mask_cpu, y),
                           lambda: _ind_put_fn(x, ind, y),
+                          lambda: _ind_put_fn(x, ind, 1.),
                           lambda: _ind_put_fn(x, 0, 5.),
                           lambda: _ind_put_fn(x, slice(0, 1), 5.),
                           lambda: _ind_get_fn(x, mask_cpu),
