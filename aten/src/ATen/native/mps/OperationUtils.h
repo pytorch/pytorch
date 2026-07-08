@@ -48,9 +48,8 @@ struct MPSScalar {
   union {
     float f; // MPS doesn't support 'double'
     at::Half h;
-    int64_t i;
+    int64_t i; // also used for bool and all narrower signed/unsigned integrals
     uint64_t u;
-    bool b;
     c10::complex<float> cf;
     c10::complex<at::Half> ch;
     at::BFloat16 bf16;
@@ -692,7 +691,7 @@ inline bool supportedFloatingOrComplexType(const TensorBase& t) {
 }
 
 inline bool needsGather(const TensorBase& t) {
-  static const bool is_macOS_15_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
+  static const bool is_macOS_15_0_or_newer = is_macos_at_least(MacOSVersion::MACOS_15_0);
   return !is_macOS_15_0_or_newer && (!t.is_contiguous() || t.storage_offset());
 }
 
