@@ -353,11 +353,6 @@ bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output)
 
 } // anonymous namespace
 
-static bool lu_has_matmul2d() {
-  // matmul2d needs macOS 26.2+; below that the simdgroup gemm fallback is used
-  return is_macos_at_least(MacOSVersion::MACOS_26_2);
-}
-
 // Blocked right-looking LU with partial pivoting, factored in place on a
 // row-major fp32 (B, M, N) buffer; pivots are 1-based, info follows LAPACK.
 static void lu_factor_panel_encode(const Tensor& LU,
@@ -368,7 +363,7 @@ static void lu_factor_panel_encode(const Tensor& LU,
                                    int64_t B,
                                    bool transposeResult) {
   auto stream = getCurrentMPSStream();
-  const bool useMpp = lu_has_matmul2d();
+  const bool useMpp = has_mpp();
 
   auto factorW32PSO = lib.getPipelineStateForFunc("factorPanelLU_1_32");
   auto factorW16PSO = lib.getPipelineStateForFunc("factorPanelLU_2_16");
@@ -617,7 +612,7 @@ static void linalg_lu_factor_ex_out_mps_impl(const Tensor& A,
 
 static void lu_solve_encode(const Tensor& W, const Tensor& pivots, int64_t n, int64_t k, int64_t Bnum, bool adjoint) {
   auto stream = getCurrentMPSStream();
-  const auto useMpp = lu_has_matmul2d();
+  const auto useMpp = has_mpp();
   const auto un = static_cast<uint32_t>(n);
   const auto uk = static_cast<uint32_t>(k);
   const auto uB = static_cast<uint32_t>(Bnum);
@@ -1494,7 +1489,7 @@ static void cholesky_stub_impl(const Tensor& out, const Tensor& info, bool upper
   auto device = MPSDevice::getInstance()->device();
   auto info_ = info.dim() >= 2 ? info.view({B}) : info;
   auto info_sizes = info.sizes();
-  if (is_macos_at_least(MacOSVersion::MACOS_26_2)) {
+  if (has_mpp()) {
     return cholesky_panel_impl(out, info_, N, B, upper);
   }
   info_.fill_(0);
