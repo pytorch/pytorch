@@ -69,7 +69,7 @@ from torch._guards import (
     TracingContext,
 )
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_type
+from torch._library.opaque_object import is_custom_class
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._utils_internal import signpost_event
 from torch.export.dynamic_shapes import _ConstraintTarget
@@ -145,6 +145,7 @@ from .source import (
 )
 from .utils import (
     _extract_tensor_dict,
+    _get_cudagraph_override,
     checkpoint_params,
     CleanupHook,
     clone_inputs,
@@ -589,6 +590,10 @@ def _is_safe_to_reorder(node: fx.Node) -> bool:
             return False
         if isinstance(node.kwargs.get("out"), fx.Node):
             return False
+        # triton_kernel_wrapper_mutation mutates tensors via kwargs but
+        # is not detected by is_impure() or trailing-underscore checks.
+        if name == "triton_kernel_wrapper_mutation":
+            return False
         # Non-OpOverload targets with no FX Node arguments are likely
         # state-changing (e.g., _vmap_increment_nesting,
         # _set_fwd_grad_enabled). This is intentionally conservative:
@@ -802,13 +807,25 @@ class OutputGraph(OutputGraphCommon):
             "co_firstlineno": f_code.co_firstlineno,
         }
 
-        # Cudagraph annotation is set during inlining in
-        # InliningInstructionTranslator.build_inline_tracer when a decorated
-        # function is inlined.
+        # The cudagraph annotation is normally set while tracing an
+        # `override_cudagraphs` context manager / decorator within this
+        # frame (see CudagraphOverrideVariable). Seed it here from any
+        # runtime-active override so a callee compiled as a separate frame
+        # (e.g. because it contains a graph break and cannot be inlined)
+        # inherits the override that lives lexically in a caller's frame.
+        # NOTE: we intentionally do not guard on the override state, so the
+        # override is sticky per code object (first compile wins): a function
+        # reached both inside and outside an override keeps whichever override
+        # was active when it first compiled.
         self.cudagraph_annotation: _CudagraphAnnotation | None = None
+        if (_override := _get_cudagraph_override()) is not None:
+            from torch._inductor import _CudagraphAnnotation as _CGA
+
+            self.cudagraph_annotation = _CGA(fwd=_override[0], bwd=_override[1])
 
         self.region_tracker = GraphRegionTracker()
         self._emit_debugger_breakpoint: bool = False
+        self._shallow_copy_placeholder_snapshots: dict[torch.fx.Node, torch.Tensor] = {}
 
         # tracked_fakes says where any tensor that was wrapped to fake came
         # from.  It is similar to GraphArg, in that all GraphArgs will get
@@ -1749,7 +1766,7 @@ class OutputGraph(OutputGraphCommon):
                 )
 
             # HACKY CODE REGION END
-        elif is_opaque_type(type(target)):
+        elif is_custom_class(type(target)):
             # HACKY CODE REGION BEGIN
             # Same as SymInt/SymFloat above: piggybacking on self.nn_modules
             # to store opaque objects as graph attributes.
@@ -1764,7 +1781,7 @@ class OutputGraph(OutputGraphCommon):
                 )
                 proxy = tracer.create_proxy("get_attr", module_key, (), {})
                 set_example_value(proxy.node, fake_script_obj)
-                return torch._dynamo.variables.script_object.TorchScriptObjectVariable.create(
+                return torch._dynamo.variables.script_object.CustomClassObjectVariable.create(
                     proxy, fake_script_obj, tx=self.root_tx, **options
                 )
 
@@ -2981,9 +2998,21 @@ class OutputGraph(OutputGraphCommon):
                 # a lot of fake_tensor ownership assumptions and runs afoul of detect_fake_mode
                 self.tracing_context.fake_mode = backend_fake_mode
 
+            example_inputs = self.example_inputs()
+
+            # Restore placeholder metadata mutated by
+            # in-graph shallow_copy_data_.
+            if self._shallow_copy_placeholder_snapshots:
+                placeholders = gm.graph.find_nodes(op="placeholder")
+                placeholder_to_idx = {n: i for i, n in enumerate(placeholders)}
+                for node, snapshot in self._shallow_copy_placeholder_snapshots.items():
+                    node.meta["example_value"] = snapshot
+                    idx = placeholder_to_idx[node]
+                    example_inputs[idx].fake_device = snapshot.fake_device  # type: ignore[union-attr]
+
             gm.graph.lint()
             with self.restore_global_state():
-                compiled_fn = self.call_user_compiler(gm, self.example_inputs())
+                compiled_fn = self.call_user_compiler(gm, example_inputs)
 
             from torch.fx._lazy_graph_module import _LazyGraphModule
 
@@ -3431,7 +3460,7 @@ class OutputGraph(OutputGraphCommon):
                                     fake_attr_val,
                                 )
                         continue
-                    if is_opaque_type(type(node.meta["grapharg"].example)):
+                    if is_custom_class(type(node.meta["grapharg"].example)):
                         continue
                     fake = (
                         arg.fake_tensor if arg.fake_tensor is not None else arg.example
