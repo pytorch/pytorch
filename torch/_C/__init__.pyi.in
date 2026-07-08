@@ -1341,17 +1341,20 @@ def _to_dlpack(
     data: Tensor,
     dl_device: tuple[IntEnum, _int] | None = None,
     copy: _bool | None = None,
+    read_only: _bool = False,
 ) -> Any: ...  # THPModule_toDLPack
 def _to_dlpack_versioned(
     data: Tensor,
     dl_device: tuple[IntEnum, _int] | None = None,
     copy: _bool | None = None,
+    read_only: _bool = False,
 ) -> Any: ...  # THPModule_toDLPackVersioned
 def _from_dlpack(data: Any) -> Tensor: ...  # THPModule_fromDLPack
 def _torchDeviceToDLDevice(
     device: torch.device,
 ) -> tuple[_int, _int]: ...  # THPModule_torchDeviceToDLDevice
 def _dlpack_exchange_api() -> object: ...  # THPModule_DLPackExchangeAPI
+def _const_dlpack_exchange_api() -> object: ...  # THPModule_ConstDLPackExchangeAPI
 def _get_cpp_backtrace(
     frames_to_skip: _int,
     maximum_number_of_frames: _int,
@@ -1383,6 +1386,7 @@ def _is_torch_function_enabled() -> _bool: ...  # THPModule_isEnabledTorchFuncti
 def _is_torch_function_all_disabled() -> (
     _bool
 ): ...  # THPModule_isAllDisabledTorchFunction
+def _peek_should_skip_torch_function() -> _bool: ...  # THPModule_peek_should_skip_torch_function
 def _has_torch_function(
     args: Iterable[Any],
 ) -> _bool: ...  # THPModule_has_torch_function
@@ -1398,6 +1402,11 @@ def _log_api_usage_metadata(
     metadata_map: dict[str, str],
 ) -> None: ...  # LogAPIUsageMetadataFromPython
 def _demangle(str) -> str: ...  # c10::demangle
+def _fake_dispatch_register_decomp(name: str, overload: str) -> None: ...
+def _fake_dispatch_register_meta(name: str, overload: str) -> None: ...
+def _fake_dispatch_register_op_impl(name: str, overload: str) -> None: ...
+def _fake_dispatch_register_prim_meta(name: str, overload: str) -> None: ...
+def _fake_dispatch_deregister_op_impl(name: str, overload: str) -> None: ...
 def _disabled_torch_function_impl(
     func: Callable,
     types: Iterable[type],
@@ -1762,6 +1771,11 @@ def _dispatch_dump_table(name: str) -> str: ...
 def _dispatch_check_invariants(name: str) -> None: ...
 def _dispatch_check_all_invariants() -> None: ...
 def _dispatch_call_boxed(handle: _DispatchOperatorHandle, *args, **kwargs) -> Any: ...
+def _dispatch_make_pyobj_dispatch_fns(
+    handle: _DispatchOperatorHandle,
+    dispatch_cpp: Callable,
+    redispatch_cpp: Callable,
+) -> tuple[Callable, Callable]: ...
 def _dispatch_find_schema_or_throw(
     name: str,
     overload_name: str,
@@ -2181,6 +2195,8 @@ def _cuda_record_memory_history_legacy(
     compile_context: _bool,
     global_record_annotations: _bool,
     skip_actions: list[str],
+    record_pinned_host_memory: _bool,
+    record_cuda: _bool,
 ) -> None: ...
 def _cuda_record_memory_history(
     enabled: str | None,
@@ -2191,6 +2207,8 @@ def _cuda_record_memory_history(
     compile_context: _bool,
     global_record_annotations: _bool,
     skip_actions: list[str],
+    record_pinned_host_memory: _bool,
+    record_cuda: _bool,
 ) -> None: ...
 def _cuda_allocationTraceback(data_ptr: _int) -> list[dict[str, Any]] | None: ...
 def _cuda_isHistoryEnabled() -> _bool: ...
