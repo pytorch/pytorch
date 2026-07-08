@@ -484,7 +484,7 @@ void CUDAGraph::begin_capture_to_conditional_node(
       getCurrentCUDAStream(), &status, nullptr, &currently_capturing_graph));
   TORCH_CHECK(
       status == cudaStreamCaptureStatusActive,
-      "capture_begin() must be called before begin_capture_to_if_node()");
+      "capture_begin() must be called before begin_capture_to_conditional_node()");
   cudaGraphConditionalHandle handle{};
   AT_CUDA_CHECK(cudaGraphConditionalHandleCreate(
       &handle, currently_capturing_graph, 0, 0));

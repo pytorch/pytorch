@@ -6684,6 +6684,60 @@ def forward(self, L_pred_ : torch.Tensor, L_x_ : torch.Tensor):
         not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
         "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
     )
+    def test_while_loop_cudagraph_kwargs_error(self):
+        def cond_fn(iteration):
+            return iteration < 1
+
+        def body_fn(iteration):
+            return (iteration + 1,)
+
+        iteration = torch.zeros((), dtype=torch.int64, device="cuda")
+        args = (cond_fn, body_fn, (iteration,), ())
+        error = "CUDA graph conditional torch.while_loop does not support kwargs"
+
+        for mode_cls in (
+            CUDAGraphCaptureControlFlowOpDispatchMode,
+            ControlFlowOpWarmupDispatchMode,
+        ):
+            with (
+                self.subTest(mode=mode_cls.__name__),
+                self.assertRaisesRegex(RuntimeError, error),
+            ):
+                mode_cls().__torch_dispatch__(
+                    torch.ops.higher_order.while_loop,
+                    (),
+                    args,
+                    {"unexpected": True},
+                )
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
+    def test_while_loop_cudagraph_body_pytree_mismatch_error(self):
+        def cond_fn(iteration):
+            return iteration < 1
+
+        def body_fn(iteration):
+            return {"iteration": iteration + 1}
+
+        iteration = torch.zeros((), dtype=torch.int64, device="cuda")
+        graph = torch.cuda.CUDAGraph()
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "body_fn should return the same pytree structure as carried_inputs",
+        ):
+            with (
+                torch.cuda.graph(graph),
+                CUDAGraphCaptureControlFlowOpDispatchMode(),
+            ):
+                torch.ops.higher_order.while_loop(cond_fn, body_fn, (iteration,), ())
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
     def test_cond_inside_while_loop_cudagraphs(self):
         def f(x, limit):
             init_iter = torch.zeros((), dtype=torch.int64, device=x.device)
