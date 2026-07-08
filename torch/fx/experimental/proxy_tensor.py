@@ -573,6 +573,13 @@ def _sympy_handlers() -> dict[type[sympy.Expr], Callable[..., Any]]:
             handlers[k] = _nary_sym_max
         elif v == "minimum":
             handlers[k] = _nary_sym_min
+        # sympy.Pow / PowByNatural map to the interp name "pow_by_natural",
+        # which has no operator.* equivalent. sympy canonicalizes x * x into
+        # Pow(x, 2), so without this _build_proxy_for_sym_expr cannot rebuild
+        # any repeated-symbol product (e.g. a reduction numel s0 * s1**2 when
+        # two equal dims duck-share a symbol).
+        elif v == "pow_by_natural":
+            handlers[k] = operator.pow
 
     # sympy.Add is n-ary (e.g. Add(a, b, c)) but operator.add is binary.
     # torch.sym_sum handles n-ary integer addition and accepts both
