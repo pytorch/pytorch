@@ -1496,7 +1496,6 @@ kernel void luStreamUpdate(
     constant uint2& dims [[buffer(3)]],
     constant uint4& params [[buffer(4)]], // d0, j, RPT, searchOnly
     device float* scratch [[buffer(6)]],
-    uint3 tid3 [[thread_position_in_threadgroup]],
     uint3 tgid [[threadgroup_position_in_grid]],
     uint warp_id [[simdgroup_index_in_threadgroup]],
     uint lane [[thread_index_in_simdgroup]]) {
