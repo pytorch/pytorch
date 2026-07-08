@@ -26,7 +26,9 @@ from torch.utils._sympy.functions import (
     Max as TorchSymMax,
     Min as TorchSymMin,
     LShift,
+    Mod,
     OpaqueUnaryFn_cos,
+    PythonMod,
     RShift,
     BitwiseFn_bitwise_and,
     simple_floordiv_gcd,
@@ -41,7 +43,7 @@ from torch.utils._sympy.reference import (
 )
 from torch.utils._sympy.singleton_int import SingletonInt
 from torch.utils._sympy.solve import INEQUALITY_TYPES, mirror_rel_op, try_solve
-from torch.utils._sympy.value_ranges import ValueRanges
+from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 from torch._inductor.bounds import ValueRangeAnalysis
 from torch._inductor.index_propagation import TypedExpr
 
@@ -501,6 +503,50 @@ class TestValueRanges(TestCase):
                 y_range = ValueRanges(y, y)
                 r = ValueRangeAnalysis.python_mod(ValueRanges(x, x), y_range)
                 self.assertIn(result, r, f"x={x}, y={y}, result={result}, range={r}")
+
+    def test_bound_sympy_mod_subtraction(self):
+        s0 = sympy.Symbol("s0", integer=True)
+        s1 = sympy.Symbol("s1", integer=True)
+        ranges = {s0: ValueRanges(2, int_oo), s1: ValueRanges(1, int_oo)}
+
+        for mod in (Mod, PythonMod, sympy.Mod):
+            with self.subTest(mod=mod.__name__):
+                self.assertEqual(
+                    bound_sympy(s0 - mod(s0, 8), ranges), ValueRanges(0, int_oo)
+                )
+                self.assertEqual(
+                    bound_sympy(1 + s0 - mod(s0, 8), ranges),
+                    ValueRanges(1, int_oo),
+                )
+                self.assertEqual(
+                    bound_sympy(2 * s0 - 2 * mod(s0, 8), ranges),
+                    ValueRanges(0, int_oo),
+                )
+                self.assertEqual(
+                    bound_sympy(s0 - mod(s0, s1), ranges), ValueRanges(0, int_oo)
+                )
+                self.assertEqual(
+                    bound_sympy(
+                        (2 * s0 + 1) - mod(2 * s0 + 1, 8),
+                        ranges,
+                    ),
+                    ValueRanges(0, int_oo),
+                )
+                self.assertEqual(
+                    bound_sympy(mod(s0, 8) - s0, ranges), ValueRanges(-int_oo, 0)
+                )
+
+    def test_bound_sympy_python_mod_subtraction_negative_base(self):
+        s0 = sympy.Symbol("s0", integer=True)
+        ranges = {s0: ValueRanges(-2, int_oo)}
+
+        self.assertEqual(
+            bound_sympy(s0 - PythonMod(s0, 8), ranges), ValueRanges(-8, int_oo)
+        )
+        self.assertEqual(
+            bound_sympy(1 + s0 - PythonMod(s0, 8), ranges),
+            ValueRanges(-7, int_oo),
+        )
 
 
 class TestSympyInterp(TestCase):
