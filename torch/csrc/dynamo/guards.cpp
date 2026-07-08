@@ -9,6 +9,8 @@
 #include <c10/util/Synchronized.h>
 #include <c10/util/flat_hash_map.h>
 #include <fmt/format.h>
+#include <torch/csrc/Device.h>
+#include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/dynamo/guards.h>
@@ -20,6 +22,7 @@
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/python_symnode.h>
 #include <torch/csrc/utils/pythoncapi_compat.h>
+#include <torch/csrc/utils/tensor_memoryformats.h>
 #include <torch/extension.h>
 #include <cstdint>
 
@@ -141,6 +144,36 @@ bool get_is_in_mode_without_ignore_compile_internals() {
   }                                         \
   self.insert_leaf_guard(name);
 
+static std::string py_type_repr(PyTypeObject* pytype) {
+  PyObject* type_str = PyObject_Str(reinterpret_cast<PyObject*>(pytype));
+  if (!type_str) {
+    PyErr_Clear();
+    return "a different type";
+  }
+
+  const char* type_str_utf8 = PyUnicode_AsUTF8(type_str);
+  if (!type_str_utf8) {
+    PyErr_Clear();
+    Py_DECREF(type_str);
+    return "a different type";
+  }
+
+  std::string result(type_str_utf8);
+  Py_DECREF(type_str);
+  return result;
+}
+
+static std::string format_tensor_type_mismatch(
+    const std::string& tensor_name,
+    PyTypeObject* expected_type,
+    PyTypeObject* actual_type) {
+  std::stringstream fail_reason;
+  fail_reason << "expected type of '" << tensor_name << "' to be "
+              << py_type_repr(expected_type) << ", but found "
+              << py_type_repr(actual_type);
+  return fail_reason.str();
+}
+
 TensorCheck::TensorCheck(
     const LocalState& state,
     PyTypeObject* pt,
@@ -250,23 +283,23 @@ std::string TensorCheck::check_verbose(
     fail_reason << "dispatch key set mismatch. expected "
                 << c10::DispatchKeySet(c10::DispatchKeySet::RAW, dispatch_key_)
                 << ", actual " << state.apply(v.key_set());
-    return fail_reason.str();
+    return std::move(fail_reason).str();
   } else if (dtype_ != v.dtype().toScalarType()) {
     // return fmt::format("tensor dtype mismatch. expected {}, actual {}",
     // dtype_, v.dtype().toScalarType());
     fail_reason << "dtype mismatch. expected " << dtype_ << ", actual "
                 << v.dtype().toScalarType();
-    return fail_reason.str();
+    return std::move(fail_reason).str();
   } else if (device_index_ != v.device().index()) {
     fail_reason << "Tensor device index mismatch. Expected device index to be "
                 << device_index_ << ", actual " << v.device().index();
-    return fail_reason.str();
+    return std::move(fail_reason).str();
   } else if (requires_grad_ != v.requires_grad()) {
     // return fmt::format("tensor requires_grad mismatch. expected {}",
     // requires_grad_);
     fail_reason << "requires_grad mismatch. expected requires_grad="
                 << requires_grad_;
-    return fail_reason.str();
+    return std::move(fail_reason).str();
   }
   auto ndim = v.ndimension();
   if (ndim != dim_) {
@@ -274,7 +307,7 @@ std::string TensorCheck::check_verbose(
     // sizes_.size(), ndim);
     fail_reason << "rank mismatch. expected " << sizes_.size() << ", actual "
                 << ndim;
-    return fail_reason.str();
+    return std::move(fail_reason).str();
   }
   const auto& sizes = v.sym_sizes();
   for (auto i : c10::irange(ndim)) {
@@ -282,7 +315,7 @@ std::string TensorCheck::check_verbose(
     if (known_size.has_value() && (known_size.value() != sizes[i])) {
       fail_reason << "size mismatch at index " << i << ". expected "
                   << known_size.value() << ", actual " << sizes[i];
-      return fail_reason.str();
+      return std::move(fail_reason).str();
     }
   }
   const bool supports_stride =
@@ -294,7 +327,7 @@ std::string TensorCheck::check_verbose(
       if (known_stride.has_value() && known_stride.value() != strides[i]) {
         fail_reason << "stride mismatch at index " << i << ". expected "
                     << known_stride.value() << ", actual " << strides[i];
-        return fail_reason.str();
+        return std::move(fail_reason).str();
       }
     }
   }
@@ -331,13 +364,7 @@ static PyObject* TensorGuards_new(
 
 static std::vector<std::optional<c10::SymInt>> wrapIntegersInOptional(
     const c10::SymIntArrayRef& intArray) {
-  std::vector<std::optional<c10::SymInt>> optVec(intArray.size());
-  std::transform(
-      intArray.begin(),
-      intArray.end(),
-      optVec.begin(),
-      [](const c10::SymInt& value) { return value; });
-  return optVec;
+  return {intArray.begin(), intArray.end()};
 }
 
 static std::vector<std::optional<c10::SymInt>> pyListToVecOptInt(
@@ -538,18 +565,9 @@ PyObject* TensorGuards_check_verbose(
   for (auto i : c10::irange(len)) {
     PyObject* item = PyTuple_GET_ITEM(args, i);
     if (Py_TYPE(item) != checks[i].pytype) {
-      std::stringstream fail_reason;
-      PyObject* type_str =
-          PyObject_Str(reinterpret_cast<PyObject*>(Py_TYPE(item)));
-      fail_reason << "expected type of '" << tensor_check_names[i]
-                  << "' to be a tensor type, ";
-      if (!type_str) {
-        fail_reason << "but found a different type";
-      } else {
-        fail_reason << "' but found " << PyUnicode_AsUTF8(type_str);
-        Py_DECREF(type_str);
-      }
-      return Py_BuildValue("s", fail_reason.str().c_str());
+      std::string fail_reason = format_tensor_type_mismatch(
+          tensor_check_names[i], checks[i].pytype, Py_TYPE(item));
+      return Py_BuildValue("s", fail_reason.c_str());
     }
 
     auto insertion = unique_tensors.insert({item, nullptr});
@@ -558,7 +576,7 @@ PyObject* TensorGuards_check_verbose(
       fail_reason << "Duplicate tensor found where not expected! ";
       fail_reason << tensor_check_names[i]
                   << "should not alias to anything, but is aliased";
-      return Py_BuildValue("s", fail_reason.str().c_str());
+      return Py_BuildValue("s", std::move(fail_reason).str().c_str());
     }
     std::string fail_reason = checks[i].check_verbose(
         state, THPVariable_Unpack(item), tensor_check_names[i]);
@@ -950,7 +968,7 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
     if (op_name) {
       msg << " for op: " << op_name;
     }
-    PyErr_SetString(PyExc_TypeError, msg.str().c_str());
+    PyErr_SetString(PyExc_TypeError, std::move(msg).str().c_str());
     return nullptr;
   }
   if (!PyTuple_CheckExact(size) || !PyTuple_CheckExact(stride)) {
@@ -959,7 +977,7 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
     if (op_name) {
       msg << " for op: " << op_name;
     }
-    PyErr_SetString(PyExc_TypeError, msg.str().c_str());
+    PyErr_SetString(PyExc_TypeError, std::move(msg).str().c_str());
     return nullptr;
   }
   at::Tensor tensor = THPVariable_Unpack(item);
@@ -970,7 +988,7 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
     if (op_name) {
       msg << " for op: " << op_name;
     }
-    PyErr_SetString(PyExc_AssertionError, msg.str().c_str());
+    PyErr_SetString(PyExc_AssertionError, std::move(msg).str().c_str());
     return nullptr;
   }
 
@@ -1005,7 +1023,7 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
     msg << "\nThis error most often comes from a incorrect fake (aka meta) kernel for a custom op.";
     msg << "\nUse torch.library.opcheck to test your custom op.";
     msg << "\nSee https://pytorch.org/docs/stable/library.html#torch.library.opcheck";
-    PyErr_SetString(PyExc_AssertionError, msg.str().c_str());
+    PyErr_SetString(PyExc_AssertionError, std::move(msg).str().c_str());
     return nullptr;
   }
 
@@ -1030,7 +1048,7 @@ static PyObject* assert_alignment(PyObject* dummy, PyObject* args) {
     if (op_name) {
       msg << " for op: " << op_name;
     }
-    PyErr_SetString(PyExc_TypeError, msg.str().c_str());
+    PyErr_SetString(PyExc_TypeError, std::move(msg).str().c_str());
     return nullptr;
   }
   if (alignment == 0) {
@@ -1039,7 +1057,7 @@ static PyObject* assert_alignment(PyObject* dummy, PyObject* args) {
     if (op_name) {
       msg << " in op: " << op_name;
     }
-    PyErr_SetString(PyExc_AssertionError, msg.str().c_str());
+    PyErr_SetString(PyExc_AssertionError, std::move(msg).str().c_str());
     return nullptr;
   }
 
@@ -1055,7 +1073,7 @@ static PyObject* assert_alignment(PyObject* dummy, PyObject* args) {
     msg << "\nExpect the tensor to be " << alignment
         << " bytes aligned. Fail due to storage_offset=" << storage_offset
         << " itemsize=" << itemsize;
-    PyErr_SetString(PyExc_AssertionError, msg.str().c_str());
+    PyErr_SetString(PyExc_AssertionError, std::move(msg).str().c_str());
     return nullptr;
   }
 
@@ -1578,11 +1596,10 @@ class StorageOverlapChecker {
       size_t size) {
     std::vector<Tensor> tensors;
     tensors.reserve(size);
-    std::transform(
-        objects.begin(),
-        objects.end(),
-        std::back_inserter(tensors),
-        [=](PyObject* obj) { return THPVariable_Unpack(obj); });
+    std::ranges::transform(
+        objects, std::back_inserter(tensors), [](PyObject* obj) {
+          return THPVariable_Unpack(obj);
+        });
     return tensors;
   }
 
@@ -1634,7 +1651,7 @@ class GuardDebugInfo {
        << "verbose_code_parts=" << verbose_code_parts << ",\n"
        << "num_guards_executed=" << num_guards_executed << ",\n"
        << "user_stack=" << user_stack << ")\n";
-    return ss.str();
+    return std::move(ss).str();
   }
 
   // Whether the guard passed or failed.
@@ -2111,7 +2128,13 @@ class LENGTH_CHECK : public LeafGuard {
   bool check_nopybind(PyObject* value) override { // borrowed ref
     // PySequence_Length returns -1 if the object is not a sequence. So, we
     // don't have to test for PySequence_Check.
-    return PySequence_Length(value) == _length;
+    Py_ssize_t length{
+        PyAnySet_Check(value) ? PySet_Size(value) : PySequence_Length(value)};
+    if (length == -1) {
+      PyErr_Clear();
+      return false;
+    }
+    return length == _length;
   }
 
  private:
@@ -2713,7 +2736,7 @@ class SYMBOLIC_SHAPE_GUARD : public RelationalGuard {
         msg += std::to_string(v) + ",";
       }
       msg.pop_back();
-      msg += "\"";
+      msg += '"';
       auto msgs = py::list();
       for (auto code_part : verbose_code_parts()) {
         msgs.append(code_part);
@@ -3785,25 +3808,45 @@ class GuardManager {
   }
 
   // Caller must hold dict_to_guard_managers lock.
+  //
+  // This function does two things; they must be gated differently.
+  //
+  // 1) Map cleanup: remove `this` from `map[dict]` for every dict this
+  //    manager watched. Must always run -- including when
+  //    `_disable_dict_tag_matching` is already true -- otherwise a later
+  //    watch callback on a still-live dict would dereference the freed
+  //    manager (heap-use-after-free at the `_disable_dict_tag_matching`
+  //    read in this function).
+  //
+  // 2) PyDict_Unwatch + erase of the dict-keyed map entry: only safe
+  //    when the dict pointer is still alive. The watch callback sets
+  //    `_disable_dict_tag_matching = true` on every event, including
+  //    `PyDict_EVENT_DEALLOCATED`. Once the flag is set, dict pointers
+  //    in our map may have been freed, so PyDict_Unwatch on them would
+  //    crash. When the flag is true, the dict's eventual deallocation
+  //    will tear down the watch automatically; skipping PyDict_Unwatch
+  //    here only loses an early-cleanup optimisation.
   void unwatch_all_saved_dict_pointers(DictToGuardManagersMap& map) {
 #if IS_PYTHON_3_12_PLUS
-    if (!_disable_dict_tag_matching) {
-      for (auto& value_stashed_pointers : _dict_pointers) {
-        auto stashed_pointers = value_stashed_pointers.second;
+    for (auto& value_stashed_pointers : _dict_pointers) {
+      auto stashed_pointers = value_stashed_pointers.second;
 
-        for (auto& stashed_pointer : stashed_pointers) {
-          PyObject* dict_pointer = stashed_pointer.first;
+      for (auto& stashed_pointer : stashed_pointers) {
+        PyObject* dict_pointer = stashed_pointer.first;
+        auto& managers = map[dict_pointer];
 
-          auto it = std::find(
-              map[dict_pointer].begin(), map[dict_pointer].end(), this);
-          if (it != map[dict_pointer].end()) {
-            map[dict_pointer].erase(it);
-          }
+        // (1) Always: remove this manager from the per-dict list.
+        auto it = std::find(managers.begin(), managers.end(), this);
+        if (it != managers.end()) {
+          managers.erase(it);
+        }
 
-          if (map[dict_pointer].empty()) {
-            PyDict_Unwatch(dict_recursive_tag_watcher_id, dict_pointer);
-            map.erase(dict_pointer);
-          }
+        // (2) Only when the dict is still guaranteed alive: unwatch and
+        // erase the now-empty map entry. The map.erase below invalidates
+        // the `managers` reference, so it must be the last use.
+        if (!_disable_dict_tag_matching && managers.empty()) {
+          PyDict_Unwatch(dict_recursive_tag_watcher_id, dict_pointer);
+          map.erase(dict_pointer);
         }
       }
     }
@@ -3860,7 +3903,7 @@ class GuardManager {
 
     // failed_on_first is just an optimization to avoid sorting if we are
     // failing on the first accessor itself. This is helpful when we have
-    // already sorted the guards once, and dont need to sort again.
+    // already sorted the guards once, and don't need to sort again.
     if (!result && !failed_on_first) {
       // Inplace sort the child guards by fail count. This moves the guard
       // with higher fail count earlier in the queue, and enables fail fast
@@ -3945,7 +3988,11 @@ class GuardManager {
     return GuardDebugInfo(true, num_guards_executed);
   }
 
-  bool has_no_accessors() {
+  bool has_no_leaf_guards() const {
+    return _leaf_guards.empty();
+  }
+
+  bool has_no_accessors() const {
     return _accessors.empty();
   }
 
@@ -4110,6 +4157,14 @@ class RootGuardManager : public GuardManager {
   // This is the root node, set its _root member to nullptr
   RootGuardManager() : GuardManager(this, "L") {}
 
+  LocalState get_local_state() const {
+    return _local_state;
+  }
+
+  void set_local_state(const LocalState& local_state) {
+    _local_state = local_state;
+  }
+
   void add_no_tensor_aliasing_guard(
       std::shared_ptr<RelationalGuard> no_tensor_aliasing_guard) {
     // stash a pointer to the _no_tensor_aliasing_guard
@@ -4266,18 +4321,27 @@ class RootGuardManager : public GuardManager {
     _epilogue_lambda_guards.emplace_back(std::move(leaf_guard));
   }
 
+  bool has_no_guards() const {
+    return has_no_leaf_guards() && has_no_accessors() &&
+        _epilogue_lambda_guards.empty();
+  }
+
   void set_init_local_state_flag() {
     _init_local_state = true;
   }
 
   // See note on [Ownership with cloning]
-  RootGuardManager* clone_manager(const py::function& clone_filter_fn) {
+  std::unique_ptr<RootGuardManager> clone_manager(
+      const py::function& clone_filter_fn) {
     // Use clone_filter_fn
     if (!py::cast<bool>(clone_filter_fn(this))) {
       return nullptr;
     }
-    RootGuardManager* cloned_root = new RootGuardManager();
-    clone_common(cloned_root, cloned_root, clone_filter_fn);
+    std::unique_ptr<RootGuardManager> cloned_root =
+        std::make_unique<RootGuardManager>();
+    cloned_root->_local_state = _local_state;
+    cloned_root->_init_local_state = _init_local_state;
+    clone_common(cloned_root.get(), cloned_root.get(), clone_filter_fn);
     for (const auto& guard : _epilogue_lambda_guards) {
       cloned_root->_epilogue_lambda_guards.emplace_back(guard);
     }
@@ -5008,9 +5072,8 @@ class TENSOR_MATCH : public LeafGuard {
     tensor_dims_stride = tensor_dims_stride.empty()
         ? wrapIntegersInOptional(tensor.sym_strides())
         : tensor_dims_stride;
-    LocalState state;
     _tensor_check = std::make_unique<TensorCheck>(
-        state,
+        _root_guard_manager->_local_state,
         (PyTypeObject*)pytype.ptr(),
         std::move(tensor),
         dispatch_keys.cast<c10::DispatchKeySet>(),
@@ -5030,18 +5093,11 @@ class TENSOR_MATCH : public LeafGuard {
       PyObject* value) override { // borrowed ref
 
     if (Py_TYPE(value) != _tensor_check->pytype) {
-      std::stringstream fail_reason;
-      PyObject* type_str =
-          PyObject_Str(reinterpret_cast<PyObject*>(Py_TYPE(value)));
-      fail_reason << "expected type of '" << _tensor_name
-                  << "' to be a tensor type, ";
-      if (!type_str) {
-        fail_reason << "but found a different type";
-      } else {
-        fail_reason << "' but found " << PyUnicode_AsUTF8(type_str);
-        Py_DECREF(type_str);
-      }
-      return GuardDebugInfo(false, fail_reason.str(), 0);
+      return GuardDebugInfo(
+          false,
+          format_tensor_type_mismatch(
+              _tensor_name, _tensor_check->pytype, Py_TYPE(value)),
+          0);
     }
 
     std::string fail_reason = _tensor_check->check_verbose(
@@ -5461,9 +5517,10 @@ class FrameLocalsGuardAccessor : public GuardAccessor {
   }
 
   std::string repr() const override {
-    return "FrameLocalsGuardAccessor(key=" +
-        py::repr(_key).cast<std::string>() +
-        ", framelocals_idx=" + std::to_string(_framelocals_idx) + ")";
+    return fmt::format(
+        "FrameLocalsGuardAccessor(key={}, framelocals_idx={})",
+        py::repr(_key).cast<std::string>(),
+        _framelocals_idx);
   }
 
  public: // cloning functions
@@ -5630,7 +5687,7 @@ class ListGetItemGuardAccessor : public GuardAccessor {
   }
 
   std::string repr() const override {
-    return "ListGetItemGuardAccessor(" + std::to_string(_index) + ")";
+    return fmt::format("ListGetItemGuardAccessor({})", _index);
   }
 
  public: // cloning functions
@@ -5655,8 +5712,38 @@ class ListGetItemGuardAccessor : public GuardAccessor {
   Py_ssize_t _index{-1};
 };
 
+static PyObject* set_getitem_new_ref(PyObject* obj, Py_ssize_t index) {
+  if (index < 0) {
+    return nullptr;
+  }
+
+  PyObject* iter = nullptr;
+  if (PySet_Check(obj)) {
+    iter = PySet_Type.tp_iter(obj);
+  } else if (PyFrozenSet_Check(obj)) {
+    iter = PyFrozenSet_Type.tp_iter(obj);
+  } else {
+    iter = PyObject_GetIter(obj);
+  }
+  if (iter == nullptr) {
+    return nullptr;
+  }
+
+  PyObject* item = nullptr;
+  for (Py_ssize_t i = 0; i <= index; i++) {
+    Py_XDECREF(item);
+    item = PyIter_Next(iter);
+    if (item == nullptr) {
+      Py_DECREF(iter);
+      return nullptr;
+    }
+  }
+  Py_DECREF(iter);
+  return item;
+}
+
 /**
- * Represents set[index] accessor by converting the set into a list.
+ * Represents set[index] accessor by walking the set iterator.
  */
 class SetGetItemGuardAccessor : public GuardAccessor {
  public:
@@ -5679,29 +5766,28 @@ class SetGetItemGuardAccessor : public GuardAccessor {
   bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
       override { // borrowed ref
 
-    PyObject* lst = PySequence_List(obj);
-    PyObject* x = PyList_GetItem(lst, _index); // borrowed ref
-    Py_XDECREF(lst);
+    PyObject* x = set_getitem_new_ref(obj, _index);
     if (x == nullptr) {
       PyErr_Clear();
       return false;
     }
-    bool result = _guard_manager->check_nopybind(x);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    bool result{_guard_manager->check_nopybind(x)};
+    Py_DECREF(x);
     return result;
   }
 
   GuardDebugInfo check_verbose_nopybind(
       PyObject* obj) override { // borrowed ref
 
-    PyObject* lst = PySequence_List(obj);
-    PyObject* x = PyList_GetItem(lst, _index); // borrowed ref
-    Py_XDECREF(lst);
+    PyObject* x = set_getitem_new_ref(obj, _index);
 
     if (x == nullptr) {
       PyErr_Clear();
       return GuardDebugInfo(false, 0);
     }
-    GuardDebugInfo result = _guard_manager->check_verbose_nopybind(x);
+    GuardDebugInfo result{_guard_manager->check_verbose_nopybind(x)};
+    Py_DECREF(x);
     return result;
   }
 
@@ -5777,7 +5863,7 @@ class TupleGetItemGuardAccessor : public GuardAccessor {
   }
 
   std::string repr() const override {
-    return "TupleGetItemGuardAccessor(" + std::to_string(_index) + ")";
+    return fmt::format("TupleGetItemGuardAccessor({})", _index);
   }
 
  public: // cloning functions
@@ -5922,8 +6008,8 @@ class TensorPropertyGuardAccessor : public GuardAccessor {
 
   std::string repr() const override {
     // Helpful when printing GuardManager tree structure.
-    return "TensorPropertyGuardAccessor<" + to_string(_prop) + +">(" +
-        std::to_string(_index) + ")";
+    return fmt::format(
+        "TensorPropertyGuardAccessor<{}>({})", to_string(_prop), _index);
   }
 
  public: // cloning functions
@@ -6538,7 +6624,7 @@ class TupleIteratorGetItemAccessor : public GuardAccessor {
   }
 
   std::string repr() const override {
-    return "TupleIteratorGetItemAccessor(" + std::to_string(_index) + ")";
+    return fmt::format("TupleIteratorGetItemAccessor({})", _index);
   }
 
  public: // cloning functions
@@ -7248,11 +7334,34 @@ double profile_guard_manager(
 
 } // namespace
 
+// These helpers are exported to Python as raw function pointers on the
+// torch._C._dynamo.guards module; see the grouped PyModule_AddObject calls in
+// torch_c_dynamo_guards_init below for the rationale.
 static void* _torchinductor_pyobject_tensor_data_ptr(PyObject* obj) {
   TORCH_CHECK(
       obj != nullptr && (THPVariable_CheckExact(obj) || THPVariable_Check(obj)),
       "_torchinductor_pyobject_tensor_data_ptr: non-tensor input");
   return THPVariable_Unpack(obj).data_ptr();
+}
+
+static PyObject* _torchinductor_thp_device_new(
+    int device_type,
+    int device_index) {
+  return THPDevice_New(
+      c10::Device(static_cast<c10::DeviceType>(device_type), device_index));
+}
+
+static PyObject* _torchinductor_get_thp_dtype(int dtype) {
+  return Py_NewRef(torch::getTHPDtype(static_cast<c10::ScalarType>(dtype)));
+}
+
+static PyObject* _torchinductor_get_thp_layout(int layout) {
+  return Py_NewRef(torch::getTHPLayout(static_cast<c10::Layout>(layout)));
+}
+
+static PyObject* _torchinductor_get_thp_memory_format(int memory_format) {
+  return Py_NewRef(torch::utils::getTHPMemoryFormat(
+      static_cast<c10::MemoryFormat>(memory_format)));
 }
 
 void* convert_to_root_guard_manager(py::object root) {
@@ -7277,6 +7386,13 @@ bool run_root_guard_manager(void* root, FrameLocalsMapping* f_locals) {
 #endif
 
   return ((RootGuardManager*)root)->check_nopybind(f_locals);
+}
+
+bool root_guard_manager_has_no_guards(void* root) {
+  if (root == nullptr) {
+    return false;
+  }
+  return ((RootGuardManager*)root)->has_no_guards();
 }
 
 PyObject* torch_c_dynamo_guards_init() {
@@ -7329,40 +7445,37 @@ PyObject* torch_c_dynamo_guards_init() {
     return nullptr;
   }
 
-  // We expose the address of _torchinductor_pyobject_tensor_data_ptr in order
-  // to allow manual linking in our generated TorchInductor Python bindings.
-  // While regular linking works in most cases, it does not work properly in
-  // fbcode due to janky build setup there.
-  if (PyModule_AddObject(
-          m,
+  // Expose helper function pointers on the torch._C._dynamo.guards module so
+  // TorchInductor cpp_wrapper generated code can resolve these libtorch_python
+  // helpers at runtime instead of at link time. This is required in fbcode,
+  // where libtorch_python symbols are absent from the executable's dynamic
+  // symbol table, so the generated JIT .so cannot link them directly; it reads
+  // the pointers back via PyLong_AsVoidPtr (see the torch_python_* wrappers in
+  // torch/csrc/inductor/cpp_wrapper/common.h).
+  const auto expose_inductor_symbol = [&](const char* name, auto fn) {
+    return PyModule_AddObject(
+               m, name, PyLong_FromVoidPtr(reinterpret_cast<void*>(fn))) >= 0;
+  };
+  if (!expose_inductor_symbol(
           "_torchinductor_pyobject_tensor_data_ptr",
-          PyLong_FromVoidPtr(reinterpret_cast<void*>(
-              &_torchinductor_pyobject_tensor_data_ptr))) < 0) {
+          &_torchinductor_pyobject_tensor_data_ptr) ||
+      !expose_inductor_symbol(
+          "_torchinductor_thp_device_new", &_torchinductor_thp_device_new) ||
+      !expose_inductor_symbol(
+          "_torchinductor_get_thp_dtype", &_torchinductor_get_thp_dtype) ||
+      !expose_inductor_symbol(
+          "_torchinductor_get_thp_layout", &_torchinductor_get_thp_layout) ||
+      !expose_inductor_symbol(
+          "_torchinductor_get_thp_memory_format",
+          &_torchinductor_get_thp_memory_format) ||
+      !expose_inductor_symbol(
+          "_torchinductor_thp_variable_wrap",
+          static_cast<PyObject* (*)(const at::TensorBase&)>(
+              &THPVariable_Wrap)) ||
+      !expose_inductor_symbol(
+          "_torchinductor_thputils_unpack_int",
+          static_cast<int32_t (*)(PyObject*)>(&THPUtils_unpackInt))) {
     return nullptr;
-  }
-
-  // Expose THPVariable_Wrap for cpp_wrapper inductor, for fbcode
-  {
-    using WrapFn = PyObject* (*)(const at::TensorBase&);
-    WrapFn fn = &THPVariable_Wrap;
-    if (PyModule_AddObject(
-            m,
-            "_torchinductor_thp_variable_wrap",
-            PyLong_FromVoidPtr(reinterpret_cast<void*>(fn))) < 0) {
-      return nullptr;
-    }
-  }
-
-  // Expose THPUtils_unpackInt for cpp_wrapper inductor, for fbcode
-  {
-    using UnpackFn = int32_t (*)(PyObject*);
-    UnpackFn fn = &THPUtils_unpackInt;
-    if (PyModule_AddObject(
-            m,
-            "_torchinductor_thputils_unpack_int",
-            PyLong_FromVoidPtr(reinterpret_cast<void*>(fn))) < 0) {
-      return nullptr;
-    }
   }
 
   auto py_m = py::handle(m).cast<py::module>();
@@ -7375,6 +7488,31 @@ PyObject* torch_c_dynamo_guards_init() {
       .def_readonly("verbose_code_parts", &GuardDebugInfo::verbose_code_parts)
       .def_readonly("num_guards_executed", &GuardDebugInfo::num_guards_executed)
       .def_readonly("user_stack", &GuardDebugInfo::user_stack);
+
+  py::class_<LocalState>(py_m, "LocalState")
+      .def(py::init<>())
+      .def(py::pickle(
+          [](const LocalState& state) {
+            return py::make_tuple(
+                state.dispatch_modifier.included_.raw_repr(),
+                state.dispatch_modifier.excluded_.raw_repr(),
+                state.override_dispatch_key_set.raw_repr(),
+                state.grad_mode_enabled,
+                state.should_mask_python_keys);
+          },
+          [](const py::tuple& t) {
+            TORCH_CHECK(t.size() == 5, "LocalState expected 5 values");
+            LocalState state;
+            state.dispatch_modifier.included_ = c10::DispatchKeySet(
+                c10::DispatchKeySet::RAW, t[0].cast<uint64_t>());
+            state.dispatch_modifier.excluded_ = c10::DispatchKeySet(
+                c10::DispatchKeySet::RAW, t[1].cast<uint64_t>());
+            state.override_dispatch_key_set = c10::DispatchKeySet(
+                c10::DispatchKeySet::RAW, t[2].cast<uint64_t>());
+            state.grad_mode_enabled = t[3].cast<bool>();
+            state.should_mask_python_keys = t[4].cast<bool>();
+            return state;
+          }));
 
   // Leaf Guards
   py::class_<LeafGuard, std::shared_ptr<LeafGuard>>(py_m, "LeafGuard")
@@ -8462,10 +8600,9 @@ PyObject* torch_c_dynamo_guards_init() {
       .def("check", &RootGuardManager::check)
       .def("check_verbose", &RootGuardManager::check_verbose)
       .def("attach_compile_id", &RootGuardManager::attach_compile_id)
-      .def(
-          "clone_manager",
-          &RootGuardManager::clone_manager,
-          py::return_value_policy::reference)
+      .def("get_local_state", &RootGuardManager::get_local_state)
+      .def("set_local_state", &RootGuardManager::set_local_state)
+      .def("clone_manager", &RootGuardManager::clone_manager)
       // return by reference because GuardManager has the ownership of leaf
       // guards
       .def(

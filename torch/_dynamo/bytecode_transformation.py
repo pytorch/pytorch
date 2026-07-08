@@ -18,6 +18,7 @@ import dataclasses
 import dis
 import functools
 import itertools
+import re
 import sys
 import types
 import uuid
@@ -529,6 +530,53 @@ def create_swap(n: int) -> list[Instruction]:
         create_instruction("POP_TOP"),
         create_instruction("UNPACK_SEQUENCE", arg=n - 1),
     ]
+
+
+def get_call_callable_depth(opname: str, arg: int) -> int:
+    """Return the depth of the callable from TOS for a call instruction.
+
+    Depth is 1-indexed: TOS = 1, below-TOS = 2, etc.  This encodes the
+    per-version stack layouts for every call instruction variant.
+
+    Note: on 3.11-3.12, CPython's CALL can have either NULL or self at the
+    bottom depending on function vs method call.  Dynamo's LOAD_METHOD
+    normalizes method calls to NULL + bound_method, so the bottom is always
+    NULL and the callable is always at depth arg + 1.
+
+    Stack layouts (bottom-to-top within the call's frame):
+      CALL (3.13+):            callable  NULL  arg0 ... argN-1
+      CALL (3.11-3.12):        NULL  callable  arg0 ... argN-1
+      CALL_KW (3.13+):         callable  NULL  arg0 ... argN-1  kw_names
+      CALL_FUNCTION (3.10):    callable  arg0 ... argN-1
+      CALL_FUNCTION_KW (3.10): callable  arg0 ... argN-1  kw_names
+      CALL_FUNCTION_EX:
+        3.14+:                 callable  NULL  args_tuple  kwargs_or_null
+        3.13:                  callable  NULL  args_tuple [kwargs_dict]
+        3.11-3.12:             NULL  callable  args_tuple [kwargs_dict]
+        3.10:                  callable  args_tuple [kwargs_dict]
+    """
+    if opname in ("CALL", "CALL_KW"):
+        kw_extra = 1 if opname == "CALL_KW" else 0
+        if sys.version_info >= (3, 13):
+            return arg + 2 + kw_extra
+        else:
+            # 3.11-3.12: NULL is always at bottom (Dynamo normalizes
+            # LOAD_METHOD to NULL + bound_method)
+            return arg + 1 + kw_extra
+    elif opname in ("CALL_FUNCTION", "CALL_FUNCTION_KW"):
+        kw_extra = 1 if opname == "CALL_FUNCTION_KW" else 0
+        return arg + 1 + kw_extra
+    elif opname == "CALL_FUNCTION_EX":
+        if sys.version_info >= (3, 14):
+            return 4
+        elif sys.version_info >= (3, 13):
+            return 3 + (arg & 1)
+        elif sys.version_info >= (3, 11):
+            return 2 + (arg & 1)
+        else:
+            return 2 + (arg & 1)
+    else:
+        raise ValueError(f"not a call instruction: {opname}")
 
 
 def create_binary_slice(
@@ -1673,7 +1721,15 @@ def fix_vars(
                     instructions[i].arg = varnames[instructions[i].argval]
         elif instructions[i].opcode in HAS_NAME:
             if should_compute_arg():
-                instructions[i].arg = get_name_index(instructions[i].argval)
+                arg = get_name_index(instructions[i].argval)
+                if (
+                    sys.version_info >= (3, 15)
+                    and instructions[i].opname == "IMPORT_NAME"
+                ):
+                    arg <<= 2
+                    # Set the second bit to ensure eager imports, since lazy imports are only valid at module scope
+                    arg |= 0x02
+                instructions[i].arg = arg
         elif instructions[i].opcode in HAS_FREE:
             if should_compute_arg():
                 instructions[i].arg = freenames[instructions[i].argval]
@@ -1904,6 +1960,21 @@ def unique_id(name: str, with_uuid: bool = False) -> str:
     if with_uuid:
         ret += f"_{uuid.uuid4()}".replace("-", "_")
     return ret
+
+
+COMPILED_FN_PREFIX = "__compiled_fn"
+_COMPILED_FN_NAME_RE = re.compile(
+    rf"^{COMPILED_FN_PREFIX}_\d+_"
+    r"[0-9a-f]{8}_[0-9a-f]{4}_[0-9a-f]{4}_[0-9a-f]{4}_[0-9a-f]{12}$"
+)
+
+
+def make_compiled_fn_name() -> str:
+    return unique_id(COMPILED_FN_PREFIX, with_uuid=True)
+
+
+def is_compiled_fn_name(name: str) -> bool:
+    return _COMPILED_FN_NAME_RE.fullmatch(name) is not None
 
 
 def is_generator(code: types.CodeType) -> bool:

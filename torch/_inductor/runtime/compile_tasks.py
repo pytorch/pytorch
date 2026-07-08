@@ -12,6 +12,8 @@ from typing import Any, TYPE_CHECKING
 
 from torch._utils_internal import log_triton_builds
 
+from ..utils import apply_subprocess_env, clear_caches
+
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -54,18 +56,26 @@ def _set_triton_ptxas_path() -> None:
 def _set_triton_libdevice_path() -> None:
     """
     Use the CUDA toolkit's libdevice instead of Triton's bundled version.
-    This ensures Triton's pow matches CUDA's powf for bitwise precision.
-    Gated by config.eager_numerics.use_pytorch_libdevice.
+    This ensures Triton's libdevice calls match CUDA eager numerics for bitwise
+    precision.  Gated by config.eager_numerics.use_pytorch_libdevice and by
+    config.emulate_precision_casts, which also requests eager-like numerics.
     """
     from torch._inductor import config
 
-    if not config.eager_numerics.use_pytorch_libdevice:
+    if not (
+        config.eager_numerics.use_pytorch_libdevice or config.emulate_precision_casts
+    ):
         return
 
     _set_triton_libdevice_path_impl()
 
 
 def _set_triton_libdevice_path_impl() -> None:
+    import torch
+
+    if torch.version.cuda is None:
+        return
+
     try:
         from triton import knobs
     except ImportError:
@@ -114,30 +124,105 @@ def _set_triton_libdevice_path_impl() -> None:
         )
 
 
+_WORKER_CACHE_ENV_VARS = ("TORCHINDUCTOR_CACHE_DIR", "TRITON_CACHE_DIR")
+_last_applied_cache_env: dict[str, str | None] | None = None
+
+
+def _apply_subprocess_env_and_clear_caches(extra_env: dict[str, str | None]) -> None:
+    global _last_applied_cache_env
+
+    cache_env = {
+        key: extra_env.get(key) for key in _WORKER_CACHE_ENV_VARS if key in extra_env
+    }
+    if cache_env and cache_env != _last_applied_cache_env:
+        clear_caches()
+        _last_applied_cache_env = cache_env.copy()
+    apply_subprocess_env(extra_env)
+
+
+def _worker_compile_pycodecache_kernel(
+    kernel_name: str,
+    source_code: str,
+    main_suffix: str,
+    extra_env: dict[str, str | None],
+    precompile_metadata: dict[str, Any] | None = None,
+) -> tuple[str, str, int]:
+    """
+    Subprocess worker for PyCodeCache-based kernel compilation.
+
+    Writes source to PyCodeCache, loads the module, validates the entry point,
+    and optionally triggers real GPU compilation (MLIR -> PTX -> CUBIN) via a
+    _precompile entry point. Compiled artifacts are persisted to disk cache so
+    the parent process can load them without recompilation.
+
+    Used by both CuteDSL and NV Universal GEMM backends.
+    """
+    _apply_subprocess_env_and_clear_caches(extra_env)
+
+    start_ns = time.time_ns()
+
+    import torch._inductor.codecache as codecache
+
+    key, path = codecache.PyCodeCache.write(source_code)
+    mod = codecache.PyCodeCache.load_by_key_path(key, path)
+
+    main_func_name = f"{kernel_name}_{main_suffix}"
+    if not hasattr(mod, main_func_name):
+        available = [name for name in dir(mod) if callable(getattr(mod, name))]
+        raise RuntimeError(
+            f"Could not find kernel function '{main_func_name}'. "
+            f"Available callables: {available}"
+        )
+
+    if precompile_metadata is not None:
+        precompile_fn_name = f"{kernel_name}_precompile"
+        precompile_fn = getattr(mod, precompile_fn_name, None)
+        if precompile_fn is not None:
+            precompile_fn(**precompile_metadata)
+        else:
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "Precompile metadata was provided but module has no %s "
+                "— the scheduling layer expected this template to support "
+                "subprocess precompilation. Kernel will compile lazily on "
+                "first call instead.",
+                precompile_fn_name,
+            )
+
+    elapsed_ns = time.time_ns() - start_ns
+    linecache.clearcache()
+    return key, path, elapsed_ns // 1000
+
+
 def _worker_compile_triton(
     load_kernel: Callable[[], CachingAutotuner],
-    extra_env: dict[str, str],
+    extra_env: dict[str, str | None],
     extra_config: dict[str, Any],
 ) -> tuple[CachingAutotuner, int]:
     _set_triton_ptxas_path()
-    os.environ.update(extra_env)
-    # Set libdevice path if passed via env from main process
-    libdevice_path = extra_env.get("TRITON_LIBDEVICE_PATH")
-    if libdevice_path:
+    _apply_subprocess_env_and_clear_caches(extra_env)
+    # Keep Triton's in-process knob in sync with the parent environment, including
+    # clearing stale worker state when the parent no longer has this variable.
+    if "TRITON_LIBDEVICE_PATH" in extra_env:
         try:
             from triton import knobs
 
-            knobs.nvidia.libdevice_path = libdevice_path
+            knobs.nvidia.libdevice_path = extra_env["TRITON_LIBDEVICE_PATH"]
         except ImportError:
             pass
     from torch._inductor import config
+    from torch._inductor.runtime import triton_helpers
 
     with config.patch(extra_config):
         fail = None
         try:
             start_ns = time.time_ns()
-            kernel = load_kernel()
-            kernel.precompile(warm_cache_only=True)
+            # Generated Triton modules set up the GPU driver at import time,
+            # but compile workers only need to warm the compile cache.
+            with triton_helpers.skip_gpu_driver_setup():
+                kernel = load_kernel()
+                kernel.precompile(warm_cache_only=True)
             elapsed_ns = time.time_ns() - start_ns
             kernel.prepare_for_pickle()
             # We can release this memory in the compile subprocesses:

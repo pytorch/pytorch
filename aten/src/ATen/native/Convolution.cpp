@@ -16,6 +16,7 @@
 #include <c10/util/irange.h>
 #include <c10/macros/Macros.h>
 #include <algorithm>
+#include <atomic>
 #include <limits>
 #include <utility>
 
@@ -92,7 +93,7 @@ constexpr int MIOPEN_DIM_MAX = 5;
 namespace at::native {
 
 
-static bool conv_benchmark_empty_cache = true;
+static constinit std::atomic<bool> conv_benchmark_empty_cache{true};
 
 // Check workload to activate fast depthwise FP16 cudnn conv kernels
 template <typename T>
@@ -702,6 +703,10 @@ static void check_shape_forward(const at::Tensor& input,
   if (!transposed) {
     std::vector<T> input_shape;
     std::vector<T> kernel_shape;
+    if (k > 2) {
+      input_shape.reserve(k - 2);
+      kernel_shape.reserve(k - 2);
+    }
     bool kernel_size_correct = true;
 
     if constexpr (std::is_same_v<T, c10::SymInt>) {
@@ -1820,8 +1825,10 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const std::option
   }
 
   // Compute ggO = conv(ggI, w) + conv(i, ggW) + ggb
+  const bool input_nonempty =
+      TORCH_GUARD_OR_TRUE(input.sym_numel().sym_ne(0));
   Tensor ggO;
-  if (input.numel() != 0) {
+  if (input_nonempty) {
     if (ggI.defined()) {
       if (weight.is_cuda()) {
         weight = weight.contiguous();
@@ -1879,7 +1886,7 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const std::option
 
     Tensor gWt;
     // Compute conv
-    if (input.numel() != 0) {
+    if (input_nonempty) {
       if (groups == 1) {
 
         if (gOt.is_cuda()) {
@@ -1933,7 +1940,7 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const std::option
   // Compute gI = convT(gO, ggW) if !transposed
   //         gI = conv(gO, ggw)  if transposed
   Tensor gI;
-  if (input.numel() != 0) {
+  if (input_nonempty) {
     if (ggW.defined()) {
       ConvParams<int64_t> gi_conv_params(params);
       gi_conv_params.transposed = !params.transposed;
@@ -2067,6 +2074,22 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
   params.deterministic = ctx.deterministicCuDNN() || ctx.deterministicAlgorithms();
   params.cudnn_enabled = ctx.userEnabledCuDNN();
   params.allow_tf32 = ctx.allowTF32CuDNN(at::Float32Op::CONV);
+
+  // Unbatched input (no leading batch dim) is supported by the slow dilated
+  // backward kernels, which insert the batch dim internally and return an
+  // unbatched grad_input. Route such inputs directly to them; the generic path
+  // below requires a batch dim. Other backends fall through and raise the usual
+  // dimensionality error.
+  if (!transposed && groups == 1 && (k == 4 || k == 5) &&
+      input.dim() == k - 1 && grad_output.dim() == k - 1) {
+    ConvBackend dilated_backend = select_conv_backend(
+        input.unsqueeze(0), weight, bias_sizes_opt, /*need_backward=*/true, params);
+    if (dilated_backend == ConvBackend::SlowDilated2d ||
+        dilated_backend == ConvBackend::SlowDilated3d) {
+      return _convolution_backward_nogroup_backend(
+          grad_output, input, weight, output_mask, dilated_backend, params);
+    }
+  }
 
   // Validate inputs.
   check_shape_backward(input, weight.sizes(), params);
@@ -2331,11 +2354,11 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
 }
 
 void _cudnn_set_conv_benchmark_empty_cache(bool enable) {
-  conv_benchmark_empty_cache = enable;
+  conv_benchmark_empty_cache.store(enable, std::memory_order_relaxed);
 }
 
 bool _cudnn_get_conv_benchmark_empty_cache() {
-  return conv_benchmark_empty_cache;
+  return conv_benchmark_empty_cache.load(std::memory_order_relaxed);
 }
 
 

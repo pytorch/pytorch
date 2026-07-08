@@ -180,7 +180,7 @@ static std::tuple<Tensor, std::optional<int64_t>> masked_select_batch_rule(
       "vmap: Attempted to vmap over `mask` in torch.masked_select(self, mask) ",
       "We cannot support this because for each batch this would return a ",
       "differently shaped Tensor. "
-      "Please voice your support in https://github.com/pytorch/functorch/issues/256");
+      "Please file an issue at https://github.com/pytorch/pytorch/issues if you need this feature.");
   auto self_ = moveBatchDimToFront(self, self_bdim);
   const auto batch_size = self_.size(0);
   const auto self_logical_rank = rankWithoutBatchDim(self, self_bdim);
@@ -200,7 +200,7 @@ static std::tuple<Tensor, std::optional<int64_t>> masked_select_backward_batch_r
       "vmap: Attempted to vmap over `mask` in torch.masked_select_backward(grad, self, mask) ",
       "We cannot support this because for each batch this would return a ",
       "differently shaped Tensor. "
-      "Please voice your support in https://github.com/pytorch/functorch/issues/256");
+      "Please file an issue at https://github.com/pytorch/pytorch/issues if you need this feature.");
   auto self_ = moveBatchDimToFront(self, self_bdim);
   auto grad_ = moveBatchDimToFront(grad, grad_bdim);
 
@@ -338,6 +338,55 @@ static std::tuple<Tensor, std::optional<int64_t>> log_sigmoid_backward_batch_rul
 
 static Tensor binomial_wrapper(const Tensor& count, const Tensor& prob, std::optional<Generator> gen) {
   return at::binomial(count, prob.contiguous(), std::move(gen)); // Bug in PyTorch, prob shouldn't need to be contiguous
+}
+
+static void masked_fill__Tensor_batch_rule(
+    Tensor& self, std::optional<int64_t> self_bdim,
+    const Tensor& mask, std::optional<int64_t> mask_bdim,
+    const Tensor& value, std::optional<int64_t> value_bdim) {
+  if (!self_bdim && (mask_bdim || value_bdim)) {
+    vmapIncompatibleInplaceError("masked_fill_");
+  }
+
+  auto self_logical_rank = rankWithoutBatchDim(self, self_bdim);
+  auto mask_logical_rank = rankWithoutBatchDim(mask, mask_bdim);
+  auto max_logical_rank = std::max(self_logical_rank, mask_logical_rank);
+
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  auto mask_ = moveBatchDimToFront(mask, mask_bdim);
+
+  self_ = maybePadToLogicalRank(self_, self_bdim, max_logical_rank);
+  mask_ = maybePadToLogicalRank(mask_, mask_bdim, max_logical_rank);
+
+  if (!value_bdim) {
+    self_.masked_fill_(mask_, value);
+    return;
+  }
+
+  TORCH_CHECK(
+    rankWithoutBatchDim(value, value_bdim) == 0,
+    "vmap: masked_fill_(self, mask, value) expects `value` to be a tensor with "
+    "logical rank 0, but got logical rank ",
+    rankWithoutBatchDim(value, value_bdim),
+    ".");
+
+  // when value is batched (0-d --> 1-d after batching)
+  auto value_ = moveBatchDimToFront(value, value_bdim);
+  value_ = maybePadToLogicalRank(value_, value_bdim, max_logical_rank);
+  TORCH_CHECK(
+      !(value_.is_complex() && !self_.is_complex()),
+      "value cannot be converted to type ",
+      self_.scalar_type(),
+      " without overflow");
+  TORCH_CHECK(
+      value_.device() == self_.device() || value_.device().is_cpu(),
+      "masked_fill_: Expected inputs to be on same device");
+  value_ = value_.to(
+      self_.device(),
+      self_.scalar_type(),
+      /*non_blocking=*/false,
+      /*copy=*/false);
+  self_.copy_(at::where(mask_, value_, self_));
 }
 
 TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
@@ -509,6 +558,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT2(clamp_min_, Tensor, SINGLE_ARG(binary_pointwise_inplace_batch_rule<TensorInplaceT, &Tensor::clamp_min_>));
   VMAP_SUPPORT2(clamp_max_, Tensor, SINGLE_ARG(binary_pointwise_inplace_batch_rule<TensorInplaceT, &Tensor::clamp_max_>));
   VMAP_SUPPORT2(masked_fill_, Scalar, SINGLE_ARG(binary_pointwise_inplace_batch_rule<TensorScalarInplaceT, &Tensor::masked_fill_, const Scalar&>));
+  VMAP_SUPPORT2(masked_fill_, Tensor, masked_fill__Tensor_batch_rule);
   VMAP_SUPPORT(copy_, SINGLE_ARG(binary_pointwise_inplace_batch_rule<CopyT, &Tensor::copy_, bool>));
 
 #define COMPARISON_POINTWISE(op) \

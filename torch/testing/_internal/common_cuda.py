@@ -43,6 +43,8 @@ IS_JETSON = LazyVal(lambda: torch.cuda.is_available() and (torch.cuda.get_device
 IS_SM89 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (8, 9))
 IS_SM90 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (9, 0))
 IS_SM100 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (10, 0))
+IS_SM103 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (10, 3))
+IS_SM10X = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 10)
 IS_SM12X = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 12)
 
 @contextlib.contextmanager
@@ -71,7 +73,7 @@ def CDNA2OrLater():
 
 def evaluate_platform_supports_flash_attention():
     if TEST_WITH_ROCM:
-        arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950"]
+        arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950", "gfx1250"]
         if os.environ.get("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "0") != "0":
             arch_list += ["gfx1101", "gfx1102", "gfx1150", "gfx1151", "gfx1200"]
         return evaluate_gfx_arch_within(arch_list)
@@ -89,7 +91,7 @@ def evaluate_platform_supports_ck_sdpa():
 
 def evaluate_platform_supports_efficient_attention():
     if TEST_WITH_ROCM:
-        arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950"]
+        arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950", "gfx1250"]
         if os.environ.get("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "0") != "0":
             arch_list += ["gfx1101", "gfx1102", "gfx1150", "gfx1151", "gfx1200"]
         return evaluate_gfx_arch_within(arch_list)
@@ -103,14 +105,12 @@ def evaluate_platform_supports_cudnn_attention():
     return (not TEST_WITH_ROCM) and SM80OrLater and (TEST_CUDNN_VERSION >= 90000)
 
 def evaluate_platform_supports_green_context():
-    if IS_WINDOWS:
+    from torch.cuda.green_contexts import _ensure_supported
+    try:
+        _ensure_supported()
+        return True
+    except RuntimeError:
         return False
-    if not _get_torch_cuda_version() >= (12, 8):
-        return False
-    driver_version = torch.utils.collect_env.get_nvidia_driver_version(torch.utils.collect_env.run)
-    if driver_version is None:
-        return False
-    return int(driver_version.split('.')[0]) >= 570
 
 PLATFORM_SUPPORTS_FLASH_ATTENTION: bool = LazyVal(lambda: evaluate_platform_supports_flash_attention())
 PLATFORM_SUPPORTS_MEM_EFF_ATTENTION: bool = LazyVal(lambda: evaluate_platform_supports_efficient_attention())
@@ -156,14 +156,13 @@ PLATFORM_SUPPORTS_HALF_ATOMICS: bool = LazyVal(lambda: evaluate_platform_support
 PLATFORM_SUPPORTS_GREEN_CONTEXT: bool = LazyVal(lambda: evaluate_platform_supports_green_context())
 
 def evaluate_platform_supports_workqueue_config():
-    if IS_WINDOWS:
+    from torch.cuda.green_contexts import _ensure_supported, _ensure_workqueue_supported
+    try:
+        _ensure_supported()
+        _ensure_workqueue_supported()
+        return True
+    except RuntimeError:
         return False
-    if not _get_torch_cuda_version() >= (13, 1):
-        return False
-    driver_version = torch.utils.collect_env.get_nvidia_driver_version(torch.utils.collect_env.run)
-    if driver_version is None:
-        return False
-    return int(driver_version.split('.')[0]) >= 590
 
 PLATFORM_SUPPORTS_WORKQUEUE_CONFIG: bool = LazyVal(lambda: evaluate_platform_supports_workqueue_config())
 
@@ -412,15 +411,7 @@ def _check_cusparse_generic_available():
     return not TEST_WITH_ROCM
 
 def _check_hipsparse_generic_available():
-    if not TEST_WITH_ROCM:
-        return False
-    if not torch.version.hip:
-        return False
-
-    rocm_version = str(torch.version.hip)
-    rocm_version = rocm_version.split("-", maxsplit=1)[0]    # ignore git sha
-    rocm_version_tuple = tuple(int(x) for x in rocm_version.split("."))
-    return not (rocm_version_tuple is None or rocm_version_tuple < (5, 1))
+    return TEST_WITH_ROCM and torch.version.hip is not None
 
 
 TEST_CUSPARSE_GENERIC = _check_cusparse_generic_available()
@@ -485,6 +476,11 @@ def xfailIfSM120OrLater(func):
     if TEST_WITH_ROCM:
         return func
     return func if not SM120OrLater else unittest.expectedFailure(func)
+
+def skipIfSM103(func):
+    if TEST_WITH_ROCM:
+        return func
+    return unittest.skip("Test skipped on SM103")(func) if IS_SM103 else func
 
 def xfailIfSM12X(func):
     return func if not IS_SM12X else unittest.expectedFailure(func)

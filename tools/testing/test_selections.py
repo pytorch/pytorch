@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import os
+import re
 import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -272,3 +273,12 @@ def calculate_shards(
 
 def get_test_case_configs(dirpath: str) -> None:
     get_disabled_tests(dirpath=dirpath)
+
+
+# Strip the "test"/"test-osdc" target suffix to recover the build env, the key
+# tools/torchci writes to test-times.json. Must match the write-side extraction.
+JOB_BASE_NAME_RE = re.compile(r" / test(?:-osdc)? \(")
+
+
+def get_job_base_name(job_name: str) -> str:
+    return JOB_BASE_NAME_RE.split(job_name, maxsplit=1)[0]

@@ -7,15 +7,16 @@ from __future__ import annotations
 
 import collections
 import functools
+from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from enum import Enum
-from typing import Any, NewType, Protocol, TYPE_CHECKING, TypeVar
+from typing import Any, NewType, Protocol, TYPE_CHECKING, TypeAlias, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
 import torch.utils._pytree as pytree
 from torch import SymInt, Tensor
-from torch._opaque_base import OpaqueBase
+from torch._custom_class_base import CustomClassBase
 from torch._subclasses import FakeTensor, FakeTensorMode
 from torch._subclasses.fake_tensor import is_fake
 from torch.fx.experimental._backward_state import BackwardState
@@ -28,7 +29,7 @@ from .utils import strict_zip
 
 if TYPE_CHECKING:
     import contextlib
-    from collections.abc import Callable, Iterable, Sequence
+    from collections.abc import Callable, Iterable
 
     from torch._guards import Source
     from torch._inductor.output_code import OutputCode
@@ -42,6 +43,9 @@ if TYPE_CHECKING:
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
 zip = strict_zip
+
+ActInputPath: TypeAlias = tuple[int, tuple[str, ...]]
+ActInputPaths: TypeAlias = Sequence[ActInputPath]
 
 
 OutputType = Enum(
@@ -138,6 +142,7 @@ class InputAliasInfo:
     mutations_under_no_grad_or_inference_mode: bool
     mutation_inductor_storage_resize: bool
     mutates_storage_metadata: bool
+    mutation_is_shallow_copy_data: bool
     requires_grad: bool
     keep_input_mutations: bool
 
@@ -202,6 +207,15 @@ class MemoryFormatMeta:
         )
         if not use_memory_format:
             use_memory_format = t._has_symbolic_sizes_strides
+
+        if (
+            not use_memory_format
+            and t.layout == torch.strided
+            and torch._debug_has_internal_overlap(t) == 1
+        ):
+            # An internally overlapping output, e.g. from expand(), cannot
+            # represent arbitrary incoming gradients with its own strides.
+            use_memory_format = True
 
         if use_memory_format:
             return MemoryFormatMeta(
@@ -270,10 +284,12 @@ class SubclassCreationMeta:
     # Used at runtime to determine the subclass type, so we don't need to save the original subclass
     original_subclass_type: type | None = None
     memory_format: MemoryFormatMeta | None = None
+    outer_size_from_attr: str | None = None
+    outer_stride_from_attr: str | None = None
 
     def compute_outer_size_and_stride(
         self,
-        all_args: Sequence[torch.Tensor | IntLikeType | OpaqueBase],
+        all_args: Sequence[torch.Tensor | IntLikeType | CustomClassBase],
         *,
         curr_start_idx: int,
     ) -> tuple[
@@ -304,18 +320,20 @@ class SubclassCreationMeta:
 
     def creation_fn(
         self,
-        all_args: Sequence[torch.Tensor | IntLikeType | OpaqueBase],
+        all_args: Sequence[torch.Tensor | IntLikeType | CustomClassBase],
         *,
         is_runtime: bool,
     ) -> torch.Tensor:
-        inner_tensors: dict[str, torch.Tensor | OpaqueBase] = {}
+        inner_tensors: dict[str, torch.Tensor | CustomClassBase] = {}
 
         curr_start_idx = self.flat_tensor_start_idx
         for attr, creation_meta in self.attrs.items():
             if isinstance(creation_meta, OpaqueMeta):
                 opaque = all_args[curr_start_idx]
-                if not isinstance(opaque, OpaqueBase):
-                    raise AssertionError(f"OpaqueBase expected, got {type(opaque)}")
+                if not isinstance(opaque, CustomClassBase):
+                    raise AssertionError(
+                        f"CustomClassBase expected, got {type(opaque)}"
+                    )
                 inner_tensors[attr] = opaque
                 curr_start_idx += 1
                 continue
@@ -346,6 +364,16 @@ class SubclassCreationMeta:
                 all_args,
                 curr_start_idx=curr_start_idx,
             )
+            if self.outer_size_from_attr is not None:
+                size_attr = inner_tensors[self.outer_size_from_attr]
+                if not isinstance(size_attr, Tensor):
+                    raise AssertionError("Tensor expected")
+                outer_size = size_attr.size()
+            if self.outer_stride_from_attr is not None:
+                stride_attr = inner_tensors[self.outer_stride_from_attr]
+                if not isinstance(stride_attr, Tensor):
+                    raise AssertionError("Tensor expected")
+                outer_stride = stride_attr.stride()
         else:
             outer_size, outer_stride = self.outer_size, self.outer_stride
 
@@ -494,10 +522,11 @@ class ViewAndMutationMeta:
     # Keeps track of which input indices store parameters (which we will treat as static)
     static_input_indices: list[int] = field(default_factory=list)
 
-    # Input indices that held AsyncCollectiveTensors at compile time.
-    # Used to emit direct trigger_wait() calls at runtime instead of
+    # Input paths that held AsyncCollectiveTensors at compile time. A path is
+    # (input_index, attr_path), where an empty attr_path means the top-level
+    # input. Used to emit direct trigger_wait() calls at runtime instead of
     # scanning every arg on every graph invocation.
-    act_input_indices: list[int] = field(default_factory=list)
+    act_input_paths: list[ActInputPath] = field(default_factory=list)
 
     # Map of effect type (ex. _EffectType.ORDERED) to token.  If there are
     # side-effectful operators, FunctionalTensorMode will populate this
@@ -528,6 +557,9 @@ class ViewAndMutationMeta:
     num_graphsafe_rng_states: int = 0
 
     graphsafe_rng_state_index: int | None = None
+
+    # Device for graphsafe RNG states (supports CUDA, TPU, etc.)
+    graphsafe_rng_device: torch.device | None = None
 
     # Stream indices for mutated inputs in the epilogue
     # Maps from index in mutated_inp_runtime_indices to the stream index that last touched
@@ -1115,7 +1147,7 @@ class CacheableAOTConfig:
             raise AssertionError("Can only have pre_dispatch IR for export.")
 
 
-@dataclass
+@dataclass(frozen=True)
 class AOTConfig:
     """
     Configuration for AOTDispatcher
@@ -1228,8 +1260,8 @@ class AOTState:
     # detected by doing an initial trace when we created this state.
     fw_metadata: ViewAndMutationMeta
 
-    # Top-level configuration
-    # This is morally immutable but sometimes we are naughty and mutate it.
+    # Top-level configuration. Stage-local compiler choices are threaded
+    # explicitly rather than mutating this object in place.
     aot_config: AOTConfig
 
     # When performing AOTAutograd traces and other passes, we typically
@@ -1252,7 +1284,7 @@ class AOTState:
     fake_mode: FakeTensorMode
 
 
-FxValue = Tensor | int | SymInt | BackwardState | OpaqueBase
+FxValue = Tensor | int | SymInt | BackwardState | CustomClassBase
 
 
 class CompilerWrapper:

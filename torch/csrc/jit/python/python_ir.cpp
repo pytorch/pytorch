@@ -503,7 +503,7 @@ void initPythonIRBindings(PyObject* module_) {
           [](Value& n) {
             std::stringstream ss;
             ss << n.debugName() << " defined in (" << *n.node() << ')';
-            return ss.str();
+            return std::move(ss).str();
           })
       .VS(type)
       .VS(setType)
@@ -594,7 +594,7 @@ void initPythonIRBindings(PyObject* module_) {
           [](Node& n) {
             std::stringstream ss;
             ss << n;
-            return ss.str();
+            return std::move(ss).str();
           })
       .def("sourceRange", [](Node& n) { return n.sourceRange().str(); })
       .def("hasMultipleOutputs", [](Node& n) { return n.outputs().size() > 1; })
@@ -619,7 +619,7 @@ void initPythonIRBindings(PyObject* module_) {
             } else {
               ss << "(no schema)";
             }
-            return ss.str();
+            return std::move(ss).str();
           })
       .def(
           "outputs",
