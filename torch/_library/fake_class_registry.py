@@ -51,7 +51,7 @@ class FakeScriptObject:
                 "The fake kernel should not depend on the contents of the "
                 "OpaqueObject at all, so we're erroring out. If this attr is "
                 "a method or constant attribute, you can allow this member access by "
-                "registering it via `register_opaque_type(members=...)`."
+                "registering it via `register_custom_class(members=...)`."
             ) from e
 
     def __setattr__(self, name, value):

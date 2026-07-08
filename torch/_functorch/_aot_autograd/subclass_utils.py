@@ -11,10 +11,11 @@ from typing import Any, TypeGuard, TypeVar
 import torch
 import torch.utils._pytree as pytree
 from torch import SymInt, Tensor
+from torch._custom_class_base import CustomClassBase
 from torch._library.fake_class_registry import maybe_unwrap_fake_script_object
 from torch._library.opaque_object import is_opaque_reference_type
-from torch._opaque_base import OpaqueBase
 from torch._subclasses.fake_tensor import get_plain_tensors
+from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq
 from torch.types import IntLikeType
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
@@ -79,12 +80,40 @@ def maybe_suggest_memory_format(
     return MemoryFormatMeta.from_tensor(t)
 
 
+def _safe_metadata_eq(
+    outer: Iterable[IntLikeType],
+    inner: Iterable[IntLikeType],
+) -> bool:
+    return guard_or_false(sym_eq(tuple(outer), tuple(inner)))
+
+
+def _find_attr_matching_outer_metadata(
+    a: Tensor,
+    inner_keys: Sequence[str],
+    *,
+    metadata_fn: Callable[[Tensor], Iterable[IntLikeType]],
+) -> str | None:
+    tensor_attrs = [key for key in inner_keys if isinstance(getattr(a, key), Tensor)]
+    if not tensor_attrs:
+        return None
+
+    outer_metadata = tuple(metadata_fn(a))
+    # Only use an attr as the runtime source when every tensor attr agrees
+    # with the wrapper metadata; otherwise there is no single attr to trust.
+    if all(
+        _safe_metadata_eq(outer_metadata, metadata_fn(getattr(a, key)))
+        for key in tensor_attrs
+    ):
+        return tensor_attrs[0]
+    return None
+
+
 def get_subclass_typing_container(
     tensor_subclass: torch.Tensor,
 ) -> dict[type[torch.Tensor], list[type[torch.Tensor]]]:
     """
     Given a subclass, returns a recursive dictionary mapping each
-    inner tensors to its' subclass types.
+    inner tensors to its subclass types.
     """
 
     def _get_types_for_subclass(tensor_subclass: torch.Tensor) -> None:
@@ -96,11 +125,11 @@ def get_subclass_typing_container(
             match getattr(tensor_subclass, key):
                 case torch.Tensor() as inner_value:
                     _get_types_for_subclass(inner_value)
-                case OpaqueBase():
+                case CustomClassBase():
                     pass
                 case unexpected:
                     raise AssertionError(
-                        f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
                     )
 
     tracker: dict[Any, list[Any]] = collections.defaultdict(list)
@@ -131,7 +160,7 @@ def create_subclass_metadata(
     for key in inner_keys:
         inner_value = getattr(a, key)
         match inner_value:
-            case OpaqueBase():
+            case CustomClassBase():
                 # During tracing, opaques are wrapped in FakeScriptObject;
                 # unwrap to check the real type.
                 real_type = type(maybe_unwrap_fake_script_object(inner_value))
@@ -154,7 +183,7 @@ def create_subclass_metadata(
                 attrs[key] = new_subclass_meta
             case _:
                 raise AssertionError(
-                    f"expected Tensor or OpaqueBase, got {type(inner_value)}"
+                    f"expected Tensor or CustomClassBase, got {type(inner_value)}"
                 )
 
     # It *must* be because is_traceable_wrapper_subclass() - but mypy is not smart.
@@ -178,6 +207,12 @@ def create_subclass_metadata(
             outer_stride=a.stride(),  # type: ignore[arg-type]
             original_subclass=a,
             memory_format=maybe_suggest_memory_format(a, with_memory_format),
+            outer_size_from_attr=_find_attr_matching_outer_metadata(
+                a, inner_keys, metadata_fn=lambda t: t.size()
+            ),
+            outer_stride_from_attr=_find_attr_matching_outer_metadata(
+                a, inner_keys, metadata_fn=lambda t: t.stride()
+            ),
         ),
         new_start_idx,
     )
@@ -262,7 +297,7 @@ def unwrap_tensor_subclasses(
     def _maybe_fakeify_opaque(v: Any) -> Any:
         # Registered opaque types need to be wrapped as FakeScriptObject for
         # compile-time FX tracing (proxy slot tracking, hashability, etc.).
-        if isinstance(v, OpaqueBase):
+        if isinstance(v, CustomClassBase):
             from torch._guards import detect_fake_mode
             from torch._library.fake_class_registry import maybe_to_fake_obj
             from torch._library.opaque_object import is_opaque_type
@@ -328,13 +363,13 @@ def runtime_unwrap_tensor_subclasses(
     *,
     append_symints: bool,
     subclass_metas: list[PlainTensorMeta | SubclassCreationMeta] | None = None,
-) -> list[int | Tensor | SymInt | OpaqueBase]:
+) -> list[int | Tensor | SymInt | CustomClassBase]:
     def flatten_subclass(
         x: Tensor | TraceableWrapperSubclass,
         subclass_meta: PlainTensorMeta | SubclassCreationMeta | OpaqueMeta | None,
         *,
-        out: list[OpaqueBase | SymInt | Tensor | int],
-    ) -> list[OpaqueBase | SymInt | Tensor | int]:
+        out: list[CustomClassBase | SymInt | Tensor | int],
+    ) -> list[CustomClassBase | SymInt | Tensor | int]:
         if not is_traceable_wrapper_subclass(x):
             out.append(x)
             return out
@@ -349,14 +384,14 @@ def runtime_unwrap_tensor_subclasses(
         for attr in attrs:
             inner_value = getattr(x, attr)
             match inner_value:
-                case OpaqueBase():
+                case CustomClassBase():
                     out.append(inner_value)
                 case Tensor():
                     inner_meta = subclass_meta.attrs.get(attr)
                     flatten_subclass(inner_value, inner_meta, out=out)
                 case _:
                     raise AssertionError(
-                        f"expected Tensor or OpaqueBase, got {type(inner_value)}"
+                        f"expected Tensor or CustomClassBase, got {type(inner_value)}"
                     )
 
         if append_symints:
@@ -385,7 +420,7 @@ def runtime_unwrap_tensor_subclasses(
             )
         return out
 
-    xs_inner: list[int | Tensor | SymInt | OpaqueBase] = []
+    xs_inner: list[int | Tensor | SymInt | CustomClassBase] = []
 
     if append_symints:
         if subclass_metas is None:

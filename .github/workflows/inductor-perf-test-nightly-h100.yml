@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: pt2"]
 name: inductor-perf-nightly-h100
 
 on:
@@ -135,7 +136,7 @@ jobs:
         ]}
       selected-test-configs: ${{ inputs.benchmark_configs }}
       build-additional-packages: "vision audio fbgemm torchao"
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.10"
       compiler: gcc11
       cuda-version: "13.0"
@@ -153,7 +154,6 @@ jobs:
       dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-cppwrapper-true-aotinductor-true-freezing_cudagraphs-true-deterministic_perf-true
       docker-image: ${{ needs.build.outputs.docker-image }}
       test-matrix: ${{ needs.build.outputs.test-matrix }}
-      test-matrix-osdc: ${{ needs.build.outputs.test-matrix-osdc }}
       timeout-minutes: 720
       # disable monitor in perf tests, next step is to enable it
       disable-monitor: false
@@ -161,7 +161,7 @@ jobs:
       monitor-data-collect-interval: 4
       export-profiler-trace: "1"
       enable-torch-trace: "1"
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.10"
       compiler: gcc11
       cuda-version: "13.0"
@@ -179,7 +179,6 @@ jobs:
       dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-cppwrapper-true-aotinductor-true-freezing_cudagraphs-true-maxautotune-true-freeze_autotune_cudagraphs-true-deterministic_perf-true
       docker-image: ${{ needs.build.outputs.docker-image }}
       test-matrix: ${{ needs.build.outputs.test-matrix }}
-      test-matrix-osdc: ${{ needs.build.outputs.test-matrix-osdc }}
       timeout-minutes: 1440
       # disable monitor in perf tests, next step is to enable it
       disable-monitor: false
@@ -187,7 +186,7 @@ jobs:
       monitor-data-collect-interval: 4
       export-profiler-trace: "1"
       enable-torch-trace: "1"
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.10"
       compiler: gcc11
       cuda-version: "13.0"
@@ -207,7 +206,6 @@ jobs:
       dashboard-tag: training-${{ inputs.training || 'true' }}-inference-${{ inputs.inference || 'true' }}-default-${{ inputs.default || 'true' }}-dynamic-${{ inputs.dynamic || 'true' }}-cudagraphs-${{ inputs.cudagraphs || 'true' }}-cppwrapper-${{ inputs.cppwrapper || 'false' }}-aotinductor-${{ inputs.aotinductor || 'false' }}-maxautotune-${{ inputs.maxautotune || 'false' }}-freezing_cudagraphs-${{ inputs.freezing_cudagraphs || 'false' }}-deterministic_perf-${{ inputs.deterministic_perf || 'false' }}-batch_invariant_accuracy-${{ inputs.batch_invariant_accuracy || 'false' }}
       docker-image: ${{ needs.build.outputs.docker-image }}
       test-matrix: ${{ needs.build.outputs.test-matrix }}
-      test-matrix-osdc: ${{ needs.build.outputs.test-matrix-osdc }}
       timeout-minutes: 720
       # disable monitor in perf tests for more investigation
       disable-monitor: false
@@ -215,7 +213,7 @@ jobs:
       monitor-data-collect-interval: 4
       export-profiler-trace: "1"
       enable-torch-trace: "1"
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      use-arc: true
       python-version: "3.10"
       compiler: gcc11
       cuda-version: "13.0"

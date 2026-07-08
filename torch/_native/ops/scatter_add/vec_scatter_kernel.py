@@ -24,7 +24,7 @@ from cutlass._mlir.dialects import llvm, vector as mlir_vector
 from cutlass.cutlass_dsl import dsl_user_op, T
 
 import torch
-from torch._vendor.quack.cache_utils import jit_cache
+from torch._native.instrumentation import instrumented_cutedsl_cache
 
 from ._ptx import make_packed_half_atomic_add
 
@@ -190,7 +190,10 @@ def _make_kernel(dtype, elem_bytes: int, vec_elems: int, contig: bool):
     return _launch
 
 
-@jit_cache
+@instrumented_cutedsl_cache(
+    "aten::scatter_add",
+    key_fn=lambda torch_dtype, N, contig: f"vec {torch_dtype} N={N} contig={contig}",
+)
 def _compile_vec_scatter(torch_dtype: torch.dtype, N: int, contig: bool):
     dtype = _TORCH_TO_CUTE[torch_dtype]
     elem_bytes = dtype.width // 8
@@ -228,7 +231,7 @@ def _compile_vec_scatter(torch_dtype: torch.dtype, N: int, contig: bool):
 
 def vec_elems_for(dtype: torch.dtype) -> int:
     """Elements per lane per step (16-byte vector gather)."""
-    return _VEC_BYTES // torch.tensor([], dtype=dtype).element_size()
+    return _VEC_BYTES // dtype.itemsize
 
 
 def vec_scatter_add_into(

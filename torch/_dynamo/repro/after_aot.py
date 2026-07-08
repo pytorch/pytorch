@@ -34,7 +34,7 @@ import typing
 import uuid
 from importlib import import_module
 from tempfile import TemporaryFile
-from typing import Any, IO, TYPE_CHECKING
+from typing import Any, IO, TYPE_CHECKING, TypedDict
 from typing_extensions import Unpack
 
 import sympy
@@ -139,6 +139,8 @@ if TYPE_CHECKING:
     from torch._inductor.output_code import OutputCode
     from torch._inductor.utils import InputType
 
+    from . import ReproOptions
+
 
 log = logging.getLogger(__name__)
 
@@ -146,9 +148,14 @@ log = logging.getLogger(__name__)
 inductor_config = import_module("torch._inductor.config")
 
 
+class GroupInfo(TypedDict):
+    size: int
+    rank: int
+
+
 def _extract_distributed_info(
     gm: torch.fx.GraphModule,
-) -> dict[str, dict[str, int]]:
+) -> dict[str, GroupInfo]:
     """
     Extract process group information from distributed ops in the graph.
 
@@ -158,7 +165,7 @@ def _extract_distributed_info(
     from torch.distributed import GroupName
     from torch.fx.operator_schemas import normalize_function
 
-    group_info: dict[str, dict[str, int]] = {}
+    group_info: dict[str, GroupInfo] = {}
 
     for node in gm.graph.nodes:
         if node.op != "call_function":
@@ -200,7 +207,7 @@ def _extract_distributed_info(
 
 
 def setup_fake_process_groups(
-    group_info: dict[str, dict[str, int]],
+    group_info: dict[str, GroupInfo],
 ) -> None:
     """
     Set up fake process groups for repro execution.
@@ -409,10 +416,14 @@ def wrap_compiler_debug(
                     # Call the compiled function with real inputs
                     out = inner_compiled_fn(real_inputs)  # type: ignore[operator]
                     # sync cuda kernels to ensure IMA detection
-                    for arg in example_inputs:
-                        if isinstance(arg, torch.Tensor) and arg.is_cuda:
-                            torch.cuda.synchronize()
-                            break
+                    if (
+                        any(
+                            isinstance(arg, torch.Tensor) and arg.device.type != "cpu"
+                            for arg in example_inputs
+                        )
+                        and torch.accelerator.is_available()
+                    ):
+                        torch.accelerator.synchronize()
                     return out
                 except Exception:
                     if config.repro_level == 1:
@@ -678,7 +689,9 @@ if "__compile_source__" in globals():
     if len(kernel_side_table.constant_args) > 0:
         model_str += f"{kernel_side_table_prefix}.constant_args={kernel_side_table.constant_args}\n"
 
-    model_str += NNModuleToString.convert(gm)
+    # This string is also emitted as a best-effort trace artifact during
+    # normal compilation, so unsupported modules must not mask compile errors.
+    model_str += NNModuleToString.convert(gm, allow_unsafe_repr=True)
 
     writer = InputWriter(save_dir, stable_hash=stable_hash)
     # pyrefly: ignore [implicit-any]
@@ -970,16 +983,14 @@ def isolate_fails(
 def inductor_fails(
     fx_g: torch.fx.GraphModule, args: Sequence[Any], check_str: str | None = None
 ) -> bool:
-    has_cuda = False
-    for arg in args:
-        if isinstance(arg, torch.Tensor) and arg.is_cuda:
-            has_cuda = True
-            break
+    has_gpu = any(
+        isinstance(arg, torch.Tensor) and arg.device.type != "cpu" for arg in args
+    )
 
     def sync() -> None:
-        if has_cuda:
+        if has_gpu and torch.accelerator.is_available():
             # Ensures that segfaults are surfaced
-            torch.cuda.synchronize()
+            torch.accelerator.synchronize()
 
     from torch._inductor.compile_fx import compile_fx_inner
 
@@ -1043,8 +1054,97 @@ backend_aot_accuracy_fails = functools.partial(backend_accuracy_fails, only_fwd=
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 
+def _build_symbolic_wrapper(
+    mod: nn.Module,
+    args: list[Any],
+    symint_exprs: dict[int, str],
+) -> tuple[nn.Module, list[Any]] | None:
+    """Build a wrapper module that preserves symbolic relationships.
+
+    Returns (wrapper_module, wrapper_args) where wrapper_args has carrier
+    tensors in place of free-symbol symints, and the wrapper's forward()
+    extracts SymInts from carrier.size(0), computes derived expressions,
+    and delegates to the inner module.
+
+    Returns None if the expressions don't contain free/derived structure
+    (nothing to do).
+    """
+    import re
+
+    free_sym_re = re.compile(r"^s\d+$")
+    free_positions: dict[int, str] = {}
+    derived_positions: dict[int, str] = {}
+
+    for idx, expr_str in symint_exprs.items():
+        if free_sym_re.fullmatch(expr_str):
+            free_positions[idx] = expr_str
+        else:
+            derived_positions[idx] = expr_str
+
+    if not free_positions:
+        return None
+
+    # Order: carrier tensors first, then all non-symint args in original order
+    free_order = sorted(free_positions.keys())
+    free_sym_names = [free_positions[i] for i in free_order]
+
+    # Precompile derived expressions
+    derived_compiled = {
+        idx: compile(expr_str, f"<derived arg {idx}>", "eval")
+        for idx, expr_str in derived_positions.items()
+    }
+
+    n_args = len(args)
+
+    class _SymIntWrapper(nn.Module):
+        def __init__(self, inner: nn.Module) -> None:
+            super().__init__()
+            self.inner = inner
+
+        def forward(self, *flat_args: Any) -> Any:
+            carriers = flat_args[: len(free_order)]
+            other = flat_args[len(free_order) :]
+
+            syms: dict[str, Any] = {}
+            for i, sym_name in enumerate(free_sym_names):
+                syms[sym_name] = carriers[i].size(0)
+
+            for idx, code in sorted(derived_compiled.items()):
+                derived_positions[idx]  # keep reference
+                syms[f"_derived_{idx}"] = eval(code, {"__builtins__": {}}, syms)
+
+            other_iter = iter(other)
+            rebuilt = []
+            for i in range(n_args):
+                if i in free_positions:
+                    rebuilt.append(syms[free_positions[i]])
+                elif i in derived_positions:
+                    rebuilt.append(syms[f"_derived_{i}"])
+                else:
+                    rebuilt.append(next(other_iter))
+
+            return self.inner(*rebuilt)
+
+    # Build wrapper args: carriers + non-symint args
+    wrapper_args: list[Any] = []
+    for i in free_order:
+        hint = int(args[i]) if not isinstance(args[i], int) else args[i]
+        device = "cpu"
+        for a in args:
+            if isinstance(a, torch.Tensor) and a.is_cuda:
+                device = a.device
+                break
+        wrapper_args.append(torch.empty(hint, dtype=torch.int8, device=device))
+
+    for i, arg in enumerate(args):
+        if i not in free_positions and i not in derived_positions:
+            wrapper_args.append(arg)
+
+    return _SymIntWrapper(mod), wrapper_args
+
+
 def repro_common(
-    options: Any, mod: nn.Module, load_args: Any
+    options: ReproOptions, mod: nn.Module, load_args: Any
 ) -> tuple[torch.fx.GraphModule, list[Any]]:
     # Invariant for graphs we generate with the repro script
     if any(mod.named_parameters()):
@@ -1082,7 +1182,12 @@ def repro_common(
 
     # Turn mod into a GraphModule the slow way
     # TODO: speed this up
-    mod = make_fx(mod, tracing_mode=options.tracing_mode)(*args)
+    # NOTE: symint_exprs (from reader.symint(val, expr=...)) are preserved
+    # in the repro script for documentation. A future improvement could use
+    # _build_symbolic_wrapper to reconstruct algebraic relationships between
+    # free and derived symints, but the arg reordering is fragile across
+    # different graph structures so we skip it for now.
+    mod = make_fx(mod, tracing_mode=options.tracing_mode)(*args)  # type: ignore[arg-type]
 
     # pyrefly: ignore [bad-assignment]
     torch._inductor.config.generate_intermediate_hooks = True
@@ -1130,7 +1235,7 @@ ACCURACY_FAILS: dict[str, Callable[[torch.fx.GraphModule, Any], bool]] = {
 }
 
 
-def repro_minifier_query(options: Any, mod: nn.Module, load_args: Any) -> None:
+def repro_minifier_query(options: ReproOptions, mod: nn.Module, load_args: Any) -> None:
     mod, args = repro_common(options, mod, load_args)
     fail_fn = functools.partial(
         ACCURACY_FAILS[options.accuracy],
@@ -1142,7 +1247,7 @@ def repro_minifier_query(options: Any, mod: nn.Module, load_args: Any) -> None:
         sys.exit(0)
 
 
-def repro_minify(options: Any, mod: nn.Module, load_args: Any) -> None:
+def repro_minify(options: ReproOptions, mod: nn.Module, load_args: Any) -> None:
     from functorch.compile import minifier
 
     mod, args = repro_common(options, mod, load_args)
@@ -1164,22 +1269,23 @@ def repro_minify(options: Any, mod: nn.Module, load_args: Any) -> None:
     else:
         module_fails = ACCURACY_FAILS[options.accuracy]
 
-    minifier(
-        mod,
-        args,
-        module_fails=functools.partial(module_fails, check_str=options.check_str),
-        dump_state=functools.partial(
-            dump_compiler_graph_state, compiler_name=compiler_name
-        ),
-        save_dir=options.save_dir,
-        offload_to_disk=options.offload_to_disk,
-        skip_offload=options.skip_saving_eager_intermediates,
-        skip_sanity=options.skip_sanity,
-        max_granularity=options.max_granularity,
-    )
+    with config.patch(repro_after=None):
+        minifier(
+            mod,
+            args,
+            module_fails=functools.partial(module_fails, check_str=options.check_str),
+            dump_state=functools.partial(
+                dump_compiler_graph_state, compiler_name=compiler_name
+            ),
+            save_dir=options.save_dir,
+            offload_to_disk=options.offload_to_disk,
+            skip_offload=options.skip_saving_eager_intermediates,
+            skip_sanity=options.skip_sanity,
+            max_granularity=options.max_granularity,
+        )
 
 
-def repro_analyze(options: Any, mod: nn.Module, load_args: Any) -> None:
+def repro_analyze(options: ReproOptions, mod: nn.Module, load_args: Any) -> None:
     from torch._inductor.compile_fx import compile_fx_inner
     from torch._inductor.hooks import intermediate_hook
 
@@ -1191,9 +1297,10 @@ def repro_analyze(options: Any, mod: nn.Module, load_args: Any) -> None:
     # It is certainly faster though!  It probably makes sense to let the
     # user specify the offload strategy.
 
-    compile_args = _get_compile_args(mod, args)
+    compile_mod = copy.deepcopy(mod)
+    compile_args = _get_compile_args(compile_mod, args)
     with tqdm(desc="Compiling"):
-        compiled = compile_fx_inner(mod, compile_args)
+        compiled = compile_fx_inner(compile_mod, compile_args)
     total = counters["inductor"]["intermediate_hooks"]
 
     known_names = set()
@@ -1204,10 +1311,15 @@ def repro_analyze(options: Any, mod: nn.Module, load_args: Any) -> None:
             writer.write_tensor(os.path.join("inductor", name), val)
         pbar.update(1)  # type: ignore[has-type]
 
+    # analyze stores and re-reads intermediates on disk, so a save_dir is
+    # required; --no-save-dir (save_dir=None) is invalid for this subcommand.
+    save_dir = options.save_dir
+    if save_dir is None:
+        raise RuntimeError("analyze requires a save_dir; do not pass --no-save-dir")
     writer = torch.utils._content_store.ContentStoreWriter(
-        options.save_dir, stable_hash=options.stable_hash
+        save_dir, stable_hash=options.stable_hash
     )
-    reader = torch.utils._content_store.ContentStoreReader(options.save_dir)
+    reader = torch.utils._content_store.ContentStoreReader(save_dir)
 
     new_args = clone_inputs(args)
     with (
@@ -1327,21 +1439,20 @@ def repro_analyze(options: Any, mod: nn.Module, load_args: Any) -> None:
 
 
 def repro_get_args(
-    options: Any, mod: nn.Module, load_args: Any
+    options: ReproOptions, mod: nn.Module, load_args: Any
 ) -> tuple[torch.fx.GraphModule, list[Any]]:
     mod, args = repro_common(options, mod, load_args)
     return mod, args
 
 
-def repro_run(options: Any, mod: nn.Module, load_args: Any) -> None:
+def repro_run(options: ReproOptions, mod: nn.Module, load_args: Any) -> None:
     from torch._inductor.compile_fx import compile_fx_inner
 
     mod, args = repro_common(options, mod, load_args)
 
-    from torch.cuda import synchronize
-
-    compile_args = _get_compile_args(mod, args)
-    compiled = compile_fx_inner(mod, compile_args)
+    compile_mod = copy.deepcopy(mod)
+    compile_args = _get_compile_args(compile_mod, args)
+    compiled = compile_fx_inner(compile_mod, compile_args)
     if isinstance(compiled, str):
         raise AssertionError("compile_fx_inner should not return a string")
 
@@ -1357,17 +1468,15 @@ def repro_run(options: Any, mod: nn.Module, load_args: Any) -> None:
         ):
             raise AccuracyError("Bad accuracy detected")
     else:
-        need_sync = False
-
-        for arg in args:
-            if isinstance(arg, torch.Tensor) and arg.is_cuda:
-                need_sync = True
-                break
-
         compiled(list(args))
-
-        if need_sync:
-            synchronize()  # ensure segfaults are surfaced
+        if (
+            any(
+                isinstance(arg, torch.Tensor) and arg.device.type != "cpu"
+                for arg in args
+            )
+            and torch.accelerator.is_available()
+        ):
+            torch.accelerator.synchronize()  # ensure segfaults are surfaced
 
 
 # TODO: lazily load the inputs or something, rather than cloning them
@@ -1455,13 +1564,13 @@ p-value, which we leave for future work.
             default=accuracy,
             help="""\
 by default, when doing accuracy minification we will reject reductions which
-change the divergence from a floating point divergence to a integral/boolean
+change the divergence from a floating point divergence to an integral/boolean
 divergence.  This is because some operations like ReLU involve temporarily
 sharp boundaries that smooth out again afterwards; without requiring
 divergence on floating point, the minifier will often fixate on divergent
 boolean tensor even though this is not the true source of the divergence.
 However, rejecting these reductions makes it more difficult for the minifier
-to make process.  Using this option will let the minifier progress for ALL
+to make progress.  Using this option will let the minifier progress for ALL
 divergences--you just might not end up with a useful repro in the end.""",
         )
 
@@ -1586,7 +1695,7 @@ divergences--you just might not end up with a useful repro in the end.""",
     if len(sys.argv) <= 1:
         args = [command, *sys.argv[1:]]
 
-    options = parser.parse_args(args)
+    options = typing.cast("ReproOptions", parser.parse_args(args))
     COMMAND_FNS = {
         "minify": repro_minify,
         "analyze": repro_analyze,

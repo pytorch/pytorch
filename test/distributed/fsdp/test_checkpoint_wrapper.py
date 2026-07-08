@@ -2,6 +2,7 @@
 
 import contextlib
 import pickle
+import tempfile
 import unittest
 from copy import deepcopy
 from functools import partial
@@ -137,6 +138,18 @@ class CheckpointWrapperTest(TestCase):
     def test_checkpoint_wrapper_pickle(self):
         model = checkpoint_wrapper(nn.Linear(2, 2))
         loaded = pickle.loads(pickle.dumps(model))
+
+        inp = torch.ones(2, 2, requires_grad=True)
+        out = loaded(inp)
+        out.sum().backward()
+        self.assertIsNotNone(inp.grad)
+
+    def test_checkpoint_wrapper_save_load(self):
+        model = checkpoint_wrapper(nn.Linear(2, 2))
+        with tempfile.TemporaryFile() as f:
+            torch.save(model, f)
+            f.seek(0)
+            loaded = torch.load(f, weights_only=False)
 
         inp = torch.ones(2, 2, requires_grad=True)
         out = loaded(inp)

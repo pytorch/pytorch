@@ -426,6 +426,13 @@ class PyCodegen:
         self.tempvars[value] = var
         self._output.append(self.create_store(var))
 
+    def clear_tempvars(self) -> None:
+        for key, var in list(self.tempvars.items()):
+            if var is not None:
+                self._output.append(self.create_delete(var))
+            del self.tempvars[key]
+        self.top_of_stack = None
+
     def foreach(self, items: Iterable[VariableTracker | Source]) -> None:
         for i in items:
             self(i)
@@ -514,6 +521,19 @@ class PyCodegen:
 
     def call_method(self, nargs: int) -> None:
         self.extend_output(create_call_method(nargs))
+
+    def create_list_append(self) -> list[Instruction]:
+        # Append TOS to the list at TOS-1, leaving the list on the stack
+        # (same stack effect as LIST_APPEND with arg=1).
+        #
+        # The bare LIST_APPEND opcode does not lock the list and so requires
+        # the target be uniquely owned (refcnt == 1) on free-threaded builds.
+        # Dynamo can't enforce this, so instead use LIST_EXTEND, which does
+        # lock
+        return [
+            create_instruction("BUILD_LIST", arg=1),
+            create_instruction("LIST_EXTEND", arg=1),
+        ]
 
     def create_load_attr(self, name: str) -> Instruction:
         if name not in self.code_options["co_names"]:
@@ -676,7 +696,7 @@ class PyCodegen:
                 if current_source in seen_sources:
                     # This source is used at least twice, so it can be reused
                     codegen.mark_source_temp(current_source)
-                    # Dont trace source further. This prevents us from marking too
+                    # Don't trace source further. This prevents us from marking too
                     # many nodes as temp sources.
                     continue
                 seen_sources.add(current_source)
@@ -735,6 +755,7 @@ class PyCodegen:
             self.pop_top()
 
         self.extend_output(create_call_function(len(graphargs), False))
+        self.clear_tempvars()
         self.add_pycode(
             f"__graph_out = {fn_name}({', '.join(arg_varnames)})",
         )

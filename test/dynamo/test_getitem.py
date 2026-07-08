@@ -23,7 +23,11 @@ import torch._dynamo.testing
 from torch._dynamo.variables.base import VariableTracker
 from torch._dynamo.variables.constant import ConstantVariable
 from torch._dynamo.variables.lists import BaseListVariable, DequeVariable, RangeVariable
-from torch._library.opaque_object import MemberType, OpaqueBase, register_opaque_type
+from torch._library.opaque_object import (
+    CustomClassBase,
+    MemberType,
+    register_custom_class,
+)
 from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON, HAS_GPU
 
 
@@ -730,31 +734,31 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
     # --- TorchScriptObjectVariable ---
 
     def test_opaque_object_getitem(self):
-        class OpaqueScaler(OpaqueBase):
+        class OpaqueScaler(CustomClassBase):
             def __init__(self, scale):
                 self.scale = scale
 
             def apply(self, x):
                 return x * self.scale
 
-        class OpaqueContainer(OpaqueBase):
+        class OpaqueContainer(CustomClassBase):
             def __init__(self, items):
                 self.items = items
 
             def __getitem__(self, idx):
                 return self.items[idx]
 
-        register_opaque_type(
+        register_custom_class(
             OpaqueScaler,
-            typ="reference",
+            typ="symbolic",
             members={
                 "scale": MemberType.USE_REAL,
                 "apply": MemberType.INLINED,
             },
         )
-        register_opaque_type(
+        register_custom_class(
             OpaqueContainer,
-            typ="reference",
+            typ="symbolic",
             members={
                 "items": MemberType.USE_REAL,
                 "__getitem__": MemberType.INLINED,
@@ -1085,6 +1089,134 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(4)
         self.assertEqual(fn(x), self._compile(fn, x))
+
+    def test_list_constructor_rejects_next_only(self):
+        class IterNextOnly:
+            def __init__(self, items):
+                self.items = items
+                self.index = 0
+
+            def __next__(self):
+                if self.index >= len(self.items):
+                    raise StopIteration
+                item = self.items[self.index]
+                self.index += 1
+                return item
+
+        def fn():
+            try:
+                list(IterNextOnly([1, 2, 3]))
+            except TypeError as exc:
+                return "object is not iterable" in str(exc)
+            return False
+
+        self.assertEqual(fn(), self._compile(fn))
+
+    def test_list_constructor_rejects_iter_without_next(self):
+        class IterNoNext:
+            def __iter__(self):
+                return self
+
+        def fn():
+            try:
+                list(IterNoNext())
+            except TypeError as exc:
+                return str(exc) == "iter() returned non-iterator of type 'IterNoNext'"
+            return False
+
+        self.assertEqual(fn(), self._compile(fn))
+
+    def test_list_constructor_rejects_keywords(self):
+        def fn():
+            try:
+                list(unsupported_arg=[])
+            except TypeError as exc:
+                return "list() takes no keyword" in str(exc)
+            return False
+
+        self.assertEqual(fn(), self._compile(fn))
+
+    def test_list_constructor_rejects_too_many_args(self):
+        def fn():
+            try:
+                list([], [])
+            except TypeError as exc:
+                return "expected at most 1 argument" in str(exc)
+            return False
+
+        self.assertEqual(fn(), self._compile(fn))
+
+    def test_tuple_constructor_preserves_exact_tuple_identity(self):
+        def fn(x):
+            items = (x, x + 1)
+            return tuple(items) is items
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), self._compile(fn, x))
+
+    def test_tuple_constructor_converts_torch_size_to_tuple(self):
+        def fn():
+            size = torch.Size([2, 3])
+            result = tuple(size)
+            return type(result) is tuple and result == (2, 3) and result is not size
+
+        self.assertEqual(fn(), self._compile(fn))
+
+    def test_tuple_constructor_rejects_next_only(self):
+        class IterNextOnly:
+            def __init__(self, items):
+                self.items = items
+                self.index = 0
+
+            def __next__(self):
+                if self.index >= len(self.items):
+                    raise StopIteration
+                item = self.items[self.index]
+                self.index += 1
+                return item
+
+        def fn():
+            try:
+                tuple(IterNextOnly([1, 2, 3]))
+            except TypeError as exc:
+                return "object is not iterable" in str(exc)
+            return False
+
+        self.assertEqual(fn(), self._compile(fn))
+
+    def test_tuple_constructor_rejects_iter_without_next(self):
+        class IterNoNext:
+            def __iter__(self):
+                return self
+
+        def fn():
+            try:
+                tuple(IterNoNext())
+            except TypeError as exc:
+                return str(exc) == "iter() returned non-iterator of type 'IterNoNext'"
+            return False
+
+        self.assertEqual(fn(), self._compile(fn))
+
+    def test_tuple_constructor_rejects_keywords(self):
+        def fn():
+            try:
+                tuple(unsupported_arg=[])
+            except TypeError as exc:
+                return "tuple() takes no keyword" in str(exc)
+            return False
+
+        self.assertEqual(fn(), self._compile(fn))
+
+    def test_tuple_constructor_rejects_too_many_args(self):
+        def fn():
+            try:
+                tuple([], [])
+            except TypeError as exc:
+                return "expected at most 1 argument" in str(exc)
+            return False
+
+        self.assertEqual(fn(), self._compile(fn))
 
     def test_tuple_seqonly(self):
         """tuple(SeqOnly) → generic_getiter → sequence_iterator → __getitem__."""

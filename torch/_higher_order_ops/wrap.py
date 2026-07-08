@@ -67,6 +67,7 @@ class InductorCompiledCode(HigherOrderOperator):
 
     def __init__(self) -> None:
         super().__init__("inductor_compiled_code")
+        self._boxed_arg_indices = (1,)
 
     def __call__(self, func, inputs, *, name: str | None = None):
         # pyrefly: ignore [missing-attribute]
@@ -357,9 +358,10 @@ class WrapActivationCheckpoint(HigherOrderOperator):
         checkpoint_kwargs, kwargs = TagActivationCheckpoint.divide_kwargs(kwargs)
         checkpoint_kwargs["use_reentrant"] = False
         checkpoint_kwargs["preserve_rng_state"] = False
-        context_fn = checkpoint_kwargs.get("context_fn")
-        if "_checkpoint_context_fn" in function.meta:
-            context_fn = function.meta["_checkpoint_context_fn"]
+        # context_fn is stashed on the graph module's meta during tracing, never
+        # passed through kwargs.
+        assert checkpoint_kwargs.get("context_fn") is None  # noqa: S101
+        context_fn = function.meta.get("_checkpoint_context_fn")
         if context_fn is not None:
             unique_graph_id = next(uid)
 
@@ -494,12 +496,6 @@ Please make sure the checkpointed region does not contain in-place ops (e.g. tor
         fwd_ctx.ac_graph_id = unique_graph_id
         return fwd_ctx, recomp_ctx
 
-    # preserve_rng_state is set to False because we want to prevent AOTAutograd
-    # from tracing through `torch.random.fork_rng` op (which is not supported
-    # yet under CUDA). This doesn't mean that we don't preserve RNG state.
-    # Instead, we will always preserve RNG state regardless of this flag (by
-    # doing RNG functionalization via `replace_random_passes` in Inductor
-    # instead of in AOTAutograd).
     # Using interpreter allows preservation of metadata through torch.compile stack.
     # We use a wrapper instead of passing Interpreter(gmod).run directly because
     # checkpoint's recompute_fn captures the function in a closure. A bound method
@@ -512,7 +508,16 @@ Please make sure the checkpointed region does not contain in-place ops (e.g. tor
     with fx_traceback.preserve_node_meta():
         from torch.utils.checkpoint import checkpoint
 
+        # use_reentrant is set to False because this op is going to be traced.
+        # And we ensure that AOT Autograd traces through the non reentrant
+        # version of checkpointing.
         checkpoint_kwargs["use_reentrant"] = False
+        # preserve_rng_state is set to False because we want to prevent
+        # AOTAutograd from tracing through `torch.random.fork_rng` op (which is
+        # not supported yet under CUDA). This doesn't mean that we don't
+        # preserve RNG state. Instead, we will always preserve RNG state
+        # regardless of this flag (by doing RNG functionalization via
+        # `replace_random_passes` in Inductor instead of in AOTAutograd).
         checkpoint_kwargs["preserve_rng_state"] = False
         checkpoint_kwargs["context_fn"] = context_fn_with_graph_id
         # Disable early stop to prevent _StopRecomputationError from

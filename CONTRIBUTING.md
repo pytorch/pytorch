@@ -55,7 +55,7 @@ aspects of contributing to PyTorch.
 - [Windows development tips](#windows-development-tips)
   - [Known MSVC (and MSVC with NVCC) bugs](#known-msvc-and-msvc-with-nvcc-bugs)
   - [Building on legacy code and CUDA](#building-on-legacy-code-and-cuda)
-- [Pre-commit tidy/linting hook](#pre-commit-tidylinting-hook)
+- [Linting before committing](#linting-before-committing)
 - [Building PyTorch with ASAN](#building-pytorch-with-asan)
   - [Getting `ccache` to work](#getting-ccache-to-work)
   - [Why this stuff with `LD_PRELOAD` and `LIBASAN_RT`?](#why-this-stuff-with-ld_preload-and-libasan_rt)
@@ -269,7 +269,6 @@ dependencies as well as the nightly binaries into the repo directory.
   * [cpp](test/cpp) - C++ unit tests for PyTorch C++ frontend.
     * [api](test/cpp/api) - [README](test/cpp/api/README.md)
     * [jit](test/cpp/jit) - [README](test/cpp/jit/README.md)
-    * [tensorexpr](test/cpp/tensorexpr) - [README](test/cpp/tensorexpr/README.md)
   * [expect](test/expect) - Automatically generated "expect" files
     which are used to compare against expected output.
   * [onnx](test/onnx) - Tests for ONNX export functionality,
@@ -298,15 +297,22 @@ A couple reminders here though:
 
 [Spin](https://github.com/scientific-python/spin) is a developer cli tool that
 helps running common tasks.
+You can either install it in your dev environment with `pip install spin` or as a global uv tool in your system with `uv tool install spin --with=packaging,pyyaml,typing_extensions`.
+
 To list the available tasks, run `spin --help`.
 Currently, we support the following tasks with Spin:
 
 ### Building
 
 To support building and general development, the following commands exist.
+Both `develop` and `install` prefer `uv pip` when available and fall back to
+regular pip. Build configuration comes from the environment as usual, e.g.
+`BUILD_CONFIG spin develop`.
 
 |command||
 |-|-|
+|`develop` / `editable`|editable install (also known as develop or `-e` install)|
+|`install`|non-editable install|
 |`clean`|clean, that is remove files and directories listed in .gitignore before the NOT-CLEAN-FILES marker|
 
 ### Linting
@@ -471,10 +477,10 @@ You can generate a commit that limits the CI to only run a specific job by using
 `tools/testing/explicit_ci_jobs.py` like so:
 
 ```bash
-# --job: specify one or more times to filter to a specific job + its dependencies
-# --filter-gha: specify github actions workflows to keep
-# --make-commit: commit CI changes to git with a message explaining the change
-python tools/testing/explicit_ci_jobs.py --job binary_linux_manywheel_3_6m_cpu_devtoolset7_nightly_test --filter-gha '*generated*gcc5.4*' --make-commit
+# --filter-gha: keep only the github actions workflow files matching this glob
+#               (all other workflow files are deleted)
+# --make-commit: commit the CI changes to git with a message explaining the change
+python tools/testing/explicit_ci_jobs.py --filter-gha '*pull*' --make-commit
 
 # Make your changes
 
@@ -569,9 +575,9 @@ pip install -r requirements.txt
 ```
 > Note: if you installed `nodejs` with a different package manager then `npm` will probably install a version of `katex` that is not
 compatible with your version of `nodejs` and doc builds will fail.
-A combination of versions that is known to work is `node@6.13.1` and
-`katex@0.13.18`. To install the latter with `npm` you can run
-```npm install -g katex@0.13.18```
+A combination of versions that is known to work is `node@22` (current LTS) and
+`katex@0.16.10`. To install the latter with `npm` you can run
+```npm install -g katex@0.16.10```
 
 
 > Note that if you are a Facebook employee using a devserver, yarn may be more convenient to install katex:
@@ -579,7 +585,7 @@ A combination of versions that is known to work is `node@6.13.1` and
 ```bash
 yarn global add katex
 ```
-> If a specific version is required you can use for example `yarn global add katex@0.13.18`.
+> If a specific version is required you can use for example `yarn global add katex@0.16.10`.
 
 3. Generate the documentation HTML files. The generated files will be in `docs/build/html`.
 
@@ -617,7 +623,7 @@ For C++ documentation (https://pytorch.org/cppdocs), we use
 reference](https://www.doxygen.nl/manual/) for more
 information on the documentation syntax.
 
-We run Doxygen in CI (Travis) to verify that you do not use invalid Doxygen
+We run Doxygen in CI to verify that you do not use invalid Doxygen
 commands. To run this check locally, run `./check-doxygen.sh` from inside
 `docs/cpp/source`.
 
@@ -1052,10 +1058,10 @@ If you are working on the CUDA code, here are some useful CUDA debugging tips:
 1. `CUDA_DEVICE_DEBUG=1` will enable CUDA device function debug symbols (`-g -G`).
     This will be particularly helpful in debugging device code. However, it will
     slow down the build process for about 50% (compared to only `DEBUG=1`), so use wisely.
-2. `cuda-gdb` and `cuda-memcheck` are your best CUDA debugging friends. Unlike`gdb`,
+2. `cuda-gdb` and `compute-sanitizer` are your best CUDA debugging friends. Unlike`gdb`,
    `cuda-gdb` can display actual values in a CUDA tensor (rather than all zeros).
-3. CUDA supports a lot of C++11/14 features such as, `std::numeric_limits`, `std::nextafter`,
-   `std::tuple` etc. in device code. Many of such features are possible because of the
+3. CUDA supports a lot of C++17/20 features, which include `std::numeric_limits`, `std::nextafter`,
+   `if constexpr` etc. in device code. Many of such features are possible because of the
    [--expt-relaxed-constexpr](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#constexpr-functions)
    nvcc flag. There is a known [issue](https://github.com/ROCm/hip/issues/374)
    that ROCm errors out on device code, which uses such STL functions.
@@ -1124,7 +1130,7 @@ two dynamic libraries, one linking with the other:
 
 ```CMake
 project(myproject CXX)
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 20)
 add_library(foo SHARED foo.cpp)
 add_library(bar SHARED bar.cpp)
 # NB: don't forget to __declspec(dllexport) at least one symbol from foo,
@@ -1181,8 +1187,9 @@ static_assert(std::is_same(A*, decltype(A::singleton()))::value, "hmm");
 ```
 
 * The compiler will run out of heap space if you attempt to compile files that
-  are too large. Splitting such files into separate files helps.
-  (Example: `THTensorMath`, `THTensorMoreMath`, `THTensorEvenMoreMath`.)
+  are too large. Splitting such files into separate files helps. This is why
+  the codegen shards large generated files (e.g. `VariableType.cpp` and
+  `RegisterCPU.cpp`); see Note [Sharded File] for details.
 
 * MSVC's preprocessor (but not the standard compiler) has a bug
   where it incorrectly tokenizes raw string literals, ending when it sees a `"`.
@@ -1196,35 +1203,29 @@ static_assert(std::is_same(A*, decltype(A::singleton()))::value, "hmm");
 
 ### Building on legacy code and CUDA
 
-CUDA, MSVC, and PyTorch versions are interdependent; please install matching versions from this table:
-| CUDA version | Newest supported VS version                             | PyTorch version |
-| ------------ | ------------------------------------------------------- | --------------- |
-| 10.1         | Visual Studio 2019 (16.X) (`_MSC_VER` < 1930)           |  1.3.0 ~ 1.7.0  |
-| 10.2         | Visual Studio 2019 (16.X) (`_MSC_VER` < 1930)           |  1.5.0 ~ 1.7.0  |
-| 11.0         | Visual Studio 2019 (16.X) (`_MSC_VER` < 1930)           |      1.7.0      |
+CUDA, MSVC, and PyTorch versions are interdependent; please install matching versions. Current
+PyTorch requires CUDA 12.8+ and Visual Studio 2022 (17.X). Building PyTorch requires a C++20
+capable toolchain (GCC 11.3+, Clang 16+, or MSVC 2022).
 
-Note: There's a [compilation issue](https://github.com/uxlfoundation/oneDNN/issues/812) in several Visual Studio 2019 versions since 16.7.1, so please make sure your Visual Studio 2019 version is not in 16.7.1 ~ 16.7.5
+## Linting before committing
 
-## Pre-commit tidy/linting hook
-
-We use clang-tidy to perform additional
-formatting and semantic checking of code. We provide a pre-commit git hook for
-performing these checks, before a commit is created:
+All linting (clang-tidy, flake8, formatting, and more) is run through
+[`lintrunner`](https://github.com/pytorch/pytorch/wiki/lintrunner). The
+easiest way to run it is via `spin`:
 
   ```bash
-  ln -s ../../tools/git-pre-commit .git/hooks/pre-commit
+  spin lint        # run the default lint
+  spin quicklint   # lint only files changed in the latest commit and working tree
+  spin quickfix    # autofix issues on those changed files
   ```
 
-If you have already committed files and
-CI reports `flake8` errors, you can run the check locally in your PR branch with:
+You can also invoke `lintrunner` directly. With no arguments it lints the files
+changed relative to the merge-base, so just run:
 
   ```bash
-  flake8 $(git diff --name-only $(git merge-base --fork-point main))
+  lintrunner          # lint changed files
+  lintrunner -a       # lint changed files and apply autofixes
   ```
-
-You'll need to install an appropriately configured flake8; see
-[Lint as you type](https://github.com/pytorch/pytorch/wiki/Lint-as-you-type)
-for documentation on how to do this.
 
 Fix the code so that no errors are reported when you re-run the above check again,
 and then commit the fix.
@@ -1235,8 +1236,8 @@ and then commit the fix.
 useful for debugging memory errors in C++. We run it in CI, but here's how to
 get the same thing to run on your local machine.
 
-First, install LLVM 8. The easiest way is to get [prebuilt
-binaries](http://releases.llvm.org/download.html#8.0.0) and extract them to
+First, install LLVM (our ASAN CI currently uses clang 18). The easiest way is to get [prebuilt
+binaries](https://releases.llvm.org/download.html) and extract them to a
 folder (later called `$LLVM_ROOT`).
 
 Then set up the appropriate scripts. You can put this in your `.bashrc`:
@@ -1245,7 +1246,7 @@ Then set up the appropriate scripts. You can put this in your `.bashrc`:
 LLVM_ROOT=<wherever your llvm install is>
 PYTORCH_ROOT=<wherever your pytorch checkout is>
 
-LIBASAN_RT="$LLVM_ROOT/lib/clang/8.0.0/lib/linux/libclang_rt.asan-x86_64.so"
+LIBASAN_RT="$LLVM_ROOT/lib/clang/18/lib/linux/libclang_rt.asan-x86_64.so"
 build_with_asan()
 {
   LD_PRELOAD=${LIBASAN_RT} \
