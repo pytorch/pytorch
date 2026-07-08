@@ -405,7 +405,7 @@ inline Tensor asTensor(const Scalar& value, const Tensor& target) {
   at::Device target_device = target.device();
   // TODO: This qint special case looks very suspicious...
   if (isQIntType(target.scalar_type())) {
-    return scalarToTensor(value, device(kCPU).dtype(kFloat), at::Device(kCPU));
+    return scalarToTensor(value, at::device(kCPU).dtype(kFloat), at::Device(kCPU));
   } else if (target_device.is_cuda()) {
     return scalarToTensor(value, target.options(), at::Device(kCPU));
   } else {
