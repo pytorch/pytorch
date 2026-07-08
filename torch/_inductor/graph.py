@@ -1781,6 +1781,20 @@ class GraphLowering(torch.fx.Interpreter):
                 f"old_kwargs length ({len(old_kwargs)}) != new_kwargs length ({len(new_kwargs)})"
             )
 
+        def already_reflected(old_arg: Any, new_arg: Any) -> bool:
+            # No propagation is needed when new_arg already reflects the
+            # mutation of old_arg: either they are the same object, or they are
+            # distinct IR nodes aliasing the same buffer (e.g. an in-place op
+            # whose output was not cloned). Emitting copy_ in the aliasing case
+            # would lower to a self-referential (buf = buf) node, which the
+            # scheduler's compute_ancestors cannot represent (self-edge).
+            if old_arg is new_arg:
+                return True
+            if isinstance(old_arg, ir.IRNode) and isinstance(new_arg, ir.IRNode):
+                name = old_arg.maybe_get_name()
+                return name is not None and name == new_arg.maybe_get_name()
+            return False
+
         if fx_node.target is torch.ops.higher_order.triton_kernel_wrapper_mutation:
             kwargs = fx_node.kwargs["kwargs"]
             if not isinstance(kwargs, dict):
@@ -1797,7 +1811,7 @@ class GraphLowering(torch.fx.Interpreter):
             for name in mutated:
                 old_arg = old_kwargs["kwargs"][name]
                 new_arg = new_kwargs["kwargs"][name]
-                if old_arg is new_arg:
+                if already_reflected(old_arg, new_arg):
                     continue
 
                 self.call_function(torch.ops.aten.copy_.default, (old_arg, new_arg), {})
@@ -1822,7 +1836,7 @@ class GraphLowering(torch.fx.Interpreter):
                     new_arg = (new_arg,)  # type: ignore[assignment]
 
                 for old_arg_item, new_arg_item in zip(old_arg, new_arg):  # type: ignore[call-overload]
-                    if old_arg_item is new_arg_item:
+                    if already_reflected(old_arg_item, new_arg_item):
                         continue
                     self.call_function(
                         torch.ops.aten.copy_.default, (old_arg_item, new_arg_item), {}

@@ -5110,6 +5110,12 @@ class Scheduler:
             ancestors: OrderedSet[str] = OrderedSet()
             for dep in node.unmet_dependencies:
                 dep_node_name = self.name_to_buf[dep.name].defining_op_name()
+                # A node can transiently depend on a buffer it also writes (a
+                # self-edge, e.g. from a mutating op whose read and write
+                # resolve to the same buffer). A node is never its own
+                # ancestor, so skip it rather than KeyError on itself.
+                if dep_node_name == node.get_name():
+                    continue
                 ancestors.add(dep_node_name)
                 ancestors |= name_to_ancestors[dep_node_name]
             name_to_ancestors[node.get_name()] = ancestors
@@ -5128,22 +5134,20 @@ class Scheduler:
         name_to_min_distance: dict[str, int] = {}
         name_to_max_distance: dict[str, int] = {}
         for node in self.nodes:
-            if not node.unmet_dependencies:
+            # Skip self-edges (a node depending on a buffer it also writes); a
+            # node is not at any distance from itself. See compute_ancestors.
+            dep_ops = [
+                op
+                for dep in node.unmet_dependencies
+                if (op := self.name_to_buf[dep.name].defining_op_name())
+                != node.get_name()
+            ]
+            if not dep_ops:
                 min_dist = 0
                 max_dist = 0
             else:
-                dep_min_dists = [
-                    name_to_min_distance[self.name_to_buf[dep.name].defining_op_name()]
-                    + 1
-                    for dep in node.unmet_dependencies
-                ]
-                dep_max_dists = [
-                    name_to_max_distance[self.name_to_buf[dep.name].defining_op_name()]
-                    + 1
-                    for dep in node.unmet_dependencies
-                ]
-                min_dist = min(dep_min_dists)
-                max_dist = max(dep_max_dists)
+                min_dist = min(name_to_min_distance[op] + 1 for op in dep_ops)
+                max_dist = max(name_to_max_distance[op] + 1 for op in dep_ops)
             name_to_min_distance[node.get_name()] = min_dist
             name_to_max_distance[node.get_name()] = max_dist
             node.min_input_distance = min_dist
