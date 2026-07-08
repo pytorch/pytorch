@@ -81,6 +81,47 @@ class CuBlasLtMatrixLayout : public CuBlasLtDescriptor<
   }
 };
 
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+class CuBlasLtGroupedMatrixLayout : public CuBlasLtDescriptor<
+                                        cublasLtMatrixLayoutOpaque_t,
+                                        &cublasLtMatrixLayoutDestroy> {
+ public:
+  CuBlasLtGroupedMatrixLayout(
+      cudaDataType_t type,
+      int group_count,
+      const void* rows_array,
+      const void* cols_array,
+      const void* ld_array,
+      bool t = false,
+      bool use_int64 = false) {
+    cublasLtMatrixLayout_t raw_descriptor = nullptr;
+    TORCH_CUDABLAS_CHECK(cublasLtGroupedMatrixLayoutCreate(
+        &raw_descriptor,
+        type,
+        group_count,
+        t ? cols_array : rows_array,
+        t ? rows_array : cols_array,
+        ld_array));
+    descriptor_.reset(raw_descriptor);
+    setAttribute(CUBLASLT_MATRIX_LAYOUT_ORDER, CUBLASLT_ORDER_ROW);
+    if (use_int64) {
+      setAttribute(
+          CUBLASLT_GROUPED_MATRIX_LAYOUT_ROWS_COLS_ARRAY_INTEGER_WIDTH,
+          CUBLASLT_INTEGER_WIDTH_64);
+      setAttribute(
+          CUBLASLT_GROUPED_MATRIX_LAYOUT_LD_ARRAY_INTEGER_WIDTH,
+          CUBLASLT_INTEGER_WIDTH_64);
+    }
+  }
+
+  template <typename T>
+  void setAttribute(cublasLtMatrixLayoutAttribute_t attr, const T value) {
+    TORCH_CUDABLAS_CHECK(::cublasLtMatrixLayoutSetAttribute(
+        descriptor(), attr, &value, sizeof(T)));
+  }
+};
+#endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+
 class CuBlasLtMatmulPreference : public CuBlasLtDescriptor<
                                      cublasLtMatmulPreferenceOpaque_t,
                                      &cublasLtMatmulPreferenceDestroy> {
