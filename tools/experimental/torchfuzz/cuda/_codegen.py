@@ -187,7 +187,7 @@ class DTensorFuzzTemplate(FuzzTemplate):
         )
 
         if arg_operations:
-            for i, (node_id, spec) in enumerate(arg_operations):
+            for i, (_node_id, spec) in enumerate(arg_operations):
                 arg_name = f"arg_{i}"
 
                 if isinstance(spec, ScalarSpec):
@@ -379,7 +379,7 @@ class StreamFuzzTemplate(DefaultFuzzTemplate):
         """
         code_lines = super().args_codegen(arg_operations, constant_operations)
         if arg_operations:
-            for i, (node_id, spec) in enumerate(arg_operations):
+            for i, (_node_id, spec) in enumerate(arg_operations):
                 if isinstance(spec, TensorSpec) and spec.dtype in [
                     torch.float32,
                     torch.float64,
@@ -610,7 +610,7 @@ class DTensorFuzzPlacementsTemplate(DTensorFuzzTemplate):
 
         # Args with random placements using dist_tensor API
         if arg_operations:
-            for i, (node_id, spec) in enumerate(arg_operations):
+            for i, (_node_id, spec) in enumerate(arg_operations):
                 if isinstance(spec, TensorSpec):
                     size_str = str(spec.size)
                     dtype_str = f"torch.{spec.dtype}".replace("torch.torch.", "torch.")
@@ -636,7 +636,7 @@ class DTensorFuzzPlacementsTemplate(DTensorFuzzTemplate):
 
         # Constants (if any) - use same dist_tensor approach
         if constant_operations:
-            for node_id, var_name, spec in constant_operations:
+            for _node_id, var_name, spec in constant_operations:
                 if isinstance(spec, TensorSpec):
                     size_str = str(spec.size)
                     dtype_str = f"torch.{spec.dtype}".replace("torch.torch.", "torch.")

@@ -1303,7 +1303,7 @@ def emit_body(
 
             # Figure out the offset of the edge that uses this variable
             derivative_var_name = derivative.var_names[0]
-            for edge_off, a in enumerate(args_with_derivatives):
+            for edge_off, a in enumerate(args_with_derivatives):  # noqa: B007
                 if a.name == derivative_var_name:
                     break
             else:

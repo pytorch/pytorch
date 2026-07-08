@@ -889,7 +889,7 @@ def _get_module_and_submodules(qname: str) -> Sequence[str] | None:
     if spec.submodule_search_locations is not None:
         package = importlib.import_module(qname)
         if hasattr(package, "__path__"):
-            for importer, modname, ispkg in pkgutil.walk_packages(
+            for _importer, modname, _ispkg in pkgutil.walk_packages(
                 path=package.__path__,
                 prefix=qname + ".",
                 onerror=lambda x: None,

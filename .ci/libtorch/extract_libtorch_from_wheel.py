@@ -220,7 +220,7 @@ def create_libtorch_zip(
 ) -> Path:
     zip_path = output_dir / f"{zip_prefix}-{version}.zip"
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        for root, dirs, files in os.walk(libtorch_dir):
+        for root, _dirs, files in os.walk(libtorch_dir):
             for f in files:
                 filepath = Path(root) / f
                 arcname = filepath.relative_to(libtorch_dir.parent)

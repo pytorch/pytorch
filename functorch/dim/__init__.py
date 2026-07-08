@@ -1325,7 +1325,7 @@ def split(tensor: Any, split_size_or_sections: Any, dim: Any = None) -> tuple:
     result = []
     new_levels = list(self_info.levels)
 
-    for i, (result_tensor, size_dim) in enumerate(zip(result_tensors, sizes)):
+    for _i, (result_tensor, size_dim) in enumerate(zip(result_tensors, sizes)):
         new_levels[idx] = DimEntry(size_dim)
         result.append(
             Tensor.from_positional(

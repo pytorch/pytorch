@@ -594,7 +594,7 @@ class TestDataParallel(TestCase):
             opt_single.step()
             opt_dp.step()
 
-            for (n1, p1), (n2, p2) in zip(
+            for (n1, p1), (_n2, p2) in zip(
                 model_single.named_parameters(), model_dp_base.named_parameters()
             ):
                 self.assertEqual(p1.grad.shape, p2.grad.shape)
@@ -604,7 +604,7 @@ class TestDataParallel(TestCase):
                     lambda msg: f"{msg}\nEpoch {epoch}: gradients differ for {n1}",
                 )
 
-            for (n1, p1), (n2, p2) in zip(
+            for (n1, p1), (_n2, p2) in zip(
                 model_single.named_parameters(), model_dp_base.named_parameters()
             ):
                 self.assertTrue(
@@ -671,7 +671,7 @@ class TestDataParallel(TestCase):
             opt_single.step()
             opt_dp.step()
 
-            for (n1, p1), (n2, p2) in zip(
+            for (n1, p1), (_n2, p2) in zip(
                 model_single.named_parameters(), model_dp_base.named_parameters()
             ):
                 self.assertEqual(p1.grad.shape, p2.grad.shape)
@@ -681,7 +681,7 @@ class TestDataParallel(TestCase):
                     lambda msg: f"{msg}\nEpoch {epoch}: gradients differ for {n1}",
                 )
 
-            for (n1, p1), (n2, p2) in zip(
+            for (n1, p1), (_n2, p2) in zip(
                 model_single.named_parameters(), model_dp_base.named_parameters()
             ):
                 self.assertTrue(

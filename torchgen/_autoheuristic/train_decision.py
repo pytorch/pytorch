@@ -473,7 +473,7 @@ class AHTrainDecisionTree(AHTrain):
         def add_near_best_configs(df):
             new_rows = []
 
-            for index, row in df.iterrows():
+            for _index, row in df.iterrows():
                 dictionary = json.loads(row["choice2time"])
                 min_value = min(dictionary.values())
 

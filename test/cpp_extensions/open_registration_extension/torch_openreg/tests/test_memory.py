@@ -364,7 +364,7 @@ class TestMemoryLeaks(TestCase):
         size = 50 * 1024 * 1024 // 4
         iterations = 50
 
-        for i in range(iterations):
+        for _i in range(iterations):
             x = torch.empty(size, device="openreg")
             del x
             gc.collect()
@@ -382,11 +382,11 @@ class TestMemoryLeaks(TestCase):
         num_cycles = 10
         allocations_per_cycle = 100
 
-        for cycle in range(num_cycles):
+        for _cycle in range(num_cycles):
             tensors = []
 
             # Allocate many tensors
-            for i in range(allocations_per_cycle):
+            for _i in range(allocations_per_cycle):
                 t = torch.empty(1000, device="openreg")
                 tensors.append(t)
 

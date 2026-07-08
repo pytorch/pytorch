@@ -64,7 +64,7 @@ class StackBenchmark(op_bench.TorchBenchmarkBase):
         if type(sizes) is list and N == -1:
             gen_sizes = sizes
         else:
-            for i in range(N):
+            for _i in range(N):
                 gen_sizes.append(
                     [
                         old_size() if callable(old_size) else old_size

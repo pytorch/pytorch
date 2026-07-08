@@ -119,7 +119,7 @@ def find_missing_redirects(
         List of (old_key, new_url) tuples. new_url is None for deletions.
     """
     missing = []
-    for status, old_path, new_path in changes:
+    for _status, old_path, new_path in changes:
         old_key = path_to_key(old_path)
         if old_key not in existing:
             new_url = path_to_url(new_path) if new_path else None

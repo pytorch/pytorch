@@ -242,7 +242,7 @@ class WorkerServerTest(TestCase):
 
             # Use the counter multiple times to generate metrics
             # Note: Using minimal/no sleep to avoid timing issues
-            for i in range(3):
+            for _i in range(3):
                 with counter.guard():
                     pass  # Minimal work
 
