@@ -1402,6 +1402,11 @@ def _log_api_usage_metadata(
     metadata_map: dict[str, str],
 ) -> None: ...  # LogAPIUsageMetadataFromPython
 def _demangle(str) -> str: ...  # c10::demangle
+def _fake_dispatch_register_decomp(name: str, overload: str) -> None: ...
+def _fake_dispatch_register_meta(name: str, overload: str) -> None: ...
+def _fake_dispatch_register_op_impl(name: str, overload: str) -> None: ...
+def _fake_dispatch_register_prim_meta(name: str, overload: str) -> None: ...
+def _fake_dispatch_deregister_op_impl(name: str, overload: str) -> None: ...
 def _disabled_torch_function_impl(
     func: Callable,
     types: Iterable[type],
@@ -2190,6 +2195,8 @@ def _cuda_record_memory_history_legacy(
     compile_context: _bool,
     global_record_annotations: _bool,
     skip_actions: list[str],
+    record_pinned_host_memory: _bool,
+    record_cuda: _bool,
 ) -> None: ...
 def _cuda_record_memory_history(
     enabled: str | None,
@@ -2200,6 +2207,8 @@ def _cuda_record_memory_history(
     compile_context: _bool,
     global_record_annotations: _bool,
     skip_actions: list[str],
+    record_pinned_host_memory: _bool,
+    record_cuda: _bool,
 ) -> None: ...
 def _cuda_allocationTraceback(data_ptr: _int) -> list[dict[str, Any]] | None: ...
 def _cuda_isHistoryEnabled() -> _bool: ...

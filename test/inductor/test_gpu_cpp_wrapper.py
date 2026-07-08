@@ -320,10 +320,15 @@ class TestGpuWrapper(InductorTestCase):
 
     @config.patch(implicit_fallbacks=True)
     def test_custom_op_optional_output_null_guards_size_assert(self):
+        import ctypes
+
         if not RUN_GPU:
             self.skipTest("GPU not available")
         if IS_FBCODE or IS_SANDCASTLE:
             torch.ops.load_library("//caffe2/test/inductor:custom_ops")
+            import torch._utils_internal as _ui
+
+            lib_path = _ui.resolve_library_path("//caffe2/test/inductor:custom_ops")
         elif IS_MACOS:
             self.skipTest("non-portable load_library call used in test")
         else:
@@ -333,6 +338,8 @@ class TestGpuWrapper(InductorTestCase):
             if not os.path.exists(lib_path):
                 self.skipTest("libaoti_custom_ops not built")
             torch.ops.load_library(str(lib_path))
+
+        ctypes.CDLL(str(lib_path), mode=ctypes.RTLD_GLOBAL)
 
         op = torch.ops.aoti_custom_ops.fn_optional_output.default
         c_shims = {
@@ -356,14 +363,7 @@ class TestGpuWrapper(InductorTestCase):
 
         x = torch.randn(8, 4, device=self.device)
         expected = fn(x)
-        # custom_op_libs links the generated .so against libaoti_custom_ops so the
-        # C-shim symbols resolve when the JIT cpp_wrapper module is loaded.
-        with config.patch(
-            {
-                "aot_inductor.custom_ops_to_c_shims": c_shims,
-                "aot_inductor.custom_op_libs": ["aoti_custom_ops"],
-            }
-        ):
+        with config.patch({"aot_inductor.custom_ops_to_c_shims": c_shims}):
             compiled = torch.compile(fullgraph=True, options={"cpp_wrapper": True})(fn)
             actual = compiled(x)
         self.assertEqual(actual[0], expected[0])
