@@ -18876,6 +18876,32 @@ if RUN_GPU or HAS_MPS:
                 )
                 self.common(fn, (x,), check_lowp=False)
 
+        @requires_cuda_and_triton
+        def test_modified_bessel_i_inf_matches_eager(self):
+            ops = (
+                ("i0", torch.special.i0),
+                ("modified_bessel_i0", torch.special.modified_bessel_i0),
+                ("i1", torch.special.i1),
+                ("modified_bessel_i1", torch.special.modified_bessel_i1),
+            )
+
+            for name, op in ops:
+                for dtype in (torch.float32, torch.float64):
+                    with self.subTest(name=name, dtype=dtype):
+                        x = torch.tensor(
+                            [float("inf"), float("-inf"), float("nan"), 0.5],
+                            device=self.device,
+                            dtype=dtype,
+                        )
+
+                        def fn(x):
+                            return op(x)
+
+                        actual = torch.compile(fn, fullgraph=True)(x)
+                        expected = fn(x)
+                        torch.testing.assert_close(actual, expected, equal_nan=True)
+                        self.assertTrue(torch.isnan(actual[:3]).all())
+
     copy_tests(CommonTemplate, GPUTests, GPU_TYPE)
 
 if RUN_TPU:
