@@ -2235,7 +2235,7 @@ class SchedulerNode(BaseSchedulerNode):
 
     def _compute_attrs(
         self,
-        extra_indexing_constraints: tuple[dict[Any, Any], list[Any]] | None = None,
+        extra_indexing_constraints: ir.ExtraIndexingConstraints | None = None,
         recompute_sizes_body_func: Callable[_P, _T] | None = None,
     ) -> None:
         if not isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer)):
@@ -2271,7 +2271,7 @@ class SchedulerNode(BaseSchedulerNode):
 
     def recompute_size_and_body(
         self,
-        extra_indexing_constraints: tuple[dict[Any, Any], list[Any]] | None = None,
+        extra_indexing_constraints: ir.ExtraIndexingConstraints | None = None,
         recompute_sizes_body_func: Callable[..., Any] | None = None,
     ) -> None:
         fake_deps: OrderedSet[Dep] = OrderedSet(
