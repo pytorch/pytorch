@@ -1986,7 +1986,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         self.assertEqual(
             num_triton_kernels,
             1,
-            f"Expected 1 Triton kernel for fused copy_(cat(...)), got {num_triton_kernels}",
+            lambda msg: f"{msg}\nExpected 1 Triton kernel for fused copy_(cat(...)), got {num_triton_kernels}",
         )
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
