@@ -28,6 +28,7 @@ from torch.testing._internal.common_device_type import (
     largeTensorTest,
     onlyAccelerator,
     onlyCPU,
+    onlyCUDA,
     onlyMPS,
     TEST_WITH_ROCM,
 )
@@ -518,6 +519,33 @@ class TestPoolingNNDeviceType(NNTestCase):
         out = avg_pool(input)
         self.assertFalse(torch.isinf(out).any())
         self.assertFalse(torch.isnan(out).any())
+
+    @onlyCUDA
+    @largeTensorTest("10GB", device="cuda")
+    def test_adaptive_avg_pool2d_backward_large_index_offsets(self, device):
+        height = 32769
+        width = 65536
+        channels = 2
+        output_width = 1024
+        input = torch.as_strided(
+            torch.empty((1,), dtype=torch.half, device=device),
+            (1, channels, height, width),
+            (0, 0, 0, 0),
+        )
+        self.assertGreater(input.numel(), torch.iinfo(torch.int32).max)
+        grad_output = torch.ones(
+            (1, channels, height, output_width), dtype=torch.half, device=device
+        )
+
+        grad_input = torch.ops.aten._adaptive_avg_pool2d_backward(grad_output, input)
+        sample = grad_input[
+            0,
+            [0, 0, 1],
+            [0, height - 1, height - 1],
+            [0, 0, width - 1],
+        ]
+        expected = torch.full_like(sample, 1 / (width // output_width))
+        self.assertEqual(sample, expected)
 
     @expectedFailureMPS  # No double, float shape prop does not work
     @dtypes(torch.float, torch.double)
@@ -1097,14 +1125,15 @@ torch.cuda.synchronize()
             grad = torch.randn(
                 n,
                 c,
-                (h - kernel_size) // stride + 1,
-                (w - kernel_size) // stride + 1,
+                (h + 2 * padding - kernel_size) // stride + 1,
+                (w + 2 * padding - kernel_size) // stride + 1,
                 dtype=dtype,
                 device=device,
             )
             pool = torch.nn.AvgPool2d(
                 kernel_size,
                 stride=stride,
+                padding=padding,
                 count_include_pad=count_include_pad,
                 divisor_override=divisor_override,
             ).to(device)
@@ -1114,6 +1143,7 @@ torch.cuda.synchronize()
             ref_pool = torch.nn.AvgPool2d(
                 kernel_size,
                 stride=stride,
+                padding=padding,
                 count_include_pad=count_include_pad,
                 divisor_override=divisor_override,
             ).to(device)
@@ -1130,7 +1160,8 @@ torch.cuda.synchronize()
 
         helper(4, 8, 8, 8, 3)
         helper(4, 8, 8, 8, 3, count_include_pad=False, padding=1)
-        helper(4, 8, 8, 8, 3, count_include_pad=False, padding=2, stride=2)
+        helper(4, 8, 8, 8, 5, count_include_pad=False, padding=2, stride=2)
+        helper(4, 8, 8, 8, 3, padding=1)
         helper(4, 8, 8, 8, 3, divisor_override=42)
         helper(4, 8, 8, 8, 7)
         # ROCm 16GB MI25 hits OOM error. Clear caching allocator prior to running large subtest.
@@ -1138,7 +1169,7 @@ torch.cuda.synchronize()
             torch.cuda.empty_cache()
         helper(200, 512, 28, 28, 2)
         helper(4, 8, 7, 7, 3, stride=1)
-        helper(4, 8, 7, 7, 3, padding=2, stride=1)
+        helper(4, 8, 7, 7, 5, padding=2, stride=1)
         helper(10, 512, 31, 31, 3, stride=2)
         helper(1, 129, 8, 8, 3, stride=2)
 

@@ -1244,9 +1244,6 @@ c10::intrusive_ptr<intra_node_comm::IntraNodeComm> ProcessGroupNCCL::
   }
 }
 
-void ProcessGroupNCCL::setSequenceNumberForGroup() {
-} // NCCL just starts sequence numbers at 0.
-
 uint64_t ProcessGroupNCCL::getSequenceNumberForGroup() {
   return seqCollective_;
 }
@@ -1296,10 +1293,7 @@ void ProcessGroupNCCL::waitForPendingWorks() {
   //      same order and hence no deadlocks.
   while (true) {
     {
-      std::lock(workMetaListMutex_, completedWorkListMutex_);
-      std::lock_guard<std::mutex> lockWork(workMetaListMutex_, std::adopt_lock);
-      std::lock_guard<std::mutex> lockHook(
-          completedWorkListMutex_, std::adopt_lock);
+      std::scoped_lock lock(workMetaListMutex_, completedWorkListMutex_);
 
       if (workMetaList_.empty() && completedWorkList_.empty()) {
         return;
