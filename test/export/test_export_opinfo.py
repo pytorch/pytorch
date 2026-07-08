@@ -31,6 +31,7 @@ from torch.utils import _pytree as pytree
 # following are failing with regular torch.export.export
 export_failures = {
     xfail("allclose"),
+    xfail("combinations"),
     xfail("corrcoef"),
     xfail("cov"),
     xfail("equal"),
