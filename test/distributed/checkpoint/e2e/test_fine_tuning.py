@@ -16,7 +16,7 @@ from torch.distributed.checkpoint.state_dict import (
 )
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import skip_if_lt_x_devices
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -181,7 +181,7 @@ class TestFineTuning(DTensorTestBase):
                 storage_writer=dist_cp.FileSystemWriter(finetune_dir),
             )
 
-    @skip_if_lt_x_gpu(4)
+    @skip_if_lt_x_devices(4)
     @with_comms
     @with_temp_dir
     def test_fine_tuning(self) -> None:
