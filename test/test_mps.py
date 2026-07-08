@@ -801,6 +801,19 @@ class TestAvgPool(TestCaseMPS):
             padding=(0, 1), stride=2)
         self.assertFalse(torch.isnan(y).any())
 
+    def test_avg_pool2d_backward_channels_last(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/175190
+        # AvgPool2d / AdaptiveAvgPool2d backward used to abort (SIGABRT) on MPS
+        # for channels_last inputs; forward worked but backward mis-sized the
+        # Metal buffer.
+        for pool in (torch.nn.AvgPool2d(2), torch.nn.AdaptiveAvgPool2d((4, 4))):
+            base = torch.randn(4, 3, 8, 8)
+            cpu_x = base.clone().to(memory_format=torch.channels_last).requires_grad_(True)
+            mps_x = base.detach().to("mps").to(memory_format=torch.channels_last).requires_grad_(True)
+            pool(cpu_x).sum().backward()
+            pool(mps_x).sum().backward()
+            self.assertEqual(cpu_x.grad, mps_x.grad.cpu())
+
     # Test some cases for avg_pool2d which used to mismatch CPU results.
     # Addresses this issue: https://github.com/pytorch/pytorch/issues/160743
     def test_avg_pool2d_ceil_mode_mismatch(self):

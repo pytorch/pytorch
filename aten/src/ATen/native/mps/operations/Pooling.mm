@@ -667,6 +667,29 @@ static void avg_pool2d_template(const Tensor& input,
   TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(input.scalar_type()), "Not implemented for complex");
   const Tensor& grad_output = *(at::borrow_from_optional_tensor(grad_output_opt));
   const bool is_backward_pass = grad_output.defined();
+
+  // The channels_last raw-buffer path in pool2d_template mis-sizes the Metal
+  // buffer for the backward pass, which either aborts (SIGABRT) or produces
+  // wrong gradients. Compute the gradient on contiguous tensors and restride
+  // the result to match. See https://github.com/pytorch/pytorch/issues/175190
+  if (is_backward_pass &&
+      input.suggest_memory_format(/*channels_last_strides_exact_match=*/true) == MemoryFormat::ChannelsLast) {
+    auto grad_input_contig = at::empty(output.sizes(), output.options());
+    avg_pool2d_template(input.contiguous(),
+                        grad_input_contig,
+                        grad_output.contiguous(),
+                        kernel_size,
+                        stride,
+                        padding,
+                        dilation,
+                        ceil_mode,
+                        count_include_pad,
+                        divisor_override,
+                        op_name);
+    output.copy_(grad_input_contig);
+    return;
+  }
+
   const bool use_divisor = divisor_override.has_value() && divisor_override.value() != 0;
 
   // custom divisor isn't supported natively in avgPooling2DWithSourceTensor().
