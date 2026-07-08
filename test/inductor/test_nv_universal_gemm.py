@@ -11,11 +11,11 @@ from torch._inductor.codegen.cuda.cuda_env import is_datacenter_blackwell_arch
 from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_scheduling import (
     EPILOGUE_FN_NAME,
 )
-from torch._inductor.scheduler import Scheduler
-from torch._inductor.template_heuristics.nv_universal_gemm import (
+from torch._inductor.heuristics.template.nv_universal_gemm import (
     HeuristicConfig,
     NVUniversalGemmHeuristics,
 )
+from torch._inductor.scheduler import Scheduler
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import (
     ceildiv,
