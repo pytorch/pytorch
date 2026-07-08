@@ -83,7 +83,7 @@ jobs:
 
   linux-jammy-py3_12-inductor-pallas-tpu-test:
     name: pallas-tpu-py3.12-inductor
-    uses: ./.github/workflows/_linux-test.yml
+    uses: ./.github/workflows/_tpu-test.yml
     needs: linux-jammy-py3_12-inductor-pallas-tpu-build
     with:
       build-environment: ${{ needs.linux-jammy-py3_12-inductor-pallas-tpu-build.outputs.build-environment }}
