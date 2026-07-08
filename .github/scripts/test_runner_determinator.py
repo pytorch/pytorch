@@ -329,9 +329,7 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
 
         """
         result = rd.get_runner_prefix(settings_text, ["User2"], USER_BRANCH)
-        self.assertEqual(
-            "lf-", result.prefix, "Runner prefix not correct for User2"
-        )
+        self.assertEqual("lf-", result.prefix, "Runner prefix not correct for User2")
 
     def test_opted_in_user_two_experiments_default(self) -> None:
         settings_text = """
@@ -369,9 +367,7 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
         result = rd.get_runner_prefix(
             settings_text, ["User2"], USER_BRANCH, frozenset(["lf", "otherExp"])
         )
-        self.assertEqual(
-            "lf-", result.prefix, "Runner prefix not correct for User2"
-        )
+        self.assertEqual("lf-", result.prefix, "Runner prefix not correct for User2")
 
     def test_opted_in_user_two_experiments_default_exp_2(self) -> None:
         settings_text = """
@@ -391,9 +387,7 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
         result = rd.get_runner_prefix(
             settings_text, ["User2"], USER_BRANCH, frozenset(["otherExp"])
         )
-        self.assertEqual(
-            "mt-", result.prefix, "Runner prefix not correct for User2"
-        )
+        self.assertEqual("mt-", result.prefix, "Runner prefix not correct for User2")
 
     @patch("random.uniform", return_value=50)
     def test_opted_out_user(self, mock_uniform: Mock) -> None:
@@ -431,9 +425,7 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
 
         # User3 is opted out, but is pulled into both experiments by the 10% rollout
         result = rd.get_runner_prefix(settings_text, ["User3"], USER_BRANCH)
-        self.assertEqual(
-            "lf-", result.prefix, "Runner prefix not correct for user"
-        )
+        self.assertEqual("lf-", result.prefix, "Runner prefix not correct for user")
 
     @patch("random.uniform", return_value=10)
     def test_opted_out_user_was_pulled_in_by_rollout_excl_nondefault(
@@ -481,9 +473,7 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
         result = rd.get_runner_prefix(
             settings_text, ["User3"], USER_BRANCH, frozenset(["otherExp"])
         )
-        self.assertEqual(
-            "mt-", result.prefix, "Runner prefix not correct for user"
-        )
+        self.assertEqual("mt-", result.prefix, "Runner prefix not correct for user")
 
     @patch("random.uniform", return_value=25)
     def test_opted_out_user_was_pulled_out_by_rollout_filter_exp(
@@ -524,9 +514,7 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
         """
 
         result = rd.get_runner_prefix(settings_text, ["User2"], USER_BRANCH)
-        self.assertEqual(
-            "lf-", result.prefix, "Runner prefix not correct for user"
-        )
+        self.assertEqual("lf-", result.prefix, "Runner prefix not correct for user")
 
     def test_ignores_commented_users(self) -> None:
         settings_text = """
@@ -563,9 +551,7 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
         """
 
         result = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
-        self.assertEqual(
-            "lf-", result.prefix, "Runner prefix not correct for user"
-        )
+        self.assertEqual("lf-", result.prefix, "Runner prefix not correct for user")
 
     def test_disables_experiment_on_exception_branches_when_not_explicitly_opted_in(
         self,
@@ -726,9 +712,7 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
         """
 
         result = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
-        self.assertEqual(
-            "lf-", result.prefix, "Runner prefix not correct for user"
-        )
+        self.assertEqual("lf-", result.prefix, "Runner prefix not correct for user")
 
     @patch("random.uniform", return_value=50)
     def test_opted_in_user_with_rollout_perc_partial_enable(
