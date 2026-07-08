@@ -1250,6 +1250,55 @@ class DecompOneOffTests(TestCase):
         res = torch._decomp.decompositions.threshold_backward(grad, input_tensor, 1)
         self.assertEqual(ref.dtype, res.dtype)
 
+        ref_out = torch.empty_like(ref)
+        res_out = torch.empty_like(ref)
+        torch.ops.aten.threshold_backward.grad_input(
+            grad, input_tensor, 1, grad_input=ref_out
+        )
+        decomposition_table[torch.ops.aten.threshold_backward.grad_input](
+            grad, input_tensor, 1, grad_input=res_out
+        )
+        self.assertEqual(ref_out, res_out)
+
+        if torch.device(device).type in ("cpu", "cuda"):
+            grad = torch.tensor([2.2, 3.3], dtype=torch.float32, device=device)
+            input_tensor = torch.tensor(
+                [0.10001, -1.0], dtype=torch.float32, device=device
+            )
+            ref_out = torch.empty(2, dtype=torch.bfloat16, device=device)
+            res_out = torch.empty(2, dtype=torch.bfloat16, device=device)
+            torch.ops.aten.threshold_backward.grad_input(
+                grad, input_tensor, 0.1, grad_input=ref_out
+            )
+            decomposition_table[torch.ops.aten.threshold_backward.grad_input](
+                grad, input_tensor, 0.1, grad_input=res_out
+            )
+            self.assertEqual(ref_out, res_out)
+
+            ref_out = torch.empty(2, dtype=torch.int32, device=device)
+            res_out = torch.empty(2, dtype=torch.int32, device=device)
+            with self.assertRaisesRegex(RuntimeError, "cast"):
+                torch.ops.aten.threshold_backward.grad_input(
+                    grad, input_tensor, 0.1, grad_input=ref_out
+                )
+            with self.assertRaisesRegex(RuntimeError, "cast"):
+                decomposition_table[torch.ops.aten.threshold_backward.grad_input](
+                    grad, input_tensor, 0.1, grad_input=res_out
+                )
+
+    @onlyCPU
+    @skipIfCrossRef
+    def test_threshold_out_dtype(self, device):
+        input_tensor = torch.tensor([0.10009765625, -1.0], dtype=torch.bfloat16)
+        ref_out = torch.empty(2, dtype=torch.float32)
+        res_out = torch.empty(2, dtype=torch.float32)
+
+        torch.ops.aten.threshold.out(input_tensor, 0.1, 9.9, out=ref_out)
+        decomposition_table[torch.ops.aten.threshold.out](
+            input_tensor, 0.1, 9.9, out=res_out
+        )
+        self.assertEqual(ref_out, res_out)
+
     @onlyNativeDeviceTypes
     @skipIfCrossRef
     def test_weight_norm_interface(self, device):
@@ -1503,7 +1552,70 @@ class DecompOneOffTests(TestCase):
             )
 
 
+class ThresholdDecompDeviceTests(TestCase):
+    def _threshold_bf16_input(self, device):
+        try:
+            return torch.tensor(
+                [0.10009765625, -1.0], dtype=torch.bfloat16, device=device
+            )
+        except RuntimeError as exc:
+            if torch.device(device).type == "mps" and "BFloat16" in str(exc):
+                self.skipTest("bfloat16 is not supported on this MPS device")
+            raise
+
+    @skipIfCrossRef
+    def test_threshold_backward_grad_input_low_precision_out(self, device):
+        input_tensor = self._threshold_bf16_input(device)
+        grad = torch.tensor([2.2, 3.3], dtype=torch.float32, device=device)
+
+        for out_dtype in (torch.bfloat16, torch.float32):
+            ref_out = torch.empty(2, dtype=out_dtype, device=device)
+            res_out = torch.empty(2, dtype=out_dtype, device=device)
+            aten.threshold_backward.grad_input(
+                grad, input_tensor, 0.1, grad_input=ref_out
+            )
+            decomposition_table[aten.threshold_backward.grad_input](
+                grad, input_tensor, 0.1, grad_input=res_out
+            )
+            self.assertEqual(ref_out, res_out)
+
+    @skipIfCrossRef
+    def test_threshold_backward_mixed_input_dtype(self, device):
+        input_tensor = torch.tensor([0, -1], dtype=torch.int32, device=device)
+        grad = torch.tensor([2.2, 3.3], dtype=torch.float32, device=device)
+
+        ref = aten.threshold_backward(grad, input_tensor, -0.1)
+        res = torch._decomp.decompositions.threshold_backward(grad, input_tensor, -0.1)
+        self.assertEqual(ref, res)
+
+        ref_out = torch.empty(2, dtype=torch.float32, device=device)
+        res_out = torch.empty(2, dtype=torch.float32, device=device)
+        aten.threshold_backward.grad_input(grad, input_tensor, -0.1, grad_input=ref_out)
+        decomposition_table[aten.threshold_backward.grad_input](
+            grad, input_tensor, -0.1, grad_input=res_out
+        )
+        self.assertEqual(ref_out, res_out)
+
+    @skipIfCrossRef
+    def test_threshold_out_low_precision_out(self, device):
+        input_tensor = self._threshold_bf16_input(device)
+
+        for out_dtype in (torch.bfloat16, torch.float32):
+            ref_out = torch.empty(2, dtype=out_dtype, device=device)
+            res_out = torch.empty(2, dtype=out_dtype, device=device)
+            aten.threshold.out(input_tensor, 0.1, 9.9, out=ref_out)
+            decomposition_table[aten.threshold.out](input_tensor, 0.1, 9.9, out=res_out)
+            self.assertEqual(ref_out, res_out)
+
+
 instantiate_device_type_tests(DecompOneOffTests, globals())
+instantiate_device_type_tests(
+    ThresholdDecompDeviceTests,
+    globals(),
+    only_for=("cpu", "cuda", "xpu", "mps"),
+    allow_mps=True,
+    allow_xpu=True,
+)
 
 
 class HasDecompTest(TestCase):

@@ -19,6 +19,8 @@ from torch._prims_common import (
     TensorLikeType,
 )
 from torch._prims_common.wrappers import (
+    _maybe_resize_out,
+    _safe_copy_out,
     elementwise_type_promotion_wrapper,
     elementwise_unary_scalar_wrapper,
     out_wrapper,
@@ -934,13 +936,57 @@ def tanhshrink(a: TensorLikeType) -> TensorLikeType:
     return a - torch.tanh(a)
 
 
-@register_decomposition(aten.threshold)
+def _threshold_impl(
+    a: TensorLikeType,
+    threshold: NumberType,
+    value: bool | int | float,
+    *,
+    kernel_dtype: torch.dtype,
+    result_dtype: torch.dtype,
+) -> TensorLikeType:
+    other = (
+        a if a.dtype == kernel_dtype else prims.convert_element_type(a, kernel_dtype)
+    )
+    cmp: TensorLikeType = other
+    cmp_threshold: TensorLikeType | NumberType = threshold
+    if utils.is_float_dtype(kernel_dtype) and utils.is_low_precision_dtype(
+        kernel_dtype
+    ):
+        if a.device.type in ("cuda", "xpu", "mps"):
+            # CUDA/XPU/MPS threshold kernels cast the scalar to the iterator dtype.
+            cmp_threshold = torch.scalar_tensor(
+                threshold, dtype=kernel_dtype, device=a.device
+            )
+        else:
+            # CPU threshold kernels compare reduced floating inputs in fp32.
+            cmp = (
+                a
+                if a.dtype == torch.float32
+                else prims.convert_element_type(a, torch.float32)
+            )
+            cmp_threshold = torch.scalar_tensor(
+                threshold, dtype=torch.float32, device=a.device
+            )
+    elif not utils.is_float_dtype(kernel_dtype):
+        cmp_threshold = torch.scalar_tensor(
+            threshold, dtype=kernel_dtype, device=a.device
+        )
+    value_arg: TensorLikeType | bool | int | float = value
+    if not utils.is_float_dtype(kernel_dtype) or utils.is_low_precision_dtype(
+        kernel_dtype
+    ):
+        value_arg = torch.scalar_tensor(value, dtype=kernel_dtype, device=a.device)
+    result = torch.where(cmp <= cmp_threshold, value_arg, other)
+    return (
+        result
+        if result_dtype == kernel_dtype
+        else prims.convert_element_type(result, result_dtype)
+    )
+
+
+@register_decomposition(aten.threshold.default)
 @_inplace_wrapper
 @out_wrapper()
-@elementwise_type_promotion_wrapper(
-    type_promoting_args=("a",),
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-)
 def threshold(
     a: TensorLikeType,
     threshold: NumberType,
@@ -954,7 +1000,32 @@ def threshold(
     if inplace:
         raise NotImplementedError
 
-    return torch.where(a <= threshold, value, a)
+    return _threshold_impl(
+        a, threshold, value, kernel_dtype=a.dtype, result_dtype=a.dtype
+    )
+
+
+@register_decomposition(aten.threshold.out)
+def threshold_out(
+    a: TensorLikeType,
+    threshold: NumberType,
+    value: bool | int | float,
+    *,
+    out: TensorLikeType,
+) -> TensorLikeType:
+    if a.device.type in ("cuda", "xpu"):
+        torch._check(
+            utils.can_safe_cast_to(cast_from=a.dtype, cast_to=out.dtype),
+            lambda: f"result type {a.dtype} can't be cast to the desired output type {out.dtype}",
+        )
+        kernel_dtype = out.dtype
+    else:
+        kernel_dtype = a.dtype
+    result = _threshold_impl(
+        a, threshold, value, kernel_dtype=kernel_dtype, result_dtype=kernel_dtype
+    )
+    _maybe_resize_out(out, result.shape)
+    return _safe_copy_out(copy_from=result, copy_to=out)
 
 
 # CompositeImplicitAutograd - don't register decomp

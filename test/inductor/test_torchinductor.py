@@ -8723,6 +8723,46 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         torch.compile(fn, fullgraph=True)(x_c).sum().backward()
         self.assertEqual(x.grad, x_c.grad)
 
+    def test_threshold_low_precision_boundary(self):
+        device_type = torch.device(self.device).type
+        if device_type not in ("cpu", "cuda", "xpu", "mps"):
+            raise unittest.SkipTest("CPU/CUDA/XPU/MPS-specific threshold boundary")
+        if not self.is_dtype_supported(torch.bfloat16):
+            raise unittest.SkipTest(
+                f"torch.bfloat16 not supported for device {self.device}"
+            )
+
+        # bf16(0.1) == 0.10009765625. CPU threshold compares this boundary in
+        # fp32, while CUDA/XPU/MPS threshold compares it in the input dtype.
+        def fn(x):
+            return F.threshold(x, 0.1, 0.0)
+
+        x = torch.tensor([0.10009765625], dtype=torch.bfloat16, device=self.device)
+        expected = x if device_type == "cpu" else torch.zeros_like(x)
+        self.assertEqual(fn(x), expected)
+        self.assertEqual(torch.compile(fn, fullgraph=True)(x), expected)
+
+        x_eager = x.detach().clone().requires_grad_(True)
+        fn(x_eager).sum().backward()
+        x_compiled = x.detach().clone().requires_grad_(True)
+        torch.compile(fn, fullgraph=True)(x_compiled).sum().backward()
+        expected_grad = (
+            torch.ones_like(x) if device_type == "cpu" else torch.zeros_like(x)
+        )
+        self.assertEqual(x_eager.grad, expected_grad)
+        self.assertEqual(x_compiled.grad, expected_grad)
+
+    def test_threshold_scalar_value_casts_to_input_dtype(self):
+        device_type = torch.device(self.device).type
+        if device_type not in ("cpu", "cuda", "xpu"):
+            raise unittest.SkipTest("CPU/CUDA/XPU integer threshold")
+
+        def fn(x):
+            return F.threshold(x, -0.1, 9.9)
+
+        x = torch.tensor([-1, 0, 1, 2], dtype=torch.int32, device=self.device)
+        self.assertEqual(torch.compile(fn, fullgraph=True)(x), fn(x))
+
     def test_hardsigmoid(self):
         def fn(x):
             return F.hardsigmoid(x), F.hardsigmoid(x + 3), F.hardsigmoid(x - 3)

@@ -235,10 +235,98 @@ def hardswish_backward(grad_output: Tensor, self: Tensor) -> Tensor:
     )
 
 
-@register_decomposition(aten.threshold_backward)
+def _threshold_backward_impl(
+    grad_output: Tensor,
+    self: Tensor,
+    threshold: float,
+    *,
+    kernel_dtype: torch.dtype,
+) -> Tensor:
+    cmp = (
+        self
+        if self.dtype == kernel_dtype
+        else prims.convert_element_type(self, kernel_dtype)
+    )
+    cmp_threshold: Tensor | float = threshold
+    zero: Tensor | int = 0
+    if self.device.type == "mps":
+        # MPS threshold kernels cast the scalar to the input dtype.
+        cmp = self
+        if not utils.is_float_dtype(self.dtype) or utils.is_low_precision_dtype(
+            self.dtype
+        ):
+            cmp_threshold = torch.scalar_tensor(
+                threshold, dtype=self.dtype, device=self.device
+            )
+    elif utils.is_float_dtype(kernel_dtype) and utils.is_low_precision_dtype(
+        kernel_dtype
+    ):
+        if self.device.type in ("cuda", "xpu"):
+            # CUDA/XPU threshold kernels cast the scalar to the iterator dtype.
+            cmp_threshold = torch.scalar_tensor(
+                threshold, dtype=kernel_dtype, device=self.device
+            )
+        else:
+            # CPU threshold kernels compare reduced floating inputs in fp32.
+            cmp = (
+                self
+                if self.dtype == torch.float32
+                else prims.convert_element_type(self, torch.float32)
+            )
+            cmp_threshold = torch.scalar_tensor(
+                threshold, dtype=torch.float32, device=self.device
+            )
+        zero = torch.scalar_tensor(0, dtype=kernel_dtype, device=grad_output.device)
+    elif not utils.is_float_dtype(kernel_dtype):
+        cmp_threshold = torch.scalar_tensor(
+            threshold, dtype=kernel_dtype, device=self.device
+        )
+        zero = torch.scalar_tensor(0, dtype=kernel_dtype, device=grad_output.device)
+    grad_output = (
+        grad_output
+        if grad_output.dtype == kernel_dtype
+        else prims.convert_element_type(grad_output, kernel_dtype)
+    )
+    return torch.where(cmp <= cmp_threshold, zero, grad_output)
+
+
+@register_decomposition(aten.threshold_backward.default)
 @out_wrapper("grad_input")
 def threshold_backward(grad_output: Tensor, self: Tensor, threshold: float):
-    return torch.where(self <= threshold, 0, grad_output)
+    _, result_dtype = utils.elementwise_dtypes(
+        self,
+        grad_output,
+        type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
+    )
+    return _threshold_backward_impl(
+        grad_output, self, threshold, kernel_dtype=result_dtype
+    )
+
+
+@register_decomposition(aten.threshold_backward.grad_input)
+def threshold_backward_grad_input(
+    grad_output: Tensor,
+    self: Tensor,
+    threshold: float,
+    *,
+    grad_input: Tensor,
+):
+    _, result_dtype = utils.elementwise_dtypes(
+        self,
+        grad_output,
+        type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
+    )
+    if self.device.type in ("cuda", "xpu"):
+        torch._check(
+            utils.can_safe_cast_to(cast_from=result_dtype, cast_to=grad_input.dtype),
+            lambda: f"result type {result_dtype} can't be cast to the desired output type {grad_input.dtype}",
+        )
+        result_dtype = grad_input.dtype
+    result = _threshold_backward_impl(
+        grad_output, self, threshold, kernel_dtype=result_dtype
+    )
+    _maybe_resize_out(grad_input, result.shape)
+    return _safe_copy_out(copy_from=result, copy_to=grad_input)
 
 
 @register_decomposition(aten.leaky_relu_backward)
