@@ -755,15 +755,15 @@ class TestFakePG(TestCase):
         )
 
         # Interleaved, unsorted subgroups: each rank shares a group with the
-        # rank two away, and is not always listed first. The child rank must
-        # therefore be the position within the *sorted* subgroup -- it cannot
-        # coincide with the parent rank or with the order ranks were listed in,
-        # which is what makes this a meaningful check of rank assignment.
+        # rank two away, and is not always listed first. split_group preserves
+        # the order ranks are listed in, so the child rank is the position
+        # within the subgroup as given -- which here differs from the parent
+        # rank, making this a meaningful check of rank assignment.
         split_ranks = [[2, 0], [3, 1]]
         new_pg = dist.split_group(split_ranks=split_ranks)
         self.assertIsNotNone(new_pg)
 
-        my_group = sorted(next(g for g in split_ranks if rank in g))
+        my_group = next(g for g in split_ranks if rank in g)
         self.assertEqual(new_pg.size(), len(my_group))
         self.assertEqual(new_pg.rank(), my_group.index(rank))
         # Independent cross-check: the child rank must map back to this

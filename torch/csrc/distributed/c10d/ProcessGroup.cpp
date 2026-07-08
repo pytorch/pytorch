@@ -192,12 +192,10 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
             deviceTypeFilter.contains(defaultBackendIt->first),
         "splitGroup deviceTypes filter must include the parent process group's default backend device type.");
   }
-  std::vector<int> sorted_ranks = ranks;
-  std::ranges::sort(sorted_ranks);
   c10::intrusive_ptr<ProcessGroup> newGroup;
   std::string groupName = name.has_value()
       ? name.value()
-      : c10::str(getGroupName(), ":split:", fmt::format("{}", sorted_ranks));
+      : c10::str(getGroupName(), ":split:", fmt::format("{}", ranks));
   c10::intrusive_ptr<Store> store = c10::static_intrusive_pointer_cast<Store>(
       c10::make_intrusive<PrefixStore>(
           fmt::format("{}/", groupName), store_->clone()));
@@ -219,7 +217,7 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
     backendOpts->timeout =
         timeout.has_value() ? timeout.value() : backendOpts->timeout;
     backendOpts->group_desc = groupDesc;
-    auto splitBackend = parentBackend->split(store, sorted_ranks, backendOpts);
+    auto splitBackend = parentBackend->split(store, ranks, backendOpts);
     if (splitBackend == nullptr) {
       continue;
     }
