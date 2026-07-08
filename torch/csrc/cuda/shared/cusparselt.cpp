@@ -13,7 +13,8 @@ size_t getVersionInt() {
 }
 #elif defined(USE_HIPSPARSELT)
 size_t getVersionInt() {
-  return hipsparseltVersionMajor * 100000 + hipsparseltVersionMinor * 100 + hipsparseltVersionPatch;
+  return hipsparseltVersionMajor * 100000 + hipsparseltVersionMinor * 100 +
+      hipsparseltVersionPatch;
 }
 #endif
 
