@@ -1,6 +1,6 @@
 #include <ATen/native/transformers/xpu/flash_attn/flash_api.h>
 #include <ATen/native/transformers/xpu/sdp_utils.h>
-#include <array>
+#include <c10/util/Array.h>
 
 namespace sdp {
 
@@ -26,11 +26,11 @@ bool check_flash_attention_hardware_support(
   }
 
   constexpr auto supported_architectures =
-      std::to_array<sycl::ext::oneapi::experimental::architecture>({
+      c10::array_of<sycl::ext::oneapi::experimental::architecture>(
           sycl::ext::oneapi::experimental::architecture::intel_gpu_pvc,
           sycl::ext::oneapi::experimental::architecture::intel_gpu_pvc_vg,
           sycl::ext::oneapi::experimental::architecture::intel_gpu_bmg_g21,
-          sycl::ext::oneapi::experimental::architecture::intel_gpu_bmg_g31});
+          sycl::ext::oneapi::experimental::architecture::intel_gpu_bmg_g31);
   auto* device_prop = at::xpu::getCurrentDeviceProperties();
   auto device_architecture = device_prop->architecture;
 
@@ -52,7 +52,7 @@ inline bool check_flash_attention_datatype(
     sdp_params const& params,
     bool debug) {
   constexpr auto supported_dtypes =
-      std::to_array<at::ScalarType>({at::kBFloat16, at::kHalf});
+      c10::array_of<at::ScalarType>(at::kBFloat16, at::kHalf);
 
   auto query_dtype = params.query.dtype();
   if (!(query_dtype == params.key.dtype() &&
