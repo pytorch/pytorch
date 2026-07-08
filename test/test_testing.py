@@ -2691,7 +2691,7 @@ class TestHardwareClassifications(TestCase):
         )
 
         loader = self._cu.HardwareClassificationTestLoader({self._cu.HardwareClassification.GENERIC})
-        filtered_suite = loader.filter_suite_by_hw_classification(suite)
+        filtered_suite = loader.get_filtered_suite(suite)
 
         self.assertEqual(
             self._suite_test_names(filtered_suite),
@@ -2710,7 +2710,7 @@ class TestHardwareClassifications(TestCase):
 
         suite = unittest.defaultTestLoader.loadTestsFromTestCase(DeviceGenericChild)
         loader = self._cu.HardwareClassificationTestLoader({self._cu.HardwareClassification.DEVICE_GENERIC})
-        filtered_suite = loader.filter_suite_by_hw_classification(suite)
+        filtered_suite = loader.get_filtered_suite(suite)
 
         self.assertEqual(
             self._suite_test_names(filtered_suite),
@@ -2749,12 +2749,27 @@ class TestHardwareClassifications(TestCase):
         mod.Cuda = Cuda
 
         loader = self._cu.HardwareClassificationTestLoader({requirement.GENERIC})
-        suite = loader.loadTestsFromModule(mod)
 
-        self.assertEqual(
-            self._suite_test_names(suite),
-            {"test_a1", "test_a2", "test_b1"},
-        )
+        with self.subTest(method="loadTestsFromModule"):
+            suite = loader.loadTestsFromModule(mod)
+            self.assertEqual(
+                self._suite_test_names(suite),
+                {"test_a1", "test_a2", "test_b1"},
+            )
+
+        with self.subTest(method="loadTestsFromNames"):
+            suite = loader.loadTestsFromNames(
+                ["GenericA.test_a1", "Cuda.test_c1"],
+                module=mod,
+            )
+            self.assertEqual(self._suite_test_names(suite), {"test_a1"})
+
+        with self.subTest(method="loadTestsFromName"):
+            suite = loader.loadTestsFromName(
+                "Cuda.test_c1",
+                module=mod,
+            )
+            self.assertEqual(self._suite_test_names(suite), set())
 
     def test_hw_classification_test_loader_no_filter(self):
         import types

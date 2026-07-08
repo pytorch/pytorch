@@ -188,6 +188,50 @@ def get_hw_classification(
     return requirement
 
 
+def filter_by_hw_classification(
+    items: Iterable[Any],
+    requirement: set[HardwareClassification],
+    get_class: Callable[[Any], type | None],
+    *,
+    on_match: Callable[[Any], None] | None = None,
+) -> None:
+    """Filter items by hardware classification and print a summary.
+
+    For each item, `get_class` extracts the associated test class. Items whose
+    hardware classification is in `requirement` are passed to `on_match`, if
+    provided. Prints a summary of matched, mismatched, unclassified, and
+    classless items.
+    """
+    total = 0
+    passed = 0
+    no_class = 0
+    unclassified = 0
+    for item in items:
+        total += 1
+        cls = get_class(item)
+        if cls is None:
+            no_class += 1
+            continue
+        classification = get_hw_classification(cls)
+        if classification is None:
+            unclassified += 1
+        elif classification in requirement:
+            passed += 1
+            if on_match is not None:
+                on_match(item)
+
+    mismatched = total - passed - unclassified - no_class
+    parts = [
+        f"HW classification mode active ({[e.name for e in requirement]}):",
+        f"total={total}, passed={passed},",
+        f"unclassified={unclassified},",
+    ]
+    if no_class > 0:
+        parts.append(f"no_class={no_class},")
+    parts.append(f"mismatched={mismatched}")
+    print(" ".join(parts))
+
+
 def is_navi3_arch():
     if torch.cuda.is_available():
         prop = torch.cuda.get_device_properties(0)
@@ -1349,32 +1393,21 @@ class HardwareClassificationTestLoader(unittest.TestLoader):
         for element in suite_or_case:
             yield from _iter(element)
 
-    def filter_suite_by_hw_classification(self, tests: unittest.TestSuite) -> unittest.TestSuite:
+    def _has_failed_test(self, suite: unittest.TestSuite) -> bool:
+        _iter = HardwareClassificationTestLoader.iter_test_cases_recursively
+        return any(isinstance(tc, unittest.loader._FailedTest) for tc in _iter(suite))
+
+    def get_filtered_suite(self, tests: unittest.TestSuite) -> unittest.TestSuite:
         if self.hw_classification is None:
             return tests
 
         filtered_suite = unittest.TestSuite()
-        total_count = 0
-        passed_count = 0
-        unclassified_count = 0
-
         _iter = HardwareClassificationTestLoader.iter_test_cases_recursively
-        for test_case in _iter(tests):
-            total_count += 1
-            requirement = get_hw_classification(test_case.__class__)
-
-            if requirement is None:
-                unclassified_count += 1
-            elif requirement in self.hw_classification:
-                filtered_suite.addTest(test_case)
-                passed_count += 1
-
-        mismatched_count = total_count - passed_count - unclassified_count
-
-        warnings.warn(
-            f"HW classification mode active ({[e.name for e in self.hw_classification]}): "
-            f"total={total_count}, passed={passed_count}, "
-            f"unclassified={unclassified_count}, mismatched={mismatched_count}"
+        filter_by_hw_classification(
+            _iter(tests),
+            self.hw_classification,
+            get_class=lambda tc: tc.__class__,
+            on_match=filtered_suite.addTest,
         )
         return filtered_suite
 
@@ -1382,7 +1415,13 @@ class HardwareClassificationTestLoader(unittest.TestLoader):
         suite = super().loadTestsFromModule(
             module, *args, pattern=pattern, **kwargs
         )
-        return self.filter_suite_by_hw_classification(suite)
+        return self.get_filtered_suite(suite)
+
+    def loadTestsFromName(self, name, module=None, *args, **kwargs):
+        suite = super().loadTestsFromName(name, module, *args, **kwargs)
+        if self._has_failed_test(suite):
+            return suite
+        return self.get_filtered_suite(suite)
 
 
 def run_tests(argv=None):
@@ -1418,8 +1457,8 @@ def run_tests(argv=None):
         testLoader = HardwareClassificationTestLoader(HW_CLASSIFICATION)
 
     # Before running the tests, lint to check that every test class extends from TestCase
-    suite = testLoader.loadTestsFromModule(__main__)
-    if not lint_test_case_extension(suite):
+    lint_suite = unittest.loader.defaultTestLoader.loadTestsFromModule(__main__)
+    if not lint_test_case_extension(lint_suite):
         sys.exit(1)
 
     if SHOWLOCALS:
@@ -1430,6 +1469,7 @@ def run_tests(argv=None):
         ]
 
     if TEST_IN_SUBPROCESS:
+        suite = testLoader.loadTestsFromModule(__main__)
         other_args = []
         if DISABLED_TESTS_FILE:
             other_args.append("--import-disabled-tests")
@@ -1483,6 +1523,7 @@ def run_tests(argv=None):
             )
 
     elif RUN_PARALLEL > 1:
+        suite = testLoader.loadTestsFromModule(__main__)
         test_cases = discover_test_cases_recursively(suite)
         test_batches = chunk_list(get_test_names(test_cases), RUN_PARALLEL)
         processes = []

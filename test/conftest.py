@@ -4,7 +4,6 @@ import json
 import os
 import re
 import sys
-import warnings
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 from types import MethodType
@@ -123,35 +122,11 @@ class HardwareClassificationPytestPlugin:
         import torch.testing._internal.common_utils as _cu
 
         filtered = []
-        total_count = 0
-        passed_count = 0
-        func_dropped = 0
-        unclassified_dropped = 0
-
-        for item in items:
-            total_count += 1
-            cls = getattr(item, "cls", None)
-            if cls is None:
-                func_dropped += 1
-                continue
-            req = _cu.get_hw_classification(cls)
-            if req is None:
-                unclassified_dropped += 1
-            elif req in self.requirement:
-                filtered.append(item)
-                passed_count += 1
-
-        mismatched_dropped = (
-            total_count - passed_count - func_dropped - unclassified_dropped
-        )
-
-        warnings.warn(
-            f"HW classification mode active "
-            f"({[e.name for e in self.requirement]}): "
-            f"total={total_count}, passed={passed_count}, "
-            f"func_dropped={func_dropped}, "
-            f"unclassified_dropped={unclassified_dropped}, "
-            f"mismatched_dropped={mismatched_dropped}"
+        _cu.filter_by_hw_classification(
+            items,
+            self.requirement,
+            get_class=lambda item: getattr(item, "cls", None),
+            on_match=filtered.append,
         )
         items[:] = filtered
 
