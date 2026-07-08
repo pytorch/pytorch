@@ -1768,7 +1768,8 @@ _cupti_monitor.enable_hes_early()
 )
 class TestCuptiMonitorNative(TestCase):
     """The monitor's native buffer-pool / v2-record-layout callbacks driven directly
-    via ctypes -- pure C++ (no cupti-python), but the extension is built only on CUDA builds."""
+    via ctypes -- pure C++ (no cupti-python), but the extension is built only on CUDA builds.
+    """
 
     @skipIfTorchDynamo("native ctypes/CUPTI probe; nothing to compile")
     def test_cupti_monitor_buffer_pool_reuse(self):
