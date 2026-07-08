@@ -658,7 +658,7 @@ static void lu_solve_encode(const Tensor& W, const Tensor& pivots, int64_t n, in
         if (rs >= re || uk == 0) {
           return;
         }
-        const uint32_t Tm = re - rs;
+        const auto Tm = re - rs;
         setP4(rs, re, un, N);
         setP5(kc, kw, 0, 0);
         if (!useMpp) {
@@ -667,10 +667,10 @@ static void lu_solve_encode(const Tensor& W, const Tensor& pivots, int64_t n, in
               threadsPerThreadgroup:MTLSizeMake(128, 1, 1)];
           return;
         }
-        const bool big = Tm >= 1024 && uk >= 64;
-        const uint32_t BM = big ? 64 : 32;
-        const uint32_t BN = 64;
-        const uint32_t NSG = big ? 4 : 2;
+        const auto big = Tm >= 1024 && uk >= 64;
+        const auto BM = big ? 64u : 32u;
+        const auto BN = 64u;
+        const auto NSG = big ? 4u : 2u;
         [enc setComputePipelineState:(big ? gemmBigPSO : gemmSmallPSO)];
         [enc dispatchThreadgroups:MTLSizeMake(at::ceil_div(uk, BN), at::ceil_div(Tm, BM), uB)
             threadsPerThreadgroup:MTLSizeMake(NSG * 32, 1, 1)];
@@ -679,14 +679,14 @@ static void lu_solve_encode(const Tensor& W, const Tensor& pivots, int64_t n, in
       if (!adjoint) {
         pivotApply(false);
       }
-      for (uint32_t p0 = 0; p0 < un; p0 += 32) {
-        const uint32_t pw = std::min(32u, un - p0);
+      for (auto p0 = 0u; p0 < un; p0 += 32) {
+        const auto pw = std::min(32u, un - p0);
         trsm(fwdPSO, p0, pw);
         gemm(p0 + pw, un, p0, pw);
       }
-      for (int64_t pb = (un ? (static_cast<int64_t>(un) - 1) / 32 * 32 : 0); pb >= 0; pb -= 32) {
-        const uint32_t p0 = static_cast<uint32_t>(pb);
-        const uint32_t pw = std::min(32u, un - p0);
+      for (auto pb = un ? (static_cast<int64_t>(un) - 1) / 32 * 32 : int64_t{0}; pb >= 0; pb -= 32) {
+        const auto p0 = static_cast<uint32_t>(pb);
+        const auto pw = std::min(32u, un - p0);
         trsm(backPSO, p0, pw);
         gemm(0, p0, p0, pw);
       }
@@ -703,24 +703,24 @@ static void mps_lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Te
   if (B.numel() == 0) {
     return;
   }
-  const bool adjoint = trans != TransposeType::NoTranspose;
-  const int64_t n = LU.size(-1);
-  const int64_t k = B.size(-1);
+  const auto adjoint = trans != TransposeType::NoTranspose;
+  const auto n = LU.size(-1);
+  const auto k = B.size(-1);
 
   std::vector<int64_t> batch(B.sizes().begin(), B.sizes().end() - 2);
-  const int64_t Bnum = c10::multiply_integers(batch);
+  const auto Bnum = c10::multiply_integers(batch);
   auto with_mat = [&](int64_t r, int64_t c) {
-    std::vector<int64_t> s = batch;
+    auto s = batch;
     s.push_back(r);
     s.push_back(c);
     return s;
   };
-  std::vector<int64_t> piv_shape = batch;
+  auto piv_shape = batch;
   piv_shape.push_back(n);
-  Tensor piv_b = pivots.expand(piv_shape).contiguous().reshape({Bnum, n});
+  auto piv_b = pivots.expand(piv_shape).contiguous().reshape({Bnum, n});
 
-  Tensor W = at::empty({Bnum, n, n + k}, LU.options());
-  Tensor factor = adjoint ? LU.expand(with_mat(n, n)).mH() : LU.expand(with_mat(n, n));
+  auto W = at::empty({Bnum, n, n + k}, LU.options());
+  auto factor = adjoint ? LU.expand(with_mat(n, n)).mH() : LU.expand(with_mat(n, n));
   W.narrow(-1, 0, n).copy_(factor.reshape({Bnum, n, n}));
   W.narrow(-1, n, k).copy_(B.reshape({Bnum, n, k}));
 
@@ -742,9 +742,9 @@ static void linalg_solve_out_mps_impl(const Tensor& A,
   if (check_errors) {
     at::_linalg_check_errors(info, "torch.linalg.solve_ex", A.dim() == 2);
   }
-  const bool vector_case = at::native::linalg_solve_is_vector_rhs(LU, B);
-  Tensor result_ = vector_case ? result.unsqueeze(-1) : result;
-  const Tensor B_ = vector_case ? B.unsqueeze(-1) : B;
+  const auto vector_case = at::native::linalg_solve_is_vector_rhs(LU, B);
+  auto result_ = vector_case ? result.unsqueeze(-1) : result;
+  const auto B_ = vector_case ? B.unsqueeze(-1) : B;
   at::linalg_lu_solve_out(result_, LU, pivots, B_, left, false);
 }
 
