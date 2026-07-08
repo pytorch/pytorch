@@ -70,7 +70,7 @@ class TestFlexGemmRuntimeImport(TestCase):
 
 class TestFlexGemmRuntimeHelpers(TestCase):
     def test_dense_config_selection_is_explicit_and_sm110_reuses_sm100(self):
-        from torch._inductor.template_heuristics import (
+        from torch._inductor.heuristics.template import (
             flex_gemm as flex_gemm_heuristics,
         )
         from torch._vendor.quack.gemm_config import GemmConfig
@@ -238,7 +238,7 @@ class FlexGemmTestCase(TestCase):
 
     def swapAndNonSwapConfigKeys(self, device):
         """Return one swap_ab and one non-swap candidate config key for ``device``."""
-        from torch._inductor.template_heuristics.flex_gemm import (
+        from torch._inductor.heuristics.template.flex_gemm import (
             candidate_gemm_configs_for_device,
             gemm_config_key,
         )
@@ -532,11 +532,11 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
 
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_mm_epilogue_explicit_config_key_matches_reference(self):
-        from torch._inductor.kernel.flex_gemm.runtime import gemm_epilogue
-        from torch._inductor.template_heuristics.flex_gemm import (
+        from torch._inductor.heuristics.template.flex_gemm import (
             candidate_gemm_configs_for_device,
             gemm_config_key,
         )
+        from torch._inductor.kernel.flex_gemm.runtime import gemm_epilogue
 
         a = self.makeTensor(128, 64)
         b = self.makeTensor(64, 128)
@@ -1046,7 +1046,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         ]
         self.assertTrue(swap_configs)
         with mock.patch(
-            "torch._inductor.template_heuristics.flex_gemm.candidate_gemm_configs_for_device",
+            "torch._inductor.heuristics.template.flex_gemm.candidate_gemm_configs_for_device",
             return_value=swap_configs[:1],
         ):
             compiled = torch.compile(
@@ -1105,7 +1105,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 torch.device("cuda")
             )[:2]
             config_context = mock.patch(
-                "torch._inductor.template_heuristics.flex_gemm.candidate_gemm_configs_for_device",
+                "torch._inductor.heuristics.template.flex_gemm.candidate_gemm_configs_for_device",
                 return_value=configs,
             )
 
@@ -1534,7 +1534,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
         configs = flex_gemm_heuristics.candidate_gemm_configs_for_device(a.device)[:2]
         with mock.patch(
-            "torch._inductor.template_heuristics.flex_gemm.candidate_gemm_configs_for_device",
+            "torch._inductor.heuristics.template.flex_gemm.candidate_gemm_configs_for_device",
             return_value=configs,
         ):
             actual, (code,) = run_and_get_code(
@@ -1575,7 +1575,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
         configs = flex_gemm_heuristics.candidate_gemm_configs_for_device(a.device)[:2]
         with mock.patch(
-            "torch._inductor.template_heuristics.flex_gemm.candidate_gemm_configs_for_device",
+            "torch._inductor.heuristics.template.flex_gemm.candidate_gemm_configs_for_device",
             return_value=configs,
         ):
             (actual, aux), (code,) = run_and_get_code(
@@ -1794,7 +1794,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
         configs = flex_gemm_heuristics.candidate_gemm_configs_for_device(a.device)[:2]
         with mock.patch(
-            "torch._inductor.template_heuristics.flex_gemm.candidate_gemm_configs_for_device",
+            "torch._inductor.heuristics.template.flex_gemm.candidate_gemm_configs_for_device",
             return_value=configs,
         ):
             actual, (code,) = run_and_get_code(
@@ -1905,7 +1905,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
         configs = flex_gemm_heuristics.candidate_gemm_configs_for_device(a.device)[:2]
         with mock.patch(
-            "torch._inductor.template_heuristics.flex_gemm.candidate_gemm_configs_for_device",
+            "torch._inductor.heuristics.template.flex_gemm.candidate_gemm_configs_for_device",
             return_value=configs,
         ):
             actual, (code,) = run_and_get_code(
