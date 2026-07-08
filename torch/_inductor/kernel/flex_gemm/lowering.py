@@ -181,10 +181,17 @@ def flex_gemm_config_keys_for_local_reduce(
     device,
     m: int,
     n: int,
-    local_reduce,
+    local_reduce_geometries: tuple[Any, ...],
     tuned: bool,
 ) -> tuple[tuple[Any, ...], ...]:
-    """Select QuACK config keys after applying local-reduce layout constraints."""
+    """Select QuACK config keys after applying grouped-layout config constraints.
+
+    Every grouped geometry constrains the config the same way, whether it backs
+    a runtime local-reduce plan or a plan-less grouped TensorSSA fragment
+    reshape in the generated epilogue: swap_ab reorients the accumulator
+    fragment and non-divisible tiles split groups across fragments, so either
+    would silently regroup the wrong elements.
+    """
     from torch._inductor.template_heuristics.flex_gemm import (
         candidate_gemm_configs_for_device,
         default_gemm_config_key,
@@ -193,33 +200,35 @@ def flex_gemm_config_keys_for_local_reduce(
 
     if not tuned:
         default_key = default_gemm_config_key(device, m, n)
-        if local_reduce is None or validate_flex_gemm_local_reduce_config(
-            dict(default_key), local_reduce.group, local_reduce.axis
+        if all(
+            validate_flex_gemm_local_reduce_config(
+                dict(default_key), geometry.group, geometry.axis
+            )
+            for geometry in local_reduce_geometries
         ):
             return (default_key,)
 
     candidate_configs = candidate_gemm_configs_for_device(device)
-    if local_reduce is None:
-        return tuple(gemm_config_key(config) for config in candidate_configs)
-
-    local_reduce_configs = tuple(
-        config
-        for config in candidate_configs
-        if validate_flex_gemm_local_reduce_config(
-            config, local_reduce.group, local_reduce.axis
-        )
-    )
-    if not local_reduce_configs:
-        raise NotImplementedError(
-            flex_gemm_local_reduce_config_error(
-                candidate_configs,
-                local_reduce.group,
-                local_reduce.axis,
+    configs = candidate_configs
+    for geometry in local_reduce_geometries:
+        configs = tuple(
+            config
+            for config in configs
+            if validate_flex_gemm_local_reduce_config(
+                config, geometry.group, geometry.axis
             )
         )
+        if not configs:
+            raise NotImplementedError(
+                flex_gemm_local_reduce_config_error(
+                    candidate_configs,
+                    geometry.group,
+                    geometry.axis,
+                )
+            )
     if tuned:
-        return tuple(gemm_config_key(config) for config in local_reduce_configs)
-    return (gemm_config_key(local_reduce_configs[0]),)
+        return tuple(gemm_config_key(config) for config in configs)
+    return (gemm_config_key(configs[0]),)
 
 
 @register_lowering(flex_gemm_hop, type_promotion_kind=None)
@@ -335,14 +344,17 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     template_local_reduce = FlexGemmEpilogueLocalReduceConfig.from_output_plan(
         outputs.local_reduce, local_reduce_out_index
     )
-    epilogue_name, epilogue_source = materialize_flex_gemm_epilogue(
+    epilogue_name, epilogue_source, grouped_geometries = materialize_flex_gemm_epilogue(
         subgraph.graph_module, gemm_op, outputs, epilogue_arg_placeholders
     )
+    local_reduce_geometries = OrderedSet(grouped_geometries)
+    if outputs.local_reduce is not None:
+        local_reduce_geometries.add(outputs.local_reduce.geometry)
     quack_config_keys = flex_gemm_config_keys_for_local_reduce(
         layout.device,
         gemm_args[mat1_index].get_size()[-2],
         gemm_args[mat2_index].get_size()[-1],
-        outputs.local_reduce,
+        tuple(local_reduce_geometries),
         tuned,
     )
     epilogue_arg_indices = tuple(

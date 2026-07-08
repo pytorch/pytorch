@@ -26,16 +26,22 @@ def grouped_reduce_dims_match(dim: Any, reduce_dims: Sequence[Any]) -> bool:
     return len(dims) == 1 and dims[0] in reduce_dims
 
 
-# Feed-main currently reduces only within one lane-layout M group; cross-warp M
-# stitching needs the two-phase/replay path used by compressed aux reductions.
+# The physical feed-main path currently reduces only within one lane-layout M
+# group; cross-warp M stitching needs the two-phase/replay path used by
+# compressed aux reductions. Axis-1 feeds whose groups fit in one TensorSSA
+# fragment lower as plain generated TensorSSA without a feed plan.
 MAX_SAME_WARP_LOCAL_REDUCE_FEED_MAIN_GROUP = 32
-MAX_TENSORSSA_LOCAL_REDUCE_GROUP_WITHOUT_PHYSICAL_CALLBACKS = 16
+MAX_TENSORSSA_LOCAL_REDUCE_GROUP_WITHOUT_PHYSICAL_CALLBACKS = 32
 LOCAL_REDUCE_FEED_MAIN_AXIS_ERROR = (
     "FlexGEMM local-reduce feed-main currently supports only axis 0"
 )
 LOCAL_REDUCE_FEED_MAIN_SAME_WARP_ERROR = (
     "FlexGEMM local-reduce feed-main currently supports only same-warp axis-0 "
     f"groups <= {MAX_SAME_WARP_LOCAL_REDUCE_FEED_MAIN_GROUP}"
+)
+LOCAL_REDUCE_FEED_MAIN_AXIS1_FRAGMENT_ERROR = (
+    "FlexGEMM local-reduce feed-main for axis-1 groups larger than one "
+    "TensorSSA fragment is not supported yet"
 )
 LOCAL_REDUCE_DIVISIBLE_SHAPE_ERROR = (
     "local_reduce_group must divide the selected FlexGEMM output dimension"
