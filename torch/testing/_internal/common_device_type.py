@@ -1640,11 +1640,6 @@ def _has_sufficient_memory(device, size):
         gc.collect()
         torch.mps.synchronize()
         torch.mps.empty_cache()
-        # Use the MPS/Metal driver's own accounting rather than the host's
-        # `psutil` "available" memory below: on Apple Silicon, freeing a
-        # large allocation isn't necessarily reflected in the OS's view of
-        # available memory right away, even though the MPS allocator has
-        # already released it.
         free_memory = torch._C._mps_maxMemory() - torch.mps.driver_allocated_memory()
         return free_memory >= size
 
