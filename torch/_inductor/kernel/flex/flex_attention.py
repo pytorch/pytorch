@@ -14,10 +14,11 @@ import sympy
 import torch
 from torch._inductor.virtualized import V
 from torch.nn.attention.flex_attention import _Backend
-from torch.utils._sympy.functions import FloorDiv, Mod
+from torch.utils._sympy.functions import FloorDiv
 
 from ...ir import ComputedBuffer, ExternKernel, FixedLayout, TensorBox
 from ...lowering import empty, empty_strided, lowerings, register_lowering, to_dtype
+from ...runtime.runtime_utils import is_power_of_2
 from ...select_algorithm import (
     autotune_select_algorithm,
     SymbolicGridFn,
@@ -28,6 +29,7 @@ from .common import (
     _flex_kernel_options_example,
     _flex_kernel_tuning_options,
     build_subgraph_buffer,
+    can_skip_boundary_checks,
     create_indices_fake,
     create_num_blocks_fake_generator,
     create_placeholder,
@@ -376,12 +378,8 @@ def flex_attention(
 
     B = Bq
 
-    seq_q_divisible = V.graph.sizevars.statically_known_true(
-        sympy.Eq(Mod(seq_len_q, 128), 0)
-    )
-    seq_kv_divisible = V.graph.sizevars.statically_known_true(
-        sympy.Eq(Mod(seq_len_kv, 128), 0)
-    )
+    seq_q_divisible = can_skip_boundary_checks(seq_len_q, SPARSE_Q_BLOCK_SIZE)
+    seq_kv_divisible = can_skip_boundary_checks(seq_len_kv, SPARSE_KV_BLOCK_SIZE)
     if seq_q_divisible and seq_kv_divisible:
         kernel_options.setdefault("IS_DIVISIBLE", True)
     else:
@@ -476,8 +474,17 @@ def flex_attention(
         if cur_kernel_options["USE_TMA"] and not can_use_tma(query, key, value):
             cur_kernel_options["USE_TMA"] = False
 
-        cur_kernel_options.setdefault("BLOCK_M", conf.block_m)
-        cur_kernel_options.setdefault("BLOCK_N", conf.block_n)
+        # Shrink default tiles to fit smaller pow2 sparse block sizes;
+        # user-pinned tiles and non-pow2 sparse sizes still error out below.
+        block_m, block_n = conf.block_m, conf.block_n
+        if len(configs) == 1 and all(
+            is_power_of_2(s) and s >= 16
+            for s in (SPARSE_Q_BLOCK_SIZE, SPARSE_KV_BLOCK_SIZE)
+        ):
+            block_m = min(block_m, SPARSE_Q_BLOCK_SIZE)
+            block_n = min(block_n, SPARSE_KV_BLOCK_SIZE)
+        cur_kernel_options.setdefault("BLOCK_M", block_m)
+        cur_kernel_options.setdefault("BLOCK_N", block_n)
         # Blocksparse options
         cur_kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
         cur_kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
@@ -834,12 +841,8 @@ def flex_attention_backward(*args, **kwargs):
     kernel_options.setdefault("ROWS_GUARANTEED_SAFE", False)
     kernel_options.setdefault("BLOCKS_ARE_CONTIGUOUS", False)
     kernel_options.setdefault("WRITE_DQ", True)
-    seq_q_divisible = V.graph.sizevars.statically_known_true(
-        sympy.Eq(Mod(seq_len_q, 128), 0)
-    )
-    seq_kv_divisible = V.graph.sizevars.statically_known_true(
-        sympy.Eq(Mod(seq_len_kv, 128), 0)
-    )
+    seq_q_divisible = can_skip_boundary_checks(seq_len_q, SPARSE_Q_BLOCK_SIZE)
+    seq_kv_divisible = can_skip_boundary_checks(seq_len_kv, SPARSE_KV_BLOCK_SIZE)
     if seq_q_divisible and seq_kv_divisible:
         kernel_options.setdefault("IS_DIVISIBLE", True)
     else:
