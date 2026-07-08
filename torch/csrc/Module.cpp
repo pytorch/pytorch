@@ -2754,6 +2754,35 @@ Call this whenever a new thread is created in order to propagate values from
     return c10::raw::intrusive_ptr::use_count(storage_impl);
   });
 
+  py_module.def(
+      "_storage_throw_on_immutable_data_ptr", [](size_t storage_impl_ptr) {
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+        c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
+        return storage_impl->throw_on_immutable_data_ptr();
+      });
+
+  py_module.def(
+      "_storage_throw_on_mutable_data_ptr", [](size_t storage_impl_ptr) {
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+        c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
+        return storage_impl->throw_on_mutable_data_ptr();
+      });
+
+  py_module.def(
+      "_set_storage_data_ptr_access_error_msg",
+      [](size_t storage_impl_ptr, std::string s) {
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+        c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
+        storage_impl->release_data_and_set_meta_custom_data_ptr_error_msg_(s);
+      });
+
+  py_module.def(
+      "_clear_storage_data_ptr_access_error_msg", [](size_t storage_impl_ptr) {
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+        c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
+        storage_impl->clear_data_ptr_access_error_msg_();
+      });
+
   ASSERT_TRUE(
       set_module_attr("has_openmp", at::hasOpenMP() ? Py_True : Py_False));
   ASSERT_TRUE(set_module_attr("has_mkl", at::hasMKL() ? Py_True : Py_False));
