@@ -30,8 +30,6 @@ from .optimizer import (
 
 __all__ = ["Adam", "adam"]
 
-_FP16_MIN_SUBNORMAL = 2**-24
-
 
 class Adam(Optimizer):
     def __init__(
@@ -395,6 +393,8 @@ def _single_tensor_adam(
     else:
         beta1_dict = None
 
+    fp16_min_subnormal = 5.960464477539063e-08
+
     for i, param in enumerate(params):
         grad = grads[i] if not maximize else -grads[i]
         exp_avg = exp_avgs[i]
@@ -531,7 +531,7 @@ def _single_tensor_adam(
                 denom.div_(bias_correction2_sqrt)
                 denom.add_(eps)
                 if eps > 0:
-                    denom.clamp_min_(_FP16_MIN_SUBNORMAL)
+                    denom.clamp_min_(fp16_min_subnormal)
                 denom.div_(step_size_neg)
                 param.addcdiv_(exp_avg, denom)
             else:
@@ -666,6 +666,7 @@ def _multi_tensor_adam(
         device_exp_avgs = cast(list[Tensor], device_exp_avgs_)
         device_exp_avg_sqs = cast(list[Tensor], device_exp_avg_sqs_)
         device_state_steps = cast(list[Tensor], device_state_steps_)
+        fp16_min_subnormal = 5.960464477539063e-08
 
         device = device_params[0].device
         if beta1_dict is not None and device not in beta1_dict:
@@ -784,7 +785,7 @@ def _multi_tensor_adam(
             if device_params[0].dtype is torch.float16 and eps > 0:
                 # float16 cannot represent the default eps. Keep the denominator
                 # nonzero without materializing fp32 buffers.
-                torch._foreach_clamp_min_(exp_avg_sq_sqrt, _FP16_MIN_SUBNORMAL)
+                torch._foreach_clamp_min_(exp_avg_sq_sqrt, fp16_min_subnormal)
             torch._foreach_div_(exp_avg_sq_sqrt, step_size)
 
             # at this point, exp_avg_sq_sqrt = - (1 - beta^t) * [sqrt(exp_avg_sq / (1 - beta2^t)) + eps] / lr
