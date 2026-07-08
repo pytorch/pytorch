@@ -37,6 +37,38 @@ def rename_nodes_to_canonical(graph: fx.Graph) -> None:
     graph._graph_namespace = ns
 
 
+def _sink_get_attr_nodes(order: list[fx.Node]) -> None:
+    """Move each get_attr node to right before its earliest consumer.
+
+    By default, Kahn's algorithm places get_attr nodes (which have no data
+    dependencies) at the top of the graph.  This post-processing step sinks
+    each one to just before its first consumer, keeping definitions close to
+    their uses.
+    """
+    non_ga = [n for n in order if n.op != "get_attr"]
+    gas = [n for n in order if n.op == "get_attr"]
+    if not gas:
+        return
+
+    pos = {n: i for i, n in enumerate(non_ga)}
+    inserts: dict[int, list[fx.Node]] = collections.defaultdict(list)
+    for ga in gas:
+        if ga.users:
+            target = min(pos.get(u, len(non_ga)) for u in ga.users)
+        else:
+            target = (
+                len(non_ga) - 1 if non_ga and non_ga[-1].op == "output" else len(non_ga)
+            )
+        inserts[target].append(ga)
+
+    order.clear()
+    for i, node in enumerate(non_ga):
+        order.extend(inserts.pop(i, ()))
+        order.append(node)
+    for remaining in inserts.values():
+        order.extend(remaining)
+
+
 def canonicalize_graph(
     graph: fx.Graph,
     canonical_key_fn: Callable[[fx.Node, dict[fx.Node, int]], object],
@@ -128,6 +160,8 @@ def canonicalize_graph(
             f"Canonicalization failed: processed {len(canonical_order)} of "
             f"{len(graph.nodes)} nodes. Remaining: {remaining}"
         )
+
+    _sink_get_attr_nodes(canonical_order)
 
     # Reorder nodes in-place to preserve node object identity.
     cursor = graph._root  # type: ignore[attr-defined]

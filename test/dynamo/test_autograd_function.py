@@ -1867,10 +1867,10 @@ class GraphModule(torch.nn.Module):
         l_x_ = L_x_
         l_y_ = L_y_
 
-        bwd_body_0 = self.bwd_body_0
-        fwd_body_0 = self.fwd_body_0
         cos: "f32[s17, 8]" = torch.cos(l_x_);  l_x_ = None
         cos_1: "f32[s17, 8]" = torch.cos(l_y_);  l_y_ = None
+        bwd_body_0 = self.bwd_body_0
+        fwd_body_0 = self.fwd_body_0
         autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, s77, cos, s17, cos_1, non_differentiable_idx = [], saved_for_backward_idx = [1, 2, 3]);  fwd_body_0 = bwd_body_0 = s77 = cos = s17 = cos_1 = None
         getitem: "f32[s17, 8]" = autograd_function_apply[0]
         getitem_1: "f32[s17, 8]" = autograd_function_apply[1];  autograd_function_apply = None
