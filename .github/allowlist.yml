@@ -40,6 +40,7 @@ L1:
   - riseproject-dev/pytorch-ci
   - NVIDIA-dev/pytorch-oot-internal
   - NVIDIA/pytorch-windows-ci
+  - google-pytorch/torch_tpu
 
 L2:
   # Canonical test repo for CRCR.
