@@ -7391,11 +7391,19 @@ class TestAddRelu(TestCase):
     def test_add_relu_broadcasting(self, device, dtype):
         a = torch.randn(1, 32, device=device, dtype=dtype)
         b_scalar = torch.ones(1, 32, device=device, dtype=dtype)
+
+        expected = torch.relu(torch.add(a, 1))
         res = torch._VF._add_relu(a, 1)
         broadcasted_res = torch._VF._add_relu(a, b_scalar)
 
-        self.assertEqual(broadcasted_res, res)
+        self.assertEqual(res, expected)
+        self.assertEqual(broadcasted_res, expected)
 
+    def test_add_relu_type_promotion(self, device):
+        a = torch.randn(7, 11, device=device, dtype=torch.float16)
+        b = torch.randn(7, 11, device=device, dtype=torch.float32)
+        expected = torch.relu(torch.add(a, b))
+        self.assertEqual(torch._VF._add_relu(a, b), expected)
 
 instantiate_device_type_tests(TestAddRelu, globals())
 
