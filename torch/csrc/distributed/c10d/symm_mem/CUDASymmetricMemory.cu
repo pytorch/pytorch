@@ -346,6 +346,9 @@ void* CUDASymmetricMemoryAllocator::alloc(
     size_t size,
     int device_idx,
     const std::optional<std::string>& group_name) {
+  // Returns the data buffer pointer (alloc_base + buffer_offset), not the
+  // allocation base; the signal pad stays hidden in front and free()/rendezvous()
+  // key off this returned pointer.
   // Layout: signal pad first at [0, signal_pad_size), then the data buffer at
   // buffer_offset = signal_pad_size. The signal pad size is already 16-aligned,
   // so the data buffer is aligned without extra padding; round up the data
@@ -761,23 +764,19 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
   }
 
   std::vector<HandleType> handles(world_size);
-  std::vector<void*> buffers(world_size, nullptr);
-  std::vector<void*> signal_pads(world_size, nullptr);
-  // Mapped base (== signal pad base) per rank; kept separately so AllocationRef
-  // gets an explicit base to unmap rather than relying on signal_pads[r].
+  // Per-rank mapped base (the signal pad lives at the base; also the address
+  // AllocationRef unmaps) and the data buffer pointer (base + buffer_offset).
   std::vector<void*> bases(world_size, nullptr);
+  std::vector<void*> buffers(world_size, nullptr);
 
   for (int r = 0; r < world_size; ++r) {
     if (r == rank) {
-      // Derive both pointers from the allocation base (not the rendezvous
-      // ptr, which may be an interior MemPool pointer): this pai is shared by
-      // every handle on the allocation, and per-handle offsets are applied
-      // separately.
+      // Derive pointers from the allocation base (not the rendezvous ptr, which
+      // may be an interior MemPool pointer): this pai is shared by every handle
+      // on the allocation, and per-handle offsets are applied separately.
       handles[r] = block->alloc_ref->handle;
       bases[r] = block->alloc_ref->ptr;
-      signal_pads[r] = block->alloc_ref->ptr;
-      buffers[r] =
-          (void*)((uintptr_t)block->alloc_ref->ptr + block->buffer_offset);
+      buffers[r] = static_cast<char*>(bases[r]) + block->buffer_offset;
       continue;
     }
     // This api imports a GPU memory allocation that was previously exported as
@@ -815,11 +814,8 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
 #endif
     // map_block returns the mapped base (== signal pad base); the data buffer
     // follows at buffer_offset.
-    void* base = nullptr;
-    map_block(&base, handles[r], block->block_size, block->device_idx);
-    bases[r] = base;
-    signal_pads[r] = base;
-    buffers[r] = (void*)((uintptr_t)base + block->buffer_offset);
+    map_block(&bases[r], handles[r], block->block_size, block->device_idx);
+    buffers[r] = static_cast<char*>(bases[r]) + block->buffer_offset;
     if constexpr (!use_fabric_handle) {
       close(imported_handles[r]);
     }
@@ -860,13 +856,14 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
   // The multicast mapping mirrors the block layout, so the data buffer lives at
   // buffer_offset within it; get_multicast_ptr() adds the per-handle offset.
   void* mc_buffer_addr = mc_addr != nullptr
-      ? (void*)((uintptr_t)mc_addr + block->buffer_offset)
+      ? static_cast<char*>(mc_addr) + block->buffer_offset
       : nullptr;
 
   auto pai = c10::make_intrusive<CUDAPeerAllocInfo>(
       std::move(alloc_refs),
       std::move(buffers),
-      std::move(signal_pads),
+      // The signal pad lives at the mapped base, so pass bases as signal_pads.
+      std::move(bases),
       mc_handle,
       mc_buffer_addr,
       block->buffer_size,
@@ -962,11 +959,11 @@ c10::intrusive_ptr<Block> CUDASymmetricMemoryAllocator::find_block_covering(void
   auto alloc_it = std::find_if(ptr_to_block_.begin(), ptr_to_block_.end(),
                              [&](const auto& pair){
                                 auto& block = pair.second;
-                                auto& allocation = block->alloc_ref;
                                 auto ptr_int = reinterpret_cast<uintptr_t>(ptr);
-                                // The data buffer starts buffer_offset bytes
-                                // into the allocation (past the signal pad).
-                                auto buffer_ptr = reinterpret_cast<uintptr_t>(allocation->ptr) + block->buffer_offset;
+                                // pair.first is buffer_ptr, the key alloc()
+                                // stored (alloc_base + buffer_offset), i.e. the
+                                // data buffer start past the signal pad.
+                                auto buffer_ptr = reinterpret_cast<uintptr_t>(pair.first);
                                 // Modify offset so that it is returned
                                 offset = ptr_int - buffer_ptr;
                                 return ptr_int >= buffer_ptr && offset < block->buffer_size; });
