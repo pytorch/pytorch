@@ -318,6 +318,57 @@ class TestGpuWrapper(InductorTestCase):
         self.assertIn("aoti_custom_ops::forward_maybe_weighted", code)
         self.assertIn("c10::IValue(at::Tensor())", code)
 
+    @config.patch(implicit_fallbacks=True)
+    def test_custom_op_optional_output_null_guards_size_assert(self):
+        import ctypes
+
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+        if IS_FBCODE or IS_SANDCASTLE:
+            torch.ops.load_library("//caffe2/test/inductor:custom_ops")
+            import torch._utils_internal as _ui
+
+            lib_path = _ui.resolve_library_path("//caffe2/test/inductor:custom_ops")
+        elif IS_MACOS:
+            self.skipTest("non-portable load_library call used in test")
+        else:
+            lib_path = find_library_location("libaoti_custom_ops.so")
+            if IS_WINDOWS:
+                lib_path = find_library_location("aoti_custom_ops.dll")
+            if not os.path.exists(lib_path):
+                self.skipTest("libaoti_custom_ops not built")
+            torch.ops.load_library(str(lib_path))
+
+        ctypes.CDLL(str(lib_path), mode=ctypes.RTLD_GLOBAL)
+
+        op = torch.ops.aoti_custom_ops.fn_optional_output.default
+        c_shims = {
+            op: [
+                "AOTITorchError aoti_torch_cpu_fn_optional_output("
+                "AtenTensorHandle x, AtenTensorHandle* ret0, AtenTensorHandle* ret1)",
+                "AOTITorchError aoti_torch_cuda_fn_optional_output("
+                "AtenTensorHandle x, AtenTensorHandle* ret0, AtenTensorHandle* ret1)",
+                "AOTITorchError aoti_torch_xpu_fn_optional_output("
+                "AtenTensorHandle x, AtenTensorHandle* ret0, AtenTensorHandle* ret1)",
+            ]
+        }
+
+        def fn(x):
+            # fn_optional_output returns (x + 1, None). The optional output is a
+            # null handle at runtime while its meta reports an (11, 13) tensor, so
+            # cpp_wrapper must null-guard its assert_size_stride rather than
+            # dereference the null handle.
+            a, b = torch.ops.aoti_custom_ops.fn_optional_output(x)
+            return a + 1, b
+
+        x = torch.randn(8, 4, device=self.device)
+        expected = fn(x)
+        with config.patch({"aot_inductor.custom_ops_to_c_shims": c_shims}):
+            compiled = torch.compile(fullgraph=True, options={"cpp_wrapper": True})(fn)
+            actual = compiled(x)
+        self.assertEqual(actual[0], expected[0])
+        self.assertIsNone(actual[1])
+
     @skipIfXpu(msg="tests CUDA/ROCm CUDADeviceOpOverrides codegen")
     def test_cpp_scratch_scales_with_grid_size_for_tma(self):
         scratch_def, scratch_var = CUDADeviceOpOverrides().cpp_scratch(

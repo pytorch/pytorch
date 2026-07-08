@@ -2315,10 +2315,16 @@ class CppWrapperCpu(PythonWrapperCodegen):
         size: str,
         stride: str,
         op_name: str,
+        maybe_null: bool = False,
     ) -> None:
         if V.graph.aot_mode and V.graph.is_const_graph:
             return
         stmt = f'assert_size_stride({name}, {size}, {stride}, "{op_name}");'
+        if maybe_null:
+            # Optional (Tensor?) output may be a null handle at runtime; assert
+            # only when it is actually present, else aoti_torch_get_dim would
+            # dereference null.
+            stmt = f"if ({name} != nullptr) {{ {stmt} }}"
         if V.graph.aot_mode:
             guarded = f"if (_check_aoti_runtime_check_inputs_env()) {{ {stmt} }}"
             if V.graph.is_dual_wrapper_mode:

@@ -6921,6 +6921,9 @@ class ExternKernel(InputsKernel):
         default_factory=dict
     )
     mutation_outputs: list[MutationOutput] = dataclasses.field(default_factory=list)
+    # Set only on MultiOutput (schema-optional Tensor? outputs that may be null
+    # at runtime); declared on the base so codegen_*_asserts can read it uniformly.
+    maybe_null: bool = False
 
     def __init__(
         self,
@@ -7840,7 +7843,9 @@ class ExternKernel(InputsKernel):
                             "Expected isinstance(self.inputs[0], IRNode)"
                         )
                     name = self.inputs[0].get_name()
-        wrapper.write_assert_size_stride(name, size, stride, op_name)
+        wrapper.write_assert_size_stride(
+            name, size, stride, op_name, maybe_null=self.maybe_null
+        )
 
     def codegen_alignment_asserts(self, wrapper: PythonWrapperCodegen) -> None:
         if config.alignment_asserts and not V.graph.cpp_wrapper:
@@ -7848,9 +7853,12 @@ class ExternKernel(InputsKernel):
             aligned = name not in V.graph.unaligned_buffers
             op_name = self.get_op_name()
             if aligned:
-                wrapper.writeline(
-                    f"assert_alignment({name}, {GPU_ALIGN_BYTES}, {op_name!r})"
-                )
+                stmt = f"assert_alignment({name}, {GPU_ALIGN_BYTES}, {op_name!r})"
+                if self.maybe_null:
+                    # Optional (Tensor?) output may be absent at runtime; assert
+                    # only when it is actually present.
+                    stmt = f"if {name} is not None: {stmt}"
+                wrapper.writeline(stmt)
             else:
                 wrapper.writeline(
                     f"# buffer {name} (op: {op_name}) is assumed to be not aligned"
@@ -9907,6 +9915,17 @@ class FallbackKernel(ExternKernelAlloc):
                 unbacked_bindings=unbacked_bindings,
             )
 
+        # Returns declared Tensor? (optional) may be absent at runtime; their
+        # output handle can be null even when the meta kernel produced a tensor.
+        optional_return_idxs: OrderedSet[int] = OrderedSet()
+        if isinstance(kernel, torch._ops.OpOverload):
+            for ret_idx, ret in enumerate(kernel._schema.returns):
+                ret_type = ret.real_type
+                if isinstance(ret_type, torch.OptionalType) and isinstance(
+                    ret_type.getElementType(), torch.TensorType
+                ):
+                    optional_return_idxs.add(ret_idx)
+
         def generate_output(output: Any, indices: list[tuple[Any, int]]) -> Any:
             if isinstance(output, (list, tuple)):
                 return type(output)(
@@ -9919,10 +9938,14 @@ class FallbackKernel(ExternKernelAlloc):
                     for key, val in output.items()
                 }
             elif isinstance(output, torch.Tensor):
+                # Tensor? (optional) outputs may be a null handle at runtime;
+                # mark them so their size/stride assert is runtime null-guarded.
+                flat_idx = indices[0][1] if indices else 0
                 buf = MultiOutput(
                     cls.tensor_to_layout(output),
                     packed,
                     indices,
+                    maybe_null=flat_idx in optional_return_idxs,
                 )
                 if (
                     config.assume_unaligned_fallback_output
@@ -10041,12 +10064,14 @@ class MultiOutput(ExternKernel):
         input: IRNode,
         indices: list[tuple[Any, ...]],
         skip_size_stride_alignment_checks: bool = False,
+        maybe_null: bool = False,
     ) -> None:
         super().__init__(None, layout, [input], ())
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
         self.indices = indices
         self.skip_size_stride_alignment_checks = skip_size_stride_alignment_checks
+        self.maybe_null = maybe_null
 
     @cache_on_self_and_args("MultiOutput")
     def get_free_symbol_uses(

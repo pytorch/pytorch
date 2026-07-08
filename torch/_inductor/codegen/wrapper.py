@@ -1296,10 +1296,11 @@ class AssertSizeStrideLine(WrapperLine):
     size: str
     stride: str
     op_name: str = "input"
+    maybe_null: bool = False
 
     def codegen(self, code: IndentedBuffer) -> None:
         self.wrapper._codegen_assert_size_stride(
-            code, self.name, self.size, self.stride, self.op_name
+            code, self.name, self.size, self.stride, self.op_name, self.maybe_null
         )
 
     @staticmethod
@@ -1822,10 +1823,12 @@ class PythonWrapperCodegen(CodeGen):
             self.write_assert_size_stride_grouped(grouped_asserts, "input")
 
     def write_assert_size_stride(
-        self, name: str, size: str, stride: str, op_name: str
+        self, name: str, size: str, stride: str, op_name: str, maybe_null: bool = False
     ) -> None:
         """Queue an assert_size_stride for emission during replay."""
-        self.writeline(AssertSizeStrideLine(self, name, size, stride, op_name))
+        self.writeline(
+            AssertSizeStrideLine(self, name, size, stride, op_name, maybe_null)
+        )
 
     def _codegen_assert_size_stride(
         self,
@@ -1834,13 +1837,19 @@ class PythonWrapperCodegen(CodeGen):
         size: str,
         stride: str,
         op_name: str,
+        maybe_null: bool = False,
     ) -> None:
         """Emit one assert_size_stride line to `code` (replay-phase target).
 
         Subclasses override to change the emitted form (e.g., C++ assert with
         an AOTI runtime env guard).
         """
-        code.writeline(f"assert_size_stride({name}, {size}, {stride}, {op_name!r})")
+        stmt = f"assert_size_stride({name}, {size}, {stride}, {op_name!r})"
+        if maybe_null:
+            # Optional (Tensor?) output may be absent at runtime; assert only
+            # when it is actually present.
+            stmt = f"if {name} is not None: {stmt}"
+        code.writeline(stmt)
 
     def write_assert_div_by_zero(self, divisor_str: str, op_name: str) -> None:
         """Queue a div-by-zero AOTI check for emission during replay.
