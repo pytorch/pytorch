@@ -44,18 +44,30 @@ void add_clamp_kernel(
     const Scalar& max_val) {
   AT_DISPATCH_ALL_TYPES_AND2(
       kHalf, kBFloat16, iter.dtype(), "add_clamp_cpu", [&]() {
+    using opmath_t = at::opmath_type<scalar_t>;
+    
     auto alpha = alpha_scalar.to<scalar_t>();
     auto alpha_vec = Vectorized<scalar_t>(alpha);
     auto min_scalar = min_val.to<scalar_t>();
     auto min_vec = Vectorized<scalar_t>(min_scalar);
     auto max_scalar = max_val.to<scalar_t>();
     auto max_vec = Vectorized<scalar_t>(max_scalar);
+
+    // Accumulate in opmath_t (single rounding for half/bf16) and 
+    // clamp to [lo, hi]; std::clamp preserves NaN since lo (0) <= hi.
+    const opmath_t alpha_op = alpha_scalar.to<opmath_t>();
+    const opmath_t lo = min_val.to<opmath_t>();
+    const opmath_t hi = max_val.to<opmath_t>();
+
     cpu_kernel_vec(
         iter,
         [=](scalar_t a, scalar_t b) __ubsan_ignore_undefined__ -> scalar_t {
-          return std::min(
-              max_scalar,
-              std::max(min_scalar, static_cast<scalar_t>(a + alpha * b)));
+          opmath_t r =
+              static_cast<opmath_t>(a) + alpha_op * static_cast<opmath_t>(b);
+
+          r = std::clamp(r, lo, hi);
+          
+          return static_cast<scalar_t>(r);
         },
         [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b)
             __ubsan_ignore_undefined__ {
