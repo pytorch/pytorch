@@ -1354,7 +1354,11 @@ static std::string reportProcessMemoryInfo(const cudaDeviceProp& prop) {
          NVML_ERROR_INSUFFICIENT_SIZE) {
     procs.resize(size);
   }
+#ifdef _WIN32
+  unsigned int self_pid = _getpid();
+#else
   unsigned int self_pid = getpid();
+#endif
   std::stringstream ss;
   TORCH_INTERNAL_ASSERT(NVML_SUCCESS == r);
   ss << "";
