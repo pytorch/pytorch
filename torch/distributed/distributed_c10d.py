@@ -61,12 +61,12 @@ from .rendezvous import register_rendezvous_handler, rendezvous  # noqa: F401
 
 def _register_process_group_opaque_type() -> None:
     from torch._library.opaque_object import (
-        is_opaque_type,
+        is_custom_class,
         MemberType,
         register_custom_class,
     )
 
-    if is_opaque_type(ProcessGroup):
+    if is_custom_class(ProcessGroup):
         return
 
     register_custom_class(
@@ -5829,8 +5829,8 @@ def split_group(
     """
     Create a new process group split from the given parent process group.
 
-    warning:: This is an experimental API. Only the ``NCCL`` and custom plugin backends
-    are supported. Other backends will raise an error.
+    warning:: This is an experimental API. Only the ``NCCL``, ``Gloo`` and custom plugin
+    backends are supported. Other backends will raise an error.
     Users of this API must guarantee that all ranks in the parent group enter this API call,
     and the split of the sub groups is the same across all ranks in the parent group.
 
@@ -5845,6 +5845,9 @@ def split_group(
             in the parent pg. For example, if the parent group has 4 ranks, and split_ranks can be
             [[0, 1], [2, 3]]. Note [[0,1]] is also a valid split, in which case ranks 2, 3 would
             return a non-group member.
+            The order of ranks within each split is preserved: position in the
+            list determines the group rank in the new group. All ranks must pass
+            the same ordering.
         timeout (timedelta, optional): see `init_process_group` for details and default value.
         pg_options (ProcessGroupOptions, optional): Additional options need to be passed in during
             the construction of specific process groups. i.e.``is_high_priority_stream``
@@ -5872,10 +5875,6 @@ def split_group(
     global _world
     default_pg = _get_default_group()
     device_id = default_pg.bound_device_id
-    if not device_id and not _use_torchcomms_enabled():
-        raise RuntimeError(
-            "No device associated with the default pg, not safe to split any process groups"
-        )
     global_rank = default_pg.rank()
     global_world_size = default_pg.size()
 
@@ -5897,22 +5896,36 @@ def split_group(
 
     parent_group_rank = parent_global_to_group_ranks[global_rank]
 
-    if torch.accelerator.is_available():
-        parent_backend = parent_pg._get_backend(
-            torch.accelerator.current_accelerator()  # pyrefly: ignore[bad-argument-type]
-        )
-    elif _use_torchcomms_enabled():
-        # torchcomms supports CPU/gloo splitting; no accelerator is required.
-        parent_backend = parent_pg._get_backend(
-            torch.device("cpu")  # pyrefly: ignore[bad-argument-type]
-        )
+    # Resolve the device whose backend drives the split: the current
+    # accelerator if the parent group has a backend for it, otherwise CPU
+    # (e.g. a cpu-only gloo parent group).
+    parent_device_types = {d.type for d in parent_pg._device_types}
+    acc = torch.accelerator.current_accelerator(check_available=True)
+    if acc is not None and acc.type in parent_device_types:
+        split_device = acc
+    elif "cpu" in parent_device_types:
+        split_device = torch.device("cpu")
     else:
         raise RuntimeError(
             "No backend for the parent process group or its backend does not support splitting"
         )
+    parent_backend = parent_pg._get_backend(split_device)
+
+    # A backend that also serves CPU (gloo, or a bare "gloo" group that
+    # registers the same backend for cpu and the accelerator) needs no bound
+    # device to split. Accelerator-only backends (e.g. NCCL) split the parent
+    # communicator eagerly, which is only safe once the default pg has
+    # initialized it -- guaranteed by a bound device id.
+    cpu_capable = "cpu" in parent_device_types and (
+        split_device.type == "cpu"
+        or parent_pg._get_backend(torch.device("cpu")) is parent_backend
+    )
+    if not device_id and not cpu_capable and not _use_torchcomms_enabled():
+        raise RuntimeError(
+            "No device associated with the default pg, not safe to split any process groups"
+        )
 
     # if the parent backend does not support splitting, raise error
-    # currently this API only support NCCL and XCCL backend
     if (
         not parent_backend or not parent_backend.supports_splitting
     ) and not _use_torchcomms_enabled():
@@ -5934,12 +5947,11 @@ def split_group(
     # loop honors this filter so unwanted backends are never split.
     device_types_filter: list[torch.device] | None = None
     if backend is not None:
-        parent_devices = {d.type for d in parent_pg._device_types}
         parent_device_backends = _parse_backend_string(
-            parent_backend_str, available_devices=parent_devices
+            parent_backend_str, available_devices=parent_device_types
         )
         requested_device_backends = _parse_backend_string(
-            str(backend), available_devices=parent_devices
+            str(backend), available_devices=parent_device_types
         )
         for device_type, requested_be in requested_device_backends.items():
             if device_type not in parent_device_backends:
@@ -5987,7 +5999,6 @@ def split_group(
             )
         if len(split_group) != len(set(split_group)):
             raise ValueError("the split group cannot have duplicate ranks")
-        split_group = sorted(split_group)
         if parent_group_rank in split_group:
             my_group = split_group
             break
@@ -6011,18 +6022,6 @@ def split_group(
     global_ranks_in_my_group = [parent_group_to_global_ranks[rank] for rank in my_group]
     split_pg.bound_device_id = device_id  # type: ignore[union-attr]
 
-    if torch.accelerator.is_available():
-        split_backend_class = split_pg._get_backend(
-            torch.accelerator.current_accelerator()  # pyrefly: ignore[bad-argument-type]
-        )
-    elif _use_torchcomms_enabled():
-        # torchcomms supports CPU/gloo splitting; no accelerator is required.
-        split_backend_class = split_pg._get_backend(torch.device("cpu"))
-    else:
-        raise RuntimeError(
-            "No backend for the parent process group or its backend does not support splitting"
-        )
-
     if split_pg.group_name != group_name:
         raise AssertionError(
             f"group name should be set to {group_name} but got {split_pg.group_name}"
@@ -6042,6 +6041,7 @@ def split_group(
     )
 
     if _use_torchcomms_enabled():
+        split_backend_class = split_pg._get_backend(split_device)
         # pyrefly: ignore [missing-attribute]
         _world.comms.append(split_backend_class.get_comm())
     return split_pg
@@ -6136,8 +6136,8 @@ def new_group(
     :func:`split_group` so subgroup creation goes through the TorchComms path.
     The delegation raises ``NotImplementedError`` for arguments that
     :func:`split_group` cannot honor (e.g. ``use_local_synchronization=True``,
-    ``sort_ranks=False``, or an explicit ``device_id`` that diverges from the
-    default group's bound device).
+    or an explicit ``device_id`` that diverges from the default group's bound
+    device).
     """
     if _use_torchcomms_enabled():
         # split_group can only split the parent's existing communicator, so it
@@ -6202,12 +6202,6 @@ def _new_group_via_split_group(
             "use_local_synchronization=True; split_group requires all ranks "
             "in the parent group to participate."
         )
-    if not sort_ranks:
-        raise NotImplementedError(
-            "new_group cannot delegate to split_group with sort_ranks=False; "
-            "split_group always sorts the ranks of each subgroup."
-        )
-
     default_pg = _get_default_group()
     if device_id is not None:
         bound = default_pg.bound_device_id
@@ -6221,8 +6215,10 @@ def _new_group_via_split_group(
     global_world_size = default_pg.size()
     if ranks is None:
         group_ranks = list(range(global_world_size))
-    else:
+    elif sort_ranks:
         group_ranks = sorted(ranks)
+    else:
+        group_ranks = list(ranks)
 
     # Auto-qualify the requested backend so it always names just the parent's
     # default device backend (the one matching ``bound_device_id``) plus any
