@@ -1388,6 +1388,16 @@ def parse_args():
         help="Run all distributed tests",
     )
     parser.add_argument(
+        "--multiproc-filter",
+        choices=["multiproc", "not-multiproc"],
+        default=None,
+        help="Restrict distributed tests by the auto-applied `multiproc` marker "
+        "(see test/conftest.py). `multiproc` runs only tests that spawn multiple "
+        "processes / need multiple GPUs; `not-multiproc` runs only single-process "
+        "tests, which can run on a single-GPU runner. Combined (AND) with the "
+        "existing serial/not-serial split.",
+    )
+    parser.add_argument(
         "--include-cpython-tests",
         "--include-cpython-tests",
         action="store_true",
@@ -2060,6 +2070,22 @@ def run_tests(
         x for x in selected_tests if x not in selected_tests_parallel
     ]
 
+    # The multiproc marker (see test/conftest.py) is orthogonal to serial: it
+    # partitions distributed tests by whether they spawn multiple processes /
+    # need multiple GPUs. AND it into whatever serial expression a pass uses so
+    # a single-GPU config can select `not multiproc` without dropping the
+    # serial/not-serial split (a bare second `-m` would clobber the first).
+    multiproc_marker = {
+        "multiproc": "multiproc",
+        "not-multiproc": "not multiproc",
+    }.get(getattr(options, "multiproc_filter", None))
+
+    def marker_args(serial_expr: str | None) -> list[str]:
+        exprs = [e for e in (serial_expr, multiproc_marker) if e]
+        if not exprs:
+            return []
+        return ["-m", " and ".join(f"({e})" for e in exprs)]
+
     # NB: This is a hack to make conftest.py and files it depends on available
     # on CPP_TESTS_DIR. We should see if the file could be turned into a
     # full-fledge ptest plugin instead
@@ -2099,6 +2125,7 @@ def run_tests(
             options_clone = copy.deepcopy(options)
             if can_run_in_pytest(test):
                 options_clone.pytest = True
+            options_clone.additional_args.extend(marker_args(None))
             failure = run_test_module(test, test_directory, options_clone)
             test_failed = handle_complete(failure)
             if (
@@ -2113,7 +2140,7 @@ def run_tests(
             options_clone = copy.deepcopy(options)
             if can_run_in_pytest(test):
                 options_clone.pytest = True
-            options_clone.additional_args.extend(["-m", "serial"])
+            options_clone.additional_args.extend(marker_args("serial"))
             failure = run_test_module(test, test_directory, options_clone)
             test_failed = handle_complete(failure)
             if (
@@ -2145,7 +2172,7 @@ def run_tests(
             options_clone = copy.deepcopy(options)
             if can_run_in_pytest(test):
                 options_clone.pytest = True
-            options_clone.additional_args.extend(["-m", "not serial"])
+            options_clone.additional_args.extend(marker_args("not serial"))
             pool.apply_async(
                 run_test_module,
                 args=(test, test_directory, options_clone),
