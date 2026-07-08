@@ -127,6 +127,12 @@ def get_source_partitions(
             if source_fn[1] in wanted_sources:
                 add_to_partition(source_fn[1], source_fn[0], node)
 
+    # Build once, reuse across all partitions to avoid O(N*P) cost.
+    node_positions = {node: i for i, node in enumerate(graph.nodes)}
+
+    def sort_key(n: Node) -> int:
+        return node_positions.get(n, len(node_positions))
+
     def make_partition(nodes: list[Node], module_type: type) -> SourcePartition:
         input_nodes = set()
         output_nodes = set()
@@ -144,13 +150,6 @@ def get_source_partitions(
             for user in node.users:
                 if user not in nodes:
                     output_nodes.add(node)
-
-        # Sort nodes by their position in the graph for deterministic ordering.
-        # Sets are non-deterministic across runs due to hash randomization.
-        node_positions = {node: i for i, node in enumerate(graph.nodes)}
-
-        def sort_key(n: Node) -> int:
-            return node_positions.get(n, len(node_positions))
 
         return SourcePartition(
             nodes,
