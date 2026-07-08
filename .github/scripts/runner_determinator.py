@@ -24,7 +24,7 @@ The user list has the following rules:
 - Users are GitHub usernames, which must start with the @ prefix
 - Each user is also a comma-separated list of features/experiments to enable
 - Each experiment can optionally include a per-user rollout percentage
-  using the syntax "experiment:percentage" (e.g. "amd-do:10" for 10% rollout)
+  using the syntax "experiment:percentage" (e.g. "split_build:10" for 10% rollout)
 - Without a percentage, opted-in experiments are enabled 100% of the time
 - A "#" prefix opts the user out of all experiments
 - A "-" prefix on an experiment opts the user out of that experiment
@@ -41,7 +41,7 @@ Example config:
         rollout_percent: 25
         all_branches: false
         default: true
-      amd-do:
+      split_build:
         rollout_perc: 50
         all_branches: true
         default: false
@@ -64,7 +64,7 @@ Example config:
     @User1,-lf,split_build
     @User2,lf
     @User3,split_build
-    @User4,lf,amd-do:10
+    @User4,lf,split_build:10
 """
 
 import json
@@ -383,7 +383,7 @@ def parse_user_opt_in_from_text(user_optin_text: str) -> UserOptins:
                 exp_str = exp_str.strip(" ")
                 if not exp_str:
                     continue
-                # Parse optional per-user rollout percentage (e.g. "amd-do:10")
+                # Parse optional per-user rollout percentage (e.g. "split_build:10")
                 # Opt-out entries (e.g. "-lf") never have a percentage
                 if ":" in exp_str and not exp_str.startswith("-"):
                     name, perc_str = exp_str.split(":", 1)
