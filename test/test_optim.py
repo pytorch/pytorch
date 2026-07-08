@@ -2352,6 +2352,68 @@ class TestOptimRenewed(TestCase):
                 self.assertGreater(len(state), 0)
 
     @onlyCUDA
+    @parametrize("foreach", [False, True])
+    @optims(
+        [o for o in optim_db if o.optim_cls.__name__ in ["Adam", "AdamW"]],
+        dtypes=[torch.float16, torch.bfloat16, torch.float32],
+    )
+    def test_adam_capturable_no_nan(self, device, dtype, optim_info, foreach):
+        optim_cls = optim_info.optim_cls
+        capturable_inputs = [
+            optim_input
+            for optim_input in optim_info.optim_inputs_func(device=device)
+            if optim_input.kwargs.get("capturable", False)
+        ]
+        self.assertGreater(len(capturable_inputs), 0)
+
+        def move_tensor_kwargs(value):
+            if isinstance(value, torch.Tensor):
+                return value.to(device=device)
+            if isinstance(value, tuple):
+                return tuple(move_tensor_kwargs(v) for v in value)
+            return value
+
+        def make_kwargs(optim_input, lr, foreach):
+            kwargs = {k: move_tensor_kwargs(v) for k, v in optim_input.kwargs.items()}
+            kwargs["foreach"] = foreach
+            kwargs["lr"] = (
+                torch.full_like(kwargs["lr"], lr, device=device)
+                if isinstance(kwargs.get("lr"), torch.Tensor)
+                else lr
+            )
+            return kwargs
+
+        lr_values = (0.0, 1e-3) if dtype is torch.float16 else (0.0,)
+        for optim_input in capturable_inputs:
+            for lr in lr_values:
+                embedding = torch.nn.Embedding(16, 4, device=device, dtype=dtype)
+                initial_weight = embedding.weight.detach().clone()
+                optim = optim_cls(
+                    embedding.parameters(), **make_kwargs(optim_input, lr, foreach)
+                )
+
+                indices = torch.tensor([0, 1, 0, 1], device=device)
+                embedding(indices).sum().backward()
+                optim.step()
+
+                self.assertTrue(torch.isfinite(embedding.weight).all().item())
+                if lr == 0.0:
+                    self.assertEqual(embedding.weight, initial_weight)
+                elif foreach:
+                    reference_embedding = torch.nn.Embedding(
+                        16, 4, device=device, dtype=dtype
+                    )
+                    reference_embedding.weight.detach().copy_(initial_weight)
+                    reference_optim = optim_cls(
+                        reference_embedding.parameters(),
+                        **make_kwargs(optim_input, lr, False),
+                    )
+                    reference_embedding(indices).sum().backward()
+                    reference_optim.step()
+
+                    self.assertEqual(embedding.weight, reference_embedding.weight)
+
+    @onlyCUDA
     @parametrize("amsgrad", [False, True])
     @optims(
         [o for o in optim_db if o.optim_cls.__name__ in ["Adam", "AdamW"]],
