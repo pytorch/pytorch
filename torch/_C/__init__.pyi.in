@@ -1274,6 +1274,10 @@ def _get_cudnn_allow_tf32() -> _bool: ...  # THPModule_allowTF32CuDNN
 def _set_cudnn_allow_tf32(arg: _bool) -> None: ...  # THPModule_setAllowTF32CuDNN
 def _get_cublas_allow_tf32() -> _bool: ...  # THPModule_allowTF32CuBLAS
 def _set_cublas_allow_tf32(arg: _bool) -> None: ...  # THPModule_setAllowTF32CuBLAS
+def _get_cublaslt_prefer_grouped_gemm() -> _bool: ...  # THPModule_preferCublasltGroupedGemm
+def _set_cublaslt_prefer_grouped_gemm(
+    arg: _bool,
+) -> None: ...  # THPModule_setPreferCublasltGroupedGemm
 def _get_float32_matmul_precision() -> str: ...  # THPModule_float32MatmulPrecision
 def _set_float32_matmul_precision(
     arg: str,
