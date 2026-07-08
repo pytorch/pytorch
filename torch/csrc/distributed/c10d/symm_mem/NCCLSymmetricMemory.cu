@@ -152,6 +152,10 @@ NCCLAllocMap::iterator find_allocation_covering(
     return alloc_it;
   }
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
+  // Recover the CUDA allocation base for interior pointers before falling back
+  // to the linear scan: a MemPool hands out interior (non-base) pointers, so
+  // `ptr` may not be a map key. cuMemGetAddressRange gives the allocation base
+  // in O(1); base + signal pad size is the data buffer ptr we keyed on.
   auto driver_api = c10::cuda::DriverAPI::get();
   CUdeviceptr base_ptr = 0;
   if (driver_api->cuMemGetAddressRange_(
@@ -315,11 +319,12 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
   void* mc_addr = nullptr;
   // Skip CHECK on purpose to improve fault tolerance since some machine's
   // Fabric Manager may be in bad NVLink Sharp state.
-  if (ncclGetLsaMultimemDevicePointer(combined_win_, 0, &mc_addr) == ncclSuccess &&
+  // Pass buffer_offset_ as the window offset so the returned multicast pointer
+  // already points at the data buffer (past the signal pad); no manual add.
+  if (ncclGetLsaMultimemDevicePointer(
+          combined_win_, buffer_offset_, &mc_addr) == ncclSuccess &&
       mc_addr != nullptr) {
-    // Point at the data buffer within the multicast mapping (data follows the
-    // signal pad).
-    mc_addr_ = static_cast<char*>(mc_addr) + buffer_offset_;
+    mc_addr_ = mc_addr;
   }
 #endif // NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 0)
 #endif // NCCL_HAS_SYMMEM_DEVICE_SUPPORT

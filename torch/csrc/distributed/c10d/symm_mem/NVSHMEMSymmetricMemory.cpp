@@ -168,12 +168,11 @@ class NVSHMEMPeerAllocInfo : public c10::intrusive_ptr_target {
     auto device = c10::Device(c10::DeviceType::CUDA, allocation->device_idx);
     auto& team_manager = c10d::nvshmem_extension::TeamManager::get(device);
     auto team = team_manager.get_team(group_name, rank_to_global_rank);
-    mc_addr_ = nvshmemx_mc_ptr(team, base_ptr_);
-    // Point at the data buffer within the multicast mapping (data follows the
-    // signal pad).
-    if (mc_addr_ != nullptr) {
-      mc_addr_ = static_cast<char*>(mc_addr_) + buffer_offset;
-    }
+    // Pass the data buffer's symmetric address (base + buffer_offset) so the
+    // returned multicast pointer already points at the data buffer; the MC
+    // mapping mirrors the symmetric layout, so no manual adjustment is needed.
+    mc_addr_ =
+        nvshmemx_mc_ptr(team, static_cast<char*>(base_ptr_) + buffer_offset);
 #endif
   }
 
