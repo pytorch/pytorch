@@ -374,7 +374,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
         def test_reduce_scatter_tensor_coalesced_debug_mode(self):
             torch.accelerator.set_device_index(self.rank)
             pg = self._create_wrapper_pg(with_new_group=True)
-            dev = torch.accelerator.current_accelerator()
+            dev = torch.accelerator.current_device_index()
 
             out_shapes = [(2, 2), (3, 3)]
             in_shapes = [(s[0] * self.world_size,) + s[1:] for s in out_shapes]
