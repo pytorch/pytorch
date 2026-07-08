@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import contextlib
+import functools
 import itertools
 import platform
 import uuid
@@ -340,6 +341,76 @@ class CheckpointFunction(torch.autograd.Function):
 def noop_context_fn():
     return contextlib.nullcontext(), contextlib.nullcontext()
 
+
+# Only consumed by Dynamo (see is_checkpoint_factory / is_utils_checkpoint_wrapped
+# in torch/_dynamo/utils.py). It is stashed on the curried checkpoint objects so
+# Dynamo can reconstruct the checkpoint configuration and install guards on it.
+# Default values are omitted so that the common case installs fewer guards.
+def _get_checkpoint_kwargs(
+    *,
+    use_reentrant: bool | None,
+    preserve: bool,
+    context_fn: Callable[[], Tuple[ContextManager, ContextManager]],
+    determinism_check: str,
+    debug: bool,
+    early_stop: bool,
+):
+    checkpoint_kwargs: dict[str, Any] = {}
+    if use_reentrant is not None:
+        checkpoint_kwargs["use_reentrant"] = use_reentrant
+    if preserve is not True:
+        checkpoint_kwargs["preserve_rng_state"] = preserve
+    if context_fn is not noop_context_fn:
+        checkpoint_kwargs["context_fn"] = context_fn
+    if determinism_check != _DEFAULT_DETERMINISM_MODE:
+        checkpoint_kwargs["determinism_check"] = determinism_check
+    if debug is not False:
+        checkpoint_kwargs["debug"] = debug
+    if early_stop is not True:
+        checkpoint_kwargs["early_stop"] = early_stop
+    return checkpoint_kwargs
+
+
+def _make_checkpoint_wrapper(
+    function,
+    *,
+    use_reentrant: bool | None,
+    preserve: bool,
+    context_fn: Callable[[], Tuple[ContextManager, ContextManager]],
+    determinism_check: str,
+    debug: bool,
+    early_stop: bool,
+):
+    @functools.wraps(function)
+    def wrapper(*args, **kwargs):
+        return _checkpoint_impl(
+            function,
+            args,
+            kwargs,
+            use_reentrant=use_reentrant,
+            preserve=preserve,
+            context_fn=context_fn,
+            determinism_check=determinism_check,
+            debug=debug,
+            early_stop=early_stop,
+        )
+
+    # The wrapper is a plain function, so it is already a descriptor: decorating
+    # a method (checkpoint(...)(Model.forward)) binds the instance for free.
+    # These markers are only read by Dynamo (see is_utils_checkpoint_wrapped) to
+    # reconstruct the checkpoint configuration and install guards on it.
+    wrapper._torch_checkpoint_wrapped_function = function  # type: ignore[attr-defined]
+    wrapper._torch_checkpoint_kwargs = _get_checkpoint_kwargs(  # type: ignore[attr-defined]
+        use_reentrant=use_reentrant,
+        preserve=preserve,
+        context_fn=context_fn,
+        determinism_check=determinism_check,
+        debug=debug,
+        early_stop=early_stop,
+    )
+    return wrapper
+
+
 # Note: [torch.compile and checkpoint]
 # TorchDynamo does not step inside utils.checkpoint function.  The flow
 # looks likes this
@@ -353,9 +424,10 @@ def noop_context_fn():
 #     utils.checkpoint innards.
 @torch._disable_dynamo
 def checkpoint(
-    function,
+    function=None,
     *args,
     use_reentrant: bool | None = None,
+    preserve_rng_state: bool = True,
     context_fn: Callable[[], Tuple[ContextManager, ContextManager]] = noop_context_fn,
     determinism_check: str = _DEFAULT_DETERMINISM_MODE,
     debug: bool = False,
@@ -440,7 +512,9 @@ def checkpoint(
             part of the model. It should also know how to handle the inputs
             passed as the tuple. For example, in LSTM, if user passes
             ``(activation, hidden)``, :attr:`function` should correctly use the
-            first input as ``activation`` and the second input as ``hidden``
+            first input as ``activation`` and the second input as ``hidden``.
+            If omitted, ``checkpoint`` returns a decorator that can be used to
+            wrap a function before passing user arguments.
         args: tuple containing inputs to the :attr:`function`
 
     Keyword args:
@@ -481,8 +555,75 @@ def checkpoint(
             Default: ``True``.
 
     Returns:
-        Output of running :attr:`function` on :attr:`*args`
+        Output of running :attr:`function` on :attr:`*args`, or a decorator
+        when :attr:`function` is omitted.
+
+    Example:
+        >>> # xdoctest: +SKIP("stub")
+        >>> # Direct call: checkpoint the function immediately.
+        >>> out = torch.utils.checkpoint.checkpoint(
+        ...     fn, *args, use_reentrant=False, **kwargs
+        ... )
+        >>> # Decorator/curried form: configure once, then call.
+        >>> checkpointed_fn = torch.utils.checkpoint.checkpoint(
+        ...     use_reentrant=False,
+        ...     preserve_rng_state=False,
+        ... )(fn)
+        >>> out = checkpointed_fn(*args, **kwargs)
     """
+    preserve = preserve_rng_state
+
+    if function is None and not args:
+        if kwargs:
+            raise ValueError(
+                "Unexpected keyword arguments: " + ",".join(arg for arg in kwargs)
+            )
+        factory: Any = functools.partial(
+            _make_checkpoint_wrapper,
+            use_reentrant=use_reentrant,
+            preserve=preserve,
+            context_fn=context_fn,
+            determinism_check=determinism_check,
+            debug=debug,
+            early_stop=early_stop,
+        )
+        # Consumed by Dynamo (is_checkpoint_factory) to guard on the checkpoint
+        # configuration of the returned decorator; unused in eager.
+        factory._torch_checkpoint_kwargs = _get_checkpoint_kwargs(
+            use_reentrant=use_reentrant,
+            preserve=preserve,
+            context_fn=context_fn,
+            determinism_check=determinism_check,
+            debug=debug,
+            early_stop=early_stop,
+        )
+        return factory
+
+    return _checkpoint_impl(
+        function,
+        args,
+        kwargs,
+        use_reentrant=use_reentrant,
+        preserve=preserve,
+        context_fn=context_fn,
+        determinism_check=determinism_check,
+        debug=debug,
+        early_stop=early_stop,
+    )
+
+
+def _checkpoint_impl(
+    function,
+    args,
+    kwargs,
+    *,
+    use_reentrant: bool | None,
+    preserve: bool,
+    context_fn: Callable[[], Tuple[ContextManager, ContextManager]],
+    determinism_check: str,
+    debug: bool,
+    early_stop: bool,
+):
     if use_reentrant is None:
         warnings.warn(
             "torch.utils.checkpoint: the use_reentrant parameter should be "
@@ -491,12 +632,10 @@ def checkpoint(
             "recommended, but if you need to preserve the current default "
             "behavior, you can pass use_reentrant=True. Refer to docs for more "
             "details on the differences between the two variants.",
-            stacklevel=2
+            stacklevel=3,
         )
         use_reentrant = True
 
-    # Hack to mix *args with **kwargs in a python 2.7-compliant way
-    preserve = kwargs.pop("preserve_rng_state", True)
     if kwargs and use_reentrant:
         raise ValueError(
             "Unexpected keyword arguments: " + ",".join(arg for arg in kwargs)
@@ -511,7 +650,14 @@ def checkpoint(
         return CheckpointFunction.apply(function, preserve, *args)
     else:
         gen = _checkpoint_without_reentrant_generator(
-            function, preserve, context_fn, determinism_check, debug, early_stop, *args, **kwargs
+            function,
+            args,
+            kwargs,
+            preserve_rng_state=preserve,
+            context_fn=context_fn,
+            determinism_check=determinism_check,
+            debug=debug,
+            early_stop=early_stop,
         )
         # Runs pre-forward logic
         next(gen)
@@ -623,11 +769,9 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=None, **kwar
     for start in range(0, segment_size * (segments - 1), segment_size):
         end = start + segment_size - 1
         input = checkpoint(
-            run_function(start, end, functions),
-            input,
             use_reentrant=use_reentrant,
             preserve_rng_state=preserve,
-        )
+        )(run_function(start, end, functions))(input)
     return run_function(end + 1, len(functions) - 1, functions)(input)
 
 
@@ -1557,13 +1701,14 @@ def create_selective_checkpoint_contexts(policy_fn_or_list, allow_cache_entry_mu
 
 def _checkpoint_without_reentrant_generator(
     fn,
+    args,
+    kwargs,
+    *,
     preserve_rng_state=True,
     context_fn: Callable[[], Tuple[ContextManager, ContextManager]] = noop_context_fn,
     determinism_check: str = _DEFAULT_DETERMINISM_MODE,
     debug: bool = False,
     early_stop: bool = True,
-    *args,
-    **kwargs
 ):
     """Checkpointing without reentrant autograd.
 
@@ -1573,6 +1718,8 @@ def _checkpoint_without_reentrant_generator(
             passed as the tuple. For example, in LSTM, if user passes
             ``(activation, hidden)``, :attr:`function` should correctly use the
             first input as ``activation`` and the second input as ``hidden``
+        args: Tuple of arguments to pass in to the given ``function``.
+        kwargs: Dict of keyword arguments to pass into the given ``function``.
         preserve_rng_state(bool, optional):  Omit stashing and restoring
             the RNG state during each checkpoint.
             Default: ``True``
@@ -1593,8 +1740,6 @@ def _checkpoint_without_reentrant_generator(
             recomputation as soon as it has computed all needed Tensors. Can be
             overridden globally using :func:`set_checkpoint_early_stop` context
             manager. Default: ``True``.
-        *args: Arguments to pass in to the given ``function``.
-        **kwargs: Keyword arguments to pass into the given ``function``.
     """
     unpack_error_cb = None
 
