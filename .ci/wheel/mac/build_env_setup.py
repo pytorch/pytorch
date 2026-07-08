@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """macOS arm64 build environment setup (runs once per Python before the build).
 
-Mirrors .ci/manywheel/build_env_setup.py for the macOS CD wheel build. macOS
+Mirrors .ci/wheel/linux/build_env_setup.py for the macOS CD wheel build. macOS
 needs far less toolchain wiring than the manylinux path: there is no
 CUDA/ROCm/XPU split and the heavy deps come from the runner image or Homebrew.
 This script just emits the macOS build flags to the --env-out file so the
