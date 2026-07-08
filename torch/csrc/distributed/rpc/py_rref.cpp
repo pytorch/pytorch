@@ -75,7 +75,7 @@ TypePtr tryInferTypeWithTypeHint(
         " is not a subtype of the type hint: ",
         type_qualified_name.qualifiedName(),
         ", did you pass a valid interface type?\n",
-        std::move(subtype_check_msg).str());
+        subtype_check_msg.str());
     return type_hint_ptr;
   } else {
     TORCH_CHECK(

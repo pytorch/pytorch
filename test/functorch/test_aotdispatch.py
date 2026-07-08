@@ -73,7 +73,6 @@ from torch._inductor.output_code import MockFXGraphCacheOutput
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode, ShapeEnv
-from torch.multiprocessing.reductions import StorageWeakRef
 from torch.nn.attention.flex_attention import flex_attention
 from torch.nn.utils.rnn import PackedSequence
 from torch.testing import FileCheck
@@ -112,7 +111,6 @@ from torch.testing._internal.subclasses import WrapperSubclass
 from torch.testing._internal.two_tensor import TwoTensor, TwoTensorMode
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
-    return_and_correct_aliasing,
     TorchDispatchMode,
 )
 
@@ -3680,6 +3678,27 @@ def forward(self, primals_1, primals_2, primals_3):
     return (as_strided_scatter, add_2, view_2, unsqueeze)""",
         )
 
+    def test_input_mutation_unsqueeze_view_of_base_input(self):
+        # Regression test: when one input is the base tensor (._base is None)
+        # and another is an unsqueeze view of it, returning the base as output
+        # must be treated as alias_of_input (not is_input) in the synthetic
+        # base calling convention.
+        def f(a, b):
+            b.add_(1)
+            return a
+
+        def inp_callable(req_grad):
+            base = torch.ones(4, requires_grad=req_grad)
+            x = base.add(1)
+            return [base], [x, x.unsqueeze(0)]
+
+        self.verify_aot_autograd(
+            f, partial(inp_callable, req_grad=False), test_mutation=True
+        )
+        self.verify_aot_autograd(
+            f, partial(inp_callable, req_grad=True), test_mutation=True
+        )
+
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_synthetic_base_base_attribute_is_none(self):
         def f(a, b):
@@ -7108,6 +7127,61 @@ def forward(self, primals_1, tangents_1):
         x = torch.randn(4, requires_grad=True)
         fn(x).sum().backward()
 
+    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
+    def test_min_cut_partitioner_multi_output_must_save_budget(self):
+        """MUST_SAVE on a multi-output (tuple) producer under a fractional
+        activation_memory_budget must not crash and must be honored.
+
+        With a low budget, choose_saved_values_set can reach the branch where
+        there is nothing left for the knapsack to trade off (every banned node
+        is must-save). That branch used to return inputs + must_save_nodes, which
+        leaked the non-saveable tuple producer node into saved_values and tripped
+        a downstream "expected all ... to be Tensors" assertion. It must instead
+        return a real min-cut, saving the producer's getitem tensors.
+        """
+        import torch._functorch.config as functorch_config
+        from torch.utils.checkpoint import CheckpointPolicy
+
+        producer = torch.ops.aten.topk.default
+
+        def f(x):
+            vals, idx = torch.topk(x.sin(), k=4, dim=1)
+            return (vals.cos() * idx.float().sin()).sum()
+
+        def mark_producer_must_save(gm, joint_inputs):
+            for node in gm.graph.nodes:
+                if node.op == "call_function" and node.target is producer:
+                    node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
+            return gm
+
+        bw_graph = {}
+
+        def bw_compiler(gm, _):
+            bw_graph["gm"] = gm
+            return gm
+
+        compiled = aot_function(
+            f,
+            fw_compiler=lambda gm, _: gm,
+            bw_compiler=bw_compiler,
+            partition_fn=min_cut_rematerialization_partition,
+        )
+
+        x = torch.randn(64, 64, requires_grad=True)
+        with functorch_config.patch(
+            activation_memory_budget=0.1,
+            joint_custom_pass=mark_producer_must_save,
+        ):
+            compiled(x).backward()
+
+        x_ref = x.detach().clone().requires_grad_()
+        f(x_ref).backward()
+        self.assertEqual(x.grad, x_ref.grad)
+
+        # MUST_SAVE on the producer is honored: it is saved, not recomputed,
+        # so the producer op does not appear in the backward graph.
+        self.assertNotIn("topk", bw_graph["gm"].code)
+
     def test_disable_functionalization_ignores_effect_token_metadata(self):
         def fn(args):
             (x,) = args
@@ -7214,7 +7288,7 @@ def forward(self, primals_1, tangents_1):
             self.assertEqual(
                 must_save_count,
                 2,
-                f"2 items should be MUST_SAVE, got {must_save_count}",
+                lambda msg: f"{msg}\n2 items should be MUST_SAVE, got {must_save_count}",
             )
             self.assertEqual(
                 len(getitem_nodes),
@@ -7306,12 +7380,12 @@ def forward(self, primals_1, tangents_1):
             self.assertEqual(
                 tensor_getitem_count,
                 3,
-                f"expected 3 getitems, got {tensor_getitem_count}",
+                lambda msg: f"{msg}\nexpected 3 getitems, got {tensor_getitem_count}",
             )
             self.assertEqual(
                 must_save_count,
                 tensor_getitem_count,
-                f"all {tensor_getitem_count} tensor getitems should be MUST_SAVE, got {must_save_count}",
+                lambda msg: f"{msg}\nall {tensor_getitem_count} tensor getitems should be MUST_SAVE, got {must_save_count}",
             )
         finally:
             handle.destroy()
@@ -9685,6 +9759,345 @@ def forward(self, primals_1, tangents_1):
         with functorch_config.patch(unsafe_treat_script_objects_as_zero_size=True):
             self.assertEqual(_size_of(node), 0)
 
+    def _build_control_deps_graph(
+        self,
+        deps,
+        additional_deps=(),
+        subgraph_op=None,
+        fwd_uses=None,
+    ):
+        """Build a minimal control_deps test graph.
+
+        Args:
+            deps: list of ("fwd" | "bw") indicating validity of each dep
+            additional_deps: list of ("fwd" | "bw") for ordering deps
+            subgraph_op: if provided, the subgraph's first output is
+                         op(dep_0) instead of None
+            fwd_uses: which dep indices (0-based) to consume in the forward
+                      output. Defaults to all fwd deps.
+        Returns: (graph, inputs, outputs, outputs_descs, mod)
+        """
+        import torch.fx as fx
+        from torch._functorch._aot_autograd.descriptors import DummyAOTOutput
+        from torch._inductor.fx_passes.control_dependencies import (
+            control_deps as cd_hop,
+        )
+
+        g = fx.Graph()
+        mod = torch.nn.Module()
+        t = torch.randn(4)
+
+        fwd_in = g.placeholder("primals_0")
+        fwd_in.meta = {"val": t}
+        bw_in = g.placeholder("tangents_0")
+        bw_in.meta = {"val": t}
+
+        def _make_val(label):
+            if label == "fwd":
+                n = g.call_function(torch.ops.aten.sin.default, (fwd_in,))
+            else:
+                n = g.call_function(torch.ops.aten.cos.default, (bw_in,))
+            n.meta = {"val": t}
+            return n
+
+        dep_nodes = [_make_val(d) for d in deps]
+        addl_nodes = [_make_val(d) for d in additional_deps]
+
+        sg = fx.Graph()
+        sg_phs = [sg.placeholder(f"d{i}") for i in range(len(deps))]
+        if subgraph_op is not None:
+            op_out = sg.call_function(subgraph_op, (sg_phs[0],))
+            sg.output(tuple([op_out] + sg_phs))
+        else:
+            sg.output(tuple([None] + sg_phs))
+        sg_name = "_test_cd_sg"
+        setattr(mod, sg_name, fx.GraphModule(torch.nn.Module(), sg))
+        g.owning_module = mod  # type: ignore[assignment]
+
+        sg_node = g.get_attr(sg_name)
+        sg_node.meta = {}
+
+        n_outputs = 1 + len(deps)
+        cd = g.call_function(
+            cd_hop,
+            args=(tuple(addl_nodes), sg_node, *dep_nodes),
+        )
+        cd.meta = {"val": tuple(t for _ in range(n_outputs))}
+
+        for i in range(n_outputs):
+            gi = g.call_function(operator.getitem, (cd, i))
+            gi.meta = {"val": t}
+
+        if fwd_uses is None:
+            fwd_uses = [i for i, d in enumerate(deps) if d == "fwd"]
+        fwd_getitems = []
+        for gi_node in list(g.nodes):
+            if (
+                gi_node.op == "call_function"
+                and gi_node.target is operator.getitem
+                and gi_node.args[0] is cd
+            ):
+                idx = gi_node.args[1]
+                if idx == 0 and subgraph_op is not None:
+                    fwd_getitems.append(gi_node)
+                elif idx - 1 in fwd_uses:
+                    fwd_getitems.append(gi_node)
+
+        if len(fwd_getitems) == 0:
+            fwd_out = g.call_function(torch.ops.aten.sin.default, (fwd_in,))
+        elif len(fwd_getitems) == 1:
+            fwd_out = g.call_function(torch.ops.aten.relu.default, (fwd_getitems[0],))
+        else:
+            fwd_out = fwd_getitems[0]
+            for gi in fwd_getitems[1:]:
+                fwd_out = g.call_function(torch.ops.aten.add.Tensor, (fwd_out, gi))
+        fwd_out.meta = {"val": t}
+        g.output((fwd_out,))
+
+        return (
+            g,
+            [fwd_in],
+            [fwd_out],
+            [DummyAOTOutput(0)],
+            mod,
+        )
+
+    def _extract_and_check(self, graph, inputs, outputs, descs):
+        from torch._inductor.fx_passes.control_dependencies import (
+            control_deps as cd_hop,
+        )
+
+        new_graph = _extract_graph_with_inputs_outputs(
+            graph, inputs, outputs, descs, ignore_must_be_in_fw_bw=True
+        )
+        new_graph.lint()
+        cd_nodes = [
+            n for n in new_graph.nodes if n.op == "call_function" and n.target is cd_hop
+        ]
+        gi_nodes = [
+            n
+            for n in new_graph.nodes
+            if n.op == "call_function" and n.target is operator.getitem
+        ]
+        return new_graph, cd_nodes, gi_nodes
+
+    def test_extract_graph_control_deps_mixed_validity(self):
+        g, ins, outs, descs, _ = self._build_control_deps_graph(deps=["fwd", "bw"])
+        _, cd_nodes, gi_nodes = self._extract_and_check(g, ins, outs, descs)
+        self.assertEqual(len(cd_nodes), 1)
+        self.assertEqual(len(cd_nodes[0].args) - 2, 1)
+        self.assertEqual(len(gi_nodes), 1)
+        self.assertEqual(gi_nodes[0].args[1], 1)
+
+    def test_extract_graph_control_deps_all_invalid(self):
+        g, ins, outs, descs, _ = self._build_control_deps_graph(deps=["bw"])
+        _, cd_nodes, _ = self._extract_and_check(g, ins, outs, descs)
+        self.assertEqual(len(cd_nodes), 0)
+
+    def test_extract_graph_control_deps_getitem_index_remap(self):
+        g, ins, outs, descs, _ = self._build_control_deps_graph(deps=["bw", "fwd"])
+        _, cd_nodes, gi_nodes = self._extract_and_check(g, ins, outs, descs)
+        self.assertEqual(len(cd_nodes), 1)
+        self.assertEqual(len(gi_nodes), 1)
+        self.assertEqual(gi_nodes[0].args[1], 1)
+
+    def test_extract_graph_control_deps_additional_deps_filtered(self):
+        g, ins, outs, descs, _ = self._build_control_deps_graph(
+            deps=["fwd", "bw"], additional_deps=["fwd"]
+        )
+        _, cd_nodes, _ = self._extract_and_check(g, ins, outs, descs)
+        self.assertEqual(len(cd_nodes), 1)
+        self.assertEqual(len(cd_nodes[0].args[0]), 1)
+        self.assertEqual(len(cd_nodes[0].args) - 2, 1)
+
+    def test_extract_graph_control_deps_preserves_subgraph_operation(self):
+        g, ins, outs, descs, mod = self._build_control_deps_graph(
+            deps=["fwd", "bw"], subgraph_op=torch.ops.aten.abs.default
+        )
+        _, cd_nodes, gi_nodes = self._extract_and_check(g, ins, outs, descs)
+        self.assertEqual(len(cd_nodes), 1)
+        sg_mod = getattr(mod, cd_nodes[0].args[1].target)
+        sg_ops = [n for n in sg_mod.graph.nodes if n.op == "call_function"]
+        self.assertEqual(len(sg_ops), 1)
+        self.assertEqual(sg_ops[0].target, torch.ops.aten.abs.default)
+        gi_indices = sorted(n.args[1] for n in gi_nodes)
+        self.assertIn(0, gi_indices)
+        self.assertIn(1, gi_indices)
+        self.assertNotIn(2, gi_indices)
+
+    def _build_backward_extract_graph(self, dep_labels, cd_tag, subgraph_op):
+        """Build a graph for testing backward extraction of control_deps.
+
+        Args:
+            dep_labels: list of ("bw_input" | "not_input") per dep.
+                "bw_input" deps become backward extraction inputs.
+                "not_input" deps are placeholders NOT in the input list.
+            cd_tag: partitioner_tag for the control_deps node.
+            subgraph_op: op for the sync subgraph (makes _control_deps_has_sync_op True).
+        Returns: (graph, bw_inputs, bw_output_node, descs, mod)
+        """
+        import torch.fx as fx
+        from torch._functorch._aot_autograd.descriptors import DummyAOTOutput
+        from torch._inductor.fx_passes.control_dependencies import (
+            control_deps as cd_hop,
+        )
+
+        g = fx.Graph()
+        mod = torch.nn.Module()
+        t = torch.randn(4)
+
+        dep_nodes = []
+        bw_inputs = []
+        for i, label in enumerate(dep_labels):
+            ph = g.placeholder(f"dep_{i}")
+            ph.meta = {"val": t}
+            dep_nodes.append(ph)
+            if label == "bw_input":
+                bw_inputs.append(ph)
+
+        sg = fx.Graph()
+        sg_phs = [sg.placeholder(f"d{i}") for i in range(len(dep_labels))]
+        op_out = sg.call_function(subgraph_op, (sg_phs[0],))
+        sg.output(tuple([op_out] + sg_phs))
+        sg_name = "_test_cd_sg"
+        setattr(mod, sg_name, fx.GraphModule(torch.nn.Module(), sg))
+        g.owning_module = mod  # type: ignore[assignment]
+
+        sg_node = g.get_attr(sg_name)
+        sg_node.meta = {}
+
+        n_outputs = 1 + len(dep_labels)
+        cd = g.call_function(cd_hop, args=((), sg_node, *dep_nodes))
+        cd.meta = {
+            "val": tuple(t for _ in range(n_outputs)),
+            "partitioner_tag": cd_tag,
+        }
+
+        getitems = []
+        for i in range(n_outputs):
+            gi = g.call_function(operator.getitem, (cd, i))
+            gi.meta = {"val": t}
+            getitems.append(gi)
+
+        # Build an output that uses only bw_input getitems (indices 1-based).
+        bw_input_set = {id(n) for n in bw_inputs}
+        used = [
+            getitems[i + 1]
+            for i, dep in enumerate(dep_nodes)
+            if id(dep) in bw_input_set
+        ]
+        if not used:
+            out = g.call_function(torch.ops.aten.sin.default, (bw_inputs[0],))
+        elif len(used) == 1:
+            out = g.call_function(torch.ops.aten.relu.default, (used[0],))
+        else:
+            out = used[0]
+            for u in used[1:]:
+                out = g.call_function(torch.ops.aten.add.Tensor, (out, u))
+        out.meta = {"val": t}
+        g.output((out,))
+
+        return g, bw_inputs, [out], [DummyAOTOutput(0)], mod
+
+    def test_backward_extract_eliminates_fwd_sync_fully_valid(self):
+        """All deps are backward inputs -- forward sync control_deps
+        should be eliminated entirely, getitems resolve to deps."""
+        from torch._functorch._aot_autograd.streams import _SYNC_OPS
+        from torch._inductor.fx_passes.control_dependencies import (
+            control_deps as cd_hop,
+        )
+
+        g, ins, outs, descs, _ = self._build_backward_extract_graph(
+            dep_labels=["bw_input", "bw_input"],
+            cd_tag="is_forward",
+            subgraph_op=_SYNC_OPS[0],
+        )
+        new_graph = _extract_graph_with_inputs_outputs(
+            g, ins, outs, descs, subgraph="backward"
+        )
+        new_graph.lint()
+        cd_nodes = [
+            n for n in new_graph.nodes if n.op == "call_function" and n.target is cd_hop
+        ]
+        self.assertEqual(len(cd_nodes), 0)
+        phs = [n for n in new_graph.nodes if n.op == "placeholder"]
+        self.assertEqual(len(phs), 2)
+        out_node = next(n for n in new_graph.nodes if n.op == "output")
+        self.assertIsNotNone(out_node)
+
+    def test_backward_extract_eliminates_fwd_sync_mixed_validity(self):
+        """Some deps are backward inputs, some are not -- forward sync
+        control_deps eliminated, valid getitems resolve to deps."""
+        from torch._functorch._aot_autograd.streams import _SYNC_OPS
+        from torch._inductor.fx_passes.control_dependencies import (
+            control_deps as cd_hop,
+        )
+
+        g, ins, outs, descs, _ = self._build_backward_extract_graph(
+            dep_labels=["bw_input", "not_input"],
+            cd_tag="is_forward",
+            subgraph_op=_SYNC_OPS[0],
+        )
+        new_graph = _extract_graph_with_inputs_outputs(
+            g, ins, outs, descs, subgraph="backward"
+        )
+        new_graph.lint()
+        cd_nodes = [
+            n for n in new_graph.nodes if n.op == "call_function" and n.target is cd_hop
+        ]
+        self.assertEqual(len(cd_nodes), 0)
+        phs = [n for n in new_graph.nodes if n.op == "placeholder"]
+        self.assertEqual(len(phs), 1)
+
+    def test_backward_extract_preserves_bwd_sync_control_deps(self):
+        """Backward-tagged sync control_deps must stay in the backward graph."""
+        from torch._functorch._aot_autograd.streams import _SYNC_OPS
+        from torch._inductor.fx_passes.control_dependencies import (
+            control_deps as cd_hop,
+        )
+
+        g, ins, outs, descs, _ = self._build_backward_extract_graph(
+            dep_labels=["bw_input"],
+            cd_tag="must_be_in_backward",
+            subgraph_op=_SYNC_OPS[0],
+        )
+        new_graph = _extract_graph_with_inputs_outputs(
+            g, ins, outs, descs, subgraph="backward"
+        )
+        new_graph.lint()
+        cd_nodes = [
+            n for n in new_graph.nodes if n.op == "call_function" and n.target is cd_hop
+        ]
+        self.assertEqual(len(cd_nodes), 1)
+        sg_node = cd_nodes[0].args[1]
+        sg_mod = getattr(
+            g.owning_module,
+            sg_node.target,  # type: ignore[union-attr]
+        )
+        sg_ops = [n for n in sg_mod.graph.nodes if n.op == "call_function"]
+        self.assertEqual(len(sg_ops), 1)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_control_deps_mixed_fwd_bw_deps_e2e(self):
+        """Forward compilation and backward must not crash when
+        wait_stream's control_deps collects forward deps."""
+
+        def fn(x, w):
+            s1 = torch.cuda.Stream()
+            s1.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(s1):
+                h = x @ w
+            ev = torch.cuda.Event()
+            ev.record(s1)
+            ev.wait()
+            return h
+
+        w = torch.randn(64, 64, device="cuda", requires_grad=True)
+        x = torch.randn(4, 64, device="cuda", requires_grad=True)
+        compiled = torch.compile(fn, backend="aot_eager")
+        out = compiled(x, w)
+        out.sum().backward()
+
 
 class TestAOTDispatch(AOTTestCase):
     # Tests to add cases for (non-exhaustive list, mostly for my notes):
@@ -9902,307 +10315,6 @@ metadata incorrectly.
         self.assertEqual(a_ref.grad.b, a_test.grad.b)
         self.assertEqual(b_ref.grad.a, b_test.grad.a)
         self.assertEqual(b_ref.grad.b, b_test.grad.b)
-
-    def test_output_alias_of_intermediate_wrapper_subclass_legacy_replay(self):
-        def f(x):
-            y = x + 1
-            aux = y[:, :1]
-            return y, aux
-
-        for backend in ("aot_eager", "inductor"):
-            for dynamic in (False, True):
-                with self.subTest(backend=backend, dynamic=dynamic):
-                    x_ref = WrapperSubclass(torch.randn(3, 3, requires_grad=True))
-                    y_ref, aux_ref = f(x_ref)
-
-                    x = WrapperSubclass(x_ref.a.detach().clone().requires_grad_(True))
-                    torch._dynamo.reset()
-                    AOTAutogradCache.clear()
-                    y, aux = torch.compile(
-                        f, backend=backend, fullgraph=True, dynamic=dynamic
-                    )(x)
-
-                    self.assertIsInstance(y, WrapperSubclass)
-                    self.assertIsInstance(aux, WrapperSubclass)
-                    self.assertEqual(y_ref.a, y.a)
-                    self.assertEqual(aux_ref.a, aux.a)
-
-                    self.assertEqual(
-                        StorageWeakRef(y.a.untyped_storage()),
-                        StorageWeakRef(aux.a.untyped_storage()),
-                    )
-
-                    (y_ref.sum() + aux_ref.sum()).backward()
-                    (y.sum() + aux.sum()).backward()
-                    self.assertIsNotNone(x_ref.grad)
-                    self.assertIsNotNone(x.grad)
-                    self.assertEqual(x_ref.grad.a, x.grad.a)
-
-    def test_output_alias_of_intermediate_subclass_view_meta_replay(self):
-        def f(x):
-            y = x + 1
-            aux = y[:, :1]
-            return y, aux
-
-        for backend in ("aot_eager", "inductor"):
-            for dynamic in (False, True):
-                with self.subTest(backend=backend, dynamic=dynamic):
-                    x_ref = ConstantExtraMetadataTensor(
-                        torch.randn(3, 3, requires_grad=True)
-                    )
-                    y_ref, aux_ref = f(x_ref)
-
-                    x = ConstantExtraMetadataTensor(
-                        x_ref.elem.detach().clone().requires_grad_(True)
-                    )
-                    torch._dynamo.reset()
-                    AOTAutogradCache.clear()
-                    y, aux = torch.compile(
-                        f, backend=backend, fullgraph=True, dynamic=dynamic
-                    )(x)
-
-                    self.assertIsInstance(y, ConstantExtraMetadataTensor)
-                    self.assertIsInstance(aux, ConstantExtraMetadataTensor)
-                    self.assertEqual(y_ref.elem, y.elem)
-                    self.assertEqual(aux_ref.elem, aux.elem)
-                    self.assertIsNotNone(aux_ref.grad_fn)
-                    self.assertIsNotNone(aux.grad_fn)
-                    self.assertEqual(aux.grad_fn.__class__, aux_ref.grad_fn.__class__)
-                    self.assertExpectedInline(
-                        str(aux.grad_fn.__class__), """<class 'SliceBackward0'>"""
-                    )
-                    self.assertIsNotNone(aux._base)
-
-                    self.assertEqual(
-                        StorageWeakRef(y.untyped_storage()),
-                        StorageWeakRef(aux.untyped_storage()),
-                    )
-
-                    (y_ref.sum() + aux_ref.sum()).backward()
-                    (y.sum() + aux.sum()).backward()
-                    self.assertIsNotNone(x_ref.grad)
-                    self.assertIsNotNone(x.grad)
-                    self.assertEqual(x_ref.grad.elem, x.grad.elem)
-
-    @patch("torch._dynamo.config.assume_static_by_default", False)
-    def test_output_alias_of_intermediate_subclass_view_meta_replay_automatic_dynamic_fallback(
-        self,
-    ):
-        def f(x, sz):
-            y = x + 1
-            aux = y.view(sz)
-            return y, aux
-
-        x_ref = ConstantExtraMetadataTensor(torch.randn(2, 2, requires_grad=True))
-        y_ref, aux_ref = f(x_ref, (4,))
-
-        x = ConstantExtraMetadataTensor(
-            x_ref.elem.detach().clone().requires_grad_(True)
-        )
-        torch._dynamo.reset()
-        AOTAutogradCache.clear()
-        # Automatic-dynamic makes `sz` symbolic, so subclass alias replay keeps
-        # the dense-style as_strided fallback for this output today.
-        y, aux = torch.compile(f, backend="aot_eager", fullgraph=True)(x, (4,))
-
-        self.assertIsInstance(y, ConstantExtraMetadataTensor)
-        self.assertIsInstance(aux, ConstantExtraMetadataTensor)
-        self.assertEqual(y_ref.elem, y.elem)
-        self.assertEqual(aux_ref.elem, aux.elem)
-        self.assertEqual(
-            StorageWeakRef(y.untyped_storage()),
-            StorageWeakRef(aux.untyped_storage()),
-        )
-
-        self.assertIsNotNone(aux.grad_fn)
-        self.assertExpectedInline(
-            str(aux.grad_fn.__class__), """<class 'AsStridedBackward0'>"""
-        )
-
-        (y_ref.sum() + aux_ref.sum()).backward()
-        (y.sum() + aux.sum()).backward()
-        self.assertIsNotNone(x_ref.grad)
-        self.assertIsNotNone(x.grad)
-        self.assertEqual(x_ref.grad.elem, x.grad.elem)
-
-    def test_output_alias_of_intermediate_subclass_view_meta_replay_signature_mismatch(
-        self,
-    ):
-        class DivergentViewMetadataTensor(torch.Tensor):
-            @staticmethod
-            def __new__(cls, a, b, outer_size=None, outer_stride=None):
-                if outer_size is None:
-                    outer_size = a.size()
-                if outer_stride is None:
-                    outer_stride = a.stride()
-                return torch.Tensor._make_wrapper_subclass(
-                    cls,
-                    outer_size,
-                    strides=outer_stride,
-                    storage_offset=a.storage_offset(),
-                    device=a.device,
-                    layout=a.layout,
-                    requires_grad=a.requires_grad,
-                    dtype=a.dtype,
-                )
-
-            def __init__(self, a, b, outer_size=None, outer_stride=None):
-                self.a = a
-                self.b = b
-
-            def __tensor_flatten__(self):
-                return ["a", "b"], "ctx"
-
-            @staticmethod
-            def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
-                if meta != "ctx":
-                    raise AssertionError(f"unexpected meta: {meta}")
-                return DivergentViewMetadataTensor(
-                    inner_tensors["a"],
-                    inner_tensors["b"],
-                    outer_size,
-                    outer_stride,
-                )
-
-            @classmethod
-            def __torch_dispatch__(cls, func, types, args, kwargs):
-                if kwargs is None:
-                    kwargs = {}
-                args_a = pytree.tree_map_only(cls, lambda x: x.a, args)
-                args_b = pytree.tree_map_only(cls, lambda x: x.b, args)
-                kwargs_a = pytree.tree_map_only(cls, lambda x: x.a, kwargs)
-                kwargs_b = pytree.tree_map_only(cls, lambda x: x.b, kwargs)
-
-                out_a = func(*args_a, **kwargs_a)
-                out_b = func(*args_b, **kwargs_b)
-                if func is torch.ops.aten.slice.Tensor:
-                    out_b = pytree.tree_map_only(
-                        torch.Tensor,
-                        lambda t: t.transpose(0, 1).transpose(0, 1),
-                        out_b,
-                    )
-
-                out_a_flat, spec = pytree.tree_flatten(out_a)
-                out_b_flat = pytree.tree_leaves(out_b)
-                out_flat = [
-                    cls(a, b) if isinstance(a, torch.Tensor) else a
-                    for a, b in zip(out_a_flat, out_b_flat, strict=True)
-                ]
-                out = pytree.tree_unflatten(out_flat, spec)
-                return return_and_correct_aliasing(func, args, kwargs, out)
-
-        def f(x):
-            y = x + 1
-            aux = y[:, :1]
-            return y, aux
-
-        x_ref = DivergentViewMetadataTensor(
-            torch.randn(3, 3, requires_grad=True),
-            torch.randn(3, 3, requires_grad=True),
-        )
-        f(x_ref)
-        x = DivergentViewMetadataTensor(
-            x_ref.a.detach().clone().requires_grad_(True),
-            x_ref.b.detach().clone().requires_grad_(True),
-        )
-        compiled_f = aot_function(
-            f,
-            fw_compiler=nop,
-            bw_compiler=nop,
-            partition_fn=min_cut_rematerialization_partition,
-        )
-        with self.assertRaisesRegex(
-            NotImplementedError,
-            "different outer view signatures",
-        ):
-            compiled_f(x)
-
-    def test_output_alias_of_intermediate_subclass_view_meta_replay_runtime_metadata_mismatch(
-        self,
-    ):
-        class RuntimeMetadataMismatchTensor(torch.Tensor):
-            view_ctx = "compile_ctx"
-
-            @staticmethod
-            def __new__(cls, elem, meta="base_ctx", outer_size=None, outer_stride=None):
-                if outer_size is None:
-                    outer_size = elem.size()
-                if outer_stride is None:
-                    outer_stride = elem.stride()
-                return torch.Tensor._make_wrapper_subclass(
-                    cls,
-                    outer_size,
-                    strides=outer_stride,
-                    storage_offset=elem.storage_offset(),
-                    device=elem.device,
-                    layout=elem.layout,
-                    requires_grad=elem.requires_grad,
-                    dtype=elem.dtype,
-                )
-
-            def __init__(
-                self, elem, meta="base_ctx", outer_size=None, outer_stride=None
-            ):
-                self.elem = elem
-                self.meta = meta
-
-            def __tensor_flatten__(self):
-                return ["elem"], self.meta
-
-            @staticmethod
-            def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
-                return RuntimeMetadataMismatchTensor(
-                    inner_tensors["elem"], meta, outer_size, outer_stride
-                )
-
-            @classmethod
-            def __torch_dispatch__(cls, func, types, args, kwargs):
-                if kwargs is None:
-                    kwargs = {}
-                args_inner = pytree.tree_map_only(cls, lambda x: x.elem, args)
-                kwargs_inner = pytree.tree_map_only(cls, lambda x: x.elem, kwargs)
-                out_inner = func(*args_inner, **kwargs_inner)
-                out_inner_flat, spec = pytree.tree_flatten(out_inner)
-
-                def wrap(o_inner):
-                    if not isinstance(o_inner, torch.Tensor):
-                        return o_inner
-                    meta = (
-                        cls.view_ctx
-                        if func is torch.ops.aten.slice.Tensor
-                        else "base_ctx"
-                    )
-                    return cls(o_inner, meta)
-
-                out = pytree.tree_unflatten([wrap(o) for o in out_inner_flat], spec)
-                return return_and_correct_aliasing(func, args, kwargs, out)
-
-        def f(x):
-            y = x + 1
-            aux = y[:, :1]
-            return y, aux
-
-        RuntimeMetadataMismatchTensor.view_ctx = "compile_ctx"
-        x = RuntimeMetadataMismatchTensor(
-            torch.randn(3, 3, requires_grad=True), "base_ctx"
-        )
-        compiled_f = aot_function(
-            f,
-            fw_compiler=nop,
-            bw_compiler=nop,
-            partition_fn=min_cut_rematerialization_partition,
-        )
-        compiled_f(x)
-
-        RuntimeMetadataMismatchTensor.view_ctx = "runtime_ctx"
-        x2 = RuntimeMetadataMismatchTensor(
-            torch.randn(3, 3, requires_grad=True), "base_ctx"
-        )
-        with self.assertRaisesRegex(
-            NotImplementedError,
-            "outer replay does not reconstruct wrapper metadata",
-        ):
-            compiled_f(x2)
 
     @torch._functorch.config.patch(
         {
@@ -10725,6 +10837,57 @@ class TestAOTModuleSimplified(AOTTestCase):
         )
         res = compiled_f(*inputs)
         res[0].sum().backward()
+
+    def test_aot_joint_print_readable_marks_backward_stack_trace(self):
+        class MockModule(torch.nn.Module):
+            def forward(self, x):
+                y = x.to(dtype=torch.float32)
+                return ((y * y).sum(),)
+
+        mod = torch.fx.symbolic_trace(MockModule())
+        for node in mod.graph.nodes:
+            if node.name == "to":
+                node.stack_trace = (
+                    '  File "/tmp/model.py", line 5, in forward\n'
+                    "    y = x.to(dtype=torch.float32)\n"
+                )
+            elif node.name in {"mul", "sum_1"}:
+                node.stack_trace = (
+                    '  File "/tmp/model.py", line 6, in forward\n'
+                    "    return ((y * y).sum(),)\n"
+                )
+
+        def compiler(gm: torch.fx.GraphModule, _):
+            return make_boxed_func(gm.forward)
+
+        joint_graph: str | None = None
+
+        def partition_fn(gm: torch.fx.GraphModule, inputs, **kwargs):
+            nonlocal joint_graph
+            joint_graph = gm.print_readable(print_output=False)
+            return default_partition(gm, inputs, **kwargs)
+
+        x = torch.randn(4, dtype=torch.bfloat16, requires_grad=True)
+        compiled_f = aot_module_simplified(
+            mod,
+            [x],
+            fw_compiler=compiler,
+            bw_compiler=compiler,
+            partition_fn=partition_fn,
+        )
+        compiled_f(x)[0].backward()
+
+        self.assertIsNotNone(joint_graph)
+        fwd_to_comment = (
+            "# File: /tmp/model.py:5 in forward, code: y = x.to(dtype=torch.float32)"
+        )
+        bw_to_comment = (
+            "# Backward of forward node: File: /tmp/model.py:5 in forward, "
+            "code: y = x.to(dtype=torch.float32)"
+        )
+        FileCheck().check(fwd_to_comment).check("_to_copy").check(bw_to_comment).check(
+            "_to_copy_1"
+        ).run(joint_graph)
 
     def test_aot_module_simplified_preserves_stack_trace_from_mutation(self):
         class MockModule(torch.nn.Module):
@@ -12506,21 +12669,6 @@ class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
                 dynamic=dynamic,
                 make_inputs_subclasses=make_inputs_subclasses,
             )
-
-    def test_output_alias_of_intermediate_subclass_view_meta_replay_dynamic_cache(
-        self,
-    ):
-        def f(x):
-            y = x + 1
-            aux = y.view(x.shape[0] * x.shape[1])
-            return y, aux
-
-        self.verify_aot_autograd(
-            f,
-            [ConstantExtraMetadataTensor(torch.randn(2, 2, requires_grad=True))],
-            dynamic=True,
-        )
-        self.assertTrue(self.inductor_cache.cache)
 
     def test_input_mutation_false_aliasing(self):
         # This test is disabled because it fails in strict cache mode
