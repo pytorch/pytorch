@@ -852,9 +852,9 @@ class FSDPParam:
     ) -> None:
         """Alias this parameter's all-gather output to a backend-owned buffer.
 
-        Used by backends that produce a parameter-contiguous output (see
-        ``AllGather.supports_param_contiguous_output``): the buffer is reused as
-        the unsharded parameter storage, so FSDP must not free it on reshard.
+        Used by backends that produce a parameter-contiguous output: the buffer
+        is reused as the unsharded parameter storage, so FSDP must not free it
+        on reshard.
         """
         if (
             hasattr(self, "_unsharded_param")

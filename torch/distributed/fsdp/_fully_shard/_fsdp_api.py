@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from typing import Any
 
 import torch
 import torch.distributed as dist
@@ -102,17 +103,12 @@ class AllGather(Comm):
     Interface for all_gather comm primitive.
 
     By default FSDP all-gathers into a rank-major ``[rank][param]`` buffer and
-    then copies each parameter out into its own contiguous storage. A backend
-    that can instead produce a parameter-major ``[param][rank]`` output may set
-    :attr:`supports_param_contiguous_output` to ``True`` and implement
-    :meth:`prepare_param_contiguous_output`. FSDP then views the unsharded
-    parameters directly on top of the backend output, skipping the copy-out and
-    its extra allocation.
+    then copies each parameter out into its own contiguous storage. A backend may
+    override :meth:`prepare_output`, :meth:`copy_in`, and
+    :meth:`finalize_outputs` to produce a different output layout, choose the
+    matching all-gather input layout, and decide whether FSDP should copy out of,
+    or view directly into, the backend-owned output buffer.
     """
-
-    # Whether the backend can write a parameter-contiguous ``[param][rank]``
-    # all-gather output that FSDP can use in place (i.e. without a copy-out).
-    supports_param_contiguous_output: bool = False
 
     @abstractmethod
     def __call__(
@@ -123,27 +119,56 @@ class AllGather(Comm):
         async_op: bool = False,
     ) -> dist.Work | None: ...
 
-    def prepare_param_contiguous_output(
+    def prepare_output(
         self,
         all_gather_input_split_sizes: list[int],
         all_gather_input_numel: int,
         world_size: int,
         dtype: torch.dtype,
         device: torch.device,
+        fsdp_params: Any,
+        param_all_gather_input_dtypes: list[list[torch.dtype]],
+        param_all_gather_input_numels: list[list[int]],
     ) -> object | None:
         """
-        Prepare backend state for a parameter-contiguous all-gather output.
+        Prepare backend state for a custom all-gather output layout.
 
-        Only called when :attr:`supports_param_contiguous_output` is ``True``.
-        ``all_gather_input_split_sizes`` gives the per-parameter input numels
+        ``all_gather_input_split_sizes`` gives the flattened per-input numels
         (summing to ``all_gather_input_numel``). The returned value, if any, is
-        opaque backend metadata carried through the all-gather and is otherwise
-        unused by FSDP.
+        opaque backend metadata carried through the all-gather result.
         """
         return None
 
-    def clear_param_contiguous_output(self) -> None:
-        """Release any state created by :meth:`prepare_param_contiguous_output`."""
+    def copy_in(
+        self,
+        all_gather_inputs: list[torch.Tensor],
+        all_gather_output: torch.Tensor,
+        all_gather_input_split_sizes: list[int],
+        all_gather_input_numel: int,
+        rank: int,
+        output_metadata: object | None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Pack per-parameter all-gather inputs into the backend input buffer."""
+        return torch.ops.fsdp.all_gather_copy_in(
+            all_gather_inputs,
+            all_gather_output,
+            all_gather_input_split_sizes,
+            all_gather_input_numel,
+            rank,
+        )
+
+    def finalize_outputs(
+        self,
+        all_gather_result: Any,
+        fsdp_params: Any,
+        group: dist.ProcessGroup,
+        default_finalize: Callable[[], None],
+    ) -> None:
+        """Finalize FSDP's per-parameter all-gather outputs."""
+        default_finalize()
+
+    def clear_output(self) -> None:
+        """Release any state created by :meth:`prepare_output`."""
 
 
 class ReduceScatter(Comm):

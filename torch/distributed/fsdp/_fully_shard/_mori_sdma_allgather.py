@@ -12,14 +12,13 @@ with::
     model.set_custom_all_gather(MoriSdmaAllGather(zero_copy_output=True))
 
 When ``zero_copy_output`` is set the backend produces a parameter-contiguous
-output that FSDP can use in place (see
-:attr:`AllGather.supports_param_contiguous_output`), avoiding the rank-major
-copy-out. The ``mori`` package is imported lazily so importing this module does
-not require ROCm/MORI to be installed.
+output that FSDP can use in place, avoiding the rank-major copy-out. The
+``mori`` package is imported lazily so importing this module does not require
+ROCm/MORI to be installed.
 """
 
 import importlib
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any
 
 import torch
@@ -52,7 +51,6 @@ class MoriSdmaAllGather(AllGather):
 
     def __init__(self, zero_copy_output: bool = True) -> None:
         self._zero_copy_output = zero_copy_output
-        self.supports_param_contiguous_output = zero_copy_output
         self._collective: Any | None = None
         self._rank: int | None = None
         self._world_size: int | None = None
@@ -127,16 +125,27 @@ class MoriSdmaAllGather(AllGather):
         collective.enqueue(input_tensor, output_tensor, count, stream=stream)
         return None
 
-    def prepare_param_contiguous_output(
+    def prepare_output(
         self,
         all_gather_input_split_sizes: list[int],
         all_gather_input_numel: int,
         world_size: int,
         dtype: torch.dtype,
         device: torch.device,
+        fsdp_params: Any,
+        param_all_gather_input_dtypes: list[list[torch.dtype]],
+        param_all_gather_input_numels: list[list[int]],
     ) -> object | None:
-        self.clear_param_contiguous_output()
         if not self._zero_copy_output:
+            return None
+        from ._fsdp_collectives import _can_use_param_contiguous_output
+
+        if not _can_use_param_contiguous_output(
+            fsdp_params,
+            param_all_gather_input_dtypes,
+            param_all_gather_input_numels,
+            dtype,
+        ):
             return None
         if not all_gather_input_split_sizes:
             raise RuntimeError("MORI zero-copy allgather requires non-empty splits")
@@ -171,7 +180,55 @@ class MoriSdmaAllGather(AllGather):
             self._param_contiguous_split_offsets,
         )
 
-    def clear_param_contiguous_output(self) -> None:
+    def copy_in(
+        self,
+        all_gather_inputs: list[torch.Tensor],
+        all_gather_output: torch.Tensor,
+        all_gather_input_split_sizes: list[int],
+        all_gather_input_numel: int,
+        rank: int,
+        output_metadata: object | None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if output_metadata is None:
+            return super().copy_in(
+                all_gather_inputs,
+                all_gather_output,
+                all_gather_input_split_sizes,
+                all_gather_input_numel,
+                rank,
+                output_metadata,
+            )
+        all_gather_input = torch.empty(
+            (all_gather_input_numel,),
+            dtype=all_gather_output.dtype,
+            device=all_gather_output.device,
+        )
+        torch._foreach_copy_(
+            torch.split(all_gather_input, all_gather_input_split_sizes),
+            all_gather_inputs,
+        )
+        return all_gather_input, all_gather_output
+
+    def finalize_outputs(
+        self,
+        all_gather_result: Any,
+        fsdp_params: Any,
+        group: dist.ProcessGroup,
+        default_finalize: Callable[[], None],
+    ) -> None:
+        if all_gather_result.output_metadata is None:
+            default_finalize()
+            return
+        from ._fsdp_collectives import _init_param_contiguous_outputs
+
+        _init_param_contiguous_outputs(
+            all_gather_result.all_gather_output,
+            fsdp_params,
+            all_gather_result.param_all_gather_input_numels,
+            group.size(),
+        )
+
+    def clear_output(self) -> None:
         self._param_contiguous_split_sizes = None
         self._param_contiguous_split_offsets = None
 
@@ -183,7 +240,7 @@ class MoriSdmaAllGather(AllGather):
             return False
         split_nbytes = int(self._param_contiguous_split_sizes.sum().item()) * 4
         if split_nbytes != _tensor_nbytes(input_tensor):
-            self.clear_param_contiguous_output()
+            self.clear_output()
             return False
         return True
 

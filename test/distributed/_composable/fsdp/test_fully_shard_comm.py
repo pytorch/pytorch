@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from collections.abc import Callable, Sequence
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock
 
 import torch
@@ -32,6 +33,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _can_use_param_contiguous_output,
     _div_if_needed,
     _get_gradient_divide_factors,
+    _init_param_contiguous_outputs,
     DefaultAllGather,
     DefaultReduceScatter,
     foreach_all_gather,
@@ -137,8 +139,6 @@ class _ParamContiguousTestAllGather(_RankMajorTestAllGather):
     result into the ``[param][rank]`` layout that FSDP can view in place.
     """
 
-    supports_param_contiguous_output = True
-
     def __init__(self) -> None:
         super().__init__()
         self.output: torch.Tensor | None = None
@@ -162,17 +162,73 @@ class _ParamContiguousTestAllGather(_RankMajorTestAllGather):
             self.outputs.append(self.output)
         return self.output
 
-    def prepare_param_contiguous_output(
+    def prepare_output(
         self,
         all_gather_input_split_sizes: list[int],
         all_gather_input_numel: int,
         world_size: int,
         dtype: torch.dtype,
         device: torch.device,
+        fsdp_params: Any,
+        param_all_gather_input_dtypes: list[list[torch.dtype]],
+        param_all_gather_input_numels: list[list[int]],
     ) -> object | None:
+        if not _can_use_param_contiguous_output(
+            fsdp_params,
+            param_all_gather_input_dtypes,
+            param_all_gather_input_numels,
+            dtype,
+        ):
+            return None
         self.split_sizes = all_gather_input_split_sizes
         self.world_size = world_size
         return self.split_sizes
+
+    def copy_in(
+        self,
+        all_gather_inputs: list[torch.Tensor],
+        all_gather_output: torch.Tensor,
+        all_gather_input_split_sizes: list[int],
+        all_gather_input_numel: int,
+        rank: int,
+        output_metadata: object | None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if output_metadata is None:
+            return super().copy_in(
+                all_gather_inputs,
+                all_gather_output,
+                all_gather_input_split_sizes,
+                all_gather_input_numel,
+                rank,
+                output_metadata,
+            )
+        all_gather_input = torch.empty(
+            (all_gather_input_numel,),
+            dtype=all_gather_output.dtype,
+            device=all_gather_output.device,
+        )
+        torch._foreach_copy_(
+            torch.split(all_gather_input, all_gather_input_split_sizes),
+            all_gather_inputs,
+        )
+        return all_gather_input, all_gather_output
+
+    def finalize_outputs(
+        self,
+        all_gather_result: Any,
+        fsdp_params: Any,
+        group: dist.ProcessGroup,
+        default_finalize: Callable[[], None],
+    ) -> None:
+        if all_gather_result.output_metadata is None:
+            default_finalize()
+            return
+        _init_param_contiguous_outputs(
+            all_gather_result.all_gather_output,
+            fsdp_params,
+            all_gather_result.param_all_gather_input_numels,
+            group.size(),
+        )
 
     def __call__(
         self,
@@ -2294,13 +2350,19 @@ class TestFullyShardReduceOpWorldSize1(FSDPTest):
 class TestMoriSdmaAllGather(TestCase):
     """Backend-level tests that do not require the ``mori`` runtime or GPUs."""
 
-    def test_zero_copy_output_capability(self):
-        self.assertFalse(
-            MoriSdmaAllGather(zero_copy_output=False).supports_param_contiguous_output
+    def test_zero_copy_output_disabled(self):
+        comm = MoriSdmaAllGather(zero_copy_output=False)
+        metadata = comm.prepare_output(
+            [],
+            0,
+            1,
+            torch.float32,
+            torch.device("cpu"),
+            [],
+            [],
+            [],
         )
-        self.assertTrue(
-            MoriSdmaAllGather(zero_copy_output=True).supports_param_contiguous_output
-        )
+        self.assertIsNone(metadata)
 
 
 class TestParamContiguousEligibility(TestCase):

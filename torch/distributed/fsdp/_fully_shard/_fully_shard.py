@@ -556,9 +556,10 @@ class FSDPModule:
         to have better control over the communication and memory usage.
         See `Comm` and `ReduceScatter` for details.
 
-        A backend that sets ``AllGather.supports_param_contiguous_output`` can
-        produce a parameter-contiguous output that FSDP uses in place, skipping
-        the rank-major copy-out (see `AllGather`).
+        A backend can override ``AllGather.prepare_output``,
+        ``AllGather.copy_in``, and ``AllGather.finalize_outputs`` to decide how
+        FSDP materializes all-gather inputs and per-parameter outputs (see
+        `AllGather`).
 
         Args:
             comm (AllGather): Custom all-gather communication.
