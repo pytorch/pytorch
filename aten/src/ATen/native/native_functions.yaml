@@ -2514,7 +2514,7 @@
   device_check: NoCheck   # TensorIterator
   structured_delegate: erfc.out
   variants: function, method
-  tags: pointwise
+  tags: [core, pointwise]
 
 - func: erfc_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator

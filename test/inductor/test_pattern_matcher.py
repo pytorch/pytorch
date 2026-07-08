@@ -2643,11 +2643,11 @@ class TestPatternMatcher(TestCase):
 
         x = torch.randn(4, 4, device=GPU_TYPE)
 
-        # Default: gelu decomposes into erf/mul/add primitives.
+        # Default: gelu decomposes into erfc/mul primitives.
         gm = fwd_only(fn, args=[x])
         targets = {n.target for n in gm.graph.nodes if n.op == "call_function"}
         self.assertNotIn(aten.gelu.default, targets)
-        self.assertIn(aten.erf.default, targets)
+        self.assertIn(aten.erfc.default, targets)
 
         # Empty decomp table: gelu stays intact as aten.gelu.default.
         gm_nodec = fwd_only(fn, args=[x], get_decomp_fn=dict)
@@ -2655,7 +2655,7 @@ class TestPatternMatcher(TestCase):
             n.target for n in gm_nodec.graph.nodes if n.op == "call_function"
         }
         self.assertIn(aten.gelu.default, targets_nodec)
-        self.assertNotIn(aten.erf.default, targets_nodec)
+        self.assertNotIn(aten.erfc.default, targets_nodec)
 
     def test_register_replacement_get_decomp_fn(self):
         """A pattern registered with get_decomp_fn matches graphs traced with

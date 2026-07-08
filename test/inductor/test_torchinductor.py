@@ -15671,7 +15671,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         opt_fn = torch.compile(fn, backend="inductor")
         same(fn(x, y), opt_fn(x_clone, y))
 
-    @xfail_if_triton_cpu
     def test_erfc(self):
         def fn(x):
             return torch.erfc(x)
