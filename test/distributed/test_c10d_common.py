@@ -1951,7 +1951,10 @@ class BackendRegistrationTest(TestCase):
 
             self.assertEqual(dist.Backend.default_device_backend_map[device], name)
             self.assertEqual(dist.Backend.backend_capability[name], [device])
-            self.assertEqual(c10d._parse_backend_string(name), {device: name})
+            self.assertEqual(
+                c10d._parse_backend_string(name, available_devices={device}),
+                {device: name},
+            )
             for character in device:
                 self.assertNotEqual(
                     dist.Backend.default_device_backend_map.get(character), name
