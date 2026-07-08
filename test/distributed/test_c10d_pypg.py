@@ -26,7 +26,11 @@ from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     MultiThreadedTestCase,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 def create_work(result):
@@ -266,12 +270,16 @@ class AbstractDDPSingleRank(test_c10d_common.CommonDistributedDataParallelTest):
 
 
 class TestDDPWithWorkSubclass(AbstractDDPSingleRank, MultiThreadedTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @property
     def use_wrapper(self):
         return False
 
 
 class TestDDPWithWorkWrapper(AbstractDDPSingleRank, MultiThreadedTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @property
     def use_wrapper(self):
         return True
@@ -290,7 +298,9 @@ class BlockWork(dist._Work):
         return self.future_
 
 
-class TestPyProcessGroup(TestCase):
+class TestPyProcessGroupGeneric(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_attr_overrides(self):
         pg = DummyAttrProcessGroup(0, 1)
         self.assertEqual(pg.name(), "dummy-attr")
@@ -474,7 +484,11 @@ class TestPyProcessGroup(TestCase):
         self.assertEqual(dist._new_window(t, group=pg), "fake-window")
         self.assertIs(pg.new_window_tensor, t)
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda/xpu")
+
+@unittest.skipIf(not TEST_CUDA, "no cuda/xpu")
+class TestPyProcessGroupCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def test_block_current_stream(self) -> None:
         torch.cuda.synchronize()
 
@@ -501,7 +515,6 @@ class TestPyProcessGroup(TestCase):
             stream.synchronize()
             self.assertTrue(event.query())
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda/xpu")
     def test_block_current_stream_use_after_free(self) -> None:
         """
         This tests that the CPU control tensor is not freed before the CUDA kernel executes.
@@ -534,6 +547,8 @@ class TestPyProcessGroup(TestCase):
 
 
 class TestBatchSendRecv(MultiProcessTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self._spawn_processes()
