@@ -14308,7 +14308,7 @@
   variants: function
   structured: True
   dispatch:
-    CPU, CUDA, XPU: linalg_lu_solve_out
+    CPU, CUDA, XPU, MPS: linalg_lu_solve_out
 
 # linalg.det
 - func: _linalg_det(Tensor A) -> (Tensor result, Tensor LU, Tensor pivots)
