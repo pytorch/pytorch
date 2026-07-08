@@ -38,6 +38,7 @@ from torch.utils._sympy.functions import (
 )
 from torch.utils._triton import (
     get_triton_version,
+    has_triton_cpu_backend,
     has_triton_package,
     has_triton_stable_tma_api,
 )
@@ -2857,14 +2858,32 @@ class TMACompatibilityChecker:
     ) -> bool:
         if self.force:
             return True
+
+        device_type = V.graph.get_current_device_or_throw().type
+        if device_type == "cpu":
+            if not (
+                config.triton.use_tensor_descriptor
+                and has_triton_cpu_backend()
+                and has_triton_stable_tma_api()
+            ):
+                log.debug(
+                    "%s Requires Triton CPU backend and `use_tensor_descriptor` option enabled",
+                    self.failed_debug_prefix,
+                )
+                return False
+            # CPU tensor descriptors are lowered by the CPU backend instead of
+            # CUDA TMA hardware, so the CUDA dtype map and 16-byte store
+            # constraints below do not apply.
+            return True
+
         if not (
             (
                 (
-                    V.graph.get_current_device_or_throw().type == "cuda"
+                    device_type == "cuda"
                     and torch.cuda.get_device_capability()[0] >= 9
                     and config.assume_aligned_inputs
                 )
-                or V.graph.get_current_device_or_throw().type == "xpu"
+                or device_type == "xpu"
             )
             and config.triton.use_tensor_descriptor
             and has_triton_stable_tma_api()
@@ -2907,6 +2926,7 @@ class TMACompatibilityChecker:
         If force, we allow relying on symbolic hints equivalent
         to what we check for Triton templates.
         """
+        device_type = V.graph.get_current_device_or_throw().type
         if self.force:
             strides = [
                 V.graph.sizevars.replace_backed_symbols_with_hints(st)
@@ -2923,11 +2943,15 @@ class TMACompatibilityChecker:
         # and that the outer strides are 16 byte aligned
         if not V.graph.sizevars.statically_known_equals(strides[-1], sympy.Integer(1)):
             log.debug(
-                "%s TMA API requires innermost stride to be 1. Strides are: %s",
+                "%s tensor descriptors require innermost stride to be 1. Strides are: %s",
                 self.failed_debug_prefix,
                 strides,
             )
             return False
+
+        # Early return for Triton CPU
+        if device_type == "cpu":
+            return True
 
         element_size = self.dtype.itemsize
         for stride in strides[:-1]:
