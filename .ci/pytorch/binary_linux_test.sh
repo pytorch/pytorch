@@ -53,6 +53,15 @@ if [[ "$PACKAGE_TYPE" != libtorch ]]; then
 
     # numpy tests:
     # We test 1 version no numpy. 1 version with numpy 1.x and rest with numpy 2.x
+    # Pythons without a prebuilt numpy wheel (e.g. 3.15) build numpy from source;
+    # meson's Cython sanity check resolves the 'python3' pkg-config dependency, which
+    # on the ROCm manylinux image returns the system Python 3.6 and aborts with
+    # "Cython requires Python 3.8+". Prepend the active interpreter's own pkgconfig
+    # dir so pkg-config resolves to it. No-op when numpy comes from a wheel.
+    numpy_libpc="\$(python -c 'import os, sysconfig; p = sysconfig.get_config_var("LIBPC"); print(p if p and os.path.isdir(p) else "")')"
+    if [[ -n "\$numpy_libpc" ]]; then
+      export PKG_CONFIG_PATH="\$numpy_libpc\${PKG_CONFIG_PATH:+:\$PKG_CONFIG_PATH}"
+    fi
     if [[ "\$python_nodot" = *311* ]]; then
       retry pip install -q numpy==1.23.5 protobuf typing-extensions
     elif [[ "\$python_nodot" = *312* ]]; then
