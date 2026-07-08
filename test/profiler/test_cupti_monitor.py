@@ -563,8 +563,7 @@ class TestCuptiMonitorCUDA(TestCase):
             assert not torch.cuda.is_initialized()
             kind = ActivityKind.CONCURRENT_KERNEL
             seen = []
-            mon.configure(use_approx_timestamps=True)
-            m = mon.CuptiMonitor()
+            m = mon.CuptiMonitor(use_approx_timestamps=True)
             obs = m.register({kind: {Kernel.START, Kernel.END}},
                              lambda cols: seen.append(cols[kind]) if kind in cols else None)
             assert m._timestamp_callback_active, "callback did not engage"
@@ -1699,7 +1698,8 @@ _cupti_monitor.enable_hes_early()
 )
 class TestCuptiMonitorNative(TestCase):
     """The monitor's native buffer-pool / v2-record-layout callbacks driven directly
-    via ctypes -- pure C++ (no cupti-python), but the extension is built only on CUDA builds."""
+    via ctypes -- pure C++ (no cupti-python), but the extension is built only on CUDA builds.
+    """
 
     @skipIfTorchDynamo("native ctypes/CUPTI probe; nothing to compile")
     def test_cupti_monitor_buffer_pool_reuse(self):
