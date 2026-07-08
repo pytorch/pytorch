@@ -1047,7 +1047,6 @@ class CommonListMethodsVariable(BaseListVariable):
 class ListVariable(CommonListMethodsVariable):
     # PyList_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L3776
     _cpython_type = list
-    _has_instance_dict = False
 
     def richcompare_impl(
         self,
