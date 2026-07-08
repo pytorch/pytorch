@@ -142,6 +142,9 @@ jobs:
           } >> "${GITHUB_ENV}"
           mkdir -p "$PYTORCH_FINAL_PACKAGE_DIR"
 
+      # PACKAGE_TYPE names the per-type build-script dir (.ci/<type>/build.sh);
+      # manywheel is the exception -- its scripts were consolidated into
+      # .ci/wheel/linux/ -- so it is remapped here and in the docker-run step.
       # Container-directive path: build runs directly inside the container.
       - name: Populate binary env
         if: inputs.use_container_directive
@@ -153,7 +156,7 @@ jobs:
         shell: bash
         run: |
           source "${BINARY_ENV_FILE}"
-          bash .ci/${{ inputs.PACKAGE_TYPE }}/build.sh
+          bash .ci/${{ inputs.PACKAGE_TYPE == 'manywheel' && 'wheel/linux' || inputs.PACKAGE_TYPE }}/build.sh
 
       # Bare-runner path: spawn the build container manually.
       - name: Build PyTorch binary (docker run)
@@ -182,7 +185,7 @@ jobs:
             "${DOCKER_IMAGE}"
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .ci/pytorch/binary_populate_env.sh"
-          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash .ci/${{ inputs.PACKAGE_TYPE }}/build.sh"
+          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash .ci/${{ inputs.PACKAGE_TYPE == 'manywheel' && 'wheel/linux' || inputs.PACKAGE_TYPE }}/build.sh"
 
       - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
