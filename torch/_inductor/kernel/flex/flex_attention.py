@@ -1051,10 +1051,25 @@ def flex_attention_backward(*args, **kwargs):
         if cur_kernel_options["USE_TMA"] and not can_use_tma(query, key, value):
             cur_kernel_options["USE_TMA"] = False
 
-        cur_kernel_options.setdefault("BLOCK_M1", conf.block_m1)
-        cur_kernel_options.setdefault("BLOCK_N1", conf.block_n1)
-        cur_kernel_options.setdefault("BLOCK_M2", conf.block_m2)
-        cur_kernel_options.setdefault("BLOCK_N2", conf.block_n2)
+        # Shrink default tiles to fit smaller pow2 sparse block sizes;
+        # user-pinned tiles and non-pow2 sparse sizes still error out below.
+        block_m1, block_n1 = conf.block_m1, conf.block_n1
+        block_m2, block_n2 = conf.block_m2, conf.block_n2
+        if len(configs) == 1 and all(
+            is_power_of_2(s) and s >= 16
+            for s in (SPARSE_Q_BLOCK_SIZE, SPARSE_KV_BLOCK_SIZE)
+        ):
+            block_m1 = min(block_m1, SPARSE_Q_BLOCK_SIZE)
+            block_n1 = min(block_n1, SPARSE_KV_BLOCK_SIZE)
+            block_m2 = min(block_m2, SPARSE_Q_BLOCK_SIZE)
+            block_n2 = min(block_n2, SPARSE_KV_BLOCK_SIZE)
+            # Kernel static asserts: BLOCK_N1 % BLOCK_M1 == BLOCK_M2 % BLOCK_N2 == 0
+            block_m1 = min(block_m1, block_n1)
+            block_n2 = min(block_n2, block_m2)
+        cur_kernel_options.setdefault("BLOCK_M1", block_m1)
+        cur_kernel_options.setdefault("BLOCK_N1", block_n1)
+        cur_kernel_options.setdefault("BLOCK_M2", block_m2)
+        cur_kernel_options.setdefault("BLOCK_N2", block_n2)
 
         # Blocksparse options
         cur_kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
@@ -1072,6 +1087,9 @@ def flex_attention_backward(*args, **kwargs):
             or cur_kernel_options["SPARSE_Q_BLOCK_SIZE"]
             % cur_kernel_options["BLOCK_M2"]
             != 0
+            # Kernel static asserts; validate here for a friendly error.
+            or cur_kernel_options["BLOCK_N1"] % cur_kernel_options["BLOCK_M1"] != 0
+            or cur_kernel_options["BLOCK_M2"] % cur_kernel_options["BLOCK_N2"] != 0
         ):
             invalid_block_options = cur_kernel_options
             if len(configs) == 1:

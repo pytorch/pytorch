@@ -5410,10 +5410,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @skip_on_cpu
     @skip_on_mps  # exercises the Triton default-config tile clamping path
     def test_narrow_kv_block_size_uses_clamped_default_config(self, device):
-        """The single default config must clamp BLOCK_N to fit a narrower KV
-        sparse block size instead of erroring."""
+        """The single default config must clamp its tiles to fit a narrower KV
+        sparse block size instead of erroring, in both forward and backward."""
         q, k, v = (
-            torch.randn(2, 8, 2048, 128, device=device, dtype=torch.bfloat16)
+            torch.randn(
+                2, 8, 2048, 128, device=device, dtype=torch.bfloat16, requires_grad=True
+            )
             for _ in range(3)
         )
         block_mask = create_block_mask(
@@ -5422,6 +5424,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         out = torch.compile(flex_attention)(q, k, v, block_mask=block_mask)
         ref = flex_attention(q, k, v, block_mask=block_mask)
         torch.testing.assert_close(out, ref, atol=2e-2, rtol=2e-2)
+
+        grad_out = torch.randn_like(out)
+        grads = torch.autograd.grad(out, (q, k, v), grad_out, retain_graph=True)
+        ref_grads = torch.autograd.grad(ref, (q, k, v), grad_out, retain_graph=True)
+        for g, rg in zip(grads, ref_grads):
+            torch.testing.assert_close(g, rg, atol=2e-2, rtol=2e-2)
 
     @supported_platform
     @skip_on_cpu
