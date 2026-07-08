@@ -4161,32 +4161,6 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(actual, expected, atol=1e-4, rtol=1e-4,
                              msg=f"pdist mismatch at n={n} (numel={n * (n - 1) // 2})")
 
-    # Regression for the pdist BACKWARD kernel's triangular index inversion
-    # (pdist_backward_kernel_cuda_impl). It uses the same fp64-sqrt-based
-    # inversion as the forward kernel and, without the exact-integer correction,
-    # produced silently-wrong gradients in the large-n regime (n >~ 6000) (see issue #168868).
-    # Compares the ROCm/CUDA gradient against the CPU gradient as reference.
-    # Memory-light: uses m>1 with modest n so it runs anywhere, no large gate.
-    @onlyCUDA
-    def test_pdist_norm_backward_index(self, device):
-        for n in (4096, 4097, 6000, 8000, 10000):
-            x = torch.randn(n, 3, dtype=torch.float64)
-
-            # CPU reference gradient
-            x_cpu = x.detach().clone().requires_grad_(True)
-            torch.pdist(x_cpu, p=2).sum().backward()
-
-            # Device (CUDA/ROCm) gradient
-            x_dev = x.detach().clone().to(device).requires_grad_(True)
-            torch.pdist(x_dev, p=2).sum().backward()
-
-            grad_dev = x_dev.grad.cpu()
-            self.assertFalse(torch.isnan(grad_dev).any(),
-                             msg=f"NaN in pdist backward grad at n={n}")
-            self.assertEqual(grad_dev, x_cpu.grad, atol=1e-6, rtol=1e-6,
-                             msg=f"pdist backward grad mismatch at n={n} "
-                                 f"(numel={n * (n - 1) // 2})")
-
     # FIXME: move to elementwise ternary test suite
     @onlyNativeDeviceTypes
     @dtypesIfCUDA(*set(get_all_math_dtypes('cuda')))

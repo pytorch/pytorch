@@ -181,12 +181,7 @@ __global__ static void pdist_backward_kernel_cuda_impl(scalar_t * buffer, const 
 
   // The -1 accounts for floating point truncation issues
   int64_t i = static_cast<int64_t>((n2 - device_sqrt<double>(n2_squared_minus_1 - 2 * k)));
-  // Same ~1-ulp fp64-sqrt rounding fix as the forward kernel: correct i with
-  // exact integer arithmetic so gradients are correct in the large-n regime.
-  auto row_start = [n](int64_t ii) { return n * ii - ii * (ii + 1) / 2; };
-  while (row_start(i + 1) <= k) ++i;
-  while (row_start(i) > k) --i;
-  int64_t j = k - row_start(i) + i + 1;
+  int64_t j = k - n * i + i * (i + 1) / 2 + i + 1;
   int64_t ib = j - i - 1;
   int64_t jb = n - 2 - i;
 
@@ -270,6 +265,8 @@ void pdist_forward_kernel_impl(Tensor& result, const Tensor& self, double p) {
   const dim3 block(kCUDANumThreads);
   int64_t n = self.size(0);
   int64_t m = self.size(1);
+  // https://github.com/pytorch/pytorch/issues/15511 demonstrated we need to do
+  // some math in fp64 -- this is just minimizing the amount of fp64 math we do on the device.
   const double n2 = n - .5;
   const double n2_squared_minus_1 = n2 * n2 - 1;
 
