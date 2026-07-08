@@ -373,7 +373,7 @@ void map_mps_decomposition_error_code_to_blas(const Tensor& status) {
 
 static bool lu_has_matmul2d() {
   // matmul2d needs macOS 26.2+; below that the simdgroup gemm fallback is used
-  return is_macos_13_later_than(MacOSVersion::MACOS_26_2);
+  return is_macos_at_least(MacOSVersion::MACOS_26_2);
 }
 
 // Blocked right-looking LU with partial pivoting, factored in place on a
