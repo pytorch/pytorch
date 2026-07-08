@@ -57,6 +57,7 @@ from .hints import (
     AutotuneHint,
     DeviceProperties,
     HeuristicType,
+    InductorMeta,
     native_matmul_block_numel,
     native_matmul_persistent_rblock,
     ReductionHint,
@@ -123,7 +124,7 @@ class NoTritonConfigsError(RuntimeError):
     pass
 
 
-def _should_enable_triton_debug_asserts(inductor_meta: dict[str, Any]) -> bool:
+def _should_enable_triton_debug_asserts(inductor_meta: InductorMeta) -> bool:
     """
     Enable Triton debug asserts whenever indirect indexing asserts are on,
     except on HIP where older Triton releases lack the required support.
@@ -349,7 +350,7 @@ def _dump_launch_tensors(args, kernel_path, kernel_hash, kernel_name):
 
 
 def check_autotune_cache(
-    configs: list[Config], filename: str | None, inductor_meta: dict[str, Any]
+    configs: list[Config], filename: str | None, inductor_meta: InductorMeta
 ) -> tuple[list[Config], AutotuneCache | None, dict[str, Any]]:
     """
     Given a list of configs, checks autotune cache and return metadata
@@ -499,7 +500,7 @@ class CachingAutotuner(KernelInterface):
         optimize_mem,
         heuristic_type,
         size_hints=None,
-        inductor_meta=None,  # metadata not relevant to triton
+        inductor_meta: InductorMeta | None = None,  # metadata not relevant to triton
         custom_kernel=False,  # whether the kernel is inductor-generated or custom
         filename: str | None = None,
         reset_to_zero_arg_names: list[str] | None = None,
@@ -523,7 +524,9 @@ class CachingAutotuner(KernelInterface):
                 "device_type": self.device_props.type,
             },
         )
-        self.inductor_meta = {} if inductor_meta is None else inductor_meta
+        self.inductor_meta: InductorMeta = (
+            {} if inductor_meta is None else inductor_meta
+        )
         # Add device properties to inductor_meta for use by coordinate descent tuner
         self.inductor_meta["warp_size"] = self.device_props.warp_size
         self.inductor_meta["max_threads_per_block"] = (
@@ -2689,7 +2692,7 @@ class CompileResult(Generic[_T]):
         kernel: _T,
         config: Config,
         compile_meta: dict[str, Any],
-        inductor_meta: dict[str, Any],
+        inductor_meta: InductorMeta,
     ):
         self.kernel = kernel
         self.config = config
@@ -2819,7 +2822,7 @@ class StaticTritonCompileResult(CompileResult[_T]):
     @staticmethod
     def can_statically_launch(
         kernel: CompiledKernel,
-        inductor_meta: dict[str, Any],
+        inductor_meta: InductorMeta,
         triton_meta: TritonMeta,
         heuristic_type: HeuristicType,
     ) -> _KernelType | None:
@@ -3417,7 +3420,7 @@ def cached_autotune(
     triton_meta: TritonMeta,
     heuristic_type,
     filename=None,
-    inductor_meta=None,
+    inductor_meta: InductorMeta | None = None,
     custom_kernel=False,
     caching_autotuner_cls: type[CachingAutotuner] = CachingAutotuner,
     debug_autotuner_cls: type[DebugAutotuner] = DebugAutotuner,
@@ -3441,7 +3444,7 @@ def cached_autotune(
     configs, autotune_cache, autotune_cache_info = check_autotune_cache(
         configs, filename, inductor_meta
     )
-    mutated_arg_names = inductor_meta.pop("mutated_arg_names", ())
+    mutated_arg_names = cast("list[str]", inductor_meta.pop("mutated_arg_names", ()))
     optimize_mem = inductor_meta.pop("optimize_mem", True)
 
     if "restore_value" in triton_meta:
@@ -3596,7 +3599,7 @@ def _cap_native_matmul_configs(configs: list[Config], r0_block: int) -> list[Con
 def _enforce_reduction_config_block_minimums(
     configs: list[Config],
     size_hints: dict[str, int],
-    inductor_meta: dict[str, Any],
+    inductor_meta: InductorMeta,
 ) -> list[Config]:
     min_xblock = inductor_meta.get("min_xblock")
     min_rblock = inductor_meta.get("min_rblock")
@@ -4001,7 +4004,7 @@ def _update_combo_kernel_kwargs(
 
 def _handle_combo_kernel_per_subkernel_blocks(
     size_hints: dict[str, int],
-    inductor_meta: dict[str, Any],
+    inductor_meta: InductorMeta,
     triton_meta: TritonMeta,
     filename: str | None = None,
     reduction_hint: bool = False,
@@ -4063,10 +4066,13 @@ def _handle_combo_kernel_per_subkernel_blocks(
         # via TritonKernel.inductor_meta_per_kernel(). Forward into
         # inductor_meta_i so pointwise()/_reduction_configs()/_persistent_reduction_configs()
         # pick configs based on the actual sub-kernel .
-        inductor_meta_i = {
-            **inductor_meta_clean,
-            **combo_meta.get(f"inductor_meta_{i}", {}),
-        }
+        inductor_meta_i = cast(
+            "InductorMeta",
+            {
+                **inductor_meta_clean,
+                **combo_meta.get(f"inductor_meta_{i}", {}),
+            },
+        )
 
         if subkernel_heuristic == "pointwise":
             cfgs = pointwise(
@@ -4229,8 +4235,10 @@ def triton_config_tiled_reduction(
     return config
 
 
-def _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs: list[Config]):
-    tma_min_block_sizes: dict[str, int]
+def _maybe_filter_configs_for_tma_restrictions(
+    inductor_meta: InductorMeta, configs: list[Config]
+):
+    tma_min_block_sizes: dict[str, int] | None
     if (tma_min_block_sizes := inductor_meta.get("tma_min_block_sizes")) and configs:
         # Rn blocks are not provided to the kernel for persistent reductions
         if inductor_meta.get("persistent_reduction"):
@@ -4286,7 +4294,7 @@ def pointwise(
     tile_hint=None,
     filename=None,
     min_elem_per_thread=0,
-    inductor_meta=None,
+    inductor_meta: InductorMeta | None = None,
     return_configs=False,
 ):
     """
@@ -4528,7 +4536,7 @@ triton_native_persistent_bmm_configs = _config_helper(bmm=True, persistent=True)
 
 
 def _get_tiling_scores(
-    inductor_meta: dict[str, Any],
+    inductor_meta: InductorMeta,
     size_hints: dict[str, int],
 ) -> dict[str, float]:
     """
@@ -4540,7 +4548,7 @@ def _get_tiling_scores(
 def _reduction_configs(
     *,
     size_hints: dict[str, int],
-    inductor_meta: dict[str, Any],
+    inductor_meta: InductorMeta,
     triton_meta: TritonMeta,
     num_dynamic=0,
 ) -> list[Config]:
@@ -4861,7 +4869,7 @@ def adapt_config_for_tiling(
 
 
 def filter_reduction_configs_for_determinism(
-    inductor_meta: dict[str, Any], configs: list[Config]
+    inductor_meta: InductorMeta, configs: list[Config]
 ) -> list[Config]:
     """
     Filter configs for reduction so the numerics can be deterministic.
@@ -4974,7 +4982,7 @@ def reduction(
     reduction_hint=False,
     triton_meta: TritonMeta | None = None,
     filename=None,
-    inductor_meta=None,
+    inductor_meta: InductorMeta | None = None,
     return_configs=False,
 ):
     """args to @triton.heuristics()"""
@@ -5039,7 +5047,7 @@ def cooperative_reduction(
     reduction_hint,
     triton_meta: TritonMeta,
     filename,
-    inductor_meta,
+    inductor_meta: InductorMeta | None = None,
 ):
     inductor_meta = {} if inductor_meta is None else inductor_meta
     inductor_meta["reduction_hint"] = reduction_hint
@@ -5092,7 +5100,7 @@ def cooperative_reduction(
 def _persistent_reduction_configs(
     size_hints,
     reduction_hint=False,
-    inductor_meta=None,
+    inductor_meta: InductorMeta | None = None,
     triton_meta: TritonMeta | None = None,
 ):
     inductor_meta = {} if inductor_meta is None else inductor_meta
@@ -5246,7 +5254,7 @@ def persistent_reduction(
     reduction_hint=False,
     triton_meta: TritonMeta | None = None,
     filename=None,
-    inductor_meta=None,
+    inductor_meta: InductorMeta | None = None,
     return_configs=False,
 ):
     """Generate persistent reductions + mix-order if available"""
@@ -5291,9 +5299,9 @@ def persistent_reduction(
         "max_autotune_pointwise"
     )
 
-    if inductor_meta.get("RSPLIT_SIZE"):
+    rsplit_size = inductor_meta.get("RSPLIT_SIZE")
+    if rsplit_size:
         new_configs = []
-        rsplit_size = inductor_meta.get("RSPLIT_SIZE")
         rnumel_hint = size_hints["r0_"]
         min_x_block = 1
         if rnumel_hint <= 512:
@@ -5369,7 +5377,7 @@ def split_scan(
     reduction_hint=False,
     triton_meta: TritonMeta | None = None,
     filename=None,
-    inductor_meta=None,
+    inductor_meta: InductorMeta | None = None,
 ):
     """Heuristic for TritonSplitScanKernel"""
     inductor_meta = {} if inductor_meta is None else inductor_meta
@@ -5412,7 +5420,7 @@ def template(
     num_consumer_groups=0,
     num_buffers_warp_spec=0,
     filename=None,
-    inductor_meta=None,
+    inductor_meta: InductorMeta | None = None,
     **kwargs,
 ):
     """
@@ -5485,7 +5493,9 @@ def config_from_dict(config: dict[str, Any]) -> Config:
     return Config(config, **_pop_config_kwargs(config))
 
 
-def fixed_config(config, filename, triton_meta: TritonMeta, inductor_meta):
+def fixed_config(
+    config, filename, triton_meta: TritonMeta, inductor_meta: InductorMeta
+):
     """
     Used when the configuration is already decided at compile time
     """
@@ -5504,7 +5514,7 @@ def user_autotune(
     configs,
     triton_meta: TritonMeta,
     filename=None,
-    inductor_meta=None,
+    inductor_meta: InductorMeta | None = None,
     custom_kernel=False,
 ):
     """
@@ -5525,10 +5535,13 @@ def user_autotune(
     )
 
 
-def foreach(triton_meta: TritonMeta, filename=None, inductor_meta=None):
+def foreach(
+    triton_meta: TritonMeta, filename=None, inductor_meta: InductorMeta | None = None
+):
     """
     Compile a triton foreach kernel
     """
+    inductor_meta = {} if inductor_meta is None else inductor_meta
     configs = []
 
     # Naive autotuning path for num_warps
@@ -5554,7 +5567,7 @@ def foreach(triton_meta: TritonMeta, filename=None, inductor_meta=None):
 class GridExpr:
     """Generate code for grid size expressions in launcher"""
 
-    inductor_meta: dict[str, Any]
+    inductor_meta: InductorMeta
     mode: Literal["python", "cpp"] = "python"
     prefix: list[str] = dataclasses.field(default_factory=list)
     x_grid: str | int = 1
@@ -5625,7 +5638,7 @@ class GridExpr:
 
     @staticmethod
     def from_meta(
-        inductor_meta: dict[str, Any],
+        inductor_meta: InductorMeta,
         cfg: Config | dict[str, int],
         mode: Literal["python", "cpp"] = "python",
     ) -> GridExpr:
@@ -5666,7 +5679,7 @@ class GridExpr:
     @classmethod
     def from_meta_lazy(
         cls,
-        inductor_meta: dict[str, Any] | None,
+        inductor_meta: InductorMeta | None,
         kernel_name: str,
     ) -> GridExpr:
         """Factory method for lazy compile mode."""
