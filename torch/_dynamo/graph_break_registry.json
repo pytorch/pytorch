@@ -2995,7 +2995,7 @@
       "Explanation": "To properly guard reference-type opaque objects, we must lift them as inputs to the graph. In order to do this, they must all have a source, meaning they come from a global value or are an attribute of an input.",
       "Hints": [
         "Register member '{name}' with MemberType.INLINED in ",
-        "register_opaque_type({real_obj_type}, members=...)."
+        "register_custom_class({real_obj_type}, members=...)."
       ]
     },
     {
@@ -3004,7 +3004,7 @@
       "Explanation": "To properly guard reference-type opaque objects, we must lift them as inputs to the graph. In order to do this, they must all have a source, meaning they come from a global value or are an attribute of an input.",
       "Hints": [
         "Register member '{name}' with MemberType.INLINED in ",
-        "register_opaque_type({value_type}, members=...)."
+        "register_custom_class({value_type}, members=...)."
       ]
     }
   ],
@@ -4812,7 +4812,7 @@
       "Context": "value={real_obj}, attr={name}",
       "Explanation": "Member '{name}' is not registered for this opaque object type.",
       "Hints": [
-        "Register '{name}' with a MemberType in register_opaque_type(members=...)."
+        "Register '{name}' with a MemberType in register_custom_class(members=...)."
       ]
     },
     {
@@ -4820,7 +4820,7 @@
       "Context": "value={self.value}, attr={name}",
       "Explanation": "Member '{name}' is not registered for this opaque object type.",
       "Hints": [
-        "Register '{name}' with a MemberType in register_opaque_type(members=...)."
+        "Register '{name}' with a MemberType in register_custom_class(members=...)."
       ]
     }
   ],
