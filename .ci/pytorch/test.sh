@@ -1585,13 +1585,18 @@ test_vulkan() {
 }
 
 test_distributed() {
-  # $1: multiproc filter ("multiproc" | "not-multiproc"), see the `multiproc`
-  # marker in test/conftest.py. "not-multiproc" runs on a single-GPU runner, so
-  # it also skips the multi-GPU-only C++ / mpiexec tests below.
-  local multiproc_filter="$1"
-  echo "Testing distributed python tests (${multiproc_filter})"
+  # $1 (optional): multiproc filter ("multiproc" | "not-multiproc"), see the
+  # `multiproc` marker in test/conftest.py. Empty runs the whole suite.
+  # "not-multiproc" runs on a single-GPU runner, so it also skips the
+  # multi-GPU-only C++ / mpiexec tests below.
+  local multiproc_filter="${1:-}"
+  local filter_arg=()
+  if [[ -n "$multiproc_filter" ]]; then
+    filter_arg=(--multiproc-filter "$multiproc_filter")
+  fi
+  echo "Testing distributed python tests (${multiproc_filter:-all})"
   # shellcheck disable=SC2086
-  time python test/run_test.py --distributed-tests --multiproc-filter "$multiproc_filter" --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" $INCLUDE_CLAUSE --verbose
+  time python test/run_test.py --distributed-tests "${filter_arg[@]}" --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" $INCLUDE_CLAUSE --verbose
   assert_git_not_dirty
 
   # The C++ / mpiexec distributed tests below require multiple GPUs.
@@ -1627,6 +1632,16 @@ test_distributed() {
       python test/run_test.py --cpp --verbose -i cpp/ProcessGroupNCCLErrorsTest
     fi
   fi
+}
+
+test_distributed_single_gpu() {
+  # Single-process (single-GPU) distributed tests, hived off the multi-GPU
+  # `distributed` config to run on the cheaper 1-GPU `default` CUDA runner (see
+  # the `multiproc` marker in test/conftest.py). Sharded with the rest of the
+  # `default` config's Python tests.
+  install_torchcomms
+  install_spmd_types
+  test_distributed not-multiproc
 }
 
 test_quantization() {
@@ -2207,18 +2222,19 @@ elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
 elif [[ "$TEST_CONFIG" == distributed ]]; then
   install_torchcomms
   install_spmd_types
-  test_distributed multiproc
+  # On CUDA the single-process (single-GPU) distributed tests are hived off to
+  # the `default` config's 1-GPU runner (see below), so this multi-GPU box only
+  # runs the process-spawning ones. Elsewhere (CPU pull, rocm) there is no such
+  # split, so run the whole suite.
+  if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+    test_distributed multiproc
+  else
+    test_distributed
+  fi
   # Only run RPC C++ tests on the first shard
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
     test_rpc
   fi
-elif [[ "$TEST_CONFIG" == distributed_single ]]; then
-  # Single-process distributed tests only (see `multiproc` marker in
-  # test/conftest.py); runs on a single-GPU runner. Skips the multi-GPU-only
-  # C++ / RPC / mpiexec tests.
-  install_torchcomms
-  install_spmd_types
-  test_distributed not-multiproc
 elif [[ "${TEST_CONFIG}" == *operator_benchmark* ]]; then
   TEST_MODE="short"
 
@@ -2360,6 +2376,11 @@ elif [[ "${BUILD_ENVIRONMENT}" == *rocm* && -n "$TESTS_TO_INCLUDE" ]]; then
   test_python_shard "$SHARD_NUMBER"
   test_aten
 elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
+  # TODO(temporary): run distributed-single first for faster signal while we
+  # validate the split; move to the end once it's proven stable.
+  if [[ "${BUILD_ENVIRONMENT}" == *cuda* ]]; then
+    test_distributed_single_gpu
+  fi
   test_lazy_tensor_meta_reference_disabled
   test_without_numpy
   install_torchvision
@@ -2370,6 +2391,9 @@ elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
     test_xpu_bin
   fi
 elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
+  if [[ "${BUILD_ENVIRONMENT}" == *cuda* ]]; then
+    test_distributed_single_gpu
+  fi
   install_torchvision
   test_python_shard 2
   test_libtorch 2
@@ -2380,6 +2404,9 @@ elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_libtorch_profiler
 elif [[ "${SHARD_NUMBER}" -gt 2 ]]; then
   # Handle arbitrary number of shards
+  if [[ "${BUILD_ENVIRONMENT}" == *cuda* ]]; then
+    test_distributed_single_gpu
+  fi
   install_torchvision
   test_python_shard "$SHARD_NUMBER"
 elif [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
