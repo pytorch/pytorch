@@ -801,7 +801,10 @@ def local_reduce_feed_main_output_plan(
 
 
 def single_output_plan(output: torch.fx.Node) -> FlexGemmOutputPlan:
-    """Classify a single-output epilogue."""
+    """Classify a single-output epilogue after checking feed-main consumers."""
+    feed_main_plan = local_reduce_feed_main_output_plan(output)
+    if feed_main_plan is not None:
+        return feed_main_plan
     return FlexGemmOutputPlan(output)
 
 
@@ -815,17 +818,27 @@ def tuple_output_plan(
         isinstance(aux_output, torch.fx.Node) for aux_output in aux_outputs
     ):
         raise NotImplementedError(FLEX_GEMM_OUTPUT_TENSOR_ERROR)
+    feed_contract = common_local_reduce_feed_main_contract((output, *aux_outputs))
     if analysis is not None:
         compressed_aux_plans = tuple(
-            (index, plan)
+            (index, contract, plan)
             for index, aux_output in enumerate(aux_outputs)
+            if (contract := analysis.contract_for(aux_output)) is not None
             if (plan := local_reduce_compressed_aux_plan(analysis, output, aux_output))
             is not None
         )
         if len(compressed_aux_plans) > 1:
             raise NotImplementedError(LOCAL_REDUCE_MIXED_CONTRACT_ERROR)
         if compressed_aux_plans:
-            local_reduce_index, compressed_aux_plan = compressed_aux_plans[0]
+            local_reduce_index, compressed_contract, compressed_aux_plan = (
+                compressed_aux_plans[0]
+            )
+            if feed_contract is not None:
+                if feed_contract.aux is not compressed_contract.aux:
+                    raise NotImplementedError(LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR)
+                compressed_aux_plan = feed_contract.to_plan(
+                    store_node=aux_outputs[local_reduce_index], feeds_main=True
+                )
             return FlexGemmOutputPlan(
                 output,
                 tuple(

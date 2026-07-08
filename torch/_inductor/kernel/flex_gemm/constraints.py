@@ -28,7 +28,7 @@ def grouped_reduce_dims_match(dim: Any, reduce_dims: Sequence[Any]) -> bool:
 
 # Feed-main currently reduces only within one lane-layout M group; cross-warp M
 # stitching needs the two-phase/replay path used by compressed aux reductions.
-MAX_SAME_WARP_LOCAL_REDUCE_FEED_MAIN_GROUP = 16
+MAX_SAME_WARP_LOCAL_REDUCE_FEED_MAIN_GROUP = 32
 MAX_TENSORSSA_LOCAL_REDUCE_GROUP_WITHOUT_PHYSICAL_CALLBACKS = 16
 LOCAL_REDUCE_FEED_MAIN_AXIS_ERROR = (
     "FlexGEMM local-reduce feed-main currently supports only axis 0"
@@ -79,10 +79,6 @@ LOCAL_REDUCE_AUX_TENSORSSA_ERROR = (
 LOCAL_REDUCE_AUX_OUTPUT_CONTRACT_ERROR = (
     "FlexGEMM does not support this aux output shape yet. Please file an issue "
     "with the FlexGEMM epilogue expression."
-)
-LOCAL_REDUCE_AUX_OUT_COMPOSITION_ERROR = (
-    "FlexGEMM local-reduce aux outputs cannot be combined with same-shape aux "
-    "outputs yet"
 )
 LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR = (
     "FlexGEMM local-reduce broadcast values support one generated physical reduction"
@@ -318,12 +314,6 @@ def validate_local_reduce_no_c_alpha_beta(
     """Reject C/alpha/beta composition until local-reduce ordering is explicit."""
     if effective_C is not None or alpha != 1.0 or beta != 1.0:
         raise NotImplementedError(LOCAL_REDUCE_C_ALPHA_BETA_ERROR)
-
-
-def validate_local_reduce_no_aux_out_composition(aux_out: Any | None) -> None:
-    """Reject mixing compressed local-reduce aux stores with same-shape aux stores."""
-    if aux_out is not None:
-        raise NotImplementedError(LOCAL_REDUCE_AUX_OUT_COMPOSITION_ERROR)
 
 
 def flex_gemm_local_reduce_config_fields(
