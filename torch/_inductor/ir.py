@@ -958,6 +958,9 @@ class Operation:
             raise AssertionError("Expected self.operation_name is not None")
         return self.operation_name
 
+    def get_buffer_name(self) -> str | None:
+        return None
+
     def get_config_patches(self) -> dict[str, Any]:
         """Get config patches for this operation (e.g., coordinate_descent_tuning)."""
         return self._config_patches
@@ -5104,6 +5107,7 @@ class Buffer(IRNode, CodegenSymbol):
     # a meaningful name
     name: str | None
     layout: OutputSpec
+    ordering_only: ClassVar[bool] = False
 
     # Multi-output buffers will define 'outputs: List[Buffer]'. Confusingly,
     # MultiOutput does NOT define this!
@@ -5118,6 +5122,9 @@ class Buffer(IRNode, CodegenSymbol):
     def get_name(self) -> str:
         if not self.name:
             raise AssertionError(self)
+        return self.name
+
+    def get_buffer_name(self) -> str | None:
         return self.name
 
     def get_example(self) -> torch.Tensor | torch.SymInt:
