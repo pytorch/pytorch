@@ -61,23 +61,23 @@ class TestFakeDistributed(DynamoTestCase):
             normalize_graph(backend.fw_graphs[0]),
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, primals_1: "Sym(s77)", primals_2: "Sym(s27)", primals_3: "f32[s77, s27]"):
-        floordiv: "Sym((s77//2))" = primals_1 // 2
+    def forward(self, primals_1: "f32[s77, s27]", primals_2: "Sym(s77)", primals_3: "Sym(s27)"):
+        floordiv: "Sym((s77//2))" = primals_2 // 2
 
-        all_to_all_single: "f32[2*((s77//2)), s27]" = torch.ops._c10d_functional.all_to_all_single.default(primals_3, [floordiv, floordiv], [floordiv, floordiv], '0');  primals_3 = None
+        all_to_all_single: "f32[2*((s77//2)), s27]" = torch.ops._c10d_functional.all_to_all_single.default(primals_1, [floordiv, floordiv], [floordiv, floordiv], '0');  primals_1 = None
 
         wait_tensor: "f32[2*((s77//2)), s27]" = torch.ops._c10d_functional.wait_tensor.default(all_to_all_single);  all_to_all_single = None
-        return (wait_tensor, primals_1, primals_2, floordiv)
+        return (wait_tensor, primals_2, primals_3, floordiv)
 """,
         )
         self.assertExpectedInline(
             normalize_graph(backend.bw_graphs[0]),
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, primals_1: "Sym(s77)", primals_2: "Sym(s27)", floordiv: "Sym((s77//2))", tangents_1: "f32[2*((s77//2)), s27]"):
+    def forward(self, primals_2: "Sym(s77)", primals_3: "Sym(s27)", floordiv: "Sym((s77//2))", tangents_1: "f32[2*((s77//2)), s27]"):
         all_to_all_single_1: "f32[2*((s77//2)), s27]" = torch.ops._c10d_functional.all_to_all_single.default(tangents_1, [floordiv, floordiv], [floordiv, floordiv], '0');  tangents_1 = floordiv = None
         wait_tensor_1: "f32[2*((s77//2)), s27]" = torch.ops._c10d_functional.wait_tensor.default(all_to_all_single_1);  all_to_all_single_1 = None
-        return (None, None, wait_tensor_1)
+        return (wait_tensor_1, None, None)
 """,
         )
 
@@ -96,29 +96,29 @@ class GraphModule(torch.nn.Module):
             normalize_graph(backend.fw_graphs[0]),
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, primals_1: "Sym(u0)", primals_2: "Sym(u1)", primals_3: "Sym(u2)", primals_4: "f32[u0, u1, u2]"):
-        ge: "Sym(u0 >= 0)" = primals_1 >= 0
+    def forward(self, primals_1: "f32[u0, u1, u2]", primals_2: "Sym(u0)", primals_3: "Sym(u1)", primals_4: "Sym(u2)"):
+        ge: "Sym(u0 >= 0)" = primals_2 >= 0
         _assert_scalar = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar = None
-        ge_1: "Sym(u1 >= 0)" = primals_2 >= 0
+        ge_1: "Sym(u1 >= 0)" = primals_3 >= 0
         _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_1 = None
-        ge_2: "Sym(u2 >= 0)" = primals_3 >= 0
+        ge_2: "Sym(u2 >= 0)" = primals_4 >= 0
         _assert_scalar_2 = torch.ops.aten._assert_scalar.default(ge_2, "Runtime assertion failed for expression u2 >= 0 on node 'ge_2'");  ge_2 = _assert_scalar_2 = None
-        floordiv: "Sym((u0//2))" = primals_1 // 2
+        floordiv: "Sym((u0//2))" = primals_2 // 2
 
-        all_to_all_single: "f32[2*((u0//2)), u1, u2]" = torch.ops._c10d_functional.all_to_all_single.default(primals_4, [floordiv, floordiv], [floordiv, floordiv], '0');  primals_4 = None
+        all_to_all_single: "f32[2*((u0//2)), u1, u2]" = torch.ops._c10d_functional.all_to_all_single.default(primals_1, [floordiv, floordiv], [floordiv, floordiv], '0');  primals_1 = None
 
         wait_tensor: "f32[2*((u0//2)), u1, u2]" = torch.ops._c10d_functional.wait_tensor.default(all_to_all_single);  all_to_all_single = None
-        return (wait_tensor, primals_1, primals_2, primals_3, floordiv)
+        return (wait_tensor, primals_2, primals_3, primals_4, floordiv)
 """,
         )
         self.assertExpectedInline(
             normalize_graph(backend.bw_graphs[0]),
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, primals_1: "Sym(u0)", primals_2: "Sym(u1)", primals_3: "Sym(u2)", floordiv: "Sym((u0//2))", tangents_1: "f32[2*((u0//2)), u1, u2]"):
+    def forward(self, primals_2: "Sym(u0)", primals_3: "Sym(u1)", primals_4: "Sym(u2)", floordiv: "Sym((u0//2))", tangents_1: "f32[2*((u0//2)), u1, u2]"):
         all_to_all_single_1: "f32[2*((u0//2)), u1, u2]" = torch.ops._c10d_functional.all_to_all_single.default(tangents_1, [floordiv, floordiv], [floordiv, floordiv], '0');  tangents_1 = floordiv = None
         wait_tensor_1: "f32[2*((u0//2)), u1, u2]" = torch.ops._c10d_functional.wait_tensor.default(all_to_all_single_1);  all_to_all_single_1 = None
-        return (None, None, None, wait_tensor_1)
+        return (wait_tensor_1, None, None, None)
 """,
         )
 
@@ -205,7 +205,6 @@ class GraphModule(torch.nn.Module):
         res = fn(x)
         self.assertEqual(res, (x + 1, [0]))
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_device_mesh_init_skip_after_graph_break(self):
         device_mesh = init_device_mesh(
             device_type="cpu",
@@ -259,9 +258,9 @@ class GraphModule(torch.nn.Module):
     def forward(self, L_tensor_: "f32[10]"):
         l_tensor_ = L_tensor_
 
-        tensor: "f32[0]" = torch.ops._c10d_functional.isend(l_tensor_, 1, 0, '0');  l_tensor_ = None
+        isend: "f32[0]" = torch.ops._c10d_functional.isend(l_tensor_, 1, 0, '0');  l_tensor_ = None
 
-        wait_tensor: "f32[0]" = torch.distributed._functional_collectives.wait_tensor(tensor);  tensor = wait_tensor = None
+        wait_tensor: "f32[0]" = torch.distributed._functional_collectives.wait_tensor(isend);  isend = wait_tensor = None
         return ()
 """,
         )
@@ -285,7 +284,7 @@ class GraphModule(torch.nn.Module):
     def forward(self, L_tensor_: "f32[4]"):
         l_tensor_ = L_tensor_
 
-        tensor: "f32[0]" = torch.ops._c10d_functional.isend(l_tensor_, 1, 0, '0');  tensor = None
+        isend: "f32[0]" = torch.ops._c10d_functional.isend(l_tensor_, 1, 0, '0');  isend = None
         return (l_tensor_,)
 """,
         )
@@ -309,11 +308,11 @@ class GraphModule(torch.nn.Module):
     def forward(self, L_tensor_: "f32[10]"):
         l_tensor_ = L_tensor_
 
-        tensor: "f32[10]" = torch.ops._c10d_functional.irecv(l_tensor_, 1, 0, '0');  l_tensor_ = None
+        irecv: "f32[10]" = torch.ops._c10d_functional.irecv(l_tensor_, 1, 0, '0');  l_tensor_ = None
 
-        req: "f32[10]" = torch.ops._c10d_functional.wait_tensor(tensor);  tensor = None
+        wait_tensor: "f32[10]" = torch.ops._c10d_functional.wait_tensor(irecv);  irecv = None
 
-        wait_tensor_1: "f32[10]" = torch.distributed._functional_collectives.wait_tensor(req);  req = wait_tensor_1 = None
+        wait_tensor_1: "f32[10]" = torch.distributed._functional_collectives.wait_tensor(wait_tensor);  wait_tensor = wait_tensor_1 = None
         return ()
 """,
         )
@@ -338,28 +337,22 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(len(backend.graphs), 1)
         self.assertExpectedInline(
             normalize_graph(backend.graphs[0]),
-            (
-                """\
+            """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_send_tensor_: "f32[10]", L_recv_tensor_: "f32[10]"):
-        l_send_tensor_ = L_send_tensor_
+    def forward(self, L_recv_tensor_: "f32[10]", L_send_tensor_: "f32[10]"):
         l_recv_tensor_ = L_recv_tensor_
+        l_send_tensor_ = L_send_tensor_
 
-"""
-                "        batch_p2p_ops = torch.ops._c10d_functional.batch_p2p_ops("
-                "['isend', 'irecv'], [1, 1], [0, 0], [l_send_tensor_, "
-                "l_recv_tensor_], '0');  l_send_tensor_ = l_recv_tensor_ = None\n"
-                """\
-        t: "f32[0]" = batch_p2p_ops[0]
-        t_1: "f32[10]" = batch_p2p_ops[1];  batch_p2p_ops = None
+        batch_p2p_ops = torch.ops._c10d_functional.batch_p2p_ops(['isend', 'irecv'], [1, 1], [0, 0], [l_send_tensor_, l_recv_tensor_], '0');  l_send_tensor_ = l_recv_tensor_ = None
+        getitem: "f32[0]" = batch_p2p_ops[0]
+        getitem_1: "f32[10]" = batch_p2p_ops[1];  batch_p2p_ops = None
 
-        w: "f32[10]" = torch.ops._c10d_functional.wait_tensor(t_1);  t_1 = None
+        wait_tensor: "f32[10]" = torch.ops._c10d_functional.wait_tensor(getitem_1);  getitem_1 = None
 
-        wait_tensor_1: "f32[0]" = torch.distributed._functional_collectives.wait_tensor(t);  t = wait_tensor_1 = None
-        wait_tensor_2: "f32[10]" = torch.distributed._functional_collectives.wait_tensor(w);  w = wait_tensor_2 = None
+        wait_tensor_1: "f32[0]" = torch.distributed._functional_collectives.wait_tensor(getitem);  getitem = wait_tensor_1 = None
+        wait_tensor_2: "f32[10]" = torch.distributed._functional_collectives.wait_tensor(wait_tensor);  wait_tensor = wait_tensor_2 = None
         return ()
-"""
-            ),
+""",
         )
 
     @torch._dynamo.config.patch(enable_p2p_compilation=True)
@@ -407,31 +400,31 @@ class GraphModule(torch.nn.Module):
         l_y1_ = L_y1_
 
         batch_p2p_ops = torch.ops._c10d_functional.batch_p2p_ops(['isend', 'irecv'], [1, 1], [0, 0], [l_x0_, l_y0_], '0')
-        t: "f32[0]" = batch_p2p_ops[0]
-        t_1: "f32[64, 64]" = batch_p2p_ops[1];  batch_p2p_ops = None
+        getitem: "f32[0]" = batch_p2p_ops[0]
+        getitem_1: "f32[64, 64]" = batch_p2p_ops[1];  batch_p2p_ops = None
 
-        w: "f32[64, 64]" = torch.ops._c10d_functional.wait_tensor(t_1);  t_1 = None
+        wait_tensor: "f32[64, 64]" = torch.ops._c10d_functional.wait_tensor(getitem_1);  getitem_1 = None
 
         mul: "f32[64, 64]" = l_x0_ * 2;  l_x0_ = None
-        t0: "f32[64, 64]" = mul + 1;  mul = None
+        add: "f32[64, 64]" = mul + 1;  mul = None
 
-        wait_tensor_1: "f32[0]" = torch.distributed._functional_collectives.wait_tensor(t);  t = wait_tensor_1 = None
-        wait_tensor_2: "f32[64, 64]" = torch.distributed._functional_collectives.wait_tensor(w);  w = wait_tensor_2 = None
+        add_1: "f32[64, 64]" = l_y0_ + add;  l_y0_ = add = None
 
-        a: "f32[64, 64]" = l_y0_ + t0;  l_y0_ = t0 = None
+        wait_tensor_1: "f32[0]" = torch.distributed._functional_collectives.wait_tensor(getitem);  getitem = wait_tensor_1 = None
+        wait_tensor_2: "f32[64, 64]" = torch.distributed._functional_collectives.wait_tensor(wait_tensor);  wait_tensor = wait_tensor_2 = None
 
-        batch_p2p_ops_1 = torch.ops._c10d_functional.batch_p2p_ops(['isend', 'irecv'], [1, 1], [0, 0], [a, l_y1_], '0')
-        t_2: "f32[0]" = batch_p2p_ops_1[0]
-        t_3: "f32[64, 64]" = batch_p2p_ops_1[1];  batch_p2p_ops_1 = None
+        batch_p2p_ops_1 = torch.ops._c10d_functional.batch_p2p_ops(['isend', 'irecv'], [1, 1], [0, 0], [add_1, l_y1_], '0')
+        getitem_2: "f32[0]" = batch_p2p_ops_1[0]
+        getitem_3: "f32[64, 64]" = batch_p2p_ops_1[1];  batch_p2p_ops_1 = None
 
-        w_1: "f32[64, 64]" = torch.ops._c10d_functional.wait_tensor(t_3);  t_3 = None
+        wait_tensor_3: "f32[64, 64]" = torch.ops._c10d_functional.wait_tensor(getitem_3);  getitem_3 = None
 
-        t1: "f32[64, 64]" = a * 1.000244140625;  a = None
+        mul_1: "f32[64, 64]" = add_1 * 1.000244140625;  add_1 = None
 
-        wait_tensor_4: "f32[0]" = torch.distributed._functional_collectives.wait_tensor(t_2);  t_2 = wait_tensor_4 = None
-        wait_tensor_5: "f32[64, 64]" = torch.distributed._functional_collectives.wait_tensor(w_1);  w_1 = wait_tensor_5 = None
+        add_2: "f32[64, 64]" = l_y1_ + mul_1;  l_y1_ = mul_1 = None
 
-        add_2: "f32[64, 64]" = l_y1_ + t1;  l_y1_ = t1 = None
+        wait_tensor_4: "f32[0]" = torch.distributed._functional_collectives.wait_tensor(getitem_2);  getitem_2 = wait_tensor_4 = None
+        wait_tensor_5: "f32[64, 64]" = torch.distributed._functional_collectives.wait_tensor(wait_tensor_3);  wait_tensor_3 = wait_tensor_5 = None
         return (add_2,)
 """,
         )
@@ -449,6 +442,72 @@ class GraphModule(torch.nn.Module):
 
 
 instantiate_parametrized_tests(TestFakeDistributedP2P)
+
+
+@skipIf(not dist.is_available(), "requires distributed")
+class TestFakeDistributedP2PSubgroup(DynamoTestCase):
+    # Regression test: on a sub-group, the functional P2P helpers must pass a
+    # GROUP-LOCAL peer rank to the _c10d_functional ops (which, like the eager
+    # ProcessGroup send/recv path, expect a group-local rank). Previously a
+    # global rank was passed, which is out of range on a proper sub-group.
+    def setUp(self):
+        super().setUp()
+        dist.init_process_group(backend="fake", rank=0, world_size=4)
+        # Sub-group [0, 2]: group-local rank 1 corresponds to global rank 2.
+        self.subgroup = dist.new_group([0, 2])
+
+    def tearDown(self):
+        dist.destroy_process_group()
+
+    @torch._dynamo.config.patch(enable_p2p_compilation=True)
+    def test_compiled_isend_subgroup_uses_group_local_rank(self):
+        backend = EagerAndRecordGraphs()
+
+        @torch.compile(fullgraph=True, backend=backend)
+        def fn(tensor):
+            req = dist.isend(tensor, group_dst=1, group=self.subgroup)
+            req.wait()
+
+        fn(torch.ones(10))
+        self.assertEqual(len(backend.graphs), 1)
+        graph = normalize_graph(backend.graphs[0])
+        self.assertIn("_c10d_functional.isend(l_tensor_, 1,", graph)
+        self.assertNotIn("_c10d_functional.isend(l_tensor_, 2,", graph)
+
+    @torch._dynamo.config.patch(enable_p2p_compilation=True)
+    def test_compiled_irecv_subgroup_uses_group_local_rank(self):
+        backend = EagerAndRecordGraphs()
+
+        @torch.compile(fullgraph=True, backend=backend)
+        def fn(tensor):
+            req = dist.irecv(tensor, group_src=1, group=self.subgroup)
+            req.wait()
+
+        fn(torch.zeros(10))
+        self.assertEqual(len(backend.graphs), 1)
+        graph = normalize_graph(backend.graphs[0])
+        self.assertIn("_c10d_functional.irecv(l_tensor_, 1,", graph)
+        self.assertNotIn("_c10d_functional.irecv(l_tensor_, 2,", graph)
+
+    @torch._dynamo.config.patch(enable_p2p_compilation=True)
+    def test_compiled_batch_isend_irecv_subgroup_uses_group_local_rank(self):
+        backend = EagerAndRecordGraphs()
+
+        @torch.compile(fullgraph=True, backend=backend)
+        def fn(send_tensor, recv_tensor):
+            ops = [
+                dist.P2POp(dist.isend, send_tensor, group_peer=1, group=self.subgroup),
+                dist.P2POp(dist.irecv, recv_tensor, group_peer=1, group=self.subgroup),
+            ]
+            for w in dist.batch_isend_irecv(ops):
+                w.wait()
+
+        fn(torch.ones(10), torch.zeros(10))
+        self.assertEqual(len(backend.graphs), 1)
+        graph = normalize_graph(backend.graphs[0])
+        self.assertIn("['isend', 'irecv'], [1, 1],", graph)
+        self.assertNotIn("[2, 2]", graph)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

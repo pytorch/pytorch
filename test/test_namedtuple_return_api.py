@@ -21,7 +21,8 @@ all_operators_with_namedtuple_return = {
     'frexp', 'lu_unpack', 'histogram', 'histogramdd',
     '_fake_quantize_per_tensor_affine_cachemask_tensor_qparams',
     '_fused_moving_avg_obs_fq_helper', 'linalg_lu_factor', 'linalg_lu_factor_ex', 'linalg_lu',
-    '_linalg_det', '_lu_with_info', 'linalg_ldl_factor_ex', 'linalg_ldl_factor', 'linalg_solve_ex', '_linalg_solve_ex'
+    '_linalg_det', '_lu_with_info', 'linalg_ldl_factor_ex', 'linalg_ldl_factor', 'linalg_solve_ex', '_linalg_solve_ex',
+    'linalg_polar'
 }
 
 all_operators_with_namedtuple_return_skip_list = {
@@ -86,6 +87,7 @@ class TestNamedTupleAPI(TestCase):
             op(operators=['slogdet', 'linalg_slogdet'], input=(), names=('sign', 'logabsdet'), hasout=True),
             op(operators=['_linalg_slogdet'], input=(), names=('sign', 'logabsdet', 'LU', 'pivots'), hasout=True),
             op(operators=['qr', 'linalg_qr'], input=(), names=('Q', 'R'), hasout=True),
+            op(operators=['linalg_polar'], input=(), names=('U', 'H'), hasout=True),
             op(operators=['geqrf'], input=(), names=('a', 'tau'), hasout=True),
             op(operators=['triangular_solve'], input=(a,), names=('solution', 'cloned_coefficient'), hasout=True),
             op(operators=['linalg_eig'], input=(), names=('eigenvalues', 'eigenvectors'), hasout=True),
