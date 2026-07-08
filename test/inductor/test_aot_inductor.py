@@ -47,7 +47,6 @@ from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import (
     CDNA2OrLater,
-    CDNA5OrLater,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_FP8_GROUPED_GEMM,
@@ -2477,6 +2476,25 @@ class AOTInductorTestsTemplate:
         }
         self.check_model(Repro(), example_inputs, dynamic_shapes=spec)
 
+    def test_wide_tolist_sum_precomputed_for_triton_autotune(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+
+        class Repro(torch.nn.Module):
+            def forward(self, x, sizes):
+                return x * sum(sizes.tolist())
+
+        n = 1000
+        example_inputs = (
+            torch.randn(4, device=self.device),
+            torch.ones(n, dtype=torch.int64, device=self.device),
+        )
+        dynamic_shapes = {
+            "x": (Dim.STATIC,),
+            "sizes": (Dim.STATIC,),
+        }
+        self.check_model(Repro(), example_inputs, dynamic_shapes=dynamic_shapes)
+
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Some archs don't support flash SDPA"
     )
@@ -3777,7 +3795,8 @@ class AOTInductorTestsTemplate:
             def forward(self, x):
                 return torch.ops.aten.normal_functional.default(x)
 
-        self.check_model(Model(), (torch.empty(4, 1, 4, 4, device=self.device),))
+        with config.patch({"fallback_random": True}):
+            self.check_model(Model(), (torch.empty(4, 1, 4, 4, device=self.device),))
 
     def test_empty_graph(self):
         class Model(torch.nn.Module):
@@ -7741,8 +7760,6 @@ class AOTInductorTestsTemplate:
             raise unittest.SkipTest("requires GPU")
 
         if TEST_WITH_ROCM:
-            if CDNA5OrLater():
-                self.skipTest("int4 mm not yet implemented for gfx1250 (needs WMMA)")
             if not CDNA2OrLater():
                 self.skipTest("_int4_mm is supported only for CDNA2 or later")
 
@@ -7780,8 +7797,6 @@ class AOTInductorTestsTemplate:
             raise unittest.SkipTest("requires Intel GPU")
 
         if TEST_WITH_ROCM:
-            if CDNA5OrLater():
-                self.skipTest("int4 mm not yet implemented for gfx1250 (needs WMMA)")
             if not CDNA2OrLater():
                 self.skipTest("_int4_mm is supported only for CDNA2 or later")
 
