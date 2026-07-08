@@ -633,7 +633,7 @@ static void handleKernelBackendInfo(
   }
 }
 
-// Additional attributes for commounication collectives
+// Additional attributes for communication collectives
 inline std::string getCommsNodeAttrs(const RecordFunction& fn) { // NOLINT
   std::vector<std::string> attrs;
 

@@ -24,12 +24,23 @@ flaky_models = {
     "sam",
 }
 
-cuda_inductor_timm_training_flaky_models = {
-    # These CUDA TIMM training models can report eager_two_runs_differ before
-    # Dynamo runs.
-    "mobilenetv2_100",
-    "tf_efficientnet_b0",
-}
+
+def get_eager_nondeterministic_models(expected_filename: str) -> set[str]:
+    expected_filename = expected_filename.replace(os.sep, "/")
+    if expected_filename.endswith("ci_expected_accuracy/inductor_timm_training.csv"):
+        return {
+            "mobilenetv2_100",
+            "tf_efficientnet_b0",
+        }
+    if expected_filename.endswith(
+        "ci_expected_accuracy/inductor_torchbench_training.csv"
+    ):
+        return {
+            "mnasnet1_0",
+            "mobilenet_v2",
+            "shufflenet_v2_x1_0",
+        }
+    return set()
 
 
 def get_field(csv, model_name: str, field: str):
@@ -42,16 +53,10 @@ def get_field(csv, model_name: str, field: str):
 def check_accuracy(actual_csv, expected_csv, expected_filename):
     failed = []
     improved = []
-    flaky_models_for_expected = set(flaky_models)
-
-    if (
-        "rocm" not in expected_filename
-        and os.path.basename(expected_filename) == "inductor_timm_training.csv"
-    ):
-        flaky_models_for_expected.update(cuda_inductor_timm_training_flaky_models)
+    eager_nondeterministic_models = get_eager_nondeterministic_models(expected_filename)
 
     if "rocm" in expected_filename:
-        flaky_models_for_expected.update(
+        flaky_models.update(
             {
                 "Background_Matting",
                 "mnasnet1_0",
@@ -88,7 +93,13 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
             status = "PASS" if expected_accuracy == "pass" else "XFAIL"
             print(f"{model:34}  {status}")
             continue
-        elif model in flaky_models_for_expected:
+        elif (
+            expected_accuracy == "pass"
+            and accuracy == "eager_two_runs_differ"
+            and model in eager_nondeterministic_models
+        ):
+            status = "EAGER_NONDETERMINISTIC:"
+        elif model in flaky_models:
             if accuracy == "pass":
                 # model passed but marked xfailed
                 status = "PASS_BUT_FLAKY:"
