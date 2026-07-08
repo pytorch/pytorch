@@ -8,10 +8,8 @@ install_ubuntu() {
   echo "Installing rust"
   curl https://sh.rustup.rs -sSf | sh -s -- -y
   echo "Checking out sccache repo"
-  git clone https://github.com/mozilla/sccache -b v0.13.0
+  git clone https://github.com/mozilla/sccache -b v0.16.0
   cd sccache
-  echo "Patch dist build on $(uname -m)"
-  sed -i "/all(target_os = \"linux\", target_arch = \"x86_64\"),/{ p; s/x86_64/$(uname -m)/; }" src/bin/sccache-dist/main.rs
   if [[ "$(uname -m)" == "riscv64" ]]; then
     # dist-server has a transient dependency on nix v0.14.1 which doesn't compile
     # on riscv64. Support was added in nix v0.17.0 with [1], released on Feb 2020.

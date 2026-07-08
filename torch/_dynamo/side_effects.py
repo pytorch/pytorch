@@ -226,7 +226,7 @@ class SideEffects:
         """Record an attribute mutation for deferred validation.
 
         Returns True if successfully deferred, False if we cannot read the
-        original value (var_getattr raises NotImplementedError) or the
+        original value (getattro_impl raises NotImplementedError) or the
         original is not a python constant — caller should fall back to
         check_allowed_side_effect.
         """
@@ -244,7 +244,7 @@ class SideEffects:
                 raise AssertionError("output_graph weakref is dead")
             tx = output_graph.current_tx
             try:
-                original_vt = item.var_getattr(tx, name)  # type: ignore[arg-type]
+                original_vt = item.getattro_impl(tx, name)  # type: ignore[arg-type]
             except NotImplementedError:
                 return False
             if not original_vt.is_python_constant():

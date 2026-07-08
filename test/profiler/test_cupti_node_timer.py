@@ -6,30 +6,8 @@ CUDA + libcupti >= 13.3 (gated the same way as the rest of the monitor suite).""
 import unittest
 
 import torch
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_ROCM, TestCase
-from torch.utils._import_utils import _check_module_exists
-
-
-TEST_CUDA = torch.cuda.is_available()
-# cupti-python is pip-installable on ROCm hosts too, but CUPTI itself is a no-op
-# there, so gate the monitor tests off ROCm as well.
-TEST_CUPTI_PYTHON = _check_module_exists("cupti") and not TEST_WITH_ROCM
-
-
-def _cupti_version() -> int:
-    if not TEST_CUPTI_PYTHON:
-        return 0
-    try:
-        from torch.profiler._cupti.cupti_python import pylibcupti
-
-        return pylibcupti().get_version()
-    except Exception:
-        return 0
-
-
-# The CUPTI monitor needs libcupti >= 13.3 (v2 user-defined records + populated
-# ppRecordLayouts); a single >= 13.3 gate covers the whole monitor.
-TEST_CUPTI_V13_3 = TEST_CUPTI_PYTHON and _cupti_version() >= 130300
+from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUPTI_V13_3
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 def _capture_relu_graph() -> "torch.cuda.CUDAGraph":
@@ -251,6 +229,39 @@ class TestCuptiNodeTimerCUDA(TestCase):
         self.assertGreater(len(spans["graphregion"]), 0)
         for start_ns, end_ns in spans["graphregion"]:
             self.assertGreaterEqual(end_ns, start_ns)
+
+    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
+    def test_node_timer_collects_memcpy2_spans(self):
+        # Peer-to-peer / cross-device copies surface under MEMCPY2 (not MEMCPY). CUPTI
+        # only emits MEMCPY2 when MEMCPY is enabled too, so requesting MEMCPY2 implicitly
+        # enables MEMCPY -- a cross-device copy_ then drains as a timed span.
+        from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
+
+        from torch.profiler._cupti.observers.node_timer import NodeTimerObserver
+
+        obs = NodeTimerObserver(kinds=(ActivityKind.MEMCPY2,))
+        # MEMCPY2 pulls in MEMCPY implicitly (else CUPTI emits no MEMCPY2 records).
+        self.assertIn(int(ActivityKind.MEMCPY), {int(k) for k in obs._kinds})
+        if not obs.available:
+            self.skipTest("CUPTI monitor unavailable (v2 subscribe failed)")
+        try:
+            a = torch.randn(1024, 1024, device="cuda:0")
+            b = torch.empty(1024, 1024, device="cuda:1")
+            for _ in range(4):
+                b.copy_(a)
+            torch.cuda.synchronize()
+            obs._monitor.flush(sync=True)
+            gnode, start, end, stream = obs.drain()
+        finally:
+            obs.close()
+
+        if len(start) == 0:
+            self.skipTest("driver did not emit MEMCPY2 records for the P2P copies")
+        self.assertEqual(len(start), len(end))
+        self.assertEqual(len(gnode), len(start))
+        self.assertEqual(len(stream), len(start))
+        self.assertTrue(bool((end >= start).all()))
 
 
 if __name__ == "__main__":

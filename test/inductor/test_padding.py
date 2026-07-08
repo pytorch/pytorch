@@ -564,7 +564,9 @@ class PaddingTest(TestCaseBase):
         out_strides = list(ir.Layout._pad_strides(in_strides, sizes, torch.float32))
         expected_strides = [2048 * 16, 2048, 1]
         self.assertEqual(
-            expected_strides, out_strides, f"{expected_strides} v.s. {out_strides}"
+            expected_strides,
+            out_strides,
+            lambda msg: f"{msg}\n{expected_strides} v.s. {out_strides}",
         )
 
     def test_pad_strides_skip(self):
@@ -576,7 +578,9 @@ class PaddingTest(TestCaseBase):
         out_strides = list(ir.Layout._pad_strides(in_strides, sizes, torch.float32))
         expected_strides = [4064, 127, 1]
         self.assertEqual(
-            expected_strides, out_strides, f"{expected_strides} v.s. {out_strides}"
+            expected_strides,
+            out_strides,
+            lambda msg: f"{msg}\n{expected_strides} v.s. {out_strides}",
         )
 
     def test_pad_3d_tensor(self):
