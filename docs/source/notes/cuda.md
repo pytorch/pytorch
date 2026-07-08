@@ -28,8 +28,6 @@ tensors spread across different devices will raise an error.
 Below you can find a small example showcasing this:
 
 ```python
-import torch
-
 cuda = torch.device('cuda')     # Default CUDA device
 cuda0 = torch.device('cuda:0')
 cuda2 = torch.device('cuda:2')  # GPU 2 (these are 0-indexed)
