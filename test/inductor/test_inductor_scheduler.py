@@ -576,10 +576,12 @@ class TestScheduler(TestCase):
             self.assertEqual(
                 reference_flops,
                 counters["inductor"]["flop_count"],
-                msg=f"op = {op} reference flops = {reference_flops} != counters {counters['inductor']['flop_count']}",
+                msg=lambda msg: f"{msg}\nop = {op} reference flops = {reference_flops} != counters {counters['inductor']['flop_count']}",
             )
             if op != torch.add:
-                self.assertNotEqual(reference_flops, 0, msg=f"op = {op} is 0 flops")
+                self.assertNotEqual(
+                    reference_flops, 0, msg=lambda msg: f"{msg}\nop = {op} is 0 flops"
+                )
             counters["inductor"]["flop_count"] = 0
         torch._logging.set_logs()
 

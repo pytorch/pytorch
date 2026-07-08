@@ -73,7 +73,6 @@ from torch.testing._internal.common_quantization import (
 )
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
-    IS_ARM64,
     IS_CI,
     IS_FBCODE,
     IS_MACOS,
@@ -90,7 +89,6 @@ from torch.testing._internal.common_utils import (
     skipIfXpu,
     TEST_MPS,
     TEST_WITH_ROCM,
-    xfailIf,
 )
 from torch.testing._internal.custom_tensor import CustomTensorPlainOut
 from torch.testing._internal.inductor_utils import (
@@ -2068,8 +2066,6 @@ class AOTInductorTestsTemplate:
         with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
             self.check_model(Model(self.device), example_inputs)
 
-    @xfailIf(IS_ARM64)
-    # see https://github.com/pytorch/pytorch/issues/177254
     @skipIfNoFBGEMM
     def test_quanatized_int8_linear(self):
         class Model(torch.nn.Module):
@@ -2479,6 +2475,25 @@ class AOTInductorTestsTemplate:
             "lst": (Dim.STATIC,),
         }
         self.check_model(Repro(), example_inputs, dynamic_shapes=spec)
+
+    def test_wide_tolist_sum_precomputed_for_triton_autotune(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+
+        class Repro(torch.nn.Module):
+            def forward(self, x, sizes):
+                return x * sum(sizes.tolist())
+
+        n = 1000
+        example_inputs = (
+            torch.randn(4, device=self.device),
+            torch.ones(n, dtype=torch.int64, device=self.device),
+        )
+        dynamic_shapes = {
+            "x": (Dim.STATIC,),
+            "sizes": (Dim.STATIC,),
+        }
+        self.check_model(Repro(), example_inputs, dynamic_shapes=dynamic_shapes)
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Some archs don't support flash SDPA"
@@ -3780,7 +3795,8 @@ class AOTInductorTestsTemplate:
             def forward(self, x):
                 return torch.ops.aten.normal_functional.default(x)
 
-        self.check_model(Model(), (torch.empty(4, 1, 4, 4, device=self.device),))
+        with config.patch({"fallback_random": True}):
+            self.check_model(Model(), (torch.empty(4, 1, 4, 4, device=self.device),))
 
     def test_empty_graph(self):
         class Model(torch.nn.Module):
@@ -8779,7 +8795,7 @@ torch._inductor.aoti_load_package("{model_path}")
             self.assertEqual(
                 result.returncode,
                 0,
-                f"Failed to load package in subprocess: {result.stdout + result.stderr}",
+                lambda msg: f"{msg}\nFailed to load package in subprocess: {result.stdout + result.stderr}",
             )
 
     @unittest.skipIf(

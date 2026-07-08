@@ -284,6 +284,7 @@ from typing import Any, ClassVar, IO
 
 import setuptools.command.bdist_wheel
 import setuptools.command.build_ext
+import setuptools.command.egg_info
 import setuptools.errors
 from setuptools import Command, Extension, find_packages, setup
 from setuptools.dist import Distribution
@@ -899,6 +900,24 @@ def check_pydep(importname: str, module: str) -> None:
         ) from e
 
 
+class egg_info(setuptools.command.egg_info.egg_info):
+    """Skip MANIFEST.in processing for non-sdist builds.
+
+    SOURCES.txt (the output of find_sources) is only consumed by sdist.
+    Processing MANIFEST.in for editable/wheel builds is pure waste: it
+    walks 121k files in third_party/ twice per build, costing ~5s.
+    """
+
+    def find_sources(self) -> None:
+        if "sdist" in (getattr(self.distribution, "commands", None) or []):
+            return super().find_sources()
+        manifest = os.path.join(self.egg_info, "SOURCES.txt")
+        if not os.path.exists(manifest):
+            os.makedirs(os.path.dirname(manifest), exist_ok=True)
+            open(manifest, "w").close()
+        self.filelist = setuptools.command.egg_info.FileList()
+
+
 class build_ext(setuptools.command.build_ext.build_ext):
     def run(self) -> None:
         # Report build options. This is run after the build completes so # `CMakeCache.txt` exists
@@ -1082,6 +1101,7 @@ def configure_extension_build() -> tuple[
     packages = find_packages(include=includes, exclude=excludes)
 
     cmdclass = {
+        "egg_info": egg_info,
         "bdist_wheel": bdist_wheel,
         "build_ext": build_ext,
         "clean": clean,
@@ -1096,11 +1116,18 @@ def configure_extension_build() -> tuple[
         ],
     }
 
-    if cmake_cache_vars["USE_DISTRIBUTED"]:
-        # Only enable fr_trace command if distributed is enabled
-        entry_points["console_scripts"].append(
-            "torchfrtrace = torch.distributed.flight_recorder.fr_trace:main",
-        )
+    # Not gated on USE_DISTRIBUTED: the CMake cache is empty during the pip
+    # metadata phase, so gating would drop these from the wheel metadata.
+    entry_points["console_scripts"].append(
+        "torchfrtrace = torch.distributed.flight_recorder.fr_trace:main",
+    )
+    entry_points["torch.distributed.backends"] = [
+        "mpi = torch.distributed.distributed_c10d:_register_builtin_mpi_backend",
+        "gloo = torch.distributed.distributed_c10d:_register_builtin_gloo_backend",
+        "nccl = torch.distributed.distributed_c10d:_register_builtin_nccl_backend",
+        "ucc = torch.distributed.distributed_c10d:_register_builtin_ucc_backend",
+        "xccl = torch.distributed.distributed_c10d:_register_builtin_xccl_backend",
+    ]
     return ext_modules, cmdclass, packages, entry_points, extra_install_requires
 
 
