@@ -33,22 +33,22 @@ class CUDAGraphCaptureControlFlowOpDispatchMode(TorchDispatchMode):
                 return if_else_node(*args)
         if func is torch.ops.higher_order.while_loop:
             # Re-enter the mode to support nested control flow
+            _check_no_while_loop_kwargs(kwargs)
             with self:
-                return while_loop_node(*args, **kwargs)
+                return while_loop_node(*args)
         return func(*args, **kwargs)
 
 
 class ControlFlowOpWarmupDispatchMode(TorchDispatchMode):
-    """The purpose of this TodchDispatchMode is to "warm up" both sides of a torch.cond() statement.
+    """Warm up control-flow subgraphs before CUDA graph capture.
 
-    For data-dependent control flow code, only one side will be
-    executed. Therefore, it is not safe to stream capture a
-    torch.cond() statement naively, since we don't have a guarantee
-    that all ops will have been "warmed up". The clever workaround is
-    to use a "relaxed" stream capture whose final cuda graph we throw
-    away. This works because stream capture does not actually execute
-    any GPU code, and because true_fn and false_fn are both fxgraphs,
-    which do not have any CPU side effects.
+    Data-dependent control flow does not necessarily execute every subgraph, so
+    operations in an untaken torch.cond branch or a torch.while_loop body may
+    not have been warmed up. This mode uses a relaxed stream capture, whose
+    final CUDA graph is discarded, to warm up both cond branches and execute a
+    while_loop body once. This works because stream capture does not execute GPU
+    code and the branch and body functions are FX graphs without CPU side
+    effects.
     """
 
     @classmethod
@@ -95,11 +95,12 @@ class ControlFlowOpWarmupDispatchMode(TorchDispatchMode):
 
                 return func(*args, **kwargs)
         elif func is torch.ops.higher_order.while_loop:
+            _check_no_while_loop_kwargs(kwargs)
             if torch.cuda.is_current_stream_capturing():
                 # This is a call to torch.while_loop() nested within another
                 # control-flow function.
                 with self:
-                    return while_loop_node(*args, **kwargs)
+                    return while_loop_node(*args)
             else:
                 with (
                     torch.cuda.graph(
@@ -110,7 +111,7 @@ class ControlFlowOpWarmupDispatchMode(TorchDispatchMode):
                     ),
                     self,
                 ):
-                    while_loop_node(*args, **kwargs)
+                    while_loop_node(*args)
 
                 return func(*args, **kwargs)
         else:
@@ -120,6 +121,13 @@ class ControlFlowOpWarmupDispatchMode(TorchDispatchMode):
 def _check_no_cond_kwargs(kwargs) -> None:
     if kwargs:
         raise RuntimeError("CUDA graph conditional torch.cond does not support kwargs")
+
+
+def _check_no_while_loop_kwargs(kwargs) -> None:
+    if kwargs:
+        raise RuntimeError(
+            "CUDA graph conditional torch.while_loop does not support kwargs"
+        )
 
 
 def _is_boolean_scalar_cuda_tensor(pred: object) -> bool:
@@ -207,7 +215,7 @@ def while_loop_node(
         body_out = body_fn(*loop_carried, *additional_inputs)
         flat_body_out, body_out_spec = pytree.tree_flatten(body_out)
         if body_out_spec != carried_spec:
-            raise AssertionError(
+            raise RuntimeError(
                 "body_fn should return the same pytree structure as carried_inputs"
             )
         if not all(isinstance(out, torch.Tensor) for out in flat_body_out):
