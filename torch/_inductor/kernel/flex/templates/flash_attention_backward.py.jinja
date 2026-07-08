@@ -1,4 +1,14 @@
-{% if HAS_BLOCK_MASK %}
+{% if HAS_BLOCK_MASK and HAS_DQ_WRITE_ORDER and HAS_DQ_WRITE_ORDER_FULL and HAS_DQ_KV_ORDER %}
+{{def_kernel("Q", "K", "V", "OUT", "D_OUT", "LSE", "DK", "DV", "Q_NUM_BLKS", "Q_IDX", "FULL_Q_NUM_BLKS", "FULL_Q_IDX", "DQ_WRITE_ORDER", "DQ_WRITE_ORDER_FULL", "DQ_KV_ORDER")}}
+{% elif HAS_BLOCK_MASK and HAS_DQ_WRITE_ORDER and HAS_DQ_WRITE_ORDER_FULL %}
+{{def_kernel("Q", "K", "V", "OUT", "D_OUT", "LSE", "DK", "DV", "Q_NUM_BLKS", "Q_IDX", "FULL_Q_NUM_BLKS", "FULL_Q_IDX", "DQ_WRITE_ORDER", "DQ_WRITE_ORDER_FULL")}}
+{% elif HAS_BLOCK_MASK and HAS_DQ_WRITE_ORDER and HAS_DQ_KV_ORDER %}
+{{def_kernel("Q", "K", "V", "OUT", "D_OUT", "LSE", "DK", "DV", "Q_NUM_BLKS", "Q_IDX", "FULL_Q_NUM_BLKS", "FULL_Q_IDX", "DQ_WRITE_ORDER", "DQ_KV_ORDER")}}
+{% elif HAS_BLOCK_MASK and HAS_DQ_WRITE_ORDER %}
+{{def_kernel("Q", "K", "V", "OUT", "D_OUT", "LSE", "DK", "DV", "Q_NUM_BLKS", "Q_IDX", "FULL_Q_NUM_BLKS", "FULL_Q_IDX", "DQ_WRITE_ORDER")}}
+{% elif HAS_BLOCK_MASK and HAS_DQ_KV_ORDER %}
+{{def_kernel("Q", "K", "V", "OUT", "D_OUT", "LSE", "DK", "DV", "Q_NUM_BLKS", "Q_IDX", "FULL_Q_NUM_BLKS", "FULL_Q_IDX", "DQ_KV_ORDER")}}
+{% elif HAS_BLOCK_MASK %}
 {{def_kernel("Q", "K", "V", "OUT", "D_OUT", "LSE", "DK", "DV", "Q_NUM_BLKS", "Q_IDX", "FULL_Q_NUM_BLKS", "FULL_Q_IDX")}}
 {% else %}
 {{def_kernel("Q", "K", "V", "OUT", "D_OUT", "LSE", "DK", "DV")}}
@@ -15,10 +25,22 @@
     dq_out_transposed = dq_out.transpose(1, 2)
     dk_out_transposed = DK.transpose(1, 2)
     dv_out_transposed = DV.transpose(1, 2)
+    aux_scalars = {{ define_aux_scalars(AUX_SCALAR_SYMBOLS) }}
 
+    {# FA4 omits aux_scalars when it is None for compatibility with older callables. #}
+    {# Keep the default so generated mods accept both FA4 call forms. #}
     {% if HAS_SCORE_MOD %}
     @cute.jit
-    def score_mod(tSrS_ssa, b_idx, h_idx, q_idx, kv_idx, seqlen_info, aux_tensors):
+    def score_mod(
+        tSrS_ssa,
+        b_idx,
+        h_idx,
+        q_idx,
+        kv_idx,
+        seqlen_info,
+        aux_tensors,
+        aux_scalars=None,
+    ):
         {{unpack_buffers("aux_tensors", indent_width=8)}}
         {{ modification(
             subgraph_number=0,
@@ -30,11 +52,21 @@
             n="kv_idx",
             out="tSrS_ssa"
         ) | indent_except_first(2) }}
-        return tSrS_ssa
+        return tSrS_ssa.to(cutlass.Float32)
     {{ set_cute_hash("score_mod", "score") }}
 
     @cute.jit
-    def score_mod_bwd(grad_score_mod_ssa, tSrS_ssa, b_idx, h_idx, q_idx, kv_idx, seqlen_info, aux_tensors):
+    def score_mod_bwd(
+        grad_score_mod_ssa,
+        tSrS_ssa,
+        b_idx,
+        h_idx,
+        q_idx,
+        kv_idx,
+        seqlen_info,
+        aux_tensors,
+        aux_scalars=None,
+    ):
         {{unpack_buffers("aux_tensors", indent_width=8)}}
         {{ modification(
             subgraph_number=1,
@@ -46,7 +78,7 @@
             m="q_idx",
             n="kv_idx"
         ) | indent_except_first(2) }}
-        return grad_score_mod_ssa_out
+        return grad_score_mod_ssa_out.to(cutlass.Float32)
     {{ set_cute_hash("score_mod_bwd", "score_bwd") }}
     {% else %}
     score_mod = None
@@ -58,7 +90,7 @@
     {# mask_mod is subgraph 2 when HAS_SCORE_MOD, else subgraph 0 #}
     {% set mask_subgraph_idx = 2 if HAS_SCORE_MOD else 0 %}
     @cute.jit
-    def mask_mod(b_idx, h_idx, q_idx, kv_idx, seqlen_info, aux_tensors):
+    def mask_mod(b_idx, h_idx, q_idx, kv_idx, seqlen_info, aux_tensors, aux_scalars=None):
         {{unpack_buffers("aux_tensors", indent_width=8)}}
         {{ modification(
             subgraph_number=mask_subgraph_idx,
@@ -70,7 +102,31 @@
         ) | indent_except_first(2) }}
         return mask_mod_output
     {{ set_cute_hash("mask_mod", "mask") }}
-    block_sparse_tensors = BlockSparseTensorsTorch(Q_NUM_BLKS, Q_IDX, FULL_Q_NUM_BLKS, FULL_Q_IDX, block_size=({{SPARSE_Q_BLOCK_SIZE}}, {{SPARSE_KV_BLOCK_SIZE}}))
+    block_sparse_kwargs = {
+        "block_size": ({{SPARSE_Q_BLOCK_SIZE}}, {{SPARSE_KV_BLOCK_SIZE}}),
+    }
+    {% if HAS_DQ_WRITE_ORDER %}
+    block_sparse_kwargs["dq_write_order"] = DQ_WRITE_ORDER
+    {% endif %}
+    {% if HAS_DQ_WRITE_ORDER_FULL %}
+    block_sparse_kwargs["dq_write_order_full"] = DQ_WRITE_ORDER_FULL
+    {% endif %}
+    {% if SUPPORTS_DQ_KV_ORDER %}
+    {% if HAS_DQ_KV_ORDER %}
+    block_sparse_kwargs["dq_kv_order"] = DQ_KV_ORDER
+    {% elif DQ_KV_ORDER_SPT is not none %}
+    block_sparse_kwargs["dq_kv_order"] = {{DQ_KV_ORDER_SPT}}
+    {% endif %}
+    {% elif SUPPORTS_SPT %}
+    {% if HAS_DQ_KV_ORDER %}
+    raise RuntimeError("Explicit tensor dq_kv_order requires flash-attn-4 with dq_kv_order support")
+    {% elif DQ_KV_ORDER_SPT is not none %}
+    block_sparse_kwargs["spt"] = {{DQ_KV_ORDER_SPT}}
+    {% endif %}
+    {% endif %}
+    block_sparse_tensors = BlockSparseTensorsTorch(
+        Q_NUM_BLKS, Q_IDX, FULL_Q_NUM_BLKS, FULL_Q_IDX, **block_sparse_kwargs
+    )
     {% else %}
     mask_mod = None
     block_sparse_tensors = None
@@ -95,10 +151,11 @@
         score_mod=score_mod,
         score_mod_bwd=score_mod_bwd,
         mask_mod=mask_mod,
-        aux_tensors=buffers,
+        aux_tensors=buffers,{% if AUX_SCALAR_SYMBOLS %}
+        aux_scalars=aux_scalars,{% endif %}
         dq=dq_out_transposed,
         dk=dk_out_transposed,
         dv=dv_out_transposed,
         block_sparse_tensors=block_sparse_tensors,
-        deterministic=torch.are_deterministic_algorithms_enabled() and not torch.is_deterministic_algorithms_warn_only_enabled()
+        deterministic={{DETERMINISTIC_BACKWARD_ENABLED}},
     )

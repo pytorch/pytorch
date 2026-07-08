@@ -608,6 +608,29 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
             actual = compiled_fn(*inputs)
             self.assertEqual(expected, actual)
 
+    def test_aot_compile_autocast_guard_reload(self):
+        def fn(x):
+            return x + 1 * x
+
+        def backend(gm, example_inputs):
+            return CustomCompiledFunction(gm, example_inputs)
+
+        x = torch.randn(3, 4)
+        with torch.amp.autocast("cpu", dtype=torch.bfloat16):
+            compiled_fn = torch.compile(
+                fn, fullgraph=True, backend=backend
+            ).aot_compile(((x,), {}))
+            expected = fn(x)
+            self.assertEqual(expected, compiled_fn(x))
+
+        compiled_fn.save_compiled_function(self.path())
+        torch._dynamo.reset()
+        with open(self.path(), "rb") as f:
+            compiled_fn = torch.compiler.load_compiled_function(f)
+        with torch.amp.autocast("cpu", dtype=torch.bfloat16):
+            actual = compiled_fn(x)
+        self.assertEqual(expected, actual)
+
     def test_aot_compile_basic_forward(self):
         mod = SimpleLinearModule()
 
@@ -1092,6 +1115,20 @@ from user code:
             torch.randn(3, 4),
         )
         self.assertEqual(compiled_foo(inputs), foo(inputs))
+
+    def test_fullgraph_capture_schema_self_arg_no_collision(self):
+        """Regression: aten op schemas with `self` at non-first position
+        (e.g. `aten.where.self(Tensor condition, Tensor self, Tensor other)`)
+        must not produce `def forward(self, condition, self, other):` and
+        SyntaxError at `graph_module.recompile()`."""
+        from torch._dynamo.functional_export import dynamo_graph_capture_for_export
+
+        cond = torch.tensor([True, False, True, False])
+        x = torch.tensor(0.0)
+        y = torch.tensor([1.0, 2.0, 3.0, 4.0])
+        op = torch.ops.aten.where.self
+        compiled = dynamo_graph_capture_for_export(op)(cond, x, y)
+        self.assertEqual(compiled(cond, x, y), op(cond, x, y))
 
     def test_aot_compile_with_closure_save_and_load(self):
         tmp = 2
@@ -1742,7 +1779,7 @@ from user code:
                     self.assertEqual(
                         compiled_grads[name],
                         eager_grads[name],
-                        msg=f"Gradients for {name} should be bitwise equivalent",
+                        msg=lambda msg: f"{msg}\nGradients for {name} should be bitwise equivalent",
                     )
         finally:
             c10d.destroy_process_group()

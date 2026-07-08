@@ -214,6 +214,7 @@ enum class PyNumberSlotBit : int64_t {
   NB_INDEX = 31,
   NB_MATRIX_MULTIPLY = 32,
   NB_INPLACE_MATRIX_MULTIPLY = 33,
+  NB_DIVMOD = 34,
 };
 
 enum class PyTypeSlotBit : int64_t {
@@ -227,6 +228,7 @@ enum class PyTypeSlotBit : int64_t {
   TP_SETATTRO = 7,
   TP_DESCR_GET = 8,
   TP_DESCR_SET = 9,
+  TP_STR = 10,
 };
 
 int64_t get_pysequence_slots(PyTypeObject* type) {
@@ -333,6 +335,8 @@ int64_t get_pynumber_slots(PyTypeObject* type) {
   if (PyType_GetSlot(type, Py_nb_inplace_matrix_multiply) != nullptr)
     slots |=
         (1LL << static_cast<int>(PyNumberSlotBit::NB_INPLACE_MATRIX_MULTIPLY));
+  if (PyType_GetSlot(type, Py_nb_divmod) != nullptr)
+    slots |= (1LL << static_cast<int>(PyNumberSlotBit::NB_DIVMOD));
   return slots;
 }
 
@@ -373,6 +377,8 @@ int64_t get_pytype_slots(PyTypeObject* type) {
     slots |= (1LL << static_cast<int>(PyTypeSlotBit::TP_DESCR_GET));
   if (PyType_GetSlot(type, Py_tp_descr_set) != nullptr)
     slots |= (1LL << static_cast<int>(PyTypeSlotBit::TP_DESCR_SET));
+  if (PyType_GetSlot(type, Py_tp_str) != nullptr)
+    slots |= (1LL << static_cast<int>(PyTypeSlotBit::TP_STR));
   return slots;
 }
 
@@ -406,7 +412,7 @@ PyObject* _get_type_slots(
 #define PYC_FN(x) ((PyCFunction)(void (*)()) & x)
 
 void _register_functions(PyObject* mod) {
-  static std::array<PyMethodDef, 4> fns = {
+  static auto fns = std::to_array<PyMethodDef>({
       PyMethodDef{
           "strip_function_call",
           PYC_FN(_strip_function_call),
@@ -420,7 +426,7 @@ void _register_functions(PyObject* mod) {
       PyMethodDef{
           "get_type_slots", PYC_FN(_get_type_slots), METH_FASTCALL, nullptr},
       PyMethodDef{nullptr, nullptr, 0, nullptr},
-  };
+  });
   PyModule_AddFunctions(mod, fns.data());
 }
 
@@ -583,7 +589,8 @@ void initDynamoBindings(PyObject* torch) {
       .value("NB_MATRIX_MULTIPLY", PyNumberSlotBit::NB_MATRIX_MULTIPLY)
       .value(
           "NB_INPLACE_MATRIX_MULTIPLY",
-          PyNumberSlotBit::NB_INPLACE_MATRIX_MULTIPLY);
+          PyNumberSlotBit::NB_INPLACE_MATRIX_MULTIPLY)
+      .value("NB_DIVMOD", PyNumberSlotBit::NB_DIVMOD);
 
   py::enum_<PyTypeSlotBit>(dynamo_module, "PyTypeSlots")
       .value("TP_HASH", PyTypeSlotBit::TP_HASH)
@@ -595,7 +602,8 @@ void initDynamoBindings(PyObject* torch) {
       .value("TP_GETATTRO", PyTypeSlotBit::TP_GETATTRO)
       .value("TP_SETATTRO", PyTypeSlotBit::TP_SETATTRO)
       .value("TP_DESCR_GET", PyTypeSlotBit::TP_DESCR_GET)
-      .value("TP_DESCR_SET", PyTypeSlotBit::TP_DESCR_SET);
+      .value("TP_DESCR_SET", PyTypeSlotBit::TP_DESCR_SET)
+      .value("TP_STR", PyTypeSlotBit::TP_STR);
 }
 
 } // namespace torch::dynamo

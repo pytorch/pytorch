@@ -1666,6 +1666,11 @@ void initJITBindings(PyObject* module) {
              uint64_t storage_alignment) {
             return self.getRecordOffsetNoRead(
                 zipfile_header_offset, filename, size, storage_alignment);
+          })
+      .def(
+          "get_record_size",
+          [](PyTorchStreamReader& self, const std::string& key) {
+            return self.getRecordSize(key);
           });
 
   // Used by torch.Package to coordinate deserialization of storages across
@@ -2031,20 +2036,20 @@ void initJITBindings(PyObject* module) {
           [](const FunctionSchema& self) {
             std::stringstream ss;
             ss << self;
-            return ss.str();
+            return std::move(ss).str();
           })
       .def(
           "__repr__",
           [](const FunctionSchema& self) {
             std::stringstream ss;
             ss << self;
-            return ss.str();
+            return std::move(ss).str();
           })
       .def(py::pickle(
           [](const FunctionSchema& self) { // __getstate__
             std::stringstream ss;
             ss << self;
-            return py::str(ss.str());
+            return py::str(std::move(ss).str());
           },
           [](const py::str& schema) { // __setstate__, note: no `self` argument
             return parseSchema(schema);

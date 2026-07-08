@@ -12,6 +12,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skipIfNoCuteDSL,
     TestCase,
 )
 
@@ -130,7 +131,7 @@ class TestNativeDSLOps(TestCase):
                 self.assertEqual(
                     api_sets[0],
                     api_set,
-                    f"Module {i} should have identical public API to module 0",
+                    lambda msg: f"{msg}\nModule {i} should have identical public API to module 0",
                 )
 
         # Test runtime functions return expected types
@@ -161,7 +162,11 @@ class TestNativeDSLOps(TestCase):
             print(repr(leaked))
         """)
         result = _subprocess_lastline(script)
-        self.assertEqual(result, "[]", f"DSL modules leaked on import torch: {result}")
+        self.assertEqual(
+            result,
+            "[]",
+            lambda msg: f"{msg}\nDSL modules leaked on import torch: {result}",
+        )
 
     def test_no_external_packaging_dependency(self):
         """torch._native must not import the external `packaging` package.
@@ -249,7 +254,7 @@ class TestNativeDSLOps(TestCase):
                     self.assertEqual(
                         result,
                         expected_result,
-                        f"_available_version({version_str!r}) = {result}",
+                        lambda msg: f"{msg}\n_available_version({version_str!r}) = {result}",
                     )
 
     def test_registry_mechanics(self):
@@ -421,7 +426,7 @@ class TestNativeDSLOps(TestCase):
                 self.assertEqual(
                     triton_mock.call_count + cute_mock.call_count,
                     2,
-                    f"Expected 2 calls but got triton: {triton_mock.call_count}, cutedsl: {cute_mock.call_count}",
+                    lambda msg: f"{msg}\nExpected 2 calls but got triton: {triton_mock.call_count}, cutedsl: {cute_mock.call_count}",
                 )
 
     @parametrize("env_value, expected", [(None, False), ("1", True)])
@@ -474,7 +479,6 @@ class TestNativeDSLOps(TestCase):
         """Test that DSL test helper decorators work"""
         from torch.testing._internal.common_utils import (
             skipIfDSLUnavailable,
-            skipIfNoCuteDSL,
             skipIfNoTritonDSL,
             skipUnlessDSLAvailable,
         )
@@ -565,6 +569,7 @@ class TestNativeDSLOps(TestCase):
 
 
 instantiate_parametrized_tests(TestNativeDSLOps)
+
 
 if __name__ == "__main__":
     run_tests()
