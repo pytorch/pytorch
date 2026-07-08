@@ -2489,6 +2489,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             ("amax_negative_dims", lambda x: x.abs().amax((-1, -3))),
             ("sum", lambda x: x.sum((1, 3))),
             ("mean", lambda x: x.mean((1, 3))),
+            ("mx_e8m0_scale", lambda x: mx_e8m0_scale(x.abs().amax((1, 3)))),
         ),
         name_fn=lambda case: case[0],
     )
@@ -2520,37 +2521,9 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         torch.testing.assert_close(
             actual.float(), reference.relu(), atol=1e-1, rtol=1e-2
         )
-        torch.testing.assert_close(aux.float(), expected_aux, atol=1e-3, rtol=1e-3)
-
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    @skipIfNoCuteDSL
-    @parametrize(
-        "case",
-        (("mx_e8m0_scale", lambda x: mx_e8m0_scale(x.abs().amax((1, 3)))),),
-        name_fn=lambda case: case[0],
-    )
-    def test_generated_block_local_reduce_rejects_deferred_reductions(self, case):
-        _, reduce_fn = case
-        m = n = 256
-        block = 128
-
-        def fn(a, b):
-            def epilogue(acc):
-                x = acc.float().view(m // block, block, n // block, block)
-                return acc.relu(), reduce_fn(x)
-
-            return flex_gemm(
-                torch.mm,
-                (a, b),
-                epilogue,
-                kernel_options={"backend": "QUACK"},
-            )
-
-        a = torch.randn(m, 64, device="cuda", dtype=torch.bfloat16)
-        b = torch.randn(64, n, device="cuda", dtype=torch.bfloat16)
-
-        with self.assertRaisesRegex(Exception, "2-D block local reductions currently"):
-            torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+        torch.testing.assert_close(
+            aux.float(), expected_aux.float(), atol=1e-3, rtol=1e-3
+        )
 
     def test_generated_block_local_reduce_rejects_non_divisible_shape(self):
         m, n = 256, 192

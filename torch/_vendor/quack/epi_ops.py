@@ -1484,14 +1484,16 @@ class GroupedLocalReduce(VecReduce):
                                 for warp_offset in cutlass.range_constexpr(1, group_warps):
                                     smem_warp_idx = group_warp_start + warp_offset - group_m_idx - 1
                                     group_value = combine_fn(group_value, sReduce[group_n_idx, smem_warp_idx])
-                                group_value = finalize_fn(group_value)
+                                finalized_group_value = finalize_fn(group_value)
                                 if const_expr(param_tensor.element_type != Float32):
-                                    group_value = group_value.to(param_tensor.element_type)
+                                    store_group_value = finalized_group_value.to(param_tensor.element_type)
+                                else:
+                                    store_group_value = finalized_group_value
                                 if (
                                     global_group_m_idx < limit_group_m
                                     and global_group_n_idx < limit_group_n
                                 ):
-                                    gReduce[group_m_idx, group_n_idx] = group_value
+                                    gReduce[group_m_idx, group_n_idx] = store_group_value
                         gemm.epilogue_barrier.arrive_and_wait()
                     else:
                         for i in cutlass.range(cute.size(tDrReduce_flt), unroll_full=True):
@@ -1507,10 +1509,12 @@ class GroupedLocalReduce(VecReduce):
                                 and global_group_m_idx < limit_group_m
                                 and global_group_n_idx < limit_group_n
                             ):
-                                group_value = finalize_fn(tDrReduce_flt[i])
+                                finalized_group_value = finalize_fn(tDrReduce_flt[i])
                                 if const_expr(param_tensor.element_type != Float32):
-                                    group_value = group_value.to(param_tensor.element_type)
-                                gReduce[group_m_idx, group_n_idx] = group_value
+                                    store_group_value = finalized_group_value.to(param_tensor.element_type)
+                                else:
+                                    store_group_value = finalized_group_value
+                                gReduce[group_m_idx, group_n_idx] = store_group_value
                 return
             if const_expr(axis == 1 and group > local_fragment_n):
                 assert combine_fn is not None
