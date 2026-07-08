@@ -4682,6 +4682,52 @@ class TestAsArray(TestCase):
                 torch.asarray(wrapper, copy=True).data_ptr(), original.data_ptr()
             )
 
+    @onlyCPU
+    def test_asarray_dlpack_failure_falls_back(self, device):
+        # If a producer exposes __dlpack__ but its export raises, asarray must
+        # fall back to the buffer/sequence paths instead of propagating the
+        # error (gh-188784 review: MLX/PyArrow-style objects).
+        class _BadDLPackSequence:
+            def __init__(self, data):
+                self._data = data
+
+            def __dlpack__(self, *args, **kwargs):
+                raise RuntimeError("dlpack export failed")
+
+            def __dlpack_device__(self):
+                raise RuntimeError("no dlpack device")
+
+            def __len__(self):
+                return len(self._data)
+
+            def __getitem__(self, index):
+                return self._data[index]
+
+        # __dlpack__ raises -> falls through to the sequence path.
+        result = torch.asarray(_BadDLPackSequence([1.0, 2.0, 3.0]))
+        self.assertEqual(result, torch.tensor([1.0, 2.0, 3.0]))
+
+        # __dlpack__ raises but the object is also a buffer -> falls through to
+        # the buffer path (PEP 688 __buffer__, Python >= 3.12).
+        if sys.version_info >= (3, 12):
+            class _BadDLPackBuffer:
+                def __init__(self, array):
+                    self._array = array
+
+                def __dlpack__(self, *args, **kwargs):
+                    raise RuntimeError("dlpack export failed")
+
+                def __dlpack_device__(self):
+                    raise RuntimeError("no dlpack device")
+
+                def __buffer__(self, flags):
+                    return memoryview(self._array)
+
+            arr = np.array([1, 2, 3], dtype=np.int32)
+            result = torch.asarray(_BadDLPackBuffer(arr))
+            self.assertEqual(result.dtype, torch.int32)
+            self.assertEqual(result, torch.tensor([1, 2, 3], dtype=torch.int32))
+
 
 instantiate_device_type_tests(TestTensorCreation, globals())
 instantiate_device_type_tests(TestRandomTensorCreation, globals())

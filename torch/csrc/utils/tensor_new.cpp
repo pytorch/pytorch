@@ -346,20 +346,27 @@ Tensor internal_new_from_data(
 #endif
 
   if (PyObject_HasAttrString(data, "__dlpack__")) {
-    py::object tensor_o =
-        py::module::import("torch").attr("utils").attr("dlpack").attr(
-            "from_dlpack")(py::handle(data));
-    Tensor tensor = py::cast<Tensor>(tensor_o);
-    const auto& inferred_scalar_type =
-        type_inference ? tensor.scalar_type() : scalar_type;
-    auto device = device_opt.has_value() ? *device_opt : tensor.device();
-    pybind11::gil_scoped_release no_gil;
-    maybe_initialize_device(device);
-    return tensor.to(
-        device,
-        inferred_scalar_type,
-        /*non_blocking=*/false,
-        /*copy=*/copy_variables);
+    try {
+      py::object tensor_o =
+          py::module::import("torch").attr("utils").attr("dlpack").attr(
+              "from_dlpack")(py::handle(data));
+      Tensor tensor = py::cast<Tensor>(tensor_o);
+      const auto& inferred_scalar_type =
+          type_inference ? tensor.scalar_type() : scalar_type;
+      auto device = device_opt.has_value() ? *device_opt : tensor.device();
+      pybind11::gil_scoped_release no_gil;
+      maybe_initialize_device(device);
+      return tensor.to(
+          device,
+          inferred_scalar_type,
+          /*non_blocking=*/false,
+          /*copy=*/copy_variables);
+    } catch (py::error_already_set& e) {
+      // The producer exposes __dlpack__ but its export failed; fall through to
+      // the sequence handling below rather than propagating the error.
+      e.restore();
+      PyErr_Clear();
+    }
   }
 
   auto device = device_opt.has_value() ? *device_opt : options.device();
@@ -1952,14 +1959,21 @@ Tensor asarray(
     tensor = tensor_fromDLPack(obj);
   }
 
-  // Check whether 'obj' exposes a '__dlpack__' method,
-  // preferring it over the buffer protocol so dtype, device, and shape come
-  // from the producer.
+  // Check whether 'obj' exposes a '__dlpack__' method, preferring it over the
+  // buffer protocol so dtype, device, and shape come from the producer. If the
+  // producer's DLPack export fails (e.g. an unsupported dtype/device, or data
+  // that only works via the buffer/sequence paths), fall back to those instead
+  // of propagating the error.
   if (!tensor.defined() && PyObject_HasAttrString(obj, "__dlpack__")) {
-    py::object tensor_o =
-        py::module::import("torch").attr("utils").attr("dlpack").attr(
-            "from_dlpack")(py::handle(obj));
-    tensor = py::cast<Tensor>(tensor_o);
+    try {
+      py::object tensor_o =
+          py::module::import("torch").attr("utils").attr("dlpack").attr(
+              "from_dlpack")(py::handle(obj));
+      tensor = py::cast<Tensor>(tensor_o);
+    } catch (py::error_already_set& e) {
+      e.restore();
+      PyErr_Clear();
+    }
   }
 
   // Check whether 'obj' implements the buffer protocol
