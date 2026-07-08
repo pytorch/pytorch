@@ -11,6 +11,7 @@ else
 fi
 
 NVSHMEM_VERSION=3.4.5
+CUDA_CUPTI_VERSION=13.3.75
 
 function install_cuda {
   version=$1
@@ -78,6 +79,29 @@ function install_nvshmem {
   rm -rf "${tmpdir}"
 
   echo "nvSHMEM ${nvshmem_version} for CUDA ${cuda_major_version} (${arch_path}) installed."
+}
+
+function install_cupti_headers {
+  cupti_version=$1                  # e.g. "13.3.75"
+  major_minor=${cupti_version%.*}   # e.g. "13.3"
+  target_dir="/usr/local/cupti-headers-${major_minor}"
+
+  # The CUDA toolkit runfile ships an older CUPTI than the standalone redist
+  # archive, so stage the newer headers where the build can pick them up. The
+  # headers are architecture independent, so always grab the x86_64 archive.
+  redist_url="https://developer.download.nvidia.com/compute/cuda/redist/cuda_cupti/linux-x86_64"
+  archive="cuda_cupti-linux-x86_64-${cupti_version}-archive"
+
+  tmp_dir=$(mktemp -d)
+  pushd "${tmp_dir}"
+  wget -q "${redist_url}/${archive}.tar.xz"
+  tar xf "${archive}.tar.xz"
+  mkdir -p "${target_dir}"
+  cp -a "${archive}/include/"* "${target_dir}/"
+  popd
+
+  rm -rf "${tmp_dir}"
+  echo "CUPTI ${cupti_version} headers installed to ${target_dir}."
 }
 
 function install_124 {
@@ -162,6 +186,8 @@ function install_130 {
 
   install_nvshmem 13 $NVSHMEM_VERSION
 
+  install_cupti_headers $CUDA_CUPTI_VERSION
+
   CUDA_VERSION=13.0 bash install_nccl.sh
 
   CUDA_VERSION=13.0 bash install_cusparselt.sh $CUSPARSELT_VERSION
@@ -180,6 +206,8 @@ function install_132 {
   install_cudnn 13 $CUDNN_VERSION
 
   install_nvshmem 13 $NVSHMEM_VERSION
+
+  install_cupti_headers $CUDA_CUPTI_VERSION
 
   CUDA_VERSION=13.2 bash install_nccl.sh
 
