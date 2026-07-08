@@ -37,6 +37,8 @@ from torch._prims_common import (
     ShapeType,
 )
 from torch._subclasses.fake_tensor import (
+    _mark_fake_tensor_mkldnn,
+    _mkldnn_flatten_shape,
     DataDependentOutputException,
     DynamicOutputShapeException,
     FakeTensor,
@@ -64,6 +66,7 @@ pytree = torch.utils._pytree
 
 __all__ = [
     "op_implementations_checks",
+    "get_pre_decomposition_op_impls",
     "get_fast_op_impls",
     "stride_incorrect_op",
     "has_meta",
@@ -73,6 +76,8 @@ __all__ = [
 op_implementations_dict = {}
 # pyrefly: ignore [implicit-any]
 op_implementations_checks = []
+# pyrefly: ignore [implicit-any]
+PRE_DECOMPOSITION_OP_IMPLEMENTATIONS = {}
 
 aten = torch._ops.ops.aten
 _MKLDNN_DISPATCH_KEYS = torch._C.DispatchKeySet(
@@ -103,6 +108,14 @@ _TO_DENSE_SPARSE_LAYOUTS = frozenset(
 _PYTHON_TLS_SNAPSHOT_KEYSET = torch._C.DispatchKeySet(
     torch._C.DispatchKey.PythonTLSSnapshot
 )
+
+
+def _mkldnn_strides_for(shape: Sequence[IntLikeType]) -> tuple[IntLikeType, ...]:
+    # Mkldnn layouts do not have meaningful dense strides, but their backing
+    # meta tensors still need internal placeholder strides for fake kernels.
+    if not shape:
+        return ()
+    return (1, *([0] * (len(shape) - 1)))
 
 
 def ordered_set(*items: _T) -> dict[_T, bool]:
@@ -251,6 +264,20 @@ def _deregister_op_impl(op: OpOverload) -> None:
         if check is op:
             op_implementations_checks.remove((check, impl))
             break
+
+
+def register_pre_decomposition_op_impl(
+    func: OpOverload,
+) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
+    def impl_decorator(op_impl: Callable[_P, _R]) -> Callable[_P, _R]:
+        PRE_DECOMPOSITION_OP_IMPLEMENTATIONS[func] = op_impl
+        return op_impl
+
+    return impl_decorator
+
+
+def get_pre_decomposition_op_impls() -> dict[OpOverload, Callable[..., Any]]:
+    return PRE_DECOMPOSITION_OP_IMPLEMENTATIONS
 
 
 @register_op_impl(op_implementations_dict.__contains__)
@@ -1221,6 +1248,10 @@ def _view_meta(
     *shape: Any,
     allow_copy: bool = False,
 ) -> FakeTensor:
+    if a.is_mkldnn:
+        raise RuntimeError(
+            "Currently Mkldnn tensor does not support view. Change to use reshape instead"
+        )
     if torch.fx.experimental._config.backed_size_oblivious or _view_has_unbacked_input(
         a, shape
     ):
@@ -1254,6 +1285,325 @@ def _view_meta_copy(
         lambda x: x.clone(memory_format=torch.contiguous_format),
         result,
     )
+
+
+def _check_mkldnn_max_pool(
+    input_: FakeTensor, dilation: Sequence[int], stride: Sequence[int], dim: int
+) -> None:
+    if not input_.is_mkldnn:
+        return
+
+    if any(d != 1 for d in dilation):
+        raise RuntimeError(f"mkldnn_max_pool{dim}d does not support dilation case")
+
+    expected_dim = dim + 2
+    if input_.dim() != expected_dim:
+        raise RuntimeError(
+            f"mkldnn_max_pool{dim}d expects {expected_dim}D input tensor, "
+            f"but got {input_.dim()}D"
+        )
+
+    if any(s <= 0 for s in stride):
+        raise ValueError("Strides must be positive!")
+
+    if (
+        input_.dtype == torch.bfloat16
+        and not torch.ops.mkldnn._is_mkldnn_bf16_supported()
+    ):
+        raise RuntimeError(
+            f"mkldnn_max_pool{dim}d: bf16 path needs the cpu support "
+            "avx512bw, avx512vl and avx512dq"
+        )
+
+
+def _mkldnn_pool_meta(
+    fake_mode: FakeTensorMode,
+    input_: FakeTensor,
+    kernel_size: Sequence[int],
+    stride: Sequence[int],
+    padding: Sequence[int],
+    dilation: Sequence[int],
+    ceil_mode: bool,
+    dim: int,
+) -> FakeTensor:
+    meta_func = (
+        aten.max_pool2d_with_indices.default
+        if dim == 2
+        else aten.max_pool3d_with_indices.default
+    )
+    with in_kernel_invocation_manager(fake_mode):
+        meta_input = torch.empty_strided(
+            input_.shape,
+            make_contiguous_strides_for(input_.shape),
+            dtype=input_.dtype,
+            device="meta",
+        )
+        output, _indices = meta_func(
+            meta_input, kernel_size, stride, padding, dilation, ceil_mode
+        )
+        output = torch.empty_strided(
+            output.shape,
+            _mkldnn_strides_for(output.shape),
+            dtype=input_.dtype,
+            device="meta",
+        )
+
+    fake_output = FakeTensor(fake_mode, output, input_.fake_device)
+    _mark_fake_tensor_mkldnn(fake_output)
+    return fake_output
+
+
+@register_pre_decomposition_op_impl(aten._prelu_kernel.default)
+@register_pre_decomposition_op_impl(aten.prelu.default)
+def _mkldnn_prelu(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    input_: FakeTensor,
+    weight: FakeTensor,
+) -> FakeTensor | None:
+    if not input_.is_mkldnn:
+        return NotImplemented
+
+    with in_kernel_invocation_manager(fake_mode):
+        meta_input = torch.empty_strided(
+            input_.shape,
+            make_contiguous_strides_for(input_.shape),
+            dtype=input_.dtype,
+            device="meta",
+        )
+        meta_weight = torch.empty_strided(
+            weight.shape,
+            make_contiguous_strides_for(weight.shape),
+            dtype=weight.dtype,
+            device="meta",
+        )
+        output = func(meta_input, meta_weight)
+        output = torch.empty_strided(
+            output.shape,
+            _mkldnn_strides_for(output.shape),
+            dtype=output.dtype,
+            device="meta",
+        )
+
+    fake_output = FakeTensor(fake_mode, output, input_.fake_device)
+    _mark_fake_tensor_mkldnn(fake_output)
+    return fake_output
+
+
+@register_pre_decomposition_op_impl(aten.max_pool2d.default)
+def _mkldnn_max_pool2d_default(
+    fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
+) -> FakeTensor | None:
+    _, new_kwargs = _normalize_function_or_error(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+    input_ = new_kwargs["self"] if "self" in new_kwargs else new_kwargs["input"]
+    if not input_.is_mkldnn:
+        return NotImplemented
+
+    _check_mkldnn_max_pool(
+        input_,
+        new_kwargs["dilation"],
+        new_kwargs["stride"],
+        dim=2,
+    )
+    return _mkldnn_pool_meta(
+        fake_mode,
+        input_,
+        new_kwargs["kernel_size"],
+        new_kwargs["stride"],
+        new_kwargs["padding"],
+        new_kwargs["dilation"],
+        new_kwargs["ceil_mode"],
+        dim=2,
+    )
+
+
+@register_op_impl(aten.max_pool2d_with_indices.default)
+def _mkldnn_max_pool2d_with_indices(
+    fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
+) -> Any:
+    _, new_kwargs = _normalize_function_or_error(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+    input_ = new_kwargs["self"] if "self" in new_kwargs else new_kwargs["input"]
+    if input_.is_mkldnn:
+        try:
+            stride = tuple(new_kwargs["stride"])
+        except TypeError:
+            stride = (new_kwargs["stride"],)
+        if any(s == 0 for s in stride):
+            raise RuntimeError("stride should not be zero")
+        if any(s <= 0 for s in stride):
+            dH = stride[0] if len(stride) > 0 else None
+            dW = stride[1] if len(stride) > 1 else None
+            raise RuntimeError(
+                f"stride should be greater than zero, but got dH: {dH} dW: {dW}"
+            )
+        raise RuntimeError(
+            "'memory_format' argument is incompatible with mkldnn tensor"
+        )
+    return NotImplemented
+
+
+@register_op_impl(aten.mkldnn_max_pool2d.default)
+def _mkldnn_max_pool2d(
+    fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
+) -> FakeTensor | None:
+    _, new_kwargs = _normalize_function_or_error(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+    input_ = new_kwargs["self"] if "self" in new_kwargs else new_kwargs["input"]
+    if not input_.is_mkldnn:
+        return NotImplemented
+
+    _check_mkldnn_max_pool(
+        input_,
+        new_kwargs["dilation"],
+        new_kwargs["stride"],
+        dim=2,
+    )
+
+    return _mkldnn_pool_meta(
+        fake_mode,
+        input_,
+        new_kwargs["kernel_size"],
+        new_kwargs["stride"],
+        new_kwargs["padding"],
+        new_kwargs["dilation"],
+        new_kwargs["ceil_mode"],
+        dim=2,
+    )
+
+
+@register_pre_decomposition_op_impl(aten.max_pool3d.default)
+def _mkldnn_max_pool3d_default(
+    fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
+) -> FakeTensor | None:
+    _, new_kwargs = _normalize_function_or_error(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+    input_ = new_kwargs["self"] if "self" in new_kwargs else new_kwargs["input"]
+    if not input_.is_mkldnn:
+        return NotImplemented
+
+    _check_mkldnn_max_pool(
+        input_,
+        new_kwargs["dilation"],
+        new_kwargs["stride"],
+        dim=3,
+    )
+    return _mkldnn_pool_meta(
+        fake_mode,
+        input_,
+        new_kwargs["kernel_size"],
+        new_kwargs["stride"],
+        new_kwargs["padding"],
+        new_kwargs["dilation"],
+        new_kwargs["ceil_mode"],
+        dim=3,
+    )
+
+
+@register_op_impl(aten.max_pool3d_with_indices.default)
+def _mkldnn_max_pool3d_with_indices(
+    fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
+) -> Any:
+    _, new_kwargs = _normalize_function_or_error(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+    input_ = new_kwargs["self"] if "self" in new_kwargs else new_kwargs["input"]
+    if input_.is_mkldnn:
+        raise NotImplementedError(
+            "Could not run 'aten::max_pool3d_with_indices' with arguments "
+            "from the 'MkldnnCPU' backend."
+        )
+    return NotImplemented
+
+
+@register_op_impl(aten.mkldnn_max_pool3d.default)
+def _mkldnn_max_pool3d(
+    fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
+) -> FakeTensor | None:
+    _, new_kwargs = _normalize_function_or_error(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+    input_ = new_kwargs["self"] if "self" in new_kwargs else new_kwargs["input"]
+    if not input_.is_mkldnn:
+        return NotImplemented
+
+    _check_mkldnn_max_pool(
+        input_,
+        new_kwargs["dilation"],
+        new_kwargs["stride"],
+        dim=3,
+    )
+
+    return _mkldnn_pool_meta(
+        fake_mode,
+        input_,
+        new_kwargs["kernel_size"],
+        new_kwargs["stride"],
+        new_kwargs["padding"],
+        new_kwargs["dilation"],
+        new_kwargs["ceil_mode"],
+        dim=3,
+    )
+
+
+@register_op_impl(aten._mkldnn_reshape.default)
+@register_op_impl(aten.reshape.default)
+def _mkldnn_reshape(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    input_: FakeTensor,
+    shape: Sequence[IntLikeType],
+) -> FakeTensor | None:
+    if not input_.is_mkldnn:
+        return NotImplemented
+
+    shape = utils.infer_size(typing_cast(Any, tuple(shape)), input_.numel())
+    with in_kernel_invocation_manager(fake_mode):
+        output = torch.empty_strided(
+            shape,
+            _mkldnn_strides_for(shape),
+            dtype=input_.dtype,
+            device="meta",
+        )
+    fake_output = FakeTensor(fake_mode, output, input_.fake_device)
+    _mark_fake_tensor_mkldnn(fake_output)
+    return fake_output
+
+
+@register_pre_decomposition_op_impl(aten.flatten.using_ints)
+def _mkldnn_flatten(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    input_: FakeTensor,
+    start_dim: int = 0,
+    end_dim: int = -1,
+) -> FakeTensor | None:
+    if not input_.is_mkldnn:
+        return NotImplemented
+
+    shape = _mkldnn_flatten_shape(input_, start_dim, end_dim)
+    if shape is None:
+        return input_
+    return _mkldnn_reshape(fake_mode, aten._mkldnn_reshape.default, input_, shape)
+
+
+@register_op_impl(aten.to_dense.default)
+def _mkldnn_to_dense_default(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    input_: FakeTensor,
+    dtype: torch.dtype | None = None,
+    masked_grad: bool | None = None,
+) -> FakeTensor | None:
+    if not input_.is_mkldnn:
+        return NotImplemented
+
+    return aten._to_dense.default(input_, dtype, masked_grad)
 
 
 @register_op_impl(aten.repeat_interleave.Tensor)
@@ -1857,9 +2207,10 @@ def to_mkldnn(
             dtype=out_dtype,
             device="meta",
         )
-    return FakeTensor(
+    fake_output = FakeTensor(
         fake_mode, out, a.fake_device, dispatch_keys=_MKLDNN_DISPATCH_KEYS
     )
+    return _mark_fake_tensor_mkldnn(fake_output)
 
 
 # These are for the `torch._foreach_...` ops like `torch._foreach_add`.
@@ -2233,7 +2584,10 @@ def _fake_alias(fake_mode: FakeTensorMode, x: FakeTensor) -> FakeTensor:
         out = aten.alias.default(x)
     # Real MKLDNN alias is not public API, but compiler-generated alias nodes
     # must preserve fake MKLDNN layout state through tracing.
-    return FakeTensor(fake_mode, out, x.device, dispatch_keys=x.dispatch_keys)
+    fake_out = FakeTensor(fake_mode, out, x.device, dispatch_keys=x.dispatch_keys)
+    if x.is_mkldnn:
+        _mark_fake_tensor_mkldnn(fake_out)
+    return fake_out
 
 
 @register_op_impl(aten.alias.default)
@@ -2452,18 +2806,26 @@ def make_fast_binary_impl(
 def fast_detach(
     fake_mode: FakeTensorMode, x: FakeTensor, include_real: bool = False
 ) -> FakeTensor:
-    with no_python_dispatcher(), in_kernel_invocation_manager(fake_mode):
+    with (
+        torch._C.DisableTorchFunctionSubclass(),
+        no_python_dispatcher(),
+        in_kernel_invocation_manager(fake_mode),
+    ):
         out = torch.ops.aten.detach.default(x)
     dispatch_keys = x.dispatch_keys
     if include_real:
-        return FakeTensor(
+        fake_out = FakeTensor(
             fake_mode,
             out,
             x.device,
             real_tensor=x.real_tensor,
             dispatch_keys=dispatch_keys,
         )
-    return FakeTensor(fake_mode, out, x.device, dispatch_keys=dispatch_keys)
+    else:
+        fake_out = FakeTensor(fake_mode, out, x.device, dispatch_keys=dispatch_keys)
+    if x.is_mkldnn:
+        _mark_fake_tensor_mkldnn(fake_out)
+    return fake_out
 
 
 def fast_alias(fake_mode: FakeTensorMode, x: FakeTensor) -> FakeTensor:
