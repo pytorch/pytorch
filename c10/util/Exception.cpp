@@ -70,7 +70,7 @@ std::string Error::compute_what(bool include_backtrace) const {
     oss << '\n' << backtrace_->get();
   }
 
-  return std::move(oss).str();
+  return oss.str();
 }
 
 const Backtrace& Error::backtrace() const {

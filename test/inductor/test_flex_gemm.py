@@ -1,13 +1,16 @@
 # Owner(s): ["module: inductor"]
 
+import contextlib
 import importlib
 import math
 import sys
 import unittest
+from types import SimpleNamespace
+from unittest import mock
 
 import torch
 from torch._higher_order_ops import flex_gemm
-from torch._higher_order_ops.flex_gemm import supported_flex_gemm_op_names
+from torch._higher_order_ops.flex_gemm import _SUPPORTED_FLEX_GEMM_OP_NAMES
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM100OrLater, TEST_CUDA
@@ -42,6 +45,21 @@ if cute is not None:
     def row_scale_epilogue(acc, row_scale):
         return acc * row_scale
 
+    @cute.jit
+    def tuple_aux_epilogue(acc):
+        main = (acc + cute.full_like(acc, 1.0)) * cute.full_like(acc, 0.5)
+        aux = acc * acc + cute.full_like(acc, 2.0)
+        return main, aux
+
+    @cute.jit
+    def captured_tuple_aux_epilogue(acc, col_bias, row_scale, tile_bias):
+        biased = (acc + col_bias) * row_scale + tile_bias
+        main = cute.where(
+            biased > cute.full_like(biased, 0), biased, cute.full_like(biased, 0)
+        )
+        aux = acc * row_scale + tile_bias
+        return main, aux
+
 
 class TestFlexGemmRuntimeImport(TestCase):
     def test_import_does_not_load_external_quack(self):
@@ -50,11 +68,189 @@ class TestFlexGemmRuntimeImport(TestCase):
         self.assertNotIn("quack", sys.modules)
 
 
+class TestFlexGemmRuntimeHelpers(TestCase):
+    def test_dense_config_selection_is_explicit_and_sm110_reuses_sm100(self):
+        from torch._inductor.template_heuristics import (
+            flex_gemm as flex_gemm_heuristics,
+        )
+        from torch._vendor.quack.gemm_config import GemmConfig
+
+        def config(tile_m, tile_n, cluster_m, cluster_n, dynamic, **kwargs):
+            values = {
+                "tile_m": tile_m,
+                "tile_n": tile_n,
+                "cluster_m": cluster_m,
+                "cluster_n": cluster_n,
+                "cluster_k": 1,
+                "is_dynamic_persistent": dynamic,
+                "swap_ab": False,
+                "use_tma_gather": False,
+                "device_capacity": 10,
+                "tile_k": None,
+                "num_warps": None,
+                "pingpong": False,
+                "max_swizzle_size": 8,
+            }
+            values.update(kwargs)
+            return GemmConfig(**values)
+
+        default = config(128, 256, 2, 1, True)
+        skinny = config(128, 192, 2, 1, True)
+        large_rect = config(256, 256, 2, 1, True)
+        large = config(256, 256, 2, 2, True)
+        swap_variant = config(128, 128, 1, 1, False, swap_ab=True)
+        gather_rejected = config(128, 128, 1, 1, False, use_tma_gather=True)
+
+        fake_graph = SimpleNamespace(
+            sizevars=SimpleNamespace(guard_or_false=lambda expr: bool(expr))
+        )
+        from torch._inductor.virtualized import V
+
+        with (
+            mock.patch("torch.cuda.get_device_capability", return_value=(11, 0)),
+            mock.patch(
+                "torch._vendor.quack.gemm_config.get_all_configs",
+                return_value=[
+                    gather_rejected,
+                    swap_variant,
+                    large_rect,
+                    default,
+                    skinny,
+                    large,
+                ],
+            ),
+            V.set_graph_handler(fake_graph),
+        ):
+            self.assertEqual(
+                flex_gemm_heuristics.candidate_gemm_configs_for_device(
+                    torch.device("cuda")
+                ),
+                [default, skinny, large_rect, large, swap_variant],
+            )
+            self.assertEqual(
+                flex_gemm_heuristics.default_gemm_config_key(
+                    torch.device("cuda"), 256, 4096
+                ),
+                flex_gemm_heuristics.gemm_config_key(skinny),
+            )
+            self.assertEqual(
+                flex_gemm_heuristics.default_gemm_config_key(
+                    torch.device("cuda"), 768, 4096
+                ),
+                flex_gemm_heuristics.gemm_config_key(large),
+            )
+            self.assertEqual(
+                flex_gemm_heuristics.default_gemm_config_key(
+                    torch.device("cuda"), 1024, 4096
+                ),
+                flex_gemm_heuristics.gemm_config_key(large_rect),
+            )
+            self.assertEqual(
+                flex_gemm_heuristics.default_gemm_config_key(
+                    torch.device("cuda"), 1024, 1024
+                ),
+                flex_gemm_heuristics.gemm_config_key(skinny),
+            )
+            self.assertEqual(
+                flex_gemm_heuristics.candidate_gemm_configs_for_device(
+                    torch.device("cuda")
+                ),
+                [default, skinny, large_rect, large, swap_variant],
+            )
+            self.assertEqual(
+                GemmConfig(**dict(flex_gemm_heuristics.gemm_config_key(large))), large
+            )
+
+        sm120_pingpong = config(
+            128,
+            128,
+            1,
+            1,
+            True,
+            device_capacity=12,
+            pingpong=True,
+        )
+        self.assertNotEqual(
+            flex_gemm_heuristics.gemm_config_key(default),
+            flex_gemm_heuristics.gemm_config_key(sm120_pingpong),
+        )
+        with (
+            mock.patch("torch.cuda.get_device_capability", return_value=(12, 0)),
+            mock.patch(
+                "torch._vendor.quack.gemm_config.get_all_configs",
+                return_value=[default, sm120_pingpong],
+            ),
+        ):
+            self.assertEqual(
+                flex_gemm_heuristics.candidate_gemm_configs_for_device(
+                    torch.device("cuda")
+                ),
+                [sm120_pingpong],
+            )
+        with (
+            mock.patch("torch.cuda.get_device_capability", return_value=(9, 0)),
+            mock.patch(
+                "torch._vendor.quack.gemm_config.get_all_configs",
+                return_value=[default],
+            ),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "no QuACK configs"):
+                flex_gemm_heuristics.candidate_gemm_configs_for_device(
+                    torch.device("cuda")
+                )
+
+    def test_precompile_metadata_counts_symbolic_skip(self):
+        import sympy
+
+        from torch._dynamo.utils import counters
+        from torch._inductor.kernel.flex_gemm.template import FlexGemmEpilogueCaller
+
+        counters.clear()
+        caller = FlexGemmEpilogueCaller.__new__(FlexGemmEpilogueCaller)
+        caller.bmreq = SimpleNamespace(
+            input_tensor_meta=[
+                SimpleNamespace(
+                    sizes=(sympy.Symbol("s0"), 64),
+                    strides=(64, 1),
+                    dtype=torch.float32,
+                    device=torch.device("cuda", 0),
+                )
+            ],
+            output_tensor_meta=SimpleNamespace(
+                sizes=(128, 128),
+                strides=(128, 1),
+                dtype=torch.float32,
+                device=torch.device("cuda", 0),
+            ),
+        )
+
+        self.assertIsNone(caller.precompile_metadata())
+        self.assertEqual(
+            counters["inductor"]["flex_gemm_precompile_skipped_dynamic"], 1
+        )
+
+
 class FlexGemmTestCase(TestCase):
     def makeTensor(self, *shape, dtype=torch.bfloat16):
         return torch.testing.make_tensor(
             *shape, device="cuda", dtype=dtype, low=-0.1, high=0.1
         )
+
+    def swapAndNonSwapConfigKeys(self, device):
+        """Return one swap_ab and one non-swap candidate config key for ``device``."""
+        from torch._inductor.template_heuristics.flex_gemm import (
+            candidate_gemm_configs_for_device,
+            gemm_config_key,
+        )
+
+        keys = [
+            gemm_config_key(config)
+            for config in candidate_gemm_configs_for_device(device)
+        ]
+        swap_keys = [key for key in keys if dict(key)["swap_ab"]]
+        non_swap_keys = [key for key in keys if not dict(key)["swap_ab"]]
+        self.assertTrue(swap_keys and non_swap_keys)
+        return swap_keys[0], non_swap_keys[0]
 
     def assertMatchesLowPrecisionEager(
         self,
@@ -86,9 +282,50 @@ class FlexGemmTestCase(TestCase):
             ),
         )
 
+    def assertTupleAuxMatchesReference(self, actual, aux, a, b, epilogue_fn):
+        """Validate tuple-aux epilogues against low/high precision references."""
+        expected, expected_aux = epilogue_fn(a @ b)
+        high_precision_acc = a.double() @ b.double()
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            expected,
+            (high_precision_acc + 1.0) * 0.5,
+            a.shape[-1],
+        )
+        self.assertMatchesLowPrecisionEager(
+            aux,
+            expected_aux,
+            high_precision_acc.square() + 2.0,
+            a.shape[-1],
+        )
+
+    def assertCapturedTupleAuxMatchesReference(
+        self, actual, aux, a, b, col_bias, row_scale, tile_bias
+    ):
+        """Validate composed captured-load and tuple-aux epilogues."""
+        acc = a @ b
+        acc_float = acc.float()
+        high_precision_acc = a.double() @ b.double()
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            ((acc_float + col_bias) * row_scale + tile_bias).relu(),
+            (
+                (high_precision_acc + col_bias.double()) * row_scale.double()
+                + tile_bias.double()
+            ).relu(),
+            a.shape[-1],
+        )
+        self.assertMatchesLowPrecisionEager(
+            aux,
+            acc_float * row_scale + tile_bias,
+            high_precision_acc * row_scale.double() + tile_bias.double(),
+            a.shape[-1],
+        )
+
 
 @skipIfNoCuteDSL
 @unittest.skipIf(not TEST_CUDA, "CUDA required")
+@instantiate_parametrized_tests
 class TestFlexGemmRuntime(FlexGemmTestCase):
     @classmethod
     def setUpClass(cls):
@@ -96,6 +333,8 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         cls.relu_epilogue = staticmethod(relu_epilogue)
         cls.affine_aux_epilogue = staticmethod(affine_aux_epilogue)
         cls.row_scale_epilogue = staticmethod(row_scale_epilogue)
+        cls.captured_tuple_aux_epilogue = staticmethod(captured_tuple_aux_epilogue)
+        cls.tuple_aux_epilogue = staticmethod(tuple_aux_epilogue)
 
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_mm_epilogue_with_c_alpha_beta_matches_reference(self):
@@ -130,6 +369,34 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         )
 
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_batched_epilogue_beta_zero_ignores_nan_c(self):
+        from torch._inductor.kernel.flex_gemm.runtime import gemm_epilogue
+
+        torch.manual_seed(7)
+        batch, m, n, k = 2, 128, 128, 64
+        a = self.makeTensor(batch, m, k)
+        b = self.makeTensor(batch, k, n)
+        c = torch.full((m, n), float("nan"), device="cuda", dtype=a.dtype)
+
+        out = gemm_epilogue(
+            a,
+            b,
+            self.relu_epilogue,
+            "test_flex_gemm_batched_beta_zero",
+            C=c,
+            alpha=1.5,
+            beta=0,
+        )
+
+        self.assertFalse(torch.isnan(out).any())
+        self.assertMatchesLowPrecisionEager(
+            out,
+            torch.baddbmm(c, a, b, beta=0, alpha=1.5).relu(),
+            torch.baddbmm(c.double(), a.double(), b.double(), beta=0, alpha=1.5).relu(),
+            k,
+        )
+
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_explicit_arg_kind_disambiguates_row_arg(self):
         from torch._inductor.kernel.flex_gemm.runtime import gemm_epilogue
 
@@ -156,14 +423,14 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         )
 
     def test_explicit_arg_kind_disambiguates_col_arg_shape(self):
-        from torch._inductor.kernel.flex_gemm.runtime import _epilogue_arg_kinds
+        from torch._inductor.kernel.flex_gemm.runtime import resolve_epilogue_arg_kinds
 
         a = torch.empty(128, 64)
         b = torch.empty(64, 1)
         col_bias = torch.empty(128, 1)
 
         self.assertEqual(
-            _epilogue_arg_kinds(a, b, (col_bias,), ("col",)),
+            resolve_epilogue_arg_kinds(a, b, (col_bias,), ("col",)),
             ("col",),
         )
 
@@ -262,14 +529,187 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
                 "test_flex_gemm_reject_bad_out_layout",
                 out=bad_out_layout,
             )
-        with self.assertRaisesRegex(NotImplementedError, "tuned=True"):
-            gemm_epilogue(
+
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_epilogue_explicit_config_key_matches_reference(self):
+        from torch._inductor.kernel.flex_gemm.runtime import gemm_epilogue
+        from torch._inductor.template_heuristics.flex_gemm import (
+            candidate_gemm_configs_for_device,
+            gemm_config_key,
+        )
+
+        a = self.makeTensor(128, 64)
+        b = self.makeTensor(64, 128)
+        row_scale = self.makeTensor(1, 128, dtype=torch.float32)
+
+        config_keys = tuple(
+            gemm_config_key(config)
+            for config in candidate_gemm_configs_for_device(a.device)
+        )
+        for index, config_key in enumerate(config_keys[:2]):
+            out = gemm_epilogue(
                 a,
                 b,
                 self.row_scale_epilogue,
-                "test_flex_gemm_reject_tuned",
-                tuned=True,
+                f"test_flex_gemm_config_key_{index}",
+                out_dtype=torch.float32,
+                epilogue_args=(row_scale,),
+                epilogue_arg_kinds=("row",),
+                config_key=config_key,
             )
+            self.assertMatchesLowPrecisionEager(
+                out,
+                (a @ b).float() * row_scale,
+                (a.double() @ b.double()) * row_scale.double(),
+                a.shape[1],
+            )
+
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @parametrize("shape", ((128, 512, 256), (512, 128, 256), (256, 256, 256)))
+    def test_swap_ab_matches_non_swap_and_eager(self, shape):
+        from torch._inductor.kernel.flex_gemm.runtime import gemm_epilogue
+
+        m, n, k = shape
+        a = self.makeTensor(m, k)
+        b = self.makeTensor(k, n)
+        swap_key, non_swap_key = self.swapAndNonSwapConfigKeys(a.device)
+
+        swapped = gemm_epilogue(
+            a,
+            b,
+            self.relu_epilogue,
+            "test_flex_gemm_swap_ab_mm",
+            out_dtype=torch.float32,
+            config_key=swap_key,
+        )
+        non_swapped = gemm_epilogue(
+            a,
+            b,
+            self.relu_epilogue,
+            "test_flex_gemm_non_swap_ab_mm",
+            out_dtype=torch.float32,
+            config_key=non_swap_key,
+        )
+        # swap_ab only reorients tile scheduling, so the result is bit-identical.
+        self.assertEqual(swapped, non_swapped)
+        self.assertMatchesLowPrecisionEager(
+            swapped, (a @ b).float().relu(), (a.double() @ b.double()).relu(), k
+        )
+
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_swap_ab_with_c_alpha_beta_matches_non_swap(self):
+        from torch._inductor.kernel.flex_gemm.runtime import gemm_epilogue
+
+        m, n, k = 256, 384, 192
+        a = self.makeTensor(m, k)
+        b = self.makeTensor(k, n)
+        c = self.makeTensor(m, n)
+        swap_key, non_swap_key = self.swapAndNonSwapConfigKeys(a.device)
+
+        def run(name, config_key):
+            return gemm_epilogue(
+                a,
+                b,
+                self.relu_epilogue,
+                name,
+                C=c,
+                alpha=1.5,
+                beta=0.5,
+                out_dtype=torch.float32,
+                config_key=config_key,
+            )
+
+        swapped = run("test_flex_gemm_swap_ab_addmm", swap_key)
+        non_swapped = run("test_flex_gemm_non_swap_ab_addmm", non_swap_key)
+        # The transposed C view must reproduce the non-swapped addmm result.
+        self.assertEqual(swapped, non_swapped)
+        self.assertMatchesLowPrecisionEager(
+            swapped,
+            (0.5 * c.float() + 1.5 * (a @ b).float()).relu(),
+            (0.5 * c.double() + 1.5 * (a.double() @ b.double())).relu(),
+            k,
+        )
+
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_swap_ab_captured_aux_matches_non_swap(self):
+        from torch._inductor.kernel.flex_gemm.runtime import gemm_epilogue
+
+        m, n, k = 128, 384, 256
+        a = self.makeTensor(m, k)
+        b = self.makeTensor(k, n)
+        col_bias = self.makeTensor(m, 1, dtype=torch.float32)
+        row_scale = self.makeTensor(1, n, dtype=torch.float32)
+        tile_bias = self.makeTensor(m, n, dtype=torch.float32)
+        swap_key, non_swap_key = self.swapAndNonSwapConfigKeys(a.device)
+
+        def run(name, config_key):
+            return gemm_epilogue(
+                a,
+                b,
+                self.affine_aux_epilogue,
+                name,
+                out_dtype=torch.float32,
+                epilogue_args=(col_bias, row_scale, tile_bias),
+                epilogue_arg_kinds=("col", "row", "tile"),
+                config_key=config_key,
+            )
+
+        swapped = run("test_flex_gemm_swap_ab_aux", swap_key)
+        non_swapped = run("test_flex_gemm_non_swap_ab_aux", non_swap_key)
+        # Swapped row/col broadcast roles must reproduce the non-swapped result.
+        self.assertEqual(swapped, non_swapped)
+        high_precision_expected = (
+            (a.double() @ b.double() + col_bias.double()) * row_scale.double()
+            + tile_bias.double()
+        ).relu()
+        low_precision_expected = (
+            ((a @ b).float() + col_bias) * row_scale + tile_bias
+        ).relu()
+        self.assertMatchesLowPrecisionEager(
+            swapped, low_precision_expected, high_precision_expected, k
+        )
+
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_swap_ab_captured_args_tuple_aux_matches_non_swap(self):
+        from torch._inductor.kernel.flex_gemm.runtime import gemm_epilogue
+
+        torch.manual_seed(10)
+        m, n, k = 128, 384, 256
+        a = self.makeTensor(m, k)
+        b = self.makeTensor(k, n)
+        col_bias = self.makeTensor(m, 1, dtype=torch.float32)
+        row_scale = self.makeTensor(1, n, dtype=torch.float32)
+        tile_bias = self.makeTensor(m, n, dtype=torch.float32)
+        swap_key, non_swap_key = self.swapAndNonSwapConfigKeys(a.device)
+
+        def run(name, config_key):
+            out = torch.empty(m, n, device="cuda", dtype=torch.bfloat16)
+            aux = torch.empty(m, n, device="cuda", dtype=torch.float32)
+            gemm_epilogue(
+                a,
+                b,
+                self.captured_tuple_aux_epilogue,
+                name,
+                out=out,
+                aux_out=aux,
+                epilogue_args=(col_bias, row_scale, tile_bias),
+                epilogue_arg_kinds=("col", "row", "tile"),
+                config_key=config_key,
+            )
+            return out, aux
+
+        swapped, swapped_aux = run(
+            "test_flex_gemm_swap_ab_captured_tuple_aux", swap_key
+        )
+        non_swapped, non_swapped_aux = run(
+            "test_flex_gemm_non_swap_ab_captured_tuple_aux", non_swap_key
+        )
+
+        self.assertEqual(swapped, non_swapped)
+        self.assertEqual(swapped_aux, non_swapped_aux)
+        self.assertCapturedTupleAuxMatchesReference(
+            swapped, swapped_aux, a, b, col_bias, row_scale, tile_bias
+        )
 
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_mm_epilogue_reads_captured_aux_tensors(self):
@@ -303,6 +743,35 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
             out, low_precision_expected, high_precision_expected, k
         )
 
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_epilogue_writes_tuple_aux_out(self):
+        from torch._inductor.kernel.flex_gemm.runtime import gemm_epilogue
+
+        torch.manual_seed(8)
+        m, n, k = 128, 128, 64
+        a = self.makeTensor(m, k)
+        b = self.makeTensor(k, n)
+        out = torch.empty(m, n, device="cuda", dtype=torch.float32)
+        aux = torch.empty(m, n, device="cuda", dtype=torch.float32)
+
+        def epilogue_fn(acc):
+            main = (acc.float() + 1.0) * 0.5
+            aux = acc.float().square() + 2.0
+            return main, aux
+
+        actual = gemm_epilogue(
+            a,
+            b,
+            self.tuple_aux_epilogue,
+            "test_flex_gemm_tuple_aux",
+            out_dtype=torch.float32,
+            out=out,
+            aux_out=aux,
+        )
+
+        self.assertIs(actual, out)
+        self.assertTupleAuxMatchesReference(out, aux, a, b, epilogue_fn)
+
 
 @instantiate_parametrized_tests
 class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
@@ -316,25 +785,67 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         )
         for check in checks:
             file_check = file_check.check(check)
-        file_check.check("tuned=False").check_not("epilogue_source=").check_not(
-            "tuned=True"
-        ).check_not("from quack").check_not("import quack").check_not(
-            "torch._vendor.quack"
-        ).run(code)
+        file_check = file_check.check("config_key=").check_not("tuned=")
+        file_check = file_check.check_not("epilogue_source=")
+        file_check.check_not("from quack").check_not("import quack").run(code)
 
-    def test_supported_op_names_match_pr2b_scope(self):
-        self.assertEqual(supported_flex_gemm_op_names(), "mm/addmm")
+    def test_supported_op_names_match_dense_scope(self):
+        self.assertEqual(_SUPPORTED_FLEX_GEMM_OP_NAMES, "mm/addmm/bmm/baddbmm")
 
-    def test_default_backend_eager_matches_reference(self):
-        a = torch.randn(8, 16)
-        b = torch.randn(16, 12)
+    @parametrize(
+        "case",
+        (
+            ("mm", torch.mm, lambda a, b: (a, b), lambda a, b: a @ b),
+            ("bmm", torch.bmm, lambda a, b: (a, b), lambda a, b: torch.bmm(a, b)),
+        ),
+        name_fn=lambda case: case[0],
+    )
+    def test_default_backend_eager_matches_reference(self, case):
+        _, op, args_fn, ref_fn = case
+        a = torch.randn(2, 8, 16)
+        b = torch.randn(2, 16, 12)
+        if op is torch.mm:
+            a = a[0]
+            b = b[0]
 
         def epilogue_fn(acc):
             return acc.relu()
 
-        actual = flex_gemm(torch.mm, (a, b), epilogue_fn)
+        actual = flex_gemm(op, args_fn(a, b), epilogue_fn)
 
-        torch.testing.assert_close(actual, epilogue_fn(a @ b))
+        torch.testing.assert_close(actual, epilogue_fn(ref_fn(a, b)))
+
+    def test_default_backend_eager_tuple_aux_matches_reference(self):
+        a = torch.randn(8, 16)
+        b = torch.randn(16, 12)
+
+        def epilogue_fn(acc):
+            return acc.relu(), acc + 1
+
+        actual, aux = flex_gemm(torch.mm, (a, b), epilogue_fn)
+        expected, expected_aux = epilogue_fn(a @ b)
+
+        torch.testing.assert_close(actual, expected)
+        torch.testing.assert_close(aux, expected_aux)
+
+    def test_fake_tensor_mode_tuple_aux_returns_fake_tensors(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        with FakeTensorMode() as mode:
+            a = mode.from_tensor(torch.randn(8, 16))
+            b = mode.from_tensor(torch.randn(16, 12))
+
+            def epilogue_fn(acc):
+                return acc.relu(), acc + 1
+
+            actual, aux = flex_gemm(torch.mm, (a, b), epilogue_fn)
+
+        self.assertEqual(actual.shape, torch.Size([8, 12]))
+        self.assertEqual(aux.shape, torch.Size([8, 12]))
+        self.assertEqual(actual.dtype, torch.float32)
+        self.assertEqual(aux.dtype, torch.float32)
+        self.assertIs(actual.fake_mode, mode)
+        self.assertIs(aux.fake_mode, mode)
 
     def test_autograd_is_not_implemented(self):
         a = torch.randn(8, 16, requires_grad=True)
@@ -347,6 +858,91 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
         with self.assertRaisesRegex(RuntimeError, "flex_gemm"):
             actual.sum().backward()
+
+    def test_generated_captured_arg_rejects_unsupported_shape(self):
+        def fn(a, b, scale):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                lambda acc: acc * scale,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(4, 8)
+        b = torch.randn(8, 5)
+        scale = torch.randn(1, 1)
+
+        with self.assertRaisesRegex(
+            Exception,
+            "captured tensor epilogue args currently must match",
+        ):
+            torch.compile(fn, backend="inductor", fullgraph=True)(a, b, scale)
+
+    def test_generated_captured_arg_rejects_addmm_scope(self):
+        def fn(bias, a, b, scale):
+            return flex_gemm(
+                torch.addmm,
+                (bias, a, b),
+                lambda acc: acc * scale,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        bias = torch.randn(4, 5)
+        a = torch.randn(4, 8)
+        b = torch.randn(8, 5)
+        scale = torch.randn(4, 5)
+
+        with self.assertRaisesRegex(
+            Exception,
+            "captured tensor reads currently support only aten.mm",
+        ):
+            torch.compile(fn, backend="inductor", fullgraph=True)(bias, a, b, scale)
+
+    def test_generated_tuple_aux_rejects_unsupported_scope(self):
+        def addmm_fn(bias, a, b):
+            return flex_gemm(
+                torch.addmm,
+                (bias, a, b),
+                lambda acc: (acc.relu(), acc + 1),
+                kernel_options={"backend": "QUACK"},
+            )
+
+        bias = torch.randn(4, 5)
+        a = torch.randn(4, 8)
+        b = torch.randn(8, 5)
+
+        with self.assertRaisesRegex(Exception, "currently support only aten.mm"):
+            torch.compile(addmm_fn, backend="inductor", fullgraph=True)(bias, a, b)
+
+    def test_generated_tuple_aux_rejects_shape_mismatch(self):
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                lambda acc: (acc.relu(), acc.sum(dim=1, keepdim=True)),
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(4, 8)
+        b = torch.randn(8, 5)
+
+        with self.assertRaisesRegex(Exception, "aux output shapes to match"):
+            torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+
+    def test_generated_tuple_aux_rejects_multiple_aux_outputs(self):
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                lambda acc: (acc.relu(), acc + 1, acc * 2),
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(4, 8)
+        b = torch.randn(8, 5)
+
+        with self.assertRaisesRegex(Exception, "at most one aux output"):
+            torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
@@ -422,6 +1018,285 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 epilogue_fn(a.double() @ b.double()),
                 a.shape[1],
             )
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_swap_ab_dynamic_shapes_tuned_matches_reference(self):
+        def epilogue_fn(acc):
+            return (acc + 1).relu()
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK", "tuned": True},
+            )
+
+        from torch._inductor.template_heuristics import (
+            flex_gemm as flex_gemm_heuristics,
+        )
+
+        device = torch.device("cuda")
+        swap_configs = [
+            config
+            for config in flex_gemm_heuristics.candidate_gemm_configs_for_device(device)
+            if config.swap_ab
+        ]
+        self.assertTrue(swap_configs)
+        with mock.patch(
+            "torch._inductor.template_heuristics.flex_gemm.candidate_gemm_configs_for_device",
+            return_value=swap_configs[:1],
+        ):
+            compiled = torch.compile(
+                fn, backend="inductor", fullgraph=True, dynamic=True
+            )
+            for m, n in ((128, 128), (256, 192)):
+                a = torch.randn(m, 64, device="cuda", dtype=torch.bfloat16)
+                b = torch.randn(64, n, device="cuda", dtype=torch.bfloat16)
+                actual = compiled(a, b)
+                self.assertMatchesLowPrecisionEager(
+                    actual,
+                    epilogue_fn(a @ b),
+                    epilogue_fn(a.double() @ b.double()),
+                    a.shape[1],
+                )
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @parametrize(
+        "case",
+        (
+            ("tile", lambda m, n: (m, n)),
+            ("row", lambda m, n: (1, n)),
+            ("col", lambda m, n: (m, 1)),
+        ),
+        name_fn=lambda case: case[0],
+    )
+    @parametrize(
+        "tuned",
+        (False, True),
+        name_fn=lambda tuned: "tuned" if tuned else "untuned",
+    )
+    def test_mm_dynamic_shapes_reads_captured_tensor_epilogue_arg(self, case, tuned):
+        torch._dynamo.reset()
+        _, shape_fn = case
+
+        def epilogue_fn(acc, scale):
+            return (acc.float() * scale).relu()
+
+        def fn(a, b, scale):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                lambda acc: epilogue_fn(acc, scale),
+                kernel_options={"backend": "QUACK", "tuned": tuned},
+            )
+
+        config_context = contextlib.nullcontext()
+        if tuned:
+            from torch._inductor.template_heuristics import (
+                flex_gemm as flex_gemm_heuristics,
+            )
+
+            configs = flex_gemm_heuristics.candidate_gemm_configs_for_device(
+                torch.device("cuda")
+            )[:2]
+            config_context = mock.patch(
+                "torch._inductor.template_heuristics.flex_gemm.candidate_gemm_configs_for_device",
+                return_value=configs,
+            )
+
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True, dynamic=True)
+        with config_context:
+            for m, k, n in ((128, 64, 128), (256, 64, 192)):
+                a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+                b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+                scale = torch.randn(*shape_fn(m, n), device="cuda", dtype=torch.float32)
+                actual = compiled(a, b, scale)
+                self.assertMatchesLowPrecisionEager(
+                    actual,
+                    epilogue_fn(a @ b, scale),
+                    epilogue_fn(a.double() @ b.double(), scale.double()),
+                    a.shape[1],
+                )
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @parametrize(
+        "case",
+        (
+            ("tile", lambda m, n: (m, n)),
+            ("row", lambda m, n: (1, n)),
+            ("col", lambda m, n: (m, 1)),
+        ),
+        name_fn=lambda case: case[0],
+    )
+    def test_mm_reads_bool_mask_captured_tensor_epilogue_arg(self, case):
+        _, shape_fn = case
+
+        def epilogue_fn(acc, mask):
+            acc_float = acc.float()
+            return torch.where(mask, acc_float, -acc_float)
+
+        def fn(a, b, mask):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                lambda acc: epilogue_fn(acc, mask),
+                kernel_options={"backend": "QUACK"},
+            )
+
+        m, k, n = 128, 64, 128
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+        mask = torch.randint(0, 2, shape_fn(m, n), device="cuda", dtype=torch.bool)
+
+        actual = torch.compile(fn, backend="inductor", fullgraph=True)(a, b, mask)
+
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            epilogue_fn(a @ b, mask),
+            epilogue_fn(a.double() @ b.double(), mask),
+            a.shape[1],
+        )
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @parametrize(
+        "case",
+        (
+            ("tile", lambda m, n: (m, n)),
+            ("row", lambda m, n: (1, n)),
+            ("col", lambda m, n: (m, 1)),
+        ),
+        name_fn=lambda case: case[0],
+    )
+    def test_mm_promotes_low_precision_captured_tensor_epilogue_arg(self, case):
+        _, shape_fn = case
+
+        def epilogue_fn(acc, scale):
+            return scale * acc.float()
+
+        def fn(a, b, scale):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                lambda acc: epilogue_fn(acc, scale),
+                kernel_options={"backend": "QUACK"},
+            )
+
+        m, k, n = 128, 64, 128
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+        scale = torch.randn(*shape_fn(m, n), device="cuda", dtype=torch.bfloat16)
+
+        actual = torch.compile(fn, backend="inductor", fullgraph=True)(a, b, scale)
+
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            epilogue_fn(a @ b, scale),
+            epilogue_fn(a.double() @ b.double(), scale.double()),
+            a.shape[1],
+        )
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_tuple_aux_dynamic_shapes_compiled_matches_reference(self):
+        def epilogue_fn(acc):
+            main = (acc.float() + 1.0) * 0.5
+            aux = acc.float().square() + 2.0
+            return main, aux
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True, dynamic=True)
+        for m, k, n in ((128, 64, 128), (256, 64, 192)):
+            a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+            b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+            actual, aux = compiled(a, b)
+            self.assertTupleAuxMatchesReference(actual, aux, a, b, epilogue_fn)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_tuple_aux_supports_distinct_output_dtypes(self):
+        def epilogue_fn(acc):
+            return acc.relu(), acc.float().square() + 2.0
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(128, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(64, 128, device="cuda", dtype=torch.bfloat16)
+
+        actual, aux = torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+
+        expected, expected_aux = epilogue_fn(a @ b)
+        high_precision_acc = a.double() @ b.double()
+        self.assertEqual(actual.dtype, torch.bfloat16)
+        self.assertEqual(aux.dtype, torch.float32)
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            expected,
+            high_precision_acc.relu(),
+            a.shape[1],
+        )
+        self.assertMatchesLowPrecisionEager(
+            aux,
+            expected_aux,
+            high_precision_acc.square() + 2.0,
+            a.shape[1],
+        )
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_tuple_aux_supports_bool_mask_output(self):
+        def epilogue_fn(acc):
+            return acc.relu(), acc > 0
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(128, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(64, 128, device="cuda", dtype=torch.bfloat16)
+
+        (actual, aux), (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+
+        expected, expected_aux = epilogue_fn(a @ b)
+        self.assertEqual(aux.dtype, torch.bool)
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            expected,
+            (a.double() @ b.double()).relu(),
+            a.shape[1],
+        )
+        torch.testing.assert_close(aux, expected_aux)
+        self.assertFlexGemmGeneratedCode(code, "aux_out=")
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
@@ -509,6 +1384,470 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @parametrize(
+        "case",
+        (
+            ("tile", lambda m, n: (m, n)),
+            ("row", lambda m, n: (1, n)),
+            ("col", lambda m, n: (m, 1)),
+        ),
+        name_fn=lambda case: case[0],
+    )
+    def test_mm_generated_code_reads_captured_tensor_epilogue_arg(self, case):
+        kind, shape_fn = case
+
+        def epilogue_fn(acc, scale):
+            return (acc.float() * scale).relu()
+
+        def fn(a, b, scale):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                lambda acc: epilogue_fn(acc, scale),
+                kernel_options={"backend": "QUACK"},
+            )
+
+        m, k, n = 128, 64, 128
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+        scale = torch.randn(*shape_fn(m, n), device="cuda", dtype=torch.float32)
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b, scale
+        )
+
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            epilogue_fn(a @ b, scale),
+            epilogue_fn(a.double() @ b.double(), scale.double()),
+            a.shape[1],
+        )
+        self.assertFlexGemmGeneratedCode(
+            code, "epilogue_args=", f"epilogue_arg_kinds=('{kind}',)"
+        )
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_generated_code_reads_multiple_captured_tensor_epilogue_args(self):
+        def fn(a, b, col_bias, row_scale, tile_bias):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                lambda acc: ((acc.float() + col_bias) * row_scale + tile_bias).relu(),
+                kernel_options={"backend": "QUACK"},
+            )
+
+        m, k, n = 128, 64, 128
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+        col_bias = torch.randn(m, 1, device="cuda", dtype=torch.float32)
+        row_scale = torch.randn(1, n, device="cuda", dtype=torch.float32)
+        tile_bias = torch.randn(m, n, device="cuda", dtype=torch.float32)
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True),
+            a,
+            b,
+            col_bias,
+            row_scale,
+            tile_bias,
+        )
+
+        low_precision_expected = fn(a, b, col_bias, row_scale, tile_bias)
+        high_precision_expected = (
+            ((a.double() @ b.double()) + col_bias.double()) * row_scale.double()
+            + tile_bias.double()
+        ).relu()
+        self.assertMatchesLowPrecisionEager(
+            actual, low_precision_expected, high_precision_expected, a.shape[1]
+        )
+        self.assertFlexGemmGeneratedCode(
+            code,
+            "epilogue_args=",
+            "epilogue_arg_kinds=('col', 'row', 'tile')",
+        )
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_generated_code_reads_captured_args_and_writes_tuple_aux(self):
+        def fn(a, b, col_bias, row_scale, tile_bias):
+            def epilogue_fn(acc):
+                biased = (acc.float() + col_bias) * row_scale + tile_bias
+                return biased.relu(), acc.float() * row_scale + tile_bias
+
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        m, k, n = 128, 64, 128
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+        col_bias = torch.randn(m, 1, device="cuda", dtype=torch.float32)
+        row_scale = torch.randn(1, n, device="cuda", dtype=torch.float32)
+        tile_bias = torch.randn(m, n, device="cuda", dtype=torch.float32)
+
+        (actual, aux), (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True),
+            a,
+            b,
+            col_bias,
+            row_scale,
+            tile_bias,
+        )
+
+        self.assertCapturedTupleAuxMatchesReference(
+            actual, aux, a, b, col_bias, row_scale, tile_bias
+        )
+        self.assertFlexGemmGeneratedCode(
+            code,
+            "epilogue_args=",
+            "epilogue_arg_kinds=('col', 'row', 'tile')",
+            "aux_out=",
+        )
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_generated_code_tuned_matches_reference(self):
+        def epilogue_fn(acc):
+            return (acc + 1).relu()
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK", "tuned": True},
+            )
+
+        a = torch.randn(128, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(64, 128, device="cuda", dtype=torch.bfloat16)
+
+        from torch._inductor.template_heuristics import (
+            flex_gemm as flex_gemm_heuristics,
+        )
+
+        configs = flex_gemm_heuristics.candidate_gemm_configs_for_device(a.device)[:2]
+        with mock.patch(
+            "torch._inductor.template_heuristics.flex_gemm.candidate_gemm_configs_for_device",
+            return_value=configs,
+        ):
+            actual, (code,) = run_and_get_code(
+                torch.compile(fn, backend="inductor", fullgraph=True), a, b
+            )
+
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            epilogue_fn(a @ b),
+            epilogue_fn(a.double() @ b.double()),
+            a.shape[1],
+        )
+        self.assertFlexGemmGeneratedCode(code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_tuple_aux_generated_code_tuned_matches_reference(self):
+        def epilogue_fn(acc):
+            main = (acc.float() + 1.0) * 0.5
+            aux = acc.float().square() + 2.0
+            return main, aux
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK", "tuned": True},
+            )
+
+        a = torch.randn(128, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(64, 128, device="cuda", dtype=torch.bfloat16)
+
+        from torch._inductor.template_heuristics import (
+            flex_gemm as flex_gemm_heuristics,
+        )
+
+        configs = flex_gemm_heuristics.candidate_gemm_configs_for_device(a.device)[:2]
+        with mock.patch(
+            "torch._inductor.template_heuristics.flex_gemm.candidate_gemm_configs_for_device",
+            return_value=configs,
+        ):
+            (actual, aux), (code,) = run_and_get_code(
+                torch.compile(fn, backend="inductor", fullgraph=True), a, b
+            )
+
+        self.assertTupleAuxMatchesReference(actual, aux, a, b, epilogue_fn)
+        self.assertFlexGemmGeneratedCode(code, "aux_out=")
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_bmm_compiled_matches_reference(self):
+        a = torch.randn(2, 128, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(2, 64, 128, device="cuda", dtype=torch.bfloat16)
+
+        def epilogue_fn(acc):
+            return acc.relu()
+
+        actual = torch.compile(flex_gemm, backend="inductor", fullgraph=True)(
+            torch.bmm,
+            (a, b),
+            epilogue_fn,
+            kernel_options={"backend": "QUACK"},
+        )
+
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            epilogue_fn(torch.bmm(a, b)),
+            epilogue_fn(torch.bmm(a.double(), b.double())),
+            a.shape[-1],
+        )
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_baddbmm_compiled_matches_reference(self):
+        bias = torch.randn(2, 128, 128, device="cuda", dtype=torch.bfloat16)
+        a = torch.randn(2, 128, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(2, 64, 128, device="cuda", dtype=torch.bfloat16)
+
+        def epilogue_fn(acc):
+            return acc.relu()
+
+        actual = torch.compile(flex_gemm, backend="inductor", fullgraph=True)(
+            torch.baddbmm,
+            (bias, a, b),
+            epilogue_fn,
+            gemm_kwargs={"beta": 0.5, "alpha": 1.5},
+            kernel_options={"backend": "QUACK"},
+        )
+
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            epilogue_fn(torch.baddbmm(bias, a, b, beta=0.5, alpha=1.5)),
+            epilogue_fn(
+                torch.baddbmm(
+                    bias.double(), a.double(), b.double(), beta=0.5, alpha=1.5
+                )
+            ),
+            a.shape[-1],
+        )
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_baddbmm_broadcast_bias_compiled_matches_reference(self):
+        bias = torch.randn(128, 128, device="cuda", dtype=torch.bfloat16)
+        a = torch.randn(2, 128, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(2, 64, 128, device="cuda", dtype=torch.bfloat16)
+
+        def epilogue_fn(acc):
+            return acc.relu()
+
+        actual = torch.compile(flex_gemm, backend="inductor", fullgraph=True)(
+            torch.baddbmm,
+            (bias, a, b),
+            epilogue_fn,
+            gemm_kwargs={"beta": 0.5, "alpha": 1.5},
+            kernel_options={"backend": "QUACK"},
+        )
+
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            epilogue_fn(torch.baddbmm(bias, a, b, beta=0.5, alpha=1.5)),
+            epilogue_fn(
+                torch.baddbmm(
+                    bias.double(), a.double(), b.double(), beta=0.5, alpha=1.5
+                )
+            ),
+            a.shape[-1],
+        )
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_baddbmm_matrix_dim_broadcast_bias_compiled_matches_reference(self):
+        batch, m, n, k = 2, 128, 192, 64
+        a = torch.randn(batch, m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(batch, k, n, device="cuda", dtype=torch.bfloat16)
+        bias_cases = (
+            ("row_1d", torch.randn(n, device="cuda", dtype=torch.bfloat16)),
+            ("row_2d", torch.randn(1, n, device="cuda", dtype=torch.bfloat16)),
+            ("col_2d", torch.randn(m, 1, device="cuda", dtype=torch.bfloat16)),
+        )
+
+        def epilogue_fn(acc):
+            return acc.relu()
+
+        for name, bias in bias_cases:
+            with self.subTest(name=name):
+                actual = torch.compile(flex_gemm, backend="inductor", fullgraph=True)(
+                    torch.baddbmm,
+                    (bias, a, b),
+                    epilogue_fn,
+                    gemm_kwargs={"beta": 0.5, "alpha": 1.5},
+                    kernel_options={"backend": "QUACK"},
+                )
+
+                self.assertMatchesLowPrecisionEager(
+                    actual,
+                    epilogue_fn(torch.baddbmm(bias, a, b, beta=0.5, alpha=1.5)),
+                    epilogue_fn(
+                        torch.baddbmm(
+                            bias.double(),
+                            a.double(),
+                            b.double(),
+                            beta=0.5,
+                            alpha=1.5,
+                        )
+                    ),
+                    k,
+                )
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_bmm_generated_code_calls_flex_gemm_adapter(self):
+        def epilogue_fn(acc):
+            return acc.relu()
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.bmm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(2, 128, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(2, 64, 128, device="cuda", dtype=torch.bfloat16)
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            epilogue_fn(torch.bmm(a, b)),
+            epilogue_fn(torch.bmm(a.double(), b.double())),
+            a.shape[-1],
+        )
+        self.assertFlexGemmGeneratedCode(code, "expected_ndim=3")
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_bmm_batch_one_generated_code_calls_flex_gemm_adapter(self):
+        def epilogue_fn(acc):
+            return acc.relu()
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.bmm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(1, 128, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(1, 64, 128, device="cuda", dtype=torch.bfloat16)
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            epilogue_fn(torch.bmm(a, b)),
+            epilogue_fn(torch.bmm(a.double(), b.double())),
+            a.shape[-1],
+        )
+        self.assertFlexGemmGeneratedCode(code, "expected_ndim=3")
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_bmm_generated_code_tuned_matches_reference(self):
+        def epilogue_fn(acc):
+            return acc.relu()
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.bmm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK", "tuned": True},
+            )
+
+        a = torch.randn(2, 128, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(2, 64, 128, device="cuda", dtype=torch.bfloat16)
+
+        from torch._inductor.template_heuristics import (
+            flex_gemm as flex_gemm_heuristics,
+        )
+
+        configs = flex_gemm_heuristics.candidate_gemm_configs_for_device(a.device)[:2]
+        with mock.patch(
+            "torch._inductor.template_heuristics.flex_gemm.candidate_gemm_configs_for_device",
+            return_value=configs,
+        ):
+            actual, (code,) = run_and_get_code(
+                torch.compile(fn, backend="inductor", fullgraph=True), a, b
+            )
+
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            epilogue_fn(torch.bmm(a, b)),
+            epilogue_fn(torch.bmm(a.double(), b.double())),
+            a.shape[-1],
+        )
+        self.assertFlexGemmGeneratedCode(code, "expected_ndim=3")
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_baddbmm_generated_code_calls_flex_gemm_adapter(self):
+        def epilogue_fn(acc):
+            return acc.relu()
+
+        def fn(bias, a, b):
+            return flex_gemm(
+                torch.baddbmm,
+                (bias, a, b),
+                epilogue_fn,
+                gemm_kwargs={"beta": 0.5, "alpha": 1.5},
+                kernel_options={"backend": "QUACK"},
+            )
+
+        bias = torch.randn(2, 128, 128, device="cuda", dtype=torch.bfloat16)
+        a = torch.randn(2, 128, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(2, 64, 128, device="cuda", dtype=torch.bfloat16)
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), bias, a, b
+        )
+
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            epilogue_fn(torch.baddbmm(bias, a, b, beta=0.5, alpha=1.5)),
+            epilogue_fn(
+                torch.baddbmm(
+                    bias.double(), a.double(), b.double(), beta=0.5, alpha=1.5
+                )
+            ),
+            a.shape[-1],
+        )
+        self.assertFlexGemmGeneratedCode(code, "C=", "expected_ndim=3")
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_addmm_generated_code_calls_flex_gemm_adapter(self):
         def epilogue_fn(acc):
             return acc.relu()
@@ -543,6 +1882,49 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_addmm_generated_code_tuned_matches_reference(self):
+        def epilogue_fn(acc):
+            return acc.relu()
+
+        def fn(bias, a, b):
+            return flex_gemm(
+                torch.addmm,
+                (bias, a, b),
+                epilogue_fn,
+                gemm_kwargs={"beta": 0.5, "alpha": 1.5},
+                kernel_options={"backend": "QUACK", "tuned": True},
+            )
+
+        bias = torch.randn(128, 128, device="cuda", dtype=torch.bfloat16)
+        a = torch.randn(128, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(64, 128, device="cuda", dtype=torch.bfloat16)
+
+        from torch._inductor.template_heuristics import (
+            flex_gemm as flex_gemm_heuristics,
+        )
+
+        configs = flex_gemm_heuristics.candidate_gemm_configs_for_device(a.device)[:2]
+        with mock.patch(
+            "torch._inductor.template_heuristics.flex_gemm.candidate_gemm_configs_for_device",
+            return_value=configs,
+        ):
+            actual, (code,) = run_and_get_code(
+                torch.compile(fn, backend="inductor", fullgraph=True), bias, a, b
+            )
+
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            epilogue_fn(torch.addmm(bias, a, b, beta=0.5, alpha=1.5)),
+            epilogue_fn(
+                torch.addmm(bias.double(), a.double(), b.double(), beta=0.5, alpha=1.5)
+            ),
+            a.shape[1],
+        )
+        self.assertFlexGemmGeneratedCode(code, "C=")
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     @parametrize(
         "case",
         (
@@ -557,12 +1939,6 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 lambda acc: acc.relu(),
                 {"backend": "QUACK", "split_k": 2},
                 "unsupported FlexGEMM kernel options",
-            ),
-            (
-                "tuned_option",
-                lambda acc: acc.relu(),
-                {"backend": "QUACK", "tuned": True},
-                "tuned=True",
             ),
         ),
         name_fn=lambda case: case[0],
@@ -585,12 +1961,12 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
     def test_rejects_unsupported_quack_op(self):
-        a = torch.randn(2, 3, 4)
-        b = torch.randn(2, 4, 5)
+        a = torch.randn(8, 16)
+        b = torch.randn(16, 12)
 
         with self.assertRaisesRegex(RuntimeError, "unsupported GEMM op"):
             flex_gemm(
-                torch.ops.aten.bmm.default,
+                torch.ops.aten.matmul.default,
                 (a, b),
                 lambda acc: acc.relu(),
                 kernel_options={"backend": "QUACK"},

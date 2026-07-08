@@ -506,7 +506,7 @@ class TestFSDPMiscMultiProcess(FSDPTestContinuous):
                         self.assertNotEqual(
                             p,
                             p_prev,
-                            f"{n_prev} Params at iter {i} same as previous iter!",
+                            lambda msg: f"{msg}\n{n_prev} Params at iter {i} same as previous iter!",
                         )
 
                 # Verify overlap and non overlapped are the same
@@ -519,15 +519,17 @@ class TestFSDPMiscMultiProcess(FSDPTestContinuous):
                             self.assertEqual(
                                 p,
                                 p_overlap,
-                                f"Rank {self.rank}: Params not equal at iteration {i}: {n_overlap} - {p} vs {p_overlap}",
+                                lambda msg: f"{msg}\nRank {self.rank}: Params not equal at iteration {i}: {n_overlap} - {p} vs {p_overlap}",
                             )
                             self.assertEqual(
-                                None, p.grad, f"Expected param {n} grad to be None"
+                                None,
+                                p.grad,
+                                lambda msg: f"{msg}\nExpected param {n} grad to be None",
                             )
                             self.assertEqual(
                                 None,
                                 p_overlap.grad,
-                                f"Expected param {n_overlap} grad to be None",
+                                lambda msg: f"{msg}\nExpected param {n_overlap} grad to be None",
                             )
 
                     fsdp_overlap_prev_params = [

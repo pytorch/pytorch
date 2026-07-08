@@ -156,64 +156,8 @@ size_t CUDASymmetricMemory::get_offset() {
   return offset_;
 }
 
-void check_channel(int channel, int world_size) {
-  TORCH_CHECK(
-      channel >= 0,
-      "channel for barrier(), put_signal() and wait_signal() ",
-      "must be greater than 0 (got ",
-      channel,
-      ")");
-  const size_t num_channels = c10d::symmetric_memory::get_signal_pad_size() /
-      sizeof(uint32_t) * world_size;
-  TORCH_CHECK(
-      static_cast<size_t>(channel) < num_channels,
-      "The maximum supported channel for barrier(), put_signal() and wait_signal() is ",
-      num_channels - 1,
-      " (got ",
-      channel,
-      ")");
-}
-
-static __global__ void barrier_kernel(
-    uint32_t** signal_pads,
-    int channel,
-    int rank,
-    int world_size,
-    size_t timeout_ms) {
-  if (threadIdx.x < world_size) {
-    auto target_rank = threadIdx.x;
-    if (target_rank == rank) {
-      return;
-    }
-    auto put_success = try_put_signal<std::memory_order_release>(
-        signal_pads[target_rank] + world_size * channel + rank, timeout_ms);
-    if (!put_success) {
-      printf(
-          "[FATAL] CUDASymmetricMemory::barrier: rank %d failed to send signal "
-          "to rank %d on channel %d after %lu microseconds\n",
-          rank,
-          target_rank,
-          channel,
-          timeout_ms);
-      trap();
-    }
-    auto wait_success = try_wait_signal<std::memory_order_acquire>(
-        signal_pads[rank] + world_size * channel + target_rank, timeout_ms);
-    if (!wait_success) {
-      printf(
-          "[FATAL] CUDASymmetricMemory::barrier: rank %d failed to receive signal "
-          "from rank %d on channel %d after %lu microseconds\n",
-          rank,
-          target_rank,
-          channel,
-          timeout_ms);
-      trap();
-    }
-  }
-}
-
 void CUDASymmetricMemory::barrier(int channel, size_t timeout_ms) {
-  check_channel(channel, world_size_);
+  check_channel(channel, world_size_, get_signal_pad_size());
   auto pg = c10d::resolve_process_group(pai_->group_name_);
   RECORD_PARAM_COMMS(
       static_cast<int64_t>(0),
@@ -269,7 +213,7 @@ void CUDASymmetricMemory::put_signal(
     int dst_rank,
     int channel,
     size_t timeout_ms) {
-  check_channel(channel, world_size_);
+  check_channel(channel, world_size_, get_signal_pad_size());
   auto pg = c10d::resolve_process_group(pai_->group_name_);
   RECORD_PARAM_COMMS(
       static_cast<int64_t>(0),
@@ -331,7 +275,7 @@ void CUDASymmetricMemory::wait_signal(
     int src_rank,
     int channel,
     size_t timeout_ms) {
-  check_channel(channel, world_size_);
+  check_channel(channel, world_size_, get_signal_pad_size());
   auto pg = c10d::resolve_process_group(pai_->group_name_);
   RECORD_PARAM_COMMS(
       static_cast<int64_t>(0),
@@ -515,7 +459,7 @@ static std::string import_err_msg(
       << " (host: " << reqs[peer].hostname
       << ", device: " << reqs[peer].device_idx << ", NCCL_MNNVL_CLIQUE_ID: "
       << c10::utils::get_env("NCCL_MNNVL_CLIQUE_ID").value_or("unset") << ").";
-  return std::move(oss).str();
+  return oss.str();
 }
 
 void validate_rendezvous_requests(
@@ -572,7 +516,7 @@ static void validate_nvlink_fabric_support(
           << ", device: " << reqs[r].device_idx
           << ", clique_id: " << reqs[r].clique_id << ')';
     }
-    TORCH_CHECK(false, std::move(oss).str());
+    TORCH_CHECK(false, oss.str());
   }
 }
 

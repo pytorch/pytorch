@@ -108,7 +108,7 @@ from torch._inductor.utils import (
     XPU_KERNEL_FORMAT,
 )
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_reference_type
+from torch._library.opaque_object import is_opaque_symbolic_type
 from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import (
     extract_tensor_metadata,
@@ -257,7 +257,8 @@ def _cuda_fatbin_command(
     fatbinary: str | None,
     current_arch: str | None = None,
 ) -> list[str]:
-    current_arch = current_arch or cuda_compile_utils._nvcc_arch_as_compile_option()
+    if not current_arch:
+        current_arch = cuda_compile_utils._nvcc_arch_as_compile_option_or_raise()
     gencode_options = cuda_compile_utils._cuda_multi_arch_gencode_options(current_arch)
     if (
         fatbinary is not None
@@ -880,12 +881,12 @@ class FxGraphCachePickler(pickle.Pickler):
             # I have not worked out the details for everything else
             # but I'm sure we could
             if (
-                opaque_object.is_opaque_type(cls)
+                opaque_object.is_custom_class(cls)
                 and opaque_object.should_hoist(cls)
                 and not opaque_object.has_members(cls)
             ):
                 return (_ident, (t.script_class_name,))
-            if opaque_object.is_opaque_type(cls):
+            if opaque_object.is_custom_class(cls):
                 # Opaque types (e.g., DeviceMesh) may have cyclic references
                 # that fast-mode pickling cannot handle.  Disable fast mode
                 # before the subtree is pickled so the memo table tracks cycles.
@@ -993,6 +994,7 @@ def torch_key() -> bytes:
                 # a hash representing the state of the source code.
                 extra_files = (
                     "codegen/aoti_runtime/interface.cpp",
+                    "codegen/aoti_runtime/streams.h",
                     "script.ld",
                 )
                 inductor_root = os.path.dirname(__file__)
@@ -1417,7 +1419,7 @@ class FxGraphHashDetails:
         processed_inputs: list[InputType | HashableOpaqueValue] = []
         seen_opaques: dict[int, HashableOpaqueValue] = {}
         for inp in example_inputs:
-            if is_opaque_reference_type(type(inp)):
+            if is_opaque_symbolic_type(type(inp)):
                 if id(inp) not in seen_opaques:
                     seen_opaques[id(inp)] = HashableOpaqueValue(len(seen_opaques))
                 processed_inputs.append(seen_opaques[id(inp)])
@@ -2164,29 +2166,8 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
 
         # Now re-evaluate with the symints to add any guards to the current env.
         if graph.guards_expr:
-            # Older cache entries were serialized before guard source locations
-            # were stored, so keep accepting entries with only guards_expr.
-            guards_expr_with_source = getattr(graph, "guards_expr_with_source", None)
-            guards_expr_with_source_arg_count = getattr(
-                graph, "guards_expr_with_source_arg_count", None
-            )
-            # AOTAutograd can load an FX graph using a custom guard checker and
-            # an argument list that differs from the one Inductor used to save
-            # these per-guard expressions. In that case, preserve the custom
-            # evaluate_guards fallback below.
-            can_replay_guards_with_source = (
-                guards_expr_with_source is not None
-                and guards_expr_with_source_arg_count == len(symints)
-                and not config.unsafe_skip_cache_dynamic_shape_guards
-            )
-            if can_replay_guards_with_source:
-                check = shape_env.evaluate_guards_expression_with_source_info(
-                    guards_expr_with_source, symints
-                )
-            else:
-                check = bool(evaluate_guards(graph.guards_expr, symints))
-            if check is not True:
-                raise AssertionError(f"Post-load guard evaluation failed for key {key}")
+            check = bool(evaluate_guards(graph.guards_expr, symints))
+            assert check is True  # noqa: S101
             log.debug(
                 "fx graph cache key %s post-load guards: %s", key, shape_env.guards
             )
@@ -2240,14 +2221,8 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
             raise AssertionError("ShapeEnv is not set for cache serialization")
         symints = FxGraphCache._filter_backed_symints(example_inputs)
         guards = shape_env.get_pruned_guards(symints)
-        (
-            compiled_graph.guards_expr,
-            compiled_graph.guards_expr_with_source,
-        ) = shape_env.produce_guards_expression_with_source_info(
+        compiled_graph.guards_expr = shape_env.produce_guards_expression(
             placeholders=symints, guards=guards
-        )
-        compiled_graph.guards_expr_with_source_arg_count = (
-            len(symints) if compiled_graph.guards_expr_with_source is not None else None
         )
         try:
             backend = torch.utils._triton.triton_backend()
@@ -4191,6 +4166,17 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
     def cache_clear() -> None:
         CppWrapperCodeCache.cache.clear()
 
+    @classmethod
+    def load_pybinding(cls, *args: Any, **kwargs: Any) -> Any:
+        # The cpp_wrapper host glue is compiled synchronously here (in the JIT
+        # torch.compile path this runs while importing the generated wrapper
+        # module, and in AOTI it runs during the autotune pass). Time it under a
+        # dedicated key so the host C++ cold-compile cost is attributed to
+        # cpp_wrapper instead of being hidden inside the generic
+        # PyCodeCache.load_by_key_path timer.
+        with dynamo_timed("cpp_wrapper_compile", log_pt2_compile_event=True):
+            return super().load_pybinding(*args, **kwargs)
+
     cpp_compile_command_flags = {
         "include_pytorch": True,
         "shared": True,
@@ -4206,8 +4192,19 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
             size_t result_len = PyList_GET_SIZE(pyvec);
             result.reserve(result_len);
             for (size_t i = 0; i < result_len; i++) {{
+                PyObject* item = PyList_GET_ITEM(pyvec, i);
+                if (item == Py_None) {{
+                    result.push_back(nullptr);
+                    continue;
+                }}
                 // AtenTensorHandle is essentially a pointer
-                void* elem = PyCapsule_GetPointer(PyList_GET_ITEM(pyvec, i), NULL);
+                void* elem = PyCapsule_GetPointer(item, NULL);
+                if (elem == nullptr && PyErr_Occurred()) {{
+                    PyErr_Clear();
+                    throw std::runtime_error(
+                        "expected input handle to be a PyCapsule or None"
+                    );
+                }}
                 result.push_back(reinterpret_cast<AtenTensorHandle>(elem));
             }}
             return result;

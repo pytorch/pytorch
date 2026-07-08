@@ -180,7 +180,7 @@ struct RNNDescriptorParams {
       default: {
         std::ostringstream oss;
         oss << "unrecognized cuDNN RNN mode " << fn_mode;
-        TORCH_CHECK(false, std::move(oss).str());
+        TORCH_CHECK(false, oss.str());
       }
     }
   }
