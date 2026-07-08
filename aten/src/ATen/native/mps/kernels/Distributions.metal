@@ -435,6 +435,39 @@ REGISTER_BERNOULLI(long);
 REGISTER_BERNOULLI(float2);
 REGISTER_BERNOULLI(half2);
 
+constant constexpr int BINOMIAL_RANDOMS_STRIDE = 32;
+
+template <typename T>
+kernel void standard_binomial(
+    device T* output [[buffer(0)]],
+    device const T* count_in [[buffer(1)]],
+    device const T* prob_in [[buffer(2)]],
+    constant long2& seed_base_offset [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  float count = static_cast<float>(count_in[tid]);
+  float prob = static_cast<float>(prob_in[tid]);
+  long seed = seed_base_offset.x;
+  long base =
+      seed_base_offset.y + static_cast<long>(tid) * BINOMIAL_RANDOMS_STRIDE;
+  BaseSampler<float, c10::metal::RandSampler> sampler(
+      c10::metal::RandSampler(seed, base));
+  output[tid] = static_cast<T>(
+      sample_binomial<float, float, RandSampler>(count, prob, sampler));
+}
+
+#define REGISTER_BINOMIAL(DTYPE)                      \
+  template [[host_name("standard_binomial_" #DTYPE)]] \
+  kernel void standard_binomial<DTYPE>(               \
+      device DTYPE*,                                  \
+      device const DTYPE*,                            \
+      device const DTYPE*,                            \
+      constant long2&,                                \
+      uint)
+
+REGISTER_BINOMIAL(float);
+REGISTER_BINOMIAL(half);
+REGISTER_BINOMIAL(bfloat);
+
 // Marsaglia & Tsang (2000) acceptance-rejection method for Gamma distribution.
 // Adapted from aten/src/ATen/native/Distributions.h sample_gamma(),
 // which originates from NumPy's random module (Copyright 2005 Robert Kern).

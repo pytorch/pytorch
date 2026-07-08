@@ -6,17 +6,17 @@ import unittest
 
 import torch
 from torch.cuda._graph_annotations import (
+    _get_node_type,
     _get_stream_id,
     _is_tools_id_unavailable,
     _rekey_annotations,
     clear_kernel_annotations,
-    enable_annotations,
     get_kernel_annotations,
     mark_kernels,
     mark_stream,
-    remap_to_exec_graph,
     resolve_pending_annotations,
 )
+from torch.cuda._utils import _check_cuda_bindings
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -48,7 +48,8 @@ except ImportError:
 class TestMarkKernels(TestCase):
     def setUp(self):
         super().setUp()
-        enable_annotations()
+        # Annotations are enabled per-capture via torch.cuda.graph(..,
+        # enable_annotations=True); there is no global toggle.
         clear_kernel_annotations()
 
     def tearDown(self):
@@ -60,17 +61,61 @@ class TestMarkKernels(TestCase):
             _ = x + 1
         self.assertEqual(len(get_kernel_annotations()), 0)
 
+    def test_memset_nodes_are_annotated(self):
+        """Memset graph nodes get annotated, not just kernels and memcpys.
+
+        A large reduction emits a ``cudaMemset`` node (zeroing the multi-block
+        reduction semaphores) alongside the reduction kernel. ``keep_graph=True``
+        retains the captured cudaGraph so its nodes can be classified, and defers
+        the remap so node toolsIds stay keyed to the capture graph.
+        """
+        from cuda.bindings import driver, runtime as cuda_runtime
+
+        memset_type = driver.CUgraphNodeType.CU_GRAPH_NODE_TYPE_MEMSET
+        big = torch.randn(8192, 8192, device="cuda")
+        graph = torch.cuda.CUDAGraph(keep_graph=True)
+
+        with torch.cuda.graph(graph, enable_annotations=True):
+            with mark_kernels("reduction"):
+                _ = torch.sum(big)
+
+        raw_graph = graph.raw_cuda_graph()
+        _, num_nodes = _check_cuda_bindings(cuda_runtime.cudaGraphGetNodes(raw_graph))
+        nodes, _ = _check_cuda_bindings(
+            cuda_runtime.cudaGraphGetNodes(raw_graph, numNodes=num_nodes)
+        )
+
+        annotations = get_kernel_annotations()
+        memset_tools_ids = [
+            _check_cuda_bindings(cuda_runtime.cudaGraphNodeGetToolsId(node))
+            for node in nodes[:num_nodes]
+            if _get_node_type(node) == memset_type
+        ]
+
+        self.assertGreater(
+            len(memset_tools_ids),
+            0,
+            "expected the reduction to emit at least one memset node; "
+            "did the reduction lowering change?",
+        )
+        for tools_id in memset_tools_ids:
+            self.assertIn(
+                tools_id,
+                annotations,
+                lambda msg: f"{msg}\nmemset toolsId {hex(tools_id)} was not annotated",
+            )
+            self.assertEqual(annotations[tools_id], [{"str": "reduction"}])
+
     def test_single_scope_at_capture_start_uses_root_fallback(self):
         graph = torch.cuda.CUDAGraph()
         x = torch.randn(8, device="cuda")
 
-        with torch.cuda.graph(graph):
+        with torch.cuda.graph(graph, enable_annotations=True):
             # mark_kernels is the first captured work here, so the entry
             # frontier is empty and the implementation must fall back to
             # newly created graph roots.
             with mark_kernels("phase_a"):
                 _ = x + 1
-            resolve_pending_annotations()
 
         annotations = get_kernel_annotations()
         self.assertGreater(len(annotations), 0)
@@ -82,12 +127,11 @@ class TestMarkKernels(TestCase):
         graph = torch.cuda.CUDAGraph()
         x = torch.randn(8, device="cuda")
 
-        with torch.cuda.graph(graph):
+        with torch.cuda.graph(graph, enable_annotations=True):
             with mark_kernels("scope_1"):
                 _ = x + 1
             with mark_kernels("scope_2"):
                 _ = x * 2
-            resolve_pending_annotations()
 
         annotations = get_kernel_annotations()
         scope_1_ids = set()
@@ -108,10 +152,9 @@ class TestMarkKernels(TestCase):
         x = torch.randn(8, device="cuda")
 
         annotation = {"name": "all_gather", "Group size": 2, "dtype": "bfloat16"}
-        with torch.cuda.graph(graph):
+        with torch.cuda.graph(graph, enable_annotations=True):
             with mark_kernels(annotation):
                 _ = x + 1
-            resolve_pending_annotations()
 
         annotations = get_kernel_annotations()
         self.assertGreater(len(annotations), 0)
@@ -123,10 +166,9 @@ class TestMarkKernels(TestCase):
         graph = torch.cuda.CUDAGraph()
         x = torch.randn(8, device="cuda")
 
-        with torch.cuda.graph(graph):
+        with torch.cuda.graph(graph, enable_annotations=True):
             with mark_kernels("test"):
                 _ = x + 1
-            resolve_pending_annotations()
 
         self.assertGreater(len(get_kernel_annotations()), 0)
         clear_kernel_annotations()
@@ -140,12 +182,11 @@ class TestMarkKernels(TestCase):
         graph = torch.cuda.CUDAGraph()
         x = torch.randn(8, device="cuda")
 
-        with torch.cuda.graph(graph):
+        with torch.cuda.graph(graph, enable_annotations=True):
             _ = x + 1
             with mark_kernels("empty"):
                 pass
             _ = x * 2
-            resolve_pending_annotations()
 
         for anns in get_kernel_annotations().values():
             for ann in anns:
@@ -155,13 +196,12 @@ class TestMarkKernels(TestCase):
         graph = torch.cuda.CUDAGraph()
         x = torch.randn(8, device="cuda")
 
-        with torch.cuda.graph(graph):
+        with torch.cuda.graph(graph, enable_annotations=True):
             _ = x + 1
             _ = x * 2
             with mark_kernels("tagged"):
                 _ = x + 3
             _ = x - 1
-            resolve_pending_annotations()
 
         annotations = get_kernel_annotations()
         total_annotated = sum(len(anns) for anns in annotations.values())
@@ -175,20 +215,21 @@ class TestMarkKernels(TestCase):
         graph = torch.cuda.CUDAGraph()
         x = torch.randn(8, device="cuda")
 
-        with torch.cuda.graph(graph):
+        with torch.cuda.graph(graph, enable_annotations=True):
             with mark_kernels("outer"):
                 _ = x + 1  # outer only
                 with mark_kernels("inner"):
                     _ = x * 2  # nested: inner should win
                 _ = x - 1  # outer only
-            resolve_pending_annotations()
 
         annotations = get_kernel_annotations()
         outer_ids = set()
         inner_ids = set()
         for tid, anns in annotations.items():
             self.assertEqual(
-                len(anns), 1, f"toolsId {hex(tid)} has {len(anns)} annotations"
+                len(anns),
+                1,
+                lambda msg: f"{msg}\ntoolsId {hex(tid)} has {len(anns)} annotations",
             )
             ann = anns[0]
             self.assertIsInstance(ann, dict)
@@ -215,13 +256,12 @@ class TestMarkKernels(TestCase):
             "dtype": "bfloat16",
         }
 
-        with torch.cuda.graph(graph):
+        with torch.cuda.graph(graph, enable_annotations=True):
             with mark_kernels(outer_ann):
                 _ = x + 1  # outer only
                 with mark_kernels(inner_ann):
                     _ = x * 2  # nested
                 _ = x - 1  # outer only
-            resolve_pending_annotations()
 
         annotations = get_kernel_annotations()
         outer_only_ids = set()
@@ -257,12 +297,11 @@ class TestMarkKernels(TestCase):
             "dtype": "bfloat16",
         }
 
-        with torch.cuda.graph(graph):
+        with torch.cuda.graph(graph, enable_annotations=True):
             # Both scopes wrap the same kernels; inner exits first.
             with mark_kernels(outer_ann):
                 with mark_kernels(inner_ann):
                     _ = x + 1
-            resolve_pending_annotations()
 
         annotations = get_kernel_annotations()
         self.assertGreater(len(annotations), 0)
@@ -277,56 +316,20 @@ class TestMarkKernels(TestCase):
             self.assertEqual(ann["In msg nelems"], 1024)
             self.assertEqual(ann["dtype"], "bfloat16")
 
-    def test_remap_to_exec_graph(self):
-        from cuda.bindings import runtime as cuda_runtime
-
-        graph = torch.cuda.CUDAGraph()
-        x = torch.randn(8, device="cuda")
-
-        with torch.cuda.graph(graph):
-            with mark_kernels("test"):
-                _ = x + 1
-            resolve_pending_annotations()
-
-        annotations_before = dict(get_kernel_annotations())
-        self.assertGreater(len(annotations_before), 0)
-
-        exec_handle = cuda_runtime.cudaGraphExec_t(
-            init_value=graph.raw_cuda_graph_exec()
-        )
-        _, exec_graph_id = cuda_runtime.cudaGraphExecGetId(exec_handle)
-
-        remap_to_exec_graph(graph)
-
-        annotations_after = get_kernel_annotations()
-        self.assertEqual(len(annotations_after), len(annotations_before))
-        for tools_id in annotations_after:
-            self.assertEqual(tools_id >> 32, exec_graph_id)
-
-    def test_disabled_is_noop(self):
-        from torch.cuda._graph_annotations import disable_annotations
-
-        disable_annotations()
-
+    def test_no_enable_records_nothing(self):
+        # Without enable_annotations=True the capture is un-annotated, so
+        # mark_kernels is a no-op and nothing is recorded.
         graph = torch.cuda.CUDAGraph()
         x = torch.randn(8, device="cuda")
 
         with torch.cuda.graph(graph):
             with mark_kernels("should_not_appear"):
                 _ = x + 1
-            resolve_pending_annotations()
 
         self.assertEqual(len(get_kernel_annotations()), 0)
 
-        # Re-enable for other tests
-        enable_annotations()
-
     def test_enable_annotations_kwarg(self):
-        """enable_annotations on torch.cuda.graph auto-resolves annotations."""
-        from torch.cuda._graph_annotations import disable_annotations
-
-        # Start with annotations disabled to verify the kwarg enables them.
-        disable_annotations()
+        """enable_annotations=True on torch.cuda.graph records and auto-resolves."""
         clear_kernel_annotations()
 
         graph = torch.cuda.CUDAGraph()
@@ -344,9 +347,6 @@ class TestMarkKernels(TestCase):
 
     def test_enable_annotations_does_not_clear(self):
         """Annotations from a previous graph survive a second capture."""
-        from torch.cuda._graph_annotations import disable_annotations
-
-        disable_annotations()
         clear_kernel_annotations()
 
         graph1 = torch.cuda.CUDAGraph()
@@ -380,10 +380,7 @@ class TestMarkKernels(TestCase):
             with mark_kernels("remap_test"):
                 _ = x + 1
 
-        exec_handle = cuda_runtime.cudaGraphExec_t(
-            init_value=graph.raw_cuda_graph_exec()
-        )
-        _, exec_graph_id = cuda_runtime.cudaGraphExecGetId(exec_handle)
+        _, exec_graph_id = cuda_runtime.cudaGraphExecGetId(graph.raw_cuda_graph_exec())
 
         annotations = get_kernel_annotations()
         self.assertGreater(len(annotations), 0)
@@ -392,22 +389,9 @@ class TestMarkKernels(TestCase):
             self.assertEqual(
                 graph_id,
                 exec_graph_id,
-                f"toolsId 0x{tools_id:016x} has graph_id {graph_id}, "
+                lambda msg: f"{msg}\ntoolsId 0x{tools_id:016x} has graph_id {graph_id}, "
                 f"expected exec_graph_id {exec_graph_id}",
             )
-
-    def test_enable_annotations_false_does_not_auto_resolve(self):
-        """Without enable_annotations, pending scopes are not resolved."""
-        graph = torch.cuda.CUDAGraph()
-        x = torch.randn(8, device="cuda")
-
-        # enable_annotations=False (default): no auto-resolve.
-        with torch.cuda.graph(graph):
-            with mark_kernels("unresolved"):
-                _ = x + 1
-
-        # Annotations should be empty because resolve was never called.
-        self.assertEqual(len(get_kernel_annotations()), 0)
 
     def test_mark_stream_snapshots_capture_before_switch(self):
         graph = torch.cuda.CUDAGraph()
@@ -418,7 +402,7 @@ class TestMarkKernels(TestCase):
         aux_done = torch.cuda.Event()
 
         capture_stream.wait_stream(torch.cuda.current_stream())
-        with torch.cuda.graph(graph, stream=capture_stream):
+        with torch.cuda.graph(graph, stream=capture_stream, enable_annotations=True):
             _ = x + 1
             aux_ready = capture_stream.record_event()
             with mark_stream(aux_stream, {"name": "aux"}):
@@ -426,7 +410,6 @@ class TestMarkKernels(TestCase):
                 _ = x * 2
                 aux_stream.record_event(aux_done)
             capture_stream.wait_event(aux_done)
-            resolve_pending_annotations()
 
         annotations = get_kernel_annotations()
         self.assertGreater(len(annotations), 0)
@@ -445,7 +428,7 @@ class TestMarkKernels(TestCase):
         aux_done = torch.cuda.Event()
 
         capture_stream.wait_stream(torch.cuda.current_stream())
-        with torch.cuda.graph(graph, stream=capture_stream):
+        with torch.cuda.graph(graph, stream=capture_stream, enable_annotations=True):
             base = x + 1
             fork_event = capture_stream.record_event()
 
@@ -462,7 +445,6 @@ class TestMarkKernels(TestCase):
                 aux_stream.record_event(aux_done)
 
             capture_stream.wait_event(aux_done)
-            resolve_pending_annotations()
 
         annotations = get_kernel_annotations()
         self.assertGreater(len(annotations), 0)
@@ -475,14 +457,13 @@ class TestMarkKernels(TestCase):
     def _exec_graph_id(self, graph):
         from cuda.bindings import runtime as cuda_runtime
 
-        handle = cuda_runtime.cudaGraphExec_t(init_value=graph.raw_cuda_graph_exec())
-        _, exec_graph_id = cuda_runtime.cudaGraphExecGetId(handle)
+        _, exec_graph_id = cuda_runtime.cudaGraphExecGetId(graph.raw_cuda_graph_exec())
         return exec_graph_id
 
     @parametrize("keep_graph", [True, False])
     def test_multiple_graphs_in_sequence_each_remapped(self, keep_graph):
-        """Several graphs captured in sequence, then resolved once and
-        remapped each, must all be annotated -- not just the last one.
+        """Several graphs captured in sequence must each be annotated and
+        remapped to their own exec id -- not just the last one.
 
         Covers both keep_graph modes: with keep_graph=True the template
         survives capture, with keep_graph=False it is destroyed -- the capture
@@ -492,24 +473,20 @@ class TestMarkKernels(TestCase):
         graph_b = torch.cuda.CUDAGraph(keep_graph=keep_graph)
         x = torch.randn(8, device="cuda")
 
-        with torch.cuda.graph(graph_a):
+        with torch.cuda.graph(graph_a, enable_annotations=True):
             with mark_kernels("graph_a"):
                 _ = x + 1
 
         # Break in between, then capture a second graph with its own marks.
-        with torch.cuda.graph(graph_b):
+        with torch.cuda.graph(graph_b, enable_annotations=True):
             with mark_kernels("graph_b"):
                 _ = x * 2
 
         if keep_graph:
-            # keep_graph=False auto-instantiates at capture_end.
+            # keep_graph=True defers instantiation (and thus the remap); for
+            # keep_graph=False capture_end already instantiated and remapped.
             graph_a.instantiate()
             graph_b.instantiate()
-
-        # Resolve the whole sequence once, then remap each graph.
-        resolve_pending_annotations()
-        remap_to_exec_graph(graph_a)
-        remap_to_exec_graph(graph_b)
 
         exec_a = self._exec_graph_id(graph_a)
         exec_b = self._exec_graph_id(graph_b)
@@ -527,6 +504,69 @@ class TestMarkKernels(TestCase):
         self.assertEqual(graph_ids_by_name["graph_a"], {exec_a})
         self.assertEqual(graph_ids_by_name["graph_b"], {exec_b})
 
+    def _assert_keyed_to(self, exec_graph_id):
+        annotations = get_kernel_annotations()
+        self.assertGreater(len(annotations), 0)
+        for tools_id in annotations:
+            self.assertEqual(tools_id >> 32, exec_graph_id)
+
+    @parametrize("trigger", ["instantiate", "replay"])
+    def test_keep_graph_true_remaps_on_first_instantiation(self, trigger):
+        """With keep_graph=True the exec graph is not instantiated at
+        capture_end, so the context exit must not error and the remap must be
+        deferred until the graph is instantiated -- whether that happens via an
+        explicit instantiate() or implicitly on the first replay().
+        """
+        clear_kernel_annotations()
+        graph = torch.cuda.CUDAGraph(keep_graph=True)
+        x = torch.randn(8, device="cuda")
+
+        # Must not raise: previously __exit__ called raw_cuda_graph_exec() before
+        # instantiation, which errors when keep_graph=True.
+        with torch.cuda.graph(graph, enable_annotations=True):
+            with mark_kernels("kg"):
+                _ = x + 1
+
+        # Annotations are recorded but still keyed by the capture id until the
+        # exec graph exists.
+        self.assertGreater(len(get_kernel_annotations()), 0)
+
+        if trigger == "instantiate":
+            graph.instantiate()
+        else:
+            graph.replay()
+
+        self._assert_keyed_to(self._exec_graph_id(graph))
+
+    def test_keep_graph_true_reinstantiate_rekeys_annotations(self):
+        """keep_graph=True is meant for modifying the template and instantiating
+        again. Each instantiate() produces a fresh exec id, so annotations must
+        be rekeyed from the previous exec id to the new one on re-instantiation,
+        while a plain replay() (no new exec graph) leaves them unchanged.
+        """
+        clear_kernel_annotations()
+        graph = torch.cuda.CUDAGraph(keep_graph=True)
+        x = torch.randn(8, device="cuda")
+
+        with torch.cuda.graph(graph, enable_annotations=True):
+            with mark_kernels("kg"):
+                _ = x + 1
+
+        graph.instantiate()
+        exec1 = self._exec_graph_id(graph)
+        self._assert_keyed_to(exec1)
+
+        # Replay does not create a new exec graph: keys must stay on exec1.
+        graph.replay()
+        self.assertEqual(self._exec_graph_id(graph), exec1)
+        self._assert_keyed_to(exec1)
+
+        # Re-instantiate: a new exec id, annotations must follow it.
+        graph.instantiate()
+        exec2 = self._exec_graph_id(graph)
+        self.assertNotEqual(exec1, exec2)
+        self._assert_keyed_to(exec2)
+
     def test_mark_kernels_skips_preexisting_dependents_on_entry_frontier(self):
         graph = torch.cuda.CUDAGraph()
         x = torch.randn(8, device="cuda")
@@ -535,7 +575,7 @@ class TestMarkKernels(TestCase):
         aux_done = torch.cuda.Event()
 
         capture_stream.wait_stream(torch.cuda.current_stream())
-        with torch.cuda.graph(graph, stream=capture_stream):
+        with torch.cuda.graph(graph, stream=capture_stream, enable_annotations=True):
             base = x + 1
             shared_event = capture_stream.record_event()
 
@@ -550,7 +590,6 @@ class TestMarkKernels(TestCase):
                     aux_stream.record_event(aux_done)
 
             capture_stream.wait_event(aux_done)
-            resolve_pending_annotations()
 
         annotations = get_kernel_annotations()
         self.assertEqual(len(annotations), 1)
@@ -601,6 +640,40 @@ class TestGetGraphData(TestCase):
         for kn in kernel_nodes:
             self.assertIsNotNone(kn["kernel_name"])
             self.assertIsInstance(kn["kernel_name"], str)
+
+    def test_export_graph_data_hook(self):
+        import os
+        import pickle
+        import tempfile
+
+        x = torch.zeros([2000], device="cuda")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # keep_graph=True: instantiate() explicitly fires the hook; the
+            # template persists so we can also compare against get_graph_data().
+            g = torch.cuda.CUDAGraph(keep_graph=True)
+            with torch.cuda.graph(g, capture_error_mode="relaxed"):
+                _ = (x + 1).relu()
+            kept_path = os.path.join(tmpdir, "kept.pkl")
+            g.register_post_instantiate_hook(torch.cuda.export_graph_data(kept_path))
+            g.instantiate()
+            self.assertGreater(os.path.getsize(kept_path), 0)
+            with open(kept_path, "rb") as f:
+                self.assertEqual(pickle.load(f), g.get_graph_data())
+
+            # keep_graph=False: capture_end instantiates (firing the hook) before
+            # it destroys the template, so get_graph_data still sees both the
+            # template and the exec graph. Register before capture.
+            g2 = torch.cuda.CUDAGraph()
+            free_path = os.path.join(tmpdir, "free.pkl")
+            g2.register_post_instantiate_hook(torch.cuda.export_graph_data(free_path))
+            with torch.cuda.graph(g2, capture_error_mode="relaxed"):
+                _ = (x + 1).relu()
+            self.assertGreater(os.path.getsize(free_path), 0)
+            with open(free_path, "rb") as f:
+                data = pickle.load(f)
+            self.assertIn("exec_graph_id", data)
+            self.assertGreater(len(data["nodes"]), 0)
 
     def test_edges(self):
         g = torch.cuda.CUDAGraph(keep_graph=True)

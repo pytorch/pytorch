@@ -1,6 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/ceil_div.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/BatchLinearAlgebra.h>
 #include <ATen/native/LinearAlgebra.h>
@@ -17,35 +18,48 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ScalarOps.h>
 #include <ATen/ops/_cholesky_solve_helper_native.h>
+#include <ATen/ops/_linalg_check_errors.h>
+#include <ATen/ops/_linalg_eigh.h>
 #include <ATen/ops/_linalg_solve_ex_native.h>
 #include <ATen/ops/addbmm_native.h>
 #include <ATen/ops/addmm_native.h>
 #include <ATen/ops/addr_native.h>
+#include <ATen/ops/all.h>
 #include <ATen/ops/baddbmm_native.h>
 #include <ATen/ops/bmm_native.h>
 #include <ATen/ops/eye.h>
 #include <ATen/ops/eye_native.h>
 #include <ATen/ops/linalg_cholesky_ex_native.h>
 #include <ATen/ops/linalg_inv_ex_native.h>
+#include <ATen/ops/linalg_lstsq_native.h>
 #include <ATen/ops/linalg_lu_factor_ex_native.h>
 #include <ATen/ops/linalg_lu_factor_native.h>
 #include <ATen/ops/linalg_lu_native.h>
 #include <ATen/ops/linalg_qr.h>
 #include <ATen/ops/linalg_qr_native.h>
 #include <ATen/ops/linalg_solve_triangular_native.h>
+#include <ATen/ops/linalg_svd.h>
+#include <ATen/ops/linalg_vector_norm.h>
 #include <ATen/ops/lu_unpack.h>
 #include <ATen/ops/lu_unpack_native.h>
 #include <ATen/ops/matmul.h>
 #include <ATen/ops/mm_native.h>
+#include <ATen/ops/mul.h>
 #include <ATen/ops/orgqr_native.h>
+#include <ATen/ops/real.h>
 #include <ATen/ops/slice.h>
 #include <ATen/ops/stack.h>
 #include <ATen/ops/triangular_solve_native.h>
+#include <ATen/ops/where.h>
+#include <ATen/ops/zeros.h>
 #endif
 
 #include <c10/util/env.h>
 #include <algorithm>
+#include <string>
+#include <unordered_set>
 
 namespace at::native {
 namespace mps {
@@ -300,8 +314,14 @@ bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output)
   static bool always_use_metal = c10::utils::has_env("PYTORCH_MPS_PREFER_METAL");
   constexpr auto max_stride_size = 32768;
   constexpr auto max_complex_inner_size = 2048;
-  static bool is_macos_14_4_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_4_PLUS);
+  static bool is_macos_14_4_or_newer = is_macos_at_least(MacOSVersion::MACOS_14_4);
   if (always_use_metal || c10::isIntegralType(self.scalar_type(), true)) {
+    return true;
+  }
+  // MPSGraph mis-writes a non-contiguous output before macOS 26; the metal
+  // kernels honor the output strides.
+  static const bool is_macos_26_0_or_newer = is_macos_at_least(MacOSVersion::MACOS_26_0);
+  if (!output.is_contiguous() && !is_macos_26_0_or_newer) {
     return true;
   }
   // multiplicationWithPrimaryTensor: returns incorrect results if inner size exceeds 2048
@@ -353,6 +373,211 @@ void map_mps_decomposition_error_code_to_blas(const Tensor& status) {
 
 } // anonymous namespace
 
+static bool lu_has_matmul2d() {
+  // matmul2d needs macOS 26.2+; below that the simdgroup gemm fallback is used
+  return is_macos_at_least(MacOSVersion::MACOS_26_2);
+}
+
+// Blocked right-looking LU with partial pivoting, factored in place on a
+// row-major fp32 (B, M, N) buffer; pivots are 1-based, info follows LAPACK.
+static void lu_factor_panel_encode(const Tensor& LU,
+                                   const Tensor& pivots,
+                                   const Tensor& info,
+                                   int64_t M,
+                                   int64_t N,
+                                   int64_t B,
+                                   bool transposeResult) {
+  auto stream = getCurrentMPSStream();
+  const bool useMpp = lu_has_matmul2d();
+
+  auto factorW32PSO = lib.getPipelineStateForFunc("factorPanelLU_1_32");
+  auto factorW16PSO = lib.getPipelineStateForFunc("factorPanelLU_2_16");
+  auto factorW8PSO = lib.getPipelineStateForFunc("factorPanelLU_4_8");
+  auto streamUpdatePSO = lib.getPipelineStateForFunc("luStreamUpdate");
+  auto streamPivotPSO = lib.getPipelineStateForFunc("luStreamPivot");
+  auto laswpPSO = lib.getPipelineStateForFunc("laswpGatherLU");
+  auto trsm8PSO = lib.getPipelineStateForFunc("trsmPanelLU_8");
+  auto trsm16PSO = lib.getPipelineStateForFunc("trsmPanelLU_16");
+  auto trsm32PSO = lib.getPipelineStateForFunc("trsmPanelLU_32");
+  uint32_t maxG = static_cast<uint32_t>(std::min({factorW32PSO.maxTotalThreadsPerThreadgroup,
+                                                  factorW16PSO.maxTotalThreadsPerThreadgroup,
+                                                  factorW8PSO.maxTotalThreadsPerThreadgroup}));
+  maxG = std::max(32u, maxG / 32 * 32);
+  auto gemmBigPSO = useMpp ? lib.getPipelineStateForFunc("gemmLU_64_64_4") : nil;
+  auto gemmSmallPSO = useMpp ? lib.getPipelineStateForFunc("gemmLU_32_64_2") : nil;
+  auto gemmSimdPSO = useMpp ? nil : lib.getPipelineStateForFunc("gemmSimdLU");
+  auto transposePSO = transposeResult ? lib.getPipelineStateForFunc("transposeInPlaceLU") : nil;
+
+  const auto uM = static_cast<uint32_t>(M);
+  const auto uN = static_cast<uint32_t>(N);
+  const auto uB = static_cast<uint32_t>(B);
+  const uint32_t mn = std::min(uM, uN);
+  const uint32_t NBo = mn <= 1024 ? 32 : mn <= 2048 ? 64 : 128;
+  // panels taller than this use the streaming kernels (kLUStreamNT argmax
+  // partials and the 32-float U row per batch in scratch)
+  const uint32_t kStreamMinRows = 4 * maxG;
+  Tensor scratch;
+  if (uM > kStreamMinRows) {
+    scratch = at::empty({B, 2 * kLUStreamNT + 32}, LU.options());
+  }
+
+  @autoreleasepool {
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      auto enc = stream->commandEncoder();
+      mtl_setArgs(enc, LU, pivots, info);
+      const uint32_t dims[2] = {uM, uN};
+      [enc setBytes:dims length:8 atIndex:3];
+      if (scratch.defined()) {
+        mtl_setArgs<6>(enc, scratch);
+      }
+
+      auto setP4 = [&](uint32_t a, uint32_t b, uint32_t c, uint32_t d) {
+        const uint32_t p[4] = {a, b, c, d};
+        [enc setBytes:p length:16 atIndex:4];
+      };
+      auto setP5 = [&](uint32_t a, uint32_t b, uint32_t c, uint32_t d) {
+        const uint32_t p[4] = {a, b, c, d};
+        [enc setBytes:p length:16 atIndex:5];
+      };
+      auto laswp = [&](uint32_t d0, uint32_t nb, uint32_t cs0, uint32_t ce0, uint32_t cs1, uint32_t ce1) {
+        const uint32_t W = (ce0 - cs0) + (ce1 - cs1);
+        if (W == 0) {
+          return;
+        }
+        setP5(cs0, ce0, cs1, ce1);
+        [enc setComputePipelineState:laswpPSO];
+        for (uint32_t s0 = 0; s0 < nb; s0 += 32) {
+          setP4(d0 + s0, std::min(32u, nb - s0), 0, 0);
+          [enc dispatchThreadgroups:MTLSizeMake((W + 63) / 64, uB, 1) threadsPerThreadgroup:MTLSizeMake(256, 1, 1)];
+        }
+      };
+      auto trsm = [&](uint32_t d0, uint32_t cs, uint32_t ce, id<MTLComputePipelineState> pso, uint32_t nr) {
+        if (cs >= ce) {
+          return;
+        }
+        setP4(d0, cs, ce, nr);
+        [enc setComputePipelineState:pso];
+        [enc dispatchThreadgroups:MTLSizeMake(uB, (ce - cs + 127) / 128, 1)
+            threadsPerThreadgroup:MTLSizeMake(128, 1, 1)];
+      };
+      auto gemm = [&](uint32_t rs, uint32_t re, uint32_t cs, uint32_t ce, uint32_t kc, uint32_t kw) {
+        if (rs >= re || cs >= ce) {
+          return;
+        }
+        setP4(rs, re, cs, ce);
+        setP5(kc, kw, 0, 0);
+        const uint32_t Tm = re - rs;
+        const uint32_t Tn = ce - cs;
+        if (!useMpp) {
+          [enc setComputePipelineState:gemmSimdPSO];
+          [enc dispatchThreadgroups:MTLSizeMake((Tn + 63) / 64, (Tm + 31) / 32, uB)
+              threadsPerThreadgroup:MTLSizeMake(128, 1, 1)];
+          return;
+        }
+        const bool big = Tm >= 1024 && Tn >= 64;
+        const uint32_t BM = big ? 64 : 32;
+        const uint32_t BN = 64;
+        const uint32_t NSG = big ? 4 : 2;
+        [enc setComputePipelineState:(big ? gemmBigPSO : gemmSmallPSO)];
+        [enc dispatchThreadgroups:MTLSizeMake((Tn + BN - 1) / BN, (Tm + BM - 1) / BM, uB)
+            threadsPerThreadgroup:MTLSizeMake(NSG * 32, 1, 1)];
+      };
+      auto factorSub = [&](uint32_t d0, id<MTLComputePipelineState> pso, uint32_t G) {
+        setP4(d0, 0, 0, 0);
+        [enc setComputePipelineState:pso];
+        [enc dispatchThreadgroups:MTLSizeMake(uB, 1, 1) threadsPerThreadgroup:MTLSizeMake(G, 1, 1)];
+      };
+      auto factorStream = [&](uint32_t c0) {
+        const uint32_t H = uM - c0;
+        const uint32_t nb = std::min(32u, mn - c0);
+        auto update = [&](uint32_t j, bool searchOnly) -> uint32_t {
+          const uint32_t rowStart = searchOnly ? j : j + 1;
+          if (rowStart >= H) {
+            return 0;
+          }
+          const uint32_t n = H - rowStart;
+          // Each threadgroup is kLUStreamWarpsPerTG simdgroups, each factoring
+          // RPT rows. Pick RPT so the threadgroup count nTG stays within the
+          // kLUStreamNT argmax-partial slots scratch holds per batch.
+          const uint32_t RPT = std::max(1u, at::ceil_div(n, kLUStreamWarpsPerTG * kLUStreamNT));
+          const uint32_t nTG = at::ceil_div(n, kLUStreamWarpsPerTG * RPT);
+          setP4(c0, j, RPT, searchOnly ? 1 : 0);
+          [enc setComputePipelineState:streamUpdatePSO];
+          [enc dispatchThreadgroups:MTLSizeMake(nTG, uB, 1) threadsPerThreadgroup:MTLSizeMake(kLUStreamNT, 1, 1)];
+          return nTG;
+        };
+        uint32_t npart = update(0, true);
+        for (uint32_t j = 0; j < nb; j++) {
+          setP4(c0, j, npart, 0);
+          [enc setComputePipelineState:streamPivotPSO];
+          [enc dispatchThreadgroups:MTLSizeMake(uB, 1, 1) threadsPerThreadgroup:MTLSizeMake(kLUStreamNT, 1, 1)];
+          npart = update(j, false);
+        }
+      };
+      // factor the 32-wide block at c0 via W-wide register panels
+      auto factor = [&](uint32_t c0, uint32_t sw) {
+        const uint32_t H = uM - c0;
+        if (H > kStreamMinRows) {
+          factorStream(c0);
+          return;
+        }
+        // smallest R (widest panel) whose per-thread row count fits in maxG
+        uint32_t R = 1;
+        while (R < 4 && (H + R - 1) / R > maxG) {
+          R *= 2;
+        }
+        const uint32_t W = 32 / R;
+        const uint32_t G = std::min(maxG, (((H + R - 1) / R) + 31) / 32 * 32);
+        const auto pso = R == 1 ? factorW32PSO : R == 2 ? factorW16PSO : factorW8PSO;
+        if (W >= sw) {
+          factorSub(c0, pso, G);
+          return;
+        }
+        const auto tpso = W == 16 ? trsm16PSO : trsm8PSO;
+        for (uint32_t q0 = c0; q0 < c0 + sw; q0 += W) {
+          const uint32_t qw = std::min(W, c0 + sw - q0);
+          factorSub(q0, pso, G);
+          laswp(q0, qw, c0, q0, q0 + qw, c0 + sw);
+          if (q0 + qw < c0 + sw) {
+            trsm(q0, q0 + qw, c0 + sw, tpso, W);
+            gemm(q0 + qw, uM, q0 + qw, c0 + sw, q0, qw);
+          }
+        }
+      };
+
+      for (uint32_t p0 = 0; p0 < mn; p0 += NBo) {
+        const uint32_t pw = std::min(NBo, mn - p0);
+        for (uint32_t c0 = p0; c0 < p0 + pw; c0 += 32) {
+          const uint32_t sw = std::min(32u, mn - c0);
+          factor(c0, sw);
+          laswp(c0, sw, p0, c0, c0 + sw, p0 + pw);
+          if (c0 + sw < p0 + pw) {
+            trsm(c0, c0 + sw, p0 + pw, trsm32PSO, 32);
+            gemm(c0 + sw, uM, c0 + sw, p0 + pw, c0, sw);
+          }
+        }
+        laswp(p0, pw, 0, p0, p0 + pw, uN);
+        if (p0 + pw < uN) {
+          for (uint32_t b0 = p0; b0 < p0 + pw; b0 += 32) {
+            trsm(b0, p0 + pw, uN, trsm32PSO, std::min(32u, mn - b0));
+            if (b0 + 32 < p0 + pw) {
+              gemm(b0 + 32, std::min(p0 + pw, uM), p0 + pw, uN, b0, 32);
+            }
+          }
+        }
+        if (p0 + pw < mn) {
+          gemm(p0 + pw, uM, p0 + pw, uN, p0, pw);
+        }
+      }
+      if (transposeResult) {
+        [enc setComputePipelineState:transposePSO];
+        const uint32_t nt = (uN + 31) / 32;
+        [enc dispatchThreadgroups:MTLSizeMake(nt, nt, uB) threadsPerThreadgroup:MTLSizeMake(32, 8, 1)];
+      }
+    });
+  }
+}
+
 static void linalg_lu_factor_ex_out_mps_impl(const Tensor& A,
                                              bool pivot,
                                              const Tensor& LU,
@@ -365,112 +590,49 @@ static void linalg_lu_factor_ex_out_mps_impl(const Tensor& A,
               "linalg.lu_factor(): MPS doesn't support complex types.");
   TORCH_CHECK(pivot, "linalg.lu_factor(): MPS doesn't allow pivot == False.");
 
-  Tensor A_t = A.contiguous();
-  uint64_t aRows = A_t.size(-2);
-  uint64_t aCols = A_t.size(-1);
-  uint64_t aElemSize = A_t.element_size();
-  uint64_t numPivots = std::min(aRows, aCols);
-  std::vector<int64_t> pivot_sizes(A_t.sizes().begin(), A_t.sizes().end() - 2);
+  int64_t aRows = A.size(-2);
+  int64_t aCols = A.size(-1);
+  int64_t numPivots = std::min(aRows, aCols);
+  std::vector<int64_t> pivot_sizes(A.sizes().begin(), A.sizes().end() - 2);
   resize_output(info, pivot_sizes);
   pivot_sizes.push_back(numPivots);
   resize_output(pivots, pivot_sizes);
 
-  if (A_t.numel() == 0) {
+  if (A.numel() == 0) {
+    info.zero_();
     return;
   }
 
-  Tensor A_ = A_t.dim() > 3 ? A_t.flatten(0, -3) : A_t;
-
-  uint64_t batchSize = A_.dim() > 2 ? A_.size(0) : 1;
-  std::vector<Tensor> status_tensors;
-  std::vector<Tensor> pivots_list;
-
-  status_tensors.reserve(batchSize);
-  pivots_list.reserve(batchSize);
-  for ([[maybe_unused]] const auto i : c10::irange(batchSize)) {
-    status_tensors.push_back(at::zeros(1, kInt, std::nullopt, kMPS, std::nullopt));
-    pivots_list.push_back(at::zeros(numPivots, kInt, std::nullopt, kMPS, std::nullopt));
-  }
-
-  // Since the MPSMatrixDecompositionLU functions in-place if the result matrix completely aliases the source matrix,
-  // We copy LU from A as the new A.
-  resize_output(LU, A_.sizes());
-  if (!LU.is_same(A_)) {
-    A_ = LU.copy_(A_);
+  // kernels factor row-major, the LU output is column-major: square factors
+  // in the LU.mT() view and transposes in place, the rest go via a scratch
+  resize_output(LU, A.sizes());
+  const bool inPlace = aRows == aCols && !LU.is_same(A) && LU.mT().is_contiguous();
+  Tensor work_full;
+  if (inPlace) {
+    work_full = LU.mT();
   } else {
-    A_ = LU;
+    work_full = at::empty(A.sizes(), A.options());
   }
+  work_full.copy_(A);
+  Tensor work = work_full.dim() > 3 ? work_full.flatten(0, -3) : work_full;
+  TORCH_INTERNAL_ASSERT(work.is_contiguous())
+  int64_t batchSize = work.dim() > 2 ? work.size(0) : 1;
 
-  TORCH_INTERNAL_ASSERT(A_.is_contiguous())
-
-  id<MTLBuffer> aBuffer = getMTLBufferStorage(A_);
-
-  MPSStream* mpsStream = getCurrentMPSStream();
-  id<MTLDevice> device = MPSDevice::getInstance()->device();
-
-  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
-    @autoreleasepool {
-      id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
-      auto filter = [[[MPSMatrixDecompositionLU alloc] initWithDevice:device rows:aRows columns:aCols] autorelease];
-
-      auto sourceMatrixDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:aRows
-                                                                    columns:aCols
-                                                                   matrices:1
-                                                                   rowBytes:aCols * aElemSize
-                                                                matrixBytes:aRows * aCols * aElemSize
-                                                                   dataType:getMPSDataType(A_)];
-      auto pivotsMatrixDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:1
-                                                                    columns:numPivots
-                                                                   matrices:1
-                                                                   rowBytes:numPivots * sizeof(uint32_t)
-                                                                matrixBytes:numPivots * sizeof(uint32_t)
-                                                                   dataType:MPSDataTypeUInt32];
-
-      for (const auto i : c10::irange(batchSize)) {
-        const uint64_t aBatchOffset = i * aRows * aCols;
-        auto sourceMatrix = [[[MPSMatrix alloc] initWithBuffer:aBuffer
-                                                        offset:(A_.storage_offset() + aBatchOffset) * aElemSize
-                                                    descriptor:sourceMatrixDesc] autorelease];
-        auto pivotIndices = [[[MPSMatrix alloc] initWithBuffer:getMTLBufferStorage(pivots_list[i])
-                                                        offset:0
-                                                    descriptor:pivotsMatrixDesc] autorelease];
-        auto solutionMatrix = [[[MPSMatrix alloc] initWithBuffer:aBuffer
-                                                          offset:(A_.storage_offset() + aBatchOffset) * aElemSize
-                                                      descriptor:sourceMatrixDesc] autorelease];
-        id<MTLBuffer> statusBuffer = getMTLBufferStorage(status_tensors[i]);
-        [filter encodeToCommandBuffer:commandBuffer
-                         sourceMatrix:sourceMatrix
-                         resultMatrix:solutionMatrix
-                         pivotIndices:pivotIndices
-                               status:statusBuffer];
-      }
-    }
-  });
-  auto stacked_pivots = A_.dim() > 2 ? at::stack(pivots_list) : pivots_list[0];
-  auto stacked_status = A_.dim() > 2 ? at::stack(status_tensors) : status_tensors[0];
-  if (A_t.dim() > 3) {
-    resize_output(LU, A_t.sizes());
-    pivots.copy_(stacked_pivots.view(pivot_sizes));
-  } else {
-    pivots.copy_(stacked_pivots);
+  Tensor pivots_ = pivots.is_contiguous() ? pivots : at::empty(pivots.sizes(), pivots.options());
+  Tensor info_ = info.is_contiguous() ? info : at::empty(info.sizes(), info.options());
+  lu_factor_panel_encode(work, pivots_, info_, aRows, aCols, batchSize, inPlace);
+  if (!inPlace) {
+    LU.copy_(work_full);
   }
-  pivot_sizes.pop_back();
-  info.copy_(stacked_status.view(pivot_sizes));
-  pivots.add_(1); // PyTorch's `pivots` is 1-index.
+  if (!pivots_.is_same(pivots)) {
+    pivots.copy_(pivots_);
+  }
+  if (!info_.is_same(info)) {
+    info.copy_(info_);
+  }
   if (check_errors) {
-    for (const auto i : c10::irange(status_tensors.size())) {
-      int status = status_tensors[i].item<int>();
-      TORCH_CHECK(
-          status == 0,
-          "lu_factor(): LU factorization failure at the ",
-          i + 1,
-          " sample with status: ",
-          status,
-          ". See https://developer.apple.com/documentation/metalperformanceshaders/mpsmatrixdecompositionstatus for details.");
-    }
+    at::_linalg_check_errors(info, "linalg.lu_factor_ex", A.dim() == 2);
   }
-
-  map_mps_decomposition_error_code_to_blas(info);
 }
 
 static void linalg_solve_out_mps_impl(const Tensor& A,
@@ -555,6 +717,7 @@ static void linalg_solve_out_mps_impl(const Tensor& A,
 
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
+      mpsStream->endKernelCoalescing();
       id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
 
       auto lu_decomp = [[[MPSMatrixDecompositionLU alloc] initWithDevice:device rows:aRows columns:aCols] autorelease];
@@ -673,7 +836,7 @@ static void linalg_inv_ex_out_mps_impl(const Tensor& A, bool check_errors, const
 
 static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& output) {
   using namespace mps;
-  static const bool is_macOS_15_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
+  static const bool is_macOS_15_0_or_newer = is_macos_at_least(MacOSVersion::MACOS_15_0);
 
   using CachedGraph = MPSBinaryCachedGraph;
   TORCH_CHECK(self.dim() == 2 && other.dim() == 2, "tensors must be 2-D");
@@ -715,7 +878,7 @@ static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& 
     // inputs on macOS < 26.4 (only every 16th row is computed). Contiguify such tensors
     // by disabling the strided API so they go through the gather/clone path first.
     // See https://github.com/pytorch/pytorch/issues/180201
-    static const bool is_macOS_26_4_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_26_4_PLUS);
+    static const bool is_macOS_26_4_or_newer = is_macos_at_least(MacOSVersion::MACOS_26_4);
     auto hasZeroStride = [](const Tensor& t) {
       return std::ranges::any_of(t.strides(), [](auto s) { return s == 0; });
     };
@@ -775,13 +938,15 @@ static Tensor& addbmm_or_baddbmm_out_mps_impl(const Tensor& input,
 
   if (opType == ADDBMM_OP_TYPE) {
     result.resize_as_(input);
+  }
 
-    const int64_t num_batches = batch1.size(0);
-
-    if (num_batches == 0) {
-      result.zero_();
-      return result;
-    }
+  // Empty tensors would hit the Placeholder [srcBuf length] > 0 assertion.
+  if (result.numel() == 0) {
+    return result;
+  }
+  if ((opType == ADDBMM_OP_TYPE && batch1.size(0) == 0) || batch1.size(2) == 0) {
+    at::mul_out(result, input, wrapped_scalar_tensor(beta));
+    return result;
   }
 
   // Use Metal kernels for integer and complex types
@@ -809,9 +974,7 @@ static Tensor& addbmm_or_baddbmm_out_mps_impl(const Tensor& input,
       MPSGraphTensor* batch1Tensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, batch1);
       MPSGraphTensor* batch2Tensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, batch2);
 
-      // Intermediates for beta and alpha
-      MPSGraphTensor* betaTensor = [mpsGraph constantWithScalar:beta.toDouble()
-                                                       dataType:getMPSScalarType(input.scalar_type())];
+      // Intermediate for alpha
       MPSGraphTensor* alphaTensor = [mpsGraph constantWithScalar:alpha.toDouble()
                                                         dataType:getMPSScalarType(batch1.scalar_type())];
 
@@ -824,18 +987,25 @@ static Tensor& addbmm_or_baddbmm_out_mps_impl(const Tensor& input,
         reductionSumTensor = [mpsGraph reductionSumWithTensor:productTensor axis:0 name:@"reductionSum(batch1@batch2)"];
       }
 
-      // Intermediates for multiplying by beta and alpha
+      // Intermediate for multiplying by alpha
       MPSGraphTensor* reductionSumTimesAlphaTensor =
           [mpsGraph multiplicationWithPrimaryTensor:reductionSumTensor
                                     secondaryTensor:alphaTensor
                                                name:@"alpha*(batch1@batch2)"];
-      MPSGraphTensor* biasTimesBetaTensor = [mpsGraph multiplicationWithPrimaryTensor:inputTensor
-                                                                      secondaryTensor:betaTensor
-                                                                                 name:@"beta*input"];
 
-      MPSGraphTensor* outputTensor = [mpsGraph additionWithPrimaryTensor:reductionSumTimesAlphaTensor
-                                                         secondaryTensor:biasTimesBetaTensor
-                                                                    name:@"beta*input + alpha*(batch1@batch2)"];
+      // When beta == 0, input is ignored so nan/inf in it are not propagated (matches CPU/CUDA and addmm).
+      const double betaVal = beta.toDouble();
+      MPSGraphTensor* outputTensor = reductionSumTimesAlphaTensor;
+      if (betaVal != 0.0) {
+        MPSGraphTensor* betaTensor = [mpsGraph constantWithScalar:betaVal
+                                                         dataType:getMPSScalarType(input.scalar_type())];
+        MPSGraphTensor* biasTimesBetaTensor = [mpsGraph multiplicationWithPrimaryTensor:inputTensor
+                                                                        secondaryTensor:betaTensor
+                                                                                   name:@"beta*input"];
+        outputTensor = [mpsGraph additionWithPrimaryTensor:reductionSumTimesAlphaTensor
+                                           secondaryTensor:biasTimesBetaTensor
+                                                      name:@"beta*input + alpha*(batch1@batch2)"];
+      }
 
       newCachedGraph->inputTensor_ = inputTensor;
       newCachedGraph->batch1Tensor_ = batch1Tensor;
@@ -970,7 +1140,7 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
 }
 
 static Tensor& tiled_bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tensor& result) {
-  if (is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS)) {
+  if (is_macos_at_least(MacOSVersion::MACOS_15_0)) {
     using namespace mps;
 
     id<MTLBuffer> aBuffer = getMTLBufferStorage(batch1);
@@ -979,11 +1149,11 @@ static Tensor& tiled_bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2
 
     MPSStream* mpsStream = getCurrentMPSStream();
     id<MTLDevice> device = MPSDevice::getInstance()->device();
-    id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
 
     dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
       @autoreleasepool {
         mpsStream->endKernelCoalescing();
+        id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
 
         uint64_t originalBatchSize = batch1.sizes().size() > 2 ? batch1.size(0) : 1;
         uint64_t aRows = batch1.size(-2);
@@ -1123,7 +1293,14 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
     return do_metal_bmm(batch1, batch2, result);
   }
 
-  static const bool is_macOS_15_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
+  // MPSGraph mis-writes a non-contiguous output before macOS 26; the metal
+  // kernel honors the output strides.
+  static const bool is_macos_26_0_or_newer = is_macos_at_least(MacOSVersion::MACOS_26_0);
+  if (!result.is_contiguous() && !is_macos_26_0_or_newer) {
+    return do_metal_bmm(batch1, batch2, result);
+  }
+
+  static const bool is_macOS_15_0_or_newer = is_macos_at_least(MacOSVersion::MACOS_15_0);
   MPSShape* shape = nil;
   bool doTranspose = false;
 
@@ -1329,6 +1506,45 @@ static void unpack_pivots_stub_impl(TensorIterator& iter, const int64_t dim_size
   });
 }
 
+static void cholesky_panel_impl(const Tensor& out, const Tensor& info_, int64_t N, int64_t B, bool upper) {
+  auto stream = getCurrentMPSStream();
+
+  constexpr auto NB = 96;
+  auto diagPanelPSO = lib.getPipelineStateForFunc(upper ? "factorDiagonalPanelU" : "factorDiagonalPanelL");
+  auto trsmPSO = lib.getPipelineStateForFunc(upper ? "applyPanelTRSMU" : "applyPanelTRSML");
+  const auto big = N - NB >= 1024;
+  const auto BM = big ? 64 : 32;
+  constexpr auto BN = 64;
+  const auto NSG = big ? 4 : 2;
+  auto syrkPSO =
+      lib.getPipelineStateForFunc(fmt::format("applySYRKTrailing{}_{}_{}_{}", upper ? "U" : "L", BM, BN, NSG));
+
+  auto numPanels = (N + NB - 1) / NB;
+
+  @autoreleasepool {
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      auto computeEncoder = stream->commandEncoder();
+      mtl_setArgs(computeEncoder, out, info_, N, NB);
+      for (auto k = 0; k < numPanels; k++) {
+        mtl_setArgs<4>(computeEncoder, k);
+        [computeEncoder setComputePipelineState:diagPanelPSO];
+        [computeEncoder dispatchThreadgroups:MTLSizeMake(B, 1, 1) threadsPerThreadgroup:MTLSizeMake(96, 1, 1)];
+
+        auto T = N - (k + 1) * NB;
+        if (T > 0) {
+          [computeEncoder setComputePipelineState:trsmPSO];
+          [computeEncoder dispatchThreadgroups:MTLSizeMake(B, (T + 31) / 32, 1)
+                         threadsPerThreadgroup:MTLSizeMake(128, 1, 1)];
+
+          [computeEncoder setComputePipelineState:syrkPSO];
+          [computeEncoder dispatchThreadgroups:MTLSizeMake((T + BN - 1) / BN, (T + BM - 1) / BM, B)
+                         threadsPerThreadgroup:MTLSizeMake(NSG * 32, 1, 1)];
+        }
+      }
+    });
+  }
+}
+
 static void cholesky_stub_impl(const Tensor& out, const Tensor& info, bool upper) {
   auto input_sizes = out.sizes();
 
@@ -1338,6 +1554,12 @@ static void cholesky_stub_impl(const Tensor& out, const Tensor& info, bool upper
 
   auto stream = getCurrentMPSStream();
   auto device = MPSDevice::getInstance()->device();
+  auto info_ = info.dim() >= 2 ? info.view({B}) : info;
+  auto info_sizes = info.sizes();
+  if (is_macos_at_least(MacOSVersion::MACOS_26_2)) {
+    return cholesky_panel_impl(out, info_, N, B, upper);
+  }
+  info_.fill_(0);
 
   auto factorDiagonalPSO = lib.getPipelineStateForFunc(upper ? "factorDiagonalBlockU" : "factorDiagonalBlockL");
   auto applyTRSMPSO = lib.getPipelineStateForFunc(upper ? "applyTRSMU" : "applyTRSML");
@@ -1345,10 +1567,6 @@ static void cholesky_stub_impl(const Tensor& out, const Tensor& info, bool upper
 
   int64_t NB = std::min<int64_t>(32, N);
   int64_t numBlocks = (N + NB - 1) / NB;
-
-  auto info_ = info.dim() >= 2 ? info.view({B}) : info;
-  auto info_sizes = info.sizes();
-  info_.fill_(0);
 
   MTLSize threadGroupSize = MTLSizeMake(32, 8, 1);
 
@@ -1454,6 +1672,262 @@ static Tensor& orgqr_stub_impl(Tensor& self, const Tensor& tau) {
   });
 
   return self;
+}
+
+static Tensor mps_orthonormal_complement(const Tensor& proj, int64_t want) {
+  const int64_t dim = proj.size(-1);
+  auto bsh = proj.sizes().slice(0, proj.dim() - 2).vec();
+  std::vector<int64_t> out_sh = bsh;
+  out_sh.push_back(dim);
+  out_sh.push_back(want);
+  Tensor out = at::zeros(out_sh, proj.options());
+  int64_t got = 0;
+  for (int64_t c = 0; c < dim && got < want; ++c) {
+    Tensor v = proj.narrow(-1, c, 1);
+    if (got > 0) {
+      Tensor Qc = out.narrow(-1, 0, got);
+      Tensor coeff = Qc.mH().matmul(v);
+      v = v.sub(Qc.matmul(coeff));
+    }
+    Tensor nrm = at::linalg_vector_norm(v, 2, {-2}, true);
+    Tensor safe = nrm.clamp_min(1e-12);
+    Tensor vn = v.div(safe.to(v.dtype()));
+    out.narrow(-1, got, 1).copy_(vn);
+    got += 1;
+  }
+  return out;
+}
+
+static void svd_kernel_mps(const Tensor& A,
+                           const bool full_matrices,
+                           const bool compute_uv,
+                           const std::optional<std::string_view>& driver,
+                           const Tensor& U,
+                           const Tensor& S,
+                           const Tensor& Vh,
+                           const Tensor& info) {
+  using namespace mps;
+  // Metal has no float64; only float32 / complex64 run on GPU.
+  TORCH_CHECK(A.scalar_type() == kFloat || A.scalar_type() == kComplexFloat,
+              "linalg.svd: the MPS backend supports only float32 and complex64. Got ",
+              A.scalar_type(),
+              ". Move the tensor to CPU for other dtypes.");
+  TORCH_CHECK(!driver.has_value(), "linalg.svd: driver= is not supported on MPS.");
+
+  if (A.numel() == 0) {
+    return;
+  }
+
+  const int64_t m = A.size(-2);
+  const int64_t n = A.size(-1);
+  const int64_t k = std::min(m, n);
+  const int64_t batch = c10::multiply_integers(A.sizes().slice(0, A.dim() - 2));
+
+  const int64_t elem_size = A.element_size();
+  const int64_t wmax = std::max(m, n);
+  const int64_t staging_bytes = wmax * k * elem_size;
+  const int64_t tg_limit = static_cast<int64_t>([MPSDevice::getInstance()->device() maxThreadgroupMemoryLength]);
+  const int64_t v_staging_bytes = k * k * elem_size;
+  const bool stage_v = compute_uv && (staging_bytes + v_staging_bytes <= tg_limit);
+  const bool too_large = (staging_bytes > tg_limit);
+  const bool too_small = (batch * m * n < 8192);
+
+  if (too_large || too_small) {
+    if (too_large) {
+      TORCH_WARN_ONCE("linalg.svd: matrix too large to stage in MPS threadgroup memory (",
+                      staging_bytes,
+                      " > ",
+                      tg_limit,
+                      " bytes); falling back to CPU.");
+    }
+    auto [U_cpu, S_cpu, Vh_cpu] = at::linalg_svd(A.to(at::kCPU), full_matrices, driver);
+    if (compute_uv) {
+      const_cast<Tensor&>(U).copy_(U_cpu.to(at::kMPS));
+      const_cast<Tensor&>(Vh).copy_(Vh_cpu.to(at::kMPS));
+    }
+    const_cast<Tensor&>(S).copy_(S_cpu.to(at::kMPS));
+    return;
+  }
+
+  const bool transposed = m < n;
+  // Kernel needs rows >= cols. For m<n run it on A^H: SVD(A^H)=(V,S,U^H), and
+  // params.transposed tells the kernel to swap left/right into the right outputs.
+  const int64_t wm = transposed ? n : m;
+  Tensor in = (transposed ? A.mH() : A).contiguous().reshape({batch, wm, k});
+
+  auto opts = A.options();
+  const bool S_direct = S.is_contiguous() && S.scalar_type() == c10::toRealValueType(A.scalar_type());
+  const bool info_direct = info.is_contiguous() && info.scalar_type() == kInt;
+  Tensor S_k =
+      S_direct ? S.reshape({batch, k}) : at::empty({batch, k}, opts.dtype(c10::toRealValueType(A.scalar_type())));
+  // Device-memory accumulator only when V is not staged; tiny placeholder otherwise.
+  Tensor Vacc_k = stage_v ? at::empty({1}, opts) : at::empty({batch, k, k}, opts);
+  Tensor info_b = info_direct ? info.reshape({batch}) : at::empty({batch}, opts.dtype(kInt));
+  // svdvals: U/Vh empty, so bind scratch for the kernel's (still-run) U writeback.
+  Tensor U_scratch, Vh_scratch;
+  if (!compute_uv) {
+    U_scratch = at::empty({batch, wm, wm}, opts);
+    Vh_scratch = at::empty({batch, wm, wm}, opts);
+  }
+
+  // Kernel writes straight into the column-major U/Vh outputs (first k cols/rows;
+  // full_matrices fills the rest below).
+  const int64_t u_ld = compute_uv ? U.size(-2) : wm;
+  const int64_t u_bs = compute_uv ? U.size(-2) * U.size(-1) : wm * wm;
+  const int64_t v_ld = compute_uv ? Vh.size(-2) : wm;
+  const int64_t v_bs = compute_uv ? Vh.size(-2) * Vh.size(-1) : wm * wm;
+
+  SvdParams params{static_cast<uint32_t>(wm),
+                   static_cast<uint32_t>(k),
+                   /*max_sweeps=*/30u,
+                   static_cast<uint32_t>(compute_uv ? 1 : 0),
+                   /*tol=*/1e-6f,
+                   static_cast<uint32_t>(u_ld),
+                   static_cast<uint32_t>(u_bs),
+                   static_cast<uint32_t>(v_ld),
+                   static_cast<uint32_t>(v_bs),
+                   static_cast<uint32_t>(transposed ? 1 : 0),
+                   static_cast<uint32_t>(stage_v ? 1 : 0)};
+
+  MPSStream* stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      id<MTLComputeCommandEncoder> enc = stream->commandEncoder();
+      auto pso = lib.getPipelineStateForFunc(fmt::format("svd_jacobi_{}", scalarToMetalTypeString(A)));
+      getMPSProfiler().beginProfileKernel(pso, "svd_jacobi", {A});
+      [enc setComputePipelineState:pso];
+      Tensor Ubind = compute_uv ? U : U_scratch;
+      Tensor Vbind = compute_uv ? Vh : Vh_scratch;
+      mtl_setArgs(enc, in, Ubind, S_k, Vbind, Vacc_k, info_b, params);
+      [enc setThreadgroupMemoryLength:wm * k * elem_size atIndex:0];
+      [enc setThreadgroupMemoryLength:(stage_v ? k * k * elem_size : elem_size) atIndex:1];
+      // One threadgroup per batch matrix; cap at 32 SIMD-groups (1024 threads).
+      const NSUInteger simd = 32;
+      const NSUInteger kMaxSimdGroups = 32;
+      const NSUInteger maxThreads = pso.maxTotalThreadsPerThreadgroup;
+      const NSUInteger nPairs = (k + 1) / 2;
+      const NSUInteger wantSG = std::min<NSUInteger>(std::max<NSUInteger>(nPairs, 1), kMaxSimdGroups);
+      NSUInteger tgs = std::min<NSUInteger>(maxThreads, wantSG * simd);
+      [enc dispatchThreads:MTLSizeMake(tgs * batch, 1, 1) threadsPerThreadgroup:MTLSizeMake(tgs, 1, 1)];
+      getMPSProfiler().endProfileKernel(pso);
+    }
+  });
+
+  if (!S_direct) {
+    const_cast<Tensor&>(S).copy_(S_k.reshape(S.sizes()));
+  }
+  if (!info_direct) {
+    const_cast<Tensor&>(info).copy_(info_b.reshape(info.sizes()));
+  }
+
+  if (compute_uv && full_matrices && (m != k || n != k)) {
+    // full_matrices: complete cols k.. via an orthonormal basis of (I - Q Q^H).
+    auto complete = [](Tensor M, int64_t kk) {
+      const int64_t dim = M.size(-1);
+      if (kk == dim)
+        return;
+      Tensor Q = M.narrow(-1, 0, kk);
+      std::vector<int64_t> ish = M.sizes().slice(0, M.dim() - 2).vec();
+      ish.push_back(dim);
+      ish.push_back(dim);
+      Tensor I = at::eye(dim, M.options()).expand(ish);
+      Tensor proj = I.sub(Q.matmul(Q.mH()));
+      // linalg_qr is float-only on MPS, so complex goes through Gram-Schmidt.
+      Tensor comp;
+      if (c10::isComplexType(proj.scalar_type())) {
+        comp = mps_orthonormal_complement(proj, dim - kk);
+      } else {
+        comp = std::get<0>(at::linalg_qr(proj, "reduced")).narrow(-1, 0, dim - kk);
+      }
+      M.narrow(-1, kk, dim - kk).copy_(comp);
+    };
+    if (m > k)
+      complete(const_cast<Tensor&>(U), k);
+    if (n > k)
+      complete(const_cast<Tensor&>(Vh).mH(), k); // V = Vh^H
+  }
+}
+
+static void eigh_kernel_mps(const Tensor& eigenvalues,
+                            const Tensor& eigenvectors,
+                            const Tensor& infos,
+                            bool upper,
+                            bool compute_eigenvectors) {
+  using namespace mps;
+
+  if (eigenvectors.numel() == 0) {
+    return;
+  }
+
+  const auto dtype = eigenvectors.scalar_type();
+  const int64_t n = eigenvectors.size(-1);
+  const int64_t batch = c10::multiply_integers(eigenvectors.sizes().slice(0, eigenvectors.dim() - 2));
+  const int64_t elem_size = eigenvectors.element_size();
+  const int64_t staging_bytes = n * n * elem_size;
+  const int64_t tg_limit = static_cast<int64_t>([MPSDevice::getInstance()->device() maxThreadgroupMemoryLength]);
+  const bool fits = (2 * staging_bytes) <= tg_limit;
+  const bool unsupported_dtype = (dtype != kFloat && dtype != kComplexFloat);
+  const bool too_small = (batch * n * n < 12288);
+
+  if (unsupported_dtype || !fits || too_small) {
+    if (!fits) {
+      TORCH_WARN_ONCE("linalg.eigh: matrix too large to stage in MPS threadgroup memory (",
+                      2 * staging_bytes,
+                      " > ",
+                      tg_limit,
+                      " bytes); falling back to CPU.");
+    }
+    auto [L_cpu, V_cpu] = at::_linalg_eigh(eigenvectors.to(at::kCPU), upper ? "U" : "L", compute_eigenvectors);
+    const_cast<Tensor&>(eigenvalues).copy_(L_cpu);
+    if (compute_eigenvectors) {
+      const_cast<Tensor&>(eigenvectors).copy_(V_cpu);
+    }
+    const_cast<Tensor&>(infos).zero_();
+    return;
+  }
+
+  Tensor V = eigenvectors.reshape({batch, n, n});
+  const bool W_direct = eigenvalues.is_contiguous() && eigenvalues.scalar_type() == c10::toRealValueType(dtype);
+  const bool info_direct = infos.is_contiguous() && infos.scalar_type() == kInt;
+  Tensor W = W_direct ? eigenvalues.reshape({batch, n})
+                      : at::empty({batch, n}, eigenvectors.options().dtype(c10::toRealValueType(dtype)));
+  Tensor info_b = info_direct ? infos.reshape({batch}) : at::empty({batch}, eigenvectors.options().dtype(kInt));
+
+  EighParams params{static_cast<uint32_t>(n),
+                    /*max_sweeps=*/80u,
+                    static_cast<uint32_t>(compute_eigenvectors ? 1 : 0),
+                    static_cast<uint32_t>(upper ? 1 : 0),
+                    /*tol=*/1e-6f};
+
+  MPSStream* stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      id<MTLComputeCommandEncoder> enc = stream->commandEncoder();
+      auto pso = lib.getPipelineStateForFunc(fmt::format("eigh_jacobi_{}", scalarToMetalTypeString(eigenvectors)));
+      getMPSProfiler().beginProfileKernel(pso, "eigh_jacobi", {eigenvectors});
+      [enc setComputePipelineState:pso];
+      // V binds to both A (in) and Q (out): safe since all reads stage into
+      // threadgroup memory before any device writeback.
+      mtl_setArgs(enc, V, W, V, info_b, params);
+      [enc setThreadgroupMemoryLength:n * n * elem_size atIndex:0];
+      [enc setThreadgroupMemoryLength:(compute_eigenvectors ? n * n * elem_size : elem_size) atIndex:1];
+      const NSUInteger simd = 32;
+      const NSUInteger kMaxSimdGroups = 16;
+      const NSUInteger maxThreads = pso.maxTotalThreadsPerThreadgroup;
+      const NSUInteger nPairs = (n + 1) / 2;
+      const NSUInteger wantSG = std::min<NSUInteger>(std::max<NSUInteger>(nPairs, 1), kMaxSimdGroups);
+      NSUInteger tgs = std::min<NSUInteger>(maxThreads, wantSG * simd);
+      [enc dispatchThreads:MTLSizeMake(tgs * batch, 1, 1) threadsPerThreadgroup:MTLSizeMake(tgs, 1, 1)];
+      getMPSProfiler().endProfileKernel(pso);
+    }
+  });
+
+  if (!W_direct) {
+    const_cast<Tensor&>(eigenvalues).copy_(W.reshape(eigenvalues.sizes()));
+  }
+  if (!info_direct) {
+    const_cast<Tensor&>(infos).copy_(info_b.reshape(infos.sizes()));
+  }
 }
 
 static Tensor& cholesky_inverse_kernel_impl_mps(Tensor& result, Tensor& infos, bool upper) {
@@ -1585,6 +2059,54 @@ static void linalg_qr_out_impl_mps(const Tensor& A, const Tensor& Q, const Tenso
   bool reduced_mode = (mode != "complete");
 
   metal_qr_kernel_impl(A, Q, R, reduced_mode);
+}
+
+static void lstsq_kernel_mps(const Tensor& a,
+                             Tensor& b,
+                             Tensor& rank,
+                             Tensor& singular_values,
+                             Tensor& infos,
+                             double rcond,
+                             std::string driver_name) {
+  const auto scalar_type = a.scalar_type();
+  const auto real_dtype = c10::toRealValueType(scalar_type);
+  const auto m = a.size(-2);
+  const auto n = a.size(-1);
+
+  const bool sets_rank = (driver_name != "gels");
+  const bool sets_singular_values = (driver_name == "gelsd" || driver_name == "gelss");
+
+  const double rcond_value =
+      rcond > 0 ? rcond : _get_epsilon(real_dtype) * static_cast<double>(std::max<int64_t>(m, n));
+
+  // RHS occupies the first m rows of the (.., max(m, n), nrhs) buffer.
+  Tensor rhs = b.narrow(-2, 0, m);
+
+  Tensor U, S, Vh;
+  std::tie(U, S, Vh) = at::linalg_svd(a, /*full_matrices=*/false);
+
+  Tensor s_max = std::get<0>(S.max(/*dim=*/-1, /*keepdim=*/true));
+  Tensor above = S.gt(s_max.mul(rcond_value));
+  Tensor s_inv = at::where(above, S.reciprocal(), at::zeros({}, S.options()));
+
+  Tensor tmp = at::matmul(U.mH(), rhs).mul(s_inv.unsqueeze(-1));
+  Tensor solution = at::matmul(Vh.mH(), tmp); // (.., n, nrhs)
+
+  if (m > n) {
+    Tensor rss = at::matmul(a, solution).sub(rhs).abs().square().sum(/*dim=*/-2, /*keepdim=*/true);
+    Tensor tail = b.narrow(-2, n, m - n);
+    tail.zero_();
+    tail.narrow(-2, 0, 1).copy_(rss.sqrt());
+  }
+  b.narrow(-2, 0, n).copy_(solution);
+
+  if (sets_rank) {
+    rank.copy_(above.sum(/*dim=*/-1).to(at::kLong));
+  }
+  if (sets_singular_values) {
+    singular_values.copy_(S.to(real_dtype));
+  }
+  infos.zero_();
 }
 
 } // namespace mps
@@ -1841,5 +2363,8 @@ REGISTER_DISPATCH(cholesky_stub, mps::cholesky_stub_impl)
 REGISTER_DISPATCH(unpack_pivots_stub, mps::unpack_pivots_stub_impl)
 REGISTER_DISPATCH(orgqr_stub, mps::orgqr_stub_impl);
 REGISTER_DISPATCH(cholesky_inverse_stub, mps::cholesky_inverse_kernel_impl_mps);
+REGISTER_DISPATCH(svd_stub, mps::svd_kernel_mps);
+REGISTER_DISPATCH(linalg_eigh_stub, mps::eigh_kernel_mps);
+REGISTER_DISPATCH(lstsq_stub, mps::lstsq_kernel_mps);
 
 } // namespace at::native

@@ -63,7 +63,7 @@ static bool is_empty_tensor(const Tensor& self) {
 }
 
 static void unary_op_noresize(const Tensor& self, const Tensor& output_, std::string op_name, UnaryOpBlock unaryBlock) {
-  static const bool is_macOS_15_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
+  static const bool is_macOS_15_0_or_newer = is_macos_at_least(MacOSVersion::MACOS_15_0);
 
   auto output = output_;
   bool needsCopyToOutput = false;
@@ -192,14 +192,6 @@ REGISTER_MPS_UNARY_STUB(trunc, truncate);
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(asinh_out_mps, asinh)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(acosh_out_mps, acosh)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(atanh_out_mps, atanh)
-
-Tensor& logical_not_out_mps(const Tensor& self, Tensor& output) {
-  auto bool_self = self.to(ScalarType::Bool);
-  mps::unary_op(bool_self, output, "logical_not_out_mps", [](MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
-    return [mpsGraph notWithTensor:inputTensor name:nil];
-  });
-  return output;
-}
 
 TORCH_IMPL_FUNC(frac_out_mps)(const Tensor& self, const Tensor& output) {
   TORCH_CHECK(isFloatingType(self.scalar_type()), "frac_out_mps is only implemented for floating types");

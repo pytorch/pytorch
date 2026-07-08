@@ -180,7 +180,11 @@ class DeviceProperties(typing.NamedTuple):
 
     @property
     def warp_size_or_default(self) -> int:
-        return self.warp_size if self.warp_size is not None else 32
+        if self.warp_size is not None:
+            return self.warp_size
+        if self.type in ("cuda", "hip"):
+            raise RuntimeError(f"{self.type} device properties must report warp_size")
+        return 32
 
     @classmethod
     @functools.cache
@@ -215,19 +219,49 @@ class DeviceProperties(typing.NamedTuple):
                 props, "max_threads_per_multi_processor", None
             ),
             max_threads_per_block=getattr(props, "max_threads_per_block", 1024),
-            warp_size=getattr(props, "warp_size", 32 if device_type != "cpu" else None),
+            warp_size=getattr(props, "warp_size", None),
         )
 
 
 def get_warp_size(device) -> int:
     """Return the wave/warp size in threads for the given device.
 
-    Reads from torch.cuda.get_device_properties(device).warp_size via the
-    cached DeviceProperties.create(). Correct on both AMD (64 for CDNA/gfx9,
-    32 for RDNA/gfx10+) and NVIDIA (always 32). Falls back to 32 only when
-    the field is unavailable.
+    Reads from torch.cuda.get_device_properties(device).warp_size via the cached
+    DeviceProperties.create(). Correct on both AMD (64 for CDNA/gfx9, 32 for
+    RDNA/gfx10+) and NVIDIA (always 32). Missing cuda/hip warp_size metadata is
+    treated as an error rather than silently falling back.
     """
     return DeviceProperties.create(device).warp_size_or_default
+
+
+class TritonMeta(typing.TypedDict, total=False):
+    """Metadata bag threaded from Triton codegen into the runtime launcher.
+
+    total=False because the key set is populated incrementally across codegen
+    (signature/device/constants/configs first, then backend/ROCm/tlx extras)
+    and the whole bag is forwarded verbatim to external Triton APIs, which
+    tolerate and ignore keys they do not recognize. `device` is typed as the
+    codegen-time DeviceProperties; CachingAutotuner rewrites it to the integer
+    device index before reaching Triton, and the runtime read sites that expect
+    that int narrow it with an explicit cast.
+    """
+
+    signature: dict[str, typing.Any]
+    device: DeviceProperties
+    device_type: str
+    constants: dict[str, typing.Any]
+    configs: list[typing.Any]
+    native_matmul: bool
+    launch_cooperative_grid: bool
+    enable_fp_fusion: bool
+    launch_pdl: bool
+    disable_ftz: bool
+    matrix_instr_nonkdim: int
+    waves_per_eu: int
+    kpack: int
+    restore_value: tuple[str, ...]
+    reset_to_zero: tuple[str, ...]
+    backend_options: dict[str, typing.Any]
 
 
 class HalideInputSpec(typing.NamedTuple):
