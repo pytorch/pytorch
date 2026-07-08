@@ -189,7 +189,12 @@ from .variables.misc import (
     UnknownVariable,
 )
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
-from .variables.object_protocol import generic_bool, generic_contains, generic_getiter
+from .variables.object_protocol import (
+    generic_bool,
+    generic_contains,
+    generic_getattr,
+    generic_getiter,
+)
 from .variables.sets import SetVariable
 from .variables.streams import SymbolicStreamState
 from .variables.tensor import supported_comparison_ops, SymNodeVariable, TensorVariable
@@ -3168,12 +3173,16 @@ class InstructionTranslatorBase(
         )
 
     def _load_attr(self, attr: Any) -> None:
-        obj = self.pop()
-        result = VariableTracker.build(self, getattr).call_function(
-            self,  # type: ignore[arg-type]
-            [obj, VariableTracker.build(self, attr)],
-            {},
-        )
+        obj = self.pop().realize()
+        try:
+            result = generic_getattr(self, obj, attr)
+        except Unsupported:
+            if not obj.is_python_constant():
+                raise
+            source = AttrSource(obj.source, attr) if obj.source else None
+            result = VariableTracker.build(
+                self, getattr(obj.as_python_constant(), attr), source=source
+            )
         self.push(result)
 
     def LOAD_ATTR(self, inst: Instruction) -> None:
