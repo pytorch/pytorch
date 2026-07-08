@@ -4310,7 +4310,7 @@ class TestCiAndCMakeWiring(unittest.TestCase):
     def test_manywheel_installs_the_raw_wheel_before_stage_two(self):
         # The kernel builders import the installed torch, so the raw wheel goes first --
         # inside the cuda guard, or a cpu container installs it for nothing.
-        text = self._read(".ci/manywheel/build.sh")
+        text = self._read(".ci/wheel/linux/build.sh")
         marker = "fi  # GPU_ARCH_TYPE == cuda*"
         self.assertIn(marker, text)
         block = text.partition(marker)[0]
@@ -4334,14 +4334,14 @@ class TestCiAndCMakeWiring(unittest.TestCase):
             build_stage2.main(["--print-verdict"])
         word = printed.getvalue().strip()
         self.assertTrue(word, "--print-verdict printed nothing")
-        for rel in (".ci/pytorch/build.sh", ".ci/manywheel/build.sh"):
+        for rel in (".ci/pytorch/build.sh", ".ci/wheel/linux/build.sh"):
             with self.subTest(rel=rel):
                 self.assertIn(f'--print-verdict)" == "{word}"', self._read(rel))
 
     def test_the_wheel_is_patched_before_it_is_repaired(self):
         # repair_wheel.py produces the PUBLISHED artifact, so stage 2 patches the raw
         # wheel first: reversed, every release wheel ships kernel-free and green.
-        sh = self._read(".ci/manywheel/build.sh")
+        sh = self._read(".ci/wheel/linux/build.sh")
         self.assertLess(
             sh.index("build_stage2.py --wheel"),
             sh.index("repair_wheel.py"),
@@ -4361,7 +4361,7 @@ class TestCiAndCMakeWiring(unittest.TestCase):
         self.assertIn("--print-verdict", block[guard_at:])
         self.assertIn(
             'if [[ "${GPU_ARCH_TYPE}" == cuda* ]]; then',
-            self._read(".ci/manywheel/build.sh"),
+            self._read(".ci/wheel/linux/build.sh"),
         )
 
     def test_both_shells_count_wheels_with_nullglob(self):
@@ -4369,7 +4369,7 @@ class TestCiAndCMakeWiring(unittest.TestCase):
         # message said "found 1" for an EMPTY directory.
         for rel, pattern in (
             (".ci/pytorch/build.sh", "naot_wheels=(dist/*.whl)"),
-            (".ci/manywheel/build.sh", 'naot_wheels=("${RAW_WHEEL_DIR}"/*.whl)'),
+            (".ci/wheel/linux/build.sh", 'naot_wheels=("${RAW_WHEEL_DIR}"/*.whl)'),
         ):
             with self.subTest(rel=rel):
                 text = self._read(rel)
