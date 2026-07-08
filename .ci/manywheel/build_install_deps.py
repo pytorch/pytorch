@@ -11,6 +11,7 @@ import argparse
 import os
 import subprocess
 import sys
+import sysconfig
 import time
 from pathlib import Path
 
@@ -49,12 +50,34 @@ def numpy_pin() -> str:
     return DEFAULT_NUMPY
 
 
+def prefer_interpreter_pkgconfig() -> None:
+    """Make ``pkg-config python3`` resolve to the interpreter we build for.
+
+    For a CPython with no prebuilt numpy wheel yet (e.g. a freshly added
+    version), pip builds numpy from source and meson's Cython sanity check
+    resolves the ``python3`` pkg-config dependency for the include/link flags.
+    The ROCm manylinux image ships the system Python 3.6 pkg-config file on the
+    default search path, so that lookup returns Python 3.6 and Cython aborts
+    with "Cython requires Python 3.8+". Prepending the active interpreter's own
+    pkgconfig dir makes pkg-config find the correct ``python3.pc`` first; it is
+    a no-op for Pythons whose numpy comes from a wheel (no source build).
+    """
+    libpc = sysconfig.get_config_var("LIBPC")
+    if not libpc or not os.path.isdir(libpc):
+        return
+    existing = os.environ.get("PKG_CONFIG_PATH", "")
+    os.environ["PKG_CONFIG_PATH"] = os.pathsep.join(
+        [libpc, *([existing] if existing else [])]
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("package_dir", type=Path)
     args = parser.parse_args()
 
     os.chdir(args.package_dir)
+    prefer_interpreter_pkgconfig()
     pip_install("-qU", "-r", "requirements-build.txt")
     # Skip when sharing build/ across Pythons in build_all.sh -- the per-Python
     # bits (libtorch_python, _C.so) are invalidated by tools/setup_helpers/cmake.py.
