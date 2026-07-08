@@ -317,17 +317,18 @@ def is_initialized():
 
 
 def _lazy_call(callable, **kwargs) -> None:
-    if is_initialized():
-        callable()
-    else:
-        global _lazy_seed_tracker
-        if kwargs.get("seed_all", False):
-            _lazy_seed_tracker.queue_seed_all(callable, traceback.format_stack())
-        elif kwargs.get("seed", False):
-            _lazy_seed_tracker.queue_seed(callable, traceback.format_stack())
+    with _initialization_lock:
+        if is_initialized():
+            callable()
         else:
-            # Don't store the actual traceback to avoid memory cycle
-            _queued_calls.append((callable, traceback.format_stack()))
+            global _lazy_seed_tracker
+            if kwargs.get("seed_all", False):
+                _lazy_seed_tracker.queue_seed_all(callable, traceback.format_stack())
+            elif kwargs.get("seed", False):
+                _lazy_seed_tracker.queue_seed(callable, traceback.format_stack())
+            else:
+                # Don't store the actual traceback to avoid memory cycle
+                _queued_calls.append((callable, traceback.format_stack()))
 
 
 def init() -> None:
@@ -927,6 +928,7 @@ def _get_zes_frequency_handle(device: Device = None) -> c_void_p:
         return info.frequency_handle
 
     device_handle = info.device_handle
+    subdevice_id = info.subdevice_id
 
     # Enumerate all frequency domains under this device handle.
     freq_count = c_uint32(0)
@@ -944,10 +946,32 @@ def _get_zes_frequency_handle(device: Device = None) -> c_void_p:
         "Can't get Level Zero Sysman frequency domain handles.",
     )
 
-    # TODO: pyzes lacks zesFrequencyGetProperties, so we cannot filter by
-    # subdevice or domain type. We assume index 0 (ZES_FREQ_DOMAIN_GPU)
-    # is the GPU frequency domain.
-    frequency_handle = freq_handles[0]
+    if _get_pyzes_version() < (0, 1, 2):
+        frequency_handle = freq_handles[0]
+        info.frequency_handle = frequency_handle
+        return frequency_handle
+
+    frequency_handle = None
+    for freq_handle in freq_handles:
+        freq_props = pyzes.zes_freq_properties_t()
+        freq_props.stype = pyzes.ZES_STRUCTURE_TYPE_FREQ_PROPERTIES
+        _zes_check(
+            pyzes.zesFrequencyGetProperties(freq_handle, byref(freq_props)),
+            "Can't get Level Zero Sysman frequency properties.",
+        )
+        if freq_props.type != pyzes.ZES_FREQ_DOMAIN_GPU:
+            continue
+        if subdevice_id is not None:
+            if freq_props.onSubdevice and freq_props.subdeviceId == subdevice_id:
+                frequency_handle = freq_handle
+                break
+        else:
+            if not freq_props.onSubdevice:
+                frequency_handle = freq_handle
+                break
+
+    if frequency_handle is None:
+        raise RuntimeError("No Level Zero Sysman GPU frequency handle found.")
     info.frequency_handle = frequency_handle
     return frequency_handle
 
@@ -993,6 +1017,7 @@ def _get_zes_power_handle(device: Device = None) -> c_void_p:
         return info.power_handle
 
     device_handle = info.device_handle
+    subdevice_id = info.subdevice_id
 
     # Enumerate all power domains under this device handle.
     power_count = c_uint32(0)
@@ -1010,10 +1035,40 @@ def _get_zes_power_handle(device: Device = None) -> c_void_p:
         "Can't get Level Zero Sysman power domain handles.",
     )
 
-    # TODO: pyzes lacks zesPowerGetProperties, so we cannot filter by
-    # subdevice or domain type. We assume index 0 (ZES_POWER_DOMAIN_CARD)
-    # is the GPU card power domain.
-    power_handle = power_handles[0]
+    if _get_pyzes_version() < (0, 1, 2):
+        power_handle = power_handles[0]
+        info.power_handle = power_handle
+        return power_handle
+
+    power_handle = None
+    for pwr_handle in power_handles:
+        pwr_props = pyzes.zes_power_properties_t()
+        pwr_props.stype = pyzes.ZES_STRUCTURE_TYPE_POWER_PROPERTIES
+        ext_pwr_props = pyzes.zes_power_ext_properties_t()
+        ext_pwr_props.stype = pyzes.ZES_STRUCTURE_TYPE_POWER_EXT_PROPERTIES
+        pwr_props.pNext = cast(pointer(ext_pwr_props), c_void_p)
+        _zes_check(
+            pyzes.zesPowerGetProperties(pwr_handle, byref(pwr_props)),
+            "Can't get Level Zero Sysman power properties.",
+        )
+        if ext_pwr_props.domain not in (
+            pyzes.ZES_POWER_DOMAIN_CARD,
+            pyzes.ZES_POWER_DOMAIN_PACKAGE,
+        ):
+            continue
+        if subdevice_id is not None:
+            if pwr_props.onSubdevice and pwr_props.subdeviceId == subdevice_id:
+                power_handle = pwr_handle
+                if ext_pwr_props.domain == pyzes.ZES_POWER_DOMAIN_CARD:
+                    break
+        else:
+            if not pwr_props.onSubdevice:
+                power_handle = pwr_handle
+                if ext_pwr_props.domain == pyzes.ZES_POWER_DOMAIN_CARD:
+                    break
+
+    if power_handle is None:
+        raise RuntimeError("No Level Zero Sysman GPU power handle found.")
     info.power_handle = power_handle
     return power_handle
 
@@ -1033,6 +1088,9 @@ def power_draw(device: Device = None) -> float:
         sampling interval required to compute an accurate power reading.
 
     .. note:: This API may require elevated privileges (e.g. ``sudo``) to access GPU power information.
+
+    .. note:: On Intel Xe2 and newer GPUs, card-level power is reported directly. On older GPUs,
+        package-level power is used as a fallback and may not reflect the full card power draw.
     """
     power_handle = _get_zes_power_handle(device)
 
