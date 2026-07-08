@@ -163,10 +163,10 @@ class GraphPickler(pickle.Pickler):
         elif isinstance(obj, torch._guards.TracingContext):
             return _TracingContextPickleData.reduce_helper(self, obj)
         elif isinstance(obj, FakeScriptObject):
-            from torch._library.opaque_object import is_opaque_value_type
+            from torch._library.opaque_object import is_opaque_constant_type
 
             real_obj = object.__getattribute__(obj, "real_obj")
-            if real_obj is not None and is_opaque_value_type(type(real_obj)):
+            if real_obj is not None and is_opaque_constant_type(type(real_obj)):
                 # Use default pickling; value-type opaques are picklable.
                 return NotImplemented
             # Reference-type FakeScriptObjects can't be default-pickled.
