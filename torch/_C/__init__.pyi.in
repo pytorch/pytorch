@@ -1386,7 +1386,6 @@ def _is_torch_function_enabled() -> _bool: ...  # THPModule_isEnabledTorchFuncti
 def _is_torch_function_all_disabled() -> (
     _bool
 ): ...  # THPModule_isAllDisabledTorchFunction
-def _peek_should_skip_torch_function() -> _bool: ...  # THPModule_peek_should_skip_torch_function
 def _has_torch_function(
     args: Iterable[Any],
 ) -> _bool: ...  # THPModule_has_torch_function
@@ -1766,11 +1765,6 @@ def _dispatch_dump_table(name: str) -> str: ...
 def _dispatch_check_invariants(name: str) -> None: ...
 def _dispatch_check_all_invariants() -> None: ...
 def _dispatch_call_boxed(handle: _DispatchOperatorHandle, *args, **kwargs) -> Any: ...
-def _dispatch_make_pyobj_dispatch_fns(
-    handle: _DispatchOperatorHandle,
-    dispatch_cpp: Callable,
-    redispatch_cpp: Callable,
-) -> tuple[Callable, Callable]: ...
 def _dispatch_find_schema_or_throw(
     name: str,
     overload_name: str,
