@@ -2080,6 +2080,134 @@ INSTANTIATE_GEMM_LU(32, 64, 2)
 
 #endif // __METAL_VERSION__ >= 400 && MetalPerformancePrimitives
 
+template <bool upper, bool unit, short TS>
+kernel void trsmDiagSolveLU(
+    device float* A [[buffer(0)]],
+    constant uint2& dims [[buffer(3)]],
+    constant uint4& params [[buffer(4)]],
+    uint3 tid3 [[thread_position_in_threadgroup]],
+    uint3 tgid [[threadgroup_position_in_grid]],
+    uint3 tpg [[threads_per_threadgroup]]) {
+  const uint M = dims.x;
+  const uint N = dims.y;
+  const uint d0 = params.x;
+  const uint cs = params.y;
+  const uint ce = params.z;
+  const uint nr = params.w;
+  const uint tid = tid3.x;
+  const uint G = tpg.x;
+  device float* Ab = A + ulong(tgid.x) * M * N;
+
+  threadgroup float T[TS][TS + 1];
+  for (uint i = tid; i < TS * TS; i += G) {
+    const uint r = i / TS;
+    const uint c = i % TS;
+    T[r][c] = (r < nr && c < nr) ? Ab[ulong(d0 + r) * N + d0 + c]
+                                 : (r == c ? 1.0f : 0.0f);
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  const uint col = cs + tgid.y * G + tid;
+  if (col >= ce) {
+    return;
+  }
+  float x[TS];
+#pragma unroll
+  for (short r = 0; r < TS; r++) {
+    x[r] = (uint(r) < nr) ? Ab[ulong(d0 + r) * N + col] : 0.0f;
+  }
+  if (!upper) {
+#pragma unroll
+    for (short c = 0; c < TS; c++) {
+      float dcol[TS];
+#pragma unroll
+      for (short i = 0; i < TS; i++) {
+        dcol[i] = T[i][c];
+      }
+      const float xc = unit ? x[c] : x[c] / T[c][c];
+      x[c] = xc;
+#pragma unroll
+      for (short i = 0; i < TS; i++) {
+        if (i > c) {
+          x[i] = fma(-xc, dcol[i], x[i]);
+        }
+      }
+    }
+  } else {
+#pragma unroll
+    for (short c = TS - 1; c >= 0; c--) {
+      float dcol[TS];
+#pragma unroll
+      for (short i = 0; i < TS; i++) {
+        dcol[i] = T[i][c];
+      }
+      const float xc = unit ? x[c] : x[c] / T[c][c];
+      x[c] = xc;
+#pragma unroll
+      for (short i = 0; i < TS; i++) {
+        if (i < c) {
+          x[i] = fma(-xc, dcol[i], x[i]);
+        }
+      }
+    }
+  }
+#pragma unroll
+  for (short r = 0; r < TS; r++) {
+    if (uint(r) < nr) {
+      Ab[ulong(d0 + r) * N + col] = x[r];
+    }
+  }
+}
+
+#define INSTANTIATE_TRSM_DIAG_SOLVE(UP, UN, SUFF)    \
+  template [[host_name("trsmDiagSolveLU_" #SUFF)]]   \
+  kernel void trsmDiagSolveLU<UP, UN, 32>(           \
+      device float* A [[buffer(0)]],                 \
+      constant uint2& dims [[buffer(3)]],            \
+      constant uint4& params [[buffer(4)]],          \
+      uint3 tid3 [[thread_position_in_threadgroup]], \
+      uint3 tgid [[threadgroup_position_in_grid]],   \
+      uint3 tpg [[threads_per_threadgroup]]);
+
+INSTANTIATE_TRSM_DIAG_SOLVE(false, true, lower_unit)
+INSTANTIATE_TRSM_DIAG_SOLVE(true, false, upper_nonunit)
+INSTANTIATE_TRSM_DIAG_SOLVE(false, false, lower_nonunit)
+INSTANTIATE_TRSM_DIAG_SOLVE(true, true, upper_unit)
+
+kernel void luApplyPivotsRHS(
+    device float* A [[buffer(0)]],
+    device const int* pivots [[buffer(1)]],
+    constant uint2& dims [[buffer(3)]],
+    constant uint4& params [[buffer(4)]],
+    uint3 tid3 [[thread_position_in_threadgroup]],
+    uint3 tgid [[threadgroup_position_in_grid]],
+    uint3 tpg [[threads_per_threadgroup]]) {
+  const uint M = dims.x;
+  const uint N = dims.y;
+  const uint coff = params.x;
+  const uint k = params.y;
+  const uint npiv = params.z;
+  const uint inverse = params.w;
+  const uint tid = tid3.x;
+  const uint G = tpg.x;
+  device float* Ab = A + ulong(tgid.x) * M * N;
+  device const int* pv = pivots + ulong(tgid.x) * npiv;
+
+  for (uint s = 0; s < npiv; s++) {
+    const uint i = inverse ? (npiv - 1 - s) : s;
+    const uint p = uint(pv[i] - 1);
+    if (p != i) {
+      for (uint col = tid; col < k; col += G) {
+        const uint cc = coff + col;
+        const float t = Ab[ulong(i) * N + cc];
+        Ab[ulong(i) * N + cc] = Ab[ulong(p) * N + cc];
+        Ab[ulong(p) * N + cc] = t;
+      }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+}
+
 kernel void applyPivots(
     device float* P [[buffer(0)]],
     device const int* pivots [[buffer(1)]],
