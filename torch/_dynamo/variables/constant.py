@@ -12,7 +12,6 @@ import enum
 import operator
 from collections.abc import Iterable
 from typing import Any, Literal, overload, TYPE_CHECKING
-from typing_extensions import override
 
 import torch
 from torch._dynamo.source import GetItemSource
@@ -455,13 +454,6 @@ class ConstantVariable(VariableTracker):
 
     def reconstruct_pycode(self, codegen) -> str:
         return repr(self.value)
-
-    @override
-    def call_obj_hasattr(
-        self, tx: InstructionTranslatorBase, name: str
-    ) -> ConstantVariable:
-        result = hasattr(self.value, name)
-        return variables.ConstantVariable.create(result)
 
     def get_id(self, tx: InstructionTranslatorBase) -> int | None:
         # Singletons have guaranteed stable identity across the process lifetime.
@@ -913,6 +905,13 @@ class FakeIdVariable(VariableTracker):
 
     def hash_impl(self, tx: InstructionTranslatorBase) -> tuple[int, bool]:
         return hash(self.value), True
+
+    def repr_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
+        # Mirrors int.__repr__: the value is an int, so str()/repr() yield its
+        # decimal string. The distinct-but-compile-time-only identity carried by
+        # the fake id is preserved in the resulting string, matching how
+        # FakeIdVariable already resolves same-kind id()/hash() comparisons.
+        return ConstantVariable.create(repr(self.value))
 
     def richcompare_impl(
         self, tx: InstructionTranslatorBase, other: VariableTracker, op: str

@@ -22,6 +22,17 @@ class FrozenstSubclass(frozenset):
     pass
 
 
+class BadCmp:
+    # Elements collide on hash (so __eq__ runs during set insertion/lookup),
+    # and __eq__ raises so the error must propagate.  Mirrors CPython
+    # test_set.py BadCmp.
+    def __hash__(self):
+        return 1
+
+    def __eq__(self, other):
+        raise RuntimeError
+
+
 class _BaseSetTests(torch._dynamo.test_case.TestCase):
     def setUp(self):
         self.old = torch._dynamo.config.enable_trace_unittest
@@ -398,6 +409,20 @@ class _FrozensetBase:
         self.assertEqual(p ^ p, self.thetype())
         self.assertEqual(p ^ q, self.thetype("acef"))
         self.assertEqual(self.thetype.__xor__(p, q), set("acef"))
+
+    @make_dynamo_test
+    def test_badcmp(self):
+        # A comparison error during insertion/lookup must propagate as the
+        # user exception.  For frozenset types hasattr(s, "add") is False, so
+        # the mutating block is skipped (regression: exact frozenset used to
+        # report hasattr(set, "add")).  Mirrors CPython test_set.py test_badcmp.
+        s = self.thetype([BadCmp()])
+        self.assertRaises(RuntimeError, self.thetype, [BadCmp(), BadCmp()])
+        self.assertRaises(RuntimeError, s.__contains__, BadCmp())
+        if hasattr(s, "add"):
+            self.assertRaises(RuntimeError, s.add, BadCmp())
+            self.assertRaises(RuntimeError, s.discard, BadCmp())
+            self.assertRaises(RuntimeError, s.remove, BadCmp())
 
     @make_dynamo_test
     def test_cmp_eq(self):
