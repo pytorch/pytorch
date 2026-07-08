@@ -1388,12 +1388,12 @@ def parse_args():
         help="Run all distributed tests",
     )
     parser.add_argument(
-        "--multiproc-filter",
-        choices=["multiproc", "not-multiproc"],
+        "--multigpu-filter",
+        choices=["multigpu", "not-multigpu"],
         default=None,
-        help="Restrict distributed tests by the auto-applied `multiproc` marker "
-        "(see test/conftest.py). `multiproc` runs only tests that spawn multiple "
-        "processes / need multiple GPUs; `not-multiproc` runs only single-process "
+        help="Restrict distributed tests by the auto-applied `multigpu` marker "
+        "(see test/conftest.py). `multigpu` runs only tests that need multiple "
+        "GPUs; `not-multigpu` runs only single-GPU "
         "tests, which can run on a single-GPU runner. Combined (AND) with the "
         "existing serial/not-serial split.",
     )
@@ -2070,18 +2070,18 @@ def run_tests(
         x for x in selected_tests if x not in selected_tests_parallel
     ]
 
-    # The multiproc marker (see test/conftest.py) is orthogonal to serial: it
+    # The multigpu marker (see test/conftest.py) is orthogonal to serial: it
     # partitions distributed tests by whether they spawn multiple processes /
     # need multiple GPUs. AND it into whatever serial expression a pass uses so
-    # a single-GPU config can select `not multiproc` without dropping the
+    # a single-GPU config can select `not multigpu` without dropping the
     # serial/not-serial split (a bare second `-m` would clobber the first).
-    multiproc_marker = {
-        "multiproc": "multiproc",
-        "not-multiproc": "not multiproc",
-    }.get(getattr(options, "multiproc_filter", None))
+    multigpu_marker = {
+        "multigpu": "multigpu",
+        "not-multigpu": "not multigpu",
+    }.get(getattr(options, "multigpu_filter", None))
 
     def marker_args(serial_expr: str | None) -> list[str]:
-        exprs = [e for e in (serial_expr, multiproc_marker) if e]
+        exprs = [e for e in (serial_expr, multigpu_marker) if e]
         if not exprs:
             return []
         return ["-m", " and ".join(f"({e})" for e in exprs)]

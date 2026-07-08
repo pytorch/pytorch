@@ -327,7 +327,7 @@ def _spawns_multiple_processes(
 
     if not dist.is_available():
         # Distributed wasn't built: no test can spawn processes, so nothing is
-        # multiproc and the single-GPU config runs everything.
+        # multigpu and the single-GPU config runs everything.
         return False
     from torch.testing._internal.common_distributed import (
         MultiProcContinuousTest,
@@ -339,13 +339,13 @@ def _spawns_multiple_processes(
 
 def pytest_itemcollected(item: Any) -> None:
     """
-    Auto-apply the `multiproc` marker based on the resolved test class. Runs
+    Auto-apply the `multigpu` marker based on the resolved test class. Runs
     per-item during collection, before pytest applies `-m` deselection, so the
-    distributed CI configs can partition a file into multiproc (multi-GPU) and
-    `not multiproc` (single-GPU) halves without touching the test source.
+    distributed CI configs can partition a file into multigpu and `not
+    multigpu` halves without touching the test source.
     """
     if _spawns_multiple_processes(getattr(item, "cls", None)):
-        item.add_marker("multiproc")
+        item.add_marker("multigpu")
 
 
 class StepcurrentPlugin:

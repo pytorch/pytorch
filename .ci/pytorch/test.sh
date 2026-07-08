@@ -1585,22 +1585,22 @@ test_vulkan() {
 }
 
 test_distributed() {
-  # $1 (optional): multiproc filter ("multiproc" | "not-multiproc"), see the
-  # `multiproc` marker in test/conftest.py. Empty runs the whole suite.
-  # "not-multiproc" runs on a single-GPU runner, so it also skips the
+  # $1 (optional): multigpu filter ("multigpu" | "not-multigpu"), see the
+  # `multigpu` marker in test/conftest.py. Empty runs the whole suite.
+  # "not-multigpu" runs on a single-GPU runner, so it also skips the
   # multi-GPU-only C++ / mpiexec tests below.
-  local multiproc_filter="${1:-}"
+  local multigpu_filter="${1:-}"
   local filter_arg=()
-  if [[ -n "$multiproc_filter" ]]; then
-    filter_arg=(--multiproc-filter "$multiproc_filter")
+  if [[ -n "$multigpu_filter" ]]; then
+    filter_arg=(--multigpu-filter "$multigpu_filter")
   fi
-  echo "Testing distributed python tests (${multiproc_filter:-all})"
+  echo "Testing distributed python tests (${multigpu_filter:-all})"
   # shellcheck disable=SC2086
   time python test/run_test.py --distributed-tests "${filter_arg[@]}" --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" $INCLUDE_CLAUSE --verbose
   assert_git_not_dirty
 
   # The C++ / mpiexec distributed tests below require multiple GPUs.
-  if [[ "$multiproc_filter" == "not-multiproc" ]]; then
+  if [[ "$multigpu_filter" == "not-multigpu" ]]; then
     return
   fi
 
@@ -1637,11 +1637,11 @@ test_distributed() {
 test_distributed_single_gpu() {
   # Single-process (single-GPU) distributed tests, hived off the multi-GPU
   # `distributed` config to run on the cheaper 1-GPU `default` CUDA runner (see
-  # the `multiproc` marker in test/conftest.py). Sharded with the rest of the
+  # the `multigpu` marker in test/conftest.py). Sharded with the rest of the
   # `default` config's Python tests.
   install_torchcomms
   install_spmd_types
-  test_distributed not-multiproc
+  test_distributed not-multigpu
 }
 
 test_quantization() {
@@ -2227,7 +2227,7 @@ elif [[ "$TEST_CONFIG" == distributed ]]; then
   # runs the process-spawning ones. Elsewhere (CPU pull, rocm) there is no such
   # split, so run the whole suite.
   if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-    test_distributed multiproc
+    test_distributed multigpu
   else
     test_distributed
   fi

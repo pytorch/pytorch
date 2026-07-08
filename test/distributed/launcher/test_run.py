@@ -690,8 +690,8 @@ class ElasticLaunchTest(TestCase):
     # ElasticLaunchTest is a plain TestCase, but this test launches
     # `torchrun --nproc-per-node=2` which needs 2 GPUs. That process spawning
     # happens via torchrun, not MultiProcessTestCase, so the conftest heuristic
-    # (see test/conftest.py) can't detect it; mark it multiproc explicitly.
-    @pytest.mark.multiproc
+    # (see test/conftest.py) can't detect it; mark it multigpu explicitly.
+    @pytest.mark.multigpu
     def test_virtual_local_rank(self):
         """
         Test that virtual-local-rank ensures consistent device IDs across ranks.
