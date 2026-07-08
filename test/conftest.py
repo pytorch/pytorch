@@ -103,13 +103,16 @@ def pytest_addoption(parser: Parser) -> None:
 class HardwareClassificationPytestPlugin:
     """Pytest plugin to filter collected tests by hw_classification."""
 
-    def __init__(self, requirement):
-        self.requirement = self._check_requirement(requirement)
+    def __init__(self, hw_classification):
+        self.hw_classification = self._resolve_hw_classification(hw_classification)
 
     @staticmethod
-    def _check_requirement(hw_classification):
+    def _resolve_hw_classification(hw_classification):
         if hw_classification is None:
             return None
+        # Temporary workaround needed until HardwareClassification makes it into a
+        # nightly because main / PR's tests are sometimes run against the previous
+        # day's nightly which won't have this class.
         try:
             from torch.testing._internal.common_utils import HardwareClassification
         except ImportError:
@@ -117,14 +120,14 @@ class HardwareClassificationPytestPlugin:
         return {HardwareClassification[name] for name in hw_classification}
 
     def pytest_collection_modifyitems(self, items):
-        if self.requirement is None:
+        if self.hw_classification is None:
             return
         import torch.testing._internal.common_utils as _cu
 
         filtered = []
         _cu.filter_by_hw_classification(
             items,
-            self.requirement,
+            self.hw_classification,
             get_class=lambda item: getattr(item, "cls", None),
             on_match=filtered.append,
         )

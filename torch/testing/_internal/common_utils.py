@@ -117,20 +117,28 @@ class ProfilingMode(Enum):
 class HardwareClassification(Enum):
     """Hardware classification metadata for test classes.
 
-    Test classes can declare a ``hw_classification`` class attribute to
-    describe the kind of hardware required to run the tests in that class.
-    When the ``--hw-classification`` CLI flag is passed, only tests whose
-    classification matches one of the requested values are executed.
+    Test classes declare a ``hw_classification`` class attribute to indicate
+    the kind of hardware their tests require.  When ``--hw-classification``
+    is passed, only tests whose classification matches one of the requested
+    values are executed.  When the flag is not specified, all test discovery
+    and execution paths remain unchanged.
 
     Currently there are three hardware classification categories:
 
-    * ``GENERIC`` – tests that validate shared CPU-only logic and do not
-    require any accelerator (CUDA, MPS, XPU, etc.) to run.
-    * ``DEVICE_GENERIC`` – tests that require an accelerator to run and
-    should run for all accelerators.
-    * ``CPU``, ``CUDA``, ``MPS``, ``XPU`` – tests that require a specific
-    device type. These should be use very rarely and only to test some
-    specific hw behavior.
+    * ``GENERIC`` – tests that exercise shared, device-agnostic logic
+      (e.g. Dynamo dispatcher, FX passes, and other framework internals
+      that do not depend on a particular accelerator).  These test classes
+      typically do **not** use
+      :func:`~torch.testing._internal.common_utils.instantiate_device_type_tests`.
+
+    * ``DEVICE_GENERIC`` – tests that verify behavior which must hold
+      across every accelerator (e.g. operator semantics, memory profiling).
+      These test classes **are** instantiated via
+      :func:`~torch.testing._internal.common_utils.instantiate_device_type_tests`.
+
+    * ``CPU``, ``CUDA``, ``MPS``, ``XPU`` – tests tied to a specific device.
+      Use sparingly, and only for device-specific behavior.  These replace
+      ``@onlyCPU``, ``@onlyCUDA``, and similar decorators
 
     Usage::
 
@@ -193,7 +201,7 @@ def filter_by_hw_classification(
     requirement: set[HardwareClassification],
     get_class: Callable[[Any], type | None],
     *,
-    on_match: Callable[[Any], None] | None = None,
+    on_match: Callable[[Any], None],
 ) -> None:
     """Filter items by hardware classification and print a summary.
 
@@ -217,8 +225,7 @@ def filter_by_hw_classification(
             unclassified += 1
         elif classification in requirement:
             passed += 1
-            if on_match is not None:
-                on_match(item)
+            on_match(item)
 
     mismatched = total - passed - unclassified - no_class
     parts = [
@@ -1393,10 +1400,6 @@ class HardwareClassificationTestLoader(unittest.TestLoader):
         for element in suite_or_case:
             yield from _iter(element)
 
-    def _has_failed_test(self, suite: unittest.TestSuite) -> bool:
-        _iter = HardwareClassificationTestLoader.iter_test_cases_recursively
-        return any(isinstance(tc, unittest.loader._FailedTest) for tc in _iter(suite))
-
     def get_filtered_suite(self, tests: unittest.TestSuite) -> unittest.TestSuite:
         if self.hw_classification is None:
             return tests
@@ -1419,7 +1422,13 @@ class HardwareClassificationTestLoader(unittest.TestLoader):
 
     def loadTestsFromName(self, name, module=None, *args, **kwargs):
         suite = super().loadTestsFromName(name, module, *args, **kwargs)
-        if self._has_failed_test(suite):
+        # _FailedTest has no hw_classification attribute, so
+        # get_filtered_suite would count it as unclassified and drop it
+        # silently. But the original unittest behavior is to surface the
+        # error when the test runs (e.g. "test not found" for a typo).
+        # Pass it through unfiltered to preserve that error.
+        tests = list(suite)
+        if tests and isinstance(tests[0], unittest.loader._FailedTest):
             return suite
         return self.get_filtered_suite(suite)
 
@@ -1452,14 +1461,14 @@ def run_tests(argv=None):
         _print_test_names()
         return
 
+    # Before running the tests, lint to check that every test class extends from TestCase
+    suite = unittest.TestLoader().loadTestsFromModule(__main__)
+    if not lint_test_case_extension(suite):
+        sys.exit(1)
+
     testLoader = unittest.loader.defaultTestLoader
     if HW_CLASSIFICATION is not None:
         testLoader = HardwareClassificationTestLoader(HW_CLASSIFICATION)
-
-    # Before running the tests, lint to check that every test class extends from TestCase
-    lint_suite = unittest.loader.defaultTestLoader.loadTestsFromModule(__main__)
-    if not lint_test_case_extension(lint_suite):
-        sys.exit(1)
 
     if SHOWLOCALS:
         argv = [
