@@ -95,6 +95,9 @@ jobs:
         with:
           repository: Dao-AILab/flash-attention
           path: flash-attention
+          # Pin to match the flash_attn_3==3.0.0 wheel; later upstream commits
+          # add hopper/flash_attn_3, which shadows the installed wheel's _C.
+          ref: 73c992c8ca746935548df620ef3c1b6238fe6e68
 
       - name: Configure AWS credentials
         id: aws-creds
