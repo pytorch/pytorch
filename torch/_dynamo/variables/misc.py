@@ -72,12 +72,7 @@ from ..utils import (
     raise_args_mismatch,
     unpack_iterable,
 )
-from .base import (
-    AsPythonConstantNotImplementedError,
-    AttrMutationKind,
-    NO_SUCH_SUBOBJ,
-    VariableTracker,
-)
+from .base import AsPythonConstantNotImplementedError, NO_SUCH_SUBOBJ, VariableTracker
 from .constant import ConstantVariable
 from .functions import NestedUserFunctionVariable, UserFunctionVariable
 from .object_protocol import generic_str
@@ -756,7 +751,19 @@ class ExceptionVariable(VariableTracker):
                 tuple(self.args),
                 source=self.source and AttrSource(self.source, "args"),
             )
-        return super().getattro_impl(tx, name)
+        try:
+            # Custom attributes are stored in the side effects instance dict and
+            # resolved by generic_getattr before reaching here, so a fall-through
+            # to the generic lookup that finds nothing means the attribute is
+            # genuinely absent -- match CPython's BaseException tp_getattro
+            # (PyObject_GenericGetAttr) and raise AttributeError.
+            return super().getattro_impl(tx, name)
+        except NotImplementedError:
+            raise_observed_exception(
+                AttributeError,
+                tx,
+                args=[f"'{self.exc_type.__name__}' object has no attribute '{name}'"],
+            )
 
     def str_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/exceptions.c#L118-L129
