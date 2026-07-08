@@ -1253,7 +1253,7 @@ class TestUtilityFuns(_BaseTestCase):
         # Test aten export of op with no symbolic
         class Module(torch.nn.Module):
             def forward(self, x):
-                return torch.erfc(x)
+                return torch.special.erfcx(x)
 
         x = torch.randn(2, 3, 4)
         GLOBALS.export_onnx_opset_version = self.opset_version
@@ -1265,7 +1265,7 @@ class TestUtilityFuns(_BaseTestCase):
             dynamic_axes={"x": [0, 1, 2]},
         )
         iter = graph.nodes()
-        self.assertEqual(next(iter).kind(), "aten::erfc")
+        self.assertEqual(next(iter).kind(), "aten::special_erfcx")
 
     def test_custom_op_fallthrough(self):
         # Test custom op

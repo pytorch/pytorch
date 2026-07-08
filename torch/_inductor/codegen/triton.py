@@ -2049,6 +2049,12 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     @maybe_upcast_float32()
     def erfc(x):
+        # Triton-CPU's libdevice shim has no erfc; keep the algebraic form
+        # there. 1 - erf cancels for large positive arguments, so erfc (and
+        # the gelu/ndtr/Normal.cdf tails decomposed onto it) stays inaccurate
+        # on Triton-CPU (gh-187806).
+        if V.graph.get_current_device_or_throw().type == "cpu":
+            return f"(1.0 - libdevice.erf({x}))"
         return f"libdevice.erfc({x})"
 
     @staticmethod

@@ -472,6 +472,133 @@ return D""",
     @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
+    def test_py_codegen_gelu_erfc_fused(self):
+        """Test EVT codegen folds gelu's erfc decomposition into gelu(x)."""
+        from torch._inductor.codegen.cutlass.python_evt import CutlassEVTCodegen
+        from torch._inductor.virtualized import ops, V
+
+        size = (100, 300, 200)
+        buf0 = MockComputedBuffer("buf0", None, torch.float32, size)
+
+        def inner_fn(index):
+            # x * 0.5 * erfc(x * -1/sqrt(2)), the decomposition of exact gelu
+            x = buf0.make_loader()(index)
+            half = ops.constant(0.5, torch.float32)
+            minus_rsqrt2 = ops.constant(-0.7071067811865476, torch.float32)
+            return ops.mul(ops.mul(x, half), ops.erfc(ops.mul(x, minus_rsqrt2)))
+
+        buf1 = MockComputedBuffer("buf1", inner_fn, torch.float32, size)
+        with V.set_graph_handler(MockGraphHandler({"buf0": buf0, "buf1": buf1})):
+            reads, writes, renames, code = CutlassEVTCodegen.ir_to_evt_python_code(
+                "buf0",
+                [MockSchedulerNode(buf1)],
+                OrderedSet(["buf0"]),
+            )
+        self.assertExpectedInline(reads, """[]""")
+        self.assertExpectedInline(writes, """['buf1']""")
+        self.assertExpectedInline(
+            code,
+            """\
+def fn(accum):
+    D = gelu(accum)
+return D""",
+        )
+
+    @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
+    @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
+    def test_py_codegen_gelu_erf_legacy_fused(self):
+        """The manual 1 + erf spelling of exact gelu still folds into gelu(x)."""
+        from torch._inductor.codegen.cutlass.python_evt import CutlassEVTCodegen
+        from torch._inductor.virtualized import ops, V
+
+        size = (100, 300, 200)
+        buf0 = MockComputedBuffer("buf0", None, torch.float32, size)
+
+        def inner_fn(index):
+            # x * 0.5 * (1 + erf(x * 1/sqrt(2)))
+            x = buf0.make_loader()(index)
+            half = ops.constant(0.5, torch.float32)
+            one = ops.constant(1.0, torch.float32)
+            rsqrt2 = ops.constant(0.7071067811865476, torch.float32)
+            erf_term = ops.erf(ops.mul(x, rsqrt2))
+            return ops.mul(ops.mul(x, half), ops.add(one, erf_term))
+
+        buf1 = MockComputedBuffer("buf1", inner_fn, torch.float32, size)
+        with V.set_graph_handler(MockGraphHandler({"buf0": buf0, "buf1": buf1})):
+            reads, writes, renames, code = CutlassEVTCodegen.ir_to_evt_python_code(
+                "buf0",
+                [MockSchedulerNode(buf1)],
+                OrderedSet(["buf0"]),
+            )
+        self.assertExpectedInline(reads, """[]""")
+        self.assertExpectedInline(writes, """['buf1']""")
+        self.assertExpectedInline(
+            code,
+            """\
+def fn(accum):
+    D = gelu(accum)
+return D""",
+        )
+
+    @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
+    @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
+    def test_py_codegen_erfc_not_gelu_unfused(self):
+        """A standalone erfc is not gelu: the code must be left unfolded so the
+        CUTLASS frontend rejects the epilogue cleanly."""
+        from torch._inductor.codegen.cutlass.python_evt import CutlassEVTCodegen
+        from torch._inductor.virtualized import ops, V
+
+        size = (100, 300, 200)
+        buf0 = MockComputedBuffer("buf0", None, torch.float32, size)
+
+        def inner_fn(index):
+            x = buf0.make_loader()(index)
+            return ops.erfc(x)
+
+        buf1 = MockComputedBuffer("buf1", inner_fn, torch.float32, size)
+        with V.set_graph_handler(MockGraphHandler({"buf0": buf0, "buf1": buf1})):
+            _, _, _, code = CutlassEVTCodegen.ir_to_evt_python_code(
+                "buf0",
+                [MockSchedulerNode(buf1)],
+                OrderedSet(["buf0"]),
+            )
+        self.assertExpectedInline(
+            code,
+            """\
+def fn(accum):
+    D = erfc(accum)
+
+return D""",
+        )
+
+    def test_fuse_activations_word_boundary_trigger(self):
+        """A name that merely contains "erf" (e.g. a read buffer) must not
+        activate the gelu pattern and discard an unrelated fold."""
+        from torch._inductor.codegen.cutlass.python_evt import _fuse_activations
+
+        code = (
+            "def fn(accum, perf_buf):\n"
+            "    tmp_0 = (0.0 - accum)\n"
+            "    tmp_1 = exp(tmp_0)\n"
+            "    tmp_2 = 1.0 + tmp_1\n"
+            "    tmp_3 = accum / tmp_2\n"
+            "    D = tmp_3 + perf_buf\n"
+            "return D"
+        )
+        self.assertExpectedInline(
+            _fuse_activations(code),
+            """\
+def fn(accum, perf_buf):
+    tmp_3 = silu(accum)
+    D = tmp_3 + perf_buf
+return D""",
+        )
+
+    @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
+    @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_example_tensor_creation(self):
         from torch._inductor.codegen.cutlass.lib_extensions.evt_extensions import (
             create_example_tensors,

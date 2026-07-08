@@ -4907,6 +4907,15 @@ def erf(g: jit_utils.GraphContext, input):
     return g.op("Erf", input)
 
 
+@_onnx_symbolic("aten::erfc")
+@symbolic_helper.parse_args("v")
+def erfc(g: jit_utils.GraphContext, input):
+    # ONNX has no Erfc op; 1 - Erf cancels for large positive inputs, so
+    # exported graphs keep the erf-form tail inaccuracy (gh-187806)
+    one = symbolic_helper._if_scalar_type_as(torch.ones(1), input)
+    return sub(g, one, erf(g, input))
+
+
 @_onnx_symbolic("aten::flatten")
 @symbolic_helper.quantized_args(True, False, False)
 @symbolic_helper.parse_args("v", "i", "i")

@@ -2737,6 +2737,19 @@ class TestDistributions(DistributionsTestCase):
             Normal(loc={loc}, scale={scale}))""",
         )
 
+    def test_normal_cdf_tail_accuracy(self):
+        # gh-187806: 0.5 * (1 + erf(z / sqrt(2))) cancels catastrophically in
+        # the lower tail (fp32 flushed to 0 below z ~ -6); the erfc form must
+        # stay relatively accurate on both sides.
+        x = torch.arange(-12.0, 12.0, 2**-6)
+        xref = x.cpu().double()
+        for loc, scale in ((0.0, 1.0), (2.0, 3.0)):
+            actual = Normal(loc, scale).cdf(x).cpu().double()
+            z = (xref - loc) / scale
+            expected = 0.5 * torch.erfc(-z / math.sqrt(2))
+            # rtol covers erfc kernel error plus fp32 argument rounding
+            self.assertEqual(actual, expected, rtol=5e-5, atol=0)
+
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
     def test_normal(self):
