@@ -2692,6 +2692,14 @@ def _rocm_native_device_arch_name(device: str) -> str:
     return torch.cuda.get_device_properties(device).gcnArchName
 
 
+@functools.lru_cache
+def using_rocm_rdna3() -> bool:
+    """Returns true if the device is based on RDNA3, otherwise returns false."""
+    return torch.cuda.is_available() and _rocm_native_device_arch_name(
+        "cuda"
+    ).startswith("gfx11")
+
+
 @functools.cache
 def try_import_ck_lib() -> tuple[
     str | None, Callable[[], list[Any]], Callable[[], list[Any]], type[Any]
@@ -4892,16 +4900,13 @@ def is_collective_op(op_name: str) -> bool:
 
 @lru_cache
 def tlx_only_cuda_options() -> list[str]:
-    if config.is_fbcode():
-        try:
-            from torch._inductor.fb.tlx_templates.registry import tlx_only_cuda_options
+    try:
+        # Succeeds only when fbtriton (a Triton fork) is installed
+        from triton.language.extra.tlx.inductor.registry import tlx_only_cuda_options
 
-            return tlx_only_cuda_options
+        return tlx_only_cuda_options
 
-        except ImportError:
-            return []
-
-    else:
+    except ImportError:
         return []
 
 
