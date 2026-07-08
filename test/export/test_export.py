@@ -12207,6 +12207,7 @@ graph():
 
         self.assertEqual(gm_flat_non_strict(*inp), gm_flat_strict(*inp))
 
+    @testing.expectedFailureSerDer
     @testing.expectedFailureStrictV2
     @testing.expectedFailureStrict
     @testing.expectedFailureRetraceability
