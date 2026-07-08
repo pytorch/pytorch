@@ -116,9 +116,7 @@ class TestInductorCompileToPythonCodegen(TestCase):
 def call(args):
     flat_1, flat_2, flat_3 = args
     args.clear()
-    assert_size_stride(flat_2, (3, ), (1, ), 'input')
-    assert_size_stride(flat_3, (5, 4), (4, 1), 'input')
-    assert_size_stride(flat_1, (3, 4), (4, 1), 'input')
+    assert_size_stride_grouped((flat_2, flat_3, flat_1), ((3, ), (5, 4), (3, 4)), ((1, ), (4, 1), (4, 1)), 'input')
     buf0 = empty_strided_cpu((5, 3), (3, 1), torch.float32)
     # Topologically Sorted Source Nodes: [], Original ATen: []
     extern_kernels.addmm(flat_2, flat_3, reinterpret_tensor(flat_1, (4, 3), (1, 4), 0), alpha=1, beta=1, out=buf0)
@@ -140,8 +138,7 @@ def call(args):
 def call(args):
     flat_1, flat_2 = args
     args.clear()
-    assert_size_stride(flat_2, (5, 4), (4, 1), 'input')
-    assert_size_stride(flat_1, (3, 4), (4, 1), 'input')
+    assert_size_stride_grouped((flat_2, flat_1), ((5, 4), (3, 4)), ((4, 1), (4, 1)), 'input')
     buf0 = empty_strided_cpu((5, 3), (3, 1), torch.float32)
     # Topologically Sorted Source Nodes: [], Original ATen: []
     extern_kernels.mm(flat_2, reinterpret_tensor(flat_1, (4, 3), (1, 4), 0), out=buf0)
@@ -162,9 +159,7 @@ def call(args):
 def call(args):
     flat_1, flat_2, flat_3 = args
     args.clear()
-    assert_size_stride(flat_2, (3, ), (1, ), 'input')
-    assert_size_stride(flat_3, (5, 4), (4, 1), 'input')
-    assert_size_stride(flat_1, (3, 4), (4, 1), 'input')
+    assert_size_stride_grouped((flat_2, flat_3, flat_1), ((3, ), (5, 4), (3, 4)), ((1, ), (4, 1), (4, 1)), 'input')
     buf0 = empty_strided_cpu((5, 3), (3, 1), torch.float32)
     # Topologically Sorted Source Nodes: [], Original ATen: []
     extern_kernels.addmm(flat_2, flat_3, reinterpret_tensor(flat_1, (4, 3), (1, 4), 0), alpha=1, beta=1, out=buf0)
@@ -303,8 +298,7 @@ def call(args):
 def call(args):
     flat_1, flat_2, flat_3 = args
     args.clear()
-    assert_size_stride(flat_3, (5, 4), (4, 1), 'input')
-    assert_size_stride(flat_1, (3, 4), (4, 1), 'input')
+    assert_size_stride_grouped((flat_3, flat_1), ((5, 4), (3, 4)), ((4, 1), (4, 1)), 'input')
     with torch.cuda._DeviceGuard(0):
         torch.cuda.set_device(0)
         flat_3 = copy_if_misaligned(flat_3)
