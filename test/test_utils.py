@@ -1130,6 +1130,35 @@ class TestDeviceLazyInit(TestCase):
         self.assertRegex(str(exc), pattern)
 
 
+class TestFileBaton(TestCase):
+    def test_wait_times_out_on_stale_lock(self):
+        # A lock left behind by a killed process (OOM/SIGKILL/cancelled job)
+        # must not deadlock waiters forever; with a timeout, wait() should fail
+        # fast with an actionable message instead of spinning indefinitely.
+        # See https://github.com/pytorch/pytorch/issues/189245.
+        from torch.utils.file_baton import FileBaton
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            lock_path = os.path.join(tmp_dir, "lock")
+
+            # Simulate a holder that acquired the lock and was killed before
+            # releasing it, leaving the lock file behind.
+            holder = FileBaton(lock_path)
+            self.assertTrue(holder.try_acquire())
+
+            waiter = FileBaton(lock_path, wait_seconds=0.01, timeout_seconds=0.5)
+            self.assertFalse(waiter.try_acquire())
+            with self.assertRaisesRegex(RuntimeError, "Timed out.*stale"):
+                waiter.wait()
+
+    def test_wait_defaults_to_no_timeout(self):
+        # The default preserves the historical wait-forever behavior so
+        # existing callers are unaffected.
+        from torch.utils.file_baton import FileBaton
+
+        self.assertIsNone(FileBaton("unused").timeout_seconds)
+
+
 instantiate_device_type_tests(
     TestDeviceLazyInit, globals(), except_for=["cpu"], allow_xpu=True
 )

@@ -2342,7 +2342,20 @@ def _jit_compile(name,
             logger.info('Bumping to version %s and re-building as %s_v%s...', version, name, version)
         name = f'{name}_v{version}'
 
-    baton = FileBaton(os.path.join(build_directory, 'lock'))
+    # Guard against a permanent deadlock if the process that acquired the lock
+    # was killed (OOM, SIGKILL, cancelled job) without releasing it. Waiting on
+    # a sibling's JIT build for this long is unambiguously abnormal, so fail
+    # fast with an actionable message instead of hanging forever. Override with
+    # PYTORCH_JIT_LOCK_TIMEOUT (seconds; empty or "0" disables the timeout).
+    _lock_timeout_env = os.environ.get('PYTORCH_JIT_LOCK_TIMEOUT')
+    if _lock_timeout_env is None:
+        lock_timeout_seconds: float | None = 3600.0
+    else:
+        lock_timeout_seconds = float(_lock_timeout_env) or None
+    baton = FileBaton(
+        os.path.join(build_directory, 'lock'),
+        timeout_seconds=lock_timeout_seconds,
+    )
     if baton.try_acquire():
         try:
             if version != old_version:

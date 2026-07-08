@@ -7,7 +7,8 @@ import warnings
 class FileBaton:
     """A primitive, file-based synchronization utility."""
 
-    def __init__(self, lock_file_path, wait_seconds=0.1, warn_after_seconds=None) -> None:
+    def __init__(self, lock_file_path, wait_seconds=0.1, warn_after_seconds=None,
+                 timeout_seconds=None) -> None:
         """
         Create a new :class:`FileBaton`.
 
@@ -17,11 +18,19 @@ class FileBaton:
                 calling ``wait()``.
             warn_after_seconds: The seconds to wait before showing
                 lock file path to warn existing lock file.
+            timeout_seconds: If not ``None``, the maximum number of seconds
+                ``wait()`` will block before raising ``RuntimeError``. This
+                guards against a permanent deadlock when the process that
+                acquired the lock was killed (e.g. by OOM, ``SIGKILL``, or a
+                cancelled job) and never released the lock file. ``None``
+                (the default) preserves the previous behavior of waiting
+                indefinitely.
         """
         self.lock_file_path = lock_file_path
         self.wait_seconds = wait_seconds
         self.fd = None
         self.warn_after_seconds = warn_after_seconds
+        self.timeout_seconds = timeout_seconds
 
     def try_acquire(self) -> bool | None:
         """
@@ -49,8 +58,18 @@ class FileBaton:
         while os.path.exists(self.lock_file_path):
             time.sleep(self.wait_seconds)
 
+            elapsed = time.time() - start_time
+
+            if self.timeout_seconds is not None and elapsed > self.timeout_seconds:
+                raise RuntimeError(
+                    f'Timed out after {self.timeout_seconds:g} seconds waiting for '
+                    f'lock file "{self.lock_file_path}". The process that acquired the '
+                    f'lock may have been killed (e.g. by the OOM killer, SIGKILL, or a '
+                    f'cancelled job) without releasing it, leaving a stale lock. Delete '
+                    f'the lock file and retry.')
+
             if self.warn_after_seconds is not None:
-                if time.time() - start_time > self.warn_after_seconds and not has_warned:
+                if elapsed > self.warn_after_seconds and not has_warned:
                     warnings.warn(f'Waited on lock file "{self.lock_file_path}" for '
                                   f'{self.warn_after_seconds} seconds.', stacklevel=2)
                     has_warned = True
