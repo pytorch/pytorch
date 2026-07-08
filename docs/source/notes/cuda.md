@@ -1780,6 +1780,27 @@ g1.replay()
 g2.replay()
 ```
 
+The `pool` argument also accepts {class}`~torch.cuda.MemPool`. If
+{func}`~torch.cuda.use_mem_pool` is used during capture, the graph retains that
+pool until the graph is reset or destroyed. {meth}`torch.cuda.CUDAGraph.pool`
+returns the primary capture pool, while `CUDAGraph.pools()` returns all pools
+retained by the graph.
+
+```python
+g_default_pool = torch.cuda.MemPool()
+g_side_pool = torch.cuda.MemPool()
+g = torch.cuda.CUDAGraph()
+
+with torch.cuda.graph(g, pool=g_default_pool):
+    y = foo(x)
+    with torch.cuda.use_mem_pool(g_side_pool):
+        tmp = baz(y)
+    z = bar(tmp)
+
+primary_pool = g.pool()
+retained_pools = g.pools()
+```
+
 It's also safe to share a memory pool across separate graphs that do not depend
 on each other's outputs, provided they never run concurrently.
 Be aware that replaying one graph can clobber another graph's outputs when

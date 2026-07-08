@@ -12,9 +12,13 @@ module without it raises ``ModuleNotFoundError`` (catchable by optional consumer
 from __future__ import annotations
 
 import ctypes
+import logging
 from collections.abc import Iterable  # noqa: TC003
 from functools import lru_cache
 from typing import TYPE_CHECKING
+
+
+logger = logging.getLogger(__name__)
 
 
 # cupti-python enums used at runtime. cupti-python is a hard requirement of this
@@ -149,6 +153,14 @@ def _configure_ctypes(lib: ctypes.CDLL) -> None:
             ctypes.POINTER(ctypes.c_uint64),
         ]
         lib.cuptiGetTimestamp_v2.restype = ctypes.c_int
+    # Custom timestamp callback (CUpti_TimestampCallbackFunc, a uint64_t(*)(void)):
+    # registers a function CUPTI invokes to stamp activity records, replacing its
+    # default CPU timer. Used to put records on the profiler's approx clock (kineto's
+    # timebase). Global, and per the header usable only when multiple subscribers are
+    # NOT allowed; NULL unregisters.
+    if hasattr(lib, "cuptiActivityRegisterTimestampCallback"):
+        lib.cuptiActivityRegisterTimestampCallback.argtypes = [ctypes.c_void_p]
+        lib.cuptiActivityRegisterTimestampCallback.restype = ctypes.c_int
     # External correlation push/pop. The plain (v1) calls return
     # CUPTI_ERROR_NOT_COMPATIBLE while a user-defined-record subscriber is active
     # (same as cuptiGetTimestamp), so the subscriber-aware _v2 variants are required
@@ -348,6 +360,26 @@ class _PyLibCupti:
         )
         return ts.value
 
+    def register_timestamp_callback(self, callback_addr: int) -> int:
+        """Register a CUpti_TimestampCallbackFunc (by address) so CUPTI stamps activity
+        records with the caller's clock instead of its default CPU timer -- used to put
+        records directly on the profiler's approx clock (kineto's timebase). Returns the
+        raw CUptiResult rather than raising: current libcupti rejects this with
+        CUPTI_ERROR_NOT_COMPATIBLE while multiple subscribers are allowed (a documented
+        beta limitation), so the caller decides whether to fall back. Returns -1 if the
+        symbol is absent (libcupti too old)."""
+        fn = getattr(self._lib, "cuptiActivityRegisterTimestampCallback", None)
+        if fn is None:
+            return -1
+        return fn(ctypes.c_void_p(callback_addr))
+
+    def unregister_timestamp_callback(self) -> None:
+        """Clear a previously registered timestamp callback (NULL restores CUPTI's
+        default timer). Best-effort -- teardown continues regardless."""
+        fn = getattr(self._lib, "cuptiActivityRegisterTimestampCallback", None)
+        if fn is not None:
+            fn(None)
+
     def activity_flush_all(self) -> None:
         """Hand over COMPLETED buffers only (``cuptiActivityFlushAll(0)``). The monitor
         never forces in-progress buffers (``CUPTI_ACTIVITY_FLAG_FLUSH_FORCED``): a
@@ -439,18 +471,26 @@ class _PyLibCupti:
         """Turn user-defined records back off for the subscription (the inverse of
         arm_user_defined_records' set-attribute). UDR mode changes how CUPTI lays
         out activity records, so leaving it on can leave a following classic
-        consumer (e.g. Kineto) unable to decode -- reset it before unsubscribing."""
+        consumer (e.g. Kineto) unable to decode -- reset it before unsubscribing.
+
+        Best-effort: some activity kinds (e.g. MEMCPY2) leave CUPTI rejecting the
+        UDR-off toggle with CUPTI_ERROR_INVALID_OPERATION at teardown. The trace is
+        already built by this point and we unsubscribe next regardless, so a failure
+        here is logged, not raised -- crashing teardown would lose the export."""
         disabled = ctypes.c_uint8(0)
         size = ctypes.c_size_t(1)
-        self._check(
-            self._lib.cuptiActivitySetAttribute_v2(
-                ctypes.c_void_p(sub_handle),
-                _ATTR_USER_DEFINED_RECORDS,
-                ctypes.byref(size),
-                ctypes.byref(disabled),
-            ),
-            "cuptiActivitySetAttribute_v2",
+        rc = self._lib.cuptiActivitySetAttribute_v2(
+            ctypes.c_void_p(sub_handle),
+            _ATTR_USER_DEFINED_RECORDS,
+            ctypes.byref(size),
+            ctypes.byref(disabled),
         )
+        if rc != 0:
+            logger.warning(
+                "cuptiActivitySetAttribute_v2 (disarm UDR) failed with %s; "
+                "continuing teardown",
+                self._result_string(rc),
+            )
 
     def enable_kernel_latency_timestamps(self, sub_handle: int, enable: bool) -> bool:
         """Toggle per-subscriber kernel latency-timestamp tracking (the queued/submitted

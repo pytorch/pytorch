@@ -21,6 +21,7 @@ from torch.testing._internal.common_utils import (
     requires_cuda_p2p_access,
     run_tests,
     skip_but_pass_in_sandcastle_if,
+    TEST_WITH_ROCM,
 )
 
 
@@ -290,6 +291,9 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
             # TODO: remove after we have wait_signal
             dist.barrier()
 
+    @skip_but_pass_in_sandcastle_if(
+        TEST_WITH_ROCM, "nvshmem_get_out not yet implemented for ROCm"
+    )
     def test_get(self) -> None:
         self._init_device()
         group_name = dist.group.WORLD.group_name

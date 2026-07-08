@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: export"]
 # ruff: noqa: F841
 # flake8: noqa
+import builtins
 import contextlib
 import copy
 import dataclasses
@@ -35,6 +36,7 @@ from torch._dynamo._trace_wrapped_higher_order_op import mod_index
 from torch._dynamo.test_case import TestCase
 from torch._dynamo.testing import normalize_gm
 from torch._export import config
+from torch._export.non_strict_utils import _override_builtin_ops
 from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
 from torch._export.utils import (
     get_buffer,
@@ -69,6 +71,7 @@ from torch.export.graph_signature import (
     TensorArgument,
 )
 from torch.export.passes import move_to_device_pass
+from torch.fx._symbolic_trace import _wrapped_fns_to_patch
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing import FileCheck
@@ -906,6 +909,20 @@ class TestExport(TestCase):
         finally:
             pytree._deregister_pytree_node(_LenTensorPytreeCache)
             torch.fx._pytree._deregister_pytree_flatten_spec(_LenTensorPytreeCache)
+
+    def test_non_strict_len_override_supports_fx_wrap(self):
+        namespace = {"torch": torch, "__name__": "test_non_strict_len_wrap"}
+        key = (id(namespace), "len")
+        self.assertNotIn(key, _wrapped_fns_to_patch)
+        try:
+            with _override_builtin_ops():
+                self.assertEqual(builtins.len.__name__, "len")
+                with self.assertRaisesRegex(TypeError, "keyword argument"):
+                    builtins.len(obj=[])
+                exec("torch.fx.wrap(len)", namespace)
+                self.assertIn(key, _wrapped_fns_to_patch)
+        finally:
+            _wrapped_fns_to_patch.pop(key, None)
 
     @skipIfCrossRef  # CrossRefMode interferes with functorch ops
     @skipIfTorchDynamo("export inside dynamo is not supported")
@@ -2255,9 +2272,15 @@ graph():
 
         f = Basic()
         args = (torch.randn(1, 3),)
-        # strict-mode will error out because foo is registered as parameter
-        # in dynamo (a behavior that's different from eager). We decided to
-        # follow eager behavior.
+        # foo is registered as a parameter in Dynamo, but not in eager.
+        # Follow eager behavior and treat it as a lifted tensor constant.
+        ep = export(f, args, strict=True)
+        gm = ep.module()
+        self.assertEqual(len(ep.graph_signature.lifted_tensor_constants), 1)
+        self.assertEqual(len(ep.graph_signature.parameters), 0)
+        self.assertEqual(len(list(gm.named_parameters())), 0)
+        self.assertEqual(gm(*args), f(*args))
+
         ep = export(f, args, strict=False)
         gm = ep.module()
         self.assertEqual(len(ep.graph_signature.lifted_tensor_constants), 1)
@@ -2275,6 +2298,46 @@ graph():
     %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %lifted_tensor_0), kwargs = {})
     return (add,)""",
         )
+
+    def test_strict_export_unregistered_module_list_parameters(self):
+        class A(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.nn.Parameter(torch.ones(3, 3))
+
+            def forward(self, x):
+                return x + self.a
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.models = [A(), A()]
+
+            def forward(self, x):
+                for m in self.models:
+                    x = m(x)
+                return x
+
+        f = M()
+        args = (torch.ones(3, 3),)
+        ep = export(f, args, strict=True)
+        gm = ep.module()
+
+        self.assertEqual(
+            [spec.kind for spec in ep.graph_signature.input_specs],
+            [
+                InputKind.CONSTANT_TENSOR,
+                InputKind.CONSTANT_TENSOR,
+                InputKind.USER_INPUT,
+            ],
+        )
+        self.assertEqual(len(ep.graph_signature.lifted_tensor_constants), 2)
+        self.assertEqual(len(ep.graph_signature.parameters), 0)
+        self.assertEqual(len(ep.state_dict), 0)
+        self.assertEqual(len(list(gm.named_parameters())), 0)
+        for constant in ep.constants.values():
+            self.assertFalse(isinstance(constant, torch.nn.Parameter))
+        self.assertEqual(gm(*args), f(*args))
 
     def test_int_shape_specialization(self):
         class M(torch.nn.Module):
@@ -10857,6 +10920,40 @@ def forward(self, b_a_buffer, x):
                 1,
             )
 
+    # associative_scan is not supported by the cpp (NativeRT) runtime yet
+    @testing.expectedFailureCppRuntime
+    def test_export_associative_scan_pointwise_cpu(self):
+        # combine_mode="pointwise" only has Inductor codegen on backends with
+        # scan support (CUDA/XPU), but the device constraint is enforced in the
+        # lowering rather than the eager wrapper, so the HOP can be captured on
+        # other devices. See https://github.com/pytorch/pytorch/issues/186594.
+        def combine_fn(x, y):
+            return x + y
+
+        class M(torch.nn.Module):
+            def forward(self, xs):
+                return associative_scan(combine_fn, xs, dim=0, combine_mode="pointwise")
+
+        xs = torch.randn(8, 4)
+
+        # A pure-eager (non-exported) CPU call runs via the generic fallback.
+        self.assertEqual(M()(xs), torch.cumsum(xs, dim=0))
+
+        # Export succeeds and retains the associative_scan HOP.
+        ep = export(M(), (xs,))
+        self.assertTrue(
+            any(
+                node.op == "call_function"
+                and node.target is torch.ops.higher_order.associative_scan
+                for node in ep.graph_module.graph.nodes
+            ),
+            "exported graph should retain the associative_scan HOP",
+        )
+
+        # The exported program runs on CPU via the HOP's eager fallback and
+        # matches the reference scan.
+        self.assertEqual(ep.module()(xs), torch.cumsum(xs, dim=0))
+
     # scan is not supported in sigmoid yet
     @testing.expectedFailureCppRuntime
     def test_export_scan_pytree_output(self):
@@ -11212,6 +11309,33 @@ def forward(self, b_a_buffer, x):
         )
         self.assertTrue(torch.allclose(core_aten_ep.module()(*inp), m(*inp)))
         self.assertEqual(id(state_dict), id(ep.state_dict))
+
+    def test_export_decomps_linalg_vector_norm(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.linalg.vector_norm(x, ord=2, dim=1, keepdim=True)
+
+        inp = (torch.randn(2, 3),)
+        m = M()
+        ep = export(m, inp)
+        self.assertTrue(
+            any(
+                node.target == torch.ops.aten.linalg_vector_norm.default
+                for node in ep.graph.nodes
+            )
+        )
+
+        core_aten_ep = ep.run_decompositions()
+        self.assertFalse(
+            any(
+                node.target == torch.ops.aten.linalg_vector_norm.default
+                for node in core_aten_ep.graph.nodes
+            )
+        )
+        FileCheck().check("torch.ops.aten.pow.Tensor_Scalar").check(
+            "torch.ops.aten.sum.dim_IntList"
+        ).run(core_aten_ep.graph_module.code)
+        self.assertEqual(core_aten_ep.module()(*inp), m(*inp))
 
     @unittest.skipIf(IS_FBCODE, "We can't customize decomp in fbcode")
     def test_export_decomp_torture_case_1(self):
@@ -14589,7 +14713,7 @@ graph():
     @testing.expectedFailureSerDer  # register_constant needs to handle serialization
     def test_opaque_obj(self):
         @dataclass(frozen=True)
-        class MyInput(torch._opaque_base.OpaqueBase):
+        class MyInput(torch._custom_class_base.CustomClassBase):
             int_1: int
             int_2: int
 
@@ -14606,7 +14730,7 @@ graph():
             def forward(self, x, f):
                 return x + f.int_1 + f.int_2
 
-        torch._library.opaque_object.register_opaque_type(MyInput, typ="value")
+        torch._library.opaque_object.register_custom_class(MyInput, typ="constant")
         self.addCleanup(
             lambda name=torch._library.opaque_object.get_opaque_type_name(MyInput): (
                 torch._C._unregister_opaque_type(name),

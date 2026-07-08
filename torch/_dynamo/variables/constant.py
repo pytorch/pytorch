@@ -12,7 +12,6 @@ import enum
 import operator
 from collections.abc import Iterable
 from typing import Any, Literal, overload, TYPE_CHECKING
-from typing_extensions import override
 
 import torch
 from torch._dynamo.source import GetItemSource
@@ -344,9 +343,14 @@ class ConstantVariable(VariableTracker):
         if isinstance(self.value, str) and name in str.__dict__:
             method = getattr(self.value, name)
             try:
-                return ConstantVariable.create(method(*const_args, **const_kwargs))
+                result = method(*const_args, **const_kwargs)
             except Exception as e:
                 raise_observed_exception(type(e), tx)
+            # str.split/rsplit/splitlines return a fresh caller-owned list;
+            # mark it mutable so in-place ops (.sort(), shuffle, etc.) are tracked.
+            if name in ("split", "rsplit", "splitlines"):
+                return ConstantVariable.create(result, mutation_type=ValueMutationNew())
+            return ConstantVariable.create(result)
         elif isinstance(self.value, (float, int)) and hasattr(self.value, name):
             if not (args or kwargs):
                 try:
@@ -451,13 +455,6 @@ class ConstantVariable(VariableTracker):
     def reconstruct_pycode(self, codegen) -> str:
         return repr(self.value)
 
-    @override
-    def call_obj_hasattr(
-        self, tx: InstructionTranslatorBase, name: str
-    ) -> ConstantVariable:
-        result = hasattr(self.value, name)
-        return variables.ConstantVariable.create(result)
-
     def get_id(self, tx: InstructionTranslatorBase) -> int | None:
         # Singletons have guaranteed stable identity across the process lifetime.
         if self.value is None or self.value is True or self.value is False:
@@ -473,7 +470,7 @@ class ConstantVariable(VariableTracker):
 
     def nb_index_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
     ) -> VariableTracker:
         # CPython: int and bool define nb_index (returns self for int,
         # int(self) for bool). All other constant types do not.
@@ -485,7 +482,7 @@ class ConstantVariable(VariableTracker):
 
     def nb_int_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
     ) -> VariableTracker:
         # CPython: int defines nb_int (long_long, returns copy).
         # bool inherits nb_int from int via slot inheritance.
@@ -494,7 +491,7 @@ class ConstantVariable(VariableTracker):
 
     def nb_float_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
     ) -> VariableTracker:
         # CPython: float defines nb_float (float_float, returns copy).
         # int defines nb_float (long_float, converts to float).
@@ -503,7 +500,7 @@ class ConstantVariable(VariableTracker):
 
     def _nb_binary_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
         op: Any,
         type_check: Any,
@@ -529,7 +526,7 @@ class ConstantVariable(VariableTracker):
 
     def nb_lshift_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
@@ -543,7 +540,7 @@ class ConstantVariable(VariableTracker):
 
     def nb_rshift_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
@@ -557,7 +554,7 @@ class ConstantVariable(VariableTracker):
 
     def nb_floor_divide_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
@@ -578,7 +575,7 @@ class ConstantVariable(VariableTracker):
 
     def nb_true_divide_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
@@ -599,7 +596,7 @@ class ConstantVariable(VariableTracker):
 
     def nb_remainder_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
@@ -621,7 +618,7 @@ class ConstantVariable(VariableTracker):
 
     def nb_divmod_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
@@ -642,7 +639,7 @@ class ConstantVariable(VariableTracker):
 
     def nb_or_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
@@ -659,7 +656,7 @@ class ConstantVariable(VariableTracker):
 
     def nb_subtract_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
@@ -721,7 +718,7 @@ class ConstantVariable(VariableTracker):
 
     def nb_and_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
@@ -737,7 +734,7 @@ class ConstantVariable(VariableTracker):
 
     def nb_xor_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
@@ -753,7 +750,7 @@ class ConstantVariable(VariableTracker):
 
     def nb_negative_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
     ) -> VariableTracker:
         # int: https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L5179-L5189
         # float: https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L839-L849
@@ -763,7 +760,7 @@ class ConstantVariable(VariableTracker):
 
     def nb_positive_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
     ) -> VariableTracker:
         # int: https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L5619 (long_long)
         # float: https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L1114 (float_float)
@@ -773,7 +770,7 @@ class ConstantVariable(VariableTracker):
 
     def nb_add_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
@@ -789,7 +786,7 @@ class ConstantVariable(VariableTracker):
 
     def nb_power_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
         z: VariableTracker | None,
         reverse: bool = False,
@@ -820,7 +817,7 @@ class ConstantVariable(VariableTracker):
 
     def nb_power_z_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         v: VariableTracker,
         w: VariableTracker,
     ) -> VariableTracker:
@@ -838,7 +835,7 @@ class ConstantVariable(VariableTracker):
 
     def nb_absolute_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
     ) -> VariableTracker:
         # int: https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L5184-L5190
         # float: https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L847-L850
@@ -853,7 +850,7 @@ class ConstantVariable(VariableTracker):
 
     def nb_invert_impl(
         self,
-        tx: Any,
+        tx: InstructionTranslatorBase,
     ) -> VariableTracker:
         # int: https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L5163-L5177
         #   long_invert implements ~x as -(x+1).
@@ -906,11 +903,18 @@ class FakeIdVariable(VariableTracker):
     def python_type(self) -> type:
         return int
 
-    def hash_impl(self, tx: Any) -> tuple[int, bool]:
+    def hash_impl(self, tx: InstructionTranslatorBase) -> tuple[int, bool]:
         return hash(self.value), True
 
+    def repr_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
+        # Mirrors int.__repr__: the value is an int, so str()/repr() yield its
+        # decimal string. The distinct-but-compile-time-only identity carried by
+        # the fake id is preserved in the resulting string, matching how
+        # FakeIdVariable already resolves same-kind id()/hash() comparisons.
+        return ConstantVariable.create(repr(self.value))
+
     def richcompare_impl(
-        self, tx: Any, other: VariableTracker, op: str
+        self, tx: InstructionTranslatorBase, other: VariableTracker, op: str
     ) -> VariableTracker:
         if (
             isinstance(other, FakeIdVariable)

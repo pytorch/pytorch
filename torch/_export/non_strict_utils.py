@@ -13,6 +13,7 @@ from typing import Any, cast, TYPE_CHECKING, TypeGuard
 
 import torch
 import torch.utils._pytree as pytree
+from torch._custom_class_base import CustomClassBase
 from torch._dynamo.source import (
     AttrSource,
     GetItemSource,
@@ -25,8 +26,7 @@ from torch._export.passes.lift_constants_pass import ConstantAttrMap
 from torch._export.utils import _fakify_params_buffers
 from torch._guards import Source
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_value
-from torch._opaque_base import OpaqueBase
+from torch._library.opaque_object import is_custom_class_obj
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.export import Constraint
 from torch.export.dynamic_shapes import (
@@ -200,7 +200,7 @@ def fakify(
     if (
         _is_constant_argument(t)
         or isinstance(t, (torch.ScriptObject, torch.nn.Module))
-        or is_opaque_value(t)
+        or is_custom_class_obj(t)
     ):
         return t
 
@@ -286,11 +286,11 @@ def _create_symbolic_context_for_tensor(t, source, t_constraints, sources, mode)
                     inner_contexts[attr] = _create_symbolic_context_for_tensor(
                         inner_value, inner_source, t_constraints, sources, mode
                     )
-                case OpaqueBase():
+                case CustomClassBase():
                     pass
                 case unexpected:
                     raise AssertionError(
-                        f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
                     )
 
         symbolic_context = SubclassSymbolicContext(
@@ -400,6 +400,14 @@ def _tensor_len(obj, *, real_callable):
     return real_callable(obj)
 
 
+def _make_tensor_len(real_callable):
+    @functools.wraps(real_callable)
+    def wrapped_len(obj, /):
+        return _tensor_len(obj, real_callable=real_callable)
+
+    return wrapped_len
+
+
 @contextmanager
 def _override_builtin_ops():
     original_len = builtins.len
@@ -408,7 +416,7 @@ def _override_builtin_ops():
     original_pow = math.pow
 
     # pyrefly: ignore [bad-assignment]
-    builtins.len = functools.partial(_tensor_len, real_callable=original_len)
+    builtins.len = _make_tensor_len(original_len)
 
     # pyrefly: ignore [bad-assignment]
     builtins.max = functools.partial(
@@ -1144,7 +1152,7 @@ def _fakify_script_objects(
         for obj, fqns in constant_attrs.items():
             if torch._library.fake_class_registry._is_script_object(
                 obj
-            ) or is_opaque_value(obj):
+            ) or is_custom_class_obj(obj):
                 fake_script_obj = _maybe_fakify_obj(obj)
                 for fqn in fqns:
                     cur_mod, attr = _leaf_mod_and_attr(mod, fqn)

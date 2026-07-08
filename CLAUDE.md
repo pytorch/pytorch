@@ -46,6 +46,11 @@ To test Tensor equality, use assertEqual.
 For tests over multiple inputs, use the `@parametrize` decorator.
 For any test that checks numerics of the on-device implementation, use `instantiate_device_type_tests` to write device-generic tests.
 
+# Type Stubs
+
+Many `.pyi` files are generated from corresponding `.pyi.in` templates. Always
+edit the `.pyi.in` file, not the generated `.pyi`.
+
 # Linting
 
 Only use commands provided via `spin` for linting.
@@ -54,6 +59,16 @@ Generally, use `spin lint` as to run the lint and `spin fixlint` to apply automa
 
 When the user asks you to commit or amend, run `lintrunner -a` before creating
 the commit. Fix any lint errors it reports, then commit.
+
+# Git
+
+This refines the Bash tool's `# Git` guidance to "branch first" when on the
+default branch:
+
+- If HEAD is detached, that is intentional (the ghstack workflow). Do NOT
+  create a new branch; commit directly onto the current detached HEAD.
+- If you are on an actual branch (including `main`), follow the default
+  guidance and branch first before committing.
 
 # Commit messages
 
