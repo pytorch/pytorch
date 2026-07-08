@@ -4206,6 +4206,7 @@ class TestBufferProtocol(TestCase):
             self.assertIn("native byte order", str(e))
             self.assertNotIn("explicit dtype", str(e))
 
+    @skipIfTorchDynamo("numpy structured dtype ('[(a, i4), (b, i4)]') isn't traceable by dynamo")
     def test_asarray_buffer_struct_format_raises(self, device):
         # A structured (record) buffer format ('T{...}') has no single-scalar
         # torch dtype and must raise rather than guess.
