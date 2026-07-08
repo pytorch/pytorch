@@ -6,6 +6,7 @@
 #include <ATen/Tensor.h>
 #include <ATen/ThreadLocalState.h>
 #include <ATen/core/ivalue.h>
+#include <c10/core/SafePyObject.h>
 #include <torch/csrc/Export.h>
 #include <torch/csrc/autograd/anomaly_mode.h>
 #include <torch/csrc/autograd/function.h>
@@ -173,6 +174,16 @@ struct TORCH_API Engine {
 
   virtual std::unique_ptr<SavedVariableHooks> get_default_saved_variable_hooks() {
     return nullptr;
+  }
+
+  // Calls a torch.autograd.graph.node_creation_hook callback on a freshly
+  // created node. Hooks can only be registered from Python, so this is only
+  // reachable when the Python engine is loaded.
+  virtual void call_node_creation_hook(
+      const c10::intrusive_ptr<Node>& /*node*/,
+      const c10::SafePyObject& /*hook*/) {
+    TORCH_INTERNAL_ASSERT(
+        false, "node creation hooks require the Python autograd engine");
   }
 
   // We pass cpu_ready_queue to evaluate_function, so that it knows

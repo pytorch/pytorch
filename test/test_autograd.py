@@ -11356,6 +11356,176 @@ for shape in [(1,), ()]:
             out = Func.apply(a)
         out.backward()
 
+    def test_node_creation_hook(self):
+        a = torch.randn(2, requires_grad=True)
+        nodes = []
+
+        b = a * 2
+        with torch.autograd.graph.node_creation_hook(nodes.append):
+            c = b.exp()
+            d = c + c
+        e = d.sum()
+
+        self.assertEqual([n.name() for n in nodes], ["ExpBackward0", "AddBackward0"])
+        self.assertIs(nodes[0], c.grad_fn)
+        self.assertIs(nodes[1], d.grad_fn)
+
+    def test_node_creation_hook_multi_output_fires_once(self):
+        nodes = []
+        a = torch.randn(5, requires_grad=True)
+        with torch.autograd.graph.node_creation_hook(nodes.append):
+            values, indices = a.sort()
+        self.assertEqual(len(nodes), 1)
+        self.assertIs(nodes[0], values.grad_fn)
+
+    def test_node_creation_hook_nesting(self):
+        calls = []
+        a = torch.randn(2, requires_grad=True)
+        with torch.autograd.graph.node_creation_hook(
+            lambda node: calls.append(("outer", node))
+        ):
+            b = a * 2
+            with torch.autograd.graph.node_creation_hook(
+                lambda node: calls.append(("inner", node))
+            ):
+                c = b.exp()
+        expected = [("outer", b.grad_fn), ("outer", c.grad_fn), ("inner", c.grad_fn)]
+        self.assertEqual(calls, expected)
+
+    def test_node_creation_hook_custom_function(self):
+        class Func(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, gO):
+                return gO * 2
+
+        nodes = []
+        a = torch.randn(2, requires_grad=True)
+        with torch.autograd.graph.node_creation_hook(nodes.append):
+            out = Func.apply(a)
+        self.assertEqual(len(nodes), 1)
+        self.assertIs(nodes[0], out.grad_fn)
+
+    def test_node_creation_hook_inplace(self):
+        nodes = []
+        a = torch.randn(2, requires_grad=True)
+        b = a * 2
+        with torch.autograd.graph.node_creation_hook(nodes.append):
+            b.mul_(2)
+        self.assertEqual(len(nodes), 1)
+        self.assertIs(nodes[0], b.grad_fn)
+
+    def test_node_creation_hook_view_of_modified_base(self):
+        # The view's grad_fn is lazily regenerated on access after the base
+        # is modified in-place; hooks should fire for it if a hook context is
+        # active at that point.
+        a = torch.randn(4, requires_grad=True).clone()
+        view = a[:2]
+        a.mul_(2)
+        nodes = []
+        with torch.autograd.graph.node_creation_hook(nodes.append):
+            fn = view.grad_fn
+        self.assertIn(fn, nodes)
+
+    def test_node_creation_hook_no_fire_outside_context(self):
+        nodes = []
+        a = torch.randn(2, requires_grad=True)
+        with torch.autograd.graph.node_creation_hook(nodes.append):
+            pass
+        b = a * 2
+        self.assertEqual(nodes, [])
+        # AccumulateGrad is created lazily during backward, outside any
+        # context, and should not fire.
+        b.sum().backward()
+        self.assertEqual(nodes, [])
+
+    def test_node_creation_hook_during_backward(self):
+        # Nodes created during backward (create_graph=True) should fire when
+        # backward runs under the context; the TLS must propagate to engine
+        # worker threads via ThreadLocalState.
+        names = []
+        a = torch.randn(2, requires_grad=True)
+        with torch.autograd.graph.node_creation_hook(
+            lambda node: names.append(node.name())
+        ):
+            b = (a * a).sum()
+            (grad,) = torch.autograd.grad(b, a, create_graph=True)
+        self.assertIn("MulBackward0", names)
+        # Nodes building grad's graph were created while backward ran inside
+        # the context.
+        self.assertIsNotNone(grad.grad_fn)
+        self.assertIn(grad.grad_fn.name(), names)
+
+    def test_node_creation_hook_error_propagates(self):
+        class CustomError(Exception):
+            pass
+
+        def bad_hook(node):
+            raise CustomError("node creation hook failed")
+
+        a = torch.randn(2, requires_grad=True)
+        with torch.autograd.graph.node_creation_hook(bad_hook):
+            with self.assertRaisesRegex(CustomError, "node creation hook failed"):
+                a * 2
+
+    def test_node_creation_hook_ops_in_hook_do_not_recurse(self):
+        nodes = []
+
+        def hook(node):
+            nodes.append(node)
+            # This op creates a node; it must not re-trigger hooks.
+            x = torch.randn(2, requires_grad=True)
+            (x * 2).sum()
+
+        a = torch.randn(2, requires_grad=True)
+        with torch.autograd.graph.node_creation_hook(hook):
+            a * 2
+        self.assertEqual(len(nodes), 1)
+
+    def test_node_creation_hook_register_backward_hooks(self):
+        # The motivating pattern: capture state at node creation, restore it
+        # around the node's execution in backward.
+        events = []
+
+        def creation_hook(node):
+            name = node.name()
+            node.register_prehook(lambda gO: events.append(("pre", name)))
+            node.register_hook(lambda gI, gO: events.append(("post", name)))
+
+        a = torch.randn(2, requires_grad=True)
+        with torch.autograd.graph.node_creation_hook(creation_hook):
+            b = (a * a).exp()
+        b.sum().backward()
+        self.assertIn(("pre", "ExpBackward0"), events)
+        self.assertIn(("post", "ExpBackward0"), events)
+        self.assertIn(("pre", "MulBackward0"), events)
+        self.assertIn(("post", "MulBackward0"), events)
+        self.assertLess(
+            events.index(("pre", "ExpBackward0")),
+            events.index(("post", "ExpBackward0")),
+        )
+
+    def test_node_creation_hook_checkpoint_recompute(self):
+        # Recomputation during backward recreates graph nodes; those should
+        # fire if backward runs under the context.
+        names = []
+
+        def fn(x):
+            return x.exp().sin()
+
+        a = torch.randn(2, requires_grad=True)
+        with torch.autograd.graph.node_creation_hook(
+            lambda node: names.append(node.name())
+        ):
+            out = torch.utils.checkpoint.checkpoint(fn, a, use_reentrant=False)
+            forward_count = names.count("ExpBackward0")
+            out.sum().backward()
+        # Once from forward (discarded graph) and once from recompute.
+        self.assertGreater(names.count("ExpBackward0"), forward_count)
+
     def test_unpack_hooks_exec_count(self):
         def f(x, y):
             return x * y

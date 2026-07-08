@@ -36,6 +36,9 @@ struct PythonEngine : public Engine {
   std::unique_ptr<AnomalyMetadata> make_anomaly_metadata() override;
   std::unique_ptr<SavedVariableHooks> get_default_saved_variable_hooks()
       override;
+  void call_node_creation_hook(
+      const c10::intrusive_ptr<Node>& node,
+      const c10::SafePyObject& hook) override;
 
  private:
   PythonEngine();

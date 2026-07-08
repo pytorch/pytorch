@@ -1,5 +1,7 @@
 #include <torch/csrc/autograd/function.h>
 
+#include <ATen/NodeCreationHooks.h>
+#include <c10/util/ScopeExit.h>
 #include <c10/util/ThreadLocal.h>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/variable.h>
@@ -35,6 +37,27 @@ NodeGuard::~NodeGuard() {
 
 c10::intrusive_ptr<Node> get_current_node() {
   return current_evaluating_node;
+}
+
+void fire_node_creation_hooks(const c10::intrusive_ptr<Node>& node) {
+  const auto& state = at::impl::NodeCreationHooks::get_tls_state();
+  if (C10_LIKELY(state.stack.empty())) {
+    return;
+  }
+  if (state.is_firing || node->node_creation_hooks_fired()) {
+    return;
+  }
+  node->set_node_creation_hooks_fired();
+  at::impl::NodeCreationHooks::set_is_firing(true);
+  auto guard = c10::make_scope_exit(
+      [] { at::impl::NodeCreationHooks::set_is_firing(false); });
+  auto& engine = Engine::get_default_engine();
+  // Index-based loop: a hook may itself push or pop hooks, reallocating the
+  // stack.
+  // NOLINTNEXTLINE(modernize-loop-convert)
+  for (size_t i = 0; i < state.stack.size(); i++) {
+    engine.call_node_creation_hook(node, state.stack[i]);
+  }
 }
 
 void Node::assign_parent() {
