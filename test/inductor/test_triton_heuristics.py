@@ -22,7 +22,6 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
-    HAS_GPU,
     HAS_GPU_AND_TRITON,
     requires_gpu_with_enough_memory,
 )
@@ -1685,5 +1684,5 @@ class TestMakeLaunchersMemory(TestCase):
 
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_GPU:
+    if IS_LINUX:
         run_tests()

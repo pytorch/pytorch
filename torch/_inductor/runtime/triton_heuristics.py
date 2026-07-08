@@ -349,10 +349,12 @@ def _dump_launch_tensors(args, kernel_path, kernel_hash, kernel_name):
         torch.save(tensor, f"{directory_path}/tensor_{index}.pt")
 
 
-def _combo_has_reduction_subkernel(inductor_meta: dict[str, Any]) -> bool:
+def _combo_has_reduction_subkernel(inductor_meta: InductorMeta) -> bool:
     combo_meta = inductor_meta.get("combo_grid_meta")
     if combo_meta is None or "heuristic_0" not in combo_meta:
         return False
+    # No-bench stitched combos use a single fixed config and don't autotune;
+    # don't add scaling candidates for them.
     if "stitched_num_warps" in combo_meta:
         return False
     return any(
@@ -366,7 +368,7 @@ def _could_dynamic_scale_rblock(
     size_hints: list[int] | None,
     heuristic_type: HeuristicType,
     device_prop: DeviceProperties | None,
-    inductor_meta: dict[str, Any],
+    inductor_meta: InductorMeta,
 ) -> bool:
     return (
         device_prop is not None
@@ -374,6 +376,8 @@ def _could_dynamic_scale_rblock(
         and inductor_meta.get("dynamic_scale_rblock", True)
         and not inductor_meta.get("persistent_reduction")
         and heuristic_type == HeuristicType.REDUCTION
+        # Combo kernels with per-subkernel blocks set size_hints=None but
+        # carry per-subkernel size hints in combo_grid_meta.
         and (size_hints is not None or _combo_has_reduction_subkernel(inductor_meta))
         # Disable for Intel as Triton is not ready to return n_regs for a compiled_binary.
         and device_prop.type in ["cuda", "hip"]
