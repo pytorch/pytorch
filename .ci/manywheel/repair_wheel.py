@@ -332,6 +332,20 @@ def repair_wheel(
             shutil.copy(lib.src, dest)
             if lib.needed_alias:
                 replace_needed(torch_dir, lib.needed_alias, lib.dest_name)
+            # Some bundled deps are dlopen'd by their *bare* soname at runtime,
+            # not just via NEEDED. In particular rocSHMEM's NUMAWrapper global
+            # ctor does dlopen("libnuma.so"). The original build_rocm.sh shipped
+            # OS deps under bare names; this pipeline keeps them versioned
+            # (e.g. libnuma.so.1), so add a bare-name symlink next to the
+            # versioned file. Without it that dlopen fails and rocSHMEM calls
+            # exit() at load, tripping a rocprofiler-sdk atexit deadlock that
+            # hangs `import torch` on no-GPU/no-kfd hosts. See
+            # pytorch/pytorch#189110.
+            if ".so." in lib.dest_name:
+                bare = lib.dest_name.split(".so.", 1)[0] + ".so"
+                bare_path = torch_lib / bare
+                if not bare_path.exists():
+                    bare_path.symlink_to(lib.dest_name)
 
         # Copy auxiliary content (gfx kernel files, MIOpen db, RCCL algos, ...)
         for aux in aux_files:
