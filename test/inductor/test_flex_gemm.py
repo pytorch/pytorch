@@ -1125,9 +1125,10 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         with self.assertRaisesRegex(RuntimeError, "must divide"):
             local_reduce_block_compressed_shape((192, 256), 128, 128)
 
-    def test_block_local_reduce_plans_reject_kernel_frontier(self):
+    def test_block_local_reduce_plans_bind_store_frontier(self):
         from torch._inductor.kernel.flex_gemm.constraints import (
             FlexGemmBlockLocalReduceGeometry,
+            FlexGemmLocalReduceCallbacks,
         )
         from torch._inductor.kernel.flex_gemm.epilogue import (
             FlexGemmBlockLocalReduceContract,
@@ -1157,10 +1158,15 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
             FlexGemmEpilogueLocalReduceConfig.from_output_plan(plan, 0).geometry,
             geometry,
         )
-        with self.assertRaisesRegex(
-            NotImplementedError, "not supported by the QUACK kernel yet"
-        ):
+        with self.assertRaisesRegex(RuntimeError, "generated local-reduce callbacks"):
             FlexGemmRuntimeLocalReducePlan(geometry, out=torch.empty(2, 2))
+        FlexGemmRuntimeLocalReducePlan(
+            geometry,
+            out=torch.empty(2, 2),
+            callbacks=FlexGemmLocalReduceCallbacks(
+                lambda lhs, rhs: lhs, lambda value: value
+            ),
+        )
 
     def test_output_plan_classifies_block_local_reduce_contract(self):
         from torch._inductor.kernel.flex_gemm.constraints import (
@@ -2451,7 +2457,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                     acc.float().view(-1, 4, 2, 4).sum((1, 3)),
                 ),
                 (4, 8),
-                "2-D block local reductions are not supported by the QUACK kernel yet",
+                "2-D block local reductions currently",
             ),
         ),
         name_fn=lambda case: case[0],
@@ -2474,6 +2480,8 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         with self.assertRaisesRegex(Exception, error):
             torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @skipIfNoCuteDSL
     @parametrize(
         "case",
         (
@@ -2481,11 +2489,47 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             ("amax_negative_dims", lambda x: x.abs().amax((-1, -3))),
             ("sum", lambda x: x.sum((1, 3))),
             ("mean", lambda x: x.mean((1, 3))),
-            ("mx_e8m0_scale", lambda x: mx_e8m0_scale(x.abs().amax((1, 3)))),
         ),
         name_fn=lambda case: case[0],
     )
-    def test_generated_block_local_reduce_rejects_kernel_frontier(self, case):
+    def test_generated_block_local_reduce_store_matches_reference(self, case):
+        _, reduce_fn = case
+        m = n = 256
+        k = 64
+        block = 128
+
+        def fn(a, b):
+            def epilogue(acc):
+                x = acc.float().view(m // block, block, n // block, block)
+                return acc.relu(), reduce_fn(x)
+
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+        actual, aux = torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+        reference = a.float() @ b.float()
+        expected_aux = reduce_fn(reference.view(m // block, block, n // block, block))
+
+        self.assertEqual(aux.shape, (2, 2))
+        torch.testing.assert_close(
+            actual.float(), reference.relu(), atol=1e-1, rtol=1e-2
+        )
+        torch.testing.assert_close(aux.float(), expected_aux, atol=1e-3, rtol=1e-3)
+
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @skipIfNoCuteDSL
+    @parametrize(
+        "case",
+        (("mx_e8m0_scale", lambda x: mx_e8m0_scale(x.abs().amax((1, 3)))),),
+        name_fn=lambda case: case[0],
+    )
+    def test_generated_block_local_reduce_rejects_deferred_reductions(self, case):
         _, reduce_fn = case
         m = n = 256
         block = 128
@@ -2502,13 +2546,10 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 kernel_options={"backend": "QUACK"},
             )
 
-        a = torch.randn(m, 64)
-        b = torch.randn(64, n)
+        a = torch.randn(m, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(64, n, device="cuda", dtype=torch.bfloat16)
 
-        with self.assertRaisesRegex(
-            Exception,
-            "2-D block local reductions are not supported by the QUACK kernel yet",
-        ):
+        with self.assertRaisesRegex(Exception, "2-D block local reductions currently"):
             torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
     def test_generated_block_local_reduce_rejects_non_divisible_shape(self):

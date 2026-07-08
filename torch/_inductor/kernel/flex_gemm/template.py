@@ -64,6 +64,10 @@ class FlexGemmEpilogueLocalReduceConfig:
         )
 
     @property
+    def is_block(self) -> bool:
+        return isinstance(self.geometry, FlexGemmBlockLocalReduceGeometry)
+
+    @property
     def group(self) -> int:
         return self.geometry.group
 
@@ -73,7 +77,11 @@ class FlexGemmEpilogueLocalReduceConfig:
 
     @property
     def needs_physical_callbacks(self) -> bool:
-        return self.requires_physical_finalize or self.geometry.needs_physical_callbacks
+        return (
+            self.is_block
+            or self.requires_physical_finalize
+            or self.geometry.needs_physical_callbacks
+        )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -160,6 +168,7 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
             """
             import torch
             from torch._inductor.kernel.flex_gemm.constraints import (
+                FlexGemmBlockLocalReduceGeometry,
                 FlexGemmLocalReduceCallbacks,
                 FlexGemmLocalReduceGeometry,
             )
@@ -246,7 +255,13 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
     def _local_reduce_geometry(
         self, local_reduce: FlexGemmEpilogueLocalReduceConfig
     ) -> str:
-        """Render the shared grouped M/N local-reduce geometry."""
+        """Render the shared grouped M/N or 2-D block local-reduce geometry."""
+        if isinstance(local_reduce.geometry, FlexGemmBlockLocalReduceGeometry):
+            return (
+                "FlexGemmBlockLocalReduceGeometry("
+                f"group_m={local_reduce.geometry.group_m!r}, "
+                f"group_n={local_reduce.geometry.group_n!r})"
+            )
         return (
             "FlexGemmLocalReduceGeometry("
             f"group={local_reduce.group!r}, axis={local_reduce.axis!r})"

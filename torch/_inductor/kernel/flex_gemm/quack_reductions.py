@@ -27,7 +27,9 @@ from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
 )
 from torch._inductor.kernel.flex_gemm.constraints import (
     FlexGemmBlockLocalReduceGeometry,
+    grouped_block_reduce_dims_match,
     grouped_reduce_dims_match,
+    LOCAL_REDUCE_BLOCK_REDUCTION_ERROR,
     LOCAL_REDUCE_EXPLICIT_DTYPE_ERROR,
     LOCAL_REDUCE_GROUPED_RESHAPE_ERROR,
     LOCAL_REDUCE_INNERMOST_GROUPED_DIM_ERROR,
@@ -619,6 +621,8 @@ def lower_view_or_reshape(
     grouped_tensors: dict[torch.fx.Node, GroupedTensorSSAInfo],
     local_reduce_store_sources: dict[torch.fx.Node, Any],
     preserve_value_layout: bool = False,
+    block_grouped_tensors: dict[torch.fx.Node, FlexGemmBlockLocalReduceGeometry]
+    | None = None,
 ) -> Any | None:
     view_args = view_or_reshape_args(node)
     if view_args is None:
@@ -632,9 +636,16 @@ def lower_view_or_reshape(
         return _cute_arg(source_node, env)
     if not isinstance(source_node, torch.fx.Node):
         return None
-    grouped_layout = grouped_tensor_layout(shape, tensor_meta_shape(source_node))
+    source_shape = tensor_meta_shape(source_node)
+    block_geometry = grouped_block_tensor_layout(shape, source_shape)
+    if block_geometry is not None and block_grouped_tensors is not None:
+        block_grouped_tensors[node] = block_geometry
+        return _cute_arg(source_node, env)
+    grouped_layout = grouped_tensor_layout(shape, source_shape)
     if grouped_layout is None:
-        if source_node in grouped_tensors:
+        if source_node in grouped_tensors or (
+            block_grouped_tensors is not None and source_node in block_grouped_tensors
+        ):
             return _cute_arg(source_node, env)
         return None
     validate_local_reduce_tensorssa_group_size(
@@ -810,6 +821,70 @@ def lower_prepare_softmax_online(
     _, sum_store = _keepdim_and_broadcast(kernel, sum_reduced, info, source)
     local_reduce_store_sources[node] = (max_store, sum_store)
     return max_store, sum_store
+
+
+def lower_block_tensorssa_reduce(
+    node: torch.fx.Node,
+    env: dict[torch.fx.Node, Any],
+    kernel: Any,
+    block_grouped_tensors: dict[torch.fx.Node, FlexGemmBlockLocalReduceGeometry],
+    local_reduce_store_sources: dict[torch.fx.Node, Any],
+    local_reduce_physical_reductions: dict[torch.fx.Node, FlexGemmPhysicalReduction]
+    | None = None,
+) -> Any | None:
+    """Lower 2-D block reductions to N-fragment partials and a physical M combine."""
+    reduction = reduction_from_node(node)
+    if reduction is None:
+        return None
+    input_node, dim, keepdim, dtype, reduction_type = reduction
+    if dtype is not None:
+        raise NotImplementedError(LOCAL_REDUCE_EXPLICIT_DTYPE_ERROR)
+    if not isinstance(input_node, torch.fx.Node):
+        return None
+    geometry = block_grouped_tensors.get(input_node)
+    if geometry is None:
+        return None
+    if not grouped_block_reduce_dims_match(dim):
+        raise NotImplementedError(LOCAL_REDUCE_INNERMOST_GROUPED_DIM_ERROR)
+    if reduction_type not in ("max", "min", "sum", "mean"):
+        raise NotImplementedError(LOCAL_REDUCE_BLOCK_REDUCTION_ERROR)
+    reduction_name = cast(
+        ReductionType, "sum" if reduction_type == "mean" else reduction_type
+    )
+    desc = tensorssa_reduction(reduction_name)
+    finalize_expr = (
+        f"value / {float(geometry.group_m * geometry.group_n)!r}"
+        if reduction_type == "mean"
+        else "value"
+    )
+    if local_reduce_physical_reductions is not None:
+        local_reduce_physical_reductions[node] = FlexGemmPhysicalReduction(
+            desc.combine_expr, finalize_expr
+        )
+    source = _cute_arg(input_node, env)
+    n_info = GroupedTensorSSAInfo(
+        GroupedTensorSSALayout(axis=1, group_size=geometry.group_n)
+    )
+    n_grouped_source = _generate_like(
+        kernel, f"{source}.reshape({n_info.layout.tensorssa_shape(source)})", source
+    )
+    reduced = _generate_like(
+        kernel,
+        f"{n_grouped_source}.reduce({desc.cute_op}, init_val={desc.init_val}, reduction_profile={n_info.layout.reduction_profile})",
+        n_grouped_source,
+    )
+    keepdim_source, grouped_store_source = _keepdim_and_broadcast(
+        kernel, reduced, n_info, n_grouped_source
+    )
+    local_reduce_store_sources[node] = _generate_like(
+        kernel,
+        f"{grouped_store_source}.reshape({source}.shape)",
+        grouped_store_source,
+        source,
+    )
+    if keepdim:
+        return keepdim_source
+    return reduced
 
 
 def lower_tensorssa_reduce(

@@ -12,7 +12,8 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     FlexGemmBlockLocalReduceGeometry,
     FlexGemmLocalReduceCallbacks,
     FlexGemmLocalReduceGeometry,
-    LOCAL_REDUCE_BLOCK_KERNEL_ERROR,
+    local_reduce_block_compressed_shape,
+    LOCAL_REDUCE_BLOCK_FEED_MAIN_ERROR,
     LOCAL_REDUCE_CALLBACKS_REQUIRED_ERROR,
     LOCAL_REDUCE_COMBINE_KEY_SUFFIX,
     local_reduce_compressed_shape,
@@ -24,6 +25,7 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     validate_local_reduce_out_shape,
     validate_local_reduce_runtime_dense_mm,
     validate_local_reduce_selected_dim_divisible,
+    validate_supported_local_reduce_block_groups,
 )
 from torch._inductor.runtime.cache_dir_utils import cache_dir
 from torch._prims_common import is_expandable_to
@@ -214,16 +216,27 @@ class FlexGemmRuntimeLocalReducePlan:
 
     def __post_init__(self) -> None:
         """Reject plans without the output/callback state required by their consumer."""
-        if isinstance(self.geometry, FlexGemmBlockLocalReduceGeometry):
-            raise NotImplementedError(LOCAL_REDUCE_BLOCK_KERNEL_ERROR)
         if self.out is None and not self.feeds_main:
             raise RuntimeError(LOCAL_REDUCE_RUNTIME_OUT_ERROR)
+        if isinstance(self.geometry, FlexGemmBlockLocalReduceGeometry):
+            validate_supported_local_reduce_block_groups(
+                self.geometry.group_m, self.geometry.group_n
+            )
+            if self.feeds_main:
+                raise NotImplementedError(LOCAL_REDUCE_BLOCK_FEED_MAIN_ERROR)
+            if self.callbacks is None:
+                raise RuntimeError(LOCAL_REDUCE_CALLBACKS_REQUIRED_ERROR)
+            return
         if self.feeds_main:
             if self.callbacks is None:
                 raise RuntimeError(LOCAL_REDUCE_CALLBACKS_REQUIRED_ERROR)
             validate_local_reduce_feed_main_capability(self.axis, self.group)
         elif self.geometry.needs_physical_callbacks and self.callbacks is None:
             raise RuntimeError(LOCAL_REDUCE_CALLBACKS_REQUIRED_ERROR)
+
+    @property
+    def is_block(self) -> bool:
+        return isinstance(self.geometry, FlexGemmBlockLocalReduceGeometry)
 
     @property
     def group(self) -> int:
@@ -246,16 +259,26 @@ def validate_runtime_local_reduce(
     if plan is None:
         return
     validate_local_reduce_runtime_dense_mm(a.ndim)
-    validate_local_reduce_selected_dim_divisible(expected_shape, plan.group, plan.axis)
     validate_local_reduce_no_c_alpha_beta(effective_C, alpha, beta)
+    if isinstance(plan.geometry, FlexGemmBlockLocalReduceGeometry):
+        validate_supported_local_reduce_block_groups(
+            plan.geometry.group_m, plan.geometry.group_n
+        )
+        expected_local_reduce_shape = local_reduce_block_compressed_shape(
+            expected_shape, plan.geometry.group_m, plan.geometry.group_n
+        )
+    else:
+        validate_local_reduce_selected_dim_divisible(
+            expected_shape, plan.group, plan.axis
+        )
+        expected_local_reduce_shape = local_reduce_compressed_shape(
+            expected_shape, plan.group, plan.axis
+        )
     local_reduce_out = plan.out
     if local_reduce_out is None:
         return
     check_matrix("local_reduce_out", local_reduce_out)
     check_matrix_row_major_layout("local_reduce_out", local_reduce_out)
-    expected_local_reduce_shape = local_reduce_compressed_shape(
-        expected_shape, plan.group, plan.axis
-    )
     validate_local_reduce_out_shape(local_reduce_out.shape, expected_local_reduce_shape)
 
 
@@ -304,15 +327,31 @@ def local_reduce_gemm_act_kwargs(
     if local_reduce is None:
         return {}
     local_reduce_combine_key, local_reduce_finalize_key = callback_keys
-    return {
+    result = {
         "tensor_epilogue_returns_local_reduce": local_reduce_out is not None,
         "local_reduce_feeds_main": local_reduce.feeds_main,
         "local_reduce_out": local_reduce_out,
-        "local_reduce_group": local_reduce.group,
-        "local_reduce_axis": local_reduce.axis,
         "local_reduce_combine_key": local_reduce_combine_key,
         "local_reduce_finalize_key": local_reduce_finalize_key,
     }
+    if isinstance(local_reduce.geometry, FlexGemmBlockLocalReduceGeometry):
+        result.update(
+            {
+                "local_reduce_is_block": True,
+                "local_reduce_group": local_reduce.geometry.group_n,
+                "local_reduce_axis": 1,
+                "local_reduce_group_m": local_reduce.geometry.group_m,
+                "local_reduce_group_n": local_reduce.geometry.group_n,
+            }
+        )
+    else:
+        result.update(
+            {
+                "local_reduce_group": local_reduce.group,
+                "local_reduce_axis": local_reduce.axis,
+            }
+        )
+    return result
 
 
 def dispatch_gemm_act(
