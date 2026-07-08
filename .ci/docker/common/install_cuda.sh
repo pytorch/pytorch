@@ -93,9 +93,12 @@ function install_cupti_headers {
   archive="cuda_cupti-linux-x86_64-${cupti_version}-archive"
 
   tmp_dir=$(mktemp -d)
-  curl -fsL "${redist_url}/${archive}.tar.xz" | tar -xJ -C "${tmp_dir}"
+  pushd "${tmp_dir}"
+  wget -q "${redist_url}/${archive}.tar.xz"
+  tar xf "${archive}.tar.xz"
   mkdir -p "${target_dir}"
-  cp -a "${tmp_dir}/${archive}/include/"* "${target_dir}/"
+  cp -a "${archive}/include/"* "${target_dir}/"
+  popd
 
   rm -rf "${tmp_dir}"
   echo "CUPTI ${cupti_version} headers installed to ${target_dir}."
