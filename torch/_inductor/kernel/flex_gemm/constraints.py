@@ -29,7 +29,7 @@ def grouped_reduce_dims_match(dim: Any, reduce_dims: Sequence[Any]) -> bool:
 # Feed-main currently reduces only within one lane-layout M group; cross-warp M
 # stitching needs the two-phase/replay path used by compressed aux reductions.
 MAX_SAME_WARP_LOCAL_REDUCE_FEED_MAIN_GROUP = 16
-MAX_TENSORSSA_LOCAL_REDUCE_GROUP_WITHOUT_PHYSICAL_CALLBACKS = 32
+MAX_TENSORSSA_LOCAL_REDUCE_GROUP_WITHOUT_PHYSICAL_CALLBACKS = 16
 LOCAL_REDUCE_FEED_MAIN_AXIS_ERROR = (
     "FlexGEMM local-reduce feed-main currently supports only axis 0"
 )
@@ -238,18 +238,18 @@ def validate_local_reduce_selected_dim_divisible(
 
 
 def validate_local_reduce_tensorssa_group_size(axis: int, group: int) -> None:
-    """Mirror the initial one-fragment TensorSSA tiling constraint.
+    """Mirror the TensorSSA fragment tiling constraints used by QuACK.
 
-    At this layer in the stack, grouped reductions must fit in one 32-lane
-    TensorSSA fragment, and the group size must divide that fragment width so
-    the generated TensorSSA reshape is exact.
+    Groups within one fragment must divide the 32-lane TensorSSA width. Larger
+    groups are handled as 32-lane TensorSSA partials plus physical combine, so
+    they must be exact multiples of that fragment width.
     """
     if group <= 1:
         raise NotImplementedError(LOCAL_REDUCE_TENSORSSA_GROUP_SIZE_ERROR)
     validate_local_reduce_group_axis(group, axis)
-    if group > 32:
+    if group > 32 and group % 32 != 0:
         raise NotImplementedError(LOCAL_REDUCE_TENSORSSA_FRAGMENT_MULTIPLE_ERROR)
-    if 32 % group != 0:
+    if group <= 32 and 32 % group != 0:
         raise NotImplementedError(LOCAL_REDUCE_TENSORSSA_FRAGMENT_DIVISIBLE_ERROR)
 
 
