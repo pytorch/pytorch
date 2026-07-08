@@ -2073,7 +2073,9 @@ class TestTorchDeviceType(TestCase):
                           lambda: torch.randperm(20000, device=device),
                           lambda: torch.repeat_interleave(x, 2, output_size=2 * size),
                           lambda: torch.repeat_interleave(x, repeats, output_size=2 * size),
-                          lambda: torch.any(y))
+                          lambda: torch.any(y),
+                          lambda: torch.combinations(x, r=2),
+                          lambda: torch.normal(x, x))
         expect_sync = (lambda: _ind_put_fn(x, mask, y),
                        lambda: _ind_put_fn(x, ind_cpu, y),
                        lambda: _ind_get_fn(x, mask),
@@ -2106,7 +2108,11 @@ class TestTorchDeviceType(TestCase):
         temp = y.repeat_interleave(2)
         self.assertEqual(torch.Size([8]), temp.size())
 
-        for dtype in [torch.int, torch.long]:
+        repeat_dtypes = [torch.int, torch.long]
+        if device == "cpu":
+            repeat_dtypes.extend([torch.int8, torch.uint8, torch.int16])
+
+        for dtype in repeat_dtypes:
             lengths = torch.tensor([1, 2], dtype=dtype, device=device)
             output_size = torch.sum(lengths)
             a = torch.repeat_interleave(
@@ -2817,6 +2823,14 @@ class TestTorchDeviceType(TestCase):
                     'Expected reduction dim -1 or 0 for scalar but got 100'):
                 op(x, dim)
 
+            # Check that zero-size tensors with invalid dims raise IndexError
+            # consistently, matching non-zero tensor behavior
+            x = torch.tensor([], device=device)
+            with self.assertRaisesRegex(
+                    IndexError,
+                    'Dimension out of range'):
+                op(x, -46)
+
             # Check that op over a zero length dimension doesn't crash on backprop.
             # Also check that op over other dimensions in a tensor with a zero-length
             # dimension also works
@@ -2848,6 +2862,11 @@ class TestTorchDeviceType(TestCase):
         test_ops(torch.cummin, "cummin", torch.tensor([[1, 0, 1],
                                                        [0, 0, 0],
                                                        [0, 0, 0]]), expected_out)
+
+        for op in [torch.cummax, torch.cummin]:
+            x = torch.randn(5, dtype=torch.complex64, device=device)
+            with self.assertRaisesRegex(RuntimeError, "not implemented for 'ComplexFloat'"):
+                op(x, 0)
 
     def test_logcumsumexp(self, device):
         def logcumsumexp(a, axis):
