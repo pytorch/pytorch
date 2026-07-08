@@ -1,6 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/TensorIterator.h>
+#include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/Copy.h>
 #include <ATen/native/mps/OperationUtils.h>
@@ -74,11 +75,46 @@ static void* pageAlignedBlockPtr(const void* ptr, NSUInteger size, NSUInteger* a
   return (void*)alignedAddress;
 }
 
+// Returns a retained (+1) MTLBuffer and byte offset for the host side of a
+// CPU<->MPS copy; the caller releases the buffer once the blit is encoded. A
+// pinned CPU tensor already owns a shared (unified-memory) MTLBuffer, so we retain
+// and blit from/to it directly; otherwise the host pages are wrapped with
+// newBufferWithBytesNoCopy, retaining the storage across an async copy so the pages
+// outlive the in-flight blit.
+static std::pair<id<MTLBuffer>, NSUInteger> buffer_with_offset_from_tensor(const at::Tensor& cpu_tensor,
+                                                                           size_t nbytes,
+                                                                           bool non_blocking) {
+  const auto byte_offset = cpu_tensor.storage_offset() * cpu_tensor.itemsize();
+  // Blit directly from/to the pinned tensor's own shared MTLBuffer, avoiding the
+  // newBufferWithBytesNoCopy wrapper. Metal blit offsets must be 4-byte aligned.
+  if (void* pinned = at::mps::getMPSPinnedMTLBuffer(cpu_tensor.storage().data()); pinned && byte_offset % 4 == 0) {
+    // Mark the buffer so that if it is freed while this copy's blit is still in
+    // flight, the allocator defers recycling it instead of handing it to a new
+    // allocation that could CPU-overwrite it before the GPU is done.
+    at::mps::getIMPSAllocator()->recordEvents({pinned});
+    return {[__builtin_bit_cast(id<MTLBuffer>, pinned) retain], static_cast<NSUInteger>(byte_offset)};
+  }
+  id<MTLDevice> device = MPSDevice::getInstance()->device();
+  const void* host = static_cast<const char*>(cpu_tensor.storage().data()) + byte_offset;
+  NSUInteger alignedLength = 0;
+  void* alignedPtr = pageAlignedBlockPtr(host, (NSUInteger)nbytes, &alignedLength);
+  // Only capture on non_blocking - capturing across waitUntilCompleted would
+  // deadlock Metal's completion thread on the GIL.
+  auto* storage = non_blocking ? new c10::Storage(cpu_tensor.storage()) : nullptr;
+  MTLResourceOptions options = MTLResourceCPUCacheModeDefaultCache | MTLResourceStorageModeShared;
+  id<MTLBuffer> buffer = [device newBufferWithBytesNoCopy:alignedPtr
+                                                   length:alignedLength
+                                                  options:options
+                                              deallocator:^(void*, NSUInteger) {
+                                                delete storage;
+                                              }];
+  return {buffer, static_cast<NSUInteger>(uintptr_t(host) - uintptr_t(alignedPtr))};
+}
+
 static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool non_blocking) {
   auto sameMemFormat =
       src_.is_contiguous(dst_.suggest_memory_format()) && dst_.is_contiguous(dst_.suggest_memory_format());
 
-  id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* stream = getCurrentMPSStream();
   Tensor dst = dst_;
   Tensor src = src_;
@@ -103,24 +139,10 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
   size_t dst_tensor_nbytes = dst.nbytes();
 
   @autoreleasepool {
-    MTLResourceOptions options = MTLResourceCPUCacheModeDefaultCache | MTLResourceStorageModeShared;
-    NSUInteger alignedLength = 0;
-
-    const void* host_dst = static_cast<const char*>(dst.storage().data()) + dst.storage_offset() * dst.itemsize();
-    void* alignedPtr = pageAlignedBlockPtr(host_dst, (NSUInteger)dst_tensor_nbytes, &alignedLength);
-    NSUInteger destOffset = (uintptr_t(host_dst) - uintptr_t(alignedPtr));
+    auto [destBuffer, destOffset] = buffer_with_offset_from_tensor(dst, dst_tensor_nbytes, non_blocking);
     // 4 bytes alignment required on macos for blits.
     TORCH_INTERNAL_ASSERT(destOffset % 4 == 0, "Unaligned blit request");
 
-    // Only capture on non_blocking - capturing across waitUntilCompleted would
-    // deadlock Metal's completion thread on the GIL.
-    auto* dst_storage = non_blocking ? new c10::Storage(dst.storage()) : nullptr;
-    id<MTLBuffer> destBuffer = [device newBufferWithBytesNoCopy:alignedPtr
-                                                         length:alignedLength
-                                                        options:options
-                                                    deallocator:^(void*, NSUInteger) {
-                                                      delete dst_storage;
-                                                    }];
     id<MTLBuffer> maybeCastedSourceBuffer = sourceBuffer;
     Tensor maybeCastedSource;
     bool needsBlit = true;
@@ -182,31 +204,14 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
 // Copies tensor from cpu to mps backed by identical strided-contiguous data
 static void copy_to_mps_stride_contig(at::Tensor& dst, const at::Tensor& src, bool non_blocking) {
   MPSStream* stream = getCurrentMPSStream();
-  id<MTLDevice> device = MPSDevice::getInstance()->device();
   auto dst_byte_offset = dst.storage_offset() * dst.itemsize();
-  auto src_byte_offset = src.storage_offset() * src.itemsize();
   id<MTLBuffer> destBuffer = getMTLBufferStorage(dst);
   const size_t size_to_copy = src.nbytes();
-  const void* host_src = static_cast<const char*>(src.storage().data()) + src_byte_offset;
 
   TORCH_INTERNAL_ASSERT(src.dtype() == dst.dtype() && src.strides() == dst.strides() && is_dense_in_storage(src));
 
   @autoreleasepool {
-    MTLResourceOptions options = MTLResourceCPUCacheModeDefaultCache | MTLResourceStorageModeShared;
-    NSUInteger alignedLength = 0;
-    NSUInteger sourceOffset = 0;
-
-    void* alignedPtr = pageAlignedBlockPtr(host_src, (NSUInteger)size_to_copy, &alignedLength);
-    sourceOffset = uintptr_t(host_src) - uintptr_t(alignedPtr);
-    // See note in copy_from_mps_ above.
-    auto* src_storage = non_blocking ? new c10::Storage(src.storage()) : nullptr;
-    id<MTLBuffer> sourceBuffer = [device newBufferWithBytesNoCopy:alignedPtr
-                                                           length:alignedLength
-                                                          options:options
-                                                      deallocator:^(void*, NSUInteger) {
-                                                        delete src_storage;
-                                                      }];
-
+    auto [sourceBuffer, sourceOffset] = buffer_with_offset_from_tensor(src, size_to_copy, non_blocking);
     uint64_t profile_id =
         getMPSProfiler().beginProfileCopy(sourceBuffer, destBuffer, src, dst, size_to_copy, non_blocking);
 
