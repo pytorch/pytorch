@@ -15,6 +15,7 @@ Environment variables:
 """
 
 import argparse
+import importlib.util
 import os
 import platform
 import shutil
@@ -115,35 +116,47 @@ def aarch64_extra_deps(use_cuda: bool) -> list[Path]:
 
 
 # ROCm shared libs to bundle. Discovered under $ROCM_HOME/{lib,lib64}.
-ROCM_SO_FILES: list[str] = [
-    "libMIOpen.so",
-    "libamdhip64.so",
-    "libhipblas.so",
-    "libhipfft.so",
-    "libhiprand.so",
-    "libhipsolver.so",
-    "libhipsparse.so",
-    "libhsa-runtime64.so",
-    "libamd_comgr.so",
-    "libmagma.so",
-    "librccl.so",
-    "librocblas.so",
-    "librocfft.so",
-    "librocm_smi64.so",
-    "librocrand.so",
-    "librocsolver.so",
-    "librocsparse.so",
-    "libroctracer64.so",
-    "libroctx64.so",
-    "libhipblaslt.so",
-    "libhipsparselt.so",
-    "libhiprtc.so",
-    "librocprofiler-sdk.so",
-    "librocprofiler-register.so",
-    "libhsa-amd-aqlprofile64.so",
-    "librocm-core.so",
-    "librocroller.so",
-]
+#
+# The canonical list lives in torch/_rocm_libs.py, the single source of truth
+# shared with torch/__init__.py::_preload_rocm_deps, so the wheel-bundled set and
+# the runtime-preloaded set never drift. We load it by file path (this script
+# must not ``import torch`` -- the compiled extension may not import in the build
+# container) preferring the copy inside the wheel being repaired, falling back to
+# the source tree. ``ROCM_SO_FILES`` there is the leaf-first preload subset;
+# ``ROCM_SO_FILES_BUNDLE_ONLY`` are the extra libs bundled but not preloaded
+# (MAGMA, the profiler stack, rocRoller). Order is irrelevant here (we just copy
+# + patchelf each file).
+
+
+def load_rocm_so_files(unpacked_torch: Path | None = None) -> list[str]:
+    """Load the full set of ROCm libs to bundle from torch/_rocm_libs.py.
+
+    Reads the module by file path (no ``import torch``), preferring the copy in
+    the unpacked wheel's ``torch/`` dir, then the in-repo source tree.
+    """
+    candidates: list[Path] = []
+    if unpacked_torch is not None:
+        candidates.append(unpacked_torch / "_rocm_libs.py")
+    # repair_wheel.py lives at <root>/.ci/manywheel/, so the source tree copy is
+    # <root>/torch/_rocm_libs.py.
+    candidates.append(Path(__file__).resolve().parents[2] / "torch" / "_rocm_libs.py")
+
+    for path in candidates:
+        if path.is_file():
+            spec = importlib.util.spec_from_file_location("torch_rocm_libs", path)
+            if spec is None or spec.loader is None:
+                continue
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            return list(module.ROCM_SO_FILES_ALL)
+    sys.exit(
+        "Could not locate torch/_rocm_libs.py (looked in: "
+        + ", ".join(str(p) for p in candidates)
+        + ")"
+    )
+
+
+ROCM_SO_FILES: list[str] = load_rocm_so_files()
 
 
 def rocm_os_deps() -> list[Path]:
