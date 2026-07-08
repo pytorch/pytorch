@@ -19,14 +19,17 @@ import time
 from pathlib import Path
 
 
-# Directory containing this script (.ci/pytorch/windows). Scratch downloads
-# land here so they don't pollute PYTORCH_ROOT.
-WIN_CI_DIR = Path(__file__).resolve().parent
-# Repo root contains pyproject.toml; spin needs to run from there.
-PYTORCH_ROOT = WIN_CI_DIR.parent.parent.parent
-
-sys.path.insert(0, str(WIN_CI_DIR))
+# This pipeline script lives in .ci/wheel/windows; _common sits beside it.
+_HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(_HERE))
 from _common import download, write_env_exports
+
+
+# The Windows CD workspace (scratch downloads, libuv) stays under the general
+# Windows CI dir so it doesn't pollute PYTORCH_ROOT.
+WIN_CI_DIR = _HERE.parents[1] / "pytorch" / "windows"
+# Repo root contains pyproject.toml; spin needs to run from there.
+PYTORCH_ROOT = _HERE.parents[2]
 
 
 # Pin numpy by Python version. Matches the legacy table in setup_build.bat.
