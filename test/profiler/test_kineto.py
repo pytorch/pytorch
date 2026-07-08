@@ -54,7 +54,8 @@ if torch.{device_type}.is_available():
 instantiate_device_type_tests(
     SimpleKinetoInitializationTest,
     globals(),
-    only_for=("cuda",),
+    only_for=("cuda", "xpu"),
+    allow_xpu=True,
 )
 
 if __name__ == "__main__":
