@@ -11,6 +11,7 @@ else
 fi
 
 NVSHMEM_VERSION=3.4.5
+CUDA_CUPTI_VERSION=13.3.75
 
 function install_cuda {
   version=$1
@@ -78,6 +79,26 @@ function install_nvshmem {
   rm -rf "${tmpdir}"
 
   echo "nvSHMEM ${nvshmem_version} for CUDA ${cuda_major_version} (${arch_path}) installed."
+}
+
+function install_cupti_headers {
+  cupti_version=$1                  # e.g. "13.3.75"
+  major_minor=${cupti_version%.*}   # e.g. "13.3"
+  target_dir="/usr/local/cupti-headers-${major_minor}"
+
+  # The CUDA toolkit runfile ships an older CUPTI than the standalone
+  # nvidia-cuda-cupti wheel, so pull the newer headers into a throwaway venv
+  # and stage them somewhere the build can pick them up.
+  tmp_venv=$(mktemp -d)
+  python3 -m venv "${tmp_venv}"
+  "${tmp_venv}/bin/pip" install -q --no-deps "nvidia-cuda-cupti==${cupti_version}"
+
+  include_dir=$(dirname "$("${tmp_venv}/bin/python" -c "import glob, sys; print(glob.glob(sys.prefix + '/**/cupti_activity.h', recursive=True)[0])")")
+  mkdir -p "${target_dir}"
+  cp -a "${include_dir}/"* "${target_dir}/"
+
+  rm -rf "${tmp_venv}"
+  echo "CUPTI ${cupti_version} headers installed to ${target_dir}."
 }
 
 function install_124 {
@@ -162,6 +183,8 @@ function install_130 {
 
   install_nvshmem 13 $NVSHMEM_VERSION
 
+  install_cupti_headers $CUDA_CUPTI_VERSION
+
   CUDA_VERSION=13.0 bash install_nccl.sh
 
   CUDA_VERSION=13.0 bash install_cusparselt.sh $CUSPARSELT_VERSION
@@ -180,6 +203,8 @@ function install_132 {
   install_cudnn 13 $CUDNN_VERSION
 
   install_nvshmem 13 $NVSHMEM_VERSION
+
+  install_cupti_headers $CUDA_CUPTI_VERSION
 
   CUDA_VERSION=13.2 bash install_nccl.sh
 
