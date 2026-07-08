@@ -1,8 +1,11 @@
 # Owner(s): ["module: inductor"]
 
+import unittest
+
 import torch
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.inductor_utils import HAS_TRITON
 from torch.testing._internal.torchbind_impls import init_torchbind_implementations
 
 
@@ -37,6 +40,7 @@ class TestTorchbindAOTI(TestCase):
 
         return M()
 
+    @unittest.skipIf(HAS_CUDA and not HAS_TRITON, "requires triton on CUDA builds")
     def test_custom_objs_exposed_through_loader(self):
         device = "cuda" if HAS_CUDA else "cpu"
         m = self._make_model().to(device)
@@ -61,6 +65,7 @@ class TestTorchbindAOTI(TestCase):
             msg=f"Expected a torchbind ScriptObject, got {type(any_torchbind)}",
         )
 
+    @unittest.skipIf(HAS_CUDA and not HAS_TRITON, "requires triton on CUDA builds")
     def test_mutating_custom_obj_after_load_affects_run(self):
         # The central contract: IValues returned by get_custom_objs() share
         # intrusive_ptr ownership with the live entries inside
@@ -97,6 +102,7 @@ class TestTorchbindAOTI(TestCase):
         after = loader.run([x])[0]
         torch.testing.assert_close(after, 40 * x + x)
 
+    @unittest.skipIf(HAS_CUDA and not HAS_TRITON, "requires triton on CUDA builds")
     def test_custom_objs_empty_when_no_torchbind(self):
         # A plain model with no torchbind attrs should yield an empty map.
         class Plain(torch.nn.Module):

@@ -2524,7 +2524,7 @@ class DeviceCachingAllocator {
           SegmentRange(block->ptr, block->size), ss);
       offset = static_cast<const char*>(block->ptr) - full_range.ptr;
     }
-    return ShareableHandle{.offset = offset, .handle = std::move(ss).str()};
+    return ShareableHandle{.offset = offset, .handle = ss.str()};
   }
 
   void recordStream(Block* block, cuda::CUDAStream stream) {

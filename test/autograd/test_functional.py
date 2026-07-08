@@ -25,7 +25,7 @@ from torch.testing._internal.logging_tensor import LoggingTensor
 # TODO: maybe move somewhere so other tests can also use
 #
 # NB: Not all factory functions included. A complete(?) list can be found here:
-#     https://pytorch.org/cppdocs/notes/tensor_creation.html
+#     https://docs.pytorch.org/docs/2.9/torch.html#creation-ops
 base_ctors_dict = {
     "ones": torch.ones,
     "zeros": torch.zeros,

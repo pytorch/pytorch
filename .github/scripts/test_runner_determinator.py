@@ -1,3 +1,4 @@
+from argparse import Namespace
 from unittest import main, TestCase
 from unittest.mock import Mock, patch
 
@@ -917,7 +918,7 @@ class TestRunnerDeterminatorArcExperiment(TestCase):
         self.assertEqual("mt-", result.prefix)
         self.assertTrue(result.use_arc)
 
-    def test_arc_takes_precedence_over_lf(self) -> None:
+    def test_arc_combined_with_lf_returns_lf_prefix(self) -> None:
         settings_text = """
         experiments:
             lf:
@@ -931,7 +932,7 @@ class TestRunnerDeterminatorArcExperiment(TestCase):
 
         """
         result = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
-        self.assertEqual("mt-", result.prefix)
+        self.assertEqual("lf-", result.prefix)
         self.assertTrue(result.use_arc)
 
     @patch("random.uniform", return_value=10)
@@ -1246,6 +1247,105 @@ class TestRunnerDeterminatorAmdDoExperiment(TestCase):
         result = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
         self.assertEqual("lf.", result.prefix)
         self.assertEqual("amd-do-", result.amd_do_prefix)
+
+
+class TestRunnerDeterminatorNoRunnerExperimentsLabel(TestCase):
+    """no-runner-experiments opts out of lf only; OSDC/arc stays on (ci-infra#841)."""
+
+    LF_AND_ARC = """
+        experiments:
+            lf:
+                rollout_perc: 0
+            arc:
+                rollout_perc: 0
+        ---
+
+        Users:
+        @User1,lf,arc
+
+        """
+
+    LF_ONLY = """
+        experiments:
+            lf:
+                rollout_perc: 0
+        ---
+
+        Users:
+        @User1,lf
+
+        """
+
+    # get_runner_prefix: opting out of lf keeps arc (mt-), never lf-.
+
+    def test_opt_out_lf_with_arc_returns_mt_not_lf(self) -> None:
+        result = rd.get_runner_prefix(
+            self.LF_AND_ARC,
+            ["User1"],
+            USER_BRANCH,
+            opt_out_experiments=frozenset({"lf"}),
+        )
+        self.assertEqual("mt-", result.prefix)
+        self.assertTrue(result.use_arc)
+
+    def test_without_opt_out_lf_and_arc_returns_lf(self) -> None:
+        # Control: same config, no opt-out -> lf- (lf fleet + arc).
+        result = rd.get_runner_prefix(self.LF_AND_ARC, ["User1"], USER_BRANCH)
+        self.assertEqual("lf-", result.prefix)
+        self.assertTrue(result.use_arc)
+
+    def test_opt_out_lf_without_arc_returns_bare(self) -> None:
+        result = rd.get_runner_prefix(
+            self.LF_ONLY,
+            ["User1"],
+            USER_BRANCH,
+            opt_out_experiments=frozenset({"lf"}),
+        )
+        self.assertEqual("", result.prefix)
+        self.assertFalse(result.use_arc)
+
+    # main(): the label wires lf into opt_out_experiments.
+
+    def _run_main(self, *, labels: list[str], settings: str) -> dict[str, str]:
+        args = Namespace(
+            github_token="t",
+            github_issue_repo="pytorch/test-infra",
+            github_repo="pytorch/pytorch",
+            github_issue=5132,
+            github_actor="User1",
+            github_issue_owner="User1",
+            github_branch=USER_BRANCH,
+            github_ref_type="branch",
+            eligible_experiments=frozenset({"lf", "arc"}),
+            opt_out_experiments=frozenset(),
+            pr_number="123",
+            workflow_name="pull",
+        )
+        captured: dict[str, str] = {}
+        with (
+            patch.object(rd, "parse_args", return_value=args),
+            patch.object(rd, "get_labels", return_value=set(labels)),
+            patch.object(rd, "get_rollout_state_from_issue", return_value=settings),
+            patch.object(rd, "get_potential_pr_author", return_value="User1"),
+            patch.object(rd, "set_github_output", side_effect=captured.__setitem__),
+        ):
+            rd.main()
+        return captured
+
+    def test_main_label_disables_lf_keeps_arc(self) -> None:
+        out = self._run_main(labels=[rd.OPT_OUT_LABEL], settings=self.LF_AND_ARC)
+        self.assertEqual("mt-", out[rd.GH_OUTPUT_KEY_LABEL_TYPE])
+        self.assertEqual("true", out[rd.GH_OUTPUT_KEY_USE_ARC])
+
+    def test_main_no_label_keeps_lf(self) -> None:
+        out = self._run_main(labels=[], settings=self.LF_AND_ARC)
+        self.assertEqual("lf-", out[rd.GH_OUTPUT_KEY_LABEL_TYPE])
+        self.assertEqual("true", out[rd.GH_OUTPUT_KEY_USE_ARC])
+
+    def test_main_label_without_arc_falls_back_to_bare(self) -> None:
+        out = self._run_main(labels=[rd.OPT_OUT_LABEL], settings=self.LF_ONLY)
+        self.assertEqual("", out[rd.GH_OUTPUT_KEY_LABEL_TYPE])
+        self.assertEqual("false", out[rd.GH_OUTPUT_KEY_USE_ARC])
 
 
 if __name__ == "__main__":

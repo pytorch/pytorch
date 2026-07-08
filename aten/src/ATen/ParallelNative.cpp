@@ -13,6 +13,7 @@
 
 #include <atomic>
 #include <latch>
+#include <memory>
 #include <utility>
 
 #ifdef _OPENMP
@@ -153,11 +154,20 @@ void invoke_parallel(
   std::tie(num_tasks, chunk_size) =
       internal::calc_num_tasks_and_chunk_size(begin, end, grain_size);
 
-  std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
-  std::exception_ptr eptr;
-  std::latch latch(num_tasks);
+  struct State {
+    std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
+    std::exception_ptr eptr;
+    std::latch latch;
+    explicit State(size_t n) : latch(static_cast<ptrdiff_t>(n)) {}
+  };
+  // shared_ptr so the latch outlives every worker's count_down(): a worker's
+  // pool job holds a reference until after it returns from count_down(), so
+  // the last reference (and thus destruction) can never race the notify. A
+  // stack-local latch is a use-after-free -- the coordinator's wait() can
+  // return and unwind this frame while a worker is still touching the latch.
+  auto state = std::make_shared<State>(num_tasks);
 
-  auto task = [&, f, begin, end, chunk_size](size_t task_id) {
+  auto task = [state, f, begin, end, chunk_size](size_t task_id) {
     int64_t local_start = static_cast<int64_t>(begin + task_id * chunk_size);
     if (local_start < end) {
       int64_t local_end = std::min(end, static_cast<int64_t>(chunk_size + local_start));
@@ -165,19 +175,19 @@ void invoke_parallel(
         ParallelRegionGuard guard(static_cast<int>(task_id));
         f(local_start, local_end);
       } catch (...) {
-        if (!err_flag.test_and_set()) {
-          eptr = std::current_exception();
+        if (!state->err_flag.test_and_set()) {
+          state->eptr = std::current_exception();
         }
       }
     }
-    latch.count_down();
+    state->latch.count_down();
   };
   _run_with_pool(std::move(task), num_tasks);
 
   // Wait for all tasks to finish.
-  latch.wait();
-  if (eptr) {
-    std::rethrow_exception(eptr);
+  state->latch.wait();
+  if (state->eptr) {
+    std::rethrow_exception(state->eptr);
   }
 }
 

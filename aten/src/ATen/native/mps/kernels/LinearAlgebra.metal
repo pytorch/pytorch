@@ -256,28 +256,6 @@ kernel void naive_addbmm(
   }
 }
 
-inline float blockReduceSum(
-    threadgroup float* sharedScratch,
-    float val,
-    uint linear_tid) {
-  float simd_result = simd_sum(val);
-  // each warp's first index should write the result to consecutive
-  // ids in sharedScratch buffer
-  if (linear_tid % 32 == 0) {
-    sharedScratch[linear_tid / 32] = simd_result;
-  }
-  threadgroup_barrier(mem_flags::mem_threadgroup);
-
-  // final reduction across first warp
-  if (linear_tid < 8) { // 256/32 = 8 simdgroups
-    float sum = sharedScratch[linear_tid];
-    sum = simd_sum(sum);
-    sharedScratch[0] = sum;
-  }
-  threadgroup_barrier(mem_flags::mem_threadgroup);
-  return sharedScratch[0];
-}
-
 template <bool col_major>
 inline device float& get_ref(device float* A, uint row, uint col, uint N);
 
@@ -297,6 +275,80 @@ inline device float& get_ref<false>(
     uint col,
     uint N) {
   return A[row + col * N];
+}
+
+inline int factor_tile32_warp(
+    threadgroup float (&tile)[32][33],
+    threadgroup float (&col)[32],
+    uint n,
+    uint lane) {
+  float row[32];
+  for (uint c = 0; c < 32; c++) {
+    row[c] = tile[lane][c];
+  }
+  int ret = 0;
+  for (uint kk = 0; kk < n; kk++) {
+    float dsq = simd_broadcast(row[kk], ushort(kk));
+    if (!(dsq > 0.0f)) {
+      ret = int(kk) + 1;
+      break;
+    }
+    float rs = rsqrt(dsq);
+    float l = (lane == kk) ? dsq * rs : row[kk] * rs;
+    col[lane] = l;
+    simdgroup_barrier(mem_flags::mem_threadgroup);
+    float ccol[32];
+#pragma unroll
+    for (uint i = 0; i < 32; i++) {
+      ccol[i] = col[i];
+    }
+    if (lane >= kk) {
+      row[kk] = l;
+      if (lane > kk) {
+#pragma unroll
+        for (uint i = 0; i < 32; i++) {
+          if (i > kk) {
+            row[i] = fma(-l, ccol[i], row[i]);
+          }
+        }
+      }
+    }
+    simdgroup_barrier(mem_flags::mem_threadgroup);
+  }
+  if (lane < n) {
+    for (uint c = 0; c < 32; c++) {
+      tile[lane][c] = row[c];
+    }
+    col[lane] = 1.0f / row[lane];
+  }
+  return ret;
+}
+
+// Solves row * D^-T in registers against the factored 32x32 diagonal block
+// `diagT` (rdiag[c] = 1 / diagT[c][c]) by right-looking column elimination:
+// the critical path per column is one multiply plus the fma into the next
+// column; the remaining unrolled updates pipeline behind it.
+inline void trsm_row32(
+    thread float (&row)[32],
+    threadgroup float (&diagT)[32][33],
+    threadgroup float (&rdiag)[32]) {
+  for (uint c = 0; c < 32; c++) {
+    // batch the column loads ahead of the fma burst; an interleaved
+    // load/fma sequence stalls the in-order pipe on every smem access
+    float dcol[32];
+#pragma unroll
+    for (uint i = 0; i < 32; i++) {
+      dcol[i] = diagT[i][c];
+    }
+    float xc = row[c] * rdiag[c];
+    row[c] = xc;
+#pragma unroll
+    for (uint i = 0; i < 32; i++) {
+      if (i > c) {
+        row[i] = fma(-xc, dcol[i], row[i]);
+      }
+    }
+  }
 }
 
 template <bool upper>
@@ -320,7 +372,8 @@ kernel void factorDiagonalBlock(
   const uint col0 = k * NB;
 
   threadgroup float tile[32][33];
-  threadgroup float reduceScratch[8];
+  threadgroup float col[32];
+  threadgroup float scratch[1];
   const uint tileSize = actSize * actSize;
 
   for (uint i = linear_tid; i < tileSize; i += group_size) {
@@ -330,70 +383,23 @@ kernel void factorDiagonalBlock(
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
 
-#pragma unroll 4
-  for (uint kk = 0; kk < actSize; kk++) {
-    float diagElt = 0.0f;
-    if (kk > 0) {
-      float4 partialSum4 = float4(0.0f);
-      uint i = linear_tid * 4;
-      // vectorized reduce
-      for (; i + 4 <= kk; i += group_size * 4) {
-        float4 val4;
-        val4.x = (i < kk) ? tile[kk][i] : 0.0f;
-        val4.y = (i + 1 < kk) ? tile[kk][i + 1] : 0.0f;
-        val4.z = (i + 2 < kk) ? tile[kk][i + 2] : 0.0f;
-        val4.w = (i + 3 < kk) ? tile[kk][i + 3] : 0.0f;
-
-        partialSum4 = fma(val4, val4, partialSum4);
-      }
-
-      float partialSum =
-          partialSum4.x + partialSum4.y + partialSum4.z + partialSum4.w;
-
-      // remaining elements
-      for (i = linear_tid + (kk / 4) * 4; i < kk; i += group_size) {
-        float val = tile[kk][i];
-        partialSum = fma(val, val, partialSum);
-      }
-      diagElt = blockReduceSum(reduceScratch, partialSum, linear_tid);
-    }
-
+  // simdgroups are linear chunks of the linearized threadgroup, so threads
+  // 0..31 form simdgroup 0
+  if (linear_tid < 32) {
+    int f = factor_tile32_warp(tile, col, actSize, linear_tid);
     if (linear_tid == 0) {
-      float diagVal = tile[kk][kk] - diagElt;
-      if (!(diagVal > 0.0f)) {
-        info[bid.x] = kk + 1;
-        return;
-      }
-      tile[kk][kk] = sqrt(diagVal);
+      scratch[0] = float(f);
     }
-    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
 
-    float pivot = tile[kk][kk];
-
-    for (uint j = kk + 1 + linear_tid; j < actSize; j += group_size) {
-      float4 partialSum4 = float4(0.0f);
-      uint i = 0;
-
-      // 4 elements at a time
-      for (; i + 4 <= kk; i += 4) {
-        float4 row4 =
-            float4(tile[j][i], tile[j][i + 1], tile[j][i + 2], tile[j][i + 3]);
-        float4 diag4 = float4(
-            tile[kk][i], tile[kk][i + 1], tile[kk][i + 2], tile[kk][i + 3]);
-        partialSum4 = fma(row4, diag4, partialSum4);
-      }
-      float partialSum =
-          partialSum4.x + partialSum4.y + partialSum4.z + partialSum4.w;
-      // remaining elements
-      for (; i < kk; i++) {
-        partialSum = fma(tile[j][i], tile[kk][i], partialSum);
-      }
-      float val = tile[j][kk];
-      val -= partialSum;
-      val /= pivot;
-      tile[j][kk] = val;
+  int fail = int(scratch[0]);
+  if (fail != 0) {
+    // first failure wins; report the global leading-minor index like LAPACK
+    if (linear_tid == 0 && info[bid.x] == 0) {
+      info[bid.x] = int(row0) + fail;
     }
-    threadgroup_barrier(mem_flags::mem_threadgroup);
+    return;
   }
 
   for (uint i = linear_tid; i < tileSize; i += group_size) {
@@ -689,6 +695,581 @@ kernel void applySYRK<false>(
     uint3 tgid [[threadgroup_position_in_grid]],
     uint3 tpg [[threads_per_threadgroup]],
     uint sgitg [[simdgroup_index_in_threadgroup]]);
+
+template <bool upper>
+kernel void factorDiagonalPanel(
+    device float* A [[buffer(0)]],
+    device int* info [[buffer(1)]],
+    constant uint& N [[buffer(2)]],
+    constant uint& NB [[buffer(3)]],
+    constant uint& k [[buffer(4)]],
+    uint3 tid3 [[thread_position_in_threadgroup]],
+    uint3 bid [[threadgroup_position_in_grid]],
+    uint warp_id [[simdgroup_index_in_threadgroup]],
+    uint lane [[thread_index_in_simdgroup]]) {
+  constexpr uint GROUP = 96; // 3 simdgroups
+  const uint tid = tid3.x;
+  const uint c0 = k * NB;
+  const uint actPanel = min(N - c0, NB);
+  const uint S = (actPanel + 31) / 32;
+  device float* Ab = A + ulong(bid.x) * N * N;
+
+  // lower tiles of the block; tile (a, b), a >= b, lives at a*(a+1)/2 + b
+  threadgroup float blk[6][32][33];
+  threadgroup float rdiag[32];
+  threadgroup float scratch[1];
+
+  if (k == 0 && tid == 0) {
+    info[bid.x] = 0;
+  }
+
+  const bool full = (actPanel == NB) && (N % 4 == 0);
+  if (full) {
+    // float4 over the contiguous device dim; smem stores are scalar (the
+    // 33-padded rows are not 16B aligned)
+    for (uint i = tid; i < 6 * 256; i += GROUP) {
+      const uint t = i / 256;
+      const uint e = i % 256;
+      const uint a = (t < 1) ? 0 : (t < 3 ? 1 : 2);
+      const uint b = t - a * (a + 1) / 2;
+      const uint fast = (e & 7) * 4; // contiguous-dim offset
+      const uint slow = e >> 3;
+      const uint r = upper ? slow : fast;
+      const uint c = upper ? fast : slow;
+      float4 v = *(device const float4*)(&get_ref<upper>(
+          Ab, c0 + 32 * a + r, c0 + 32 * b + c, N));
+      if (upper) {
+        blk[t][r][c + 0] = v.x;
+        blk[t][r][c + 1] = v.y;
+        blk[t][r][c + 2] = v.z;
+        blk[t][r][c + 3] = v.w;
+      } else {
+        blk[t][r + 0][c] = v.x;
+        blk[t][r + 1][c] = v.y;
+        blk[t][r + 2][c] = v.z;
+        blk[t][r + 3][c] = v.w;
+      }
+    }
+  } else {
+    for (uint i = tid; i < 6 * 1024; i += GROUP) {
+      const uint t = i / 1024;
+      const uint e = i % 1024;
+      const uint a = (t < 1) ? 0 : (t < 3 ? 1 : 2);
+      const uint b = t - a * (a + 1) / 2;
+      const uint r = upper ? e >> 5 : e & 31;
+      const uint c = upper ? e & 31 : e >> 5;
+      if (32 * a + r < actPanel && 32 * b + c < actPanel) {
+        blk[t][r][c] = get_ref<upper>(Ab, c0 + 32 * a + r, c0 + 32 * b + c, N);
+      }
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  for (uint s = 0; s < S; s++) {
+    const uint actS = min(32u, actPanel - 32 * s);
+    const uint m = S - 1 - s;
+    threadgroup float(&diagT)[32][33] = blk[s * (s + 1) / 2 + s];
+
+    if (warp_id == 0) {
+      int f = factor_tile32_warp(diagT, rdiag, actS, lane);
+      if (lane == 0) {
+        scratch[0] = float(f);
+      }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    int fail = int(scratch[0]);
+    if (fail != 0) {
+      // bail without writing the block back; the result is undefined once
+      // info is set
+      if (tid == 0 && info[bid.x] == 0) {
+        info[bid.x] = int(c0 + 32 * s) + fail;
+      }
+      return;
+    }
+
+    // TRSM the strips below within the block, one simdgroup per strip
+    if (warp_id < m) {
+      const uint rt = s + 1 + warp_id;
+      const uint actR = min(32u, actPanel - 32 * rt);
+      threadgroup float(&st)[32][33] = blk[rt * (rt + 1) / 2 + s];
+      if (lane < actR) {
+        float row[32];
+        for (uint c = 0; c < 32; c++) {
+          row[c] = st[lane][c];
+        }
+        trsm_row32(row, diagT, rdiag);
+        for (uint c = 0; c < 32; c++) {
+          st[lane][c] = row[c];
+        }
+      }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    // rank-32 update of the remaining tiles, one simdgroup per (rt, ht) pair
+    const uint nPairs = m * (m + 1) / 2;
+    if (warp_id < nPairs) {
+      const uint jRel = (warp_id == 0) ? 0 : 1;
+      const uint hRel = (warp_id == 2) ? 1 : 0;
+      const uint rt = s + 1 + jRel;
+      const uint ht = s + 1 + hRel;
+      const uint actR = min(32u, actPanel - 32 * rt);
+      const uint actH = min(32u, actPanel - 32 * ht);
+      threadgroup float(&stR)[32][33] = blk[rt * (rt + 1) / 2 + s];
+      threadgroup float(&stH)[32][33] = blk[ht * (ht + 1) / 2 + s];
+      threadgroup float(&tg)[32][33] = blk[rt * (rt + 1) / 2 + ht];
+
+      if (actR == 32 && actH == 32) {
+        simdgroup_float8x8 negI = simdgroup_float8x8(-1.0f);
+        for (uint f = 0; f < 16; f++) {
+          uint fy = (f / 4) * 8;
+          uint fx = (f % 4) * 8;
+          if (rt == ht && fy < fx) {
+            continue;
+          }
+          simdgroup_float8x8 C, Af, Bf, P;
+          simdgroup_load(C, &tg[fy][fx], 33);
+          for (uint kk = 0; kk < 32; kk += 8) {
+            simdgroup_load(Af, &stR[fy][kk], 33);
+            simdgroup_load(Bf, &stH[fx][kk], 33, 0, /*transpose=*/true);
+            simdgroup_multiply(P, Af, Bf);
+            simdgroup_multiply_accumulate(C, P, negI, C);
+          }
+          simdgroup_store(C, &tg[fy][fx], 33);
+        }
+      } else {
+        // ragged last-panel tiles: scalar fallback
+        for (uint idx = lane; idx < actR * actH; idx += 32) {
+          uint y = idx / actH;
+          uint x = idx % actH;
+          if (rt == ht && y < x) {
+            continue;
+          }
+          float sum = 0.0f;
+          for (uint kk = 0; kk < 32; kk++) {
+            sum = fma(stR[y][kk], stH[x][kk], sum);
+          }
+          tg[y][x] -= sum;
+        }
+      }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+
+  if (full) {
+    for (uint i = tid; i < 6 * 256; i += GROUP) {
+      const uint t = i / 256;
+      const uint e = i % 256;
+      const uint a = (t < 1) ? 0 : (t < 3 ? 1 : 2);
+      const uint b = t - a * (a + 1) / 2;
+      const uint fast = (e & 7) * 4;
+      const uint slow = e >> 3;
+      const uint r = upper ? slow : fast;
+      const uint c = upper ? fast : slow;
+      float4 v;
+      if (upper) {
+        v = float4(
+            blk[t][r][c], blk[t][r][c + 1], blk[t][r][c + 2], blk[t][r][c + 3]);
+      } else {
+        v = float4(
+            blk[t][r][c], blk[t][r + 1][c], blk[t][r + 2][c], blk[t][r + 3][c]);
+      }
+      *(device float4*)(&get_ref<upper>(
+          Ab, c0 + 32 * a + r, c0 + 32 * b + c, N)) = v;
+    }
+  } else {
+    for (uint i = tid; i < 6 * 1024; i += GROUP) {
+      const uint t = i / 1024;
+      const uint e = i % 1024;
+      const uint a = (t < 1) ? 0 : (t < 3 ? 1 : 2);
+      const uint b = t - a * (a + 1) / 2;
+      const uint r = upper ? e >> 5 : e & 31;
+      const uint c = upper ? e & 31 : e >> 5;
+      if (32 * a + r < actPanel && 32 * b + c < actPanel) {
+        get_ref<upper>(Ab, c0 + 32 * a + r, c0 + 32 * b + c, N) = blk[t][r][c];
+      }
+    }
+  }
+}
+
+#define INSTANTIATE_FACTOR_DIAGONAL_PANEL(SUFF, UPPER) \
+  template [[host_name("factorDiagonalPanel" #SUFF)]]  \
+  kernel void factorDiagonalPanel<UPPER>(              \
+      device float* A [[buffer(0)]],                   \
+      device int* info [[buffer(1)]],                  \
+      constant uint& N [[buffer(2)]],                  \
+      constant uint& NB [[buffer(3)]],                 \
+      constant uint& k [[buffer(4)]],                  \
+      uint3 tid3 [[thread_position_in_threadgroup]],   \
+      uint3 bid [[threadgroup_position_in_grid]],      \
+      uint warp_id [[simdgroup_index_in_threadgroup]], \
+      uint lane [[thread_index_in_simdgroup]]);
+
+INSTANTIATE_FACTOR_DIAGONAL_PANEL(U, true)
+INSTANTIATE_FACTOR_DIAGONAL_PANEL(L, false)
+
+template <bool upper>
+kernel void applyPanelTRSM(
+    device float* A [[buffer(0)]],
+    constant uint& N [[buffer(2)]],
+    constant uint& NB [[buffer(3)]],
+    constant uint& k [[buffer(4)]],
+    uint3 tid3 [[thread_position_in_threadgroup]],
+    uint3 tgid [[threadgroup_position_in_grid]],
+    uint warp_id [[simdgroup_index_in_threadgroup]],
+    uint lane [[thread_index_in_simdgroup]]) {
+  constexpr uint GROUP = 128; // 4 simdgroups
+  const uint tid = tid3.x;
+  const uint c0 = k * NB;
+  const uint r0 = (k + 1) * NB + tgid.y * 32;
+  const uint actR = min(32u, N - r0);
+  device float* Ab = A + ulong(tgid.x) * N * N;
+
+  threadgroup float strip[32][97];
+  threadgroup float diagT[32][33];
+  threadgroup float dT[32][33];
+  threadgroup float rdiag[32];
+
+  const bool full = (actR == 32) && (N % 4 == 0);
+  if (full) {
+    for (uint i = tid; i < 768; i += GROUP) {
+      uint r, c;
+      if (upper) {
+        r = i / 24;
+        c = (i % 24) * 4;
+      } else {
+        r = (i & 7) * 4;
+        c = i >> 3;
+      }
+      float4 v =
+          *(device const float4*)(&get_ref<upper>(Ab, r0 + r, c0 + c, N));
+      if (upper) {
+        strip[r][c + 0] = v.x;
+        strip[r][c + 1] = v.y;
+        strip[r][c + 2] = v.z;
+        strip[r][c + 3] = v.w;
+      } else {
+        strip[r + 0][c] = v.x;
+        strip[r + 1][c] = v.y;
+        strip[r + 2][c] = v.z;
+        strip[r + 3][c] = v.w;
+      }
+    }
+  } else {
+    for (uint i = tid; i < actR * 96; i += GROUP) {
+      uint r = upper ? i / 96 : i % actR;
+      uint c = upper ? i % 96 : i / actR;
+      strip[r][c] = get_ref<upper>(Ab, r0 + r, c0 + c, N);
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  simdgroup_float8x8 negI = simdgroup_float8x8(-1.0f);
+  const bool aligned4 = (N % 4 == 0);
+  for (uint s = 0; s < NB / 32; s++) {
+    const uint d0 = c0 + 32 * s;
+
+    if (aligned4) {
+      for (uint i = tid; i < 256; i += GROUP) {
+        uint fast = (i & 7) * 4;
+        uint slow = i >> 3;
+        uint r = upper ? slow : fast;
+        uint c = upper ? fast : slow;
+        float4 v =
+            *(device const float4*)(&get_ref<upper>(Ab, d0 + r, d0 + c, N));
+        if (upper) {
+          diagT[r][c + 0] = v.x;
+          diagT[r][c + 1] = v.y;
+          diagT[r][c + 2] = v.z;
+          diagT[r][c + 3] = v.w;
+        } else {
+          diagT[r + 0][c] = v.x;
+          diagT[r + 1][c] = v.y;
+          diagT[r + 2][c] = v.z;
+          diagT[r + 3][c] = v.w;
+        }
+      }
+    } else {
+      for (uint i = tid; i < 1024; i += GROUP) {
+        uint r = upper ? i >> 5 : i & 31;
+        uint c = upper ? i & 31 : i >> 5;
+        diagT[r][c] = get_ref<upper>(Ab, d0 + r, d0 + c, N);
+      }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    // strip[:, s] -= strip[:, t < s] @ D(s, t)^T; simdgroup w owns fragment
+    // row 8w of the 32x32 target, with each D(s, t) staged through smem
+    if (s > 0) {
+      const uint fy = warp_id * 8;
+      simdgroup_float8x8 C[4];
+      for (uint j = 0; j < 4; j++) {
+        simdgroup_load(C[j], &strip[fy][32 * s + 8 * j], 97);
+      }
+      for (uint t = 0; t < s; t++) {
+        const uint ct = c0 + 32 * t;
+        if (aligned4) {
+          for (uint i = tid; i < 256; i += GROUP) {
+            uint fast = (i & 7) * 4;
+            uint slow = i >> 3;
+            uint r = upper ? slow : fast;
+            uint c = upper ? fast : slow;
+            float4 v =
+                *(device const float4*)(&get_ref<upper>(Ab, d0 + r, ct + c, N));
+            if (upper) {
+              dT[r][c + 0] = v.x;
+              dT[r][c + 1] = v.y;
+              dT[r][c + 2] = v.z;
+              dT[r][c + 3] = v.w;
+            } else {
+              dT[r + 0][c] = v.x;
+              dT[r + 1][c] = v.y;
+              dT[r + 2][c] = v.z;
+              dT[r + 3][c] = v.w;
+            }
+          }
+        } else {
+          for (uint i = tid; i < 1024; i += GROUP) {
+            uint r = upper ? i >> 5 : i & 31;
+            uint c = upper ? i & 31 : i >> 5;
+            dT[r][c] = get_ref<upper>(Ab, d0 + r, ct + c, N);
+          }
+        }
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+
+        for (uint kf = 0; kf < 32; kf += 8) {
+          simdgroup_float8x8 Af, P;
+          simdgroup_load(Af, &strip[fy][32 * t + kf], 97);
+          for (uint j = 0; j < 4; j++) {
+            simdgroup_float8x8 Bf;
+            simdgroup_load(Bf, &dT[8 * j][kf], 33, 0, /*transpose=*/true);
+            simdgroup_multiply(P, Af, Bf);
+            simdgroup_multiply_accumulate(C[j], P, negI, C[j]);
+          }
+        }
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+      }
+      for (uint j = 0; j < 4; j++) {
+        simdgroup_store(C[j], &strip[fy][32 * s + 8 * j], 97);
+      }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    if (warp_id == 0) {
+      rdiag[lane] = 1.0f / diagT[lane][lane];
+      simdgroup_barrier(mem_flags::mem_threadgroup);
+      if (lane < actR) {
+        float row[32];
+        for (uint c = 0; c < 32; c++) {
+          row[c] = strip[lane][32 * s + c];
+        }
+        trsm_row32(row, diagT, rdiag);
+        for (uint c = 0; c < 32; c++) {
+          strip[lane][32 * s + c] = row[c];
+        }
+      }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+
+  if (full) {
+    for (uint i = tid; i < 768; i += GROUP) {
+      uint r, c;
+      if (upper) {
+        r = i / 24;
+        c = (i % 24) * 4;
+      } else {
+        r = (i & 7) * 4;
+        c = i >> 3;
+      }
+      float4 v;
+      if (upper) {
+        v = float4(
+            strip[r][c], strip[r][c + 1], strip[r][c + 2], strip[r][c + 3]);
+      } else {
+        v = float4(
+            strip[r][c], strip[r + 1][c], strip[r + 2][c], strip[r + 3][c]);
+      }
+      *(device float4*)(&get_ref<upper>(Ab, r0 + r, c0 + c, N)) = v;
+    }
+  } else {
+    for (uint i = tid; i < actR * 96; i += GROUP) {
+      uint r = upper ? i / 96 : i % actR;
+      uint c = upper ? i % 96 : i / actR;
+      get_ref<upper>(Ab, r0 + r, c0 + c, N) = strip[r][c];
+    }
+  }
+}
+
+#define INSTANTIATE_APPLY_PANEL_TRSM(SUFF, UPPER)      \
+  template [[host_name("applyPanelTRSM" #SUFF)]]       \
+  kernel void applyPanelTRSM<UPPER>(                   \
+      device float* A [[buffer(0)]],                   \
+      constant uint& N [[buffer(2)]],                  \
+      constant uint& NB [[buffer(3)]],                 \
+      constant uint& k [[buffer(4)]],                  \
+      uint3 tid3 [[thread_position_in_threadgroup]],   \
+      uint3 tgid [[threadgroup_position_in_grid]],     \
+      uint warp_id [[simdgroup_index_in_threadgroup]], \
+      uint lane [[thread_index_in_simdgroup]]);
+
+INSTANTIATE_APPLY_PANEL_TRSM(U, true)
+INSTANTIATE_APPLY_PANEL_TRSM(L, false)
+
+#if __METAL_VERSION__ >= 400 && \
+    __has_include(<MetalPerformancePrimitives/MetalPerformancePrimitives.h>)
+#include <MetalPerformancePrimitives/MetalPerformancePrimitives.h>
+
+template <bool upper, int BM, int BN, int NSG>
+kernel void applySYRKTrailing(
+    device float* A [[buffer(0)]],
+    constant uint& N [[buffer(2)]],
+    constant uint& NB [[buffer(3)]],
+    constant uint& k [[buffer(4)]],
+    uint3 tgid [[threadgroup_position_in_grid]]) {
+  const int gN = int(N);
+  const int o = int((k + 1) * NB);
+  const int pc = int(k * NB);
+  const int T = gN - o;
+  const int K = int(NB);
+  const int ro = int(tgid.y) * BM;
+  const int co = int(tgid.x) * BN;
+  if (ro + BM <= co) {
+    return;
+  }
+  device float* Ab = A + ulong(tgid.z) * ulong(N) * ulong(N);
+
+  constexpr auto desc = upper
+      ? mpp::tensor_ops::matmul2d_descriptor(
+            BM,
+            BN,
+            static_cast<int>(dynamic_extent),
+            false,
+            true,
+            false,
+            mpp::tensor_ops::matmul2d_descriptor::mode::multiply)
+      : mpp::tensor_ops::matmul2d_descriptor(
+            BN,
+            BM,
+            static_cast<int>(dynamic_extent),
+            true,
+            false,
+            false,
+            mpp::tensor_ops::matmul2d_descriptor::mode::multiply);
+  mpp::tensor_ops::matmul2d<desc, execution_simdgroups<NSG>> op;
+
+  device float* panel = upper ? (Ab + o * gN + pc) : (Ab + o + pc * gN);
+  device float* trail = upper ? (Ab + o * gN + o) : (Ab + o + o * gN);
+  const auto eP =
+      upper ? dextents<int32_t, 2>(K, T) : dextents<int32_t, 2>(T, K);
+  tensor<device float, dextents<int32_t, 2>, tensor_inline> tA(
+      panel, eP, array<int32_t, 2>{1, gN});
+  tensor<device float, dextents<int32_t, 2>, tensor_inline> tB(
+      panel, eP, array<int32_t, 2>{1, gN});
+  tensor<device float, dextents<int32_t, 2>, tensor_inline> tC(
+      trail, dextents<int32_t, 2>(T, T), array<int32_t, 2>{1, gN});
+
+  const bool inside = (ro + BM <= T) && (co + BN <= T);
+
+  if (inside) {
+    if (upper) {
+      auto mA = tA.template slice<dynamic_extent, BM>(0, ro);
+      auto mB = tB.template slice<dynamic_extent, BN>(0, co);
+      auto mC = tC.template slice<BN, BM>(co, ro);
+      auto cT = op.template get_destination_cooperative_tensor<
+          decltype(mA),
+          decltype(mB),
+          float>();
+      op.run(mA, mB, cT);
+      uint16_t e = 0;
+      for (auto it = cT.begin(); it != cT.end(); ++it, ++e) {
+        auto idx = it.get_multidimensional_index();
+        int r = ro + int(idx[1]);
+        int c = co + int(idx[0]);
+        cT[e] = get_ref<upper>(Ab, o + r, o + c, N) - cT[e];
+      }
+      cT.store(mC);
+    } else {
+      auto mA = tA.template slice<BN, dynamic_extent>(co, 0);
+      auto mB = tB.template slice<BM, dynamic_extent>(ro, 0);
+      auto mC = tC.template slice<BM, BN>(ro, co);
+      auto cT = op.template get_destination_cooperative_tensor<
+          decltype(mA),
+          decltype(mB),
+          float>();
+      op.run(mA, mB, cT);
+      uint16_t e = 0;
+      for (auto it = cT.begin(); it != cT.end(); ++it, ++e) {
+        auto idx = it.get_multidimensional_index();
+        int r = ro + int(idx[0]);
+        int c = co + int(idx[1]);
+        cT[e] = get_ref<upper>(Ab, o + r, o + c, N) - cT[e];
+      }
+      cT.store(mC);
+    }
+  } else {
+    if (upper) {
+      auto mA = tA.slice(0, ro);
+      auto mB = tB.slice(0, co);
+      auto mC = tC.slice(co, ro);
+      auto cT = op.template get_destination_cooperative_tensor<
+          decltype(mA),
+          decltype(mB),
+          float>();
+      op.run(mA, mB, cT);
+      uint16_t e = 0;
+      for (auto it = cT.begin(); it != cT.end(); ++it, ++e) {
+        if (!cT.is_valid_element(e)) {
+          continue;
+        }
+        auto idx = it.get_multidimensional_index();
+        int r = ro + int(idx[1]);
+        int c = co + int(idx[0]);
+        cT[e] = get_ref<upper>(Ab, o + r, o + c, N) - cT[e];
+      }
+      cT.store(mC);
+    } else {
+      auto mA = tA.slice(co, 0);
+      auto mB = tB.slice(ro, 0);
+      auto mC = tC.slice(ro, co);
+      auto cT = op.template get_destination_cooperative_tensor<
+          decltype(mA),
+          decltype(mB),
+          float>();
+      op.run(mA, mB, cT);
+      uint16_t e = 0;
+      for (auto it = cT.begin(); it != cT.end(); ++it, ++e) {
+        if (!cT.is_valid_element(e)) {
+          continue;
+        }
+        auto idx = it.get_multidimensional_index();
+        int r = ro + int(idx[0]);
+        int c = co + int(idx[1]);
+        cT[e] = get_ref<upper>(Ab, o + r, o + c, N) - cT[e];
+      }
+      cT.store(mC);
+    }
+  }
+}
+
+#define INSTANTIATE_SYRK_TRAILING(SUFF, UPPER, BM, BN, NSG)      \
+  template [[host_name("applySYRKTrailing" #SUFF "_" #BM "_" #BN \
+                       "_" #NSG)]] kernel void                   \
+  applySYRKTrailing<UPPER, BM, BN, NSG>(                         \
+      device float* A [[buffer(0)]],                             \
+      constant uint& N [[buffer(2)]],                            \
+      constant uint& NB [[buffer(3)]],                           \
+      constant uint& k [[buffer(4)]],                            \
+      uint3 tgid [[threadgroup_position_in_grid]]);
+
+INSTANTIATE_SYRK_TRAILING(U, true, 64, 64, 4)
+INSTANTIATE_SYRK_TRAILING(L, false, 64, 64, 4)
+INSTANTIATE_SYRK_TRAILING(U, true, 32, 64, 2)
+INSTANTIATE_SYRK_TRAILING(L, false, 32, 64, 2)
+INSTANTIATE_SYRK_TRAILING(U, true, 32, 128, 4)
+INSTANTIATE_SYRK_TRAILING(L, false, 32, 128, 4)
+
+#endif // __METAL_VERSION__ >= 400 && MetalPerformancePrimitives
 
 kernel void applyPivots(
     device float* P [[buffer(0)]],
@@ -996,12 +1577,12 @@ kernel void linalg_qr_householder(
       const auto val = static_cast<opmath_t>(r_ik);
       norm_sq = fma(val, val, norm_sq);
     }
-    const auto norm = ::metal::precise::sqrt(
+    const auto norm = precise::sqrt(
         c10::metal::threadgroup_sum(scratch, norm_sq, tid, group_size));
 
     // scale norm_eps by matrix dimension to handle accumulated error
-    const auto norm_eps = ::metal::numeric_limits<opmath_t>::epsilon() * m;
-    const auto tau_eps = ::metal::numeric_limits<opmath_t>::epsilon();
+    const auto norm_eps = numeric_limits<opmath_t>::epsilon() * m;
+    constexpr auto tau_eps = numeric_limits<opmath_t>::epsilon();
 
     // Step 2: compute Householder vector and tau
     if (tid == 0) {
@@ -1214,3 +1795,590 @@ REGISTER_UNPACK_PIVOTS(int, int);
 REGISTER_UNPACK_PIVOTS(int, long);
 REGISTER_UNPACK_PIVOTS(long, int);
 REGISTER_UNPACK_PIVOTS(long, long);
+
+template <typename T>
+struct svd_real {
+  using type = T;
+};
+template <>
+struct svd_real<float2> {
+  using type = float;
+};
+template <typename T>
+using svd_real_t = typename svd_real<T>::type;
+
+inline float svd_abs2(float z) {
+  return z * z;
+}
+inline float svd_abs2(float2 z) {
+  return z.x * z.x + z.y * z.y;
+}
+inline float svd_conjmul(float a, float b) {
+  return a * b;
+}
+inline float2 svd_conjmul(float2 a, float2 b) {
+  return float2(a.x * b.x + a.y * b.y, a.x * b.y - a.y * b.x);
+}
+inline float svd_conj(float z) {
+  return z;
+}
+inline float2 svd_conj(float2 z) {
+  return float2(z.x, -z.y);
+}
+inline float svd_mul(float a, float b) {
+  return a * b;
+}
+inline float2 svd_mul(float2 a, float2 b) {
+  return float2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
+}
+inline float svd_simd_sum(float v) {
+  return c10::metal::simd_sum(v);
+}
+inline float2 svd_simd_sum(float2 v) {
+  return float2(c10::metal::simd_sum(v.x), c10::metal::simd_sum(v.y));
+}
+inline float svd_one(float) {
+  return 1.0f;
+}
+inline float2 svd_one(float2) {
+  return float2(1.0f, 0.0f);
+}
+inline float svd_real_part(float z) {
+  return z;
+}
+inline float svd_real_part(float2 z) {
+  return z.x;
+}
+// NB: float2(x) -> (x,x), so build real T explicitly.
+inline float svd_from_real(float, float x) {
+  return x;
+}
+inline float2 svd_from_real(float2, float x) {
+  return float2(x, 0.0f);
+}
+
+template <typename T>
+kernel void svd_jacobi(
+    device const T* A [[buffer(0)]],
+    device T* U [[buffer(1)]],
+    device svd_real_t<T>* S [[buffer(2)]],
+    device T* V [[buffer(3)]],
+    device T* Vacc [[buffer(4)]], // rotation accumulator when V not staged
+    device int* info [[buffer(5)]],
+    constant SvdParams& params [[buffer(6)]],
+    threadgroup T* Atg [[threadgroup(0)]],
+    threadgroup T* Vtg [[threadgroup(1)]],
+    uint3 thread_pos [[thread_position_in_threadgroup]],
+    uint3 tpg [[threads_per_threadgroup]],
+    uint3 tg_pos [[threadgroup_position_in_grid]],
+    uint simd_lane [[thread_index_in_simdgroup]],
+    uint simd_group [[simdgroup_index_in_threadgroup]]) {
+  const uint32_t tid = thread_pos.x;
+  const uint32_t group_size = tpg.x;
+  const uint32_t m = params.m;
+  const uint32_t n = params.n;
+  const uint32_t batch_idx = tg_pos.x;
+  const uint32_t kSimd = c10::metal::simdgroup_size;
+  const uint32_t num_sg = group_size / kSimd;
+
+  device const T* A_b = A + batch_idx * m * n;
+  device T* U_b = U + batch_idx * params.u_bstride;
+  device T* V_b = V + batch_idx * params.v_bstride;
+  device T* Vacc_b = Vacc + batch_idx * n * n;
+
+  // Stage A column-major so each lane's row access is contiguous.
+  for (uint32_t idx = tid; idx < m * n; idx += group_size) {
+    uint32_t row = idx / n, col = idx % n;
+    Atg[col * m + row] = A_b[idx];
+  }
+  if (params.compute_uv) {
+    if (params.stage_v) {
+      for (uint32_t i = tid; i < n * n; i += group_size) {
+        uint32_t row = i / n, col = i % n;
+        // NB: float2(1.0) broadcasts to (1,1); use svd_one()/T(0) for a real
+        // 1/0.
+        Vtg[col * n + row] = (row == col) ? svd_one(T(0)) : T(0);
+      }
+    } else {
+      for (uint32_t i = tid; i < n * n; i += group_size) {
+        Vacc_b[i] = (i / n == i % n) ? svd_one(T(0)) : T(0);
+      }
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_device | mem_flags::mem_threadgroup);
+
+  constexpr auto eps = numeric_limits<float>::epsilon();
+  // Concurrent SIMD-groups flag "I rotated"; a plain flag races, so use an
+  // atomic.
+  threadgroup atomic_uint any_rotation;
+
+  // Round-robin tournament pairing (closed-form circle method): pad to even ne;
+  // each sweep is ne-1 rounds of ne/2 disjoint pairs; index >= n is phantom.
+  const uint32_t ne = n + (n & 1u);
+  const uint32_t n_pairs = ne / 2;
+
+  uint32_t sweep = 0;
+  for (; sweep < params.max_sweeps; ++sweep) {
+    if (tid == 0) {
+      atomic_store_explicit(&any_rotation, 0u, memory_order_relaxed);
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    for (uint32_t round = 0; round < ne - 1; ++round) {
+      for (uint32_t k = simd_group; k < n_pairs; k += num_sg) {
+        uint32_t p = (k == 0) ? 0u : ((k - 1 + round) % (ne - 1)) + 1u;
+        uint32_t kq = ne - 1 - k;
+        uint32_t q = (kq == 0) ? 0u : ((kq - 1 + round) % (ne - 1)) + 1u;
+        bool act = !(p >= n || q >= n);
+        if (act && p > q) {
+          uint32_t tmp = p;
+          p = q;
+          q = tmp;
+        }
+
+        threadgroup T* colP = Atg + p * m;
+        threadgroup T* colQ = Atg + q * m;
+        float app = 0, aqq = 0;
+        T apq_acc = T(0);
+        if (act) {
+          for (uint32_t i = simd_lane; i < m; i += kSimd) {
+            T vp = colP[i];
+            T vq = colQ[i];
+            app += svd_abs2(vp);
+            aqq += svd_abs2(vq);
+            apq_acc += svd_conjmul(vp, vq);
+          }
+        }
+        app = c10::metal::simd_sum(app);
+        aqq = c10::metal::simd_sum(aqq);
+        apq_acc = svd_simd_sum(apq_acc);
+
+        if (!act) {
+          continue;
+        }
+        float apq_abs = precise::sqrt(svd_abs2(apq_acc));
+        float off = precise::sqrt(app * aqq);
+        if (off < eps || apq_abs <= params.tol * off) {
+          continue;
+        }
+        if (simd_lane == 0) {
+          atomic_store_explicit(&any_rotation, 1u, memory_order_relaxed);
+        }
+        T phi = (apq_abs > 0) ? (apq_acc * (1.0f / apq_abs)) : svd_one(T(0));
+        float tau = (aqq - app) / (2 * apq_abs);
+        float t = (tau >= 0 ? 1.0f : -1.0f) /
+            (fabs(tau) + precise::sqrt(1 + tau * tau));
+        float c = 1 / precise::sqrt(1 + t * t);
+        float s = c * t;
+        T cphi = svd_conj(phi);
+        for (uint32_t i = simd_lane; i < m; i += kSimd) {
+          T vp = colP[i];
+          T vq = colQ[i];
+          colP[i] = c * vp - svd_mul(cphi, s * vq);
+          colQ[i] = svd_mul(phi, s * vp) + c * vq;
+        }
+        if (params.compute_uv) {
+          if (params.stage_v) {
+            threadgroup T* vP = Vtg + p * n;
+            threadgroup T* vQ = Vtg + q * n;
+            for (uint32_t i = simd_lane; i < n; i += kSimd) {
+              T vp = vP[i];
+              T vq = vQ[i];
+              vP[i] = c * vp - svd_mul(cphi, s * vq);
+              vQ[i] = svd_mul(phi, s * vp) + c * vq;
+            }
+          } else {
+            device T* vP = Vacc_b + p * n;
+            device T* vQ = Vacc_b + q * n;
+            for (uint32_t i = simd_lane; i < n; i += kSimd) {
+              T vp = vP[i];
+              T vq = vQ[i];
+              vP[i] = c * vp - svd_mul(cphi, s * vq);
+              vQ[i] = svd_mul(phi, s * vp) + c * vq;
+            }
+          }
+        }
+      }
+      threadgroup_barrier(
+          params.stage_v
+              ? mem_flags::mem_threadgroup
+              : (mem_flags::mem_threadgroup | mem_flags::mem_device));
+    }
+
+    threadgroup_barrier(mem_flags::mem_device | mem_flags::mem_threadgroup);
+    threadgroup uint32_t do_break = 0;
+    if (tid == 0) {
+      do_break =
+          atomic_load_explicit(&any_rotation, memory_order_relaxed) == 0u;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    if (do_break) {
+      break;
+    }
+  }
+
+  // n <= 90 (host staging gate); 96 gives headroom.
+  threadgroup float sig[96];
+  threadgroup uint32_t ord[96];
+  for (uint32_t j = simd_group; j < n; j += num_sg) {
+    threadgroup T* colj = Atg + j * m;
+    float norm_sq = 0;
+    for (uint32_t i = simd_lane; i < m; i += kSimd) {
+      norm_sq += svd_abs2(colj[i]);
+    }
+    float sigma = precise::sqrt(c10::metal::simd_sum(norm_sq));
+    if (simd_lane == 0) {
+      sig[j] = sigma;
+      ord[j] = j;
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  if (tid == 0) {
+    for (uint32_t a = 0; a < n; ++a) {
+      uint32_t best = a;
+      for (uint32_t b = a + 1; b < n; ++b) {
+        if (sig[ord[b]] > sig[ord[best]])
+          best = b;
+      }
+      uint32_t tmp = ord[a];
+      ord[a] = ord[best];
+      ord[best] = tmp;
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  // Emit column j from source ord[j]. Transposed run swaps left/right targets;
+  // right vectors written as Vh rows are conjugated (Vh = V^H), left vectors
+  // not.
+  for (uint32_t j = simd_group; j < n; j += num_sg) {
+    uint32_t src = ord[j];
+    float sigma = sig[src];
+    if (simd_lane == 0) {
+      S[batch_idx * n + j] = sigma;
+    }
+    float inv = sigma > eps ? (1 / sigma) : 0.0f;
+    threadgroup T* colsrc = Atg + src * m;
+    if (params.transposed == 0u) {
+      for (uint32_t i = simd_lane; i < m; i += kSimd) {
+        U_b[j * params.u_ld + i] = inv * colsrc[i];
+      }
+      if (params.compute_uv) {
+        threadgroup T* vsrc = Vtg + src * n;
+        for (uint32_t c = simd_lane; c < n; c += kSimd) {
+          T v = params.stage_v ? vsrc[c] : Vacc_b[src * n + c];
+          V_b[c * params.v_ld + j] = svd_conj(v);
+        }
+      }
+    } else {
+      for (uint32_t i = simd_lane; i < m; i += kSimd) {
+        V_b[i * params.v_ld + j] = svd_conj(inv * colsrc[i]);
+      }
+      if (params.compute_uv) {
+        threadgroup T* vsrc = Vtg + src * n;
+        for (uint32_t c = simd_lane; c < n; c += kSimd) {
+          U_b[j * params.u_ld + c] =
+              params.stage_v ? vsrc[c] : Vacc_b[src * n + c];
+        }
+      }
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_device);
+
+  if (tid == 0) {
+    // NaN/Inf never triggers a rotation, so flag info to raise like the CPU
+    // path.
+    bool nonfinite = false;
+    for (uint32_t j = 0; j < n; ++j) {
+      if (!isfinite(sig[j])) {
+        nonfinite = true;
+        break;
+      }
+    }
+    info[batch_idx] = (nonfinite || sweep >= params.max_sweeps)
+        ? static_cast<int>(sweep + 1)
+        : 0;
+  }
+}
+
+#define REGISTER_SVD_JACOBI(T)                             \
+  template [[host_name("svd_jacobi_" #T)]]                 \
+  kernel void svd_jacobi<T>(                               \
+      device const T* A [[buffer(0)]],                     \
+      device T* U [[buffer(1)]],                           \
+      device svd_real_t<T>* S [[buffer(2)]],               \
+      device T* V [[buffer(3)]],                           \
+      device T* Vacc [[buffer(4)]],                        \
+      device int* info [[buffer(5)]],                      \
+      constant SvdParams& params [[buffer(6)]],            \
+      threadgroup T* Atg [[threadgroup(0)]],               \
+      threadgroup T* Vtg [[threadgroup(1)]],               \
+      uint3 thread_pos [[thread_position_in_threadgroup]], \
+      uint3 tpg [[threads_per_threadgroup]],               \
+      uint3 tg_pos [[threadgroup_position_in_grid]],       \
+      uint simd_lane [[thread_index_in_simdgroup]],        \
+      uint simd_group [[simdgroup_index_in_threadgroup]]);
+
+REGISTER_SVD_JACOBI(float);
+REGISTER_SVD_JACOBI(float2);
+
+template <typename T>
+kernel void eigh_jacobi(
+    device T* A [[buffer(0)]],
+    device svd_real_t<T>* W [[buffer(1)]],
+    device T* Q [[buffer(2)]],
+    device int* info [[buffer(3)]],
+    constant EighParams& params [[buffer(4)]],
+    threadgroup T* Atg [[threadgroup(0)]],
+    threadgroup T* Qtg [[threadgroup(1)]],
+    uint3 thread_pos [[thread_position_in_threadgroup]],
+    uint3 tpg [[threads_per_threadgroup]],
+    uint3 tg_pos [[threadgroup_position_in_grid]],
+    uint simd_lane [[thread_index_in_simdgroup]],
+    uint simd_group [[simdgroup_index_in_threadgroup]]) {
+  const uint32_t tid = thread_pos.x;
+  const uint32_t group_size = tpg.x;
+  const uint32_t n = params.n;
+  const uint32_t batch_idx = tg_pos.x;
+  const uint32_t kSimd = c10::metal::simdgroup_size;
+  const uint32_t num_sg = group_size / kSimd;
+  const bool compute_v = params.compute_v != 0u;
+
+  device T* A_b = A + batch_idx * n * n;
+  device T* Q_b = Q + batch_idx * n * n;
+
+  // Stage A into Atg, symmetrizing from the selected UPLO triangle (input may
+  // be non-Hermitian otherwise); two-sided Jacobi needs an exactly Hermitian
+  // matrix.
+  const bool upper = params.upper != 0u;
+  for (uint32_t i = tid; i < n * n; i += group_size) {
+    uint32_t row = i % n, col = i / n;
+    if (row == col) {
+      Atg[i] = svd_from_real(T(0), svd_real_part(A_b[i]));
+    } else {
+      bool in_upper = row < col;
+      if (in_upper == upper) {
+        Atg[i] = A_b[i];
+      } else {
+        Atg[i] = svd_conj(A_b[col + row * n]);
+      }
+    }
+  }
+  if (compute_v) {
+    for (uint32_t i = tid; i < n * n; i += group_size) {
+      uint32_t row = i % n, col = i / n;
+      Qtg[i] = (row == col) ? svd_one(T(0)) : T(0);
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_device | mem_flags::mem_threadgroup);
+
+  threadgroup float cbuf[48];
+  threadgroup T sbuf[48];
+  threadgroup uint32_t pbuf[48], qbuf[48];
+  // Concurrent SIMD-groups flag "I rotated"; a plain flag races, so use an
+  // atomic.
+  threadgroup atomic_uint any_rotation;
+
+  const uint32_t ne = n + (n & 1u);
+  const uint32_t n_pairs = ne / 2;
+
+  threadgroup float red_diag[16];
+  threadgroup float red_off[16];
+
+  uint32_t sweep = 0;
+  for (; sweep < params.max_sweeps; ++sweep) {
+    if (tid == 0) {
+      atomic_store_explicit(&any_rotation, 0u, memory_order_relaxed);
+    }
+    {
+      float ld = 0.0f;
+      float lo = 0.0f;
+      for (uint32_t i = tid; i < n * n; i += group_size) {
+        uint32_t row = i % n, col = i / n;
+        float a2 = svd_abs2(Atg[i]);
+        if (row == col) {
+          ld = max(ld, a2);
+        } else {
+          lo = max(lo, a2);
+        }
+      }
+      ld = c10::metal::simd_max(ld);
+      lo = c10::metal::simd_max(lo);
+      if (simd_lane == 0) {
+        red_diag[simd_group] = ld;
+        red_off[simd_group] = lo;
+      }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    float g2 = 0.0f;
+    float o2 = 0.0f;
+    for (uint32_t s = 0; s < num_sg; ++s) {
+      g2 = max(g2, red_diag[s]);
+      o2 = max(o2, red_off[s]);
+    }
+    const float gscale = precise::sqrt(g2);
+    if (o2 <= params.tol * params.tol * g2) {
+      break;
+    }
+
+    for (uint32_t round = 0; round < ne - 1; ++round) {
+      for (uint32_t k = simd_group; k < n_pairs; k += num_sg) {
+        uint32_t p = (k == 0) ? 0u : ((k - 1 + round) % (ne - 1)) + 1u;
+        uint32_t kq = ne - 1 - k;
+        uint32_t q = (kq == 0) ? 0u : ((kq - 1 + round) % (ne - 1)) + 1u;
+        bool act = !(p >= n || q >= n || p == q);
+        if (act && p > q) {
+          uint32_t t = p;
+          p = q;
+          q = t;
+        }
+        if (!act) {
+          if (simd_lane == 0) {
+            pbuf[k] = n;
+            qbuf[k] = n;
+          }
+          continue;
+        }
+        float app = svd_real_part(Atg[p * n + p]);
+        float aqq = svd_real_part(Atg[q * n + q]);
+        T apq = Atg[q * n + p];
+        float apq_abs = precise::sqrt(svd_abs2(apq));
+        float off = precise::sqrt(::metal::fabs(app * aqq));
+        float c = 1.0f;
+        T s = T(0);
+        float thresh = max(params.tol * off, params.tol * gscale);
+        bool rotate = apq_abs > thresh + 1e-30f;
+        if (rotate) {
+          if (simd_lane == 0) {
+            atomic_store_explicit(&any_rotation, 1u, memory_order_relaxed);
+          }
+          T phi = apq * (1.0f / apq_abs);
+          float tau = (aqq - app) / (2.0f * apq_abs);
+          float t = (tau >= 0 ? 1.0f : -1.0f) /
+              (fabs(tau) + precise::sqrt(1.0f + tau * tau));
+          c = 1.0f / precise::sqrt(1.0f + t * t);
+          float sreal = c * t;
+          s = svd_mul(phi, svd_from_real(T(0), sreal));
+        }
+        if (simd_lane == 0) {
+          cbuf[k] = c;
+          sbuf[k] = s;
+          pbuf[k] = rotate ? p : n;
+          qbuf[k] = q;
+        }
+        if (!rotate) {
+          continue;
+        }
+        T cs = svd_conj(s);
+        threadgroup T* colP = Atg + p * n;
+        threadgroup T* colQ = Atg + q * n;
+        for (uint32_t i = simd_lane; i < n; i += kSimd) {
+          T ap = colP[i], aq = colQ[i];
+          colP[i] = c * ap - svd_mul(cs, aq);
+          colQ[i] = svd_mul(s, ap) + c * aq;
+        }
+        if (compute_v) {
+          threadgroup T* qP = Qtg + p * n;
+          threadgroup T* qQ = Qtg + q * n;
+          for (uint32_t i = simd_lane; i < n; i += kSimd) {
+            T qp = qP[i], qq = qQ[i];
+            qP[i] = c * qp - svd_mul(cs, qq);
+            qQ[i] = svd_mul(s, qp) + c * qq;
+          }
+        }
+      }
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+
+      for (uint32_t k = simd_group; k < n_pairs; k += num_sg) {
+        uint32_t p = pbuf[k], q = qbuf[k];
+        if (p >= n) {
+          continue;
+        }
+        float c = cbuf[k];
+        T s = sbuf[k];
+        T cs = svd_conj(s);
+        for (uint32_t col = simd_lane; col < n; col += kSimd) {
+          T ap = Atg[col * n + p], aq = Atg[col * n + q];
+          Atg[col * n + p] = c * ap - svd_mul(s, aq);
+          Atg[col * n + q] = svd_mul(cs, ap) + c * aq;
+        }
+      }
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+    }
+    if (atomic_load_explicit(&any_rotation, memory_order_relaxed) == 0u) {
+      break;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+
+  threadgroup float wv[96];
+  threadgroup uint32_t ord[96];
+  for (uint32_t j = simd_group; j < n; j += num_sg) {
+    if (simd_lane == 0) {
+      wv[j] = svd_real_part(Atg[j * n + j]);
+      ord[j] = j;
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  for (uint32_t j = simd_group; j < n; j += num_sg) {
+    float vj = wv[j];
+    uint32_t cnt = 0;
+    for (uint32_t k = simd_lane; k < n; k += kSimd) {
+      float vk = wv[k];
+      cnt += (vk < vj || (vk == vj && k < j)) ? 1u : 0u;
+    }
+    cnt = c10::metal::simd_sum(cnt);
+    if (simd_lane == 0) {
+      ord[cnt] = j;
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  for (uint32_t j = simd_group; j < n; j += num_sg) {
+    uint32_t src = ord[j];
+    if (simd_lane == 0) {
+      W[batch_idx * n + j] = wv[src];
+    }
+    if (compute_v) {
+      threadgroup T* qs = Qtg + src * n;
+      for (uint32_t i = simd_lane; i < n; i += kSimd) {
+        Q_b[j * n + i] = qs[i];
+      }
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_device);
+
+  if (tid == 0) {
+    // NaN/Inf never triggers a rotation, so flag info to raise like the CPU
+    // path.
+    bool nonfinite = false;
+    for (uint32_t j = 0; j < n; ++j) {
+      if (!isfinite(wv[j])) {
+        nonfinite = true;
+        break;
+      }
+    }
+    info[batch_idx] = (nonfinite || sweep >= params.max_sweeps)
+        ? static_cast<int>(sweep + 1)
+        : 0;
+  }
+}
+
+#define REGISTER_EIGH_JACOBI(T)                            \
+  template [[host_name("eigh_jacobi_" #T)]]                \
+  kernel void eigh_jacobi<T>(                              \
+      device T * A [[buffer(0)]],                          \
+      device svd_real_t<T> * W [[buffer(1)]],              \
+      device T * Q [[buffer(2)]],                          \
+      device int* info [[buffer(3)]],                      \
+      constant EighParams& params [[buffer(4)]],           \
+      threadgroup T* Atg [[threadgroup(0)]],               \
+      threadgroup T* Qtg [[threadgroup(1)]],               \
+      uint3 thread_pos [[thread_position_in_threadgroup]], \
+      uint3 tpg [[threads_per_threadgroup]],               \
+      uint3 tg_pos [[threadgroup_position_in_grid]],       \
+      uint simd_lane [[thread_index_in_simdgroup]],        \
+      uint simd_group [[simdgroup_index_in_threadgroup]]);
+
+REGISTER_EIGH_JACOBI(float);
+REGISTER_EIGH_JACOBI(float2);

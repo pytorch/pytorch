@@ -290,7 +290,7 @@ void NodeToONNX(
       ss << "symbolic for " << op_name
          << " produced an incorrect number of outputs (expected ";
       ss << num_old_outputs << ", but got " << outputs.size() << ')';
-      throw std::runtime_error(std::move(ss).str());
+      throw std::runtime_error(ss.str());
     }
     // For const node, it does not need params_dict info, so set it to {}.
     const ParamMap empty_params_dict = {};
@@ -390,7 +390,7 @@ void NodeToONNX(
           ss << " (indicating conversion for that particular output is not supported), ";
           ss << "but the network uses this output later";
           // TODO: Say what actually used it
-          throw std::runtime_error(std::move(ss).str());
+          throw std::runtime_error(ss.str());
         }
       }
     }
@@ -449,7 +449,7 @@ void NodeToONNX(
          << ": expected to return list of op nodes, instead received type ''"
          << py::str(py::type::handle_of(raw_output))
          << "': " << py::str(raw_output);
-      throw std::runtime_error(std::move(ss).str());
+      throw std::runtime_error(ss.str());
     }
 
     setOutputs(op_name, n, outputs);

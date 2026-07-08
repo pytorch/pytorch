@@ -146,8 +146,7 @@ struct C10_API TensorOptions {
   /// See NOTE [ TensorOptions Constructors ] on why this is templatized.
   template <
       typename T,
-      typename = std::enable_if_t< // NOLINT(modernize-use-constraints)
-          std::is_same_v<std::decay_t<T>, Device>>>
+      typename = std::enable_if_t<std::is_same_v<std::decay_t<T>, Device>>>
   /* implicit */ TensorOptions(T&& device) : TensorOptions() {
     this->set_device(std::forward<T>(device));
   }
@@ -162,8 +161,7 @@ struct C10_API TensorOptions {
   ///     constructors too.
   template <
       typename... Args,
-      typename = std::enable_if_t< // NOLINT(modernize-use-constraints)
-          std::is_constructible_v<Device, Args&&...>>>
+      typename = std::enable_if_t<std::is_constructible_v<Device, Args&&...>>>
   /* implicit */ TensorOptions(Args&&... args)
       : TensorOptions(Device(std::forward<Args>(args)...)) {}
 
@@ -618,7 +616,7 @@ inline TensorOptions dtype() {
 inline std::string toString(const TensorOptions& options) {
   std::ostringstream stream;
   stream << options;
-  return std::move(stream).str();
+  return stream.str();
 }
 
 // This is intended to be a centralized location by which we can determine
@@ -652,6 +650,11 @@ inline DispatchKey computeDispatchKey(
         case c10::DeviceType::Metal:
           return DispatchKey::Metal;
         case c10::DeviceType::MKLDNN:
+          TORCH_CHECK_NOT_IMPLEMENTED(
+              false,
+              "The 'mkldnn' device type is deprecated and cannot be used "
+              "to allocate dense tensors. Please use a supported device type "
+              "instead.");
         case c10::DeviceType::OPENGL:
         case c10::DeviceType::OPENCL:
         case c10::DeviceType::IDEEP:

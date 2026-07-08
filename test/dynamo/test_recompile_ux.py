@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import operator
 import unittest
 import weakref
 from functools import cache
@@ -217,7 +218,27 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
             opt_func(a, 1)
         self.assert_single_log_contains(
             logs,
-            "expected type of 'b' to be a tensor type, ' but found <class 'int'>",
+            "expected type of 'b' to be <class 'torch.Tensor'>, but found <class 'int'>",
+        )
+
+    def test_mismatched_tensor_type(self):
+        a = torch.rand(3, 4, 5)
+        b_parameter = torch.nn.Parameter(torch.rand(3, 4, 5))
+        b_tensor = torch.rand(3, 4, 5)
+
+        def func(a, b):
+            return a + b
+
+        opt_func = torch.compile(func, backend="eager")
+        # warmup
+        opt_func(a, b_parameter)
+
+        with self.assertLogs(logger="torch._dynamo", level="WARNING") as logs:
+            opt_func = torch.compile(func, backend="eager")
+            opt_func(a, b_tensor)
+        self.assert_single_log_contains(
+            logs,
+            "expected type of 'b' to be <class 'torch.nn.parameter.Parameter'>, but found <class 'torch.Tensor'>",
         )
 
     @torch._dynamo.config.patch(recompile_limit=1, fail_on_recompile_limit_hit=True)
@@ -444,6 +465,23 @@ class RecompileLimitKwargTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(num_resume_entries, 2)
 
 
+def _count_graphs(graphs, node_op, target):
+    return sum(
+        any(n.op == node_op and n.target == target for n in gm.graph.nodes)
+        for gm in graphs
+    )
+
+
+def _count_sin_graphs(graphs):
+    # Graphs with a `call_method` "sin" node (`x.sin()`, the main frame).
+    return _count_graphs(graphs, "call_method", "sin")
+
+
+def _count_add_graphs(graphs):
+    # Graphs with an `operator.add` call_function node (`a + 1`, the resume frame).
+    return _count_graphs(graphs, "call_function", operator.add)
+
+
 class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
     """Tests for isolate_recompiles=True on torch.compile().
 
@@ -466,19 +504,33 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         automatic_dynamic_shapes=False,
     )
     def test_isolate_recompiles_basic(self):
-        """A single isolated region respects its per-region recompile limit."""
+        """Each isolated region has its own recompile limit: region A hitting
+        its limit (recompile_limit=1) does not consume region B's budget."""
 
         def f(x):
             return x.sin()
 
-        opt_f = torch.compile(
+        opt_a = torch.compile(
             f, backend="eager", dynamic=False, isolate_recompiles=True
         )
+        opt_b = torch.compile(
+            f, backend="eager", dynamic=False, isolate_recompiles=True
+        )
+        self.assertNotEqual(opt_a._isolate_recompiles_id, opt_b._isolate_recompiles_id)
 
-        opt_f(torch.randn(3))
-
+        opt_a(torch.randn(3))
         with self.assertRaises(FailOnRecompileLimitHit):
-            opt_f(torch.randn(4))
+            opt_a(torch.randn(4))  # region A exhausts its own limit
+
+        # Region B is unaffected: its own budget still allows one compile.
+        opt_b(torch.randn(5))
+        self.assertEqual(
+            len(_get_cache_entries_for_region(f, opt_a._isolate_recompiles_id)), 1
+        )
+        self.assertEqual(
+            len(_get_cache_entries_for_region(f, opt_b._isolate_recompiles_id)), 1
+        )
+        self.assertEqual(len(_get_cache_entries_for_region(f, -1)), 0)
 
     @torch._dynamo.config.patch(
         recompile_limit=1,
@@ -530,7 +582,9 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         """Two isolated regions sharing the SAME CompileCounter backend.
         Without per-region bucketing, the second region would get a cache
         hit from the first (same backend, same guards). Verifies the
-        per-region cache map routes entries to the correct bucket."""
+        per-region cache map routes entries to the correct bucket, that each
+        region recompiles independently for a new shape, and that both produce
+        correct outputs."""
         cnt = torch._dynamo.testing.CompileCounter()
 
         def f(x):
@@ -539,19 +593,28 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         opt_a = torch.compile(f, backend=cnt, dynamic=False, isolate_recompiles=True)
         opt_b = torch.compile(f, backend=cnt, dynamic=False, isolate_recompiles=True)
 
-        opt_a(torch.randn(3))
+        x3 = torch.randn(3)
+        x4 = torch.randn(4)
+
+        self.assertEqual(opt_a(x3), f(x3))
         self.assertEqual(cnt.frame_count, 1)
 
         # Must compile again — different region, even though same backend + input
-        opt_b(torch.randn(3))
+        self.assertEqual(opt_b(x3), f(x3))
         self.assertEqual(cnt.frame_count, 2)
 
-        # Cache hits within each region
-        opt_a(torch.randn(3))
-        opt_b(torch.randn(3))
+        # Cache hits within each region for the same shape
+        opt_a(x3)
+        opt_b(x3)
         self.assertEqual(cnt.frame_count, 2)
 
-    @parametrize("backend", ["eager", "aot_eager", "inductor"])
+        # A new shape recompiles per-region, independently in each bucket
+        self.assertEqual(opt_a(x4), f(x4))
+        self.assertEqual(cnt.frame_count, 3)
+        self.assertEqual(opt_b(x4), f(x4))
+        self.assertEqual(cnt.frame_count, 4)
+
+    @parametrize("backend", ["eager", "aot_eager"])
     def test_isolate_recompiles_string_backends(self, backend):
         """Two isolated regions with the same string backend compile
         independently — verified by total cache entry count."""
@@ -609,6 +672,22 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         opt_static(torch.randn(5, 9))
         self.assertEqual(cnt.frame_count, 3)
 
+        # Entries are bucketed per region, not pooled: the static region holds
+        # its 2 shapes, the dynamic region its 1, and nothing leaked to the
+        # default (-1) bucket.
+        self.assertNotEqual(
+            opt_static._isolate_recompiles_id, opt_dynamic._isolate_recompiles_id
+        )
+        self.assertEqual(
+            len(_get_cache_entries_for_region(f, opt_static._isolate_recompiles_id)), 2
+        )
+        self.assertEqual(
+            len(_get_cache_entries_for_region(f, opt_dynamic._isolate_recompiles_id)),
+            1,
+        )
+        self.assertEqual(len(_get_cache_entries_for_region(f, -1)), 0)
+
+    @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
     def test_isolate_recompiles_mark_dynamic_vs_static(self):
         """Two regions: one with mark_static, one with mark_dynamic.
         Their guards don't interfere across regions."""
@@ -648,6 +727,20 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         opt_static(x_static3)
         self.assertEqual(cnt_static.frame_count, 2)
 
+        # Per-region buckets: static holds its 2 shapes, dynamic its 1, and the
+        # default (-1) bucket stays empty.
+        self.assertNotEqual(
+            opt_static._isolate_recompiles_id, opt_dynamic._isolate_recompiles_id
+        )
+        self.assertEqual(
+            len(_get_cache_entries_for_region(f, opt_static._isolate_recompiles_id)), 2
+        )
+        self.assertEqual(
+            len(_get_cache_entries_for_region(f, opt_dynamic._isolate_recompiles_id)),
+            1,
+        )
+        self.assertEqual(len(_get_cache_entries_for_region(f, -1)), 0)
+
     @torch._dynamo.config.patch(automatic_dynamic_shapes=True)
     def test_isolate_recompiles_auto_dynamic_shared_pgo(self):
         """PGO (frame_state) is shared across isolated regions. Region B
@@ -672,6 +765,14 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
 
         opt_b(torch.randn(9, 4))
         self.assertEqual(cnt_b.frame_count, 1)
+
+        # PGO is shared, but cache entries are bucketed per region: region B's
+        # single entry lives in its own bucket, not the default and not A's.
+        self.assertNotEqual(opt_a._isolate_recompiles_id, opt_b._isolate_recompiles_id)
+        self.assertEqual(
+            len(_get_cache_entries_for_region(f, opt_b._isolate_recompiles_id)), 1
+        )
+        self.assertEqual(len(_get_cache_entries_for_region(f, -1)), 0)
 
     @torch._dynamo.config.patch(
         recompile_limit=2,
@@ -716,19 +817,112 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
 
     @torch._dynamo.config.patch(recompile_limit=1)
     def test_isolate_recompiles_fullgraph_raises(self):
-        """With fullgraph=True, hitting the recompile limit raises
-        FailOnRecompileLimitHit regardless of fail_on_recompile_limit_hit."""
+        """With fullgraph=True, hitting a region's recompile limit raises
+        FailOnRecompileLimitHit regardless of fail_on_recompile_limit_hit. The
+        limit is per-region: region A raising does not stop region B from
+        compiling its first graph."""
 
         def f(x):
             return x.sin()
 
-        opt_f = torch.compile(
+        opt_a = torch.compile(
             f, backend="eager", fullgraph=True, dynamic=False, isolate_recompiles=True
         )
+        opt_b = torch.compile(
+            f, backend="eager", fullgraph=True, dynamic=False, isolate_recompiles=True
+        )
+        self.assertNotEqual(opt_a._isolate_recompiles_id, opt_b._isolate_recompiles_id)
 
-        opt_f(torch.randn(3))
+        opt_a(torch.randn(3))
         with self.assertRaisesRegex(FailOnRecompileLimitHit, "fullgraph=True"):
-            opt_f(torch.randn(4))
+            opt_a(torch.randn(4))
+
+        # Region B has its own budget: its first compile must succeed, not raise.
+        opt_b(torch.randn(5))
+        self.assertEqual(
+            len(_get_cache_entries_for_region(f, opt_b._isolate_recompiles_id)), 1
+        )
+        self.assertEqual(len(_get_cache_entries_for_region(f, -1)), 0)
+
+    @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
+    def test_isolate_recompiles_graph_break_independent_regions(self):
+        """fullgraph=False with isolate_recompiles=True and a graph break:
+        each region keeps independent buckets for both the main frame and
+        the resume frame."""
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+
+        def f(x):
+            a = x.sin()
+            torch._dynamo.graph_break()
+            return a + 1
+
+        opt_a = torch.compile(
+            f, backend=backend, dynamic=False, isolate_recompiles=True
+        )
+        opt_b = torch.compile(
+            f, backend=backend, dynamic=False, isolate_recompiles=True
+        )
+
+        x3 = torch.randn(3)
+        x4 = torch.randn(4)
+        expected3 = x3.sin() + 1
+        expected4 = x4.sin() + 1
+
+        self.assertEqual(opt_a(x3), expected3)
+        self.assertEqual(opt_b(x3), expected3)
+        self.assertEqual(opt_a(x4), expected4)
+        self.assertEqual(opt_b(x4), expected4)
+
+        # 8 graphs: 2 regions x 2 shapes x 2 frames (main + resume). Static
+        # shapes (automatic_dynamic_shapes=False) make each new shape recompile.
+        # Main frames trace `x.sin()`, resume frames trace `a + 1`.
+        self.assertEqual(len(backend.graphs), 8)
+        self.assertEqual(_count_sin_graphs(backend.graphs), 4)
+        self.assertEqual(_count_add_graphs(backend.graphs), 4)
+
+    @torch._dynamo.config.patch(recompile_limit=2, automatic_dynamic_shapes=False)
+    def test_isolate_recompiles_graph_break_per_region_limit(self):
+        """Graph-break function with two regions: each region independently
+        tracks and limits both its main frame (sin) and its resume frame (add).
+        Region a exhausts its per-region recompile_limit; region b continues
+        compiling unaffected. Static shapes (automatic_dynamic_shapes=False)
+        make each new shape recompile until the limit is hit."""
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+
+        def f(x):
+            a = x.sin()
+            torch._dynamo.graph_break()
+            return a + 1
+
+        opt_a = torch.compile(
+            f, backend=backend, dynamic=False, isolate_recompiles=True
+        )
+        opt_b = torch.compile(
+            f, backend=backend, dynamic=False, isolate_recompiles=True
+        )
+
+        # Fill region a up to its limit with 2 distinct shapes. Both frames
+        # reach the limit: 2 main (sin) + 2 resume (add).
+        opt_a(torch.randn(3))
+        opt_a(torch.randn(4))
+        self.assertEqual(len(backend.graphs), 4)
+        self.assertEqual(_count_sin_graphs(backend.graphs), 2)
+        self.assertEqual(_count_add_graphs(backend.graphs), 2)
+
+        # Third shape in region a hits the per-region limit -> the main frame
+        # goes RUN_ONLY and runs eagerly. The post-break code still executes
+        # eagerly, but no compiled resume function is invoked, so neither frame
+        # produces a new graph.
+        opt_a(torch.randn(5))
+        self.assertEqual(len(backend.graphs), 4)
+        self.assertEqual(_count_sin_graphs(backend.graphs), 2)
+        self.assertEqual(_count_add_graphs(backend.graphs), 2)
+
+        # Region b is independent: both its main and resume frames compile.
+        opt_b(torch.randn(3))
+        self.assertEqual(len(backend.graphs), 6)
+        self.assertEqual(_count_sin_graphs(backend.graphs), 3)
+        self.assertEqual(_count_add_graphs(backend.graphs), 3)
 
     @torch._dynamo.config.patch(
         accumulated_recompile_limit=6,
@@ -860,6 +1054,9 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
 
         id_a = opt_a._isolate_recompiles_id
         id_b = opt_b._isolate_recompiles_id
+        # The two regions and the default bucket are genuinely distinct.
+        self.assertNotEqual(id_a, id_b)
+        self.assertNotEqual(id_a, -1)
 
         # Region A compiles once, then hits limit
         opt_a(torch.randn(3))
@@ -941,6 +1138,9 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
 
         opt_iso = torch.compile(f, backend=cnt, isolate_recompiles=True)
         id_iso = opt_iso._isolate_recompiles_id
+        # A genuine isolated region (distinct from the default bucket) that
+        # nonetheless inherits the global SKIP.
+        self.assertNotEqual(id_iso, -1)
 
         x = torch.randn(3)
         self.assertEqual(opt_iso(x), f(x))
@@ -994,12 +1194,16 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         )
         id_a = opt_a._isolate_recompiles_id
         id_b = opt_b._isolate_recompiles_id
+        self.assertNotEqual(id_a, id_b)
 
         # Interleave compilations
         opt_a(torch.randn(3))
         opt_b(torch.randn(10))
         opt_a(torch.randn(4))
         opt_b(torch.randn(11))
+
+        # 4 entries total across the two regions (2 each), not pooled into one.
+        self.assertEqual(_get_total_cache_entry_count(f), 4)
 
         # Newest at front in each region
         entries_a = _get_cache_entries_for_region(f, id_a)
@@ -1092,6 +1296,16 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         opt_isolated(torch.randn(3))
         self.assertEqual(cnt.frame_count, 1)
 
+        # The reuse is genuine cross-bucket fallback: opt_isolated is a real
+        # region (not the default), it added no entry of its own, and the reused
+        # entry lives in the default (-1) bucket.
+        self.assertNotEqual(opt_isolated._isolate_recompiles_id, -1)
+        self.assertEqual(
+            len(_get_cache_entries_for_region(f, opt_isolated._isolate_recompiles_id)),
+            0,
+        )
+        self.assertEqual(len(_get_cache_entries_for_region(f, -1)), 1)
+
     @torch._dynamo.config.patch(recompile_limit=8)
     def test_isolate_recompiles_reasons_include_default_bucket(self):
         """Recompile-reason logging for an isolated region must also walk
@@ -1137,6 +1351,14 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
             f"default-bucket entries' guard failures dropped from "
             f"recompile reasons (bug): {default_fails}",
         )
+        # Region and default are separate buckets: only shape-3 is in the
+        # default bucket; the region holds its own shape-4/5 entries.
+        self.assertNotEqual(opt_isolated._isolate_recompiles_id, -1)
+        self.assertEqual(len(_get_cache_entries_for_region(f, -1)), 1)
+        self.assertEqual(
+            len(_get_cache_entries_for_region(f, opt_isolated._isolate_recompiles_id)),
+            2,
+        )
 
     @torch._dynamo.config.patch(recompile_limit=8)
     def test_non_isolated_reasons_unchanged(self):
@@ -1159,7 +1381,7 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(fails, f"no recompile reasons logged: {fails}")
 
     @torch._dynamo.config.patch(recompile_limit=8)
-    def test_reasons_include_all_default_entries(self):
+    def test_isolate_recompiles_reasons_include_all_default_entries(self):
         """When the default bucket has multiple entries, recompile-reason
         logging from an isolated region must report guard failures from
         each of them, not just one."""
@@ -1195,8 +1417,12 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
             2,
             f"expected guard failures for both default entries, got {default_fails}",
         )
+        # The two default entries (shapes 3, 4) stay in the default bucket; the
+        # region's shape-5/6 entries live in its own bucket.
+        self.assertNotEqual(opt_iso._isolate_recompiles_id, -1)
+        self.assertEqual(len(_get_cache_entries_for_region(f, -1)), 2)
 
-    def test_reset_clears_region_strategy(self):
+    def test_isolate_recompiles_reset_clears_region_strategy(self):
         """torch._dynamo.reset() must clear region_strategy_map on
         ExtraState. Otherwise a RUN_ONLY persisted by a prior region
         would survive reset and prevent the new region from compiling."""
@@ -1218,6 +1444,10 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.reset()
 
         opt_b = torch.compile(f, backend=cnt, isolate_recompiles=True)
+        # Both are genuine isolated regions (distinct from the default bucket);
+        # the RUN_ONLY persisted for opt_a's region must not survive reset.
+        self.assertNotEqual(opt_a._isolate_recompiles_id, -1)
+        self.assertNotEqual(opt_b._isolate_recompiles_id, -1)
         opt_b(torch.randn(5))
         self.assertEqual(cnt.frame_count, 2)
 
@@ -1254,30 +1484,6 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         # Shared limit exceeded
         with self.assertRaises(FailOnRecompileLimitHit):
             opt_a(torch.randn(5))
-
-    @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
-    def test_no_isolate_recompiles_shared_cache(self):
-        """Baseline: without isolate_recompiles, compile calls share the
-        cache. A recompile from one is visible to the other."""
-        cnt = torch._dynamo.testing.CompileCounter()
-
-        def f(x):
-            return x.sum()
-
-        opt_a = torch.compile(f, backend=cnt, dynamic=False)
-        opt_b = torch.compile(f, backend=cnt, dynamic=False)
-
-        opt_a(torch.randn(4))
-        self.assertEqual(cnt.frame_count, 1)
-
-        opt_b(torch.randn(4))
-        self.assertEqual(cnt.frame_count, 1)
-
-        opt_a(torch.randn(5))
-        self.assertEqual(cnt.frame_count, 2)
-
-        opt_b(torch.randn(5))
-        self.assertEqual(cnt.frame_count, 2)
 
     @torch._dynamo.config.patch(
         recompile_limit=2,
@@ -1346,6 +1552,15 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         opt_b(torch.randn(4))
         self.assertEqual(cnt_a.frame_count, 1)
         self.assertEqual(cnt_b.frame_count, 1)
+        # Each region owns one entry; nothing leaked to the default bucket.
+        self.assertNotEqual(opt_a._isolate_recompiles_id, opt_b._isolate_recompiles_id)
+        self.assertEqual(
+            len(_get_cache_entries_for_region(f, opt_a._isolate_recompiles_id)), 1
+        )
+        self.assertEqual(
+            len(_get_cache_entries_for_region(f, opt_b._isolate_recompiles_id)), 1
+        )
+        self.assertEqual(len(_get_cache_entries_for_region(f, -1)), 0)
 
         torch._dynamo.reset()
 
@@ -1356,8 +1571,11 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
 
     @torch._dynamo.config.patch(recompile_limit=3)
     def test_isolate_recompiles_resume_function(self):
-        """Resume functions from a graph break inherit the region's
-        isolate_recompiles_id and respect its per-region recompile limit."""
+        """Resume functions from a graph break are bucketed by their region's
+        isolate_recompiles_id, both for cache lookup and for the per-region
+        recompile limit. Region A exhausting its resume-frame limit leaves
+        region B free to compile the same main/resume frames independently
+        (they share the backend, so without isolation B would cache-hit A)."""
         cnt = torch._dynamo.testing.CompileCounter()
 
         mode = {"value": "a"}
@@ -1374,25 +1592,31 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
             else:
                 return a + 1
 
-        opt_f = torch.compile(f, backend=cnt, isolate_recompiles=True)
+        opt_a = torch.compile(f, backend=cnt, isolate_recompiles=True)
+        opt_b = torch.compile(f, backend=cnt, isolate_recompiles=True)
+        self.assertNotEqual(opt_a._isolate_recompiles_id, opt_b._isolate_recompiles_id)
 
-        opt_f(torch.randn(4))
-        frame_count_after_1 = cnt.frame_count
+        # Region A, first call: main frame (sin) + resume frame (cos) = 2.
+        opt_a(torch.randn(4))
+        self.assertEqual(cnt.frame_count, 2)
 
-        mode["value"] = "b"
-        opt_f(torch.randn(4))
-        frame_count_after_2 = cnt.frame_count
-        self.assertGreater(frame_count_after_2, frame_count_after_1)
+        # Each new mode recompiles only region A's resume frame (main cached).
+        for m, expected in (("b", 3), ("c", 4)):
+            mode["value"] = m
+            opt_a(torch.randn(4))
+            self.assertEqual(cnt.frame_count, expected)
 
-        mode["value"] = "c"
-        opt_f(torch.randn(4))
-        frame_count_after_3 = cnt.frame_count
-        self.assertGreater(frame_count_after_3, frame_count_after_2)
-
-        # Resume function has 3 entries = recompile_limit. Fourth blocked.
+        # Region A's resume frame has 3 entries = recompile_limit. A fourth
+        # mode is blocked (runs eager), so no new compile.
         mode["value"] = "d"
-        opt_f(torch.randn(4))
-        self.assertEqual(cnt.frame_count, frame_count_after_3)
+        opt_a(torch.randn(4))
+        self.assertEqual(cnt.frame_count, 4)
+
+        # Region B is independent: mode "a" would cache-hit region A's main and
+        # resume frames without isolation, but here both recompile (+2).
+        mode["value"] = "a"
+        opt_b(torch.randn(4))
+        self.assertEqual(cnt.frame_count, 6)
 
     def test_isolate_recompiles_gc_wrapper(self):
         """When an isolated compile wrapper is GC'd, orphaned cache entries
@@ -1427,7 +1651,7 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
 
     # ===== Debug / introspection =====
 
-    def test_debug_get_cache_entry_list_deterministic_order(self):
+    def test_isolate_recompiles_debug_cache_entry_list_deterministic_order(self):
         """_debug_get_cache_entry_list returns entries sorted by
         isolate_recompiles_id for deterministic output."""
         cnt = torch._dynamo.testing.CompileCounter()
