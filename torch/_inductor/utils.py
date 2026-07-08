@@ -116,15 +116,16 @@ def get_gpu_type() -> str:
 
 
 @functools.cache
-def get_triton_type() -> str | None:
-    """Get a device type that supports generating Triton code as a backend, or
-    ``None`` if there aren't any. Note that the returned device may not
-    currently be configured to generate Triton.
+def _get_triton_type(disable_device_detection: bool) -> str | None:
+    """Body of functionality for ``get_triton_type``.
 
-    Will prefer to return any other device type before CPU."""
-    from torch.utils._triton import devices_supporting_triton
+    Split the function like this so that we can still cache the result per-value
+    of ``torch._inductor.config.triton_disable_device_detection``.
+    """
+    from torch.utils._triton import _devices_supporting_triton
 
-    candidates: list[str] = devices_supporting_triton()
+    # (note we're getting a copy here)
+    candidates: list[str] = list(_devices_supporting_triton(disable_device_detection))
 
     if len(candidates) == 0:
         return None
@@ -137,6 +138,17 @@ def get_triton_type() -> str | None:
         return "cpu"
 
     return candidates.pop()
+
+
+def get_triton_type() -> str | None:
+    """Get a device type that supports generating Triton code as a backend, or
+    ``None`` if there aren't any. Note that the returned device may not
+    currently be configured to generate Triton.
+
+    Will prefer to return any other device type before CPU."""
+    from torch._inductor.config import triton_disable_device_detection
+
+    return _get_triton_type(triton_disable_device_detection)
 
 
 from torch._dynamo.device_interface import get_interface_for_device
