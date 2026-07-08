@@ -24,7 +24,7 @@ The user list has the following rules:
 - Users are GitHub usernames, which must start with the @ prefix
 - Each user is also a comma-separated list of features/experiments to enable
 - Each experiment can optionally include a per-user rollout percentage
-  using the syntax "experiment:percentage" (e.g. "arc:10" for 10% rollout)
+  using the syntax "experiment:percentage" (e.g. "amd-do:10" for 10% rollout)
 - Without a percentage, opted-in experiments are enabled 100% of the time
 - A "#" prefix opts the user out of all experiments
 - A "-" prefix on an experiment opts the user out of that experiment
@@ -41,7 +41,7 @@ Example config:
         rollout_percent: 25
         all_branches: false
         default: true
-      arc:
+      amd-do:
         rollout_perc: 50
         all_branches: true
         default: false
@@ -64,7 +64,7 @@ Example config:
     @User1,-lf,split_build
     @User2,lf
     @User3,split_build
-    @User4,lf,arc:10
+    @User4,lf,amd-do:10
 """
 
 import json
@@ -84,10 +84,6 @@ from github import Auth, Github
 from github.Issue import Issue
 
 
-# The Meta (OSDC) fleet is the default; the "lf" experiment switches to the
-# Linux Foundation fleet.
-DEFAULT_LABEL_PREFIX = "mt-"  # fall back to the Meta fleet
-
 GITHUB_OUTPUT = os.getenv("GITHUB_OUTPUT", "")
 GH_OUTPUT_KEY_AMI = "runner-ami"
 GH_OUTPUT_KEY_LABEL_TYPE = "label-type"
@@ -101,6 +97,8 @@ WORKFLOW_ALLOWLIST_ALL = "ALL"
 
 LF_FLEET_EXPERIMENT = "lf"
 
+# The Meta (OSDC) fleet is the default; the "lf" experiment switches to the
+# Linux Foundation fleet. META_LABEL_PREFIX is also the fallback on error.
 META_LABEL_PREFIX = "mt-"
 META_CANARY_LABEL_PREFIX = "c-mt-"
 LF_LABEL_PREFIX = "lf-"
@@ -385,7 +383,7 @@ def parse_user_opt_in_from_text(user_optin_text: str) -> UserOptins:
                 exp_str = exp_str.strip(" ")
                 if not exp_str:
                     continue
-                # Parse optional per-user rollout percentage (e.g. "arc:10")
+                # Parse optional per-user rollout percentage (e.g. "amd-do:10")
                 # Opt-out entries (e.g. "-lf") never have a percentage
                 if ":" in exp_str and not exp_str.startswith("-"):
                     name, perc_str = exp_str.split(":", 1)
@@ -739,7 +737,7 @@ def get_labels(github_repo: str, github_token: str, pr_number: int) -> set[str]:
 def main() -> None:
     args = parse_args()
 
-    runner_label_prefix = DEFAULT_LABEL_PREFIX
+    runner_label_prefix = META_LABEL_PREFIX
     amd_do_label_prefix = ""
 
     # no-runner-experiments means "use Meta, not LF": opt out of the lf
