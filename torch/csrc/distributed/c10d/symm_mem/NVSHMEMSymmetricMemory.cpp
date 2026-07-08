@@ -399,10 +399,12 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
 
     // Signal pad first at [0, signal_pad_size), data buffer at buffer_offset =
     // signal_pad_size. The signal pad size is already 16-aligned, so the data
-    // buffer is aligned without extra padding; round up the data size instead.
+    // buffer base is aligned. nvshmem_malloc returns a malloc-aligned symmetric
+    // pointer and handles any size internally, so (unlike the CUDA cuMem path)
+    // the data size needs no rounding up.
     const size_t signal_pad_size = get_signal_pad_size();
     const size_t buffer_offset = signal_pad_size;
-    const size_t total_size = buffer_offset + at::round_up(size, 16UL);
+    const size_t total_size = buffer_offset + size;
     auto alloc_base = nvshmem_malloc(total_size);
     TORCH_CHECK(alloc_base != nullptr, "nvshmem_malloc failed");
     // Zero the signal pad (at the front) for the signaling protocol.
