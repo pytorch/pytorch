@@ -345,6 +345,13 @@ class _KinetoProfile:
                 enable_cuda_sync=bool(
                     self._custom_profiler_config.get("enable_cuda_sync_events")
                 ),
+                # PM sampling (true SM-active % + DRAM-throughput % counters) is a CUPTI-monitor
+                # feature, opt-in (not always-on like env counters). The metrics are per-profile
+                # (custom_profiler_config["pm_metrics"], a list of CUPTI metric names).
+                enable_pm_sampling=bool(
+                    self._custom_profiler_config.get("enable_pm_sampling")
+                ),
+                pm_metrics=self._custom_profiler_config.get("pm_metrics"),
                 # Synchronous export finalizes on the calling thread, so skip the poll thread.
                 defer_export=self._cupti_async_export,
             )
