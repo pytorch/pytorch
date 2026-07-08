@@ -470,13 +470,16 @@ class Backend(str):  # noqa: SLOT000
                                            Default: ``False``. If set to ``True``, the backend
                                            will get an instance of ``c10d::DistributedBackendOptions``, and
                                            a process group options object as defined by the backend implementation.
-            device (str or list of str, optional): device type this backend
+            devices (str or list of str, optional): device type this backend
                             supports, e.g. "cpu", "cuda", etc. If `None`,
                             assumes CPU and the current accelerator.
 
         .. note:: This support of 3rd party backend is experimental and subject to change.
 
         """
+        if isinstance(devices, str):
+            devices = [devices]
+
         # This takes care of CUSTOM Out-of-tree backend types, update in backend_list indicates availability
         normalized_name = name.lower()
         if not hasattr(Backend, normalized_name.upper()):
@@ -499,8 +502,6 @@ class Backend(str):  # noqa: SLOT000
             device_list = ["cpu"]
             if (acc := torch.accelerator.current_accelerator()) is not None:
                 device_list.append(acc.type)
-        elif isinstance(devices, str):
-            device_list = [devices]
         else:
             device_list = devices
 
