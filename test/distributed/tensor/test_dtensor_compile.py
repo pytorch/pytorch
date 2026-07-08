@@ -76,7 +76,7 @@ from torch.utils.checkpoint import checkpoint
 dev_type = torch.device(get_devtype())
 
 
-class PytreeTuple(torch._opaque_base.OpaqueBase):
+class PytreeTuple(torch._custom_class_base.CustomClassBase):
     """
     Tuple-like values that are treated as leaves of a PyTree.
     """
@@ -140,12 +140,12 @@ class PytreeTuple(torch._opaque_base.OpaqueBase):
 
 # Register PytreeTuple as an opaque value type to enable Dynamo to handle
 # instances created during tracing
-from torch._library.opaque_object import MemberType, register_opaque_type
+from torch._library.opaque_object import MemberType, register_custom_class
 
 
-register_opaque_type(
+register_custom_class(
     PytreeTuple,
-    typ="value",
+    typ="constant",
     members={
         "__getitem__": MemberType.USE_REAL,
         "__iter__": MemberType.USE_REAL,
