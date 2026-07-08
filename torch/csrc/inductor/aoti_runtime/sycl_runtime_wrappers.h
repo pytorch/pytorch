@@ -144,7 +144,7 @@ static std::unique_ptr<sycl::kernel> _createKernel(
   std::string kernelName =
       kernelPtr->get_info<sycl::info::kernel::function_name>();
   uint32_t numParams = kernelPtr->get_info<sycl::info::kernel::num_args>();
-  size_t globalRangeX = gridX * threadsPerWarp * numWarps;
+  size_t globalRangeX = static_cast<size_t>(gridX) * threadsPerWarp * numWarps;
   size_t globalRangeY = gridY;
   size_t globalRangeZ = gridZ;
   size_t localRangeX = numWarps * threadsPerWarp;
