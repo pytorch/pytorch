@@ -587,6 +587,65 @@ class TestFP8Lowering(TestCase):
         self.assertEqual(expected, actual)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @skipIfRocm(msg="FP8 scaled_mm tensorwise eager path is not supported by hipBLAS")
+    @onlyCUDA
+    @parametrize(
+        "scale_a_shape,scale_b_shape",
+        [
+            ((1,), ()),
+            ((), (1,)),
+            ((1, 1, 1), ()),
+            ((1, 1, 1), (1,)),
+            ((1, 1, 1), (1, 1)),
+        ],
+    )
+    def test_scaled_mm_mixed_tensorwise_scale_ranks(
+        self, scale_a_shape, scale_b_shape, device
+    ):
+        M = N = K = 64
+        x_fp8 = torch.ones(M, K, device=device, dtype=torch.float8_e4m3fn)
+        w_fp8 = torch.ones(N, K, device=device, dtype=torch.float8_e4m3fn)
+        scale_a = torch.ones(scale_a_shape, device=device)
+        scale_b = torch.ones(scale_b_shape, device=device)
+
+        def fn(x_fp8, w_fp8, scale_a, scale_b):
+            return torch._scaled_mm(
+                x_fp8,
+                w_fp8.T,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.float32,
+            )
+
+        expected = fn(x_fp8, w_fp8, scale_a, scale_b)
+        actual = torch.compile(fn, fullgraph=True)(x_fp8, w_fp8, scale_a, scale_b)
+        self.assertEqual(expected, actual, rtol=1e-2, atol=1e-2)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @skipIfRocm(msg="FP8 scaled_mm tensorwise eager path is not supported by hipBLAS")
+    @onlyCUDA
+    def test_scaled_mm_rejects_high_rank_scale_b(self, device):
+        M = N = K = 64
+        x_fp8 = torch.ones(M, K, device=device, dtype=torch.float8_e4m3fn)
+        w_fp8 = torch.ones(N, K, device=device, dtype=torch.float8_e4m3fn)
+        scale_a = torch.ones(1, 1, 1, device=device)
+        scale_b = torch.ones(1, 1, 1, device=device)
+
+        def fn(x_fp8, w_fp8, scale_a, scale_b):
+            return torch._scaled_mm(
+                x_fp8,
+                w_fp8.T,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.float32,
+            )
+
+        with self.assertRaisesRegex(RuntimeError, r"t\(\) expects"):
+            fn(x_fp8, w_fp8, scale_a, scale_b)
+        with self.assertRaisesRegex(RuntimeError, r"t\(\) expects"):
+            torch.compile(fn, fullgraph=True)(x_fp8, w_fp8, scale_a, scale_b)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("dtype", (torch.bfloat16, torch.float32))
     @parametrize("shape", ("16,16,32", "16,32,32", "1024,1024,512"))
     @parametrize("has_bias", (False, True))
