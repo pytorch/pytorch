@@ -28,11 +28,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import download, write_env_exports
 
 
-# Directory containing this script (.ci/pytorch/windows). Used as the root
-# for tmp_bin/, magma_*/, and the internal/*.bat installer scripts -- matches
-# the legacy `%~dp0` convention so the installers' own path math keeps
-# working.
-WIN_CI_DIR = Path(__file__).resolve().parent
+# The Windows CD workspace: root for tmp_bin/, magma_*/, and the shared
+# internal/*.bat installers. It stays under the general Windows CI dir
+# (.ci/pytorch/windows), matching the legacy `%~dp0` convention the installers'
+# path math relies on, even though this pipeline script now lives in
+# .ci/wheel/windows.
+WIN_CI_DIR = Path(__file__).resolve().parents[2] / "pytorch" / "windows"
 
 
 # Common env applied to every Windows wheel build. Mirrors the legacy
