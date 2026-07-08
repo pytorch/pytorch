@@ -7159,10 +7159,7 @@ class ExternKernel(InputsKernel):
     ) -> ProcessKernelResult:
         """Partition kernel args into tensor and non-tensor, realize tensor inputs,
         re-run fake tensor propagation with the realized strides, and return a
-        ProcessKernelResult.
-
-        unflatten_args(new_tensor_args, new_non_tensor_args) reconstructs the
-        original (args, kwargs) tree from replacement lists.
+        ProcessKernelResult (see that class for field semantics).
         """
         binded_args = {"args": args, "kwargs": kwargs}
 

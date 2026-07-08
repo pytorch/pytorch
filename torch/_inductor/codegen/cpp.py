@@ -5142,7 +5142,7 @@ class CppScheduling(BaseScheduling):
                     raise AssertionError((var_ranges, constraints.ranges, node.snodes))
                 indexing_exprs.update(constraints.exprs)
             if var_ranges is None:
-                raise AssertionError(node.snodes)
+                raise AssertionError("expected at least one snode to set var_ranges")
             return ir.ExtraIndexingConstraints(var_ranges, list(indexing_exprs))
 
         if not isinstance(node, SchedulerNode):
