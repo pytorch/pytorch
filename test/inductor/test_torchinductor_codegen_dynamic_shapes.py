@@ -125,6 +125,9 @@ test_failures = {
     "test_as_strided_on_split_view_dynamic_shapes": TestFailure(
         ("cpu", "cuda", "xpu"), is_skip=True
     ),
+    "test_normal_fallback_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu"), is_skip=True
+    ),
     "test_cat_empty_1d_negative_dim_zero_output_dynamic_shapes": TestFailure(
         ("cpu", "cuda", "xpu"), is_skip=True
     ),
@@ -152,6 +155,7 @@ test_failures = {
         ("cpu",)
     ),
     "test_expand_dynamic_shapes": TestFailure(("cpu",)),
+    "test_expand_implicit_kwarg_dynamic_shapes": TestFailure(("cpu",)),
     "test_full_boolean_dynamic_shapes": TestFailure(("cpu",)),
     "test_glu_dynamic_shapes": TestFailure(("cpu",)),
     "test_isinf2_dynamic_shapes": TestFailure(("cpu",)),

@@ -274,7 +274,7 @@ class DistMatrixOpsTest(DTensorTestBase):
                     self.assertEqual(
                         bias_placement.reduce_op,
                         output_placement.reduce_op,
-                        f"Bias Partial should have same reduce_op as output Partial. "
+                        lambda msg: f"{msg}\nBias Partial should have same reduce_op as output Partial. "
                         f"Got bias={bias_placement.reduce_op}, output={output_placement.reduce_op}",
                     )
 

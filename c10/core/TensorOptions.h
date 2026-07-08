@@ -650,6 +650,11 @@ inline DispatchKey computeDispatchKey(
         case c10::DeviceType::Metal:
           return DispatchKey::Metal;
         case c10::DeviceType::MKLDNN:
+          TORCH_CHECK_NOT_IMPLEMENTED(
+              false,
+              "The 'mkldnn' device type is deprecated and cannot be used "
+              "to allocate dense tensors. Please use a supported device type "
+              "instead.");
         case c10::DeviceType::OPENGL:
         case c10::DeviceType::OPENCL:
         case c10::DeviceType::IDEEP:

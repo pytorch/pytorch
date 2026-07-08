@@ -433,7 +433,7 @@ def get_worker_info(worker_name=None):
 
     Args:
         worker_name (str): the string name of a worker. If ``None``, return the
-                           the id of the current worker. (default ``None``)
+                           id of the current worker. (default ``None``)
 
     Returns:
         :class:`~torch.distributed.rpc.WorkerInfo` instance for the given
