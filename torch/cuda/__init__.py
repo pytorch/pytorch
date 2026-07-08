@@ -11,7 +11,9 @@ It is lazily initialized, so you can always import it, and use
 :ref:`cuda-semantics` has more details about working with CUDA.
 """
 
+import glob
 import importlib
+import importlib.util
 import os
 import platform
 import threading
@@ -90,12 +92,37 @@ try:
                     paths = ["libamd_smi.so"]
                     if rocm_home := os.getenv("ROCM_HOME", os.getenv("ROCM_PATH")):
                         paths = [os.path.join(rocm_home, "lib/libamd_smi.so")] + paths
+                    # TheRock ROCm wheels install the amdsmi python package in
+                    # site-packages/amdsmi and ship the native library under the
+                    # _rocm_sdk_core wheel (site-packages/_rocm_sdk_core/lib)
+                    # rather than on the loader path or under $ROCM_HOME. The
+                    # file there is a versioned soname (e.g. libamd_smi.so.26),
+                    # so amdsmi's bare CDLL("libamd_smi.so") can't find it. Locate
+                    # the package and append the concrete versioned files as a
+                    # last-resort fallback so the hook can redirect to them.
+                    if platform.system() == "Linux":
+                        paths = paths + self._rocm_sdk_core_amdsmi_paths()
                     self.paths: list[str] = paths
+
+                @staticmethod
+                def _rocm_sdk_core_amdsmi_paths() -> list[str]:
+                    try:
+                        spec = importlib.util.find_spec("_rocm_sdk_core")
+                    except (ImportError, ValueError):
+                        return []
+                    if spec is None or not spec.submodule_search_locations:
+                        return []
+                    found: list[str] = []
+                    for location in spec.submodule_search_locations:
+                        found += glob.glob(
+                            os.path.join(location, "lib", "libamd_smi.so*")
+                        )
+                    return sorted(found)
 
                 def hooked_CDLL(
                     self, name: str | Path | None, *args: Any, **kwargs: Any
                 ) -> ctypes.CDLL:
-                    if name and Path(name).name == "libamd_smi.so":
+                    if name and Path(name).name.startswith("libamd_smi.so"):
                         for path in self.paths:
                             try:
                                 return self.original_CDLL(path, *args, **kwargs)
@@ -116,6 +143,17 @@ try:
             except ModuleNotFoundError as err:
                 _AMDSMI_ERR = err
                 raise
+            except (KeyError, OSError) as err:
+                # The amdsmi python package is installed but its native library
+                # (libamd_smi.so) could not be discovered/loaded -- e.g. TheRock
+                # ROCm wheels lay amdsmi out so that its own find_smi_library()
+                # misses the versioned libamd_smi.so.* and raises KeyError. Treat
+                # this like a missing optional dependency (degrade to
+                # _HAS_AMDSMI=False) instead of aborting `import torch`.
+                _AMDSMI_ERR = err
+                raise ModuleNotFoundError(
+                    "amdsmi is installed but libamd_smi.so could not be loaded"
+                ) from err
 
         _HAS_PYNVML = True
     except ModuleNotFoundError:
