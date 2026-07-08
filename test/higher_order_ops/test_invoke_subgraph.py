@@ -3135,12 +3135,12 @@ class GraphModule(torch.nn.Module):
 
         subgraph_0 = self.subgraph_0
         invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_x_);  subgraph_0 = None
-        b: "i64[1]" = invoke_subgraph[1];  invoke_subgraph = None
+        getitem: "i64[1]" = invoke_subgraph[1];  invoke_subgraph = None
 
         subgraph_1 = self.subgraph_1
         invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_1', l_x_);  subgraph_1 = l_x_ = None
-        getitem_4: "i64[1]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
-        return self._dynamo_bytecode_unflatten((b, getitem_4,), _fn_args)
+        getitem_2: "i64[1]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
+        return self._dynamo_bytecode_unflatten((getitem, getitem_2,), _fn_args)
 
     class subgraph_0(torch.nn.Module):
         def forward(self, l_x_: "f32[64, 1]"):
