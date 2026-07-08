@@ -1471,6 +1471,7 @@ class CppFlexAttentionTemplate(CppTemplate):
             )
         )
 
+
     def micro_gemm_define(self, kernel_name: str):
         from torch._inductor.codegen.cpp_gemm_template import (
             CppTemplateKernel,
