@@ -825,6 +825,9 @@ class EnterDeviceContextManagerWithStreamInfoLine(EnterDeviceContextManagerLine)
         """Generate context switching and stream retrieval code."""
         if V.graph.cpp_wrapper:
             super().codegen(code)
+            V.graph.wrapper_code.codegen_stream_info_prologue(
+                code, self.num_streams, self.stream_idx_to_user_obj_idx
+            )
         else:
             super().codegen(code)
 
@@ -869,8 +872,12 @@ class EnterCudaStreamContextLine(WrapperLine):
     stream_idx: int
 
     def codegen(self, code: IndentedBuffer) -> None:
-        code.writeline(f"with {get_stream_name(self.stream_idx)}:")
-        code.do_indent()
+        wrapper_code = getattr(V.graph, "wrapper_code", None)
+        if wrapper_code is None:
+            code.writeline(f"with {get_stream_name(self.stream_idx)}:")
+            code.do_indent()
+        else:
+            wrapper_code.codegen_enter_cuda_stream_context(code, self.stream_idx)
 
 
 @dataclasses.dataclass
@@ -878,7 +885,11 @@ class ExitCudaStreamContextLine(WrapperLine):
     """Generate code to exit the current stream context."""
 
     def codegen(self, code: IndentedBuffer) -> None:
-        code.do_unindent()
+        wrapper_code = getattr(V.graph, "wrapper_code", None)
+        if wrapper_code is None:
+            code.do_unindent()
+        else:
+            wrapper_code.codegen_exit_cuda_stream_context(code)
 
 
 class EfficientPeakEstimate:
@@ -1943,11 +1954,12 @@ class PythonWrapperCodegen(CodeGen):
         if num_streams > 1:
             if stream_idx_to_user_obj_idx is None:
                 raise AssertionError("expected stream_idx_to_user_obj_idx to be set")
-            import_line = (
-                "from torch._dynamo.variables.streams import _get_stream_by_index"
-            )
-            if not self.imports.contains(import_line):
-                self.imports.writeline(import_line)
+            if not V.graph.cpp_wrapper:
+                import_line = (
+                    "from torch._dynamo.variables.streams import _get_stream_by_index"
+                )
+                if not self.imports.contains(import_line):
+                    self.imports.writeline(import_line)
             setup_stream_cache = self._last_default_stream_device != device_idx
             self._last_default_stream_device = device_idx
             self.writeline(
@@ -2016,6 +2028,23 @@ class PythonWrapperCodegen(CodeGen):
     def codegen_cuda_stream_exit(self) -> None:
         """Generate data structure for exiting a CUDA Stream context."""
         self.writeline(ExitCudaStreamContextLine())
+
+    def codegen_enter_cuda_stream_context(
+        self, code: IndentedBuffer, stream_idx: int
+    ) -> None:
+        code.writeline(f"with {get_stream_name(stream_idx)}:")
+        code.do_indent()
+
+    def codegen_exit_cuda_stream_context(self, code: IndentedBuffer) -> None:
+        code.do_unindent()
+
+    def codegen_stream_info_prologue(
+        self,
+        code: IndentedBuffer,
+        num_streams: int,
+        stream_idx_to_user_obj_idx: dict[int, int],
+    ) -> None:
+        raise NotImplementedError
 
     def generate_return(self, output_refs: list[str]) -> None:
         if output_refs:
