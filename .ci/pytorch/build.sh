@@ -37,12 +37,16 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   echo "NVCC version:"
   nvcc --version
 
-  # The CUPTI monitor's native worker compiles against cupti_activity.h from the
-  # nvidia-cuda-cupti wheel, and its field-id codegen parses that header with clang's
-  # python bindings. Both are CUDA-only build inputs, so they are installed here rather
-  # than in [build-system].requires / requirements-build.txt -- keeping CPU builds (which
-  # never compile the monitor) from having to provide a CUDA-only wheel.
-  python -mpip install "nvidia-cuda-cupti>=13.3.75" clang
+  # The CUPTI monitor is a CUDA >= 13.x feature (its CUPTI floor is 13.3): its native worker
+  # compiles against cupti_activity.h -- staged into the CUDA 13.x Docker image by
+  # .ci/docker/common/install_cuda.sh -- and its field-id codegen parses that header with
+  # libclang's python bindings. Only libclang is a pip build input (it bundles libclang.so,
+  # so the codegen needn't locate one), installed here rather than in
+  # [build-system].requires / requirements-build.txt -- keeping non-13.x / CPU builds (which
+  # never compile the monitor) from having to provide it.
+  if [[ "$BUILD_ENVIRONMENT" == *cuda13* ]]; then
+    python -mpip install libclang
+  fi
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *cuda13* ]]; then
