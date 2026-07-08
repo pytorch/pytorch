@@ -1585,10 +1585,24 @@ test_vulkan() {
 }
 
 test_distributed() {
-  echo "Testing distributed python tests"
+  # Optional $1: multiproc filter passed through to run_test.py
+  # ("multiproc" | "not-multiproc"). When "not-multiproc" we are on a
+  # single-GPU runner and must skip the multi-GPU-only C++ / mpiexec tests.
+  local multiproc_filter="${1:-}"
+  local filter_clause=""
+  if [[ -n "$multiproc_filter" ]]; then
+    filter_clause="--multiproc-filter $multiproc_filter"
+  fi
+  echo "Testing distributed python tests (multiproc_filter=${multiproc_filter:-none})"
   # shellcheck disable=SC2086
-  time python test/run_test.py --distributed-tests --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" $INCLUDE_CLAUSE --verbose
+  time python test/run_test.py --distributed-tests --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" $filter_clause $INCLUDE_CLAUSE --verbose
   assert_git_not_dirty
+
+  # The C++ / mpiexec distributed tests below require multiple GPUs; skip them
+  # on the single-process (single-GPU) config.
+  if [[ "$multiproc_filter" == "not-multiproc" ]]; then
+    return
+  fi
 
   if [[ ("$BUILD_ENVIRONMENT" == *cuda* || "$BUILD_ENVIRONMENT" == *rocm*) && "$SHARD_NUMBER" == 1 ]]; then
     echo "Testing distributed C++ tests"
@@ -2198,11 +2212,18 @@ elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
 elif [[ "$TEST_CONFIG" == distributed ]]; then
   install_torchcomms
   install_spmd_types
-  test_distributed
+  test_distributed multiproc
   # Only run RPC C++ tests on the first shard
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
     test_rpc
   fi
+elif [[ "$TEST_CONFIG" == distributed_single ]]; then
+  # Single-process distributed tests only (see `multiproc` marker in
+  # test/conftest.py); runs on a single-GPU runner. Skips the multi-GPU-only
+  # C++ / RPC / mpiexec tests.
+  install_torchcomms
+  install_spmd_types
+  test_distributed not-multiproc
 elif [[ "${TEST_CONFIG}" == *operator_benchmark* ]]; then
   TEST_MODE="short"
 
