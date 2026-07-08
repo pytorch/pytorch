@@ -108,8 +108,6 @@ class TORCH_API KernelFunction final {
   bool isValidSymUnboxed() const;
   bool isValid() const;
   bool isFallthrough() const;
-  template <class KernelFunctor>
-  const KernelFunctor* boxedKernelFunctor() const;
 
   /**
    * Call the function in a boxed way.
@@ -328,10 +326,6 @@ class SafeKernelFunction {
   // Get the OpHandle that lives on this SafeKernelFunction
   const OperatorHandle& opHandle() const {
     return *opHandle_;
-  }
-
-  const KernelFunction& kernelFunction() const {
-    return kernel_;
   }
 
  private:
