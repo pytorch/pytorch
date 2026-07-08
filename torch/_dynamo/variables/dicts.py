@@ -67,7 +67,6 @@ from .object_protocol import (
     mro_lookup,
     vt_getitem,
 )
-from .sets import SetVariable
 
 
 if TYPE_CHECKING:
@@ -1264,25 +1263,6 @@ class DictKeysVariable(DictViewVariable):
             {},
         )
 
-    def call_method(
-        self,
-        tx: "InstructionTranslatorBase",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if name in (
-            "__and__",
-            "__iand__",
-            "__xor__",
-            "__ixor__",
-        ):
-            # These methods always returns a set
-            m = getattr(self.set_items, name)
-            r = m(args[0].set_items)  # type: ignore[attr-defined]
-            return SetVariable(r)
-        return super().call_method(tx, name, args, kwargs)
-
 
 class DictValuesVariable(DictViewVariable):
     # PyDictValues_Type: https://github.com/python/cpython/blob/e76aa128fe/Objects/dictobject.c#L6615
@@ -1437,25 +1417,6 @@ class DictItemsVariable(DictViewVariable):
         if self.dv_dict.source and not is_constant_source(self.dv_dict.source):
             tx.output.guard_on_key_order.add(self.dv_dict.source)
         return DictItemsIterator(self.dv_dict.items)
-
-    def call_method(
-        self,
-        tx: "InstructionTranslatorBase",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if name in (
-            "__and__",
-            "__iand__",
-            "__xor__",
-            "__ixor__",
-        ):
-            # These methods always returns a set
-            fn_hdl = getattr(self.set_items, name)
-            ret_val = fn_hdl(args[0].set_items)  # type: ignore[attr-defined]
-            return SetVariable(ret_val)
-        return super().call_method(tx, name, args, kwargs)
 
 
 kV = HashableTracker | str
