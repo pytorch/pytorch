@@ -76,6 +76,15 @@ class Gamma(ExponentialFamily):
         new._validate_args = self._validate_args
         return new
 
+    def sample(
+        self,
+        sample_shape: _size = torch.Size(),
+        *,
+        generator: torch.Generator | None = None,
+    ) -> Tensor:
+        with torch.no_grad():
+            return self.rsample(sample_shape, generator=generator)
+
     def rsample(
         self,
         sample_shape: _size = torch.Size(),

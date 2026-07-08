@@ -164,24 +164,15 @@ class Distribution:
         """
         return self.variance.sqrt()
 
-    def sample(
-        self,
-        sample_shape: _size = torch.size(),
-        *,
-        generator: torch.Generator | None = None,
-    ) -> Tensor:
+    def sample(self, sample_shape: _size = torch.Size()) -> Tensor:
         """
         Generates a sample_shape shaped sample or sample_shape shaped batch of
         samples if the distribution parameters are batched.
         """
         with torch.no_grad():
-            return self.rsample(sample_shape, generator=generator)
+            return self.rsample(sample_shape)
 
-    def rsample(
-        self,
-        sample_shape: _size = torch.Size(),
-        generator: torch.Generator | None = None,
-    ) -> Tensor:
+    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
         """
         Generates a sample_shape shaped reparameterized sample or sample_shape
         shaped batch of reparameterized samples if the distribution parameters
