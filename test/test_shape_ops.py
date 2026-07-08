@@ -409,6 +409,7 @@ class TestShapeOps(TestCase):
 
     @dtypes(*all_passthru_types())
     @dtypesIfCUDA(*all_passthru_types_and(torch.chalf))
+    @dtypesIfXPU(*all_passthru_types_and(torch.chalf))
     def test_flip(self, device, dtype):
         make_from_data = partial(torch.tensor, device=device, dtype=dtype)
         make_from_size = partial(make_tensor, device=device, dtype=dtype)
@@ -861,7 +862,7 @@ class TestShapeOps(TestCase):
             torch.ops.aten.unfold_backward(grad_in, input_sizes, 0, -1, 1)
 
 
-instantiate_device_type_tests(TestShapeOps, globals())
+instantiate_device_type_tests(TestShapeOps, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()
