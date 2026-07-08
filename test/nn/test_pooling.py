@@ -28,6 +28,7 @@ from torch.testing._internal.common_device_type import (
     largeTensorTest,
     onlyAccelerator,
     onlyCPU,
+    onlyCUDA,
     onlyMPS,
     TEST_WITH_ROCM,
 )
@@ -518,6 +519,33 @@ class TestPoolingNNDeviceType(NNTestCase):
         out = avg_pool(input)
         self.assertFalse(torch.isinf(out).any())
         self.assertFalse(torch.isnan(out).any())
+
+    @onlyCUDA
+    @largeTensorTest("10GB", device="cuda")
+    def test_adaptive_avg_pool2d_backward_large_index_offsets(self, device):
+        height = 32769
+        width = 65536
+        channels = 2
+        output_width = 1024
+        input = torch.as_strided(
+            torch.empty((1,), dtype=torch.half, device=device),
+            (1, channels, height, width),
+            (0, 0, 0, 0),
+        )
+        self.assertGreater(input.numel(), torch.iinfo(torch.int32).max)
+        grad_output = torch.ones(
+            (1, channels, height, output_width), dtype=torch.half, device=device
+        )
+
+        grad_input = torch.ops.aten._adaptive_avg_pool2d_backward(grad_output, input)
+        sample = grad_input[
+            0,
+            [0, 0, 1],
+            [0, height - 1, height - 1],
+            [0, 0, width - 1],
+        ]
+        expected = torch.full_like(sample, 1 / (width // output_width))
+        self.assertEqual(sample, expected)
 
     @expectedFailureMPS  # No double, float shape prop does not work
     @dtypes(torch.float, torch.double)

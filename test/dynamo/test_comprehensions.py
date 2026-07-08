@@ -774,20 +774,24 @@ class ComprehensionTests(torch._dynamo.test_case.TestCase):
     def test_reuse_name(self):
         def fn(x):
             i = [(i + x, torch._dynamo.graph_break()) for i in range(5)]
-            return i
+            return i, x.sin()
 
         x = torch.randn(3, 3)
-        opt_fn = torch.compile(fn, backend="eager")
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, backend=backend)
         self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(len(backend.graphs), 1)
 
     def test_store_multiple(self):
         def fn(x):
             i, j, k = [(i + x, torch._dynamo.graph_break()) for i in range(3)]
-            return i, j, k
+            return i, j, k, x.sin()
 
         x = torch.randn(3, 3)
-        opt_fn = torch.compile(fn, backend="eager")
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, backend=backend)
         self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(len(backend.graphs), 1)
 
     def test_store_nonlocal(self):
         i = 0
@@ -795,13 +799,15 @@ class ComprehensionTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             nonlocal i
             i = [(i + x, torch._dynamo.graph_break()) for i in range(2)]
-            return i
+            return i, x.sin()
 
         x = torch.randn(3, 3)
-        opt_fn = torch.compile(fn, backend="eager")
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, backend=backend)
         res = fn(x)
         self.assertEqual(res, opt_fn(x))
-        self.assertEqual(i, res)
+        self.assertEqual(i, res[0])
+        self.assertEqual(len(backend.graphs), 1)
 
     def test_store_global(self):
         global _comprehension_global
@@ -811,13 +817,15 @@ class ComprehensionTests(torch._dynamo.test_case.TestCase):
             _comprehension_global = [
                 (i + x, torch._dynamo.graph_break()) for i in range(2)
             ]
-            return _comprehension_global
+            return _comprehension_global, x.sin()
 
         x = torch.randn(3, 3)
-        opt_fn = torch.compile(fn, backend="eager")
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, backend=backend)
         res = fn(x)
         self.assertEqual(res, opt_fn(x))
-        self.assertEqual(_comprehension_global, res)
+        self.assertEqual(_comprehension_global, res[0])
+        self.assertEqual(len(backend.graphs), 1)
 
     def test_store_attribute(self):
         class C:
@@ -826,21 +834,25 @@ class ComprehensionTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             obj = C()
             obj.vals = [(i + x, torch._dynamo.graph_break()) for i in range(2)]
-            return obj.vals
+            return obj.vals, x.sin()
 
         x = torch.randn(3, 3)
-        opt_fn = torch.compile(fn, backend="eager")
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, backend=backend)
         self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(len(backend.graphs), 1)
 
     def test_augmented_assign(self):
         def fn(x):
             acc = [x]
             acc += [(i + x, torch._dynamo.graph_break()) for i in range(2)]
-            return acc
+            return acc, x.sin()
 
         x = torch.randn(3, 3)
-        opt_fn = torch.compile(fn, backend="eager")
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, backend=backend)
         self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(len(backend.graphs), 1)
 
 
 @skipIfNotPy312
