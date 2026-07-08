@@ -4832,7 +4832,7 @@ def is_nonfreeable_buffers(dep: Dep) -> bool:
 # Make sure to also include your jinja templates within torch_package_data in setup.py, or this function won't be able to find them
 def load_template(name: str, template_dir: Path) -> str:
     """Load a template file and return its content."""
-    with open(template_dir / f"{name}.py.jinja") as f:
+    with open(template_dir / f"{name}.py.jinja", encoding="utf-8") as f:
         return f.read()
 
 
