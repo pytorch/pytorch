@@ -61,6 +61,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from ..graph import GraphLowering
+    from ..runtime.hints import TritonMeta
 
     # At most, the list nesting can go one layer deep.
     _OUTPUT_ARGS_TYPE = list[str | None | list[str | None]]
@@ -95,7 +96,7 @@ class DeferredCpuTritonCallWrapper:
     wrapper_name: str
     kernel_name: str
     arg_types: list[Any]
-    triton_meta: dict[str, Any] | None = None
+    triton_meta: TritonMeta | None = None
     inductor_meta: dict[str, Any] | None = None
 
     def _get_cpp_param_type(self, name: str, arg_type: Any) -> str:
@@ -421,7 +422,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         arg_types=None,
         raw_keys=None,
         raw_args=None,
-        triton_meta=None,
+        triton_meta: TritonMeta | None = None,
         inductor_meta=None,
         graph_name="",
         original_fxnode_name=None,
@@ -2357,6 +2358,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
         else:
             code.writeline(stmt)
 
+    def _codegen_assert_size_stride_grouped(
+        self, code: IndentedBuffer, asserts: list[tuple[str, str, str]], op_name: str
+    ) -> None:
+        for name, size, stride in asserts:
+            self._codegen_assert_size_stride(code, name, size, stride, op_name)
+
     def codegen_device(self, device):
         if device.type not in DEVICE_TO_ATEN:
             raise AssertionError(device.type + " not found in DEVICE_TO_ATEN")
@@ -3324,7 +3331,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         ) -> str | None | _OUTPUT_ARGS_TYPE:
             if out is None:
                 return None
-            if isinstance(out, (ir.MultiOutput, ir._CollectiveKernel)):
+            if isinstance(
+                out, (ir.MultiOutput, ir._CollectiveKernel, ir.FallbackKernel)
+            ):
                 return out.get_name()
             if isinstance(out, ir.MutationOutput):
                 mutated_buf_names = out.get_mutation_names()
