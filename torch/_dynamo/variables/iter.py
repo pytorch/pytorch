@@ -277,27 +277,19 @@ class ItertoolsVariable(VariableTracker):
             return RepeatIteratorVariable(
                 item, times=max(times_val, 0), mutation_type=ValueMutationNew()
             )
-        elif self.value is itertools.count:
-            # CPython count_new: count(start=0, step=1) accepts start/step
-            # positionally or by keyword. Only bind the unambiguous forms here;
-            # anything else (extra args, duplicate/unknown kwargs) falls through
-            # to a graph break so eager raises the CPython TypeError.
-            item = args[0] if len(args) >= 1 else None
-            step = args[1] if len(args) >= 2 else None
-            bindable = len(args) <= 2 and set(kwargs).issubset({"start", "step"})
-            if bindable and "start" in kwargs:
-                bindable = item is None
-                item = kwargs["start"]
-            if bindable and "step" in kwargs:
-                bindable = step is None
-                step = kwargs["step"]
-            if bindable:
-                iter_kwargs: dict[str, Any] = {"mutation_type": ValueMutationNew()}
-                if item is not None:
-                    iter_kwargs["item"] = item
-                if step is not None:
-                    iter_kwargs["step"] = step
-                return variables.CountIteratorVariable(**iter_kwargs)
+        elif self.value is itertools.count and not kwargs:
+            if len(args) == 0:
+                return variables.CountIteratorVariable(mutation_type=ValueMutationNew())
+            if len(args) == 1:
+                return variables.CountIteratorVariable(
+                    item=args[0], mutation_type=ValueMutationNew()
+                )
+            if len(args) == 2:
+                return variables.CountIteratorVariable(
+                    item=args[0],
+                    step=args[1],
+                    mutation_type=ValueMutationNew(),
+                )
             return super().call_function(tx, args, kwargs)
         else:
             return super().call_function(tx, args, kwargs)
@@ -523,19 +515,6 @@ class CountIteratorVariable(IteratorVariable):
         self.item = self.item.call_method(tx, "__add__", [self.step], {})
         self.advance_count += 1
         return old_item
-
-    def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        # ref: https://github.com/python/cpython/blob/3.13/Modules/itertoolsmodule.c#L4218-L4243
-        if not (self.item.is_python_constant() and self.step.is_python_constant()):
-            return super().repr_impl(tx)
-        cnt = self.item.as_python_constant()
-        step = self.step.as_python_constant()
-        # Suppress step in the repr when it is an integer equal to 1.
-        if isinstance(step, int) and step == 1:
-            result = f"count({cnt!r})"
-        else:
-            result = f"count({cnt!r}, {step!r})"
-        return ConstantVariable.create(result)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
