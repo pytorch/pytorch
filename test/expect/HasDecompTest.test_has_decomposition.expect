@@ -1044,7 +1044,6 @@ aten::nonzero
 aten::nonzero.out
 aten::nonzero_static
 aten::nonzero_static.out
-aten::normal_functional
 aten::ones.out
 aten::ormqr
 aten::ormqr.out
