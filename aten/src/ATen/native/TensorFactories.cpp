@@ -941,6 +941,21 @@ Tensor& ones_out(IntArrayRef size, Tensor& result) {
   return native::full_out(size, /*fill_value=*/1., result);
 }
 
+// SymInt-aware Meta kernel for ones
+Tensor ones_meta_symint(
+    SymIntArrayRef size,
+    std::optional<ScalarType> dtype,
+    std::optional<Layout> layout,
+    std::optional<Device> device,
+    std::optional<bool> pin_memory) {
+  TensorOptions options =
+      TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
+          pin_memory);
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      options.layout() != kSparse, "ones is not implemented for sparse layout");
+  return at::empty_symint(size, infer_full_options(/*fill_value=*/1., options));
+}
+
 Tensor ones_like(
     const Tensor& self,
     std::optional<ScalarType> dtype,

@@ -3406,6 +3406,47 @@ Tensor& _chunk_cat_out(
   return out;
 }
 
+Tensor stack_meta(TensorList tensors, int64_t dim) {
+  TORCH_CHECK(!tensors.empty(), "stack expects a non-empty TensorList");
+  auto wrapped_dim = maybe_wrap_dim(dim, tensors[0].dim() + 1);
+  if (wrapped_dim < tensors[0].dim()) {
+    auto entry_shape = tensors[0].sym_sizes();
+    for (const auto i : c10::irange(1, tensors.size())) {
+      auto shape = tensors[i].sym_sizes();
+      TORCH_CHECK(
+          shape.size() == entry_shape.size(),
+          "stack expects each tensor to be equal size, but got ",
+          entry_shape,
+          " at entry 0 and ",
+          shape,
+          " at entry ",
+          i);
+      for (const auto d : c10::irange(entry_shape.size())) {
+        TORCH_SYM_CHECK(
+            shape[d].sym_eq(entry_shape[d]),
+            "stack expects each tensor to be equal size, but got ",
+            entry_shape,
+            " at entry 0 and ",
+            shape,
+            " at entry ",
+            i);
+      }
+    }
+    auto result_sizes = entry_shape.vec();
+    result_sizes.insert(
+        result_sizes.begin() + wrapped_dim,
+        c10::SymInt(static_cast<int64_t>(tensors.size())));
+    return at::cat(tensors, wrapped_dim).view_symint(result_sizes);
+  }
+  // dim == tensors[0].dim(): cannot be expressed as a view of cat
+  std::vector<Tensor> unsqueezed;
+  unsqueezed.reserve(tensors.size());
+  for (const Tensor& t : tensors) {
+    unsqueezed.push_back(t.unsqueeze(wrapped_dim));
+  }
+  return at::cat(unsqueezed, wrapped_dim);
+}
+
 // TODO(msubkhankulov): refactor to use _stack
 Tensor stack(TensorList tensors, int64_t dim) {
   TORCH_CHECK(!tensors.empty(), "stack expects a non-empty TensorList");
@@ -3416,8 +3457,8 @@ Tensor stack(TensorList tensors, int64_t dim) {
     result_sizes.insert(result_sizes.begin() + wrapped_dim, tensors.size());
     auto out = at::cat(tensors, wrapped_dim);
     return out.view(result_sizes); // one can always split a dimension with view
-  } else { // dim = tensors[0].ndimension() cannot be efficiently handled by
-           // view
+  } else {
+    // if dim = tensors[0].ndimension(), view cannot efficiently handle it
     return at::cat(get_stack_inputs(tensors, dim), dim);
   }
 }
