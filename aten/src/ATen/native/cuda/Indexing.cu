@@ -715,7 +715,7 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<std::optional<Ten
       const int warp_size = at::cuda::warp_size();
       dim3 grid(ceil_div(num_indices, (int64_t) indices_per_block),
            std::min<int>(at::cuda::getCurrentDeviceProperties()->maxGridSize[1], ceil_div(sliceSize, (int64_t) (warp_size*UNROLL))),
-           std::min(std::max<int>(1,nElemBefore), at::cuda::getCurrentDeviceProperties()->maxGridSize[2]));
+           std::clamp<int>(nElemBefore, 1, at::cuda::getCurrentDeviceProperties()->maxGridSize[2]));
       dim3 block(warp_size, indices_per_block);
 
 #ifdef USE_ROCM
@@ -919,7 +919,7 @@ void index_put_with_sort_quantized(Tensor & self, const c10::List<std::optional<
       const int warp_size = at::cuda::warp_size();
       dim3 grid(ceil_div(num_indices, (int64_t) indices_per_block),
            std::min<int>(at::cuda::getCurrentDeviceProperties()->maxGridSize[1], ceil_div(sliceSize, (int64_t) (warp_size*UNROLL))),
-           std::min(std::max<int>(1,nElemBefore), at::cuda::getCurrentDeviceProperties()->maxGridSize[2]));
+           std::clamp<int>(nElemBefore, 1, at::cuda::getCurrentDeviceProperties()->maxGridSize[2]));
       dim3 block(warp_size, indices_per_block);
 
       AT_DISPATCH_QINT_TYPES(

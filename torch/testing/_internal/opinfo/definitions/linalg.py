@@ -2100,17 +2100,6 @@ op_db: list[OpInfo] = [
                 "TestCommon",
                 "test_floating_inputs_are_differentiable",
             ),
-            # RuntimeError: The size of tensor a (5) must match the size of tensor b (4) at non-singleton dimension 1
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_out_warning",
-                device_type="mps",
-            ),
-            # AssertionError: The values for attribute 'shape' do not match: torch.Size([3, 4]) != torch.Size([0]).
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
-            ),
             # RuntimeError: linalg.solve.triangular(); Only float is supported!
             DecorateInfo(
                 unittest.expectedFailure,

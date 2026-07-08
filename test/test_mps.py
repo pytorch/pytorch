@@ -2519,6 +2519,71 @@ class TestMPS(TestCaseMPS):
             X_mps_t = torch.linalg.solve(A_mps.mT, b_mps, left=left)
             self.assertEqual(X_cpu_t, X_mps_t)
 
+    def test_linalg_solve_batch_broadcasting(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/189134
+        # A and B with different batch shapes broadcast against each other. MPS used to solve
+        # only the first batch element and silently zero-fill the rest.
+        from functools import partial
+        from torch.testing._internal.common_utils import (
+            make_fullrank_matrices_with_distinct_singular_values,
+        )
+
+        make_A = partial(make_fullrank_matrices_with_distinct_singular_values, device="cpu", dtype=torch.float32)
+
+        def check(A_cpu, B_cpu, left):
+            X_cpu = torch.linalg.solve(A_cpu, B_cpu, left=left)
+            X_mps = torch.linalg.solve(A_cpu.to("mps"), B_cpu.to("mps"), left=left)
+            self.assertEqual(X_cpu, X_mps)
+
+        n, k = 3, 2
+        check(make_A(2, n, n), torch.randn(n, k), left=True)  # A batched, B unbatched
+        check(make_A(n, n), torch.randn(2, n, k), left=True)  # A unbatched, B batched
+        check(make_A(2, 1, n, n), torch.randn(1, 3, n, k), left=True)  # broadcast in different dims
+        check(make_A(2, n, n), torch.randn(n), left=True)  # vector rhs
+        check(make_A(2, 2, n, n), torch.randn(n), left=True)
+        check(make_A(2, n, n), torch.randn(1, k, n), left=False)  # left=False, B broadcast
+        check(make_A(n, n), torch.randn(2, k, n), left=False)  # left=False, A unbatched
+
+        # Backward: LU (A's shape) broadcasts against a batched grad through lu_solve; verify grads too.
+        def check_grad(A_cpu, B_cpu, left):
+            A_mps, B_mps = A_cpu.to("mps").requires_grad_(), B_cpu.to("mps").requires_grad_()
+            A_cpu, B_cpu = A_cpu.requires_grad_(), B_cpu.requires_grad_()
+            g = torch.randn_like(torch.linalg.solve(A_cpu, B_cpu, left=left))
+            torch.linalg.solve(A_cpu, B_cpu, left=left).backward(g)
+            torch.linalg.solve(A_mps, B_mps, left=left).backward(g.to("mps"))
+            self.assertEqual(A_cpu.grad, A_mps.grad)
+            self.assertEqual(B_cpu.grad, B_mps.grad)
+
+        check_grad(make_A(n, n), torch.randn(2, n, k), left=True)  # reverse broadcast
+        check_grad(make_A(2, n, n), torch.randn(n), left=True)  # vector rhs
+        check_grad(make_A(2, n, n), torch.randn(1, k, n), left=False)  # left=False
+
+    def test_linalg_lu_solve(self):
+        # Native Metal lu_solve: all (left, adjoint) combinations and batch broadcasting vs CPU.
+        from functools import partial
+        from torch.testing._internal.common_utils import (
+            make_fullrank_matrices_with_distinct_singular_values,
+        )
+
+        make_A = partial(make_fullrank_matrices_with_distinct_singular_values, device="cpu", dtype=torch.float32)
+        n, k = 4, 3
+
+        def check(A_cpu, B_cpu, left, adjoint):
+            LU_cpu, piv_cpu = torch.linalg.lu_factor(A_cpu)
+            X_cpu = torch.linalg.lu_solve(LU_cpu, piv_cpu, B_cpu, left=left, adjoint=adjoint)
+            X_mps = torch.linalg.lu_solve(LU_cpu.to("mps"), piv_cpu.to("mps"), B_cpu.to("mps"), left=left, adjoint=adjoint)
+            self.assertEqual(X_cpu, X_mps)
+
+        for a_batch, b_batch in [((), ()), ((2,), (2,)), ((), (4,)), ((2,), ()), ((2, 1), (1, 3))]:
+            for left in [True, False]:
+                for adjoint in [True, False]:
+                    A = make_A(*a_batch, n, n)
+                    mat = (n, k) if left else (k, n)
+                    check(A, torch.randn(*b_batch, *mat), left, adjoint)
+
+        # multi-block (n > 32) path
+        check(make_A(2, 40, 40), torch.randn(2, 40, 5), left=True, adjoint=False)
+
     def test_linalg_det(self):
         from torch.testing._internal.common_utils import make_fullrank_matrices_with_distinct_singular_values
 
