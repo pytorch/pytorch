@@ -1335,11 +1335,11 @@ def _free_unbacked_symbols_with_path(
         and not is_batchedtensor(a)
         and not is_gradtrackingtensor(a)
     ):
-        from torch._subclasses.fake_tensor import FakeTensor
+        from torch._subclasses.fake_tensor import FakeTensor, maybe_get_real_tensor
 
         if not isinstance(a, FakeTensor):
             raise AssertionError(f"Expected FakeTensor, got {type(a)}")
-        match_tensor(a, a.real_tensor)
+        match_tensor(a, maybe_get_real_tensor(a))
     elif (
         isinstance(a, (torch.SymInt, torch.SymFloat))
         and isinstance(s := expr(a), sympy.Symbol)

@@ -12,7 +12,7 @@ from torch._export.pass_infra.node_metadata import NodeMetadata
 from torch._export.pass_infra.proxy_value import ProxyValue
 from torch._higher_order_ops.map import _unstack_pytree
 from torch._subclasses import FakeTensor, UnsupportedFakeTensorException
-from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensorMode, maybe_get_fake_constant
 from torch.fx import traceback as fx_traceback
 from torch.fx.experimental.proxy_tensor import PythonKeyTracer
 from torch.fx.experimental.symbolic_shapes import (
@@ -82,9 +82,9 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
                     self.root.add_module(name_submodule, a)
                     self.submodules[a] = name_submodule
             elif isinstance(a, FakeTensor):
-                if not hasattr(a, "constant") or a.constant is None:
+                if maybe_get_fake_constant(a) is None:
                     raise ExportPassBaseError(f"Cannot add {a} to graph.")
-                a = a.constant
+                a = maybe_get_fake_constant(a)
             node = super().create_arg(a)
             if (
                 isinstance(a, torch.Tensor)

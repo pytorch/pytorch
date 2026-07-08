@@ -62,7 +62,10 @@ import torch.utils._pytree as pytree
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import counters
 from torch._prims_common import is_integer_dtype
-from torch._subclasses.fake_tensor import unset_fake_temporarily
+from torch._subclasses.fake_tensor import (
+    maybe_get_fake_constant,
+    unset_fake_temporarily,
+)
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import guard_or_false, statically_known_true
 from torch.fx.graph_module import _get_attr
@@ -2178,7 +2181,7 @@ def gen_register_replacement(
         pat = getattr(m, unique_name)
 
     for arg in pytree.tree_iter(example_inputs):
-        if isinstance(arg, FakeTensor) and arg.constant is not None:
+        if isinstance(arg, FakeTensor) and maybe_get_fake_constant(arg) is not None:
             # This can be a problem - small fake tensors (e.g. `tensor(2)`) will
             # hold onto their original constant value - and by stashing it here
             # will cause a memory leak if the constant value is on GPU.
