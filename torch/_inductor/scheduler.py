@@ -1080,6 +1080,9 @@ class SchedulerBuffer:
             raise AssertionError("expected op to be set")
         return op.get_name()
 
+    def is_ordering_only(self) -> bool:
+        return self.node.ordering_only
+
     def __hash__(self) -> int:
         return hash(self.node.name)
 
@@ -4763,7 +4766,7 @@ class Scheduler:
                     )
                 for alt_name in buf.get_mutations():
                     alt_name = rename(alt_name)
-                    is_ordering_only = getattr(buf, "ordering_only", False)
+                    is_ordering_only = buf.is_ordering_only()
                     if is_ordering_only:
                         add_user(alt_name, node, is_weak=True)
                         node.add_fake_dep(
