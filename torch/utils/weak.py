@@ -4,7 +4,6 @@ from __future__ import annotations
 import collections.abc as _collections_abc
 import weakref
 from collections.abc import Mapping, MutableMapping
-from typing_extensions import Self
 from weakref import ref
 
 from torch import Tensor
@@ -347,29 +346,18 @@ class WeakIdKeyDictionary(MutableMapping):
 WeakTensorKeyDictionary = WeakIdKeyDictionary
 
 
-class TensorWeakRef(weakref.ref):
+class TensorWeakRef:
     """Wrapper around a weak ref of a Tensor that handles the _fix_weakref() call required when unwrapping a Tensor weakref."""
 
-    # Keep .ref visible to BC tooling while implementing it as a property below
-    # to avoid the self-reference cycle that storing self.ref = self would create.
     ref: WeakRef[Tensor]
 
-    __slots__ = ["_id"]
-
-    def __new__(cls, tensor: Tensor) -> Self:
+    def __init__(self, tensor: Tensor) -> None:
         if not isinstance(tensor, Tensor):
             raise AssertionError(f"expected torch.Tensor, got {type(tensor)}.")
-        return weakref.ref.__new__(cls, tensor)
-
-    def __init__(self, tensor: Tensor) -> None:
-        self._id = id(tensor)
-
-    @property
-    def ref(self) -> TensorWeakRef:
-        return self
+        self.ref = weakref.ref(tensor)
 
     def __call__(self):
-        out = super().__call__()
+        out = self.ref()
         if out is None:
             return out
         if not isinstance(out, Tensor):
@@ -377,15 +365,3 @@ class TensorWeakRef(weakref.ref):
         # TODO, add _fix_weakref type binding
         out._fix_weakref()  # type: ignore[attr-defined]
         return out
-
-    def __hash__(self):
-        return self._id
-
-    def __eq__(self, other):
-        if not isinstance(other, TensorWeakRef):
-            return NotImplemented
-        a = self()
-        b = other()
-        if a is not None and b is not None:
-            return a is b
-        return self is other
