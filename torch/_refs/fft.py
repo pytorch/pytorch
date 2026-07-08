@@ -71,6 +71,16 @@ def _promote_type_fft(
 
     if maybe_support_half:
         allowed_types.append(torch.float16)
+        # bfloat16 is supported for FFT on CUDA/XPU devices, but there is no
+        # corresponding "complex bfloat16" dtype (corresponding_complex_dtype
+        # maps it to complex64). Promote bfloat16 -> float32 here so that:
+        #   * the decomposition output dtype (complex64) matches aten, and
+        #   * a real dtype conversion happens, so the result never aliases the
+        #     input. Otherwise, for size-1 inputs the prim would return a view
+        #     while aten returns a fresh tensor, breaking view-consistency
+        #     (test_python_ref__refs_fft_*_cuda_bfloat16).
+        if dtype == torch.bfloat16:
+            dtype = torch.float32
     torch._check(dtype in allowed_types, lambda: f"Unsupported dtype {dtype}")
 
     if require_complex:
