@@ -7,6 +7,7 @@ from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
 from torch.types import _Number, _size
 
+
 __all__ = ["Gamma"]
 
 
