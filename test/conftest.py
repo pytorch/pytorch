@@ -304,6 +304,41 @@ def pytest_collection_modifyitems(items: list[Any]) -> None:
     items.extend(filtered_items)
 
 
+def _spawns_multiple_processes(cls: type | None) -> bool:
+    """
+    A distributed test needs multiple GPUs iff its class spawns multiple
+    processes. This is encoded by the base class: MultiProcessTestCase and
+    MultiProcContinuousTest fork `world_size` subprocesses, one per GPU. Plain
+    TestCase and MultiThreadedTestCase run in a single process (one GPU).
+
+    Returns True (needs multiple GPUs) on any ambiguity, so we never route a
+    process-spawning test to a single-GPU runner.
+    """
+    if cls is None:
+        return True
+    try:
+        from torch.testing._internal.common_distributed import (
+            MultiProcContinuousTest,
+            MultiProcessTestCase,
+        )
+    except Exception:
+        # Distributed unavailable: no test can spawn processes, so nothing is
+        # multiproc and the single-GPU config runs everything.
+        return False
+    return issubclass(cls, (MultiProcessTestCase, MultiProcContinuousTest))
+
+
+def pytest_itemcollected(item: Any) -> None:
+    """
+    Auto-apply the `multiproc` marker based on the resolved test class. Runs
+    per-item during collection, before pytest applies `-m` deselection, so the
+    distributed CI configs can partition a file into multiproc (multi-GPU) and
+    `not multiproc` (single-GPU) halves without touching the test source.
+    """
+    if _spawns_multiple_processes(getattr(item, "cls", None)):
+        item.add_marker("multiproc")
+
+
 class StepcurrentPlugin:
     # Modified fromo _pytest/stepwise.py in order to save the currently running
     # test instead of the last failed test
