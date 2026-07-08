@@ -545,12 +545,9 @@ class ContinueExecutionCache:
                             create_instruction("STORE_FAST", argval=name),
                         ]
                     )
-                tensor_resume_arg_indexes_set = set(tensor_resume_arg_indexes)
                 for idx in tensor_resume_arg_indexes:
                     if idx >= 2 + nstack:
                         prefix.extend(create_clear_resume_arg(resume_args_varname, idx))
-            else:
-                tensor_resume_arg_indexes_set = set()
 
             cleanup: list[Instruction] = []
             hooks = {fn.stack_index: fn for fn in setup_fns}
@@ -577,7 +574,7 @@ class ContinueExecutionCache:
                         # NOTE: we assume that current stack var is a context manager CLASS!
                         # Load args for context variable and construct it
                         prefix.extend(_load_tuple_and_call(stack_ctx_vars_d[stack_i]))
-                    if boxed_resume and 2 + stack_i in tensor_resume_arg_indexes_set:
+                    if boxed_resume:
                         prefix.extend(
                             create_clear_resume_arg(resume_args_varname, 2 + stack_i)
                         )
