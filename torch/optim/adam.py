@@ -393,6 +393,8 @@ def _single_tensor_adam(
     else:
         beta1_dict = None
 
+    fp16_min_subnormal = 5.960464477539063e-08
+
     for i, param in enumerate(params):
         grad = grads[i] if not maximize else -grads[i]
         exp_avg = exp_avgs[i]
@@ -510,19 +512,35 @@ def _single_tensor_adam(
                 max_exp_avg_sqs[i].copy_(torch.maximum(max_exp_avg_sq, exp_avg_sq))
 
                 # Uses the max. for normalizing running avg. of gradient
-                # Folds in (admittedly ugly) 1-elem step_size math here to avoid extra param-set-sized read+write
-                # (can't fold it into addcdiv_ below because addcdiv_ requires value is a Number, not a Tensor)
-                denom = (
-                    max_exp_avg_sqs[i].sqrt() / (bias_correction2_sqrt * step_size_neg)
-                ).add_(eps / step_size_neg)
+                denom = max_exp_avg_sqs[i].sqrt()
             else:
-                denom = (
-                    exp_avg_sq.sqrt() / (bias_correction2_sqrt * step_size_neg)
-                ).add_(eps / step_size_neg)
+                denom = exp_avg_sq.sqrt()
 
+            is_float16 = denom.dtype is torch.float16
             if differentiable:
-                param.addcdiv_(exp_avg.clone(), denom)
+                exp_avg_for_update = exp_avg.clone()
+                if is_float16:
+                    denom = denom.float()
+                    exp_avg_for_update = exp_avg_for_update.float()
+                denom = denom / bias_correction2_sqrt
+                denom = denom + eps
+                param.addcdiv_(exp_avg_for_update * step_size_neg, denom)
+            elif is_float16:
+                # float16 cannot represent the default eps. Keep the denominator
+                # nonzero without materializing fp32 buffers.
+                denom.div_(bias_correction2_sqrt)
+                denom.add_(eps)
+                if eps > 0:
+                    denom.clamp_min_(fp16_min_subnormal)
+                denom.div_(step_size_neg)
+                param.addcdiv_(exp_avg, denom)
             else:
+                # Build the folded denominator's numerator before dividing by
+                # the step size. This keeps the numerator nonzero for untouched
+                # rows, so lr=0 gives an infinite denominator instead of
+                # 0 / -0 -> NaN.
+                denom.add_(eps * bias_correction2_sqrt)
+                denom.div_(bias_correction2_sqrt * step_size_neg)
                 param.addcdiv_(exp_avg, denom)
         else:
             step = _get_value(step_t)
@@ -648,6 +666,7 @@ def _multi_tensor_adam(
         device_exp_avgs = cast(list[Tensor], device_exp_avgs_)
         device_exp_avg_sqs = cast(list[Tensor], device_exp_avg_sqs_)
         device_state_steps = cast(list[Tensor], device_state_steps_)
+        fp16_min_subnormal = 5.960464477539063e-08
 
         device = device_params[0].device
         if beta1_dict is not None and device not in beta1_dict:
@@ -763,6 +782,10 @@ def _multi_tensor_adam(
 
             torch._foreach_div_(exp_avg_sq_sqrt, bias_correction2_sqrt)
             torch._foreach_add_(exp_avg_sq_sqrt, eps)
+            if device_params[0].dtype is torch.float16 and eps > 0:
+                # float16 cannot represent the default eps. Keep the denominator
+                # nonzero without materializing fp32 buffers.
+                torch._foreach_clamp_min_(exp_avg_sq_sqrt, fp16_min_subnormal)
             torch._foreach_div_(exp_avg_sq_sqrt, step_size)
 
             # at this point, exp_avg_sq_sqrt = - (1 - beta^t) * [sqrt(exp_avg_sq / (1 - beta2^t)) + eps] / lr
