@@ -1415,26 +1415,6 @@ except RuntimeError as e:
             self.assertTrue(input.is_pinned())
             self.assertTrue(target.is_pinned())
 
-    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
-    def test_multiple_dataloaders(self):
-        for multiprocessing_context in supported_multiprocessing_contexts:
-            loader1_it = iter(self._get_data_loader(self.dataset, num_workers=1))
-            loader2_it = iter(
-                self._get_data_loader(
-                    self.dataset,
-                    num_workers=2,
-                    multiprocessing_context=multiprocessing_context,
-                )
-            )
-            next(loader1_it)
-            next(loader1_it)
-            next(loader2_it)
-            next(loader2_it)
-            next(loader1_it)
-            next(loader2_it)
-            del loader1_it
-            del loader2_it
-
     @skipIfXpu
     @unittest.skipIf(IS_S390X, "Unexpectedly succeeds on s390x")
     # Test that DataLoader properly handles worker segfaults
@@ -1905,105 +1885,6 @@ except RuntimeError as e:
             AssertionError, "ChainDataset only supports IterableDataset"
         ):
             list(iter(ChainDataset([dataset1, self.dataset])))
-
-    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
-    def test_multiprocessing_contexts(self):
-        reference = [
-            torch.arange(3),
-            torch.arange(3, 6),
-            torch.arange(6, 9),
-            torch.arange(9, 11),
-        ]
-        counting_ds_n = 11
-        dl_common_args = dict(num_workers=3, batch_size=3, pin_memory=False)
-        for ctx in supported_multiprocessing_contexts:
-            # windows and jetson devices don't support sharing cuda tensor; ROCm does not yet fully support IPC
-            if (
-                ctx in ["spawn", "forkserver"]
-                and TEST_CUDA
-                and not IS_WINDOWS
-                and not IS_JETSON
-            ):
-                ds_cls = CUDACountingDataset
-            else:
-                ds_cls = CountingDataset
-            self.assertEqual(
-                reference,
-                list(
-                    self._get_data_loader(
-                        ds_cls(counting_ds_n),
-                        multiprocessing_context=ctx,
-                        **dl_common_args,
-                    )
-                ),
-            )
-            if ctx is not None:
-                # test ctx object
-                ctx = mp.get_context(ctx)
-                self.assertEqual(
-                    reference,
-                    list(
-                        self._get_data_loader(
-                            ds_cls(counting_ds_n),
-                            multiprocessing_context=ctx,
-                            **dl_common_args,
-                        )
-                    ),
-                )
-
-    def _test_multiprocessing_iterdatapipe(self, with_dill):
-        # Testing to make sure that function from global scope (e.g. imported from library) can be serialized
-        # and used with multiprocess DataLoader
-
-        reference = [
-            torch.as_tensor([[2, 3, 4, 5]], dtype=torch.int64),
-            torch.as_tensor([[2, 3, 4, 5]], dtype=torch.int64),
-        ]
-        datapipe: IterDataPipe = IterableWrapper([[1, 2, 3, 4], [1, 2, 3, 4, 5, 6]])
-        datapipe = datapipe.map(row_processor)
-        datapipe = (
-            datapipe.filter(lambda row: len(row) == 4)
-            if with_dill
-            else datapipe.filter(filter_len)
-        )
-
-        dl_common_args = dict(
-            num_workers=2, batch_size=2, shuffle=True, pin_memory=False
-        )
-        for ctx in supported_multiprocessing_contexts:
-            self.assertEqual(
-                reference,
-                [
-                    t.type(torch.int64)
-                    for t in self._get_data_loader(
-                        datapipe, multiprocessing_context=ctx, **dl_common_args
-                    )
-                ],
-            )
-            if ctx is not None:
-                # test ctx object
-                ctx = mp.get_context(ctx)
-                self.assertEqual(
-                    reference,
-                    [
-                        t.type(torch.int64)
-                        for t in self._get_data_loader(
-                            datapipe, multiprocessing_context=ctx, **dl_common_args
-                        )
-                    ],
-                )
-
-    @skipIfNoNumpy
-    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
-    def test_multiprocessing_iterdatapipe(self):
-        self._test_multiprocessing_iterdatapipe(with_dill=False)
-
-    @unittest.expectedFailure
-    @skipIfNoNumpy
-    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
-    @skipIfNoDill
-    def test_multiprocessing_iterdatapipe_with_dill(self):
-        self._test_multiprocessing_iterdatapipe(with_dill=True)
 
     def test_worker_seed(self):
         num_workers = 6
@@ -3070,7 +2951,7 @@ except RuntimeError as e:
             dataloader = DataLoader(self.dataset, batch_size=2, num_workers=1000)
 
 
-class TestDataLoaderDeviceType(TestCase):
+class TestDataLoaderDevice(TestCase):
     @parametrize(
         "context",
         [ctx for ctx in supported_multiprocessing_contexts if ctx is not None],
@@ -3304,6 +3185,17 @@ class TestDictDataLoader(TestCase):
                 self.assertEqual(n.size(), torch.Size([batch_size]))
                 self.assertEqual(n[0], idx)
                 self.assertEqual(n[1], idx + 1)
+
+
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "Fails with TSAN with the following error: starting new threads after multi-threaded "
+    "fork is not supported. Dying (set die_after_fork=0 to override)",
+)
+class TestDictDataLoaderDevice(TestCase):
+    def setUp(self):
+        super().setUp()
+        self.dataset = DictDataset()
 
     @unittest.skipIf(not TEST_PIN_MEMORY, "pin_memory requires accelerator")
     def test_pin_memory(self):
@@ -3583,6 +3475,141 @@ if __name__ == '__main__':
 """,
             ]
         )
+
+
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "Fails with TSAN with the following error: starting new threads after multi-threaded "
+    "fork is not supported. Dying (set die_after_fork=0 to override)",
+)
+class TestDataLoaderCUDA(TestCase):
+    def setUp(self):
+        super().setUp()
+        self.data = torch.randn(100, 2, 3, 5)
+        self.labels = torch.randperm(50).repeat(2)
+        self.dataset = TensorDataset(self.data, self.labels)
+
+    def _get_data_loader(self, dataset, **kwargs):
+        return DataLoader(dataset, **kwargs)
+
+    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
+    def test_multiple_dataloaders(self):
+        for multiprocessing_context in supported_multiprocessing_contexts:
+            loader1_it = iter(self._get_data_loader(self.dataset, num_workers=1))
+            loader2_it = iter(
+                self._get_data_loader(
+                    self.dataset,
+                    num_workers=2,
+                    multiprocessing_context=multiprocessing_context,
+                )
+            )
+            next(loader1_it)
+            next(loader1_it)
+            next(loader2_it)
+            next(loader2_it)
+            next(loader1_it)
+            next(loader2_it)
+            del loader1_it
+            del loader2_it
+
+    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
+    def test_multiprocessing_contexts(self):
+        reference = [
+            torch.arange(3),
+            torch.arange(3, 6),
+            torch.arange(6, 9),
+            torch.arange(9, 11),
+        ]
+        counting_ds_n = 11
+        dl_common_args = dict(num_workers=3, batch_size=3, pin_memory=False)
+        for ctx in supported_multiprocessing_contexts:
+            # windows and jetson devices don't support sharing cuda tensor; ROCm does not yet fully support IPC
+            if (
+                ctx in ["spawn", "forkserver"]
+                and TEST_CUDA
+                and not IS_WINDOWS
+                and not IS_JETSON
+            ):
+                ds_cls = CUDACountingDataset
+            else:
+                ds_cls = CountingDataset
+            self.assertEqual(
+                reference,
+                list(
+                    self._get_data_loader(
+                        ds_cls(counting_ds_n),
+                        multiprocessing_context=ctx,
+                        **dl_common_args,
+                    )
+                ),
+            )
+            if ctx is not None:
+                # test ctx object
+                ctx = mp.get_context(ctx)
+                self.assertEqual(
+                    reference,
+                    list(
+                        self._get_data_loader(
+                            ds_cls(counting_ds_n),
+                            multiprocessing_context=ctx,
+                            **dl_common_args,
+                        )
+                    ),
+                )
+
+    def _test_multiprocessing_iterdatapipe(self, with_dill):
+        # Testing to make sure that function from global scope (e.g. imported from library) can be serialized
+        # and used with multiprocess DataLoader
+
+        reference = [
+            torch.as_tensor([[2, 3, 4, 5]], dtype=torch.int64),
+            torch.as_tensor([[2, 3, 4, 5]], dtype=torch.int64),
+        ]
+        datapipe: IterDataPipe = IterableWrapper([[1, 2, 3, 4], [1, 2, 3, 4, 5, 6]])
+        datapipe = datapipe.map(row_processor)
+        datapipe = (
+            datapipe.filter(lambda row: len(row) == 4)
+            if with_dill
+            else datapipe.filter(filter_len)
+        )
+
+        dl_common_args = dict(
+            num_workers=2, batch_size=2, shuffle=True, pin_memory=False
+        )
+        for ctx in supported_multiprocessing_contexts:
+            self.assertEqual(
+                reference,
+                [
+                    t.type(torch.int64)
+                    for t in self._get_data_loader(
+                        datapipe, multiprocessing_context=ctx, **dl_common_args
+                    )
+                ],
+            )
+            if ctx is not None:
+                # test ctx object
+                ctx = mp.get_context(ctx)
+                self.assertEqual(
+                    reference,
+                    [
+                        t.type(torch.int64)
+                        for t in self._get_data_loader(
+                            datapipe, multiprocessing_context=ctx, **dl_common_args
+                        )
+                    ],
+                )
+
+    @skipIfNoNumpy
+    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
+    def test_multiprocessing_iterdatapipe(self):
+        self._test_multiprocessing_iterdatapipe(with_dill=False)
+
+    @unittest.expectedFailure
+    @skipIfNoNumpy
+    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
+    @skipIfNoDill
+    def test_multiprocessing_iterdatapipe_with_dill(self):
+        self._test_multiprocessing_iterdatapipe(with_dill=True)
 
 
 class NamedTupleDataset(Dataset):
@@ -3966,7 +3993,7 @@ class TestOutOfOrderDataLoader(TestCase):
         self.assertEqual(expected_data, data)
 
 
-instantiate_device_type_tests(TestDataLoaderDeviceType, globals())
+instantiate_device_type_tests(TestDataLoaderDevice, globals())
 
 
 if __name__ == "__main__":
