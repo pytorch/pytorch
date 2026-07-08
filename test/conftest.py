@@ -7,7 +7,7 @@ import sys
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 from types import MethodType
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, TypeGuard
 
 import pytest
 from _pytest.config import Config, filename_arg
@@ -33,6 +33,10 @@ except ImportError:
 
 if TYPE_CHECKING:
     from _pytest._code.code import ReprFileLocation
+    from torch.testing._internal.common_distributed import (
+        MultiProcContinuousTest,
+        MultiProcessTestCase,
+    )
 
 # a lot of this file is copied from _pytest.junitxml and modified to get rerun info
 
@@ -304,7 +308,9 @@ def pytest_collection_modifyitems(items: list[Any]) -> None:
     items.extend(filtered_items)
 
 
-def _spawns_multiple_processes(cls: type | None) -> bool:
+def _spawns_multiple_processes(
+    cls: type | None,
+) -> TypeGuard["type[MultiProcessTestCase | MultiProcContinuousTest] | None"]:
     """
     A distributed test needs multiple GPUs iff its class spawns multiple
     processes. This is encoded by the base class: MultiProcessTestCase and
