@@ -1562,6 +1562,27 @@ class DecoratorTests(PytreeRegisteringTestCase):
         decorator = torch._dynamo.assume_constant_result(specialize_args=True)
         self.assertEqual(self._run_specialize_args(decorator, calls), 3)
 
+    def test_assume_constant_result_specialize_args_symbolic_scalars(self):
+        @torch._dynamo.assume_constant_result(specialize_args=True)
+        def select(n, f, b):
+            return n * 2 if b else f
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(x, n, f, b):
+            return x * select(n, f, b)
+
+        x = torch.ones(4)
+        # The first call traces with concrete scalars; subsequent value
+        # changes retrace with n/f wrapped as symbolic scalars (automatic
+        # dynamic), which must specialize instead of graph breaking.
+        self.assertEqual(fn(x, 3, 1.0, True), x * 6)
+        self.assertEqual(fn(x, 5, 1.0, True), x * 10)
+        self.assertEqual(fn(x, 5, 7.5, False), x * 7.5)
+        self.assertEqual(fn(x, 5, 7.5, False), x * 7.5)
+        self.assertEqual(cnts.frame_count, 3)
+
     def test_assume_constant_result_specialize_args_list(self):
         @torch._dynamo.assume_constant_result(specialize_args=True)
         def select(sizes):

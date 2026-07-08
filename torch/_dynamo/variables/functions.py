@@ -1962,6 +1962,12 @@ def invoke_and_store_as_constant(
                     "any guard",
                 ],
             )
+        if isinstance(x, variables.SymNodeVariable):
+            # A symbolic scalar (e.g. an int made dynamic by automatic dynamic
+            # shapes) has no single Python value to bake; evaluate_expr()
+            # specializes it to the traced value and installs a shape-env
+            # guard, so a different value recompiles and re-invokes fn.
+            return x.evaluate_expr(tx.output)
         if x.source is None:
             try:
                 return x.as_python_constant()

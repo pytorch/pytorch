@@ -208,7 +208,10 @@ def assume_constant_result(fn=None, *, specialize_args=False):  # type: ignore[n
     :func:`torch.utils._pytree.register_constant` or
     ``torch._library.opaque_object.register_custom_class`` with
     ``typ="constant"`` (guarded via their ``__eq__``), dicts with literal
-    keys, and dataclasses whose fields are recursively supported. Anything
+    keys, and dataclasses whose fields are recursively supported. Symbolic
+    scalars (an ``int``/``float``/``bool`` made dynamic by automatic dynamic
+    shapes) are specialized to their traced value with a shape-env guard.
+    Anything
     else - arbitrary objects, tensors, or arguments mutated inside the
     compiled region before the call - triggers a graph break rather than
     silently falling back to identity guarding. In particular, tensor
