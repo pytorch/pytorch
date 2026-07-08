@@ -323,6 +323,10 @@ function install_flash_attn_cute() {
   else
     pip_install flash-attn-4==4.0.0b17
   fi
+  # flash-attn-4 pulls quack unpinned; newer quack needs cutlass._mlir_helpers,
+  # absent from the gated cutlass-dsl 4.5.2. Pin quack to the SHA torch vendors
+  # (torch/_vendor/quack), which uses cutlass._mlir and works with 4.5.2. See #188477.
+  pip_install "git+https://github.com/Dao-AILab/quack.git@99bd7973bf3dc6db40961e413d4bdfea6c6fee3e"
   echo "FlashAttention 4 installation complete."
 }
 
