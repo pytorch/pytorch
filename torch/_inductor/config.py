@@ -2875,6 +2875,11 @@ class trace:
         os.environ.get("TORCH_COMPILE_DEBUG_EXTEND", "0") == "1"
     )
 
+    # Add Inductor fusion graph metadata back into exported PyTorch profiler timelines.
+    provenance_tracking_fusion = (
+        os.environ.get("TORCH_COMPILE_DEBUG_FUSION", "0") == "1"
+    )
+
     # Maximum number of trace events to process in profiler timeline post-processing.
     # If the trace exceeds this limit, provenance tracking will be skipped to avoid OOM.
     # Set to 0 to disable this protection.
@@ -2897,8 +2902,12 @@ class trace:
     )
 
 
+def provenance_tracking_to_profiler_timeline() -> bool:
+    return trace.provenance_tracking_to_timeline or trace.provenance_tracking_fusion
+
+
 def effective_provenance_tracking_level() -> int:
-    if trace.provenance_tracking_to_timeline:
+    if provenance_tracking_to_profiler_timeline():
         return max(trace.provenance_tracking_level, 1)
     return trace.provenance_tracking_level
 

@@ -357,10 +357,51 @@ _inductor_pre_grad_node_stack_trace: dict[str, str] = {}
 _inductor_kernel_stack_trace: dict[str, list[str]] = {}
 _kernel_information_jsons: dict[str, dict[str, Any]] = {}
 _inductor_kernel_provenance_debug_handle: int = 0
+_INDUCTOR_TIMELINE_ARTIFACTS_KEY = "__artifacts__"
+_INDUCTOR_TIMELINE_ARTIFACT_FILES = {
+    "readable": "fx_graph_readable.py",
+    "runnable": "fx_graph_runnable.py",
+    "transformed": "fx_graph_transformed.py",
+    "ir_pre_fusion": "ir_pre_fusion.txt",
+    "ir_post_fusion": "ir_post_fusion.txt",
+    "output_code": "output_code.py",
+}
 
 
 def get_kernel_information_jsons() -> dict[str, dict[str, Any]]:
     return _kernel_information_jsons
+
+
+def create_inductor_timeline_artifact_manifest() -> dict[str, Any]:
+    """Create a manifest for debug artifacts tied to the active Inductor graph."""
+    try:
+        debug_path = getattr(V.debug, "_path", None)
+        if not debug_path:
+            return {}
+
+        artifacts = {
+            name: filename
+            for name, filename in _INDUCTOR_TIMELINE_ARTIFACT_FILES.items()
+            if os.path.exists(os.path.join(debug_path, filename))
+        }
+        if not artifacts:
+            return {}
+
+        return {
+            "dir": debug_path,
+            "artifacts": artifacts,
+        }
+    except Exception as e:
+        signpost_event(
+            "inductor",
+            "provenance_tracking_error",
+            {
+                "function": "create_inductor_timeline_artifact_manifest",
+                "error_msg": str(e),
+                "stack_trace": traceback.format_exc(),
+            },
+        )
+        return {}
 
 
 def alias_kernel_provenance(original_kernel_name: str, alias_kernel_name: str) -> None:
@@ -1126,7 +1167,7 @@ def dump_inductor_provenance_info() -> dict[str, Any]:
         return {}
 
 
-def create_kernel_information_json() -> dict[str, dict[str, list[str]]]:
+def create_kernel_information_json() -> dict[str, Any]:
     """Create kernel information JSON"""
     try:
         global _inductor_post_to_pre_grad_nodes
@@ -1153,6 +1194,11 @@ def create_kernel_information_json() -> dict[str, dict[str, list[str]]]:
                 "post_grad_nodes": post_grad_nodes,
                 "pre_grad_nodes": list(pre_grad_nodes),
             }
+
+        if config.trace.provenance_tracking_fusion:
+            artifact_manifest = create_inductor_timeline_artifact_manifest()
+            if artifact_manifest:
+                result[_INDUCTOR_TIMELINE_ARTIFACTS_KEY] = artifact_manifest
 
         return result
     except Exception as e:
