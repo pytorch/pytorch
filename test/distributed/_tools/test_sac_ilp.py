@@ -37,13 +37,13 @@ except ImportError:
     sac_milp = None  # type: ignore[assignment]
 
 
-# TODO(multiproc-marker): These tests are single-process but their AC-decision
+# TODO(multigpu-marker): These tests are single-process but their AC-decision
 # assertions depend on RuntimeEstimator's roofline runtime estimates, which read
 # the live GPU's peak FLOPS / DRAM bandwidth -- so they fail when the runner GPU
-# differs (e.g. L4 vs T4). Temporarily marked multiproc to keep them on the
+# differs (e.g. L4 vs T4). Temporarily marked multigpu to keep them on the
 # original multi-GPU box until the runtime estimator is pinned to a fixed device
 # spec (torch/_inductor/analysis/device_info.py) to make them hardware-independent.
-@pytest.mark.multiproc
+@pytest.mark.multigpu
 class TestSACILP(TestCase):
     def setUp(self):
         super().setUp()
