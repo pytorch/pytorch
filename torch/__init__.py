@@ -381,33 +381,12 @@ def _preload_cuda_deps(err: OSError | None = None, required: bool = True) -> Non
     _preload_cuda_lib("nvtx", "libnvToolsExt.so.*[0-9]", required=False)
 
 
-# ROCm runtime libs a TheRock-built libtorch DT_NEEDEDs, mirroring the set
-# bundled by .ci/manywheel/repair_wheel.py::ROCM_SO_FILES. Ordered leaf-first so
-# that RTLD_GLOBAL preloading satisfies inter-lib NEEDED entries as we go.
-_rocm_core_libs: list[str] = [
-    "libamd_comgr.so",
-    "libhsa-runtime64.so",
-    "libamdhip64.so",
-    "libhiprtc.so",
-    "librocm-core.so",
-    "librocm_smi64.so",
-    "libroctx64.so",
-    "libroctracer64.so",
-    "librocblas.so",
-    "libhipblas.so",
-    "libhipblaslt.so",
-    "librocfft.so",
-    "libhipfft.so",
-    "librocrand.so",
-    "libhiprand.so",
-    "librocsolver.so",
-    "libhipsolver.so",
-    "librocsparse.so",
-    "libhipsparse.so",
-    "libhipsparselt.so",
-    "libMIOpen.so",
-    "librccl.so",
-]
+# ROCm runtime libs a TheRock-built libtorch DT_NEEDEDs. These share a single
+# source of truth with the set bundled by .ci/manywheel/repair_wheel.py: both
+# import the basenames from torch/_rocm_libs.py (a dependency-free module).
+# ROCM_SO_FILES is ordered leaf-first so that RTLD_GLOBAL preloading satisfies
+# inter-lib NEEDED entries as we go.
+from torch._rocm_libs import ROCM_SO_FILES as _rocm_core_libs
 
 
 def _preload_rocm_deps() -> None:
