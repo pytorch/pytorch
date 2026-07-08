@@ -42,7 +42,6 @@ from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
     instantiate_device_type_tests,
     onlyAccelerator,
-    onlyCUDA,
     skipMPSIf,
 )
 from torch.testing._internal.common_dtype import all_types_and_complex_and
@@ -4973,7 +4972,7 @@ class TestSerializationDeviceType(TestCase):
                 sd_loaded[k] = sd_loaded[k].zero_()
             self.assertEqual(sd_loaded, sd_zeroed)
 
-    @onlyCUDA
+    @onlyAccelerator
     def test_serialization_mmap_loading_with_map_location(self, device):
         class DummyModel(torch.nn.Module):
             def __init__(self) -> None:
@@ -4991,7 +4990,7 @@ class TestSerializationDeviceType(TestCase):
             torch.save(state_dict, f)
             result = torch.load(f, mmap=True)
             for v in result.values():
-                self.assertEqual(v.device.type, device.type)
+                self.assertEqual(v.device, torch.device(device))
 
     @parametrize("materialize_fake", (True, False))
     def test_skip_data_serialization(self, device, materialize_fake):
