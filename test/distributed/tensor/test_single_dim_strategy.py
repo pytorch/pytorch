@@ -16,9 +16,11 @@ from torch.distributed.tensor import (
 )
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
+    OpInfo,
     OpSchema,
     OpSpec,
     OpStrategy,
+    OutputSharding,
     RuntimeSchemaInfo,
     TupleStrategy,
 )
@@ -46,7 +48,11 @@ from torch.distributed.tensor._ops.single_dim_strategy import (
 )
 from torch.distributed.tensor._ops.utils import expand_to_full_mesh_op_strategy
 from torch.distributed.tensor._redistribute import use_min_cost_redistribution_plan
-from torch.distributed.tensor._sharding_prop import _select_min_cost_strategy
+from torch.distributed.tensor._sharding_prop import (
+    _op_schema_can_be_cached,
+    _select_min_cost_strategy,
+    ShardingPropagator,
+)
 from torch.distributed.tensor.placement_types import (
     _MaskPartial,
     _StridedShard,
@@ -844,6 +850,55 @@ class TestExpandPlaceholder(TestCase):
         # Verify result is valid
         self.assertIsInstance(result, OpStrategy)
         self.assertGreater(len(result.strategies), 0)
+
+    def test_symbolic_shapes_bypass_sharding_prop_caches(self):
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv, SymNode
+
+        mesh = DeviceMesh("cpu", mesh=torch.arange(2))
+        shape_env = ShapeEnv()
+        from torch._dynamo.source import ConstantSource
+
+        sym_size = 8
+        symbol = shape_env.create_symbol(
+            sym_size, source=ConstantSource("test_sym_size")
+        )
+        sym_int = torch.SymInt(SymNode(symbol, shape_env, int, hint=sym_size))
+
+        symbolic_meta = TensorMeta(torch.Size([sym_int, 4]), (4, 1), torch.float32)
+        spec = DTensorSpec(mesh, (Shard(0),), symbolic_meta)
+        op_schema = OpSchema(torch.ops.aten.sin.default, (spec,), {})
+        self.assertFalse(_op_schema_can_be_cached(op_schema))
+
+        propagator = ShardingPropagator()
+
+        with (
+            patch.object(
+                propagator,
+                "_propagate_tensor_meta_non_cached",
+                return_value=symbolic_meta,
+            ) as non_cached_tensor_meta,
+        ):
+            self.assertIs(propagator._propagate_tensor_meta(op_schema), symbolic_meta)
+            non_cached_tensor_meta.assert_called_once_with(op_schema)
+
+        output_sharding = OutputSharding(spec)
+        op_info = OpInfo(
+            compute_mesh=mesh,
+            schema=op_schema,
+            flat_args_schema=[spec],
+            local_args=(),
+            local_kwargs={},
+        )
+        with (
+            patch.object(
+                propagator,
+                "propagate_op_sharding_non_cached",
+                return_value=output_sharding,
+            ) as non_cached_sharding,
+        ):
+            propagator.propagate(op_info)
+            self.assertIs(op_info.output_sharding, output_sharding)
+            non_cached_sharding.assert_called_once_with(op_schema)
 
     def test_strategy_length_validation(self):
         """Test that _PreparedSingleDimStrategy validates strategy length against

@@ -2849,6 +2849,7 @@ class GraphModule(torch.nn.Module):
             primals_9,  # SubclassStrideAOTOutput(base=PlainAOTOutput(idx=0), idx=0)
             primals_9,  # SavedForBackwardsAOTOutput(idx=0)
             primals_10,  # SavedForBackwardsAOTOutput(idx=1)
+            primals_7,  # SavedForBackwardsAOTOutput(idx=2)
         )
 """,
         )
@@ -2861,6 +2862,7 @@ class GraphModule(torch.nn.Module):
         self,
         primals_9: "Sym(s47)",  # PlainAOTInput(idx=4)
         primals_10: "Sym(s16)",  # PlainAOTInput(idx=5)
+        primals_7: "Sym(s16)",  # PlainAOTInput(idx=2)
         tangents_1: "f32[s16, s47]",  # SubclassGetAttrAOTInput(base=TangentAOTInput(output=PlainAOTOutput(idx=0)), attr='a')
         tangents_2: "f32[s16, s47]",  # SubclassGetAttrAOTInput(base=TangentAOTInput(output=PlainAOTOutput(idx=0)), attr='b')
     ):

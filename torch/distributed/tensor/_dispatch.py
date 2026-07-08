@@ -24,7 +24,10 @@ from torch.distributed.tensor._op_schema import (
 )
 from torch.distributed.tensor._random import is_rng_supported_mesh
 from torch.distributed.tensor._redistribute import redistribute_local_tensor
-from torch.distributed.tensor._sharding_prop import ShardingPropagator
+from torch.distributed.tensor._sharding_prop import (
+    _cached_or_uncached,
+    ShardingPropagator,
+)
 from torch.distributed.tensor._tp_conv import (
     convolution_backward_handler,
     convolution_handler,
@@ -260,7 +263,11 @@ class OpDispatcher:
             # We have basically inlined propagate() here, but WITHOUT the
             # output_sharding assignment
             if try_cache and not _are_we_tracing():
-                result = self.sharding_propagator.propagate_op_sharding(op_info.schema)
+                result = _cached_or_uncached(
+                    op_info.schema,
+                    self.sharding_propagator.propagate_op_sharding,
+                    self.sharding_propagator.propagate_op_sharding_non_cached,
+                )
             else:
                 result = self.sharding_propagator.propagate_op_sharding_non_cached(
                     op_info.schema

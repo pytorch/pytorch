@@ -665,12 +665,12 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
                     self.assertExpectedInline(
                         graph_aot,
                         """\
-def forward(self, arg0_1: "Sym(s17)", arg1_1: "f32[s17][1]cpu", arg2_1: "f32[s17][1]cpu"):
-        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.mylib.foo.default, _x_base_index = 0, _y_base_index = 1, _all_bases = [arg1_1, arg2_1])
+def forward(self, arg0_1: "f32[s17][1]cpu", arg1_1: "Sym(s17)", arg2_1: "f32[s17][1]cpu"):
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.mylib.foo.default, _x_base_index = 0, _y_base_index = 1, _all_bases = [arg0_1, arg2_1])
         getitem_1: "f32[s17][1]cpu" = auto_functionalized_v2[1]
         getitem_2: "f32[s17][1]cpu" = auto_functionalized_v2[2];  auto_functionalized_v2 = None
         add: "f32[s17][1]cpu" = torch.ops.aten.add.Tensor(getitem_1, getitem_2)
-        copy_: "f32[s17][1]cpu" = torch.ops.aten.copy_.default(arg1_1, getitem_1);  arg1_1 = getitem_1 = copy_ = None
+        copy_: "f32[s17][1]cpu" = torch.ops.aten.copy_.default(arg0_1, getitem_1);  arg0_1 = getitem_1 = copy_ = None
         copy__1: "f32[s17][1]cpu" = torch.ops.aten.copy_.default(arg2_1, getitem_2);  arg2_1 = getitem_2 = copy__1 = None
         return (add,)""",
                         ignore_comments=True,
@@ -697,10 +697,10 @@ def forward(self, arg0_1: "f32[2][1]cpu", arg1_1: "f32[2][1]cpu"):
                     self.assertExpectedInline(
                         graph_inductor,
                         """\
-def forward(self, arg0_1: "Sym(s17)", arg1_1: "f32[s17][1]cpu", arg2_1: "f32[s17][1]cpu"):
-        foo_default = torch.ops.mylib.foo.default(arg1_1, arg2_1);  foo_default = None
-        add: "f32[s17][1]cpu" = torch.ops.aten.add.Tensor(arg1_1, arg2_1)
-        copy_: "f32[s17][1]cpu" = torch.ops.aten.copy_.default(arg1_1, arg1_1);  arg1_1 = copy_ = None
+def forward(self, arg0_1: "f32[s17][1]cpu", arg1_1: "Sym(s17)", arg2_1: "f32[s17][1]cpu"):
+        foo_default = torch.ops.mylib.foo.default(arg0_1, arg2_1);  foo_default = None
+        add: "f32[s17][1]cpu" = torch.ops.aten.add.Tensor(arg0_1, arg2_1)
+        copy_: "f32[s17][1]cpu" = torch.ops.aten.copy_.default(arg0_1, arg0_1);  arg0_1 = copy_ = None
         copy__1: "f32[s17][1]cpu" = torch.ops.aten.copy_.default(arg2_1, arg2_1);  arg2_1 = copy__1 = None
         return (add,)""",
                         ignore_comments=True,

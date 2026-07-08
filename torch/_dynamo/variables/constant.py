@@ -343,9 +343,14 @@ class ConstantVariable(VariableTracker):
         if isinstance(self.value, str) and name in str.__dict__:
             method = getattr(self.value, name)
             try:
-                return ConstantVariable.create(method(*const_args, **const_kwargs))
+                result = method(*const_args, **const_kwargs)
             except Exception as e:
                 raise_observed_exception(type(e), tx)
+            # str.split/rsplit/splitlines return a fresh caller-owned list;
+            # mark it mutable so in-place ops (.sort(), shuffle, etc.) are tracked.
+            if name in ("split", "rsplit", "splitlines"):
+                return ConstantVariable.create(result, mutation_type=ValueMutationNew())
+            return ConstantVariable.create(result)
         elif isinstance(self.value, (float, int)) and hasattr(self.value, name):
             if not (args or kwargs):
                 try:
@@ -900,6 +905,13 @@ class FakeIdVariable(VariableTracker):
 
     def hash_impl(self, tx: InstructionTranslatorBase) -> tuple[int, bool]:
         return hash(self.value), True
+
+    def repr_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
+        # Mirrors int.__repr__: the value is an int, so str()/repr() yield its
+        # decimal string. The distinct-but-compile-time-only identity carried by
+        # the fake id is preserved in the resulting string, matching how
+        # FakeIdVariable already resolves same-kind id()/hash() comparisons.
+        return ConstantVariable.create(repr(self.value))
 
     def richcompare_impl(
         self, tx: InstructionTranslatorBase, other: VariableTracker, op: str
