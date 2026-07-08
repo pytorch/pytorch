@@ -1585,21 +1585,16 @@ test_vulkan() {
 }
 
 test_distributed() {
-  # Optional $1: multiproc filter passed through to run_test.py
-  # ("multiproc" | "not-multiproc"). When "not-multiproc" we are on a
-  # single-GPU runner and must skip the multi-GPU-only C++ / mpiexec tests.
-  local multiproc_filter="${1:-}"
-  local filter_clause=""
-  if [[ -n "$multiproc_filter" ]]; then
-    filter_clause="--multiproc-filter $multiproc_filter"
-  fi
-  echo "Testing distributed python tests (multiproc_filter=${multiproc_filter:-none})"
+  # $1: multiproc filter ("multiproc" | "not-multiproc"), see the `multiproc`
+  # marker in test/conftest.py. "not-multiproc" runs on a single-GPU runner, so
+  # it also skips the multi-GPU-only C++ / mpiexec tests below.
+  local multiproc_filter="$1"
+  echo "Testing distributed python tests (${multiproc_filter})"
   # shellcheck disable=SC2086
-  time python test/run_test.py --distributed-tests --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" $filter_clause $INCLUDE_CLAUSE --verbose
+  time python test/run_test.py --distributed-tests --multiproc-filter "$multiproc_filter" --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" $INCLUDE_CLAUSE --verbose
   assert_git_not_dirty
 
-  # The C++ / mpiexec distributed tests below require multiple GPUs; skip them
-  # on the single-process (single-GPU) config.
+  # The C++ / mpiexec distributed tests below require multiple GPUs.
   if [[ "$multiproc_filter" == "not-multiproc" ]]; then
     return
   fi

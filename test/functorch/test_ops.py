@@ -1370,7 +1370,6 @@ class TestOperators(TestCase):
                 xfail(
                     "cdouble"
                 ),  # RuntimeError: required rank 4 tensor to use channels_last format
-                xfail("fill"),
                 skip("masked.mean"),  # ???
                 xfail("masked_scatter"),
                 xfail("put"),
@@ -1442,7 +1441,6 @@ class TestOperators(TestCase):
                 xfail("view_as_complex"),
                 xfail("cummax"),
                 xfail("cummin"),
-                xfail("fill"),
                 xfail(
                     "narrow"
                 ),  # Batching rule not implemented for `narrow.Tensor` (and view op)
