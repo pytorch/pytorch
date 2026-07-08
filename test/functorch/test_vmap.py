@@ -3682,7 +3682,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
                 self.assertEqual(actual, expected)
 
 
-instantiate_parametrized_tests(TestVmapOperators)
+instantiate_parametrized_tests(TestVmapOperators, allow_xpu=True)
 
 
 def construct_v(output, batch_size, contig=False):
@@ -6716,9 +6716,7 @@ instantiate_device_type_tests(
 )
 
 instantiate_device_type_tests(
-    TestVmapBatchedGradient,
-    globals(),
-    only_for=only_for,
+    TestVmapBatchedGradient, globals(), only_for=only_for, allow_xpu=True
 )
 instantiate_device_type_tests(
     TestTransformFailure, globals(), only_for=only_for, allow_xpu=True
@@ -6726,8 +6724,12 @@ instantiate_device_type_tests(
 instantiate_device_type_tests(
     TestRandomness, globals(), only_for=only_for, allow_xpu=True
 )
-instantiate_device_type_tests(TestVmapDeviceType, globals(), only_for=only_for)
-instantiate_device_type_tests(TestVmapNestedTensor, globals(), only_for=only_for)
+instantiate_device_type_tests(
+    TestVmapDeviceType, globals(), only_for=only_for, allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestVmapNestedTensor, globals(), only_for=only_for, allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()
