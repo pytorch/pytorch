@@ -54,8 +54,6 @@ purposes) which tensors are saved by a certain ``grad_fn`` by looking for its
 attributes starting with the prefix ``_saved``.
 
 ```python
-import torch
-
 x = torch.randn(5, requires_grad=True)
 y = x.pow(2)
 print(x.equal(y.grad_fn._saved_self))  # True
