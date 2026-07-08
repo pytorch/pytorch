@@ -278,6 +278,7 @@ int munmap(void* addr, size_t length) {
 #include <cctype>
 #include <chrono>
 #include <cstdlib>
+#include <iostream>
 #include <optional>
 #include <regex>
 #include <stdexcept>
@@ -329,6 +330,17 @@ inline void setPinnedAsyncConstantsCopyStageBufferBytes(size_t bytes);
 inline size_t pinnedAsyncConstantsCopyStageBufferBytes();
 } // namespace torch::aot_inductor
 
+// S646785: env-gated logging for the AOTI constant-load pipeline. Emits when
+// the AOTI_LOG_LOADING env var is set so [AOTI_LOAD] markers are greppable in
+// trainer logs without rebuilding.
+#define AOTI_LOG_LOADING(msg)                                                  \
+  do {                                                                         \
+    static const bool _aoti_log_ = std::getenv("AOTI_LOG_LOADING") != nullptr; \
+    if (_aoti_log_) {                                                          \
+      std::cerr << "[AOTI_LOAD] " << msg << std::endl;                         \
+    }                                                                          \
+  } while (0)
+
 namespace {
 
 using RAIIDataPtr = std::unique_ptr<void, std::function<void(void*)>>;
@@ -372,6 +384,10 @@ class PinnedStagingPool {
         cudaStreamCreateWithFlags(&pool->stream_, cudaStreamNonBlocking);
     if (rc != cudaSuccess) {
       (void)cudaGetLastError();
+      AOTI_LOG_LOADING(
+          "PinnedStagingPool: cudaStreamCreateWithFlags failed rc="
+          << rc << " (" << cudaGetErrorString(rc)
+          << "); falling back to sync copy");
       return nullptr;
     }
     const int64_t sizes = static_cast<int64_t>(buffer_bytes);
@@ -380,6 +396,9 @@ class PinnedStagingPool {
       rc = cudaEventCreateWithFlags(&pool->events_[i], cudaEventDisableTiming);
       if (rc != cudaSuccess) {
         (void)cudaGetLastError();
+        AOTI_LOG_LOADING(
+            "PinnedStagingPool: cudaEventCreateWithFlags failed rc="
+            << rc << "; falling back to sync copy");
         return nullptr;
       }
       AtenTensorHandle handle = nullptr;
@@ -392,15 +411,26 @@ class PinnedStagingPool {
           /*device_index=*/0,
           &handle);
       if (trc != AOTI_TORCH_SUCCESS || handle == nullptr) {
+        AOTI_LOG_LOADING(
+            "PinnedStagingPool: aoti_torch_empty_strided_pinned("
+            << buffer_bytes << ") failed trc=" << trc
+            << "; falling back to sync copy");
         return nullptr;
       }
       pool->stage_tensors_[i] = RAIIAtenTensorHandle(handle);
       trc = aoti_torch_get_data_ptr(
           pool->stage_tensors_[i].get(), &pool->stage_[i]);
       if (trc != AOTI_TORCH_SUCCESS || pool->stage_[i] == nullptr) {
+        AOTI_LOG_LOADING(
+            "PinnedStagingPool: aoti_torch_get_data_ptr failed trc="
+            << trc << "; falling back to sync copy");
         return nullptr;
       }
     }
+    AOTI_LOG_LOADING(
+        "PinnedStagingPool: allocated 2x"
+        << (buffer_bytes / (1024 * 1024))
+        << " MiB pinned staging buffers via cached pinned host allocator");
     return pool;
   }
 
@@ -443,24 +473,39 @@ class PinnedStagingPool {
   }
 
   ~PinnedStagingPool() {
-    // Best-effort cleanup: never throw from a destructor.
-    //
-    // Order: sync the stream FIRST so no in-flight async H2D is still
-    // reading from the pinned buffers when their RAIIAtenTensorHandle
-    // members run (which return the blocks to ATen's cached pinned host
-    // allocator pool). Members are destroyed after this body returns, in
-    // reverse declaration order; stage_tensors_ is last-declared so it
-    // runs first among members.
+    // Best-effort cleanup: never throw from a destructor, but log rc on
+    // failure so leaks are visible in production. Sync the stream FIRST so
+    // no in-flight async H2D is still reading from the pinned buffers when
+    // their RAIIAtenTensorHandle members run (which return the blocks to
+    // ATen's cached pinned host allocator pool). Members are destroyed after
+    // this body returns, in reverse declaration order; stage_tensors_ is
+    // last-declared so it runs first among members.
     if (stream_ != nullptr) {
-      (void)cudaStreamSynchronize(stream_);
+      cudaError_t rc = cudaStreamSynchronize(stream_);
+      if (rc != cudaSuccess) {
+        AOTI_LOG_LOADING(
+            "~PinnedStagingPool: cudaStreamSynchronize failed rc="
+            << rc << " (" << cudaGetErrorString(rc) << ")");
+      }
     }
     for (int i = 0; i < 2; ++i) {
       if (events_[i] != nullptr) {
-        (void)cudaEventDestroy(events_[i]);
+        cudaError_t rc = cudaEventDestroy(events_[i]);
+        if (rc != cudaSuccess) {
+          AOTI_LOG_LOADING(
+              "~PinnedStagingPool: cudaEventDestroy buf="
+              << i << " failed rc=" << rc << " (" << cudaGetErrorString(rc)
+              << ")");
+        }
       }
     }
     if (stream_ != nullptr) {
-      (void)cudaStreamDestroy(stream_);
+      cudaError_t rc = cudaStreamDestroy(stream_);
+      if (rc != cudaSuccess) {
+        AOTI_LOG_LOADING(
+            "~PinnedStagingPool: cudaStreamDestroy failed rc="
+            << rc << " (" << cudaGetErrorString(rc) << ")");
+      }
     }
     // Clear any error left by best-effort cleanup.
     (void)cudaGetLastError();
@@ -957,6 +1002,11 @@ class AOTInductorModelBase {
     PinnedStagingPool* pool_raw = staging_pool.get();
 #endif
 
+    auto _copy_start = std::chrono::steady_clock::now();
+    AOTI_LOG_LOADING(
+        "load_constants: starting H2D copy of " << num_constants
+                                                << " constants");
+
     for (size_t i = 0; i < num_constants; i++) {
       bool from_folded = this->constant_from_folded(i);
       if (from_folded) {
@@ -1053,6 +1103,11 @@ class AOTInductorModelBase {
     }
     staging_pool.reset();
 #endif
+    auto _copy_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - _copy_start)
+                        .count();
+    AOTI_LOG_LOADING(
+        "load_constants: H2D copy completed in " << _copy_ms << " ms");
     if (constants_map_) {
       this->update_constants_array_from_map();
     }
