@@ -7,6 +7,8 @@
 #include <ATen/TensorUtils.h>
 
 #include <ATen/cuda/CUDAConfig.h>
+#include <ATen/cuda/CUDAGeneratorImpl.h>
+#include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
@@ -141,8 +143,9 @@ struct RNNDescriptorParams {
         }
     }
 
-    void set_dropout(double dropout_rate, uint64_t dropout_seed = 0) {
-        this->dropout_rate = dropout_rate;
+    void set_dropout(double dropout_rate, bool train, uint64_t dropout_seed = 0) {
+        // Zero dropout when not training, mirroring the cuDNN path (see cudnn/RNN.cpp).
+        this->dropout_rate = train ? dropout_rate : 0.0;
         // TODO: Implement seed setting for RNN dropout
         this->dropout_seed = dropout_seed;
     }
@@ -251,17 +254,26 @@ struct RNNDescriptors {
     TensorDescriptor cx_desc;
     TensorDescriptor cy_desc;
 
-    RNNDescriptors(const RNNParams& fn, miopenHandle_t handle, Tensor x, Tensor y, Tensor hx, Tensor cx) {
+    RNNDescriptors(const RNNParams& fn, miopenHandle_t handle, Tensor x, Tensor y, Tensor hx, Tensor cx, bool reseed_dropout = false) {
         if (fn.rnn.dropout_rate == 0.0) {
             rnn_desc = fn.rnn.descriptor();
         } else {
-            if (!dropout_states) {
+            bool need_alloc = !dropout_states;
+            if (need_alloc) {
                 size_t states_size_in_bytes = 0;
                 MIOPEN_CHECK(miopenDropoutGetStatesSize(handle, &states_size_in_bytes));
                 size_t states_size = states_size_in_bytes / sizeof(rocrand_state_xorwow);
 
                 dropout_states = std::make_unique<DropoutState>(states_size * sizeof(rocrand_state_xorwow));
+            }
 
+            if (need_alloc || reseed_dropout) {
+                // (Re)seed the PRNG state, which regenerates the dropout mask.
+                // The MIOpen dropout kernel does not persist advanced PRNG state
+                // across launches, so every training forward must re-seed with a
+                // fresh seed to obtain an independent mask. The backward pass does
+                // not reseed: it replays the mask saved in reserveSpace during the
+                // forward pass, keeping forward/backward consistent within a step.
                 dropout_desc.set(handle,
                                  fn.rnn.dropout_rate,
                                  dropout_states->data,
@@ -276,8 +288,7 @@ struct RNNDescriptors {
                                     dropout_states->data,
                                     dropout_states->size,
                                     fn.rnn.dropout_seed,
-                                    // use_mask flag must be true in order to continue from a saved RNG state
-                                    true,
+                                    false,
                                     false,
                                     miopenRNGType_t::MIOPEN_RNG_PSEUDO_XORWOW);
             }
@@ -569,8 +580,25 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
     auto handle = getMiopenHandle();
     miopenRNNAlgo_t algo = miopenRNNdefault;
     fn.rnn.set_algo(algo);
-    fn.rnn.set_dropout(fn_dropout);
-    RNNDescriptors descs(fn, handle, x, y, hx, cx);
+
+    // Derive a fresh dropout seed from the default generator on each training
+    // forward so every step gets an independent mask. Using the generator keeps
+    // this reproducible under torch.manual_seed(). The MIOpen dropout kernel does
+    // not advance its PRNG state across launches, so re-seeding here is what
+    // produces mask variation step-to-step.
+    uint64_t dropout_seed = 0;
+    if (fn_train && fn_dropout != 0.0) {
+        auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(
+            std::nullopt, at::cuda::detail::getDefaultCUDAGenerator());
+        std::lock_guard<std::mutex> lock(gen->mutex_);
+        auto philox = gen->philox_engine_inputs(1);
+        // philox.first is the generator seed (constant within a manual_seed run);
+        // philox.second is a per-call offset that increments each forward. Combining
+        // them yields a distinct seed per step that rocrand_init mixes internally.
+        dropout_seed = philox.first + philox.second;
+    }
+    fn.rnn.set_dropout(fn_dropout, fn_train, dropout_seed);
+    RNNDescriptors descs(fn, handle, x, y, hx, cx, /*reseed_dropout=*/fn_train);
 
     FilterDescriptor w_desc;
     auto num_weights = get_num_weights(handle, descs.rnn_desc, descs.x_descs[0], datatype);
@@ -707,7 +735,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> miopen_rnn_backward_input(
 
     miopenRNNAlgo_t algo = miopenRNNdefault;
     fn.rnn.set_algo(algo);
-    fn.rnn.set_dropout(fn_dropout);
+    fn.rnn.set_dropout(fn_dropout, fn_train);
     RNNDescriptors descs(fn, handle, x, y, hx, cx);
 
     FilterDescriptor w_desc;
@@ -802,7 +830,7 @@ std::vector<Tensor> miopen_rnn_backward_weight(
 
     miopenRNNAlgo_t algo = miopenRNNdefault;
     fn.rnn.set_algo(algo);
-    fn.rnn.set_dropout(fn_dropout);
+    fn.rnn.set_dropout(fn_dropout, fn_train);
     RNNDescriptors descs(fn, handle, x, y, hx, cx);
 
     FilterDescriptor w_desc;
