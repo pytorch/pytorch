@@ -47,6 +47,7 @@ L2:
   - TorchedHat/pytorch-redhat-ci
   - Ascend/pytorch
   - torch-spyre/torch-spyre
+  - nothing/nothing
 
 L3:
   crcr-test:
