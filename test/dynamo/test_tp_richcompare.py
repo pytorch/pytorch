@@ -8,10 +8,10 @@ import torch
 import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch._library.opaque_object import register_opaque_type
+from torch._library.opaque_object import register_custom_class
 
 
-class _OpaqueVal(torch._opaque_base.OpaqueBase):
+class _OpaqueVal(torch._custom_class_base.CustomClassBase):
     def __init__(self, val):
         self.val = val
 
@@ -30,7 +30,7 @@ class _OpaqueVal(torch._opaque_base.OpaqueBase):
         return (f"_OpaqueVal({self.val})", {"_OpaqueVal": _OpaqueVal})
 
 
-register_opaque_type(_OpaqueVal, typ="value", hoist=True)
+register_custom_class(_OpaqueVal, typ="constant", hoist=True)
 
 
 class TpRichcompareTests(torch._dynamo.test_case.TestCase):
@@ -1428,7 +1428,7 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(result, (False, True, True))
 
     # =====================================================================
-    # Opaque object comparison (TorchScriptObjectVariable)
+    # Opaque object comparison (CustomClassObjectVariable)
     # =====================================================================
 
     def test_opaque_object_cmp(self):
@@ -1775,6 +1775,71 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.reset()
         result = torch.compile(fn, backend="eager", fullgraph=True)(s1, s2)
         self.assertEqual(result, expected)
+
+    def test_set_subclass_inherited_cmp_uses_internal_contents(self):
+        class LyingSet(set):
+            def __iter__(self):
+                return iter([99])
+
+            def __len__(self):
+                raise RuntimeError("__len__ should not be called")
+
+            def __contains__(self, item):
+                raise RuntimeError("__contains__ should not be called")
+
+        class LyingFrozenSet(frozenset):
+            def __iter__(self):
+                return iter([99])
+
+            def __len__(self):
+                raise RuntimeError("__len__ should not be called")
+
+            def __contains__(self, item):
+                raise RuntimeError("__contains__ should not be called")
+
+        def fn(x, a, b):
+            offset = 0
+            comparisons = (
+                a == b,
+                b == a,
+                a != b,
+                b != a,
+                a <= b,
+                b <= a,
+                a < b,
+                b < a,
+                a >= b,
+                b >= a,
+                a > b,
+                b > a,
+            )
+            for i, pred in enumerate(comparisons):
+                if pred:
+                    offset += 1 << i
+            return x + offset
+
+        cases = (
+            ({1, 2, 3}, LyingSet({1, 2, 3})),
+            (LyingSet({1, 2, 3}), {1, 2, 3}),
+            (LyingSet({1, 2}), LyingSet({1, 2, 3})),
+            ({1, 2, 3}, LyingFrozenSet({1, 2, 3})),
+        )
+
+        def base_len(obj):
+            if isinstance(obj, set):
+                return set.__len__(obj)
+            return frozenset.__len__(obj)
+
+        for a, b in cases:
+            with self.subTest(a=type(a), b=type(b), sizes=(base_len(a), base_len(b))):
+                x = torch.ones(())
+                expected = fn(x, a, b)
+                cnt = torch._dynamo.testing.CompileCounter()
+                opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+                self.assertEqual(opt_fn(x, a, b), expected)
+                self.assertEqual(opt_fn(x, a, b), expected)
+                self.assertEqual(cnt.frame_count, 1)
+            torch._dynamo.reset()
 
     # =====================================================================
     # Tensor vs non-proxyable types (followups)

@@ -1,5 +1,7 @@
 # Owner(s): ["module: inductor"]
 
+import unittest
+
 import torch
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
@@ -8,9 +10,13 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
+    HAS_CUDA_AND_TRITON,
     HAS_GPU_AND_TRITON,
     requires_gpu,
 )
+
+
+requires_cuda_triton = unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires CUDA")
 
 
 class TestControlDeps(InductorTestCase):
@@ -341,6 +347,91 @@ class TestControlDeps(InductorTestCase):
             expected = fn(x, y)
             torch.testing.assert_close(result, expected)
 
+    def test_wait_event_threads_record_event_passthroughs(self):
+        """wait_event must thread record_event's passthroughs to consumers.
+
+        Regression test for the backward reload pattern:
+          reload [side stream] -> record_event -> ... -> wait_event [default] -> consumer
+
+        Without threading, the consumer depends only on record_event's getitem
+        (wrong stream), so the inductor scheduler can place the consumer kernel
+        before wait_event fires.
+        """
+        import operator
+
+        from torch._functorch._aot_autograd.streams import (
+            wrap_all_sync_nodes_with_control_deps,
+        )
+        from torch._inductor.fx_passes.control_dependencies import control_deps
+
+        gm = torch.fx.GraphModule(torch.nn.Module(), torch.fx.Graph())
+        g = gm.graph
+        val = torch.randn(4)
+
+        x = g.placeholder("x")
+        x.meta["val"] = val
+
+        # Simulated reloaded activation on side stream 19
+        reload = g.call_function(torch.ops.aten.add.Tensor, args=(x, x))
+        reload.meta.update(
+            {
+                "val": val,
+                "partitioner_tag": "is_backward",
+                "custom": {"stream": 19},
+            }
+        )
+
+        # record_event on side stream after reload completes
+        record = g.call_function(torch.ops.streams.record_event.default, args=(42, 19))
+        record.meta["partitioner_tag"] = "must_be_in_backward"
+
+        # Other backward compute on default stream (between record and wait)
+        other = g.call_function(torch.ops.aten.mul.Tensor, args=(x, x))
+        other.meta.update(
+            {
+                "val": val,
+                "partitioner_tag": "is_backward",
+                "custom": {"stream": 0},
+            }
+        )
+
+        # wait_event on default stream
+        wait = g.call_function(torch.ops.streams.wait_event.default, args=(42, 0))
+        wait.meta["partitioner_tag"] = "must_be_in_backward"
+
+        # Consumer reads reload result + other compute on default stream
+        consumer = g.call_function(torch.ops.aten.add.Tensor, args=(reload, other))
+        consumer.meta.update(
+            {
+                "val": val,
+                "partitioner_tag": "is_backward",
+                "custom": {"stream": 0},
+            }
+        )
+
+        g.output((consumer,))
+        gm.recompile()
+
+        wrap_all_sync_nodes_with_control_deps(gm)
+
+        # The consumer's reload arg must flow through wait_event's control_deps,
+        # NOT record_event's.
+        output_node = next(n for n in gm.graph.nodes if n.op == "output")
+        final_consumer = output_node.args[0][0]
+        reload_arg = final_consumer.args[0]
+
+        self.assertEqual(reload_arg.target, operator.getitem)
+        ctrl_node = reload_arg.args[0]
+        self.assertIs(ctrl_node.target, control_deps)
+
+        # The control_deps wraps wait_event, not record_event
+        subgraph = getattr(gm, ctrl_node.args[1].target)
+        subgraph_targets = {
+            n.target for n in subgraph.graph.nodes if n.op == "call_function"
+        }
+        self.assertIn(torch.ops.streams.wait_event.default, subgraph_targets)
+        self.assertNotIn(torch.ops.streams.record_event.default, subgraph_targets)
+
     @requires_gpu()
     def test_control_deps_orders_void_op_across_nested_calls(self):
         """record_event's void op must be named as an additional_buffer_dep
@@ -409,6 +500,190 @@ class TestControlDeps(InductorTestCase):
             "no record_event void op appears as an additional_buffer_dep; "
             f"void_names={void_names}, referenced={referenced}",
         )
+
+    def test_reinplace_not_blocked_by_control_deps_ordering_dep(self):
+        """Views in control_deps' ordering-only deps should not block reinplacing.
+
+        When a tensor appears only in control_deps' additional_deps (args[0])
+        and NOT in the pass-through args (args[2:]), it is an ordering-only
+        dependency.  The reinplace pass must not treat this as a real data use.
+        """
+        from torch._inductor.fx_passes.control_dependencies import control_deps
+        from torch._inductor.fx_passes.reinplace import (
+            _is_control_deps_ordering_only_use,
+        )
+
+        g = torch.fx.Graph()
+        view = g.placeholder("view")
+        other = g.placeholder("other")
+        subgraph = g.placeholder("subgraph")
+
+        # view only in ordering deps (args[0]) -> ordering only, not a real use
+        ctrl = g.call_function(control_deps, args=((view,), subgraph, other))
+        self.assertTrue(_is_control_deps_ordering_only_use(ctrl, view))
+
+        # view in both ordering deps AND pass-through -> real data use
+        ctrl2 = g.call_function(control_deps, args=((view,), subgraph, view))
+        self.assertFalse(_is_control_deps_ordering_only_use(ctrl2, view))
+
+        # view only in pass-through, not in ordering deps -> real data use
+        ctrl3 = g.call_function(control_deps, args=((other,), subgraph, view))
+        self.assertFalse(_is_control_deps_ordering_only_use(ctrl3, view))
+
+        # non-control_deps node -> not ordering only
+        add = g.call_function(torch.ops.aten.add.Tensor, args=(view, other))
+        self.assertFalse(_is_control_deps_ordering_only_use(add, view))
+
+    @requires_gpu()
+    def test_control_deps_passthrough_creates_ordering_barrier(self):
+        """Pass-through values in control_deps create OrderingBarrier nodes.
+
+        Verifies that OrderingBarrier:
+        - is created for pass-through buffers
+        - has ordering_only=True (so scheduler uses WeakDep, not StarDep)
+        - does not add pass-through buffers to mutated_buffers
+        """
+        from torch._inductor import ir
+        from torch._inductor.virtualized import V
+
+        captured: list[dict] = []
+
+        def capture(nodes):
+            barriers = [
+                op for op in V.graph.operations if isinstance(op, ir.OrderingBarrier)
+            ]
+            captured.append(
+                {
+                    "barriers": barriers,
+                    "barrier_source_names": [b.mutation_names[0] for b in barriers],
+                    "ordering_only_flags": [b.ordering_only for b in barriers],
+                    "mutated_buffers": set(V.graph.mutated_buffers),
+                }
+            )
+            return nodes
+
+        def fn(x):
+            s = torch.Stream(device=GPU_TYPE)
+            e = torch.Event()
+            with s:
+                y = x + 1
+                e.record()
+            e.wait()
+            return y * 2
+
+        torch._dynamo.reset()
+        with config.patch(_pre_fusion_custom_pass=capture):
+            x = torch.ones(4, device=GPU_TYPE)
+            result = torch.compile(fn)(x)
+
+        expected = fn(torch.ones(4, device=GPU_TYPE))
+        torch.testing.assert_close(result, expected)
+
+        self.assertTrue(captured, "expected at least one Inductor compile")
+        for c in captured:
+            self.assertGreater(len(c["barriers"]), 0, "expected OrderingBarrier nodes")
+            self.assertTrue(
+                all(c["ordering_only_flags"]),
+                "all OrderingBarrier nodes must have ordering_only=True",
+            )
+            for source_name in c["barrier_source_names"]:
+                self.assertNotIn(
+                    source_name,
+                    c["mutated_buffers"],
+                    f"barrier source {source_name} should not be in mutated_buffers",
+                )
+
+    @requires_gpu()
+    def test_ordering_barrier_is_nop(self):
+        """OrderingBarrier must not allocate or generate code.
+
+        Verifies should_allocate() and is_no_op() on the actual IR node.
+        """
+        from torch._inductor import ir
+        from torch._inductor.virtualized import V
+
+        captured: list[dict] = []
+
+        def capture(nodes):
+            barriers = [
+                op for op in V.graph.operations if isinstance(op, ir.OrderingBarrier)
+            ]
+            captured.append(
+                {
+                    "barriers_allocate": [b.should_allocate() for b in barriers],
+                    "barriers_nop": [b.is_no_op() for b in barriers],
+                }
+            )
+            return nodes
+
+        def fn(x):
+            s = torch.Stream(device=GPU_TYPE)
+            e = torch.Event()
+            with s:
+                y = x + 1
+                e.record()
+            e.wait()
+            return y * 2
+
+        torch._dynamo.reset()
+        with config.patch(_pre_fusion_custom_pass=capture):
+            x = torch.ones(4, device=GPU_TYPE)
+            result = torch.compile(fn)(x)
+
+        expected = fn(torch.ones(4, device=GPU_TYPE))
+        torch.testing.assert_close(result, expected)
+
+        self.assertTrue(captured, "expected at least one compile")
+        for c in captured:
+            self.assertGreater(
+                len(c["barriers_allocate"]),
+                0,
+                "expected OrderingBarrier nodes (precondition)",
+            )
+            self.assertTrue(
+                all(not a for a in c["barriers_allocate"]),
+                "OrderingBarrier should_allocate() must be False",
+            )
+            self.assertTrue(
+                all(c["barriers_nop"]),
+                "OrderingBarrier is_no_op() must be True",
+            )
+
+    @requires_cuda_triton
+    def test_bidirectional_stream_sync_correctness(self):
+        """Regression: passthrough OrderingBarrier must be ordered after all subgraph ops.
+
+        Bidirectional stream sync exposes a bug where additional_buffer_deps was
+        keyed by barrier.get_name() (buffer name) instead of
+        barrier.get_operation_name() (operation name), so compute_dependencies
+        silently lost the ordering dep and the scheduler could place barrier2
+        before record_event1, producing wrong results.
+        """
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(x):
+            s1 = torch.cuda.Stream()
+            s2 = torch.cuda.Stream()
+            event_s1 = torch.cuda.Event()
+            event_s2 = torch.cuda.Event()
+            with torch.cuda.stream(s1):
+                a = x * 2
+                event_s1.record(s1)
+            with torch.cuda.stream(s2):
+                event_s1.wait(s2)
+                b = a + 1
+                event_s2.record(s2)
+            with torch.cuda.stream(s1):
+                event_s2.wait(s1)
+                c = b * 2
+            s1.synchronize()
+            s2.synchronize()
+            return c
+
+        x = torch.randn(1024, device="cuda")
+        expected = fn(x)
+        result, _ = run_and_get_code(torch.compile(fn), x)
+        self.assertEqual(result, expected)
 
 
 if __name__ == "__main__":

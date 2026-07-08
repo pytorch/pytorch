@@ -503,6 +503,16 @@ observed_exception_map = {
 }
 
 
+class UnhandledDescriptorError(NotImplementedError):
+    """Raised by object_generic_getattr when a descriptor type is not
+    recognized by _resolve_descriptor_get.  Subclasses NotImplementedError
+    so callers that catch NotImplementedError (e.g., generic_getattr's
+    graph-break fallback) still work, but callers that want to
+    distinguish unhandled descriptors from other NotImplementedErrors can
+    catch this specifically.
+    """
+
+
 def get_dynamo_observed_exception(exc_type: type[Exception]) -> type[ObservedException]:
     if exc_type not in observed_exception_map:
         name = getattr(exc_type, "__name__", str(exc_type))
