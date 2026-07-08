@@ -33,6 +33,7 @@ except ImportError:
 
 if TYPE_CHECKING:
     from _pytest._code.code import ReprFileLocation
+
     from torch.testing._internal.common_distributed import (
         MultiProcContinuousTest,
         MultiProcessTestCase,
