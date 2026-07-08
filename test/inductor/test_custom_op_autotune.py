@@ -629,10 +629,10 @@ class TestCustomOpAutoTune(TestCase):
         cuda_graph_benchmark_called = False
         original_benchmark_gpu_with_cuda_graph = torch._inductor.runtime.benchmarking.Benchmarker.benchmark_gpu_with_cuda_graph
 
-        def patched_benchmark_gpu_with_cuda_graph(self, fn):
+        def patched_benchmark_gpu_with_cuda_graph(self, fn, *args, **kwargs):
             nonlocal cuda_graph_benchmark_called
             cuda_graph_benchmark_called = True
-            return original_benchmark_gpu_with_cuda_graph(self, fn)
+            return original_benchmark_gpu_with_cuda_graph(self, fn, *args, **kwargs)
 
         torch._dynamo.reset()
         with config.patch(max_autotune=True, fx_graph_cache=False):
