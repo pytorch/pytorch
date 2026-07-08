@@ -66,8 +66,8 @@ struct TORCH_API ExperimentalConfig {
       bool record_python_gc_info = false,
       bool expose_kineto_event_metadata = false,
       std::string custom_profiler_config = "",
-      bool adjust_timestamps = false);
-  explicit operator bool() const;
+      bool adjust_timestamps = false,
+      bool trace_only = false);
 
   std::vector<std::string> profiler_metrics;
   bool profiler_measure_per_kernel;
@@ -132,6 +132,11 @@ struct TORCH_API ExperimentalConfig {
    * information instead of the original information.
    */
   bool adjust_timestamps;
+
+  // When true, __exit__ skips TransferEvents, build_tree, and
+  // materializeOpEvents. Only export_chrome_trace / save() will work;
+  // accessing events() raises an error.
+  bool trace_only;
 };
 
 struct TORCH_API ProfilerConfig {
@@ -174,11 +179,8 @@ struct TORCH_API ProfilerStateBase : public c10::MemoryReportingInfoBase {
   ProfilerStateBase& operator=(ProfilerStateBase&&) = delete;
   ~ProfilerStateBase() override;
 
-  static ProfilerStateBase* get(bool global);
-  static ProfilerStateBase* get() {
-    auto* out = get(/*global=*/true);
-    return out ? out : get(/*global=*/false);
-  }
+  static std::shared_ptr<ProfilerStateBase> getGlobal();
+  static ProfilerStateBase* getTLS();
 
   static void push(std::shared_ptr<ProfilerStateBase>&& state);
 

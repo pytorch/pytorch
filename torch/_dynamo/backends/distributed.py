@@ -152,8 +152,12 @@ def has_higher_order_op(gm: fx.GraphModule) -> bool:
 
 
 def propagate_metadata(orig_gm: fx.GraphModule, split_gm: fx.GraphModule) -> None:
+    # Only propagate to partition submodules, not to HOP body subgraphs (e.g.
+    # wrap_body_*) which are also hoisted as top-level children by split_module
+    # and carry their own metadata (e.g. _checkpoint_context_fn for SAC).
+    partition_names = split_gm.meta["partition_names"]
     for name, module in split_gm.named_modules():
-        if "." not in name and len(name):
+        if name in partition_names:
             # TODO: add split id to CompileId: https://github.com/pytorch/tlparse/pull/83/files#r1880649384
             module.meta = orig_gm.meta
             module._param_name_to_source = orig_gm._param_name_to_source
@@ -164,8 +168,9 @@ def propagate_dynamo_source(orig_gm: fx.GraphModule, split_gm: fx.GraphModule) -
     for node in orig_gm.graph.find_nodes(op="placeholder"):
         name_to_dynamo_source[node.name] = node._dynamo_source
 
+    partition_names = split_gm.meta["partition_names"]
     for name, module in split_gm.named_modules():
-        if "." not in name and len(name):
+        if name in partition_names:
             for node in module.graph.find_nodes(op="placeholder"):
                 # non-placeholder in original_gm may become placeholder in submodules
                 node._dynamo_source = name_to_dynamo_source.get(node.name)

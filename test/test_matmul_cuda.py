@@ -119,8 +119,8 @@ class TestMatmulCuda(InductorTestCase):
 
     @unittest.skipIf(not SM90OrLater, "sm89 kernel isn't opted into carveout yet")
     def test_legacy_cublas_honors_sm_carveout(self, device):
-        if torch.version.cuda is None or int(torch.version.cuda.split(".")[0]) < 12 or not IS_SM90:
-            raise unittest.SkipTest("cublasSetSmCountTarget requires CUDA 12+ and sm90")
+        if torch.version.cuda is None or not IS_SM90:
+            raise unittest.SkipTest("cublasSetSmCountTarget requires CUDA and sm90")
 
         torch._C._set_sm_carveout_experimental(None)
         dtype = torch.float16
@@ -161,8 +161,8 @@ class TestMatmulCuda(InductorTestCase):
 
     @unittest.skipIf(not SM90OrLater, "sm89 kernel isn't opted into carveout yet")
     def test_sm_carveout_invalid_value_throws(self, device):
-        if torch.version.cuda is None or int(torch.version.cuda.split(".")[0]) < 12 or not IS_SM90:
-            raise unittest.SkipTest("cublasSetSmCountTarget requires CUDA 12+ and sm90")
+        if torch.version.cuda is None or not IS_SM90:
+            raise unittest.SkipTest("cublasSetSmCountTarget requires CUDA and sm90")
         sm_count = torch.cuda.get_device_properties().multi_processor_count
         a = torch.empty(64, 64, device=device, dtype=torch.float16)
         b = torch.empty(64, 64, device=device, dtype=torch.float16)
@@ -521,9 +521,10 @@ class TestMatmulCuda(InductorTestCase):
     @onlyCUDA
     @skipIfRocm
     @dtypes(torch.half, torch.bfloat16)
+    @parametrize("batched", [False, True])
     @unittest.skipIf(not SM100OrLater, "cuBLAS integration for batch invariance is only on Blackwell")
     @serialTest()
-    def test_cublas_batch_invariance_blackwell(self, device, dtype):
+    def test_cublas_batch_invariance_blackwell(self, device, dtype, batched):
         orig_bf16 = torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction
         orig_fp16 = torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
         torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (False, False)
@@ -532,12 +533,21 @@ class TestMatmulCuda(InductorTestCase):
             N = 2048
             K = 6144
             M_max = 32
-            x = torch.randn(M_max, K, device="cuda", dtype=torch.bfloat16)
-            w = torch.randn(N, K, device="cuda", dtype=torch.bfloat16).t()
-            full = x @ w
-            xx = x[:1]
-            out = xx @ w
-            self.assertEqual(full[:1], out, atol=0., rtol=0.)
+            if batched:
+                B = 8
+                x = torch.randn(B, M_max, K, device=device, dtype=dtype)
+                w = torch.randn(B, N, K, device=device, dtype=dtype).transpose(-2, -1)
+                full = x @ w
+                xx = x[:, :1]
+                out = xx @ w
+                self.assertEqual(full[:, :1], out, atol=0.0, rtol=0.0)
+            else:
+                x = torch.randn(M_max, K, device=device, dtype=dtype)
+                w = torch.randn(N, K, device=device, dtype=dtype).t()
+                full = x @ w
+                xx = x[:1]
+                out = xx @ w
+                self.assertEqual(full[:1], out, atol=0.0, rtol=0.0)
         torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = orig_bf16
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = orig_fp16
 
@@ -897,7 +907,9 @@ class TestMatmulCuda(InductorTestCase):
     @parametrize("batch_size", [None, 1, 16])
     @parametrize("backend", ["cublas", "cublaslt"])
     def test_mm_bmm_dtype_overload(self, input_dtype, M, N, K, batch_size, backend):
-        if torch.version.hip and _get_torch_rocm_version() < (7, 2, 1):
+        if torch.version.hip and (
+            _get_torch_rocm_version() < (7, 2, 1) or isRocmArchAnyOf(MI200_ARCH)
+        ):
             msg = "accuracy regression in hipblas and hipblaslt in ROCm 7.0 for certain shapes"
             if input_dtype == torch.bfloat16 and N == 1 and K == 32 and batch_size:
                 raise unittest.SkipTest(msg)
@@ -964,7 +976,9 @@ class TestMatmulCuda(InductorTestCase):
     @parametrize("high_precision_self", [False, True])
     @parametrize("backend", ["cublas", "cublaslt"])
     def test_addmm_baddmm_dtype_overload(self, input_dtype, M, N, K, batch_size, broadcast_self, high_precision_self, backend):
-        if torch.version.hip and _get_torch_rocm_version() < (7, 2, 1):
+        if torch.version.hip and (
+            _get_torch_rocm_version() < (7, 2, 1) or isRocmArchAnyOf(MI200_ARCH)
+        ):
             msg = "accuracy regression in hipblas and hipblaslt in ROCm 7.0 for certain shapes"
             if input_dtype == torch.bfloat16 and N == 1 and K == 32 and batch_size:
                 raise unittest.SkipTest(msg)
