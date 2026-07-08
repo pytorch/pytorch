@@ -54,7 +54,7 @@ from torch._higher_order_ops.auto_functionalize import can_auto_functionalize
 from torch._inductor import metrics
 from torch._inductor.utils import get_free_symbols
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import get_opaque_obj_repr, is_opaque_value
+from torch._library.opaque_object import get_opaque_obj_repr, is_custom_class_obj
 from torch._prims_common import (
     compute_required_storage_length,
     is_boolean_dtype,
@@ -957,6 +957,9 @@ class Operation:
         if self.operation_name is None:
             raise AssertionError("Expected self.operation_name is not None")
         return self.operation_name
+
+    def get_buffer_name(self) -> str | None:
+        return None
 
     def get_config_patches(self) -> dict[str, Any]:
         """Get config patches for this operation (e.g., coordinate_descent_tuning)."""
@@ -5104,6 +5107,7 @@ class Buffer(IRNode, CodegenSymbol):
     # a meaningful name
     name: str | None
     layout: OutputSpec
+    ordering_only: ClassVar[bool] = False
 
     # Multi-output buffers will define 'outputs: List[Buffer]'. Confusingly,
     # MultiOutput does NOT define this!
@@ -5118,6 +5122,9 @@ class Buffer(IRNode, CodegenSymbol):
     def get_name(self) -> str:
         if not self.name:
             raise AssertionError(self)
+        return self.name
+
+    def get_buffer_name(self) -> str | None:
         return self.name
 
     def get_example(self) -> torch.Tensor | torch.SymInt:
@@ -9394,7 +9401,7 @@ class FallbackKernel(ExternKernelAlloc):
             direct_symbol_outputs = OrderedSet(
                 [
                     output
-                    for output in pytree.tree_leaves(self.outputs)
+                    for output in pytree.tree_leaves(self.codegen_outputs())
                     if isinstance(output, sympy.Symbol)
                 ]
             )
@@ -9405,8 +9412,17 @@ class FallbackKernel(ExternKernelAlloc):
                     if k not in direct_symbol_outputs
                 }
         return wrapper.codegen_unbacked_symbol_defs_for_outputs(
-            self.get_name(), self.outputs, unbacked_bindings
+            self.get_name(),
+            self.codegen_outputs(),
+            unbacked_bindings,
         )
+
+    def codegen_outputs(self) -> Sequence[Any]:
+        if self.outputs:
+            return self.outputs
+        if isinstance(self.layout, Layout):
+            return [self]
+        return self.mutation_outputs
 
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
         if unbacked_bindings := getattr(self, "unbacked_bindings", None):
@@ -9462,7 +9478,7 @@ class FallbackKernel(ExternKernelAlloc):
             return example_output.device
         if isinstance(
             example_output, (torch._C.ScriptObject, FakeScriptObject)
-        ) or is_opaque_value(example_output):
+        ) or is_custom_class_obj(example_output):
             return torch.device("cpu")
         if isinstance(example_output, (list, tuple)):
             device_set = OrderedSet(
@@ -9616,7 +9632,7 @@ class FallbackKernel(ExternKernelAlloc):
         if len(returns) == 1:
             # NOTE: [special handling of all_reduce_coalesced_'s return value]
             # all_reduce_coalesced_ return a list of tensors via self.mutation_outputs
-            outputs = self.outputs if self.outputs else self.mutation_outputs
+            outputs = self.codegen_outputs()
             return_type = returns[0].real_type
             output_arguments = [handle_single_output(return_type, outputs)]
         else:
@@ -9733,16 +9749,19 @@ class FallbackKernel(ExternKernelAlloc):
                 self.op_overload,
                 exported_args,
                 # NOTE: [special handling of all_reduce_coalesced_'s return value]
-                self.outputs if self.outputs else self.mutation_outputs,
+                self.codegen_outputs(),
             )
         else:
             wrapper.generate_fallback_kernel(self)
-            if isinstance(self.layout, Layout):
-                self.codegen_size_asserts(wrapper)
-                self.codegen_alignment_asserts(wrapper)
-                self.codegen_memory_tracking(wrapper)
 
         self.codegen_unbacked_symbol_defs(wrapper)
+        # AOT runtime dispatch assertions are emitted by the proxy executor path.
+        if not (self.use_runtime_dispatch and V.graph.aot_mode) and isinstance(
+            self.layout, Layout
+        ):
+            self.codegen_size_asserts(wrapper)
+            self.codegen_alignment_asserts(wrapper)
+            self.codegen_memory_tracking(wrapper)
 
     @staticmethod
     def tensor_to_layout(output: torch.Tensor) -> FixedLayout:
@@ -9877,6 +9896,26 @@ class FallbackKernel(ExternKernelAlloc):
         ):
             device = torch.device("cpu")
 
+        def create_direct_output(output: torch.Tensor) -> FallbackKernel:
+            if not device:
+                raise AssertionError("Not sure where to find device info")
+            packed = cls(
+                cls.tensor_to_layout(output),
+                kernel,
+                tensor_args,
+                non_tensor_args,
+                unflatten_args,
+                kwargs=kwargs,
+                unbacked_bindings=unbacked_bindings,
+            )
+            if (
+                config.assume_unaligned_fallback_output
+                or has_unaligned_input
+                or not tensor_is_aligned(output)
+            ):
+                V.graph.unaligned_buffers.add(packed.get_name())
+            return packed
+
         # Try multi-output .out() lowering for custom ops with the out tag.
         if (
             isinstance(kernel, torch._ops.OpOverload)
@@ -9908,6 +9947,9 @@ class FallbackKernel(ExternKernelAlloc):
                 kwargs=kwargs,
                 unbacked_bindings=unbacked_bindings,
             )
+
+        elif isinstance(example_output, torch.Tensor):
+            return create_direct_output(example_output)
 
         else:
             if not device:
@@ -9952,7 +9994,7 @@ class FallbackKernel(ExternKernelAlloc):
                 return output.node.expr
             elif isinstance(
                 output, (torch._C.ScriptObject, FakeScriptObject)
-            ) or is_opaque_value(output):
+            ) or is_custom_class_obj(output):
                 return OpaqueMultiOutput(
                     NoneLayout(device=device),
                     packed,
@@ -11436,7 +11478,7 @@ class TorchBindObject(NonTensorObj):
         # Returns the sum of all tensors in the flattened object
         real_script_obj = self.get_real_obj()
 
-        if is_opaque_value(real_script_obj):
+        if is_custom_class_obj(real_script_obj):
             return 0
 
         if not hasattr(real_script_obj, "__obj_flatten__"):

@@ -61,6 +61,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from ..graph import GraphLowering
+    from ..runtime.hints import TritonMeta
 
     # At most, the list nesting can go one layer deep.
     _OUTPUT_ARGS_TYPE = list[str | None | list[str | None]]
@@ -95,7 +96,7 @@ class DeferredCpuTritonCallWrapper:
     wrapper_name: str
     kernel_name: str
     arg_types: list[Any]
-    triton_meta: dict[str, Any] | None = None
+    triton_meta: TritonMeta | None = None
     inductor_meta: dict[str, Any] | None = None
 
     def _get_cpp_param_type(self, name: str, arg_type: Any) -> str:
@@ -421,7 +422,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         arg_types=None,
         raw_keys=None,
         raw_args=None,
-        triton_meta=None,
+        triton_meta: TritonMeta | None = None,
         inductor_meta=None,
         graph_name="",
         original_fxnode_name=None,
@@ -1591,20 +1592,30 @@ class CppWrapperCpu(PythonWrapperCodegen):
         cst_names = V.graph.constants.keys()
         output2idx: dict[str, int] = {}
 
-        has_cuda_data_ptr_keepalive = False
+        cuda_data_ptr_keepalive_device_idxs: OrderedSet[int] = OrderedSet()
         for name in V.graph.data_ptr_keepalive_buffers:
             buf = V.graph.try_get_buffer(name)
             if buf is None:
                 continue
             device = buf.get_device()
             if device is not None and device.type == "cuda":
-                has_cuda_data_ptr_keepalive = True
-                break
+                if device.index is None:
+                    raise AssertionError(
+                        f"Expected CUDA keepalive buffer {name} to have an indexed device"
+                    )
+                cuda_data_ptr_keepalive_device_idxs.add(device.index)
 
-        if has_cuda_data_ptr_keepalive:
+        if cuda_data_ptr_keepalive_device_idxs:
             # The stable ABI wrapper has no record_stream shim for hidden
             # data_ptr() sources, so wait before RAII handles release storage.
-            self.generate_debug_sync(self.wrapper_call)
+            with (
+                self._preserve_device_guard_state(),
+                self.set_writeline(self.wrapper_call, self.wrapper_call.writeline),
+            ):
+                for device_idx in cuda_data_ptr_keepalive_device_idxs:
+                    self.codegen_device_guard_enter(device_idx)
+                    self.generate_debug_sync(self.wrapper_call)
+                    self.codegen_device_guard_exit()
 
         # If any output ref represents an rvalue tensor, materialize it to an lvalue
         # RAIIAtenTensorHandle first.  This prevents situations where the code for the
@@ -2344,6 +2355,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 code.writeline(guarded)
         else:
             code.writeline(stmt)
+
+    def _codegen_assert_size_stride_grouped(
+        self, code: IndentedBuffer, asserts: list[tuple[str, str, str]], op_name: str
+    ) -> None:
+        for name, size, stride in asserts:
+            self._codegen_assert_size_stride(code, name, size, stride, op_name)
 
     def codegen_device(self, device):
         if device.type not in DEVICE_TO_ATEN:
@@ -3309,7 +3326,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         ) -> str | None | _OUTPUT_ARGS_TYPE:
             if out is None:
                 return None
-            if isinstance(out, (ir.MultiOutput, ir._CollectiveKernel)):
+            if isinstance(
+                out, (ir.MultiOutput, ir._CollectiveKernel, ir.FallbackKernel)
+            ):
                 return out.get_name()
             if isinstance(out, ir.MutationOutput):
                 mutated_buf_names = out.get_mutation_names()

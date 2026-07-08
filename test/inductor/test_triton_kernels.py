@@ -390,6 +390,8 @@ class KernelTests(torch._inductor.test_case.TestCase):
                     else "cudaDeviceSynchronize"
                 )
                 self.assertIn(sync_fn, code)
+                sync_idx = code.index(sync_fn)
+                self.assertIn("device_guard.set_index(", code[:sync_idx])
 
     @requires_gpu
     def test_triton_kernel_dunder_name_no_name_mangling(self):
@@ -3540,9 +3542,9 @@ def forward(self, arg0_1, arg1_1):
             return y
 
         # make sure FLOAT_CONSTANT_C is NOT annotated
-        self.assertFalse("FLOAT_CONSTANT_C" in globals().get("__annotations__", {}))
+        self.assertFalse("FLOAT_CONSTANT_C" in sys.modules[__name__].__annotations__)
         # sanity check: STRING_CONSTANT_C _should_ be annotated
-        self.assertTrue("STRING_CONSTANT_C" in globals().get("__annotations__", {}))
+        self.assertTrue("STRING_CONSTANT_C" in sys.modules[__name__].__annotations__)
 
         x = torch.randn(512, device=GPU_TYPE)
         expected = x + 3.14
