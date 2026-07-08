@@ -379,16 +379,13 @@ static void initialize_nvshmem_with_store(
 
 class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
  public:
-  // Signal pad first at [0, signal_pad_size), data buffer at buffer_offset =
-  // signal_pad_size. The signal pad size is already 16-aligned, so the data
-  // buffer is aligned without extra padding; round up the data size instead.
-  // Returns the data buffer pointer (alloc_base + buffer_offset), not
-  // alloc_base; the signal pad stays hidden in front and free()/rendezvous()
-  // key off this returned pointer.
   void* alloc(
       size_t size,
       int device_idx,
       const std::optional<std::string>& group_name) override {
+    // Returns the data buffer pointer (alloc_base + buffer_offset), not
+    // alloc_base; the signal pad stays hidden in front and free()/rendezvous()
+    // key off this returned pointer.
     TORCH_CHECK(
         group_name == std::nullopt,
         "NVSHMEMSymmetricMemoryAllocator::alloc "
@@ -400,6 +397,9 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     initialize_nvshmem_with_store(
         group->getStore(), group->getRank(), group->getSize(), device_idx);
 
+    // Signal pad first at [0, signal_pad_size), data buffer at buffer_offset =
+    // signal_pad_size. The signal pad size is already 16-aligned, so the data
+    // buffer is aligned without extra padding; round up the data size instead.
     const size_t signal_pad_size = get_signal_pad_size();
     const size_t buffer_offset = signal_pad_size;
     const size_t total_size = buffer_offset + at::round_up(size, 16UL);
