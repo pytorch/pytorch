@@ -32,8 +32,6 @@ _PY_PROFILER = torch._C._profiler
 # is never used when None. Importing this module on a non-CUDA build must not fail. Typed
 # as the module for checkers (its methods are exercised only on the CUDA path).
 if TYPE_CHECKING:
-    from typing_extensions import Self
-
     _cupti_monitor_native = _PY_PROFILER._cupti_monitor
 else:
     _cupti_monitor_native = getattr(_PY_PROFILER, "_cupti_monitor", None)
