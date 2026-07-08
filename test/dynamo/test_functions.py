@@ -168,6 +168,26 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_inline_lru_cache_fn_with_default_args(a, b):
         return inline_lru_cache_fn_with_default_args(a, 2, b)
 
+    def test_str_split_returns_mutable_list(self):
+        # str.split/rsplit/splitlines return a fresh caller-owned mutable list;
+        # in-place mutations on the result must be tracked (no graph break).
+        def fn(t, s):
+            words = s.split()
+            words.sort(key=str.lower)
+            words.append("zzz")
+            rparts = s.rsplit(" ")
+            rparts.reverse()
+            lines = s.splitlines()
+            lines.pop()
+            return t + 1, words, rparts, lines
+
+        s = "the Quick brown Fox"
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        ref = fn(torch.ones(3), s)
+        res = opt(torch.ones(3), s)
+        self.assertEqual(ref[0], res[0])
+        self.assertEqual(ref[1:], res[1:])
+
     def test_lru_cache_warning_issued_during_tracing(self):
         import warnings
         from functools import lru_cache
