@@ -13,10 +13,8 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wset-but-not-used")
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-parameter")
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-variable")
 
-// Determine if the architecture supports rowwise scaled mm
-// Currently failing on windows with:
-// https://github.com/NVIDIA/cutlass/issues/1571
-#if !defined(USE_ROCM) && !defined(_WIN32) && defined(CUDA_VERSION)
+// CUTLASS bf16 grouped GEMM (CUDA). MSVC issues from NVIDIA/cutlass#1571 are fixed upstream.
+#if !defined(USE_ROCM) && defined(CUDA_VERSION)
 
 #define BUILD_GG_KERNEL
 #endif
@@ -166,7 +164,7 @@ void bf16bf16_grouped_gemm_impl_sm90_sm100(
 
   using GemmKernel = std::conditional_t<
       std::is_same_v<ArchTag, cutlass::arch::Sm100>,
-      at::cuda::detail::enable_3x_kernel_for_sm10<GemmKernelBase>,
+      at::cuda::detail::enable_3x_kernel_for_sm10_or_later<GemmKernelBase>,
       at::cuda::detail::enable_3x_kernel_for_sm9x<GemmKernelBase>>;
 
   using Gemm = cutlass::gemm::device::GemmUniversalAdapter<GemmKernel>;
@@ -346,8 +344,9 @@ void dispatch_bf16_grouped_kernel_on_tile_size(
   cudaDeviceProp* properties = at::cuda::getCurrentDeviceProperties();
   const bool sm10x = properties != nullptr && properties->major == 10;
   const bool sm11x = properties != nullptr && properties->major == 11;
+  const bool sm12x = properties != nullptr && properties->major == 12;
 
-  if (sm10x || sm11x) {
+  if (sm10x || sm11x || sm12x) {
     if (small){
       bf16bf16_grouped_gemm_impl_sm90_sm100<
         cutlass::arch::Sm100,
