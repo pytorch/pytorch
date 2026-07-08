@@ -558,8 +558,7 @@ class TestCuptiMonitorCUDA(TestCase):
             assert not torch.cuda.is_initialized()
             kind = ActivityKind.CONCURRENT_KERNEL
             seen = []
-            mon.configure(use_approx_timestamps=True)
-            m = mon.CuptiMonitor()
+            m = mon.CuptiMonitor(use_approx_timestamps=True)
             obs = m.register({kind: {Kernel.START, Kernel.END}},
                              lambda cols: seen.append(cols[kind]) if kind in cols else None)
             assert m._timestamp_callback_active, "callback did not engage"
