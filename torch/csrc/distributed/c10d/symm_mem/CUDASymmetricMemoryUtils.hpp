@@ -21,7 +21,7 @@ bool allow_overlapping_devices();
 std::string getSymmMemBackendCUDA();
 
 // All-gather a fixed-size byte payload through the given ProcessGroup.
-// Uses ProcessGroup::_allgather_base (NCCL allgather for a NCCL-backed PG).
+// Uses ProcessGroup::all_gather_single (NCCL allgather for a NCCL-backed PG).
 // The payload is staged through a uint8 CUDA tensor on `device_idx`; the H2D
 // and D2H copies are negligible at the sizes exchanged during rendezvous (a
 // few hundred bytes per rank). Returns a contiguous CPU tensor of
