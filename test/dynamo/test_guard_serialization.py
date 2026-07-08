@@ -293,7 +293,7 @@ class SubclassWithSubclassInnerTensor(torch.Tensor):
 
 
 # defines a custom __eq__() / __hash__() to be registered as a pytree constant type
-class CustomConstantType(torch._opaque_base.OpaqueBase):
+class CustomConstantType(torch._custom_class_base.CustomClassBase):
     def __init__(self, a, b):
         self.a = a
         self.b = b
@@ -315,7 +315,7 @@ class CustomConstantType(torch._opaque_base.OpaqueBase):
         }
 
 
-torch._library.opaque_object.register_opaque_type(CustomConstantType, typ="value")
+torch._library.opaque_object.register_custom_class(CustomConstantType, typ="constant")
 
 
 class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
@@ -1525,7 +1525,6 @@ class TestGuardSerialization(TestGuardSerializationBase):
             True,
         )
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_ddp_module(self):
         import torch.distributed as dist
 
@@ -1543,13 +1542,15 @@ class TestGuardSerialization(TestGuardSerializationBase):
             def foo(ddp, x):
                 return ddp(x)
 
+            unsupported = frozenset(
+                torch._dynamo.guards.CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
+            )
             x = torch.randn(10)
             package = CompilePackage(foo)
             torch._dynamo.optimize(
                 package=package,
                 guard_filter_fn=lambda gs: [
-                    x.guard_type not in ("CLOSURE_MATCH", "ID_MATCH", "CLASS_MATCH")
-                    for x in gs
+                    x.guard_type not in unsupported for x in gs
                 ],
             )(foo)(ddp_model, x)
             self.assertEqual(len(package._codes[foo.__code__].guarded_codes), 1)

@@ -437,7 +437,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             self.assertEqual(
                 torch.tensor([(i * self.world_size) + (i % self.world_size)]),
                 inputs[i],
-                msg=(f"Mismatch in iteration {i:d}"),
+                msg=(lambda msg: f"{msg}\nMismatch in iteration {i:d}"),
             )
 
     @requires_gloo()
@@ -603,7 +603,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                     ]
                 ),
                 future_handle.value()[0],
-                msg=(f"Mismatch in iteration {i:d}"),
+                msg=(lambda msg: f"{msg}\nMismatch in iteration {i:d}"),
             )
 
     @requires_gloo()
@@ -700,7 +700,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             self.assertEqual(
                 self._expected_output(i),
                 result,
-                msg=f"Mismatch in iteration {i}",
+                msg=lambda msg: f"{msg}\nMismatch in iteration {i}",
             )
 
     @requires_gloo()
@@ -722,7 +722,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             self.assertEqual(
                 self._expected_output(i),
                 fut.wait(),
-                msg=f"Mismatch in iteration {i}",
+                msg=lambda msg: f"{msg}\nMismatch in iteration {i}",
             )
 
     @requires_gloo()
@@ -1135,7 +1135,9 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             self.assertEqual(
                 torch.tensor([iter + root]),
                 result[0],
-                msg=(f"Mismatch in iteration {iter:d} for rank {root:d}"),
+                msg=(
+                    lambda msg: f"{msg}\nMismatch in iteration {iter:d} for rank {root:d}"
+                ),
             )
 
     @requires_gloo()
@@ -1392,7 +1394,9 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 self.assertEqual(
                     expected_outputs[iter],
                     [result],
-                    msg=(f"Mismatch in iteration {iter:d} for root {root:d}"),
+                    msg=(
+                        lambda msg: f"{msg}\nMismatch in iteration {iter:d} for root {root:d}"
+                    ),
                 )
 
     @requires_gloo()
@@ -1528,7 +1532,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             self.assertEqual(
                 expected_outputs[i],
                 [result],
-                msg=(f"Mismatch in iteration {i:d}"),
+                msg=(lambda msg: f"{msg}\nMismatch in iteration {i:d}"),
             )
 
     @requires_gloo()
@@ -1715,7 +1719,9 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                         ]
                     ),
                     result[0],
-                    msg=(f"Mismatch in iteration {iter:d} with root rank {root:d}"),
+                    msg=(
+                        lambda msg: f"{msg}\nMismatch in iteration {iter:d} with root rank {root:d}"
+                    ),
                 )
 
     @requires_gloo()
@@ -1934,7 +1940,9 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 self.assertEqual(
                     expected_value,
                     outputs[i][j],
-                    msg=(f"Mismatch in iteration {i:d} from rank {j:d}"),
+                    msg=(
+                        lambda msg: f"{msg}\nMismatch in iteration {i:d} from rank {j:d}"
+                    ),
                 )
 
     @requires_gloo()
@@ -1989,7 +1997,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 expected_value,
                 actual_value,
                 msg=(
-                    f"Rank {self.rank}: output_tensors[{j}] = "
+                    lambda msg: f"{msg}\nRank {self.rank}: output_tensors[{j}] = "
                     f"{actual_value}, expected {expected_value}"
                 ),
             )
