@@ -79,7 +79,6 @@ op_implementations_checks = []
 # pyrefly: ignore [implicit-any]
 PRE_DECOMPOSITION_OP_IMPLEMENTATIONS = {}
 
-
 aten = torch._ops.ops.aten
 _MKLDNN_DISPATCH_KEYS = torch._C.DispatchKeySet(
     torch._C._dispatch_key_parse("MkldnnCPU")
@@ -234,6 +233,8 @@ def register_op_impl(
             if run_impl_check in op_implementations_dict:
                 raise AssertionError(f"duplicate registration: {run_impl_check}")
             op_implementations_dict[run_impl_check] = op_impl
+            schema = run_impl_check._schema
+            torch._C._fake_dispatch_register_op_impl(schema.name, schema.overload_name)
         elif isinstance(run_impl_check, (list, tuple)):
             for op in run_impl_check:
                 register_op_impl(op)(op_impl)
@@ -254,7 +255,11 @@ def _is_op_registered_to_fake_rule(op: OpOverload) -> bool:
 
 
 def _deregister_op_impl(op: OpOverload) -> None:
-    op_implementations_dict.pop(op, None)
+    if op in op_implementations_dict:
+        op_implementations_dict.pop(op, None)
+        torch._C._fake_dispatch_deregister_op_impl(
+            op._schema.name, op._schema.overload_name
+        )
     for check, impl in op_implementations_checks:
         if check is op:
             op_implementations_checks.remove((check, impl))
@@ -1895,22 +1900,22 @@ def assert_tensor_metadata(
     fake_mode: FakeTensorMode,
     func: OpOverload,
     t: FakeTensor,
-    sizes: torch.Size | None = None,
-    strides: tuple[int, ...] | None = None,
+    size: list[int] | None = None,
+    stride: list[int] | None = None,
     dtype: torch.dtype | None = None,
     *,
     device: torch.device | None = None,
     layout: torch.layout | None = None,
 ) -> None:
-    if sizes is not None:
-        if t.size() != sizes:
+    if size is not None:
+        if t.size() != tuple(size):
             raise AssertionError(
-                f"Tensor sizes mismatch! Expected: {sizes}, Got: {t.size()}"
+                f"Tensor size mismatch! Expected: {size}, Got: {t.size()}"
             )
-    if strides is not None:
-        if t.stride() != strides:
+    if stride is not None:
+        if t.stride() != tuple(stride):
             raise AssertionError(
-                f"Tensor strides mismatch! Expected: {strides}, Got: {t.stride()}"
+                f"Tensor stride mismatch! Expected: {stride}, Got: {t.stride()}"
             )
     if dtype is not None:
         if t.dtype != dtype:
@@ -2579,7 +2584,10 @@ def _fake_alias(fake_mode: FakeTensorMode, x: FakeTensor) -> FakeTensor:
         out = aten.alias.default(x)
     # Real MKLDNN alias is not public API, but compiler-generated alias nodes
     # must preserve fake MKLDNN layout state through tracing.
-    return FakeTensor(fake_mode, out, x.device, dispatch_keys=x.dispatch_keys)
+    fake_out = FakeTensor(fake_mode, out, x.device, dispatch_keys=x.dispatch_keys)
+    if x.is_mkldnn:
+        _mark_fake_tensor_mkldnn(fake_out)
+    return fake_out
 
 
 @register_op_impl(aten.alias.default)

@@ -26,7 +26,7 @@ from torch._export.passes.lift_constants_pass import ConstantAttrMap
 from torch._export.utils import _fakify_params_buffers
 from torch._guards import Source
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_value
+from torch._library.opaque_object import is_custom_class_obj
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.export import Constraint
 from torch.export.dynamic_shapes import (
@@ -200,7 +200,7 @@ def fakify(
     if (
         _is_constant_argument(t)
         or isinstance(t, (torch.ScriptObject, torch.nn.Module))
-        or is_opaque_value(t)
+        or is_custom_class_obj(t)
     ):
         return t
 
@@ -394,21 +394,11 @@ def _tensor_min_max(*args, real_callable, tensor_callable, **kwargs):
     return real_callable(*args, **kwargs)
 
 
-def _tensor_len(obj, *, real_callable):
-    if isinstance(obj, torch.Tensor):
-        return obj.__len__()
-    return real_callable(obj)
-
-
 @contextmanager
 def _override_builtin_ops():
-    original_len = builtins.len
     original_max = builtins.max
     original_min = builtins.min
     original_pow = math.pow
-
-    # pyrefly: ignore [bad-assignment]
-    builtins.len = functools.partial(_tensor_len, real_callable=original_len)
 
     # pyrefly: ignore [bad-assignment]
     builtins.max = functools.partial(
@@ -425,7 +415,6 @@ def _override_builtin_ops():
     try:
         yield
     finally:
-        builtins.len = original_len
         builtins.max = original_max
         builtins.min = original_min
         math.pow = original_pow
@@ -1144,7 +1133,7 @@ def _fakify_script_objects(
         for obj, fqns in constant_attrs.items():
             if torch._library.fake_class_registry._is_script_object(
                 obj
-            ) or is_opaque_value(obj):
+            ) or is_custom_class_obj(obj):
                 fake_script_obj = _maybe_fakify_obj(obj)
                 for fqn in fqns:
                     cur_mod, attr = _leaf_mod_and_attr(mod, fqn)
