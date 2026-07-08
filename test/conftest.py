@@ -316,15 +316,17 @@ def _spawns_multiple_processes(cls: type | None) -> bool:
     """
     if cls is None:
         return True
-    try:
-        from torch.testing._internal.common_distributed import (
-            MultiProcContinuousTest,
-            MultiProcessTestCase,
-        )
-    except Exception:
-        # Distributed unavailable: no test can spawn processes, so nothing is
+    import torch.distributed as dist
+
+    if not dist.is_available():
+        # Distributed wasn't built: no test can spawn processes, so nothing is
         # multiproc and the single-GPU config runs everything.
         return False
+    from torch.testing._internal.common_distributed import (
+        MultiProcContinuousTest,
+        MultiProcessTestCase,
+    )
+
     return issubclass(cls, (MultiProcessTestCase, MultiProcContinuousTest))
 
 
