@@ -6,10 +6,6 @@
 
 namespace c10d::nccl2 {
 
-#if defined(IS_NCCLX)
-#error "NCCLX should not be used"
-#endif
-
 // DefaultNcclApi implementation
 const char* DefaultNcclApi::getErrorString(ncclResult_t result) {
   std::lock_guard<std::mutex> lock(api_mutex_);

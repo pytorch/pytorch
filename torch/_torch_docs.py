@@ -607,8 +607,10 @@ Args:
     mat1 (Tensor): the first matrix to be matrix multiplied
     mat2 (Tensor): the second matrix to be matrix multiplied
     out_dtype (dtype): the dtype of the output tensor.
-        Supported only on CUDA and for torch.float32 given
-        torch.float16/torch.bfloat16 input dtypes.
+        On CUDA and XPU, only ``torch.float32`` is supported given
+        ``torch.float16``/``torch.bfloat16`` input dtypes. Other backends
+        (including out-of-tree accelerators) may support additional
+        input/output dtype combinations.
 
 Keyword args:
     beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
@@ -1422,8 +1424,10 @@ Args:
     batch1 (Tensor): the first batch of matrices to be multiplied
     batch2 (Tensor): the second batch of matrices to be multiplied
     out_dtype (dtype): the dtype of the output tensor.
-        Supported only on CUDA and for torch.float32 given
-        torch.float16/torch.bfloat16 input dtypes.
+        On CUDA and XPU, only ``torch.float32`` is supported given
+        ``torch.float16``/``torch.bfloat16`` input dtypes. Other backends
+        (including out-of-tree accelerators) may support additional
+        input/output dtype combinations.
 
 Keyword args:
     beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
@@ -1603,8 +1607,10 @@ Args:
     input (Tensor): the first batch of matrices to be multiplied
     mat2 (Tensor): the second batch of matrices to be multiplied
     out_dtype (dtype): the dtype of the output tensor.
-        Supported only on CUDA and for torch.float32 given
-        torch.float16/torch.bfloat16 input dtypes.
+        On CUDA and XPU, only ``torch.float32`` is supported given
+        ``torch.float16``/``torch.bfloat16`` input dtypes. Other backends
+        (including out-of-tree accelerators) may support additional
+        input/output dtype combinations.
 
 Keyword Args:
     {out}
@@ -5594,7 +5600,7 @@ allocated during inference mode. A view tensor is an inference
 tensor if and only if the tensor it is a view of is an inference tensor.
 
 For details on inference mode please see
-`Inference Mode <https://pytorch.org/cppdocs/notes/inference_mode.html>`_.
+`Inference Mode <https://docs.pytorch.org/docs/2.9/notes/autograd.html#inference-mode>`_.
 
 Args:
     {input}
@@ -7519,8 +7525,10 @@ Args:
     input (Tensor): the first matrix to be matrix multiplied
     mat2 (Tensor): the second matrix to be matrix multiplied
     out_dtype (dtype): the dtype of the output tensor.
-        Supported only on CUDA and for torch.float32 given
-        torch.float16/torch.bfloat16 input dtypes.
+        On CUDA and XPU, only ``torch.float32`` is supported given
+        ``torch.float16``/``torch.bfloat16`` input dtypes. Other backends
+        (including out-of-tree accelerators) may support additional
+        input/output dtype combinations.
 
 Keyword args:
     {out}
@@ -9387,7 +9395,7 @@ Args:
 Keyword args:
     {out}
     {dtype} If `dtype` is not given, infer the data type from the other input
-        arguments. If any of `start`, `end`, or `stop` are floating-point, the
+        arguments. If any of `start`, `end`, or `step` are floating-point, the
         `dtype` is inferred to be the default dtype, see
         :meth:`~torch.get_default_dtype`. Otherwise, the `dtype` is inferred to
         be `torch.int64`.
@@ -14099,7 +14107,8 @@ the returned index satisfies the following rules:
 Args:
     sorted_sequence (Tensor): N-D or 1-D tensor, containing monotonically increasing sequence on the *innermost*
                               dimension unless :attr:`sorter` is provided, in which case the sequence does not
-                              need to be sorted
+                              need to be sorted. PyTorch does not validate this condition when :attr:`sorter` is
+                              not provided, and the behavior is undefined if the sequence is not sorted.
     values (Tensor or Scalar): N-D tensor or a Scalar containing the search value(s).
 
 Keyword args:
