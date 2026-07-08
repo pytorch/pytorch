@@ -650,14 +650,14 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
 
     def _stable_hash_for_cache_value(self, obj: Any) -> str:
         """Get a stable hash for an object used inside tensor subclass metadata."""
-        from torch._opaque_base import OpaqueBase
+        from torch._custom_class_base import CustomClassBase
         from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
         if hasattr(obj, "_stable_hash_for_caching"):
             return obj._stable_hash_for_caching()
         if isinstance(obj, torch.Tensor) and is_traceable_wrapper_subclass(obj):
             return self._default_stable_hash_for_caching(obj)
-        if isinstance(obj, OpaqueBase):
+        if isinstance(obj, CustomClassBase):
             # Opaque objects are runtime pass-throughs; only the type matters
             # for cache key purposes, not the instance identity or value.
             return self._hash_bytes_for_cache(type(obj).__qualname__.encode())
@@ -694,9 +694,9 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
         return inner_hashes
 
     def _stabilize_tensor_subclass_metadata(self, obj: Any) -> Any:
-        from torch._opaque_base import OpaqueBase
+        from torch._custom_class_base import CustomClassBase
 
-        if isinstance(obj, OpaqueBase):
+        if isinstance(obj, CustomClassBase):
             return type(obj).__qualname__
         if isinstance(obj, tuple):
             return tuple(self._stabilize_tensor_subclass_metadata(x) for x in obj)
