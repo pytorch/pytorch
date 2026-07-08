@@ -1163,7 +1163,7 @@ class TestMaxAutotune(TestCase):
                 self.assertEqual(
                     len(kernel_events),
                     1,
-                    f"Expected exactly 1 kernel event, but got {len(kernel_events)}",
+                    lambda msg: f"{msg}\nExpected exactly 1 kernel event, but got {len(kernel_events)}",
                 )
 
                 # Check that grid size matches expected values based on carveout
@@ -1177,7 +1177,7 @@ class TestMaxAutotune(TestCase):
                 self.assertEqual(
                     kernel_events[0]["grid_size"],
                     expected_grid_size,
-                    f"Grid size {kernel_events[0]['grid_size']} doesn't match {expected_grid_size} for carveout={carveout}",
+                    lambda msg: f"{msg}\nGrid size {kernel_events[0]['grid_size']} doesn't match {expected_grid_size} for carveout={carveout}",
                 )
 
     @parametrize("dynamic", (False, True))
@@ -1794,7 +1794,7 @@ class TestMaxAutotune(TestCase):
 
                         self.assertTrue(
                             divisor_found,
-                            f"Could not find a split in {divisors} in {kernel}",
+                            lambda msg: f"{msg}\nCould not find a split in {divisors} in {kernel}",
                         )
 
             compiled_func = torch.compile(lambda a, b: a @ b, dynamic=dynamic)
@@ -2838,7 +2838,7 @@ class TestMaxAutotune(TestCase):
                     self.assertIsInstance(
                         choice.layout,
                         expected_layout,
-                        f"Expected {expected_layout.__name__} with max_autotune={max_autotune_enabled}",
+                        lambda msg: f"{msg}\nExpected {expected_layout.__name__} with max_autotune={max_autotune_enabled}",
                     )
             return choices
 
@@ -3156,7 +3156,7 @@ class TestMaxAutotune(TestCase):
 
         self.assertTrue(
             b.numel() > 2**31 - 1,
-            f"Test requires tensor with >2^31 elements, got {b.numel()}",
+            lambda msg: f"{msg}\nTest requires tensor with >2^31 elements, got {b.numel()}",
         )
 
         with config.patch(
@@ -3196,7 +3196,7 @@ class TestMaxAutotune(TestCase):
         expected_offset = 7 * batch * K
         self.assertTrue(
             expected_offset > 2**31 - 1,
-            f"Test requires offset > i32_max, got {expected_offset}",
+            lambda msg: f"{msg}\nTest requires offset > i32_max, got {expected_offset}",
         )
 
         torch._dynamo.mark_dynamic(x, 0)
@@ -3238,7 +3238,7 @@ class TestMaxAutotune(TestCase):
 
         self.assertTrue(
             M * N >= 2**32,
-            f"Test requires M*N >= 2^32 for overflow, got {M * N}",
+            lambda msg: f"{msg}\nTest requires M*N >= 2^32 for overflow, got {M * N}",
         )
 
         with config.patch(
@@ -3280,7 +3280,7 @@ class TestMaxAutotune(TestCase):
 
         self.assertTrue(
             b.numel() > 2**31 - 1,
-            f"Test requires tensor with >2^31 elements, got {b.numel()}",
+            lambda msg: f"{msg}\nTest requires tensor with >2^31 elements, got {b.numel()}",
         )
 
         with config.patch(
@@ -3761,13 +3761,13 @@ class TestTemplateConfigPruning(TestCase):
             if triton_compilation_fails:
                 self.assertTrue(
                     exceeds,
-                    f"Config {c} failed to compile due to shared memory, "
+                    lambda msg: f"{msg}\nConfig {c} failed to compile due to shared memory, "
                     "but the checker predicted it would NOT exceed shared memory limits.",
                 )
             else:
                 self.assertTrue(
                     captured_smem <= smem_estimation,
-                    f"Estimated maximum smem should exceed actual smem used for config {c}",
+                    lambda msg: f"{msg}\nEstimated maximum smem should exceed actual smem used for config {c}",
                 )
 
 
@@ -4046,12 +4046,12 @@ class TestMaxAutotuneSubproc(TestCase):
         self.assertGreater(
             len(finite_timings_ms),
             0,
-            f"Expected finite autotune benchmark timings, got {benchmark_timings_ms}",
+            lambda msg: f"{msg}\nExpected finite autotune benchmark timings, got {benchmark_timings_ms}",
         )
         self.assertGreater(
             min(finite_timings_ms),
             0.0,
-            f"Expected autotune benchmark timing > 0, got {finite_timings_ms}",
+            lambda msg: f"{msg}\nExpected autotune benchmark timing > 0, got {finite_timings_ms}",
         )
 
     @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))

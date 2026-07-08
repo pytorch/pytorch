@@ -769,9 +769,6 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(8, requires_grad=True)
         # Difficult to check the results here because we random does not match
         # between eager and Triton.
-        res = torch.compile(fn, backend="inductor", fullgraph=True)(x)
-
-        torch.compiler.reset()
         backend = InductorAndRecordGraphs()
         res = torch.compile(fn, backend=backend, fullgraph=True)(x)
         res.sum().backward()
@@ -4321,7 +4318,7 @@ class GraphModule(torch.nn.Module):
                 name.startswith("repeated_subgraph") and "._tensor_constant" in name
                 for name in buffer_names
             ),
-            f"Expected repeated_subgraph*._tensor_constant* buffer; got {buffer_names}",
+            lambda msg: f"{msg}\nExpected repeated_subgraph*._tensor_constant* buffer; got {buffer_names}",
         )
         # Use the first buffer that actually matches the expected naming pattern
         # so the subsequent assertions are meaningful rather than checking an

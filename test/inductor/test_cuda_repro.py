@@ -1188,7 +1188,8 @@ class CudaReproTests(TestCase):
         out = compiled(inp)
         norm = out.norm(dim=-1)
         self.assertTrue(
-            torch.all(norm <= 1.0), f"expected norm <= 1.0 but got {norm.item()}"
+            torch.all(norm <= 1.0),
+            lambda msg: f"{msg}\nexpected norm <= 1.0 but got {norm.item()}",
         )
 
     def test_libdevice_routing(self):
@@ -2844,7 +2845,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
                 # They should be identical (or very close)
                 self.assertTrue(
                     torch.allclose(eager_output, compiled_output, rtol=1e-5, atol=1e-5),
-                    f"Results differ for input shape {(batch, channels, h, w)}. "
+                    lambda msg: f"{msg}\nResults differ for input shape {(batch, channels, h, w)}. "
                     f"Max diff: {torch.max(torch.abs(eager_output - compiled_output)):.6f}",
                 )
 

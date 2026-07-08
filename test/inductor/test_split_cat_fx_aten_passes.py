@@ -396,7 +396,7 @@ class TestSplitCatAtenNormalizationPasses(TestCase):
             self.assertEqual(
                 counters["inductor"]["normalization_aten_pass"],
                 expected_split_norm_count,
-                msg=f"for {fn}",
+                msg=lambda msg: f"{msg}\nfor {fn}",
             )
             counters.clear()
 

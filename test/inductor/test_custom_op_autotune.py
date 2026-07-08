@@ -77,7 +77,9 @@ class TestCustomOpAutoTune(TestCase):
             compiled_result = test_model(*inputs)
 
         self.assertEqual(
-            compiled_result.shape, expected.shape, f"{test_name} shape mismatch"
+            compiled_result.shape,
+            expected.shape,
+            lambda msg: f"{msg}\n{test_name} shape mismatch",
         )
         torch.testing.assert_close(
             compiled_result,
@@ -98,7 +100,7 @@ class TestCustomOpAutoTune(TestCase):
             # Basic sanity checks
             self.assertTrue(
                 torch.isfinite(result).all(),
-                f"{op_name} {name} produced non-finite values",
+                lambda msg: f"{msg}\n{op_name} {name} produced non-finite values",
             )
 
         # Verify numerical equivalence
@@ -832,7 +834,7 @@ class TestCustomOpAutoTune(TestCase):
         self.assertEqual(
             len(code_with_coord),
             len(code),
-            f"Expected all {len(code)} code modules to have coordinate_descent_tuning, "
+            lambda msg: f"{msg}\nExpected all {len(code)} code modules to have coordinate_descent_tuning, "
             f"but only {len(code_with_coord)} have it",
         )
 
@@ -893,7 +895,9 @@ class TestCustomOpAutoTune(TestCase):
         # Verify we got concrete integers during benchmarking (not symbolic)
         unique_shapes = sorted(set(shapes_seen))
         for shape in unique_shapes:
-            self.assertIsInstance(shape, int, f"Expected int, got {type(shape)}")
+            self.assertIsInstance(
+                shape, int, lambda msg: f"{msg}\nExpected int, got {type(shape)}"
+            )
 
         # Verify we hit all 3 ranges during autotuning
         ranges_hit = set()
@@ -908,7 +912,7 @@ class TestCustomOpAutoTune(TestCase):
         self.assertEqual(
             len(ranges_hit),
             3,
-            f"Expected 3 ranges hit during benchmarking, got {ranges_hit}",
+            lambda msg: f"{msg}\nExpected 3 ranges hit during benchmarking, got {ranges_hit}",
         )
 
         # Verify tracing uses SYMBOLIC shapes in generated code
@@ -1475,7 +1479,7 @@ class TestCustomOpAutoTune(TestCase):
         self.assertEqual(
             memory_after_cleanup,
             baseline_memory,
-            f"Memory leak detected: baseline={baseline_memory}, after_cleanup={memory_after_cleanup}",
+            lambda msg: f"{msg}\nMemory leak detected: baseline={baseline_memory}, after_cleanup={memory_after_cleanup}",
         )
 
     @skipIfXpu
@@ -1514,7 +1518,7 @@ class TestCustomOpAutoTune(TestCase):
         self.assertEqual(
             memory_after_many,
             memory_after_first,
-            f"Memory leak detected: after_first={memory_after_first}, after_many={memory_after_many}",
+            lambda msg: f"{msg}\nMemory leak detected: after_first={memory_after_first}, after_many={memory_after_many}",
         )
 
 

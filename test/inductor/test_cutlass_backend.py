@@ -340,9 +340,12 @@ class TestCutlassBackend(TestCase):
         cutlass_dir = _get_cutlass_dir()
         self.assertTrue(
             try_import_cutlass(),
-            "CUTLASS backend is required by this test but could not be imported. "
-            f"Set {_CUTLASS_DIR_ENV_VAR} to a valid CUTLASS checkout; "
-            f"current cutlass_dir={cutlass_dir!r}.",
+            lambda msg: f"{msg}\n"
+            + (
+                "CUTLASS backend is required by this test but could not be imported. "
+                f"Set {_CUTLASS_DIR_ENV_VAR} to a valid CUTLASS checkout; "
+                f"current cutlass_dir={cutlass_dir!r}."
+            ),
         )
 
         # Scale inputs by 1/sqrt(K) to avoid large accumulation differences
@@ -968,11 +971,11 @@ class TestCutlassBackend(TestCase):
 
             self.assertTrue(
                 all(t != float("inf") for t in timings_by_type["aten"]),
-                f"ATen benchmark failed: {timings_by_type['aten']}",
+                lambda msg: f"{msg}\nATen benchmark failed: {timings_by_type['aten']}",
             )
             self.assertTrue(
                 all(t != float("inf") for t in timings_by_type["cutlass"]),
-                f"CUTLASS benchmark failed: {timings_by_type['cutlass']}",
+                lambda msg: f"{msg}\nCUTLASS benchmark failed: {timings_by_type['cutlass']}",
             )
         finally:
             AlgorithmSelectorCache.benchmark_choices = original_benchmark_choices
@@ -1738,7 +1741,7 @@ class TestCutlassBackend(TestCase):
 
                 self.assertTrue(
                     sa.called,
-                    f"autotune_select_algorithm was not called  with shape M={M}, N={N}, K={K}",
+                    lambda msg: f"{msg}\nautotune_select_algorithm was not called  with shape M={M}, N={N}, K={K}",
                 )
                 args, _ = sa.call_args
                 op_name, choices, _, __ = args
@@ -1758,8 +1761,11 @@ class TestCutlassBackend(TestCase):
                 self.assertGreater(
                     cuda_template_count,
                     0,
-                    "No CUTLASSTemplateCaller choices found for matmul with shape "
-                    f"M={M}, N={N}, K={K}",
+                    lambda msg: f"{msg}\n"
+                    + (
+                        "No CUTLASSTemplateCaller choices found for matmul with shape "
+                        f"M={M}, N={N}, K={K}"
+                    ),
                 )
 
     @skipXPUIf(not Xe2_Or_Later, "")
@@ -2945,7 +2951,7 @@ class TestCutlassBackend(TestCase):
         expected_count = 2 if GPU_TYPE == "xpu" else 1
         self.assertTrue(
             len(set(all_counts)) == expected_count,
-            f"Config counts should be equal across all layout/dtype combinations. "
+            lambda msg: f"{msg}\nConfig counts should be equal across all layout/dtype combinations. "
             f"Got counts: {config_counts}",
         )
 

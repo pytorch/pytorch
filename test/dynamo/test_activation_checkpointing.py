@@ -415,7 +415,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             # Check for the pattern with any graph ID (the ID depends on test order)
             self.assertTrue(
                 re.search(r"# ac_graph_id: \d+ - PREFER_RECOMPUTE", gm_str),
-                f"Expected ac_graph_id pattern not found in:\n{gm_str}",
+                lambda msg: f"{msg}\nExpected ac_graph_id pattern not found in:\n{gm_str}",
             )
             return min_cut_rematerialization_partition(joint_gm, *args, **kwargs)
 
@@ -868,7 +868,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(
             additional_saved_tensors,
             expected_additional_saved_tensors,
-            f"""
+            lambda msg: f"""{msg}\n
 Expected additional saved tensors: {expected_additional_saved_tensors} but got: {additional_saved_tensors}.
 Non-primal fwd outputs from model w/ backward hook: {mod_with_hook_fwd_outputs_no_primal}.
 Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no_primal}.""",
@@ -3042,7 +3042,7 @@ def forward(self, arg0_1, arg1_1):
 
         self.assertTrue(
             any("relu" in name for name in recomputed_nodes),
-            f"Expected relu_recomputed but got: {recomputed_nodes}",
+            lambda msg: f"{msg}\nExpected relu_recomputed but got: {recomputed_nodes}",
         )
 
     def _compile_with_joint_graph_pass_and_capture(self, fn, inputs):

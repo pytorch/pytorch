@@ -2444,7 +2444,7 @@ main()
                             node.target is auto_functionalize_func
                             for node in gm.graph.nodes
                         ),
-                        f"{auto_functionalize_func} op not found in {gm.graph}",
+                        lambda msg: f"{msg}\n{auto_functionalize_func} op not found in {gm.graph}",
                     )
                     return compiler_fn(gm)
 

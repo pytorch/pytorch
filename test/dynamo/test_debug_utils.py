@@ -827,15 +827,23 @@ class TestInductorConfigOverrideIntegration(TestCase):
         # Verify each graph has fwd+bwd, correct overrides, no cross-graph
         # leak, and identical configs for forward and backward.
         for gid in range(3):
-            self.assertIn((gid, False), configs_at_compile, f"graph {gid} fwd missing")
-            self.assertIn((gid, True), configs_at_compile, f"graph {gid} bwd missing")
+            self.assertIn(
+                (gid, False),
+                configs_at_compile,
+                lambda msg: f"{msg}\ngraph {gid} fwd missing",
+            )
+            self.assertIn(
+                (gid, True),
+                configs_at_compile,
+                lambda msg: f"{msg}\ngraph {gid} bwd missing",
+            )
             expected = {**baseline, **expected_overrides[gid]}
             for is_bw in [False, True]:
                 phase = "backward" if is_bw else "forward"
                 self.assertEqual(
                     configs_at_compile[(gid, is_bw)],
                     expected,
-                    f"graph {gid} {phase}: config mismatch",
+                    lambda msg: f"{msg}\ngraph {gid} {phase}: config mismatch",
                 )
 
         self.assertIsNotNone(x.grad)

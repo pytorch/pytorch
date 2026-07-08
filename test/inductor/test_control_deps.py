@@ -406,8 +406,11 @@ class TestControlDeps(InductorTestCase):
         )
         self.assertTrue(
             void_names & referenced,
-            "no record_event void op appears as an additional_buffer_dep; "
-            f"void_names={void_names}, referenced={referenced}",
+            lambda msg: f"{msg}\n"
+            + (
+                "no record_event void op appears as an additional_buffer_dep; "
+                f"void_names={void_names}, referenced={referenced}"
+            ),
         )
 
 

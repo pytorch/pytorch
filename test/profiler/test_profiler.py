@@ -233,7 +233,7 @@ class TestProfilerCUDA(TestCase):
             max_diff = max(max_diff, last_rss[idx] - last_rss[idx - 1])
         self.assertTrue(
             not (is_increasing and max_diff > 100 * 1024),
-            msg=f"memory usage is increasing, {str(last_rss)}",
+            msg=lambda msg: f"{msg}\nmemory usage is increasing, {str(last_rss)}",
         )
 
     def test_custom_module_input_op_ids(self):
@@ -408,7 +408,7 @@ with profile(activities=[ProfilerActivity.CUDA]):
             event_name = "cuda_sync" if torch.version.cuda else "hipDeviceSynchronize"
             self.assertTrue(
                 event_name in cats,
-                f"Expected to find {event_name} event found = {cats}",
+                lambda msg: f"{msg}\nExpected to find {event_name} event found = {cats}",
             )
 
         print("Testing enable_cuda_sync_events in _ExperimentalConfig")
@@ -695,7 +695,7 @@ _cupti_monitor.enable_hes_early()
             self.assertIn(
                 expected,
                 cats,
-                f"missing {expected}; got {sorted(c for c in cats if c)}",
+                lambda msg: f"{msg}\nmissing {expected}; got {sorted(c for c in cats if c)}",
             )
 
         kernels = [e for e in events if e.get("cat") == "kernel" and e.get("ph") == "X"]
@@ -1666,7 +1666,9 @@ class TestProfiler(TestCase):
         )
         expected_threads = prior_threads + 1
         self.assertEqual(
-            len(tid_counts), expected_threads, f"{expected_threads}, {tid_counts}"
+            len(tid_counts),
+            expected_threads,
+            lambda msg: f"{msg}\n{expected_threads}, {tid_counts}",
         )
         self.assertEqual(len(nodes), sum(tid_counts.values()))
 
@@ -2047,7 +2049,7 @@ class TestProfiler(TestCase):
             self.assertEqual(
                 missing,
                 set(),
-                f"{op}: metadata keys missing in trace_only: {missing}",
+                lambda msg: f"{msg}\n{op}: metadata keys missing in trace_only: {missing}",
             )
 
         if use_cuda:
@@ -2061,12 +2063,14 @@ class TestProfiler(TestCase):
             trace_only_counts = count_by_cat(trace_only_trace)
             for cat in ("kernel", "ac2g"):
                 self.assertGreater(
-                    default_counts[cat], 0, f"expected {cat} events in default trace"
+                    default_counts[cat],
+                    0,
+                    lambda msg: f"{msg}\nexpected {cat} events in default trace",
                 )
                 self.assertEqual(
                     default_counts[cat],
                     trace_only_counts[cat],
-                    f"{cat} event count mismatch",
+                    lambda msg: f"{msg}\n{cat} event count mismatch",
                 )
 
         # events() must raise in trace_only mode
@@ -2232,7 +2236,7 @@ class TestProfiler(TestCase):
                     self.assertGreaterEqual(
                         args.get("Record function id", -1),
                         0,
-                        f"Failed finding record funciont for op = {e}",
+                        lambda msg: f"{msg}\nFailed finding record funciont for op = {e}",
                     )
 
     def test_profiler_strides(self):
@@ -3255,13 +3259,17 @@ class TestProfilerDevice(TestCase):
                 for alloc_fn in allocs:
                     self.assertTrue(alloc_fn in stat_metrics)
                     self.assertGreater(
-                        stat_metrics[alloc_fn], 0, f"alloc_fn = {alloc_fn}"
+                        stat_metrics[alloc_fn],
+                        0,
+                        lambda msg: f"{msg}\nalloc_fn = {alloc_fn}",
                     )
             if deallocs is not None:
                 for dealloc_fn in deallocs:
                     self.assertTrue(dealloc_fn in stat_metrics)
                     self.assertLess(
-                        stat_metrics[dealloc_fn], 0, f"alloc_fn = {dealloc_fn}"
+                        stat_metrics[dealloc_fn],
+                        0,
+                        lambda msg: f"{msg}\nalloc_fn = {dealloc_fn}",
                     )
 
         def create_cpu_tensor():
@@ -4005,13 +4013,15 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
                 args = ke.get("args", {})
                 name = ke.get("name", "<unknown>")
                 for key in ["device", "stream", "correlation"]:
-                    self.assertIn(key, args, f"kernel '{name}' missing '{key}'")
+                    self.assertIn(
+                        key, args, lambda msg: f"{msg}\nkernel '{name}' missing '{key}'"
+                    )
                 has_grid = "grid" in args
                 has_block = "block" in args
                 self.assertEqual(
                     has_grid,
                     has_block,
-                    f"kernel '{name}' should provide grid and block together",
+                    lambda msg: f"{msg}\nkernel '{name}' should provide grid and block together",
                 )
                 has_kernel_launch_metadata |= has_grid
             self.assertTrue(
@@ -5173,7 +5183,7 @@ class TestProfilerEventsParity(TestCase):
                 self.assertIn(
                     (e.name, e.activity_type),
                     json_name_cats,
-                    f"activity_type mismatch for {e.name}",
+                    lambda msg: f"{msg}\nactivity_type mismatch for {e.name}",
                 )
 
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179944")
@@ -5246,7 +5256,7 @@ class TestProfilerEventsParity(TestCase):
             self.assertNotIn(
                 key,
                 event_records,
-                f"Duplicate FunctionEvent record key encountered: {key}",
+                lambda msg: f"{msg}\nDuplicate FunctionEvent record key encountered: {key}",
             )
             event_records[key] = metadata_dict_from_function_event(fe)
 
@@ -5280,7 +5290,7 @@ class TestProfilerEventsParity(TestCase):
             self.assertNotIn(
                 key,
                 json_records,
-                f"Duplicate Chrome trace record key encountered: {key}",
+                lambda msg: f"{msg}\nDuplicate Chrome trace record key encountered: {key}",
             )
             json_records[key] = metadata_dict_from_trace_args(args)
 
@@ -5324,7 +5334,7 @@ For a model PR to follow, see: https://github.com/pytorch/pytorch/pull/180100
             self.assertEqual(
                 actual_meta,
                 expected_meta,
-                f"{key}: structured metadata differs between events() and Chrome trace JSON",
+                lambda msg: f"{msg}\n{key}: structured metadata differs between events() and Chrome trace JSON",
             )
 
 
@@ -5377,7 +5387,7 @@ class TestPythonChromeTraceExport(TestCase):
         self.assertEqual(
             len(kineto_acts),
             len(py_acts),
-            f"Activity event count mismatch: kineto={len(kineto_acts)}, python={len(py_acts)}",
+            lambda msg: f"{msg}\nActivity event count mismatch: kineto={len(kineto_acts)}, python={len(py_acts)}",
         )
 
         from collections import Counter
@@ -5409,7 +5419,7 @@ class TestPythonChromeTraceExport(TestCase):
             self.assertEqual(
                 ke,
                 pe,
-                f"Event mismatch for {ke['cat']}::{ke['name']} at ts={ke['ts']}",
+                lambda msg: f"{msg}\nEvent mismatch for {ke['cat']}::{ke['name']} at ts={ke['ts']}",
             )
 
         # Flow event parity (ph, id, cat).
@@ -5504,7 +5514,11 @@ class TestMetadataJsonFormat(TestCase):
         ]
         expected = common_keys if TEST_WITH_ROCM else common_keys + cuda_only_keys
         for key in expected:
-            self.assertIn(key, parsed, f"Missing field '{key}' in kernel metadataJson")
+            self.assertIn(
+                key,
+                parsed,
+                lambda msg: f"{msg}\nMissing field '{key}' in kernel metadataJson",
+            )
 
     def test_kernel_metadata_field_types(self):
         md = self._get_kernel_metadata()
@@ -5524,7 +5538,7 @@ class TestMetadataJsonFormat(TestCase):
             self.assertIsInstance(
                 parsed[key],
                 int,
-                f"Expected int for '{key}', got {type(parsed[key]).__name__}",
+                lambda msg: f"{msg}\nExpected int for '{key}', got {type(parsed[key]).__name__}",
             )
         for key in ["grid", "block"]:
             self.assertIsInstance(parsed[key], list)

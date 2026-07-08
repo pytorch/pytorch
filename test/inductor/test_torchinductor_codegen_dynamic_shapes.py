@@ -91,7 +91,10 @@ def check_codegen(
         _check_has_dynamic_shape(self, code)
     else:
         code = run_and_get_triton_code(run, *example_inputs, **kwargs)
-        self.assertTrue("def triton" in code, f"Failed to find triton kernel\n{code}")
+        self.assertTrue(
+            "def triton" in code,
+            lambda msg: f"{msg}\nFailed to find triton kernel\n{code}",
+        )
 
     if not called:
         raise AssertionError("Ran graph without calling compile_fx")

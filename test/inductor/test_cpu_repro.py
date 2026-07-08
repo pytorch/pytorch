@@ -189,11 +189,11 @@ class CPUReproTests(TestCase):
                             expected_fmt = torch.channels_last
                         test_self.assertTrue(
                             args[0].is_contiguous(memory_format=expected_fmt),
-                            f"input stride {args[0].stride()} is not {expected_fmt}",
+                            lambda msg: f"{msg}\ninput stride {args[0].stride()} is not {expected_fmt}",
                         )
                         test_self.assertTrue(
                             args[1].is_contiguous(memory_format=expected_fmt),
-                            f"weight stride {args[1].stride()} is not {expected_fmt}",
+                            lambda msg: f"{msg}\nweight stride {args[1].stride()} is not {expected_fmt}",
                         )
                         nonlocal conv_seen
                         conv_seen = True
@@ -2877,7 +2877,8 @@ class CPUReproTests(TestCase):
         ]
         union = {*cpp_vec_op_list, *diff}
         self.assertTrue(
-            set(cpp_op_list).issubset(union), f"unexpected: {set(cpp_op_list) - union}"
+            set(cpp_op_list).issubset(union),
+            lambda msg: f"{msg}\nunexpected: {set(cpp_op_list) - union}",
         )
 
     def test_atomic_add_lowp_fp(self):
@@ -5440,7 +5441,7 @@ class CPUReproTests(TestCase):
         self.assertEqual(
             x.to(torch.uint8),
             fn(x),
-            msg=f"Expected {x.to(torch.uint8)} but got {fn(x)}",
+            msg=lambda msg: f"{msg}\nExpected {x.to(torch.uint8)} but got {fn(x)}",
         )
 
     def test_non_contiguous_reduction_store(self):

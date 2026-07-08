@@ -611,7 +611,7 @@ class TestProvenanceTracingStackTraces(TestCase):
                     self.assertEqual(
                         sorted(actual_lines),
                         sorted(expected_lines),
-                        f"Mismatch for key: {key}",
+                        lambda msg: f"{msg}\nMismatch for key: {key}",
                     )
 
     @torch._inductor.config.patch({"trace.provenance_tracking_level": 2})
@@ -663,7 +663,7 @@ class TestProvenanceTracingStackTraces(TestCase):
                     self.assertEqual(
                         sorted(actual_lines),
                         sorted(expected_lines),
-                        f"Mismatch for key: {key}",
+                        lambda msg: f"{msg}\nMismatch for key: {key}",
                     )
 
     @torch._inductor.config.patch(
@@ -700,7 +700,7 @@ class TestProvenanceTracingStackTraces(TestCase):
             self.assertIn(
                 expected,
                 kernel_info,
-                f"Expected kernel {expected} not found in {list(kernel_info)}",
+                lambda msg: f"{msg}\nExpected kernel {expected} not found in {list(kernel_info)}",
             )
 
         for data in kernel_info.values():
@@ -743,7 +743,7 @@ class TestProvenanceTracingStackTraces(TestCase):
             )
             self.assertTrue(
                 os.path.exists(json_path),
-                f"kernel_information.json not found in extracted package at {json_path}",
+                lambda msg: f"{msg}\nkernel_information.json not found in extracted package at {json_path}",
             )
 
             with open(json_path) as f:
@@ -808,13 +808,13 @@ class TestProvenanceTracingStackTraces(TestCase):
                 self.assertEqual(
                     sorted(kernel_info[key]["pre_grad_nodes"]),
                     sorted(data["pre_grad_nodes"]),
-                    f"Mismatch for key: {key}",
+                    lambda msg: f"{msg}\nMismatch for key: {key}",
                 )
 
                 self.assertEqual(
                     sorted(kernel_info[key]["post_grad_nodes"]),
                     sorted(data["post_grad_nodes"]),
-                    f"Mismatch for key: {key}",
+                    lambda msg: f"{msg}\nMismatch for key: {key}",
                 )
 
     @torch._inductor.config.patch("trace.provenance_tracking_level", 0)

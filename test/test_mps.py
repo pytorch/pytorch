@@ -191,7 +191,7 @@ class TestAutocastMPS(TestCase):
         self.assertEqual(autocast_output_tensor.dtype, torch.float16, "Autocast output tensor was not expected type float16")
         self.assertEqual(autocast_output_tensor,
                          output_tensor.to(torch.float16),
-                         f"Autocast & non-autocast tensors did not match, \
+                         lambda msg: f"{msg}\nAutocast & non-autocast tensors did not match, \
                          got:\n{autocast_output_tensor} \n{output_tensor.to(torch.float16)}")
 
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
@@ -427,7 +427,7 @@ class TestMemoryLeak(TestCaseMPS):
         step(a)
         torch.mps.empty_cache()
         driver_after = torch.mps.driver_allocated_memory()
-        self.assertEqual(driver_before, driver_after, f"Detected {driver_after - driver_before} bytes leak of GPU memory")
+        self.assertEqual(driver_before, driver_after, lambda msg: f"{msg}\nDetected {driver_after - driver_before} bytes leak of GPU memory")
 
 
 class TestPixelShuffle(TestCaseMPS):
@@ -1063,7 +1063,7 @@ class TestMPS(TestCaseMPS):
                 actual = torch.zeros(64, dtype=torch.int8, device="mps")
                 actual[offs_head:64 - offs_tail].fill_(7)
                 self.assertEqual(actual.cpu(), expected,
-                                 f"offs_head={offs_head} offs_tail={offs_tail}")
+                                 lambda msg: f"{msg}\noffs_head={offs_head} offs_tail={offs_tail}")
 
     def test_cdist_large(self, device="mps"):
         for cm in ['use_mm_for_euclid_dist_if_necessary', 'use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
@@ -1482,14 +1482,14 @@ class TestMPS(TestCaseMPS):
                 inp = torch.full((8, 77, 77), bad, dtype=dtype, device="mps")
                 out = torch.baddbmm(inp, batch1, batch2, beta=0, alpha=0.125)
                 self.assertFalse(out.isnan().any() or out.isinf().any(),
-                                 f"baddbmm beta=0 propagated {bad} for dtype={dtype}")
+                                 lambda msg: f"{msg}\nbaddbmm beta=0 propagated {bad} for dtype={dtype}")
                 ref = torch.bmm(batch1, batch2) * 0.125
                 self.assertEqual(out, ref)
 
                 inp_a = torch.full((77, 77), bad, dtype=dtype, device="mps")
                 out_a = torch.addbmm(inp_a, batch1, batch2, beta=0, alpha=0.125)
                 self.assertFalse(out_a.isnan().any() or out_a.isinf().any(),
-                                 f"addbmm beta=0 propagated {bad} for dtype={dtype}")
+                                 lambda msg: f"{msg}\naddbmm beta=0 propagated {bad} for dtype={dtype}")
 
     def test_local_scalar_dense_mps(self):
         x_cpu = torch.randn(1)
@@ -3990,7 +3990,7 @@ class TestMPS(TestCaseMPS):
         for i in range(n_tensors - 1):
             t = tensor_list[i].view(1, n_tensor_elems)
             t_mps = t.to("mps")
-            self.assertEqual(t, t_mps.cpu(), f"i={i}")
+            self.assertEqual(t, t_mps.cpu(), lambda msg: f"{msg}\ni={i}")
 
     # See https://github.com/pytorch/pytorch/issues/82427
     # and https://github.com/pytorch/pytorch/issues/83692
@@ -5464,7 +5464,7 @@ class TestMPS(TestCaseMPS):
                 src = x_fp32
                 ref = src.to(dtype).to(torch.float).mean(dim=(-2, -1), keepdim=True).to(dtype)
                 mps = src.to("mps").to(dtype).mean(dim=(-2, -1), keepdim=True)
-            self.assertEqual(mps.cpu(), ref, msg=f"mean({dtype}) diverges from fp32-intermediate reference")
+            self.assertEqual(mps.cpu(), ref, msg=lambda msg: f"{msg}\nmean({dtype}) diverges from fp32-intermediate reference")
 
     # TODO: fold into OpInfo-based consistency tests once there's a hook to
     # exercise the two-pass reduction path for scalar outputs.
@@ -5489,7 +5489,7 @@ class TestMPS(TestCaseMPS):
             x = torch.randn(N, device="mps")
             ref = x.sum().item()
             for _ in range(4):
-                self.assertEqual(x.sum().item(), ref, msg=f"unstable sum for N={N}")
+                self.assertEqual(x.sum().item(), ref, msg=lambda msg: f"{msg}\nunstable sum for N={N}")
 
     def test_sum_reduction_non_contiguous(self):
         x = torch.randn(64, 96, dtype=torch.bfloat16, device="mps")
@@ -7767,13 +7767,13 @@ class TestMPS(TestCaseMPS):
 
             mps_out = torch.nn.functional.gelu(x, approximate='tanh')
             cpu_out = torch.nn.functional.gelu(cpu_xg, approximate='tanh')
-            self.assertFalse(torch.isnan(mps_out).any(), f"NaN in forward for {dtype}")
+            self.assertFalse(torch.isnan(mps_out).any(), lambda msg: f"{msg}\nNaN in forward for {dtype}")
             self.assertEqual(mps_out, cpu_out.to('mps'))
 
             grad = torch.ones_like(mps_out)
             mps_out.backward(gradient=grad)
             cpu_out.backward(gradient=torch.ones_like(cpu_out))
-            self.assertFalse(torch.isnan(x.grad).any(), f"NaN in backward for {dtype}")
+            self.assertFalse(torch.isnan(x.grad).any(), lambda msg: f"{msg}\nNaN in backward for {dtype}")
             self.assertEqual(x.grad, cpu_xg.grad.to('mps'))
 
     # Test hardtanh
@@ -8474,7 +8474,7 @@ class TestMPS(TestCaseMPS):
             for diag in diag_vals:
                 mps_result = torch.tril(mps_tensor, diagonal=diag)
                 cpu_result = torch.tril(cpu_tensor, diagonal=diag)
-                self.assertEqual(mps_result, cpu_result, f"Mismatch for diag={diag}")
+                self.assertEqual(mps_result, cpu_result, lambda msg: f"{msg}\nMismatch for diag={diag}")
 
         helper_nans_infs(float("inf"))
         helper_nans_infs(float("-inf"))
@@ -9076,7 +9076,7 @@ class TestMPS(TestCaseMPS):
                 # Create non-contiguous tensor via transpose
                 t_mps = torch.zeros(50, 50, device='mps').T.clone()
                 self.assertFalse(t_mps.is_contiguous(),
-                                 f"{name}: tensor should be non-contiguous")
+                                 lambda msg: f"{msg}\n{name}: tensor should be non-contiguous")
 
                 # Apply operation
                 op_func(t_mps)
@@ -9084,7 +9084,7 @@ class TestMPS(TestCaseMPS):
                 # Verify tensor was modified (not all zeros)
                 max_val = t_mps.max().item()
                 self.assertNotEqual(max_val, 0.0,
-                                    f"{name}: operation failed to modify non-contiguous tensor")
+                                    lambda msg: f"{msg}\n{name}: operation failed to modify non-contiguous tensor")
 
         # Test rand_like specifically (issue #124029)
         t = torch.ones((3, 2, 2), device='mps').permute(2, 0, 1)
@@ -9123,11 +9123,11 @@ class TestMPS(TestCaseMPS):
             samples_cpu = torch.poisson(rate_cpu)
 
             self.assertTrue((samples_mps >= 0).all(),
-                            f"Poisson samples should be non-negative for rate={rate_val}")
+                            lambda msg: f"{msg}\nPoisson samples should be non-negative for rate={rate_val}")
 
             mps_f = samples_mps.float()
             self.assertTrue(torch.allclose(mps_f, mps_f.floor()),
-                            f"Poisson samples should be integers for rate={rate_val}")
+                            lambda msg: f"{msg}\nPoisson samples should be integers for rate={rate_val}")
 
             # Theoretical Poisson has mean == var == rate. Sampling error on
             # n=10k is roughly sqrt(rate / n); compare MPS to CPU within a few
@@ -9139,16 +9139,16 @@ class TestMPS(TestCaseMPS):
             mps_mean = mps_f.mean().item()
             cpu_mean = samples_cpu.float().mean().item()
             self.assertAlmostEqual(mps_mean, rate_val, delta=tol_mean,
-                                   msg=f"MPS mean should match rate={rate_val}")
+                                   msg=lambda msg: f"{msg}\nMPS mean should match rate={rate_val}")
             self.assertAlmostEqual(mps_mean, cpu_mean, delta=tol_mean,
-                                   msg=f"MPS mean should match CPU mean for rate={rate_val}")
+                                   msg=lambda msg: f"{msg}\nMPS mean should match CPU mean for rate={rate_val}")
 
             mps_var = mps_f.var(unbiased=False).item()
             cpu_var = samples_cpu.float().var(unbiased=False).item()
             self.assertAlmostEqual(mps_var, rate_val, delta=tol_var,
-                                   msg=f"MPS variance should match rate={rate_val}")
+                                   msg=lambda msg: f"{msg}\nMPS variance should match rate={rate_val}")
             self.assertAlmostEqual(mps_var, cpu_var, delta=tol_var,
-                                   msg=f"MPS variance should match CPU variance for rate={rate_val}")
+                                   msg=lambda msg: f"{msg}\nMPS variance should match CPU variance for rate={rate_val}")
 
         # Test zero rate
         zero_rate = torch.zeros(100, device='mps', dtype=dtype)
@@ -9882,7 +9882,7 @@ class TestBinaryDispatchRouting(TestCaseMPS):
     def _assert_kernel(self, msg, expected):
         self.assertIn(
             f"Failed to create function state object for: {expected}", msg,
-            f"expected dispatcher to select '{expected}', got: {msg}")
+            lambda _m: f"{_m}\nexpected dispatcher to select '{expected}', got: {msg}")
 
     def test_dense_contiguous(self):
         a = torch.empty(8, dtype=torch.float32, device="mps")
@@ -13644,7 +13644,7 @@ class TestConvolutionMPS(TestCaseMPS):
                     output = F.grid_sample(input, grid, mode=mode, padding_mode=padding_mode,
                                            align_corners=align_corners)
                     self.assertEqual(output, groundtruth, atol=1e-5, rtol=0,
-                                     msg=f"groundtruth comparison failed for mode={mode}, "
+                                     msg=lambda msg: f"{msg}\ngroundtruth comparison failed for mode={mode}, "
                                      f"padding_mode={padding_mode}")
 
     def test_grid_sample_non_contig(self):
@@ -14634,7 +14634,7 @@ class TestRNNMPS(TestCaseMPS):
                 self.assertEqual(cpu_input_grad, mps_input_grad)
                 for (cpu_name, cpu_weight_grad), (mps_name, mps_weight_grad) in zip(cpu_weights_grad, mps_weights_grad):
                     self.assertEqual(cpu_weight_grad, mps_weight_grad,
-                                     f"mismatch in cpu:{cpu_name} vs mps:{mps_name}, layers: {num_layers}")
+                                     lambda msg: f"{msg}\nmismatch in cpu:{cpu_name} vs mps:{mps_name}, layers: {num_layers}")
 
     LSTM_TEST_CASES = [
         {},  # default
@@ -14794,8 +14794,8 @@ if len(w) != 1:
                 self.assertTrue(False, "There was a warning when importing torch when PYTORCH_ENABLE_MPS_FALLBACK is set." +
                                        e.output.decode("utf-8"))
             elif e.returncode == 2:
-                self.assertTrue(False, "There wasn't exactly one warning when running not implemented op with "
-                                f"PYTORCH_ENABLE_MPS_FALLBACK set. {e.output}")
+                self.assertTrue(False, lambda msg: f"{msg}\n" + ("There wasn't exactly one warning when running not implemented op with "
+                                f"PYTORCH_ENABLE_MPS_FALLBACK set. {e.output}"))  # noqa: F821
             else:
                 self.assertTrue(False, "Running a not implemented op failed even though PYTORCH_ENABLE_MPS_FALLBACK is set. " +
                                        e.output.decode("utf-8"))
@@ -15732,7 +15732,7 @@ class TestComplex(TestCase):
                 x_cpu, y_cpu = map(to_cpu, (x, y))
                 res = getattr(x, op_name)(y)
                 res_cpu = getattr(x_cpu, op_name)(y_cpu)
-                self.assertEqual(to_cpu(res), res_cpu, f"{op_name}({x}, {y}) produces different results {res} vs {res_cpu}")
+                self.assertEqual(to_cpu(res), res_cpu, lambda msg: f"{msg}\n{op_name}({x}, {y}) produces different results {res} vs {res_cpu}")
 
 
 # Copied from `TestCommon` in `test_ops.py`, just enough to duplicate the `test_numpy_ref` for MPS
@@ -15932,11 +15932,11 @@ class TestMetalLibrary(TestCaseMPS):
         x_max, x_max_idx = x.max(dim=0)
         max_err = (y - x_sum).abs().max().item()
         self.assertLess(max_err, 1e-2 if dtype == torch.float16 else 1e-5,
-                        f"results are {y}, but all elements should have been {x_sum.item()}")
+                        lambda msg: f"{msg}\nresults are {y}, but all elements should have been {x_sum.item()}")
         self.assertTrue((z0 == x_max).all().item(),
-                        f"results are {z0}, but all elements should have been {x_max.item()}")
+                        lambda msg: f"{msg}\nresults are {z0}, but all elements should have been {x_max.item()}")
         self.assertTrue((z1 == x_max_idx).all().item(),
-                        f"results are {z1}, but all elements should have been {x_max_idx.item()}")
+                        lambda msg: f"{msg}\nresults are {z1}, but all elements should have been {x_max_idx.item()}")
         # Test nan propagation
         if not dtype.is_floating_point:
             return
@@ -15944,8 +15944,8 @@ class TestMetalLibrary(TestCaseMPS):
         idx = 25
         x[idx] = torch.nan
         lib.do_max(z0, z1, x)
-        self.assertTrue(z0.isnan().all().item(), f"results are {z0}, but all elements should have been nan")
-        self.assertTrue((z1 == idx).all().item(), f"results are {z1}, but all elements should have been {idx}")
+        self.assertTrue(z0.isnan().all().item(), lambda msg: f"{msg}\nresults are {z0}, but all elements should have been nan")
+        self.assertTrue((z1 == idx).all().item(), lambda msg: f"{msg}\nresults are {z1}, but all elements should have been {idx}")
 
     def test_reduction_utils_complex(self):
         """Test simd_sum and simd_prod for float2 (complex64)."""
@@ -15970,7 +15970,7 @@ class TestMetalLibrary(TestCaseMPS):
         lib.do_sum(y, x)
         x_sum = x.sum()
         max_err = (y - x_sum).abs().max().item()
-        self.assertLess(max_err, 1e-4, f"simd_sum error {max_err}, expected {x_sum}")
+        self.assertLess(max_err, 1e-4, lambda msg: f"{msg}\nsimd_sum error {max_err}, expected {x_sum}")
 
         # Test simd_prod: product of a few small complex numbers
         # Use only 4 non-unit values to keep the product numerically stable
@@ -15984,7 +15984,7 @@ class TestMetalLibrary(TestCaseMPS):
         expected_prod = x_prod.prod()
         # Only lane 0 has the final result for shuffle-down reduction
         max_err = (y_prod[0] - expected_prod).abs().item()
-        self.assertLess(max_err, 1e-4, f"simd_prod error {max_err}, expected {expected_prod}")
+        self.assertLess(max_err, 1e-4, lambda msg: f"{msg}\nsimd_prod error {max_err}, expected {expected_prod}")
 
     @parametrize("dtype", [torch.float32, torch.float16, torch.int32, torch.bfloat16])
     def test_atomic_add(self, dtype):
@@ -16041,11 +16041,11 @@ class TestMetalLibrary(TestCaseMPS):
             mps_tensor = torch.rand(32, device="mps")
             lib.full(mps_tensor)
         self.assertEqual(mps_tensor.sum().item(), mps_tensor.numel())
-        self.assertTrue(os.path.exists(capture_dirname), f"Capture file {capture_dirname} has not been generated")
+        self.assertTrue(os.path.exists(capture_dirname), lambda msg: f"{msg}\nCapture file {capture_dirname} has not been generated")
         capture_listdir = os.listdir(capture_dirname)
         shutil.rmtree(capture_dirname)
         self.assertGreater(len(capture_listdir), 3,
-                           f"Capture file {capture_dirname} contains only metadata, i.e. {capture_listdir}")
+                           lambda msg: f"{msg}\nCapture file {capture_dirname} contains only metadata, i.e. {capture_listdir}")
 
     def test_metal_lambda_expressions(self):
         # Lambda expressions require Metal 3.2 (macOS 15+)

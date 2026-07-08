@@ -547,7 +547,7 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
             self.assertEqual(
                 res.returncode,
                 0,
-                f"Repro failed:\nSTDERR:\n{res.stderr[-1000:]}",
+                lambda msg: f"{msg}\nRepro failed:\nSTDERR:\n{res.stderr[-1000:]}",
             )
 
 

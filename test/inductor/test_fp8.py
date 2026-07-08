@@ -1480,7 +1480,7 @@ class TestFP8Lowering(TestCase):
                     self.assertEqual(
                         input_values[0][i],
                         input_values[1][i],
-                        msg=f"idx {i} seed {seed}",
+                        msg=lambda msg: f"{msg}\nidx {i} seed {seed}",
                     )
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)

@@ -500,7 +500,7 @@ class TestValueRanges(TestCase):
                 result = x % y
                 y_range = ValueRanges(y, y)
                 r = ValueRangeAnalysis.python_mod(ValueRanges(x, x), y_range)
-                self.assertIn(result, r, f"x={x}, y={y}, result={result}, range={r}")
+                self.assertIn(result, r, lambda msg: f"{msg}\nx={x}, y={y}, result={result}, range={r}")
 
 
 class TestSympyInterp(TestCase):
@@ -691,7 +691,7 @@ class TestSympyInterp(TestCase):
                         torch.allclose(
                             direct_result, interp_result, rtol=1e-5, atol=1e-8
                         ),
-                        f"Mismatch for {fn}{args}: direct={direct_result}, interp={interp_result}",
+                        lambda msg: f"{msg}\nMismatch for {fn}{args}: direct={direct_result}, interp={interp_result}",
                     )
 
                     if fn in UNARY_BOOL_OPS + BINARY_BOOL_OPS + COMPARE_OPS:
