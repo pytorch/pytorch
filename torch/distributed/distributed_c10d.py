@@ -5892,6 +5892,9 @@ def split_group(
             in the parent pg. For example, if the parent group has 4 ranks, and split_ranks can be
             [[0, 1], [2, 3]]. Note [[0,1]] is also a valid split, in which case ranks 2, 3 would
             return a non-group member.
+            The order of ranks within each split is preserved: position in the
+            list determines the group rank in the new group. All ranks must pass
+            the same ordering.
         timeout (timedelta, optional): see `init_process_group` for details and default value.
         pg_options (ProcessGroupOptions, optional): Additional options need to be passed in during
             the construction of specific process groups. i.e.``is_high_priority_stream``
@@ -6034,7 +6037,6 @@ def split_group(
             )
         if len(split_group) != len(set(split_group)):
             raise ValueError("the split group cannot have duplicate ranks")
-        split_group = sorted(split_group)
         if parent_group_rank in split_group:
             my_group = split_group
             break
@@ -6183,8 +6185,8 @@ def new_group(
     :func:`split_group` so subgroup creation goes through the TorchComms path.
     The delegation raises ``NotImplementedError`` for arguments that
     :func:`split_group` cannot honor (e.g. ``use_local_synchronization=True``,
-    ``sort_ranks=False``, or an explicit ``device_id`` that diverges from the
-    default group's bound device).
+    or an explicit ``device_id`` that diverges from the default group's bound
+    device).
     """
     if _use_torchcomms_enabled():
         # split_group can only split the parent's existing communicator, so it
@@ -6249,12 +6251,6 @@ def _new_group_via_split_group(
             "use_local_synchronization=True; split_group requires all ranks "
             "in the parent group to participate."
         )
-    if not sort_ranks:
-        raise NotImplementedError(
-            "new_group cannot delegate to split_group with sort_ranks=False; "
-            "split_group always sorts the ranks of each subgroup."
-        )
-
     default_pg = _get_default_group()
     if device_id is not None:
         bound = default_pg.bound_device_id
@@ -6268,8 +6264,10 @@ def _new_group_via_split_group(
     global_world_size = default_pg.size()
     if ranks is None:
         group_ranks = list(range(global_world_size))
-    else:
+    elif sort_ranks:
         group_ranks = sorted(ranks)
+    else:
+        group_ranks = list(ranks)
 
     # Auto-qualify the requested backend so it always names just the parent's
     # default device backend (the one matching ``bound_device_id``) plus any
