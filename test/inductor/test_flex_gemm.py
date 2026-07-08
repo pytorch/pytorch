@@ -1102,6 +1102,91 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
             ),
         )
 
+    def test_block_local_reduce_geometry_and_compressed_shape(self):
+        from torch._inductor.kernel.flex_gemm.constraints import (
+            FlexGemmBlockLocalReduceGeometry,
+            local_reduce_block_compressed_shape,
+        )
+
+        with self.assertRaisesRegex(
+            RuntimeError, "local_reduce_group must be positive"
+        ):
+            FlexGemmBlockLocalReduceGeometry(0, 128)
+        with self.assertRaisesRegex(
+            RuntimeError, "local_reduce_group must be positive"
+        ):
+            FlexGemmBlockLocalReduceGeometry(128, -1)
+        self.assertEqual(
+            local_reduce_block_compressed_shape((256, 256), 128, 128), (2, 2)
+        )
+        self.assertEqual(local_reduce_block_compressed_shape((64, 128), 16, 32), (4, 4))
+        with self.assertRaisesRegex(RuntimeError, "must divide"):
+            local_reduce_block_compressed_shape((256, 192), 128, 128)
+        with self.assertRaisesRegex(RuntimeError, "must divide"):
+            local_reduce_block_compressed_shape((192, 256), 128, 128)
+
+    def test_block_local_reduce_plans_reject_kernel_frontier(self):
+        from torch._inductor.kernel.flex_gemm.constraints import (
+            FlexGemmBlockLocalReduceGeometry,
+        )
+        from torch._inductor.kernel.flex_gemm.epilogue import (
+            FlexGemmBlockLocalReduceContract,
+            FlexGemmOutputPlan,
+        )
+        from torch._inductor.kernel.flex_gemm.runtime import (
+            FlexGemmRuntimeLocalReducePlan,
+        )
+        from torch._inductor.kernel.flex_gemm.template import (
+            FlexGemmEpilogueLocalReduceConfig,
+        )
+
+        geometry = FlexGemmBlockLocalReduceGeometry(128, 128)
+        with self.assertRaisesRegex(RuntimeError, "tensor nodes"):
+            FlexGemmBlockLocalReduceContract(object(), geometry)
+
+        graph = torch.fx.Graph()
+        node = graph.placeholder("x")
+        aux = graph.placeholder("aux")
+        plan = FlexGemmBlockLocalReduceContract(aux, geometry).to_plan(
+            store_node=aux, feeds_main=False
+        )
+        self.assertEqual(plan.geometry, geometry)
+        self.assertFalse(plan.feeds_main)
+        FlexGemmOutputPlan(node, (), plan, local_reduce_aux_index=0)
+        self.assertIs(
+            FlexGemmEpilogueLocalReduceConfig.from_output_plan(plan, 0).geometry,
+            geometry,
+        )
+        with self.assertRaisesRegex(
+            NotImplementedError, "not supported by the QUACK kernel yet"
+        ):
+            FlexGemmRuntimeLocalReducePlan(geometry, out=torch.empty(2, 2))
+
+    def test_output_plan_classifies_block_local_reduce_contract(self):
+        from torch._inductor.kernel.flex_gemm.constraints import (
+            FlexGemmBlockLocalReduceGeometry,
+        )
+        from torch._inductor.kernel.flex_gemm.epilogue import output_plan
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def body(a, b):
+            acc = torch.mm(a, b)
+            x = acc.view(2, 128, 2, 128)
+            return acc, x.abs().amax((1, 3))
+
+        graph_module = make_fx(body, tracing_mode="fake")(
+            torch.randn(256, 64), torch.randn(64, 256)
+        )
+        plan = output_plan(graph_module)
+        self.assertIsNotNone(plan.local_reduce)
+        self.assertEqual(
+            plan.local_reduce.geometry, FlexGemmBlockLocalReduceGeometry(128, 128)
+        )
+        self.assertEqual(plan.local_reduce_aux_index, 0)
+        self.assertEqual(plan.aux_outputs, ())
+        self.assertFalse(plan.local_reduce.feeds_main)
+        self.assertIsNotNone(plan.local_reduce.store_node)
+
     def test_local_reduce_feed_main_binary_candidates_support_method_nodes(self):
         from torch._inductor.kernel.flex_gemm.epilogue import (
             local_reduce_feed_main_binary_candidates,
@@ -2366,7 +2451,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                     acc.float().view(-1, 4, 2, 4).sum((1, 3)),
                 ),
                 (4, 8),
-                "local-reduce output contract",
+                "2-D block local reductions are not supported by the QUACK kernel yet",
             ),
         ),
         name_fn=lambda case: case[0],
@@ -2387,6 +2472,114 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         b = torch.randn(8, n)
 
         with self.assertRaisesRegex(Exception, error):
+            torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+
+    @parametrize(
+        "case",
+        (
+            ("amax", lambda x: x.abs().amax((1, 3))),
+            ("amax_negative_dims", lambda x: x.abs().amax((-1, -3))),
+            ("sum", lambda x: x.sum((1, 3))),
+            ("mean", lambda x: x.mean((1, 3))),
+            ("mx_e8m0_scale", lambda x: mx_e8m0_scale(x.abs().amax((1, 3)))),
+        ),
+        name_fn=lambda case: case[0],
+    )
+    def test_generated_block_local_reduce_rejects_kernel_frontier(self, case):
+        _, reduce_fn = case
+        m = n = 256
+        block = 128
+
+        def fn(a, b):
+            def epilogue(acc):
+                x = acc.float().view(m // block, block, n // block, block)
+                return acc.relu(), reduce_fn(x)
+
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(m, 64)
+        b = torch.randn(64, n)
+
+        with self.assertRaisesRegex(
+            Exception,
+            "2-D block local reductions are not supported by the QUACK kernel yet",
+        ):
+            torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+
+    def test_generated_block_local_reduce_rejects_non_divisible_shape(self):
+        m, n = 256, 192
+
+        def fn(a, b):
+            def epilogue(acc):
+                x = acc.float().view(-1, 128, 1, 128)
+                return acc.relu(), x.abs().amax((1, 3))
+
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(m, 64)
+        b = torch.randn(64, n)
+
+        with self.assertRaisesRegex(Exception, "must divide"):
+            torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+
+    @parametrize("dim", (1, 3))
+    def test_generated_block_view_single_dim_reduce_keeps_aux_shape_error(self, dim):
+        m = n = 256
+
+        def fn(a, b):
+            def epilogue(acc):
+                x = acc.float().view(2, 128, 2, 128)
+                return acc.relu(), x.abs().amax(dim)
+
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(m, 64)
+        b = torch.randn(64, n)
+
+        with self.assertRaisesRegex(
+            Exception, "does not support this aux output shape yet"
+        ):
+            torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+
+    def test_generated_block_transpose_reduce_keeps_partial_output_error(self):
+        m = n = 256
+
+        def fn(a, b):
+            def epilogue(acc):
+                x = (
+                    acc.float()
+                    .reshape(2, 128, 2, 128)
+                    .transpose(1, 2)
+                    .reshape(2, 2, 128 * 128)
+                )
+                return acc.relu(), x.abs().amax(-1)
+
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(m, 64)
+        b = torch.randn(64, n)
+
+        with self.assertRaisesRegex(Exception, "partial-output contract"):
             torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
     def test_generated_local_reduce_rejects_mixed_row_column_grouping(self):

@@ -26,6 +26,7 @@ from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
     tensorssa_reduction,
 )
 from torch._inductor.kernel.flex_gemm.constraints import (
+    FlexGemmBlockLocalReduceGeometry,
     grouped_reduce_dims_match,
     LOCAL_REDUCE_EXPLICIT_DTYPE_ERROR,
     LOCAL_REDUCE_GROUPED_RESHAPE_ERROR,
@@ -159,6 +160,32 @@ def _grouped_layout_from_source_shape(
         if _grouped_layout_matches_source_shape(shape, source_shape, layout):
             return layout
     return None
+
+
+def grouped_block_tensor_layout(
+    shape: Any, source_shape: Any | None = None
+) -> FlexGemmBlockLocalReduceGeometry | None:
+    """Recognize exact ``(M//bm, bm, N//bn, bn)`` block reshapes of a 2-D GEMM output."""
+    shape = normalize_shape(shape)
+    source_shape = normalize_shape(source_shape)
+    if (
+        not isinstance(shape, tuple)
+        or not isinstance(source_shape, tuple)
+        or len(shape) != 4
+        or len(source_shape) != 2
+    ):
+        return None
+    m, n = source_shape
+    match shape:
+        case (m_count, int(group_m), n_count, int(group_n)) if (
+            group_m > 0
+            and group_n > 0
+            and _group_count_matches_selected_dim(m_count, m, group_m)
+            and _group_count_matches_selected_dim(n_count, n, group_n)
+        ):
+            return FlexGemmBlockLocalReduceGeometry(group_m, group_n)
+        case _:
+            return None
 
 
 def grouped_tensor_layout(
@@ -531,6 +558,23 @@ def propagate_grouped_tensorssa_info(
     if any(info.layout != layout for info in input_infos):
         raise NotImplementedError(LOCAL_REDUCE_MIXED_GROUPED_LAYOUT_ERROR)
     return GroupedTensorSSAInfo(layout)
+
+
+def propagate_block_grouped_geometry(
+    node: torch.fx.Node,
+    block_grouped_tensors: dict[torch.fx.Node, FlexGemmBlockLocalReduceGeometry],
+) -> FlexGemmBlockLocalReduceGeometry | None:
+    geometries = [
+        block_grouped_tensors[arg]
+        for arg in iter_fx_node_inputs((node.args, node.kwargs))
+        if arg in block_grouped_tensors
+    ]
+    if not geometries:
+        return None
+    geometry = geometries[0]
+    if any(item != geometry for item in geometries):
+        raise NotImplementedError(LOCAL_REDUCE_MIXED_GROUPED_LAYOUT_ERROR)
+    return geometry
 
 
 def shape_arg_value(value: Any) -> Any:

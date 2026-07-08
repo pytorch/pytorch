@@ -9,8 +9,10 @@ from typing import Any, TypeAlias
 import torch
 import torch._vendor.quack.gemm_config as quack_gemm_config
 from torch._inductor.kernel.flex_gemm.constraints import (
+    FlexGemmBlockLocalReduceGeometry,
     FlexGemmLocalReduceCallbacks,
     FlexGemmLocalReduceGeometry,
+    LOCAL_REDUCE_BLOCK_KERNEL_ERROR,
     LOCAL_REDUCE_CALLBACKS_REQUIRED_ERROR,
     LOCAL_REDUCE_COMBINE_KEY_SUFFIX,
     local_reduce_compressed_shape,
@@ -205,13 +207,15 @@ def normalize_c(
 class FlexGemmRuntimeLocalReducePlan:
     """Runtime plan for one local reduction and its output/feed-main consumers."""
 
-    geometry: FlexGemmLocalReduceGeometry
+    geometry: FlexGemmLocalReduceGeometry | FlexGemmBlockLocalReduceGeometry
     out: torch.Tensor | None = None
     callbacks: FlexGemmLocalReduceCallbacks | None = None
     feeds_main: bool = False
 
     def __post_init__(self) -> None:
         """Reject plans without the output/callback state required by their consumer."""
+        if isinstance(self.geometry, FlexGemmBlockLocalReduceGeometry):
+            raise NotImplementedError(LOCAL_REDUCE_BLOCK_KERNEL_ERROR)
         if self.out is None and not self.feeds_main:
             raise RuntimeError(LOCAL_REDUCE_RUNTIME_OUT_ERROR)
         if self.feeds_main:

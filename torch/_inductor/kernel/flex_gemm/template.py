@@ -14,6 +14,7 @@ from torch._inductor.codegen.cutedsl.cutedsl_template import (
     CuteDSLTemplateCaller,
 )
 from torch._inductor.kernel.flex_gemm.constraints import (
+    FlexGemmBlockLocalReduceGeometry,
     FlexGemmLocalReduceGeometry,
     LOCAL_REDUCE_COMBINE_FN_SUFFIX,
     LOCAL_REDUCE_FINALIZE_FN_SUFFIX,
@@ -31,7 +32,7 @@ log = logging.getLogger(__name__)
 class FlexGemmEpilogueLocalReduceConfig:
     """Template-time local-reduce metadata for output and/or feed-main consumers."""
 
-    geometry: FlexGemmLocalReduceGeometry
+    geometry: FlexGemmLocalReduceGeometry | FlexGemmBlockLocalReduceGeometry
     out_index: int | None = None
     feeds_main: bool = False
     requires_physical_finalize: bool = False
