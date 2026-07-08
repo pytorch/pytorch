@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import dataclasses
 import hashlib
 from typing import Any
 
@@ -6,6 +7,7 @@ import torch
 from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
     CuteDSLCSEVariable,
     CuteDSLOpOverrides,
+    upcast_compute_type,
 )
 from torch._inductor.virtualized import V
 from torch.utils._sympy.value_ranges import ValueRanges
@@ -99,16 +101,30 @@ class FlexGemmCuteDSLOpOverrides(CuteDSLOpOverrides):
         return CuteDSLOpOverrides.to_dtype(x, dtype)
 
 
-def output_node(graph_module: torch.fx.GraphModule) -> torch.fx.Node:
+@dataclasses.dataclass(frozen=True)
+class FlexGemmOutputPlan:
+    """Classify the FlexGEMM body output into a main result and aux returns."""
+
+    output: torch.fx.Node
+    aux_outputs: tuple[torch.fx.Node, ...] = ()
+
+
+def output_plan(
+    graph_module: torch.fx.GraphModule,
+) -> FlexGemmOutputPlan:
     output_nodes = [node for node in graph_module.graph.nodes if node.op == "output"]
     if len(output_nodes) != 1:
         raise NotImplementedError("FlexGEMM expects one output node")
     output_value = output_nodes[0].args[0]
-    if isinstance(output_value, (tuple, list)) and len(output_value) == 1:
-        output_value = output_value[0]
+    if isinstance(output_value, (tuple, list)):
+        if len(output_value) == 1:
+            output_value = output_value[0]
+        else:
+            output, *aux_outputs = output_value
+            return FlexGemmOutputPlan(output, tuple(aux_outputs))
     if not isinstance(output_value, torch.fx.Node):
         raise NotImplementedError("FlexGEMM expects one tensor output")
-    return output_value
+    return FlexGemmOutputPlan(output_value)
 
 
 def gemm_node(
@@ -125,6 +141,7 @@ def gemm_node(
 
 
 def _cute_arg(value: Any, env: dict[torch.fx.Node, Any]) -> Any:
+    """Translate FX node references and constants into CuTeDSL epilogue values."""
     if isinstance(value, torch.fx.Node):
         if value in env:
             return env[value]
@@ -165,18 +182,39 @@ def _cute_call(target: Any, args: tuple[Any, ...], kwargs: dict[str, Any]) -> An
 
 
 def materialize_flex_gemm_epilogue(
-    graph_module: torch.fx.GraphModule, gemm_op: torch._ops.OpOverload
+    graph_module: torch.fx.GraphModule,
+    gemm_op: torch._ops.OpOverload,
+    epilogue_arg_placeholders: tuple[torch.fx.Node, ...] = (),
 ) -> tuple[str, str]:
+    """Build the generated CuTeDSL epilogue callable from the traced FX body."""
     gemm = gemm_node(graph_module, gemm_op)
-    output = output_node(graph_module)
+    outputs = output_plan(graph_module)
     kernel = FlexGemmCuteDSLKernel()
     env: dict[torch.fx.Node, Any] = {
         gemm: CuteDSLCSEVariable(
             "acc", ValueRanges.unknown(), dtype=torch.float32, shape=(1,)
         )
     }
-
     with V.set_kernel_handler(kernel), V.set_ops_handler(FlexGemmCuteDSLOpOverrides()):
+        for index, node in enumerate(epilogue_arg_placeholders):
+            epilogue_arg_meta = node.meta["val"]
+            physical_dtype = (
+                torch.uint8
+                if epilogue_arg_meta.dtype is torch.bool
+                else epilogue_arg_meta.dtype
+            )
+            logical_dtype = upcast_compute_type(epilogue_arg_meta.dtype)
+            env[node] = CuteDSLCSEVariable(
+                f"aux{index}",
+                ValueRanges.unknown(),
+                dtype=physical_dtype,
+                shape=(1,),
+            )
+            if logical_dtype != physical_dtype:
+                env[node] = FlexGemmCuteDSLOpOverrides.to_dtype(
+                    env[node], logical_dtype, use_compute_types=False
+                )
+
         for node in graph_module.graph.nodes:
             if node is gemm or node.op in ("placeholder", "output"):
                 continue
@@ -192,17 +230,24 @@ def materialize_flex_gemm_epilogue(
                     f"unsupported FlexGEMM epilogue node: {node.format_node()}"
                 )
 
-    key = hashlib.sha256(graph_module.code.encode()).hexdigest()[:16]
-    name = f"flex_gemm_epilogue_{key}"
     body = "\n".join(f"    {line}" for line in kernel.body.lines)
     if body:
         body += "\n"
+    aux_args = [f"aux{index}" for index in range(len(epilogue_arg_placeholders))]
+    epilogue_params = ", ".join(["acc", *aux_args])
+    result = _cute_arg(outputs.output, env)
+    if outputs.aux_outputs:
+        aux_results = [_cute_arg(aux_output, env) for aux_output in outputs.aux_outputs]
+        result = f"({', '.join(str(item) for item in (result, *aux_results))})"
+    key_payload = f"{graph_module.code}\n{body}\nreturn {result}"
+    key = hashlib.sha256(key_payload.encode()).hexdigest()[:16]
+    name = f"flex_gemm_epilogue_{key}"
     return (
         name,
         "import cutlass\n"
         "import cutlass.cute as cute\n"
         "import operator\n"
         "from cutlass._mlir.dialects import math as mlir_math\n\n"
-        f"@cute.jit\ndef {name}(acc):\n"
-        f"{body}    return {_cute_arg(output, env)}\n",
+        f"@cute.jit\ndef {name}({epilogue_params}):\n"
+        f"{body}    return {result}\n",
     )

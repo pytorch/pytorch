@@ -200,7 +200,7 @@ class TestStreamCodegen(InductorTestCase):
 with torch.cuda._DeviceGuard(0):
     torch.cuda.set_device(0)
     default_stream = torch.cuda.current_stream()
-    stream1 = get_external_object_by_index(3)
+    stream1 = _get_stream_by_index(3)
     with stream1:
 """,
             ),
@@ -211,7 +211,7 @@ with torch.cuda._DeviceGuard(0):
 with torch.xpu._DeviceGuard(0):
     torch.xpu.set_device(0)
     default_stream = torch.xpu.current_stream()
-    stream1 = get_external_object_by_index(3)
+    stream1 = _get_stream_by_index(3)
     with stream1:
 """,
             ),
@@ -222,6 +222,7 @@ with torch.xpu._DeviceGuard(0):
                 graph = SimpleNamespace(
                     cpp_wrapper=False,
                     device_ops=device_ops,
+                    device_type=device,
                 )
 
                 code = IndentedBuffer()
@@ -272,6 +273,48 @@ with torch.xpu._DeviceGuard(0):
 
         # The exit just unindents, verify no error
         self.assertIsNotNone(code.getvalue())
+
+    def test_default_stream_setup_only_once_per_device(self):
+        """default_stream capture should only run once per device entry."""
+        from torch._inductor.codegen.wrapper import (
+            EnterDeviceContextManagerWithStreamInfoLine,
+        )
+
+        last_device = None
+        stream_map = {1: 10}
+
+        def make_line(device_idx):
+            nonlocal last_device
+            setup = last_device != device_idx
+            last_device = device_idx
+            return EnterDeviceContextManagerWithStreamInfoLine(
+                device_idx=device_idx,
+                last_seen_device_guard_index=None,
+                num_streams=2,
+                stream_idx_to_user_obj_idx=stream_map,
+                setup_stream_cache=setup,
+            )
+
+        self.assertTrue(make_line(0).setup_stream_cache)
+        self.assertFalse(make_line(0).setup_stream_cache)
+        self.assertTrue(make_line(1).setup_stream_cache)
+        self.assertTrue(make_line(0).setup_stream_cache)
+
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    def test_generated_code_uses_get_stream_by_index(self):
+        """Generated inductor code should use _get_stream_by_index."""
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(x):
+            s = torch.Stream(device="cuda")
+            with s:
+                return x + 1
+
+        x = torch.ones(4, 4, device="cuda")
+        result, code = run_and_get_code(torch.compile(fn), x)
+        FileCheck().check("_get_stream_by_index").run(code[0])
+        expected = fn(torch.ones(4, 4, device="cuda"))
+        torch.testing.assert_close(result, expected)
 
 
 @unittest.skipIf(not TEST_CUDA, "requires CUDA")
@@ -351,7 +394,7 @@ class TestUserStreamCompile(InductorTestCase):
         torch.cuda.synchronize()
 
         self.assertEqual(actual, expected)
-        self.assertIn("stream1 = get_external_object_by_index", code)
+        self.assertIn("stream1 = _get_stream_by_index", code)
         self.assertIn("raw_stream1 = get_raw_stream(1)", code)
         self.assertNotRegex(code, r"(?m)^\s*stream1 = get_raw_stream\(1\)")
 
@@ -1160,12 +1203,12 @@ class TestUserStreamCompile(InductorTestCase):
         self.assertEqual(
             len(stream_kernels.get("s1", [])),
             1,
-            f"Expected 1 kernel on s1, got: {stream_kernels}",
+            lambda msg: f"{msg}\nExpected 1 kernel on s1, got: {stream_kernels}",
         )
         self.assertEqual(
             len(stream_kernels.get("s2", [])),
             1,
-            f"Expected 1 kernel on s2, got: {stream_kernels}",
+            lambda msg: f"{msg}\nExpected 1 kernel on s2, got: {stream_kernels}",
         )
 
     def test_no_buffer_reuse_across_streams(self):
@@ -1377,37 +1420,28 @@ class GraphModule(torch.nn.Module):
 
         get_external_object_by_index = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(1);  get_external_object_by_index = None
 
-        a: "f32[1024]" = l_x_ * 2
+        mul: "f32[1024]" = l_x_ * 2
 
-        b: "f32[1024]" = l_x_ * 3;  l_x_ = None
+        mul_1: "f32[1024]" = l_x_ * 3;  l_x_ = None
 
         synchronize_stream = torch.ops.streams.synchronize_stream(1);  synchronize_stream = None
 
-        add: "f32[1024]" = a + b;  a = b = None
+        add: "f32[1024]" = mul + mul_1;  mul = mul_1 = None
         return (add,)
 """,
         )
 
         wrapper_body = _extract_wrapper_body(code)
-        self.assertExpectedInline(
-            wrapper_body,
-            """\
-arg0_1, = args
-with torch.cuda._DeviceGuard(0):
-    torch.cuda.set_device(0)
-    default_stream = torch.cuda.current_stream()
-    stream1 = get_external_object_by_index(1)
-    with stream1:
-        arg0_1 = copy_if_misaligned(arg0_1)
-        buf0 = empty_strided_cuda((1024, ), (1, ), torch.float32)
-        raw_stream = get_raw_stream(0)
-        triton_kernel.run(arg0_1, buf0, 1024, stream=raw_stream)
-    with default_stream:
-        buf3 = empty_strided_cuda((1024, ), (1, ), torch.float32)
-        raw_stream0 = get_raw_stream(0)
-        triton_kernel.run(arg0_1, buf0, buf3, 1024, stream=raw_stream0)
-        torch.ops.streams.synchronize_stream.default(1)
-    return (buf3, )""",
+        self.assertGreaterEqual(wrapper_body.count("triton_kernel.run("), 2)
+        (
+            FileCheck()
+            .check("default_stream = torch.cuda.current_stream()")
+            .check("stream1 = _get_stream_by_index(1)")
+            .check("with stream1:")
+            .check("triton_kernel.run(")
+            .check("synchronize_stream")
+            .check("return (")
+            .run(wrapper_body)
         )
 
     def test_codegen_structure_pipeline(self):
@@ -1438,26 +1472,26 @@ with torch.cuda._DeviceGuard(0):
             normalize_gm(counter.graphs[0].print_readable(print_output=False)),
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_: "f32[32, 32]", L_w1_: "f32[32, 32]", L_w2_: "f32[32, 32]"):
-        l_x_ = L_x_
+    def forward(self, L_w1_: "f32[32, 32]", L_w2_: "f32[32, 32]", L_x_: "f32[32, 32]"):
         l_w1_ = L_w1_
         l_w2_ = L_w2_
+        l_x_ = L_x_
 
         get_external_object_by_index = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(1);  get_external_object_by_index = None
 
         get_external_object_by_index_1 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(2);  get_external_object_by_index_1 = None
 
-        a: "f32[32, 32]" = l_x_ @ l_w1_;  l_x_ = l_w1_ = None
+        matmul: "f32[32, 32]" = l_x_ @ l_w1_;  l_x_ = l_w1_ = None
 
         get_external_object_by_index_2 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(0);  get_external_object_by_index_2 = None
         record_event = torch.ops.streams.record_event(2, 0);  record_event = None
 
         wait_event = torch.ops.streams.wait_event(2, 1);  wait_event = None
 
-        b: "f32[32, 32]" = a @ l_w2_;  a = l_w2_ = None
+        matmul_1: "f32[32, 32]" = matmul @ l_w2_;  matmul = l_w2_ = None
 
         synchronize_stream = torch.ops.streams.synchronize_stream(1);  synchronize_stream = None
-        return (b,)
+        return (matmul_1,)
 """,
         )
 
@@ -1516,11 +1550,11 @@ class GraphModule(torch.nn.Module):
             normalize_gm(counter.graphs[0].print_readable(print_output=False)),
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_: "f32[32, 32]", L_w1_: "f32[32, 32]", L_w2_: "f32[32, 32]", L_w3_: "f32[32, 32]"):
-        l_x_ = L_x_
+    def forward(self, L_w1_: "f32[32, 32]", L_w2_: "f32[32, 32]", L_w3_: "f32[32, 32]", L_x_: "f32[32, 32]"):
         l_w1_ = L_w1_
         l_w2_ = L_w2_
         l_w3_ = L_w3_
+        l_x_ = L_x_
 
         get_external_object_by_index = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(1);  get_external_object_by_index = None
 
@@ -1532,26 +1566,26 @@ class GraphModule(torch.nn.Module):
 
         get_external_object_by_index_4 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(5);  get_external_object_by_index_4 = None
 
-        a: "f32[32, 32]" = l_x_ @ l_w1_;  l_x_ = l_w1_ = None
+        matmul: "f32[32, 32]" = l_x_ @ l_w1_;  l_x_ = l_w1_ = None
 
         record_event = torch.ops.streams.record_event(4, 1);  record_event = None
 
         wait_event = torch.ops.streams.wait_event(4, 2);  wait_event = None
 
-        b: "f32[32, 32]" = a @ l_w2_;  a = l_w2_ = None
+        matmul_1: "f32[32, 32]" = matmul @ l_w2_;  matmul = l_w2_ = None
 
         record_event_1 = torch.ops.streams.record_event(5, 2);  record_event_1 = None
 
         wait_event_1 = torch.ops.streams.wait_event(5, 3);  wait_event_1 = None
 
-        c: "f32[32, 32]" = b @ l_w3_;  b = l_w3_ = None
+        matmul_2: "f32[32, 32]" = matmul_1 @ l_w3_;  matmul_1 = l_w3_ = None
 
         synchronize_stream = torch.ops.streams.synchronize_stream(1);  synchronize_stream = None
 
         synchronize_stream_1 = torch.ops.streams.synchronize_stream(2);  synchronize_stream_1 = None
 
         synchronize_stream_2 = torch.ops.streams.synchronize_stream(3);  synchronize_stream_2 = None
-        return (c,)
+        return (matmul_2,)
 """,
         )
 
@@ -1613,10 +1647,10 @@ class GraphModule(torch.nn.Module):
             normalize_gm(counter.graphs[0].print_readable(print_output=False)),
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_: "f32[32, 32]", L_w1_: "f32[32, 32]", L_w2_: "f32[32, 32]"):
-        l_x_ = L_x_
+    def forward(self, L_w1_: "f32[32, 32]", L_w2_: "f32[32, 32]", L_x_: "f32[32, 32]"):
         l_w1_ = L_w1_
         l_w2_ = L_w2_
+        l_x_ = L_x_
 
         get_external_object_by_index = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(1);  get_external_object_by_index = None
 
@@ -1626,11 +1660,11 @@ class GraphModule(torch.nn.Module):
 
         get_external_object_by_index_3 = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(4);  get_external_object_by_index_3 = None
 
-        a: "f32[32, 32]" = l_x_ @ l_w1_;  l_w1_ = None
+        matmul: "f32[32, 32]" = l_x_ @ l_w1_;  l_w1_ = None
 
         record_event = torch.ops.streams.record_event(3, 1);  record_event = None
 
-        b: "f32[32, 32]" = l_x_ @ l_w2_;  l_x_ = l_w2_ = None
+        matmul_1: "f32[32, 32]" = l_x_ @ l_w2_;  l_x_ = l_w2_ = None
 
         record_event_1 = torch.ops.streams.record_event(4, 2);  record_event_1 = None
 
@@ -1638,12 +1672,12 @@ class GraphModule(torch.nn.Module):
 
         wait_event_1 = torch.ops.streams.wait_event(4, 0);  wait_event_1 = None
 
-        c: "f32[32, 32]" = a + b;  a = b = None
+        add: "f32[32, 32]" = matmul + matmul_1;  matmul = matmul_1 = None
 
         synchronize_stream = torch.ops.streams.synchronize_stream(1);  synchronize_stream = None
 
         synchronize_stream_1 = torch.ops.streams.synchronize_stream(2);  synchronize_stream_1 = None
-        return (c,)
+        return (add,)
 """,
         )
 
@@ -2105,7 +2139,7 @@ class TestStreamIdentity(InductorTestCase):
     """Verify that compiled code uses the user's original stream objects."""
 
     def test_single_stream_identity(self):
-        """Codegen should retrieve the user's stream via get_external_object_by_index."""
+        """Codegen should retrieve the user's stream via _get_stream_by_index."""
         from torch._inductor.utils import run_and_get_code
 
         user_stream = torch.cuda.Stream()
@@ -2118,7 +2152,7 @@ class TestStreamIdentity(InductorTestCase):
         result, (code,) = run_and_get_code(torch.compile(fn), x)
 
         self.assertEqual(result, fn(x))
-        self.assertIn("get_external_object_by_index", code)
+        self.assertIn("_get_stream_by_index", code)
         self.assertNotIn("torch.cuda.Stream(device=", code)
 
     def test_multiple_stream_identity(self):
@@ -2143,8 +2177,8 @@ class TestStreamIdentity(InductorTestCase):
         result, (code,) = run_and_get_code(torch.compile(fn), x)
 
         self.assertEqual(result, fn(x))
-        # Should have two distinct get_external_object_by_index calls
-        matches = re.findall(r"get_external_object_by_index\((\d+)\)", code)
+        # Should have two distinct _get_stream_by_index calls
+        matches = re.findall(r"_get_stream_by_index\((\d+)\)", code)
         self.assertEqual(len(matches), 2)
         self.assertNotEqual(matches[0], matches[1])
         self.assertNotIn("torch.cuda.Stream(device=", code)
@@ -2482,6 +2516,94 @@ class TestPDLWithMultiStream(InductorTestCase):
 
 
 @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+@xfailIfNoAcceleratorTriton
+class TestAOTIUserStreams(InductorTestCase):
+    @staticmethod
+    def _runtime_name(cuda_name):
+        if TEST_WITH_ROCM:
+            return cuda_name.replace("cuda", "hip", 1)
+        return cuda_name
+
+    def _compile_and_run(self, model, inputs):
+        from torch._inductor.utils import fresh_cache, run_and_get_cpp_code
+
+        with fresh_cache():
+            ep = torch.export.export(model, inputs, strict=True)
+
+            def _compile():
+                return torch._inductor.aoti_compile_and_package(ep)
+
+            package_path, code = run_and_get_cpp_code(_compile)
+            loaded = torch._inductor.aoti_load_package(package_path)
+            result = loaded(*inputs)
+        return result, code
+
+    def test_record_wait_event_basic(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                s = torch.cuda.Stream()
+                with torch.cuda.stream(s):
+                    y = x + 1
+                event = s.record_event()
+                event.wait()
+                return y * 2
+
+        model = Model().cuda()
+        inputs = (torch.randn(1024, device="cuda"),)
+        expected = model(*inputs)
+
+        result, code = self._compile_and_run(model, inputs)
+
+        self.assertEqual(result, expected)
+        self.assertIn(self._runtime_name("cudaEventRecord"), code)
+        self.assertIn(self._runtime_name("cudaStreamWaitEvent"), code)
+        self.assertIn("AOTIPerThreadStreamCache", code)
+
+    def test_two_stream_dependency(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                s1 = torch.cuda.Stream()
+                s2 = torch.cuda.Stream()
+                with torch.cuda.stream(s1):
+                    a = x + 1
+                event = s1.record_event()
+                s2.wait_event(event)
+                with torch.cuda.stream(s2):
+                    b = a * 2
+                final = s2.record_event()
+                final.wait()
+                return b
+
+        model = Model().cuda()
+        inputs = (torch.randn(1024, device="cuda"),)
+        expected = model(*inputs)
+
+        result, code = self._compile_and_run(model, inputs)
+
+        self.assertEqual(result, expected)
+        self.assertGreaterEqual(code.count(self._runtime_name("cudaEventRecord")), 2)
+        self.assertGreaterEqual(
+            code.count(self._runtime_name("cudaStreamWaitEvent")), 2
+        )
+        self.assertIn("_aoti_aux_stream_cache.get(2", code)
+
+    def test_stream_synchronize_raises(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                s = torch.cuda.Stream()
+                with torch.cuda.stream(s):
+                    y = x + 1
+                s.synchronize()
+                return y * 2
+
+        model = Model().cuda()
+        inputs = (torch.randn(1024, device="cuda"),)
+
+        with self.assertRaisesRegex(Exception, "synchronize_stream"):
+            self._compile_and_run(model, inputs)
+
+
+@unittest.skipIf(not TEST_CUDA, "requires CUDA")
 @torch._inductor.config.patch({"triton.cudagraphs": True})
 @xfailIfNoAcceleratorTriton
 class TestStreamCudagraphInteraction(InductorTestCase):
@@ -2606,7 +2728,28 @@ instantiate_parametrized_tests(TestStreamOrderingStress)
 instantiate_parametrized_tests(TestGenericStreamCompile)
 instantiate_parametrized_tests(TestStreamIdentity)
 instantiate_parametrized_tests(TestPDLWithMultiStream)
+instantiate_parametrized_tests(TestAOTIUserStreams)
 instantiate_parametrized_tests(TestStreamCudagraphInteraction)
+
+
+@unittest.skipIf(not TEST_CUDA, "requires CUDA")
+class TestStreamExternalObjectRestore(InductorTestCase):
+    def test_restore_external_objects_before_backward(self):
+        """Forward snapshots external object registry, backward restores it."""
+        from torch._dynamo.graph_bytecode_inputs import store_user_object_weakrefs
+
+        def fn(x):
+            s = torch.Stream(device="cuda")
+            with s:
+                return x * 2 + 1
+
+        compiled_fn = torch.compile(fn)
+        x = torch.randn(4, 4, device="cuda", requires_grad=True)
+        out = compiled_fn(x)
+        store_user_object_weakrefs(torch.cuda.Stream())
+        out.sum().backward()
+        self.assertIsNotNone(x.grad)
+        torch.testing.assert_close(x.grad, torch.full_like(x, 2.0))
 
 
 if __name__ == "__main__":

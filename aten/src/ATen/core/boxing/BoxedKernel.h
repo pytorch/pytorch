@@ -183,11 +183,20 @@ class TORCH_API BoxedKernel final {
       DispatchKeySet /*ks*/,
       Stack* stack);
 
+  template <class KernelFunctor>
+  static void make_boxed_functor(
+      OperatorKernel* kernel,
+      const OperatorHandle& op,
+      DispatchKeySet ks,
+      Stack* stack);
+
   explicit BoxedKernel(
       std::unique_ptr<OperatorKernel> functor,
       InternalBoxedKernelFunction* boxed_kernel_func);
 
   OperatorKernel* getFunctor() const;
+  template <class KernelFunctor>
+  const KernelFunctor* getFunctor() const;
   InternalBoxedKernelFunction* getFnPtr() const;
 
   c10::intrusive_ptr<OperatorKernel> functor_;

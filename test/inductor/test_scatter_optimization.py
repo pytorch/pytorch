@@ -172,7 +172,11 @@ class TestScatterOpt(TestCase):
             expect = f(x)
             actual = torch.compile(f)(x)
             self.assertEqual(expect.dtype, dtype)
-            self.assertEqual(actual.dtype, dtype, f"dtype not preserved for {dtype}")
+            self.assertEqual(
+                actual.dtype,
+                dtype,
+                lambda msg: f"{msg}\ndtype not preserved for {dtype}",
+            )
             self.assertTrue(same(expect, actual, tol=1e-2), f"{expect=}\n{actual=}\n")
             self.check_metric()
 
