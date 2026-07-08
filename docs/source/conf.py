@@ -1857,6 +1857,8 @@ coverage_ignore_classes = [
     "linalg_lu_factor_ex_out",
     "linalg_lu_factor_out",
     "linalg_lu_out",
+    "linalg_polar",
+    "linalg_polar_out",
     "linalg_qr",
     "linalg_qr_out",
     "linalg_slogdet",
@@ -2371,8 +2373,7 @@ def coverage_post_process(app, exception):
 
     if output:
         with open(output_file, "a") as f:
-            for o in output:
-                f.write(o)
+            f.writelines(output)
 
 
 def process_docstring(app, what_, name, obj, options, lines):

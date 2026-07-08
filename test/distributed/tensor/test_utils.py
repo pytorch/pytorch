@@ -1408,7 +1408,7 @@ class Test_StridedShard_Optimizer(DTensorTestBase):
                 self.assertEqual(
                     ref_param,
                     param.full_tensor(),
-                    msg=f"Parameter mismatch at iteration {iter_idx}",
+                    msg=lambda msg: f"{msg}\nParameter mismatch at iteration {iter_idx}",
                 )
 
     @with_comms
@@ -1751,7 +1751,7 @@ class TestStridedShardReplicate(TestStridedShardCollectiveOpUtils, DTensorTestBa
                 self.assertEqual(
                     a_dt_after_to_replicate,
                     b_dt.to_local(),
-                    f"{tensor_size=}, placements={src_p}",
+                    lambda msg: f"{msg}\n{tensor_size=}, placements={src_p}",
                 )
 
     @with_comms

@@ -6,9 +6,9 @@ from typing import Any, cast, TYPE_CHECKING
 
 import torch
 import torch.utils._pytree as pytree
+from torch._custom_class_base import CustomClassBase
 from torch._guards import detect_fake_mode
-from torch._library.opaque_object import is_opaque_type
-from torch._opaque_base import OpaqueBase
+from torch._library.opaque_object import is_custom_class
 from torch._subclasses import FakeTensor, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import _pytree_subclasses_that_lose_info
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -101,7 +101,7 @@ def process_inputs(
                         hint=x,
                         source=source,
                     )
-            if isinstance(x, torch.ScriptObject) or is_opaque_type(type(x)):
+            if isinstance(x, torch.ScriptObject) or is_custom_class(type(x)):
                 return torch._library.fake_class_registry.maybe_to_fake_obj(
                     fake_mode, x
                 )
@@ -130,11 +130,11 @@ def process_inputs(
                         case torch.Tensor():
                             all_this_fake = False
                             break
-                        case OpaqueBase():
+                        case CustomClassBase():
                             pass
                         case unexpected:
                             raise AssertionError(
-                                f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                                f"expected Tensor or CustomClassBase, got {type(unexpected)}"
                             )
 
                 if all_this_fake:
@@ -194,7 +194,7 @@ def _resolve_input_async_collectives(
     for attr in attrs:
         inner = getattr(x, attr)
         match inner:
-            case OpaqueBase():
+            case CustomClassBase():
                 continue
             case torch.Tensor():
                 resolved_inner = _resolve_input_async_collectives(
@@ -206,7 +206,7 @@ def _resolve_input_async_collectives(
                 )
             case _:
                 raise AssertionError(
-                    f"expected Tensor or OpaqueBase, got {type(inner)}"
+                    f"expected Tensor or CustomClassBase, got {type(inner)}"
                 )
 
         if resolved_inner is not inner:
