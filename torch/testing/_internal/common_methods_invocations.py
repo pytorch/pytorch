@@ -13772,15 +13772,7 @@ op_db: list[OpInfo] = [
            # See https://github.com/pytorch/pytorch/pull/78358
            check_batched_forward_grad=False,
            supports_out=False,
-           sample_inputs_func=sample_inputs_combinations,
-           decorators=[
-               DecorateInfo(
-                   toleranceOverride({torch.float16: tol(atol=5e-4, rtol=2e-3)}),
-                   device_type='cuda',
-                   dtypes=(torch.float16,),
-                   active_if=TEST_WITH_ROCM,
-               ),
-           ]),
+           sample_inputs_func=sample_inputs_combinations),
     OpInfo('cartesian_prod',
            op=torch.cartesian_prod,
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -15329,8 +15321,6 @@ op_db: list[OpInfo] = [
                             device_type='mps', dtypes=[torch.float32]),
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',
                             device_type='mps', dtypes=[torch.float32]),
-               # RuntimeError: The size of tensor a (5) must match the size of tensor b (4) at non-singleton dimension 1
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
                # Exception: linalg.solve.triangular(); Only float is supported!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
                DecorateInfo(unittest.skip("Tests different backward paths"),
@@ -22379,6 +22369,7 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
                DecorateInfo(unittest.expectedFailure, 'TestDTensorOps', 'test_dtensor_op_db'),
+               DecorateInfo(unittest.expectedFailure, 'TestInductorOpInfo', 'test_comprehensive'),
                DecorateInfo(unittest.expectedFailure, 'TestVmapOperatorsOpInfo', 'test_op_has_batch_rule'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_non_standard_bool_values',
                             dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
@@ -22769,10 +22760,8 @@ op_db: list[OpInfo] = [
             # lambda impl
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             # AssertionError: Tensor-likes are not close!
-            # Fails in cuda11.7
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu', device_type='cuda'),
-            # AssertionError: Tensor-likes are not close!
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu', device_type='xpu'),
+            # Fails in cuda11.7 and xpu
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu', device_type=('cuda', 'xpu')),
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),),),
     # In training mode, feature_alpha_dropout currently doesn't support inputs of complex dtype
     # unlike when `train=False`, it supports complex inputs, hence 2 OpInfos to cover all cases
@@ -22996,11 +22985,10 @@ op_db: list[OpInfo] = [
         gradcheck_nondet_tol=1e-15,
         skips=(
             # NOTE: Only run on MPS
-            DecorateInfo(unittest.skip('Skipped!'), device_type='cpu'),
-            DecorateInfo(unittest.skip('Skipped!'), device_type='cuda'),
-            DecorateInfo(unittest.skip('Skipped!'), device_type='xpu'),
-            DecorateInfo(unittest.skip('Skipped!'), device_type='meta'),
-            DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-4)}),
+            DecorateInfo(unittest.skip('Skipped!'), device_type=('cpu', 'xpu', 'cuda', 'meta')),
+            DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-4),
+                                            torch.float16: tol(atol=1e-4, rtol=1e-4),
+                                            torch.bfloat16: tol(atol=1e-4, rtol=1e-4)}),
                          "TestConsistency", "test_output_match", device_type="mps"),
             DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-3, rtol=2e-6),
                                             torch.float16: tol(atol=5e-3, rtol=2e-2)}),
