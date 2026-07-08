@@ -26,6 +26,16 @@ def grouped_reduce_dims_match(dim: Any, reduce_dims: Sequence[Any]) -> bool:
     return len(dims) == 1 and dims[0] in reduce_dims
 
 
+def grouped_block_reduce_dims_match(dim: Any) -> bool:
+    """Treat equivalent two-dim spellings of a ``(M//bm, bm, N//bn, bn)`` view's
+    grouped dims (1 and 3, negatives included) as one block reduction domain."""
+    if not isinstance(dim, (list, tuple)) or len(dim) != 2:
+        return False
+    if not all(isinstance(item, int) for item in dim):
+        return False
+    return sorted(item % 4 for item in dim) == [1, 3]
+
+
 # The physical feed-main path currently reduces only within one lane-layout M
 # group; cross-warp M stitching needs the two-phase/replay path used by
 # compressed aux reductions. Axis-1 feeds whose groups fit in one TensorSSA
@@ -115,6 +125,9 @@ LOCAL_REDUCE_EXPLICIT_DTYPE_ERROR = (
 LOCAL_REDUCE_INNERMOST_GROUPED_DIM_ERROR = (
     "FlexGEMM local reductions currently support only reductions over the "
     "innermost grouped dimension"
+)
+LOCAL_REDUCE_BLOCK_KERNEL_ERROR = (
+    "FlexGEMM 2-D block local reductions are not supported by the QUACK kernel yet"
 )
 LOCAL_REDUCE_GROUPED_RESHAPE_ERROR = (
     "FlexGEMM local-reduce grouped reshape must split exactly one GEMM output dimension"
@@ -314,6 +327,21 @@ def local_reduce_compressed_shape(
     return tuple(result)
 
 
+def validate_local_reduce_block_groups(group_m: int, group_n: int) -> None:
+    """Keep block local-reduce specs inside the GEMM tile's M x N blocking model."""
+    if group_m <= 0 or group_n <= 0:
+        raise RuntimeError(LOCAL_REDUCE_GROUP_POSITIVE_ERROR)
+
+
+def local_reduce_block_compressed_shape(
+    shape: Sequence[Any], group_m: int, group_n: int
+) -> tuple[Any, ...]:
+    """Compute the explicit aux shape holding one value per bm x bn block."""
+    return local_reduce_compressed_shape(
+        local_reduce_compressed_shape(shape, group_m, 0), group_n, 1
+    )
+
+
 def validate_local_reduce_no_c_alpha_beta(
     effective_C: Any | None, alpha: float, beta: float
 ) -> None:
@@ -434,6 +462,23 @@ class FlexGemmLocalReduceGeometry:
     @property
     def needs_physical_callbacks(self) -> bool:
         return local_reduce_needs_physical_callbacks(self.axis, self.group)
+
+
+@dataclasses.dataclass(frozen=True)
+class FlexGemmBlockLocalReduceGeometry:
+    """Describe the 2-D bm x bn output blocking shared by local-reduce consumers.
+
+    Attributes:
+        group_m: Number of contiguous M elements in each block.
+        group_n: Number of contiguous N elements in each block.
+    """
+
+    group_m: int
+    group_n: int
+
+    def __post_init__(self) -> None:
+        """Reject geometry outside the GEMM tile's M x N blocking model."""
+        validate_local_reduce_block_groups(self.group_m, self.group_n)
 
 
 @dataclasses.dataclass(frozen=True)

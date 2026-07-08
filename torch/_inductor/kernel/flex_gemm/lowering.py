@@ -17,9 +17,11 @@ from ...ir import IRNode, TensorBox
 from ...lowering import empty_strided, process_subgraph_nodes, register_lowering
 from .constraints import (
     flex_gemm_local_reduce_config_error,
+    FlexGemmBlockLocalReduceGeometry,
     is_flex_gemm_partial_reduction_shape,
     LOCAL_REDUCE_AUX_METADATA_ERROR,
     LOCAL_REDUCE_AUX_OUTPUT_CONTRACT_ERROR,
+    LOCAL_REDUCE_BLOCK_KERNEL_ERROR,
     LOCAL_REDUCE_DENSE_MM_SCOPE_ERROR,
     LOCAL_REDUCE_PARTIAL_OUTPUT_CONTRACT_ERROR,
     statically_known_shape_equal,
@@ -169,7 +171,11 @@ def flex_gemm_local_reduce_metas(
 ) -> tuple[Any, ...]:
     """Return local-reduce output metadata after validating consumer compatibility."""
     validate_flex_gemm_local_reduce_scope(gemm_op, local_reduce)
-    if local_reduce is None or local_reduce.store_node is None:
+    if local_reduce is None:
+        return ()
+    if isinstance(local_reduce.geometry, FlexGemmBlockLocalReduceGeometry):
+        raise NotImplementedError(LOCAL_REDUCE_BLOCK_KERNEL_ERROR)
+    if local_reduce.store_node is None:
         return ()
     local_reduce_meta = local_reduce.store_node.meta.get("val")
     if local_reduce_meta is None:

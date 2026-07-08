@@ -14,9 +14,12 @@ from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
 from torch._inductor.kernel.flex_gemm.constraints import (
     FLEX_GEMM_OUTPUT_PLAN_NODE_ERROR,
     FLEX_GEMM_OUTPUT_TENSOR_ERROR,
+    FlexGemmBlockLocalReduceGeometry,
     FlexGemmLocalReduceGeometry,
+    grouped_block_reduce_dims_match,
     grouped_reduce_dims_match,
     LOCAL_REDUCE_AUX_TENSORSSA_ERROR,
+    local_reduce_block_compressed_shape,
     LOCAL_REDUCE_COMBINE_FN_SUFFIX,
     local_reduce_compressed_shape,
     LOCAL_REDUCE_CONTRACT_NODE_ERROR,
@@ -45,6 +48,7 @@ from torch._inductor.kernel.flex_gemm.quack_reductions import (
     _cute_call,
     _local_reduce_store_arg,
     FlexGemmPhysicalReduction,
+    grouped_block_tensor_layout,
     grouped_tensor_layout,
     GroupedTensorSSAInfo,
     has_local_reduce_store_source,
@@ -56,6 +60,7 @@ from torch._inductor.kernel.flex_gemm.quack_reductions import (
     lower_squeeze,
     lower_tensorssa_reduce,
     lower_view_or_reshape,
+    propagate_block_grouped_geometry,
     propagate_grouped_tensorssa_info,
     reduction_from_node,
     reduction_requires_physical_finalize,
@@ -151,7 +156,7 @@ class FlexGemmCuteDSLOpOverrides(CuteDSLOpOverrides):
 class FlexGemmOutputLocalReducePlan:
     """Bind one local-reduce value to store and/or feed consumers."""
 
-    geometry: FlexGemmLocalReduceGeometry
+    geometry: FlexGemmLocalReduceGeometry | FlexGemmBlockLocalReduceGeometry
     value_node: torch.fx.Node
     store_node: torch.fx.Node | None = None
     feeds_main: bool = False
@@ -219,12 +224,45 @@ class FlexGemmLocalReduceContract:
     ) -> FlexGemmOutputLocalReducePlan:
         """Bind this reduction value to the requested local-reduce consumers."""
         return FlexGemmOutputLocalReducePlan(
-            FlexGemmLocalReduceGeometry(self.group, self.axis),
+            self.geometry,
             self.aux,
             store_node=store_node,
             feeds_main=feeds_main,
             requires_physical_finalize=self.requires_physical_finalize,
         )
+
+    @property
+    def geometry(self) -> FlexGemmLocalReduceGeometry:
+        return FlexGemmLocalReduceGeometry(self.group, self.axis)
+
+
+@dataclasses.dataclass(frozen=True)
+class FlexGemmBlockLocalReduceContract:
+    """Bind one reduced value per bm x bn output block to its producing node."""
+
+    aux: torch.fx.Node
+    geometry: FlexGemmBlockLocalReduceGeometry
+
+    def __post_init__(self) -> None:
+        """Reject invalid block local-reduce source nodes."""
+        if not isinstance(self.aux, torch.fx.Node):
+            raise RuntimeError(LOCAL_REDUCE_CONTRACT_NODE_ERROR)
+
+    def to_plan(
+        self, *, store_node: torch.fx.Node | None, feeds_main: bool
+    ) -> FlexGemmOutputLocalReducePlan:
+        """Bind this block reduction value to the requested local-reduce consumers."""
+        return FlexGemmOutputLocalReducePlan(
+            self.geometry,
+            self.aux,
+            store_node=store_node,
+            feeds_main=feeds_main,
+        )
+
+
+FlexGemmAnyLocalReduceContract = (
+    FlexGemmLocalReduceContract | FlexGemmBlockLocalReduceContract
+)
 
 
 @dataclasses.dataclass
@@ -234,24 +272,31 @@ class FlexGemmLocalReduceAnalysis:
     grouped_tensors: dict[torch.fx.Node, GroupedTensorSSAInfo] = dataclasses.field(
         default_factory=dict
     )
-    contracts: dict[torch.fx.Node, FlexGemmLocalReduceContract] = dataclasses.field(
+    block_grouped_tensors: dict[torch.fx.Node, FlexGemmBlockLocalReduceGeometry] = (
+        dataclasses.field(default_factory=dict)
+    )
+    contracts: dict[torch.fx.Node, FlexGemmAnyLocalReduceContract] = dataclasses.field(
         default_factory=dict
     )
 
     def bind_grouped_layout(self, node: torch.fx.Node, shape: Any, source: Any) -> bool:
         """Record reshapes that introduce grouped TensorSSA provenance."""
-        source_shape = (
-            tensor_meta_shape(source) if isinstance(source, torch.fx.Node) else None
-        )
+        if not isinstance(source, torch.fx.Node):
+            return False
+        source_shape = tensor_meta_shape(source)
+        block_geometry = grouped_block_tensor_layout(shape, source_shape)
+        if block_geometry is not None:
+            self.block_grouped_tensors[node] = block_geometry
+            return True
         layout = grouped_tensor_layout(shape, source_shape)
-        if layout is None or not isinstance(source, torch.fx.Node):
+        if layout is None:
             return False
         validate_local_reduce_tensorssa_group_size(layout.axis, layout.group_size)
         self.grouped_tensors[node] = GroupedTensorSSAInfo(layout)
         return True
 
     def bind_contract(
-        self, node: torch.fx.Node, contract: FlexGemmLocalReduceContract | None
+        self, node: torch.fx.Node, contract: FlexGemmAnyLocalReduceContract | None
     ) -> bool:
         """Record a discovered local-reduce contract and report whether it matched."""
         if contract is None:
@@ -291,15 +336,38 @@ class FlexGemmLocalReduceAnalysis:
             ),
         )
 
+    def bind_block_grouped_reduction(
+        self, node: torch.fx.Node, input_node: Any, dim: Any, dtype: Any = None
+    ) -> bool:
+        """Match reductions covering exactly both grouped block dims and bind them.
+
+        Mismatched dims fall through without raising so single-dim reductions
+        over 4-D block views keep their existing rejection behavior downstream.
+        """
+        if not isinstance(input_node, torch.fx.Node):
+            return False
+        geometry = self.block_grouped_tensors.get(input_node)
+        if geometry is None or not grouped_block_reduce_dims_match(dim):
+            return False
+        if dtype is not None:
+            raise NotImplementedError(LOCAL_REDUCE_EXPLICIT_DTYPE_ERROR)
+        return self.bind_contract(
+            node, FlexGemmBlockLocalReduceContract(node, geometry)
+        )
+
     def has_grouped_tensor(self, value: Any) -> bool:
         """Return whether a value currently has grouped TensorSSA provenance."""
         return isinstance(value, torch.fx.Node) and value in self.grouped_tensors
 
-    def contract_for(self, node: torch.fx.Node) -> FlexGemmLocalReduceContract | None:
+    def contract_for(
+        self, node: torch.fx.Node
+    ) -> FlexGemmAnyLocalReduceContract | None:
         """Return the discovered local-reduce contract for a node, if any."""
         return self.contracts.get(node)
 
-    def contracts_from_inputs(self, *values: Any) -> list[FlexGemmLocalReduceContract]:
+    def contracts_from_inputs(
+        self, *values: Any
+    ) -> list[FlexGemmAnyLocalReduceContract]:
         """Collect known contracts from FX inputs for pointwise propagation."""
         return [
             self.contracts[arg]
@@ -314,14 +382,17 @@ class FlexGemmLocalReduceAnalysis:
         grouped_info = propagate_grouped_tensorssa_info(node, self.grouped_tensors)
         if grouped_info is not None:
             self.grouped_tensors[node] = grouped_info
+        block_geometry = propagate_block_grouped_geometry(
+            node, self.block_grouped_tensors
+        )
+        if block_geometry is not None:
+            self.block_grouped_tensors[node] = block_geometry
         contract = common_local_reduce_contract(
             self.contracts_from_inputs(node.args, node.kwargs), mixed_contract_error
         )
         if contract is None:
             return False
-        self.contracts[node] = FlexGemmLocalReduceContract(
-            node, contract.group, contract.axis, contract.requires_physical_finalize
-        )
+        self.contracts[node] = dataclasses.replace(contract, aux=node)
         return True
 
 
@@ -349,24 +420,22 @@ def fx_node_depends_on(
 
 
 def common_local_reduce_contract(
-    contracts: list[FlexGemmLocalReduceContract],
+    contracts: list[FlexGemmAnyLocalReduceContract],
     mixed_contract_error: str,
-) -> FlexGemmLocalReduceContract | None:
+) -> FlexGemmAnyLocalReduceContract | None:
     """Merge contracts that share one grouped reduction layout."""
     if not contracts:
         return None
     contract = contracts[0]
-    if any(
-        item.group != contract.group or item.axis != contract.axis for item in contracts
-    ):
+    if any(item.geometry != contract.geometry for item in contracts):
         raise NotImplementedError(mixed_contract_error)
     return contract
 
 
 def common_local_reduce_value_contract(
-    contracts: list[FlexGemmLocalReduceContract],
+    contracts: list[FlexGemmAnyLocalReduceContract],
     mixed_contract_error: str,
-) -> FlexGemmLocalReduceContract | None:
+) -> FlexGemmAnyLocalReduceContract | None:
     """Merge contracts for one reusable physical reduction value."""
     contract = common_local_reduce_contract(contracts, mixed_contract_error)
     if contract is None:
@@ -794,6 +863,8 @@ def local_reduce_analysis(
             input_node, dim, _, dtype, _ = reduction
             if analysis.bind_grouped_reduction(node, input_node, dim, dtype):
                 continue
+            if analysis.bind_block_grouped_reduction(node, input_node, dim, dtype):
+                continue
         if (
             node.op == "call_function"
             and node.target is inductor_prims.prepare_softmax_online
@@ -843,9 +914,15 @@ def local_reduce_compressed_aux_plan(
     aux_meta = aux.meta.get("val")
     if contract is None or aux_meta is None or output_meta is None:
         return None
-    expected_aux_shape = local_reduce_compressed_shape(
-        output_meta.shape, contract.group, contract.axis
-    )
+    match contract:
+        case FlexGemmBlockLocalReduceContract(geometry=geometry):
+            expected_aux_shape = local_reduce_block_compressed_shape(
+                output_meta.shape, geometry.group_m, geometry.group_n
+            )
+        case _:
+            expected_aux_shape = local_reduce_compressed_shape(
+                output_meta.shape, contract.group, contract.axis
+            )
     if not statically_known_shape_equal(expected_aux_shape, aux_meta.shape):
         return None
     return contract.to_plan(store_node=aux, feeds_main=False)
