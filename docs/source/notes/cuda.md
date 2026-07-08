@@ -67,7 +67,7 @@ with torch.cuda.device(1):
 
 ## TensorFloat-32 (TF32) on Ampere (and later) devices
 
-After Pytorch 2.9, we provide a new sets of APIs to control the TF32 behavior in a more fine-grained way, and
+After PyTorch 2.9, we provide a new sets of APIs to control the TF32 behavior in a more fine-grained way, and
 suggest to use the new APIs for better control.
 We can set float32 precision per backend and per operators. We can also override the global setting for a specific operator.
 
