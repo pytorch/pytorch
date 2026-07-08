@@ -1342,9 +1342,9 @@ class VariableBuilder:
         elif is_checkpoint_factory(value):
             from .higher_order_ops import CheckpointDecoratorVariable
 
-            kwargs_source = AttrSource(self.get_source(), "_torch_checkpoint_kwargs")
+            kwargs_source = AttrSource(self.get_source(), "keywords")
             checkpoint_kwargs = {}
-            for k, v in value._torch_checkpoint_kwargs.items():
+            for k, v in value.keywords.items():
                 checkpoint_kwargs[k] = VariableBuilder(
                     self.tx, DictGetItemSource(kwargs_source, k)
                 )(v)
@@ -1361,16 +1361,12 @@ class VariableBuilder:
         elif is_utils_checkpoint_wrapped(value):
             from .higher_order_ops import CheckpointedFunctionVariable
 
-            fn_source = AttrSource(
-                self.get_source(), "_torch_checkpoint_wrapped_function"
-            )
-            fn = VariableBuilder(self.tx, fn_source)(
-                value._torch_checkpoint_wrapped_function
-            )
+            fn_source = AttrSource(self.get_source(), "function")
+            fn = VariableBuilder(self.tx, fn_source)(value.function)
 
-            kwargs_source = AttrSource(self.get_source(), "_torch_checkpoint_kwargs")
+            kwargs_source = AttrSource(self.get_source(), "checkpoint_kwargs")
             checkpoint_kwargs = {}
-            for k, v in value._torch_checkpoint_kwargs.items():
+            for k, v in value.checkpoint_kwargs.items():
                 checkpoint_kwargs[k] = VariableBuilder(
                     self.tx, DictGetItemSource(kwargs_source, k)
                 )(v)
