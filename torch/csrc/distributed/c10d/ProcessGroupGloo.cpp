@@ -781,15 +781,27 @@ c10::intrusive_ptr<Backend> ProcessGroupGloo::split(
     glooOpts = ProcessGroupGloo::Options::create_default();
   }
 
+  // The child must not share the parent's devices: a gloo device routes
+  // incoming connections to pairs via a per-device sequence counter, and the
+  // lazy-init connect path assumes a remote pair's sequence number equals its
+  // rank, which only holds for a device serving a single context. Sharing
+  // devices would hang the child's first collective under lazy init.
+  auto childOpts = ProcessGroupGloo::Options::create_default(glooOpts->timeout);
+  childOpts->threads = glooOpts->threads;
+  childOpts->group_name = glooOpts->group_name;
+  childOpts->group_desc = glooOpts->group_desc;
+  childOpts->use_pg_for_symm_mem_rendezvous =
+      glooOpts->use_pg_for_symm_mem_rendezvous;
+
   // TODO: we need to get rid of globalRanksInGroup eventually.
   std::vector<uint64_t> globalRanksInGroup;
   globalRanksInGroup.reserve(ranks.size());
   for (auto rank : ranks) {
     globalRanksInGroup.emplace_back(groupRanks()[rank]);
   }
-  glooOpts->global_ranks_in_group = std::move(globalRanksInGroup);
+  childOpts->global_ranks_in_group = std::move(globalRanksInGroup);
   auto pg = c10::make_intrusive<ProcessGroupGloo>(
-      store->clone(), groupRank, ranks.size(), glooOpts);
+      store->clone(), groupRank, ranks.size(), childOpts);
   return c10::static_intrusive_pointer_cast<Backend>(pg);
 }
 
