@@ -2,6 +2,7 @@
 # Owner(s): ["oncall: distributed"]
 import copy
 import logging
+import os
 from dataclasses import dataclass
 
 from model_registry import (
@@ -20,6 +21,7 @@ from schedule_registry import (
 
 import torch
 import torch.distributed as dist
+import torch.distributed.config as dist_config
 from torch.distributed.pipelining import (
     _ScheduleForwardOnly,
     pipeline,
@@ -1368,6 +1370,133 @@ class CustomSchedulesTest(MultiProcContinuousTest):
 
 
 instantiate_parametrized_tests(CustomSchedulesTest)
+
+
+class PerDirectionScheduleTest(MultiProcContinuousTest):
+    """Per-direction PP communicators (``config.pipeline_per_direction_p2p``).
+
+    A single PP communicator serializes all send/recv in one FIFO; splitting
+    downstream (r -> r+1 activations) and upstream (r -> r-1 gradients) onto two
+    communicators removes the cross-batch deadlock hazard. PipelineStage builds
+    the two subgroups with ``split_group``, which requires a device-bound default
+    PG -- so this class binds ``device_id`` in ``_init_pg`` (see below) rather
+    than relying on the shared MultiProcContinuousTest path.
+    """
+
+    world_size = 4
+
+    @classmethod
+    def backend_str(cls) -> str:
+        return backend
+
+    @classmethod
+    def _init_pg(cls, rank, world_size, rdvz_file):
+        # Bind device_id so PipelineStage can split the default PG into
+        # downstream/upstream subgroups. We override here instead of changing
+        # MultiProcContinuousTest._init_pg, which also serves CPU/Gloo callers
+        # where device_id would alter PG initialization semantics.
+        if rdvz_file is None:
+            raise AssertionError("Expected rdvz_file to not be None")
+        os.environ["LOCAL_RANK"] = str(rank)
+        store = dist.FileStore(rdvz_file, world_size)
+        # _init_pg runs at class spawn, before the per-test skip_if_lt_x_gpu(4).
+        # Only bind device_id when every rank maps to a real accelerator;
+        # otherwise the tests are skipped anyway and an out-of-range device_id
+        # would make init_process_group raise instead of skip.
+        device_id = None
+        if torch.accelerator.device_count() >= world_size:
+            device_id = torch.device(cls.device_type(), rank)
+        dist.init_process_group(
+            backend=cls.backend_str(),
+            world_size=world_size,
+            rank=rank,
+            store=store,
+            pg_options=cls.opts(),
+            timeout=cls.timeout,
+            device_id=device_id,
+        )
+        cls.pg = dist.distributed_c10d._get_default_group()
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device(device_type, self.rank)
+
+    @property
+    def config(self) -> PipelineTestConfig:
+        return PipelineTestConfig(
+            world_size=self.world_size, device=self.device, rank=self.rank
+        )
+
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+    )
+    @skip_if_lt_x_gpu(4)
+    def test_creates_distinct_direction_groups(self):
+        """PipelineStage builds two distinct, non-WORLD direction groups when the
+        config flag is set (no constructor arg)."""
+        with dist_config.patch(pipeline_per_direction_p2p=True):
+            mod, _, x, _, _ = setup_models_and_data(self.config)
+            chunks = 2 * self.world_size
+            stage, _, _ = create_single_stage_pipeline(
+                self.config, mod, x, chunks, use_tracer=False
+            )
+            self.assertTrue(stage.p2p_per_direction)
+            self.assertIsNot(stage._downstream_group, dist.group.WORLD)
+            self.assertIsNot(stage._upstream_group, dist.group.WORLD)
+            self.assertIsNot(stage._downstream_group, stage._upstream_group)
+
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+    )
+    @parametrize("ScheduleClass", [ScheduleGPipe, Schedule1F1B])
+    @skip_if_lt_x_gpu(4)
+    def test_grad_with_manual_per_direction(self, ScheduleClass):
+        """Per-direction P2P only changes which communicator carries the bytes,
+        not the math: gradients/outputs must still match the reference model."""
+        with dist_config.patch(pipeline_per_direction_p2p=True):
+            mod, ref_mod, x, target, loss_fn = setup_models_and_data(self.config)
+
+            # Run reference
+            ref_out, ref_loss = run_reference_model(ref_mod, x, target, loss_fn)
+
+            # Create manual pipeline stage; the per-direction groups are built
+            # inside PipelineStage from the config flag set above.
+            chunks = 2 * self.world_size
+            stage, stage_module, _ = create_single_stage_pipeline(
+                self.config, mod, x, chunks, use_tracer=False
+            )
+            self.assertTrue(stage.p2p_per_direction)
+            self.assertIsNot(stage._downstream_group, stage._upstream_group)
+
+            schedule = ScheduleClass(stage, chunks, loss_fn=loss_fn, scale_grads=False)
+
+            # Run pipeline
+            out = None
+            losses = []
+            for _ in range(2):
+                zero_gradients(stage_module)
+                if self.rank == 0:
+                    schedule.step(x)
+                elif self.rank == self.world_size - 1:
+                    out = schedule.step(target=target, losses=losses)
+                else:
+                    schedule.step()
+
+            dist.barrier(device_ids=[self.rank])
+
+            # Last rank checks result
+            if self.rank == self.world_size - 1:
+                torch.testing.assert_close(out, ref_out)
+                pipe_loss = sum(losses)
+                torch.testing.assert_close(pipe_loss, ref_loss)
+
+            # Check gradients using helper method
+            check_gradients(self.config, stage_module, ref_mod)
+
+
+instantiate_parametrized_tests(PerDirectionScheduleTest)
 
 
 if __name__ == "__main__":

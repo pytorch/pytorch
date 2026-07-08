@@ -41,10 +41,6 @@ ExperimentalConfig::ExperimentalConfig(
       adjust_timestamps{adjust_timestamps},
       trace_only{trace_only} {}
 
-/*explicit*/ ExperimentalConfig::operator bool() const {
-  return !profiler_metrics.empty();
-}
-
 ProfilerConfig::ProfilerConfig(
     ProfilerState state,
     bool report_input_shapes,

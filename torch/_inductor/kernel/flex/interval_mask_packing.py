@@ -30,6 +30,9 @@ from ...virtualized import NullHandler, V
 from .aux_vectorization import fx_aux_index_to_sympy
 
 
+perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
+
+
 # Fall back to scalar mask lowering before interval expansion makes generated CuTe too large.
 MAX_PACKED_MASK_INTERVALS_FOR_CODE_SIZE = 8
 LANE_UNIFORM_BINARY_OPS: Mapping[object, str] = {
@@ -224,6 +227,8 @@ class PackedMaskAnalyzer:
     kv_symbol: SymPy symbol used for the packed window base KV index.
     lane_symbol: SymPy symbol for the lane offset within the packed window.
     symbol_codes: CuTe renderings for temporary symbols introduced for aux loads.
+    placeholder_codes: CuTe renderings for captured scalar and tensor placeholders.
+    placeholder_exprs: SymPy expressions for captured scalar placeholders.
     aux_load_symbols: Stable symbols assigned to supported lane-uniform aux loads.
     next_symbol_id: Counter for naming temporary aux-load symbols.
     """
@@ -243,6 +248,12 @@ class PackedMaskAnalyzer:
         )
     )
     symbol_codes: dict[sympy.Symbol, str] = dataclasses.field(default_factory=dict)
+    placeholder_codes: Mapping[torch.fx.Node, str] = dataclasses.field(
+        default_factory=dict
+    )
+    placeholder_exprs: Mapping[torch.fx.Node, sympy.Expr] = dataclasses.field(
+        default_factory=dict
+    )
     aux_load_symbols: dict[torch.fx.Node, sympy.Symbol] = dataclasses.field(
         default_factory=dict
     )
@@ -279,6 +290,21 @@ class PackedMaskAnalyzer:
                 )
             case torch.ops.aten.eq.Tensor | torch.ops.aten.eq.Scalar:
                 return self.equality_to_intervals(node.args[0], node.args[1])
+            case torch.ops.aten.ne.Tensor | torch.ops.aten.ne.Scalar:
+                intervals = self.equality_to_intervals(node.args[0], node.args[1])
+                return (
+                    None if intervals is None else self.complement_intervals(intervals)
+                )
+            case (
+                torch.ops.aten.logical_not.default | torch.ops.aten.bitwise_not.default
+            ):
+                child = node.args[0]
+                if not isinstance(child, torch.fx.Node):
+                    return None
+                intervals = self.node_to_intervals(child)
+                return (
+                    None if intervals is None else self.complement_intervals(intervals)
+                )
             case _:
                 return None
 
@@ -335,24 +361,67 @@ class PackedMaskAnalyzer:
         *,
         strict: bool,
     ) -> MaybeIntervalSet:
-        """Convert a lane-affine comparison into one packed keep interval."""
+        """Convert ``lhs_expr < rhs_expr`` or ``lhs_expr <= rhs_expr`` to an interval.
+
+        The caller normalizes ``>`` and ``>=`` by swapping operands, so this method
+        only has to lower ``lhs_expr - rhs_expr < 0`` when ``strict`` is true and
+        ``lhs_expr - rhs_expr <= 0`` otherwise. The difference decomposes as
+        ``lane_coeff * mask_lane + rest``, and each unit coefficient maps to a mask
+        shape:
+
+        - ``1``: kv on the small side, e.g. ``kv_idx < q_idx`` (causal-style) ->
+          prefix interval ``[0, upper)``.
+        - ``-1``: kv on the large side, e.g. ``start[b] <= kv_idx`` (window or
+          document starts) -> suffix interval ``[lower, 32)``.
+        - ``0``: no kv dependence, e.g. ``q_idx < seq_lens[b]`` (padding or other
+          row/batch/head bounds) -> the whole window is kept or dropped. Truth is
+          encoded as the upper bound ``32 * keep`` with ``keep`` positive iff the
+          predicate holds; keep-mask rendering clamps bounds to ``[0, 32]``, so any
+          positive multiple of 32 keeps all lanes and any non-positive value keeps
+          none.
+
+        Other coefficients (e.g. ``2 * kv_idx < q_idx``, dilated/strided patterns)
+        describe non-interval lane sets and fall back to per-lane evaluation.
+        """
         diff = V.graph.sizevars.simplify(lhs_expr - rhs_expr)
         affine = decompose_affine_lane_expr(diff, self.lane_symbol)
         if affine is None:
             return None
         lane_coeff, rest = affine
-        if lane_coeff == 1:
-            upper = V.graph.sizevars.simplify(-rest if strict else -rest + 1)
-            return self.interval_if_renderable(sympy.Integer(0), upper)
-        if lane_coeff == -1:
-            lower = V.graph.sizevars.simplify(rest + 1 if strict else rest)
-            return self.interval_if_renderable(lower, sympy.Integer(32))
-        return None
+        match lane_coeff:
+            case 0:
+                keep = -rest if strict else 1 - rest
+                upper = V.graph.sizevars.simplify(sympy.Integer(32) * keep)
+                return self.interval_if_renderable(sympy.Integer(0), upper)
+            case 1:
+                upper = V.graph.sizevars.simplify(-rest if strict else -rest + 1)
+                return self.interval_if_renderable(sympy.Integer(0), upper)
+            case -1:
+                lower = V.graph.sizevars.simplify(rest + 1 if strict else rest)
+                return self.interval_if_renderable(lower, sympy.Integer(32))
+            case _:
+                return None
 
     def lane_equality_to_intervals(
         self, lhs_expr: sympy.Expr, rhs_expr: sympy.Expr
     ) -> MaybeIntervalSet:
-        """Convert a lane-affine equality into singleton keep intervals."""
+        """Convert ``lhs_expr == rhs_expr`` to packed keep intervals.
+
+        Matching ``FloorDiv`` expressions can describe a contiguous block, e.g.
+        ``q_idx // B == kv_idx // B``, and are handled before the generic
+        lane-affine path. Otherwise the difference decomposes as
+        ``lane_coeff * mask_lane + rest``:
+
+        - ``1`` or ``-1``: exactly one lane can satisfy the equality, e.g.
+          ``kv_idx == q_idx + c`` -> singleton interval ``[v, v + 1)``.
+        - ``0``: no kv dependence, e.g. ``head_type[h] == 0`` -> the whole window
+          is kept or dropped. ``Min(32 * (1 - rest), 32 * (1 + rest))`` is >= 32
+          iff ``rest == 0`` and non-positive otherwise, reusing the clamped
+          all-or-none upper-bound encoding from the comparison case.
+
+        Other coefficients are rejected rather than emitting strided or
+        divisibility-dependent masks.
+        """
         if isinstance(lhs_expr, FloorDiv) and isinstance(rhs_expr, FloorDiv):
             intervals = self._floor_div_equality_to_intervals(lhs_expr, rhs_expr)
             if intervals is not None:
@@ -362,12 +431,20 @@ class PackedMaskAnalyzer:
         if affine is None:
             return None
         lane_coeff, rest = affine
-        if lane_coeff in (1, -1):
-            lane_value = -rest if lane_coeff == 1 else rest
-            lower = V.graph.sizevars.simplify(lane_value)
-            upper = V.graph.sizevars.simplify(lane_value + 1)
-            return self.interval_if_renderable(lower, upper)
-        return None
+        match lane_coeff:
+            case 0:
+                scale = sympy.Integer(32)
+                upper = V.graph.sizevars.simplify(
+                    Min(scale * (1 - rest), scale * (1 + rest))
+                )
+                return self.interval_if_renderable(sympy.Integer(0), upper)
+            case 1 | -1:
+                lane_value = -rest if lane_coeff == 1 else rest
+                lower = V.graph.sizevars.simplify(lane_value)
+                upper = V.graph.sizevars.simplify(lane_value + 1)
+                return self.interval_if_renderable(lower, upper)
+            case _:
+                return None
 
     def _floor_div_equality_to_intervals(
         self, lhs_expr: FloorDiv, rhs_expr: FloorDiv
@@ -404,6 +481,26 @@ class PackedMaskAnalyzer:
             return (PackedMaskInterval(lower, upper),)
         return None
 
+    def complement_intervals(self, intervals: IntervalSet) -> MaybeIntervalSet:
+        """Complement a keep-set within the 32-lane window via De Morgan.
+
+        The complement of a union of intervals is the intersection of each
+        interval's two complement pieces, which stays interval-representable.
+        Interval bounds may be symbolic, so this composes existing renderable
+        bounds instead of sorting; merge_intersection caps the blowup.
+        """
+        result: IntervalSet = (PackedMaskInterval.full(),)
+        for interval in intervals:
+            pieces = (
+                PackedMaskInterval(sympy.Integer(0), interval.lower_lane),
+                PackedMaskInterval(interval.upper_lane_exclusive, sympy.Integer(32)),
+            )
+            merged = self.merge_intersection(result, pieces)
+            if merged is None:
+                return None
+            result = merged
+        return result
+
     def merge_intersection(
         self,
         intervals: IntervalSet,
@@ -427,14 +524,12 @@ class PackedMaskAnalyzer:
 
     def fx_mask_expr_to_sympy(self, expr: object) -> sympy.Expr | None:
         """Translate a mask expression with kv_idx expanded by mask_lane."""
-        return fx_aux_index_to_sympy(
-            expr,
-            {
-                self.q_idx: self.q_symbol,
-                self.kv_idx: self.kv_symbol + self.lane_symbol,
-            },
-            self.mask_aux_load_to_symbol,
-        )
+        index_symbols = {
+            self.q_idx: self.q_symbol,
+            self.kv_idx: self.kv_symbol + self.lane_symbol,
+        }
+        index_symbols.update(self.placeholder_exprs)
+        return fx_aux_index_to_sympy(expr, index_symbols, self.mask_aux_load_to_symbol)
 
     def mask_aux_load_to_symbol(self, node: torch.fx.Node) -> sympy.Expr | None:
         """Assign a temporary SymPy symbol to a supported aux tensor load."""
@@ -478,9 +573,8 @@ class PackedMaskAnalyzer:
                 return "b_idx[0]"
             if expr is self.placeholders[1]:
                 return "h_idx[0]"
-        for aux_idx, placeholder in enumerate(self.placeholders[4:]):
-            if expr is placeholder:
-                return f"aux_tensors[{aux_idx}]"
+        if expr in self.placeholder_codes:
+            return self.placeholder_codes[expr]
 
         if is_aten_index_node(expr):
             return self._render_lane_uniform_index_expr(expr, for_index=for_index)
@@ -560,8 +654,44 @@ class PackedMaskAnalyzer:
         return f"cutlass.Int32({load})"
 
 
+@dataclasses.dataclass(frozen=True)
+class PackedMaskAuxPlaceholderMap:
+    """Maps mask_mod aux placeholders to runtime scalar expressions or tensors."""
+
+    codes: Mapping[torch.fx.Node, str]
+    exprs: Mapping[torch.fx.Node, sympy.Expr]
+
+    @classmethod
+    def from_placeholders(
+        cls,
+        placeholders: Sequence[torch.fx.Node],
+        other_buffers: Sequence[object],
+        symbol_codes: Mapping[sympy.Symbol, str],
+    ) -> "PackedMaskAuxPlaceholderMap | None":
+        """Render lane-uniform mask_mod captures for packed interval analysis."""
+        codes: dict[torch.fx.Node, str] = {}
+        exprs: dict[torch.fx.Node, sympy.Expr] = {}
+        tensor_idx = 0
+        for placeholder, buffer in zip(placeholders[4:], other_buffers):
+            if isinstance(buffer, sympy.Expr):
+                rendered = sympy_to_cute_index(buffer, symbol_codes)
+                if rendered is None:
+                    return None
+                codes[placeholder] = rendered
+                exprs[placeholder] = buffer
+            else:
+                codes[placeholder] = f"aux_tensors[{tensor_idx}]"
+                tensor_idx += 1
+        for placeholder in placeholders[4 + len(other_buffers) :]:
+            codes[placeholder] = f"aux_tensors[{tensor_idx}]"
+            tensor_idx += 1
+        return cls(codes, exprs)
+
+
 def select_packed_mask_intervals(
     graph_module: GraphModule,
+    other_buffers: Sequence[object] = (),
+    aux_scalar_symbol_codes: Mapping[sympy.Symbol, str] | None = None,
 ) -> MaybeIntervalSet:
     """Entry point for selecting packed mask intervals from a mask_mod graph.
 
@@ -581,13 +711,30 @@ def select_packed_mask_intervals(
     if not isinstance(output_val, torch.fx.Node):
         return None
 
+    symbol_codes = dict(aux_scalar_symbol_codes or {})
+    placeholder_map = PackedMaskAuxPlaceholderMap.from_placeholders(
+        placeholders, other_buffers, symbol_codes
+    )
+    if placeholder_map is None:
+        return None
+
     analyzer = PackedMaskAnalyzer(
         placeholders=placeholders,
         q_idx=q_idx,
         kv_idx=kv_idx,
+        symbol_codes=symbol_codes,
+        placeholder_codes=placeholder_map.codes,
+        placeholder_exprs=placeholder_map.exprs,
     )
     intervals = analyzer.node_to_intervals(output_val)
     if intervals is None:
+        perf_hint_log.info(
+            "flex FLASH: mask_mod could not be lowered to packed 32-lane intervals; "
+            "partial blocks will evaluate the mask per lane, which can be much "
+            "slower. Prefer comparisons of q_idx/kv_idx against lane-uniform bounds "
+            "(e.g. seq_lens[b]) over per-token gathers. mask graph:\n%s",
+            graph,
+        )
         return None
     if len(intervals) == 1 and intervals[0].is_full():
         return None

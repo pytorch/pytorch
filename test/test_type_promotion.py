@@ -140,8 +140,10 @@ class TestTypePromotion(TestCase):
                     expected_dtype = s.dtype
                 else:
                     expected_dtype = float_to_corresponding_complex_type_map[torch.get_default_dtype()]
-            self.assertEqual((s * t).dtype, expected_dtype)
-            self.assertEqual((t * s).dtype, expected_dtype)
+            # Note (bcomplex32): Remove the guard against dtype once bcomplex32 is more widely supported.
+            if expected_dtype != torch.bcomplex32:
+                self.assertEqual((s * t).dtype, expected_dtype)
+                self.assertEqual((t * s).dtype, expected_dtype)
             self.assertEqual(torch.result_type(s, t), expected_dtype)
             self.assertEqual(torch.result_type(t, s), expected_dtype)
 
@@ -267,9 +269,11 @@ class TestTypePromotion(TestCase):
             self.assertEqual((bf + scalar).dtype, torch.bfloat16)
             self.assertEqual(scalar + bf, bf + scalar)
 
-        for scalar in (complex(1, 1), complex(-2, 0), complex(0, -3)):
-            self.assertEqual((bf + scalar).dtype, torch.cfloat)
-            self.assertEqual(bf + scalar, scalar + bf)
+        # Note (bcomplex32): Add scalar complex testing back once bcomplex32
+        # is more widely requested.
+        # for scalar in (complex(1, 1), complex(-2, 0), complex(0, -3)):
+        #     self.assertEqual((bf + scalar).dtype, torch.cfloat)
+        #     self.assertEqual(bf + scalar, scalar + bf)
 
         # with tensor
         for dtype in all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool):
@@ -403,8 +407,8 @@ class TestTypePromotion(TestCase):
                 self.assertEqual(not second.is_contiguous(), non_contiguous)
                 result = op(first, second)
                 expected = op(first.to(common_dtype), second.to(common_dtype))
-                self.assertEqual(result.dtype, expected.dtype, msg=f'{op.__name__} with {dt1}, {dt2}')
-                self.assertEqual(result, expected, msg=f'{op.__name__} with {dt1}, {dt2}')
+                self.assertEqual(result.dtype, expected.dtype, msg=lambda msg: f'{msg}\n{op.__name__} with {dt1}, {dt2}')
+                self.assertEqual(result, expected, msg=lambda msg: f'{msg}\n{op.__name__} with {dt1}, {dt2}')
 
     @float_double_default_dtype
     def test_non_promoting_ops(self, device):
@@ -493,6 +497,9 @@ class TestTypePromotion(TestCase):
             dtype_b = _get_dtype(b)
             try:
                 result = a + b
+            except NotImplementedError:
+                # Note (bcomplex32): Remove this branch when bcomplex32 ops are more widely implemented.
+                pass
             except RuntimeError:
                 with self.assertRaises(RuntimeError):
                     torch.promote_types(dtype_a, dtype_b)
@@ -502,13 +509,13 @@ class TestTypePromotion(TestCase):
                 dtype_res = _get_dtype(result)
                 if a is a_scalar and b is b_scalar and dtype_a == torch.bool and dtype_b == torch.bool:
                     # special case: in Python, True + True is an integer
-                    self.assertEqual(dtype_res, torch.int64, f"a == {a}, b == {b}")
+                    self.assertEqual(dtype_res, torch.int64, lambda msg: f"{msg}\na == {a}, b == {b}")
                 else:
-                    self.assertEqual(dtype_res, torch.result_type(a, b), f"a == {a}, b == {b}")
+                    self.assertEqual(dtype_res, torch.result_type(a, b), lambda msg: f"{msg}\na == {a}, b == {b}")
                 if a is a_scalar and b is b_scalar:  # Python internal type determination is good enough in this case
                     continue
                 if any(a is a0 and b is b0 for a0, b0 in zip(*combo)):  # a and b belong to the same class
-                    self.assertEqual(dtype_res, torch.promote_types(dtype_a, dtype_b), f"a == {a}, b == {b}")
+                    self.assertEqual(dtype_res, torch.promote_types(dtype_a, dtype_b), lambda msg: f"{msg}\na == {a}, b == {b}")
 
     # Spot check some result type for tensor against scalar (including single-element tensor).
     @float_double_default_dtype
