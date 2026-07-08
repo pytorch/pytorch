@@ -189,7 +189,7 @@ ASGD.__doc__ = rf"""Implements Averaged Stochastic Gradient Descent.
         {_capturable_doc}
 
     .. _Acceleration of stochastic approximation by averaging:
-        https://meyn.ece.ufl.edu/wp-content/uploads/sites/77/archive/spm_files/Courses/ECE555-2011/555media/poljud92.pdf
+        https://doi.org/10.1137/0330046
 
     """
 
