@@ -516,6 +516,8 @@ class TestRegistryRuntime(TestCase):
             fn_id in trace_rules._disallowed_callable_ids,
             fn_id in trace_rules._nonstrict_trace_callable_ids,
         )
+        # torch._lazy_clone normally stays out of the FX graph. Force it into
+        # the graph here to cover the defensive call_function scan.
         if fn_id in trace_rules._disallowed_callable_ids:
             trace_rules._disallowed_callable_ids.remove(fn_id)
         trace_rules._allowed_callable_ids.add(fn_id)
@@ -570,6 +572,48 @@ class TestRegistryRuntime(TestCase):
 
         self.assertFalse(_cow_tensor_matches(fake, False))
         self.assertFalse(_cow_tensor_matches(fake, True))
+
+    def test_dynamo_graph_breaks_on_subclass_cow_state(self):
+        class CowStateWrapperTensor(torch.Tensor):
+            elem: torch.Tensor
+
+            __slots__ = ["elem"]
+
+            @staticmethod
+            def __new__(cls, elem):
+                out = torch.Tensor._make_wrapper_subclass(
+                    cls,
+                    elem.size(),
+                    dtype=elem.dtype,
+                    layout=elem.layout,
+                    device=elem.device,
+                    requires_grad=elem.requires_grad,
+                    strides=elem.stride(),
+                    storage_offset=elem.storage_offset(),
+                )
+                out.elem = elem
+                return out
+
+            def __tensor_flatten__(self):
+                return ["elem"], None
+
+            @staticmethod
+            def __tensor_unflatten__(inner_tensors, metadata, outer_size, outer_stride):
+                return CowStateWrapperTensor(inner_tensors["elem"])
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                raise AssertionError("unexpected dispatch")
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(a):
+            return torch._C._is_cow_tensor(a)
+
+        x = CowStateWrapperTensor(torch.tensor([2.0, 3.0]))
+        with self.assertRaisesRegex(
+            Exception, "COW tensor check on Python tensor subclass"
+        ):
+            fn(x)
 
     def test_dynamo_allows_previously_mutated_cow_state(self):
         @torch.compile(backend="eager", fullgraph=True)

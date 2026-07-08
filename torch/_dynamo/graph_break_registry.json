@@ -1695,6 +1695,17 @@
       ]
     }
   ],
+  "GB1576": [
+    {
+      "Gb_type": "COW tensor check on Python tensor subclass",
+      "Context": "torch._C._is_cow_tensor on Python tensor subclass",
+      "Explanation": "Dynamo cannot safely evaluate COW state for Python tensor subclasses because their storage semantics are controlled by __torch_dispatch__.",
+      "Hints": [
+        "Avoid checking COW state on tensor subclasses inside ",
+        "torch.compile regions."
+      ]
+    }
+  ],
   "GB0119": [
     {
       "Gb_type": "Uninitialized nn.Module",

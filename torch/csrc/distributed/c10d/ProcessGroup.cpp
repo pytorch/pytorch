@@ -192,18 +192,19 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
             deviceTypeFilter.contains(defaultBackendIt->first),
         "splitGroup deviceTypes filter must include the parent process group's default backend device type.");
   }
-  std::vector<int> sorted_ranks = ranks;
-  std::ranges::sort(sorted_ranks);
   c10::intrusive_ptr<ProcessGroup> newGroup;
   std::string groupName = name.has_value()
       ? name.value()
-      : c10::str(getGroupName(), ":split:", fmt::format("{}", sorted_ranks));
+      : c10::str(getGroupName(), ":split:", fmt::format("{}", ranks));
   c10::intrusive_ptr<Store> store = c10::static_intrusive_pointer_cast<Store>(
       c10::make_intrusive<PrefixStore>(
           fmt::format("{}/", groupName), store_->clone()));
   std::string groupDesc = desc.has_value()
       ? desc.value()
       : c10::str(getGroupDesc(), ":split:", incrementSplitCount());
+  // A single backend may serve multiple device types (e.g. a bare "gloo"
+  // group registers the same backend for cpu and cuda); split it only once.
+  std::unordered_map<BackendType, c10::intrusive_ptr<Backend>> splitBackends;
   for (const auto& pair : deviceTypeToBackendType_) {
     c10::DeviceType deviceType = pair.first;
     BackendType backendType = pair.second;
@@ -212,14 +213,21 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
       continue;
     }
 
-    auto parentBackend = getBackend(deviceType);
-    auto backendOpts =
-        opts.has_value() ? opts.value() : parentBackend->getBackendOptions();
-    backendOpts->group_name = groupName;
-    backendOpts->timeout =
-        timeout.has_value() ? timeout.value() : backendOpts->timeout;
-    backendOpts->group_desc = groupDesc;
-    auto splitBackend = parentBackend->split(store, sorted_ranks, backendOpts);
+    auto splitIt = splitBackends.find(backendType);
+    c10::intrusive_ptr<Backend> splitBackend;
+    if (splitIt != splitBackends.end()) {
+      splitBackend = splitIt->second;
+    } else {
+      auto parentBackend = getBackend(deviceType);
+      auto backendOpts =
+          opts.has_value() ? opts.value() : parentBackend->getBackendOptions();
+      backendOpts->group_name = groupName;
+      backendOpts->timeout =
+          timeout.has_value() ? timeout.value() : backendOpts->timeout;
+      backendOpts->group_desc = groupDesc;
+      splitBackend = parentBackend->split(store, ranks, backendOpts);
+      splitBackends.emplace(backendType, splitBackend);
+    }
     if (splitBackend == nullptr) {
       continue;
     }

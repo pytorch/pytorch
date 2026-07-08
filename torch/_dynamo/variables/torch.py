@@ -33,7 +33,7 @@ import math
 import re
 from collections.abc import Callable, Iterable
 from contextlib import nullcontext
-from typing import Any, NoReturn, TYPE_CHECKING, TypeVar, Union
+from typing import Any, cast, NoReturn, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import TypeIs
 
 import torch._C
@@ -65,7 +65,12 @@ from ..exc import (
     UserError,
     UserErrorType,
 )
-from ..guards import GuardBuilder, install_guard
+from ..guards import (
+    _COW_TENSOR_UNSUPPORTED,
+    _try_is_cow_tensor,
+    GuardBuilder,
+    install_guard,
+)
 from ..source import (
     AttrSource,
     CallFunctionNoArgsSource,
@@ -101,7 +106,7 @@ from .functions import (
 )
 from .lists import ListVariable, TupleVariable
 from .object_protocol import vt_is_iterable
-from .script_object import TorchScriptObjectVariable
+from .script_object import CustomClassObjectVariable
 from .torch_function import (
     can_dispatch_torch_function,
     dispatch_torch_function,
@@ -1561,13 +1566,23 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         "torch.compile regions.",
                     ],
                 )
+            cow_state = _try_is_cow_tensor(real_value)
+            if cow_state is _COW_TENSOR_UNSUPPORTED:
+                unimplemented(
+                    gb_type="COW tensor check on Python tensor subclass",
+                    context="torch._C._is_cow_tensor on Python tensor subclass",
+                    explanation=(
+                        "Dynamo cannot safely evaluate COW state for Python "
+                        "tensor subclasses because their storage semantics are "
+                        "controlled by __torch_dispatch__."
+                    ),
+                    hints=[
+                        "Avoid checking COW state on tensor subclasses inside "
+                        "torch.compile regions.",
+                    ],
+                )
             install_guard(arg.source.make_guard(GuardBuilder.COW_TENSOR_MATCH))
-            return VariableTracker.build(
-                tx,
-                torch._C._is_cow_tensor(  # pyrefly: ignore[missing-attribute]
-                    real_value
-                ),
-            )
+            return VariableTracker.build(tx, cast(bool, cow_state))
 
         @register(torch._C._is_torch_function_all_disabled)
         def handle_is_torch_function_all_disabled(
@@ -1961,7 +1976,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     if not (
                         args[0].is_python_constant()
                         or (
-                            isinstance(args[0], TorchScriptObjectVariable)
+                            isinstance(args[0], CustomClassObjectVariable)
                             and args[  # pyrefly: ignore[missing-attribute]
                                 0
                             ].value.script_class_name  # pyrefly: ignore[missing-attribute]
@@ -1991,9 +2006,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     )
 
                 def get_arg_value(arg: VariableTracker) -> Any:
-                    # TorchScriptObjectVariable for ProcessGroup doesn't support
+                    # CustomClassObjectVariable for ProcessGroup doesn't support
                     # as_python_constant(), so extract real_obj directly
-                    if isinstance(arg, TorchScriptObjectVariable):
+                    if isinstance(arg, CustomClassObjectVariable):
                         return arg.value.real_obj  # pyrefly: ignore[missing-attribute]
                     return arg.as_python_constant()
 
