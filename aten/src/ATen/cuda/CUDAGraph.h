@@ -99,7 +99,10 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
 
   static CUDAGraph* get_currently_capturing_graph();
   void begin_capture_to_if_node(const Tensor& scalar_cuda_pred_tensor);
+  void begin_capture_to_while_node(const Tensor& scalar_cuda_pred_tensor);
   void end_capture_to_conditional_node();
+  void set_conditional_handle_for_current_node(
+      const Tensor& scalar_cuda_pred_tensor);
   static void set_conditional_handle(
       cudaGraphConditionalHandle handle,
       const Tensor& scalar_cuda_pred_tensor);
@@ -110,6 +113,11 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   std::function<bool(cudaStream_t)> create_child_allocate_filter();
   void record_retained_pool(MempoolId_t pool);
   bool has_retained_pool(MempoolId_t pool) const;
+#if !defined(USE_ROCM) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
+  void begin_capture_to_conditional_node(
+      const Tensor& scalar_cuda_pred_tensor,
+      cudaGraphConditionalNodeType conditional_type);
+#endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12040
 
  protected:
   cudaGraph_t graph_ = nullptr;
@@ -188,6 +196,7 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   std::stack<at::cuda::CUDAStreamGuard> conditional_node_streams_;
   std::stack<CaptureId_t> conditional_graph_capture_ids_;
   std::stack<OwnedCUDAStream> conditional_node_raw_streams_;
+  std::stack<cudaGraphConditionalHandle> conditional_node_handles_;
 #endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12040
 };
 
