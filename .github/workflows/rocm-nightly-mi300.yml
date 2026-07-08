@@ -1,10 +1,10 @@
 # Owner(s): ["module: rocm"]
-name: rocm-nightly
+name: rocm-nightly-mi300
 
 on:
   push:
     tags:
-      - ciflow/rocm-nightly/*
+      - ciflow/rocm-nightly-mi300/*
   workflow_dispatch:
   schedule:
     - cron: 0 0 * * *  # midnight UTC
