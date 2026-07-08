@@ -4617,6 +4617,12 @@ class TestCase(expecttest.TestCase):
         with self.assertRaises(AssertionError, msg=msg):
             self.assertEqual(x, y, msg, atol=atol, rtol=rtol, **kwargs)
 
+    def _formatMessage(self, msg, standardMsg) -> str:  # type: ignore[override]
+        # Allow a callable msg, invoked lazily on failure to build the message.
+        if callable(msg):
+            return msg(standardMsg)
+        return super()._formatMessage(msg, standardMsg)
+
     def assertEqualTypeString(self, x, y) -> None:
         # This API is used simulate deprecated x.type() is y.type()
         self.assertEqual(x.device, y.device)
