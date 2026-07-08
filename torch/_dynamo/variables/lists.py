@@ -1559,6 +1559,21 @@ class DequeVariable(CommonListMethodsVariable):
         else:
             slice_within_maxlen = None
 
+        if name in ("copy", "__copy__"):
+            # deque_copy preserves maxlen: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L890
+            if args or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+            return DequeVariable(
+                list(self.items),
+                maxlen=self.maxlen,
+                mutation_type=ValueMutationNew(),
+            )
+
         if name == "extendleft" and self.is_mutable() and len(args) > 0:
             if kwargs or len(args) != 1:
                 raise_args_mismatch(
@@ -2263,6 +2278,35 @@ class RangeIteratorVariable(IteratorVariable):
         current = self.start
         self.start += self.step
         return VariableTracker.build(tx, current)
+
+    def call_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name == "__setstate__":
+            # rangeiter_setstate clamps the arg against the current remaining
+            # length, then advances: r->start += arg*step; r->len -= arg.
+            # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/rangeobject.c#L1093-L1107
+            if len(args) != 1 or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+            arg = args[0].as_python_constant()
+            index = min(max(arg, 0), self.len)
+            self.start += index * self.step
+            self.len -= index
+            return ConstantVariable.create(None)
+        elif name == "__length_hint__":
+            # rangeiter_len: remaining items.
+            # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/rangeobject.c#L1109-L1115
+            return ConstantVariable.create(self.len)
+        return super().call_method(tx, name, args, kwargs)
 
     def python_type(self) -> type:
         return range_iterator
