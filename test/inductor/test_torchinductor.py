@@ -18067,6 +18067,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         compiled = torch.compile(fn, backend="inductor")(a, b)
         self.assertEqual(eager, compiled)
 
+    @unittest.skipIf(
+        not torch.cuda.is_available(), "This WAW hazard is specific to Triton on CUDA"
+    )
     def test_slice_scatter_deterministic_mutation(self):
         import torch
         from torch._dynamo.testing import same

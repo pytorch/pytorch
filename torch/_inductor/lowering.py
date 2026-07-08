@@ -4075,8 +4075,6 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
         ranges=list(x.get_size()),
     )
 
-    import torch._inductor.config as config
-
     # [Fix for #188890] Prevent fusion overlapping in strided slice_scatter.
     # A permanent fix belongs in the scheduler's overlap analysis. For now,
     # we enforce a kernel boundary to prevent WAW data races and silent
