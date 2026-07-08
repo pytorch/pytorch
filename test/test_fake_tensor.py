@@ -3362,6 +3362,35 @@ class FakeTensorPropTest(TestCase):
             for k in sd:
                 _read_tensor_and_check(k, sd_loaded, sd, all_bytes, "cpu")
 
+    def test_inference_mode_nonzero_memo(self):
+        """D106102842: nonzero() memo must be stored for inference FakeTensors.
+
+        Without the fix, SymNumberMemoDescriptor.__set__ skipped memo storage
+        for inference tensors, so each boolean indexing (x[mask]) allocated a
+        fresh unbacked symint. Two tensors filtered by the same mask would get
+        independent symbols, causing GuardOnDataDependentSymNode failures.
+        """
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        with fake_mode:
+            with torch.inference_mode():
+                x = torch.randn(10, 3)
+                y = torch.randn(10, 5)
+                mask = torch.randn(10) > 0
+
+                self.assertIsInstance(x, FakeTensor)
+                self.assertTrue(x.is_inference())
+
+                filtered_x = x[mask]
+                filtered_y = y[mask]
+
+                sx = filtered_x.shape[0]
+                sy = filtered_y.shape[0]
+
+                # Both shapes should be the same unified symbol because
+                # mask.nonzero() is memoized.
+                self.assertTrue(statically_known_true(sx == sy))
+
 
 make_propagate_real_tensors_cls(FakeTensorPropTest)
 
@@ -3549,6 +3578,20 @@ class FakeTensorDispatchCache(TestCase):
                 extract_tensor_metadata(res1),
                 extract_tensor_metadata(res2),
             )
+
+    def test_cache_bypass_prims_as_strided(self):
+        x = torch.empty(0, 8)
+        y = torch.empty(0, 8)
+        mode = FakeTensorMode(shape_env=ShapeEnv())
+        x = mode.from_tensor(x, static_shapes=True)
+        y = mode.from_tensor(y, static_shapes=True)
+
+        with mode:
+            FakeTensorMode.cache_clear()
+            prims.as_strided(x, (0, 8), (8, 1), 0)
+            prims.as_strided(y, (0, 8), (8, 1), 0)
+
+            self.assertBypasses("prims.as_strided", 2)
 
     def test_cache_bypass(self):
         """

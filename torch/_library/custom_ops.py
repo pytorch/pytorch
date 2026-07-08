@@ -261,7 +261,6 @@ def custom_op(
                     f"Please make these consistent."
                 )
         result.register_kernel(device_types)(fn)
-        result._opoverload._enable_pyobj_dispatch(True)
         return result
 
     if fn is None:
