@@ -56,7 +56,7 @@ def _reserve_current_stream_index_if_needed() -> None:
         return
     if not _device_module_is_initialized(current_accelerator):
         return
-    source = CurrentStreamSource(current_accelerator)
+    source = CurrentStreamSource(torch.accelerator.current_stream().device)
     reserve_user_object_index(CURRENT_STREAM_INDEX, lambda cg: cg(source))
 
 
@@ -313,9 +313,11 @@ class SymbolicStreamState:
             reset_user_object_tracking()
 
         stream = torch.accelerator.current_stream(device)
+        _reserve_current_stream_index_if_needed()
         source = CurrentStreamSource(stream.device)
         if (
-            CURRENT_STREAM_INDEX in index_to_bytecode_constructor
+            device is None
+            and CURRENT_STREAM_INDEX in index_to_bytecode_constructor
             and CURRENT_STREAM_INDEX not in index_to_external_object_weakref
         ):
             set_external_object_by_index(CURRENT_STREAM_INDEX, stream)
@@ -374,6 +376,7 @@ class SymbolicStreamState:
             for stream in reversed(self.cur_stream_stack):
                 if stream.device == device:
                     return stream
+            return self._register_current_stream(device, tx)
 
         if not self.cur_stream_stack:
             stream = self._register_current_stream(device, tx)

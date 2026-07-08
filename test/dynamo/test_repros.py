@@ -9690,6 +9690,45 @@ torch.testing.assert_close(actual, expected)
         )
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_preserve_rng_state_lazy_cuda_init_under_fake_mode(self):
+        script = """\
+import torch
+from torch._dynamo.utils import preserve_rng_state
+from torch._subclasses.fake_tensor import FakeTensorMode
+
+assert torch.cuda.is_available()
+assert not torch.cuda.is_initialized()
+
+torch.manual_seed(123)
+queued_calls_len = len(torch.cuda._queued_calls)
+with preserve_rng_state():
+    assert not torch.cuda.is_initialized()
+    with FakeTensorMode():
+        torch.cuda.get_device_properties(0)
+assert torch.cuda.is_initialized()
+assert len(torch.cuda._queued_calls) == queued_calls_len
+
+actual = torch.rand(4, device="cuda")
+torch.cuda.manual_seed_all(123)
+expected = torch.rand(4, device="cuda")
+torch.testing.assert_close(actual, expected)
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            env={**os.environ, "MKL_SERVICE_FORCE_INTEL": "1"},
+            timeout=60,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            msg=(
+                f"subprocess failed:\nstdout:\n{result.stdout.decode()}\n"
+                f"stderr:\n{result.stderr.decode()}"
+            ),
+        )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_preserve_rng_state_restores_lazy_cuda_seed(self):
         script = """\
 import torch

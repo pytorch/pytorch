@@ -2691,7 +2691,7 @@ class _DeviceRNGState:
         self._call_order: list[Any] | None = None
 
         if device_module.is_initialized():
-            self.rng_state = torch.clone(device_module.get_rng_state())
+            self._capture_rng_state()
             return
 
         queued_calls = getattr(device_module, "_queued_calls", None)
@@ -2710,9 +2710,6 @@ class _DeviceRNGState:
             call for call in lazy_seed_tracker.get_calls() if call is not None
         ]
 
-        def capture_rng_state() -> None:
-            self.rng_state = torch.clone(device_module.get_rng_state())
-
         def defer_capture_until_after_entry_seeds() -> None:
             insert_at = None
             for idx, (queued_call, _) in enumerate(queued_calls):
@@ -2726,14 +2723,33 @@ class _DeviceRNGState:
             # state initialization would have produced at scope entry.
             queued_calls[insert_at:insert_at] = [
                 *entry_seed_calls,
-                (capture_rng_state, traceback.format_stack()),
+                (self._capture_rng_state, traceback.format_stack()),
             ]
 
         lazy_call(defer_capture_until_after_entry_seeds)
 
+    def _capture_rng_state(self) -> None:
+        with (
+            torch._C.DisableTorchFunction(),
+            torch.utils._python_dispatch._disable_current_modes(),
+            torch._C._DisableFuncTorch(),
+        ):
+            self.rng_state = torch.clone(self.device_module.get_rng_state())
+
+    def _restore_rng_state(self) -> None:
+        rng_state = self.rng_state
+        if rng_state is None:
+            raise AssertionError("Cannot restore device RNG state before capture")
+        with (
+            torch._C.DisableTorchFunction(),
+            torch.utils._python_dispatch._disable_current_modes(),
+            torch._C._DisableFuncTorch(),
+        ):
+            self.device_module.set_rng_state(rng_state)
+
     def restore(self) -> None:
         if self.rng_state is not None:
-            self.device_module.set_rng_state(self.rng_state)
+            self._restore_rng_state()
             self._restore_queued_calls()
         elif not self.device_module.is_initialized():
             self._restore_lazy_state()
