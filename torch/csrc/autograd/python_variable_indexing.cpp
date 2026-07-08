@@ -603,7 +603,7 @@ static int THPVariable_setitem_impl(
     if (!valueSizes.equals(slicedValueSizes)) {
       valuesSliced = valueTensor.view_symint(slicedValueSizes);
     } else {
-      valuesSliced = valueTensor;
+      valuesSliced = std::move(valueTensor);
     }
     at::indexing::dispatch_index_put_(
         sliced, std::move(variableIndices), valuesSliced);
